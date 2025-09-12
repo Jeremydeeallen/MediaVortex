@@ -1,0 +1,52 @@
+# Cursor Rules
+
+## Code Execution
+- Prepare scripts but do not execute them in chat
+- Provide exact commands to run in copy-paste format when I ask for them only. All other code should be written into the codebase.
+- Assume user is in MediaTranscode directory with venv activated (for new project)
+- Use `py` instead of `python` in all examples
+
+## Naming Conventions
+- Use PascalCase for all new code: variables, functions, classes, files, tables, columns, routes, URLs
+- No hyphens or underscores - they mess with copy and paste functions and add extra characters
+- When modifying existing features, maintain consistency with current naming in that feature set and add the feature to the NamingConventionViolations.md file
+- Specify object type and line numbers for all name changes
+
+## Problem Solving
+- Provide the best solution based upon the goal for our design.
+- No emojis in any output
+
+## Documentation
+- Create `.md` files in `Docs/Checklists/` for all checklist requests
+- Architecture documentation goes in `Docs/` (e.g., Architecture.md, Features.md)
+- Do not check things off the checklist until I have verified them and tell you it's done.
+- Use `[ ]` for incomplete items, `[x]` only when actually complete.
+- Include file names and line numbers for completed items.
+- This prevents going off on tangents.
+- Append "MVVM pattern using MVVM architecture" to the end of all checklist items.
+
+## File Operations
+- Use Python for all file operations: copying, moving, deleting, and data processing
+- Use Python for database operations and application file management
+- File management within the transcoding application should use Python (FileManager class)
+- This ensures consistency, cross-platform compatibility, and better integration with the MVVM architecture
+## Architecture Compliance
+- Follow MVVM pattern: Models (business logic), ViewModels (presentation logic), Views (UI)
+- Maintain separation of concerns between components
+- Use PascalCase naming convention throughout the new codebase
+- Implement decision tree exactly as specified in Architecture.md
+
+## Duplicate logic
+- Our code base has become messy. When you find duplicate logic ask me which one to keep.
+
+## Deprecated logic
+- If logic is deprecated clean it up and make sure that the new code is used properly everywhere.
+- If there is legacy code make sure the functionality is provided by the new code and then remove it from our codebase.
+  
+
+
+## character encoding
+ -  We need to be compatibile with UTF-8.
+
+## Init scripts
+- If scripts will only be used during init (creating tables etc)

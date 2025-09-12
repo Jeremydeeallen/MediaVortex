@@ -4,7 +4,9 @@
 We will only use PascalCase for everything!
 
 ## Database 
+The database is located at \Data\MediaVortex.db
 ### Data Layer 
+
 The DatabaseManager handles the business logic for data access (e.g., "get all users," "save this transaction"), and the DatabaseService provides the low-level infrastructure for connecting to the database.
 
 - **DatabaseService**: Services/DatabaseService.py (The only file allowed to interact with /Data/MediaVortex.db)

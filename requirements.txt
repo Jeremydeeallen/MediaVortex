@@ -1,0 +1,17 @@
+# Core dependencies
+flask>=2.3.0
+psutil>=5.9.0
+
+# Configuration and logging
+configparser
+
+# Web interface
+flask-cors
+requests
+
+# Development tools
+pytest
+black
+flake8
+
+# Note: pathlib, shutil, os, tempfile, subprocess, logging, json are built-in Python modules
