@@ -3,6 +3,8 @@ from Models.TranscodeProfileModel import TranscodeProfileModel
 from Models.ProfileThresholdModel import ProfileThresholdModel
 from Models.RootFolderModel import RootFolderModel
 from Models.MediaFileModel import MediaFileModel
+from Models.SeasonModel import SeasonModel
+from Models.FileScanResultModel import FileScanResultModel
 from Services.DatabaseService import DatabaseService
 from Services.LoggingService import LoggingService
 
@@ -456,6 +458,127 @@ class DatabaseManager:
             mediaFiles.append(mediaFile)
         
         return mediaFiles
+    
+    # Season Management Methods
+    def GetAllSeasons(self) -> List[SeasonModel]:
+        """Get all seasons."""
+        query = """
+            SELECT Id, RootFolderId, SeasonName, SeasonNumber, EpisodeCount, 
+                   TotalSizeGB, CreatedDate, LastUpdatedDate
+            FROM Seasons 
+            ORDER BY RootFolderId, SeasonNumber
+        """
+        rows = self.DatabaseService.ExecuteQuery(query)
+        
+        seasons = []
+        for row in rows:
+            season = SeasonModel(
+                Id=row['Id'],
+                RootFolderId=row['RootFolderId'],
+                SeasonName=row['SeasonName'],
+                SeasonNumber=row['SeasonNumber'],
+                EpisodeCount=row['EpisodeCount'],
+                TotalSizeGB=row['TotalSizeGB'],
+                CreatedDate=row['CreatedDate'],
+                LastUpdatedDate=row['LastUpdatedDate']
+            )
+            seasons.append(season)
+        
+        return seasons
+    
+    def GetSeasonById(self, SeasonId: int) -> Optional[SeasonModel]:
+        """Get a specific season by ID."""
+        query = """
+            SELECT Id, RootFolderId, SeasonName, SeasonNumber, EpisodeCount, 
+                   TotalSizeGB, CreatedDate, LastUpdatedDate
+            FROM Seasons 
+            WHERE Id = ?
+        """
+        rows = self.DatabaseService.ExecuteQuery(query, (SeasonId,))
+        
+        if not rows:
+            return None
+        
+        row = rows[0]
+        return SeasonModel(
+            Id=row['Id'],
+            RootFolderId=row['RootFolderId'],
+            SeasonName=row['SeasonName'],
+            SeasonNumber=row['SeasonNumber'],
+            EpisodeCount=row['EpisodeCount'],
+            TotalSizeGB=row['TotalSizeGB'],
+            CreatedDate=row['CreatedDate'],
+            LastUpdatedDate=row['LastUpdatedDate']
+        )
+    
+    def SaveSeason(self, Season: SeasonModel) -> int:
+        """Save a season (insert or update) and return the season ID."""
+        try:
+            if Season.Id is None:
+                # Insert new season
+                query = """
+                    INSERT INTO Seasons 
+                    (RootFolderId, SeasonName, SeasonNumber, EpisodeCount, TotalSizeGB, CreatedDate, LastUpdatedDate)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """
+                parameters = (
+                    Season.RootFolderId, Season.SeasonName, Season.SeasonNumber, 
+                    Season.EpisodeCount, Season.TotalSizeGB, Season.CreatedDate, Season.LastUpdatedDate
+                )
+                Season.Id = self.DatabaseService.ExecuteNonQuery(query, parameters)
+                LoggingService.LogInfo("Created new season: {} with ID: {}", Season.SeasonName, Season.Id)
+            else:
+                # Update existing season
+                query = """
+                    UPDATE Seasons 
+                    SET RootFolderId = ?, SeasonName = ?, SeasonNumber = ?, EpisodeCount = ?,
+                        TotalSizeGB = ?, LastUpdatedDate = ?
+                    WHERE Id = ?
+                """
+                parameters = (
+                    Season.RootFolderId, Season.SeasonName, Season.SeasonNumber, 
+                    Season.EpisodeCount, Season.TotalSizeGB, Season.LastUpdatedDate, Season.Id
+                )
+                self.DatabaseService.ExecuteNonQuery(query, parameters)
+                LoggingService.LogInfo("Updated season: {} with ID: {}", Season.SeasonName, Season.Id)
+            
+            return Season.Id
+            
+        except Exception as e:
+            LoggingService.LogException("Error saving season", e)
+            raise
+    
+    def DeleteSeason(self, SeasonId: int) -> bool:
+        """Delete a season."""
+        affectedRows = self.DatabaseService.ExecuteNonQuery("DELETE FROM Seasons WHERE Id = ?", (SeasonId,))
+        return affectedRows > 0
+    
+    def GetSeasonsByRootFolder(self, RootFolderId: int) -> List[SeasonModel]:
+        """Get all seasons for a specific root folder."""
+        query = """
+            SELECT Id, RootFolderId, SeasonName, SeasonNumber, EpisodeCount, 
+                   TotalSizeGB, CreatedDate, LastUpdatedDate
+            FROM Seasons 
+            WHERE RootFolderId = ?
+            ORDER BY SeasonNumber
+        """
+        rows = self.DatabaseService.ExecuteQuery(query, (RootFolderId,))
+        
+        seasons = []
+        for row in rows:
+            season = SeasonModel(
+                Id=row['Id'],
+                RootFolderId=row['RootFolderId'],
+                SeasonName=row['SeasonName'],
+                SeasonNumber=row['SeasonNumber'],
+                EpisodeCount=row['EpisodeCount'],
+                TotalSizeGB=row['TotalSizeGB'],
+                CreatedDate=row['CreatedDate'],
+                LastUpdatedDate=row['LastUpdatedDate']
+            )
+            seasons.append(season)
+        
+        return seasons
     
     # System Settings Management Methods
     def GetSystemSetting(self, SettingKey: str) -> Optional[str]:

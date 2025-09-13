@@ -2,6 +2,8 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime
 from Models.RootFolderModel import RootFolderModel
 from Models.MediaFileModel import MediaFileModel
+from Models.SeasonModel import SeasonModel
+from Models.FileScanResultModel import FileScanResultModel
 from Services.FileScanningBusinessService import FileScanningBusinessService
 from Services.LoggingService import LoggingService
 
@@ -14,15 +16,7 @@ class FileScanningViewModel:
         self.IsScanning = False
         self.ScanProgress = 0.0
         self.CurrentScanDirectory = ""
-        self.ScanResults = {
-            'TotalFiles': 0,
-            'ProcessedFiles': 0,
-            'SkippedFiles': 0,
-            'EncodingErrors': 0,
-            'NewFiles': 0,
-            'UpdatedFiles': 0,
-            'DeletedFiles': 0
-        }
+        self.ScanResults = FileScanResultModel()
         self.ScanDirectories = []
         self.LoadScanDirectories()
         self.ScanErrors = []
@@ -108,7 +102,9 @@ class FileScanningViewModel:
             self.IsScanning = status['IsScanning']
             self.ScanProgress = status['Progress']
             self.CurrentScanDirectory = status['CurrentDirectory']
-            self.ScanResults = status['Results'].copy()
+            # Update scan results from business service
+            if 'Results' in status and status['Results']:
+                self.ScanResults = status['Results']
             self.ScanErrors = status['Errors'].copy()
             
             # Update status message based on subprocess status
@@ -116,7 +112,7 @@ class FileScanningViewModel:
                 self.ScanStatusMessage = f"Scanning: {self.CurrentScanDirectory} ({self.ScanProgress:.1f}%)"
             else:
                 if status.get('Status') == 'Completed':
-                    self.ScanStatusMessage = f"Scan completed: {self.ScanResults['ProcessedFiles']} files processed"
+                    self.ScanStatusMessage = f"Scan completed: {self.ScanResults.TotalFilesProcessed} files processed"
                 elif status.get('Status') == 'Failed':
                     self.ScanStatusMessage = f"Scan failed: {status.get('ErrorMessage', 'Unknown error')}"
                 elif status.get('Status') == 'Stopped':
@@ -242,9 +238,9 @@ class FileScanningViewModel:
         """Get list of scan errors."""
         return self.ScanErrors.copy()
     
-    def GetScanResults(self) -> Dict[str, Any]:
+    def GetScanResults(self) -> FileScanResultModel:
         """Get current scan results."""
-        return self.ScanResults.copy()
+        return self.ScanResults
     
     def GetRootFoldersForDisplay(self) -> List[Dict[str, Any]]:
         """Get root folders formatted for display."""

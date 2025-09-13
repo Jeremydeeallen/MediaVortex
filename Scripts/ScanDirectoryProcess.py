@@ -203,11 +203,13 @@ class ScanDirectoryProcess:
                     LoggingService.LogException(f"Error processing file {FilePath}", e, 'ScanDirectoryProcess', 'ProcessFile')
                     Stats['EncodingErrors'] += 1
             
-            # Update root folder size
+            # Update root folder size with actual calculated size
             try:
-                TotalSizeGB = sum(Stats[key] for key in ['NewFiles', 'UpdatedFiles']) * 0.001  # Rough estimate
+                LoggingService.LogInfo(f"Calculating actual directory size for {self.RootFolderPath}", 'ScanDirectoryProcess', 'ScanDirectory')
+                TotalSizeGB = self.FileManagerService.CalculateDirectorySize(self.RootFolderPath)
                 UpdateQuery = "UPDATE RootFolders SET TotalSizeGB = ?, LastScannedDate = ? WHERE Id = ?"
                 self.DatabaseService.ExecuteNonQuery(UpdateQuery, (TotalSizeGB, datetime.now(), RootFolderId))
+                LoggingService.LogInfo(f"Updated root folder size to {TotalSizeGB} GB", 'ScanDirectoryProcess', 'ScanDirectory')
             except Exception as e:
                 LoggingService.LogException("Error updating root folder size", e, 'ScanDirectoryProcess', 'ScanDirectory')
             

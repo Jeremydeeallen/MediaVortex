@@ -7,6 +7,8 @@ from datetime import datetime
 from pathlib import Path
 from Models.RootFolderModel import RootFolderModel
 from Models.MediaFileModel import MediaFileModel
+from Models.SeasonModel import SeasonModel
+from Models.FileScanResultModel import FileScanResultModel
 from Services.FileManagerService import FileManagerService
 from Repositories.DatabaseManager import DatabaseManager
 from Services.LoggingService import LoggingService
@@ -21,6 +23,9 @@ class FileScanningBusinessService:
         self.CurrentJobId = None
         self.ScanProcess = None
         self.ScriptPath = Path(__file__).parent.parent / "Scripts" / "ScanDirectoryProcess.py"
+        self.ScanProgress = 0.0
+        self.ScanResults = FileScanResultModel()
+        self.ScanErrors = []
         
         # Check for existing running scans on startup
         self._CheckForExistingRunningScan()
@@ -319,11 +324,12 @@ class FileScanningBusinessService:
             LoggingService.LogInfo("Scanning for media files...")
             self.ScanProgress = 30.0
             MediaFiles = self.FileManager.ScanDirectory(RootFolderPath, Recursive)
-            self.ScanResults['TotalFiles'] = len(MediaFiles)
+            self.ScanResults.TotalFilesFound = len(MediaFiles)
+            self.ScanResults.RootFolderId = RootFolder.Id
             
             # Step 4: Process each media file
             LoggingService.LogInfo("Processing {} media files...", len(MediaFiles))
-            self.ProcessMediaFiles(MediaFiles, RootFolder.Id)
+            self.ProcessMediaFiles(MediaFiles, RootFolder.Id, RootFolderPath)
             
             # Step 5: Update scan results
             self.ScanProgress = 90.0
@@ -338,7 +344,7 @@ class FileScanningBusinessService:
             return {
                 'Success': True,
                 'Message': 'Scan completed successfully',
-                'Results': self.ScanResults.copy(),
+                'Results': self.ScanResults,
                 'RootFolderId': RootFolder.Id,
                 'TotalSizeGB': TotalSizeGB
             }
@@ -351,8 +357,33 @@ class FileScanningBusinessService:
                 'Success': False,
                 'Message': f'Error during scan: {str(e)}',
                 'Error': 'ScanError',
-                'Results': self.ScanResults.copy()
+                'Results': self.ScanResults
             }
+    
+    def GetOrCreateSeason(self, SeasonName: str, RootFolderId: int) -> SeasonModel:
+        """Get existing season or create a new one."""
+        try:
+            # Check if season already exists
+            ExistingSeasons = self.DatabaseManager.GetAllSeasons()
+            for Season in ExistingSeasons:
+                if Season.SeasonName == SeasonName and Season.RootFolderId == RootFolderId:
+                    return Season
+            
+            # Create new season
+            NewSeason = SeasonModel(
+                RootFolderId=RootFolderId,
+                SeasonName=SeasonName,
+                SeasonNumber=1,  # Default to 1, could be extracted from name later
+                EpisodeCount=0,
+                TotalSizeGB=0.0
+            )
+            self.DatabaseManager.SaveSeason(NewSeason)
+            LoggingService.LogInfo("Created new season: {}", SeasonName)
+            return NewSeason
+            
+        except Exception as e:
+            LoggingService.LogException("Error getting or creating season", e)
+            raise
     
     def GetOrCreateRootFolder(self, RootFolderPath: str, TotalSizeGB: float) -> RootFolderModel:
         """Get existing root folder or create a new one."""
@@ -385,7 +416,7 @@ class FileScanningBusinessService:
             LoggingService.LogException("Error managing root folder", e)
             raise
     
-    def ProcessMediaFiles(self, MediaFiles: List[str], RootFolderId: Optional[int]):
+    def ProcessMediaFiles(self, MediaFiles: List[str], RootFolderId: Optional[int], RootFolderPath: str = ""):
         """Process each media file found during scanning."""
         try:
             TotalFiles = len(MediaFiles)
@@ -397,7 +428,7 @@ class FileScanningBusinessService:
                     self.ScanProgress = Progress
                     
                     # Process the file
-                    self.ProcessSingleMediaFile(FilePath, RootFolderId)
+                    self.ProcessSingleMediaFile(FilePath, RootFolderId, RootFolderPath)
                     
                 except Exception as e:
                     LoggingService.LogException("Error processing media file", e)
@@ -408,12 +439,48 @@ class FileScanningBusinessService:
             LoggingService.LogException("Error processing media files", e)
             raise
     
-    def ProcessSingleMediaFile(self, FilePath: str, RootFolderId: Optional[int]):
+    def ExtractSeasonFromPath(self, FilePath: str, RootFolderPath: str) -> str:
+        """Extract season information from file path."""
+        try:
+            # Get relative path from root folder
+            RelativePath = os.path.relpath(FilePath, RootFolderPath)
+            PathParts = RelativePath.split(os.sep)
+            
+            # Look for season indicators in path
+            for Part in PathParts:
+                PartLower = Part.lower()
+                if 'season' in PartLower or 's' in PartLower:
+                    # Extract season number or name
+                    if 'season' in PartLower:
+                        # Format: "Season 1", "Season1", etc.
+                        SeasonPart = Part
+                    elif PartLower.startswith('s') and len(Part) > 1:
+                        # Format: "S01", "S1", etc.
+                        SeasonPart = f"Season {Part[1:]}"
+                    else:
+                        SeasonPart = Part
+                    return SeasonPart
+            
+            # If no season found, use the first directory after root
+            if len(PathParts) > 1:
+                return PathParts[0]  # Use first subdirectory as season
+            
+            return "Default Season"
+            
+        except Exception as e:
+            LoggingService.LogException("Error extracting season from path", e)
+            return "Default Season"
+    
+    def ProcessSingleMediaFile(self, FilePath: str, RootFolderId: Optional[int], RootFolderPath: str = ""):
         """Process a single media file."""
         try:
             # Get file information
             FileSizeMB = self.FileManager.GetFileSizeMB(FilePath)
             FileName = self.FileManager.GetFileNameFromPath(FilePath)
+            
+            # Extract season information and get/create season
+            SeasonName = self.ExtractSeasonFromPath(FilePath, RootFolderPath)
+            Season = self.GetOrCreateSeason(SeasonName, RootFolderId)
             
             # Check if file already exists in database
             ExistingFiles = self.DatabaseManager.GetAllMediaFiles()
@@ -427,28 +494,29 @@ class FileScanningBusinessService:
             if ExistingFile:
                 # Update existing file
                 ExistingFile.SizeMB = FileSizeMB
+                ExistingFile.SeasonId = Season.Id
                 ExistingFile.LastScannedDate = datetime.now()
                 self.DatabaseManager.SaveMediaFile(ExistingFile)
-                self.ScanResults['UpdatedFiles'] += 1
+                self.ScanResults.TotalFilesProcessed += 1
                 LoggingService.LogInfo("Updated existing media file: {}", FilePath)
             else:
                 # Create new file record
                 NewFile = MediaFileModel(
-                    SeasonId=RootFolderId,  # Using root folder ID as season ID for now
+                    SeasonId=Season.Id,
                     FilePath=FilePath,
                     FileName=FileName,
                     SizeMB=FileSizeMB,
                     LastScannedDate=datetime.now()
                 )
                 self.DatabaseManager.SaveMediaFile(NewFile)
-                self.ScanResults['NewFiles'] += 1
-                LoggingService.LogInfo("Added new media file: {}", FilePath)
+                self.ScanResults.TotalFilesProcessed += 1
+                LoggingService.LogInfo("Added new media file: {} to season: {}", FilePath, SeasonName)
             
-            self.ScanResults['ProcessedFiles'] += 1
+            # Note: TotalFilesProcessed is already incremented above for both new and updated files
             
         except Exception as e:
             LoggingService.LogException("Error processing single media file", e)
-            self.ScanResults['SkippedFiles'] += 1
+            self.ScanResults.TotalFilesSkipped += 1
             raise
     
     def UpdateScanResults(self):
@@ -457,13 +525,18 @@ class FileScanningBusinessService:
             FileManagerStats = self.FileManager.GetProcessingStats()
             EncodingErrors = self.FileManager.GetEncodingErrors()
             
-            self.ScanResults['SkippedFiles'] = FileManagerStats['SkippedFiles']
-            self.ScanResults['EncodingErrors'] = FileManagerStats['EncodingErrors']
+            # Update scan results with file manager statistics
+            self.ScanResults.TotalFilesSkipped = FileManagerStats.get('SkippedFiles', 0)
+            self.ScanResults.TotalFilesWithErrors = FileManagerStats.get('EncodingErrors', 0)
             
             # Add encoding errors to scan errors
             self.ScanErrors.extend(EncodingErrors)
             
-            LoggingService.LogInfo("Scan results updated: {}", self.ScanResults)
+            LoggingService.LogInfo("Scan results updated: TotalFiles={}, Processed={}, Skipped={}, Errors={}", 
+                                 self.ScanResults.TotalFilesFound, 
+                                 self.ScanResults.TotalFilesProcessed,
+                                 self.ScanResults.TotalFilesSkipped,
+                                 self.ScanResults.TotalFilesWithErrors)
             
         except Exception as e:
             LoggingService.LogException("Error updating scan results", e)
@@ -487,7 +560,7 @@ class FileScanningBusinessService:
             return {
                 'Success': True,
                 'Message': 'Scan stopped successfully',
-                'Results': self.ScanResults.copy()
+                'Results': self.ScanResults
             }
             
         except Exception as e:
