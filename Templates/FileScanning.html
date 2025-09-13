@@ -294,6 +294,9 @@
                         IsScanning = true;
                         StartProgressPolling();
                         UpdateScanProgress(response);
+                    } else {
+                        // No active scan, just update UI without polling
+                        UpdateScanProgress(response);
                     }
                 },
                 error: function(xhr, status, error) {
@@ -416,11 +419,14 @@
         function UpdateScanProgress(response) {
             const Progress = response.Progress || 0;
             const CurrentDirectory = response.CurrentDirectory || '';
-            const IsScanning = response.IsScanning || false;
+            const ResponseIsScanning = response.IsScanning || false;
             const Status = response.Status || '';
             
+            // Update the global IsScanning variable
+            IsScanning = ResponseIsScanning;
+            
             // Update the current scan status display
-            if (IsScanning) {
+            if (ResponseIsScanning) {
                 const RootFolderPath = response.RootFolderPath || CurrentDirectory.split('\\')[0] + '\\' || 'Unknown';
                 $('#CurrentScanText').text(RootFolderPath);
                 $('#CurrentScanStatus').removeClass('alert-info alert-success alert-danger').addClass('alert-warning');
@@ -430,7 +436,7 @@
             }
             
             // Show/hide progress section and update button states
-            if (IsScanning) {
+            if (ResponseIsScanning) {
                 $('#ScanProgressSection').show();
                 $('#StartScanBtn').prop('disabled', true);
                 $('#StopScanBtn').prop('disabled', false);
@@ -443,7 +449,7 @@
             $('#ScanProgressBar').css('width', Progress + '%').text(Progress.toFixed(1) + '%');
             
             // Update status text based on scan state
-            if (IsScanning) {
+            if (ResponseIsScanning) {
                 $('#ScanStatusText').text(`Scanning: ${CurrentDirectory}`);
             } else {
                 if (Status === 'Completed') {
@@ -460,8 +466,8 @@
             // Update current directory display
             $('#CurrentDirectory').text(CurrentDirectory);
             
-            // Check if scan is complete
-            if (!IsScanning && Status !== 'Pending') {
+            // Check if scan is complete or not running
+            if (!IsScanning) {
                 IsScanning = false;
                 $('#StartScanBtn').prop('disabled', false);
                 $('#StopScanBtn').prop('disabled', true);

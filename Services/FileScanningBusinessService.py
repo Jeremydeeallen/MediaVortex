@@ -2,6 +2,7 @@ import os
 import subprocess
 import uuid
 import psutil
+import re
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 from pathlib import Path
@@ -28,20 +29,20 @@ class FileScanningBusinessService:
         self.ScanErrors = []
         
         # Check for existing running scans on startup
-        self._CheckForExistingRunningScan()
+        self.CheckForExistingRunningScan()
     
-    def _CheckForExistingRunningScan(self):
+    def CheckForExistingRunningScan(self):
         """Check for existing running scans and set CurrentJobId if found."""
         try:
             Query = "SELECT JobId FROM ScanJobs WHERE Status IN ('Pending', 'Running') ORDER BY StartTime DESC LIMIT 1"
             Result = self.DatabaseManager.DatabaseService.ExecuteQuery(Query)
             if Result:
                 self.CurrentJobId = Result[0]['JobId']
-                LoggingService.LogInfo(f"Found existing running scan with JobId: {self.CurrentJobId}", 'FileScanningBusinessService', '_CheckForExistingRunningScan')
+                LoggingService.LogInfo(f"Found existing running scan with JobId: {self.CurrentJobId}", 'FileScanningBusinessService', 'CheckForExistingRunningScan')
             else:
-                LoggingService.LogInfo("No existing running scans found", 'FileScanningBusinessService', '_CheckForExistingRunningScan')
+                LoggingService.LogInfo("No existing running scans found", 'FileScanningBusinessService', 'CheckForExistingRunningScan')
         except Exception as e:
-            LoggingService.LogException("Error checking for existing running scans", e, 'FileScanningBusinessService', '_CheckForExistingRunningScan')
+            LoggingService.LogException("Error checking for existing running scans", e, 'FileScanningBusinessService', 'CheckForExistingRunningScan')
     
     def StartScanning(self, RootFolderPath: str, Recursive: bool = True) -> Dict[str, Any]:
         """Start scanning a root folder for media files using subprocess."""
@@ -187,7 +188,7 @@ class FileScanningBusinessService:
                     'Progress': 0.0,
                     'CurrentDirectory': '',
                     'RootFolderPath': '',
-                    'Results': {},
+                    'Results': FileScanResultModel(),
                     'Errors': []
                 }
             
@@ -199,20 +200,25 @@ class FileScanningBusinessService:
                     'Progress': 0.0,
                     'CurrentDirectory': '',
                     'RootFolderPath': '',
-                    'Results': {},
+                    'Results': FileScanResultModel(),
                     'Errors': []
                 }
             
             IsScanning = JobStatus['Status'] in ['Pending', 'Running']
-            Results = {
-                'TotalFiles': JobStatus['TotalFiles'] or 0,
-                'ProcessedFiles': JobStatus['ProcessedFiles'] or 0,
-                'SkippedFiles': JobStatus['SkippedFiles'] or 0,
-                'EncodingErrors': JobStatus['EncodingErrors'] or 0,
-                'NewFiles': JobStatus['NewFiles'] or 0,
-                'UpdatedFiles': JobStatus['UpdatedFiles'] or 0,
-                'DeletedFiles': JobStatus['DeletedFiles'] or 0
-            }
+            
+            # Create FileScanResultModel from database results
+            Results = FileScanResultModel()
+            Results.Id = JobStatus['JobId']
+            Results.RootFolderId = None  # Will be set by the scan process
+            Results.ScanStartTime = JobStatus['StartTime']
+            Results.ScanEndTime = JobStatus['EndTime']
+            Results.TotalFilesFound = JobStatus['TotalFiles'] or 0
+            Results.TotalFilesProcessed = JobStatus['ProcessedFiles'] or 0
+            Results.TotalFilesSkipped = JobStatus['SkippedFiles'] or 0
+            Results.TotalFilesWithErrors = JobStatus['EncodingErrors'] or 0
+            Results.ScanStatus = JobStatus['Status']
+            Results.ErrorMessage = JobStatus['ErrorMessage']
+            Results.ProcessId = JobStatus['ProcessId']
             
             Errors = [JobStatus['ErrorMessage']] if JobStatus['ErrorMessage'] else []
             
@@ -435,6 +441,10 @@ class FileScanningBusinessService:
                     self.ScanErrors.append(f"Error processing {FilePath}: {str(e)}")
                     continue
             
+            # Clean up missing files after processing all found files
+            if RootFolderId:
+                self.CleanupMissingFiles(MediaFiles, RootFolderId)
+            
         except Exception as e:
             LoggingService.LogException("Error processing media files", e)
             raise
@@ -471,8 +481,125 @@ class FileScanningBusinessService:
             LoggingService.LogException("Error extracting season from path", e)
             return "Default Season"
     
+    def ExtractShowInfo(self, FileName: str) -> Dict[str, str]:
+        """Extract show, season, and episode information from filename."""
+        try:
+            # Remove file extension
+            NameWithoutExt = Path(FileName).stem
+            
+            ShowInfo = {
+                'ShowName': '',
+                'Season': '',
+                'Episode': '',
+                'Quality': '',
+                'Source': ''
+            }
+            
+            # Extract season/episode pattern (S01E11, S1E11, 1x11, etc.)
+            SeasonEpisodePattern = r'[Ss](\d+)[Ee](\d+)'
+            Match = re.search(SeasonEpisodePattern, NameWithoutExt)
+            
+            if Match:
+                ShowInfo['Season'] = f"S{Match.group(1).zfill(2)}"
+                ShowInfo['Episode'] = f"E{Match.group(2).zfill(2)}"
+                
+                # Extract show name (everything before season/episode)
+                ShowName = NameWithoutExt[:Match.start()].strip()
+                ShowName = re.sub(r'[-._]', ' ', ShowName).strip()
+                ShowInfo['ShowName'] = ShowName
+            else:
+                # Try alternative pattern (1x11, 1.11, etc.)
+                AltPattern = r'(\d+)[x.](\d+)'
+                AltMatch = re.search(AltPattern, NameWithoutExt)
+                if AltMatch:
+                    ShowInfo['Season'] = f"S{AltMatch.group(1).zfill(2)}"
+                    ShowInfo['Episode'] = f"E{AltMatch.group(2).zfill(2)}"
+                    
+                    # Extract show name
+                    ShowName = NameWithoutExt[:AltMatch.start()].strip()
+                    ShowName = re.sub(r'[-._]', ' ', ShowName).strip()
+                    ShowInfo['ShowName'] = ShowName
+            
+            # Extract quality indicators
+            QualityPatterns = ['1080p', '720p', '480p', '4K', 'Bluray', 'HDTV', 'WEBRip', 'WEB-DL', 'BRRip', 'DVDRip']
+            for Pattern in QualityPatterns:
+                if Pattern.lower() in NameWithoutExt.lower():
+                    ShowInfo['Quality'] = Pattern
+                    break
+            
+            # Extract source indicators
+            SourcePatterns = ['Bluray', 'HDTV', 'WEBRip', 'WEB-DL', 'BRRip', 'DVDRip', 'TVRip']
+            for Pattern in SourcePatterns:
+                if Pattern.lower() in NameWithoutExt.lower():
+                    ShowInfo['Source'] = Pattern
+                    break
+            
+            return ShowInfo
+            
+        except Exception as e:
+            LoggingService.LogException("Error extracting show info", e)
+            return {'ShowName': '', 'Season': '', 'Episode': '', 'Quality': '', 'Source': ''}
+    
+    def IsFuzzyMatch(self, FileInfo: Dict[str, str], DbFileInfo: Dict[str, str], 
+                    FileSize: float, DbFileSize: float) -> bool:
+        """Determine if two files are a fuzzy match."""
+        try:
+            # Must have same show name (case insensitive)
+            if FileInfo['ShowName'].lower() != DbFileInfo['ShowName'].lower():
+                return False
+            
+            # Must have same season and episode
+            if FileInfo['Season'] != DbFileInfo['Season'] or FileInfo['Episode'] != DbFileInfo['Episode']:
+                return False
+            
+            # Size difference tolerance (within 10% or 100MB, whichever is larger)
+            SizeDifference = abs(FileSize - DbFileSize)
+            SizeTolerance = max(FileSize * 0.1, 100)  # 10% or 100MB, whichever is larger
+            
+            if SizeDifference > SizeTolerance:
+                return False
+            
+            # If we get here, it's a fuzzy match
+            return True
+            
+        except Exception as e:
+            LoggingService.LogException("Error in fuzzy match logic", e)
+            return False
+    
+    def FindFuzzyFileMatch(self, FilePath: str, FileName: str, FileSizeMB: float, RootFolderId: int) -> Optional[MediaFileModel]:
+        """Find a fuzzy match for a file in the database."""
+        try:
+            # Get all files for this root folder
+            DatabaseFiles = self.DatabaseManager.GetMediaFilesByRootFolder(RootFolderId)
+            
+            # Extract show/season/episode info from filename
+            FileShowInfo = self.ExtractShowInfo(FileName)
+            
+            # Skip fuzzy matching if we don't have show info
+            if not FileShowInfo['ShowName'] or not FileShowInfo['Season'] or not FileShowInfo['Episode']:
+                return None
+            
+            for DbFile in DatabaseFiles:
+                DbShowInfo = self.ExtractShowInfo(DbFile.FileName)
+                
+                # Check for fuzzy match criteria
+                if self.IsFuzzyMatch(FileShowInfo, DbShowInfo, FileSizeMB, DbFile.SizeMB):
+                    # Only update if old file doesn't exist on filesystem
+                    if not os.path.exists(DbFile.FilePath):
+                        LoggingService.LogInfo("Found fuzzy match (old file missing): {} -> {}", DbFile.FilePath, FilePath)
+                        return DbFile
+                    else:
+                        LoggingService.LogInfo("Found fuzzy match but both files exist - creating new record: {} and {}", DbFile.FilePath, FilePath)
+                        return None
+            
+            return None
+            
+        except Exception as e:
+            LoggingService.LogException("Error in fuzzy file matching", e)
+            return None
+    
     def ProcessSingleMediaFile(self, FilePath: str, RootFolderId: Optional[int], RootFolderPath: str = ""):
-        """Process a single media file."""
+        """Process a single media file with fuzzy matching."""
         try:
             # Get file information
             FileSizeMB = self.FileManager.GetFileSizeMB(FilePath)
@@ -482,42 +609,81 @@ class FileScanningBusinessService:
             SeasonName = self.ExtractSeasonFromPath(FilePath, RootFolderPath)
             Season = self.GetOrCreateSeason(SeasonName, RootFolderId)
             
-            # Check if file already exists in database
-            ExistingFiles = self.DatabaseManager.GetAllMediaFiles()
-            ExistingFile = None
+            # Try fuzzy match first
+            FuzzyMatch = self.FindFuzzyFileMatch(FilePath, FileName, FileSizeMB, RootFolderId)
             
-            for MediaFile in ExistingFiles:
-                if MediaFile.FilePath == FilePath:
-                    ExistingFile = MediaFile
-                    break
-            
-            if ExistingFile:
-                # Update existing file
-                ExistingFile.SizeMB = FileSizeMB
-                ExistingFile.SeasonId = Season.Id
-                ExistingFile.LastScannedDate = datetime.now()
-                self.DatabaseManager.SaveMediaFile(ExistingFile)
+            if FuzzyMatch:
+                # Update the fuzzy match
+                FuzzyMatch.FilePath = FilePath  # Update to new path
+                FuzzyMatch.FileName = FileName  # Update to new filename
+                FuzzyMatch.SizeMB = FileSizeMB  # Update to new size
+                FuzzyMatch.SeasonId = Season.Id  # Update season if needed
+                FuzzyMatch.LastScannedDate = datetime.now()
+                
+                self.DatabaseManager.SaveMediaFile(FuzzyMatch)
                 self.ScanResults.TotalFilesProcessed += 1
-                LoggingService.LogInfo("Updated existing media file: {}", FilePath)
+                LoggingService.LogInfo("Updated fuzzy match: {} -> {}", FuzzyMatch.FilePath, FilePath)
+                
             else:
-                # Create new file record
-                NewFile = MediaFileModel(
-                    SeasonId=Season.Id,
-                    FilePath=FilePath,
-                    FileName=FileName,
-                    SizeMB=FileSizeMB,
-                    LastScannedDate=datetime.now()
-                )
-                self.DatabaseManager.SaveMediaFile(NewFile)
-                self.ScanResults.TotalFilesProcessed += 1
-                LoggingService.LogInfo("Added new media file: {} to season: {}", FilePath, SeasonName)
-            
-            # Note: TotalFilesProcessed is already incremented above for both new and updated files
+                # Check for exact path match
+                ExistingFile = self.DatabaseManager.GetMediaFileByPath(FilePath)
+                
+                if ExistingFile:
+                    # Update existing exact match
+                    ExistingFile.SizeMB = FileSizeMB
+                    ExistingFile.SeasonId = Season.Id
+                    ExistingFile.LastScannedDate = datetime.now()
+                    self.DatabaseManager.SaveMediaFile(ExistingFile)
+                    self.ScanResults.TotalFilesProcessed += 1
+                    LoggingService.LogInfo("Updated existing media file: {}", FilePath)
+                else:
+                    # Create new file record
+                    NewFile = MediaFileModel(
+                        SeasonId=Season.Id,
+                        FilePath=FilePath,
+                        FileName=FileName,
+                        SizeMB=FileSizeMB,
+                        LastScannedDate=datetime.now()
+                    )
+                    self.DatabaseManager.SaveMediaFile(NewFile)
+                    self.ScanResults.TotalFilesProcessed += 1
+                    LoggingService.LogInfo("Added new media file: {} to season: {}", FilePath, SeasonName)
             
         except Exception as e:
             LoggingService.LogException("Error processing single media file", e)
             self.ScanResults.TotalFilesSkipped += 1
             raise
+    
+    def CleanupMissingFiles(self, FoundFiles: List[str], RootFolderId: int):
+        """Remove database records for files that no longer exist on disk."""
+        try:
+            LoggingService.LogInfo("Starting cleanup of missing files for root folder: {}", RootFolderId)
+            
+            # Get all files in database for this root folder
+            DatabaseFiles = self.DatabaseManager.GetMediaFilesByRootFolder(RootFolderId)
+            
+            # Create set of found file paths for efficient lookup
+            FoundFilePaths = set(FoundFiles)
+            
+            # Find files that are in database but not found on disk
+            MissingFiles = []
+            for DbFile in DatabaseFiles:
+                if DbFile.FilePath not in FoundFilePaths:
+                    MissingFiles.append(DbFile)
+            
+            # Remove missing files from database
+            for MissingFile in MissingFiles:
+                self.DatabaseManager.DeleteMediaFileByPath(MissingFile.FilePath)
+                LoggingService.LogInfo("Removed missing file from database: {}", MissingFile.FilePath)
+                self.ScanResults.TotalFilesWithErrors += 1  # Track as "error" for reporting
+            
+            if MissingFiles:
+                LoggingService.LogInfo("Cleaned up {} missing files from database", len(MissingFiles))
+            else:
+                LoggingService.LogInfo("No missing files found to clean up")
+                
+        except Exception as e:
+            LoggingService.LogException("Error cleaning up missing files", e)
     
     def UpdateScanResults(self):
         """Update scan results with file manager statistics."""

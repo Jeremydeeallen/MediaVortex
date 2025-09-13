@@ -580,6 +580,79 @@ class DatabaseManager:
         
         return seasons
     
+    # Advanced MediaFile Operations for Fuzzy Matching
+    def GetMediaFileByPath(self, FilePath: str) -> Optional[MediaFileModel]:
+        """Get a media file by exact path match."""
+        query = """
+            SELECT Id, SeasonId, FilePath, FileName, SizeMB, VideoBitrateKbps, AudioBitrateKbps,
+                   Resolution, Codec, DurationMinutes, FrameRate, LastScannedDate,
+                   CompressionPotential, AssignedProfile
+            FROM MediaFiles 
+            WHERE FilePath = ?
+        """
+        rows = self.DatabaseService.ExecuteQuery(query, (FilePath,))
+        
+        if not rows:
+            return None
+        
+        row = rows[0]
+        return MediaFileModel(
+            Id=row['Id'],
+            SeasonId=row['SeasonId'],
+            FilePath=row['FilePath'],
+            FileName=row['FileName'],
+            SizeMB=row['SizeMB'],
+            VideoBitrateKbps=row['VideoBitrateKbps'],
+            AudioBitrateKbps=row['AudioBitrateKbps'],
+            Resolution=row['Resolution'],
+            Codec=row['Codec'],
+            DurationMinutes=row['DurationMinutes'],
+            FrameRate=row['FrameRate'],
+            LastScannedDate=row['LastScannedDate'],
+            CompressionPotential=row['CompressionPotential'],
+            AssignedProfile=row['AssignedProfile']
+        )
+    
+    def GetMediaFilesByRootFolder(self, RootFolderId: int) -> List[MediaFileModel]:
+        """Get all media files for a specific root folder through seasons."""
+        query = """
+            SELECT mf.Id, mf.SeasonId, mf.FilePath, mf.FileName, mf.SizeMB, mf.VideoBitrateKbps, mf.AudioBitrateKbps,
+                   mf.Resolution, mf.Codec, mf.DurationMinutes, mf.FrameRate, mf.LastScannedDate,
+                   mf.CompressionPotential, mf.AssignedProfile
+            FROM MediaFiles mf
+            INNER JOIN Seasons s ON mf.SeasonId = s.Id
+            WHERE s.RootFolderId = ?
+            ORDER BY mf.FilePath
+        """
+        rows = self.DatabaseService.ExecuteQuery(query, (RootFolderId,))
+        
+        mediaFiles = []
+        for row in rows:
+            mediaFile = MediaFileModel(
+                Id=row['Id'],
+                SeasonId=row['SeasonId'],
+                FilePath=row['FilePath'],
+                FileName=row['FileName'],
+                SizeMB=row['SizeMB'],
+                VideoBitrateKbps=row['VideoBitrateKbps'],
+                AudioBitrateKbps=row['AudioBitrateKbps'],
+                Resolution=row['Resolution'],
+                Codec=row['Codec'],
+                DurationMinutes=row['DurationMinutes'],
+                FrameRate=row['FrameRate'],
+                LastScannedDate=row['LastScannedDate'],
+                CompressionPotential=row['CompressionPotential'],
+                AssignedProfile=row['AssignedProfile']
+            )
+            mediaFiles.append(mediaFile)
+        
+        return mediaFiles
+    
+    def DeleteMediaFileByPath(self, FilePath: str) -> bool:
+        """Delete a media file by path."""
+        affectedRows = self.DatabaseService.ExecuteNonQuery("DELETE FROM MediaFiles WHERE FilePath = ?", (FilePath,))
+        return affectedRows > 0
+    
     # System Settings Management Methods
     def GetSystemSetting(self, SettingKey: str) -> Optional[str]:
         """Get a system setting value by key."""

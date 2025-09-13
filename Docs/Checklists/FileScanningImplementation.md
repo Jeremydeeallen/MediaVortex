@@ -97,8 +97,8 @@ Start with a minimal working slice to prove core functionality and Unicode chara
 ### Phase 8: Basic Slice - Integration
 - [x] Update `MediaVortex.py` to register FileScanningController with UTF-8 encoding support MVVM pattern using MVVM architecture
 - [x] Add navigation route for file scanning page MVVM pattern using MVVM architecture
-- [ ] Test end-to-end basic scanning functionality with Unicode character support MVVM pattern using MVVM architecture
-- [ ] Test with problematic filenames (Cyrillic, emojis, special symbols) MVVM pattern using MVVM architecture
+- [x] Test end-to-end basic scanning functionality with Unicode character support MVVM pattern using MVVM architecture
+- [x] Test with problematic filenames (Cyrillic, emojis, special symbols) MVVM pattern using MVVM architecture
 - [x] Ensure only PascalCase was used
 
 ### Phase 8.5: Subprocess Implementation - Process Management

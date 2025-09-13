@@ -16,13 +16,13 @@ class FileScanResultModel:
     TotalFilesSkipped: int = 0
     TotalFilesWithErrors: int = 0
     TotalSizeGB: float = 0.0
-    ScanStatus: str = "Pending"  # Pending, InProgress, Completed, Failed, Cancelled
+    ScanStatus: str = "Idle"  # Idle, Pending, InProgress, Completed, Failed, Cancelled
     ErrorMessage: Optional[str] = None
     ProcessId: Optional[int] = None
     
     def __post_init__(self):
-        if self.ScanStartTime is None:
-            self.ScanStartTime = datetime.now()
+        # Don't automatically set ScanStartTime - let it be None until explicitly set
+        pass
     
     @property
     def DurationMinutes(self) -> Optional[float]:
