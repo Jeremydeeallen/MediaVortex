@@ -69,6 +69,12 @@
                                 Recursive Scan (include subdirectories)
                             </label>
                         </div>
+                        <div class="mb-3">
+                            <label class="form-label">Currently Running Scan:</label>
+                            <div class="alert alert-info" id="CurrentScanStatus">
+                                <i class="fas fa-info-circle"></i> <span id="CurrentScanText">None</span>
+                            </div>
+                        </div>
                     </div>
                     <div class="col-md-4">
                         <div class="d-grid gap-2">
@@ -86,7 +92,7 @@
                 </div>
                 
                 <!-- Scan Progress -->
-                <div id="ScanProgressSection" style="display: none;">
+                <div id="ScanProgressSection" style="display: block;">
                     <div class="mb-2">
                         <strong>Scan Progress:</strong>
                         <span id="ScanStatusText">Preparing...</span>
@@ -268,7 +274,27 @@
             LoadRootFolders();
             LoadMediaFiles();
             SetupEventHandlers();
+            CheckForExistingScan();
         });
+
+        function CheckForExistingScan() {
+            // Check if there's already a scan running when the page loads
+            $.ajax({
+                url: '/api/Scan/Status',
+                method: 'GET',
+                success: function(response) {
+                    if (response.Success && response.IsScanning) {
+                        // There's an active scan, start polling and update UI
+                        IsScanning = true;
+                        StartProgressPolling();
+                        UpdateScanProgress(response);
+                    }
+                },
+                error: function(xhr, status, error) {
+                    // Silently handle errors
+                }
+            });
+        }
 
         function SetupEventHandlers() {
             $('#StartScanBtn').click(StartScan);
@@ -383,25 +409,66 @@
 
         function UpdateScanProgress(response) {
             const Progress = response.Progress || 0;
-            const StatusText = response.StatusText || 'Scanning...';
             const CurrentDirectory = response.CurrentDirectory || '';
+            const IsScanning = response.IsScanning || false;
+            const Status = response.Status || '';
             
-            $('#ScanProgressBar').css('width', Progress + '%').text(Progress + '%');
-            $('#ScanStatusText').text(StatusText);
+            // Update the current scan status display
+            if (IsScanning) {
+                const RootFolderPath = response.RootFolderPath || CurrentDirectory.split('\\')[0] + '\\' || 'Unknown';
+                $('#CurrentScanText').text(RootFolderPath);
+                $('#CurrentScanStatus').removeClass('alert-info alert-success alert-danger').addClass('alert-warning');
+            } else {
+                $('#CurrentScanText').text('None');
+                $('#CurrentScanStatus').removeClass('alert-warning alert-success alert-danger').addClass('alert-info');
+            }
+            
+            // Show/hide progress section and update button states
+            if (IsScanning) {
+                $('#ScanProgressSection').show();
+                $('#StartScanBtn').prop('disabled', true);
+                $('#StopScanBtn').prop('disabled', false);
+            } else {
+                $('#StartScanBtn').prop('disabled', false);
+                $('#StopScanBtn').prop('disabled', true);
+            }
+            
+            // Update progress bar
+            $('#ScanProgressBar').css('width', Progress + '%').text(Progress.toFixed(1) + '%');
+            
+            // Update status text based on scan state
+            if (IsScanning) {
+                $('#ScanStatusText').text(`Scanning: ${CurrentDirectory}`);
+            } else {
+                if (Status === 'Completed') {
+                    $('#ScanStatusText').text('Scan completed successfully');
+                } else if (Status === 'Failed') {
+                    $('#ScanStatusText').text('Scan failed');
+                } else if (Status === 'Stopped') {
+                    $('#ScanStatusText').text('Scan stopped');
+                } else {
+                    $('#ScanStatusText').text('Ready to scan');
+                }
+            }
+            
+            // Update current directory display
             $('#CurrentDirectory').text(CurrentDirectory);
             
-            if (response.IsComplete) {
+            // Check if scan is complete
+            if (!IsScanning && Status !== 'Pending') {
                 IsScanning = false;
                 $('#StartScanBtn').prop('disabled', false);
                 $('#StopScanBtn').prop('disabled', true);
                 StopProgressPolling();
                 
-                if (response.Success) {
+                if (Status === 'Completed') {
                     ShowSuccess('Scan completed successfully');
                     LoadRootFolders();
                     LoadMediaFiles();
-                } else {
-                    ShowError('Scan completed with errors: ' + response.Error);
+                } else if (Status === 'Failed') {
+                    ShowError('Scan failed: ' + (response.ErrorMessage || 'Unknown error'));
+                } else if (Status === 'Stopped') {
+                    ShowSuccess('Scan stopped by user');
                 }
             }
         }

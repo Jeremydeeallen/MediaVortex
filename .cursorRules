@@ -53,10 +53,11 @@ Emphasize the Rule:
 - If logic is deprecated clean it up and make sure that the new code is used properly everywhere.
 - If there is legacy code make sure the functionality is provided by the new code and then remove it from our codebase.
   
-
-
 ## character encoding
  -  We need to be compatibile with UTF-8.
 
 ## Init scripts
 - If scripts will only be used during init (creating tables etc)
+## Logging
+- Logging needs to be the first step of our "slice" or  walking skeleton. That way we can track and debug errors easily.
+- 

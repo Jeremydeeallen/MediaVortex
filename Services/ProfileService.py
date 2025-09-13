@@ -3,7 +3,7 @@ from datetime import datetime
 from Models.TranscodeProfileModel import TranscodeProfileModel
 from Models.ProfileThresholdModel import ProfileThresholdModel
 from Repositories.DatabaseManager import DatabaseManager
-from Services.DebugService import DebugService
+from Services.LoggingService import LoggingService
 
 
 class ProfileService:
@@ -23,7 +23,7 @@ class ProfileService:
     def CreateProfile(self, profile_name: str, description: str = "") -> TranscodeProfileModel:
         """Create a new transcoding profile."""
         try:
-            DebugService.LogFunctionEntry("CreateProfile", profile_name, description)
+            LoggingService.LogFunctionEntry("CreateProfile", 'ProfileService', profile_name, description=description)
             profile = TranscodeProfileModel(
                 ProfileName=profile_name,
                 Description=description,
@@ -31,30 +31,30 @@ class ProfileService:
                 LastModified=datetime.now()
             )
             
-            DebugService.Log("Saving profile to database...")
+            LoggingService.LogInfo("Saving profile to database...", 'ProfileService', 'CreateProfile')
             profile_id = self.DatabaseManager.SaveProfile(profile)
             profile.Id = profile_id
-            DebugService.Log("Profile saved with ID: {}", profile_id)
+            LoggingService.LogInfo(f"Profile saved with ID: {profile_id}", 'ProfileService', 'CreateProfile')
             
-            DebugService.LogFunctionExit("CreateProfile", profile_id)
+            LoggingService.LogFunctionExit("CreateProfile", profile_id)
             return profile
         except Exception as e:
-            DebugService.LogException("Exception in ProfileService.CreateProfile", e)
+            LoggingService.LogException("Exception in ProfileService.CreateProfile", e, 'ProfileService', 'CreateProfile')
             raise
     
     def UpdateProfile(self, profile: TranscodeProfileModel) -> TranscodeProfileModel:
         """Update an existing transcoding profile."""
         try:
-            DebugService.LogFunctionEntry("UpdateProfile", profile.Id, profile.ProfileName, profile.Description)
+            LoggingService.LogFunctionEntry("UpdateProfile", 'ProfileService', profile.Id, profile.ProfileName, profile.Description)
             profile.LastModified = datetime.now()
-            DebugService.Log("Saving profile to database...")
+            LoggingService.LogInfo("Saving profile to database...", 'ProfileService', 'CreateProfile')
             profile_id = self.DatabaseManager.SaveProfile(profile)
             profile.Id = profile_id
-            DebugService.Log("Profile updated successfully with ID: {}", profile_id)
-            DebugService.LogFunctionExit("UpdateProfile", profile_id)
+            LoggingService.LogInfo(f"Profile updated successfully with ID: {profile_id}", 'ProfileService', 'UpdateProfile')
+            LoggingService.LogFunctionExit("UpdateProfile", profile_id)
             return profile
         except Exception as e:
-            DebugService.LogException("Exception in ProfileService.UpdateProfile", e)
+            LoggingService.LogException("Exception in ProfileService.UpdateProfile", e, 'ProfileService', 'UpdateProfile')
             raise
     
     def DeleteProfile(self, profile_id: int) -> bool:
@@ -72,11 +72,11 @@ class ProfileService:
                     transcode_down_to: str) -> ProfileThresholdModel:
         """Add a new threshold to a profile."""
         try:
-            DebugService.LogFunctionEntry("AddThreshold", profile_id, resolution, 
-                                        under_30_min_mb, under_65_min_mb, over_65_min_mb,
-                                        video_bitrate_kbps, audio_bitrate_kbps,
-                                        fallback_video_bitrate_kbps, fallback_audio_bitrate_kbps,
-                                        transcode_down_to)
+            LoggingService.LogFunctionEntry("AddThreshold", 'ProfileService', profile_id, resolution, 
+                                           under_30_min_mb, under_65_min_mb, over_65_min_mb,
+                                           video_bitrate_kbps, audio_bitrate_kbps,
+                                           fallback_video_bitrate_kbps, fallback_audio_bitrate_kbps,
+                                           transcode_down_to)
             threshold = ProfileThresholdModel(
                 ProfileId=profile_id,
                 Resolution=resolution,
@@ -90,15 +90,15 @@ class ProfileService:
                 TranscodeDownTo=transcode_down_to
             )
             
-            DebugService.Log("Saving threshold to database...")
+            LoggingService.LogInfo("Saving threshold to database...", 'ProfileService', 'AddThreshold')
             threshold_id = self.DatabaseManager.SaveThreshold(threshold)
             threshold.Id = threshold_id
-            DebugService.Log("Threshold saved with ID: {}", threshold_id)
+            LoggingService.LogInfo(f"Threshold saved with ID: {threshold_id}", 'ProfileService', 'AddThreshold')
             
-            DebugService.LogFunctionExit("AddThreshold", threshold_id)
+            LoggingService.LogFunctionExit("AddThreshold", threshold_id)
             return threshold
         except Exception as e:
-            DebugService.LogException("Exception in ProfileService.AddThreshold", e)
+            LoggingService.LogException("Exception in ProfileService.AddThreshold", e, 'ProfileService', 'AddThreshold')
             raise
     
     def UpdateThreshold(self, threshold: ProfileThresholdModel) -> ProfileThresholdModel:

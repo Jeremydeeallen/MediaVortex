@@ -102,13 +102,13 @@ Start with a minimal working slice to prove core functionality and Unicode chara
 - [x] Ensure only PascalCase was used
 
 ### Phase 8.5: Subprocess Implementation - Process Management
-- [ ] Create database table for scan job state tracking MVVM pattern using MVVM architecture
-- [ ] Create separate scan script for subprocess execution MVVM pattern using MVVM architecture
-- [ ] Implement subprocess management in FileScanningBusinessService MVVM pattern using MVVM architecture
-- [ ] Add PID tracking and process monitoring MVVM pattern using MVVM architecture
-- [ ] Update status endpoints to read from database instead of memory MVVM pattern using MVVM architecture
-- [ ] Implement proper process cleanup and error handling MVVM pattern using MVVM architecture
-- [ ] Ensure only PascalCase was used
+- [x] Create database table for scan job state tracking MVVM pattern using MVVM architecture
+- [x] Create separate scan script for subprocess execution MVVM pattern using MVVM architecture
+- [x] Implement subprocess management in FileScanningBusinessService MVVM pattern using MVVM architecture
+- [x] Add PID tracking and process monitoring MVVM pattern using MVVM architecture
+- [x] Update status endpoints to read from database instead of memory MVVM pattern using MVVM architecture
+- [x] Implement proper process cleanup and error handling MVVM pattern using MVVM architecture
+- [x] Ensure only PascalCase was used
 
 ### Phase 9: Complete Feature - Additional Models
 - [ ] Create `Models/SeasonModel.py` - Simple data class for season organization MVVM pattern using MVVM architecture

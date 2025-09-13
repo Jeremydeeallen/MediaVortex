@@ -1,7 +1,7 @@
 from flask import Blueprint, request, jsonify, render_template
 from typing import Dict, Any
 from ViewModels.FileScanningViewModel import FileScanningViewModel
-from Services.DebugService import DebugService
+from Services.LoggingService import LoggingService
 
 
 class FileScanningController:
@@ -17,20 +17,28 @@ class FileScanningController:
         
         @self.Blueprint.route('/Scan/Start', methods=['POST'])
         def StartScan():
-            """Start scanning a root folder."""
+            """Start scanning a root folder using subprocess."""
             try:
+                LoggingService.LogInfo("StartScan endpoint called", "FileScanningController", "StartScan")
                 data = request.get_json()
-                rootFolderPath = data.get('RootFolderPath', '')
-                recursive = data.get('Recursive', True)
+                LoggingService.LogInfo(f"Request data received: {data}", "FileScanningController", "StartScan")
                 
-                if not rootFolderPath:
+                RootFolderPath = data.get('RootFolderPath', '')
+                Recursive = data.get('Recursive', True)
+                
+                LoggingService.LogInfo(f"Parsed parameters - RootFolderPath: {RootFolderPath}, Recursive: {Recursive}", "FileScanningController", "StartScan")
+                
+                if not RootFolderPath:
+                    LoggingService.LogError("RootFolderPath is missing", "FileScanningController", "StartScan")
                     return jsonify({
                         'Success': False,
                         'Message': 'RootFolderPath is required',
                         'Error': 'MissingPath'
                     }), 400
                 
-                result = self.ViewModel.StartScanning(rootFolderPath, recursive)
+                LoggingService.LogInfo("Calling ViewModel.StartScanning", "FileScanningController", "StartScan")
+                result = self.ViewModel.StartScanning(RootFolderPath, Recursive)
+                LoggingService.LogInfo(f"ViewModel.StartScanning result: {result}", "FileScanningController", "StartScan")
                 
                 if result['Success']:
                     return jsonify(result), 200
@@ -38,7 +46,7 @@ class FileScanningController:
                     return jsonify(result), 400
                     
             except Exception as e:
-                DebugService.LogException("Error in StartScan endpoint", e)
+                LoggingService.LogException("Error in StartScan endpoint", e, "FileScanningController", "StartScan")
                 return jsonify({
                     'Success': False,
                     'Message': f'Error starting scan: {str(e)}',
@@ -49,11 +57,13 @@ class FileScanningController:
         def GetScanStatus():
             """Get current scan status and progress."""
             try:
+                LoggingService.LogInfo("GetScanStatus endpoint called", "FileScanningController", "GetScanStatus")
                 status = self.ViewModel.UpdateScanStatus()
+                LoggingService.LogInfo(f"GetScanStatus returning: {status}", "FileScanningController", "GetScanStatus")
                 return jsonify(status), 200
                 
             except Exception as e:
-                DebugService.LogException("Error in GetScanStatus endpoint", e)
+                LoggingService.LogException("Error in GetScanStatus endpoint", e, "FileScanningController", "GetScanStatus")
                 return jsonify({
                     'Success': False,
                     'Message': f'Error getting scan status: {str(e)}',
@@ -72,7 +82,7 @@ class FileScanningController:
                     return jsonify(result), 400
                     
             except Exception as e:
-                DebugService.LogException("Error in StopScan endpoint", e)
+                LoggingService.LogException("Error in StopScan endpoint", e, "FileScanningController", "StopScan")
                 return jsonify({
                     'Success': False,
                     'Message': f'Error stopping scan: {str(e)}',
@@ -97,7 +107,7 @@ class FileScanningController:
                 }), 200
                 
             except Exception as e:
-                DebugService.LogException("Error in GetRootFolders endpoint", e)
+                LoggingService.LogException("Error in GetRootFolders endpoint", e, "FileScanningController", "GetRootFolders")
                 return jsonify({
                     'Success': False,
                     'Message': f'Error getting root folders: {str(e)}',
@@ -123,7 +133,7 @@ class FileScanningController:
                     }), 400
                     
             except Exception as e:
-                DebugService.LogException("Error in DeleteRootFolder endpoint", e)
+                LoggingService.LogException("Error in DeleteRootFolder endpoint", e, "FileScanningController", "DeleteRootFolder")
                 return jsonify({
                     'Success': False,
                     'Message': f'Error deleting root folder: {str(e)}',
@@ -149,7 +159,7 @@ class FileScanningController:
                 }), 200
                 
             except Exception as e:
-                DebugService.LogException("Error in GetMediaFiles endpoint", e)
+                LoggingService.LogException("Error in GetMediaFiles endpoint", e, "FileScanningController", "GetMediaFiles")
                 return jsonify({
                     'Success': False,
                     'Message': f'Error getting media files: {str(e)}',
@@ -175,7 +185,7 @@ class FileScanningController:
                     }), 400
                     
             except Exception as e:
-                DebugService.LogException("Error in DeleteMediaFile endpoint", e)
+                LoggingService.LogException("Error in DeleteMediaFile endpoint", e, "FileScanningController", "DeleteMediaFile")
                 return jsonify({
                     'Success': False,
                     'Message': f'Error deleting media file: {str(e)}',
@@ -210,7 +220,7 @@ class FileScanningController:
                 }), 200
                 
             except Exception as e:
-                DebugService.LogException("Error in TestUnicodeSupport endpoint", e)
+                LoggingService.LogException("Error in TestUnicodeSupport endpoint", e, "FileScanningController", "TestUnicodeSupport")
                 return jsonify({
                     'Success': False,
                     'Message': f'Error testing Unicode support: {str(e)}',
@@ -242,7 +252,7 @@ class FileScanningController:
                 }), 200
                 
             except Exception as e:
-                DebugService.LogException("Error in GetScanProgress endpoint", e)
+                LoggingService.LogException("Error in GetScanProgress endpoint", e, "FileScanningController", "GetScanProgress")
                 return jsonify({
                     'Success': False,
                     'Message': f'Error getting scan progress: {str(e)}',
@@ -261,7 +271,7 @@ class FileScanningController:
                 }), 200
                 
             except Exception as e:
-                DebugService.LogException("Error in RefreshData endpoint", e)
+                LoggingService.LogException("Error in RefreshData endpoint", e, "FileScanningController", "RefreshData")
                 return jsonify({
                     'Success': False,
                     'Message': f'Error refreshing data: {str(e)}',
@@ -290,5 +300,5 @@ class FileScanningController:
                 return render_template('FileScanning.html')
                 
             except Exception as e:
-                DebugService.LogException("Error serving FileScanning page", e)
+                LoggingService.LogException("Error serving FileScanning page", e, "FileScanningController", "FileScanning")
                 return f"Error loading page: {str(e)}", 500

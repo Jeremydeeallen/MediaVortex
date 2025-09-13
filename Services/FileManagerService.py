@@ -2,7 +2,7 @@ import os
 import sys
 from typing import List, Optional, Tuple
 from pathlib import Path
-from Services.DebugService import DebugService
+from Services.LoggingService import LoggingService
 
 
 class FileManagerService:
@@ -25,7 +25,7 @@ class FileManagerService:
             fileExtension = Path(filePath).suffix.lower()
             return fileExtension in self.MediaExtensions
         except Exception as e:
-            DebugService.LogException("Error checking media file extension", e)
+            LoggingService.LogException("Error checking media file extension", e, 'FileManagerService', 'IsMediaFile')
             return False
     
     def ValidateUnicodePath(self, filePath: str) -> Tuple[bool, str]:
@@ -43,15 +43,15 @@ class FileManagerService:
                 return False, sanitizedPath
                 
         except UnicodeEncodeError as e:
-            DebugService.Log("Unicode encoding error for path: {}", filePath)
+            LoggingService.LogWarning(f"Unicode encoding error for path: {filePath}", 'FileManagerService', 'ValidateUnicodePath')
             sanitizedPath = self.SanitizeUnicodePath(filePath)
             return False, sanitizedPath
         except UnicodeDecodeError as e:
-            DebugService.Log("Unicode decoding error for path: {}", filePath)
+            LoggingService.LogWarning(f"Unicode decoding error for path: {filePath}", 'FileManagerService', 'ValidateUnicodePath')
             sanitizedPath = self.SanitizeUnicodePath(filePath)
             return False, sanitizedPath
         except Exception as e:
-            DebugService.LogException("Unexpected error validating Unicode path", e)
+            LoggingService.LogException("Unexpected error validating Unicode path", e, 'FileManagerService', 'ValidateUnicodePath')
             sanitizedPath = self.SanitizeUnicodePath(filePath)
             return False, sanitizedPath
     
@@ -131,7 +131,7 @@ class FileManagerService:
                 return sanitized.encode('ascii', errors='replace').decode('ascii')
                 
         except Exception as e:
-            DebugService.LogException("Error sanitizing Unicode path", e)
+            LoggingService.LogException("Error sanitizing Unicode path", e, 'FileManagerService', 'SanitizeUnicodePath')
             # Fallback: return a safe filename
             return f"SanitizedFile{hash(filePath) % 10000}"
     
@@ -142,7 +142,7 @@ class FileManagerService:
             isValid, safePath = self.ValidateUnicodePath(filePath)
             
             if not isValid:
-                DebugService.Log("Using sanitized path for file size: {}", safePath)
+                LoggingService.LogDebug(f"Using sanitized path for file size: {safePath}", 'FileManagerService', 'GetFileSizeMB')
                 self.EncodingErrors.append(f"Unicode issue: {filePath} -> {safePath}")
             
             # Try to get file size
@@ -150,11 +150,11 @@ class FileManagerService:
                 sizeBytes = os.path.getsize(safePath)
                 return sizeBytes / (1024 * 1024)  # Convert to MB
             else:
-                DebugService.Log("File not found: {}", safePath)
+                LoggingService.LogWarning(f"File not found: {safePath}", 'FileManagerService', 'GetFileSizeMB')
                 return 0.0
                 
         except Exception as e:
-            DebugService.LogException("Error getting file size", e)
+            LoggingService.LogException("Error getting file size", e, 'FileManagerService', 'GetFileSizeMB')
             return 0.0
     
     def ScanDirectory(self, directoryPath: str, recursive: bool = True) -> List[str]:
@@ -162,21 +162,21 @@ class FileManagerService:
         mediaFiles = []
         
         try:
-            DebugService.LogFunctionEntry("ScanDirectory", directoryPath, recursive)
+            LoggingService.LogFunctionEntry("ScanDirectory", 'FileManagerService', directoryPath, recursive=recursive)
             
             # Validate the directory path
             isValid, safePath = self.ValidateUnicodePath(directoryPath)
             
             if not isValid:
-                DebugService.Log("Using sanitized path for directory scan: {}", safePath)
+                LoggingService.LogDebug(f"Using sanitized path for directory scan: {safePath}", 'FileManagerService', 'ScanDirectory')
                 self.EncodingErrors.append(f"Unicode issue: {directoryPath} -> {safePath}")
             
             if not os.path.exists(safePath):
-                DebugService.Log("Directory does not exist: {}", safePath)
+                LoggingService.LogWarning(f"Directory does not exist: {safePath}", 'FileManagerService', 'ScanDirectory')
                 return mediaFiles
             
             if not os.path.isdir(safePath):
-                DebugService.Log("Path is not a directory: {}", safePath)
+                LoggingService.LogWarning(f"Path is not a directory: {safePath}", 'FileManagerService', 'ScanDirectory')
                 return mediaFiles
             
             # Scan the directory
@@ -190,7 +190,7 @@ class FileManagerService:
                             fileIsValid, safeFilePath = self.ValidateUnicodePath(filePath)
                             
                             if not fileIsValid:
-                                DebugService.Log("Using sanitized path for file: {}", safeFilePath)
+                                LoggingService.LogDebug(f"Using sanitized path for file: {safeFilePath}", 'FileManagerService', 'ScanDirectory')
                                 self.EncodingErrors.append(f"Unicode issue: {filePath} -> {safeFilePath}")
                             
                             if self.IsMediaFile(safeFilePath):
@@ -200,7 +200,7 @@ class FileManagerService:
                                 self.SkippedFiles += 1
                                 
                         except Exception as e:
-                            DebugService.LogException("Error processing file in directory scan", e)
+                            LoggingService.LogException("Error processing file in directory scan", e, 'FileManagerService', 'ScanDirectory')
                             self.SkippedFiles += 1
                             continue
             else:
@@ -216,7 +216,7 @@ class FileManagerService:
                                 fileIsValid, safeFilePath = self.ValidateUnicodePath(filePath)
                                 
                                 if not fileIsValid:
-                                    DebugService.Log("Using sanitized path for file: {}", safeFilePath)
+                                    LoggingService.LogDebug(f"Using sanitized path for file: {safeFilePath}", 'FileManagerService', 'ScanDirectory')
                                     self.EncodingErrors.append(f"Unicode issue: {filePath} -> {safeFilePath}")
                                 
                                 if self.IsMediaFile(safeFilePath):
@@ -226,19 +226,18 @@ class FileManagerService:
                                     self.SkippedFiles += 1
                                     
                         except Exception as e:
-                            DebugService.LogException("Error processing file in non-recursive scan", e)
+                            LoggingService.LogException("Error processing file in non-recursive scan", e, 'FileManagerService', 'ScanDirectory')
                             self.SkippedFiles += 1
                             continue
                             
                 except Exception as e:
-                    DebugService.LogException("Error listing directory contents", e)
+                    LoggingService.LogException("Error listing directory contents", e, 'FileManagerService', 'ScanDirectory')
                     return mediaFiles
             
-            DebugService.Log("Directory scan completed. Found {} media files, processed {}, skipped {}", 
-                           len(mediaFiles), self.ProcessedFiles, self.SkippedFiles)
+            LoggingService.LogInfo(f"Directory scan completed. Found {len(mediaFiles)} media files, processed {self.ProcessedFiles}, skipped {self.SkippedFiles}", 'FileManagerService', 'ScanDirectory')
             
         except Exception as e:
-            DebugService.LogException("Error in directory scan", e)
+            LoggingService.LogException("Error in directory scan", e, 'FileManagerService', 'ScanDirectory')
         
         return mediaFiles
     
@@ -247,17 +246,17 @@ class FileManagerService:
         totalSizeBytes = 0
         
         try:
-            DebugService.LogFunctionEntry("CalculateDirectorySize", directoryPath)
+            LoggingService.LogFunctionEntry("CalculateDirectorySize", 'FileManagerService', directoryPath)
             
             # Validate the directory path
             isValid, safePath = self.ValidateUnicodePath(directoryPath)
             
             if not isValid:
-                DebugService.Log("Using sanitized path for directory size calculation: {}", safePath)
+                LoggingService.LogDebug(f"Using sanitized path for directory size calculation: {safePath}", 'FileManagerService', 'CalculateDirectorySize')
                 self.EncodingErrors.append(f"Unicode issue: {directoryPath} -> {safePath}")
             
             if not os.path.exists(safePath) or not os.path.isdir(safePath):
-                DebugService.Log("Directory does not exist or is not a directory: {}", safePath)
+                LoggingService.LogWarning(f"Directory does not exist or is not a directory: {safePath}", 'FileManagerService', 'CalculateDirectorySize')
                 return 0.0
             
             # Walk through all files in the directory
@@ -270,22 +269,22 @@ class FileManagerService:
                         fileIsValid, safeFilePath = self.ValidateUnicodePath(filePath)
                         
                         if not fileIsValid:
-                            DebugService.Log("Using sanitized path for file size calculation: {}", safeFilePath)
+                            LoggingService.LogDebug(f"Using sanitized path for file size calculation: {safeFilePath}", 'FileManagerService', 'CalculateDirectorySize')
                             self.EncodingErrors.append(f"Unicode issue: {filePath} -> {safeFilePath}")
                         
                         if os.path.exists(safeFilePath):
                             totalSizeBytes += os.path.getsize(safeFilePath)
                             
                     except Exception as e:
-                        DebugService.LogException("Error calculating file size", e)
+                        LoggingService.LogException("Error calculating file size", e, 'FileManagerService', 'CalculateDirectorySize')
                         continue
             
             # Convert to GB
             totalSizeGB = totalSizeBytes / (1024 * 1024 * 1024)
-            DebugService.Log("Directory size calculated: {} GB", totalSizeGB)
+            LoggingService.LogInfo(f"Directory size calculated: {totalSizeGB} GB", 'FileManagerService', 'CalculateDirectorySize')
             
         except Exception as e:
-            DebugService.LogException("Error calculating directory size", e)
+            LoggingService.LogException("Error calculating directory size", e, 'FileManagerService', 'CalculateDirectorySize')
             return 0.0
         
         return totalSizeGB
@@ -297,13 +296,13 @@ class FileManagerService:
             isValid, safePath = self.ValidateUnicodePath(filePath)
             
             if not isValid:
-                DebugService.Log("Using sanitized path for filename extraction: {}", safePath)
+                LoggingService.LogDebug(f"Using sanitized path for filename extraction: {safePath}", 'FileManagerService', 'GetFileNameFromPath')
                 self.EncodingErrors.append(f"Unicode issue: {filePath} -> {safePath}")
             
             return os.path.basename(safePath)
             
         except Exception as e:
-            DebugService.LogException("Error extracting filename", e)
+            LoggingService.LogException("Error extracting filename", e, 'FileManagerService', 'GetFileNameFromPath')
             return "UnknownFile"
     
     def GetEncodingErrors(self) -> List[str]:

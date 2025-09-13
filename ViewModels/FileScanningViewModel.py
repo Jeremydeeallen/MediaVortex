@@ -3,7 +3,7 @@ from datetime import datetime
 from Models.RootFolderModel import RootFolderModel
 from Models.MediaFileModel import MediaFileModel
 from Services.FileScanningBusinessService import FileScanningBusinessService
-from Services.DebugService import DebugService
+from Services.LoggingService import LoggingService
 
 
 class FileScanningViewModel:
@@ -35,18 +35,15 @@ class FileScanningViewModel:
         self.ErrorMessage = ""
     
     def StartScanning(self, RootFolderPath: str, Recursive: bool = True) -> Dict[str, Any]:
-        """Start scanning a root folder and update UI state."""
+        """Start scanning a root folder using subprocess and update UI state."""
         try:
-            DebugService.LogFunctionEntry("StartScanning", RootFolderPath, Recursive)
+            LoggingService.LogFunctionEntry("StartScanning", RootFolderPath, Recursive)
             
-            # Clear previous state
-            self.ClearScanState()
-            
-            # Start the scan
+            # Start the scan using subprocess
             result = self.BusinessService.StartScanning(RootFolderPath, Recursive)
             
             if result['Success']:
-                self.IsScanning = True
+                # Update UI state with subprocess info
                 self.CurrentScanDirectory = RootFolderPath
                 self.ScanStatusMessage = "Scan started successfully"
                 self.IsError = False
@@ -60,7 +57,7 @@ class FileScanningViewModel:
             return result
             
         except Exception as e:
-            DebugService.LogException("Error in StartScanning", e)
+            LoggingService.LogInfoException("Error in StartScanning", e)
             self.IsError = True
             self.ErrorMessage = f"Error starting scan: {str(e)}"
             self.ScanStatusMessage = self.ErrorMessage
@@ -90,7 +87,7 @@ class FileScanningViewModel:
             return result
             
         except Exception as e:
-            DebugService.LogException("Error in StopScanning", e)
+            LoggingService.LogInfoException("Error in StopScanning", e)
             self.IsError = True
             self.ErrorMessage = f"Error stopping scan: {str(e)}"
             self.ScanStatusMessage = self.ErrorMessage
@@ -101,9 +98,11 @@ class FileScanningViewModel:
             }
     
     def UpdateScanStatus(self) -> Dict[str, Any]:
-        """Update the current scan status and progress."""
+        """Update the current scan status and progress from subprocess data."""
         try:
+            LoggingService.LogInfo("UpdateScanStatus called", "FileScanningViewModel", "UpdateScanStatus")
             status = self.BusinessService.GetScanStatus()
+            LoggingService.LogInfo(f"BusinessService.GetScanStatus returned: {status}", "FileScanningViewModel", "UpdateScanStatus")
             
             # Update UI state from business service
             self.IsScanning = status['IsScanning']
@@ -112,12 +111,16 @@ class FileScanningViewModel:
             self.ScanResults = status['Results'].copy()
             self.ScanErrors = status['Errors'].copy()
             
-            # Update status message
+            # Update status message based on subprocess status
             if self.IsScanning:
                 self.ScanStatusMessage = f"Scanning: {self.CurrentScanDirectory} ({self.ScanProgress:.1f}%)"
             else:
-                if self.ScanResults['TotalFiles'] > 0:
+                if status.get('Status') == 'Completed':
                     self.ScanStatusMessage = f"Scan completed: {self.ScanResults['ProcessedFiles']} files processed"
+                elif status.get('Status') == 'Failed':
+                    self.ScanStatusMessage = f"Scan failed: {status.get('ErrorMessage', 'Unknown error')}"
+                elif status.get('Status') == 'Stopped':
+                    self.ScanStatusMessage = "Scan stopped by user"
                 else:
                     self.ScanStatusMessage = "Ready to scan"
             
@@ -132,7 +135,7 @@ class FileScanningViewModel:
             return status
             
         except Exception as e:
-            DebugService.LogException("Error in UpdateScanStatus", e)
+            LoggingService.LogException("Error in UpdateScanStatus", e, "FileScanningViewModel", "UpdateScanStatus")
             self.IsError = True
             self.ErrorMessage = f"Error updating scan status: {str(e)}"
             self.ScanStatusMessage = self.ErrorMessage
@@ -146,11 +149,11 @@ class FileScanningViewModel:
         """Load all root folders and update UI state."""
         try:
             self.RootFolders = self.BusinessService.GetRootFolders()
-            DebugService.Log("Loaded {} root folders", len(self.RootFolders))
+            LoggingService.LogInfo("Loaded {} root folders", len(self.RootFolders))
             return self.RootFolders
             
         except Exception as e:
-            DebugService.LogException("Error loading root folders", e)
+            LoggingService.LogInfoException("Error loading root folders", e)
             self.IsError = True
             self.ErrorMessage = f"Error loading root folders: {str(e)}"
             return []
@@ -160,11 +163,11 @@ class FileScanningViewModel:
         try:
             self.MediaFiles = self.BusinessService.GetMediaFiles(RootFolderPath)
             self.SelectedRootFolder = RootFolderPath
-            DebugService.Log("Loaded {} media files", len(self.MediaFiles))
+            LoggingService.LogInfo("Loaded {} media files", len(self.MediaFiles))
             return self.MediaFiles
             
         except Exception as e:
-            DebugService.LogException("Error loading media files", e)
+            LoggingService.LogInfoException("Error loading media files", e)
             self.IsError = True
             self.ErrorMessage = f"Error loading media files: {str(e)}"
             return []
@@ -188,7 +191,7 @@ class FileScanningViewModel:
             return success
             
         except Exception as e:
-            DebugService.LogException("Error deleting root folder", e)
+            LoggingService.LogInfoException("Error deleting root folder", e)
             self.IsError = True
             self.ErrorMessage = f"Error deleting root folder: {str(e)}"
             self.ScanStatusMessage = self.ErrorMessage
@@ -213,7 +216,7 @@ class FileScanningViewModel:
             return success
             
         except Exception as e:
-            DebugService.LogException("Error deleting media file", e)
+            LoggingService.LogInfoException("Error deleting media file", e)
             self.IsError = True
             self.ErrorMessage = f"Error deleting media file: {str(e)}"
             self.ScanStatusMessage = self.ErrorMessage
@@ -298,7 +301,7 @@ class FileScanningViewModel:
             }
             
         except Exception as e:
-            DebugService.LogException("Error getting paginated root folders", e)
+            LoggingService.LogInfoException("Error getting paginated root folders", e)
             return {
                 'RootFolders': [],
                 'TotalCount': 0,
@@ -368,7 +371,7 @@ class FileScanningViewModel:
             }
             
         except Exception as e:
-            DebugService.LogException("Error getting paginated media files", e)
+            LoggingService.LogInfoException("Error getting paginated media files", e)
             return {
                 'MediaFiles': [],
                 'TotalCount': 0,
@@ -405,7 +408,7 @@ class FileScanningViewModel:
             self.UpdateScanStatus()
             
         except Exception as e:
-            DebugService.LogException("Error refreshing data", e)
+            LoggingService.LogInfoException("Error refreshing data", e)
             self.IsError = True
             self.ErrorMessage = f"Error refreshing data: {str(e)}"
     
@@ -414,7 +417,7 @@ class FileScanningViewModel:
         try:
             self.ScanDirectories = self.BusinessService.GetScanDirectories()
         except Exception as e:
-            DebugService.LogError(f"Error loading scan directories: {str(e)}")
+            LoggingService.LogInfoError(f"Error loading scan directories: {str(e)}")
             self.ScanDirectories = []
     
     def GetScanDirectoriesForDisplay(self) -> List[Dict[str, str]]:

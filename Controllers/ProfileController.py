@@ -2,7 +2,7 @@ from flask import Blueprint, request, jsonify
 from ViewModels.ProfileManagementViewModel import ProfileManagementViewModel
 from Models.TranscodeProfileModel import TranscodeProfileModel
 from Models.ProfileThresholdModel import ProfileThresholdModel
-from Services.DebugService import DebugService
+from Services.LoggingService import LoggingService
 from datetime import datetime
 
 
@@ -65,12 +65,12 @@ class ProfileController:
         def create_profile():
             """Create a new profile with thresholds."""
             try:
-                DebugService.LogFunctionEntry("create_profile")
+                LoggingService.LogFunctionEntry("create_profile")
                 data = request.get_json()
-                DebugService.LogData("Received data", data)
+                LoggingService.LogInfo("Received data", data)
                 
                 if not data or 'ProfileName' not in data:
-                    DebugService.Log("Missing ProfileName")
+                    LoggingService.LogInfo("Missing ProfileName")
                     return jsonify({
                         'success': False,
                         'error': 'ProfileName is required'
@@ -80,26 +80,26 @@ class ProfileController:
                 description = data.get('Description', '').strip()
                 thresholds = data.get('Thresholds', [])
                 
-                DebugService.Log("Profile name: {}, Description: {}, Thresholds count: {}", 
+                LoggingService.LogInfo("Profile name: {}, Description: {}, Thresholds count: {}", 
                                profile_name, description, len(thresholds))
                 
                 success = self.ViewModel.CreateProfileWithThresholds(profile_name, description, thresholds)
-                DebugService.Log("CreateProfileWithThresholds result: {}", success)
+                LoggingService.LogInfo("CreateProfileWithThresholds result: {}", success)
                 
                 if success:
-                    DebugService.Log("Success message: {}", self.ViewModel.SuccessMessage)
+                    LoggingService.LogInfo("Success message: {}", self.ViewModel.SuccessMessage)
                     return jsonify({
                         'success': True,
                         'message': self.ViewModel.SuccessMessage
                     }), 201
                 else:
-                    DebugService.Log("Error message: {}", self.ViewModel.ErrorMessage)
+                    LoggingService.LogInfo("Error message: {}", self.ViewModel.ErrorMessage)
                     return jsonify({
                         'success': False,
                         'error': self.ViewModel.ErrorMessage
                     }), 400
             except Exception as e:
-                DebugService.LogException("Exception in create_profile", e)
+                LoggingService.LogInfoException("Exception in create_profile", e)
                 return jsonify({
                     'success': False,
                     'error': f'Failed to create profile: {str(e)}'
@@ -109,12 +109,12 @@ class ProfileController:
         def update_profile(profile_id):
             """Update an existing profile with thresholds."""
             try:
-                DebugService.LogFunctionEntry("update_profile", profile_id)
+                LoggingService.LogFunctionEntry("update_profile", profile_id)
                 data = request.get_json()
-                DebugService.LogData("Received data", data)
+                LoggingService.LogInfo("Received data", data)
                 
                 if not data:
-                    DebugService.Log("No data received")
+                    LoggingService.LogInfo("No data received")
                     return jsonify({
                         'success': False,
                         'error': 'Profile data is required'
@@ -124,26 +124,26 @@ class ProfileController:
                 description = data.get('Description', '').strip()
                 thresholds = data.get('Thresholds', [])
                 
-                DebugService.Log("Profile name: {}, Description: {}, Thresholds count: {}", 
+                LoggingService.LogInfo("Profile name: {}, Description: {}, Thresholds count: {}", 
                                profile_name, description, len(thresholds))
                 
                 success = self.ViewModel.UpdateProfileWithThresholds(profile_id, profile_name, description, thresholds)
-                DebugService.Log("UpdateProfileWithThresholds result: {}", success)
+                LoggingService.LogInfo("UpdateProfileWithThresholds result: {}", success)
                 
                 if success:
-                    DebugService.Log("Success message: {}", self.ViewModel.SuccessMessage)
+                    LoggingService.LogInfo("Success message: {}", self.ViewModel.SuccessMessage)
                     return jsonify({
                         'success': True,
                         'message': self.ViewModel.SuccessMessage
                     })
                 else:
-                    DebugService.Log("Error message: {}", self.ViewModel.ErrorMessage)
+                    LoggingService.LogInfo("Error message: {}", self.ViewModel.ErrorMessage)
                     return jsonify({
                         'success': False,
                         'error': self.ViewModel.ErrorMessage
                     }), 400
             except Exception as e:
-                DebugService.LogException("Exception in update_profile", e)
+                LoggingService.LogInfoException("Exception in update_profile", e)
                 return jsonify({
                     'success': False,
                     'error': f'Failed to update profile: {str(e)}'

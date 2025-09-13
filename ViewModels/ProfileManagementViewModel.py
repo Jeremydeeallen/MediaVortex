@@ -3,7 +3,7 @@ from datetime import datetime
 from Models.TranscodeProfileModel import TranscodeProfileModel
 from Models.ProfileThresholdModel import ProfileThresholdModel
 from Services.ProfileService import ProfileService
-from Services.DebugService import DebugService
+from Services.LoggingService import LoggingService
 
 
 class ProfileManagementViewModel:
@@ -68,8 +68,8 @@ class ProfileManagementViewModel:
     def CreateProfileWithThresholds(self, profile_name: str, description: str, thresholds: List[dict]) -> bool:
         """Create a new profile with multiple thresholds."""
         try:
-            DebugService.LogFunctionEntry("CreateProfileWithThresholds", profile_name, description, len(thresholds))
-            DebugService.LogData("Thresholds data", thresholds)
+            LoggingService.LogFunctionEntry("CreateProfileWithThresholds", "ProfileManagementViewModel", profile_name, description, len(thresholds))
+            LoggingService.LogInfo("Thresholds data: {}", "ProfileManagementViewModel", "CreateProfileWithThresholds", thresholds)
             
             if not profile_name.strip():
                 self.ErrorMessage = "Profile name is required"
@@ -82,14 +82,14 @@ class ProfileManagementViewModel:
                 return False
             
             # Create the profile first
-            DebugService.Log("Creating profile...")
+            LoggingService.LogInfo("Creating profile...", "ProfileManagementViewModel", "CreateProfileWithThresholds")
             new_profile = self.ProfileService.CreateProfile(profile_name, description)
-            DebugService.Log("Profile created with ID: {}", new_profile.Id)
+            LoggingService.LogInfo("Profile created with ID: {}", "ProfileManagementViewModel", "CreateProfileWithThresholds", new_profile.Id)
             
             # Add all thresholds
-            DebugService.Log("Adding {} thresholds...", len(thresholds))
+            LoggingService.LogInfo("Adding {} thresholds...", "ProfileManagementViewModel", "CreateProfileWithThresholds", len(thresholds))
             for i, threshold_data in enumerate(thresholds):
-                DebugService.Log("Adding threshold {}: {}", i+1, threshold_data)
+                LoggingService.LogInfo("Adding threshold {}: {}", "ProfileManagementViewModel", "CreateProfileWithThresholds", i+1, threshold_data)
                 self.ProfileService.AddThreshold(
                     new_profile.Id,
                     threshold_data['Resolution'],
@@ -102,17 +102,17 @@ class ProfileManagementViewModel:
                     threshold_data['FallbackAudioBitrateKbps'],
                     threshold_data['TranscodeDownTo']
                 )
-                DebugService.Log("Threshold {} added successfully", i+1)
+                LoggingService.LogInfo("Threshold {} added successfully", "ProfileManagementViewModel", "CreateProfileWithThresholds", i+1)
             
             # Reload profiles to get updated data
-            DebugService.Log("Reloading profiles...")
+            LoggingService.LogInfo("Reloading profiles...", "ProfileManagementViewModel", "CreateProfileWithThresholds")
             self.LoadProfiles()
             self.SuccessMessage = f"Profile '{profile_name}' created successfully with {len(thresholds)} thresholds"
             self.ErrorMessage = ""
-            DebugService.LogFunctionExit("CreateProfileWithThresholds", True)
+            LoggingService.LogFunctionExit("CreateProfileWithThresholds", "ProfileManagementViewModel", True)
             return True
         except Exception as e:
-            DebugService.LogException("Exception in CreateProfileWithThresholds", e)
+            LoggingService.LogException("Exception in CreateProfileWithThresholds", e, "ProfileManagementViewModel", "CreateProfileWithThresholds")
             self.ErrorMessage = f"Failed to create profile: {str(e)}"
             return False
     
@@ -151,30 +151,30 @@ class ProfileManagementViewModel:
     def UpdateProfileWithThresholds(self, profile_id: int, profile_name: str, description: str, thresholds: List[dict]) -> bool:
         """Update an existing profile with multiple thresholds."""
         try:
-            DebugService.LogFunctionEntry("UpdateProfileWithThresholds", profile_id, profile_name, description, len(thresholds))
-            DebugService.LogData("Thresholds data", thresholds)
+            LoggingService.LogFunctionEntry("UpdateProfileWithThresholds", "ProfileManagementViewModel", profile_id, profile_name, description, len(thresholds))
+            LoggingService.LogInfo("Thresholds data: {}", "ProfileManagementViewModel", "CreateProfileWithThresholds", thresholds)
             
             if not profile_name.strip():
                 self.ErrorMessage = "Profile name is required"
-                DebugService.Log("Profile name validation failed")
+                LoggingService.LogInfo("Profile name validation failed")
                 return False
             
             # Check if another profile has the same name
             existing_profiles = [p for p in self.Profiles if p.ProfileName.lower() == profile_name.lower() and p.Id != profile_id]
             if existing_profiles:
                 self.ErrorMessage = "A profile with this name already exists"
-                DebugService.Log("Profile name already exists")
+                LoggingService.LogInfo("Profile name already exists")
                 return False
             
             # Update the profile - get existing profile to preserve CreatedDate
-            DebugService.Log("Getting existing profile to preserve CreatedDate...")
+            LoggingService.LogInfo("Getting existing profile to preserve CreatedDate...")
             existing_profile = self.ProfileService.GetProfileById(profile_id)
             if not existing_profile:
                 self.ErrorMessage = f"Profile with ID {profile_id} not found"
-                DebugService.Log("Profile not found for update")
+                LoggingService.LogInfo("Profile not found for update")
                 return False
             
-            DebugService.Log("Creating profile model for update...")
+            LoggingService.LogInfo("Creating profile model for update...")
             profile = TranscodeProfileModel(
                 Id=profile_id,
                 ProfileName=profile_name,
@@ -182,22 +182,22 @@ class ProfileManagementViewModel:
                 CreatedDate=existing_profile.CreatedDate,  # Preserve original CreatedDate
                 LastModified=datetime.now()
             )
-            DebugService.Log("Updating profile in database...")
+            LoggingService.LogInfo("Updating profile in database...")
             updated_profile = self.ProfileService.UpdateProfile(profile)
-            DebugService.Log("Profile updated successfully with ID: {}", updated_profile.Id)
+            LoggingService.LogInfo("Profile updated successfully with ID: {}", "ProfileManagementViewModel", "UpdateProfileWithThresholds", updated_profile.Id)
             
             # Delete existing thresholds
-            DebugService.Log("Getting existing thresholds...")
+            LoggingService.LogInfo("Getting existing thresholds...")
             existing_thresholds = self.ProfileService.GetProfileThresholds(profile_id)
-            DebugService.Log("Found {} existing thresholds to delete", len(existing_thresholds))
+            LoggingService.LogInfo("Found {} existing thresholds to delete", "ProfileManagementViewModel", "UpdateProfileWithThresholds", len(existing_thresholds))
             for threshold in existing_thresholds:
-                DebugService.Log("Deleting threshold ID: {}", threshold.Id)
+                LoggingService.LogInfo("Deleting threshold ID: {}", "ProfileManagementViewModel", "UpdateProfileWithThresholds", threshold.Id)
                 self.ProfileService.DeleteThreshold(threshold.Id)
             
             # Add new thresholds
-            DebugService.Log("Adding {} new thresholds...", len(thresholds))
+            LoggingService.LogInfo("Adding {} new thresholds...", "ProfileManagementViewModel", "UpdateProfileWithThresholds", len(thresholds))
             for i, threshold_data in enumerate(thresholds):
-                DebugService.Log("Adding threshold {}: {}", i+1, threshold_data)
+                LoggingService.LogInfo("Adding threshold {}: {}", "ProfileManagementViewModel", "UpdateProfileWithThresholds", i+1, threshold_data)
                 self.ProfileService.AddThreshold(
                     profile_id,
                     threshold_data['Resolution'],
@@ -210,17 +210,17 @@ class ProfileManagementViewModel:
                     threshold_data['FallbackAudioBitrateKbps'],
                     threshold_data['TranscodeDownTo']
                 )
-                DebugService.Log("Threshold {} added successfully", i+1)
+                LoggingService.LogInfo("Threshold {} added successfully", "ProfileManagementViewModel", "CreateProfileWithThresholds", i+1)
             
             # Reload profiles to get updated data
-            DebugService.Log("Reloading profiles...")
+            LoggingService.LogInfo("Reloading profiles...", "ProfileManagementViewModel", "CreateProfileWithThresholds")
             self.LoadProfiles()
             self.SuccessMessage = f"Profile '{profile_name}' updated successfully with {len(thresholds)} thresholds"
             self.ErrorMessage = ""
-            DebugService.LogFunctionExit("UpdateProfileWithThresholds", True)
+            LoggingService.LogFunctionExit("UpdateProfileWithThresholds", True)
             return True
         except Exception as e:
-            DebugService.LogException("Exception in UpdateProfileWithThresholds", e)
+            LoggingService.LogException("Exception in UpdateProfileWithThresholds", e)
             self.ErrorMessage = f"Failed to update profile: {str(e)}"
             return False
     

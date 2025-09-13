@@ -1,39 +1,50 @@
 import os
+import subprocess
+import uuid
+import psutil
 from typing import List, Optional, Dict, Any
 from datetime import datetime
+from pathlib import Path
 from Models.RootFolderModel import RootFolderModel
 from Models.MediaFileModel import MediaFileModel
 from Services.FileManagerService import FileManagerService
 from Repositories.DatabaseManager import DatabaseManager
-from Services.DebugService import DebugService
+from Services.LoggingService import LoggingService
 
 
 class FileScanningBusinessService:
     """Orchestrates the file scanning process and coordinates between services."""
     
-    def __init__(self, databaseManager: DatabaseManager = None, fileManager: FileManagerService = None):
-        self.DatabaseManager = databaseManager or DatabaseManager()
-        self.FileManager = fileManager or FileManagerService()
-        self.IsScanning = False
-        self.ScanProgress = 0.0
-        self.CurrentScanDirectory = ""
-        self.ScanResults = {
-            'TotalFiles': 0,
-            'ProcessedFiles': 0,
-            'SkippedFiles': 0,
-            'EncodingErrors': 0,
-            'NewFiles': 0,
-            'UpdatedFiles': 0,
-            'DeletedFiles': 0
-        }
-        self.ScanErrors = []
+    def __init__(self, DatabaseManagerInstance: DatabaseManager = None, FileManagerInstance: FileManagerService = None):
+        self.DatabaseManager = DatabaseManagerInstance or DatabaseManager()
+        self.FileManager = FileManagerInstance or FileManagerService()
+        self.CurrentJobId = None
+        self.ScanProcess = None
+        self.ScriptPath = Path(__file__).parent.parent / "Scripts" / "ScanDirectoryProcess.py"
+        
+        # Check for existing running scans on startup
+        self._CheckForExistingRunningScan()
     
-    def StartScanning(self, rootFolderPath: str, recursive: bool = True) -> Dict[str, Any]:
-        """Start scanning a root folder for media files."""
+    def _CheckForExistingRunningScan(self):
+        """Check for existing running scans and set CurrentJobId if found."""
         try:
-            DebugService.LogFunctionEntry("StartScanning", rootFolderPath, recursive)
+            Query = "SELECT JobId FROM ScanJobs WHERE Status IN ('Pending', 'Running') ORDER BY StartTime DESC LIMIT 1"
+            Result = self.DatabaseManager.DatabaseService.ExecuteQuery(Query)
+            if Result:
+                self.CurrentJobId = Result[0]['JobId']
+                LoggingService.LogInfo(f"Found existing running scan with JobId: {self.CurrentJobId}", 'FileScanningBusinessService', '_CheckForExistingRunningScan')
+            else:
+                LoggingService.LogInfo("No existing running scans found", 'FileScanningBusinessService', '_CheckForExistingRunningScan')
+        except Exception as e:
+            LoggingService.LogException("Error checking for existing running scans", e, 'FileScanningBusinessService', '_CheckForExistingRunningScan')
+    
+    def StartScanning(self, RootFolderPath: str, Recursive: bool = True) -> Dict[str, Any]:
+        """Start scanning a root folder for media files using subprocess."""
+        try:
+            LoggingService.LogFunctionEntry("StartScanning", 'FileScanningBusinessService', RootFolderPath, Recursive=Recursive)
             
-            if self.IsScanning:
+            # Check if there's already a running scan
+            if self.IsScanRunning():
                 return {
                     'Success': False,
                     'Message': 'Scan is already in progress',
@@ -41,74 +52,278 @@ class FileScanningBusinessService:
                 }
             
             # Validate the root folder path
-            if not rootFolderPath or not os.path.exists(rootFolderPath):
+            if not RootFolderPath or not os.path.exists(RootFolderPath):
                 return {
                     'Success': False,
-                    'Message': f'Root folder does not exist: {rootFolderPath}',
+                    'Message': f'Root folder does not exist: {RootFolderPath}',
                     'Error': 'InvalidPath'
                 }
             
-            if not os.path.isdir(rootFolderPath):
+            if not os.path.isdir(RootFolderPath):
                 return {
                     'Success': False,
-                    'Message': f'Path is not a directory: {rootFolderPath}',
+                    'Message': f'Path is not a directory: {RootFolderPath}',
                     'Error': 'NotDirectory'
                 }
             
-            # Initialize scan state
-            self.IsScanning = True
-            self.ScanProgress = 0.0
-            self.CurrentScanDirectory = rootFolderPath
-            self.ScanResults = {
-                'TotalFiles': 0,
-                'ProcessedFiles': 0,
-                'SkippedFiles': 0,
-                'EncodingErrors': 0,
-                'NewFiles': 0,
-                'UpdatedFiles': 0,
-                'DeletedFiles': 0
-            }
-            self.ScanErrors.clear()
-            self.FileManager.ResetStats()
+            # Generate unique job ID
+            JobId = str(uuid.uuid4())
+            self.CurrentJobId = JobId
             
-            # Start the scanning process
-            scanResult = self.PerformScan(rootFolderPath, recursive)
+            # Create scan job record
+            self.CreateScanJob(JobId, RootFolderPath, Recursive)
             
-            return scanResult
+            # Start subprocess
+            ProcessArgs = [
+                'py', str(self.ScriptPath), JobId, RootFolderPath, str(Recursive)
+            ]
+            
+            LoggingService.LogInfo(f"Starting subprocess with args: {ProcessArgs}", 'FileScanningBusinessService', 'StartScanning')
+            LoggingService.LogInfo(f"Script path: {self.ScriptPath}", 'FileScanningBusinessService', 'StartScanning')
+            LoggingService.LogInfo(f"Script exists: {self.ScriptPath.exists()}", 'FileScanningBusinessService', 'StartScanning')
+            LoggingService.LogInfo(f"Working directory: {Path(__file__).parent.parent}", 'FileScanningBusinessService', 'StartScanning')
+            
+            try:
+                self.ScanProcess = subprocess.Popen(
+                    ProcessArgs,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    cwd=Path(__file__).parent.parent
+                )
+                
+                LoggingService.LogInfo(f"Started scan process {self.ScanProcess.pid} for job {JobId}", 'FileScanningBusinessService', 'StartScanning')
+                
+                return {
+                    'Success': True,
+                    'Message': 'Scan started successfully',
+                    'JobId': JobId,
+                    'ProcessId': self.ScanProcess.pid
+                }
+                
+            except Exception as subprocessError:
+                LoggingService.LogException(f"Error starting subprocess for job {JobId}", subprocessError, 'FileScanningBusinessService', 'StartScanning')
+                return {
+                    'Success': False,
+                    'Message': f'Error starting subprocess: {str(subprocessError)}',
+                    'Error': 'SubprocessStartError'
+                }
             
         except Exception as e:
-            DebugService.LogException("Error starting scan", e)
-            self.IsScanning = False
+            LoggingService.LogException("Error starting scan", e, 'FileScanningBusinessService', 'StartScanning')
             return {
                 'Success': False,
                 'Message': f'Error starting scan: {str(e)}',
                 'Error': 'ScanError'
             }
     
-    def PerformScan(self, rootFolderPath: str, recursive: bool) -> Dict[str, Any]:
+    def CreateScanJob(self, JobId: str, RootFolderPath: str, Recursive: bool):
+        """Create a new scan job record in the database."""
+        try:
+            LoggingService.LogInfo(f"Creating scan job {JobId} for {RootFolderPath}, Recursive: {Recursive}", 'FileScanningBusinessService', 'CreateScanJob')
+            
+            Query = """
+            INSERT INTO ScanJobs (JobId, RootFolderPath, Recursive, Status, StartTime, LastUpdated)
+            VALUES (?, ?, ?, 'Pending', ?, ?)
+            """
+            Now = datetime.now()
+            LoggingService.LogInfo(f"Executing query with params: JobId={JobId}, RootFolderPath={RootFolderPath}, Recursive={Recursive}, Now={Now}")
+            
+            self.DatabaseManager.DatabaseService.ExecuteNonQuery(Query, (JobId, RootFolderPath, Recursive, Now, Now))
+            LoggingService.LogInfo(f"Successfully created scan job {JobId} for {RootFolderPath}")
+            
+        except Exception as e:
+            LoggingService.LogException(f"Error creating scan job {JobId}", e, 'FileScanningBusinessService', 'CreateScanJob')
+            raise
+    
+    def IsScanRunning(self) -> bool:
+        """Check if there's currently a scan running."""
+        try:
+            # Check if we have a current job
+            if self.CurrentJobId:
+                JobStatus = self.GetScanJobStatus(self.CurrentJobId)
+                if JobStatus and JobStatus['Status'] in ['Pending', 'Running']:
+                    return True
+            
+            # Check for any running scans in database
+            Query = "SELECT COUNT(*) as Count FROM ScanJobs WHERE Status IN ('Pending', 'Running')"
+            Result = self.DatabaseManager.DatabaseService.ExecuteQuery(Query)
+            return Result[0]['Count'] > 0 if Result else False
+            
+        except Exception as e:
+            LoggingService.LogException("Error checking scan status", e)
+            return False
+    
+    def GetScanJobStatus(self, JobId: str) -> Optional[Dict[str, Any]]:
+        """Get the status of a specific scan job."""
+        try:
+            Query = """
+            SELECT JobId, RootFolderPath, Recursive, Status, ProcessId, StartTime, EndTime,
+                   Progress, CurrentDirectory, TotalFiles, ProcessedFiles, SkippedFiles,
+                   EncodingErrors, NewFiles, UpdatedFiles, DeletedFiles, ErrorMessage, LastUpdated
+            FROM ScanJobs WHERE JobId = ?
+            """
+            Result = self.DatabaseManager.DatabaseService.ExecuteQuery(Query, (JobId,))
+            
+            if Result:
+                return Result[0]
+            return None
+            
+        except Exception as e:
+            LoggingService.LogException(f"Error getting scan job status for {JobId}", e)
+            return None
+    
+    def GetCurrentScanStatus(self) -> Dict[str, Any]:
+        """Get the status of the current scan job."""
+        try:
+            if not self.CurrentJobId:
+                return {
+                    'Success': True,
+                    'IsScanning': False,
+                    'Progress': 0.0,
+                    'CurrentDirectory': '',
+                    'RootFolderPath': '',
+                    'Results': {},
+                    'Errors': []
+                }
+            
+            JobStatus = self.GetScanJobStatus(self.CurrentJobId)
+            if not JobStatus:
+                return {
+                    'Success': True,
+                    'IsScanning': False,
+                    'Progress': 0.0,
+                    'CurrentDirectory': '',
+                    'RootFolderPath': '',
+                    'Results': {},
+                    'Errors': []
+                }
+            
+            IsScanning = JobStatus['Status'] in ['Pending', 'Running']
+            Results = {
+                'TotalFiles': JobStatus['TotalFiles'] or 0,
+                'ProcessedFiles': JobStatus['ProcessedFiles'] or 0,
+                'SkippedFiles': JobStatus['SkippedFiles'] or 0,
+                'EncodingErrors': JobStatus['EncodingErrors'] or 0,
+                'NewFiles': JobStatus['NewFiles'] or 0,
+                'UpdatedFiles': JobStatus['UpdatedFiles'] or 0,
+                'DeletedFiles': JobStatus['DeletedFiles'] or 0
+            }
+            
+            Errors = [JobStatus['ErrorMessage']] if JobStatus['ErrorMessage'] else []
+            
+            return {
+                'Success': True,
+                'IsScanning': IsScanning,
+                'Progress': JobStatus['Progress'] or 0.0,
+                'CurrentDirectory': JobStatus['CurrentDirectory'] or '',
+                'RootFolderPath': JobStatus['RootFolderPath'] or '',
+                'Results': Results,
+                'Errors': Errors,
+                'Status': JobStatus['Status'],
+                'JobId': JobStatus['JobId'],
+                'ProcessId': JobStatus['ProcessId']
+            }
+            
+        except Exception as e:
+            LoggingService.LogException("Error getting current scan status", e)
+            return {
+                'Success': False,
+                'IsScanning': False,
+                'Progress': 0.0,
+                'CurrentDirectory': '',
+                'RootFolderPath': '',
+                'Results': {},
+                'Errors': [str(e)]
+            }
+    
+    def StopScanning(self) -> Dict[str, Any]:
+        """Stop the current scanning process."""
+        try:
+            if not self.CurrentJobId:
+                return {
+                    'Success': False,
+                    'Message': 'No scan is currently in progress',
+                    'Error': 'NoScanInProgress'
+                }
+            
+            # Update job status to stopped
+            Query = "UPDATE ScanJobs SET Status = 'Stopped', EndTime = ?, LastUpdated = ? WHERE JobId = ?"
+            Now = datetime.now()
+            self.DatabaseManager.DatabaseService.ExecuteNonQuery(Query, (Now, Now, self.CurrentJobId))
+            
+            # Terminate the subprocess if it's still running
+            if self.ScanProcess and self.ScanProcess.poll() is None:
+                try:
+                    self.ScanProcess.terminate()
+                    # Wait a bit for graceful termination
+                    try:
+                        self.ScanProcess.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        # Force kill if it doesn't terminate gracefully
+                        self.ScanProcess.kill()
+                        self.ScanProcess.wait()
+                    
+                    LoggingService.LogInfo(f"Terminated scan process {self.ScanProcess.pid}")
+                except Exception as e:
+                    LoggingService.LogException("Error terminating scan process", e)
+            
+            # Clear current job
+            self.CurrentJobId = None
+            self.ScanProcess = None
+            
+            LoggingService.LogInfo("Scan stopped by user request")
+            
+            return {
+                'Success': True,
+                'Message': 'Scan stopped successfully'
+            }
+            
+        except Exception as e:
+            LoggingService.LogException("Error stopping scan", e)
+            return {
+                'Success': False,
+                'Message': f'Error stopping scan: {str(e)}',
+                'Error': 'StopError'
+            }
+    
+    def CleanupCompletedJobs(self):
+        """Clean up old completed scan jobs."""
+        try:
+            # Delete jobs older than 7 days
+            Query = """
+            DELETE FROM ScanJobs 
+            WHERE Status IN ('Completed', 'Failed', 'Stopped') 
+            AND LastUpdated < datetime('now', '-7 days')
+            """
+            self.DatabaseManager.DatabaseService.ExecuteNonQuery(Query)
+            LoggingService.LogInfo("Cleaned up old scan jobs")
+        except Exception as e:
+            LoggingService.LogException("Error cleaning up scan jobs", e)
+    
+    def PerformScan(self, RootFolderPath: str, Recursive: bool) -> Dict[str, Any]:
         """Perform the actual scanning process."""
         try:
-            DebugService.Log("Starting scan of directory: {}", rootFolderPath)
+            LoggingService.LogInfo("Starting scan of directory: {}", RootFolderPath)
             
             # Step 1: Calculate directory size
-            DebugService.Log("Calculating directory size...")
+            LoggingService.LogInfo("Calculating directory size...")
             self.ScanProgress = 10.0
-            totalSizeGB = self.FileManager.CalculateDirectorySize(rootFolderPath)
+            TotalSizeGB = self.FileManager.CalculateDirectorySize(RootFolderPath)
             
             # Step 2: Get or create root folder record
-            DebugService.Log("Managing root folder record...")
+            LoggingService.LogInfo("Managing root folder record...")
             self.ScanProgress = 20.0
-            rootFolder = self.GetOrCreateRootFolder(rootFolderPath, totalSizeGB)
+            RootFolder = self.GetOrCreateRootFolder(RootFolderPath, TotalSizeGB)
             
             # Step 3: Scan for media files
-            DebugService.Log("Scanning for media files...")
+            LoggingService.LogInfo("Scanning for media files...")
             self.ScanProgress = 30.0
-            mediaFiles = self.FileManager.ScanDirectory(rootFolderPath, recursive)
-            self.ScanResults['TotalFiles'] = len(mediaFiles)
+            MediaFiles = self.FileManager.ScanDirectory(RootFolderPath, Recursive)
+            self.ScanResults['TotalFiles'] = len(MediaFiles)
             
             # Step 4: Process each media file
-            DebugService.Log("Processing {} media files...", len(mediaFiles))
-            self.ProcessMediaFiles(mediaFiles, rootFolder.Id)
+            LoggingService.LogInfo("Processing {} media files...", len(MediaFiles))
+            self.ProcessMediaFiles(MediaFiles, RootFolder.Id)
             
             # Step 5: Update scan results
             self.ScanProgress = 90.0
@@ -118,18 +333,18 @@ class FileScanningBusinessService:
             self.ScanProgress = 100.0
             self.IsScanning = False
             
-            DebugService.Log("Scan completed successfully")
+            LoggingService.LogInfo("Scan completed successfully")
             
             return {
                 'Success': True,
                 'Message': 'Scan completed successfully',
                 'Results': self.ScanResults.copy(),
-                'RootFolderId': rootFolder.Id,
-                'TotalSizeGB': totalSizeGB
+                'RootFolderId': RootFolder.Id,
+                'TotalSizeGB': TotalSizeGB
             }
             
         except Exception as e:
-            DebugService.LogException("Error during scan", e)
+            LoggingService.LogException("Error during scan", e)
             self.IsScanning = False
             self.ScanErrors.append(f"Scan error: {str(e)}")
             return {
@@ -139,119 +354,119 @@ class FileScanningBusinessService:
                 'Results': self.ScanResults.copy()
             }
     
-    def GetOrCreateRootFolder(self, rootFolderPath: str, totalSizeGB: float) -> RootFolderModel:
+    def GetOrCreateRootFolder(self, RootFolderPath: str, TotalSizeGB: float) -> RootFolderModel:
         """Get existing root folder or create a new one."""
         try:
             # Check if root folder already exists
-            existingFolders = self.DatabaseManager.GetAllRootFolders()
+            ExistingFolders = self.DatabaseManager.GetAllRootFolders()
             
-            for folder in existingFolders:
-                if folder.RootFolder == rootFolderPath:
+            for Folder in ExistingFolders:
+                if Folder.RootFolder == RootFolderPath:
                     # Update existing folder
-                    folder.LastScannedDate = datetime.now()
-                    folder.TotalSizeGB = totalSizeGB
-                    folderId = self.DatabaseManager.SaveRootFolder(folder)
-                    folder.Id = folderId
-                    DebugService.Log("Updated existing root folder: {}", rootFolderPath)
-                    return folder
+                    Folder.LastScannedDate = datetime.now()
+                    Folder.TotalSizeGB = TotalSizeGB
+                    FolderId = self.DatabaseManager.SaveRootFolder(Folder)
+                    Folder.Id = FolderId
+                    LoggingService.LogInfo("Updated existing root folder: {}", RootFolderPath)
+                    return Folder
             
             # Create new root folder
-            newFolder = RootFolderModel(
-                RootFolder=rootFolderPath,
+            NewFolder = RootFolderModel(
+                RootFolder=RootFolderPath,
                 LastScannedDate=datetime.now(),
-                TotalSizeGB=totalSizeGB
+                TotalSizeGB=TotalSizeGB
             )
-            folderId = self.DatabaseManager.SaveRootFolder(newFolder)
-            newFolder.Id = folderId
-            DebugService.Log("Created new root folder: {}", rootFolderPath)
-            return newFolder
+            FolderId = self.DatabaseManager.SaveRootFolder(NewFolder)
+            NewFolder.Id = FolderId
+            LoggingService.LogInfo("Created new root folder: {}", RootFolderPath)
+            return NewFolder
             
         except Exception as e:
-            DebugService.LogException("Error managing root folder", e)
+            LoggingService.LogException("Error managing root folder", e)
             raise
     
-    def ProcessMediaFiles(self, mediaFiles: List[str], rootFolderId: Optional[int]):
+    def ProcessMediaFiles(self, MediaFiles: List[str], RootFolderId: Optional[int]):
         """Process each media file found during scanning."""
         try:
-            totalFiles = len(mediaFiles)
+            TotalFiles = len(MediaFiles)
             
-            for i, filePath in enumerate(mediaFiles):
+            for i, FilePath in enumerate(MediaFiles):
                 try:
                     # Update progress
-                    progress = 30.0 + (60.0 * (i + 1) / totalFiles)
-                    self.ScanProgress = progress
+                    Progress = 30.0 + (60.0 * (i + 1) / TotalFiles)
+                    self.ScanProgress = Progress
                     
                     # Process the file
-                    self.ProcessSingleMediaFile(filePath, rootFolderId)
+                    self.ProcessSingleMediaFile(FilePath, RootFolderId)
                     
                 except Exception as e:
-                    DebugService.LogException("Error processing media file", e)
-                    self.ScanErrors.append(f"Error processing {filePath}: {str(e)}")
+                    LoggingService.LogException("Error processing media file", e)
+                    self.ScanErrors.append(f"Error processing {FilePath}: {str(e)}")
                     continue
             
         except Exception as e:
-            DebugService.LogException("Error processing media files", e)
+            LoggingService.LogException("Error processing media files", e)
             raise
     
-    def ProcessSingleMediaFile(self, filePath: str, rootFolderId: Optional[int]):
+    def ProcessSingleMediaFile(self, FilePath: str, RootFolderId: Optional[int]):
         """Process a single media file."""
         try:
             # Get file information
-            fileSizeMB = self.FileManager.GetFileSizeMB(filePath)
-            fileName = self.FileManager.GetFileNameFromPath(filePath)
+            FileSizeMB = self.FileManager.GetFileSizeMB(FilePath)
+            FileName = self.FileManager.GetFileNameFromPath(FilePath)
             
             # Check if file already exists in database
-            existingFiles = self.DatabaseManager.GetAllMediaFiles()
-            existingFile = None
+            ExistingFiles = self.DatabaseManager.GetAllMediaFiles()
+            ExistingFile = None
             
-            for mediaFile in existingFiles:
-                if mediaFile.FilePath == filePath:
-                    existingFile = mediaFile
+            for MediaFile in ExistingFiles:
+                if MediaFile.FilePath == FilePath:
+                    ExistingFile = MediaFile
                     break
             
-            if existingFile:
+            if ExistingFile:
                 # Update existing file
-                existingFile.SizeMB = fileSizeMB
-                existingFile.LastScannedDate = datetime.now()
-                self.DatabaseManager.SaveMediaFile(existingFile)
+                ExistingFile.SizeMB = FileSizeMB
+                ExistingFile.LastScannedDate = datetime.now()
+                self.DatabaseManager.SaveMediaFile(ExistingFile)
                 self.ScanResults['UpdatedFiles'] += 1
-                DebugService.Log("Updated existing media file: {}", filePath)
+                LoggingService.LogInfo("Updated existing media file: {}", FilePath)
             else:
                 # Create new file record
-                newFile = MediaFileModel(
-                    SeasonId=rootFolderId,  # Using root folder ID as season ID for now
-                    FilePath=filePath,
-                    FileName=fileName,
-                    SizeMB=fileSizeMB,
+                NewFile = MediaFileModel(
+                    SeasonId=RootFolderId,  # Using root folder ID as season ID for now
+                    FilePath=FilePath,
+                    FileName=FileName,
+                    SizeMB=FileSizeMB,
                     LastScannedDate=datetime.now()
                 )
-                self.DatabaseManager.SaveMediaFile(newFile)
+                self.DatabaseManager.SaveMediaFile(NewFile)
                 self.ScanResults['NewFiles'] += 1
-                DebugService.Log("Added new media file: {}", filePath)
+                LoggingService.LogInfo("Added new media file: {}", FilePath)
             
             self.ScanResults['ProcessedFiles'] += 1
             
         except Exception as e:
-            DebugService.LogException("Error processing single media file", e)
+            LoggingService.LogException("Error processing single media file", e)
             self.ScanResults['SkippedFiles'] += 1
             raise
     
     def UpdateScanResults(self):
         """Update scan results with file manager statistics."""
         try:
-            fileManagerStats = self.FileManager.GetProcessingStats()
-            encodingErrors = self.FileManager.GetEncodingErrors()
+            FileManagerStats = self.FileManager.GetProcessingStats()
+            EncodingErrors = self.FileManager.GetEncodingErrors()
             
-            self.ScanResults['SkippedFiles'] = fileManagerStats['SkippedFiles']
-            self.ScanResults['EncodingErrors'] = fileManagerStats['EncodingErrors']
+            self.ScanResults['SkippedFiles'] = FileManagerStats['SkippedFiles']
+            self.ScanResults['EncodingErrors'] = FileManagerStats['EncodingErrors']
             
             # Add encoding errors to scan errors
-            self.ScanErrors.extend(encodingErrors)
+            self.ScanErrors.extend(EncodingErrors)
             
-            DebugService.Log("Scan results updated: {}", self.ScanResults)
+            LoggingService.LogInfo("Scan results updated: {}", self.ScanResults)
             
         except Exception as e:
-            DebugService.LogException("Error updating scan results", e)
+            LoggingService.LogException("Error updating scan results", e)
     
     def StopScanning(self) -> Dict[str, Any]:
         """Stop the current scanning process."""
@@ -267,7 +482,7 @@ class FileScanningBusinessService:
             self.ScanProgress = 0.0
             self.CurrentScanDirectory = ""
             
-            DebugService.Log("Scan stopped by user request")
+            LoggingService.LogInfo("Scan stopped by user request")
             
             return {
                 'Success': True,
@@ -276,7 +491,7 @@ class FileScanningBusinessService:
             }
             
         except Exception as e:
-            DebugService.LogException("Error stopping scan", e)
+            LoggingService.LogException("Error stopping scan", e)
             return {
                 'Success': False,
                 'Message': f'Error stopping scan: {str(e)}',
@@ -285,47 +500,41 @@ class FileScanningBusinessService:
     
     def GetScanStatus(self) -> Dict[str, Any]:
         """Get current scan status and progress."""
-        return {
-            'IsScanning': self.IsScanning,
-            'Progress': self.ScanProgress,
-            'CurrentDirectory': self.CurrentScanDirectory,
-            'Results': self.ScanResults.copy(),
-            'Errors': self.ScanErrors.copy()
-        }
+        return self.GetCurrentScanStatus()
     
     def GetRootFolders(self) -> List[RootFolderModel]:
         """Get all root folders."""
         try:
             return self.DatabaseManager.GetAllRootFolders()
         except Exception as e:
-            DebugService.LogException("Error getting root folders", e)
+            LoggingService.LogException("Error getting root folders", e)
             return []
     
-    def GetMediaFiles(self, rootFolderPath: Optional[str] = None) -> List[MediaFileModel]:
+    def GetMediaFiles(self, RootFolderPath: Optional[str] = None) -> List[MediaFileModel]:
         """Get media files, optionally filtered by root folder."""
         try:
-            if rootFolderPath:
-                return self.DatabaseManager.GetMediaFilesByRootFolder(rootFolderPath)
+            if RootFolderPath:
+                return self.DatabaseManager.GetMediaFilesByRootFolder(RootFolderPath)
             else:
                 return self.DatabaseManager.GetAllMediaFiles()
         except Exception as e:
-            DebugService.LogException("Error getting media files", e)
+            LoggingService.LogException("Error getting media files", e)
             return []
     
-    def DeleteRootFolder(self, rootFolderId: int) -> bool:
+    def DeleteRootFolder(self, RootFolderId: int) -> bool:
         """Delete a root folder and its associated media files."""
         try:
-            return self.DatabaseManager.DeleteRootFolder(rootFolderId)
+            return self.DatabaseManager.DeleteRootFolder(RootFolderId)
         except Exception as e:
-            DebugService.LogException("Error deleting root folder", e)
+            LoggingService.LogException("Error deleting root folder", e)
             return False
     
-    def DeleteMediaFile(self, mediaFileId: int) -> bool:
+    def DeleteMediaFile(self, MediaFileId: int) -> bool:
         """Delete a media file."""
         try:
-            return self.DatabaseManager.DeleteMediaFile(mediaFileId)
+            return self.DatabaseManager.DeleteMediaFile(MediaFileId)
         except Exception as e:
-            DebugService.LogException("Error deleting media file", e)
+            LoggingService.LogException("Error deleting media file", e)
             return False
     
     def GetScanDirectories(self) -> List[Dict[str, str]]:
@@ -333,21 +542,13 @@ class FileScanningBusinessService:
         try:
             return self.DatabaseManager.GetScanDirectories()
         except Exception as e:
-            DebugService.LogException("Error getting scan directories", e)
+            LoggingService.LogException("Error getting scan directories", e)
             return []
     
     def ResetScanState(self):
         """Reset the scan state to allow new scans."""
-        self.IsScanning = False
-        self.ScanProgress = 0
-        self.CurrentScanDirectory = ""
-        self.ScanResults = {
-            'TotalFiles': 0,
-            'ProcessedFiles': 0,
-            'SkippedFiles': 0,
-            'EncodingErrors': 0,
-            'NewFiles': 0,
-            'UpdatedFiles': 0,
-            'DeletedFiles': 0
-        }
-        self.ScanErrors = []
+        # Clear current job reference
+        self.CurrentJobId = None
+        self.ScanProcess = None
+        # Clean up old completed jobs
+        self.CleanupCompletedJobs()

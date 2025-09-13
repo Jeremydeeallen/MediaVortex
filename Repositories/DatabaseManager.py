@@ -4,7 +4,7 @@ from Models.ProfileThresholdModel import ProfileThresholdModel
 from Models.RootFolderModel import RootFolderModel
 from Models.MediaFileModel import MediaFileModel
 from Services.DatabaseService import DatabaseService
-from Services.DebugService import DebugService
+from Services.LoggingService import LoggingService
 
 
 class DatabaseManager:
@@ -52,7 +52,7 @@ class DatabaseManager:
     def SaveProfile(self, profile: TranscodeProfileModel) -> int:
         """Save a profile (insert or update) and return the profile ID."""
         try:
-            DebugService.LogFunctionEntry("SaveProfile", profile.Id, profile.ProfileName, profile.Description)
+            LoggingService.LogFunctionEntry("SaveProfile", "DatabaseManager", profile.Id, profile.ProfileName, profile.Description)
             
             connection = self.DatabaseService.GetConnection()
             try:
@@ -60,37 +60,37 @@ class DatabaseManager:
                 
                 if profile.Id is None:
                     # Insert new profile
-                    DebugService.Log("Inserting new profile...")
+                    LoggingService.LogInfo("Inserting new profile...", "DatabaseManager", "SaveProfile")
                     query = """
                         INSERT INTO Profiles (ProfileName, Description, CreatedDate, LastModified)
                         VALUES (?, ?, ?, ?)
                     """
                     parameters = (profile.ProfileName, profile.Description, profile.CreatedDate, profile.LastModified)
-                    DebugService.LogData("Insert parameters", parameters)
+                    LoggingService.LogInfo("Insert parameters: {}", "DatabaseManager", "SaveProfile", parameters)
                     cursor.execute(query, parameters)
                     connection.commit()
                     profile_id = cursor.lastrowid
-                    DebugService.Log("Profile inserted with ID: {}", profile_id)
+                    LoggingService.LogInfo("Profile inserted with ID: {}", "DatabaseManager", "SaveProfile", profile_id)
                     return profile_id
                 else:
                     # Update existing profile
-                    DebugService.Log("Updating existing profile with ID: {}", profile.Id)
+                    LoggingService.LogInfo("Updating existing profile with ID: {}", "DatabaseManager", "SaveProfile", profile.Id)
                     query = """
                         UPDATE Profiles 
                         SET ProfileName = ?, Description = ?, LastModified = ?
                         WHERE Id = ?
                     """
                     parameters = (profile.ProfileName, profile.Description, profile.LastModified, profile.Id)
-                    DebugService.LogData("Update parameters", parameters)
+                    LoggingService.LogInfo("Update parameters: {}", "DatabaseManager", "SaveProfile", parameters)
                     cursor.execute(query, parameters)
                     connection.commit()
                     affected_rows = cursor.rowcount
-                    DebugService.Log("Profile update affected {} rows", affected_rows)
+                    LoggingService.LogInfo("Profile update affected {} rows", "DatabaseManager", "SaveProfile", affected_rows)
                     return profile.Id
             finally:
                 connection.close()
         except Exception as e:
-            DebugService.LogException("Exception in SaveProfile", e)
+            LoggingService.LogException("Exception in SaveProfile", e, "DatabaseManager", "SaveProfile")
             raise
     
     def DeleteProfile(self, profile_id: int) -> bool:
@@ -140,7 +140,7 @@ class DatabaseManager:
     def SaveThreshold(self, threshold: ProfileThresholdModel) -> int:
         """Save a threshold (insert or update) and return the threshold ID."""
         try:
-            DebugService.LogFunctionEntry("SaveThreshold", threshold.Id, threshold.ProfileId, threshold.Resolution)
+            LoggingService.LogFunctionEntry("SaveThreshold", "DatabaseManager", threshold.Id, threshold.ProfileId, threshold.Resolution)
             
             connection = self.DatabaseService.GetConnection()
             try:
@@ -148,7 +148,7 @@ class DatabaseManager:
                 
                 if threshold.Id is None:
                     # Insert new threshold
-                    DebugService.Log("Inserting new threshold...")
+                    LoggingService.LogInfo("Inserting new threshold...")
                     query = """
                         INSERT INTO ProfileThresholds 
                         (ProfileId, Resolution, Under30MinMB, Under65MinMB, Over65MinMB,
@@ -162,15 +162,15 @@ class DatabaseManager:
                         threshold.AudioBitrateKbps, threshold.FallbackVideoBitrateKbps,
                         threshold.FallbackAudioBitrateKbps, threshold.TranscodeDownTo
                     )
-                    DebugService.LogData("Insert threshold parameters", parameters)
+                    LoggingService.LogInfo("Insert threshold parameters: {}", "DatabaseManager", "SaveThreshold", parameters)
                     cursor.execute(query, parameters)
                     connection.commit()
                     threshold_id = cursor.lastrowid
-                    DebugService.Log("Threshold inserted with ID: {}", threshold_id)
+                    LoggingService.LogInfo("Threshold inserted with ID: {}", "DatabaseManager", "SaveThreshold", threshold_id)
                     return threshold_id
                 else:
                     # Update existing threshold
-                    DebugService.Log("Updating existing threshold with ID: {}", threshold.Id)
+                    LoggingService.LogInfo("Updating existing threshold with ID: {}", "DatabaseManager", "SaveThreshold", threshold.Id)
                     query = """
                         UPDATE ProfileThresholds 
                         SET ProfileId = ?, Resolution = ?, Under30MinMB = ?, Under65MinMB = ?,
@@ -185,16 +185,16 @@ class DatabaseManager:
                         threshold.AudioBitrateKbps, threshold.FallbackVideoBitrateKbps,
                         threshold.FallbackAudioBitrateKbps, threshold.TranscodeDownTo, threshold.Id
                     )
-                    DebugService.LogData("Update threshold parameters", parameters)
+                    LoggingService.LogInfo("Update threshold parameters: {}", "DatabaseManager", "SaveThreshold", parameters)
                     cursor.execute(query, parameters)
                     connection.commit()
                     affected_rows = cursor.rowcount
-                    DebugService.Log("Threshold update affected {} rows", affected_rows)
+                    LoggingService.LogInfo("Threshold update affected {} rows", "DatabaseManager", "SaveThreshold", affected_rows)
                     return threshold.Id
             finally:
                 connection.close()
         except Exception as e:
-            DebugService.LogException("Exception in SaveThreshold", e)
+            LoggingService.LogException("Exception in SaveThreshold", e, "DatabaseManager", "SaveThreshold")
             raise
     
     def DeleteThreshold(self, threshold_id: int) -> bool:
@@ -239,7 +239,7 @@ class DatabaseManager:
     def SaveRootFolder(self, rootFolder: RootFolderModel) -> int:
         """Save a root folder (insert or update) and return the root folder ID."""
         try:
-            DebugService.LogFunctionEntry("SaveRootFolder", rootFolder.Id, rootFolder.RootFolder, rootFolder.TotalSizeGB)
+            LoggingService.LogInfoFunctionEntry("SaveRootFolder", rootFolder.Id, rootFolder.RootFolder, rootFolder.TotalSizeGB)
             
             connection = self.DatabaseService.GetConnection()
             try:
@@ -247,37 +247,37 @@ class DatabaseManager:
                 
                 if rootFolder.Id is None:
                     # Insert new root folder
-                    DebugService.Log("Inserting new root folder...")
+                    LoggingService.LogInfo("Inserting new root folder...")
                     query = """
                         INSERT INTO RootFolders (RootFolder, LastScannedDate, TotalSizeGB)
                         VALUES (?, ?, ?)
                     """
                     parameters = (rootFolder.RootFolder, rootFolder.LastScannedDate, rootFolder.TotalSizeGB)
-                    DebugService.LogData("Insert root folder parameters", parameters)
+                    LoggingService.LogInfo("Insert root folder parameters: {}", "DatabaseManager", "SaveRootFolder", parameters)
                     cursor.execute(query, parameters)
                     connection.commit()
                     rootFolderId = cursor.lastrowid
-                    DebugService.Log("Root folder inserted with ID: {}", rootFolderId)
+                    LoggingService.LogInfo("Root folder inserted with ID: {}", "DatabaseManager", "SaveRootFolder", rootFolderId)
                     return rootFolderId
                 else:
                     # Update existing root folder
-                    DebugService.Log("Updating existing root folder with ID: {}", rootFolder.Id)
+                    LoggingService.LogInfo("Updating existing root folder with ID: {}", "DatabaseManager", "SaveRootFolder", rootFolder.Id)
                     query = """
                         UPDATE RootFolders 
                         SET RootFolder = ?, LastScannedDate = ?, TotalSizeGB = ?
                         WHERE Id = ?
                     """
                     parameters = (rootFolder.RootFolder, rootFolder.LastScannedDate, rootFolder.TotalSizeGB, rootFolder.Id)
-                    DebugService.LogData("Update root folder parameters", parameters)
+                    LoggingService.LogInfo("Update root folder parameters: {}", "DatabaseManager", "SaveRootFolder", parameters)
                     cursor.execute(query, parameters)
                     connection.commit()
                     affectedRows = cursor.rowcount
-                    DebugService.Log("Root folder update affected {} rows", affectedRows)
+                    LoggingService.LogInfo("Root folder update affected {} rows", "DatabaseManager", "SaveRootFolder", affectedRows)
                     return rootFolder.Id
             finally:
                 connection.close()
         except Exception as e:
-            DebugService.LogException("Exception in SaveRootFolder", e)
+            LoggingService.LogException("Exception in SaveRootFolder", e, "DatabaseManager", "SaveRootFolder")
             raise
     
     def DeleteRootFolder(self, rootFolderId: int) -> bool:
@@ -361,7 +361,7 @@ class DatabaseManager:
     def SaveMediaFile(self, mediaFile: MediaFileModel) -> int:
         """Save a media file (insert or update) and return the media file ID."""
         try:
-            DebugService.LogFunctionEntry("SaveMediaFile", mediaFile.Id, mediaFile.FilePath, mediaFile.FileName)
+            LoggingService.LogInfoFunctionEntry("SaveMediaFile", mediaFile.Id, mediaFile.FilePath, mediaFile.FileName)
             
             connection = self.DatabaseService.GetConnection()
             try:
@@ -369,7 +369,7 @@ class DatabaseManager:
                 
                 if mediaFile.Id is None:
                     # Insert new media file
-                    DebugService.Log("Inserting new media file...")
+                    LoggingService.LogInfo("Inserting new media file...")
                     query = """
                         INSERT INTO MediaFiles 
                         (SeasonId, FilePath, FileName, SizeMB, VideoBitrateKbps, AudioBitrateKbps,
@@ -383,15 +383,15 @@ class DatabaseManager:
                         mediaFile.Codec, mediaFile.DurationMinutes, mediaFile.FrameRate,
                         mediaFile.LastScannedDate, mediaFile.CompressionPotential, mediaFile.AssignedProfile
                     )
-                    DebugService.LogData("Insert media file parameters", parameters)
+                    LoggingService.LogInfo("Insert media file parameters: {}", "DatabaseManager", "SaveMediaFile", parameters)
                     cursor.execute(query, parameters)
                     connection.commit()
                     mediaFileId = cursor.lastrowid
-                    DebugService.Log("Media file inserted with ID: {}", mediaFileId)
+                    LoggingService.LogInfo("Media file inserted with ID: {}", "DatabaseManager", "SaveMediaFile", mediaFileId)
                     return mediaFileId
                 else:
                     # Update existing media file
-                    DebugService.Log("Updating existing media file with ID: {}", mediaFile.Id)
+                    LoggingService.LogInfo("Updating existing media file with ID: {}", "DatabaseManager", "SaveMediaFile", mediaFile.Id)
                     query = """
                         UPDATE MediaFiles 
                         SET SeasonId = ?, FilePath = ?, FileName = ?, SizeMB = ?, VideoBitrateKbps = ?,
@@ -406,16 +406,16 @@ class DatabaseManager:
                         mediaFile.LastScannedDate, mediaFile.CompressionPotential, mediaFile.AssignedProfile,
                         mediaFile.Id
                     )
-                    DebugService.LogData("Update media file parameters", parameters)
+                    LoggingService.LogInfo("Update media file parameters: {}", "DatabaseManager", "SaveMediaFile", parameters)
                     cursor.execute(query, parameters)
                     connection.commit()
                     affectedRows = cursor.rowcount
-                    DebugService.Log("Media file update affected {} rows", affectedRows)
+                    LoggingService.LogInfo("Media file update affected {} rows", "DatabaseManager", "SaveMediaFile", affectedRows)
                     return mediaFile.Id
             finally:
                 connection.close()
         except Exception as e:
-            DebugService.LogException("Exception in SaveMediaFile", e)
+            LoggingService.LogException("Exception in SaveMediaFile", e, "DatabaseManager", "SaveMediaFile")
             raise
     
     def DeleteMediaFile(self, mediaFileId: int) -> bool:
