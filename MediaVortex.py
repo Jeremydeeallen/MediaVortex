@@ -1,6 +1,7 @@
 from flask import Flask, render_template, jsonify
 from flask_cors import CORS
 from Controllers.ProfileController import ProfileController
+from Controllers.FileScanningController import FileScanningController
 import os
 
 
@@ -14,6 +15,7 @@ class MediaVortexApp:
         
         # Initialize controllers
         self.ProfileController = ProfileController()
+        self.FileScanningController = FileScanningController()
         
         self._register_routes()
         self._register_blueprints()
@@ -31,6 +33,11 @@ class MediaVortexApp:
             """Settings page with profile management."""
             return render_template('Settings.html')
         
+        @self.App.route('/Scanning')
+        def scanning():
+            """File scanning page."""
+            return render_template('FileScanning.html')
+        
         @self.App.route('/api/health')
         def health_check():
             """Health check endpoint."""
@@ -42,11 +49,13 @@ class MediaVortexApp:
     def _register_blueprints(self):
         """Register controller blueprints."""
         self.App.register_blueprint(self.ProfileController.Blueprint, url_prefix='/api')
+        self.App.register_blueprint(self.FileScanningController.Blueprint, url_prefix='/api')
     
     def Run(self, host='127.0.0.1', port=5000, debug=True):
         """Run the Flask application."""
         print(f"Starting MediaVortex on http://{host}:{port}")
         print(f"Settings page: http://{host}:{port}/settings")
+        print(f"File Scanning page: http://{host}:{port}/Scanning")
         self.App.run(host=host, port=port, debug=debug)
 
 

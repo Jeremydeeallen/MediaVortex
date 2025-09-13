@@ -100,6 +100,10 @@ CompressionLearningStats.MaxReductionPercent	REAL
 CompressionLearningStats.StandardDeviation	REAL
 CompressionLearningStats.ConfidenceScore	REAL
 CompressionLearningStats.LastUpdated	TIMESTAMP
+Configuration.Key	TEXT
+Configuration.Value	TEXT
+Configuration.Description	TEXT
+Configuration.UpdatedAt	DATETIME
 Logs.Id	INTEGER
 Logs.Timestamp	DATETIME
 Logs.LogLevel	TEXT
@@ -164,6 +168,25 @@ RootFolders.Id	INTEGER
 RootFolders.RootFolder	TEXT
 RootFolders.LastScannedDate	TIMESTAMP
 RootFolders.TotalSizeGB	REAL
+ScanJobs.Id	INTEGER
+ScanJobs.JobId	TEXT
+ScanJobs.RootFolderPath	TEXT
+ScanJobs.Recursive	BOOLEAN
+ScanJobs.Status	TEXT
+ScanJobs.ProcessId	INTEGER
+ScanJobs.StartTime	TIMESTAMP
+ScanJobs.EndTime	TIMESTAMP
+ScanJobs.Progress	REAL
+ScanJobs.CurrentDirectory	TEXT
+ScanJobs.TotalFiles	INTEGER
+ScanJobs.ProcessedFiles	INTEGER
+ScanJobs.SkippedFiles	INTEGER
+ScanJobs.EncodingErrors	INTEGER
+ScanJobs.NewFiles	INTEGER
+ScanJobs.UpdatedFiles	INTEGER
+ScanJobs.DeletedFiles	INTEGER
+ScanJobs.ErrorMessage	TEXT
+ScanJobs.LastUpdated	TIMESTAMP
 Seasons.Id	INTEGER
 Seasons.RootFolderId	INTEGER
 Seasons.SeasonName	TEXT
@@ -228,6 +251,12 @@ CompressionLearningSamples	idx_CompressionLearningSamples_ContentType	0	c	0
 CompressionLearningSamples	idx_CompressionLearningSamples_FilePath	0	c	0
 CompressionLearningStats	idx_CompressionLearningStats_Quality	0	c	0
 CompressionLearningStats	idx_CompressionLearningStats_ContentType	0	c	0
+Configuration	sqlite_autoindex_Configuration_1	1	pk	0
+Logs	IdxLogsTimestampLevel	0	c	0
+Logs	IdxLogsUserSession	0	c	0
+Logs	IdxLogsOperation	0	c	0
+Logs	IdxLogsComponent	0	c	0
+Logs	IdxLogsLogger	0	c	0
 Logs	IdxLogsLevel	0	c	0
 Logs	IdxLogsTimestamp	0	c	0
 ProblemFiles	idx_ProblemFiles_Directory	0	c	0
@@ -236,6 +265,8 @@ ProblemFiles	idx_ProblemFiles_FilePath	0	c	0
 ProfileThresholds	sqlite_autoindex_ProfileThresholds_1	1	u	0
 Profiles	sqlite_autoindex_Profiles_1	1	u	0
 RootFolders	sqlite_autoindex_RootFolders_1	1	u	0
+ScanJobs	sqlite_autoindex_ScanJobs_1	1	u	0
+SystemSettings	idx_SystemSettings_SettingKey	0	c	0
 SystemSettings	sqlite_autoindex_SystemSettings_1	1	u	0
 TranscodeAttempts	idx_TranscodeAttempts_Success	0	c	0
 TranscodeAttempts	idx_TranscodeAttempts_AttemptDate	0	c	0
@@ -267,6 +298,14 @@ CompressionLearningSamples	idx_CompressionLearningSamples_ContentType	ContentTyp
 CompressionLearningSamples	idx_CompressionLearningSamples_FilePath	FilePath	0
 CompressionLearningStats	idx_CompressionLearningStats_Quality	Quality	0
 CompressionLearningStats	idx_CompressionLearningStats_ContentType	ContentType	0
+Configuration	sqlite_autoindex_Configuration_1	Key	0
+Logs	IdxLogsTimestampLevel	Timestamp	0
+Logs	IdxLogsTimestampLevel	LogLevel	1
+Logs	IdxLogsUserSession	UserId	0
+Logs	IdxLogsUserSession	SessionId	1
+Logs	IdxLogsOperation	Operation	0
+Logs	IdxLogsComponent	Component	0
+Logs	IdxLogsLogger	LoggerName	0
 Logs	IdxLogsLevel	LogLevel	0
 Logs	IdxLogsTimestamp	Timestamp	0
 ProblemFiles	idx_ProblemFiles_Directory	Directory	0
@@ -276,6 +315,8 @@ ProfileThresholds	sqlite_autoindex_ProfileThresholds_1	ProfileId	0
 ProfileThresholds	sqlite_autoindex_ProfileThresholds_1	Resolution	1
 Profiles	sqlite_autoindex_Profiles_1	ProfileName	0
 RootFolders	sqlite_autoindex_RootFolders_1	RootFolder	0
+ScanJobs	sqlite_autoindex_ScanJobs_1	JobId	0
+SystemSettings	idx_SystemSettings_SettingKey	SettingKey	0
 SystemSettings	sqlite_autoindex_SystemSettings_1	SettingKey	0
 TranscodeAttempts	idx_TranscodeAttempts_Success	Success	0
 TranscodeAttempts	idx_TranscodeAttempts_AttemptDate	AttemptDate	0

@@ -46,59 +46,68 @@ Start with a minimal working slice to prove core functionality and Unicode chara
 ## Implementation Checklist
 
 ### Phase 1: Basic Slice - Models and Data Structures
-- [ ] Create `Models/RootFolderModel.py` - Basic directory information (RootFolder, LastScannedDate, TotalSizeGB) MVVM pattern using MVVM architecture
-- [ ] Create `Models/MediaFileModel.py` - Basic file information (FilePath, FileName, SizeMB, LastScannedDate) MVVM pattern using MVVM architecture
-- [ ] Ensure only PascalCase was used
+- [x] Create `Models/RootFolderModel.py` - Basic directory information (RootFolder, LastScannedDate, TotalSizeGB) MVVM pattern using MVVM architecture
+- [x] Create `Models/MediaFileModel.py` - Basic file information (FilePath, FileName, SizeMB, LastScannedDate) MVVM pattern using MVVM architecture
+- [x] Ensure only PascalCase was used
 
 ### Phase 2: Basic Slice - Repository Layer Extensions
-- [ ] Extend `Repositories/DatabaseManager.py` with basic RootFolder operations (GetAllRootFolders, SaveRootFolder) MVVM pattern using MVVM architecture
-- [ ] Extend `Repositories/DatabaseManager.py` with basic MediaFile operations (GetAllMediaFiles, SaveMediaFile, DeleteMediaFile) MVVM pattern using MVVM architecture
-- [ ] Ensure only PascalCase was used
+- [x] Extend `Repositories/DatabaseManager.py` with basic RootFolder operations (GetAllRootFolders, SaveRootFolder) MVVM pattern using MVVM architecture
+- [x] Extend `Repositories/DatabaseManager.py` with basic MediaFile operations (GetAllMediaFiles, SaveMediaFile, DeleteMediaFile) MVVM pattern using MVVM architecture
+- [x] Ensure only PascalCase was used
 
 ### Phase 3: Basic Slice - Utility Services
-- [ ] Create `Services/FileManagerService.py` - Basic file system operations, directory traversal, file discovery with Unicode character support MVVM pattern using MVVM architecture
-- [ ] Implement Unicode character validation and sanitization in FileManagerService MVVM pattern using MVVM architecture
-- [ ] Add error handling for problematic characters (Cyrillic, emojis, special symbols) MVVM pattern using MVVM architecture
-- [ ] Ensure only PascalCase was used
+- [x] Create `Services/FileManagerService.py` - Basic file system operations, directory traversal, file discovery with Unicode character support MVVM pattern using MVVM architecture
+- [x] Implement Unicode character validation and sanitization in FileManagerService MVVM pattern using MVVM architecture
+- [x] Add error handling for problematic characters (Cyrillic, emojis, special symbols) MVVM pattern using MVVM architecture
+- [x] Ensure only PascalCase was used
 
 ### Phase 4: Basic Slice - Business Services
-- [ ] Create `Services/FileScanningBusinessService.py` - Orchestrate basic scanning process, coordinate between FileManagerService and DatabaseManager MVVM pattern using MVVM architecture
-- [ ] Implement directory scanning logic with size calculation and Unicode path handling MVVM pattern using MVVM architecture
-- [ ] Implement basic file discovery (no metadata extraction) with robust character encoding support MVVM pattern using MVVM architecture
-- [ ] Implement database synchronization (Insert, Delete) with proper UTF-8 encoding MVVM pattern using MVVM architecture
-- [ ] Add fallback mechanisms for files with problematic Unicode characters MVVM pattern using MVVM architecture
-- [ ] Ensure only PascalCase was used
+- [x] Create `Services/FileScanningBusinessService.py` - Orchestrate basic scanning process, coordinate between FileManagerService and DatabaseManager MVVM pattern using MVVM architecture
+- [x] Implement directory scanning logic with size calculation and Unicode path handling MVVM pattern using MVVM architecture
+- [x] Implement basic file discovery (no metadata extraction) with robust character encoding support MVVM pattern using MVVM architecture
+- [x] Implement database synchronization (Insert, Delete) with proper UTF-8 encoding MVVM pattern using MVVM architecture
+- [x] Add fallback mechanisms for files with problematic Unicode characters MVVM pattern using MVVM architecture
+- [x] Ensure only PascalCase was used
 
 ### Phase 5: Basic Slice - ViewModels
-- [ ] Create `ViewModels/FileScanningViewModel.py` - Manage basic scanning UI state, progress tracking, error handling with Unicode character support MVVM pattern using MVVM architecture
-- [ ] Implement scanning progress tracking with Unicode filename display MVVM pattern using MVVM architecture
-- [ ] Implement basic scan result management with proper character encoding for web display MVVM pattern using MVVM architecture
-- [ ] Add error reporting for files with problematic Unicode characters MVVM pattern using MVVM architecture
-- [ ] Ensure only PascalCase was used
+- [x] Create `ViewModels/FileScanningViewModel.py` - Manage basic scanning UI state, progress tracking, error handling with Unicode character support MVVM pattern using MVVM architecture
+- [x] Implement scanning progress tracking with Unicode filename display MVVM pattern using MVVM architecture
+- [x] Implement basic scan result management with proper character encoding for web display MVVM pattern using MVVM architecture
+- [x] Add error reporting for files with problematic Unicode characters MVVM pattern using MVVM architecture
+- [x] Ensure only PascalCase was used
 
 ### Phase 6: Basic Slice - Controllers
-- [ ] Create `Controllers/FileScanningController.py` - Basic REST API endpoints for scanning operations with Unicode character support MVVM pattern using MVVM architecture
-- [ ] Implement `/api/Scan/Start` endpoint to initiate scanning with proper UTF-8 encoding MVVM pattern using MVVM architecture
-- [ ] Implement `/api/Scan/Status` endpoint to check scan progress with Unicode filename reporting MVVM pattern using MVVM architecture
-- [ ] Implement `/api/Scan/Stop` endpoint to stop scanning MVVM pattern using MVVM architecture
-- [ ] Implement `/api/RootFolders` endpoints for basic root folder management with Unicode path support MVVM pattern using MVVM architecture
-- [ ] Implement `/api/MediaFiles` endpoints for basic media file management with proper character encoding MVVM pattern using MVVM architecture
-- [ ] Add error handling for API requests with problematic Unicode characters MVVM pattern using MVVM architecture
-- [ ] Ensure only PascalCase was used
+- [x] Create `Controllers/FileScanningController.py` - Basic REST API endpoints for scanning operations with Unicode character support MVVM pattern using MVVM architecture
+- [x] Implement `/api/Scan/Start` endpoint to initiate scanning with proper UTF-8 encoding MVVM pattern using MVVM architecture
+- [x] Implement `/api/Scan/Status` endpoint to check scan progress with Unicode filename reporting MVVM pattern using MVVM architecture
+- [x] Implement `/api/Scan/Stop` endpoint to stop scanning MVVM pattern using MVVM architecture
+- [x] Implement `/api/RootFolders` endpoints for basic root folder management with Unicode path support MVVM pattern using MVVM architecture
+- [x] Implement `/api/MediaFiles` endpoints for basic media file management with proper character encoding MVVM pattern using MVVM architecture
+- [x] Add error handling for API requests with problematic Unicode characters MVVM pattern using MVVM architecture
+- [x] Ensure only PascalCase was used
 
 ### Phase 7: Basic Slice - Views
-- [ ] Create `Templates/FileScanning.html` - Basic web interface for scanning operations with proper UTF-8 encoding MVVM pattern using MVVM architecture
-- [ ] Implement root folder selection interface with Unicode path support MVVM pattern using MVVM architecture
-- [ ] Implement scanning progress display with Unicode filename rendering MVVM pattern using MVVM architecture
-- [ ] Implement basic scan results display with proper character encoding for international filenames MVVM pattern using MVVM architecture
-- [ ] Add error display for files with problematic Unicode characters MVVM pattern using MVVM architecture
-- [ ] Ensure only PascalCase was used
+- [x] Create `Templates/FileScanning.html` - Basic web interface for scanning operations with proper UTF-8 encoding MVVM pattern using MVVM architecture
+- [x] Implement root folder selection interface with Unicode path support MVVM pattern using MVVM architecture
+- [x] Implement scanning progress display with Unicode filename rendering MVVM pattern using MVVM architecture
+- [x] Implement basic scan results display with proper character encoding for international filenames MVVM pattern using MVVM architecture
+- [x] Add error display for files with problematic Unicode characters MVVM pattern using MVVM architecture
+- [x] Ensure only PascalCase was used
 
 ### Phase 8: Basic Slice - Integration
-- [ ] Update `MediaVortex.py` to register FileScanningController with UTF-8 encoding support MVVM pattern using MVVM architecture
-- [ ] Add navigation route for file scanning page MVVM pattern using MVVM architecture
+- [x] Update `MediaVortex.py` to register FileScanningController with UTF-8 encoding support MVVM pattern using MVVM architecture
+- [x] Add navigation route for file scanning page MVVM pattern using MVVM architecture
 - [ ] Test end-to-end basic scanning functionality with Unicode character support MVVM pattern using MVVM architecture
 - [ ] Test with problematic filenames (Cyrillic, emojis, special symbols) MVVM pattern using MVVM architecture
+- [x] Ensure only PascalCase was used
+
+### Phase 8.5: Subprocess Implementation - Process Management
+- [ ] Create database table for scan job state tracking MVVM pattern using MVVM architecture
+- [ ] Create separate scan script for subprocess execution MVVM pattern using MVVM architecture
+- [ ] Implement subprocess management in FileScanningBusinessService MVVM pattern using MVVM architecture
+- [ ] Add PID tracking and process monitoring MVVM pattern using MVVM architecture
+- [ ] Update status endpoints to read from database instead of memory MVVM pattern using MVVM architecture
+- [ ] Implement proper process cleanup and error handling MVVM pattern using MVVM architecture
 - [ ] Ensure only PascalCase was used
 
 ### Phase 9: Complete Feature - Additional Models

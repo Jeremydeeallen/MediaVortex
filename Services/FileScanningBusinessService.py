@@ -327,3 +327,27 @@ class FileScanningBusinessService:
         except Exception as e:
             DebugService.LogException("Error deleting media file", e)
             return False
+    
+    def GetScanDirectories(self) -> List[Dict[str, str]]:
+        """Get all scan directory settings from SystemSettings table."""
+        try:
+            return self.DatabaseManager.GetScanDirectories()
+        except Exception as e:
+            DebugService.LogException("Error getting scan directories", e)
+            return []
+    
+    def ResetScanState(self):
+        """Reset the scan state to allow new scans."""
+        self.IsScanning = False
+        self.ScanProgress = 0
+        self.CurrentScanDirectory = ""
+        self.ScanResults = {
+            'TotalFiles': 0,
+            'ProcessedFiles': 0,
+            'SkippedFiles': 0,
+            'EncodingErrors': 0,
+            'NewFiles': 0,
+            'UpdatedFiles': 0,
+            'DeletedFiles': 0
+        }
+        self.ScanErrors = []

@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from Models.TranscodeProfileModel import TranscodeProfileModel
 from Models.ProfileThresholdModel import ProfileThresholdModel
 from Models.RootFolderModel import RootFolderModel
@@ -456,3 +456,48 @@ class DatabaseManager:
             mediaFiles.append(mediaFile)
         
         return mediaFiles
+    
+    # System Settings Management Methods
+    def GetSystemSetting(self, SettingKey: str) -> Optional[str]:
+        """Get a system setting value by key."""
+        query = "SELECT SettingValue FROM SystemSettings WHERE SettingKey = ?"
+        rows = self.DatabaseService.ExecuteQuery(query, (SettingKey,))
+        
+        if not rows:
+            return None
+        
+        return rows[0]['SettingValue']
+    
+    def GetAllSystemSettings(self) -> List[Dict[str, Any]]:
+        """Get all system settings."""
+        query = "SELECT Id, SettingKey, SettingValue, Description, DataType, LastModified FROM SystemSettings ORDER BY SettingKey"
+        rows = self.DatabaseService.ExecuteQuery(query)
+        
+        settings = []
+        for row in rows:
+            settings.append({
+                'Id': row['Id'],
+                'SettingKey': row['SettingKey'],
+                'SettingValue': row['SettingValue'],
+                'Description': row['Description'],
+                'DataType': row['DataType'],
+                'LastModified': row['LastModified']
+            })
+        
+        return settings
+    
+    def GetScanDirectories(self) -> List[Dict[str, str]]:
+        """Get all scan directory settings (ScanDir1, ScanDir2, etc.)."""
+        query = "SELECT SettingKey, SettingValue, Description FROM SystemSettings WHERE SettingKey LIKE 'ScanDir%' ORDER BY SettingKey"
+        rows = self.DatabaseService.ExecuteQuery(query)
+        
+        scanDirs = []
+        for row in rows:
+            if row['SettingValue'] and row['SettingValue'].strip():  # Only include non-empty directories
+                scanDirs.append({
+                    'Key': row['SettingKey'],
+                    'Path': row['SettingValue'],
+                    'Description': row['Description']
+                })
+        
+        return scanDirs
