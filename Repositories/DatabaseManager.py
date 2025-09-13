@@ -1,6 +1,8 @@
 from typing import List, Optional
 from Models.TranscodeProfileModel import TranscodeProfileModel
 from Models.ProfileThresholdModel import ProfileThresholdModel
+from Models.RootFolderModel import RootFolderModel
+from Models.MediaFileModel import MediaFileModel
 from Services.DatabaseService import DatabaseService
 from Services.DebugService import DebugService
 
@@ -199,3 +201,258 @@ class DatabaseManager:
         """Delete a threshold."""
         affected_rows = self.DatabaseService.ExecuteNonQuery("DELETE FROM ProfileThresholds WHERE Id = ?", (threshold_id,))
         return affected_rows > 0
+    
+    # Root Folder Management Methods
+    def GetAllRootFolders(self) -> List[RootFolderModel]:
+        """Get all root folders."""
+        query = "SELECT Id, RootFolder, LastScannedDate, TotalSizeGB FROM RootFolders ORDER BY RootFolder"
+        rows = self.DatabaseService.ExecuteQuery(query)
+        
+        rootFolders = []
+        for row in rows:
+            rootFolder = RootFolderModel(
+                Id=row['Id'],
+                RootFolder=row['RootFolder'],
+                LastScannedDate=row['LastScannedDate'],
+                TotalSizeGB=row['TotalSizeGB']
+            )
+            rootFolders.append(rootFolder)
+        
+        return rootFolders
+    
+    def GetRootFolderById(self, rootFolderId: int) -> Optional[RootFolderModel]:
+        """Get a specific root folder by ID."""
+        query = "SELECT Id, RootFolder, LastScannedDate, TotalSizeGB FROM RootFolders WHERE Id = ?"
+        rows = self.DatabaseService.ExecuteQuery(query, (rootFolderId,))
+        
+        if not rows:
+            return None
+        
+        row = rows[0]
+        return RootFolderModel(
+            Id=row['Id'],
+            RootFolder=row['RootFolder'],
+            LastScannedDate=row['LastScannedDate'],
+            TotalSizeGB=row['TotalSizeGB']
+        )
+    
+    def SaveRootFolder(self, rootFolder: RootFolderModel) -> int:
+        """Save a root folder (insert or update) and return the root folder ID."""
+        try:
+            DebugService.LogFunctionEntry("SaveRootFolder", rootFolder.Id, rootFolder.RootFolder, rootFolder.TotalSizeGB)
+            
+            connection = self.DatabaseService.GetConnection()
+            try:
+                cursor = connection.cursor()
+                
+                if rootFolder.Id is None:
+                    # Insert new root folder
+                    DebugService.Log("Inserting new root folder...")
+                    query = """
+                        INSERT INTO RootFolders (RootFolder, LastScannedDate, TotalSizeGB)
+                        VALUES (?, ?, ?)
+                    """
+                    parameters = (rootFolder.RootFolder, rootFolder.LastScannedDate, rootFolder.TotalSizeGB)
+                    DebugService.LogData("Insert root folder parameters", parameters)
+                    cursor.execute(query, parameters)
+                    connection.commit()
+                    rootFolderId = cursor.lastrowid
+                    DebugService.Log("Root folder inserted with ID: {}", rootFolderId)
+                    return rootFolderId
+                else:
+                    # Update existing root folder
+                    DebugService.Log("Updating existing root folder with ID: {}", rootFolder.Id)
+                    query = """
+                        UPDATE RootFolders 
+                        SET RootFolder = ?, LastScannedDate = ?, TotalSizeGB = ?
+                        WHERE Id = ?
+                    """
+                    parameters = (rootFolder.RootFolder, rootFolder.LastScannedDate, rootFolder.TotalSizeGB, rootFolder.Id)
+                    DebugService.LogData("Update root folder parameters", parameters)
+                    cursor.execute(query, parameters)
+                    connection.commit()
+                    affectedRows = cursor.rowcount
+                    DebugService.Log("Root folder update affected {} rows", affectedRows)
+                    return rootFolder.Id
+            finally:
+                connection.close()
+        except Exception as e:
+            DebugService.LogException("Exception in SaveRootFolder", e)
+            raise
+    
+    def DeleteRootFolder(self, rootFolderId: int) -> bool:
+        """Delete a root folder and its associated media files."""
+        try:
+            # Delete associated media files first
+            self.DatabaseService.ExecuteNonQuery("DELETE FROM MediaFiles WHERE Id IN (SELECT Id FROM MediaFiles WHERE FilePath LIKE (SELECT RootFolder || '%' FROM RootFolders WHERE Id = ?))", (rootFolderId,))
+            
+            # Delete the root folder
+            affectedRows = self.DatabaseService.ExecuteNonQuery("DELETE FROM RootFolders WHERE Id = ?", (rootFolderId,))
+            return affectedRows > 0
+        except Exception:
+            return False
+    
+    # Media File Management Methods
+    def GetAllMediaFiles(self) -> List[MediaFileModel]:
+        """Get all media files."""
+        query = """
+            SELECT Id, SeasonId, FilePath, FileName, SizeMB, VideoBitrateKbps, AudioBitrateKbps,
+                   Resolution, Codec, DurationMinutes, FrameRate, LastScannedDate,
+                   CompressionPotential, AssignedProfile
+            FROM MediaFiles 
+            ORDER BY FilePath
+        """
+        rows = self.DatabaseService.ExecuteQuery(query)
+        
+        mediaFiles = []
+        for row in rows:
+            mediaFile = MediaFileModel(
+                Id=row['Id'],
+                SeasonId=row['SeasonId'],
+                FilePath=row['FilePath'],
+                FileName=row['FileName'],
+                SizeMB=row['SizeMB'],
+                VideoBitrateKbps=row['VideoBitrateKbps'],
+                AudioBitrateKbps=row['AudioBitrateKbps'],
+                Resolution=row['Resolution'],
+                Codec=row['Codec'],
+                DurationMinutes=row['DurationMinutes'],
+                FrameRate=row['FrameRate'],
+                LastScannedDate=row['LastScannedDate'],
+                CompressionPotential=row['CompressionPotential'],
+                AssignedProfile=row['AssignedProfile']
+            )
+            mediaFiles.append(mediaFile)
+        
+        return mediaFiles
+    
+    def GetMediaFileById(self, mediaFileId: int) -> Optional[MediaFileModel]:
+        """Get a specific media file by ID."""
+        query = """
+            SELECT Id, SeasonId, FilePath, FileName, SizeMB, VideoBitrateKbps, AudioBitrateKbps,
+                   Resolution, Codec, DurationMinutes, FrameRate, LastScannedDate,
+                   CompressionPotential, AssignedProfile
+            FROM MediaFiles 
+            WHERE Id = ?
+        """
+        rows = self.DatabaseService.ExecuteQuery(query, (mediaFileId,))
+        
+        if not rows:
+            return None
+        
+        row = rows[0]
+        return MediaFileModel(
+            Id=row['Id'],
+            SeasonId=row['SeasonId'],
+            FilePath=row['FilePath'],
+            FileName=row['FileName'],
+            SizeMB=row['SizeMB'],
+            VideoBitrateKbps=row['VideoBitrateKbps'],
+            AudioBitrateKbps=row['AudioBitrateKbps'],
+            Resolution=row['Resolution'],
+            Codec=row['Codec'],
+            DurationMinutes=row['DurationMinutes'],
+            FrameRate=row['FrameRate'],
+            LastScannedDate=row['LastScannedDate'],
+            CompressionPotential=row['CompressionPotential'],
+            AssignedProfile=row['AssignedProfile']
+        )
+    
+    def SaveMediaFile(self, mediaFile: MediaFileModel) -> int:
+        """Save a media file (insert or update) and return the media file ID."""
+        try:
+            DebugService.LogFunctionEntry("SaveMediaFile", mediaFile.Id, mediaFile.FilePath, mediaFile.FileName)
+            
+            connection = self.DatabaseService.GetConnection()
+            try:
+                cursor = connection.cursor()
+                
+                if mediaFile.Id is None:
+                    # Insert new media file
+                    DebugService.Log("Inserting new media file...")
+                    query = """
+                        INSERT INTO MediaFiles 
+                        (SeasonId, FilePath, FileName, SizeMB, VideoBitrateKbps, AudioBitrateKbps,
+                         Resolution, Codec, DurationMinutes, FrameRate, LastScannedDate,
+                         CompressionPotential, AssignedProfile)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """
+                    parameters = (
+                        mediaFile.SeasonId, mediaFile.FilePath, mediaFile.FileName, mediaFile.SizeMB,
+                        mediaFile.VideoBitrateKbps, mediaFile.AudioBitrateKbps, mediaFile.Resolution,
+                        mediaFile.Codec, mediaFile.DurationMinutes, mediaFile.FrameRate,
+                        mediaFile.LastScannedDate, mediaFile.CompressionPotential, mediaFile.AssignedProfile
+                    )
+                    DebugService.LogData("Insert media file parameters", parameters)
+                    cursor.execute(query, parameters)
+                    connection.commit()
+                    mediaFileId = cursor.lastrowid
+                    DebugService.Log("Media file inserted with ID: {}", mediaFileId)
+                    return mediaFileId
+                else:
+                    # Update existing media file
+                    DebugService.Log("Updating existing media file with ID: {}", mediaFile.Id)
+                    query = """
+                        UPDATE MediaFiles 
+                        SET SeasonId = ?, FilePath = ?, FileName = ?, SizeMB = ?, VideoBitrateKbps = ?,
+                            AudioBitrateKbps = ?, Resolution = ?, Codec = ?, DurationMinutes = ?,
+                            FrameRate = ?, LastScannedDate = ?, CompressionPotential = ?, AssignedProfile = ?
+                        WHERE Id = ?
+                    """
+                    parameters = (
+                        mediaFile.SeasonId, mediaFile.FilePath, mediaFile.FileName, mediaFile.SizeMB,
+                        mediaFile.VideoBitrateKbps, mediaFile.AudioBitrateKbps, mediaFile.Resolution,
+                        mediaFile.Codec, mediaFile.DurationMinutes, mediaFile.FrameRate,
+                        mediaFile.LastScannedDate, mediaFile.CompressionPotential, mediaFile.AssignedProfile,
+                        mediaFile.Id
+                    )
+                    DebugService.LogData("Update media file parameters", parameters)
+                    cursor.execute(query, parameters)
+                    connection.commit()
+                    affectedRows = cursor.rowcount
+                    DebugService.Log("Media file update affected {} rows", affectedRows)
+                    return mediaFile.Id
+            finally:
+                connection.close()
+        except Exception as e:
+            DebugService.LogException("Exception in SaveMediaFile", e)
+            raise
+    
+    def DeleteMediaFile(self, mediaFileId: int) -> bool:
+        """Delete a media file."""
+        affectedRows = self.DatabaseService.ExecuteNonQuery("DELETE FROM MediaFiles WHERE Id = ?", (mediaFileId,))
+        return affectedRows > 0
+    
+    def GetMediaFilesByRootFolder(self, rootFolderPath: str) -> List[MediaFileModel]:
+        """Get all media files for a specific root folder."""
+        query = """
+            SELECT Id, SeasonId, FilePath, FileName, SizeMB, VideoBitrateKbps, AudioBitrateKbps,
+                   Resolution, Codec, DurationMinutes, FrameRate, LastScannedDate,
+                   CompressionPotential, AssignedProfile
+            FROM MediaFiles 
+            WHERE FilePath LIKE ?
+            ORDER BY FilePath
+        """
+        rows = self.DatabaseService.ExecuteQuery(query, (f"{rootFolderPath}%",))
+        
+        mediaFiles = []
+        for row in rows:
+            mediaFile = MediaFileModel(
+                Id=row['Id'],
+                SeasonId=row['SeasonId'],
+                FilePath=row['FilePath'],
+                FileName=row['FileName'],
+                SizeMB=row['SizeMB'],
+                VideoBitrateKbps=row['VideoBitrateKbps'],
+                AudioBitrateKbps=row['AudioBitrateKbps'],
+                Resolution=row['Resolution'],
+                Codec=row['Codec'],
+                DurationMinutes=row['DurationMinutes'],
+                FrameRate=row['FrameRate'],
+                LastScannedDate=row['LastScannedDate'],
+                CompressionPotential=row['CompressionPotential'],
+                AssignedProfile=row['AssignedProfile']
+            )
+            mediaFiles.append(mediaFile)
+        
+        return mediaFiles

@@ -48,15 +48,18 @@ Start with a minimal working slice to prove core functionality and Unicode chara
 ### Phase 1: Basic Slice - Models and Data Structures
 - [ ] Create `Models/RootFolderModel.py` - Basic directory information (RootFolder, LastScannedDate, TotalSizeGB) MVVM pattern using MVVM architecture
 - [ ] Create `Models/MediaFileModel.py` - Basic file information (FilePath, FileName, SizeMB, LastScannedDate) MVVM pattern using MVVM architecture
+- [ ] Ensure only PascalCase was used
 
 ### Phase 2: Basic Slice - Repository Layer Extensions
 - [ ] Extend `Repositories/DatabaseManager.py` with basic RootFolder operations (GetAllRootFolders, SaveRootFolder) MVVM pattern using MVVM architecture
 - [ ] Extend `Repositories/DatabaseManager.py` with basic MediaFile operations (GetAllMediaFiles, SaveMediaFile, DeleteMediaFile) MVVM pattern using MVVM architecture
+- [ ] Ensure only PascalCase was used
 
 ### Phase 3: Basic Slice - Utility Services
 - [ ] Create `Services/FileManagerService.py` - Basic file system operations, directory traversal, file discovery with Unicode character support MVVM pattern using MVVM architecture
 - [ ] Implement Unicode character validation and sanitization in FileManagerService MVVM pattern using MVVM architecture
 - [ ] Add error handling for problematic characters (Cyrillic, emojis, special symbols) MVVM pattern using MVVM architecture
+- [ ] Ensure only PascalCase was used
 
 ### Phase 4: Basic Slice - Business Services
 - [ ] Create `Services/FileScanningBusinessService.py` - Orchestrate basic scanning process, coordinate between FileManagerService and DatabaseManager MVVM pattern using MVVM architecture
@@ -64,12 +67,14 @@ Start with a minimal working slice to prove core functionality and Unicode chara
 - [ ] Implement basic file discovery (no metadata extraction) with robust character encoding support MVVM pattern using MVVM architecture
 - [ ] Implement database synchronization (Insert, Delete) with proper UTF-8 encoding MVVM pattern using MVVM architecture
 - [ ] Add fallback mechanisms for files with problematic Unicode characters MVVM pattern using MVVM architecture
+- [ ] Ensure only PascalCase was used
 
 ### Phase 5: Basic Slice - ViewModels
 - [ ] Create `ViewModels/FileScanningViewModel.py` - Manage basic scanning UI state, progress tracking, error handling with Unicode character support MVVM pattern using MVVM architecture
 - [ ] Implement scanning progress tracking with Unicode filename display MVVM pattern using MVVM architecture
 - [ ] Implement basic scan result management with proper character encoding for web display MVVM pattern using MVVM architecture
 - [ ] Add error reporting for files with problematic Unicode characters MVVM pattern using MVVM architecture
+- [ ] Ensure only PascalCase was used
 
 ### Phase 6: Basic Slice - Controllers
 - [ ] Create `Controllers/FileScanningController.py` - Basic REST API endpoints for scanning operations with Unicode character support MVVM pattern using MVVM architecture
@@ -79,6 +84,7 @@ Start with a minimal working slice to prove core functionality and Unicode chara
 - [ ] Implement `/api/RootFolders` endpoints for basic root folder management with Unicode path support MVVM pattern using MVVM architecture
 - [ ] Implement `/api/MediaFiles` endpoints for basic media file management with proper character encoding MVVM pattern using MVVM architecture
 - [ ] Add error handling for API requests with problematic Unicode characters MVVM pattern using MVVM architecture
+- [ ] Ensure only PascalCase was used
 
 ### Phase 7: Basic Slice - Views
 - [ ] Create `Templates/FileScanning.html` - Basic web interface for scanning operations with proper UTF-8 encoding MVVM pattern using MVVM architecture
@@ -86,51 +92,61 @@ Start with a minimal working slice to prove core functionality and Unicode chara
 - [ ] Implement scanning progress display with Unicode filename rendering MVVM pattern using MVVM architecture
 - [ ] Implement basic scan results display with proper character encoding for international filenames MVVM pattern using MVVM architecture
 - [ ] Add error display for files with problematic Unicode characters MVVM pattern using MVVM architecture
+- [ ] Ensure only PascalCase was used
 
 ### Phase 8: Basic Slice - Integration
 - [ ] Update `MediaVortex.py` to register FileScanningController with UTF-8 encoding support MVVM pattern using MVVM architecture
 - [ ] Add navigation route for file scanning page MVVM pattern using MVVM architecture
 - [ ] Test end-to-end basic scanning functionality with Unicode character support MVVM pattern using MVVM architecture
 - [ ] Test with problematic filenames (Cyrillic, emojis, special symbols) MVVM pattern using MVVM architecture
+- [ ] Ensure only PascalCase was used
 
 ### Phase 9: Complete Feature - Additional Models
 - [ ] Create `Models/SeasonModel.py` - Simple data class for season organization MVVM pattern using MVVM architecture
 - [ ] Create `Models/FileScanResultModel.py` - Simple data class for scan operation results MVVM pattern using MVVM architecture
 - [ ] Extend `Models/MediaFileModel.py` - Add metadata fields (VideoBitrateKbps, AudioBitrateKbps, Resolution, Codec, DurationMinutes, FrameRate, CompressionPotential, AssignedProfile) MVVM pattern using MVVM architecture
+- [ ] Ensure only PascalCase was used
 
 ### Phase 10: Complete Feature - Extended Repository Layer
 - [ ] Extend `Repositories/DatabaseManager.py` with Season operations (GetAllSeasons, SaveSeason, DeleteSeason, GetSeasonsByRootFolder) MVVM pattern using MVVM architecture
 - [ ] Extend `Repositories/DatabaseManager.py` with advanced MediaFile operations (UpdateMediaFile, GetMediaFilesByRootFolder) MVVM pattern using MVVM architecture
+- [ ] Ensure only PascalCase was used
 
 ### Phase 11: Complete Feature - Additional Utility Services
 - [ ] Create `Services/MediaAnalysisService.py` - Analyze media files for codec, bitrate, resolution, duration with robust Unicode filename handling MVVM pattern using MVVM architecture
 - [ ] Extend `Services/FileManagerService.py` - Add metadata extraction capabilities MVVM pattern using MVVM architecture
+- [ ] Ensure only PascalCase was used
 
 ### Phase 12: Complete Feature - Enhanced Business Services
 - [ ] Extend `Services/FileScanningBusinessService.py` - Add metadata extraction coordination MVVM pattern using MVVM architecture
 - [ ] Implement advanced database synchronization (Update existing files) MVVM pattern using MVVM architecture
 - [ ] Add season organization logic MVVM pattern using MVVM architecture
+- [ ] Ensure only PascalCase was used
 
 ### Phase 13: Complete Feature - Enhanced ViewModels
 - [ ] Extend `ViewModels/FileScanningViewModel.py` - Add metadata display and management MVVM pattern using MVVM architecture
 - [ ] Add season organization features MVVM pattern using MVVM architecture
 - [ ] Add advanced filtering and search capabilities MVVM pattern using MVVM architecture
+- [ ] Ensure only PascalCase was used
 
 ### Phase 14: Complete Feature - Enhanced Controllers
 - [ ] Extend `Controllers/FileScanningController.py` - Add advanced API endpoints for metadata and seasons MVVM pattern using MVVM architecture
 - [ ] Add bulk operations endpoints MVVM pattern using MVVM architecture
 - [ ] Add export functionality endpoints MVVM pattern using MVVM architecture
+- [ ] Ensure only PascalCase was used
 
 ### Phase 15: Complete Feature - Enhanced Views
 - [ ] Extend `Templates/FileScanning.html` - Add metadata display and management interface MVVM pattern using MVVM architecture
 - [ ] Add season organization interface MVVM pattern using MVVM architecture
 - [ ] Add advanced filtering and search interface MVVM pattern using MVVM architecture
 - [ ] Add export functionality interface MVVM pattern using MVVM architecture
+- [ ] Ensure only PascalCase was used
 
 ### Phase 16: Complete Feature - Final Integration
 - [ ] Test complete end-to-end functionality with all features MVVM pattern using MVVM architecture
 - [ ] Performance testing with large file collections MVVM pattern using MVVM architecture
 - [ ] Final Unicode character testing with all features MVVM pattern using MVVM architecture
+- [ ] Ensure only PascalCase was used
 
 ## File Structure (Complete Feature)
 ```
