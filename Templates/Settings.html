@@ -1,0 +1,583 @@
+{% extends "Base.html" %}
+
+{% block title %}Settings - MediaVortex{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <h2><i class="fas fa-cog"></i> Settings</h2>
+
+        <!-- Alert Messages -->
+        <div id="AlertContainer"></div>
+
+        <!-- Profile Management Section -->
+        <div class="card mt-4">
+            <div class="card-header bg-light" data-bs-toggle="collapse" data-bs-target="#ProfileManagementSection" style="cursor: pointer;">
+                <div class="d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">
+                        <i class="fas fa-sliders-h"></i> Profile Management
+                    </h5>
+                    <i class="fas fa-chevron-up"></i>
+                </div>
+            </div>
+            <div class="collapse show" id="ProfileManagementSection">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <h6 class="mb-0">Transcoding Profiles</h6>
+                        <button class="btn btn-primary" onclick="ShowCreateProfileModal()">
+                            <i class="fas fa-plus"></i> Add New Profile
+                        </button>
+                    </div>
+
+                    <!-- Profiles List -->
+                    <div id="ProfilesList">
+                        <!-- Profiles will be loaded here -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Profile Management Modal -->
+<div class="modal fade" id="ProfileManagementModal" tabindex="-1">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Profile Management</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="ProfileManagementForm">
+                    <input type="hidden" id="ProfileId">
+                    
+                    <!-- Profile Details -->
+                    <div class="row mb-4">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="ProfileName" class="form-label">Profile Name</label>
+                                <input type="text" class="form-control" id="ProfileName" required>
+                                <div class="form-text">Unique name for the profile</div>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="ProfileDescription" class="form-label">Description</label>
+                                <input type="text" class="form-control" id="ProfileDescription">
+                                <div class="form-text">Description of the profile</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Profile Thresholds -->
+                    <h6 class="mb-3">Profile Thresholds</h6>
+                    
+                    <!-- 480p Settings -->
+                    <div class="card mb-3">
+                        <div class="card-header">
+                            <h6 class="mb-0">480p Settings</h6>
+                        </div>
+                        <div class="card-body">
+                            <div class="row">
+                                <div class="col-md-3">
+                                    <div class="mb-3">
+                                        <label for="VideoBitrate480p" class="form-label">Video Bitrate (kbps)</label>
+                                        <input type="number" class="form-control" id="VideoBitrate480p" value="400">
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="mb-3">
+                                        <label for="FallbackVideo480p" class="form-label">Fallback Video (kbps)</label>
+                                        <input type="number" class="form-control" id="FallbackVideo480p" value="350">
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="mb-3">
+                                        <label for="AudioBitrate480p" class="form-label">Audio Bitrate (kbps)</label>
+                                        <input type="number" class="form-control" id="AudioBitrate480p" value="80">
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="mb-3">
+                                        <label for="FallbackAudio480p" class="form-label">Fallback Audio (kbps)</label>
+                                        <input type="number" class="form-control" id="FallbackAudio480p" value="80">
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="row">
+                                <div class="col-md-3">
+                                    <div class="mb-3">
+                                        <label for="Under30Min480p" class="form-label">Under 30 Min (MB)</label>
+                                        <input type="number" class="form-control" id="Under30Min480p" value="200">
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="mb-3">
+                                        <label for="Under65Min480p" class="form-label">Under 65 Min (MB)</label>
+                                        <input type="number" class="form-control" id="Under65Min480p" value="300">
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="mb-3">
+                                        <label for="Over65Min480p" class="form-label">Over 65 Min (MB)</label>
+                                        <input type="number" class="form-control" id="Over65Min480p" value="700">
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="mb-3">
+                                        <label for="TranscodeDownTo480p" class="form-label">Transcode Down To</label>
+                                        <select class="form-select" id="TranscodeDownTo480p">
+                                            <option value="No downscaling">No downscaling</option>
+                                            <option value="360p">360p</option>
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 720p Settings -->
+                    <div class="card mb-3">
+                        <div class="card-header">
+                            <h6 class="mb-0">720p Settings</h6>
+                        </div>
+                        <div class="card-body">
+                            <div class="row">
+                                <div class="col-md-3">
+                                    <div class="mb-3">
+                                        <label for="VideoBitrate720p" class="form-label">Video Bitrate (kbps)</label>
+                                        <input type="number" class="form-control" id="VideoBitrate720p" value="450">
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="mb-3">
+                                        <label for="FallbackVideo720p" class="form-label">Fallback Video (kbps)</label>
+                                        <input type="number" class="form-control" id="FallbackVideo720p" value="400">
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="mb-3">
+                                        <label for="AudioBitrate720p" class="form-label">Audio Bitrate (kbps)</label>
+                                        <input type="number" class="form-control" id="AudioBitrate720p" value="70">
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="mb-3">
+                                        <label for="FallbackAudio720p" class="form-label">Fallback Audio (kbps)</label>
+                                        <input type="number" class="form-control" id="FallbackAudio720p" value="70">
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="row">
+                                <div class="col-md-3">
+                                    <div class="mb-3">
+                                        <label for="Under30Min720p" class="form-label">Under 30 Min (MB)</label>
+                                        <input type="number" class="form-control" id="Under30Min720p" value="200">
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="mb-3">
+                                        <label for="Under65Min720p" class="form-label">Under 65 Min (MB)</label>
+                                        <input type="number" class="form-control" id="Under65Min720p" value="300">
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="mb-3">
+                                        <label for="Over65Min720p" class="form-label">Over 65 Min (MB)</label>
+                                        <input type="number" class="form-control" id="Over65Min720p" value="800">
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="mb-3">
+                                        <label for="TranscodeDownTo720p" class="form-label">Transcode Down To</label>
+                                        <select class="form-select" id="TranscodeDownTo720p">
+                                            <option value="480p">480p</option>
+                                            <option value="360p">360p</option>
+                                            <option value="No downscaling">No downscaling</option>
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 1080p Settings -->
+                    <div class="card mb-3">
+                        <div class="card-header">
+                            <h6 class="mb-0">1080p Settings</h6>
+                        </div>
+                        <div class="card-body">
+                            <div class="row">
+                                <div class="col-md-3">
+                                    <div class="mb-3">
+                                        <label for="VideoBitrate1080p" class="form-label">Video Bitrate (kbps)</label>
+                                        <input type="number" class="form-control" id="VideoBitrate1080p" value="500">
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="mb-3">
+                                        <label for="FallbackVideo1080p" class="form-label">Fallback Video (kbps)</label>
+                                        <input type="number" class="form-control" id="FallbackVideo1080p" value="450">
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="mb-3">
+                                        <label for="AudioBitrate1080p" class="form-label">Audio Bitrate (kbps)</label>
+                                        <input type="number" class="form-control" id="AudioBitrate1080p" value="80">
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="mb-3">
+                                        <label for="FallbackAudio1080p" class="form-label">Fallback Audio (kbps)</label>
+                                        <input type="number" class="form-control" id="FallbackAudio1080p" value="80">
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="row">
+                                <div class="col-md-3">
+                                    <div class="mb-3">
+                                        <label for="Under30Min1080p" class="form-label">Under 30 Min (MB)</label>
+                                        <input type="number" class="form-control" id="Under30Min1080p" value="200">
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="mb-3">
+                                        <label for="Under65Min1080p" class="form-label">Under 65 Min (MB)</label>
+                                        <input type="number" class="form-control" id="Under65Min1080p" value="300">
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="mb-3">
+                                        <label for="Over65Min1080p" class="form-label">Over 65 Min (MB)</label>
+                                        <input type="number" class="form-control" id="Over65Min1080p" value="800">
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="mb-3">
+                                        <label for="TranscodeDownTo1080p" class="form-label">Transcode Down To</label>
+                                        <select class="form-select" id="TranscodeDownTo1080p">
+                                            <option value="480p">480p</option>
+                                            <option value="720p">720p</option>
+                                            <option value="360p">360p</option>
+                                            <option value="No downscaling">No downscaling</option>
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="SaveProfile()">
+                    <i class="fas fa-check"></i> Save Profile
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let CurrentProfile = null;
+let IsEditMode = false;
+
+// Load profiles on page load
+$(document).ready(function() {
+    LoadProfiles();
+});
+
+function ShowAlert(Message, Type = 'info') {
+    const AlertHtml = `
+        <div class="alert alert-${Type} alert-dismissible fade show" role="alert">
+            ${Message}
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+    `;
+    $('#AlertContainer').html(AlertHtml);
+}
+
+function LoadProfiles() {
+    $.get('/api/profiles')
+        .done(function(Response) {
+            if (Response.success) {
+                DisplayProfiles(Response.profiles);
+            } else {
+                ShowAlert('Failed to load profiles: ' + Response.error, 'danger');
+            }
+        })
+        .fail(function() {
+            ShowAlert('Failed to load profiles', 'danger');
+        });
+}
+
+function DisplayProfiles(Profiles) {
+    const ProfilesList = $('#ProfilesList');
+    ProfilesList.empty();
+    
+    if (Profiles.length === 0) {
+        ProfilesList.append('<p class="text-muted text-center">No profiles found</p>');
+        return;
+    }
+    
+    Profiles.forEach(function(Profile) {
+        const ProfileCard = `
+            <div class="card mb-3">
+                <div class="card-body">
+                    <div class="row align-items-center">
+                        <div class="col-md-8">
+                            <h5 class="card-title mb-1">${Profile.ProfileName}</h5>
+                            <p class="card-text text-muted mb-1">${Profile.Description || 'No description provided'}</p>
+                            <small class="text-muted">Last modified: ${new Date(Profile.LastModified).toLocaleDateString()}</small>
+                        </div>
+                        <div class="col-md-4 text-end">
+                            <button class="btn btn-outline-primary btn-sm me-2" onclick="EditProfile(${Profile.Id})">
+                                <i class="fas fa-edit"></i> Edit
+                            </button>
+                            <button class="btn btn-outline-secondary btn-sm me-2" onclick="CopyProfile(${Profile.Id})">
+                                <i class="fas fa-copy"></i> Copy
+                            </button>
+                            <button class="btn btn-outline-danger btn-sm" onclick="DeleteProfile(${Profile.Id}, '${Profile.ProfileName}')">
+                                <i class="fas fa-trash"></i> Delete
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+        ProfilesList.append(ProfileCard);
+    });
+}
+
+function ShowCreateProfileModal() {
+    IsEditMode = false;
+    CurrentProfile = null;
+    ClearProfileForm();
+    $('#ProfileManagementModal').modal('show');
+}
+
+function EditProfile(ProfileId) {
+    IsEditMode = true;
+    $.get(`/api/profiles/${ProfileId}`)
+        .done(function(Response) {
+            if (Response.success) {
+                CurrentProfile = Response.profile;
+                PopulateProfileForm(Response.profile);
+                $('#ProfileManagementModal').modal('show');
+            } else {
+                ShowAlert('Failed to load profile: ' + Response.error, 'danger');
+            }
+        })
+        .fail(function() {
+            ShowAlert('Failed to load profile', 'danger');
+        });
+}
+
+function CopyProfile(ProfileId) {
+    IsEditMode = false;
+    $.get(`/api/profiles/${ProfileId}`)
+        .done(function(Response) {
+            if (Response.success) {
+                CurrentProfile = null;
+                const Profile = Response.profile;
+                Profile.ProfileName = Profile.ProfileName + ' - Copy';
+                PopulateProfileForm(Profile);
+                $('#ProfileManagementModal').modal('show');
+            } else {
+                ShowAlert('Failed to load profile: ' + Response.error, 'danger');
+            }
+        })
+        .fail(function() {
+            ShowAlert('Failed to load profile', 'danger');
+        });
+}
+
+function PopulateProfileForm(Profile) {
+    // Only set the ID if we're in edit mode, otherwise clear it for new profiles
+    if (IsEditMode) {
+        $('#ProfileId').val(Profile.Id || '');
+    } else {
+        $('#ProfileId').val(''); // Clear ID for new profiles (create/copy)
+    }
+    $('#ProfileName').val(Profile.ProfileName || '');
+    $('#ProfileDescription').val(Profile.Description || '');
+    
+    // Populate thresholds for each resolution
+    const Thresholds = Profile.Thresholds || [];
+    
+    // 480p settings
+    const Threshold480p = Thresholds.find(t => t.Resolution === '480p');
+    if (Threshold480p) {
+        $('#VideoBitrate480p').val(Threshold480p.VideoBitrateKbps);
+        $('#FallbackVideo480p').val(Threshold480p.FallbackVideoBitrateKbps);
+        $('#AudioBitrate480p').val(Threshold480p.AudioBitrateKbps);
+        $('#FallbackAudio480p').val(Threshold480p.FallbackAudioBitrateKbps);
+        $('#Under30Min480p').val(Threshold480p.Under30MinMB);
+        $('#Under65Min480p').val(Threshold480p.Under65MinMB);
+        $('#Over65Min480p').val(Threshold480p.Over65MinMB);
+        $('#TranscodeDownTo480p').val(Threshold480p.TranscodeDownTo);
+    }
+    
+    // 720p settings
+    const Threshold720p = Thresholds.find(t => t.Resolution === '720p');
+    if (Threshold720p) {
+        $('#VideoBitrate720p').val(Threshold720p.VideoBitrateKbps);
+        $('#FallbackVideo720p').val(Threshold720p.FallbackVideoBitrateKbps);
+        $('#AudioBitrate720p').val(Threshold720p.AudioBitrateKbps);
+        $('#FallbackAudio720p').val(Threshold720p.FallbackAudioBitrateKbps);
+        $('#Under30Min720p').val(Threshold720p.Under30MinMB);
+        $('#Under65Min720p').val(Threshold720p.Under65MinMB);
+        $('#Over65Min720p').val(Threshold720p.Over65MinMB);
+        $('#TranscodeDownTo720p').val(Threshold720p.TranscodeDownTo);
+    }
+    
+    // 1080p settings
+    const Threshold1080p = Thresholds.find(t => t.Resolution === '1080p');
+    if (Threshold1080p) {
+        $('#VideoBitrate1080p').val(Threshold1080p.VideoBitrateKbps);
+        $('#FallbackVideo1080p').val(Threshold1080p.FallbackVideoBitrateKbps);
+        $('#AudioBitrate1080p').val(Threshold1080p.AudioBitrateKbps);
+        $('#FallbackAudio1080p').val(Threshold1080p.FallbackAudioBitrateKbps);
+        $('#Under30Min1080p').val(Threshold1080p.Under30MinMB);
+        $('#Under65Min1080p').val(Threshold1080p.Under65MinMB);
+        $('#Over65Min1080p').val(Threshold1080p.Over65MinMB);
+        $('#TranscodeDownTo1080p').val(Threshold1080p.TranscodeDownTo);
+    }
+}
+
+function ClearProfileForm() {
+    $('#ProfileId').val('');
+    $('#ProfileName').val('');
+    $('#ProfileDescription').val('');
+    
+    // Clear all threshold fields
+    const Resolutions = ['480p', '720p', '1080p'];
+    Resolutions.forEach(function(Resolution) {
+        $(`#VideoBitrate${Resolution}`).val('');
+        $(`#FallbackVideo${Resolution}`).val('');
+        $(`#AudioBitrate${Resolution}`).val('');
+        $(`#FallbackAudio${Resolution}`).val('');
+        $(`#Under30Min${Resolution}`).val('');
+        $(`#Under65Min${Resolution}`).val('');
+        $(`#Over65Min${Resolution}`).val('');
+        $(`#TranscodeDownTo${Resolution}`).val('No downscaling');
+    });
+}
+
+function SaveProfile() {
+    const ProfileName = $('#ProfileName').val().trim();
+    const Description = $('#ProfileDescription').val().trim();
+    
+    if (!ProfileName) {
+        ShowAlert('Profile name is required', 'warning');
+        return;
+    }
+    
+    const ProfileData = {
+        ProfileName: ProfileName,
+        Description: Description,
+        Thresholds: [
+            {
+                Resolution: '480p',
+                VideoBitrateKbps: parseInt($('#VideoBitrate480p').val()) || 0,
+                FallbackVideoBitrateKbps: parseInt($('#FallbackVideo480p').val()) || 0,
+                AudioBitrateKbps: parseInt($('#AudioBitrate480p').val()) || 0,
+                FallbackAudioBitrateKbps: parseInt($('#FallbackAudio480p').val()) || 0,
+                Under30MinMB: parseInt($('#Under30Min480p').val()) || 0,
+                Under65MinMB: parseInt($('#Under65Min480p').val()) || 0,
+                Over65MinMB: parseInt($('#Over65Min480p').val()) || 0,
+                TranscodeDownTo: $('#TranscodeDownTo480p').val()
+            },
+            {
+                Resolution: '720p',
+                VideoBitrateKbps: parseInt($('#VideoBitrate720p').val()) || 0,
+                FallbackVideoBitrateKbps: parseInt($('#FallbackVideo720p').val()) || 0,
+                AudioBitrateKbps: parseInt($('#AudioBitrate720p').val()) || 0,
+                FallbackAudioBitrateKbps: parseInt($('#FallbackAudio720p').val()) || 0,
+                Under30MinMB: parseInt($('#Under30Min720p').val()) || 0,
+                Under65MinMB: parseInt($('#Under65Min720p').val()) || 0,
+                Over65MinMB: parseInt($('#Over65Min720p').val()) || 0,
+                TranscodeDownTo: $('#TranscodeDownTo720p').val()
+            },
+            {
+                Resolution: '1080p',
+                VideoBitrateKbps: parseInt($('#VideoBitrate1080p').val()) || 0,
+                FallbackVideoBitrateKbps: parseInt($('#FallbackVideo1080p').val()) || 0,
+                AudioBitrateKbps: parseInt($('#AudioBitrate1080p').val()) || 0,
+                FallbackAudioBitrateKbps: parseInt($('#FallbackAudio1080p').val()) || 0,
+                Under30MinMB: parseInt($('#Under30Min1080p').val()) || 0,
+                Under65MinMB: parseInt($('#Under65Min1080p').val()) || 0,
+                Over65MinMB: parseInt($('#Over65Min1080p').val()) || 0,
+                TranscodeDownTo: $('#TranscodeDownTo1080p').val()
+            }
+        ]
+    };
+    
+    if (IsEditMode && CurrentProfile) {
+        // Update existing profile
+        $.ajax({
+            url: `/api/profiles/${CurrentProfile.Id}`,
+            type: 'PUT',
+            contentType: 'application/json',
+            data: JSON.stringify(ProfileData)
+        })
+        .done(function(Response) {
+            if (Response.success) {
+                $('#ProfileManagementModal').modal('hide');
+                ShowAlert(Response.message, 'success');
+                LoadProfiles();
+            } else {
+                ShowAlert('Failed to update profile: ' + Response.error, 'danger');
+            }
+        })
+        .fail(function() {
+            ShowAlert('Failed to update profile', 'danger');
+        });
+    } else {
+        // Create new profile
+        $.ajax({
+            url: '/api/profiles',
+            type: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify(ProfileData)
+        })
+        .done(function(Response) {
+            if (Response.success) {
+                $('#ProfileManagementModal').modal('hide');
+                ShowAlert(Response.message, 'success');
+                LoadProfiles();
+            } else {
+                ShowAlert('Failed to create profile: ' + Response.error, 'danger');
+            }
+        })
+        .fail(function() {
+            ShowAlert('Failed to create profile', 'danger');
+        });
+    }
+}
+
+function DeleteProfile(ProfileId, ProfileName) {
+    if (!confirm(`Are you sure you want to delete the profile "${ProfileName}"? This will also delete all associated thresholds.`)) {
+        return;
+    }
+    
+    $.ajax({
+        url: `/api/profiles/${ProfileId}`,
+        type: 'DELETE'
+    })
+    .done(function(Response) {
+        if (Response.success) {
+            ShowAlert(Response.message, 'success');
+            LoadProfiles();
+        } else {
+            ShowAlert('Failed to delete profile: ' + Response.error, 'danger');
+        }
+    })
+    .fail(function() {
+        ShowAlert('Failed to delete profile', 'danger');
+    });
+}
+</script>
+{% endblock %}

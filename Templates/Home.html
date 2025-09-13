@@ -1,0 +1,28 @@
+{% extends "Base.html" %}
+
+{% block title %}Home - MediaVortex{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-body text-center">
+                <h1 class="card-title">
+                    <i class="fas fa-video text-primary"></i>
+                    Welcome to MediaVortex
+                </h1>
+                <p class="card-text lead">
+                    Your comprehensive media transcoding solution
+                </p>
+                <hr>
+                <p class="text-muted">
+                    This is a blank home page. Navigate to <strong>Settings</strong> to manage your transcoding profiles.
+                </p>
+                <a href="/settings" class="btn btn-primary btn-lg">
+                    <i class="fas fa-cog"></i> Go to Settings
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
