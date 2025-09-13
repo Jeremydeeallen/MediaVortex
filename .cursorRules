@@ -11,6 +11,16 @@
 - No hyphens or underscores - they mess with copy and paste functions and add extra characters
 - When modifying existing features, maintain consistency with current naming in that feature set and add the feature to the NamingConventionViolations.md file
 - Specify object type and line numbers for all name changes
+"Use PascalCase for ALL custom variables, parameters, method names, class names, file names, URLs, and string literals"
+"NO camelCase (like rootFolderPath) and NO snake_case (like root_folder_path)"
+- Give Specific Examples:
+✅ Correct: RootFolderPath, BusinessService, DisplayFolders
+❌ Wrong: rootFolderPath, businessService, displayFolders
+❌ Wrong: root_folder_path, business_service, display_folders
+Emphasize the Rule:
+"Every word in a name should start with a capital letter"
+"No exceptions for parameters, local variables, or any custom names"
+"Only Python built-ins like __init__, str(), len() can have lowercase"
 
 ## Problem Solving
 - Provide the best solution based upon the goal for our design.
