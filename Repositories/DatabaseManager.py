@@ -10,8 +10,8 @@ from Services.LoggingService import LoggingService
 class DatabaseManager:
     """Handles business logic for data access operations."""
     
-    def __init__(self, database_service: DatabaseService = None):
-        self.DatabaseService = database_service or DatabaseService()
+    def __init__(self, DatabaseServiceInstance: DatabaseService = None):
+        self.DatabaseService = DatabaseServiceInstance or DatabaseService()
     
     # Profile Management Methods
     def GetAllProfiles(self) -> List[TranscodeProfileModel]:
@@ -32,10 +32,10 @@ class DatabaseManager:
         
         return profiles
     
-    def GetProfileById(self, profile_id: int) -> Optional[TranscodeProfileModel]:
+    def GetProfileById(self, ProfileId: int) -> Optional[TranscodeProfileModel]:
         """Get a specific profile by ID."""
         query = "SELECT Id, ProfileName, Description, CreatedDate, LastModified FROM Profiles WHERE Id = ?"
-        rows = self.DatabaseService.ExecuteQuery(query, (profile_id,))
+        rows = self.DatabaseService.ExecuteQuery(query, (ProfileId,))
         
         if not rows:
             return None
@@ -49,10 +49,10 @@ class DatabaseManager:
             LastModified=row['LastModified']
         )
     
-    def SaveProfile(self, profile: TranscodeProfileModel) -> int:
+    def SaveProfile(self, Profile: TranscodeProfileModel) -> int:
         """Save a profile (insert or update) and return the profile ID."""
         try:
-            LoggingService.LogFunctionEntry("SaveProfile", "DatabaseManager", profile.Id, profile.ProfileName, profile.Description)
+            LoggingService.LogFunctionEntry("SaveProfile", "DatabaseManager", Profile.Id, Profile.ProfileName, Profile.Description)
             
             connection = self.DatabaseService.GetConnection()
             try:
@@ -93,20 +93,20 @@ class DatabaseManager:
             LoggingService.LogException("Exception in SaveProfile", e, "DatabaseManager", "SaveProfile")
             raise
     
-    def DeleteProfile(self, profile_id: int) -> bool:
+    def DeleteProfile(self, ProfileId: int) -> bool:
         """Delete a profile and its associated thresholds."""
         try:
             # Delete associated thresholds first
-            self.DatabaseService.ExecuteNonQuery("DELETE FROM ProfileThresholds WHERE ProfileId = ?", (profile_id,))
+            self.DatabaseService.ExecuteNonQuery("DELETE FROM ProfileThresholds WHERE ProfileId = ?", (ProfileId,))
             
             # Delete the profile
-            affected_rows = self.DatabaseService.ExecuteNonQuery("DELETE FROM Profiles WHERE Id = ?", (profile_id,))
+            affected_rows = self.DatabaseService.ExecuteNonQuery("DELETE FROM Profiles WHERE Id = ?", (ProfileId,))
             return affected_rows > 0
         except Exception:
             return False
     
     # Profile Threshold Management Methods
-    def GetThresholdsByProfileId(self, profile_id: int) -> List[ProfileThresholdModel]:
+    def GetThresholdsByProfileId(self, ProfileId: int) -> List[ProfileThresholdModel]:
         """Get all thresholds for a specific profile."""
         query = """
             SELECT Id, ProfileId, Resolution, Under30MinMB, Under65MinMB, Over65MinMB,
@@ -116,7 +116,7 @@ class DatabaseManager:
             WHERE ProfileId = ?
             ORDER BY Resolution
         """
-        rows = self.DatabaseService.ExecuteQuery(query, (profile_id,))
+        rows = self.DatabaseService.ExecuteQuery(query, (ProfileId,))
         
         thresholds = []
         for row in rows:
@@ -137,10 +137,10 @@ class DatabaseManager:
         
         return thresholds
     
-    def SaveThreshold(self, threshold: ProfileThresholdModel) -> int:
+    def SaveThreshold(self, Threshold: ProfileThresholdModel) -> int:
         """Save a threshold (insert or update) and return the threshold ID."""
         try:
-            LoggingService.LogFunctionEntry("SaveThreshold", "DatabaseManager", threshold.Id, threshold.ProfileId, threshold.Resolution)
+            LoggingService.LogFunctionEntry("SaveThreshold", "DatabaseManager", Threshold.Id, Threshold.ProfileId, Threshold.Resolution)
             
             connection = self.DatabaseService.GetConnection()
             try:
@@ -197,9 +197,9 @@ class DatabaseManager:
             LoggingService.LogException("Exception in SaveThreshold", e, "DatabaseManager", "SaveThreshold")
             raise
     
-    def DeleteThreshold(self, threshold_id: int) -> bool:
+    def DeleteThreshold(self, ThresholdId: int) -> bool:
         """Delete a threshold."""
-        affected_rows = self.DatabaseService.ExecuteNonQuery("DELETE FROM ProfileThresholds WHERE Id = ?", (threshold_id,))
+        affected_rows = self.DatabaseService.ExecuteNonQuery("DELETE FROM ProfileThresholds WHERE Id = ?", (ThresholdId,))
         return affected_rows > 0
     
     # Root Folder Management Methods
@@ -220,10 +220,10 @@ class DatabaseManager:
         
         return rootFolders
     
-    def GetRootFolderById(self, rootFolderId: int) -> Optional[RootFolderModel]:
+    def GetRootFolderById(self, RootFolderId: int) -> Optional[RootFolderModel]:
         """Get a specific root folder by ID."""
         query = "SELECT Id, RootFolder, LastScannedDate, TotalSizeGB FROM RootFolders WHERE Id = ?"
-        rows = self.DatabaseService.ExecuteQuery(query, (rootFolderId,))
+        rows = self.DatabaseService.ExecuteQuery(query, (RootFolderId,))
         
         if not rows:
             return None
@@ -236,10 +236,10 @@ class DatabaseManager:
             TotalSizeGB=row['TotalSizeGB']
         )
     
-    def SaveRootFolder(self, rootFolder: RootFolderModel) -> int:
+    def SaveRootFolder(self, RootFolder: RootFolderModel) -> int:
         """Save a root folder (insert or update) and return the root folder ID."""
         try:
-            LoggingService.LogInfoFunctionEntry("SaveRootFolder", rootFolder.Id, rootFolder.RootFolder, rootFolder.TotalSizeGB)
+            LoggingService.LogInfoFunctionEntry("SaveRootFolder", RootFolder.Id, RootFolder.RootFolder, RootFolder.TotalSizeGB)
             
             connection = self.DatabaseService.GetConnection()
             try:
@@ -280,14 +280,14 @@ class DatabaseManager:
             LoggingService.LogException("Exception in SaveRootFolder", e, "DatabaseManager", "SaveRootFolder")
             raise
     
-    def DeleteRootFolder(self, rootFolderId: int) -> bool:
+    def DeleteRootFolder(self, RootFolderId: int) -> bool:
         """Delete a root folder and its associated media files."""
         try:
             # Delete associated media files first
-            self.DatabaseService.ExecuteNonQuery("DELETE FROM MediaFiles WHERE Id IN (SELECT Id FROM MediaFiles WHERE FilePath LIKE (SELECT RootFolder || '%' FROM RootFolders WHERE Id = ?))", (rootFolderId,))
+            self.DatabaseService.ExecuteNonQuery("DELETE FROM MediaFiles WHERE Id IN (SELECT Id FROM MediaFiles WHERE FilePath LIKE (SELECT RootFolder || '%' FROM RootFolders WHERE Id = ?))", (RootFolderId,))
             
             # Delete the root folder
-            affectedRows = self.DatabaseService.ExecuteNonQuery("DELETE FROM RootFolders WHERE Id = ?", (rootFolderId,))
+            affectedRows = self.DatabaseService.ExecuteNonQuery("DELETE FROM RootFolders WHERE Id = ?", (RootFolderId,))
             return affectedRows > 0
         except Exception:
             return False
@@ -326,7 +326,7 @@ class DatabaseManager:
         
         return mediaFiles
     
-    def GetMediaFileById(self, mediaFileId: int) -> Optional[MediaFileModel]:
+    def GetMediaFileById(self, MediaFileId: int) -> Optional[MediaFileModel]:
         """Get a specific media file by ID."""
         query = """
             SELECT Id, SeasonId, FilePath, FileName, SizeMB, VideoBitrateKbps, AudioBitrateKbps,
@@ -335,7 +335,7 @@ class DatabaseManager:
             FROM MediaFiles 
             WHERE Id = ?
         """
-        rows = self.DatabaseService.ExecuteQuery(query, (mediaFileId,))
+        rows = self.DatabaseService.ExecuteQuery(query, (MediaFileId,))
         
         if not rows:
             return None
@@ -358,10 +358,10 @@ class DatabaseManager:
             AssignedProfile=row['AssignedProfile']
         )
     
-    def SaveMediaFile(self, mediaFile: MediaFileModel) -> int:
+    def SaveMediaFile(self, MediaFile: MediaFileModel) -> int:
         """Save a media file (insert or update) and return the media file ID."""
         try:
-            LoggingService.LogInfoFunctionEntry("SaveMediaFile", mediaFile.Id, mediaFile.FilePath, mediaFile.FileName)
+            LoggingService.LogInfoFunctionEntry("SaveMediaFile", MediaFile.Id, MediaFile.FilePath, MediaFile.FileName)
             
             connection = self.DatabaseService.GetConnection()
             try:
@@ -418,12 +418,12 @@ class DatabaseManager:
             LoggingService.LogException("Exception in SaveMediaFile", e, "DatabaseManager", "SaveMediaFile")
             raise
     
-    def DeleteMediaFile(self, mediaFileId: int) -> bool:
+    def DeleteMediaFile(self, MediaFileId: int) -> bool:
         """Delete a media file."""
-        affectedRows = self.DatabaseService.ExecuteNonQuery("DELETE FROM MediaFiles WHERE Id = ?", (mediaFileId,))
+        affectedRows = self.DatabaseService.ExecuteNonQuery("DELETE FROM MediaFiles WHERE Id = ?", (MediaFileId,))
         return affectedRows > 0
     
-    def GetMediaFilesByRootFolder(self, rootFolderPath: str) -> List[MediaFileModel]:
+    def GetMediaFilesByRootFolder(self, RootFolderPath: str) -> List[MediaFileModel]:
         """Get all media files for a specific root folder."""
         query = """
             SELECT Id, SeasonId, FilePath, FileName, SizeMB, VideoBitrateKbps, AudioBitrateKbps,
@@ -433,7 +433,7 @@ class DatabaseManager:
             WHERE FilePath LIKE ?
             ORDER BY FilePath
         """
-        rows = self.DatabaseService.ExecuteQuery(query, (f"{rootFolderPath}%",))
+        rows = self.DatabaseService.ExecuteQuery(query, (f"{RootFolderPath}%",))
         
         mediaFiles = []
         for row in rows:

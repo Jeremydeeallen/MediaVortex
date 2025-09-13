@@ -251,11 +251,17 @@
 {% endblock %}
 
 {% block scripts %}
+<!-- MVVM Delete Components -->
+<script src="{{ url_for('static', filename='js/DeleteViewModel.js') }}"></script>
+<script src="{{ url_for('static', filename='js/DeleteService.js') }}"></script>
+
 <script>
         let IsScanning = false;
         let ScanInterval = null;
-        let DeleteType = '';
-        let DeleteId = 0;
+        
+        // Initialize MVVM Delete Components (Global scope for onclick handlers)
+        window.DeleteViewModelInstance = new DeleteViewModel();
+        window.DeleteServiceInstance = new DeleteService(window.DeleteViewModelInstance);
         
         // Pagination variables
         let RootFolderCurrentPage = 1;
@@ -323,7 +329,7 @@
                 LoadMediaFiles();
             });
             
-            $('#ConfirmDeleteBtn').click(ConfirmDelete);
+            $('#ConfirmDeleteBtn').click(() => window.DeleteServiceInstance.ExecuteDelete());
         }
 
         function StartScan() {
@@ -572,6 +578,8 @@
             }
             
             rootFolders.forEach(function(folder) {
+                // Properly escape the folder path for JavaScript
+                const EscapedPath = folder.RootFolder.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '\\"');
                 const Row = `
                     <tr>
                         <td>${folder.Id}</td>
@@ -579,7 +587,7 @@
                         <td>${folder.LastScannedDate}</td>
                         <td>${folder.TotalSizeGB}</td>
                         <td>
-                            <button class="btn btn-sm btn-outline-danger" onclick="DeleteItem('rootfolder', ${folder.Id}, '${folder.RootFolder}')">
+                            <button class="btn btn-sm btn-outline-danger" onclick="window.DeleteServiceInstance.ShowDeleteConfirmation('rootfolder', ${folder.Id}, '${EscapedPath}')">
                                 <i class="fas fa-trash"></i> Delete
                             </button>
                         </td>
@@ -634,6 +642,8 @@
             }
             
             mediaFiles.forEach(function(file) {
+                // Properly escape the file name for JavaScript
+                const EscapedFileName = file.FileName.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '\\"');
                 const Row = `
                     <tr>
                         <td>${file.Id}</td>
@@ -645,7 +655,7 @@
                         <td>${file.Resolution}</td>
                         <td>${file.DurationMinutes}</td>
                         <td>
-                            <button class="btn btn-sm btn-outline-danger" onclick="DeleteItem('mediafile', ${file.Id}, '${file.FileName}')">
+                            <button class="btn btn-sm btn-outline-danger" onclick="window.DeleteServiceInstance.ShowDeleteConfirmation('mediafile', ${file.Id}, '${EscapedFileName}')">
                                 <i class="fas fa-trash"></i> Delete
                             </button>
                         </td>
@@ -655,39 +665,6 @@
             });
         }
 
-        function DeleteItem(type, id, name) {
-            DeleteType = type;
-            DeleteId = id;
-            const Message = `Are you sure you want to delete this ${type === 'rootfolder' ? 'root folder' : 'media file'}?<br><strong>${name}</strong>`;
-            $('#DeleteMessage').html(Message);
-            $('#DeleteModal').modal('show');
-        }
-
-        function ConfirmDelete() {
-            const Url = DeleteType === 'rootfolder' ? `/api/RootFolders/${DeleteId}` : `/api/MediaFiles/${DeleteId}`;
-            
-            $.ajax({
-                url: Url,
-                method: 'DELETE',
-                success: function(response) {
-                    $('#DeleteModal').modal('hide');
-                    if (response.Success) {
-                        ShowSuccess(response.Message || 'Item deleted successfully');
-                        if (DeleteType === 'rootfolder') {
-                            LoadRootFolders();
-                        } else {
-                            LoadMediaFiles();
-                        }
-                    } else {
-                        ShowError(response.Message || 'Failed to delete item');
-                    }
-                },
-                error: function(xhr) {
-                    const response = xhr.responseJSON;
-                    ShowError(response?.Message || 'Error deleting item');
-                }
-            });
-        }
 
         function RefreshData() {
             LoadRootFolders();

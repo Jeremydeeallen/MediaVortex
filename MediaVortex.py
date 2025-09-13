@@ -51,7 +51,7 @@ class MediaVortexApp:
         self.App.register_blueprint(self.ProfileController.Blueprint, url_prefix='/api')
         self.App.register_blueprint(self.FileScanningController.Blueprint, url_prefix='/api')
     
-    def Run(self, host='127.0.0.1', port=5000, debug=True):
+    def Run(self, host='0.0.0.0', port=5000, debug=True):
         """Run the Flask application."""
         print(f"Starting MediaVortex on http://{host}:{port}")
         print(f"Settings page: http://{host}:{port}/settings")
