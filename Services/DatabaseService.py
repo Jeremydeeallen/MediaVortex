@@ -20,6 +20,10 @@ class DatabaseService:
         """Get a database connection. Creates a new one for each call to handle threading."""
         connection = sqlite3.connect(self.DatabasePath)
         connection.row_factory = sqlite3.Row  # Enable column access by name
+        
+        # Ensure UTF-8 encoding is properly handled
+        connection.execute("PRAGMA encoding = 'UTF-8'")
+        
         return connection
     
     def CloseConnection(self):

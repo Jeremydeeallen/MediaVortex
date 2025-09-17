@@ -57,9 +57,8 @@ class FileScanningController:
         def GetScanStatus():
             """Get current scan status and progress."""
             try:
-                LoggingService.LogInfo("GetScanStatus endpoint called", "FileScanningController", "GetScanStatus")
+                # Remove verbose logging - only log errors
                 status = self.ViewModel.UpdateScanStatus()
-                LoggingService.LogInfo(f"GetScanStatus returning: {status}", "FileScanningController", "GetScanStatus")
                 return jsonify(status), 200
                 
             except Exception as e:
@@ -276,6 +275,34 @@ class FileScanningController:
                     'Success': False,
                     'Message': f'Error refreshing data: {str(e)}',
                     'Error': 'RefreshError'
+                }), 500
+        
+        @self.Blueprint.route('/Scan/ExtractMetadata', methods=['POST'])
+        def ExtractMetadata():
+            """Extract metadata for existing files that need it."""
+            try:
+                LoggingService.LogInfo("ExtractMetadata endpoint called", "FileScanningController", "ExtractMetadata")
+                data = request.get_json() or {}
+                
+                RootFolderId = data.get('RootFolderId', None)
+                
+                LoggingService.LogInfo(f"ExtractMetadata parameters - RootFolderId: {RootFolderId}", "FileScanningController", "ExtractMetadata")
+                
+                LoggingService.LogInfo("Calling ViewModel.ExtractMetadataForExistingFiles", "FileScanningController", "ExtractMetadata")
+                result = self.ViewModel.ExtractMetadataForExistingFiles(RootFolderId)
+                LoggingService.LogInfo(f"ViewModel.ExtractMetadataForExistingFiles result: {result}", "FileScanningController", "ExtractMetadata")
+                
+                if result['Success']:
+                    return jsonify(result), 200
+                else:
+                    return jsonify(result), 400
+                    
+            except Exception as e:
+                LoggingService.LogException("Error in ExtractMetadata endpoint", e, "FileScanningController", "ExtractMetadata")
+                return jsonify({
+                    'Success': False,
+                    'Message': f'Error extracting metadata: {str(e)}',
+                    'Error': 'ExtractMetadataError'
                 }), 500
         
         @self.Blueprint.route('/ScanDirectories', methods=['GET'])

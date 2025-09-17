@@ -87,6 +87,9 @@
                             <button class="btn btn-primary" id="RefreshBtn">
                                 <i class="fas fa-sync-alt"></i> Refresh Data
                             </button>
+                            <button class="btn btn-info" id="ExtractMetadataBtn">
+                                <i class="fas fa-cogs"></i> Extract Metadata
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -309,6 +312,7 @@
             $('#StartScanBtn').click(StartScan);
             $('#StopScanBtn').click(StopScan);
             $('#RefreshBtn').click(RefreshData);
+            $('#ExtractMetadataBtn').click(ExtractMetadata);
             $('#TestUnicodeBtn').click(TestUnicode);
             $('#RefreshRootFoldersBtn').click(LoadRootFolders);
             $('#RefreshMediaFilesBtn').click(LoadMediaFiles);
@@ -676,6 +680,36 @@
             LoadRootFolders();
             LoadMediaFiles();
             ShowSuccess('Data refreshed');
+        }
+
+        function ExtractMetadata() {
+            // Disable button during processing
+            $('#ExtractMetadataBtn').prop('disabled', true).html('<i class="fas fa-spinner fa-spin"></i> Extracting...');
+            
+            $.ajax({
+                url: '/api/Scan/ExtractMetadata',
+                method: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({
+                    RootFolderId: null  // Extract for all files, or could be specific root folder
+                }),
+                success: function(response) {
+                    if (response.Success) {
+                        const ProcessedFiles = response.ProcessedFiles || 0;
+                        ShowSuccess(`Metadata extraction completed. Processed ${ProcessedFiles} files.`);
+                        RefreshData(); // Refresh to show updated metadata
+                    } else {
+                        ShowError('Error extracting metadata: ' + (response.Message || 'Unknown error'));
+                    }
+                },
+                error: function(xhr, status, error) {
+                    ShowError('Error extracting metadata: ' + error);
+                },
+                complete: function() {
+                    // Re-enable button
+                    $('#ExtractMetadataBtn').prop('disabled', false).html('<i class="fas fa-cogs"></i> Extract Metadata');
+                }
+            });
         }
 
         function ShowScanErrors(errors) {

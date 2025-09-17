@@ -241,7 +241,7 @@ class DatabaseManager:
     def SaveRootFolder(self, RootFolder: RootFolderModel) -> int:
         """Save a root folder (insert or update) and return the root folder ID."""
         try:
-            LoggingService.LogInfoFunctionEntry("SaveRootFolder", RootFolder.Id, RootFolder.RootFolder, RootFolder.TotalSizeGB)
+            LoggingService.LogFunctionEntry("SaveRootFolder", 'DatabaseManager', f"RootFolder: {RootFolder.RootFolder}, Size: {RootFolder.TotalSizeGB}GB")
             
             connection = self.DatabaseService.GetConnection()
             try:
@@ -363,13 +363,13 @@ class DatabaseManager:
     def SaveMediaFile(self, MediaFile: MediaFileModel) -> int:
         """Save a media file (insert or update) and return the media file ID."""
         try:
-            LoggingService.LogInfoFunctionEntry("SaveMediaFile", MediaFile.Id, MediaFile.FilePath, MediaFile.FileName)
+            LoggingService.LogFunctionEntry("SaveMediaFile", 'DatabaseManager', f"File: {MediaFile.FileName}, Path: {MediaFile.FilePath}")
             
             connection = self.DatabaseService.GetConnection()
             try:
                 cursor = connection.cursor()
                 
-                if mediaFile.Id is None:
+                if MediaFile.Id is None:
                     # Insert new media file
                     LoggingService.LogInfo("Inserting new media file...")
                     query = """
@@ -380,20 +380,20 @@ class DatabaseManager:
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """
                     parameters = (
-                        mediaFile.SeasonId, mediaFile.FilePath, mediaFile.FileName, mediaFile.SizeMB,
-                        mediaFile.VideoBitrateKbps, mediaFile.AudioBitrateKbps, mediaFile.Resolution,
-                        mediaFile.Codec, mediaFile.DurationMinutes, mediaFile.FrameRate,
-                        mediaFile.LastScannedDate, mediaFile.CompressionPotential, mediaFile.AssignedProfile
+                        MediaFile.SeasonId, MediaFile.FilePath, MediaFile.FileName, MediaFile.SizeMB,
+                        MediaFile.VideoBitrateKbps, MediaFile.AudioBitrateKbps, MediaFile.Resolution,
+                        MediaFile.Codec, MediaFile.DurationMinutes, MediaFile.FrameRate,
+                        MediaFile.LastScannedDate, MediaFile.CompressionPotential, MediaFile.AssignedProfile
                     )
-                    LoggingService.LogInfo("Insert media file parameters: {}", "DatabaseManager", "SaveMediaFile", parameters)
+                    LoggingService.LogInfo(f"Insert media file parameters: {parameters}", "DatabaseManager", "SaveMediaFile")
                     cursor.execute(query, parameters)
                     connection.commit()
                     mediaFileId = cursor.lastrowid
-                    LoggingService.LogInfo("Media file inserted with ID: {}", "DatabaseManager", "SaveMediaFile", mediaFileId)
+                    LoggingService.LogInfo(f"Media file inserted with ID: {mediaFileId}", "DatabaseManager", "SaveMediaFile")
                     return mediaFileId
                 else:
                     # Update existing media file
-                    LoggingService.LogInfo("Updating existing media file with ID: {}", "DatabaseManager", "SaveMediaFile", mediaFile.Id)
+                    LoggingService.LogInfo(f"Updating existing media file with ID: {MediaFile.Id}", "DatabaseManager", "SaveMediaFile")
                     query = """
                         UPDATE MediaFiles 
                         SET SeasonId = ?, FilePath = ?, FileName = ?, SizeMB = ?, VideoBitrateKbps = ?,
@@ -402,18 +402,18 @@ class DatabaseManager:
                         WHERE Id = ?
                     """
                     parameters = (
-                        mediaFile.SeasonId, mediaFile.FilePath, mediaFile.FileName, mediaFile.SizeMB,
-                        mediaFile.VideoBitrateKbps, mediaFile.AudioBitrateKbps, mediaFile.Resolution,
-                        mediaFile.Codec, mediaFile.DurationMinutes, mediaFile.FrameRate,
-                        mediaFile.LastScannedDate, mediaFile.CompressionPotential, mediaFile.AssignedProfile,
-                        mediaFile.Id
+                        MediaFile.SeasonId, MediaFile.FilePath, MediaFile.FileName, MediaFile.SizeMB,
+                        MediaFile.VideoBitrateKbps, MediaFile.AudioBitrateKbps, MediaFile.Resolution,
+                        MediaFile.Codec, MediaFile.DurationMinutes, MediaFile.FrameRate,
+                        MediaFile.LastScannedDate, MediaFile.CompressionPotential, MediaFile.AssignedProfile,
+                        MediaFile.Id
                     )
-                    LoggingService.LogInfo("Update media file parameters: {}", "DatabaseManager", "SaveMediaFile", parameters)
+                    LoggingService.LogInfo(f"Update media file parameters: {parameters}", "DatabaseManager", "SaveMediaFile")
                     cursor.execute(query, parameters)
                     connection.commit()
                     affectedRows = cursor.rowcount
-                    LoggingService.LogInfo("Media file update affected {} rows", "DatabaseManager", "SaveMediaFile", affectedRows)
-                    return mediaFile.Id
+                    LoggingService.LogInfo(f"Media file update affected {affectedRows} rows", "DatabaseManager", "SaveMediaFile")
+                    return MediaFile.Id
             finally:
                 connection.close()
         except Exception as e:
@@ -613,40 +613,6 @@ class DatabaseManager:
             AssignedProfile=row['AssignedProfile']
         )
     
-    def GetMediaFilesByRootFolder(self, RootFolderId: int) -> List[MediaFileModel]:
-        """Get all media files for a specific root folder through seasons."""
-        query = """
-            SELECT mf.Id, mf.SeasonId, mf.FilePath, mf.FileName, mf.SizeMB, mf.VideoBitrateKbps, mf.AudioBitrateKbps,
-                   mf.Resolution, mf.Codec, mf.DurationMinutes, mf.FrameRate, mf.LastScannedDate,
-                   mf.CompressionPotential, mf.AssignedProfile
-            FROM MediaFiles mf
-            INNER JOIN Seasons s ON mf.SeasonId = s.Id
-            WHERE s.RootFolderId = ?
-            ORDER BY mf.FilePath
-        """
-        rows = self.DatabaseService.ExecuteQuery(query, (RootFolderId,))
-        
-        mediaFiles = []
-        for row in rows:
-            mediaFile = MediaFileModel(
-                Id=row['Id'],
-                SeasonId=row['SeasonId'],
-                FilePath=row['FilePath'],
-                FileName=row['FileName'],
-                SizeMB=row['SizeMB'],
-                VideoBitrateKbps=row['VideoBitrateKbps'],
-                AudioBitrateKbps=row['AudioBitrateKbps'],
-                Resolution=row['Resolution'],
-                Codec=row['Codec'],
-                DurationMinutes=row['DurationMinutes'],
-                FrameRate=row['FrameRate'],
-                LastScannedDate=row['LastScannedDate'],
-                CompressionPotential=row['CompressionPotential'],
-                AssignedProfile=row['AssignedProfile']
-            )
-            mediaFiles.append(mediaFile)
-        
-        return mediaFiles
     
     def DeleteMediaFileByPath(self, FilePath: str) -> bool:
         """Delete a media file by path."""

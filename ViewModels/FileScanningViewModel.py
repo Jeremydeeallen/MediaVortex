@@ -94,9 +94,8 @@ class FileScanningViewModel:
     def UpdateScanStatus(self) -> Dict[str, Any]:
         """Update the current scan status and progress from subprocess data."""
         try:
-            LoggingService.LogInfo("UpdateScanStatus called", "FileScanningViewModel", "UpdateScanStatus")
+            # Remove verbose logging - only log errors
             status = self.BusinessService.GetScanStatus()
-            LoggingService.LogInfo(f"BusinessService.GetScanStatus returned: {status}", "FileScanningViewModel", "UpdateScanStatus")
             
             # Update UI state from business service
             self.IsScanning = status['IsScanning']
@@ -427,3 +426,28 @@ class FileScanningViewModel:
                 'DisplayText': f"{directory['Description']} ({directory['Path']})"
             })
         return DisplayDirectories
+    
+    def ExtractMetadataForExistingFiles(self, RootFolderId: Optional[int] = None) -> Dict[str, Any]:
+        """Extract metadata for existing files that need it."""
+        try:
+            LoggingService.LogFunctionEntry("ExtractMetadataForExistingFiles", 'FileScanningViewModel', f"RootFolderId: {RootFolderId}")
+            
+            # Call the business service to extract metadata
+            result = self.BusinessService.ExtractMetadataForExistingFiles(RootFolderId)
+            
+            if result['Success']:
+                # Refresh data to show updated metadata
+                self.RefreshData()
+                LoggingService.LogInfo(f"Successfully extracted metadata for {result.get('ProcessedFiles', 0)} files", 'FileScanningViewModel', 'ExtractMetadataForExistingFiles')
+            else:
+                LoggingService.LogWarning(f"Metadata extraction failed: {result.get('Message', 'Unknown error')}", 'FileScanningViewModel', 'ExtractMetadataForExistingFiles')
+            
+            return result
+            
+        except Exception as e:
+            LoggingService.LogException("Error extracting metadata for existing files", e, 'FileScanningViewModel', 'ExtractMetadataForExistingFiles')
+            return {
+                'Success': False,
+                'Message': f'Error extracting metadata: {str(e)}',
+                'Error': 'MetadataExtractionError'
+            }
