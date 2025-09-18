@@ -4,19 +4,38 @@
 Implement transcoding functionality to process media files from the queue, apply transcoding profiles, and manage the complete transcoding workflow following MVVM architecture.
 
 ## Database Tables Involved
-- **TranscodeJobs**: Store transcoding job information and status
-- **TranscodeProfiles**: Store transcoding configuration settings
+
+### Primary Tables
+- **TranscodeQueue**: Store transcoding job information and status
+  - Id, FilePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted
+- **Profiles**: Store transcoding configuration settings (already implemented)
+  - Id, ProfileName, Description, CreatedDate, LastModified
+- **ProfileThresholds**: Store transcoding threshold settings (already implemented)
+  - Id, ProfileId, Resolution, Under30MinMB, Under65MinMB, Over65MinMB, VideoBitrateKbps, AudioBitrateKbps, FallbackVideoBitrateKbps, FallbackAudioBitrateKbps, TranscodeDownTo
 - **MediaFiles**: Source files for transcoding (already implemented)
+  - Id, SeasonId, FilePath, FileName, SizeMB, VideoBitrateKbps, AudioBitrateKbps, Resolution, Codec, DurationMinutes, FrameRate, LastScannedDate, CompressionPotential, AssignedProfile
+
+### Supporting Tables
+- **TranscodeAttempts**: Track individual transcoding attempts and results
+  - Id, FilePath, AttemptDate, Quality, OldSizeBytes, NewSizeBytes, Success, SizeReductionBytes, SizeReductionPercent, ErrorMessage, TranscodeDurationSeconds, HandbrakeSettings, AudioBitrateKbps, VideoBitrateKbps, ProfileName
+- **TranscodeFiles**: Track overall transcoding status for files
+  - Id, FilePath, AllQualitiesFailed, SuccessfullyTranscoded, FirstAttemptDate, LastAttemptDate, SuccessDate, FinalQuality, FinalSizeBytes, TotalAttempts, OriginalFilePath, FinalFilePath
 - **Logs**: Track transcoding operations and errors (already implemented)
+  - Id, Timestamp, LogLevel, LoggerName, Message, SourceFile, SourceLine, SourceFunction, ExceptionType, ExceptionMessage, StackTrace, UserId, SessionId, RequestId, Component, Operation, DurationMs, AdditionalData, CreatedAt
 
 ## MVVM Architecture Components
 
 ### Models (Data Layer)
-- **TranscodeJobModel**: Represents a single transcoding job with source, destination, profile, and status
-- **TranscodeProfileModel**: Represents transcoding configuration settings (already implemented)
-- **TranscodeQueueModel**: Represents the current state of the transcoding queue
-- **TranscodeProgressModel**: Represents real-time transcoding progress information
-- **TranscodeResultModel**: Represents the result of a completed transcoding operation
+- **TranscodeQueueModel**: Represents a single transcoding job using TranscodeQueue table
+  - Id, FilePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted
+- **TranscodeProfileModel**: Represents transcoding configuration settings using Profiles table (already implemented)
+  - Id, ProfileName, Description, CreatedDate, LastModified
+- **TranscodeAttemptModel**: Represents individual transcoding attempts using TranscodeAttempts table
+  - Id, FilePath, AttemptDate, Quality, OldSizeBytes, NewSizeBytes, Success, SizeReductionBytes, SizeReductionPercent, ErrorMessage, TranscodeDurationSeconds, HandbrakeSettings, AudioBitrateKbps, VideoBitrateKbps, ProfileName
+- **TranscodeFileModel**: Represents overall transcoding status using TranscodeFiles table
+  - Id, FilePath, AllQualitiesFailed, SuccessfullyTranscoded, FirstAttemptDate, LastAttemptDate, SuccessDate, FinalQuality, FinalSizeBytes, TotalAttempts, OriginalFilePath, FinalFilePath
+- **MediaFileModel**: Source files for transcoding using MediaFiles table (already implemented)
+  - Id, SeasonId, FilePath, FileName, SizeMB, VideoBitrateKbps, AudioBitrateKbps, Resolution, Codec, DurationMinutes, FrameRate, LastScannedDate, CompressionPotential, AssignedProfile
 
 ### Business Services (Business Logic)
 - **TranscodingBusinessService**: Orchestrates the entire transcoding process using utility services
@@ -30,7 +49,10 @@ Implement transcoding functionality to process media files from the queue, apply
 - **LoggingService**: Centralized logging system (already implemented)
 
 ### Repository Layer (Data Access)
-- **DatabaseManager**: Extend existing with TranscodeJob operations
+- **DatabaseManager**: Extend existing with TranscodeQueue operations
+  - TranscodeQueue table operations: GetAllTranscodeQueueItems, GetTranscodeQueueItemById, SaveTranscodeQueueItem, DeleteTranscodeQueueItem
+  - TranscodeAttempts table operations: GetAllTranscodeAttempts, GetTranscodeAttemptsByFilePath, SaveTranscodeAttempt
+  - TranscodeFiles table operations: GetAllTranscodeFiles, GetTranscodeFileByFilePath, SaveTranscodeFile, UpdateTranscodeFileStatus
 
 ### ViewModels (Presentation Logic)
 - **TranscodeJobViewModel**: Manages transcoding job UI state and operations
@@ -61,16 +83,16 @@ Start with a minimal working slice to prove core transcoding functionality, then
 ## Implementation Checklist
 
 ### Phase 1: Basic Slice - Models and Data Structures
-- [ ] Create `Models/TranscodeJobModel.py` - Basic transcoding job information (JobId, SourceFilePath, DestinationFilePath, ProfileId, Status, Progress, CreatedDate, StartedDate, CompletedDate) MVVM pattern using MVVM architecture
-- [ ] Create `Models/TranscodeQueueModel.py` - Basic queue state information (TotalJobs, PendingJobs, RunningJobs, CompletedJobs, FailedJobs) MVVM pattern using MVVM architecture
-- [ ] Create `Models/TranscodeProgressModel.py` - Basic progress information (JobId, CurrentFrame, TotalFrames, Percentage, EstimatedTimeRemaining, CurrentSpeed) MVVM pattern using MVVM architecture
-- [ ] Create `Models/TranscodeResultModel.py` - Basic result information (JobId, Success, OutputFilePath, FileSize, Duration, ErrorMessage) MVVM pattern using MVVM architecture
+- [ ] Create `Models/TranscodeQueueModel.py` - Basic transcoding job information using TranscodeQueue table (Id, FilePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted) MVVM pattern using MVVM architecture
+- [ ] Create `Models/TranscodeAttemptModel.py` - Individual transcoding attempt information using TranscodeAttempts table (Id, FilePath, AttemptDate, Quality, OldSizeBytes, NewSizeBytes, Success, SizeReductionBytes, SizeReductionPercent, ErrorMessage, TranscodeDurationSeconds, HandbrakeSettings, AudioBitrateKbps, VideoBitrateKbps, ProfileName) MVVM pattern using MVVM architecture
+- [ ] Create `Models/TranscodeFileModel.py` - Overall transcoding status using TranscodeFiles table (Id, FilePath, AllQualitiesFailed, SuccessfullyTranscoded, FirstAttemptDate, LastAttemptDate, SuccessDate, FinalQuality, FinalSizeBytes, TotalAttempts, OriginalFilePath, FinalFilePath) MVVM pattern using MVVM architecture
 - [ ] Ensure only PascalCase was used
 
 ### Phase 2: Basic Slice - Repository Layer Extensions
-- [ ] Extend `Repositories/DatabaseManager.py` with basic TranscodeJob operations (GetAllTranscodeJobs, SaveTranscodeJob, UpdateTranscodeJob, DeleteTranscodeJob) MVVM pattern using MVVM architecture
-- [ ] Extend `Repositories/DatabaseManager.py` with TranscodeJob status operations (GetJobsByStatus, UpdateJobStatus, GetJobProgress) MVVM pattern using MVVM architecture
-- [ ] Extend `Repositories/DatabaseManager.py` with queue statistics operations (GetQueueStatistics, GetJobCounts) MVVM pattern using MVVM architecture
+- [ ] Extend `Repositories/DatabaseManager.py` with TranscodeQueue operations (GetAllTranscodeQueueItems, GetTranscodeQueueItemById, SaveTranscodeQueueItem, DeleteTranscodeQueueItem) MVVM pattern using MVVM architecture
+- [ ] Extend `Repositories/DatabaseManager.py` with TranscodeAttempts operations (GetAllTranscodeAttempts, GetTranscodeAttemptsByFilePath, SaveTranscodeAttempt) MVVM pattern using MVVM architecture
+- [ ] Extend `Repositories/DatabaseManager.py` with TranscodeFiles operations (GetAllTranscodeFiles, GetTranscodeFileByFilePath, SaveTranscodeFile, UpdateTranscodeFileStatus) MVVM pattern using MVVM architecture
+- [ ] Extend `Repositories/DatabaseManager.py` with queue statistics operations using existing tables (GetQueueStatistics, GetJobCounts) MVVM pattern using MVVM architecture
 - [ ] Ensure only PascalCase was used
 
 ### Phase 3: Basic Slice - Utility Services
@@ -80,50 +102,65 @@ Start with a minimal working slice to prove core transcoding functionality, then
 - [ ] Add progress parsing from HandBrake output MVVM pattern using MVVM architecture
 - [ ] Ensure only PascalCase was used
 
-### Phase 4: Basic Slice - Business Services
-- [ ] Create `Services/TranscodingBusinessService.py` - Orchestrate basic transcoding process, coordinate between HandBrakeService and DatabaseManager MVVM pattern using MVVM architecture
-- [ ] Implement job creation logic from MediaFiles and TranscodeProfiles MVVM pattern using MVVM architecture
+### Phase 4: Basic Slice - Queue Management Business Service
+- [ ] Create `Services/QueueManagementBusinessService.py` - Handle queue operations and population logic MVVM pattern using MVVM architecture
+- [ ] Implement queue population logic that evaluates MediaFiles against ProfileThresholds MVVM pattern using MVVM architecture
+- [ ] Implement decision logic to determine which files need transcoding based on compression potential MVVM pattern using MVVM architecture
+- [ ] Implement basic queue operations (AddJob, RemoveJob, PrioritizeJob) MVVM pattern using MVVM architecture
+- [ ] Implement job prioritization logic MVVM pattern using MVVM architecture
+- [ ] Implement queue state management and statistics MVVM pattern using MVVM architecture
+- [ ] Ensure only PascalCase was used
+
+### Phase 5: Basic Slice - Transcoding Business Service
+- [ ] Create `Services/TranscodingBusinessService.py` - Orchestrate transcoding process, coordinate between HandBrakeService and QueueManagementBusinessService MVVM pattern using MVVM architecture
+- [ ] Implement queue monitoring logic to call QueueManagementBusinessService when queue is empty MVVM pattern using MVVM architecture
 - [ ] Implement basic transcoding execution with status updates MVVM pattern using MVVM architecture
 - [ ] Implement progress tracking and database updates MVVM pattern using MVVM architecture
 - [ ] Add error handling and job failure management MVVM pattern using MVVM architecture
-- [ ] Ensure only PascalCase was used
-
-### Phase 5: Basic Slice - Queue Management
-- [ ] Create `Services/QueueManagementBusinessService.py` - Handle basic queue operations (AddJob, RemoveJob, PrioritizeJob) MVVM pattern using MVVM architecture
-- [ ] Implement job prioritization logic MVVM pattern using MVVM architecture
-- [ ] Implement queue state management MVVM pattern using MVVM architecture
-- [ ] Add job scheduling and resource allocation MVVM pattern using MVVM architecture
+- [ ] Implement integration with TranscodeAttempts and TranscodeFiles tables MVVM pattern using MVVM architecture
 - [ ] Ensure only PascalCase was used
 
 ### Phase 6: Basic Slice - ViewModels
-- [ ] Create `ViewModels/TranscodeJobViewModel.py` - Manage basic transcoding job UI state, progress tracking, error handling MVVM pattern using MVVM architecture
-- [ ] Implement job creation and management with profile selection MVVM pattern using MVVM architecture
-- [ ] Implement basic progress tracking and status display MVVM pattern using MVVM architecture
+- [ ] Create `ViewModels/TranscodeQueueViewModel.py` - Manage transcoding queue UI state and operations MVVM pattern using MVVM architecture
+- [ ] Implement queue display and management with job status and progress MVVM pattern using MVVM architecture
+- [ ] Implement queue population controls and manual job addition MVVM pattern using MVVM architecture
+- [ ] Add queue statistics display and job filtering MVVM pattern using MVVM architecture
+- [ ] Create `ViewModels/TranscodeProgressViewModel.py` - Manage real-time transcoding progress UI state MVVM pattern using MVVM architecture
+- [ ] Implement progress tracking and status display for active transcoding jobs MVVM pattern using MVVM architecture
 - [ ] Add error reporting and job failure handling MVVM pattern using MVVM architecture
 - [ ] Ensure only PascalCase was used
 
 ### Phase 7: Basic Slice - Controllers
-- [ ] Create `Controllers/TranscodeJobController.py` - Basic REST API endpoints for transcoding operations MVVM pattern using MVVM architecture
+- [ ] Create `Controllers/TranscodeQueueController.py` - REST API endpoints for queue management operations MVVM pattern using MVVM architecture
+- [ ] Implement `/api/TranscodeQueue/GetQueue` endpoint to get current queue status MVVM pattern using MVVM architecture
+- [ ] Implement `/api/TranscodeQueue/PopulateQueue` endpoint to populate queue from MediaFiles MVVM pattern using MVVM architecture
+- [ ] Implement `/api/TranscodeQueue/AddJob` endpoint to manually add jobs to queue MVVM pattern using MVVM architecture
+- [ ] Implement `/api/TranscodeQueue/RemoveJob` endpoint to remove jobs from queue MVVM pattern using MVVM architecture
+- [ ] Create `Controllers/TranscodeJobController.py` - REST API endpoints for transcoding operations MVVM pattern using MVVM architecture
 - [ ] Implement `/api/Transcode/Start` endpoint to initiate transcoding jobs MVVM pattern using MVVM architecture
 - [ ] Implement `/api/Transcode/Status` endpoint to check job progress MVVM pattern using MVVM architecture
 - [ ] Implement `/api/Transcode/Stop` endpoint to stop transcoding jobs MVVM pattern using MVVM architecture
-- [ ] Implement `/api/Transcode/Jobs` endpoints for basic job management MVVM pattern using MVVM architecture
 - [ ] Add error handling for API requests MVVM pattern using MVVM architecture
 - [ ] Ensure only PascalCase was used
 
 ### Phase 8: Basic Slice - Views
-- [ ] Create `Templates/TranscodeQueue.html` - Basic web interface for queue management and job monitoring MVVM pattern using MVVM architecture
-- [ ] Implement job creation interface with profile selection MVVM pattern using MVVM architecture
-- [ ] Implement queue display with job status and progress MVVM pattern using MVVM architecture
-- [ ] Implement basic job control interface (start, stop, remove) MVVM pattern using MVVM architecture
-- [ ] Add error display for failed jobs MVVM pattern using MVVM architecture
+- [ ] Create `Templates/TranscodeQueue.html` - Web interface for queue management and job monitoring MVVM pattern using MVVM architecture
+- [ ] Implement queue display with job status, progress, and statistics MVVM pattern using MVVM architecture
+- [ ] Implement queue population controls and manual job addition interface MVVM pattern using MVVM architecture
+- [ ] Implement job control interface (start, stop, remove, prioritize) MVVM pattern using MVVM architecture
+- [ ] Add error display for failed jobs and queue management MVVM pattern using MVVM architecture
+- [ ] Create `Templates/TranscodeProgress.html` - Web interface for real-time transcoding progress MVVM pattern using MVVM architecture
+- [ ] Implement progress tracking display for active transcoding jobs MVVM pattern using MVVM architecture
+- [ ] Add transcoding status and error reporting interface MVVM pattern using MVVM architecture
 - [ ] Ensure only PascalCase was used
 
 ### Phase 9: Basic Slice - Integration
-- [ ] Update `MediaVortex.py` to register TranscodeJobController MVVM pattern using MVVM architecture
-- [ ] Add navigation route for transcoding queue page MVVM pattern using MVVM architecture
+- [ ] Update `MediaVortex.py` to register TranscodeQueueController and TranscodeJobController MVVM pattern using MVVM architecture
+- [ ] Add navigation routes for transcoding queue and progress pages MVVM pattern using MVVM architecture
 - [ ] Test end-to-end basic transcoding functionality MVVM pattern using MVVM architecture
+- [ ] Test queue population from MediaFiles and profile evaluation MVVM pattern using MVVM architecture
 - [ ] Test job creation, execution, and completion MVVM pattern using MVVM architecture
+- [ ] Test queue management operations (add, remove, prioritize) MVVM pattern using MVVM architecture
 - [ ] Ensure only PascalCase was used
 
 ### Phase 10: Complete Feature - Enhanced Models
@@ -199,12 +236,11 @@ Start with a minimal working slice to prove core transcoding functionality, then
 ```
 MediaVortex/
 ├── Models/
-│   ├── TranscodeJobModel.py
-│   ├── TranscodeQueueModel.py
-│   ├── TranscodeProgressModel.py
-│   ├── TranscodeResultModel.py
-│   ├── TranscodeJobSchedulerModel.py
-│   └── TranscodeJobHistoryModel.py
+│   ├── TranscodeQueueModel.py (using TranscodeQueue table)
+│   ├── TranscodeAttemptModel.py (using TranscodeAttempts table)
+│   ├── TranscodeFileModel.py (using TranscodeFiles table)
+│   ├── TranscodeProfileModel.py (using Profiles table - already implemented)
+│   └── MediaFileModel.py (using MediaFiles table - already implemented)
 ├── Services/
 │   ├── TranscodingBusinessService.py
 │   ├── QueueManagementBusinessService.py

@@ -17,11 +17,11 @@ This is where the most significant changes are needed. The Models should be simp
 
 ### Models: These are simple data classes.
 
-- **TranscodeJobModel**: Represents a single item in the queue.
-- **TranscodeProfileModel**: Represents a set of transcoding settings.
-- **FileStatusModel**: Represents the status of a specific file.
-- **SystemConfigurationModel**: Represents the app's settings.
-- **LogEntryModel**: Represents a single log entry.
+- **TranscodeQueueModel**: Represents a single transcoding job using TranscodeQueue table.
+- **TranscodeAttemptModel**: Represents individual transcoding attempts using TranscodeAttempts table.
+- **TranscodeFileModel**: Represents overall transcoding status using TranscodeFiles table.
+- **TranscodeProfileModel**: Represents a set of transcoding settings using Profiles table.
+- **ProfileThresholdModel**: Represents transcoding threshold settings using ProfileThresholds table.
 - **RootFolderModel**: Represents a base directory with size information.
 - **MediaFileModel**: Represents individual media files with metadata.
 - **SeasonModel**: Represents season/folder organization.
@@ -34,7 +34,11 @@ This is where the most significant changes are needed. The Models should be simp
 ### Business Services (New Category): These services handle the core business processes by coordinating between models and other services.
 
 - **TranscodingBusinessService**: The orchestrator for the entire transcoding process. It would use the FFmpegService or HandBrakeService.
-- **QueueManagementBusinessService**: Handles adding, removing, and prioritizing items in the transcode queue.
+- **QueueManagementBusinessService**: Handles transcoding queue operations including:
+  - Queue population logic (evaluates MediaFiles against ProfileThresholds to determine what to transcode)
+  - Adding, removing, and prioritizing items in the transcode queue
+  - Queue statistics and management operations
+  - Called by TranscodingBusinessService when queue is empty
 - **FileScanningBusinessService**: Handles discovering media files in specified directories. It would use a FileManager.
 - **ReportingBusinessService**: Collects data from various models to generate reports for the dashboard.
 
@@ -50,6 +54,29 @@ This layer is well-defined. Services like FFmpegService and HandBrakeService are
 - **CleanupService**: Services/CleanupService.py
 - **FileManagerService**: Services/FileManagerService.py - File system operations and metadata extraction
 
+## Transcoding Workflow Architecture
+
+The transcoding system follows a clear workflow with proper separation of concerns:
+
+### Workflow Flow:
+1. **FileScanningBusinessService** → Discovers and analyzes media files, stores in MediaFiles table
+2. **QueueManagementBusinessService** → Evaluates MediaFiles against ProfileThresholds, populates TranscodeQueue
+3. **TranscodingBusinessService** → Processes jobs from TranscodeQueue, updates TranscodeAttempts and TranscodeFiles
+
+### Service Interactions:
+- **TranscodingBusinessService** calls **QueueManagementBusinessService** when queue is empty
+- **QueueManagementBusinessService** evaluates MediaFiles against ProfileThresholds to determine transcoding candidates
+- **TranscodingBusinessService** uses **HandBrakeService** for actual transcoding operations
+- All services use **DatabaseManager** for data persistence and **LoggingService** for operation tracking
+
+### Database Tables Used:
+- **MediaFiles**: Source files discovered by scanning
+- **Profiles/ProfileThresholds**: Transcoding configuration and decision rules
+- **TranscodeQueue**: Jobs ready for processing
+- **TranscodeAttempts**: Individual transcoding attempt results
+- **TranscodeFiles**: Overall transcoding status per file
+- **Logs**: Operation tracking and error logging
+
 ## Presentation, API, and View Layers (Correct)
 These layers are organized correctly. The ViewModels prepare data for the UI, the Controllers handle API requests and map them to ViewModels, and the Views are the final web interface.
 
@@ -59,16 +86,24 @@ These layers are organized correctly. The ViewModels prepare data for the UI, th
 - **FFmpegComparisonViewModel**: Manages FFmpeg comparison UI state and operations (includes VMAF)
 - **FFmpegScreenshotViewModel**: Manages FFmpeg screenshot UI state and operations
 - **ProfileManagementViewModel**: Manages profile management UI state and operations
+- **TranscodeQueueViewModel**: Manages transcoding queue UI state and operations
+- **TranscodeProgressViewModel**: Manages real-time transcoding progress UI state
+- **TranscodeHistoryViewModel**: Manages transcoding history and results UI state
 
 ### Controllers (API Layer)
 - **FileScanningController**: Provides REST API endpoints for scanning operations
 - **FFmpegController**: Provides REST API endpoints for FFmpeg operations (analysis, screenshots, comparisons, VMAF)
 - **ProfileController**: Provides REST API endpoints for profile management
+- **TranscodeQueueController**: Provides REST API endpoints for transcoding queue management
+- **TranscodeJobController**: Provides REST API endpoints for transcoding job operations
 
 ### Views (UI Layer)
 - **FileScanning.html**: Web interface for scanning operations
 - **Settings.html**: Web interface for settings and profile management
 - **Home.html**: Main dashboard interface
+- **TranscodeQueue.html**: Web interface for transcoding queue management
+- **TranscodeProgress.html**: Web interface for real-time transcoding progress
+- **TranscodeHistory.html**: Web interface for transcoding history and results
 
 ## FFmpeg Integration Architecture
 
