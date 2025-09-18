@@ -41,7 +41,7 @@ class LoggingService:
         cls._DebugEnabled = Enabled
     
     @classmethod
-    def LogToDatabase(cls, LogLevel: str, Message: str, Component: str = 'System', 
+    def LogToDatabase(cls, LogLevel: str, Message: str, FunctionName: str = '', Component: str = 'System', 
                      Operation: str = '', ExceptionType: str = None, 
                      ExceptionMessage: str = None, StackTrace: str = None):
         """Log a message to the database."""
@@ -51,7 +51,7 @@ class LoggingService:
                 cls.DatabaseService = DatabaseService()
             
             Query = """
-            INSERT INTO Logs (Timestamp, LogLevel, LoggerName, Message, SourceFile, 
+            INSERT INTO Logs (Timestamp, LogLevel, FunctionName, Message, SourceFile, 
                             SourceLine, SourceFunction, ExceptionType, ExceptionMessage, 
                             StackTrace, Component, Operation, CreatedAt)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -61,7 +61,7 @@ class LoggingService:
             Params = (
                 Now,           # Timestamp
                 LogLevel,      # LogLevel
-                'LoggingService',  # LoggerName
+                FunctionName,  # FunctionName
                 Message,       # Message
                 '',            # SourceFile
                 0,             # SourceLine
@@ -82,32 +82,32 @@ class LoggingService:
             print(f"Original message: {Message}")
     
     @classmethod
-    def LogInfo(cls, Message: str, Component: str = 'System', Operation: str = ''):
+    def LogInfo(cls, Message: str, FunctionName: str = '', Component: str = 'System', Operation: str = ''):
         """Log an info message."""
         print(f"INFO: {Message}")
-        cls.LogToDatabase('INFO', Message, Component, Operation)
+        cls.LogToDatabase('INFO', Message, FunctionName, Component, Operation)
     
     @classmethod
-    def LogError(cls, Message: str, Component: str = 'System', Operation: str = ''):
+    def LogError(cls, Message: str, FunctionName: str = '', Component: str = 'System', Operation: str = ''):
         """Log an error message."""
         print(f"ERROR: {Message}")
-        cls.LogToDatabase('ERROR', Message, Component, Operation)
+        cls.LogToDatabase('ERROR', Message, FunctionName, Component, Operation)
     
     @classmethod
-    def LogWarning(cls, Message: str, Component: str = 'System', Operation: str = ''):
+    def LogWarning(cls, Message: str, FunctionName: str = '', Component: str = 'System', Operation: str = ''):
         """Log a warning message."""
         print(f"WARNING: {Message}")
-        cls.LogToDatabase('WARNING', Message, Component, Operation)
+        cls.LogToDatabase('WARNING', Message, FunctionName, Component, Operation)
     
     @classmethod
-    def LogDebug(cls, Message: str, Component: str = 'System', Operation: str = ''):
+    def LogDebug(cls, Message: str, FunctionName: str = '', Component: str = 'System', Operation: str = ''):
         """Log a debug message if debugging is enabled."""
         if cls._DebugEnabled:
             print(f"DEBUG: {Message}")
-            cls.LogToDatabase('DEBUG', Message, Component, Operation)
+            cls.LogToDatabase('DEBUG', Message, FunctionName, Component, Operation)
     
     @classmethod
-    def LogException(cls, Message: str, Exception: Exception, Component: str = 'System', Operation: str = ''):
+    def LogException(cls, Message: str, Exception: Exception, FunctionName: str = '', Component: str = 'System', Operation: str = ''):
         """Log an exception with full traceback."""
         ExceptionType = type(Exception).__name__
         ExceptionMessage = str(Exception)
@@ -117,7 +117,7 @@ class LoggingService:
         print(f"EXCEPTION: {ErrorMessage}")
         print(StackTrace)
         
-        cls.LogToDatabase('ERROR', ErrorMessage, Component, Operation, 
+        cls.LogToDatabase('ERROR', ErrorMessage, FunctionName, Component, Operation, 
                          ExceptionType, ExceptionMessage, StackTrace)
     
     @classmethod
@@ -132,7 +132,7 @@ class LoggingService:
             ParamStr = ", ".join(Params) if Params else "no parameters"
             Message = f"{FunctionName} called with {ParamStr}"
             print(f"DEBUG: {Message}")
-            cls.LogToDatabase('DEBUG', Message, Component, FunctionName)
+            cls.LogToDatabase('DEBUG', Message, FunctionName, Component, FunctionName)
     
     @classmethod
     def LogFunctionExit(cls, FunctionName: str, Result: Any = None, Component: str = 'System'):
@@ -143,15 +143,15 @@ class LoggingService:
             else:
                 Message = f"{FunctionName} completed"
             print(f"DEBUG: {Message}")
-            cls.LogToDatabase('DEBUG', Message, Component, FunctionName)
+            cls.LogToDatabase('DEBUG', Message, FunctionName, Component, FunctionName)
     
     @classmethod
-    def LogData(cls, Message: str, Data: Any, Component: str = 'System', Operation: str = ''):
+    def LogData(cls, Message: str, Data: Any, FunctionName: str = '', Component: str = 'System', Operation: str = ''):
         """Log data if debugging is enabled."""
         if cls._DebugEnabled:
             FullMessage = f"{Message}: {Data}"
             print(f"DEBUG: {FullMessage}")
-            cls.LogToDatabase('DEBUG', FullMessage, Component, Operation)
+            cls.LogToDatabase('DEBUG', FullMessage, FunctionName, Component, Operation)
     
     # Backward compatibility methods
     @classmethod

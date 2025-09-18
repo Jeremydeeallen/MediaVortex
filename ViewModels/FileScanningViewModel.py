@@ -440,12 +440,12 @@ class FileScanningViewModel:
                 self.RefreshData()
                 LoggingService.LogInfo(f"Successfully extracted metadata for {result.get('ProcessedFiles', 0)} files", 'FileScanningViewModel', 'ExtractMetadataForExistingFiles')
             else:
-                LoggingService.LogWarning(f"Metadata extraction failed: {result.get('Message', 'Unknown error')}", 'FileScanningViewModel', 'ExtractMetadataForExistingFiles')
+                LoggingService.LogWarning(f"Metadata extraction failed: {result.get('Message', '', 'Unknown error')}", 'FileScanningViewModel', 'ExtractMetadataForExistingFiles')
             
             return result
             
         except Exception as e:
-            LoggingService.LogException("Error extracting metadata for existing files", e, 'FileScanningViewModel', 'ExtractMetadataForExistingFiles')
+            LoggingService.LogException("Error extracting metadata for existing files", e, 'ExtractMetadataForExistingFiles', 'FileScanningViewModel')
             return {
                 'Success': False,
                 'Message': f'Error extracting metadata: {str(e)}',

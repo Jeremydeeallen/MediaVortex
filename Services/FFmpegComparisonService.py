@@ -69,16 +69,16 @@ class FFmpegComparisonService:
             
             if Result['Success']:
                 ComparisonModel.Success = True
-                LoggingService.LogInfo(f"Successfully created side-by-side comparison: {OutputPath}", 'FFmpegComparisonService', 'CreateSideBySideComparison')
+                LoggingService.LogInfo(f"Successfully created side-by-side comparison: {OutputPath}", 'CreateSideBySideComparison', 'FFmpegComparisonService')
             else:
                 ComparisonModel.Success = False
                 ComparisonModel.ErrorMessage = Result.get('ErrorMessage', 'Comparison generation failed')
-                LoggingService.LogWarning(f"Failed to create comparison: {ComparisonModel.ErrorMessage}", 'FFmpegComparisonService', 'CreateSideBySideComparison')
+                LoggingService.LogWarning(f"Failed to create comparison: {ComparisonModel.ErrorMessage}", 'CreateSideBySideComparison', 'FFmpegComparisonService')
             
             return ComparisonModel
             
         except Exception as e:
-            LoggingService.LogException("Error creating side-by-side comparison", e, 'FFmpegComparisonService', 'CreateSideBySideComparison')
+            LoggingService.LogException("Error creating side-by-side comparison", e, 'CreateSideBySideComparison', 'FFmpegComparisonService')
             ComparisonModel = FFmpegComparisonModel()
             ComparisonModel.OriginalFilePath = OriginalFilePath
             ComparisonModel.TranscodedFilePath = TranscodedFilePath
@@ -129,16 +129,16 @@ class FFmpegComparisonService:
             
             if Result['Success']:
                 ComparisonModel.Success = True
-                LoggingService.LogInfo(f"Successfully created picture-in-picture comparison: {OutputPath}", 'FFmpegComparisonService', 'CreatePictureInPictureComparison')
+                LoggingService.LogInfo(f"Successfully created picture-in-picture comparison: {OutputPath}", 'CreatePictureInPictureComparison', 'FFmpegComparisonService')
             else:
                 ComparisonModel.Success = False
                 ComparisonModel.ErrorMessage = Result.get('ErrorMessage', 'Comparison generation failed')
-                LoggingService.LogWarning(f"Failed to create comparison: {ComparisonModel.ErrorMessage}", 'FFmpegComparisonService', 'CreatePictureInPictureComparison')
+                LoggingService.LogWarning(f"Failed to create comparison: {ComparisonModel.ErrorMessage}", 'CreatePictureInPictureComparison', 'FFmpegComparisonService')
             
             return ComparisonModel
             
         except Exception as e:
-            LoggingService.LogException("Error creating picture-in-picture comparison", e, 'FFmpegComparisonService', 'CreatePictureInPictureComparison')
+            LoggingService.LogException("Error creating picture-in-picture comparison", e, 'CreatePictureInPictureComparison', 'FFmpegComparisonService')
             ComparisonModel = FFmpegComparisonModel()
             ComparisonModel.OriginalFilePath = OriginalFilePath
             ComparisonModel.TranscodedFilePath = TranscodedFilePath
@@ -189,16 +189,16 @@ class FFmpegComparisonService:
             
             if Result['Success']:
                 ComparisonModel.Success = True
-                LoggingService.LogInfo(f"Successfully created overlay comparison: {OutputPath}", 'FFmpegComparisonService', 'CreateOverlayComparison')
+                LoggingService.LogInfo(f"Successfully created overlay comparison: {OutputPath}", 'CreateOverlayComparison', 'FFmpegComparisonService')
             else:
                 ComparisonModel.Success = False
                 ComparisonModel.ErrorMessage = Result.get('ErrorMessage', 'Comparison generation failed')
-                LoggingService.LogWarning(f"Failed to create comparison: {ComparisonModel.ErrorMessage}", 'FFmpegComparisonService', 'CreateOverlayComparison')
+                LoggingService.LogWarning(f"Failed to create comparison: {ComparisonModel.ErrorMessage}", 'CreateOverlayComparison', 'FFmpegComparisonService')
             
             return ComparisonModel
             
         except Exception as e:
-            LoggingService.LogException("Error creating overlay comparison", e, 'FFmpegComparisonService', 'CreateOverlayComparison')
+            LoggingService.LogException("Error creating overlay comparison", e, 'CreateOverlayComparison', 'FFmpegComparisonService')
             ComparisonModel = FFmpegComparisonModel()
             ComparisonModel.OriginalFilePath = OriginalFilePath
             ComparisonModel.TranscodedFilePath = TranscodedFilePath
@@ -259,20 +259,20 @@ class FFmpegComparisonService:
                 if os.path.exists(OutputPath):
                     self.ParseVMAFResults(VMAFModel, OutputPath)
                     VMAFModel.Success = True
-                    LoggingService.LogInfo(f"Successfully created VMAF comparison: {OutputPath}", 'FFmpegComparisonService', 'CreateVMAFComparison')
+                    LoggingService.LogInfo(f"Successfully created VMAF comparison: {OutputPath}", 'CreateVMAFComparison', 'FFmpegComparisonService')
                 else:
                     VMAFModel.Success = False
                     VMAFModel.ErrorMessage = "VMAF results file was not created"
-                    LoggingService.LogWarning("VMAF results file was not created", 'FFmpegComparisonService', 'CreateVMAFComparison')
+                    LoggingService.LogWarning("VMAF results file was not created", 'CreateVMAFComparison', 'FFmpegComparisonService')
             else:
                 VMAFModel.Success = False
                 VMAFModel.ErrorMessage = Result.get('ErrorMessage', 'VMAF comparison generation failed')
-                LoggingService.LogWarning(f"Failed to create VMAF comparison: {VMAFModel.ErrorMessage}", 'FFmpegComparisonService', 'CreateVMAFComparison')
+                LoggingService.LogWarning(f"Failed to create VMAF comparison: {VMAFModel.ErrorMessage}", 'CreateVMAFComparison', 'FFmpegComparisonService')
             
             return VMAFModel
             
         except Exception as e:
-            LoggingService.LogException("Error creating VMAF comparison", e, 'FFmpegComparisonService', 'CreateVMAFComparison')
+            LoggingService.LogException("Error creating VMAF comparison", e, 'CreateVMAFComparison', 'FFmpegComparisonService')
             VMAFModel = FFmpegVMAFComparisonModel()
             VMAFModel.OriginalFilePath = OriginalFilePath
             VMAFModel.TranscodedFilePath = TranscodedFilePath
@@ -345,7 +345,7 @@ class FFmpegComparisonService:
                                  'FFmpegComparisonService', 'ParseVMAFResults')
             
         except Exception as e:
-            LoggingService.LogException("Error parsing VMAF results", e, 'FFmpegComparisonService', 'ParseVMAFResults')
+            LoggingService.LogException("Error parsing VMAF results", e, 'ParseVMAFResults', 'FFmpegComparisonService')
             VMAFModel.ErrorMessage = f"VMAF results parsing error: {str(e)}"
     
     def IsAvailable(self) -> bool:

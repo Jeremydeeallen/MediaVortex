@@ -139,17 +139,17 @@ class FileScanningBusinessService:
     def CreateScanJob(self, JobId: str, RootFolderPath: str, Recursive: bool):
         """Create a new scan job record in the database."""
         try:
-            LoggingService.LogInfo(f"Creating scan job {JobId} for {RootFolderPath}, Recursive: {Recursive}", 'FileScanningBusinessService', 'CreateScanJob')
+            LoggingService.LogInfo(f"Creating scan job {JobId} for {RootFolderPath}, Recursive: {Recursive}", 'CreateScanJob', 'FileScanningBusinessService')
             
             Query = """
             INSERT INTO ScanJobs (JobId, RootFolderPath, Recursive, Status, StartTime, LastUpdated, ScanType)
             VALUES (?, ?, ?, 'Pending', ?, ?, 'File')
             """
             Now = datetime.now()
-            LoggingService.LogInfo(f"Executing query with params: JobId={JobId}, RootFolderPath={RootFolderPath}, Recursive={Recursive}, Now={Now}")
+            LoggingService.LogInfo(f"Executing query with params: JobId={JobId}, RootFolderPath={RootFolderPath}, Recursive={Recursive}, Now={Now}", 'CreateScanJob', 'FileScanningBusinessService')
             
             self.DatabaseManager.DatabaseService.ExecuteNonQuery(Query, (JobId, RootFolderPath, Recursive, Now, Now))
-            LoggingService.LogInfo(f"Successfully created scan job {JobId} for {RootFolderPath}")
+            LoggingService.LogInfo(f"Successfully created scan job {JobId} for {RootFolderPath}", 'FileScanningBusinessService', 'CreateScanJob')
             
         except Exception as e:
             LoggingService.LogException(f"Error creating scan job {JobId}", e, 'FileScanningBusinessService', 'CreateScanJob')
@@ -414,7 +414,7 @@ class FileScanningBusinessService:
             return NewSeason
             
         except Exception as e:
-            LoggingService.LogException("Error getting or creating season", e, 'FileScanningBusinessService', 'GetOrCreateSeason')
+            LoggingService.LogException("Error getting or creating season", e, 'GetOrCreateSeason', 'FileScanningBusinessService')
             raise
     
     def GetOrCreateRootFolder(self, RootFolderPath: str, TotalSizeGB: float) -> RootFolderModel:
@@ -457,7 +457,7 @@ class FileScanningBusinessService:
             self.ProcessMediaFilesWithMetadata(MediaFiles, RootFolderId, RootFolderPath, ExtractMetadata)
             
         except Exception as e:
-            LoggingService.LogException("Error processing media files", e, 'FileScanningBusinessService', 'ProcessMediaFiles')
+            LoggingService.LogException("Error processing media files", e, 'ProcessMediaFiles', 'FileScanningBusinessService')
             raise
     
     def ExtractSeasonFromPath(self, FilePath: str, RootFolderPath: str) -> str:
@@ -726,7 +726,7 @@ class FileScanningBusinessService:
                         else:
                             LoggingService.LogError(f"FAILED: No rows affected when deleting file: {FilePath} (ID: {FileId})")
                     except Exception as DeleteError:
-                        LoggingService.LogException(f"EXCEPTION: Error deleting file from database: {DeleteError}", DeleteError, 'FileScanningBusinessService', 'CleanupMissingFiles')
+                        LoggingService.LogException(f"EXCEPTION: Error deleting file from database: {DeleteError}", DeleteError, 'CleanupMissingFiles', 'FileScanningBusinessService')
             
             LoggingService.LogInfo("=== CLEANUP MISSING FILES COMPLETED ===")
             if DeletedCount > 0:
@@ -735,7 +735,7 @@ class FileScanningBusinessService:
                 LoggingService.LogInfo("No missing files found to clean up")
                         
         except Exception as e:
-            LoggingService.LogException(f"CRITICAL ERROR in CleanupMissingFiles: {e}", e, 'FileScanningBusinessService', 'CleanupMissingFiles')
+            LoggingService.LogException(f"CRITICAL ERROR in CleanupMissingFiles: {e}", e, 'CleanupMissingFiles', 'FileScanningBusinessService')
             LoggingService.LogException(f"RootFolderId: {RootFolderId}, FoundFiles count: {len(FoundFiles)}", e, 'FileScanningBusinessService', 'CleanupMissingFiles')
     
     def CleanupOrphanedFiles(self, RootFolderId: int) -> Dict[str, Any]:
@@ -1038,7 +1038,7 @@ class FileScanningBusinessService:
             return False
             
         except Exception as e:
-            LoggingService.LogException("Error determining if metadata should be extracted", e, 'FileScanningBusinessService', 'ShouldExtractMetadata')
+            LoggingService.LogException("Error determining if metadata should be extracted", e, 'ShouldExtractMetadata', 'FileScanningBusinessService')
             return False
     
     def HasFileChanged(self, MediaFile: MediaFileModel) -> bool:
@@ -1059,14 +1059,14 @@ class FileScanningBusinessService:
             return False
             
         except Exception as e:
-            LoggingService.LogException("Error checking if file has changed", e, 'FileScanningBusinessService', 'HasFileChanged')
+            LoggingService.LogException("Error checking if file has changed", e, 'HasFileChanged', 'FileScanningBusinessService')
             # If we can't check, assume it changed to be safe
             return True
     
     def ExtractAndUpdateMetadata(self, MediaFile: MediaFileModel, FilePath: str):
         """Extract metadata and update the media file model."""
         try:
-            LoggingService.LogDebug(f"Extracting metadata for: {FilePath}", 'FileScanningBusinessService', 'ExtractAndUpdateMetadata')
+            LoggingService.LogDebug(f"Extracting metadata for: {FilePath}", 'ExtractAndUpdateMetadata', 'FileScanningBusinessService')
             
             # Update file size and name to current values (in case file changed)
             MediaFile.SizeMB = self.FileManager.GetFileSizeMB(FilePath)
@@ -1090,16 +1090,16 @@ class FileScanningBusinessService:
                 MediaFile.AssignedProfile = MetadataResult.get('AssignedProfile')
                 
                 
-                LoggingService.LogDebug(f"Successfully extracted metadata for: {FilePath}", 'FileScanningBusinessService', 'ExtractAndUpdateMetadata')
+                LoggingService.LogDebug(f"Successfully extracted metadata for: {FilePath}", 'ExtractAndUpdateMetadata', 'FileScanningBusinessService')
             else:
                 # Set default values for failed extraction
                 MediaFile.CompressionPotential = 'Unknown'
                 MediaFile.AssignedProfile = 'Default'
                 ErrorMessage = MetadataResult.get('ErrorMessage', 'Unknown error')
-                LoggingService.LogWarning(f"Failed to extract metadata for {FilePath}: {ErrorMessage}", 'FileScanningBusinessService', 'ExtractAndUpdateMetadata')
+                LoggingService.LogWarning(f"Failed to extract metadata for {FilePath}: {ErrorMessage}", 'ExtractAndUpdateMetadata', 'FileScanningBusinessService')
             
         except Exception as e:
-            LoggingService.LogException("Error extracting and updating metadata", e, 'FileScanningBusinessService', 'ExtractAndUpdateMetadata')
+            LoggingService.LogException("Error extracting and updating metadata", e, 'ExtractAndUpdateMetadata', 'FileScanningBusinessService')
             # Set default values on error
             MediaFile.CompressionPotential = 'Unknown'
             MediaFile.AssignedProfile = 'Default'
@@ -1124,7 +1124,7 @@ class FileScanningBusinessService:
                     self.ProcessSingleMediaFile(FilePath, RootFolderId, RootFolderPath, ExtractMetadata)
                     
                 except Exception as e:
-                    LoggingService.LogException("Error processing media file with metadata", e, 'FileScanningBusinessService', 'ProcessMediaFilesWithMetadata')
+                    LoggingService.LogException("Error processing media file with metadata", e, 'ProcessMediaFilesWithMetadata', 'FileScanningBusinessService')
                     self.ScanErrors.append(f"Error processing {FilePath}: {str(e)}")
                     continue
             
@@ -1141,7 +1141,7 @@ class FileScanningBusinessService:
             LoggingService.LogInfo(f"Completed processing {len(MediaFiles)} media files with metadata extraction: {ExtractMetadata}", 'FileScanningBusinessService', 'ProcessMediaFilesWithMetadata')
             
         except Exception as e:
-            LoggingService.LogException("Error processing media files with metadata", e, 'FileScanningBusinessService', 'ProcessMediaFilesWithMetadata')
+            LoggingService.LogException("Error processing media files with metadata", e, 'ProcessMediaFilesWithMetadata', 'FileScanningBusinessService')
             raise
     
     def ExtractMetadataForExistingFiles(self, RootFolderId: Optional[int] = None) -> Dict[str, Any]:
@@ -1175,7 +1175,7 @@ class FileScanningBusinessService:
                     'ProcessedFiles': 0
                 }
             
-            LoggingService.LogInfo(f"Found {len(FilesToProcess)} files that need metadata extraction", 'FileScanningBusinessService', 'ExtractMetadataForExistingFiles')
+            LoggingService.LogInfo(f"Found {len(FilesToProcess)} files that need metadata extraction", 'ExtractMetadataForExistingFiles', 'FileScanningBusinessService')
             
             # Process files in batches
             BatchSize = 10
@@ -1191,13 +1191,13 @@ class FileScanningBusinessService:
                         self.DatabaseManager.SaveMediaFile(File)
                         ProcessedCount += 1
                         
-                        LoggingService.LogDebug(f"Extracted metadata for: {File.FilePath}", 'FileScanningBusinessService', 'ExtractMetadataForExistingFiles')
+                        LoggingService.LogDebug(f"Extracted metadata for: {File.FilePath}", 'ExtractMetadataForExistingFiles', 'FileScanningBusinessService')
                         
                     except Exception as e:
-                        LoggingService.LogException(f"Error extracting metadata for: {File.FilePath}", e, 'FileScanningBusinessService', 'ExtractMetadataForExistingFiles')
+                        LoggingService.LogException(f"Error extracting metadata for: {File.FilePath}", e, 'ExtractMetadataForExistingFiles', 'FileScanningBusinessService')
                         continue
             
-            LoggingService.LogInfo(f"Completed metadata extraction for {ProcessedCount} files", 'FileScanningBusinessService', 'ExtractMetadataForExistingFiles')
+            LoggingService.LogInfo(f"Completed metadata extraction for {ProcessedCount} files", 'ExtractMetadataForExistingFiles', 'FileScanningBusinessService')
             
             return {
                 'Success': True,
@@ -1206,7 +1206,7 @@ class FileScanningBusinessService:
             }
             
         except Exception as e:
-            LoggingService.LogException("Error extracting metadata for existing files", e, 'FileScanningBusinessService', 'ExtractMetadataForExistingFiles')
+            LoggingService.LogException("Error extracting metadata for existing files", e, 'ExtractMetadataForExistingFiles', 'FileScanningBusinessService')
             return {
                 'Success': False,
                 'Message': f'Error extracting metadata: {str(e)}',
@@ -1242,7 +1242,7 @@ class FileScanningBusinessService:
             return None
             
         except Exception as e:
-            LoggingService.LogException("Error extracting season number", e, 'FileScanningBusinessService', 'ExtractSeasonNumber')
+            LoggingService.LogException("Error extracting season number", e, 'ExtractSeasonNumber', 'FileScanningBusinessService')
             return None
     
     def UpdateSeasonStatistics(self, SeasonId: int):
@@ -1254,7 +1254,7 @@ class FileScanningBusinessService:
             SeasonFiles = self.DatabaseManager.GetMediaFilesBySeason(SeasonId)
             
             if not SeasonFiles:
-                LoggingService.LogWarning(f"No files found for season {SeasonId}", 'FileScanningBusinessService', 'UpdateSeasonStatistics')
+                LoggingService.LogWarning(f"No files found for season {SeasonId}", 'UpdateSeasonStatistics', 'FileScanningBusinessService')
                 return
             
             # Calculate statistics
@@ -1264,7 +1264,7 @@ class FileScanningBusinessService:
             # Get the season record
             Season = self.DatabaseManager.GetSeasonById(SeasonId)
             if not Season:
-                LoggingService.LogWarning(f"Season {SeasonId} not found", 'FileScanningBusinessService', 'UpdateSeasonStatistics')
+                LoggingService.LogWarning(f"Season {SeasonId} not found", 'UpdateSeasonStatistics', 'FileScanningBusinessService')
                 return
             
             # Update season statistics
@@ -1278,7 +1278,7 @@ class FileScanningBusinessService:
             LoggingService.LogInfo(f"Updated season {Season.SeasonName}: {EpisodeCount} episodes, {TotalSizeGB:.2f} GB", 'FileScanningBusinessService', 'UpdateSeasonStatistics')
             
         except Exception as e:
-            LoggingService.LogException("Error updating season statistics", e, 'FileScanningBusinessService', 'UpdateSeasonStatistics')
+            LoggingService.LogException("Error updating season statistics", e, 'UpdateSeasonStatistics', 'FileScanningBusinessService')
     
     def OrganizeFilesBySeason(self, RootFolderId: int) -> Dict[str, Any]:
         """Organize files by season and update season statistics."""
@@ -1310,10 +1310,10 @@ class FileScanningBusinessService:
                     self.UpdateSeasonStatistics(SeasonId)
                     SeasonsUpdated += 1
                 except Exception as e:
-                    LoggingService.LogException(f"Error updating season {SeasonId} statistics", e, 'FileScanningBusinessService', 'OrganizeFilesBySeason')
+                    LoggingService.LogException(f"Error updating season {SeasonId} statistics", e, 'OrganizeFilesBySeason', 'FileScanningBusinessService')
                     continue
             
-            LoggingService.LogInfo(f"Organized {len(MediaFiles)} files into {len(SeasonGroups)} seasons", 'FileScanningBusinessService', 'OrganizeFilesBySeason')
+            LoggingService.LogInfo(f"Organized {len(MediaFiles)} files into {len(SeasonGroups)} seasons", 'OrganizeFilesBySeason', 'FileScanningBusinessService')
             
             return {
                 'Success': True,
@@ -1324,7 +1324,7 @@ class FileScanningBusinessService:
             }
             
         except Exception as e:
-            LoggingService.LogException("Error organizing files by season", e, 'FileScanningBusinessService', 'OrganizeFilesBySeason')
+            LoggingService.LogException("Error organizing files by season", e, 'OrganizeFilesBySeason', 'FileScanningBusinessService')
             return {
                 'Success': False,
                 'Message': f'Error organizing files by season: {str(e)}',
@@ -1369,11 +1369,11 @@ class FileScanningBusinessService:
             # Sort by season number
             SeasonSummary.sort(key=lambda x: x['SeasonNumber'] or 0)
             
-            LoggingService.LogInfo(f"Generated season summary for {len(SeasonSummary)} seasons", 'FileScanningBusinessService', 'GetSeasonSummary')
+            LoggingService.LogInfo(f"Generated season summary for {len(SeasonSummary)} seasons", 'GetSeasonSummary', 'FileScanningBusinessService')
             return SeasonSummary
             
         except Exception as e:
-            LoggingService.LogException("Error getting season summary", e, 'FileScanningBusinessService', 'GetSeasonSummary')
+            LoggingService.LogException("Error getting season summary", e, 'GetSeasonSummary', 'FileScanningBusinessService')
             return []
     
     def MergeSeasons(self, SourceSeasonId: int, TargetSeasonId: int) -> Dict[str, Any]:
@@ -1410,7 +1410,7 @@ class FileScanningBusinessService:
                     self.DatabaseManager.SaveMediaFile(File)
                     FilesMerged += 1
                 except Exception as e:
-                    LoggingService.LogException(f"Error moving file {File.FileName} to target season", e, 'FileScanningBusinessService', 'MergeSeasons')
+                    LoggingService.LogException(f"Error moving file {File.FileName} to target season", e, 'MergeSeasons', 'FileScanningBusinessService')
                     continue
             
             # Update target season statistics
@@ -1420,9 +1420,9 @@ class FileScanningBusinessService:
             RemainingFiles = self.DatabaseManager.GetMediaFilesBySeason(SourceSeasonId)
             if not RemainingFiles:
                 self.DatabaseManager.DeleteSeason(SourceSeasonId)
-                LoggingService.LogInfo(f"Deleted empty source season: {SourceSeason.SeasonName}", 'FileScanningBusinessService', 'MergeSeasons')
+                LoggingService.LogInfo(f"Deleted empty source season: {SourceSeason.SeasonName}", 'MergeSeasons', 'FileScanningBusinessService')
             
-            LoggingService.LogInfo(f"Merged {FilesMerged} files from {SourceSeason.SeasonName} to {TargetSeason.SeasonName}", 'FileScanningBusinessService', 'MergeSeasons')
+            LoggingService.LogInfo(f"Merged {FilesMerged} files from {SourceSeason.SeasonName} to {TargetSeason.SeasonName}", 'MergeSeasons', 'FileScanningBusinessService')
             
             return {
                 'Success': True,
@@ -1431,7 +1431,7 @@ class FileScanningBusinessService:
             }
             
         except Exception as e:
-            LoggingService.LogException("Error merging seasons", e, 'FileScanningBusinessService', 'MergeSeasons')
+            LoggingService.LogException("Error merging seasons", e, 'MergeSeasons', 'FileScanningBusinessService')
             return {
                 'Success': False,
                 'Message': f'Error merging seasons: {str(e)}',

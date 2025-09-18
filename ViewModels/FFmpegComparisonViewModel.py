@@ -39,14 +39,14 @@ class FFmpegComparisonViewModel:
             }
             
             if ComparisonResult.Success:
-                LoggingService.LogInfo(f"Successfully created side-by-side comparison: {ComparisonResult.ComparisonVideoPath}", 'FFmpegComparisonViewModel', 'CreateSideBySideComparison')
+                LoggingService.LogInfo(f"Successfully created side-by-side comparison: {ComparisonResult.ComparisonVideoPath}", 'CreateSideBySideComparison', 'FFmpegComparisonViewModel')
             else:
-                LoggingService.LogWarning(f"Failed to create comparison: {ComparisonResult.ErrorMessage}", 'FFmpegComparisonViewModel', 'CreateSideBySideComparison')
+                LoggingService.LogWarning(f"Failed to create comparison: {ComparisonResult.ErrorMessage}", 'CreateSideBySideComparison', 'FFmpegComparisonViewModel')
             
             return Result
             
         except Exception as e:
-            LoggingService.LogException("Error in side-by-side comparison view model", e, 'FFmpegComparisonViewModel', 'CreateSideBySideComparison')
+            LoggingService.LogException("Error in side-by-side comparison view model", e, 'CreateSideBySideComparison', 'FFmpegComparisonViewModel')
             return {
                 'Success': False,
                 'ErrorMessage': f"Side-by-side comparison error: {str(e)}",
@@ -81,14 +81,14 @@ class FFmpegComparisonViewModel:
             }
             
             if ComparisonResult.Success:
-                LoggingService.LogInfo(f"Successfully created picture-in-picture comparison: {ComparisonResult.ComparisonVideoPath}", 'FFmpegComparisonViewModel', 'CreatePictureInPictureComparison')
+                LoggingService.LogInfo(f"Successfully created picture-in-picture comparison: {ComparisonResult.ComparisonVideoPath}", 'CreatePictureInPictureComparison', 'FFmpegComparisonViewModel')
             else:
-                LoggingService.LogWarning(f"Failed to create comparison: {ComparisonResult.ErrorMessage}", 'FFmpegComparisonViewModel', 'CreatePictureInPictureComparison')
+                LoggingService.LogWarning(f"Failed to create comparison: {ComparisonResult.ErrorMessage}", 'CreatePictureInPictureComparison', 'FFmpegComparisonViewModel')
             
             return Result
             
         except Exception as e:
-            LoggingService.LogException("Error in picture-in-picture comparison view model", e, 'FFmpegComparisonViewModel', 'CreatePictureInPictureComparison')
+            LoggingService.LogException("Error in picture-in-picture comparison view model", e, 'CreatePictureInPictureComparison', 'FFmpegComparisonViewModel')
             return {
                 'Success': False,
                 'ErrorMessage': f"Picture-in-picture comparison error: {str(e)}",
@@ -123,14 +123,14 @@ class FFmpegComparisonViewModel:
             }
             
             if ComparisonResult.Success:
-                LoggingService.LogInfo(f"Successfully created overlay comparison: {ComparisonResult.ComparisonVideoPath}", 'FFmpegComparisonViewModel', 'CreateOverlayComparison')
+                LoggingService.LogInfo(f"Successfully created overlay comparison: {ComparisonResult.ComparisonVideoPath}", 'CreateOverlayComparison', 'FFmpegComparisonViewModel')
             else:
-                LoggingService.LogWarning(f"Failed to create comparison: {ComparisonResult.ErrorMessage}", 'FFmpegComparisonViewModel', 'CreateOverlayComparison')
+                LoggingService.LogWarning(f"Failed to create comparison: {ComparisonResult.ErrorMessage}", 'CreateOverlayComparison', 'FFmpegComparisonViewModel')
             
             return Result
             
         except Exception as e:
-            LoggingService.LogException("Error in overlay comparison view model", e, 'FFmpegComparisonViewModel', 'CreateOverlayComparison')
+            LoggingService.LogException("Error in overlay comparison view model", e, 'CreateOverlayComparison', 'FFmpegComparisonViewModel')
             return {
                 'Success': False,
                 'ErrorMessage': f"Overlay comparison error: {str(e)}",
@@ -162,14 +162,14 @@ class FFmpegComparisonViewModel:
             }
             
             if VMAFResult.Success:
-                LoggingService.LogInfo(f"Successfully created VMAF comparison: {VMAFResult.VMAFResultsPath}", 'FFmpegComparisonViewModel', 'CreateVMAFComparison')
+                LoggingService.LogInfo(f"Successfully created VMAF comparison: {VMAFResult.VMAFResultsPath}", 'CreateVMAFComparison', 'FFmpegComparisonViewModel')
             else:
-                LoggingService.LogWarning(f"Failed to create VMAF comparison: {VMAFResult.ErrorMessage}", 'FFmpegComparisonViewModel', 'CreateVMAFComparison')
+                LoggingService.LogWarning(f"Failed to create VMAF comparison: {VMAFResult.ErrorMessage}", 'CreateVMAFComparison', 'FFmpegComparisonViewModel')
             
             return Result
             
         except Exception as e:
-            LoggingService.LogException("Error in VMAF comparison view model", e, 'FFmpegComparisonViewModel', 'CreateVMAFComparison')
+            LoggingService.LogException("Error in VMAF comparison view model", e, 'CreateVMAFComparison', 'FFmpegComparisonViewModel')
             return {
                 'Success': False,
                 'ErrorMessage': f"VMAF comparison error: {str(e)}",

@@ -16,14 +16,14 @@ class FFmpegService:
         # Only log once when first instance is created
         if not hasattr(FFmpegService, '_logged_initialization'):
             if not self.FFmpegPath:
-                LoggingService.LogWarning("FFmpeg not found. Video processing will not be available.", 'FFmpegService', '__init__')
+                LoggingService.LogWarning("FFmpeg not found. Video processing will not be available.", '__init__', 'FFmpegService')
             else:
-                LoggingService.LogInfo(f"FFmpeg found at: {self.FFmpegPath}", 'FFmpegService', '__init__')
+                LoggingService.LogInfo(f"FFmpeg found at: {self.FFmpegPath}", '__init__', 'FFmpegService')
                 
             if not self.FFprobePath:
-                LoggingService.LogWarning("FFprobe not found. Media analysis will not be available.", 'FFmpegService', '__init__')
+                LoggingService.LogWarning("FFprobe not found. Media analysis will not be available.", '__init__', 'FFmpegService')
             else:
-                LoggingService.LogInfo(f"FFprobe found at: {self.FFprobePath}", 'FFmpegService', '__init__')
+                LoggingService.LogInfo(f"FFprobe found at: {self.FFprobePath}", '__init__', 'FFmpegService')
             
             FFmpegService._logged_initialization = True
     
@@ -33,7 +33,7 @@ class FFmpegService:
             # Check if ffmpeg is in PATH
             FFmpegPath = shutil.which('ffmpeg')
             if FFmpegPath:
-                LoggingService.LogInfo(f"Found FFmpeg in PATH: {FFmpegPath}", 'FFmpegService', 'FindFFmpegPath')
+                LoggingService.LogInfo(f"Found FFmpeg in PATH: {FFmpegPath}", 'FindFFmpegPath', 'FFmpegService')
                 return FFmpegPath
             
             # Check common installation paths
@@ -48,14 +48,14 @@ class FFmpegService:
             
             for Path in CommonPaths:
                 if os.path.exists(Path):
-                    LoggingService.LogInfo(f"Found FFmpeg at: {Path}", 'FFmpegService', 'FindFFmpegPath')
+                    LoggingService.LogInfo(f"Found FFmpeg at: {Path}", 'FindFFmpegPath', 'FFmpegService')
                     return Path
             
-            LoggingService.LogWarning("FFmpeg not found in common paths", 'FFmpegService', 'FindFFmpegPath')
+            LoggingService.LogWarning("FFmpeg not found in common paths", 'FindFFmpegPath', 'FFmpegService')
             return None
             
         except Exception as e:
-            LoggingService.LogException("Error finding FFmpeg path", e, 'FFmpegService', 'FindFFmpegPath')
+            LoggingService.LogException("Error finding FFmpeg path", e, 'FindFFmpegPath', 'FFmpegService')
             return None
     
     def FindFFprobePath(self) -> Optional[str]:
@@ -64,7 +64,7 @@ class FFmpegService:
             # Check if ffprobe is in PATH
             FFprobePath = shutil.which('ffprobe')
             if FFprobePath:
-                LoggingService.LogInfo(f"Found FFprobe in PATH: {FFprobePath}", 'FFmpegService', 'FindFFprobePath')
+                LoggingService.LogInfo(f"Found FFprobe in PATH: {FFprobePath}", 'FindFFprobePath', 'FFmpegService')
                 return FFprobePath
             
             # Check common installation paths
@@ -79,14 +79,14 @@ class FFmpegService:
             
             for Path in CommonPaths:
                 if os.path.exists(Path):
-                    LoggingService.LogInfo(f"Found FFprobe at: {Path}", 'FFmpegService', 'FindFFprobePath')
+                    LoggingService.LogInfo(f"Found FFprobe at: {Path}", 'FindFFprobePath', 'FFmpegService')
                     return Path
             
-            LoggingService.LogWarning("FFprobe not found in common paths", 'FFmpegService', 'FindFFprobePath')
+            LoggingService.LogWarning("FFprobe not found in common paths", 'FindFFprobePath', 'FFmpegService')
             return None
             
         except Exception as e:
-            LoggingService.LogException("Error finding FFprobe path", e, 'FFmpegService', 'FindFFprobePath')
+            LoggingService.LogException("Error finding FFprobe path", e, 'FindFFprobePath', 'FFmpegService')
             return None
     
     def ExecuteFFprobe(self, FilePath: str, Arguments: List[str] = None) -> Dict[str, Any]:
@@ -110,7 +110,7 @@ class FFmpegService:
                 CommandString += f' {Arg}'
             CommandString += f' "{FilePath}"'
             
-            LoggingService.LogInfo(f"Executing FFprobe command: {CommandString}", 'FFmpegService', 'ExecuteFFprobe')
+            LoggingService.LogInfo(f"Executing FFprobe command: {CommandString}", 'ExecuteFFprobe', 'FFmpegService')
             
             Result = subprocess.run(
                 CommandString,
@@ -134,13 +134,13 @@ class FFmpegService:
                 ResultDict['ErrorMessage'] = f"FFprobe failed: ReturnCode={Result.returncode}, Error={Result.stderr}"
                 LoggingService.LogError(f"FFprobe failed for {FilePath}: ReturnCode={Result.returncode}, Error={Result.stderr}", 'FFmpegService', 'ExecuteFFprobe')
             else:
-                LoggingService.LogInfo(f"FFprobe succeeded for {FilePath}", 'FFmpegService', 'ExecuteFFprobe')
+                LoggingService.LogInfo(f"FFprobe succeeded for {FilePath}", 'ExecuteFFprobe', 'FFmpegService')
             
             return ResultDict
             
         except subprocess.TimeoutExpired:
             ErrorMessage = f"FFprobe timeout for file: {FilePath}"
-            LoggingService.LogError(f"{ErrorMessage}", 'FFmpegService', 'ExecuteFFprobe')
+            LoggingService.LogError(f"{ErrorMessage}", 'ExecuteFFprobe', 'FFmpegService')
             return {
                 'Success': False,
                 'ErrorMessage': ErrorMessage,
@@ -150,7 +150,7 @@ class FFmpegService:
             }
         except Exception as e:
             ErrorMessage = f"FFprobe execution error: {str(e)}"
-            LoggingService.LogError(f"{ErrorMessage}", 'FFmpegService', 'ExecuteFFprobe')
+            LoggingService.LogError(f"{ErrorMessage}", 'ExecuteFFprobe', 'FFmpegService')
             return {
                 'Success': False,
                 'ErrorMessage': ErrorMessage,
@@ -172,7 +172,7 @@ class FFmpegService:
             
             Command = [self.FFmpegPath] + Arguments
             
-            LoggingService.LogDebug(f"Executing FFmpeg command: {' '.join(Command)}", 'FFmpegService', 'ExecuteFFmpegCommand')
+            LoggingService.LogDebug(f"Executing FFmpeg command: {' '.join(Command)}", 'ExecuteFFmpegCommand', 'FFmpegService')
             
             Result = subprocess.run(
                 Command,
@@ -193,7 +193,7 @@ class FFmpegService:
             
         except subprocess.TimeoutExpired:
             ErrorMessage = f"FFmpeg timeout for command: {' '.join(Arguments)}"
-            LoggingService.LogWarning(ErrorMessage, 'FFmpegService', 'ExecuteFFmpegCommand')
+            LoggingService.LogWarning(ErrorMessage, 'ExecuteFFmpegCommand', 'FFmpegService')
             return {
                 'Success': False,
                 'ErrorMessage': ErrorMessage,
@@ -202,7 +202,7 @@ class FFmpegService:
             }
         except Exception as e:
             ErrorMessage = f"FFmpeg execution error: {str(e)}"
-            LoggingService.LogException(ErrorMessage, e, 'FFmpegService', 'ExecuteFFmpegCommand')
+            LoggingService.LogException(ErrorMessage, e, 'ExecuteFFmpegCommand', 'FFmpegService')
             return {
                 'Success': False,
                 'ErrorMessage': ErrorMessage,
@@ -227,7 +227,7 @@ class FFmpegService:
             if OutputFile:
                 Command.append(OutputFile)
             
-            LoggingService.LogDebug(f"Executing FFmpeg command: {' '.join(Command)}", 'FFmpegService', 'ExecuteFFmpeg')
+            LoggingService.LogDebug(f"Executing FFmpeg command: {' '.join(Command)}", 'ExecuteFFmpeg', 'FFmpegService')
             
             Result = subprocess.run(
                 Command,
@@ -248,7 +248,7 @@ class FFmpegService:
             
         except subprocess.TimeoutExpired:
             ErrorMessage = f"FFmpeg timeout for command: {' '.join(Arguments)}"
-            LoggingService.LogWarning(ErrorMessage, 'FFmpegService', 'ExecuteFFmpeg')
+            LoggingService.LogWarning(ErrorMessage, 'ExecuteFFmpeg', 'FFmpegService')
             return {
                 'Success': False,
                 'ErrorMessage': ErrorMessage,
@@ -257,7 +257,7 @@ class FFmpegService:
             }
         except Exception as e:
             ErrorMessage = f"FFmpeg execution error: {str(e)}"
-            LoggingService.LogException(ErrorMessage, e, 'FFmpegService', 'ExecuteFFmpeg')
+            LoggingService.LogException(ErrorMessage, e, 'ExecuteFFmpeg', 'FFmpegService')
             return {
                 'Success': False,
                 'ErrorMessage': ErrorMessage,
@@ -296,7 +296,7 @@ class FFmpegService:
                     Versions['FFprobe'] = FirstLine
                     
         except Exception as e:
-            LoggingService.LogException("Error getting FFmpeg versions", e, 'FFmpegService', 'GetVersion')
+            LoggingService.LogException("Error getting FFmpeg versions", e, 'GetVersion', 'FFmpegService')
         
         return Versions
     
@@ -331,14 +331,14 @@ class FFmpegService:
             Result = self.ExecuteFFmpeg(Arguments, OutputFile=OutputFilePath)
             
             if Result['Success']:
-                LoggingService.LogInfo(f"Successfully added MediaVortex title: {MediaVortexTitle}", 'FFmpegService', 'AddMediaVortexTitle')
+                LoggingService.LogInfo(f"Successfully added MediaVortex title: {MediaVortexTitle}", 'AddMediaVortexTitle', 'FFmpegService')
             else:
-                LoggingService.LogWarning(f"Failed to add MediaVortex title: {Result.get('ErrorMessage', 'Unknown error')}", 'FFmpegService', 'AddMediaVortexTitle')
+                LoggingService.LogWarning(f"Failed to add MediaVortex title: {Result.get('ErrorMessage', '', 'Unknown error')}", 'FFmpegService', 'AddMediaVortexTitle')
             
             return Result
             
         except Exception as e:
-            LoggingService.LogException("Error adding MediaVortex title", e, 'FFmpegService', 'AddMediaVortexTitle')
+            LoggingService.LogException("Error adding MediaVortex title", e, 'AddMediaVortexTitle', 'FFmpegService')
             return {
                 'Success': False,
                 'ErrorMessage': f"Title addition error: {str(e)}",

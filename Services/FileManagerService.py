@@ -27,7 +27,7 @@ class FileManagerService:
             fileExtension = Path(filePath).suffix.lower()
             return fileExtension in self.MediaExtensions
         except Exception as e:
-            LoggingService.LogException("Error checking media file extension", e, 'FileManagerService', 'IsMediaFile')
+            LoggingService.LogException("Error checking media file extension", e, 'IsMediaFile', 'FileManagerService')
             return False
     
     def ValidateUnicodePath(self, filePath: str) -> Tuple[bool, str]:
@@ -42,17 +42,17 @@ class FileManagerService:
                 return True, filePath
             else:
                 # Path has encoding issues - log warning but still return original path
-                LoggingService.LogWarning(f"Unicode encoding issue detected for path: {filePath}", 'FileManagerService', 'ValidateUnicodePath')
+                LoggingService.LogWarning(f"Unicode encoding issue detected for path: {filePath}", 'ValidateUnicodePath', 'FileManagerService')
                 return False, filePath
                 
         except UnicodeEncodeError as e:
-            LoggingService.LogWarning(f"Unicode encoding error for path: {filePath}", 'FileManagerService', 'ValidateUnicodePath')
+            LoggingService.LogWarning(f"Unicode encoding error for path: {filePath}", 'ValidateUnicodePath', 'FileManagerService')
             return False, filePath
         except UnicodeDecodeError as e:
-            LoggingService.LogWarning(f"Unicode decoding error for path: {filePath}", 'FileManagerService', 'ValidateUnicodePath')
+            LoggingService.LogWarning(f"Unicode decoding error for path: {filePath}", 'ValidateUnicodePath', 'FileManagerService')
             return False, filePath
         except Exception as e:
-            LoggingService.LogException("Unexpected error validating Unicode path", e, 'FileManagerService', 'ValidateUnicodePath')
+            LoggingService.LogException("Unexpected error validating Unicode path", e, 'ValidateUnicodePath', 'FileManagerService')
             return False, filePath
     
     
@@ -63,7 +63,7 @@ class FileManagerService:
             isValid, validatedPath = self.ValidateUnicodePath(filePath)
             
             if not isValid:
-                LoggingService.LogDebug(f"Unicode validation failed for path: {filePath}", 'FileManagerService', 'GetFileSizeMB')
+                LoggingService.LogDebug(f"Unicode validation failed for path: {filePath}", 'GetFileSizeMB', 'FileManagerService')
                 self.EncodingErrors.append(f"Unicode issue: {filePath}")
             
             # Try to get file size using the original path
@@ -71,11 +71,11 @@ class FileManagerService:
                 sizeBytes = os.path.getsize(filePath)
                 return sizeBytes / (1024 * 1024)  # Convert to MB
             else:
-                LoggingService.LogWarning(f"File not found: {filePath}", 'FileManagerService', 'GetFileSizeMB')
+                LoggingService.LogWarning(f"File not found: {filePath}", 'GetFileSizeMB', 'FileManagerService')
                 return 0.0
                 
         except Exception as e:
-            LoggingService.LogException("Error getting file size", e, 'FileManagerService', 'GetFileSizeMB')
+            LoggingService.LogException("Error getting file size", e, 'GetFileSizeMB', 'FileManagerService')
             return 0.0
     
     def ScanDirectory(self, directoryPath: str, recursive: bool = True) -> List[str]:
@@ -89,15 +89,15 @@ class FileManagerService:
             isValid, validatedPath = self.ValidateUnicodePath(directoryPath)
             
             if not isValid:
-                LoggingService.LogDebug(f"Unicode validation failed for directory: {directoryPath}", 'FileManagerService', 'ScanDirectory')
+                LoggingService.LogDebug(f"Unicode validation failed for directory: {directoryPath}", 'ScanDirectory', 'FileManagerService')
                 self.EncodingErrors.append(f"Unicode issue: {directoryPath}")
             
             if not os.path.exists(directoryPath):
-                LoggingService.LogWarning(f"Directory does not exist: {directoryPath}", 'FileManagerService', 'ScanDirectory')
+                LoggingService.LogWarning(f"Directory does not exist: {directoryPath}", 'ScanDirectory', 'FileManagerService')
                 return mediaFiles
             
             if not os.path.isdir(directoryPath):
-                LoggingService.LogWarning(f"Path is not a directory: {directoryPath}", 'FileManagerService', 'ScanDirectory')
+                LoggingService.LogWarning(f"Path is not a directory: {directoryPath}", 'ScanDirectory', 'FileManagerService')
                 return mediaFiles
             
             # Scan the directory
@@ -111,7 +111,7 @@ class FileManagerService:
                             fileIsValid, validatedFilePath = self.ValidateUnicodePath(filePath)
                             
                             if not fileIsValid:
-                                LoggingService.LogDebug(f"Unicode validation failed for file: {filePath}", 'FileManagerService', 'ScanDirectory')
+                                LoggingService.LogDebug(f"Unicode validation failed for file: {filePath}", 'ScanDirectory', 'FileManagerService')
                                 self.EncodingErrors.append(f"Unicode issue: {filePath}")
                             
                             if self.IsMediaFile(filePath):
@@ -121,7 +121,7 @@ class FileManagerService:
                                 self.SkippedFiles += 1
                                 
                         except Exception as e:
-                            LoggingService.LogException("Error processing file in directory scan", e, 'FileManagerService', 'ScanDirectory')
+                            LoggingService.LogException("Error processing file in directory scan", e, 'ScanDirectory', 'FileManagerService')
                             self.SkippedFiles += 1
                             continue
             else:
@@ -137,7 +137,7 @@ class FileManagerService:
                                 fileIsValid, validatedFilePath = self.ValidateUnicodePath(filePath)
                                 
                                 if not fileIsValid:
-                                    LoggingService.LogDebug(f"Unicode validation failed for file: {filePath}", 'FileManagerService', 'ScanDirectory')
+                                    LoggingService.LogDebug(f"Unicode validation failed for file: {filePath}", 'ScanDirectory', 'FileManagerService')
                                     self.EncodingErrors.append(f"Unicode issue: {filePath}")
                                 
                                 if self.IsMediaFile(filePath):
@@ -147,18 +147,18 @@ class FileManagerService:
                                     self.SkippedFiles += 1
                                     
                         except Exception as e:
-                            LoggingService.LogException("Error processing file in non-recursive scan", e, 'FileManagerService', 'ScanDirectory')
+                            LoggingService.LogException("Error processing file in non-recursive scan", e, 'ScanDirectory', 'FileManagerService')
                             self.SkippedFiles += 1
                             continue
                             
                 except Exception as e:
-                    LoggingService.LogException("Error listing directory contents", e, 'FileManagerService', 'ScanDirectory')
+                    LoggingService.LogException("Error listing directory contents", e, 'ScanDirectory', 'FileManagerService')
                     return mediaFiles
             
             LoggingService.LogInfo(f"Directory scan completed. Found {len(mediaFiles)} media files, processed {self.ProcessedFiles}, skipped {self.SkippedFiles}", 'FileManagerService', 'ScanDirectory')
             
         except Exception as e:
-            LoggingService.LogException("Error in directory scan", e, 'FileManagerService', 'ScanDirectory')
+            LoggingService.LogException("Error in directory scan", e, 'ScanDirectory', 'FileManagerService')
         
         return mediaFiles
     
@@ -173,11 +173,11 @@ class FileManagerService:
             isValid, validatedPath = self.ValidateUnicodePath(directoryPath)
             
             if not isValid:
-                LoggingService.LogDebug(f"Unicode validation failed for directory: {directoryPath}", 'FileManagerService', 'CalculateDirectorySize')
+                LoggingService.LogDebug(f"Unicode validation failed for directory: {directoryPath}", 'CalculateDirectorySize', 'FileManagerService')
                 self.EncodingErrors.append(f"Unicode issue: {directoryPath}")
             
             if not os.path.exists(directoryPath) or not os.path.isdir(directoryPath):
-                LoggingService.LogWarning(f"Directory does not exist or is not a directory: {directoryPath}", 'FileManagerService', 'CalculateDirectorySize')
+                LoggingService.LogWarning(f"Directory does not exist or is not a directory: {directoryPath}", 'CalculateDirectorySize', 'FileManagerService')
                 return 0.0
             
             # Walk through all files in the directory
@@ -190,22 +190,22 @@ class FileManagerService:
                         fileIsValid, validatedFilePath = self.ValidateUnicodePath(filePath)
                         
                         if not fileIsValid:
-                            LoggingService.LogDebug(f"Unicode validation failed for file: {filePath}", 'FileManagerService', 'CalculateDirectorySize')
+                            LoggingService.LogDebug(f"Unicode validation failed for file: {filePath}", 'CalculateDirectorySize', 'FileManagerService')
                             self.EncodingErrors.append(f"Unicode issue: {filePath}")
                         
                         if os.path.exists(filePath):
                             totalSizeBytes += os.path.getsize(filePath)
                             
                     except Exception as e:
-                        LoggingService.LogException("Error calculating file size", e, 'FileManagerService', 'CalculateDirectorySize')
+                        LoggingService.LogException("Error calculating file size", e, 'CalculateDirectorySize', 'FileManagerService')
                         continue
             
             # Convert to GB
             totalSizeGB = totalSizeBytes / (1024 * 1024 * 1024)
-            LoggingService.LogInfo(f"Directory size calculated: {totalSizeGB} GB", 'FileManagerService', 'CalculateDirectorySize')
+            LoggingService.LogInfo(f"Directory size calculated: {totalSizeGB} GB", 'CalculateDirectorySize', 'FileManagerService')
             
         except Exception as e:
-            LoggingService.LogException("Error calculating directory size", e, 'FileManagerService', 'CalculateDirectorySize')
+            LoggingService.LogException("Error calculating directory size", e, 'CalculateDirectorySize', 'FileManagerService')
             return 0.0
         
         return totalSizeGB
@@ -217,13 +217,13 @@ class FileManagerService:
             isValid, validatedPath = self.ValidateUnicodePath(filePath)
             
             if not isValid:
-                LoggingService.LogDebug(f"Unicode validation failed for path: {filePath}", 'FileManagerService', 'GetFileNameFromPath')
+                LoggingService.LogDebug(f"Unicode validation failed for path: {filePath}", 'GetFileNameFromPath', 'FileManagerService')
                 self.EncodingErrors.append(f"Unicode issue: {filePath}")
             
             return os.path.basename(filePath)
             
         except Exception as e:
-            LoggingService.LogException("Error extracting filename", e, 'FileManagerService', 'GetFileNameFromPath')
+            LoggingService.LogException("Error extracting filename", e, 'GetFileNameFromPath', 'FileManagerService')
             return "UnknownFile"
     
     def GetEncodingErrors(self) -> List[str]:
@@ -254,7 +254,7 @@ class FileManagerService:
             LoggingService.LogFunctionEntry("ExtractMediaMetadata", 'FileManagerService', FilePath)
             
             if not self.FFmpegAnalysisService.IsAvailable():
-                LoggingService.LogWarning("Media analysis service not available", 'FileManagerService', 'ExtractMediaMetadata')
+                LoggingService.LogWarning("Media analysis service not available", 'ExtractMediaMetadata', 'FileManagerService')
                 return {
                     'Success': False,
                     'ErrorMessage': 'Media analysis service not available',
@@ -291,11 +291,11 @@ class FileManagerService:
             AnalysisModel = self.FFmpegAnalysisService.AnalyzeMediaFile(FilePath)
             AnalysisResult = AnalysisModel.ToDict()
             
-            LoggingService.LogDebug(f"Metadata extraction completed for: {FilePath}", 'FileManagerService', 'ExtractMediaMetadata')
+            LoggingService.LogDebug(f"Metadata extraction completed for: {FilePath}", 'ExtractMediaMetadata', 'FileManagerService')
             return AnalysisResult
             
         except Exception as e:
-            LoggingService.LogException("Error extracting media metadata", e, 'FileManagerService', 'ExtractMediaMetadata')
+            LoggingService.LogException("Error extracting media metadata", e, 'ExtractMediaMetadata', 'FileManagerService')
             return {
                 'Success': False,
                 'ErrorMessage': f'Metadata extraction error: {str(e)}',
@@ -334,7 +334,7 @@ class FileManagerService:
             LoggingService.LogFunctionEntry("ExtractMediaMetadataBatch", 'FileManagerService', f"Processing {len(FilePaths)} files")
             
             if not self.FFmpegAnalysisService.IsAvailable():
-                LoggingService.LogWarning("Media analysis service not available for batch processing", 'FileManagerService', 'ExtractMediaMetadataBatch')
+                LoggingService.LogWarning("Media analysis service not available for batch processing", 'ExtractMediaMetadataBatch', 'FileManagerService')
                 # Return empty results for all files
                 return [{
                     'FilePath': FilePath,
@@ -377,11 +377,11 @@ class FileManagerService:
                 AnalysisResult['FilePath'] = FilePath
                 AnalysisResults.append(AnalysisResult)
             
-            LoggingService.LogInfo(f"Batch metadata extraction completed for {len(FilePaths)} files", 'FileManagerService', 'ExtractMediaMetadataBatch')
+            LoggingService.LogInfo(f"Batch metadata extraction completed for {len(FilePaths)} files", 'ExtractMediaMetadataBatch', 'FileManagerService')
             return AnalysisResults
             
         except Exception as e:
-            LoggingService.LogException("Error in batch media metadata extraction", e, 'FileManagerService', 'ExtractMediaMetadataBatch')
+            LoggingService.LogException("Error in batch media metadata extraction", e, 'ExtractMediaMetadataBatch', 'FileManagerService')
             # Return error results for all files
             return [{
                 'FilePath': FilePath,

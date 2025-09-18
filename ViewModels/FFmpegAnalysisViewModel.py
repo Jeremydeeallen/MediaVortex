@@ -26,14 +26,14 @@ class FFmpegAnalysisViewModel:
             }
             
             if AnalysisResult.Success:
-                LoggingService.LogInfo(f"Successfully analyzed file: {FilePath}", 'FFmpegAnalysisViewModel', 'AnalyzeMediaFile')
+                LoggingService.LogInfo(f"Successfully analyzed file: {FilePath}", 'AnalyzeMediaFile', 'FFmpegAnalysisViewModel')
             else:
-                LoggingService.LogWarning(f"Failed to analyze file: {FilePath} - {AnalysisResult.ErrorMessage}", 'FFmpegAnalysisViewModel', 'AnalyzeMediaFile')
+                LoggingService.LogWarning(f"Failed to analyze file: {FilePath} - {AnalysisResult.ErrorMessage}", 'AnalyzeMediaFile', 'FFmpegAnalysisViewModel')
             
             return Result
             
         except Exception as e:
-            LoggingService.LogException("Error in analysis view model", e, 'FFmpegAnalysisViewModel', 'AnalyzeMediaFile')
+            LoggingService.LogException("Error in analysis view model", e, 'AnalyzeMediaFile', 'FFmpegAnalysisViewModel')
             return {
                 'Success': False,
                 'ErrorMessage': f"Analysis error: {str(e)}",
@@ -76,7 +76,7 @@ class FFmpegAnalysisViewModel:
             return Result
             
         except Exception as e:
-            LoggingService.LogException("Error in batch analysis view model", e, 'FFmpegAnalysisViewModel', 'AnalyzeMediaFiles')
+            LoggingService.LogException("Error in batch analysis view model", e, 'AnalyzeMediaFiles', 'FFmpegAnalysisViewModel')
             return {
                 'Success': False,
                 'ErrorMessage': f"Batch analysis error: {str(e)}",

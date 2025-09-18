@@ -38,14 +38,14 @@ class FFmpegScreenshotViewModel:
             }
             
             if ScreenshotResult.Success:
-                LoggingService.LogInfo(f"Successfully generated screenshot: {ScreenshotResult.ScreenshotPath}", 'FFmpegScreenshotViewModel', 'GenerateScreenshot')
+                LoggingService.LogInfo(f"Successfully generated screenshot: {ScreenshotResult.ScreenshotPath}", 'GenerateScreenshot', 'FFmpegScreenshotViewModel')
             else:
-                LoggingService.LogWarning(f"Failed to generate screenshot: {ScreenshotResult.ErrorMessage}", 'FFmpegScreenshotViewModel', 'GenerateScreenshot')
+                LoggingService.LogWarning(f"Failed to generate screenshot: {ScreenshotResult.ErrorMessage}", 'GenerateScreenshot', 'FFmpegScreenshotViewModel')
             
             return Result
             
         except Exception as e:
-            LoggingService.LogException("Error in screenshot view model", e, 'FFmpegScreenshotViewModel', 'GenerateScreenshot')
+            LoggingService.LogException("Error in screenshot view model", e, 'GenerateScreenshot', 'FFmpegScreenshotViewModel')
             return {
                 'Success': False,
                 'ErrorMessage': f"Screenshot generation error: {str(e)}",
@@ -92,14 +92,14 @@ class FFmpegScreenshotViewModel:
             }
             
             if BatchResult.Success:
-                LoggingService.LogInfo(f"Successfully generated {BatchResult.SuccessfulScreenshots} screenshots", 'FFmpegScreenshotViewModel', 'GenerateScreenshotsAtIntervals')
+                LoggingService.LogInfo(f"Successfully generated {BatchResult.SuccessfulScreenshots} screenshots", 'GenerateScreenshotsAtIntervals', 'FFmpegScreenshotViewModel')
             else:
-                LoggingService.LogWarning(f"Failed to generate screenshots: {BatchResult.ErrorMessage}", 'FFmpegScreenshotViewModel', 'GenerateScreenshotsAtIntervals')
+                LoggingService.LogWarning(f"Failed to generate screenshots: {BatchResult.ErrorMessage}", 'GenerateScreenshotsAtIntervals', 'FFmpegScreenshotViewModel')
             
             return Result
             
         except Exception as e:
-            LoggingService.LogException("Error in batch screenshot view model", e, 'FFmpegScreenshotViewModel', 'GenerateScreenshotsAtIntervals')
+            LoggingService.LogException("Error in batch screenshot view model", e, 'GenerateScreenshotsAtIntervals', 'FFmpegScreenshotViewModel')
             return {
                 'Success': False,
                 'ErrorMessage': f"Batch screenshot generation error: {str(e)}",
@@ -146,14 +146,14 @@ class FFmpegScreenshotViewModel:
             }
             
             if BatchResult.Success:
-                LoggingService.LogInfo(f"Successfully generated {BatchResult.SuccessfulScreenshots} screenshots", 'FFmpegScreenshotViewModel', 'GenerateScreenshotsAtSpecificTimes')
+                LoggingService.LogInfo(f"Successfully generated {BatchResult.SuccessfulScreenshots} screenshots", 'GenerateScreenshotsAtSpecificTimes', 'FFmpegScreenshotViewModel')
             else:
-                LoggingService.LogWarning(f"Failed to generate screenshots: {BatchResult.ErrorMessage}", 'FFmpegScreenshotViewModel', 'GenerateScreenshotsAtSpecificTimes')
+                LoggingService.LogWarning(f"Failed to generate screenshots: {BatchResult.ErrorMessage}", 'GenerateScreenshotsAtSpecificTimes', 'FFmpegScreenshotViewModel')
             
             return Result
             
         except Exception as e:
-            LoggingService.LogException("Error in specific time screenshot view model", e, 'FFmpegScreenshotViewModel', 'GenerateScreenshotsAtSpecificTimes')
+            LoggingService.LogException("Error in specific time screenshot view model", e, 'GenerateScreenshotsAtSpecificTimes', 'FFmpegScreenshotViewModel')
             return {
                 'Success': False,
                 'ErrorMessage': f"Specific time screenshot generation error: {str(e)}",

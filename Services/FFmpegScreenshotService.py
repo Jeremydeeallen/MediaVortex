@@ -61,16 +61,16 @@ class FFmpegScreenshotService:
             
             if Result['Success']:
                 ScreenshotModel.Success = True
-                LoggingService.LogInfo(f"Successfully generated screenshot: {OutputPath}", 'FFmpegScreenshotService', 'GenerateScreenshot')
+                LoggingService.LogInfo(f"Successfully generated screenshot: {OutputPath}", 'GenerateScreenshot', 'FFmpegScreenshotService')
             else:
                 ScreenshotModel.Success = False
                 ScreenshotModel.ErrorMessage = Result.get('ErrorMessage', 'Screenshot generation failed')
-                LoggingService.LogWarning(f"Failed to generate screenshot: {ScreenshotModel.ErrorMessage}", 'FFmpegScreenshotService', 'GenerateScreenshot')
+                LoggingService.LogWarning(f"Failed to generate screenshot: {ScreenshotModel.ErrorMessage}", 'GenerateScreenshot', 'FFmpegScreenshotService')
             
             return ScreenshotModel
             
         except Exception as e:
-            LoggingService.LogException("Error generating screenshot", e, 'FFmpegScreenshotService', 'GenerateScreenshot')
+            LoggingService.LogException("Error generating screenshot", e, 'GenerateScreenshot', 'FFmpegScreenshotService')
             ScreenshotModel = FFmpegScreenshotModel()
             ScreenshotModel.SourceFilePath = SourceFilePath
             ScreenshotModel.Success = False
@@ -123,13 +123,12 @@ class FFmpegScreenshotService:
                 BatchModel.AddScreenshot(Screenshot)
             
             BatchModel.Success = True
-            LoggingService.LogInfo(f"Generated {BatchModel.SuccessfulScreenshots} screenshots for {SourceFilePath}", 
-                                 'FFmpegScreenshotService', 'GenerateScreenshotsAtIntervals')
+            LoggingService.LogInfo(f"Generated {BatchModel.SuccessfulScreenshots} screenshots for {SourceFilePath}", 'GenerateScreenshotsAtIntervals', 'FFmpegScreenshotService')
             
             return BatchModel
             
         except Exception as e:
-            LoggingService.LogException("Error generating screenshots at intervals", e, 'FFmpegScreenshotService', 'GenerateScreenshotsAtIntervals')
+            LoggingService.LogException("Error generating screenshots at intervals", e, 'GenerateScreenshotsAtIntervals', 'FFmpegScreenshotService')
             BatchModel = FFmpegScreenshotBatchModel()
             BatchModel.SourceFilePath = SourceFilePath
             BatchModel.Success = False
@@ -167,13 +166,12 @@ class FFmpegScreenshotService:
                 BatchModel.AddScreenshot(Screenshot)
             
             BatchModel.Success = True
-            LoggingService.LogInfo(f"Generated {BatchModel.SuccessfulScreenshots} screenshots for {SourceFilePath}", 
-                                 'FFmpegScreenshotService', 'GenerateScreenshotsAtSpecificTimes')
+            LoggingService.LogInfo(f"Generated {BatchModel.SuccessfulScreenshots} screenshots for {SourceFilePath}", 'GenerateScreenshotsAtSpecificTimes', 'FFmpegScreenshotService')
             
             return BatchModel
             
         except Exception as e:
-            LoggingService.LogException("Error generating screenshots at specific times", e, 'FFmpegScreenshotService', 'GenerateScreenshotsAtSpecificTimes')
+            LoggingService.LogException("Error generating screenshots at specific times", e, 'GenerateScreenshotsAtSpecificTimes', 'FFmpegScreenshotService')
             BatchModel = FFmpegScreenshotBatchModel()
             BatchModel.SourceFilePath = SourceFilePath
             BatchModel.Success = False
@@ -196,7 +194,7 @@ class FFmpegScreenshotService:
                 return {'Success': False, 'ErrorMessage': Result.get('ErrorMessage', 'Failed to get duration')}
                 
         except Exception as e:
-            LoggingService.LogException("Error getting video duration", e, 'FFmpegScreenshotService', 'GetVideoDuration')
+            LoggingService.LogException("Error getting video duration", e, 'GetVideoDuration', 'FFmpegScreenshotService')
             return {'Success': False, 'ErrorMessage': f"Duration error: {str(e)}"}
     
     def IsAvailable(self) -> bool:

@@ -39,7 +39,7 @@ class FFmpegAnalysisService:
                 Command = FFprobeResult.get('Command', 'Unknown command')
                 ErrorMessage = FFprobeResult.get('ErrorMessage', 'FFprobe analysis failed')
                 AnalysisModel.ErrorMessage = f"{ErrorMessage} - Command: {Command}"
-                LoggingService.LogError(f"FFprobe failed for {FilePath}: {ErrorMessage} - Command: {Command}", 'FFmpegAnalysisService', 'AnalyzeMediaFile')
+                LoggingService.LogError(f"FFprobe failed for {FilePath}: {ErrorMessage} - Command: {Command}", 'AnalyzeMediaFile', 'FFmpegAnalysisService')
                 return AnalysisModel
             
             # Parse FFprobe JSON output
@@ -51,7 +51,7 @@ class FFmpegAnalysisService:
             except json.JSONDecodeError as e:
                 Command = FFprobeResult.get('Command', 'Unknown command')
                 AnalysisModel.ErrorMessage = f"Failed to parse FFprobe JSON output: {str(e)} - Command: {Command}"
-                LoggingService.LogError(f"FFprobe JSON parsing failed for {FilePath}: {str(e)} - Command: {Command}", 'FFmpegAnalysisService', 'AnalyzeMediaFile')
+                LoggingService.LogError(f"FFprobe JSON parsing failed for {FilePath}: {str(e)} - Command: {Command}", 'AnalyzeMediaFile', 'FFmpegAnalysisService')
                 return AnalysisModel
             
             # Extract metadata from filename if not found in embedded tags
@@ -59,11 +59,11 @@ class FFmpegAnalysisService:
                 FilenameMetadata = self.ExtractMetadataFromFilename(AnalysisModel.FileName)
                 self.ApplyFilenameMetadata(AnalysisModel, FilenameMetadata)
             
-            LoggingService.LogDebug(f"Successfully analyzed file: {FilePath}", 'FFmpegAnalysisService', 'AnalyzeMediaFile')
+            LoggingService.LogDebug(f"Successfully analyzed file: {FilePath}", 'AnalyzeMediaFile', 'FFmpegAnalysisService')
             return AnalysisModel
             
         except Exception as e:
-            LoggingService.LogException("Error analyzing media file", e, 'FFmpegAnalysisService', 'AnalyzeMediaFile')
+            LoggingService.LogException("Error analyzing media file", e, 'AnalyzeMediaFile', 'FFmpegAnalysisService')
             AnalysisModel = FFmpegAnalysisModel()
             AnalysisModel.FilePath = FilePath
             AnalysisModel.ErrorMessage = f"Analysis error: {str(e)}"
@@ -91,15 +91,15 @@ class FFmpegAnalysisService:
             if FormatBitrate:
                 try:
                     FormatBitrateKbps = int(FormatBitrate) // 1000
-                    LoggingService.LogInfo(f"Found format bitrate: {FormatBitrateKbps} kbps for {AnalysisModel.FilePath}", 'FFmpegAnalysisService', 'ParseFFprobeOutput')
+                    LoggingService.LogInfo(f"Found format bitrate: {FormatBitrateKbps} kbps for {AnalysisModel.FilePath}", 'ParseFFprobeOutput', 'FFmpegAnalysisService')
                     # If we don't have video bitrate, use format bitrate as video bitrate
                     if not AnalysisModel.VideoBitrateKbps:
                         AnalysisModel.VideoBitrateKbps = FormatBitrateKbps
-                        LoggingService.LogInfo(f"Set video bitrate from format: {FormatBitrateKbps} kbps", 'FFmpegAnalysisService', 'ParseFFprobeOutput')
+                        LoggingService.LogInfo(f"Set video bitrate from format: {FormatBitrateKbps} kbps", 'ParseFFprobeOutput', 'FFmpegAnalysisService')
                     # If we don't have audio bitrate, estimate it (typically 10-20% of total)
                     if not AnalysisModel.AudioBitrateKbps:
                         AnalysisModel.AudioBitrateKbps = FormatBitrateKbps // 10  # Rough estimate
-                        LoggingService.LogInfo(f"Set audio bitrate from format: {FormatBitrateKbps // 10} kbps", 'FFmpegAnalysisService', 'ParseFFprobeOutput')
+                        LoggingService.LogInfo(f"Set audio bitrate from format: {FormatBitrateKbps // 10} kbps", 'ParseFFprobeOutput', 'FFmpegAnalysisService')
                 except (ValueError, TypeError):
                     pass
             
@@ -151,7 +151,7 @@ class FFmpegAnalysisService:
                 if VideoBitrate:
                     try:
                         AnalysisModel.VideoBitrateKbps = int(VideoBitrate) // 1000
-                        LoggingService.LogInfo(f"Set video bitrate from stream: {AnalysisModel.VideoBitrateKbps} kbps", 'FFmpegAnalysisService', 'ParseFFprobeOutput')
+                        LoggingService.LogInfo(f"Set video bitrate from stream: {AnalysisModel.VideoBitrateKbps} kbps", 'ParseFFprobeOutput', 'FFmpegAnalysisService')
                     except (ValueError, TypeError):
                         pass
                 else:
@@ -218,7 +218,7 @@ class FFmpegAnalysisService:
                 AnalysisModel.ReleaseGroup = Tags.get('release_group')
             
         except Exception as e:
-            LoggingService.LogException("Error parsing FFprobe output", e, 'FFmpegAnalysisService', 'ParseFFprobeOutput')
+            LoggingService.LogException("Error parsing FFprobe output", e, 'ParseFFprobeOutput', 'FFmpegAnalysisService')
     
     def ExtractMetadataFromFilename(self, FileName: str) -> Dict[str, Any]:
         """Extract metadata from filename using pattern matching."""
@@ -313,7 +313,7 @@ class FFmpegAnalysisService:
             return Result
             
         except Exception as e:
-            LoggingService.LogException("Error extracting metadata from filename", e, 'FFmpegAnalysisService', 'ExtractMetadataFromFilename')
+            LoggingService.LogException("Error extracting metadata from filename", e, 'ExtractMetadataFromFilename', 'FFmpegAnalysisService')
             return {}
     
     def ApplyFilenameMetadata(self, AnalysisModel: FFmpegAnalysisModel, FilenameMetadata: Dict[str, Any]):
@@ -337,7 +337,7 @@ class FFmpegAnalysisService:
                 AnalysisModel.ReleaseGroup = FilenameMetadata['ReleaseGroup']
                 
         except Exception as e:
-            LoggingService.LogException("Error applying filename metadata", e, 'FFmpegAnalysisService', 'ApplyFilenameMetadata')
+            LoggingService.LogException("Error applying filename metadata", e, 'ApplyFilenameMetadata', 'FFmpegAnalysisService')
     
     def IsAvailable(self) -> bool:
         """Check if FFprobe is available for analysis."""
@@ -358,13 +358,13 @@ class FFmpegAnalysisService:
             if self.DatabaseService:
                 self.DatabaseService.ExecuteNonQuery(Query, (JobId, RootFolderPath, Recursive, Now, Now))
             else:
-                LoggingService.LogWarning("DatabaseService not available", 'FFmpegAnalysisService', 'CreateFFprobeScanJob')
+                LoggingService.LogWarning("DatabaseService not available", 'CreateFFprobeScanJob', 'FFmpegAnalysisService')
                 return
             
             LoggingService.LogInfo(f"Successfully created FFprobe scan job {JobId} for {RootFolderPath}")
             
         except Exception as e:
-            LoggingService.LogException(f"Error creating FFprobe scan job {JobId}", e, 'FFmpegAnalysisService', 'CreateFFprobeScanJob')
+            LoggingService.LogException(f"Error creating FFprobe scan job {JobId}", e, 'CreateFFprobeScanJob', 'FFmpegAnalysisService')
             raise
     
     def StartFFprobeScanning(self, RootFolderPath: str, Recursive: bool = True) -> Dict[str, Any]:
@@ -385,7 +385,7 @@ class FFmpegAnalysisService:
             if self.DatabaseService:
                 self.DatabaseService.ExecuteNonQuery(Query, (os.getpid(), Now, JobId))
             else:
-                LoggingService.LogWarning("DatabaseService not available", 'FFmpegAnalysisService', 'StartFFprobeScanning')
+                LoggingService.LogWarning("DatabaseService not available", 'StartFFprobeScanning', 'FFmpegAnalysisService')
                 return {
                     'Success': False,
                     'Message': 'DatabaseService not available',
@@ -401,7 +401,7 @@ class FFmpegAnalysisService:
             }
             
         except Exception as e:
-            LoggingService.LogException("Error starting FFprobe scan", e, 'FFmpegAnalysisService', 'StartFFprobeScanning')
+            LoggingService.LogException("Error starting FFprobe scan", e, 'StartFFprobeScanning', 'FFmpegAnalysisService')
             return {
                 'Success': False,
                 'Message': f'Error starting FFprobe scan: {str(e)}',

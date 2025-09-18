@@ -46,7 +46,7 @@ This layer is well-defined. Services like FFmpegService and HandBrakeService are
 - **FFmpegScreenshotService**: Services/FFmpegScreenshotService.py - Screenshot generation using FFmpegService
 - **FFmpegComparisonService**: Services/FFmpegComparisonService.py - Video comparison operations using FFmpegService (includes VMAF quality comparison)
 - **HandBrakeService**: Services/HandBrakeService.py
-- **LoggingService**: Services/LoggingService.py
+- **LoggingService**: Services/LoggingService.py - Centralized logging system with database storage
 - **CleanupService**: Services/CleanupService.py
 - **FileManagerService**: Services/FileManagerService.py - File system operations and metadata extraction
 
@@ -102,5 +102,110 @@ The VMAF (Video Multi-Method Assessment Fusion) comparison is a specialized feat
 4. **Model**: Parses XML results and provides structured data
 5. **Response**: Returns comprehensive VMAF metrics to client
 
+## Logging Architecture
+
+### Centralized Logging System
+MediaVortex uses a centralized logging system that stores all log entries in the database for persistence, searchability, and analysis.
+
+### LoggingService Design
+The `LoggingService` is implemented as a singleton service that provides:
+
+- **Database Storage**: All logs are stored in the `Logs` table in `MediaVortex.db`
+- **Multiple Log Levels**: INFO, ERROR, WARNING, DEBUG, EXCEPTION
+- **Function Tracking**: Each log entry includes the function name that generated it
+- **Component Identification**: Logs are tagged with the component/service that generated them
+- **Exception Handling**: Full stack traces for exceptions with automatic fallback to console
+
+### Logging Database Schema
+The `Logs` table structure:
+```sql
+CREATE TABLE Logs (
+    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+    Timestamp DATETIME,
+    LogLevel TEXT,           -- INFO, ERROR, WARNING, DEBUG
+    FunctionName TEXT,       -- Name of the function that generated the log
+    Message TEXT,            -- The actual log message
+    SourceFile TEXT,         -- Source file (future use)
+    SourceLine INTEGER,      -- Source line number (future use)
+    SourceFunction TEXT,     -- Source function (future use)
+    ExceptionType TEXT,      -- Exception type for error logs
+    ExceptionMessage TEXT,   -- Exception message for error logs
+    StackTrace TEXT,         -- Full stack trace for exceptions
+    Component TEXT,          -- Component/service that generated the log
+    Operation TEXT,          -- Operation being performed
+    CreatedAt DATETIME
+);
+```
+
+### Logging Method Signatures
+All logging methods follow a consistent parameter pattern:
+
+```python
+# Standard logging methods
+LoggingService.LogInfo(message, function_name, component, operation='')
+LoggingService.LogError(message, function_name, component, operation='')
+LoggingService.LogWarning(message, function_name, component, operation='')
+LoggingService.LogDebug(message, function_name, component, operation='')
+
+# Exception logging
+LoggingService.LogException(message, exception, function_name, component, operation='')
+
+# Function entry/exit logging (for debugging)
+LoggingService.LogFunctionEntry(function_name, component, *args, **kwargs)
+LoggingService.LogFunctionExit(function_name, result, component)
+
+# Data logging
+LoggingService.LogData(message, data, function_name, component, operation='')
+```
+
+### Logging Best Practices
+
+1. **Function Name Parameter**: Always pass the current function name as the second parameter
+   ```python
+   def ProcessMediaFiles(self, MediaFiles):
+       LoggingService.LogInfo(f"Processing {len(MediaFiles)} files", 'ProcessMediaFiles', 'FileScanningBusinessService')
+   ```
+
+2. **Component Identification**: Use the service/class name as the component
+   ```python
+   # In FileScanningBusinessService.py
+   LoggingService.LogInfo("Starting scan", 'StartScanning', 'FileScanningBusinessService')
+   
+   # In FileScanningController.py  
+   LoggingService.LogInfo("Received scan request", 'StartScan', 'FileScanningController')
+   ```
+
+3. **Operation Context**: Use the operation parameter for additional context
+   ```python
+   LoggingService.LogInfo("File processed successfully", 'ProcessFile', 'FileScanningBusinessService', 'FileProcessing')
+   ```
+
+4. **Exception Handling**: Always log exceptions with full context
+   ```python
+   try:
+       # Some operation
+   except Exception as e:
+       LoggingService.LogException("Error processing file", e, 'ProcessFile', 'FileScanningBusinessService', 'FileProcessing')
+   ```
+
+### Logging Flow
+1. **Application Code**: Calls appropriate LoggingService method with function name and component
+2. **LoggingService**: Formats message and stores in database via DatabaseService
+3. **Database**: Persists log entry with timestamp and metadata
+4. **Fallback**: If database logging fails, falls back to console output
+
+### Debug Mode
+- **Environment Variable**: `MEDIAVORTEX_DEBUG=true` enables debug logging
+- **Debug Methods**: `LogDebug`, `LogFunctionEntry`, `LogFunctionExit`, `LogData` only execute when debug mode is enabled
+- **Performance**: Debug logging can be disabled in production for better performance
+
+### Logging Benefits
+- **Traceability**: Every log entry includes the exact function that generated it
+- **Component Isolation**: Easy to filter logs by component/service
+- **Operation Tracking**: Can trace operations across multiple components
+- **Error Analysis**: Full exception context with stack traces
+- **Performance Monitoring**: Function entry/exit logging for performance analysis
+- **Audit Trail**: Complete record of all system operations
+
 ## Summary
-This revised structure follows a more traditional and effective Service-Oriented Architecture within an MVVM framework. The Models remain focused on data, while the Services handle the complex logic and interactions with external resources. This makes the system more modular, testable, and maintainable in the long run.
+This revised structure follows a more traditional and effective Service-Oriented Architecture within an MVVM framework. The Models remain focused on data, while the Services handle the complex logic and interactions with external resources. The centralized logging system provides comprehensive traceability and debugging capabilities throughout the application. This makes the system more modular, testable, and maintainable in the long run.

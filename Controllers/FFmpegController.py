@@ -36,7 +36,7 @@ class FFmpegController:
                 return jsonify(Result)
                 
             except Exception as e:
-                LoggingService.LogException("Error in AnalyzeFile endpoint", e, 'FFmpegController', 'AnalyzeFile')
+                LoggingService.LogException("Error in AnalyzeFile endpoint", e, 'AnalyzeFile', 'FFmpegController')
                 return jsonify({
                     'Success': False,
                     'ErrorMessage': f'Analysis error: {str(e)}'
@@ -59,7 +59,7 @@ class FFmpegController:
                 return jsonify(Result)
                 
             except Exception as e:
-                LoggingService.LogException("Error in AnalyzeFiles endpoint", e, 'FFmpegController', 'AnalyzeFiles')
+                LoggingService.LogException("Error in AnalyzeFiles endpoint", e, 'AnalyzeFiles', 'FFmpegController')
                 return jsonify({
                     'Success': False,
                     'ErrorMessage': f'Batch analysis error: {str(e)}'
@@ -76,7 +76,7 @@ class FFmpegController:
                 })
                 
             except Exception as e:
-                LoggingService.LogException("Error in GetAnalysisCapabilities endpoint", e, 'FFmpegController', 'GetAnalysisCapabilities')
+                LoggingService.LogException("Error in GetAnalysisCapabilities endpoint", e, 'GetAnalysisCapabilities', 'FFmpegController')
                 return jsonify({
                     'Success': False,
                     'ErrorMessage': f'Capabilities error: {str(e)}'
@@ -107,7 +107,7 @@ class FFmpegController:
                 return jsonify(Result)
                 
             except Exception as e:
-                LoggingService.LogException("Error in GenerateSingleScreenshot endpoint", e, 'FFmpegController', 'GenerateSingleScreenshot')
+                LoggingService.LogException("Error in GenerateSingleScreenshot endpoint", e, 'GenerateSingleScreenshot', 'FFmpegController')
                 return jsonify({
                     'Success': False,
                     'ErrorMessage': f'Screenshot generation error: {str(e)}'
@@ -138,7 +138,7 @@ class FFmpegController:
                 return jsonify(Result)
                 
             except Exception as e:
-                LoggingService.LogException("Error in GenerateScreenshotsAtIntervals endpoint", e, 'FFmpegController', 'GenerateScreenshotsAtIntervals')
+                LoggingService.LogException("Error in GenerateScreenshotsAtIntervals endpoint", e, 'GenerateScreenshotsAtIntervals', 'FFmpegController')
                 return jsonify({
                     'Success': False,
                     'ErrorMessage': f'Interval screenshot generation error: {str(e)}'
@@ -174,7 +174,7 @@ class FFmpegController:
                 return jsonify(Result)
                 
             except Exception as e:
-                LoggingService.LogException("Error in GenerateScreenshotsAtTimes endpoint", e, 'FFmpegController', 'GenerateScreenshotsAtTimes')
+                LoggingService.LogException("Error in GenerateScreenshotsAtTimes endpoint", e, 'GenerateScreenshotsAtTimes', 'FFmpegController')
                 return jsonify({
                     'Success': False,
                     'ErrorMessage': f'Specific time screenshot generation error: {str(e)}'
@@ -191,7 +191,7 @@ class FFmpegController:
                 })
                 
             except Exception as e:
-                LoggingService.LogException("Error in GetScreenshotCapabilities endpoint", e, 'FFmpegController', 'GetScreenshotCapabilities')
+                LoggingService.LogException("Error in GetScreenshotCapabilities endpoint", e, 'GetScreenshotCapabilities', 'FFmpegController')
                 return jsonify({
                     'Success': False,
                     'ErrorMessage': f'Screenshot capabilities error: {str(e)}'
@@ -221,7 +221,7 @@ class FFmpegController:
                 return jsonify(Result)
                 
             except Exception as e:
-                LoggingService.LogException("Error in CreateSideBySideComparison endpoint", e, 'FFmpegController', 'CreateSideBySideComparison')
+                LoggingService.LogException("Error in CreateSideBySideComparison endpoint", e, 'CreateSideBySideComparison', 'FFmpegController')
                 return jsonify({
                     'Success': False,
                     'ErrorMessage': f'Side-by-side comparison error: {str(e)}'
@@ -250,7 +250,7 @@ class FFmpegController:
                 return jsonify(Result)
                 
             except Exception as e:
-                LoggingService.LogException("Error in CreatePictureInPictureComparison endpoint", e, 'FFmpegController', 'CreatePictureInPictureComparison')
+                LoggingService.LogException("Error in CreatePictureInPictureComparison endpoint", e, 'CreatePictureInPictureComparison', 'FFmpegController')
                 return jsonify({
                     'Success': False,
                     'ErrorMessage': f'Picture-in-picture comparison error: {str(e)}'
@@ -278,7 +278,7 @@ class FFmpegController:
                 return jsonify(Result)
                 
             except Exception as e:
-                LoggingService.LogException("Error in CreateOverlayComparison endpoint", e, 'FFmpegController', 'CreateOverlayComparison')
+                LoggingService.LogException("Error in CreateOverlayComparison endpoint", e, 'CreateOverlayComparison', 'FFmpegController')
                 return jsonify({
                     'Success': False,
                     'ErrorMessage': f'Overlay comparison error: {str(e)}'
@@ -308,7 +308,7 @@ class FFmpegController:
                 return jsonify(Result)
                 
             except Exception as e:
-                LoggingService.LogException("Error in CreateVMAFComparison endpoint", e, 'FFmpegController', 'CreateVMAFComparison')
+                LoggingService.LogException("Error in CreateVMAFComparison endpoint", e, 'CreateVMAFComparison', 'FFmpegController')
                 return jsonify({
                     'Success': False,
                     'ErrorMessage': f'VMAF comparison error: {str(e)}'
@@ -325,7 +325,7 @@ class FFmpegController:
                 })
                 
             except Exception as e:
-                LoggingService.LogException("Error in GetComparisonCapabilities endpoint", e, 'FFmpegController', 'GetComparisonCapabilities')
+                LoggingService.LogException("Error in GetComparisonCapabilities endpoint", e, 'GetComparisonCapabilities', 'FFmpegController')
                 return jsonify({
                     'Success': False,
                     'ErrorMessage': f'Comparison capabilities error: {str(e)}'
@@ -360,7 +360,7 @@ class FFmpegController:
                 return jsonify(Result)
                 
             except Exception as e:
-                LoggingService.LogException("Error in AddMediaVortexTitle endpoint", e, 'FFmpegController', 'AddMediaVortexTitle')
+                LoggingService.LogException("Error in AddMediaVortexTitle endpoint", e, 'AddMediaVortexTitle', 'FFmpegController')
                 return jsonify({
                     'Success': False,
                     'ErrorMessage': f'Title addition error: {str(e)}'

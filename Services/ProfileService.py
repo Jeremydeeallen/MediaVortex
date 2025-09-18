@@ -31,15 +31,15 @@ class ProfileService:
                 LastModified=datetime.now()
             )
             
-            LoggingService.LogInfo("Saving profile to database...", 'ProfileService', 'CreateProfile')
+            LoggingService.LogInfo("Saving profile to database...", 'CreateProfile', 'ProfileService')
             profile_id = self.DatabaseManager.SaveProfile(profile)
             profile.Id = profile_id
-            LoggingService.LogInfo(f"Profile saved with ID: {profile_id}", 'ProfileService', 'CreateProfile')
+            LoggingService.LogInfo(f"Profile saved with ID: {profile_id}", 'CreateProfile', 'ProfileService')
             
             LoggingService.LogFunctionExit("CreateProfile", profile_id)
             return profile
         except Exception as e:
-            LoggingService.LogException("Exception in ProfileService.CreateProfile", e, 'ProfileService', 'CreateProfile')
+            LoggingService.LogException("Exception in ProfileService.CreateProfile", e, 'CreateProfile', 'ProfileService')
             raise
     
     def UpdateProfile(self, profile: TranscodeProfileModel) -> TranscodeProfileModel:
@@ -47,14 +47,14 @@ class ProfileService:
         try:
             LoggingService.LogFunctionEntry("UpdateProfile", 'ProfileService', profile.Id, profile.ProfileName, profile.Description)
             profile.LastModified = datetime.now()
-            LoggingService.LogInfo("Saving profile to database...", 'ProfileService', 'CreateProfile')
+            LoggingService.LogInfo("Saving profile to database...", 'CreateProfile', 'ProfileService')
             profile_id = self.DatabaseManager.SaveProfile(profile)
             profile.Id = profile_id
-            LoggingService.LogInfo(f"Profile updated successfully with ID: {profile_id}", 'ProfileService', 'UpdateProfile')
+            LoggingService.LogInfo(f"Profile updated successfully with ID: {profile_id}", 'UpdateProfile', 'ProfileService')
             LoggingService.LogFunctionExit("UpdateProfile", profile_id)
             return profile
         except Exception as e:
-            LoggingService.LogException("Exception in ProfileService.UpdateProfile", e, 'ProfileService', 'UpdateProfile')
+            LoggingService.LogException("Exception in ProfileService.UpdateProfile", e, 'UpdateProfile', 'ProfileService')
             raise
     
     def DeleteProfile(self, profile_id: int) -> bool:
@@ -90,15 +90,15 @@ class ProfileService:
                 TranscodeDownTo=transcode_down_to
             )
             
-            LoggingService.LogInfo("Saving threshold to database...", 'ProfileService', 'AddThreshold')
+            LoggingService.LogInfo("Saving threshold to database...", 'AddThreshold', 'ProfileService')
             threshold_id = self.DatabaseManager.SaveThreshold(threshold)
             threshold.Id = threshold_id
-            LoggingService.LogInfo(f"Threshold saved with ID: {threshold_id}", 'ProfileService', 'AddThreshold')
+            LoggingService.LogInfo(f"Threshold saved with ID: {threshold_id}", 'AddThreshold', 'ProfileService')
             
             LoggingService.LogFunctionExit("AddThreshold", threshold_id)
             return threshold
         except Exception as e:
-            LoggingService.LogException("Exception in ProfileService.AddThreshold", e, 'ProfileService', 'AddThreshold')
+            LoggingService.LogException("Exception in ProfileService.AddThreshold", e, 'AddThreshold', 'ProfileService')
             raise
     
     def UpdateThreshold(self, threshold: ProfileThresholdModel) -> ProfileThresholdModel:

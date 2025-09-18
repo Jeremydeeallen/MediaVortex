@@ -104,7 +104,7 @@ class ScanDirectoryProcess:
             self.DatabaseService.ExecuteNonQuery(Query, UpdateValues)
             
         except Exception as e:
-            LoggingService.LogException(f"Error updating job status for {self.JobId}", e, 'ScanDirectoryProcess', 'UpdateJobStatus')
+            LoggingService.LogException(f"Error updating job status for {self.JobId}", e, 'UpdateJobStatus', 'ScanDirectoryProcess')
     
     def GetOrCreateRootFolder(self, RootFolderPath: str) -> int:
         """Get or create a root folder record."""
@@ -128,7 +128,7 @@ class ScanDirectoryProcess:
             return Result[0]['Id'] if Result else None
             
         except Exception as e:
-            LoggingService.LogException(f"Error getting/creating root folder for {RootFolderPath}", e, 'ScanDirectoryProcess', 'GetOrCreateRootFolder')
+            LoggingService.LogException(f"Error getting/creating root folder for {RootFolderPath}", e, 'GetOrCreateRootFolder', 'ScanDirectoryProcess')
             return None
     
     
@@ -136,7 +136,7 @@ class ScanDirectoryProcess:
     def ScanDirectory(self):
         """Main scanning logic."""
         try:
-            LoggingService.LogInfo(f"Starting scan process {self.ProcessId} for job {self.JobId}", 'ScanDirectoryProcess', 'ScanDirectory')
+            LoggingService.LogInfo(f"Starting scan process {self.ProcessId} for job {self.JobId}", 'ScanDirectory', 'ScanDirectoryProcess')
             
             # Update job status to running
             self.UpdateJobStatus('Running', Progress=0.0, ProcessId=self.ProcessId, StartTime=datetime.now())
@@ -155,11 +155,11 @@ class ScanDirectoryProcess:
             
             # Scan directory
             self.UpdateJobStatus('Running', Progress=10.0, CurrentDirectory='Scanning directory for media files...')
-            LoggingService.LogInfo(f"Scanning directory: {self.RootFolderPath}", 'ScanDirectoryProcess', 'ScanDirectory')
+            LoggingService.LogInfo(f"Scanning directory: {self.RootFolderPath}", 'ScanDirectory', 'ScanDirectoryProcess')
             Files = self.FileManagerService.ScanDirectory(self.RootFolderPath, self.Recursive)
             
             if not Files:
-                LoggingService.LogWarning(f"No files found in {self.RootFolderPath}", 'ScanDirectoryProcess', 'ScanDirectory')
+                LoggingService.LogWarning(f"No files found in {self.RootFolderPath}", 'ScanDirectory', 'ScanDirectoryProcess')
                 ScanResults.ScanStatus = 'Completed'
                 ScanResults.ScanEndTime = datetime.now()
                 self.UpdateJobStatus('Completed', Progress=100.0, ScanResults=ScanResults)
@@ -170,7 +170,7 @@ class ScanDirectoryProcess:
             
             # Use business service to process all files with full workflow
             try:
-                LoggingService.LogInfo(f"Processing {len(Files)} files using business service workflow", 'ScanDirectoryProcess', 'ScanDirectory')
+                LoggingService.LogInfo(f"Processing {len(Files)} files using business service workflow", 'ScanDirectory', 'ScanDirectoryProcess')
                 
                 # Set up business service with scan results
                 self.FileScanningBusinessService.ScanResults = ScanResults
@@ -178,14 +178,14 @@ class ScanDirectoryProcess:
                 
                 # First, run cleanup phase separately with status updates
                 self.UpdateJobStatus('Running', Progress=20.0, CurrentDirectory='Cleaning up orphaned database files...', ScanResults=ScanResults)
-                LoggingService.LogInfo("Starting cleanup phase", 'ScanDirectoryProcess', 'ScanDirectory')
+                LoggingService.LogInfo("Starting cleanup phase", 'ScanDirectory', 'ScanDirectoryProcess')
                 
                 # Run cleanup for all files in database
                 self.FileScanningBusinessService.CleanupMissingFiles([], RootFolderId)  # Empty list since we're checking ALL files
                 if RootFolderId:
                     self.FileScanningBusinessService.CleanupOrphanedFiles(RootFolderId)
                 
-                LoggingService.LogInfo("Cleanup phase completed", 'ScanDirectoryProcess', 'ScanDirectory')
+                LoggingService.LogInfo("Cleanup phase completed", 'ScanDirectory', 'ScanDirectoryProcess')
                 
                 # Now process files with metadata extraction
                 self.UpdateJobStatus('Running', Progress=25.0, CurrentDirectory='Processing files with FFprobe...', ScanResults=ScanResults)
@@ -196,7 +196,7 @@ class ScanDirectoryProcess:
                 
                 for BatchStart in range(0, TotalFiles, BatchSize):
                     if not self.IsRunning:
-                        LoggingService.LogInfo(f"Scan process {self.ProcessId} stopped by signal during processing", 'ScanDirectoryProcess', 'ScanDirectory')
+                        LoggingService.LogInfo(f"Scan process {self.ProcessId} stopped by signal during processing", 'ScanDirectory', 'ScanDirectoryProcess')
                         break
                     
                     BatchEnd = min(BatchStart + BatchSize, TotalFiles)
@@ -212,7 +212,7 @@ class ScanDirectoryProcess:
                     # Process this batch
                     self.FileScanningBusinessService.ProcessMediaFilesWithMetadata(BatchFiles, RootFolderId, self.RootFolderPath, ExtractMetadata=True)
                     
-                    LoggingService.LogInfo(f"Processed batch {BatchStart+1}-{BatchEnd} of {TotalFiles} files", 'ScanDirectoryProcess', 'ScanDirectory')
+                    LoggingService.LogInfo(f"Processed batch {BatchStart+1}-{BatchEnd} of {TotalFiles} files", 'ScanDirectory', 'ScanDirectoryProcess')
                 
                 # Update scan results from business service
                 ScanResults = self.FileScanningBusinessService.ScanResults
@@ -220,12 +220,12 @@ class ScanDirectoryProcess:
                 LoggingService.LogInfo(f"Business service processing completed. Processed: {ScanResults.TotalFilesProcessed}, Errors: {ScanResults.TotalFilesWithErrors}", 'ScanDirectoryProcess', 'ScanDirectory')
                 
             except Exception as e:
-                LoggingService.LogException("Error during business service file processing", e, 'ScanDirectoryProcess', 'ScanDirectory')
+                LoggingService.LogException("Error during business service file processing", e, 'ScanDirectory', 'ScanDirectoryProcess')
                 ScanResults.TotalFilesWithErrors += len(Files)
             
             # Check if scan was stopped during processing
             if not self.IsRunning:
-                LoggingService.LogInfo(f"Scan process {self.ProcessId} stopped by signal", 'ScanDirectoryProcess', 'ScanDirectory')
+                LoggingService.LogInfo(f"Scan process {self.ProcessId} stopped by signal", 'ScanDirectory', 'ScanDirectoryProcess')
                 ScanResults.ScanStatus = 'Stopped'
                 ScanResults.ScanEndTime = datetime.now()
                 self.UpdateJobStatus('Stopped', Progress=100.0, ScanResults=ScanResults)
@@ -234,13 +234,13 @@ class ScanDirectoryProcess:
             # Update root folder size with actual calculated size
             try:
                 self.UpdateJobStatus('Running', Progress=90.0, CurrentDirectory='Calculating directory size...', ScanResults=ScanResults)
-                LoggingService.LogInfo(f"Calculating actual directory size for {self.RootFolderPath}", 'ScanDirectoryProcess', 'ScanDirectory')
+                LoggingService.LogInfo(f"Calculating actual directory size for {self.RootFolderPath}", 'ScanDirectory', 'ScanDirectoryProcess')
                 TotalSizeGB = self.FileManagerService.CalculateDirectorySize(self.RootFolderPath)
                 UpdateQuery = "UPDATE RootFolders SET TotalSizeGB = ?, LastScannedDate = ? WHERE Id = ?"
                 self.DatabaseService.ExecuteNonQuery(UpdateQuery, (TotalSizeGB, datetime.now(), RootFolderId))
-                LoggingService.LogInfo(f"Updated root folder size to {TotalSizeGB} GB", 'ScanDirectoryProcess', 'ScanDirectory')
+                LoggingService.LogInfo(f"Updated root folder size to {TotalSizeGB} GB", 'ScanDirectory', 'ScanDirectoryProcess')
             except Exception as e:
-                LoggingService.LogException("Error updating root folder size", e, 'ScanDirectoryProcess', 'ScanDirectory')
+                LoggingService.LogException("Error updating root folder size", e, 'ScanDirectory', 'ScanDirectoryProcess')
             
             # Cleanup is now handled by ProcessMediaFilesWithMetadata in the business service
             
@@ -249,10 +249,10 @@ class ScanDirectoryProcess:
             ScanResults.ScanStatus = 'Completed'
             ScanResults.ScanEndTime = datetime.now()
             self.UpdateJobStatus('Completed', Progress=100.0, EndTime=datetime.now(), ScanResults=ScanResults)
-            LoggingService.LogInfo(f"Scan process {self.ProcessId} completed successfully", 'ScanDirectoryProcess', 'ScanDirectory')
+            LoggingService.LogInfo(f"Scan process {self.ProcessId} completed successfully", 'ScanDirectory', 'ScanDirectoryProcess')
             
         except Exception as e:
-            LoggingService.LogException(f"Error in scan process {self.ProcessId}", e, 'ScanDirectoryProcess', 'ScanDirectory')
+            LoggingService.LogException(f"Error in scan process {self.ProcessId}", e, 'ScanDirectory', 'ScanDirectoryProcess')
             self.UpdateJobStatus('Failed', ErrorMessage=str(e), EndTime=datetime.now())
     
     def Run(self):
@@ -260,10 +260,10 @@ class ScanDirectoryProcess:
         try:
             self.ScanDirectory()
         except Exception as e:
-            LoggingService.LogException(f"Fatal error in scan process {self.ProcessId}", e, 'ScanDirectoryProcess', 'Run')
+            LoggingService.LogException(f"Fatal error in scan process {self.ProcessId}", e, 'Run', 'ScanDirectoryProcess')
             self.UpdateJobStatus('Failed', ErrorMessage=f"Fatal error: {str(e)}", EndTime=datetime.now())
         finally:
-            LoggingService.LogInfo(f"Scan process {self.ProcessId} exiting", 'ScanDirectoryProcess', 'Run')
+            LoggingService.LogInfo(f"Scan process {self.ProcessId} exiting", 'Run', 'ScanDirectoryProcess')
 
 
 def main():
@@ -274,7 +274,7 @@ def main():
         if len(sys.argv) < 2:
             ErrorMsg = f"Usage: ScanDirectoryProcess.py <JobId> [Recursive]. Got {len(sys.argv)} args: {sys.argv}"
             print(ErrorMsg)
-            LoggingService.LogError(ErrorMsg, 'ScanDirectoryProcess', 'main')
+            LoggingService.LogError(ErrorMsg, 'main', 'ScanDirectoryProcess')
             sys.exit(1)
         
         JobId = sys.argv[1]
@@ -285,7 +285,7 @@ def main():
         if not RootFolderPath:
             ErrorMsg = "MEDIAVORTEX_ROOT_FOLDER_PATH environment variable not set"
             print(ErrorMsg)
-            LoggingService.LogError(ErrorMsg, 'ScanDirectoryProcess', 'main')
+            LoggingService.LogError(ErrorMsg, 'main', 'ScanDirectoryProcess')
             sys.exit(1)
         
         print(f"Starting scan process - JobId: {JobId}, Path: {RootFolderPath}, Recursive: {Recursive}")
@@ -295,12 +295,12 @@ def main():
         Scanner.Run()
         
         print(f"ScanDirectoryProcess completed successfully for job {JobId}")
-        LoggingService.LogInfo(f"ScanDirectoryProcess completed successfully for job {JobId}", 'ScanDirectoryProcess', 'main')
+        LoggingService.LogInfo(f"ScanDirectoryProcess completed successfully for job {JobId}", 'main', 'ScanDirectoryProcess')
         
     except Exception as e:
         ErrorMsg = f"Fatal error in scan process: {str(e)}"
         print(ErrorMsg)
-        LoggingService.LogException("Fatal error in scan process", e, 'ScanDirectoryProcess', 'main')
+        LoggingService.LogException("Fatal error in scan process", e, 'main', 'ScanDirectoryProcess')
         sys.exit(1)
 
 
