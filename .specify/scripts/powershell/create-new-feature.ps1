@@ -13,8 +13,15 @@ if (-not $FeatureDescription -or $FeatureDescription.Count -eq 0) {
 }
 $featureDesc = ($FeatureDescription -join ' ').Trim()
 
-$repoRoot = git rev-parse --show-toplevel
-$specsDir = Join-Path $repoRoot 'specs'
+# Check if we're in a project subdirectory with .specify folder
+$currentDir = Get-Location
+$projectRoot = $currentDir
+if (Test-Path (Join-Path $currentDir '.specify')) {
+    $projectRoot = $currentDir
+} else {
+    $projectRoot = git rev-parse --show-toplevel
+}
+$specsDir = Join-Path $projectRoot 'specs'
 New-Item -ItemType Directory -Path $specsDir -Force | Out-Null
 
 $highest = 0
@@ -38,7 +45,7 @@ git checkout -b $branchName | Out-Null
 $featureDir = Join-Path $specsDir $branchName
 New-Item -ItemType Directory -Path $featureDir -Force | Out-Null
 
-$template = Join-Path $repoRoot 'templates/spec-template.md'
+$template = Join-Path $projectRoot '.specify/templates/spec-template.md'
 $specFile = Join-Path $featureDir 'spec.md'
 if (Test-Path $template) { Copy-Item $template $specFile -Force } else { New-Item -ItemType File -Path $specFile | Out-Null }
 

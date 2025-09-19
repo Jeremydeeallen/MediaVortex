@@ -27,10 +27,10 @@
 
 ---
 
-## ⚡ Quick Guidelines
-- ✅ Focus on WHAT users need and WHY
-- ❌ Avoid HOW to implement (no tech stack, APIs, code structure)
-- 👥 Written for business stakeholders, not developers
+## Quick Guidelines
+- Focus on WHAT users need and WHY
+- Avoid HOW to implement (no tech stack, APIs, code structure)
+- Written for business stakeholders, not developers
 
 ### Section Requirements
 - **Mandatory sections**: Must be completed for every feature
