@@ -67,6 +67,16 @@
                             <i class="fas fa-search"></i> File Scanning
                         </a>
                     </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.endpoint == 'transcode_queue' %}active{% endif %}" href="/TranscodeQueue">
+                            <i class="fas fa-list"></i> Transcode Queue
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.endpoint == 'transcode_progress' %}active{% endif %}" href="/TranscodeProgress">
+                            <i class="fas fa-chart-line"></i> Transcode Progress
+                        </a>
+                    </li>
                 </ul>
             </div>
         </div>

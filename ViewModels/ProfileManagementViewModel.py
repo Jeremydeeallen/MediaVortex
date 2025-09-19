@@ -100,7 +100,8 @@ class ProfileManagementViewModel:
                     threshold_data['AudioBitrateKbps'],
                     threshold_data['FallbackVideoBitrateKbps'],
                     threshold_data['FallbackAudioBitrateKbps'],
-                    threshold_data['TranscodeDownTo']
+                    threshold_data['TranscodeDownTo'],
+                    threshold_data.get('Quality')
                 )
                 LoggingService.LogInfo("Threshold {} added successfully", "ProfileManagementViewModel", "CreateProfileWithThresholds", i+1)
             
@@ -184,33 +185,69 @@ class ProfileManagementViewModel:
             )
             LoggingService.LogInfo("Updating profile in database...")
             updated_profile = self.ProfileService.UpdateProfile(profile)
-            LoggingService.LogInfo("Profile updated successfully with ID: {}", "ProfileManagementViewModel", "UpdateProfileWithThresholds", updated_profile.Id)
+            LoggingService.LogInfo(f"Profile updated successfully with ID: {updated_profile.Id}", "UpdateProfileWithThresholds", "ProfileManagementViewModel")
             
-            # Delete existing thresholds
+            # Update thresholds efficiently
             LoggingService.LogInfo("Getting existing thresholds...")
-            existing_thresholds = self.ProfileService.GetProfileThresholds(profile_id)
-            LoggingService.LogInfo("Found {} existing thresholds to delete", "ProfileManagementViewModel", "UpdateProfileWithThresholds", len(existing_thresholds))
-            for threshold in existing_thresholds:
-                LoggingService.LogInfo("Deleting threshold ID: {}", "ProfileManagementViewModel", "UpdateProfileWithThresholds", threshold.Id)
-                self.ProfileService.DeleteThreshold(threshold.Id)
+            ExistingThresholds = self.ProfileService.GetProfileThresholds(profile_id)
+            LoggingService.LogInfo(f"Found {len(ExistingThresholds)} existing thresholds", "UpdateProfileWithThresholds", "ProfileManagementViewModel")
             
-            # Add new thresholds
-            LoggingService.LogInfo("Adding {} new thresholds...", "ProfileManagementViewModel", "UpdateProfileWithThresholds", len(thresholds))
-            for i, threshold_data in enumerate(thresholds):
-                LoggingService.LogInfo("Adding threshold {}: {}", "ProfileManagementViewModel", "UpdateProfileWithThresholds", i+1, threshold_data)
-                self.ProfileService.AddThreshold(
-                    profile_id,
-                    threshold_data['Resolution'],
-                    threshold_data['Under30MinMB'],
-                    threshold_data['Under65MinMB'],
-                    threshold_data['Over65MinMB'],
-                    threshold_data['VideoBitrateKbps'],
-                    threshold_data['AudioBitrateKbps'],
-                    threshold_data['FallbackVideoBitrateKbps'],
-                    threshold_data['FallbackAudioBitrateKbps'],
-                    threshold_data['TranscodeDownTo']
-                )
-                LoggingService.LogInfo("Threshold {} added successfully", "ProfileManagementViewModel", "CreateProfileWithThresholds", i+1)
+            # Create lookup maps for efficient comparison
+            ExistingThresholdMap = {t.Resolution: t for t in ExistingThresholds}
+            NewThresholdMap = {t['Resolution']: t for t in thresholds}
+            
+            # Update existing thresholds that match resolution
+            UpdatedCount = 0
+            for resolution, threshold_data in NewThresholdMap.items():
+                if resolution in ExistingThresholdMap:
+                    # Update existing threshold
+                    ExistingThreshold = ExistingThresholdMap[resolution]
+                    LoggingService.LogInfo(f"Updating existing threshold for {resolution} (ID: {ExistingThreshold.Id})", "UpdateProfileWithThresholds", "ProfileManagementViewModel")
+                    
+                    # Create updated threshold model
+                    UpdatedThreshold = ProfileThresholdModel(
+                        Id=ExistingThreshold.Id,
+                        ProfileId=profile_id,
+                        Resolution=threshold_data['Resolution'],
+                        Under30MinMB=threshold_data['Under30MinMB'],
+                        Under65MinMB=threshold_data['Under65MinMB'],
+                        Over65MinMB=threshold_data['Over65MinMB'],
+                        VideoBitrateKbps=threshold_data['VideoBitrateKbps'],
+                        AudioBitrateKbps=threshold_data['AudioBitrateKbps'],
+                        FallbackVideoBitrateKbps=threshold_data['FallbackVideoBitrateKbps'],
+                        FallbackAudioBitrateKbps=threshold_data['FallbackAudioBitrateKbps'],
+                        TranscodeDownTo=threshold_data['TranscodeDownTo'],
+                        Quality=threshold_data.get('Quality')
+                    )
+                    
+                    self.ProfileService.UpdateThreshold(UpdatedThreshold)
+                    UpdatedCount += 1
+                else:
+                    # Add new threshold
+                    LoggingService.LogInfo(f"Adding new threshold for {resolution}", "UpdateProfileWithThresholds", "ProfileManagementViewModel")
+                    self.ProfileService.AddThreshold(
+                        profile_id,
+                        threshold_data['Resolution'],
+                        threshold_data['Under30MinMB'],
+                        threshold_data['Under65MinMB'],
+                        threshold_data['Over65MinMB'],
+                        threshold_data['VideoBitrateKbps'],
+                        threshold_data['AudioBitrateKbps'],
+                        threshold_data['FallbackVideoBitrateKbps'],
+                        threshold_data['FallbackAudioBitrateKbps'],
+                        threshold_data['TranscodeDownTo'],
+                        threshold_data.get('Quality')
+                    )
+            
+            # Delete thresholds that no longer exist
+            DeletedCount = 0
+            for resolution, existing_threshold in ExistingThresholdMap.items():
+                if resolution not in NewThresholdMap:
+                    LoggingService.LogInfo(f"Deleting threshold for {resolution} (ID: {existing_threshold.Id})", "UpdateProfileWithThresholds", "ProfileManagementViewModel")
+                    self.ProfileService.DeleteThreshold(existing_threshold.Id)
+                    DeletedCount += 1
+            
+            LoggingService.LogInfo(f"Threshold update complete: {UpdatedCount} updated, {len(NewThresholdMap) - UpdatedCount} added, {DeletedCount} deleted", "UpdateProfileWithThresholds", "ProfileManagementViewModel")
             
             # Reload profiles to get updated data
             LoggingService.LogInfo("Reloading profiles...", "ProfileManagementViewModel", "CreateProfileWithThresholds")
@@ -366,3 +403,29 @@ class ProfileManagementViewModel:
                 for threshold in self.SelectedProfileThresholds
             ]
         }
+    
+    def AssignProfileToRootFolder(self, RootFolderPath: str, ProfileId: int) -> Dict[str, Any]:
+        """Assign a profile to all media files in a specific root folder."""
+        try:
+            LoggingService.LogFunctionEntry("AssignProfileToRootFolder", "ProfileManagementViewModel", RootFolderPath, ProfileId)
+            
+            self.ErrorMessage = ""
+            self.SuccessMessage = ""
+            
+            # Call business service
+            result = self.ProfileService.AssignProfileToRootFolder(RootFolderPath, ProfileId)
+            
+            if result.get("Success", False):
+                self.SuccessMessage = result.get("Message", "Profile assigned successfully")
+                LoggingService.LogInfo(f"Profile assignment successful: {self.SuccessMessage}", "ProfileManagementViewModel", "AssignProfileToRootFolder")
+            else:
+                self.ErrorMessage = result.get("ErrorMessage", "Failed to assign profile")
+                LoggingService.LogError(self.ErrorMessage, "ProfileManagementViewModel", "AssignProfileToRootFolder")
+            
+            return result
+            
+        except Exception as e:
+            errorMsg = f"Exception assigning profile to root folder: {str(e)}"
+            self.ErrorMessage = errorMsg
+            LoggingService.LogException(errorMsg, e, "ProfileManagementViewModel", "AssignProfileToRootFolder")
+            return {"Success": False, "ErrorMessage": errorMsg, "FilesUpdated": 0}

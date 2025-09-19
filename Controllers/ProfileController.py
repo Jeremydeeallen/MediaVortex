@@ -283,3 +283,66 @@ class ProfileController:
                     'success': False,
                     'error': f'Failed to delete threshold: {str(e)}'
                 }), 500
+        
+        @self.Blueprint.route('/profiles/assign-to-root-folder', methods=['POST'])
+        def assign_profile_to_root_folder():
+            """Assign a profile to all media files in a specific root folder."""
+            try:
+                LoggingService.LogFunctionEntry("assign_profile_to_root_folder", "ProfileController")
+                
+                # Get request data
+                data = request.get_json()
+                if not data:
+                    return jsonify({
+                        'success': False,
+                        'error': 'Request body is required'
+                    }), 400
+                
+                root_folder_path = data.get('RootFolderPath')
+                profile_id = data.get('ProfileId')
+                
+                # Validate input parameters
+                if not root_folder_path:
+                    return jsonify({
+                        'success': False,
+                        'error': 'RootFolderPath is required'
+                    }), 400
+                
+                if not profile_id:
+                    return jsonify({
+                        'success': False,
+                        'error': 'ProfileId is required'
+                    }), 400
+                
+                if not isinstance(profile_id, int) or profile_id < 1:
+                    return jsonify({
+                        'success': False,
+                        'error': 'ProfileId must be a positive integer'
+                    }), 400
+                
+                # Call ViewModel
+                result = self.ViewModel.AssignProfileToRootFolder(root_folder_path, profile_id)
+                
+                if result.get('Success', False):
+                    LoggingService.LogInfo(f"Profile assignment successful: {result.get('Message', '')}", "ProfileController", "assign_profile_to_root_folder")
+                    return jsonify({
+                        'success': True,
+                        'message': result.get('Message', 'Profile assigned successfully'),
+                        'filesUpdated': result.get('FilesUpdated', 0),
+                        'profileName': result.get('ProfileName', ''),
+                        'rootFolderPath': result.get('RootFolderPath', '')
+                    })
+                else:
+                    LoggingService.LogError(f"Profile assignment failed: {result.get('ErrorMessage', '')}", "ProfileController", "assign_profile_to_root_folder")
+                    return jsonify({
+                        'success': False,
+                        'error': result.get('ErrorMessage', 'Failed to assign profile')
+                    }), 400
+                    
+            except Exception as e:
+                errorMsg = f'Failed to assign profile to root folder: {str(e)}'
+                LoggingService.LogException(errorMsg, e, "ProfileController", "assign_profile_to_root_folder")
+                return jsonify({
+                    'success': False,
+                    'error': errorMsg
+                }), 500

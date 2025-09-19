@@ -2,6 +2,8 @@ from flask import Flask, render_template, jsonify
 from flask_cors import CORS
 from Controllers.ProfileController import ProfileController
 from Controllers.FileScanningController import FileScanningController
+from Controllers.TranscodeQueueController import TranscodeQueueBlueprint
+from Controllers.TranscodeJobController import TranscodeJobBlueprint
 import os
 
 
@@ -38,6 +40,16 @@ class MediaVortexApp:
             """File scanning page."""
             return render_template('FileScanning.html')
         
+        @self.App.route('/TranscodeQueue')
+        def transcode_queue():
+            """Transcoding queue management page."""
+            return render_template('TranscodeQueue.html')
+        
+        @self.App.route('/TranscodeProgress')
+        def transcode_progress():
+            """Transcoding progress monitoring page."""
+            return render_template('TranscodeProgress.html')
+        
         @self.App.route('/api/health')
         def health_check():
             """Health check endpoint."""
@@ -50,12 +62,16 @@ class MediaVortexApp:
         """Register controller blueprints."""
         self.App.register_blueprint(self.ProfileController.Blueprint, url_prefix='/api')
         self.App.register_blueprint(self.FileScanningController.Blueprint, url_prefix='/api')
+        self.App.register_blueprint(TranscodeQueueBlueprint)
+        self.App.register_blueprint(TranscodeJobBlueprint)
     
     def Run(self, host='0.0.0.0', port=5000, debug=True):
         """Run the Flask application."""
         print(f"Starting MediaVortex on http://{host}:{port}")
         print(f"Settings page: http://{host}:{port}/settings")
         print(f"File Scanning page: http://{host}:{port}/Scanning")
+        print(f"Transcoding Queue page: http://{host}:{port}/TranscodeQueue")
+        print(f"Transcoding Progress page: http://{host}:{port}/TranscodeProgress")
         self.App.run(host=host, port=port, debug=debug)
 
 

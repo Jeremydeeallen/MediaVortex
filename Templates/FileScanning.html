@@ -136,88 +136,20 @@
     </div>
 </div>
 
-<!-- Root Folders -->
+<!-- Database Statistics -->
 <div class="row mb-4">
     <div class="col-12">
         <div class="card">
             <div class="card-header d-flex justify-content-between align-items-center">
-                <h5><i class="fas fa-folder-open"></i> Root Folders</h5>
-                <div class="d-flex gap-2">
-                    <input type="text" class="form-control form-control-sm" id="RootFolderSearch" placeholder="Search folders..." style="width: 200px;">
-                    <button type="button" class="btn btn-sm btn-outline-primary" id="RefreshRootFoldersBtn">
-                        <i class="fas fa-sync-alt"></i> Refresh
-                    </button>
-                </div>
+                <h5><i class="fas fa-chart-bar"></i> Database Statistics</h5>
+                <button type="button" class="btn btn-sm btn-outline-primary" id="RefreshStatisticsBtn">
+                    <i class="fas fa-sync-alt"></i> Refresh
+                </button>
             </div>
             <div class="card-body">
-                <div class="table-responsive">
-                    <table class="table table-striped" id="RootFoldersTable">
-                        <thead>
-                            <tr>
-                                <th>ID</th>
-                                <th>Path</th>
-                                <th>Last Scanned</th>
-                                <th>Total Size</th>
-                                <th>Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <!-- Root folders will be loaded here -->
-                        </tbody>
-                    </table>
+                <div class="row" id="StatisticsContainer">
+                    <!-- Statistics will be loaded here -->
                 </div>
-                <nav aria-label="Root folders pagination">
-                    <ul class="pagination pagination-sm justify-content-center" id="RootFolderPagination">
-                        <!-- Pagination will be populated here -->
-                    </ul>
-                </nav>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- Media Files -->
-<div class="row mb-4">
-    <div class="col-12">
-        <div class="card">
-            <div class="card-header d-flex justify-content-between align-items-center">
-                <h5><i class="fas fa-file-video"></i> Media Files</h5>
-                <div class="d-flex gap-2">
-                    <input type="text" class="form-control form-control-sm" id="MediaFileSearch" placeholder="Search files..." style="width: 200px;">
-                    <select class="form-select form-select-sm" id="RootFolderFilter" style="width: auto;">
-                        <option value="">All Root Folders</option>
-                    </select>
-                    <button type="button" class="btn btn-sm btn-outline-primary" id="RefreshMediaFilesBtn">
-                        <i class="fas fa-sync-alt"></i> Refresh
-                    </button>
-                </div>
-            </div>
-            <div class="card-body">
-                <div class="table-responsive file-list">
-                    <table class="table table-striped" id="MediaFilesTable">
-                        <thead>
-                            <tr>
-                                <th>ID</th>
-                                <th>File Name</th>
-                                <th>Path</th>
-                                <th>Size</th>
-                                <th>Last Scanned</th>
-                                <th>Codec</th>
-                                <th>Resolution</th>
-                                <th>Duration</th>
-                                <th>Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <!-- Media files will be loaded here -->
-                        </tbody>
-                    </table>
-                </div>
-                <nav aria-label="Media files pagination">
-                    <ul class="pagination pagination-sm justify-content-center" id="MediaFilePagination">
-                        <!-- Pagination will be populated here -->
-                    </ul>
-                </nav>
             </div>
         </div>
     </div>
@@ -266,22 +198,10 @@
         window.DeleteViewModelInstance = new DeleteViewModel();
         window.DeleteServiceInstance = new DeleteService(window.DeleteViewModelInstance);
         
-        // Pagination variables
-        let RootFolderCurrentPage = 1;
-        let RootFolderPageSize = 10;
-        let RootFolderTotalPages = 1;
-        let RootFolderSearchTerm = '';
-        
-        let MediaFileCurrentPage = 1;
-        let MediaFilePageSize = 20;
-        let MediaFileTotalPages = 1;
-        let MediaFileSearchTerm = '';
-        let MediaFileFilterPath = '';
 
         $(document).ready(function() {
             LoadScanDirectories();
-            LoadRootFolders();
-            LoadMediaFiles();
+            LoadStatistics();
             SetupEventHandlers();
             CheckForExistingScan();
         });
@@ -314,27 +234,7 @@
             $('#RefreshBtn').click(RefreshData);
             $('#ExtractMetadataBtn').click(ExtractMetadata);
             $('#TestUnicodeBtn').click(TestUnicode);
-            $('#RefreshRootFoldersBtn').click(LoadRootFolders);
-            $('#RefreshMediaFilesBtn').click(LoadMediaFiles);
-            
-            // Search handlers
-            $('#RootFolderSearch').on('input', function() {
-                RootFolderSearchTerm = $(this).val();
-                RootFolderCurrentPage = 1;
-                LoadRootFolders();
-            });
-            
-            $('#MediaFileSearch').on('input', function() {
-                MediaFileSearchTerm = $(this).val();
-                MediaFileCurrentPage = 1;
-                LoadMediaFiles();
-            });
-            
-            $('#RootFolderFilter').change(function() {
-                MediaFileFilterPath = $(this).val();
-                MediaFileCurrentPage = 1;
-                LoadMediaFiles();
-            });
+            $('#RefreshStatisticsBtn').click(LoadStatistics);
             
             $('#ConfirmDeleteBtn').click(() => window.DeleteServiceInstance.ExecuteDelete());
         }
@@ -479,8 +379,7 @@
                 
                 if (Status === 'Completed') {
                     ShowSuccess('Scan completed successfully');
-                    LoadRootFolders();
-                    LoadMediaFiles();
+                    LoadStatistics();
                 } else if (Status === 'Failed') {
                     ShowError('Scan failed: ' + (response.ErrorMessage || 'Unknown error'));
                 } else if (Status === 'Stopped') {
@@ -526,27 +425,6 @@
             });
         }
 
-        function LoadRootFolders() {
-            const Url = `/api/RootFolders?Page=${RootFolderCurrentPage}&PageSize=${RootFolderPageSize}&Search=${encodeURIComponent(RootFolderSearchTerm)}`;
-            
-            $.ajax({
-                url: Url,
-                method: 'GET',
-                success: function(response) {
-                    if (response.Success) {
-                        DisplayRootFolders(response.RootFolders);
-                        UpdateRootFolderPagination(response.TotalCount, response.TotalPages);
-                        UpdateRootFolderFilter(response.AllRootFolders || response.RootFolders);
-                    } else {
-                        ShowError(response.Message || 'Failed to load root folders');
-                    }
-                },
-                error: function(xhr) {
-                    const response = xhr.responseJSON;
-                    ShowError(response?.Message || 'Error loading root folders');
-                }
-            });
-        }
 
         function LoadScanDirectories() {
             console.log('Loading scan directories...');
@@ -578,107 +456,144 @@
             });
         }
 
-        function DisplayRootFolders(rootFolders) {
-            const Tbody = $('#RootFoldersTable tbody');
-            Tbody.empty();
-            
-            if (rootFolders.length === 0) {
-                Tbody.append('<tr><td colspan="5" class="text-center text-muted">No root folders found</td></tr>');
-                return;
-            }
-            
-            rootFolders.forEach(function(folder) {
-                // Properly escape the folder path for JavaScript
-                const EscapedPath = folder.RootFolder.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '\\"');
-                const Row = `
-                    <tr>
-                        <td>${folder.Id}</td>
-                        <td>${folder.RootFolder}</td>
-                        <td>${folder.LastScannedDate}</td>
-                        <td>${folder.TotalSizeGB}</td>
-                        <td>
-                            <button class="btn btn-sm btn-outline-danger" onclick="window.DeleteServiceInstance.ShowDeleteConfirmation('rootfolder', ${folder.Id}, '${EscapedPath}')">
-                                <i class="fas fa-trash"></i> Delete
-                            </button>
-                        </td>
-                    </tr>
-                `;
-                Tbody.append(Row);
-            });
-        }
 
-        function UpdateRootFolderFilter(rootFolders) {
-            const Select = $('#RootFolderFilter');
-            Select.empty();
-            Select.append('<option value="">All Root Folders</option>');
-            
-            rootFolders.forEach(function(folder) {
-                Select.append(`<option value="${folder.RootFolder}">${folder.RootFolder}</option>`);
-            });
-        }
 
-        function LoadMediaFiles(rootFolderPath = '') {
-            if (rootFolderPath) {
-                MediaFileFilterPath = rootFolderPath;
-            }
-            
-            const Url = `/api/MediaFiles?Page=${MediaFileCurrentPage}&PageSize=${MediaFilePageSize}&Search=${encodeURIComponent(MediaFileSearchTerm)}&RootFolderPath=${encodeURIComponent(MediaFileFilterPath)}`;
-            
+
+        function LoadStatistics() {
             $.ajax({
-                url: Url,
+                url: '/api/Statistics',
                 method: 'GET',
                 success: function(response) {
                     if (response.Success) {
-                        DisplayMediaFiles(response.MediaFiles);
-                        UpdateMediaFilePagination(response.TotalCount, response.TotalPages);
+                        DisplayStatistics(response.Statistics);
                     } else {
-                        ShowError(response.Message || 'Failed to load media files');
+                        ShowError(response.Message || 'Failed to load statistics');
                     }
                 },
                 error: function(xhr) {
                     const response = xhr.responseJSON;
-                    ShowError(response?.Message || 'Error loading media files');
+                    ShowError(response?.Message || 'Error loading statistics');
                 }
             });
         }
 
-        function DisplayMediaFiles(mediaFiles) {
-            const Tbody = $('#MediaFilesTable tbody');
-            Tbody.empty();
+        function DisplayStatistics(stats) {
+            const Container = $('#StatisticsContainer');
+            Container.empty();
             
-            if (mediaFiles.length === 0) {
-                Tbody.append('<tr><td colspan="9" class="text-center text-muted">No media files found</td></tr>');
-                return;
-            }
+            const StatisticsHtml = `
+                <div class="col-md-3 mb-3">
+                    <div class="card bg-primary text-white">
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between">
+                                <div>
+                                    <h4 class="card-title">${stats.TotalMediaFiles}</h4>
+                                    <p class="card-text">Total Media Files</p>
+                                </div>
+                                <div class="align-self-center">
+                                    <i class="fas fa-file-video fa-2x"></i>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3 mb-3">
+                    <div class="card bg-warning text-white">
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between">
+                                <div>
+                                    <h4 class="card-title">${stats.FilesWithoutProfiles}</h4>
+                                    <p class="card-text">Files Without Profiles</p>
+                                </div>
+                                <div class="align-self-center">
+                                    <i class="fas fa-exclamation-triangle fa-2x"></i>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3 mb-3">
+                    <div class="card bg-info text-white">
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between">
+                                <div>
+                                    <h4 class="card-title">${stats.TotalRootFolders}</h4>
+                                    <p class="card-text">Root Folders</p>
+                                </div>
+                                <div class="align-self-center">
+                                    <i class="fas fa-folder-open fa-2x"></i>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3 mb-3">
+                    <div class="card bg-success text-white">
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between">
+                                <div>
+                                    <h4 class="card-title">${stats.TotalSizeGB.toFixed(1)} GB</h4>
+                                    <p class="card-text">Total Size</p>
+                                </div>
+                                <div class="align-self-center">
+                                    <i class="fas fa-hdd fa-2x"></i>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-4 mb-3">
+                    <div class="card bg-secondary text-white">
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between">
+                                <div>
+                                    <h4 class="card-title">${stats.FilesWithMetadata}</h4>
+                                    <p class="card-text">Files With Metadata</p>
+                                </div>
+                                <div class="align-self-center">
+                                    <i class="fas fa-info-circle fa-2x"></i>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-4 mb-3">
+                    <div class="card bg-danger text-white">
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between">
+                                <div>
+                                    <h4 class="card-title">${stats.FilesWithoutMetadata}</h4>
+                                    <p class="card-text">Files Without Metadata</p>
+                                </div>
+                                <div class="align-self-center">
+                                    <i class="fas fa-question-circle fa-2x"></i>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-4 mb-3">
+                    <div class="card bg-dark text-white">
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between">
+                                <div>
+                                    <h4 class="card-title">${stats.LastScanDate}</h4>
+                                    <p class="card-text">Last Scan Date</p>
+                                </div>
+                                <div class="align-self-center">
+                                    <i class="fas fa-clock fa-2x"></i>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
             
-            mediaFiles.forEach(function(file) {
-                // Properly escape the file name for JavaScript
-                const EscapedFileName = file.FileName.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '\\"');
-                const Row = `
-                    <tr>
-                        <td>${file.Id}</td>
-                        <td>${file.FileName}</td>
-                        <td>${file.FilePath}</td>
-                        <td>${file.SizeMB}</td>
-                        <td>${file.LastScannedDate}</td>
-                        <td>${file.Codec}</td>
-                        <td>${file.Resolution}</td>
-                        <td>${file.DurationMinutes}</td>
-                        <td>
-                            <button class="btn btn-sm btn-outline-danger" onclick="window.DeleteServiceInstance.ShowDeleteConfirmation('mediafile', ${file.Id}, '${EscapedFileName}')">
-                                <i class="fas fa-trash"></i> Delete
-                            </button>
-                        </td>
-                    </tr>
-                `;
-                Tbody.append(Row);
-            });
+            Container.html(StatisticsHtml);
         }
 
-
         function RefreshData() {
-            LoadRootFolders();
-            LoadMediaFiles();
+            LoadStatistics();
             ShowSuccess('Data refreshed');
         }
 
@@ -726,63 +641,7 @@
             alert('Error: ' + message);
         }
 
-        function UpdateRootFolderPagination(totalCount, totalPages) {
-            RootFolderTotalPages = totalPages || 1;
-            const Pagination = $('#RootFolderPagination');
-            Pagination.empty();
-            
-            if (RootFolderTotalPages <= 1) return;
-            
-            // Previous button
-            const PrevDisabled = RootFolderCurrentPage <= 1 ? 'disabled' : '';
-            Pagination.append(`<li class="page-item ${PrevDisabled}"><a class="page-link" href="#" onclick="ChangeRootFolderPage(${RootFolderCurrentPage - 1})">Previous</a></li>`);
-            
-            // Page numbers
-            for (let i = 1; i <= RootFolderTotalPages; i++) {
-                const Active = i === RootFolderCurrentPage ? 'active' : '';
-                Pagination.append(`<li class="page-item ${Active}"><a class="page-link" href="#" onclick="ChangeRootFolderPage(${i})">${i}</a></li>`);
-            }
-            
-            // Next button
-            const NextDisabled = RootFolderCurrentPage >= RootFolderTotalPages ? 'disabled' : '';
-            Pagination.append(`<li class="page-item ${NextDisabled}"><a class="page-link" href="#" onclick="ChangeRootFolderPage(${RootFolderCurrentPage + 1})">Next</a></li>`);
-        }
 
-        function UpdateMediaFilePagination(totalCount, totalPages) {
-            MediaFileTotalPages = totalPages || 1;
-            const Pagination = $('#MediaFilePagination');
-            Pagination.empty();
-            
-            if (MediaFileTotalPages <= 1) return;
-            
-            // Previous button
-            const PrevDisabled = MediaFileCurrentPage <= 1 ? 'disabled' : '';
-            Pagination.append(`<li class="page-item ${PrevDisabled}"><a class="page-link" href="#" onclick="ChangeMediaFilePage(${MediaFileCurrentPage - 1})">Previous</a></li>`);
-            
-            // Page numbers
-            for (let i = 1; i <= MediaFileTotalPages; i++) {
-                const Active = i === MediaFileCurrentPage ? 'active' : '';
-                Pagination.append(`<li class="page-item ${Active}"><a class="page-link" href="#" onclick="ChangeMediaFilePage(${i})">${i}</a></li>`);
-            }
-            
-            // Next button
-            const NextDisabled = MediaFileCurrentPage >= MediaFileTotalPages ? 'disabled' : '';
-            Pagination.append(`<li class="page-item ${NextDisabled}"><a class="page-link" href="#" onclick="ChangeMediaFilePage(${MediaFileCurrentPage + 1})">Next</a></li>`);
-        }
-
-        function ChangeRootFolderPage(page) {
-            if (page >= 1 && page <= RootFolderTotalPages) {
-                RootFolderCurrentPage = page;
-                LoadRootFolders();
-            }
-        }
-
-        function ChangeMediaFilePage(page) {
-            if (page >= 1 && page <= MediaFileTotalPages) {
-                MediaFileCurrentPage = page;
-                LoadMediaFiles();
-            }
-        }
 
         function ShowSuccess(message) {
             // You can implement a toast notification system here

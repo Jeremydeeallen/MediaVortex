@@ -140,10 +140,10 @@ class FileScanningViewModel:
                 'Error': 'StatusUpdateError'
             }
     
-    def LoadRootFolders(self) -> List[RootFolderModel]:
-        """Load all root folders and update UI state."""
+    def LoadRootFolders(self, SortColumn: str = 'RootFolder', SortOrder: str = 'ASC') -> List[RootFolderModel]:
+        """Load all root folders and update UI state with optional sorting."""
         try:
-            self.RootFolders = self.BusinessService.GetRootFolders()
+            self.RootFolders = self.BusinessService.GetRootFolders(SortColumn, SortOrder)
             LoggingService.LogInfo("Loaded {} root folders", len(self.RootFolders))
             return self.RootFolders
             
@@ -253,11 +253,11 @@ class FileScanningViewModel:
             })
         return DisplayFolders
     
-    def GetRootFoldersPaginated(self, Page: int, PageSize: int, Search: str = '') -> Dict[str, Any]:
-        """Get root folders with pagination and filtering."""
+    def GetRootFoldersPaginated(self, Page: int, PageSize: int, Search: str = '', SortColumn: str = 'RootFolder', SortOrder: str = 'ASC') -> Dict[str, Any]:
+        """Get root folders with pagination, filtering, and sorting."""
         try:
-            # Load all root folders first
-            self.LoadRootFolders()
+            # Load all root folders first with sorting
+            self.LoadRootFolders(SortColumn, SortOrder)
             
             # Apply search filter
             FilteredFolders = self.RootFolders
@@ -320,7 +320,7 @@ class FileScanningViewModel:
             })
         return DisplayFiles
     
-    def GetMediaFilesPaginated(self, Page: int, PageSize: int, Search: str = '', RootFolderPath: str = '') -> Dict[str, Any]:
+    def GetMediaFilesPaginated(self, Page: int, PageSize: int, Search: str = '', RootFolderPath: str = '', SortBy: str = 'SizeMB', SortOrder: str = 'DESC') -> Dict[str, Any]:
         """Get media files with pagination and filtering."""
         try:
             # Load media files first
@@ -335,6 +335,21 @@ class FileScanningViewModel:
                 SearchLower = Search.lower()
                 FilteredFiles = [file for file in self.MediaFiles 
                                if SearchLower in file.FileName.lower() or SearchLower in file.FilePath.lower()]
+            
+            # Apply sorting
+            if SortBy == 'SizeMB':
+                # Handle None values properly - put them at the end for DESC, beginning for ASC
+                LoggingService.LogInfo(f"Sorting {len(FilteredFiles)} files by SizeMB {SortOrder}. Sample sizes: {[f.SizeMB for f in FilteredFiles[:5]]}", "FileScanningViewModel", "GetMediaFilesPaginated")
+                FilteredFiles.sort(key=lambda x: (x.SizeMB is None, x.SizeMB or 0), reverse=(SortOrder == 'DESC'))
+                LoggingService.LogInfo(f"After sorting. Sample sizes: {[f.SizeMB for f in FilteredFiles[:5]]}", "FileScanningViewModel", "GetMediaFilesPaginated")
+            elif SortBy == 'FileName':
+                FilteredFiles.sort(key=lambda x: x.FileName or '', reverse=(SortOrder == 'DESC'))
+            elif SortBy == 'Directory':
+                FilteredFiles.sort(key=lambda x: x.Directory or '', reverse=(SortOrder == 'DESC'))
+            elif SortBy == 'Resolution':
+                FilteredFiles.sort(key=lambda x: x.Resolution or '', reverse=(SortOrder == 'DESC'))
+            elif SortBy == 'AssignedProfile':
+                FilteredFiles.sort(key=lambda x: x.AssignedProfile or '', reverse=(SortOrder == 'DESC'))
             
             # Calculate pagination
             TotalCount = len(FilteredFiles)
@@ -450,4 +465,32 @@ class FileScanningViewModel:
                 'Success': False,
                 'Message': f'Error extracting metadata: {str(e)}',
                 'Error': 'MetadataExtractionError'
+            }
+    
+    def GetStatistics(self) -> Dict[str, Any]:
+        """Get database statistics for display."""
+        try:
+            # Get statistics from business service
+            stats = self.BusinessService.GetStatistics()
+            
+            return {
+                'TotalMediaFiles': stats.get('TotalMediaFiles', 0),
+                'FilesWithoutProfiles': stats.get('FilesWithoutProfiles', 0),
+                'TotalRootFolders': stats.get('TotalRootFolders', 0),
+                'TotalSizeGB': stats.get('TotalSizeGB', 0.0),
+                'LastScanDate': stats.get('LastScanDate', 'Never'),
+                'FilesWithMetadata': stats.get('FilesWithMetadata', 0),
+                'FilesWithoutMetadata': stats.get('FilesWithoutMetadata', 0)
+            }
+            
+        except Exception as e:
+            LoggingService.LogException("Error getting statistics", e, "FileScanningViewModel", "GetStatistics")
+            return {
+                'TotalMediaFiles': 0,
+                'FilesWithoutProfiles': 0,
+                'TotalRootFolders': 0,
+                'TotalSizeGB': 0.0,
+                'LastScanDate': 'Error',
+                'FilesWithMetadata': 0,
+                'FilesWithoutMetadata': 0
             }

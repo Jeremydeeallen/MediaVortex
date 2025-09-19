@@ -963,10 +963,10 @@ class FileScanningBusinessService:
         """Get current scan status and progress."""
         return self.GetCurrentScanStatus()
     
-    def GetRootFolders(self) -> List[RootFolderModel]:
-        """Get all root folders."""
+    def GetRootFolders(self, SortColumn: str = 'RootFolder', SortOrder: str = 'ASC') -> List[RootFolderModel]:
+        """Get all root folders with optional sorting."""
         try:
-            return self.DatabaseManager.GetAllRootFolders()
+            return self.DatabaseManager.GetAllRootFolders(SortColumn, SortOrder)
         except Exception as e:
             LoggingService.LogException("Error getting root folders", e)
             return []
@@ -1005,6 +1005,70 @@ class FileScanningBusinessService:
         except Exception as e:
             LoggingService.LogException("Error getting scan directories", e)
             return []
+    
+    def GetStatistics(self) -> Dict[str, Any]:
+        """Get database statistics for display."""
+        try:
+            # Get total media files count
+            TotalMediaFilesQuery = "SELECT COUNT(*) as Count FROM MediaFiles"
+            TotalMediaFilesResult = self.DatabaseManager.DatabaseService.ExecuteQuery(TotalMediaFilesQuery)
+            TotalMediaFiles = TotalMediaFilesResult[0]['Count'] if TotalMediaFilesResult else 0
+            
+            # Get files without profiles count
+            FilesWithoutProfilesQuery = "SELECT COUNT(*) as Count FROM MediaFiles WHERE AssignedProfile IS NULL OR AssignedProfile = ''"
+            FilesWithoutProfilesResult = self.DatabaseManager.DatabaseService.ExecuteQuery(FilesWithoutProfilesQuery)
+            FilesWithoutProfiles = FilesWithoutProfilesResult[0]['Count'] if FilesWithoutProfilesResult else 0
+            
+            # Get total root folders count
+            TotalRootFoldersQuery = "SELECT COUNT(*) as Count FROM RootFolders"
+            TotalRootFoldersResult = self.DatabaseManager.DatabaseService.ExecuteQuery(TotalRootFoldersQuery)
+            TotalRootFolders = TotalRootFoldersResult[0]['Count'] if TotalRootFoldersResult else 0
+            
+            # Get total size in GB
+            TotalSizeQuery = "SELECT SUM(TotalSizeGB) as TotalSize FROM RootFolders"
+            TotalSizeResult = self.DatabaseManager.DatabaseService.ExecuteQuery(TotalSizeQuery)
+            TotalSizeGB = TotalSizeResult[0]['TotalSize'] if TotalSizeResult and TotalSizeResult[0]['TotalSize'] else 0.0
+            
+            # Get last scan date
+            LastScanQuery = "SELECT MAX(LastScannedDate) as LastScanDate FROM RootFolders"
+            LastScanResult = self.DatabaseManager.DatabaseService.ExecuteQuery(LastScanQuery)
+            LastScanDate = LastScanResult[0]['LastScanDate'] if LastScanResult and LastScanResult[0]['LastScanDate'] else 'Never'
+            
+            # Get files with metadata count
+            FilesWithMetadataQuery = """
+                SELECT COUNT(*) as Count FROM MediaFiles 
+                WHERE VideoBitrateKbps IS NOT NULL 
+                AND AudioBitrateKbps IS NOT NULL 
+                AND Resolution IS NOT NULL 
+                AND Codec IS NOT NULL
+            """
+            FilesWithMetadataResult = self.DatabaseManager.DatabaseService.ExecuteQuery(FilesWithMetadataQuery)
+            FilesWithMetadata = FilesWithMetadataResult[0]['Count'] if FilesWithMetadataResult else 0
+            
+            # Get files without metadata count
+            FilesWithoutMetadata = TotalMediaFiles - FilesWithMetadata
+            
+            return {
+                'TotalMediaFiles': TotalMediaFiles,
+                'FilesWithoutProfiles': FilesWithoutProfiles,
+                'TotalRootFolders': TotalRootFolders,
+                'TotalSizeGB': TotalSizeGB,
+                'LastScanDate': LastScanDate,
+                'FilesWithMetadata': FilesWithMetadata,
+                'FilesWithoutMetadata': FilesWithoutMetadata
+            }
+            
+        except Exception as e:
+            LoggingService.LogException("Error getting statistics", e, "FileScanningBusinessService", "GetStatistics")
+            return {
+                'TotalMediaFiles': 0,
+                'FilesWithoutProfiles': 0,
+                'TotalRootFolders': 0,
+                'TotalSizeGB': 0.0,
+                'LastScanDate': 'Error',
+                'FilesWithMetadata': 0,
+                'FilesWithoutMetadata': 0
+            }
     
     def ResetScanState(self):
         """Reset the scan state to allow new scans."""

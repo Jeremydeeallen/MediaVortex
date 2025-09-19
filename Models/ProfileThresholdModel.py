@@ -17,3 +17,4 @@ class ProfileThresholdModel:
     FallbackVideoBitrateKbps: int = 0
     FallbackAudioBitrateKbps: int = 0
     TranscodeDownTo: str = ""
+    Quality: Optional[int] = None

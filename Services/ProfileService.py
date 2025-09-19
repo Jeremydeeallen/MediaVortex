@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from datetime import datetime
 from Models.TranscodeProfileModel import TranscodeProfileModel
 from Models.ProfileThresholdModel import ProfileThresholdModel
@@ -69,7 +69,7 @@ class ProfileService:
                     under_30_min_mb: int, under_65_min_mb: int, over_65_min_mb: int,
                     video_bitrate_kbps: int, audio_bitrate_kbps: int,
                     fallback_video_bitrate_kbps: int, fallback_audio_bitrate_kbps: int,
-                    transcode_down_to: str) -> ProfileThresholdModel:
+                    transcode_down_to: str, quality: int = None) -> ProfileThresholdModel:
         """Add a new threshold to a profile."""
         try:
             LoggingService.LogFunctionEntry("AddThreshold", 'ProfileService', profile_id, resolution, 
@@ -87,7 +87,8 @@ class ProfileService:
                 AudioBitrateKbps=audio_bitrate_kbps,
                 FallbackVideoBitrateKbps=fallback_video_bitrate_kbps,
                 FallbackAudioBitrateKbps=fallback_audio_bitrate_kbps,
-                TranscodeDownTo=transcode_down_to
+                TranscodeDownTo=transcode_down_to,
+                Quality=quality
             )
             
             LoggingService.LogInfo("Saving threshold to database...", 'AddThreshold', 'ProfileService')
@@ -124,3 +125,50 @@ class ProfileService:
             'profile': profile,
             'thresholds': thresholds
         }
+    
+    def AssignProfileToRootFolder(self, RootFolderPath: str, ProfileId: int) -> Dict[str, Any]:
+        """Assign a profile to all media files in a specific root folder."""
+        try:
+            LoggingService.LogFunctionEntry("AssignProfileToRootFolder", "ProfileService", RootFolderPath, ProfileId)
+            
+            # Validate that profile exists
+            profile = self.GetProfileById(ProfileId)
+            if not profile:
+                errorMsg = f"Profile with ID {ProfileId} not found"
+                LoggingService.LogError(errorMsg, "ProfileService", "AssignProfileToRootFolder")
+                return {"Success": False, "ErrorMessage": errorMsg, "FilesUpdated": 0}
+            
+            # Validate that root folder path is not empty
+            if not RootFolderPath or not RootFolderPath.strip():
+                errorMsg = "Root folder path cannot be empty"
+                LoggingService.LogError(errorMsg, "ProfileService", "AssignProfileToRootFolder")
+                return {"Success": False, "ErrorMessage": errorMsg, "FilesUpdated": 0}
+            
+            # Update media files in the root folder
+            filesUpdated = self.DatabaseManager.UpdateMediaFilesProfileByRootFolder(RootFolderPath.strip(), ProfileId)
+            
+            if filesUpdated > 0:
+                successMsg = f"Successfully assigned profile '{profile.ProfileName}' to {filesUpdated} files in root folder '{RootFolderPath}'"
+                LoggingService.LogInfo(successMsg, "ProfileService", "AssignProfileToRootFolder")
+                return {
+                    "Success": True, 
+                    "Message": successMsg,
+                    "FilesUpdated": filesUpdated,
+                    "ProfileName": profile.ProfileName,
+                    "RootFolderPath": RootFolderPath
+                }
+            else:
+                warningMsg = f"No files found in root folder '{RootFolderPath}' to assign profile '{profile.ProfileName}'"
+                LoggingService.LogWarning(warningMsg, "ProfileService", "AssignProfileToRootFolder")
+                return {
+                    "Success": True, 
+                    "Message": warningMsg,
+                    "FilesUpdated": 0,
+                    "ProfileName": profile.ProfileName,
+                    "RootFolderPath": RootFolderPath
+                }
+            
+        except Exception as e:
+            errorMsg = f"Exception assigning profile to root folder: {str(e)}"
+            LoggingService.LogException(errorMsg, e, "ProfileService", "AssignProfileToRootFolder")
+            return {"Success": False, "ErrorMessage": errorMsg, "FilesUpdated": 0}

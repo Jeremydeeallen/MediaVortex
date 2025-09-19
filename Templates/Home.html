@@ -3,26 +3,211 @@
 {% block title %}Home - MediaVortex{% endblock %}
 
 {% block content %}
-<div class="row">
-    <div class="col-12">
-        <div class="card">
-            <div class="card-body text-center">
-                <h1 class="card-title">
-                    <i class="fas fa-video text-primary"></i>
-                    Welcome to MediaVortex
-                </h1>
-                <p class="card-text lead">
-                    Your comprehensive media transcoding solution
-                </p>
-                <hr>
-                <p class="text-muted">
-                    This is a blank home page. Navigate to <strong>Settings</strong> to manage your transcoding profiles.
-                </p>
-                <a href="/settings" class="btn btn-primary btn-lg">
-                    <i class="fas fa-cog"></i> Go to Settings
-                </a>
+<div class="container-fluid">
+    <div class="row">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-body text-center">
+                    <h1 class="card-title">
+                        <i class="fas fa-video text-primary"></i>
+                        Welcome to MediaVortex
+                    </h1>
+                    <p class="card-text lead">
+                        Your comprehensive media transcoding solution
+                    </p>
+                    <hr>
+                    <p class="text-muted mb-4">
+                        Choose from the available features below to get started:
+                    </p>
+                    
+                    <!-- Navigation Cards -->
+                    <div class="row g-4">
+                        <!-- Settings Card -->
+                        <div class="col-md-6 col-lg-4">
+                            <div class="card h-100 border-primary">
+                                <div class="card-body text-center">
+                                    <i class="fas fa-cog fa-3x text-primary mb-3"></i>
+                                    <h5 class="card-title">Settings</h5>
+                                    <p class="card-text">Manage transcoding profiles and system configuration</p>
+                                    <a href="/settings" class="btn btn-primary">
+                                        <i class="fas fa-cog"></i> Go to Settings
+                                    </a>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- File Scanning Card -->
+                        <div class="col-md-6 col-lg-4">
+                            <div class="card h-100 border-info">
+                                <div class="card-body text-center">
+                                    <i class="fas fa-search fa-3x text-info mb-3"></i>
+                                    <h5 class="card-title">File Scanning</h5>
+                                    <p class="card-text">Discover and analyze media files in your directories</p>
+                                    <a href="/Scanning" class="btn btn-info">
+                                        <i class="fas fa-search"></i> Start Scanning
+                                    </a>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Transcoding Queue Card -->
+                        <div class="col-md-6 col-lg-4">
+                            <div class="card h-100 border-success">
+                                <div class="card-body text-center">
+                                    <i class="fas fa-list fa-3x text-success mb-3"></i>
+                                    <h5 class="card-title">Transcoding Queue</h5>
+                                    <p class="card-text">Manage and monitor your transcoding job queue</p>
+                                    <a href="/TranscodeQueue" class="btn btn-success">
+                                        <i class="fas fa-list"></i> View Queue
+                                    </a>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Transcoding Progress Card -->
+                        <div class="col-md-6 col-lg-4">
+                            <div class="card h-100 border-warning">
+                                <div class="card-body text-center">
+                                    <i class="fas fa-chart-line fa-3x text-warning mb-3"></i>
+                                    <h5 class="card-title">Transcoding Progress</h5>
+                                    <p class="card-text">Monitor real-time transcoding progress and history</p>
+                                    <a href="/TranscodeProgress" class="btn btn-warning">
+                                        <i class="fas fa-chart-line"></i> View Progress
+                                    </a>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Quick Actions Card -->
+                        <div class="col-md-6 col-lg-4">
+                            <div class="card h-100 border-secondary">
+                                <div class="card-body text-center">
+                                    <i class="fas fa-bolt fa-3x text-secondary mb-3"></i>
+                                    <h5 class="card-title">Quick Actions</h5>
+                                    <p class="card-text">Common transcoding operations and shortcuts</p>
+                                    <div class="btn-group-vertical w-100" role="group">
+                                        <button type="button" class="btn btn-outline-secondary btn-sm" onclick="populateQueue()">
+                                            <i class="fas fa-plus"></i> Populate Queue
+                                        </button>
+                                        <button type="button" class="btn btn-outline-secondary btn-sm" onclick="startTranscoding()">
+                                            <i class="fas fa-play"></i> Start Transcoding
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- System Status Card -->
+                        <div class="col-md-6 col-lg-4">
+                            <div class="card h-100 border-dark">
+                                <div class="card-body text-center">
+                                    <i class="fas fa-heartbeat fa-3x text-dark mb-3"></i>
+                                    <h5 class="card-title">System Status</h5>
+                                    <p class="card-text">Check system health and service status</p>
+                                    <button type="button" class="btn btn-dark" onclick="checkSystemStatus()">
+                                        <i class="fas fa-heartbeat"></i> Check Status
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
 </div>
+
+<script>
+// Quick action functions
+async function populateQueue() {
+    try {
+        const response = await fetch('/api/TranscodeQueue/PopulateQueue', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ MaxItems: 10 })
+        });
+        
+        const data = await response.json();
+        
+        if (data.Success) {
+            const itemsAdded = data.ItemsAdded || 0;
+            showAlert(`Successfully added ${itemsAdded} items to the queue`, 'success');
+        } else {
+            showAlert('Error populating queue: ' + data.ErrorMessage, 'danger');
+        }
+    } catch (error) {
+        showAlert('Error populating queue: ' + error.message, 'danger');
+    }
+}
+
+async function startTranscoding() {
+    try {
+        const response = await fetch('/api/Transcode/Start', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ MaxConcurrentJobs: 1 })
+        });
+        
+        const data = await response.json();
+        
+        if (data.Success) {
+            showAlert('Transcoding started successfully', 'success');
+        } else {
+            showAlert('Error starting transcoding: ' + data.ErrorMessage, 'danger');
+        }
+    } catch (error) {
+        showAlert('Error starting transcoding: ' + error.message, 'danger');
+    }
+}
+
+async function checkSystemStatus() {
+    try {
+        const response = await fetch('/api/health');
+        const data = await response.json();
+        
+        if (data.status === 'healthy') {
+            showAlert('System is healthy and running', 'success');
+        } else {
+            showAlert('System status: ' + data.message, 'warning');
+        }
+    } catch (error) {
+        showAlert('Error checking system status: ' + error.message, 'danger');
+    }
+}
+
+function showAlert(message, type) {
+    // Create alert container if it doesn't exist
+    let alertContainer = document.getElementById('AlertContainer');
+    if (!alertContainer) {
+        alertContainer = document.createElement('div');
+        alertContainer.id = 'AlertContainer';
+        alertContainer.className = 'position-fixed top-0 end-0 p-3';
+        alertContainer.style.zIndex = '1050';
+        document.body.appendChild(alertContainer);
+    }
+    
+    const alertId = 'alert-' + Date.now();
+    
+    const alertHtml = `
+        <div class="alert alert-${type} alert-dismissible fade show" role="alert" id="${alertId}">
+            ${message}
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+    `;
+    
+    alertContainer.insertAdjacentHTML('beforeend', alertHtml);
+    
+    // Auto-remove after 5 seconds
+    setTimeout(() => {
+        const alert = document.getElementById(alertId);
+        if (alert) {
+            alert.remove();
+        }
+    }, 5000);
+}
+</script>
 {% endblock %}

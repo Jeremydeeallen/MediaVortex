@@ -90,13 +90,15 @@ class FileScanningController:
         
         @self.Blueprint.route('/RootFolders', methods=['GET'])
         def GetRootFolders():
-            """Get root folders with pagination and filtering."""
+            """Get root folders with pagination, filtering, and sorting."""
             try:
                 page = int(request.args.get('Page', 1))
                 pageSize = int(request.args.get('PageSize', 10))
                 search = request.args.get('Search', '')
+                sortColumn = request.args.get('SortColumn', 'RootFolder')
+                sortOrder = request.args.get('SortOrder', 'ASC')
                 
-                result = self.ViewModel.GetRootFoldersPaginated(page, pageSize, search)
+                result = self.ViewModel.GetRootFoldersPaginated(page, pageSize, search, sortColumn, sortOrder)
                 return jsonify({
                     'Success': True,
                     'RootFolders': result['RootFolders'],
@@ -147,8 +149,12 @@ class FileScanningController:
                 pageSize = int(request.args.get('PageSize', 20))
                 search = request.args.get('Search', '')
                 rootFolderPath = request.args.get('RootFolderPath', '')
+                sortBy = request.args.get('SortBy', 'SizeMB')
+                sortOrder = request.args.get('SortOrder', 'DESC')
                 
-                result = self.ViewModel.GetMediaFilesPaginated(page, pageSize, search, rootFolderPath)
+                LoggingService.LogInfo(f"MediaFiles API called with SortBy={sortBy}, SortOrder={sortOrder}", "FileScanningController", "GetMediaFiles")
+                
+                result = self.ViewModel.GetMediaFilesPaginated(page, pageSize, search, rootFolderPath, sortBy, sortOrder)
                 return jsonify({
                     'Success': True,
                     'MediaFiles': result['MediaFiles'],
@@ -318,6 +324,24 @@ class FileScanningController:
                 return jsonify({
                     'Success': False,
                     'Error': f'Error getting scan directories: {str(e)}'
+                }), 500
+        
+        @self.Blueprint.route('/Statistics', methods=['GET'])
+        def GetStatistics():
+            """Get database statistics for the file scanning page."""
+            try:
+                result = self.ViewModel.GetStatistics()
+                return jsonify({
+                    'Success': True,
+                    'Statistics': result
+                }), 200
+                
+            except Exception as e:
+                LoggingService.LogException("Error getting statistics", e, "FileScanningController", "GetStatistics")
+                return jsonify({
+                    'Success': False,
+                    'Message': f'Error getting statistics: {str(e)}',
+                    'Error': 'StatisticsError'
                 }), 500
         
         @self.Blueprint.route('/Scanning', methods=['GET'])

@@ -1,10 +1,14 @@
 from typing import List, Optional, Dict, Any
+from datetime import datetime
 from Models.TranscodeProfileModel import TranscodeProfileModel
 from Models.ProfileThresholdModel import ProfileThresholdModel
 from Models.RootFolderModel import RootFolderModel
 from Models.MediaFileModel import MediaFileModel
 from Models.SeasonModel import SeasonModel
 from Models.FileScanResultModel import FileScanResultModel
+from Models.TranscodeQueueModel import TranscodeQueueModel
+from Models.TranscodeAttemptModel import TranscodeAttemptModel
+from Models.TranscodeFileModel import TranscodeFileModel
 from Services.DatabaseService import DatabaseService
 from Services.LoggingService import LoggingService
 
@@ -60,14 +64,14 @@ class DatabaseManager:
             try:
                 cursor = connection.cursor()
                 
-                if profile.Id is None:
+                if Profile.Id is None:
                     # Insert new profile
                     LoggingService.LogInfo("Inserting new profile...", "DatabaseManager", "SaveProfile")
                     query = """
                         INSERT INTO Profiles (ProfileName, Description, CreatedDate, LastModified)
                         VALUES (?, ?, ?, ?)
                     """
-                    parameters = (profile.ProfileName, profile.Description, profile.CreatedDate, profile.LastModified)
+                    parameters = (Profile.ProfileName, Profile.Description, Profile.CreatedDate, Profile.LastModified)
                     LoggingService.LogInfo("Insert parameters: {}", "DatabaseManager", "SaveProfile", parameters)
                     cursor.execute(query, parameters)
                     connection.commit()
@@ -76,19 +80,19 @@ class DatabaseManager:
                     return profile_id
                 else:
                     # Update existing profile
-                    LoggingService.LogInfo("Updating existing profile with ID: {}", "DatabaseManager", "SaveProfile", profile.Id)
+                    LoggingService.LogInfo("Updating existing profile with ID: {}", "DatabaseManager", "SaveProfile", Profile.Id)
                     query = """
                         UPDATE Profiles 
                         SET ProfileName = ?, Description = ?, LastModified = ?
                         WHERE Id = ?
                     """
-                    parameters = (profile.ProfileName, profile.Description, profile.LastModified, profile.Id)
+                    parameters = (Profile.ProfileName, Profile.Description, Profile.LastModified, Profile.Id)
                     LoggingService.LogInfo("Update parameters: {}", "DatabaseManager", "SaveProfile", parameters)
                     cursor.execute(query, parameters)
                     connection.commit()
                     affected_rows = cursor.rowcount
                     LoggingService.LogInfo("Profile update affected {} rows", "DatabaseManager", "SaveProfile", affected_rows)
-                    return profile.Id
+                    return Profile.Id
             finally:
                 connection.close()
         except Exception as e:
@@ -113,7 +117,7 @@ class DatabaseManager:
         query = """
             SELECT Id, ProfileId, Resolution, Under30MinMB, Under65MinMB, Over65MinMB,
                    VideoBitrateKbps, AudioBitrateKbps, FallbackVideoBitrateKbps,
-                   FallbackAudioBitrateKbps, TranscodeDownTo
+                   FallbackAudioBitrateKbps, TranscodeDownTo, Quality
             FROM ProfileThresholds 
             WHERE ProfileId = ?
             ORDER BY Resolution
@@ -133,7 +137,8 @@ class DatabaseManager:
                 AudioBitrateKbps=row['AudioBitrateKbps'],
                 FallbackVideoBitrateKbps=row['FallbackVideoBitrateKbps'],
                 FallbackAudioBitrateKbps=row['FallbackAudioBitrateKbps'],
-                TranscodeDownTo=row['TranscodeDownTo']
+                TranscodeDownTo=row['TranscodeDownTo'],
+                Quality=row['Quality']
             )
             thresholds.append(threshold)
         
@@ -148,51 +153,51 @@ class DatabaseManager:
             try:
                 cursor = connection.cursor()
                 
-                if threshold.Id is None:
+                if Threshold.Id is None:
                     # Insert new threshold
                     LoggingService.LogInfo("Inserting new threshold...")
                     query = """
                         INSERT INTO ProfileThresholds 
                         (ProfileId, Resolution, Under30MinMB, Under65MinMB, Over65MinMB,
                          VideoBitrateKbps, AudioBitrateKbps, FallbackVideoBitrateKbps,
-                         FallbackAudioBitrateKbps, TranscodeDownTo)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                         FallbackAudioBitrateKbps, TranscodeDownTo, Quality)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """
                     parameters = (
-                        threshold.ProfileId, threshold.Resolution, threshold.Under30MinMB,
-                        threshold.Under65MinMB, threshold.Over65MinMB, threshold.VideoBitrateKbps,
-                        threshold.AudioBitrateKbps, threshold.FallbackVideoBitrateKbps,
-                        threshold.FallbackAudioBitrateKbps, threshold.TranscodeDownTo
+                        Threshold.ProfileId, Threshold.Resolution, Threshold.Under30MinMB,
+                        Threshold.Under65MinMB, Threshold.Over65MinMB, Threshold.VideoBitrateKbps,
+                        Threshold.AudioBitrateKbps, Threshold.FallbackVideoBitrateKbps,
+                        Threshold.FallbackAudioBitrateKbps, Threshold.TranscodeDownTo, Threshold.Quality
                     )
-                    LoggingService.LogInfo("Insert threshold parameters: {}", "DatabaseManager", "SaveThreshold", parameters)
+                    LoggingService.LogInfo(f"Insert threshold parameters: {parameters}", "SaveThreshold", "DatabaseManager")
                     cursor.execute(query, parameters)
                     connection.commit()
                     threshold_id = cursor.lastrowid
-                    LoggingService.LogInfo("Threshold inserted with ID: {}", "DatabaseManager", "SaveThreshold", threshold_id)
+                    LoggingService.LogInfo(f"Threshold inserted with ID: {threshold_id}", "SaveThreshold", "DatabaseManager")
                     return threshold_id
                 else:
                     # Update existing threshold
-                    LoggingService.LogInfo("Updating existing threshold with ID: {}", "DatabaseManager", "SaveThreshold", threshold.Id)
+                    LoggingService.LogInfo(f"Updating existing threshold with ID: {Threshold.Id}", "SaveThreshold", "DatabaseManager")
                     query = """
                         UPDATE ProfileThresholds 
                         SET ProfileId = ?, Resolution = ?, Under30MinMB = ?, Under65MinMB = ?,
                             Over65MinMB = ?, VideoBitrateKbps = ?, AudioBitrateKbps = ?,
                             FallbackVideoBitrateKbps = ?, FallbackAudioBitrateKbps = ?,
-                            TranscodeDownTo = ?
+                            TranscodeDownTo = ?, Quality = ?
                         WHERE Id = ?
                     """
                     parameters = (
-                        threshold.ProfileId, threshold.Resolution, threshold.Under30MinMB,
-                        threshold.Under65MinMB, threshold.Over65MinMB, threshold.VideoBitrateKbps,
-                        threshold.AudioBitrateKbps, threshold.FallbackVideoBitrateKbps,
-                        threshold.FallbackAudioBitrateKbps, threshold.TranscodeDownTo, threshold.Id
+                        Threshold.ProfileId, Threshold.Resolution, Threshold.Under30MinMB,
+                        Threshold.Under65MinMB, Threshold.Over65MinMB, Threshold.VideoBitrateKbps,
+                        Threshold.AudioBitrateKbps, Threshold.FallbackVideoBitrateKbps,
+                        Threshold.FallbackAudioBitrateKbps, Threshold.TranscodeDownTo, Threshold.Quality, Threshold.Id
                     )
-                    LoggingService.LogInfo("Update threshold parameters: {}", "DatabaseManager", "SaveThreshold", parameters)
+                    LoggingService.LogInfo(f"Update threshold parameters: {parameters}", "SaveThreshold", "DatabaseManager")
                     cursor.execute(query, parameters)
                     connection.commit()
                     affected_rows = cursor.rowcount
-                    LoggingService.LogInfo("Threshold update affected {} rows", "DatabaseManager", "SaveThreshold", affected_rows)
-                    return threshold.Id
+                    LoggingService.LogInfo(f"Threshold update affected {affected_rows} rows", "SaveThreshold", "DatabaseManager")
+                    return Threshold.Id
             finally:
                 connection.close()
         except Exception as e:
@@ -205,9 +210,18 @@ class DatabaseManager:
         return affected_rows > 0
     
     # Root Folder Management Methods
-    def GetAllRootFolders(self) -> List[RootFolderModel]:
-        """Get all root folders."""
-        query = "SELECT Id, RootFolder, LastScannedDate, TotalSizeGB FROM RootFolders ORDER BY RootFolder"
+    def GetAllRootFolders(self, SortColumn: str = 'RootFolder', SortOrder: str = 'ASC') -> List[RootFolderModel]:
+        """Get all root folders with optional sorting."""
+        # Validate sort column to prevent SQL injection
+        ValidColumns = ['Id', 'RootFolder', 'LastScannedDate', 'TotalSizeGB']
+        if SortColumn not in ValidColumns:
+            SortColumn = 'RootFolder'
+        
+        # Validate sort order
+        if SortOrder.upper() not in ['ASC', 'DESC']:
+            SortOrder = 'ASC'
+        
+        query = f"SELECT Id, RootFolder, LastScannedDate, TotalSizeGB FROM RootFolders ORDER BY {SortColumn} {SortOrder.upper()}"
         rows = self.DatabaseService.ExecuteQuery(query)
         
         rootFolders = []
@@ -247,14 +261,14 @@ class DatabaseManager:
             try:
                 cursor = connection.cursor()
                 
-                if rootFolder.Id is None:
+                if RootFolder.Id is None:
                     # Insert new root folder
                     LoggingService.LogInfo("Inserting new root folder...")
                     query = """
                         INSERT INTO RootFolders (RootFolder, LastScannedDate, TotalSizeGB)
                         VALUES (?, ?, ?)
                     """
-                    parameters = (rootFolder.RootFolder, rootFolder.LastScannedDate, rootFolder.TotalSizeGB)
+                    parameters = (RootFolder.RootFolder, RootFolder.LastScannedDate, RootFolder.TotalSizeGB)
                     LoggingService.LogInfo("Insert root folder parameters: {}", "DatabaseManager", "SaveRootFolder", parameters)
                     cursor.execute(query, parameters)
                     connection.commit()
@@ -263,19 +277,19 @@ class DatabaseManager:
                     return rootFolderId
                 else:
                     # Update existing root folder
-                    LoggingService.LogInfo("Updating existing root folder with ID: {}", "DatabaseManager", "SaveRootFolder", rootFolder.Id)
+                    LoggingService.LogInfo("Updating existing root folder with ID: {}", "DatabaseManager", "SaveRootFolder", RootFolder.Id)
                     query = """
                         UPDATE RootFolders 
                         SET RootFolder = ?, LastScannedDate = ?, TotalSizeGB = ?
                         WHERE Id = ?
                     """
-                    parameters = (rootFolder.RootFolder, rootFolder.LastScannedDate, rootFolder.TotalSizeGB, rootFolder.Id)
+                    parameters = (RootFolder.RootFolder, RootFolder.LastScannedDate, RootFolder.TotalSizeGB, RootFolder.Id)
                     LoggingService.LogInfo("Update root folder parameters: {}", "DatabaseManager", "SaveRootFolder", parameters)
                     cursor.execute(query, parameters)
                     connection.commit()
                     affectedRows = cursor.rowcount
                     LoggingService.LogInfo("Root folder update affected {} rows", "DatabaseManager", "SaveRootFolder", affectedRows)
-                    return rootFolder.Id
+                    return RootFolder.Id
             finally:
                 connection.close()
         except Exception as e:
@@ -301,8 +315,7 @@ class DatabaseManager:
             SELECT Id, SeasonId, FilePath, FileName, SizeMB, VideoBitrateKbps, AudioBitrateKbps,
                    Resolution, Codec, DurationMinutes, FrameRate, LastScannedDate,
                    CompressionPotential, AssignedProfile
-            FROM MediaFiles 
-            ORDER BY FilePath
+            FROM MediaFiles
         """
         rows = self.DatabaseService.ExecuteQuery(query)
         
@@ -433,7 +446,6 @@ class DatabaseManager:
                    CompressionPotential, AssignedProfile
             FROM MediaFiles 
             WHERE FilePath LIKE ?
-            ORDER BY FilePath
         """
         rows = self.DatabaseService.ExecuteQuery(query, (f"{RootFolderPath}%",))
         
@@ -663,3 +675,609 @@ class DatabaseManager:
                 })
         
         return scanDirs
+    
+    # TranscodeQueue Management Methods
+    def GetAllTranscodeQueueItems(self) -> List[TranscodeQueueModel]:
+        """Get all transcoding queue items."""
+        query = """
+            SELECT Id, FilePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted
+            FROM TranscodeQueue 
+            ORDER BY Priority DESC, DateAdded ASC
+        """
+        rows = self.DatabaseService.ExecuteQuery(query)
+        
+        queueItems = []
+        for row in rows:
+            queueItem = TranscodeQueueModel(
+                Id=row['Id'],
+                FilePath=row['FilePath'],
+                FileName=row['FileName'],
+                Directory=row['Directory'],
+                SizeBytes=row['SizeBytes'],
+                SizeMB=row['SizeMB'],
+                Priority=row['Priority'],
+                Status=row['Status'],
+                DateAdded=row['DateAdded'],
+                DateStarted=row['DateStarted']
+            )
+            queueItems.append(queueItem)
+        
+        return queueItems
+    
+    def GetTranscodeQueueItemById(self, ItemId: int) -> Optional[TranscodeQueueModel]:
+        """Get a specific transcoding queue item by ID."""
+        query = """
+            SELECT Id, FilePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted
+            FROM TranscodeQueue 
+            WHERE Id = ?
+        """
+        rows = self.DatabaseService.ExecuteQuery(query, (ItemId,))
+        
+        if not rows:
+            return None
+        
+        row = rows[0]
+        return TranscodeQueueModel(
+            Id=row['Id'],
+            FilePath=row['FilePath'],
+            FileName=row['FileName'],
+            Directory=row['Directory'],
+            SizeBytes=row['SizeBytes'],
+            SizeMB=row['SizeMB'],
+            Priority=row['Priority'],
+            Status=row['Status'],
+            DateAdded=row['DateAdded'],
+            DateStarted=row['DateStarted']
+        )
+    
+    def SaveTranscodeQueueItem(self, QueueItem: TranscodeQueueModel) -> int:
+        """Save a transcoding queue item (insert or update) and return the item ID."""
+        try:
+            LoggingService.LogFunctionEntry("SaveTranscodeQueueItem", "DatabaseManager", QueueItem.Id, QueueItem.FilePath, QueueItem.Status)
+            
+            connection = self.DatabaseService.GetConnection()
+            try:
+                cursor = connection.cursor()
+                
+                if QueueItem.Id is None:
+                    # Insert new queue item
+                    LoggingService.LogInfo("Inserting new transcoding queue item...", "DatabaseManager", "SaveTranscodeQueueItem")
+                    query = """
+                        INSERT INTO TranscodeQueue 
+                        (FilePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """
+                    parameters = (
+                        QueueItem.FilePath, QueueItem.FileName, QueueItem.Directory,
+                        QueueItem.SizeBytes, QueueItem.SizeMB, QueueItem.Priority,
+                        QueueItem.Status, QueueItem.DateAdded, QueueItem.DateStarted
+                    )
+                    LoggingService.LogInfo(f"Insert queue item parameters: {parameters}", "DatabaseManager", "SaveTranscodeQueueItem")
+                    cursor.execute(query, parameters)
+                    connection.commit()
+                    itemId = cursor.lastrowid
+                    LoggingService.LogInfo(f"Queue item inserted with ID: {itemId}", "DatabaseManager", "SaveTranscodeQueueItem")
+                    return itemId
+                else:
+                    # Update existing queue item
+                    LoggingService.LogInfo(f"Updating existing queue item with ID: {QueueItem.Id}", "DatabaseManager", "SaveTranscodeQueueItem")
+                    query = """
+                        UPDATE TranscodeQueue 
+                        SET FilePath = ?, FileName = ?, Directory = ?, SizeBytes = ?, SizeMB = ?,
+                            Priority = ?, Status = ?, DateAdded = ?, DateStarted = ?
+                        WHERE Id = ?
+                    """
+                    parameters = (
+                        QueueItem.FilePath, QueueItem.FileName, QueueItem.Directory,
+                        QueueItem.SizeBytes, QueueItem.SizeMB, QueueItem.Priority,
+                        QueueItem.Status, QueueItem.DateAdded, QueueItem.DateStarted, QueueItem.Id
+                    )
+                    LoggingService.LogInfo(f"Update queue item parameters: {parameters}", "DatabaseManager", "SaveTranscodeQueueItem")
+                    cursor.execute(query, parameters)
+                    connection.commit()
+                    affectedRows = cursor.rowcount
+                    LoggingService.LogInfo(f"Queue item update affected {affectedRows} rows", "DatabaseManager", "SaveTranscodeQueueItem")
+                    return QueueItem.Id
+            finally:
+                connection.close()
+        except Exception as e:
+            LoggingService.LogException("Exception in SaveTranscodeQueueItem", e, "DatabaseManager", "SaveTranscodeQueueItem")
+            raise
+    
+    def DeleteTranscodeQueueItem(self, ItemId: int) -> bool:
+        """Delete a transcoding queue item."""
+        affectedRows = self.DatabaseService.ExecuteNonQuery("DELETE FROM TranscodeQueue WHERE Id = ?", (ItemId,))
+        return affectedRows > 0
+    
+    def GetTranscodeQueueItemsByStatus(self, Status: str) -> List[TranscodeQueueModel]:
+        """Get all transcoding queue items with a specific status."""
+        query = """
+            SELECT Id, FilePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted
+            FROM TranscodeQueue 
+            WHERE Status = ?
+            ORDER BY Priority DESC, DateAdded ASC
+        """
+        rows = self.DatabaseService.ExecuteQuery(query, (Status,))
+        
+        queueItems = []
+        for row in rows:
+            queueItem = TranscodeQueueModel(
+                Id=row['Id'],
+                FilePath=row['FilePath'],
+                FileName=row['FileName'],
+                Directory=row['Directory'],
+                SizeBytes=row['SizeBytes'],
+                SizeMB=row['SizeMB'],
+                Priority=row['Priority'],
+                Status=row['Status'],
+                DateAdded=row['DateAdded'],
+                DateStarted=row['DateStarted']
+            )
+            queueItems.append(queueItem)
+        
+        return queueItems
+    
+    def ClearAllTranscodeQueueItems(self) -> int:
+        """Clear all items from the transcoding queue and return the count of deleted items."""
+        try:
+            LoggingService.LogFunctionEntry("ClearAllTranscodeQueueItems", "DatabaseManager")
+            
+            # First get the count of items to be deleted for logging
+            countQuery = "SELECT COUNT(*) as Count FROM TranscodeQueue"
+            countResult = self.DatabaseService.ExecuteQuery(countQuery)
+            itemsToDelete = countResult[0]['Count'] if countResult else 0
+            
+            if itemsToDelete > 0:
+                # Delete all items from the queue
+                deleteQuery = "DELETE FROM TranscodeQueue"
+                affectedRows = self.DatabaseService.ExecuteNonQuery(deleteQuery)
+                
+                LoggingService.LogInfo(f"Cleared {affectedRows} items from TranscodeQueue", "DatabaseManager", "ClearAllTranscodeQueueItems")
+                return affectedRows
+            else:
+                LoggingService.LogInfo("No items found in TranscodeQueue to clear", "DatabaseManager", "ClearAllTranscodeQueueItems")
+                return 0
+                
+        except Exception as e:
+            LoggingService.LogException("Exception clearing all transcoding queue items", e, "DatabaseManager", "ClearAllTranscodeQueueItems")
+            return 0
+    
+    # TranscodeAttempts Management Methods
+    def GetAllTranscodeAttempts(self) -> List[TranscodeAttemptModel]:
+        """Get all transcoding attempts."""
+        query = """
+            SELECT Id, FilePath, AttemptDate, Quality, OldSizeBytes, NewSizeBytes, Success,
+                   SizeReductionBytes, SizeReductionPercent, ErrorMessage, TranscodeDurationSeconds,
+                   HandbrakeSettings, AudioBitrateKbps, VideoBitrateKbps, ProfileName, VMAF, VMAF
+            FROM TranscodeAttempts 
+            ORDER BY AttemptDate DESC
+        """
+        rows = self.DatabaseService.ExecuteQuery(query)
+        
+        attempts = []
+        for row in rows:
+            attempt = TranscodeAttemptModel(
+                Id=row['Id'],
+                FilePath=row['FilePath'],
+                AttemptDate=row['AttemptDate'],
+                Quality=row['Quality'],
+                OldSizeBytes=row['OldSizeBytes'],
+                NewSizeBytes=row['NewSizeBytes'],
+                Success=row['Success'],
+                SizeReductionBytes=row['SizeReductionBytes'],
+                SizeReductionPercent=row['SizeReductionPercent'],
+                ErrorMessage=row['ErrorMessage'],
+                TranscodeDurationSeconds=row['TranscodeDurationSeconds'],
+                HandbrakeSettings=row['HandbrakeSettings'],
+                AudioBitrateKbps=row['AudioBitrateKbps'],
+                VideoBitrateKbps=row['VideoBitrateKbps'],
+                ProfileName=row['ProfileName'],
+                VMAF=row['VMAF']
+            )
+            attempts.append(attempt)
+        
+        return attempts
+    
+    def GetTranscodeAttemptsByFilePath(self, FilePath: str) -> List[TranscodeAttemptModel]:
+        """Get all transcoding attempts for a specific file."""
+        query = """
+            SELECT Id, FilePath, AttemptDate, Quality, OldSizeBytes, NewSizeBytes, Success,
+                   SizeReductionBytes, SizeReductionPercent, ErrorMessage, TranscodeDurationSeconds,
+                   HandbrakeSettings, AudioBitrateKbps, VideoBitrateKbps, ProfileName, VMAF
+            FROM TranscodeAttempts 
+            WHERE FilePath = ?
+            ORDER BY AttemptDate DESC
+        """
+        rows = self.DatabaseService.ExecuteQuery(query, (FilePath,))
+        
+        attempts = []
+        for row in rows:
+            attempt = TranscodeAttemptModel(
+                Id=row['Id'],
+                FilePath=row['FilePath'],
+                AttemptDate=row['AttemptDate'],
+                Quality=row['Quality'],
+                OldSizeBytes=row['OldSizeBytes'],
+                NewSizeBytes=row['NewSizeBytes'],
+                Success=row['Success'],
+                SizeReductionBytes=row['SizeReductionBytes'],
+                SizeReductionPercent=row['SizeReductionPercent'],
+                ErrorMessage=row['ErrorMessage'],
+                TranscodeDurationSeconds=row['TranscodeDurationSeconds'],
+                HandbrakeSettings=row['HandbrakeSettings'],
+                AudioBitrateKbps=row['AudioBitrateKbps'],
+                VideoBitrateKbps=row['VideoBitrateKbps'],
+                ProfileName=row['ProfileName'],
+                VMAF=row['VMAF']
+            )
+            attempts.append(attempt)
+        
+        return attempts
+    
+    def SaveTranscodeAttempt(self, Attempt: TranscodeAttemptModel) -> int:
+        """Save a transcoding attempt (insert or update) and return the attempt ID."""
+        try:
+            LoggingService.LogFunctionEntry("SaveTranscodeAttempt", "DatabaseManager", Attempt.Id, Attempt.FilePath, Attempt.Success)
+            
+            connection = self.DatabaseService.GetConnection()
+            try:
+                cursor = connection.cursor()
+                
+                if Attempt.Id is None:
+                    # Insert new attempt
+                    LoggingService.LogInfo("Inserting new transcoding attempt...", "DatabaseManager", "SaveTranscodeAttempt")
+                    query = """
+                        INSERT INTO TranscodeAttempts 
+                        (FilePath, AttemptDate, Quality, OldSizeBytes, NewSizeBytes, Success,
+                         SizeReductionBytes, SizeReductionPercent, ErrorMessage, TranscodeDurationSeconds,
+                         HandbrakeSettings, AudioBitrateKbps, VideoBitrateKbps, ProfileName, VMAF)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """
+                    parameters = (
+                        Attempt.FilePath, Attempt.AttemptDate, Attempt.Quality,
+                        Attempt.OldSizeBytes, Attempt.NewSizeBytes, Attempt.Success,
+                        Attempt.SizeReductionBytes, Attempt.SizeReductionPercent, Attempt.ErrorMessage,
+                        Attempt.TranscodeDurationSeconds, Attempt.HandbrakeSettings,
+                        Attempt.AudioBitrateKbps, Attempt.VideoBitrateKbps, Attempt.ProfileName, Attempt.VMAF
+                    )
+                    LoggingService.LogInfo(f"Insert attempt parameters: {parameters}", "DatabaseManager", "SaveTranscodeAttempt")
+                    cursor.execute(query, parameters)
+                    connection.commit()
+                    attemptId = cursor.lastrowid
+                    LoggingService.LogInfo(f"Attempt inserted with ID: {attemptId}", "DatabaseManager", "SaveTranscodeAttempt")
+                    return attemptId
+                else:
+                    # Update existing attempt
+                    LoggingService.LogInfo(f"Updating existing attempt with ID: {Attempt.Id}", "DatabaseManager", "SaveTranscodeAttempt")
+                    query = """
+                        UPDATE TranscodeAttempts 
+                        SET FilePath = ?, AttemptDate = ?, Quality = ?, OldSizeBytes = ?, NewSizeBytes = ?,
+                            Success = ?, SizeReductionBytes = ?, SizeReductionPercent = ?, ErrorMessage = ?,
+                            TranscodeDurationSeconds = ?, HandbrakeSettings = ?, AudioBitrateKbps = ?,
+                            VideoBitrateKbps = ?, ProfileName = ?, VMAF = ?
+                        WHERE Id = ?
+                    """
+                    parameters = (
+                        Attempt.FilePath, Attempt.AttemptDate, Attempt.Quality,
+                        Attempt.OldSizeBytes, Attempt.NewSizeBytes, Attempt.Success,
+                        Attempt.SizeReductionBytes, Attempt.SizeReductionPercent, Attempt.ErrorMessage,
+                        Attempt.TranscodeDurationSeconds, Attempt.HandbrakeSettings,
+                        Attempt.AudioBitrateKbps, Attempt.VideoBitrateKbps, Attempt.ProfileName, Attempt.VMAF, Attempt.Id
+                    )
+                    LoggingService.LogInfo(f"Update attempt parameters: {parameters}", "DatabaseManager", "SaveTranscodeAttempt")
+                    cursor.execute(query, parameters)
+                    connection.commit()
+                    affectedRows = cursor.rowcount
+                    LoggingService.LogInfo(f"Attempt update affected {affectedRows} rows", "DatabaseManager", "SaveTranscodeAttempt")
+                    return Attempt.Id
+            finally:
+                connection.close()
+        except Exception as e:
+            LoggingService.LogException("Exception in SaveTranscodeAttempt", e, "DatabaseManager", "SaveTranscodeAttempt")
+            raise
+    
+    # TranscodeFiles Management Methods
+    def GetAllTranscodeFiles(self) -> List[TranscodeFileModel]:
+        """Get all transcoding file records."""
+        query = """
+            SELECT Id, FilePath, AllQualitiesFailed, SuccessfullyTranscoded, FirstAttemptDate,
+                   LastAttemptDate, SuccessDate, FinalQuality, FinalSizeBytes, TotalAttempts,
+                   OriginalFilePath, FinalFilePath
+            FROM TranscodeFiles 
+            ORDER BY FirstAttemptDate DESC
+        """
+        rows = self.DatabaseService.ExecuteQuery(query)
+        
+        transcodeFiles = []
+        for row in rows:
+            transcodeFile = TranscodeFileModel(
+                Id=row['Id'],
+                FilePath=row['FilePath'],
+                AllQualitiesFailed=row['AllQualitiesFailed'],
+                SuccessfullyTranscoded=row['SuccessfullyTranscoded'],
+                FirstAttemptDate=row['FirstAttemptDate'],
+                LastAttemptDate=row['LastAttemptDate'],
+                SuccessDate=row['SuccessDate'],
+                FinalQuality=row['FinalQuality'],
+                FinalSizeBytes=row['FinalSizeBytes'],
+                TotalAttempts=row['TotalAttempts'],
+                OriginalFilePath=row['OriginalFilePath'],
+                FinalFilePath=row['FinalFilePath']
+            )
+            transcodeFiles.append(transcodeFile)
+        
+        return transcodeFiles
+    
+    def GetTranscodeFileByFilePath(self, FilePath: str) -> Optional[TranscodeFileModel]:
+        """Get transcoding file record by file path."""
+        query = """
+            SELECT Id, FilePath, AllQualitiesFailed, SuccessfullyTranscoded, FirstAttemptDate,
+                   LastAttemptDate, SuccessDate, FinalQuality, FinalSizeBytes, TotalAttempts,
+                   OriginalFilePath, FinalFilePath
+            FROM TranscodeFiles 
+            WHERE FilePath = ?
+        """
+        rows = self.DatabaseService.ExecuteQuery(query, (FilePath,))
+        
+        if not rows:
+            return None
+        
+        row = rows[0]
+        return TranscodeFileModel(
+            Id=row['Id'],
+            FilePath=row['FilePath'],
+            AllQualitiesFailed=row['AllQualitiesFailed'],
+            SuccessfullyTranscoded=row['SuccessfullyTranscoded'],
+            FirstAttemptDate=row['FirstAttemptDate'],
+            LastAttemptDate=row['LastAttemptDate'],
+            SuccessDate=row['SuccessDate'],
+            FinalQuality=row['FinalQuality'],
+            FinalSizeBytes=row['FinalSizeBytes'],
+            TotalAttempts=row['TotalAttempts'],
+            OriginalFilePath=row['OriginalFilePath'],
+            FinalFilePath=row['FinalFilePath']
+        )
+    
+    def SaveTranscodeFile(self, TranscodeFile: TranscodeFileModel) -> int:
+        """Save a transcoding file record (insert or update) and return the file ID."""
+        try:
+            LoggingService.LogFunctionEntry("SaveTranscodeFile", "DatabaseManager", TranscodeFile.Id, TranscodeFile.FilePath, TranscodeFile.SuccessfullyTranscoded)
+            
+            connection = self.DatabaseService.GetConnection()
+            try:
+                cursor = connection.cursor()
+                
+                if TranscodeFile.Id is None:
+                    # Insert new transcode file
+                    LoggingService.LogInfo("Inserting new transcoding file record...", "DatabaseManager", "SaveTranscodeFile")
+                    query = """
+                        INSERT INTO TranscodeFiles 
+                        (FilePath, AllQualitiesFailed, SuccessfullyTranscoded, FirstAttemptDate,
+                         LastAttemptDate, SuccessDate, FinalQuality, FinalSizeBytes, TotalAttempts,
+                         OriginalFilePath, FinalFilePath)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """
+                    parameters = (
+                        TranscodeFile.FilePath, TranscodeFile.AllQualitiesFailed, TranscodeFile.SuccessfullyTranscoded,
+                        TranscodeFile.FirstAttemptDate, TranscodeFile.LastAttemptDate, TranscodeFile.SuccessDate,
+                        TranscodeFile.FinalQuality, TranscodeFile.FinalSizeBytes, TranscodeFile.TotalAttempts,
+                        TranscodeFile.OriginalFilePath, TranscodeFile.FinalFilePath
+                    )
+                    LoggingService.LogInfo(f"Insert transcode file parameters: {parameters}", "DatabaseManager", "SaveTranscodeFile")
+                    cursor.execute(query, parameters)
+                    connection.commit()
+                    fileId = cursor.lastrowid
+                    LoggingService.LogInfo(f"Transcode file inserted with ID: {fileId}", "DatabaseManager", "SaveTranscodeFile")
+                    return fileId
+                else:
+                    # Update existing transcode file
+                    LoggingService.LogInfo(f"Updating existing transcode file with ID: {TranscodeFile.Id}", "DatabaseManager", "SaveTranscodeFile")
+                    query = """
+                        UPDATE TranscodeFiles 
+                        SET FilePath = ?, AllQualitiesFailed = ?, SuccessfullyTranscoded = ?, FirstAttemptDate = ?,
+                            LastAttemptDate = ?, SuccessDate = ?, FinalQuality = ?, FinalSizeBytes = ?,
+                            TotalAttempts = ?, OriginalFilePath = ?, FinalFilePath = ?
+                        WHERE Id = ?
+                    """
+                    parameters = (
+                        TranscodeFile.FilePath, TranscodeFile.AllQualitiesFailed, TranscodeFile.SuccessfullyTranscoded,
+                        TranscodeFile.FirstAttemptDate, TranscodeFile.LastAttemptDate, TranscodeFile.SuccessDate,
+                        TranscodeFile.FinalQuality, TranscodeFile.FinalSizeBytes, TranscodeFile.TotalAttempts,
+                        TranscodeFile.OriginalFilePath, TranscodeFile.FinalFilePath, TranscodeFile.Id
+                    )
+                    LoggingService.LogInfo(f"Update transcode file parameters: {parameters}", "DatabaseManager", "SaveTranscodeFile")
+                    cursor.execute(query, parameters)
+                    connection.commit()
+                    affectedRows = cursor.rowcount
+                    LoggingService.LogInfo(f"Transcode file update affected {affectedRows} rows", "DatabaseManager", "SaveTranscodeFile")
+                    return TranscodeFile.Id
+            finally:
+                connection.close()
+        except Exception as e:
+            LoggingService.LogException("Exception in SaveTranscodeFile", e, "DatabaseManager", "SaveTranscodeFile")
+            raise
+    
+    def UpdateTranscodeFileStatus(self, FilePath: str, SuccessfullyTranscoded: bool = None, 
+                                 AllQualitiesFailed: bool = None, FinalQuality: int = None,
+                                 FinalSizeBytes: int = None, FinalFilePath: str = None) -> bool:
+        """Update transcoding file status fields."""
+        try:
+            LoggingService.LogFunctionEntry("UpdateTranscodeFileStatus", "DatabaseManager", FilePath, SuccessfullyTranscoded, AllQualitiesFailed)
+            
+            # Build dynamic update query
+            updateFields = []
+            parameters = []
+            
+            if SuccessfullyTranscoded is not None:
+                updateFields.append("SuccessfullyTranscoded = ?")
+                parameters.append(SuccessfullyTranscoded)
+            
+            if AllQualitiesFailed is not None:
+                updateFields.append("AllQualitiesFailed = ?")
+                parameters.append(AllQualitiesFailed)
+            
+            if FinalQuality is not None:
+                updateFields.append("FinalQuality = ?")
+                parameters.append(FinalQuality)
+            
+            if FinalSizeBytes is not None:
+                updateFields.append("FinalSizeBytes = ?")
+                parameters.append(FinalSizeBytes)
+            
+            if FinalFilePath is not None:
+                updateFields.append("FinalFilePath = ?")
+                parameters.append(FinalFilePath)
+            
+            if not updateFields:
+                LoggingService.LogWarning("No fields to update", "DatabaseManager", "UpdateTranscodeFileStatus")
+                return False
+            
+            # Add LastAttemptDate update
+            updateFields.append("LastAttemptDate = ?")
+            parameters.append(datetime.now())
+            
+            # Add FilePath to parameters for WHERE clause
+            parameters.append(FilePath)
+            
+            query = f"UPDATE TranscodeFiles SET {', '.join(updateFields)} WHERE FilePath = ?"
+            
+            affectedRows = self.DatabaseService.ExecuteNonQuery(query, parameters)
+            LoggingService.LogInfo(f"Updated transcode file status for {FilePath}, affected {affectedRows} rows", "DatabaseManager", "UpdateTranscodeFileStatus")
+            return affectedRows > 0
+            
+        except Exception as e:
+            LoggingService.LogException("Exception in UpdateTranscodeFileStatus", e, "DatabaseManager", "UpdateTranscodeFileStatus")
+            return False
+    
+    # Queue Statistics Methods
+    def GetQueueStatistics(self) -> Dict[str, Any]:
+        """Get current queue statistics."""
+        try:
+            LoggingService.LogFunctionEntry("GetQueueStatistics", "DatabaseManager")
+            
+            # Get total counts by status
+            query = """
+                SELECT Status, COUNT(*) as Count
+                FROM TranscodeQueue 
+                GROUP BY Status
+            """
+            rows = self.DatabaseService.ExecuteQuery(query)
+            
+            # Initialize counts
+            totalJobs = 0
+            pendingJobs = 0
+            runningJobs = 0
+            completedJobs = 0
+            failedJobs = 0
+            cancelledJobs = 0
+            
+            for row in rows:
+                status = row['Status']
+                count = row['Count']
+                totalJobs += count
+                
+                if status == "Pending":
+                    pendingJobs = count
+                elif status == "Running":
+                    runningJobs = count
+                elif status == "Completed":
+                    completedJobs = count
+                elif status == "Failed":
+                    failedJobs = count
+                elif status == "Cancelled":
+                    cancelledJobs = count
+            
+            # Get active job IDs
+            activeJobsQuery = "SELECT Id FROM TranscodeQueue WHERE Status = 'Running' ORDER BY Priority DESC, DateAdded ASC"
+            activeJobRows = self.DatabaseService.ExecuteQuery(activeJobsQuery)
+            activeJobs = [row['Id'] for row in activeJobRows]
+            
+            # Get next job ID (highest priority pending job)
+            nextJobQuery = """
+                SELECT Id FROM TranscodeQueue 
+                WHERE Status = 'Pending' 
+                ORDER BY Priority DESC, DateAdded ASC 
+                LIMIT 1
+            """
+            nextJobRows = self.DatabaseService.ExecuteQuery(nextJobQuery)
+            nextJobId = nextJobRows[0]['Id'] if nextJobRows else None
+            
+            statistics = {
+                'TotalJobs': totalJobs,
+                'PendingJobs': pendingJobs,
+                'RunningJobs': runningJobs,
+                'CompletedJobs': completedJobs,
+                'FailedJobs': failedJobs,
+                'CancelledJobs': cancelledJobs,
+                'QueueSize': pendingJobs + runningJobs,
+                'ActiveJobs': activeJobs,
+                'NextJobId': nextJobId
+            }
+            
+            # Calculate success rate
+            if totalJobs > 0:
+                statistics['SuccessRate'] = (completedJobs / totalJobs) * 100.0
+                statistics['FailureRate'] = (failedJobs / totalJobs) * 100.0
+            else:
+                statistics['SuccessRate'] = 0.0
+                statistics['FailureRate'] = 0.0
+            
+            LoggingService.LogInfo(f"Queue statistics: {totalJobs} total, {pendingJobs} pending, {runningJobs} running", "DatabaseManager", "GetQueueStatistics")
+            return statistics
+            
+        except Exception as e:
+            LoggingService.LogException("Exception in GetQueueStatistics", e, "DatabaseManager", "GetQueueStatistics")
+            return {}
+    
+    def GetJobCounts(self) -> Dict[str, int]:
+        """Get job counts by status."""
+        try:
+            LoggingService.LogFunctionEntry("GetJobCounts", "DatabaseManager")
+            
+            query = """
+                SELECT Status, COUNT(*) as Count
+                FROM TranscodeQueue 
+                GROUP BY Status
+            """
+            rows = self.DatabaseService.ExecuteQuery(query)
+            
+            counts = {}
+            for row in rows:
+                counts[row['Status']] = row['Count']
+            
+            LoggingService.LogInfo(f"Job counts: {counts}", "DatabaseManager", "GetJobCounts")
+            return counts
+            
+        except Exception as e:
+            LoggingService.LogException("Exception in GetJobCounts", e, "DatabaseManager", "GetJobCounts")
+            return {}
+    
+    def UpdateMediaFilesProfileByRootFolder(self, RootFolderPath: str, ProfileId: int) -> int:
+        """Update AssignedProfile for all MediaFiles in a specific root folder."""
+        try:
+            LoggingService.LogFunctionEntry("UpdateMediaFilesProfileByRootFolder", "DatabaseManager", RootFolderPath, ProfileId)
+            
+            # Get profile name for logging
+            profile = self.GetProfileById(ProfileId)
+            profileName = profile.ProfileName if profile else f"ProfileId_{ProfileId}"
+            
+            # Update all media files where FilePath starts with RootFolderPath
+            query = """
+                UPDATE MediaFiles 
+                SET AssignedProfile = ?
+                WHERE FilePath LIKE ? || '%'
+            """
+            
+            connection = self.DatabaseService.GetConnection()
+            cursor = connection.cursor()
+            cursor.execute(query, (profileName, RootFolderPath))
+            connection.commit()
+            
+            filesUpdated = cursor.rowcount
+            LoggingService.LogInfo(f"Updated {filesUpdated} media files in root folder '{RootFolderPath}' to use profile '{profileName}'", "DatabaseManager", "UpdateMediaFilesProfileByRootFolder")
+            
+            return filesUpdated
+            
+        except Exception as e:
+            LoggingService.LogException("Exception updating media files profile by root folder", e, "DatabaseManager", "UpdateMediaFilesProfileByRootFolder")
+            return 0
