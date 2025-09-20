@@ -442,6 +442,89 @@ class FileManagerService:
         self.SkippedFiles = 0
         self.EncodingErrors.clear()
     
+    def EnsureDirectoryExists(self, DirectoryPath: str) -> bool:
+        """Ensure a directory exists, creating it if necessary with Unicode path support."""
+        try:
+            LoggingService.LogFunctionEntry("EnsureDirectoryExists", 'FileManagerService', DirectoryPath)
+            
+            # Validate the directory path
+            isValid, validatedPath = self.ValidateUnicodePath(DirectoryPath)
+            
+            if not isValid:
+                LoggingService.LogDebug(f"Unicode validation failed for directory: {DirectoryPath}", 'EnsureDirectoryExists', 'FileManagerService')
+                self.EncodingErrors.append(f"Unicode issue: {DirectoryPath}")
+            
+            # Check if directory already exists
+            if os.path.exists(DirectoryPath):
+                if os.path.isdir(DirectoryPath):
+                    LoggingService.LogDebug(f"Directory already exists: {DirectoryPath}", 'EnsureDirectoryExists', 'FileManagerService')
+                    return True
+                else:
+                    LoggingService.LogError(f"Path exists but is not a directory: {DirectoryPath}", 'EnsureDirectoryExists', 'FileManagerService')
+                    return False
+            
+            # Create directory and all parent directories
+            os.makedirs(DirectoryPath, exist_ok=True)
+            LoggingService.LogInfo(f"Created directory: {DirectoryPath}", 'EnsureDirectoryExists', 'FileManagerService')
+            return True
+            
+        except Exception as e:
+            LoggingService.LogException("Error ensuring directory exists", e, 'EnsureDirectoryExists', 'FileManagerService')
+            return False
+    
+    def SetupTranscodingDirectories(self) -> Dict[str, Any]:
+        """Setup the required transcoding directory structure."""
+        try:
+            LoggingService.LogFunctionEntry("SetupTranscodingDirectories", 'FileManagerService')
+            
+            # Define required directories
+            HandBrakeSourceDir = r"c:\HandBrake\Source"
+            HandBrakeTempDir = r"c:\HandBrakeTemp"
+            
+            Results = {
+                'Success': True,
+                'HandBrakeSourceDir': HandBrakeSourceDir,
+                'HandBrakeTempDir': HandBrakeTempDir,
+                'CreatedDirectories': [],
+                'Errors': []
+            }
+            
+            # Create HandBrake\Source directory
+            if self.EnsureDirectoryExists(HandBrakeSourceDir):
+                Results['CreatedDirectories'].append(HandBrakeSourceDir)
+                LoggingService.LogInfo(f"HandBrake Source directory ready: {HandBrakeSourceDir}", 'SetupTranscodingDirectories', 'FileManagerService')
+            else:
+                Results['Success'] = False
+                Results['Errors'].append(f"Failed to create HandBrake Source directory: {HandBrakeSourceDir}")
+                LoggingService.LogError(f"Failed to create HandBrake Source directory: {HandBrakeSourceDir}", 'SetupTranscodingDirectories', 'FileManagerService')
+            
+            # Create HandBrakeTemp directory
+            if self.EnsureDirectoryExists(HandBrakeTempDir):
+                Results['CreatedDirectories'].append(HandBrakeTempDir)
+                LoggingService.LogInfo(f"HandBrake Temp directory ready: {HandBrakeTempDir}", 'SetupTranscodingDirectories', 'FileManagerService')
+            else:
+                Results['Success'] = False
+                Results['Errors'].append(f"Failed to create HandBrake Temp directory: {HandBrakeTempDir}")
+                LoggingService.LogError(f"Failed to create HandBrake Temp directory: {HandBrakeTempDir}", 'SetupTranscodingDirectories', 'FileManagerService')
+            
+            # Log summary
+            if Results['Success']:
+                LoggingService.LogInfo(f"Transcoding directories setup completed successfully. Created: {len(Results['CreatedDirectories'])} directories", 'SetupTranscodingDirectories', 'FileManagerService')
+            else:
+                LoggingService.LogError(f"Transcoding directories setup failed. Errors: {Results['Errors']}", 'SetupTranscodingDirectories', 'FileManagerService')
+            
+            return Results
+            
+        except Exception as e:
+            LoggingService.LogException("Error setting up transcoding directories", e, 'SetupTranscodingDirectories', 'FileManagerService')
+            return {
+                'Success': False,
+                'HandBrakeSourceDir': r"c:\HandBrake\Source",
+                'HandBrakeTempDir': r"c:\HandBrakeTemp",
+                'CreatedDirectories': [],
+                'Errors': [f"Setup error: {str(e)}"]
+            }
+    
     def ValidateFileExists(self, FilePath: str) -> bool:
         """Validate that a file exists on disk with Unicode path support."""
         try:

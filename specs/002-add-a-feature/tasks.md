@@ -43,65 +43,75 @@
 - Paths shown below assume single project - adjust based on plan.md structure
 
 ## Phase 3.1: Setup
-- [ ] T001 Create database schema extensions for TranscodeQueue, TranscodeAttempts, TranscodeFiles, and Profiles tables
-- [ ] T002 Initialize HandBrake CLI integration with subprocess module and error handling
-- [ ] T003 [P] Configure temporary directory structure at c:\HandBrakeTemp\Source and c:\HandBrakeTemp\Output
+- [x] T001 Create database schema extensions for TranscodeQueue, TranscodeAttempts, TranscodeFiles, and Profiles tables
+- [x] T002 Initialize FFmpeg integration for transcoding and quality scoring with VMAF analysis
+- [x] T003 [P] Configure temporary directory structure at c:\HandBrake\Source and c:\HandBrakeTemp\<filename>
+- [x] T004 [P] Setup filename resolution logic for resolution-based naming (1080p/2160p to 720p replacement)
+- [x] T005 [P] Setup FFmpeg transcoding service with quality settings from MediaFiles table
 
 ## Phase 3.2: Tests First (TDD) - MUST COMPLETE BEFORE 3.3
 **CRITICAL: These tests MUST be written and MUST FAIL before ANY implementation**
-- [ ] T004 [P] Contract test POST /api/transcode/start in tests/contract/TestTranscodeStart.py
-- [ ] T005 [P] Contract test GET /api/transcode/status/{JobId} in tests/contract/TestTranscodeStatus.py
-- [ ] T006 [P] Contract test POST /api/transcode/queue/prioritize in tests/contract/TestQueuePrioritize.py
-- [ ] T007 [P] Integration test transcoding workflow in tests/integration/TestTranscodingWorkflow.py
-- [ ] T008 [P] Integration test queue prioritization in tests/integration/TestQueuePrioritization.py
-- [ ] T009 [P] Integration test error handling in tests/integration/TestErrorHandling.py
+- [ ] T006 [P] Contract test POST /api/transcode/start in tests/contract/TestTranscodeStart.py
+- [ ] T007 [P] Contract test GET /api/transcode/status/{JobId} in tests/contract/TestTranscodeStatus.py
+- [ ] T008 [P] Contract test GET /api/transcode/queue in tests/contract/TestQueueGet.py
+- [ ] T009 [P] Integration test transcoding workflow with quality scoring in tests/integration/TestTranscodingWorkflow.py
+- [ ] T010 [P] Integration test filename resolution logic in tests/integration/TestFilenameResolution.py
+- [ ] T011 [P] Integration test quality scoring and file replacement logic in tests/integration/TestQualityScoring.py
 
 ## Phase 3.3: Core Implementation (ONLY after tests are failing)
-- [ ] T010 [P] TranscodeQueueItem model in Models/TranscodeQueueModel.py
-- [ ] T011 [P] TranscodingJob model in Models/TranscodeAttemptModel.py
-- [ ] T012 [P] TranscodingResult model in Models/TranscodeFileModel.py
-- [ ] T013 [P] TranscodingProfile model in Models/TranscodeProfileModel.py
-- [ ] T014 [P] TranscodingQueueProcessor service in Services/TranscodingQueueProcessor.py
-- [ ] T015 [P] HandBrakeTranscodingService in Services/HandBrakeTranscodingService.py
-- [ ] T016 [P] FileManagerService for copy/delete operations in Services/FileManagerService.py
-- [ ] T017 POST /api/transcode/start endpoint in Controllers/TranscodeQueueController.py
-- [ ] T018 GET /api/transcode/status/{jobId} endpoint in Controllers/TranscodeQueueController.py
-- [ ] T019 POST /api/transcode/queue/prioritize endpoint in Controllers/TranscodeQueueController.py
-- [ ] T020 Input validation for transcoding requests
-- [ ] T021 Error handling and logging for transcoding operations
+- [ ] T012 [P] TranscodeQueueItem model in Models/TranscodeQueueModel.py
+- [ ] T013 [P] TranscodingJob model in Models/TranscodeAttemptModel.py
+- [ ] T014 [P] TranscodingResult model in Models/TranscodeFileModel.py
+- [ ] T015 [P] TranscodingProfile model in Models/TranscodeProfileModel.py
+- [ ] T016 [P] TranscodingQueueProcessor service in Services/TranscodingQueueProcessor.py
+- [ ] T017 [P] FFmpegTranscodingService with aspect ratio preservation in Services/FFmpegTranscodingService.py
+- [ ] T018 [P] FileManagerService for copy/delete operations in Services/FileManagerService.py
+- [ ] T019 [P] QualityScoringService with FFmpeg VMAF analysis in Services/QualityScoringService.py
+- [ ] T020 [P] FilenameResolutionService for resolution-based naming in Services/FilenameResolutionService.py
+- [ ] T021 POST /api/transcode/start endpoint in Controllers/TranscodeQueueController.py
+- [ ] T022 GET /api/transcode/status/{jobId} endpoint in Controllers/TranscodeQueueController.py
+- [ ] T023 GET /api/transcode/queue endpoint in Controllers/TranscodeQueueController.py
+- [ ] T024 Input validation for transcoding requests
+- [ ] T025 Error handling and logging for transcoding operations
 
 ## Phase 3.4: Integration
-- [ ] T022 Connect TranscodingQueueProcessor to database with transaction management
-- [ ] T023 Integrate HandBrake CLI execution with progress tracking
-- [ ] T024 File system operations with UTF-8 compatibility
-- [ ] T025 Database logging for all transcoding operations
-- [ ] T026 Queue prioritization by file size (SizeMB DESC, DateAdded ASC)
+- [ ] T026 Connect TranscodingQueueProcessor to database with transaction management
+- [ ] T027 Integrate complete transcoding workflow: copy to c:\HandBrake\Source, transcode with FFmpeg and aspect ratio preservation
+- [ ] T028 Integrate quality scoring workflow: FFmpeg VMAF analysis with >90 threshold validation
+- [ ] T029 Integrate file replacement logic: delete original and copy transcoded file only on quality pass
+- [ ] T030 Integrate filename resolution: replace 1080p/2160p with target resolution in output filename
+- [ ] T031 File system operations with UTF-8 compatibility
+- [ ] T032 Database logging for all transcoding operations in TranscodeAttempts table
+- [ ] T033 Queue retrieval with proper ordering (top item processing)
+- [ ] T034 Error handling: log failures in TranscodeAttempts, skip file cleanup on quality failure
 
 ## Phase 3.5: Polish
-- [ ] T027 [P] Unit tests for TranscodingQueueProcessor in tests/unit/TestTranscodingQueueProcessor.py
-- [ ] T028 [P] Unit tests for HandBrakeTranscodingService in tests/unit/TestHandBrakeService.py
-- [ ] T029 [P] Unit tests for FileManagerService in tests/unit/TestFileManager.py
-- [ ] T030 Performance tests for large file processing
-- [ ] T031 [P] Update documentation in Docs/TranscodingFeature.md
-- [ ] T032 Remove code duplication and optimize database queries
-- [ ] T033 Run quickstart.md validation scenarios
+- [ ] T035 [P] Unit tests for TranscodingQueueProcessor in tests/unit/TestTranscodingQueueProcessor.py
+- [ ] T036 [P] Unit tests for FFmpegTranscodingService in tests/unit/TestFFmpegTranscodingService.py
+- [ ] T037 [P] Unit tests for FileManagerService in tests/unit/TestFileManager.py
+- [ ] T038 [P] Unit tests for QualityScoringService in tests/unit/TestQualityScoringService.py
+- [ ] T039 [P] Unit tests for FilenameResolutionService in tests/unit/TestFilenameResolutionService.py
+- [ ] T040 Performance tests for large file processing
+- [ ] T041 [P] Update documentation in Docs/TranscodingFeature.md
+- [ ] T042 Remove code duplication and optimize database queries
+- [ ] T043 Run quickstart.md validation scenarios
 
 ## Dependencies
-- Tests (T004-T009) before implementation (T010-T021)
-- T010-T013 (models) block T014-T016 (services)
-- T014-T016 (services) block T017-T019 (endpoints)
-- T022-T026 (integration) depend on T010-T021 (core implementation)
-- Implementation before polish (T027-T033)
+- Tests (T006-T011) before implementation (T012-T025)
+- T012-T015 (models) block T016-T020 (services)
+- T016-T020 (services) block T021-T023 (endpoints)
+- T026-T034 (integration) depend on T012-T025 (core implementation)
+- Implementation before polish (T035-T043)
 
 ## Parallel Example
 ```
-# Launch T004-T009 together:
+# Launch T006-T011 together:
 Task: "Contract test POST /api/transcode/start in tests/contract/TestTranscodeStart.py"
 Task: "Contract test GET /api/transcode/status/{JobId} in tests/contract/TestTranscodeStatus.py"
-Task: "Contract test POST /api/transcode/queue/prioritize in tests/contract/TestQueuePrioritize.py"
-Task: "Integration test transcoding workflow in tests/integration/TestTranscodingWorkflow.py"
-Task: "Integration test queue prioritization in tests/integration/TestQueuePrioritization.py"
-Task: "Integration test error handling in tests/integration/TestErrorHandling.py"
+Task: "Contract test GET /api/transcode/queue in tests/contract/TestQueueGet.py"
+Task: "Integration test transcoding workflow with quality scoring in tests/integration/TestTranscodingWorkflow.py"
+Task: "Integration test filename resolution logic in tests/integration/TestFilenameResolution.py"
+Task: "Integration test quality scoring and file replacement logic in tests/integration/TestQualityScoring.py"
 ```
 
 ## Notes
@@ -117,34 +127,38 @@ Task: "Integration test error handling in tests/integration/TestErrorHandling.py
 *Applied during main() execution*
 
 1. **From Contracts**:
-   - TranscodeStartContract.json → T004 contract test [P]
-   - TranscodeStatusContract.json → T005 contract test [P]
-   - TranscodeQueuePrioritizeContract.json → T006 contract test [P]
+   - TranscodeStartContract.json → T006 contract test [P]
+   - TranscodeStatusContract.json → T007 contract test [P]
+   - TranscodeQueueGetContract.json → T008 contract test [P]
    - Each endpoint → implementation task
 
 2. **From Data Model**:
-   - TranscodeQueueItem → T010 model creation [P]
-   - TranscodingJob → T011 model creation [P]
-   - TranscodingResult → T012 model creation [P]
-   - TranscodingProfile → T013 model creation [P]
+   - TranscodeQueueItem → T012 model creation [P]
+   - TranscodingJob → T013 model creation [P]
+   - TranscodingResult → T014 model creation [P]
+   - TranscodingProfile → T015 model creation [P]
+   - MediaFiles quality settings → FFmpeg transcoding service tasks
    - Relationships → service layer tasks
 
 3. **From User Stories**:
-   - Transcoding workflow → T007 integration test [P]
-   - Queue prioritization → T008 integration test [P]
-   - Error handling → T009 integration test [P]
+   - Transcoding workflow with quality scoring → T009 integration test [P]
+   - Filename resolution logic → T010 integration test [P]
+   - Quality scoring and file replacement → T011 integration test [P]
    - Quickstart scenarios → validation tasks
 
 4. **Ordering**:
-   - Setup → Tests → Models → Services → Endpoints → Polish
+   - Setup → Tests → Models → Services → Endpoints → Integration → Polish
    - Dependencies block parallel execution
 
 ## Validation Checklist
 *GATE: Checked by main() before returning*
 
-- [x] All contracts have corresponding tests (T004-T006)
-- [x] All entities have model tasks (T010-T013)
-- [x] All tests come before implementation (T004-T009 before T010-T021)
+- [x] All contracts have corresponding tests (T006-T008)
+- [x] All entities have model tasks (T012-T015)
+- [x] All tests come before implementation (T006-T011 before T012-T025)
+- [x] Quality scoring workflow included (T009, T011, T019, T028)
+- [x] Filename resolution logic included (T010, T020, T030)
+- [x] Complete transcoding workflow with file replacement (T027-T034)
 - [x] Parallel tasks truly independent
 - [x] Each task specifies exact file path
 - [x] No task modifies same file as another [P] task
