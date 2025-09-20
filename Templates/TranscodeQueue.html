@@ -1109,6 +1109,9 @@ class TranscodeQueueManager {
             `;
             tbody.appendChild(row);
         });
+        
+        // Populate profile dropdowns after creating the media files table
+        this.loadProfilesForDropdowns();
     }
 
     // Pagination methods for Root Folders
@@ -1294,28 +1297,48 @@ class TranscodeQueueManager {
         const profileSelect = document.getElementById(`MediaFileProfileSelect_${fileId}`);
         const profileId = profileSelect.value;
         
+        // If no profile selected, try to add without profile (file might already have one)
         if (!profileId) {
-            this.showAlert('Please select a profile first', 'warning');
-            return;
+            // Check if file already has a profile by looking at the badge
+            const badge = document.querySelector(`#MediaFileProfileSelect_${fileId}`).closest('td').querySelector('.badge');
+            if (badge && badge.textContent.trim() !== 'No Profile') {
+                // File has a profile, add it directly
+                await this.addFileToQueueDirectly(fileId);
+                return;
+            } else {
+                // File has no profile, user must select one
+                this.showAlert('Please select a profile first', 'warning');
+                return;
+            }
         }
         
+        // User selected a profile, add with profile
+        await this.addFileToQueueDirectly(fileId, parseInt(profileId));
+    }
+    
+    async addFileToQueueDirectly(fileId, profileId = null) {
         try {
+            const requestBody = { MediaFileId: fileId };
+            if (profileId) {
+                requestBody.ProfileId = profileId;
+            }
+            
             const response = await fetch('/api/TranscodeQueue/AddJob', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
                 },
-                body: JSON.stringify({ 
-                    MediaFileId: fileId,
-                    ProfileId: parseInt(profileId)
-                })
+                body: JSON.stringify(requestBody)
             });
 
             const data = await response.json();
 
             if (data.Success) {
                 this.showAlert('File added to queue successfully', 'success');
-                profileSelect.value = ''; // Clear selection
+                if (profileId) {
+                    const profileSelect = document.getElementById(`MediaFileProfileSelect_${fileId}`);
+                    profileSelect.value = ''; // Clear selection
+                }
                 this.loadQueueData(); // Refresh queue
                 this.loadMediaFiles(); // Refresh media files to show updated profile
             } else {

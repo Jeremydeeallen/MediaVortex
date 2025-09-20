@@ -398,7 +398,8 @@ class ProfileManagementViewModel:
                     'AudioBitrateKbps': threshold.AudioBitrateKbps,
                     'FallbackVideoBitrateKbps': threshold.FallbackVideoBitrateKbps,
                     'FallbackAudioBitrateKbps': threshold.FallbackAudioBitrateKbps,
-                    'TranscodeDownTo': threshold.TranscodeDownTo
+                    'TranscodeDownTo': threshold.TranscodeDownTo,
+                    'Quality': threshold.Quality
                 }
                 for threshold in self.SelectedProfileThresholds
             ]

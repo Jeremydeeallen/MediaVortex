@@ -51,7 +51,7 @@ class FileScanningViewModel:
             return result
             
         except Exception as e:
-            LoggingService.LogInfoException("Error in StartScanning", e)
+            LoggingService.LogException("Error in StartScanning", e, "StartScanning", "FileScanningViewModel")
             self.IsError = True
             self.ErrorMessage = f"Error starting scan: {str(e)}"
             self.ScanStatusMessage = self.ErrorMessage
@@ -81,7 +81,7 @@ class FileScanningViewModel:
             return result
             
         except Exception as e:
-            LoggingService.LogInfoException("Error in StopScanning", e)
+            LoggingService.LogException("Error in StopScanning", e, "StopScanning", "FileScanningViewModel")
             self.IsError = True
             self.ErrorMessage = f"Error stopping scan: {str(e)}"
             self.ScanStatusMessage = self.ErrorMessage
@@ -148,7 +148,7 @@ class FileScanningViewModel:
             return self.RootFolders
             
         except Exception as e:
-            LoggingService.LogInfoException("Error loading root folders", e)
+            LoggingService.LogException("Error loading root folders", e, "LoadRootFolders", "FileScanningViewModel")
             self.IsError = True
             self.ErrorMessage = f"Error loading root folders: {str(e)}"
             return []
@@ -162,7 +162,7 @@ class FileScanningViewModel:
             return self.MediaFiles
             
         except Exception as e:
-            LoggingService.LogInfoException("Error loading media files", e)
+            LoggingService.LogException("Error loading media files", e, "LoadMediaFiles", "FileScanningViewModel")
             self.IsError = True
             self.ErrorMessage = f"Error loading media files: {str(e)}"
             return []
@@ -186,7 +186,7 @@ class FileScanningViewModel:
             return success
             
         except Exception as e:
-            LoggingService.LogInfoException("Error deleting root folder", e)
+            LoggingService.LogException("Error deleting root folder", e, "DeleteRootFolder", "FileScanningViewModel")
             self.IsError = True
             self.ErrorMessage = f"Error deleting root folder: {str(e)}"
             self.ScanStatusMessage = self.ErrorMessage
@@ -211,7 +211,7 @@ class FileScanningViewModel:
             return success
             
         except Exception as e:
-            LoggingService.LogInfoException("Error deleting media file", e)
+            LoggingService.LogException("Error deleting media file", e, "DeleteMediaFile", "FileScanningViewModel")
             self.IsError = True
             self.ErrorMessage = f"Error deleting media file: {str(e)}"
             self.ScanStatusMessage = self.ErrorMessage
@@ -296,7 +296,7 @@ class FileScanningViewModel:
             }
             
         except Exception as e:
-            LoggingService.LogInfoException("Error getting paginated root folders", e)
+            LoggingService.LogException("Error getting paginated root folders", e, "GetRootFoldersPaginated", "FileScanningViewModel")
             return {
                 'RootFolders': [],
                 'TotalCount': 0,
@@ -323,55 +323,39 @@ class FileScanningViewModel:
     def GetMediaFilesPaginated(self, Page: int, PageSize: int, Search: str = '', RootFolderPath: str = '', SortBy: str = 'SizeMB', SortOrder: str = 'DESC') -> Dict[str, Any]:
         """Get media files with pagination and filtering."""
         try:
-            # Load media files first
-            if RootFolderPath:
-                self.LoadMediaFiles(RootFolderPath)
-            else:
-                self.LoadMediaFiles()
+            # Get media files directly from business service
+            MediaFiles = self.BusinessService.GetMediaFiles(RootFolderPath)
             
-            # Apply search filter
-            FilteredFiles = self.MediaFiles
-            if Search:
-                SearchLower = Search.lower()
-                FilteredFiles = [file for file in self.MediaFiles 
-                               if SearchLower in file.FileName.lower() or SearchLower in file.FilePath.lower()]
-            
-            # Apply sorting
-            if SortBy == 'SizeMB':
-                # Handle None values properly - put them at the end for DESC, beginning for ASC
-                LoggingService.LogInfo(f"Sorting {len(FilteredFiles)} files by SizeMB {SortOrder}. Sample sizes: {[f.SizeMB for f in FilteredFiles[:5]]}", "FileScanningViewModel", "GetMediaFilesPaginated")
-                FilteredFiles.sort(key=lambda x: (x.SizeMB is None, x.SizeMB or 0), reverse=(SortOrder == 'DESC'))
-                LoggingService.LogInfo(f"After sorting. Sample sizes: {[f.SizeMB for f in FilteredFiles[:5]]}", "FileScanningViewModel", "GetMediaFilesPaginated")
-            elif SortBy == 'FileName':
-                FilteredFiles.sort(key=lambda x: x.FileName or '', reverse=(SortOrder == 'DESC'))
-            elif SortBy == 'Directory':
-                FilteredFiles.sort(key=lambda x: x.Directory or '', reverse=(SortOrder == 'DESC'))
-            elif SortBy == 'Resolution':
-                FilteredFiles.sort(key=lambda x: x.Resolution or '', reverse=(SortOrder == 'DESC'))
-            elif SortBy == 'AssignedProfile':
-                FilteredFiles.sort(key=lambda x: x.AssignedProfile or '', reverse=(SortOrder == 'DESC'))
+            # Sort by size descending (simple)
+            MediaFiles.sort(key=lambda x: x.SizeMB or 0, reverse=True)
             
             # Calculate pagination
-            TotalCount = len(FilteredFiles)
+            TotalCount = len(MediaFiles)
             TotalPages = (TotalCount + PageSize - 1) // PageSize
             
             # Get page slice
             StartIndex = (Page - 1) * PageSize
             EndIndex = StartIndex + PageSize
-            PageFiles = FilteredFiles[StartIndex:EndIndex]
+            PageFiles = MediaFiles[StartIndex:EndIndex]
             
             # Format for display
             DisplayFiles = []
             for file in PageFiles:
+                # Extract directory from file path
+                import os
+                Directory = os.path.dirname(file.FilePath) if file.FilePath else ''
+                
                 DisplayFiles.append({
                     'Id': file.Id,
                     'FileName': file.FileName,
                     'FilePath': file.FilePath,
-                    'SizeMB': f"{file.SizeMB:.2f} MB",
+                    'Directory': Directory,
+                    'SizeMB': f"{file.SizeMB:.2f} MB" if file.SizeMB else 'Unknown',
                     'LastScannedDate': file.LastScannedDate.strftime('%Y-%m-%d %H:%M:%S') if file.LastScannedDate and hasattr(file.LastScannedDate, 'strftime') else str(file.LastScannedDate) if file.LastScannedDate else 'Unknown',
                     'Codec': file.Codec or 'Unknown',
                     'Resolution': file.Resolution or 'Unknown',
-                    'DurationMinutes': f"{file.DurationMinutes:.1f} min" if file.DurationMinutes else 'Unknown'
+                    'DurationMinutes': f"{file.DurationMinutes:.1f} min" if file.DurationMinutes else 'Unknown',
+                    'AssignedProfile': file.AssignedProfile or None
                 })
             
             return {
@@ -381,7 +365,7 @@ class FileScanningViewModel:
             }
             
         except Exception as e:
-            LoggingService.LogInfoException("Error getting paginated media files", e)
+            LoggingService.LogException("Error getting paginated media files", e, "GetMediaFilesPaginated", "FileScanningViewModel")
             return {
                 'MediaFiles': [],
                 'TotalCount': 0,
@@ -418,7 +402,7 @@ class FileScanningViewModel:
             self.UpdateScanStatus()
             
         except Exception as e:
-            LoggingService.LogInfoException("Error refreshing data", e)
+            LoggingService.LogException("Error refreshing data", e, "RefreshData", "FileScanningViewModel")
             self.IsError = True
             self.ErrorMessage = f"Error refreshing data: {str(e)}"
     

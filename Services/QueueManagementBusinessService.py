@@ -1,11 +1,13 @@
 from typing import List, Optional, Dict, Any
 from datetime import datetime
+import os
 from Models.TranscodeQueueModel import TranscodeQueueModel
 from Models.MediaFileModel import MediaFileModel
 from Models.ProfileThresholdModel import ProfileThresholdModel
 from Models.TranscodeProfileModel import TranscodeProfileModel
 from Repositories.DatabaseManager import DatabaseManager
 from Services.LoggingService import LoggingService
+from Services.FileManagerService import FileManagerService
 
 
 class QueueManagementBusinessService:
@@ -13,6 +15,7 @@ class QueueManagementBusinessService:
     
     def __init__(self, DatabaseManagerInstance: DatabaseManager = None):
         self.DatabaseManager = DatabaseManagerInstance or DatabaseManager()
+        self.FileManager = FileManagerService()
     
     def PopulateQueueFromMediaFiles(self, MaxItems: int = 10) -> Dict[str, Any]:
         """Populate transcoding queue from MediaFiles that have assigned profiles, ordered by largest disk space."""
@@ -111,6 +114,30 @@ class QueueManagementBusinessService:
             LoggingService.LogException("Exception getting media files with profiles", e, "QueueManagementBusinessService", "GetMediaFilesWithProfilesOrderedBySize")
             return []
     
+    def CreateQueueItemFromMediaFileSimple(self, MediaFile: MediaFileModel) -> Optional[TranscodeQueueModel]:
+        """Create a queue item directly from a media file without threshold matching."""
+        try:
+            LoggingService.LogFunctionEntry("CreateQueueItemFromMediaFileSimple", "QueueManagementBusinessService", MediaFile.FileName)
+            
+            # Create queue item with basic information
+            queueItem = TranscodeQueueModel(
+                FilePath=MediaFile.FilePath,
+                FileName=MediaFile.FileName,
+                Directory=os.path.dirname(MediaFile.FilePath) if MediaFile.FilePath else '',
+                SizeBytes=int((MediaFile.SizeMB or 0) * 1024 * 1024),
+                SizeMB=MediaFile.SizeMB or 0,
+                Priority=self.CalculatePriority(MediaFile),
+                Status='Pending',
+                DateAdded=datetime.now()
+            )
+            
+            LoggingService.LogInfo(f"Created simple queue item for {MediaFile.FileName}", "QueueManagementBusinessService", "CreateQueueItemFromMediaFileSimple")
+            return queueItem
+            
+        except Exception as e:
+            LoggingService.LogException("Exception creating simple queue item", e, "QueueManagementBusinessService", "CreateQueueItemFromMediaFileSimple")
+            return None
+    
     def CreateQueueItemFromMediaFileWithProfile(self, MediaFile: MediaFileModel) -> Optional[TranscodeQueueModel]:
         """Create a queue item from a media file that already has an assigned profile."""
         try:
@@ -148,16 +175,32 @@ class QueueManagementBusinessService:
             LoggingService.LogException("Exception creating queue item from media file with profile", e, "QueueManagementBusinessService", "CreateQueueItemFromMediaFileWithProfile")
             return None
     
-    def FindMatchingProfileThreshold(self, MediaFile: MediaFileModel, ProfileThresholds: List[ProfileThresholdModel]) -> Optional[ProfileThresholdModel]:
+    def FindMatchingProfileThreshold(self, MediaFile: MediaFileModel, ProfileThresholds: List[ProfileThresholdModel], AllowAssignedProfile: bool = False) -> Optional[ProfileThresholdModel]:
         """Find the best matching profile threshold for a media file."""
         try:
             LoggingService.LogFunctionEntry("FindMatchingProfileThreshold", "QueueManagementBusinessService", MediaFile.FileName, MediaFile.Resolution)
             
-            # Filter thresholds by resolution
-            matchingThresholds = [pt for pt in ProfileThresholds if pt.Resolution == MediaFile.Resolution]
+            # Convert file resolution to standard format for matching
+            fileResolution = MediaFile.Resolution or ""
+            fileResolutionStandard = self.StandardizeResolution(fileResolution)
+            
+            LoggingService.LogInfo(f"Looking for threshold for file resolution: {fileResolution} (standardized: {fileResolutionStandard})", "QueueManagementBusinessService", "FindMatchingProfileThreshold")
+            
+            # First, try exact match by standardized resolution
+            matchingThresholds = []
+            for pt in ProfileThresholds:
+                thresholdResolutionStandard = self.StandardizeResolution(pt.Resolution or "")
+                if thresholdResolutionStandard == fileResolutionStandard:
+                    matchingThresholds.append(pt)
+                    LoggingService.LogInfo(f"Found exact resolution match: {pt.Resolution} -> {thresholdResolutionStandard}", "QueueManagementBusinessService", "FindMatchingProfileThreshold")
+            
+            # If no exact match and this is a manually assigned profile, use the first available threshold
+            if not matchingThresholds and AllowAssignedProfile:
+                LoggingService.LogInfo(f"No exact resolution match found for {fileResolution}, using first available threshold for manually assigned profile", "QueueManagementBusinessService", "FindMatchingProfileThreshold")
+                matchingThresholds = ProfileThresholds[:1] if ProfileThresholds else []
             
             if not matchingThresholds:
-                LoggingService.LogDebug(f"No thresholds found for resolution {MediaFile.Resolution}", "QueueManagementBusinessService", "FindMatchingProfileThreshold")
+                LoggingService.LogDebug(f"No thresholds found for resolution {fileResolution}", "QueueManagementBusinessService", "FindMatchingProfileThreshold")
                 return None
             
             # Find threshold based on duration
@@ -165,8 +208,8 @@ class QueueManagementBusinessService:
             
             for threshold in matchingThresholds:
                 # Check if file meets the threshold criteria
-                if self.EvaluateThresholdCriteria(MediaFile, threshold, durationMinutes):
-                    LoggingService.LogInfo(f"Found matching threshold for {MediaFile.FileName}: {threshold.ProfileId}", "QueueManagementBusinessService", "FindMatchingProfileThreshold")
+                if self.EvaluateThresholdCriteria(MediaFile, threshold, durationMinutes, AllowAssignedProfile):
+                    LoggingService.LogInfo(f"Found matching threshold for {MediaFile.FileName}: {threshold.ProfileId} (Resolution: {threshold.Resolution}, TranscodeDownTo: {threshold.TranscodeDownTo})", "QueueManagementBusinessService", "FindMatchingProfileThreshold")
                     return threshold
             
             LoggingService.LogDebug(f"No matching threshold found for {MediaFile.FileName}", "QueueManagementBusinessService", "FindMatchingProfileThreshold")
@@ -176,7 +219,26 @@ class QueueManagementBusinessService:
             LoggingService.LogException("Exception finding matching profile threshold", e, "QueueManagementBusinessService", "FindMatchingProfileThreshold")
             return None
     
-    def EvaluateThresholdCriteria(self, MediaFile: MediaFileModel, Threshold: ProfileThresholdModel, DurationMinutes: float) -> bool:
+    def StandardizeResolution(self, Resolution: str) -> str:
+        """Standardize resolution string for consistent matching."""
+        if not Resolution:
+            return ""
+        
+        resolution = Resolution.lower().strip()
+        
+        # Handle common resolution formats
+        if "3840x2160" in resolution or "2160p" in resolution or "4k" in resolution:
+            return "2160p"
+        elif "1920x1080" in resolution or "1080p" in resolution:
+            return "1080p"
+        elif "1280x720" in resolution or "720p" in resolution:
+            return "720p"
+        elif "854x480" in resolution or "480p" in resolution:
+            return "480p"
+        else:
+            return resolution
+    
+    def EvaluateThresholdCriteria(self, MediaFile: MediaFileModel, Threshold: ProfileThresholdModel, DurationMinutes: float, AllowAssignedProfile: bool = False) -> bool:
         """Evaluate if a media file meets the threshold criteria for transcoding."""
         try:
             LoggingService.LogFunctionEntry("EvaluateThresholdCriteria", "QueueManagementBusinessService", MediaFile.FileName, DurationMinutes, Threshold.ProfileId)
@@ -201,9 +263,12 @@ class QueueManagementBusinessService:
             # Check if already has assigned profile (might indicate it was processed before)
             hasAssignedProfile = MediaFile.AssignedProfile and MediaFile.AssignedProfile.strip()
             
-            result = meetsSizeThreshold and hasCompressionPotential and not hasAssignedProfile
+            # Allow files with assigned profiles if explicitly requested (for manual profile selection)
+            profileCheck = not hasAssignedProfile if not AllowAssignedProfile else True
             
-            LoggingService.LogDebug(f"Threshold evaluation for {MediaFile.FileName}: size={fileSizeMB}MB vs {thresholdSize}MB, compression={compressionPotential}, assigned={hasAssignedProfile} -> {result}", "QueueManagementBusinessService", "EvaluateThresholdCriteria")
+            result = meetsSizeThreshold and hasCompressionPotential and profileCheck
+            
+            LoggingService.LogDebug(f"Threshold evaluation for {MediaFile.FileName}: size={fileSizeMB}MB vs {thresholdSize}MB, compression={compressionPotential}, assigned={hasAssignedProfile}, allowAssigned={AllowAssignedProfile} -> {result}", "QueueManagementBusinessService", "EvaluateThresholdCriteria")
             
             return result
             
@@ -293,7 +358,7 @@ class QueueManagementBusinessService:
             return 50  # Default priority
     
     def AddJobToQueue(self, MediaFileId: int, Priority: int = None, ProfileId: int = None) -> Dict[str, Any]:
-        """Add a specific media file to the transcoding queue."""
+        """Add a specific media file to the transcoding queue. Simple logic: if it has a profile or user selects one, add it."""
         try:
             LoggingService.LogFunctionEntry("AddJobToQueue", "QueueManagementBusinessService", MediaFileId, Priority)
             
@@ -311,14 +376,7 @@ class QueueManagementBusinessService:
                 LoggingService.LogWarning(errorMsg, "QueueManagementBusinessService", "AddJobToQueue")
                 return {"Success": False, "ErrorMessage": errorMsg}
             
-            # Check if already successfully transcoded
-            transcodeFile = self.DatabaseManager.GetTranscodeFileByFilePath(mediaFile.FilePath)
-            if transcodeFile and transcodeFile.SuccessfullyTranscoded:
-                errorMsg = f"File {mediaFile.FileName} has already been successfully transcoded"
-                LoggingService.LogWarning(errorMsg, "QueueManagementBusinessService", "AddJobToQueue")
-                return {"Success": False, "ErrorMessage": errorMsg}
-            
-            # Handle profile assignment if ProfileId is provided
+            # Handle profile assignment if ProfileId is provided (user selected a profile)
             if ProfileId is not None:
                 # Get the profile and update the media file's assigned profile
                 profile = self.DatabaseManager.GetProfileById(ProfileId)
@@ -332,25 +390,26 @@ class QueueManagementBusinessService:
                 self.DatabaseManager.SaveMediaFile(mediaFile)
                 LoggingService.LogInfo(f"Updated media file {mediaFile.FileName} to use profile {profile.ProfileName}", "QueueManagementBusinessService", "AddJobToQueue")
             
-            # Get profile thresholds to find matching one
-            profileThresholds = self.DatabaseManager.GetAllProfileThresholds()
-            matchingThreshold = self.FindMatchingProfileThreshold(mediaFile, profileThresholds)
-            
-            if not matchingThreshold:
-                errorMsg = f"No matching profile threshold found for {mediaFile.FileName}"
+            # Check if file has a profile (either existing or just assigned)
+            if not mediaFile.AssignedProfile or mediaFile.AssignedProfile.strip() == '':
+                errorMsg = f"File {mediaFile.FileName} has no profile assigned. Please select a profile first."
                 LoggingService.LogWarning(errorMsg, "QueueManagementBusinessService", "AddJobToQueue")
                 return {"Success": False, "ErrorMessage": errorMsg}
             
-            # Create queue item
-            queueItem = self.CreateQueueItemFromMediaFile(mediaFile, matchingThreshold)
+            # Create queue item directly from media file (no threshold matching needed)
+            queueItem = self.CreateQueueItemFromMediaFileSimple(mediaFile)
             if not queueItem:
                 errorMsg = f"Failed to create queue item for {mediaFile.FileName}"
                 LoggingService.LogError(errorMsg, "QueueManagementBusinessService", "AddJobToQueue")
                 return {"Success": False, "ErrorMessage": errorMsg}
             
-            # Override priority if specified
+            # Override priority if specified, or add bonus for manual addition
             if Priority is not None:
                 queueItem.Priority = Priority
+            else:
+                # Add 15 points to priority for manual addition via + button
+                queueItem.Priority = min(100, queueItem.Priority + 15)
+                LoggingService.LogInfo(f"Added manual addition bonus (+15) to priority for {mediaFile.FileName}. New priority: {queueItem.Priority}", "QueueManagementBusinessService", "AddJobToQueue")
             
             # Save to database
             itemId = self.DatabaseManager.SaveTranscodeQueueItem(queueItem)

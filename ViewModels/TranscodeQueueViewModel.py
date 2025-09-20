@@ -30,11 +30,13 @@ class TranscodeQueueViewModel:
             # Get all queue items from service
             allQueueItems = self.QueueManagementService.DatabaseManager.GetAllTranscodeQueueItems()
             
-            # Sort items
+            # Sort items - Priority first, then SizeMB as tiebreaker
             if SortBy == "SizeMB":
-                allQueueItems.sort(key=lambda x: x.SizeMB or 0, reverse=(SortOrder == "DESC"))
+                # Sort by priority first (DESC), then by size (DESC)
+                allQueueItems.sort(key=lambda x: (x.Priority or 0, x.SizeMB or 0), reverse=True)
             elif SortBy == "Priority":
-                allQueueItems.sort(key=lambda x: x.Priority or 0, reverse=(SortOrder == "DESC"))
+                # Sort by priority first (DESC), then by size (DESC) as tiebreaker
+                allQueueItems.sort(key=lambda x: (x.Priority or 0, x.SizeMB or 0), reverse=True)
             elif SortBy == "DateAdded":
                 allQueueItems.sort(key=lambda x: x.DateAdded or datetime.min, reverse=(SortOrder == "DESC"))
             elif SortBy == "FileName":
@@ -261,30 +263,6 @@ class TranscodeQueueViewModel:
             self.ErrorMessage = f"Error getting queue statistics: {str(e)}"
             LoggingService.LogException("Exception getting queue statistics", e, "TranscodeQueueViewModel", "GetQueueStatistics")
             return {"Success": False, "ErrorMessage": self.ErrorMessage}
-    
-    def FilterQueueItems(self, Status: str = None, Priority: int = None) -> List[Dict[str, Any]]:
-        """Filter queue items by status and/or priority."""
-        try:
-            LoggingService.LogFunctionEntry("FilterQueueItems", "TranscodeQueueViewModel", Status, Priority)
-            
-            filteredItems = self.QueueItems.copy()
-            
-            # Filter by status
-            if Status:
-                filteredItems = [item for item in filteredItems if item.Status == Status]
-            
-            # Filter by priority
-            if Priority is not None:
-                filteredItems = [item for item in filteredItems if item.Priority >= Priority]
-            
-            result = [self.QueueItemToDict(item) for item in filteredItems]
-            
-            LoggingService.LogInfo(f"Filtered to {len(result)} items", "TranscodeQueueViewModel", "FilterQueueItems")
-            return result
-            
-        except Exception as e:
-            LoggingService.LogException("Exception filtering queue items", e, "TranscodeQueueViewModel", "FilterQueueItems")
-            return []
     
     def QueueItemToDict(self, QueueItem: TranscodeQueueModel) -> Dict[str, Any]:
         """Convert a queue item to dictionary for JSON serialization."""

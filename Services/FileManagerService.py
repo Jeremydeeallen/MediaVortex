@@ -441,3 +441,65 @@ class FileManagerService:
         self.ProcessedFiles = 0
         self.SkippedFiles = 0
         self.EncodingErrors.clear()
+    
+    def ValidateFileExists(self, FilePath: str) -> bool:
+        """Validate that a file exists on disk with Unicode path support."""
+        try:
+            LoggingService.LogFunctionEntry("ValidateFileExists", 'FileManagerService', FilePath)
+            
+            # Validate the path first
+            isValid, validatedPath = self.ValidateUnicodePath(FilePath)
+            
+            if not isValid:
+                LoggingService.LogDebug(f"Unicode validation failed for path: {FilePath}", 'ValidateFileExists', 'FileManagerService')
+                self.EncodingErrors.append(f"Unicode issue: {FilePath}")
+            
+            # Check if file exists
+            fileExists = os.path.exists(FilePath)
+            
+            if not fileExists:
+                LoggingService.LogWarning(f"File does not exist: {FilePath}", 'ValidateFileExists', 'FileManagerService')
+            else:
+                LoggingService.LogDebug(f"File exists: {FilePath}", 'ValidateFileExists', 'FileManagerService')
+            
+            return fileExists
+            
+        except Exception as e:
+            LoggingService.LogException("Error validating file existence", e, 'ValidateFileExists', 'FileManagerService')
+            return False
+    
+    def ValidateMediaFileExists(self, MediaFile) -> Dict[str, Any]:
+        """Validate that a MediaFileModel exists on disk and return validation result."""
+        try:
+            LoggingService.LogFunctionEntry("ValidateMediaFileExists", 'FileManagerService', MediaFile.FilePath)
+            
+            fileExists = self.ValidateFileExists(MediaFile.FilePath)
+            
+            if not fileExists:
+                LoggingService.LogWarning(f"Media file does not exist: {MediaFile.FileName} at {MediaFile.FilePath}", 'ValidateMediaFileExists', 'FileManagerService')
+                return {
+                    'Success': False,
+                    'FileExists': False,
+                    'ErrorMessage': f'File does not exist: {MediaFile.FileName}',
+                    'FilePath': MediaFile.FilePath,
+                    'FileName': MediaFile.FileName
+                }
+            else:
+                LoggingService.LogDebug(f"Media file exists: {MediaFile.FileName}", 'ValidateMediaFileExists', 'FileManagerService')
+                return {
+                    'Success': True,
+                    'FileExists': True,
+                    'ErrorMessage': None,
+                    'FilePath': MediaFile.FilePath,
+                    'FileName': MediaFile.FileName
+                }
+                
+        except Exception as e:
+            LoggingService.LogException("Error validating media file existence", e, 'ValidateMediaFileExists', 'FileManagerService')
+            return {
+                'Success': False,
+                'FileExists': False,
+                'ErrorMessage': f'Validation error: {str(e)}',
+                'FilePath': MediaFile.FilePath if hasattr(MediaFile, 'FilePath') else 'Unknown',
+                'FileName': MediaFile.FileName if hasattr(MediaFile, 'FileName') else 'Unknown'
+            }

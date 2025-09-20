@@ -10,6 +10,7 @@ from Repositories.DatabaseManager import DatabaseManager
 from Services.HandBrakeService import HandBrakeService
 from Services.QueueManagementBusinessService import QueueManagementBusinessService
 from Services.LoggingService import LoggingService
+from Services.FileManagerService import FileManagerService
 
 
 class TranscodingBusinessService:
@@ -21,6 +22,7 @@ class TranscodingBusinessService:
         self.DatabaseManager = DatabaseManagerInstance or DatabaseManager()
         self.HandBrakeService = HandBrakeServiceInstance or HandBrakeService()
         self.QueueManagementService = QueueManagementServiceInstance or QueueManagementBusinessService(self.DatabaseManager)
+        self.FileManager = FileManagerService()
         self.IsRunning = False
         self.CurrentJob = None
     
@@ -126,6 +128,28 @@ class TranscodingBusinessService:
         """Process a single transcoding job."""
         try:
             LoggingService.LogFunctionEntry("ProcessTranscodingJob", "TranscodingBusinessService", QueueItem.Id, QueueItem.FileName)
+            
+            # Validate file exists on disk before starting transcoding (lazy cleanup)
+            if not self.FileManager.ValidateFileExists(QueueItem.FilePath):
+                errorMsg = f"Source file no longer exists: {QueueItem.FileName} at {QueueItem.FilePath}"
+                LoggingService.LogWarning(errorMsg, "TranscodingBusinessService", "ProcessTranscodingJob")
+                
+                # Mark job as failed and remove from queue
+                QueueItem.Status = "Failed"
+                QueueItem.ErrorMessage = errorMsg
+                QueueItem.DateCompleted = datetime.now()
+                self.DatabaseManager.SaveTranscodeQueueItem(QueueItem)
+                
+                # Clean up the media file record since it doesn't exist
+                try:
+                    mediaFile = self.DatabaseManager.GetMediaFileByFilePath(QueueItem.FilePath)
+                    if mediaFile:
+                        self.DatabaseManager.DeleteMediaFile(mediaFile.Id)
+                        LoggingService.LogInfo(f"Cleaned up missing media file from database: {QueueItem.FileName}", "TranscodingBusinessService", "ProcessTranscodingJob")
+                except Exception as cleanupError:
+                    LoggingService.LogException("Error cleaning up missing media file from database", cleanupError, "TranscodingBusinessService", "ProcessTranscodingJob")
+                
+                return {"Success": False, "ErrorMessage": errorMsg}
             
             # Update job status to running
             QueueItem.Status = "Running"

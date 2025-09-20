@@ -1,0 +1,130 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "Transcode Status API",
+    "version": "1.0.0",
+    "description": "API contract for getting transcoding job status"
+  },
+  "paths": {
+    "/api/transcode/status/{JobId}": {
+      "get": {
+        "summary": "Get transcoding job status",
+        "description": "Retrieves the current status and progress of a transcoding job",
+        "operationId": "getTranscodeStatus",
+        "parameters": [
+          {
+            "name": "JobId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Unique identifier for the transcoding job"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Job status retrieved successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TranscodeStatusResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Job not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "TranscodeStatusResponse": {
+        "type": "object",
+        "properties": {
+          "JobId": {
+            "type": "string",
+            "description": "Unique identifier for the transcoding job"
+          },
+          "FilePath": {
+            "type": "string",
+            "description": "Path to the file being transcoded"
+          },
+          "Status": {
+            "type": "string",
+            "enum": ["running", "completed", "failed", "cancelled"],
+            "description": "Current status of the transcoding job"
+          },
+          "ProgressPercent": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100,
+            "description": "Completion percentage (0-100)"
+          },
+          "StartTime": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When transcoding started"
+          },
+          "EndTime": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When transcoding ended (if completed/failed)"
+          },
+          "ErrorMessage": {
+            "type": "string",
+            "description": "Error message if job failed"
+          },
+          "OutputFilePath": {
+            "type": "string",
+            "description": "Path to the transcoded output file (if successful)"
+          },
+          "SizeReductionPercent": {
+            "type": "number",
+            "description": "Percentage reduction in file size (if successful)"
+          }
+        },
+        "required": ["JobId", "FilePath", "Status", "ProgressPercent", "StartTime"]
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "properties": {
+          "Error": {
+            "type": "string",
+            "description": "Error message"
+          },
+          "ErrorCode": {
+            "type": "string",
+            "description": "Error code"
+          },
+          "Timestamp": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the error occurred"
+          }
+        },
+        "required": ["Error", "ErrorCode", "Timestamp"]
+      }
+    }
+  }
+}

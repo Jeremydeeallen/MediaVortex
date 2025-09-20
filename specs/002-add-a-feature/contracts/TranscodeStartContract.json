@@ -1,0 +1,108 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "Transcode Start API",
+    "version": "1.0.0",
+    "description": "API contract for starting transcoding operations"
+  },
+  "paths": {
+    "/api/transcode/start": {
+      "post": {
+        "summary": "Start transcoding next item in queue",
+        "description": "Starts transcoding the largest file in the queue with assigned profile",
+        "operationId": "startTranscoding",
+        "responses": {
+          "200": {
+            "description": "Transcoding started successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TranscodeStartResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request - no items in queue or invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "TranscodeStartResponse": {
+        "type": "object",
+        "properties": {
+          "JobId": {
+            "type": "string",
+            "description": "Unique identifier for the transcoding job"
+          },
+          "FilePath": {
+            "type": "string",
+            "description": "Path to the file being transcoded"
+          },
+          "FileName": {
+            "type": "string",
+            "description": "Name of the file being transcoded"
+          },
+          "SizeMB": {
+            "type": "number",
+            "description": "Size of the file in MB"
+          },
+          "AssignedProfile": {
+            "type": "string",
+            "description": "Profile assigned to this transcoding job"
+          },
+          "Status": {
+            "type": "string",
+            "enum": ["processing"],
+            "description": "Current status of the transcoding job"
+          },
+          "StartTime": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When transcoding started"
+          }
+        },
+        "required": ["JobId", "FilePath", "FileName", "SizeMB", "AssignedProfile", "Status", "StartTime"]
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "properties": {
+          "Error": {
+            "type": "string",
+            "description": "Error message"
+          },
+          "ErrorCode": {
+            "type": "string",
+            "description": "Error code"
+          },
+          "Timestamp": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the error occurred"
+          }
+        },
+        "required": ["Error", "ErrorCode", "Timestamp"]
+      }
+    }
+  }
+}

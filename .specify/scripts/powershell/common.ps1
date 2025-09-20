@@ -2,7 +2,13 @@
 # Common PowerShell functions analogous to common.sh (moved to powershell/)
 
 function Get-RepoRoot {
-    git rev-parse --show-toplevel
+    # Check if we're in a project subdirectory with .specify folder
+    $currentDir = Get-Location
+    if (Test-Path (Join-Path $currentDir '.specify')) {
+        return $currentDir
+    } else {
+        return git rev-parse --show-toplevel
+    }
 }
 
 function Get-CurrentBranch {

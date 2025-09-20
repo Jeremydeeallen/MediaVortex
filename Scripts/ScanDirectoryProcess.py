@@ -176,19 +176,8 @@ class ScanDirectoryProcess:
                 self.FileScanningBusinessService.ScanResults = ScanResults
                 self.FileScanningBusinessService.ScanProgress = 0.0
                 
-                # First, run cleanup phase separately with status updates
-                self.UpdateJobStatus('Running', Progress=20.0, CurrentDirectory='Cleaning up orphaned database files...', ScanResults=ScanResults)
-                LoggingService.LogInfo("Starting cleanup phase", 'ScanDirectory', 'ScanDirectoryProcess')
-                
-                # Run cleanup for all files in database
-                self.FileScanningBusinessService.CleanupMissingFiles([], RootFolderId)  # Empty list since we're checking ALL files
-                if RootFolderId:
-                    self.FileScanningBusinessService.CleanupOrphanedFiles(RootFolderId)
-                
-                LoggingService.LogInfo("Cleanup phase completed", 'ScanDirectory', 'ScanDirectoryProcess')
-                
-                # Now process files with metadata extraction
-                self.UpdateJobStatus('Running', Progress=25.0, CurrentDirectory='Processing files with FFprobe...', ScanResults=ScanResults)
+                # Process files with metadata extraction
+                self.UpdateJobStatus('Running', Progress=20.0, CurrentDirectory='Processing files with FFprobe...', ScanResults=ScanResults)
                 
                 # Process files in batches to provide progress updates
                 BatchSize = 50  # Process 50 files at a time
