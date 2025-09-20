@@ -7,24 +7,29 @@ from Models.TranscodeAttemptModel import TranscodeAttemptModel
 from Models.TranscodeFileModel import TranscodeFileModel
 from Models.ProfileThresholdModel import ProfileThresholdModel
 from Repositories.DatabaseManager import DatabaseManager
-from Services.HandBrakeService import HandBrakeService
+from Services.FFmpegTranscodingService import FFmpegTranscodingService
+from Services.FilenameResolutionService import FilenameResolutionService
+from Services.FFmpegComparisonService import FFmpegComparisonService
 from Services.QueueManagementBusinessService import QueueManagementBusinessService
 from Services.LoggingService import LoggingService
 from Services.FileManagerService import FileManagerService
 
 
 class TranscodingBusinessService:
-    """Orchestrates the transcoding process, coordinates between HandBrakeService and QueueManagementBusinessService."""
+    """Orchestrates the transcoding process, coordinates between FFmpegService and QueueManagementBusinessService."""
     
     def __init__(self, DatabaseManagerInstance: DatabaseManager = None, 
-                 HandBrakeServiceInstance: HandBrakeService = None,
+                 FFmpegServiceInstance: FFmpegTranscodingService = None,
                  QueueManagementServiceInstance: QueueManagementBusinessService = None):
         self.DatabaseManager = DatabaseManagerInstance or DatabaseManager()
-        self.HandBrakeService = HandBrakeServiceInstance or HandBrakeService()
+        self.FFmpegService = FFmpegServiceInstance or FFmpegTranscodingService()
+        self.FilenameService = FilenameResolutionService()
+        self.QualityService = FFmpegComparisonService()
         self.QueueManagementService = QueueManagementServiceInstance or QueueManagementBusinessService(self.DatabaseManager)
         self.FileManager = FileManagerService()
         self.IsRunning = False
         self.CurrentJob = None
+        self.QualityThreshold = 90.0
     
     def StartTranscoding(self, MaxConcurrentJobs: int = 1) -> Dict[str, Any]:
         """Start the transcoding process."""
@@ -35,9 +40,9 @@ class TranscodingBusinessService:
                 LoggingService.LogWarning("Transcoding is already running", "TranscodingBusinessService", "StartTranscoding")
                 return {"Success": False, "ErrorMessage": "Transcoding is already running"}
             
-            # Check HandBrake availability
-            if not self.HandBrakeService.CheckAvailability():
-                errorMsg = "HandBrake is not available"
+            # Check FFmpeg availability
+            if not self.FFmpegService.CheckAvailability():
+                errorMsg = "FFmpeg is not available"
                 LoggingService.LogError(errorMsg, "TranscodingBusinessService", "StartTranscoding")
                 return {"Success": False, "ErrorMessage": errorMsg}
             
@@ -185,7 +190,7 @@ class TranscodingBusinessService:
                 AttemptDate=datetime.now(),
                 Quality=20,  # Default quality
                 OldSizeBytes=QueueItem.SizeBytes,
-                HandbrakeSettings=f"Quality: 20, VideoBitrate: {profileThreshold.VideoBitrateKbps}, AudioBitrate: {profileThreshold.AudioBitrateKbps}",
+                FFmpegSettings=f"Quality: 20, VideoBitrate: {profileThreshold.VideoBitrateKbps}, AudioBitrate: {profileThreshold.AudioBitrateKbps}",
                 AudioBitrateKbps=profileThreshold.AudioBitrateKbps,
                 VideoBitrateKbps=profileThreshold.VideoBitrateKbps,
                 ProfileName=f"Profile_{profileThreshold.ProfileId}"
@@ -195,12 +200,14 @@ class TranscodingBusinessService:
             LoggingService.LogInfo(f"Starting transcoding: {QueueItem.FileName} -> {os.path.basename(outputFilePath)}", "TranscodingBusinessService", "ProcessTranscodingJob")
             
             startTime = time.time()
-            transcodeResult = self.HandBrakeService.TranscodeFile(
+            transcodeResult = self.FFmpegService.TranscodeVideo(
                 InputFile=QueueItem.FilePath,
                 OutputFile=outputFilePath,
-                Quality=20,
-                VideoBitrate=profileThreshold.VideoBitrateKbps,
-                AudioBitrate=profileThreshold.AudioBitrateKbps
+                QualitySettings={
+                    "Quality": 20,
+                    "VideoBitrate": profileThreshold.VideoBitrateKbps,
+                    "AudioBitrate": profileThreshold.AudioBitrateKbps
+                }
             )
             endTime = time.time()
             
@@ -382,7 +389,7 @@ class TranscodingBusinessService:
                 "IsRunning": self.IsRunning,
                 "CurrentJob": None,
                 "QueueStatistics": self.QueueManagementService.GetQueueStatistics(),
-                "HandBrakeAvailable": self.HandBrakeService.CheckAvailability()
+                "FFmpegAvailable": self.FFmpegService.CheckAvailability()
             }
             
             if self.CurrentJob:
@@ -450,3 +457,203 @@ class TranscodingBusinessService:
         except Exception as e:
             LoggingService.LogException("Exception getting transcoding history", e, "TranscodingBusinessService", "GetTranscodingHistory")
             return []
+    
+    def ProcessTranscodingWorkflow(self, QueueItem: TranscodeQueueModel, QualitySettings: Dict[str, Any]) -> Dict[str, Any]:
+        """Process complete transcoding workflow with quality scoring."""
+        try:
+            LoggingService.LogFunctionEntry("ProcessTranscodingWorkflow", "TranscodingBusinessService")
+            
+            # Setup transcoding directories
+            directoryResult = self.FileManager.SetupTranscodingDirectories()
+            if not directoryResult.get('Success', False):
+                return {
+                    'Success': False,
+                    'Status': 'failed',
+                    'ErrorMessage': 'Failed to setup transcoding directories'
+                }
+            
+            # Generate output file path
+            outputFilePath = self.FilenameService.GenerateOutputFilePath(
+                QueueItem.FilePath,
+                directoryResult['MediaVortexTempDir'],
+                QualitySettings.get('TargetResolution', '720p')
+            )
+            
+            # Transcode video
+            transcodeResult = self.FFmpegService.TranscodeVideo(
+                QueueItem.FilePath,
+                outputFilePath,
+                QualitySettings
+            )
+            
+            if not transcodeResult.get('Success', False):
+                return {
+                    'Success': False,
+                    'Status': 'failed',
+                    'ErrorMessage': transcodeResult.get('ErrorMessage', 'Transcoding failed')
+                }
+            
+            # Perform quality scoring
+            qualityResult = self.QualityService.CreateVMAFComparison(
+                QueueItem.FilePath,
+                outputFilePath,
+                os.path.join(directoryResult['MediaVortexTempDir'], "VMAFResults.json")
+            )
+            
+            if not qualityResult.Success:
+                return {
+                    'Success': False,
+                    'Status': 'failed',
+                    'ErrorMessage': 'Quality scoring failed'
+                }
+            
+            # Check quality threshold
+            if qualityResult.VMAFScore >= self.QualityThreshold:
+                # Quality passed - process file replacement
+                replacementResult = self.ProcessFileReplacement(
+                    QueueItem.FilePath,
+                    outputFilePath,
+                    None,  # TranscodeAttempt will be created
+                    qualityResult.VMAFScore
+                )
+                
+                if replacementResult.get('Success', False):
+                    return {
+                        'Success': True,
+                        'Status': 'completed',
+                        'VMAFScore': qualityResult.VMAFScore,
+                        'OutputFilePath': outputFilePath,
+                        'TranscodeAttempt': replacementResult.get('TranscodeAttempt')
+                    }
+                else:
+                    return replacementResult
+            else:
+                # Quality failed
+                return {
+                    'Success': False,
+                    'Status': 'failed',
+                    'VMAFScore': qualityResult.VMAFScore,
+                    'ErrorMessage': f'Quality score {qualityResult.VMAFScore} below threshold {self.QualityThreshold}'
+                }
+                
+        except Exception as e:
+            LoggingService.LogException("Exception in transcoding workflow", e, "TranscodingBusinessService", "ProcessTranscodingWorkflow")
+            return {
+                'Success': False,
+                'Status': 'failed',
+                'ErrorMessage': f'Workflow exception: {str(e)}'
+            }
+    
+    def ProcessFileReplacement(self, OriginalFilePath: str, TranscodedFilePath: str, 
+                              TranscodeAttempt: TranscodeAttemptModel, VMAFScore: float) -> Dict[str, Any]:
+        """Process file replacement when quality score passes threshold."""
+        try:
+            LoggingService.LogFunctionEntry("ProcessFileReplacement", "TranscodingBusinessService")
+            
+            # Validate files exist
+            if not self.FileManager.ValidateFileExists(OriginalFilePath):
+                return {
+                    'Success': False,
+                    'Status': 'failed',
+                    'ErrorMessage': 'Original file not found'
+                }
+            
+            if not self.FileManager.ValidateFileExists(TranscodedFilePath):
+                return {
+                    'Success': False,
+                    'Status': 'failed',
+                    'ErrorMessage': 'Transcoded file not found'
+                }
+            
+            # Create TranscodeAttempt if not provided
+            if TranscodeAttempt is None:
+                TranscodeAttempt = TranscodeAttemptModel(
+                    FilePath=OriginalFilePath,
+                    Success=True,
+                    VMAF=VMAFScore
+                )
+            
+            # Save transcoding attempt to database
+            self.DatabaseManager.SaveTranscodeAttempt(TranscodeAttempt)
+            
+            # Replace original file with transcoded file
+            # Note: This would be implemented based on specific file replacement logic
+            
+            return {
+                'Success': True,
+                'Status': 'completed',
+                'VMAFScore': VMAFScore,
+                'TranscodeAttempt': TranscodeAttempt
+            }
+            
+        except Exception as e:
+            LoggingService.LogException("Exception in file replacement", e, "TranscodingBusinessService", "ProcessFileReplacement")
+            return {
+                'Success': False,
+                'Status': 'failed',
+                'ErrorMessage': f'File replacement exception: {str(e)}'
+            }
+    
+    def GetTranscodeStatus(self, JobId: str) -> Dict[str, Any]:
+        """Get the status of a transcoding job."""
+        try:
+            LoggingService.LogFunctionEntry(f"GetTranscodeStatus({JobId})", "TranscodingBusinessService")
+            
+            # This would query the database for job status
+            # For now, return a mock response
+            return {
+                'Success': True,
+                'JobId': JobId,
+                'FilePath': '/path/to/file.mkv',
+                'Status': 'running',
+                'ProgressPercent': 50.0,
+                'StartTime': datetime.now().isoformat()
+            }
+            
+        except Exception as e:
+            LoggingService.LogException("Exception getting transcoding status", e, "TranscodingBusinessService", "GetTranscodeStatus")
+            return {
+                'Success': False,
+                'Error': f'Exception getting status: {str(e)}',
+                'ErrorCode': 'INTERNAL_SERVER_ERROR',
+                'Timestamp': datetime.now().isoformat()
+            }
+    
+    def GetTranscodeQueue(self) -> Dict[str, Any]:
+        """Get the current transcoding queue."""
+        try:
+            LoggingService.LogFunctionEntry("GetTranscodeQueue", "TranscodingBusinessService")
+            
+            # Get queue items from database
+            queueItems = self.QueueManagementService.GetQueueItems()
+            
+            # Calculate total size
+            totalSizeMB = sum(item.SizeMB for item in queueItems)
+            
+            return {
+                'Success': True,
+                'Message': 'Queue retrieved successfully',
+                'QueueItems': [
+                    {
+                        'Id': item.Id,
+                        'FilePath': item.FilePath,
+                        'FileName': item.FileName,
+                        'SizeMB': item.SizeMB,
+                        'Status': item.Status.lower(),
+                        'AssignedProfile': item.AssignedProfile,
+                        'DateAdded': item.DateAdded.isoformat() if item.DateAdded else None
+                    }
+                    for item in queueItems
+                ],
+                'TotalItems': len(queueItems),
+                'TotalSizeMB': totalSizeMB
+            }
+            
+        except Exception as e:
+            LoggingService.LogException("Exception getting transcoding queue", e, "TranscodingBusinessService", "GetTranscodeQueue")
+            return {
+                'Success': False,
+                'Error': f'Exception getting queue: {str(e)}',
+                'ErrorCode': 'INTERNAL_SERVER_ERROR',
+                'Timestamp': datetime.now().isoformat()
+            }

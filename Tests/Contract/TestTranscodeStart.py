@@ -28,7 +28,7 @@ class TestTranscodeStart(unittest.TestCase):
         self.ValidAssignedProfile = "HighQuality"
         self.ValidStartTime = "2024-01-15T10:30:00Z"
     
-    def TestTranscodeStartSuccessResponse(self):
+    def test_transcode_start_success_response(self):
         """Test successful transcoding start response matches contract schema."""
         # This test will FAIL until implementation is complete
         # Expected response structure from TranscodeStartContract.json
@@ -73,7 +73,7 @@ class TestTranscodeStart(unittest.TestCase):
             self.assertEqual(response['SizeMB'], self.ValidSizeMB)
             self.assertEqual(response['AssignedProfile'], self.ValidAssignedProfile)
     
-    def TestTranscodeStartNoQueueItems(self):
+    def test_transcode_start_no_queue_items(self):
         """Test error response when no items in queue."""
         # This test will FAIL until implementation is complete
         
@@ -100,7 +100,7 @@ class TestTranscodeStart(unittest.TestCase):
             self.assertEqual(response['ErrorCode'], 'NO_QUEUE_ITEMS')
             self.assertIsInstance(response['Timestamp'], str)
     
-    def TestTranscodeStartInvalidRequest(self):
+    def test_transcode_start_invalid_request(self):
         """Test error response for invalid request."""
         # This test will FAIL until implementation is complete
         
@@ -123,7 +123,7 @@ class TestTranscodeStart(unittest.TestCase):
             self.assertEqual(response['Error'], 'Invalid request parameters')
             self.assertEqual(response['ErrorCode'], 'INVALID_REQUEST')
     
-    def TestTranscodeStartInternalServerError(self):
+    def test_transcode_start_internal_server_error(self):
         """Test error response for internal server error."""
         # This test will FAIL until implementation is complete
         
@@ -141,7 +141,7 @@ class TestTranscodeStart(unittest.TestCase):
             self.assertIn('Database connection failed', response['Error'])
             self.assertEqual(response['ErrorCode'], 'INTERNAL_SERVER_ERROR')
     
-    def TestTranscodeStartResponseStatusCode(self):
+    def test_transcode_start_response_status_code(self):
         """Test that correct HTTP status codes are returned."""
         # This test will FAIL until implementation is complete
         

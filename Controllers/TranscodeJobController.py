@@ -226,15 +226,15 @@ def HealthCheck():
         # Get basic status
         status = viewModel.GetTranscodingStatus()
         
-        # Check HandBrake availability
-        handBrakeAvailable = viewModel.TranscodingService.HandBrakeService.CheckAvailability()
+        # Check FFmpeg availability
+        ffmpegAvailable = viewModel.TranscodingService.FFmpegService.CheckAvailability()
         
         result = {
             "Success": True,
             "Service": "TranscodeJobController",
             "Status": "Healthy",
             "IsTranscoding": status.get("IsTranscoding", False),
-            "HandBrakeAvailable": handBrakeAvailable,
+            "FFmpegAvailable": ffmpegAvailable,
             "Timestamp": viewModel.TranscodingService.DatabaseManager.DatabaseService.GetCurrentTimestamp()
         }
         

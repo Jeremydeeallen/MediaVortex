@@ -854,7 +854,7 @@ class DatabaseManager:
         query = """
             SELECT Id, FilePath, AttemptDate, Quality, OldSizeBytes, NewSizeBytes, Success,
                    SizeReductionBytes, SizeReductionPercent, ErrorMessage, TranscodeDurationSeconds,
-                   HandbrakeSettings, AudioBitrateKbps, VideoBitrateKbps, ProfileName, VMAF, VMAF
+                   FFmpegSettings, AudioBitrateKbps, VideoBitrateKbps, ProfileName, VMAF, VMAF
             FROM TranscodeAttempts 
             ORDER BY AttemptDate DESC
         """
@@ -874,7 +874,7 @@ class DatabaseManager:
                 SizeReductionPercent=row['SizeReductionPercent'],
                 ErrorMessage=row['ErrorMessage'],
                 TranscodeDurationSeconds=row['TranscodeDurationSeconds'],
-                HandbrakeSettings=row['HandbrakeSettings'],
+                FFmpegSettings=row['FFmpegSettings'],
                 AudioBitrateKbps=row['AudioBitrateKbps'],
                 VideoBitrateKbps=row['VideoBitrateKbps'],
                 ProfileName=row['ProfileName'],
@@ -889,7 +889,7 @@ class DatabaseManager:
         query = """
             SELECT Id, FilePath, AttemptDate, Quality, OldSizeBytes, NewSizeBytes, Success,
                    SizeReductionBytes, SizeReductionPercent, ErrorMessage, TranscodeDurationSeconds,
-                   HandbrakeSettings, AudioBitrateKbps, VideoBitrateKbps, ProfileName, VMAF
+                   FFmpegSettings, AudioBitrateKbps, VideoBitrateKbps, ProfileName, VMAF
             FROM TranscodeAttempts 
             WHERE FilePath = ?
             ORDER BY AttemptDate DESC
@@ -910,7 +910,7 @@ class DatabaseManager:
                 SizeReductionPercent=row['SizeReductionPercent'],
                 ErrorMessage=row['ErrorMessage'],
                 TranscodeDurationSeconds=row['TranscodeDurationSeconds'],
-                HandbrakeSettings=row['HandbrakeSettings'],
+                FFmpegSettings=row['FFmpegSettings'],
                 AudioBitrateKbps=row['AudioBitrateKbps'],
                 VideoBitrateKbps=row['VideoBitrateKbps'],
                 ProfileName=row['ProfileName'],
@@ -936,14 +936,14 @@ class DatabaseManager:
                         INSERT INTO TranscodeAttempts 
                         (FilePath, AttemptDate, Quality, OldSizeBytes, NewSizeBytes, Success,
                          SizeReductionBytes, SizeReductionPercent, ErrorMessage, TranscodeDurationSeconds,
-                         HandbrakeSettings, AudioBitrateKbps, VideoBitrateKbps, ProfileName, VMAF)
+                         FFmpegSettings, AudioBitrateKbps, VideoBitrateKbps, ProfileName, VMAF)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """
                     parameters = (
                         Attempt.FilePath, Attempt.AttemptDate, Attempt.Quality,
                         Attempt.OldSizeBytes, Attempt.NewSizeBytes, Attempt.Success,
                         Attempt.SizeReductionBytes, Attempt.SizeReductionPercent, Attempt.ErrorMessage,
-                        Attempt.TranscodeDurationSeconds, Attempt.HandbrakeSettings,
+                        Attempt.TranscodeDurationSeconds, Attempt.FFmpegSettings,
                         Attempt.AudioBitrateKbps, Attempt.VideoBitrateKbps, Attempt.ProfileName, Attempt.VMAF
                     )
                     LoggingService.LogInfo(f"Insert attempt parameters: {parameters}", "DatabaseManager", "SaveTranscodeAttempt")
@@ -959,7 +959,7 @@ class DatabaseManager:
                         UPDATE TranscodeAttempts 
                         SET FilePath = ?, AttemptDate = ?, Quality = ?, OldSizeBytes = ?, NewSizeBytes = ?,
                             Success = ?, SizeReductionBytes = ?, SizeReductionPercent = ?, ErrorMessage = ?,
-                            TranscodeDurationSeconds = ?, HandbrakeSettings = ?, AudioBitrateKbps = ?,
+                            TranscodeDurationSeconds = ?, FFmpegSettings = ?, AudioBitrateKbps = ?,
                             VideoBitrateKbps = ?, ProfileName = ?, VMAF = ?
                         WHERE Id = ?
                     """
@@ -967,7 +967,7 @@ class DatabaseManager:
                         Attempt.FilePath, Attempt.AttemptDate, Attempt.Quality,
                         Attempt.OldSizeBytes, Attempt.NewSizeBytes, Attempt.Success,
                         Attempt.SizeReductionBytes, Attempt.SizeReductionPercent, Attempt.ErrorMessage,
-                        Attempt.TranscodeDurationSeconds, Attempt.HandbrakeSettings,
+                        Attempt.TranscodeDurationSeconds, Attempt.FFmpegSettings,
                         Attempt.AudioBitrateKbps, Attempt.VideoBitrateKbps, Attempt.ProfileName, Attempt.VMAF, Attempt.Id
                     )
                     LoggingService.LogInfo(f"Update attempt parameters: {parameters}", "DatabaseManager", "SaveTranscodeAttempt")

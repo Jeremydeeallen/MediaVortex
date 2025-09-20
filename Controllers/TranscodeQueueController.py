@@ -1,7 +1,9 @@
 from flask import Blueprint, request, jsonify, render_template
-from typing import Dict, Any
+from typing import Dict, Any, Tuple
 from ViewModels.TranscodeQueueViewModel import TranscodeQueueViewModel
 from Services.LoggingService import LoggingService
+from Services.TranscodingBusinessService import TranscodingBusinessService
+from datetime import datetime
 
 
 # Create Blueprint for transcoding queue routes
@@ -254,5 +256,95 @@ def PrioritizeJob():
         errorMsg = f"Exception updating job priority: {str(e)}"
         LoggingService.LogException(errorMsg, e, "TranscodeQueueController", "PrioritizeJob")
         return jsonify({"Success": False, "ErrorMessage": errorMsg}), 500
+
+
+class TranscodeQueueController:
+    """Controller class for transcoding queue operations."""
+    
+    def __init__(self):
+        """Initialize the controller with required services."""
+        self.TranscodingService = TranscodingBusinessService()
+        self.ViewModel = TranscodeQueueViewModel()
+    
+    def StartTranscoding(self) -> Tuple[Dict[str, Any], int]:
+        """Start transcoding the next item in the queue."""
+        try:
+            LoggingService.LogFunctionEntry("StartTranscoding", "TranscodeQueueController")
+            
+            # Get the next item from the queue
+            result = self.TranscodingService.StartTranscoding()
+            
+            if result.get("Success", False):
+                LoggingService.LogInfo(f"Started transcoding job: {result.get('JobId', 'Unknown')}", "TranscodeQueueController", "StartTranscoding")
+                return result, 200
+            else:
+                errorCode = result.get("ErrorCode", "UNKNOWN_ERROR")
+                if errorCode == "NO_QUEUE_ITEMS":
+                    return result, 400
+                else:
+                    return result, 500
+                    
+        except Exception as e:
+            errorMsg = f"Exception starting transcoding: {str(e)}"
+            LoggingService.LogException(errorMsg, e, "TranscodeQueueController", "StartTranscoding")
+            return {
+                "Success": False,
+                "Error": errorMsg,
+                "ErrorCode": "INTERNAL_SERVER_ERROR",
+                "Timestamp": datetime.now().isoformat()
+            }, 500
+    
+    def GetTranscodeStatus(self, JobId: str) -> Tuple[Dict[str, Any], int]:
+        """Get the status of a transcoding job."""
+        try:
+            LoggingService.LogFunctionEntry(f"GetTranscodeStatus({JobId})", "TranscodeQueueController")
+            
+            # Get job status from transcoding service
+            result = self.TranscodingService.GetTranscodeStatus(JobId)
+            
+            if result.get("Success", False):
+                LoggingService.LogInfo(f"Retrieved status for job {JobId}: {result.get('Status', 'Unknown')}", "TranscodeQueueController", "GetTranscodeStatus")
+                return result, 200
+            else:
+                errorCode = result.get("ErrorCode", "UNKNOWN_ERROR")
+                if errorCode == "JOB_NOT_FOUND":
+                    return result, 404
+                else:
+                    return result, 500
+                    
+        except Exception as e:
+            errorMsg = f"Exception getting transcoding status: {str(e)}"
+            LoggingService.LogException(errorMsg, e, "TranscodeQueueController", "GetTranscodeStatus")
+            return {
+                "Success": False,
+                "Error": errorMsg,
+                "ErrorCode": "INTERNAL_SERVER_ERROR",
+                "Timestamp": datetime.now().isoformat()
+            }, 500
+    
+    def GetTranscodeQueue(self) -> Tuple[Dict[str, Any], int]:
+        """Get the current transcoding queue."""
+        try:
+            LoggingService.LogFunctionEntry("GetTranscodeQueue", "TranscodeQueueController")
+            
+            # Get queue from transcoding service
+            result = self.TranscodingService.GetTranscodeQueue()
+            
+            if result.get("Success", False):
+                totalItems = result.get("TotalItems", 0)
+                LoggingService.LogInfo(f"Retrieved transcoding queue with {totalItems} items", "TranscodeQueueController", "GetTranscodeQueue")
+                return result, 200
+            else:
+                return result, 500
+                
+        except Exception as e:
+            errorMsg = f"Exception getting transcoding queue: {str(e)}"
+            LoggingService.LogException(errorMsg, e, "TranscodeQueueController", "GetTranscodeQueue")
+            return {
+                "Success": False,
+                "Error": errorMsg,
+                "ErrorCode": "INTERNAL_SERVER_ERROR",
+                "Timestamp": datetime.now().isoformat()
+            }, 500
 
 

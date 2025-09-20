@@ -59,20 +59,20 @@
 - [x] T011 [P] Integration test quality scoring and file replacement logic in Tests/Integration/TestQualityScoring.py
 
 ## Phase 3.3: Core Implementation (ONLY after tests are failing)
-- [ ] T012 [P] TranscodeQueueItem model in Models/TranscodeQueueModel.py
-- [ ] T013 [P] TranscodingJob model in Models/TranscodeAttemptModel.py
-- [ ] T014 [P] TranscodingResult model in Models/TranscodeFileModel.py
-- [ ] T015 [P] TranscodingProfile model in Models/TranscodeProfileModel.py
-- [ ] T016 [P] TranscodingQueueProcessor service in Services/TranscodingQueueProcessor.py
-- [ ] T017 [P] FFmpegTranscodingService with aspect ratio preservation in Services/FFmpegTranscodingService.py
-- [ ] T018 [P] FileManagerService for copy/delete operations in Services/FileManagerService.py
-- [ ] T019 [P] QualityScoringService with FFmpeg VMAF analysis in Services/QualityScoringService.py
-- [ ] T020 [P] FilenameResolutionService for resolution-based naming in Services/FilenameResolutionService.py
-- [ ] T021 POST /api/transcode/start endpoint in Controllers/TranscodeQueueController.py
-- [ ] T022 GET /api/transcode/status/{jobId} endpoint in Controllers/TranscodeQueueController.py
-- [ ] T023 GET /api/transcode/queue endpoint in Controllers/TranscodeQueueController.py
-- [ ] T024 Input validation for transcoding requests
-- [ ] T025 Error handling and logging for transcoding operations
+- [x] T012 [P] TranscodeQueueItem model in Models/TranscodeQueueModel.py
+- [x] T013 [P] TranscodingJob model in Models/TranscodeAttemptModel.py
+- [x] T014 [P] TranscodingResult model in Models/TranscodeFileModel.py
+- [x] T015 [P] TranscodingProfile model in Models/TranscodeProfileModel.py
+- [x] T016 [P] TranscodingQueueProcessor service in Services/TranscodingQueueProcessor.py
+- [x] T017 [P] FFmpegTranscodingService with aspect ratio preservation in Services/FFmpegTranscodingService.py
+- [x] T018 [P] FileManagerService for copy/delete operations in Services/FileManagerService.py
+- [x] T019 [P] QualityScoringService with FFmpeg VMAF analysis in Services/QualityScoringService.py
+- [x] T020 [P] FilenameResolutionService for resolution-based naming in Services/FilenameResolutionService.py
+- [x] T021 POST /api/transcode/start endpoint in Controllers/TranscodeQueueController.py
+- [x] T022 GET /api/transcode/status/{jobId} endpoint in Controllers/TranscodeQueueController.py
+- [x] T023 GET /api/transcode/queue endpoint in Controllers/TranscodeQueueController.py
+- [x] T024 Input validation for transcoding requests
+- [x] T025 Error handling and logging for transcoding operations
 
 ## Phase 3.4: Integration
 - [ ] T026 Connect TranscodingQueueProcessor to database with transaction management

@@ -48,7 +48,7 @@ class TranscodeProgressViewModel:
                 "CurrentJob": self.CurrentJob,
                 "Progress": self.Progress,
                 "QueueStatistics": status.get("QueueStatistics", {}),
-                "HandBrakeAvailable": status.get("HandBrakeAvailable", False)
+                "FFmpegAvailable": status.get("FFmpegAvailable", False)
             }
             
             return result
@@ -223,7 +223,7 @@ class TranscodeProgressViewModel:
                 "RecentAttemptsCount": len(recentAttempts),
                 "SuccessRate": successRate,
                 "AverageCompression": avgCompression,
-                "HandBrakeAvailable": self.TranscodingService.HandBrakeService.CheckAvailability()
+                "FFmpegAvailable": self.TranscodingService.FFmpegService.CheckAvailability()
             }
             
             return summary

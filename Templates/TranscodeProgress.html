@@ -229,7 +229,7 @@ class TranscodeProgressManager {
             document.getElementById('CurrentJobStatus').textContent = this.currentJob.Status || 'Running';
             document.getElementById('CurrentJobStartTime').textContent = this.formatDate(this.currentJob.DateStarted);
 
-            // Update progress (this would come from HandBrake output in a real implementation)
+            // Update progress (this would come from FFmpeg output in a real implementation)
             document.getElementById('CurrentJobProgress').textContent = 'Processing...';
             document.getElementById('CurrentJobProgressBar').style.width = '50%';
             document.getElementById('CurrentJobETA').textContent = 'Calculating...';
