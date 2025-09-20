@@ -30,7 +30,7 @@
 - Phase 3-4: Implementation execution (manual or via tools)
 
 ## Summary
-Video queue transcoding feature that processes videos from the TranscodeQueue table using FFmpeg with quality settings from the MediaFiles table. The system copies the top queue item to c:\HandBrake\Source, transcodes it with FFmpeg using quality settings and audio bitrate while maintaining aspect ratio, outputs to c:\HandBrakeTemp\<filename> with resolution-adjusted naming, performs quality scoring (>90 threshold), and replaces original files only on successful transcoding with proper database logging in TranscodeAttempts table.
+Video queue transcoding feature that processes videos from the TranscodeQueue table using FFmpeg with quality settings from the MediaFiles table. The system copies the top queue item to c:\MediaVortex\Source, transcodes it with FFmpeg using quality settings and audio bitrate while maintaining aspect ratio, outputs to c:\MediaVortex\<filename> with resolution-adjusted naming, performs quality scoring (>90 threshold), and replaces original files only on successful transcoding with proper database logging in TranscodeAttempts table.
 
 ## Technical Context
 **Language/Version**: Python 3.11  
@@ -42,7 +42,7 @@ Video queue transcoding feature that processes videos from the TranscodeQueue ta
 **Performance Goals**: Process queue items sequentially with quality validation  
 **Constraints**: Must preserve original files during transcoding, UTF-8 compatibility required, quality score >90 threshold  
 **Scale/Scope**: Single transcoding operation at a time, database-driven queue management  
-**File Paths**: Source files from scan directory, temp processing at c:\HandBrake\Source, output to c:\HandBrakeTemp\<filename>  
+**File Paths**: Source files from scan directory, temp processing at c:\MediaVortex\Source, output to c:\MediaVortex\<filename>  
 **Quality Validation**: FFmpeg-based quality scoring with 90+ threshold for file replacement  
 **Transcoding Engine**: FFmpeg with quality settings from MediaFiles table  
 

@@ -28,8 +28,8 @@ def TestDirectorySetup():
         result = fileManager.SetupTranscodingDirectories()
         
         print(f"Directory Setup Result: {result['Success']}")
-        print(f"HandBrake Source Dir: {result['HandBrakeSourceDir']}")
-        print(f"HandBrake Temp Dir: {result['HandBrakeTempDir']}")
+        print(f"MediaVortex Source Dir: {result['MediaVortexSourceDir']}")
+        print(f"MediaVortex Temp Dir: {result['MediaVortexTempDir']}")
         print(f"Created Directories: {result['CreatedDirectories']}")
         
         if result['Errors']:

@@ -8,7 +8,7 @@ This quickstart demonstrates the video queue transcoding feature that processes 
 - FFmpeg available in system PATH
 - Database with existing TranscodeQueue items
 - At least one transcoding profile configured
-- Temporary directory `c:\HandBrake\Source` accessible
+- Temporary directory `c:\MediaVortex\Source` accessible
 
 ## Step-by-Step Validation
 
@@ -27,7 +27,7 @@ This quickstart demonstrates the video queue transcoding feature that processes 
 - Click "Start Transcoding" button
 - Verify job status changes to "processing"
 - Confirm JobId is generated and displayed
-- Check that file is copied to `c:\HandBrake\Source`
+- Check that file is copied to `c:\MediaVortex\Source`
 
 ### 3. Monitor Progress
 **Action**: Track transcoding progress

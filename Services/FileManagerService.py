@@ -478,34 +478,34 @@ class FileManagerService:
             LoggingService.LogFunctionEntry("SetupTranscodingDirectories", 'FileManagerService')
             
             # Define required directories
-            HandBrakeSourceDir = r"c:\HandBrake\Source"
-            HandBrakeTempDir = r"c:\HandBrakeTemp"
+            MediaVortexSourceDir = r"c:\MediaVortex\Source"
+            MediaVortexTempDir = r"c:\MediaVortex"
             
             Results = {
                 'Success': True,
-                'HandBrakeSourceDir': HandBrakeSourceDir,
-                'HandBrakeTempDir': HandBrakeTempDir,
+                'MediaVortexSourceDir': MediaVortexSourceDir,
+                'MediaVortexTempDir': MediaVortexTempDir,
                 'CreatedDirectories': [],
                 'Errors': []
             }
             
-            # Create HandBrake\Source directory
-            if self.EnsureDirectoryExists(HandBrakeSourceDir):
-                Results['CreatedDirectories'].append(HandBrakeSourceDir)
-                LoggingService.LogInfo(f"HandBrake Source directory ready: {HandBrakeSourceDir}", 'SetupTranscodingDirectories', 'FileManagerService')
+            # Create MediaVortex\Source directory
+            if self.EnsureDirectoryExists(MediaVortexSourceDir):
+                Results['CreatedDirectories'].append(MediaVortexSourceDir)
+                LoggingService.LogInfo(f"MediaVortex Source directory ready: {MediaVortexSourceDir}", 'SetupTranscodingDirectories', 'FileManagerService')
             else:
                 Results['Success'] = False
-                Results['Errors'].append(f"Failed to create HandBrake Source directory: {HandBrakeSourceDir}")
-                LoggingService.LogError(f"Failed to create HandBrake Source directory: {HandBrakeSourceDir}", 'SetupTranscodingDirectories', 'FileManagerService')
+                Results['Errors'].append(f"Failed to create MediaVortex Source directory: {MediaVortexSourceDir}")
+                LoggingService.LogError(f"Failed to create MediaVortex Source directory: {MediaVortexSourceDir}", 'SetupTranscodingDirectories', 'FileManagerService')
             
-            # Create HandBrakeTemp directory
-            if self.EnsureDirectoryExists(HandBrakeTempDir):
-                Results['CreatedDirectories'].append(HandBrakeTempDir)
-                LoggingService.LogInfo(f"HandBrake Temp directory ready: {HandBrakeTempDir}", 'SetupTranscodingDirectories', 'FileManagerService')
+            # Create MediaVortex directory
+            if self.EnsureDirectoryExists(MediaVortexTempDir):
+                Results['CreatedDirectories'].append(MediaVortexTempDir)
+                LoggingService.LogInfo(f"MediaVortex Temp directory ready: {MediaVortexTempDir}", 'SetupTranscodingDirectories', 'FileManagerService')
             else:
                 Results['Success'] = False
-                Results['Errors'].append(f"Failed to create HandBrake Temp directory: {HandBrakeTempDir}")
-                LoggingService.LogError(f"Failed to create HandBrake Temp directory: {HandBrakeTempDir}", 'SetupTranscodingDirectories', 'FileManagerService')
+                Results['Errors'].append(f"Failed to create MediaVortex Temp directory: {MediaVortexTempDir}")
+                LoggingService.LogError(f"Failed to create MediaVortex Temp directory: {MediaVortexTempDir}", 'SetupTranscodingDirectories', 'FileManagerService')
             
             # Log summary
             if Results['Success']:
@@ -519,8 +519,8 @@ class FileManagerService:
             LoggingService.LogException("Error setting up transcoding directories", e, 'SetupTranscodingDirectories', 'FileManagerService')
             return {
                 'Success': False,
-                'HandBrakeSourceDir': r"c:\HandBrake\Source",
-                'HandBrakeTempDir': r"c:\HandBrakeTemp",
+                'MediaVortexSourceDir': r"c:\MediaVortex\Source",
+                'MediaVortexTempDir': r"c:\MediaVortex",
                 'CreatedDirectories': [],
                 'Errors': [f"Setup error: {str(e)}"]
             }

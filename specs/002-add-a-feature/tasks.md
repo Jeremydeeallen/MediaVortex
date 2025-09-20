@@ -45,7 +45,7 @@
 ## Phase 3.1: Setup
 - [x] T001 Create database schema extensions for TranscodeQueue, TranscodeAttempts, TranscodeFiles, and Profiles tables
 - [x] T002 Initialize FFmpeg integration for transcoding and quality scoring with VMAF analysis
-- [x] T003 [P] Configure temporary directory structure at c:\HandBrake\Source and c:\HandBrakeTemp\<filename>
+- [x] T003 [P] Configure temporary directory structure at c:\MediaVortex\Source and c:\MediaVortex\<filename>
 - [x] T004 [P] Setup filename resolution logic for resolution-based naming (1080p/2160p to 720p replacement)
 - [x] T005 [P] Setup FFmpeg transcoding service with quality settings from MediaFiles table
 
@@ -76,7 +76,7 @@
 
 ## Phase 3.4: Integration
 - [ ] T026 Connect TranscodingQueueProcessor to database with transaction management
-- [ ] T027 Integrate complete transcoding workflow: copy to c:\HandBrake\Source, transcode with FFmpeg and aspect ratio preservation
+- [ ] T027 Integrate complete transcoding workflow: copy to c:\MediaVortex\Source, transcode with FFmpeg and aspect ratio preservation
 - [ ] T028 Integrate quality scoring workflow: FFmpeg VMAF analysis with >90 threshold validation
 - [ ] T029 Integrate file replacement logic: delete original and copy transcoded file only on quality pass
 - [ ] T030 Integrate filename resolution: replace 1080p/2160p with target resolution in output filename
