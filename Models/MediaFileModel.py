@@ -21,6 +21,7 @@ class MediaFileModel:
     LastScannedDate: Optional[datetime] = None
     CompressionPotential: Optional[str] = None
     AssignedProfile: Optional[str] = None
+    FileModificationTime: Optional[datetime] = None
     
     
     def __post_init__(self):

@@ -1,0 +1,123 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "Transcode Queue Prioritize API",
+    "version": "1.0.0",
+    "description": "API contract for reordering queue by file size"
+  },
+  "paths": {
+    "/api/transcode/queue/prioritize": {
+      "post": {
+        "summary": "Reorder queue by file size",
+        "description": "Reorders the transcoding queue to process largest files first",
+        "operationId": "prioritizeQueue",
+        "responses": {
+          "200": {
+            "description": "Queue reordered successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueuePrioritizeResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "QueuePrioritizeResponse": {
+        "type": "object",
+        "properties": {
+          "Message": {
+            "type": "string",
+            "description": "Success message"
+          },
+          "QueueItems": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/QueueItem"
+            },
+            "description": "List of queue items in new order"
+          },
+          "TotalItems": {
+            "type": "integer",
+            "description": "Total number of items in queue"
+          },
+          "TotalSizeMB": {
+            "type": "number",
+            "description": "Total size of all items in queue (MB)"
+          }
+        },
+        "required": ["Message", "QueueItems", "TotalItems", "TotalSizeMB"]
+      },
+      "QueueItem": {
+        "type": "object",
+        "properties": {
+          "Id": {
+            "type": "integer",
+            "description": "Queue item ID"
+          },
+          "FilePath": {
+            "type": "string",
+            "description": "Path to the file"
+          },
+          "FileName": {
+            "type": "string",
+            "description": "Name of the file"
+          },
+          "SizeMB": {
+            "type": "number",
+            "description": "Size of the file in MB"
+          },
+          "Status": {
+            "type": "string",
+            "enum": ["pending", "processing", "completed", "failed"],
+            "description": "Current status of the queue item"
+          },
+          "AssignedProfile": {
+            "type": "string",
+            "description": "Profile assigned to this item"
+          },
+          "DateAdded": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the item was added to queue"
+          }
+        },
+        "required": ["Id", "FilePath", "FileName", "SizeMB", "Status", "AssignedProfile", "DateAdded"]
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "properties": {
+          "Error": {
+            "type": "string",
+            "description": "Error message"
+          },
+          "ErrorCode": {
+            "type": "string",
+            "description": "Error code"
+          },
+          "Timestamp": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the error occurred"
+          }
+        },
+        "required": ["Error", "ErrorCode", "Timestamp"]
+      }
+    }
+  }
+}

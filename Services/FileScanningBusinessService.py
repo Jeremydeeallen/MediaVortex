@@ -356,9 +356,9 @@ class FileScanningBusinessService:
             self.ScanResults.TotalFilesFound = len(MediaFiles)
             self.ScanResults.RootFolderId = RootFolder.Id
             
-            # Step 4: Process each media file with metadata extraction
-            LoggingService.LogInfo("Processing {} media files with metadata extraction...", len(MediaFiles))
-            self.ProcessMediaFiles(MediaFiles, RootFolder.Id, RootFolderPath, ExtractMetadata=True)
+            # Step 4: Process each media file (without metadata extraction for speed)
+            LoggingService.LogInfo("Processing {} media files...", len(MediaFiles))
+            self.ProcessMediaFiles(MediaFiles, RootFolder.Id, RootFolderPath, ExtractMetadata=False)
             
             # Step 5: Update scan results
             self.ScanProgress = 90.0
@@ -369,6 +369,18 @@ class FileScanningBusinessService:
             self.IsScanning = False
             
             LoggingService.LogInfo("Scan completed successfully")
+            
+            # Step 7: Automatically trigger metadata extraction for the scanned files
+            LoggingService.LogInfo("Automatically starting metadata extraction for scanned files...")
+            try:
+                metadataResult = self.ExtractMetadataForExistingFiles(RootFolder.Id)
+                if metadataResult.get('Success', False):
+                    processedFiles = metadataResult.get('ProcessedFiles', 0)
+                    LoggingService.LogInfo(f"Automatic metadata extraction completed: {processedFiles} files processed")
+                else:
+                    LoggingService.LogWarning(f"Automatic metadata extraction failed: {metadataResult.get('Message', 'Unknown error')}")
+            except Exception as e:
+                LoggingService.LogException("Error during automatic metadata extraction", e, 'PerformScan', 'FileScanningBusinessService')
             
             return {
                 'Success': True,
@@ -389,33 +401,6 @@ class FileScanningBusinessService:
                 'Results': self.ScanResults
             }
     
-    def GetOrCreateSeason(self, SeasonName: str, RootFolderId: int) -> SeasonModel:
-        """Get existing season or create a new one with enhanced organization logic."""
-        try:
-            # Check if season already exists
-            ExistingSeasons = self.DatabaseManager.GetAllSeasons()
-            for Season in ExistingSeasons:
-                if Season.SeasonName == SeasonName and Season.RootFolderId == RootFolderId:
-                    return Season
-            
-            # Extract season number from name if possible
-            SeasonNumber = self.ExtractSeasonNumber(SeasonName)
-            
-            # Create new season
-            NewSeason = SeasonModel(
-                RootFolderId=RootFolderId,
-                SeasonName=SeasonName,
-                SeasonNumber=SeasonNumber,
-                EpisodeCount=0,
-                TotalSizeGB=0.0
-            )
-            self.DatabaseManager.SaveSeason(NewSeason)
-            LoggingService.LogInfo("Created new season: {} (Number: {})", SeasonName, SeasonNumber)
-            return NewSeason
-            
-        except Exception as e:
-            LoggingService.LogException("Error getting or creating season", e, 'GetOrCreateSeason', 'FileScanningBusinessService')
-            raise
     
     def GetOrCreateRootFolder(self, RootFolderPath: str, TotalSizeGB: float) -> RootFolderModel:
         """Get existing root folder or create a new one."""
@@ -461,36 +446,8 @@ class FileScanningBusinessService:
             raise
     
     def ExtractSeasonFromPath(self, FilePath: str, RootFolderPath: str) -> str:
-        """Extract season information from file path."""
-        try:
-            # Get relative path from root folder
-            RelativePath = os.path.relpath(FilePath, RootFolderPath)
-            PathParts = RelativePath.split(os.sep)
-            
-            # Look for season indicators in path
-            for Part in PathParts:
-                PartLower = Part.lower()
-                if 'season' in PartLower or 's' in PartLower:
-                    # Extract season number or name
-                    if 'season' in PartLower:
-                        # Format: "Season 1", "Season1", etc.
-                        SeasonPart = Part
-                    elif PartLower.startswith('s') and len(Part) > 1:
-                        # Format: "S01", "S1", etc.
-                        SeasonPart = f"Season {Part[1:]}"
-                    else:
-                        SeasonPart = Part
-                    return SeasonPart
-            
-            # If no season found, use the first directory after root
-            if len(PathParts) > 1:
-                return PathParts[0]  # Use first subdirectory as season
-            
-            return "Default Season"
-            
-        except Exception as e:
-            LoggingService.LogException("Error extracting season from path", e)
-            return "Default Season"
+        """Simplified season extraction - return empty string since season functionality is disabled."""
+        return ""
     
     
     def ExtractShowInfo(self, FileName: str) -> Dict[str, str]:
@@ -619,27 +576,34 @@ class FileScanningBusinessService:
             # Get file information
             FileSizeMB = self.FileManager.GetFileSizeMB(FilePath)
             FileName = self.FileManager.GetFileNameFromPath(FilePath)
-            
-            # Extract season information and get/create season
-            SeasonName = self.ExtractSeasonFromPath(FilePath, RootFolderPath)
-            Season = self.GetOrCreateSeason(SeasonName, RootFolderId)
+            FileModificationTime = self.GetFileModificationTime(FilePath)
             
             # Check if this file already exists in database (exact match)
             ExistingFile = self.DatabaseManager.GetMediaFileByPath(FilePath)
             if ExistingFile:
-                # File exists in database and on disk - update if needed
-                ExistingFile.SizeMB = FileSizeMB
-                ExistingFile.FileName = FileName
-                ExistingFile.SeasonId = Season.Id
-                ExistingFile.LastScannedDate = datetime.now()
-                
-                # Extract metadata if requested and not already present
-                if ExtractMetadata and self.ShouldExtractMetadata(ExistingFile):
-                    self.ExtractAndUpdateMetadata(ExistingFile, FilePath)
-                
-                self.DatabaseManager.SaveMediaFile(ExistingFile)
-                self.ScanResults.TotalFilesProcessed += 1
-                LoggingService.LogInfo("Updated existing file: {}", FilePath)
+                # Check if file has actually changed
+                if self.HasFileChanged(ExistingFile, FileSizeMB, FileName, FileModificationTime):
+                    # File has changed - update it
+                    ExistingFile.SizeMB = FileSizeMB
+                    ExistingFile.FileName = FileName
+                    ExistingFile.FileModificationTime = FileModificationTime
+                    ExistingFile.SeasonId = None  # Season functionality disabled
+                    ExistingFile.LastScannedDate = datetime.now()
+                    
+                    # Extract metadata if requested and not already present
+                    if ExtractMetadata and self.ShouldExtractMetadata(ExistingFile):
+                        self.ExtractAndUpdateMetadata(ExistingFile, FilePath)
+                    
+                    self.DatabaseManager.SaveMediaFile(ExistingFile)
+                    self.ScanResults.TotalFilesProcessed += 1
+                    LoggingService.LogInfo("Updated changed file: {}", FilePath)
+                else:
+                    # File hasn't changed - just update scan date and skip database update
+                    ExistingFile.LastScannedDate = datetime.now()
+                    # Only update the LastScannedDate without triggering a full save
+                    self.UpdateLastScannedDate(ExistingFile.Id, ExistingFile.LastScannedDate)
+                    self.ScanResults.TotalFilesSkipped += 1
+                    LoggingService.LogDebug("Skipped unchanged file: {}", FilePath)
                 
             else:
                 # File doesn't exist in database - check for fuzzy match (renamed file)
@@ -651,7 +615,8 @@ class FileScanningBusinessService:
                     FuzzyMatch.FilePath = FilePath  # Update to new path
                     FuzzyMatch.FileName = FileName  # Update to new filename
                     FuzzyMatch.SizeMB = FileSizeMB  # Update to new size
-                    FuzzyMatch.SeasonId = Season.Id  # Update season if needed
+                    FuzzyMatch.FileModificationTime = FileModificationTime
+                    FuzzyMatch.SeasonId = None  # Season functionality disabled
                     FuzzyMatch.LastScannedDate = datetime.now()
                     
                     # Extract metadata if requested and not already present
@@ -664,10 +629,11 @@ class FileScanningBusinessService:
                 else:
                     # Create new file record
                     NewFile = MediaFileModel(
-                        SeasonId=Season.Id,
+                        SeasonId=None,  # Season functionality disabled
                         FilePath=FilePath,
                         FileName=FileName,
                         SizeMB=FileSizeMB,
+                        FileModificationTime=FileModificationTime,
                         LastScannedDate=datetime.now()
                     )
                     
@@ -677,264 +643,17 @@ class FileScanningBusinessService:
                     
                     self.DatabaseManager.SaveMediaFile(NewFile)
                     self.ScanResults.TotalFilesProcessed += 1
-                    LoggingService.LogInfo("Added new media file: {} to season: {}", FilePath, SeasonName)
+                    LoggingService.LogInfo("Added new media file: {}", FilePath)
             
         except Exception as e:
             LoggingService.LogException("Error processing single media file", e)
             self.ScanResults.TotalFilesSkipped += 1
             raise
     
-    def CleanupMissingFiles(self, FoundFiles: List[str], RootFolderId: int):
-        """Remove database records for files that no longer exist on disk."""
-        try:
-            LoggingService.LogInfo("=== CLEANUP MISSING FILES STARTED ===")
-            LoggingService.LogInfo(f"RootFolderId: {RootFolderId}")
-            LoggingService.LogInfo(f"FoundFiles count: {len(FoundFiles)}")
-            
-            # Get ALL files from database, not just current root folder
-            LoggingService.LogInfo("Querying database for ALL files in MediaFiles table")
-            Query = "SELECT Id, FilePath, SizeMB FROM MediaFiles"
-            DatabaseFiles = self.DatabaseManager.DatabaseService.ExecuteQuery(Query)
-            LoggingService.LogInfo(f"Database returned {len(DatabaseFiles)} files for cleanup check")
-            
-            if len(DatabaseFiles) == 0:
-                LoggingService.LogWarning("No files found in database")
-                return
-            
-            # Check each database file to see if it actually exists on disk
-            DeletedCount = 0
-            for i, DbFile in enumerate(DatabaseFiles):
-                FilePath = DbFile['FilePath']
-                FileId = DbFile['Id']
-                SizeMB = DbFile['SizeMB']
-                
-                # Only log progress every 100 files to reduce verbosity
-                if i % 100 == 0:
-                    LoggingService.LogInfo(f"Cleanup progress: {i+1}/{len(DatabaseFiles)} files checked")
-                
-                if not os.path.exists(FilePath):
-                    LoggingService.LogInfo(f"FILE NOT FOUND ON DISK - DELETING FROM DATABASE: {FilePath}")
-                    try:
-                        # Delete directly using the database service
-                        DeleteQuery = "DELETE FROM MediaFiles WHERE Id = ?"
-                        AffectedRows = self.DatabaseManager.DatabaseService.ExecuteNonQuery(DeleteQuery, (FileId,))
-                        
-                        if AffectedRows > 0:
-                            LoggingService.LogInfo(f"SUCCESS: Deleted missing file from database: {FilePath} (ID: {FileId})")
-                            DeletedCount += 1
-                            self.ScanResults.TotalFilesWithErrors += 1
-                        else:
-                            LoggingService.LogError(f"FAILED: No rows affected when deleting file: {FilePath} (ID: {FileId})")
-                    except Exception as DeleteError:
-                        LoggingService.LogException(f"EXCEPTION: Error deleting file from database: {DeleteError}", DeleteError, 'CleanupMissingFiles', 'FileScanningBusinessService')
-            
-            LoggingService.LogInfo("=== CLEANUP MISSING FILES COMPLETED ===")
-            if DeletedCount > 0:
-                LoggingService.LogInfo(f"SUCCESS: Cleaned up {DeletedCount} missing files from database")
-            else:
-                LoggingService.LogInfo("No missing files found to clean up")
-                        
-        except Exception as e:
-            LoggingService.LogException(f"CRITICAL ERROR in CleanupMissingFiles: {e}", e, 'CleanupMissingFiles', 'FileScanningBusinessService')
-            LoggingService.LogException(f"RootFolderId: {RootFolderId}, FoundFiles count: {len(FoundFiles)}", e, 'FileScanningBusinessService', 'CleanupMissingFiles')
     
-    def CleanupOrphanedFiles(self, RootFolderId: int) -> Dict[str, Any]:
-        """Remove files on disk that don't have corresponding database records."""
-        try:
-            LoggingService.LogInfo("Starting cleanup of orphaned files for root folder: {}", RootFolderId)
-            
-            # Get root folder path
-            RootFolder = self.DatabaseManager.GetRootFolderById(RootFolderId)
-            if not RootFolder:
-                LoggingService.LogWarning("Root folder not found: {}", RootFolderId)
-                return {'Success': False, 'Message': 'Root folder not found', 'DeletedCount': 0}
-            
-            # Get all files on disk
-            FoundFiles = self.FileManager.ScanDirectory(RootFolder.Path, True)
-            LoggingService.LogInfo("Found {} files on disk", len(FoundFiles))
-            
-            # Get all database file paths
-            DatabaseFiles = self.DatabaseManager.GetMediaFilesByRootFolder(RootFolderId)
-            DatabasePaths = {DbFile.FilePath for DbFile in DatabaseFiles}
-            LoggingService.LogInfo("Found {} files in database", len(DatabasePaths))
-            
-            # Find orphaned files (exist on disk but not in database)
-            OrphanedFiles = []
-            for FilePath in FoundFiles:
-                if FilePath not in DatabasePaths:
-                    OrphanedFiles.append(FilePath)
-                    LoggingService.LogInfo("Found orphaned file: {}", FilePath)
-            
-            # Delete orphaned files from disk
-            DeletedCount = 0
-            for OrphanedFile in OrphanedFiles:
-                try:
-                    if os.path.exists(OrphanedFile):
-                        os.remove(OrphanedFile)
-                        LoggingService.LogInfo("Deleted orphaned file: {}", OrphanedFile)
-                        DeletedCount += 1
-                        self.ScanResults.TotalFilesWithErrors += 1
-                    else:
-                        LoggingService.LogWarning("Orphaned file no longer exists: {}", OrphanedFile)
-                except Exception as DeleteError:
-                    LoggingService.LogException("Failed to delete orphaned file: {}", DeleteError, OrphanedFile)
-            
-            if DeletedCount > 0:
-                LoggingService.LogInfo("Cleaned up {} orphaned files from disk", DeletedCount)
-            else:
-                LoggingService.LogInfo("No orphaned files found to clean up")
-            
-            return {
-                'Success': True,
-                'Message': f'Cleaned up {DeletedCount} orphaned files',
-                'DeletedCount': DeletedCount
-            }
-                
-        except Exception as e:
-            LoggingService.LogException("Error cleaning up orphaned files", e)
-            return {'Success': False, 'Message': f'Error: {str(e)}', 'DeletedCount': 0}
-    
-    def FindDuplicateMediaFiles(self, RootFolderId: int) -> List[Dict[str, Any]]:
-        """Find duplicate media files on disk based on file size and content."""
-        try:
-            LoggingService.LogInfo("Starting duplicate media file detection for root folder: {}", RootFolderId)
-            
-            # Get root folder path
-            RootFolder = self.DatabaseManager.GetRootFolderById(RootFolderId)
-            if not RootFolder:
-                LoggingService.LogWarning("Root folder not found: {}", RootFolderId)
-                return []
-            
-            # Get all files on disk
-            FoundFiles = self.FileManager.ScanDirectory(RootFolder.Path, True)
-            LoggingService.LogInfo("Scanning {} files for duplicates", len(FoundFiles))
-            
-            # Group files by size (first pass - files with same size are potential duplicates)
-            SizeGroups = {}
-            for FilePath in FoundFiles:
-                try:
-                    FileSize = os.path.getsize(FilePath)
-                    if FileSize not in SizeGroups:
-                        SizeGroups[FileSize] = []
-                    SizeGroups[FileSize].append(FilePath)
-                except Exception as e:
-                    LoggingService.LogException("Error getting file size: {}", e, FilePath)
-                    continue
-            
-            # Find groups with multiple files (potential duplicates)
-            DuplicateGroups = []
-            for FileSize, Files in SizeGroups.items():
-                if len(Files) > 1:
-                    # Files with same size are potential duplicates
-                    DuplicateGroups.append({
-                        'Size': FileSize,
-                        'Files': Files,
-                        'Count': len(Files)
-                    })
-                    LoggingService.LogInfo("Found {} files with size {} bytes", len(Files), FileSize)
-            
-            LoggingService.LogInfo("Found {} potential duplicate groups", len(DuplicateGroups))
-            return DuplicateGroups
-                
-        except Exception as e:
-            LoggingService.LogException("Error finding duplicate media files", e)
-            return []
-    
-    def CleanupDuplicateMediaFiles(self, RootFolderId: int, KeepBestQuality: bool = True) -> Dict[str, Any]:
-        """Remove duplicate media files, keeping the best quality version."""
-        try:
-            LoggingService.LogInfo("Starting duplicate media file cleanup for root folder: {}", RootFolderId)
-            
-            # Find duplicate groups
-            DuplicateGroups = self.FindDuplicateMediaFiles(RootFolderId)
-            
-            if not DuplicateGroups:
-                LoggingService.LogInfo("No duplicate files found")
-                return {'Success': True, 'Message': 'No duplicates found', 'DeletedCount': 0}
-            
-            DeletedCount = 0
-            ProcessedGroups = 0
-            
-            for Group in DuplicateGroups:
-                Files = Group['Files']
-                LoggingService.LogInfo("Processing duplicate group with {} files", len(Files))
-                
-                if KeepBestQuality:
-                    # Keep the file with the best quality indicators in the filename
-                    BestFile = self.SelectBestQualityFile(Files)
-                    FilesToDelete = [f for f in Files if f != BestFile]
-                else:
-                    # Keep the first file, delete the rest
-                    BestFile = Files[0]
-                    FilesToDelete = Files[1:]
-                
-                LoggingService.LogInfo("Keeping file: {}", BestFile)
-                
-                # Delete duplicate files
-                for FileToDelete in FilesToDelete:
-                    try:
-                        if os.path.exists(FileToDelete):
-                            os.remove(FileToDelete)
-                            LoggingService.LogInfo("Deleted duplicate file: {}", FileToDelete)
-                            DeletedCount += 1
-                            self.ScanResults.TotalFilesWithErrors += 1
-                            
-                            # Also remove from database if it exists
-                            self.DatabaseManager.DeleteMediaFileByPath(FileToDelete)
-                        else:
-                            LoggingService.LogWarning("Duplicate file no longer exists: {}", FileToDelete)
-                    except Exception as DeleteError:
-                        LoggingService.LogException("Failed to delete duplicate file: {}", DeleteError, FileToDelete)
-                
-                ProcessedGroups += 1
-            
-            LoggingService.LogInfo("Cleaned up {} duplicate files from {} groups", DeletedCount, ProcessedGroups)
-            
-            return {
-                'Success': True,
-                'Message': f'Cleaned up {DeletedCount} duplicate files from {ProcessedGroups} groups',
-                'DeletedCount': DeletedCount,
-                'ProcessedGroups': ProcessedGroups
-            }
-                
-        except Exception as e:
-            LoggingService.LogException("Error cleaning up duplicate media files", e)
-            return {'Success': False, 'Message': f'Error: {str(e)}', 'DeletedCount': 0}
-    
-    def SelectBestQualityFile(self, Files: List[str]) -> str:
-        """Select the best quality file from a list of duplicates based on filename indicators."""
-        try:
-            # Quality indicators in order of preference
-            QualityIndicators = [
-                '4K', '2160p', '1080p', '720p', '480p', '360p',
-                'BluRay', 'Blu-ray', 'BDRip', 'BRRip', 'HDTV', 'WEBRip', 'WEB-DL', 'DVDRip', 'TVRip'
-            ]
-            
-            BestFile = Files[0]
-            BestScore = 0
-            
-            for FilePath in Files:
-                FileName = os.path.basename(FilePath).lower()
-                Score = 0
-                
-                # Check for quality indicators
-                for i, Indicator in enumerate(QualityIndicators):
-                    if Indicator.lower() in FileName:
-                        Score += len(QualityIndicators) - i  # Higher score for better quality
-                        break
-                
-                # Prefer files with more metadata (longer filenames often indicate more info)
-                Score += len(FileName) * 0.1
-                
-                if Score > BestScore:
-                    BestScore = Score
-                    BestFile = FilePath
-            
-            return BestFile
-            
-        except Exception as e:
-            LoggingService.LogException("Error selecting best quality file", e)
-            return Files[0] if Files else ""
+    # Note: Duplicate detection methods have been moved to DuplicateDetectionService
+    # to keep the scanning process focused and fast. Use the dedicated service
+    # for duplicate file detection and cleanup operations.
     
     def UpdateScanResults(self):
         """Update scan results with file manager statistics."""
@@ -1094,8 +813,28 @@ class FileScanningBusinessService:
                 MediaFile.FrameRate is None):
                 return True
             
+            # Always extract if resolution is None (FFprobe analysis failed or never ran)
+            if MediaFile.Resolution is None:
+                LoggingService.LogInfo(f"Resolution is None for {MediaFile.FileName}, will re-analyze", 'ShouldExtractMetadata', 'FileScanningBusinessService')
+                return True
+            
             # Check if file has changed (size or name)
-            if self.HasFileChanged(MediaFile):
+            # Get current file information to compare
+            try:
+                if os.path.exists(MediaFile.FilePath):
+                    CurrentSizeMB = os.path.getsize(MediaFile.FilePath) / (1024 * 1024)
+                    CurrentFileName = os.path.basename(MediaFile.FilePath)
+                    CurrentModificationTime = self.GetFileModificationTime(MediaFile.FilePath)
+                    
+                    if self.HasFileChanged(MediaFile, CurrentSizeMB, CurrentFileName, CurrentModificationTime):
+                        return True
+                else:
+                    # File doesn't exist, should be cleaned up
+                    LoggingService.LogWarning(f"File {MediaFile.FilePath} no longer exists", 'ShouldExtractMetadata', 'FileScanningBusinessService')
+                    return False
+            except Exception as e:
+                LoggingService.LogException(f"Error checking file changes for {MediaFile.FilePath}", e, 'ShouldExtractMetadata', 'FileScanningBusinessService')
+                # If we can't check, assume it needs analysis to be safe
                 return True
             
             # File hasn't changed and has metadata, skip extraction
@@ -1105,19 +844,30 @@ class FileScanningBusinessService:
             LoggingService.LogException("Error determining if metadata should be extracted", e, 'ShouldExtractMetadata', 'FileScanningBusinessService')
             return False
     
-    def HasFileChanged(self, MediaFile: MediaFileModel) -> bool:
-        """Check if a file has changed by comparing size and name with current file."""
+    def GetFileModificationTime(self, FilePath: str) -> datetime:
+        """Get the file modification time."""
         try:
-            # Get current file information
-            CurrentSizeMB = self.FileManager.GetFileSizeMB(MediaFile.FilePath)
-            CurrentFileName = self.FileManager.GetFileNameFromPath(MediaFile.FilePath)
-            
+            ModificationTime = os.path.getmtime(FilePath)
+            return datetime.fromtimestamp(ModificationTime)
+        except Exception as e:
+            LoggingService.LogException(f"Error getting file modification time for {FilePath}", e, 'GetFileModificationTime', 'FileScanningBusinessService')
+            return datetime.now()
+    
+    def HasFileChanged(self, MediaFile: MediaFileModel, CurrentSizeMB: float, CurrentFileName: str, CurrentModificationTime: datetime) -> bool:
+        """Check if a file has changed by comparing size, name, and modification time."""
+        try:
             # Compare with stored values
             SizeChanged = abs(CurrentSizeMB - MediaFile.SizeMB) > 0.1  # Allow small floating point differences
             NameChanged = CurrentFileName != MediaFile.FileName
             
-            if SizeChanged or NameChanged:
-                LoggingService.LogDebug(f"File changed detected for {MediaFile.FilePath}: Size={SizeChanged}, Name={NameChanged}", 'FileScanningBusinessService', 'HasFileChanged')
+            # Compare modification time (allow 1 second tolerance for filesystem precision)
+            ModificationTimeChanged = False
+            if MediaFile.FileModificationTime and CurrentModificationTime:
+                TimeDifference = abs((CurrentModificationTime - MediaFile.FileModificationTime).total_seconds())
+                ModificationTimeChanged = TimeDifference > 1.0
+            
+            if SizeChanged or NameChanged or ModificationTimeChanged:
+                LoggingService.LogDebug(f"File changed detected for {MediaFile.FilePath}: Size={SizeChanged}, Name={NameChanged}, ModTime={ModificationTimeChanged}", 'FileScanningBusinessService', 'HasFileChanged')
                 return True
             
             return False
@@ -1127,14 +877,23 @@ class FileScanningBusinessService:
             # If we can't check, assume it changed to be safe
             return True
     
+    def UpdateLastScannedDate(self, MediaFileId: int, LastScannedDate: datetime):
+        """Update only the LastScannedDate for a media file without full save."""
+        try:
+            Query = "UPDATE MediaFiles SET LastScannedDate = ? WHERE Id = ?"
+            self.DatabaseManager.DatabaseService.ExecuteNonQuery(Query, (LastScannedDate, MediaFileId))
+        except Exception as e:
+            LoggingService.LogException(f"Error updating LastScannedDate for file ID {MediaFileId}", e, 'UpdateLastScannedDate', 'FileScanningBusinessService')
+    
     def ExtractAndUpdateMetadata(self, MediaFile: MediaFileModel, FilePath: str):
         """Extract metadata and update the media file model."""
         try:
             LoggingService.LogDebug(f"Extracting metadata for: {FilePath}", 'ExtractAndUpdateMetadata', 'FileScanningBusinessService')
             
-            # Update file size and name to current values (in case file changed)
+            # Update file size, name, and modification time to current values (in case file changed)
             MediaFile.SizeMB = self.FileManager.GetFileSizeMB(FilePath)
             MediaFile.FileName = self.FileManager.GetFileNameFromPath(FilePath)
+            MediaFile.FileModificationTime = self.GetFileModificationTime(FilePath)
             
             # Extract metadata using FileManagerService
             MetadataResult = self.FileManager.ExtractMediaMetadata(FilePath)
@@ -1153,6 +912,9 @@ class FileScanningBusinessService:
                 MediaFile.CompressionPotential = MetadataResult.get('CompressionPotential')
                 MediaFile.AssignedProfile = MetadataResult.get('AssignedProfile')
                 
+                # Assign profile based on resolution if not already assigned
+                if not MediaFile.AssignedProfile or MediaFile.AssignedProfile == 'Default':
+                    self.AssignProfileBasedOnResolution(MediaFile)
                 
                 LoggingService.LogDebug(f"Successfully extracted metadata for: {FilePath}", 'ExtractAndUpdateMetadata', 'FileScanningBusinessService')
             else:
@@ -1167,6 +929,42 @@ class FileScanningBusinessService:
             # Set default values on error
             MediaFile.CompressionPotential = 'Unknown'
             MediaFile.AssignedProfile = 'Default'
+    
+    def AssignProfileBasedOnResolution(self, MediaFile: MediaFileModel):
+        """Assign a profile to a media file based on its resolution."""
+        try:
+            LoggingService.LogFunctionEntry("AssignProfileBasedOnResolution", "FileScanningBusinessService", MediaFile.FileName, MediaFile.Resolution)
+            
+            if not MediaFile.Resolution:
+                LoggingService.LogWarning(f"Cannot assign profile for {MediaFile.FileName} - no resolution detected", "AssignProfileBasedOnResolution", "FileScanningBusinessService")
+                MediaFile.AssignedProfile = 'Needs Analysis'
+                return
+            
+            # Get all profile thresholds to find a matching one
+            AllThresholds = self.DatabaseManager.GetAllProfileThresholds()
+            
+            # Find thresholds that match this resolution
+            MatchingThresholds = [t for t in AllThresholds if t.Resolution == MediaFile.Resolution]
+            
+            if MatchingThresholds:
+                # Use the first matching threshold's profile
+                # In the future, this could be enhanced to pick the best profile based on other criteria
+                ProfileId = MatchingThresholds[0].ProfileId
+                Profile = self.DatabaseManager.GetProfileById(ProfileId)
+                
+                if Profile:
+                    MediaFile.AssignedProfile = Profile.ProfileName
+                    LoggingService.LogInfo(f"Assigned profile '{Profile.ProfileName}' to {MediaFile.FileName} based on resolution {MediaFile.Resolution}", "AssignProfileBasedOnResolution", "FileScanningBusinessService")
+                else:
+                    MediaFile.AssignedProfile = 'Profile Not Found'
+                    LoggingService.LogWarning(f"Profile with ID {ProfileId} not found for {MediaFile.FileName}", "AssignProfileBasedOnResolution", "FileScanningBusinessService")
+            else:
+                MediaFile.AssignedProfile = 'No Matching Profile'
+                LoggingService.LogWarning(f"No profile threshold found for resolution {MediaFile.Resolution} for {MediaFile.FileName}", "AssignProfileBasedOnResolution", "FileScanningBusinessService")
+                
+        except Exception as e:
+            LoggingService.LogException("Error assigning profile based on resolution", e, "AssignProfileBasedOnResolution", "FileScanningBusinessService")
+            MediaFile.AssignedProfile = 'Assignment Error'
     
     def ProcessMediaFilesWithMetadata(self, MediaFiles: List[str], RootFolderId: Optional[int], RootFolderPath: str = "", ExtractMetadata: bool = True):
         """Process media files with optional metadata extraction."""
@@ -1192,15 +990,9 @@ class FileScanningBusinessService:
                     self.ScanErrors.append(f"Error processing {FilePath}: {str(e)}")
                     continue
             
-            # Find and report duplicate files after processing
-            if RootFolderId:
-                DuplicateGroups = self.FindDuplicateMediaFiles(RootFolderId)
-                if DuplicateGroups:
-                    LoggingService.LogInfo(f"Found {len(DuplicateGroups)} duplicate file groups during scan")
-                    for Group in DuplicateGroups:
-                        LoggingService.LogInfo(f"Duplicate group: {Group['Count']} files with size {Group['Size']} bytes")
-                        for FilePath in Group['Files']:
-                            LoggingService.LogInfo(f"  - {FilePath}")
+            # Note: Duplicate file detection has been moved to a separate process
+            # to avoid slowing down the scanning process. Use the dedicated
+            # duplicate detection methods when needed.
             
             LoggingService.LogInfo(f"Completed processing {len(MediaFiles)} media files with metadata extraction: {ExtractMetadata}", 'FileScanningBusinessService', 'ProcessMediaFilesWithMetadata')
             
@@ -1277,227 +1069,7 @@ class FileScanningBusinessService:
                 'Error': 'MetadataExtractionError'
             }
     
-    def ExtractSeasonNumber(self, SeasonName: str) -> Optional[int]:
-        """Extract season number from season name."""
-        try:
-            import re
-            
-            # Try various patterns to extract season number
-            Patterns = [
-                r'season\s*(\d+)',  # "Season 1", "season1"
-                r's(\d+)',          # "S1", "S01"
-                r'(\d+)',           # Just a number
-                r'season\s*(\d+)\s*episode',  # "Season 1 Episode"
-                r's(\d+)e\d+',      # "S1E1"
-            ]
-            
-            SeasonNameLower = SeasonName.lower()
-            
-            for Pattern in Patterns:
-                Match = re.search(Pattern, SeasonNameLower)
-                if Match:
-                    try:
-                        SeasonNumber = int(Match.group(1))
-                        return SeasonNumber
-                    except (ValueError, IndexError):
-                        continue
-            
-            # If no pattern matches, return None
-            return None
-            
-        except Exception as e:
-            LoggingService.LogException("Error extracting season number", e, 'ExtractSeasonNumber', 'FileScanningBusinessService')
-            return None
     
-    def UpdateSeasonStatistics(self, SeasonId: int):
-        """Update season statistics (episode count, total size)."""
-        try:
-            LoggingService.LogFunctionEntry("UpdateSeasonStatistics", 'FileScanningBusinessService', f"SeasonId: {SeasonId}")
-            
-            # Get all media files for this season
-            SeasonFiles = self.DatabaseManager.GetMediaFilesBySeason(SeasonId)
-            
-            if not SeasonFiles:
-                LoggingService.LogWarning(f"No files found for season {SeasonId}", 'UpdateSeasonStatistics', 'FileScanningBusinessService')
-                return
-            
-            # Calculate statistics
-            EpisodeCount = len(SeasonFiles)
-            TotalSizeGB = sum(File.SizeMB for File in SeasonFiles) / 1024.0  # Convert MB to GB
-            
-            # Get the season record
-            Season = self.DatabaseManager.GetSeasonById(SeasonId)
-            if not Season:
-                LoggingService.LogWarning(f"Season {SeasonId} not found", 'UpdateSeasonStatistics', 'FileScanningBusinessService')
-                return
-            
-            # Update season statistics
-            Season.EpisodeCount = EpisodeCount
-            Season.TotalSizeGB = TotalSizeGB
-            Season.LastUpdatedDate = datetime.now()
-            
-            # Save updated season
-            self.DatabaseManager.SaveSeason(Season)
-            
-            LoggingService.LogInfo(f"Updated season {Season.SeasonName}: {EpisodeCount} episodes, {TotalSizeGB:.2f} GB", 'FileScanningBusinessService', 'UpdateSeasonStatistics')
-            
-        except Exception as e:
-            LoggingService.LogException("Error updating season statistics", e, 'UpdateSeasonStatistics', 'FileScanningBusinessService')
     
-    def OrganizeFilesBySeason(self, RootFolderId: int) -> Dict[str, Any]:
-        """Organize files by season and update season statistics."""
-        try:
-            LoggingService.LogFunctionEntry("OrganizeFilesBySeason", 'FileScanningBusinessService', f"RootFolderId: {RootFolderId}")
-            
-            # Get all media files for this root folder
-            MediaFiles = self.DatabaseManager.GetMediaFilesByRootFolder(RootFolderId)
-            
-            if not MediaFiles:
-                return {
-                    'Success': True,
-                    'Message': 'No media files found to organize',
-                    'SeasonsUpdated': 0
-                }
-            
-            # Group files by season
-            SeasonGroups = {}
-            for File in MediaFiles:
-                SeasonId = File.SeasonId
-                if SeasonId not in SeasonGroups:
-                    SeasonGroups[SeasonId] = []
-                SeasonGroups[SeasonId].append(File)
-            
-            # Update statistics for each season
-            SeasonsUpdated = 0
-            for SeasonId, Files in SeasonGroups.items():
-                try:
-                    self.UpdateSeasonStatistics(SeasonId)
-                    SeasonsUpdated += 1
-                except Exception as e:
-                    LoggingService.LogException(f"Error updating season {SeasonId} statistics", e, 'OrganizeFilesBySeason', 'FileScanningBusinessService')
-                    continue
-            
-            LoggingService.LogInfo(f"Organized {len(MediaFiles)} files into {len(SeasonGroups)} seasons", 'OrganizeFilesBySeason', 'FileScanningBusinessService')
-            
-            return {
-                'Success': True,
-                'Message': f'Successfully organized {len(MediaFiles)} files into {len(SeasonGroups)} seasons',
-                'SeasonsUpdated': SeasonsUpdated,
-                'TotalFiles': len(MediaFiles),
-                'TotalSeasons': len(SeasonGroups)
-            }
-            
-        except Exception as e:
-            LoggingService.LogException("Error organizing files by season", e, 'OrganizeFilesBySeason', 'FileScanningBusinessService')
-            return {
-                'Success': False,
-                'Message': f'Error organizing files by season: {str(e)}',
-                'Error': 'SeasonOrganizationError'
-            }
     
-    def GetSeasonSummary(self, RootFolderId: int) -> List[Dict[str, Any]]:
-        """Get summary of all seasons for a root folder."""
-        try:
-            LoggingService.LogFunctionEntry("GetSeasonSummary", 'FileScanningBusinessService', f"RootFolderId: {RootFolderId}")
-            
-            # Get all seasons for this root folder
-            Seasons = self.DatabaseManager.GetSeasonsByRootFolder(RootFolderId)
-            
-            SeasonSummary = []
-            for Season in Seasons:
-                # Get media files for this season
-                SeasonFiles = self.DatabaseManager.GetMediaFilesBySeason(Season.Id)
-                
-                Summary = {
-                    'SeasonId': Season.Id,
-                    'SeasonName': Season.SeasonName,
-                    'SeasonNumber': Season.SeasonNumber,
-                    'EpisodeCount': len(SeasonFiles),
-                    'TotalSizeGB': sum(File.SizeMB for File in SeasonFiles) / 1024.0,
-                    'CreatedDate': Season.CreatedDate,
-                    'LastUpdatedDate': Season.LastUpdatedDate,
-                    'Files': [
-                        {
-                            'Id': File.Id,
-                            'FileName': File.FileName,
-                            'SizeMB': File.SizeMB,
-                            'Resolution': File.Resolution,
-                            'Codec': File.Codec,
-                            'DurationMinutes': File.DurationMinutes
-                        }
-                        for File in SeasonFiles
-                    ]
-                }
-                SeasonSummary.append(Summary)
-            
-            # Sort by season number
-            SeasonSummary.sort(key=lambda x: x['SeasonNumber'] or 0)
-            
-            LoggingService.LogInfo(f"Generated season summary for {len(SeasonSummary)} seasons", 'GetSeasonSummary', 'FileScanningBusinessService')
-            return SeasonSummary
-            
-        except Exception as e:
-            LoggingService.LogException("Error getting season summary", e, 'GetSeasonSummary', 'FileScanningBusinessService')
-            return []
     
-    def MergeSeasons(self, SourceSeasonId: int, TargetSeasonId: int) -> Dict[str, Any]:
-        """Merge files from source season into target season."""
-        try:
-            LoggingService.LogFunctionEntry("MergeSeasons", 'FileScanningBusinessService', f"SourceSeasonId: {SourceSeasonId}, TargetSeasonId: {TargetSeasonId}")
-            
-            # Get both seasons
-            SourceSeason = self.DatabaseManager.GetSeasonById(SourceSeasonId)
-            TargetSeason = self.DatabaseManager.GetSeasonById(TargetSeasonId)
-            
-            if not SourceSeason or not TargetSeason:
-                return {
-                    'Success': False,
-                    'Message': 'One or both seasons not found',
-                    'Error': 'SeasonNotFound'
-                }
-            
-            # Get files from source season
-            SourceFiles = self.DatabaseManager.GetMediaFilesBySeason(SourceSeasonId)
-            
-            if not SourceFiles:
-                return {
-                    'Success': True,
-                    'Message': 'No files to merge',
-                    'FilesMerged': 0
-                }
-            
-            # Move files to target season
-            FilesMerged = 0
-            for File in SourceFiles:
-                try:
-                    File.SeasonId = TargetSeasonId
-                    self.DatabaseManager.SaveMediaFile(File)
-                    FilesMerged += 1
-                except Exception as e:
-                    LoggingService.LogException(f"Error moving file {File.FileName} to target season", e, 'MergeSeasons', 'FileScanningBusinessService')
-                    continue
-            
-            # Update target season statistics
-            self.UpdateSeasonStatistics(TargetSeasonId)
-            
-            # Delete source season if it's now empty
-            RemainingFiles = self.DatabaseManager.GetMediaFilesBySeason(SourceSeasonId)
-            if not RemainingFiles:
-                self.DatabaseManager.DeleteSeason(SourceSeasonId)
-                LoggingService.LogInfo(f"Deleted empty source season: {SourceSeason.SeasonName}", 'MergeSeasons', 'FileScanningBusinessService')
-            
-            LoggingService.LogInfo(f"Merged {FilesMerged} files from {SourceSeason.SeasonName} to {TargetSeason.SeasonName}", 'MergeSeasons', 'FileScanningBusinessService')
-            
-            return {
-                'Success': True,
-                'Message': f'Successfully merged {FilesMerged} files from {SourceSeason.SeasonName} to {TargetSeason.SeasonName}',
-                'FilesMerged': FilesMerged
-            }
-            
-        except Exception as e:
-            LoggingService.LogException("Error merging seasons", e, 'MergeSeasons', 'FileScanningBusinessService')
-            return {
-                'Success': False,
-                'Message': f'Error merging seasons: {str(e)}',
-                'Error': 'SeasonMergeError'
-            }

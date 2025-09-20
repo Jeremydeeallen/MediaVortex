@@ -9,6 +9,7 @@ Follow-up TODOs: None
 -->
 
 # MediaVortex Constitution
+our root folder is /Automation/MediaVortex/
 
 ## Core Principles
 
@@ -39,7 +40,7 @@ Code must be prepared but not executed in chat; Provide exact commands to run in
 
 ## Quality Assurance
 
-Create `.md` files in `Docs/Checklists/` for all checklist requests; Architecture documentation goes in `Docs/` (e.g., Architecture.md, Features.md); Do not check things off the checklist until I have verified them and tell you it's done; Use `[ ]` for incomplete items, `[x]` only when actually complete; Include file names and line numbers for completed items; This prevents going off on tangents; Append "MVVM pattern using MVVM architecture" to the end of all checklist items; If scripts will only be used during init (creating tables etc)
+Create `.md` files in `/Media/Docs/Checklists/` for all checklist requests; Architecture documentation goes in `Docs/` (e.g., Architecture.md, Features.md); Do not check things off the checklist until I have verified them and tell you it's done; Use `[ ]` for incomplete items, `[x]` only when actually complete; Include file names and line numbers for completed items; This prevents going off on tangents; Append "MVVM pattern using MVVM architecture" to the end of all checklist items; If scripts will only be used during init (creating tables etc)
 
 ## Governance
 

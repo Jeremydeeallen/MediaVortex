@@ -293,6 +293,81 @@
                             </div>
                         </div>
                     </div>
+
+                    <!-- 4K (2160p) Settings -->
+                    <div class="card mb-3">
+                        <div class="card-header">
+                            <h6 class="mb-0">4K (2160p) Settings</h6>
+                        </div>
+                        <div class="card-body">
+                            <div class="row">
+                                <div class="col-md-3">
+                                    <div class="mb-3">
+                                        <label for="VideoBitrate2160p" class="form-label">Video Bitrate (kbps)</label>
+                                        <input type="number" class="form-control" id="VideoBitrate2160p" value="2000">
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="mb-3">
+                                        <label for="FallbackVideo2160p" class="form-label">Fallback Video (kbps)</label>
+                                        <input type="number" class="form-control" id="FallbackVideo2160p" value="1800">
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="mb-3">
+                                        <label for="AudioBitrate2160p" class="form-label">Audio Bitrate (kbps)</label>
+                                        <input type="number" class="form-control" id="AudioBitrate2160p" value="128">
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="mb-3">
+                                        <label for="FallbackAudio2160p" class="form-label">Fallback Audio (kbps)</label>
+                                        <input type="number" class="form-control" id="FallbackAudio2160p" value="128">
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="row">
+                                <div class="col-md-3">
+                                    <div class="mb-3">
+                                        <label for="Quality2160p" class="form-label">Quality (CRF)</label>
+                                        <input type="number" class="form-control" id="Quality2160p" placeholder="Leave empty for bitrate mode" min="0" max="51">
+                                        <small class="form-text text-muted">If set, video bitrate fields will be disabled (audio bitrates remain adjustable)</small>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="row">
+                                <div class="col-md-3">
+                                    <div class="mb-3">
+                                        <label for="Under30Min2160p" class="form-label">Under 30 Min (MB)</label>
+                                        <input type="number" class="form-control" id="Under30Min2160p" value="800">
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="mb-3">
+                                        <label for="Under65Min2160p" class="form-label">Under 65 Min (MB)</label>
+                                        <input type="number" class="form-control" id="Under65Min2160p" value="1200">
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="mb-3">
+                                        <label for="Over65Min2160p" class="form-label">Over 65 Min (MB)</label>
+                                        <input type="number" class="form-control" id="Over65Min2160p" value="3000">
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="mb-3">
+                                        <label for="TranscodeDownTo2160p" class="form-label">Transcode Down To</label>
+                                        <select class="form-select" id="TranscodeDownTo2160p">
+                                            <option value="1080p">1080p</option>
+                                            <option value="720p">720p</option>
+                                            <option value="480p">480p</option>
+                                            <option value="No downscaling">No downscaling</option>
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                 </form>
             </div>
             <div class="modal-footer">
@@ -519,6 +594,21 @@ function PopulateProfileForm(Profile) {
         $('#TranscodeDownTo1080p').val(Threshold1080p.TranscodeDownTo);
         UpdateBitrateFieldsState('1080p');
     }
+    
+    // 2160p (4K) settings
+    const Threshold2160p = Thresholds.find(t => t.Resolution === '2160p');
+    if (Threshold2160p) {
+        $('#VideoBitrate2160p').val(Threshold2160p.VideoBitrateKbps);
+        $('#FallbackVideo2160p').val(Threshold2160p.FallbackVideoBitrateKbps);
+        $('#AudioBitrate2160p').val(Threshold2160p.AudioBitrateKbps);
+        $('#FallbackAudio2160p').val(Threshold2160p.FallbackAudioBitrateKbps);
+        $('#Quality2160p').val(Threshold2160p.Quality || '');
+        $('#Under30Min2160p').val(Threshold2160p.Under30MinMB);
+        $('#Under65Min2160p').val(Threshold2160p.Under65MinMB);
+        $('#Over65Min2160p').val(Threshold2160p.Over65MinMB);
+        $('#TranscodeDownTo2160p').val(Threshold2160p.TranscodeDownTo);
+        UpdateBitrateFieldsState('2160p');
+    }
 }
 
 function ClearProfileForm() {
@@ -527,7 +617,7 @@ function ClearProfileForm() {
     $('#ProfileDescription').val('');
     
     // Clear all threshold fields
-    const Resolutions = ['480p', '720p', '1080p'];
+    const Resolutions = ['480p', '720p', '1080p', '2160p'];
     Resolutions.forEach(function(Resolution) {
         $(`#VideoBitrate${Resolution}`).val('');
         $(`#FallbackVideo${Resolution}`).val('');
@@ -590,6 +680,18 @@ function SaveProfile() {
                 Under65MinMB: parseInt($('#Under65Min1080p').val()) || 0,
                 Over65MinMB: parseInt($('#Over65Min1080p').val()) || 0,
                 TranscodeDownTo: $('#TranscodeDownTo1080p').val()
+            },
+            {
+                Resolution: '2160p',
+                VideoBitrateKbps: parseInt($('#VideoBitrate2160p').val()) || 0,
+                FallbackVideoBitrateKbps: parseInt($('#FallbackVideo2160p').val()) || 0,
+                AudioBitrateKbps: parseInt($('#AudioBitrate2160p').val()) || 0,
+                FallbackAudioBitrateKbps: parseInt($('#FallbackAudio2160p').val()) || 0,
+                Quality: parseInt($('#Quality2160p').val()) || null,
+                Under30MinMB: parseInt($('#Under30Min2160p').val()) || 0,
+                Under65MinMB: parseInt($('#Under65Min2160p').val()) || 0,
+                Over65MinMB: parseInt($('#Over65Min2160p').val()) || 0,
+                TranscodeDownTo: $('#TranscodeDownTo2160p').val()
             }
         ]
     };

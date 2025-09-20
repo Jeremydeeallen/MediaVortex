@@ -314,7 +314,7 @@ class DatabaseManager:
         query = """
             SELECT Id, SeasonId, FilePath, FileName, SizeMB, VideoBitrateKbps, AudioBitrateKbps,
                    Resolution, Codec, DurationMinutes, FrameRate, LastScannedDate,
-                   CompressionPotential, AssignedProfile
+                   CompressionPotential, AssignedProfile, FileModificationTime
             FROM MediaFiles
         """
         rows = self.DatabaseService.ExecuteQuery(query)
@@ -335,7 +335,8 @@ class DatabaseManager:
                 FrameRate=row['FrameRate'],
                 LastScannedDate=row['LastScannedDate'],
                 CompressionPotential=row['CompressionPotential'],
-                AssignedProfile=row['AssignedProfile']
+                AssignedProfile=row['AssignedProfile'],
+                FileModificationTime=row['FileModificationTime']
             )
             mediaFiles.append(mediaFile)
         
@@ -346,7 +347,7 @@ class DatabaseManager:
         query = """
             SELECT Id, SeasonId, FilePath, FileName, SizeMB, VideoBitrateKbps, AudioBitrateKbps,
                    Resolution, Codec, DurationMinutes, FrameRate, LastScannedDate,
-                   CompressionPotential, AssignedProfile
+                   CompressionPotential, AssignedProfile, FileModificationTime
             FROM MediaFiles 
             WHERE Id = ?
         """
@@ -370,7 +371,8 @@ class DatabaseManager:
             FrameRate=row['FrameRate'],
             LastScannedDate=row['LastScannedDate'],
             CompressionPotential=row['CompressionPotential'],
-            AssignedProfile=row['AssignedProfile']
+            AssignedProfile=row['AssignedProfile'],
+            FileModificationTime=row['FileModificationTime']
         )
     
     def SaveMediaFile(self, MediaFile: MediaFileModel) -> int:
@@ -389,14 +391,15 @@ class DatabaseManager:
                         INSERT INTO MediaFiles 
                         (SeasonId, FilePath, FileName, SizeMB, VideoBitrateKbps, AudioBitrateKbps,
                          Resolution, Codec, DurationMinutes, FrameRate, LastScannedDate,
-                         CompressionPotential, AssignedProfile)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                         CompressionPotential, AssignedProfile, FileModificationTime)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """
                     parameters = (
                         MediaFile.SeasonId, MediaFile.FilePath, MediaFile.FileName, MediaFile.SizeMB,
                         MediaFile.VideoBitrateKbps, MediaFile.AudioBitrateKbps, MediaFile.Resolution,
                         MediaFile.Codec, MediaFile.DurationMinutes, MediaFile.FrameRate,
-                        MediaFile.LastScannedDate, MediaFile.CompressionPotential, MediaFile.AssignedProfile
+                        MediaFile.LastScannedDate, MediaFile.CompressionPotential, MediaFile.AssignedProfile,
+                        MediaFile.FileModificationTime
                     )
                     LoggingService.LogInfo(f"Insert media file parameters: {parameters}", "DatabaseManager", "SaveMediaFile")
                     cursor.execute(query, parameters)
@@ -411,7 +414,8 @@ class DatabaseManager:
                         UPDATE MediaFiles 
                         SET SeasonId = ?, FilePath = ?, FileName = ?, SizeMB = ?, VideoBitrateKbps = ?,
                             AudioBitrateKbps = ?, Resolution = ?, Codec = ?, DurationMinutes = ?,
-                            FrameRate = ?, LastScannedDate = ?, CompressionPotential = ?, AssignedProfile = ?
+                            FrameRate = ?, LastScannedDate = ?, CompressionPotential = ?, AssignedProfile = ?,
+                            FileModificationTime = ?
                         WHERE Id = ?
                     """
                     parameters = (
@@ -419,7 +423,7 @@ class DatabaseManager:
                         MediaFile.VideoBitrateKbps, MediaFile.AudioBitrateKbps, MediaFile.Resolution,
                         MediaFile.Codec, MediaFile.DurationMinutes, MediaFile.FrameRate,
                         MediaFile.LastScannedDate, MediaFile.CompressionPotential, MediaFile.AssignedProfile,
-                        MediaFile.Id
+                        MediaFile.FileModificationTime, MediaFile.Id
                     )
                     LoggingService.LogInfo(f"Update media file parameters: {parameters}", "DatabaseManager", "SaveMediaFile")
                     cursor.execute(query, parameters)
@@ -443,7 +447,7 @@ class DatabaseManager:
         query = """
             SELECT Id, SeasonId, FilePath, FileName, SizeMB, VideoBitrateKbps, AudioBitrateKbps,
                    Resolution, Codec, DurationMinutes, FrameRate, LastScannedDate,
-                   CompressionPotential, AssignedProfile
+                   CompressionPotential, AssignedProfile, FileModificationTime
             FROM MediaFiles 
             WHERE FilePath LIKE ?
         """
@@ -465,7 +469,8 @@ class DatabaseManager:
                 FrameRate=row['FrameRate'],
                 LastScannedDate=row['LastScannedDate'],
                 CompressionPotential=row['CompressionPotential'],
-                AssignedProfile=row['AssignedProfile']
+                AssignedProfile=row['AssignedProfile'],
+                FileModificationTime=row['FileModificationTime']
             )
             mediaFiles.append(mediaFile)
         
@@ -598,7 +603,7 @@ class DatabaseManager:
         query = """
             SELECT Id, SeasonId, FilePath, FileName, SizeMB, VideoBitrateKbps, AudioBitrateKbps,
                    Resolution, Codec, DurationMinutes, FrameRate, LastScannedDate,
-                   CompressionPotential, AssignedProfile
+                   CompressionPotential, AssignedProfile, FileModificationTime
             FROM MediaFiles 
             WHERE FilePath = ?
         """
@@ -622,7 +627,8 @@ class DatabaseManager:
             FrameRate=row['FrameRate'],
             LastScannedDate=row['LastScannedDate'],
             CompressionPotential=row['CompressionPotential'],
-            AssignedProfile=row['AssignedProfile']
+            AssignedProfile=row['AssignedProfile'],
+            FileModificationTime=row['FileModificationTime']
         )
     
     
