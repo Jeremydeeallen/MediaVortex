@@ -51,12 +51,12 @@
 
 ## Phase 3.2: Tests First (TDD) - MUST COMPLETE BEFORE 3.3
 **CRITICAL: These tests MUST be written and MUST FAIL before ANY implementation**
-- [ ] T006 [P] Contract test POST /api/transcode/start in tests/contract/TestTranscodeStart.py
-- [ ] T007 [P] Contract test GET /api/transcode/status/{JobId} in tests/contract/TestTranscodeStatus.py
-- [ ] T008 [P] Contract test GET /api/transcode/queue in tests/contract/TestQueueGet.py
-- [ ] T009 [P] Integration test transcoding workflow with quality scoring in tests/integration/TestTranscodingWorkflow.py
-- [ ] T010 [P] Integration test filename resolution logic in tests/integration/TestFilenameResolution.py
-- [ ] T011 [P] Integration test quality scoring and file replacement logic in tests/integration/TestQualityScoring.py
+- [x] T006 [P] Contract test POST /api/transcode/start in Tests/Contract/TestTranscodeStart.py
+- [x] T007 [P] Contract test GET /api/transcode/status/{JobId} in Tests/Contract/TestTranscodeStatus.py
+- [x] T008 [P] Contract test GET /api/transcode/queue in Tests/Contract/TestQueueGet.py
+- [x] T009 [P] Integration test transcoding workflow with quality scoring in Tests/Integration/TestTranscodingWorkflow.py
+- [x] T010 [P] Integration test filename resolution logic in Tests/Integration/TestFilenameResolution.py
+- [x] T011 [P] Integration test quality scoring and file replacement logic in Tests/Integration/TestQualityScoring.py
 
 ## Phase 3.3: Core Implementation (ONLY after tests are failing)
 - [ ] T012 [P] TranscodeQueueItem model in Models/TranscodeQueueModel.py
