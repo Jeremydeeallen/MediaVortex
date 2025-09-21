@@ -107,7 +107,7 @@ Configuration.UpdatedAt	DATETIME
 Logs.Id	INTEGER
 Logs.Timestamp	DATETIME
 Logs.LogLevel	TEXT
-Logs.LoggerName	TEXT
+Logs.FunctionName	TEXT
 Logs.Message	TEXT
 Logs.SourceFile	TEXT
 Logs.SourceLine	INTEGER
@@ -137,6 +137,9 @@ MediaFiles.FrameRate	REAL
 MediaFiles.LastScannedDate	TIMESTAMP
 MediaFiles.CompressionPotential	TEXT
 MediaFiles.AssignedProfile	TEXT
+MediaFiles.IsInterlaced	BIT
+MediaFiles.ResolutionCategory	TEXT
+MediaFiles.FileModificationTime	DATETIME
 ProblemFiles.Id	INTEGER
 ProblemFiles.FilePath	TEXT
 ProblemFiles.FileName	TEXT
@@ -159,6 +162,7 @@ ProfileThresholds.AudioBitrateKbps	INTEGER
 ProfileThresholds.FallbackVideoBitrateKbps	INTEGER
 ProfileThresholds.FallbackAudioBitrateKbps	INTEGER
 ProfileThresholds.TranscodeDownTo	TEXT
+ProfileThresholds.Quality	INTEGER
 Profiles.Id	INTEGER
 Profiles.ProfileName	TEXT
 Profiles.Description	TEXT
@@ -187,6 +191,7 @@ ScanJobs.UpdatedFiles	INTEGER
 ScanJobs.DeletedFiles	INTEGER
 ScanJobs.ErrorMessage	TEXT
 ScanJobs.LastUpdated	TIMESTAMP
+ScanJobs.ScanType	TEXT
 Seasons.Id	INTEGER
 Seasons.RootFolderId	INTEGER
 Seasons.SeasonName	TEXT
@@ -207,10 +212,11 @@ TranscodeAttempts.SizeReductionBytes	INTEGER
 TranscodeAttempts.SizeReductionPercent	REAL
 TranscodeAttempts.ErrorMessage	TEXT
 TranscodeAttempts.TranscodeDurationSeconds	REAL
-TranscodeAttempts.HandbrakeSettings	TEXT
+TranscodeAttempts.FfpmpegCommand	TEXT
 TranscodeAttempts.AudioBitrateKbps	INTEGER
 TranscodeAttempts.VideoBitrateKbps	INTEGER
 TranscodeAttempts.ProfileName	TEXT
+TranscodeAttempts.VMAF	REAL
 TranscodeFiles.Id	INTEGER
 TranscodeFiles.FilePath	TEXT
 TranscodeFiles.AllQualitiesFailed	BOOLEAN
@@ -223,6 +229,17 @@ TranscodeFiles.FinalSizeBytes	INTEGER
 TranscodeFiles.TotalAttempts	INTEGER
 TranscodeFiles.OriginalFilePath	TEXT
 TranscodeFiles.FinalFilePath	TEXT
+TranscodeProgress.Id	INTEGER
+TranscodeProgress.TranscodeAttemptId	INTEGER
+TranscodeProgress.CurrentPhase	TEXT
+TranscodeProgress.ProgressPercent	INTEGER
+TranscodeProgress.CurrentFrame	INTEGER
+TranscodeProgress.CurrentFPS	REAL
+TranscodeProgress.CurrentBitrate	TEXT
+TranscodeProgress.CurrentTime	TEXT
+TranscodeProgress.CurrentSpeed	TEXT
+TranscodeProgress.LastProgressUpdate	TIMESTAMP
+TranscodeProgress.FFmpegOutput	TEXT
 TranscodeQueue.Id	INTEGER
 TranscodeQueue.FilePath	TEXT
 TranscodeQueue.FileName	TEXT
@@ -274,6 +291,7 @@ TranscodeAttempts	idx_TranscodeAttempts_FilePath	0	c	0
 TranscodeFiles	idx_TranscodeFiles_SuccessfullyTranscoded	0	c	0
 TranscodeFiles	idx_TranscodeFiles_FilePath	0	c	0
 TranscodeFiles	sqlite_autoindex_TranscodeFiles_1	1	u	0
+TranscodeProgress	idx_TranscodeProgress_AttemptId	0	c	0
 TranscodeQueue	idx_TranscodeQueue_FileName	0	c	0
 TranscodeQueue	idx_TranscodeQueue_Directory	0	c	0
 TranscodeQueue	idx_TranscodeQueue_Priority	0	c	0
@@ -305,7 +323,7 @@ Logs	IdxLogsUserSession	UserId	0
 Logs	IdxLogsUserSession	SessionId	1
 Logs	IdxLogsOperation	Operation	0
 Logs	IdxLogsComponent	Component	0
-Logs	IdxLogsLogger	LoggerName	0
+Logs	IdxLogsLogger	FunctionName	0
 Logs	IdxLogsLevel	LogLevel	0
 Logs	IdxLogsTimestamp	Timestamp	0
 ProblemFiles	idx_ProblemFiles_Directory	Directory	0
@@ -324,6 +342,7 @@ TranscodeAttempts	idx_TranscodeAttempts_FilePath	FilePath	0
 TranscodeFiles	idx_TranscodeFiles_SuccessfullyTranscoded	SuccessfullyTranscoded	0
 TranscodeFiles	idx_TranscodeFiles_FilePath	FilePath	0
 TranscodeFiles	sqlite_autoindex_TranscodeFiles_1	FilePath	0
+TranscodeProgress	idx_TranscodeProgress_AttemptId	TranscodeAttemptId	0
 TranscodeQueue	idx_TranscodeQueue_FileName	FileName	0
 TranscodeQueue	idx_TranscodeQueue_Directory	Directory	0
 TranscodeQueue	idx_TranscodeQueue_Priority	Priority	0

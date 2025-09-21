@@ -21,6 +21,8 @@ class MediaFileModel:
     LastScannedDate: Optional[datetime] = None
     CompressionPotential: Optional[str] = None
     AssignedProfile: Optional[str] = None
+    IsInterlaced: Optional[bool] = None
+    ResolutionCategory: Optional[str] = None
     FileModificationTime: Optional[datetime] = None
     
     

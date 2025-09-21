@@ -1,14 +1,14 @@
 # Quickstart: Video Queue Transcoding
 
 ## Overview
-This quickstart demonstrates the video queue transcoding feature that processes videos from the TranscodeQueue table using HandBrake CLI with profile-based settings.
+This quickstart demonstrates the video queue transcoding feature that processes videos from the TranscodeQueue table using FFmpeg with quality settings from the MediaFiles table.
 
 ## Prerequisites
 - MediaVortex application running
-- HandBrake CLI available at `\MediaVortex\HandBrake\HandBrakeCLI.exe`
+- FFmpeg available in system PATH
 - Database with existing TranscodeQueue items
 - At least one transcoding profile configured
-- Temporary directory `c:\HandBrakeTemp\Source` accessible
+- Temporary directory `c:\MediaVortex\Source` accessible
 
 ## Step-by-Step Validation
 
@@ -27,7 +27,7 @@ This quickstart demonstrates the video queue transcoding feature that processes 
 - Click "Start Transcoding" button
 - Verify job status changes to "processing"
 - Confirm JobId is generated and displayed
-- Check that file is copied to `c:\HandBrakeTemp\Source`
+- Check that file is copied to `c:\MediaVortex\Source`
 
 ### 3. Monitor Progress
 **Action**: Track transcoding progress
@@ -36,7 +36,7 @@ This quickstart demonstrates the video queue transcoding feature that processes 
 - Progress percentage increases from 0% to 100%
 - Status remains "processing" during operation
 - No error messages appear in logs
-- HandBrake CLI process is running
+- FFmpeg process is running
 
 ### 4. Verify Completion
 **Action**: Confirm successful transcoding

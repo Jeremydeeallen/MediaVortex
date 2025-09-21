@@ -9,6 +9,9 @@ configparser
 flask-cors
 requests
 
+# Video transcoding (FFmpeg integration)
+ffmpeg-python>=0.2.0
+
 # Development tools
 pytest
 black

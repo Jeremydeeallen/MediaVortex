@@ -30,18 +30,21 @@
 - Phase 3-4: Implementation execution (manual or via tools)
 
 ## Summary
-Video queue transcoding feature that processes videos from the TranscodeQueue table using HandBrake CLI with profile-based settings. The system copies the largest file by MB to c:\HandBrakeTemp\Source, transcodes it using HandBrakeCLI.exe, and manages the output file replacement with proper database logging.
+Video queue transcoding feature that processes videos from the TranscodeQueue table using FFmpeg with quality settings from the MediaFiles table. The system copies the top queue item to c:\MediaVortex\Source, transcodes it with FFmpeg using quality settings and audio bitrate while maintaining aspect ratio, outputs to c:\MediaVortex\<filename> with resolution-adjusted naming, performs quality scoring (>90 threshold), and replaces original files only on successful transcoding with proper database logging in TranscodeAttempts table.
 
 ## Technical Context
 **Language/Version**: Python 3.11  
-**Primary Dependencies**: SQLite3, HandBrake CLI, Python file operations  
+**Primary Dependencies**: SQLite3, FFmpeg for transcoding and quality scoring, Python file operations  
 **Storage**: SQLite database (MediaVortex.db) with existing schema  
-**Testing**: pytest for unit tests, integration tests for HandBrake operations  
-**Target Platform**: Windows (HandBrake CLI path specific)  
+**Testing**: pytest for unit tests, integration tests for FFmpeg operations  
+**Target Platform**: Windows (FFmpeg path specific)  
 **Project Type**: single (existing MediaVortex application)  
-**Performance Goals**: Process largest files first for optimal queue management  
-**Constraints**: Must preserve original files during transcoding, UTF-8 compatibility required  
+**Performance Goals**: Process queue items sequentially with quality validation  
+**Constraints**: Must preserve original files during transcoding, UTF-8 compatibility required, quality score >90 threshold  
 **Scale/Scope**: Single transcoding operation at a time, database-driven queue management  
+**File Paths**: Source files from scan directory, temp processing at c:\MediaVortex\Source, output to c:\MediaVortex\<filename>  
+**Quality Validation**: FFmpeg-based quality scoring with 90+ threshold for file replacement  
+**Transcoding Engine**: FFmpeg with quality settings from MediaFiles table  
 
 ## Constitution Check
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
@@ -51,7 +54,7 @@ Video queue transcoding feature that processes videos from the TranscodeQueue ta
 - ViewModels: TranscodeQueueViewModel (existing)
 - Views: TranscodeQueue.html (existing)
 - Controllers: TranscodeQueueController (existing)
-- Services: TranscodingBusinessService (existing), HandBrakeService (existing)
+- Services: TranscodingBusinessService (existing), FFmpegService (existing)
 
 ### PascalCase Naming Convention
 - All new classes, methods, variables must use PascalCase
@@ -103,7 +106,7 @@ MediaVortex/
 │   └── TranscodeFileModel.py (existing)
 ├── Services/
 │   ├── TranscodingBusinessService.py (existing)
-│   ├── HandBrakeService.py (existing)
+│   ├── FFmpegService.py (existing)
 │   └── DatabaseService.py (existing)
 ├── Controllers/
 │   └── TranscodeQueueController.py (existing)

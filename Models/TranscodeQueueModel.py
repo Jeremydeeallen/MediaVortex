@@ -15,6 +15,7 @@ class TranscodeQueueModel:
     SizeMB: float = 0.0
     Priority: int = 0
     Status: str = "Pending"  # Pending, Running, Completed, Failed, Cancelled
+    AssignedProfile: str = ""  # Profile assigned for transcoding
     DateAdded: Optional[datetime] = None
     DateStarted: Optional[datetime] = None
     

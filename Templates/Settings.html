@@ -73,299 +73,255 @@
                     <h6 class="mb-3">Profile Thresholds</h6>
                     
                     <!-- 480p Settings -->
-                    <div class="card mb-3">
-                        <div class="card-header">
+                    <div class="card mb-2">
+                        <div class="card-header py-2">
                             <h6 class="mb-0">480p Settings</h6>
                         </div>
-                        <div class="card-body">
-                            <div class="row">
-                                <div class="col-md-3">
-                                    <div class="mb-3">
-                                        <label for="VideoBitrate480p" class="form-label">Video Bitrate (kbps)</label>
-                                        <input type="number" class="form-control" id="VideoBitrate480p" value="400">
-                                    </div>
+                        <div class="card-body py-2">
+                            <div class="row g-2">
+                                <div class="col-md-2">
+                                    <label for="VideoBitrate480p" class="form-label small">Video Bitrate (kbps)</label>
+                                    <input type="number" class="form-control form-control-sm" id="VideoBitrate480p" value="400">
                                 </div>
-                                <div class="col-md-3">
-                                    <div class="mb-3">
-                                        <label for="FallbackVideo480p" class="form-label">Fallback Video (kbps)</label>
-                                        <input type="number" class="form-control" id="FallbackVideo480p" value="350">
-                                    </div>
+                                <div class="col-md-2">
+                                    <label for="FallbackVideo480p" class="form-label small">Fallback Video (kbps)</label>
+                                    <input type="number" class="form-control form-control-sm" id="FallbackVideo480p" value="350">
                                 </div>
-                                <div class="col-md-3">
-                                    <div class="mb-3">
-                                        <label for="AudioBitrate480p" class="form-label">Audio Bitrate (kbps)</label>
-                                        <input type="number" class="form-control" id="AudioBitrate480p" value="80">
-                                    </div>
+                                <div class="col-md-2">
+                                    <label for="AudioBitrate480p" class="form-label small">Audio Bitrate (kbps)</label>
+                                    <input type="number" class="form-control form-control-sm" id="AudioBitrate480p" value="80">
                                 </div>
-                                <div class="col-md-3">
-                                    <div class="mb-3">
-                                        <label for="FallbackAudio480p" class="form-label">Fallback Audio (kbps)</label>
-                                        <input type="number" class="form-control" id="FallbackAudio480p" value="80">
-                                    </div>
+                                <div class="col-md-2">
+                                    <label for="FallbackAudio480p" class="form-label small">Fallback Audio (kbps)</label>
+                                    <input type="number" class="form-control form-control-sm" id="FallbackAudio480p" value="80">
                                 </div>
-                            </div>
-                            <div class="row">
-                                <div class="col-md-3">
-                                    <div class="mb-3">
-                                        <label for="Quality480p" class="form-label">Quality (CRF)</label>
-                                        <input type="number" class="form-control" id="Quality480p" placeholder="Leave empty for bitrate mode" min="0" max="51">
-                                        <small class="form-text text-muted">If set, video bitrate fields will be disabled (audio bitrates remain adjustable)</small>
-                                    </div>
+                                <div class="col-md-2">
+                                    <label for="Quality480p" class="form-label small">Quality (CRF)</label>
+                                    <input type="number" class="form-control form-control-sm" id="Quality480p" placeholder="Empty for bitrate" min="0" max="51">
+                                </div>
+                                <div class="col-md-2">
+                                    <label for="Codec480p" class="form-label small">Video Codec</label>
+                                    <select class="form-select form-select-sm" id="Codec480p">
+                                        <option value="libx265">H.265 (libx265)</option>
+                                        <option value="libx264">H.264 (libx264)</option>
+                                        <option value="libvpx-vp9">VP9 (libvpx-vp9)</option>
+                                        <option value="libaom-av1">AV1 (libaom-av1)</option>
+                                    </select>
                                 </div>
                             </div>
-                            <div class="row">
+                            <div class="row g-2 mt-1">
                                 <div class="col-md-3">
-                                    <div class="mb-3">
-                                        <label for="Under30Min480p" class="form-label">Under 30 Min (MB)</label>
-                                        <input type="number" class="form-control" id="Under30Min480p" value="200">
-                                    </div>
+                                    <label for="Under30Min480p" class="form-label small">Under 30 Min (MB)</label>
+                                    <input type="number" class="form-control form-control-sm" id="Under30Min480p" value="200">
                                 </div>
                                 <div class="col-md-3">
-                                    <div class="mb-3">
-                                        <label for="Under65Min480p" class="form-label">Under 65 Min (MB)</label>
-                                        <input type="number" class="form-control" id="Under65Min480p" value="300">
-                                    </div>
+                                    <label for="Under65Min480p" class="form-label small">Under 65 Min (MB)</label>
+                                    <input type="number" class="form-control form-control-sm" id="Under65Min480p" value="300">
                                 </div>
                                 <div class="col-md-3">
-                                    <div class="mb-3">
-                                        <label for="Over65Min480p" class="form-label">Over 65 Min (MB)</label>
-                                        <input type="number" class="form-control" id="Over65Min480p" value="700">
-                                    </div>
+                                    <label for="Over65Min480p" class="form-label small">Over 65 Min (MB)</label>
+                                    <input type="number" class="form-control form-control-sm" id="Over65Min480p" value="700">
                                 </div>
                                 <div class="col-md-3">
-                                    <div class="mb-3">
-                                        <label for="TranscodeDownTo480p" class="form-label">Transcode Down To</label>
-                                        <select class="form-select" id="TranscodeDownTo480p">
-                                            <option value="No downscaling">No downscaling</option>
-                                            <option value="360p">360p</option>
-                                        </select>
-                                    </div>
+                                    <label for="TranscodeDownTo480p" class="form-label small">Transcode Down To</label>
+                                    <select class="form-select form-select-sm" id="TranscodeDownTo480p">
+                                        <option value="No downscaling">No downscaling</option>
+                                        <option value="360p">360p</option>
+                                    </select>
                                 </div>
                             </div>
+                            <small class="text-muted">If CRF is set, video bitrate fields are disabled</small>
                         </div>
                     </div>
 
                     <!-- 720p Settings -->
-                    <div class="card mb-3">
-                        <div class="card-header">
+                    <div class="card mb-2">
+                        <div class="card-header py-2">
                             <h6 class="mb-0">720p Settings</h6>
                         </div>
-                        <div class="card-body">
-                            <div class="row">
-                                <div class="col-md-3">
-                                    <div class="mb-3">
-                                        <label for="VideoBitrate720p" class="form-label">Video Bitrate (kbps)</label>
-                                        <input type="number" class="form-control" id="VideoBitrate720p" value="450">
-                                    </div>
+                        <div class="card-body py-2">
+                            <div class="row g-2">
+                                <div class="col-md-2">
+                                    <label for="VideoBitrate720p" class="form-label small">Video Bitrate (kbps)</label>
+                                    <input type="number" class="form-control form-control-sm" id="VideoBitrate720p" value="450">
                                 </div>
-                                <div class="col-md-3">
-                                    <div class="mb-3">
-                                        <label for="FallbackVideo720p" class="form-label">Fallback Video (kbps)</label>
-                                        <input type="number" class="form-control" id="FallbackVideo720p" value="400">
-                                    </div>
+                                <div class="col-md-2">
+                                    <label for="FallbackVideo720p" class="form-label small">Fallback Video (kbps)</label>
+                                    <input type="number" class="form-control form-control-sm" id="FallbackVideo720p" value="400">
                                 </div>
-                                <div class="col-md-3">
-                                    <div class="mb-3">
-                                        <label for="AudioBitrate720p" class="form-label">Audio Bitrate (kbps)</label>
-                                        <input type="number" class="form-control" id="AudioBitrate720p" value="70">
-                                    </div>
+                                <div class="col-md-2">
+                                    <label for="AudioBitrate720p" class="form-label small">Audio Bitrate (kbps)</label>
+                                    <input type="number" class="form-control form-control-sm" id="AudioBitrate720p" value="70">
                                 </div>
-                                <div class="col-md-3">
-                                    <div class="mb-3">
-                                        <label for="FallbackAudio720p" class="form-label">Fallback Audio (kbps)</label>
-                                        <input type="number" class="form-control" id="FallbackAudio720p" value="70">
-                                    </div>
+                                <div class="col-md-2">
+                                    <label for="FallbackAudio720p" class="form-label small">Fallback Audio (kbps)</label>
+                                    <input type="number" class="form-control form-control-sm" id="FallbackAudio720p" value="70">
                                 </div>
-                            </div>
-                            <div class="row">
-                                <div class="col-md-3">
-                                    <div class="mb-3">
-                                        <label for="Quality720p" class="form-label">Quality (CRF)</label>
-                                        <input type="number" class="form-control" id="Quality720p" placeholder="Leave empty for bitrate mode" min="0" max="51">
-                                        <small class="form-text text-muted">If set, video bitrate fields will be disabled (audio bitrates remain adjustable)</small>
-                                    </div>
+                                <div class="col-md-2">
+                                    <label for="Quality720p" class="form-label small">Quality (CRF)</label>
+                                    <input type="number" class="form-control form-control-sm" id="Quality720p" placeholder="Empty for bitrate" min="0" max="51">
+                                </div>
+                                <div class="col-md-2">
+                                    <label for="Codec720p" class="form-label small">Video Codec</label>
+                                    <select class="form-select form-select-sm" id="Codec720p">
+                                        <option value="libx265">H.265 (libx265)</option>
+                                        <option value="libx264">H.264 (libx264)</option>
+                                        <option value="libvpx-vp9">VP9 (libvpx-vp9)</option>
+                                        <option value="libaom-av1">AV1 (libaom-av1)</option>
+                                    </select>
                                 </div>
                             </div>
-                            <div class="row">
+                            <div class="row g-2 mt-1">
                                 <div class="col-md-3">
-                                    <div class="mb-3">
-                                        <label for="Under30Min720p" class="form-label">Under 30 Min (MB)</label>
-                                        <input type="number" class="form-control" id="Under30Min720p" value="200">
-                                    </div>
+                                    <label for="Under30Min720p" class="form-label small">Under 30 Min (MB)</label>
+                                    <input type="number" class="form-control form-control-sm" id="Under30Min720p" value="200">
                                 </div>
                                 <div class="col-md-3">
-                                    <div class="mb-3">
-                                        <label for="Under65Min720p" class="form-label">Under 65 Min (MB)</label>
-                                        <input type="number" class="form-control" id="Under65Min720p" value="300">
-                                    </div>
+                                    <label for="Under65Min720p" class="form-label small">Under 65 Min (MB)</label>
+                                    <input type="number" class="form-control form-control-sm" id="Under65Min720p" value="300">
                                 </div>
                                 <div class="col-md-3">
-                                    <div class="mb-3">
-                                        <label for="Over65Min720p" class="form-label">Over 65 Min (MB)</label>
-                                        <input type="number" class="form-control" id="Over65Min720p" value="800">
-                                    </div>
+                                    <label for="Over65Min720p" class="form-label small">Over 65 Min (MB)</label>
+                                    <input type="number" class="form-control form-control-sm" id="Over65Min720p" value="800">
                                 </div>
                                 <div class="col-md-3">
-                                    <div class="mb-3">
-                                        <label for="TranscodeDownTo720p" class="form-label">Transcode Down To</label>
-                                        <select class="form-select" id="TranscodeDownTo720p">
-                                            <option value="480p">480p</option>
-                                            <option value="360p">360p</option>
-                                            <option value="No downscaling">No downscaling</option>
-                                        </select>
-                                    </div>
+                                    <label for="TranscodeDownTo720p" class="form-label small">Transcode Down To</label>
+                                    <select class="form-select form-select-sm" id="TranscodeDownTo720p">
+                                        <option value="480p">480p</option>
+                                        <option value="360p">360p</option>
+                                        <option value="No downscaling">No downscaling</option>
+                                    </select>
                                 </div>
                             </div>
+                            <small class="text-muted">If CRF is set, video bitrate fields are disabled</small>
                         </div>
                     </div>
 
                     <!-- 1080p Settings -->
-                    <div class="card mb-3">
-                        <div class="card-header">
+                    <div class="card mb-2">
+                        <div class="card-header py-2">
                             <h6 class="mb-0">1080p Settings</h6>
                         </div>
-                        <div class="card-body">
-                            <div class="row">
-                                <div class="col-md-3">
-                                    <div class="mb-3">
-                                        <label for="VideoBitrate1080p" class="form-label">Video Bitrate (kbps)</label>
-                                        <input type="number" class="form-control" id="VideoBitrate1080p" value="500">
-                                    </div>
+                        <div class="card-body py-2">
+                            <div class="row g-2">
+                                <div class="col-md-2">
+                                    <label for="VideoBitrate1080p" class="form-label small">Video Bitrate (kbps)</label>
+                                    <input type="number" class="form-control form-control-sm" id="VideoBitrate1080p" value="500">
                                 </div>
-                                <div class="col-md-3">
-                                    <div class="mb-3">
-                                        <label for="FallbackVideo1080p" class="form-label">Fallback Video (kbps)</label>
-                                        <input type="number" class="form-control" id="FallbackVideo1080p" value="450">
-                                    </div>
+                                <div class="col-md-2">
+                                    <label for="FallbackVideo1080p" class="form-label small">Fallback Video (kbps)</label>
+                                    <input type="number" class="form-control form-control-sm" id="FallbackVideo1080p" value="450">
                                 </div>
-                                <div class="col-md-3">
-                                    <div class="mb-3">
-                                        <label for="AudioBitrate1080p" class="form-label">Audio Bitrate (kbps)</label>
-                                        <input type="number" class="form-control" id="AudioBitrate1080p" value="80">
-                                    </div>
+                                <div class="col-md-2">
+                                    <label for="AudioBitrate1080p" class="form-label small">Audio Bitrate (kbps)</label>
+                                    <input type="number" class="form-control form-control-sm" id="AudioBitrate1080p" value="80">
                                 </div>
-                                <div class="col-md-3">
-                                    <div class="mb-3">
-                                        <label for="FallbackAudio1080p" class="form-label">Fallback Audio (kbps)</label>
-                                        <input type="number" class="form-control" id="FallbackAudio1080p" value="80">
-                                    </div>
+                                <div class="col-md-2">
+                                    <label for="FallbackAudio1080p" class="form-label small">Fallback Audio (kbps)</label>
+                                    <input type="number" class="form-control form-control-sm" id="FallbackAudio1080p" value="80">
                                 </div>
-                            </div>
-                            <div class="row">
-                                <div class="col-md-3">
-                                    <div class="mb-3">
-                                        <label for="Quality1080p" class="form-label">Quality (CRF)</label>
-                                        <input type="number" class="form-control" id="Quality1080p" placeholder="Leave empty for bitrate mode" min="0" max="51">
-                                        <small class="form-text text-muted">If set, video bitrate fields will be disabled (audio bitrates remain adjustable)</small>
-                                    </div>
+                                <div class="col-md-2">
+                                    <label for="Quality1080p" class="form-label small">Quality (CRF)</label>
+                                    <input type="number" class="form-control form-control-sm" id="Quality1080p" placeholder="Empty for bitrate" min="0" max="51">
+                                </div>
+                                <div class="col-md-2">
+                                    <label for="Codec1080p" class="form-label small">Video Codec</label>
+                                    <select class="form-select form-select-sm" id="Codec1080p">
+                                        <option value="libx265">H.265 (libx265)</option>
+                                        <option value="libx264">H.264 (libx264)</option>
+                                        <option value="libvpx-vp9">VP9 (libvpx-vp9)</option>
+                                        <option value="libaom-av1">AV1 (libaom-av1)</option>
+                                    </select>
                                 </div>
                             </div>
-                            <div class="row">
+                            <div class="row g-2 mt-1">
                                 <div class="col-md-3">
-                                    <div class="mb-3">
-                                        <label for="Under30Min1080p" class="form-label">Under 30 Min (MB)</label>
-                                        <input type="number" class="form-control" id="Under30Min1080p" value="200">
-                                    </div>
+                                    <label for="Under30Min1080p" class="form-label small">Under 30 Min (MB)</label>
+                                    <input type="number" class="form-control form-control-sm" id="Under30Min1080p" value="200">
                                 </div>
                                 <div class="col-md-3">
-                                    <div class="mb-3">
-                                        <label for="Under65Min1080p" class="form-label">Under 65 Min (MB)</label>
-                                        <input type="number" class="form-control" id="Under65Min1080p" value="300">
-                                    </div>
+                                    <label for="Under65Min1080p" class="form-label small">Under 65 Min (MB)</label>
+                                    <input type="number" class="form-control form-control-sm" id="Under65Min1080p" value="300">
                                 </div>
                                 <div class="col-md-3">
-                                    <div class="mb-3">
-                                        <label for="Over65Min1080p" class="form-label">Over 65 Min (MB)</label>
-                                        <input type="number" class="form-control" id="Over65Min1080p" value="800">
-                                    </div>
+                                    <label for="Over65Min1080p" class="form-label small">Over 65 Min (MB)</label>
+                                    <input type="number" class="form-control form-control-sm" id="Over65Min1080p" value="800">
                                 </div>
                                 <div class="col-md-3">
-                                    <div class="mb-3">
-                                        <label for="TranscodeDownTo1080p" class="form-label">Transcode Down To</label>
-                                        <select class="form-select" id="TranscodeDownTo1080p">
-                                            <option value="480p">480p</option>
-                                            <option value="720p">720p</option>
-                                            <option value="360p">360p</option>
-                                            <option value="No downscaling">No downscaling</option>
-                                        </select>
-                                    </div>
+                                    <label for="TranscodeDownTo1080p" class="form-label small">Transcode Down To</label>
+                                    <select class="form-select form-select-sm" id="TranscodeDownTo1080p">
+                                        <option value="480p">480p</option>
+                                        <option value="720p">720p</option>
+                                        <option value="360p">360p</option>
+                                        <option value="No downscaling">No downscaling</option>
+                                    </select>
                                 </div>
                             </div>
+                            <small class="text-muted">If CRF is set, video bitrate fields are disabled</small>
                         </div>
                     </div>
 
                     <!-- 4K (2160p) Settings -->
-                    <div class="card mb-3">
-                        <div class="card-header">
+                    <div class="card mb-2">
+                        <div class="card-header py-2">
                             <h6 class="mb-0">4K (2160p) Settings</h6>
                         </div>
-                        <div class="card-body">
-                            <div class="row">
-                                <div class="col-md-3">
-                                    <div class="mb-3">
-                                        <label for="VideoBitrate2160p" class="form-label">Video Bitrate (kbps)</label>
-                                        <input type="number" class="form-control" id="VideoBitrate2160p" value="2000">
-                                    </div>
+                        <div class="card-body py-2">
+                            <div class="row g-2">
+                                <div class="col-md-2">
+                                    <label for="VideoBitrate2160p" class="form-label small">Video Bitrate (kbps)</label>
+                                    <input type="number" class="form-control form-control-sm" id="VideoBitrate2160p" value="2000">
                                 </div>
-                                <div class="col-md-3">
-                                    <div class="mb-3">
-                                        <label for="FallbackVideo2160p" class="form-label">Fallback Video (kbps)</label>
-                                        <input type="number" class="form-control" id="FallbackVideo2160p" value="1800">
-                                    </div>
+                                <div class="col-md-2">
+                                    <label for="FallbackVideo2160p" class="form-label small">Fallback Video (kbps)</label>
+                                    <input type="number" class="form-control form-control-sm" id="FallbackVideo2160p" value="1800">
                                 </div>
-                                <div class="col-md-3">
-                                    <div class="mb-3">
-                                        <label for="AudioBitrate2160p" class="form-label">Audio Bitrate (kbps)</label>
-                                        <input type="number" class="form-control" id="AudioBitrate2160p" value="128">
-                                    </div>
+                                <div class="col-md-2">
+                                    <label for="AudioBitrate2160p" class="form-label small">Audio Bitrate (kbps)</label>
+                                    <input type="number" class="form-control form-control-sm" id="AudioBitrate2160p" value="128">
                                 </div>
-                                <div class="col-md-3">
-                                    <div class="mb-3">
-                                        <label for="FallbackAudio2160p" class="form-label">Fallback Audio (kbps)</label>
-                                        <input type="number" class="form-control" id="FallbackAudio2160p" value="128">
-                                    </div>
+                                <div class="col-md-2">
+                                    <label for="FallbackAudio2160p" class="form-label small">Fallback Audio (kbps)</label>
+                                    <input type="number" class="form-control form-control-sm" id="FallbackAudio2160p" value="128">
                                 </div>
-                            </div>
-                            <div class="row">
-                                <div class="col-md-3">
-                                    <div class="mb-3">
-                                        <label for="Quality2160p" class="form-label">Quality (CRF)</label>
-                                        <input type="number" class="form-control" id="Quality2160p" placeholder="Leave empty for bitrate mode" min="0" max="51">
-                                        <small class="form-text text-muted">If set, video bitrate fields will be disabled (audio bitrates remain adjustable)</small>
-                                    </div>
+                                <div class="col-md-2">
+                                    <label for="Quality2160p" class="form-label small">Quality (CRF)</label>
+                                    <input type="number" class="form-control form-control-sm" id="Quality2160p" placeholder="Empty for bitrate" min="0" max="51">
+                                </div>
+                                <div class="col-md-2">
+                                    <label for="Codec2160p" class="form-label small">Video Codec</label>
+                                    <select class="form-select form-select-sm" id="Codec2160p">
+                                        <option value="libx265">H.265 (libx265)</option>
+                                        <option value="libx264">H.264 (libx264)</option>
+                                        <option value="libvpx-vp9">VP9 (libvpx-vp9)</option>
+                                        <option value="libaom-av1">AV1 (libaom-av1)</option>
+                                    </select>
                                 </div>
                             </div>
-                            <div class="row">
+                            <div class="row g-2 mt-1">
                                 <div class="col-md-3">
-                                    <div class="mb-3">
-                                        <label for="Under30Min2160p" class="form-label">Under 30 Min (MB)</label>
-                                        <input type="number" class="form-control" id="Under30Min2160p" value="800">
-                                    </div>
+                                    <label for="Under30Min2160p" class="form-label small">Under 30 Min (MB)</label>
+                                    <input type="number" class="form-control form-control-sm" id="Under30Min2160p" value="800">
                                 </div>
                                 <div class="col-md-3">
-                                    <div class="mb-3">
-                                        <label for="Under65Min2160p" class="form-label">Under 65 Min (MB)</label>
-                                        <input type="number" class="form-control" id="Under65Min2160p" value="1200">
-                                    </div>
+                                    <label for="Under65Min2160p" class="form-label small">Under 65 Min (MB)</label>
+                                    <input type="number" class="form-control form-control-sm" id="Under65Min2160p" value="1200">
                                 </div>
                                 <div class="col-md-3">
-                                    <div class="mb-3">
-                                        <label for="Over65Min2160p" class="form-label">Over 65 Min (MB)</label>
-                                        <input type="number" class="form-control" id="Over65Min2160p" value="3000">
-                                    </div>
+                                    <label for="Over65Min2160p" class="form-label small">Over 65 Min (MB)</label>
+                                    <input type="number" class="form-control form-control-sm" id="Over65Min2160p" value="3000">
                                 </div>
                                 <div class="col-md-3">
-                                    <div class="mb-3">
-                                        <label for="TranscodeDownTo2160p" class="form-label">Transcode Down To</label>
-                                        <select class="form-select" id="TranscodeDownTo2160p">
-                                            <option value="1080p">1080p</option>
-                                            <option value="720p">720p</option>
-                                            <option value="480p">480p</option>
-                                            <option value="No downscaling">No downscaling</option>
-                                        </select>
-                                    </div>
+                                    <label for="TranscodeDownTo2160p" class="form-label small">Transcode Down To</label>
+                                    <select class="form-select form-select-sm" id="TranscodeDownTo2160p">
+                                        <option value="1080p">1080p</option>
+                                        <option value="720p">720p</option>
+                                        <option value="480p">480p</option>
+                                        <option value="No downscaling">No downscaling</option>
+                                    </select>
                                 </div>
                             </div>
+                            <small class="text-muted">If CRF is set, video bitrate fields are disabled</small>
                         </div>
                     </div>
                 </form>
@@ -558,6 +514,7 @@ function PopulateProfileForm(Profile) {
         $('#AudioBitrate480p').val(Threshold480p.AudioBitrateKbps);
         $('#FallbackAudio480p').val(Threshold480p.FallbackAudioBitrateKbps);
         $('#Quality480p').val(Threshold480p.Quality || '');
+        $('#Codec480p').val(Threshold480p.Codec || 'libx265');
         $('#Under30Min480p').val(Threshold480p.Under30MinMB);
         $('#Under65Min480p').val(Threshold480p.Under65MinMB);
         $('#Over65Min480p').val(Threshold480p.Over65MinMB);

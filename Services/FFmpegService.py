@@ -9,12 +9,23 @@ from Services.LoggingService import LoggingService
 class FFmpegService:
     """Core FFmpeg service for executing FFmpeg and FFprobe commands."""
     
+    # Static cache for paths to avoid repeated lookups
+    _cached_ffmpeg_path = None
+    _cached_ffprobe_path = None
+    _logged_initialization = False
+    
     def __init__(self):
-        self.FFmpegPath = self.FindFFmpegPath()
-        self.FFprobePath = self.FindFFprobePath()
+        # Use cached paths if available, otherwise find them
+        if FFmpegService._cached_ffmpeg_path is None:
+            FFmpegService._cached_ffmpeg_path = self.FindFFmpegPath()
+        if FFmpegService._cached_ffprobe_path is None:
+            FFmpegService._cached_ffprobe_path = self.FindFFprobePath()
+            
+        self.FFmpegPath = FFmpegService._cached_ffmpeg_path
+        self.FFprobePath = FFmpegService._cached_ffprobe_path
         
         # Only log once when first instance is created
-        if not hasattr(FFmpegService, '_logged_initialization'):
+        if not FFmpegService._logged_initialization:
             if not self.FFmpegPath:
                 LoggingService.LogWarning("FFmpeg not found. Video processing will not be available.", '__init__', 'FFmpegService')
             else:
@@ -33,7 +44,10 @@ class FFmpegService:
             # Check if ffmpeg is in PATH
             FFmpegPath = shutil.which('ffmpeg')
             if FFmpegPath:
-                LoggingService.LogInfo(f"Found FFmpeg in PATH: {FFmpegPath}", 'FindFFmpegPath', 'FFmpegService')
+                # Only log once per class, not per instance
+                if not hasattr(FFmpegService, '_ffmpeg_path_logged'):
+                    LoggingService.LogInfo(f"Found FFmpeg in PATH: {FFmpegPath}", 'FindFFmpegPath', 'FFmpegService')
+                    FFmpegService._ffmpeg_path_logged = True
                 return FFmpegPath
             
             # Check common installation paths
@@ -64,7 +78,10 @@ class FFmpegService:
             # Check if ffprobe is in PATH
             FFprobePath = shutil.which('ffprobe')
             if FFprobePath:
-                LoggingService.LogInfo(f"Found FFprobe in PATH: {FFprobePath}", 'FindFFprobePath', 'FFmpegService')
+                # Only log once per class, not per instance
+                if not hasattr(FFmpegService, '_ffprobe_path_logged'):
+                    LoggingService.LogInfo(f"Found FFprobe in PATH: {FFprobePath}", 'FindFFprobePath', 'FFmpegService')
+                    FFmpegService._ffprobe_path_logged = True
                 return FFprobePath
             
             # Check common installation paths
@@ -159,8 +176,8 @@ class FFmpegService:
                 'Command': CommandString
             }
     
-    def ExecuteFFmpegCommand(self, Arguments: List[str]) -> Dict[str, Any]:
-        """Execute FFmpeg command directly without input/output file handling."""
+    def ExecuteFFmpegCommand(self, Arguments: List[str], ProgressCallback=None) -> Dict[str, Any]:
+        """Execute FFmpeg command with optional real-time progress monitoring."""
         try:
             if not self.FFmpegPath:
                 return {
@@ -170,25 +187,182 @@ class FFmpegService:
                     'Error': ''
                 }
             
-            Command = [self.FFmpegPath] + Arguments
+            # Add progress reporting if callback is provided
+            if ProgressCallback:
+                # Insert -progress pipe:1 before the output file
+                Command = [self.FFmpegPath] + Arguments[:-1] + ['-progress', 'pipe:1'] + Arguments[-1:]
+            else:
+                Command = [self.FFmpegPath] + Arguments
             
-            LoggingService.LogDebug(f"Executing FFmpeg command: {' '.join(Command)}", 'ExecuteFFmpegCommand', 'FFmpegService')
+            LoggingService.LogInfo(f"Executing FFmpeg command: {' '.join(Command)}", 'ExecuteFFmpegCommand', 'FFmpegService')
             
-            Result = subprocess.run(
+            if ProgressCallback:
+                return self._ExecuteFFmpegWithProgress(Command, ProgressCallback)
+            else:
+                Result = subprocess.run(
+                    Command,
+                    capture_output=True,
+                    text=True,
+                    timeout=300,  # 5 minute timeout for FFmpeg operations
+                    encoding='utf-8',
+                    errors='replace'
+                )
+                
+                return {
+                    'Success': Result.returncode == 0,
+                    'Output': Result.stdout,
+                    'Error': Result.stderr,
+                    'ReturnCode': Result.returncode
+                }
+                
+        except subprocess.TimeoutExpired as e:
+            LoggingService.LogError(f"FFmpeg command timed out: {str(e)}", 'ExecuteFFmpegCommand', 'FFmpegService')
+            return {
+                'Success': False,
+                'ErrorMessage': f'FFmpeg command timed out: {str(e)}',
+                'Output': '',
+                'Error': str(e)
+            }
+        except Exception as e:
+            LoggingService.LogException("Exception executing FFmpeg command", e, 'ExecuteFFmpegCommand', 'FFmpegService')
+            return {
+                'Success': False,
+                'ErrorMessage': f'Exception executing FFmpeg: {str(e)}',
+                'Output': '',
+                'Error': str(e)
+            }
+
+    def _ExecuteFFmpegWithProgress(self, Command: List[str], ProgressCallback) -> Dict[str, Any]:
+        """Execute FFmpeg command with real-time progress monitoring."""
+        import threading
+        import time
+        
+        try:
+            # Start FFmpeg process with progress output to stdout
+            process = subprocess.Popen(
                 Command,
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 text=True,
-                timeout=300,  # 5 minute timeout for FFmpeg operations
                 encoding='utf-8',
                 errors='replace'
             )
             
+            # Store all FFmpeg output for debugging
+            AllOutput = []
+            
+            # Thread to read progress updates
+            ProgressData = {'frame': 0, 'fps': 0, 'bitrate': 0, 'time': 0, 'speed': 0, 'duration': 0}
+            
+            def progress_reader():
+                import time
+                
+                LoggingService.LogInfo("Progress reader thread started", '_ExecuteFFmpegWithProgress', 'FFmpegService')
+                lineCount = 0
+                
+                while True:
+                    if process.poll() is not None:
+                        LoggingService.LogInfo(f"Process finished, exiting progress reader. Total lines read: {lineCount}", '_ExecuteFFmpegWithProgress', 'FFmpegService')
+                        break
+                    
+                    line = process.stdout.readline()
+                    if not line:
+                        LoggingService.LogDebug("No more lines from stdout, breaking", '_ExecuteFFmpegWithProgress', 'FFmpegService')
+                        break
+                    
+                    line = line.strip()
+                    lineCount += 1
+                    
+                    # Store all output for debugging
+                    AllOutput.append(f"STDOUT: {line}")
+                    
+                    # Log raw FFmpeg output for debugging
+                    LoggingService.LogInfo(f"Raw FFmpeg line #{lineCount}: '{line}'", '_ExecuteFFmpegWithProgress', 'FFmpegService')
+                    
+                    if '=' in line:
+                        key, value = line.split('=', 1)
+                        key = key.strip()
+                        value = value.strip()
+                        
+                        # Log each key-value pair for debugging
+                        LoggingService.LogDebug(f"FFmpeg progress: {key} = {value}", '_ExecuteFFmpegWithProgress', 'FFmpegService')
+                        
+                        if key == 'frame':
+                            ProgressData['frame'] = int(value) if value.isdigit() else 0
+                        elif key == 'fps':
+                            ProgressData['fps'] = float(value) if value.replace('.', '').isdigit() else 0
+                        elif key == 'bitrate':
+                            ProgressData['bitrate'] = value
+                        elif key == 'time':
+                            ProgressData['time'] = value
+                        elif key == 'speed':
+                            ProgressData['speed'] = value
+                        elif key == 'duration':
+                            # Parse duration in seconds
+                            try:
+                                if ':' in value:
+                                    # Format: HH:MM:SS.mmm
+                                    parts = value.split(':')
+                                    if len(parts) == 3:
+                                        hours = int(parts[0])
+                                        minutes = int(parts[1])
+                                        seconds = float(parts[2])
+                                        ProgressData['duration'] = hours * 3600 + minutes * 60 + seconds
+                                else:
+                                    # Format: seconds
+                                    ProgressData['duration'] = float(value)
+                            except:
+                                ProgressData['duration'] = 0
+                        
+                        # Call progress callback immediately for debugging - no delays
+                        if ProgressCallback:
+                            # Include current FFmpeg output in progress data
+                            ProgressDataWithOutput = ProgressData.copy()
+                            ProgressDataWithOutput['FFmpegOutput'] = '\n'.join(AllOutput)
+                            LoggingService.LogInfo(f"CALLING PROGRESS CALLBACK with data: {ProgressDataWithOutput}", '_ExecuteFFmpegWithProgress', 'FFmpegService')
+                            ProgressCallback(ProgressDataWithOutput)
+                            LoggingService.LogInfo("PROGRESS CALLBACK COMPLETED", '_ExecuteFFmpegWithProgress', 'FFmpegService')
+            
+            # Start progress reader thread
+            ProgressThread = threading.Thread(target=progress_reader)
+            ProgressThread.daemon = True
+            ProgressThread.start()
+            
+            # Wait for process to complete
+            stdout, stderr = process.communicate()
+            
+            # Add stderr to output collection
+            if stderr:
+                AllOutput.append(f"STDERR: {stderr}")
+            
+            # Wait for progress thread to finish
+            ProgressThread.join(timeout=1)
+            
+            # Send final progress update
+            if ProgressCallback:
+                LoggingService.LogDebug(f"Sending final progress update: {ProgressData}", '_ExecuteFFmpegWithProgress', 'FFmpegService')
+                FinalProgressData = ProgressData.copy()
+                FinalProgressData['FFmpegOutput'] = '\n'.join(AllOutput)
+                ProgressCallback(FinalProgressData)
+            
+            # Combine all output for debugging
+            CombinedOutput = '\n'.join(AllOutput)
+            
             return {
-                'Success': Result.returncode == 0,
-                'ReturnCode': Result.returncode,
-                'Output': Result.stdout,
-                'Error': Result.stderr,
-                'Command': ' '.join(Command)
+                'Success': process.returncode == 0,
+                'Output': stdout,
+                'Error': stderr,
+                'ReturnCode': process.returncode,
+                'AllOutput': CombinedOutput
+            }
+            
+        except Exception as e:
+            LoggingService.LogException("Exception executing FFmpeg with progress", e, '_ExecuteFFmpegWithProgress', 'FFmpegService')
+            return {
+                'Success': False,
+                'ErrorMessage': f'Exception executing FFmpeg with progress: {str(e)}',
+                'Output': '',
+                'Error': str(e)
             }
             
         except subprocess.TimeoutExpired:

@@ -603,7 +603,8 @@ class DatabaseManager:
         query = """
             SELECT Id, SeasonId, FilePath, FileName, SizeMB, VideoBitrateKbps, AudioBitrateKbps,
                    Resolution, Codec, DurationMinutes, FrameRate, LastScannedDate,
-                   CompressionPotential, AssignedProfile, FileModificationTime
+                   CompressionPotential, AssignedProfile, IsInterlaced,
+                   ResolutionCategory, FileModificationTime
             FROM MediaFiles 
             WHERE FilePath = ?
         """
@@ -854,7 +855,7 @@ class DatabaseManager:
         query = """
             SELECT Id, FilePath, AttemptDate, Quality, OldSizeBytes, NewSizeBytes, Success,
                    SizeReductionBytes, SizeReductionPercent, ErrorMessage, TranscodeDurationSeconds,
-                   HandbrakeSettings, AudioBitrateKbps, VideoBitrateKbps, ProfileName, VMAF, VMAF
+                   FfpmpegCommand, AudioBitrateKbps, VideoBitrateKbps, ProfileName, VMAF
             FROM TranscodeAttempts 
             ORDER BY AttemptDate DESC
         """
@@ -874,7 +875,7 @@ class DatabaseManager:
                 SizeReductionPercent=row['SizeReductionPercent'],
                 ErrorMessage=row['ErrorMessage'],
                 TranscodeDurationSeconds=row['TranscodeDurationSeconds'],
-                HandbrakeSettings=row['HandbrakeSettings'],
+                FfpmpegCommand=row['FfpmpegCommand'],
                 AudioBitrateKbps=row['AudioBitrateKbps'],
                 VideoBitrateKbps=row['VideoBitrateKbps'],
                 ProfileName=row['ProfileName'],
@@ -889,7 +890,7 @@ class DatabaseManager:
         query = """
             SELECT Id, FilePath, AttemptDate, Quality, OldSizeBytes, NewSizeBytes, Success,
                    SizeReductionBytes, SizeReductionPercent, ErrorMessage, TranscodeDurationSeconds,
-                   HandbrakeSettings, AudioBitrateKbps, VideoBitrateKbps, ProfileName, VMAF
+                   FfpmpegCommand, AudioBitrateKbps, VideoBitrateKbps, ProfileName, VMAF
             FROM TranscodeAttempts 
             WHERE FilePath = ?
             ORDER BY AttemptDate DESC
@@ -910,7 +911,7 @@ class DatabaseManager:
                 SizeReductionPercent=row['SizeReductionPercent'],
                 ErrorMessage=row['ErrorMessage'],
                 TranscodeDurationSeconds=row['TranscodeDurationSeconds'],
-                HandbrakeSettings=row['HandbrakeSettings'],
+                FfpmpegCommand=row['FfpmpegCommand'],
                 AudioBitrateKbps=row['AudioBitrateKbps'],
                 VideoBitrateKbps=row['VideoBitrateKbps'],
                 ProfileName=row['ProfileName'],
@@ -936,14 +937,15 @@ class DatabaseManager:
                         INSERT INTO TranscodeAttempts 
                         (FilePath, AttemptDate, Quality, OldSizeBytes, NewSizeBytes, Success,
                          SizeReductionBytes, SizeReductionPercent, ErrorMessage, TranscodeDurationSeconds,
-                         HandbrakeSettings, AudioBitrateKbps, VideoBitrateKbps, ProfileName, VMAF)
+                         FfpmpegCommand, AudioBitrateKbps, VideoBitrateKbps, ProfileName, VMAF)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """
                     parameters = (
                         Attempt.FilePath, Attempt.AttemptDate, Attempt.Quality,
                         Attempt.OldSizeBytes, Attempt.NewSizeBytes, Attempt.Success,
                         Attempt.SizeReductionBytes, Attempt.SizeReductionPercent, Attempt.ErrorMessage,
-                        Attempt.TranscodeDurationSeconds, Attempt.HandbrakeSettings,
+                        Attempt.TranscodeDurationSeconds,
+                        Attempt.FfpmpegCommand,
                         Attempt.AudioBitrateKbps, Attempt.VideoBitrateKbps, Attempt.ProfileName, Attempt.VMAF
                     )
                     LoggingService.LogInfo(f"Insert attempt parameters: {parameters}", "DatabaseManager", "SaveTranscodeAttempt")
@@ -959,7 +961,7 @@ class DatabaseManager:
                         UPDATE TranscodeAttempts 
                         SET FilePath = ?, AttemptDate = ?, Quality = ?, OldSizeBytes = ?, NewSizeBytes = ?,
                             Success = ?, SizeReductionBytes = ?, SizeReductionPercent = ?, ErrorMessage = ?,
-                            TranscodeDurationSeconds = ?, HandbrakeSettings = ?, AudioBitrateKbps = ?,
+                            TranscodeDurationSeconds = ?, FfpmpegCommand = ?, AudioBitrateKbps = ?,
                             VideoBitrateKbps = ?, ProfileName = ?, VMAF = ?
                         WHERE Id = ?
                     """
@@ -967,7 +969,8 @@ class DatabaseManager:
                         Attempt.FilePath, Attempt.AttemptDate, Attempt.Quality,
                         Attempt.OldSizeBytes, Attempt.NewSizeBytes, Attempt.Success,
                         Attempt.SizeReductionBytes, Attempt.SizeReductionPercent, Attempt.ErrorMessage,
-                        Attempt.TranscodeDurationSeconds, Attempt.HandbrakeSettings,
+                        Attempt.TranscodeDurationSeconds,
+                        Attempt.FfpmpegCommand,
                         Attempt.AudioBitrateKbps, Attempt.VideoBitrateKbps, Attempt.ProfileName, Attempt.VMAF, Attempt.Id
                     )
                     LoggingService.LogInfo(f"Update attempt parameters: {parameters}", "DatabaseManager", "SaveTranscodeAttempt")
@@ -1286,4 +1289,286 @@ class DatabaseManager:
             
         except Exception as e:
             LoggingService.LogException("Exception updating media files profile by root folder", e, "DatabaseManager", "UpdateMediaFilesProfileByRootFolder")
+            return 0
+    
+    def GetProfileQuality(self, ProfileName: str) -> Optional[int]:
+        """Get the Quality value from ProfileThresholds for a given profile name."""
+        try:
+            LoggingService.LogFunctionEntry("GetProfileQuality", "DatabaseManager", ProfileName)
+            
+            query = """
+                SELECT pt.Quality 
+                FROM ProfileThresholds pt
+                JOIN Profiles p ON pt.ProfileId = p.Id
+                WHERE p.ProfileName = ?
+                LIMIT 1
+            """
+            rows = self.DatabaseService.ExecuteQuery(query, (ProfileName,))
+            
+            if rows:
+                quality = rows[0]['Quality']
+                LoggingService.LogInfo(f"Found Quality {quality} for Profile {ProfileName}", "DatabaseManager", "GetProfileQuality")
+                return quality
+            else:
+                LoggingService.LogWarning(f"No Quality found for Profile {ProfileName}", "DatabaseManager", "GetProfileQuality")
+                return None
+                
+        except Exception as e:
+            LoggingService.LogException("Exception getting profile quality", e, "DatabaseManager", "GetProfileQuality")
+            return None
+    
+    def GetProfileQualityForTargetResolution(self, ProfileName: str, SourceResolution: str) -> Optional[int]:
+        """Get the Quality value from ProfileThresholds for the target resolution based on TranscodeDownTo setting."""
+        try:
+            LoggingService.LogFunctionEntry("GetProfileQualityForTargetResolution", "DatabaseManager", ProfileName, SourceResolution)
+            
+            # Convert pixel dimensions to resolution category
+            resolutionCategory = self._ConvertPixelDimensionsToResolutionCategory(SourceResolution)
+            LoggingService.LogInfo(f"Converted {SourceResolution} to {resolutionCategory}", "DatabaseManager", "GetProfileQualityForTargetResolution")
+            
+            # First, get the TranscodeDownTo setting for the source resolution
+            query = """
+                SELECT pt.TranscodeDownTo 
+                FROM ProfileThresholds pt
+                JOIN Profiles p ON pt.ProfileId = p.Id
+                WHERE p.ProfileName = ? AND pt.Resolution = ?
+                LIMIT 1
+            """
+            rows = self.DatabaseService.ExecuteQuery(query, (ProfileName, resolutionCategory))
+            
+            if not rows:
+                LoggingService.LogWarning(f"No TranscodeDownTo found for Profile {ProfileName} and Resolution {SourceResolution}", "DatabaseManager", "GetProfileQualityForTargetResolution")
+                return None
+            
+            targetResolution = rows[0]['TranscodeDownTo']
+            if not targetResolution:
+                LoggingService.LogInfo(f"No TranscodeDownTo set for Profile {ProfileName} and Resolution {SourceResolution}", "DatabaseManager", "GetProfileQualityForTargetResolution")
+                return None
+            
+            # Now get the Quality for the target resolution
+            query = """
+                SELECT pt.Quality 
+                FROM ProfileThresholds pt
+                JOIN Profiles p ON pt.ProfileId = p.Id
+                WHERE p.ProfileName = ? AND pt.Resolution = ?
+                LIMIT 1
+            """
+            rows = self.DatabaseService.ExecuteQuery(query, (ProfileName, targetResolution))
+            
+            if rows:
+                quality = rows[0]['Quality']
+                LoggingService.LogInfo(f"Found Quality {quality} for Profile {ProfileName} targeting {targetResolution} (from source {SourceResolution})", "DatabaseManager", "GetProfileQualityForTargetResolution")
+                return quality
+            else:
+                LoggingService.LogWarning(f"No Quality found for Profile {ProfileName} and target Resolution {targetResolution}", "DatabaseManager", "GetProfileQualityForTargetResolution")
+                return None
+                
+        except Exception as e:
+            LoggingService.LogException("Exception getting profile quality for target resolution", e, "DatabaseManager", "GetProfileQualityForTargetResolution")
+            return None
+
+    def GetProfileSettingsForTargetResolution(self, ProfileName: str, SourceResolution: str) -> Optional[Dict[str, Any]]:
+        """Get all quality settings from ProfileThresholds for the target resolution based on TranscodeDownTo setting."""
+        try:
+            LoggingService.LogFunctionEntry("GetProfileSettingsForTargetResolution", "DatabaseManager", ProfileName, SourceResolution)
+            
+            # Convert pixel dimensions to resolution category
+            resolutionCategory = self._ConvertPixelDimensionsToResolutionCategory(SourceResolution)
+            LoggingService.LogInfo(f"Converted {SourceResolution} to {resolutionCategory}", "DatabaseManager", "GetProfileSettingsForTargetResolution")
+            
+            # First, get the TranscodeDownTo setting for the source resolution
+            query = """
+                SELECT pt.TranscodeDownTo 
+                FROM ProfileThresholds pt
+                JOIN Profiles p ON pt.ProfileId = p.Id
+                WHERE p.ProfileName = ? AND pt.Resolution = ?
+                LIMIT 1
+            """
+            rows = self.DatabaseService.ExecuteQuery(query, (ProfileName, resolutionCategory))
+            
+            if not rows:
+                LoggingService.LogWarning(f"No TranscodeDownTo found for Profile {ProfileName} and Resolution {SourceResolution}", "DatabaseManager", "GetProfileSettingsForTargetResolution")
+                return None
+            
+            targetResolution = rows[0]['TranscodeDownTo']
+            if not targetResolution:
+                LoggingService.LogInfo(f"No TranscodeDownTo set for Profile {ProfileName} and Resolution {SourceResolution}", "DatabaseManager", "GetProfileSettingsForTargetResolution")
+                return None
+            
+            # Now get all settings for the target resolution
+            query = """
+                SELECT pt.VideoBitrateKbps, pt.AudioBitrateKbps, pt.Quality, pt.Resolution, pt.Codec
+                FROM ProfileThresholds pt
+                JOIN Profiles p ON pt.ProfileId = p.Id
+                WHERE p.ProfileName = ? AND pt.Resolution = ?
+                LIMIT 1
+            """
+            rows = self.DatabaseService.ExecuteQuery(query, (ProfileName, targetResolution))
+            
+            if rows:
+                row = rows[0]
+                settings = {
+                    'VideoBitrateKbps': row['VideoBitrateKbps'],
+                    'AudioBitrateKbps': row['AudioBitrateKbps'],
+                    'Quality': row['Quality'],
+                    'TargetResolution': row['Resolution'],
+                    'Codec': row['Codec']
+                }
+                LoggingService.LogInfo(f"Found ProfileSettings for {ProfileName} targeting {targetResolution}: {settings}", "DatabaseManager", "GetProfileSettingsForTargetResolution")
+                return settings
+            else:
+                LoggingService.LogWarning(f"No ProfileSettings found for Profile {ProfileName} and target Resolution {targetResolution}", "DatabaseManager", "GetProfileSettingsForTargetResolution")
+                return None
+                
+        except Exception as e:
+            LoggingService.LogException("Exception getting profile settings for target resolution", e, "DatabaseManager", "GetProfileSettingsForTargetResolution")
+            return None
+    
+    def _ConvertPixelDimensionsToResolutionCategory(self, PixelDimensions: str) -> str:
+        """Convert pixel dimensions (e.g., '3840x2160') to resolution category (e.g., '2160p')."""
+        try:
+            if not PixelDimensions or 'x' not in PixelDimensions:
+                return PixelDimensions  # Return as-is if not in expected format
+            
+            # Extract height from pixel dimensions
+            height = int(PixelDimensions.split('x')[1])
+            
+            # Map height to resolution category
+            if height >= 2160:
+                return "2160p"
+            elif height >= 1080:
+                return "1080p"
+            elif height >= 720:
+                return "720p"
+            elif height >= 480:
+                return "480p"
+            else:
+                return "480p"  # Default fallback
+                
+        except (ValueError, IndexError):
+            # If parsing fails, return original value
+            return PixelDimensions
+    
+    def SaveTranscodeProgress(self, TranscodeAttemptId: int, CurrentPhase: str, ProgressPercent: int, 
+                             CurrentFrame: int, CurrentFPS: float, CurrentBitrate: str, 
+                             CurrentTime: str, CurrentSpeed: str, FFmpegOutput: str = "") -> int:
+        """Save transcoding progress information in the TranscodeProgress table. Creates new record for each update for debugging."""
+        try:
+            LoggingService.LogFunctionEntry("SaveTranscodeProgress", "DatabaseManager", TranscodeAttemptId, CurrentPhase, ProgressPercent)
+            
+            # Always insert new record for debugging - this will be noisy but necessary for fixing progress issues
+            query = """
+                INSERT INTO TranscodeProgress 
+                (TranscodeAttemptId, CurrentPhase, ProgressPercent, CurrentFrame, CurrentFPS, 
+                 CurrentBitrate, CurrentTime, CurrentSpeed, FFmpegOutput, LastProgressUpdate)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """
+            
+            parameters = (TranscodeAttemptId, CurrentPhase, ProgressPercent, CurrentFrame, CurrentFPS, 
+                         CurrentBitrate, CurrentTime, CurrentSpeed, FFmpegOutput, datetime.now())
+            
+            progressId = self.DatabaseService.ExecuteNonQuery(query, parameters)
+            
+            LoggingService.LogDebug(f"Inserted new progress record for attempt {TranscodeAttemptId}: {CurrentPhase} ({ProgressPercent}%) - Frame: {CurrentFrame}, FPS: {CurrentFPS}, Bitrate: {CurrentBitrate}", "DatabaseManager", "SaveTranscodeProgress")
+            return progressId
+                
+        except Exception as e:
+            LoggingService.LogException("Exception saving transcode progress", e, "DatabaseManager", "SaveTranscodeProgress")
+            return 0
+    
+    def GetLatestTranscodeProgress(self, TranscodeAttemptId: int) -> Optional[Dict[str, Any]]:
+        """Get the latest progress information for a transcoding attempt."""
+        try:
+            LoggingService.LogFunctionEntry("GetLatestTranscodeProgress", "DatabaseManager", TranscodeAttemptId)
+            
+            query = """
+                SELECT CurrentPhase, ProgressPercent, CurrentFrame, CurrentFPS, 
+                       CurrentBitrate, CurrentTime, CurrentSpeed, FFmpegOutput, LastProgressUpdate
+                FROM TranscodeProgress 
+                WHERE TranscodeAttemptId = ? 
+                ORDER BY LastProgressUpdate DESC 
+                LIMIT 1
+            """
+            
+            rows = self.DatabaseService.ExecuteQuery(query, (TranscodeAttemptId,))
+            
+            if rows:
+                row = rows[0]
+                progress = {
+                    'CurrentPhase': row['CurrentPhase'],
+                    'ProgressPercent': row['ProgressPercent'],
+                    'CurrentFrame': row['CurrentFrame'],
+                    'CurrentFPS': row['CurrentFPS'],
+                    'CurrentBitrate': row['CurrentBitrate'],
+                    'CurrentTime': row['CurrentTime'],
+                    'CurrentSpeed': row['CurrentSpeed'],
+                    'FFmpegOutput': row['FFmpegOutput'],
+                    'LastProgressUpdate': row['LastProgressUpdate']
+                }
+                LoggingService.LogDebug(f"Retrieved latest progress for attempt {TranscodeAttemptId}: {progress['CurrentPhase']} ({progress['ProgressPercent']}%)", "DatabaseManager", "GetLatestTranscodeProgress")
+                return progress
+            else:
+                LoggingService.LogDebug(f"No progress found for attempt {TranscodeAttemptId}", "DatabaseManager", "GetLatestTranscodeProgress")
+                return None
+                
+        except Exception as e:
+            LoggingService.LogException("Exception getting latest transcode progress", e, "DatabaseManager", "GetLatestTranscodeProgress")
+            return None
+    
+    def GetTranscodeProgressByPhase(self, TranscodeAttemptId: int, CurrentPhase: str) -> Optional[Dict[str, Any]]:
+        """Get progress information for a specific phase of a transcoding attempt."""
+        try:
+            LoggingService.LogFunctionEntry("GetTranscodeProgressByPhase", "DatabaseManager", TranscodeAttemptId, CurrentPhase)
+            
+            query = """
+                SELECT CurrentPhase, ProgressPercent, CurrentFrame, CurrentFPS, 
+                       CurrentBitrate, CurrentTime, CurrentSpeed, FFmpegOutput, LastProgressUpdate
+                FROM TranscodeProgress 
+                WHERE TranscodeAttemptId = ? AND CurrentPhase = ?
+                ORDER BY LastProgressUpdate DESC 
+                LIMIT 1
+            """
+            
+            rows = self.DatabaseService.ExecuteQuery(query, (TranscodeAttemptId, CurrentPhase))
+            
+            if rows:
+                row = rows[0]
+                progress = {
+                    'CurrentPhase': row['CurrentPhase'],
+                    'ProgressPercent': row['ProgressPercent'],
+                    'CurrentFrame': row['CurrentFrame'],
+                    'CurrentFPS': row['CurrentFPS'],
+                    'CurrentBitrate': row['CurrentBitrate'],
+                    'CurrentTime': row['CurrentTime'],
+                    'CurrentSpeed': row['CurrentSpeed'],
+                    'FFmpegOutput': row['FFmpegOutput'],
+                    'LastProgressUpdate': row['LastProgressUpdate']
+                }
+                LoggingService.LogDebug(f"Retrieved progress for attempt {TranscodeAttemptId} phase {CurrentPhase}: {progress['ProgressPercent']}%", "DatabaseManager", "GetTranscodeProgressByPhase")
+                return progress
+            else:
+                LoggingService.LogDebug(f"No progress found for attempt {TranscodeAttemptId} phase {CurrentPhase}", "DatabaseManager", "GetTranscodeProgressByPhase")
+                return None
+                
+        except Exception as e:
+            LoggingService.LogException("Exception getting transcode progress by phase", e, "DatabaseManager", "GetTranscodeProgressByPhase")
+            return None
+    
+    def CleanupOldProgressData(self, DaysToKeep: int = 7) -> int:
+        """Clean up old progress data to keep the table manageable."""
+        try:
+            LoggingService.LogFunctionEntry("CleanupOldProgressData", "DatabaseManager", DaysToKeep)
+            
+            query = """
+                DELETE FROM TranscodeProgress 
+                WHERE LastProgressUpdate < datetime('now', '-{} days')
+            """.format(DaysToKeep)
+            
+            rowsAffected = self.DatabaseService.ExecuteNonQuery(query)
+            
+            LoggingService.LogInfo(f"Cleaned up {rowsAffected} old progress records (older than {DaysToKeep} days)", "DatabaseManager", "CleanupOldProgressData")
+            return rowsAffected
+                
+        except Exception as e:
+            LoggingService.LogException("Exception cleaning up old progress data", e, "DatabaseManager", "CleanupOldProgressData")
             return 0

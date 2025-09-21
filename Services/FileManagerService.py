@@ -442,6 +442,89 @@ class FileManagerService:
         self.SkippedFiles = 0
         self.EncodingErrors.clear()
     
+    def EnsureDirectoryExists(self, DirectoryPath: str) -> bool:
+        """Ensure a directory exists, creating it if necessary with Unicode path support."""
+        try:
+            LoggingService.LogFunctionEntry("EnsureDirectoryExists", 'FileManagerService', DirectoryPath)
+            
+            # Validate the directory path
+            isValid, validatedPath = self.ValidateUnicodePath(DirectoryPath)
+            
+            if not isValid:
+                LoggingService.LogDebug(f"Unicode validation failed for directory: {DirectoryPath}", 'EnsureDirectoryExists', 'FileManagerService')
+                self.EncodingErrors.append(f"Unicode issue: {DirectoryPath}")
+            
+            # Check if directory already exists
+            if os.path.exists(DirectoryPath):
+                if os.path.isdir(DirectoryPath):
+                    LoggingService.LogDebug(f"Directory already exists: {DirectoryPath}", 'EnsureDirectoryExists', 'FileManagerService')
+                    return True
+                else:
+                    LoggingService.LogError(f"Path exists but is not a directory: {DirectoryPath}", 'EnsureDirectoryExists', 'FileManagerService')
+                    return False
+            
+            # Create directory and all parent directories
+            os.makedirs(DirectoryPath, exist_ok=True)
+            LoggingService.LogInfo(f"Created directory: {DirectoryPath}", 'EnsureDirectoryExists', 'FileManagerService')
+            return True
+            
+        except Exception as e:
+            LoggingService.LogException("Error ensuring directory exists", e, 'EnsureDirectoryExists', 'FileManagerService')
+            return False
+    
+    def SetupTranscodingDirectories(self) -> Dict[str, Any]:
+        """Setup the required transcoding directory structure."""
+        try:
+            LoggingService.LogFunctionEntry("SetupTranscodingDirectories", 'FileManagerService')
+            
+            # Define required directories
+            MediaVortexSourceDir = r"c:\MediaVortex\Source"
+            MediaVortexTempDir = r"c:\MediaVortex"
+            
+            Results = {
+                'Success': True,
+                'MediaVortexSourceDir': MediaVortexSourceDir,
+                'MediaVortexTempDir': MediaVortexTempDir,
+                'CreatedDirectories': [],
+                'Errors': []
+            }
+            
+            # Create MediaVortex\Source directory
+            if self.EnsureDirectoryExists(MediaVortexSourceDir):
+                Results['CreatedDirectories'].append(MediaVortexSourceDir)
+                LoggingService.LogInfo(f"MediaVortex Source directory ready: {MediaVortexSourceDir}", 'SetupTranscodingDirectories', 'FileManagerService')
+            else:
+                Results['Success'] = False
+                Results['Errors'].append(f"Failed to create MediaVortex Source directory: {MediaVortexSourceDir}")
+                LoggingService.LogError(f"Failed to create MediaVortex Source directory: {MediaVortexSourceDir}", 'SetupTranscodingDirectories', 'FileManagerService')
+            
+            # Create MediaVortex directory
+            if self.EnsureDirectoryExists(MediaVortexTempDir):
+                Results['CreatedDirectories'].append(MediaVortexTempDir)
+                LoggingService.LogInfo(f"MediaVortex Temp directory ready: {MediaVortexTempDir}", 'SetupTranscodingDirectories', 'FileManagerService')
+            else:
+                Results['Success'] = False
+                Results['Errors'].append(f"Failed to create MediaVortex Temp directory: {MediaVortexTempDir}")
+                LoggingService.LogError(f"Failed to create MediaVortex Temp directory: {MediaVortexTempDir}", 'SetupTranscodingDirectories', 'FileManagerService')
+            
+            # Log summary
+            if Results['Success']:
+                LoggingService.LogInfo(f"Transcoding directories setup completed successfully. Created: {len(Results['CreatedDirectories'])} directories", 'SetupTranscodingDirectories', 'FileManagerService')
+            else:
+                LoggingService.LogError(f"Transcoding directories setup failed. Errors: {Results['Errors']}", 'SetupTranscodingDirectories', 'FileManagerService')
+            
+            return Results
+            
+        except Exception as e:
+            LoggingService.LogException("Error setting up transcoding directories", e, 'SetupTranscodingDirectories', 'FileManagerService')
+            return {
+                'Success': False,
+                'MediaVortexSourceDir': r"c:\MediaVortex\Source",
+                'MediaVortexTempDir': r"c:\MediaVortex",
+                'CreatedDirectories': [],
+                'Errors': [f"Setup error: {str(e)}"]
+            }
+    
     def ValidateFileExists(self, FilePath: str) -> bool:
         """Validate that a file exists on disk with Unicode path support."""
         try:
@@ -503,3 +586,65 @@ class FileManagerService:
                 'FilePath': MediaFile.FilePath if hasattr(MediaFile, 'FilePath') else 'Unknown',
                 'FileName': MediaFile.FileName if hasattr(MediaFile, 'FileName') else 'Unknown'
             }
+    
+    def CopyFile(self, SourceFilePath: str, DestinationFilePath: str) -> Dict[str, Any]:
+        """Copy a file from source to destination with UTF-8 compatibility."""
+        try:
+            LoggingService.LogFunctionEntry("CopyFile", "FileManagerService", SourceFilePath, DestinationFilePath)
+            
+            # Validate source file exists
+            if not os.path.exists(SourceFilePath):
+                errorMsg = f"Source file does not exist: {SourceFilePath}"
+                LoggingService.LogError(errorMsg, "FileManagerService", "CopyFile")
+                return {'Success': False, 'ErrorMessage': errorMsg}
+            
+            # Ensure destination directory exists
+            destinationDir = os.path.dirname(DestinationFilePath)
+            if destinationDir and not os.path.exists(destinationDir):
+                os.makedirs(destinationDir, exist_ok=True)
+                LoggingService.LogInfo(f"Created destination directory: {destinationDir}", "FileManagerService", "CopyFile")
+            
+            # Copy file with UTF-8 path support
+            import shutil
+            shutil.copy2(SourceFilePath, DestinationFilePath)
+            
+            LoggingService.LogInfo(f"Successfully copied file: {SourceFilePath} -> {DestinationFilePath}", "FileManagerService", "CopyFile")
+            return {'Success': True, 'DestinationFilePath': DestinationFilePath}
+            
+        except Exception as e:
+            errorMsg = f"Error copying file: {str(e)}"
+            LoggingService.LogException(errorMsg, e, "FileManagerService", "CopyFile")
+            return {'Success': False, 'ErrorMessage': errorMsg}
+    
+    def ReplaceFile(self, OriginalFilePath: str, NewFilePath: str) -> Dict[str, Any]:
+        """Replace original file with new file, handling UTF-8 paths."""
+        try:
+            LoggingService.LogFunctionEntry("ReplaceFile", "FileManagerService", OriginalFilePath, NewFilePath)
+            
+            # Validate new file exists
+            if not os.path.exists(NewFilePath):
+                errorMsg = f"New file does not exist: {NewFilePath}"
+                LoggingService.LogError(errorMsg, "FileManagerService", "ReplaceFile")
+                return {'Success': False, 'ErrorMessage': errorMsg}
+            
+            # Create backup of original file if it exists
+            if os.path.exists(OriginalFilePath):
+                backupPath = f"{OriginalFilePath}.backup"
+                try:
+                    import shutil
+                    shutil.copy2(OriginalFilePath, backupPath)
+                    LoggingService.LogInfo(f"Created backup of original file: {backupPath}", "FileManagerService", "ReplaceFile")
+                except Exception as backupError:
+                    LoggingService.LogWarning(f"Failed to create backup: {str(backupError)}", "FileManagerService", "ReplaceFile")
+            
+            # Replace original file with new file
+            import shutil
+            shutil.move(NewFilePath, OriginalFilePath)
+            
+            LoggingService.LogInfo(f"Successfully replaced file: {OriginalFilePath}", "FileManagerService", "ReplaceFile")
+            return {'Success': True, 'OriginalFilePath': OriginalFilePath}
+            
+        except Exception as e:
+            errorMsg = f"Error replacing file: {str(e)}"
+            LoggingService.LogException(errorMsg, e, "FileManagerService", "ReplaceFile")
+            return {'Success': False, 'ErrorMessage': errorMsg}
