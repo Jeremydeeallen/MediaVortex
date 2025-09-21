@@ -586,3 +586,65 @@ class FileManagerService:
                 'FilePath': MediaFile.FilePath if hasattr(MediaFile, 'FilePath') else 'Unknown',
                 'FileName': MediaFile.FileName if hasattr(MediaFile, 'FileName') else 'Unknown'
             }
+    
+    def CopyFile(self, SourceFilePath: str, DestinationFilePath: str) -> Dict[str, Any]:
+        """Copy a file from source to destination with UTF-8 compatibility."""
+        try:
+            LoggingService.LogFunctionEntry("CopyFile", "FileManagerService", SourceFilePath, DestinationFilePath)
+            
+            # Validate source file exists
+            if not os.path.exists(SourceFilePath):
+                errorMsg = f"Source file does not exist: {SourceFilePath}"
+                LoggingService.LogError(errorMsg, "FileManagerService", "CopyFile")
+                return {'Success': False, 'ErrorMessage': errorMsg}
+            
+            # Ensure destination directory exists
+            destinationDir = os.path.dirname(DestinationFilePath)
+            if destinationDir and not os.path.exists(destinationDir):
+                os.makedirs(destinationDir, exist_ok=True)
+                LoggingService.LogInfo(f"Created destination directory: {destinationDir}", "FileManagerService", "CopyFile")
+            
+            # Copy file with UTF-8 path support
+            import shutil
+            shutil.copy2(SourceFilePath, DestinationFilePath)
+            
+            LoggingService.LogInfo(f"Successfully copied file: {SourceFilePath} -> {DestinationFilePath}", "FileManagerService", "CopyFile")
+            return {'Success': True, 'DestinationFilePath': DestinationFilePath}
+            
+        except Exception as e:
+            errorMsg = f"Error copying file: {str(e)}"
+            LoggingService.LogException(errorMsg, e, "FileManagerService", "CopyFile")
+            return {'Success': False, 'ErrorMessage': errorMsg}
+    
+    def ReplaceFile(self, OriginalFilePath: str, NewFilePath: str) -> Dict[str, Any]:
+        """Replace original file with new file, handling UTF-8 paths."""
+        try:
+            LoggingService.LogFunctionEntry("ReplaceFile", "FileManagerService", OriginalFilePath, NewFilePath)
+            
+            # Validate new file exists
+            if not os.path.exists(NewFilePath):
+                errorMsg = f"New file does not exist: {NewFilePath}"
+                LoggingService.LogError(errorMsg, "FileManagerService", "ReplaceFile")
+                return {'Success': False, 'ErrorMessage': errorMsg}
+            
+            # Create backup of original file if it exists
+            if os.path.exists(OriginalFilePath):
+                backupPath = f"{OriginalFilePath}.backup"
+                try:
+                    import shutil
+                    shutil.copy2(OriginalFilePath, backupPath)
+                    LoggingService.LogInfo(f"Created backup of original file: {backupPath}", "FileManagerService", "ReplaceFile")
+                except Exception as backupError:
+                    LoggingService.LogWarning(f"Failed to create backup: {str(backupError)}", "FileManagerService", "ReplaceFile")
+            
+            # Replace original file with new file
+            import shutil
+            shutil.move(NewFilePath, OriginalFilePath)
+            
+            LoggingService.LogInfo(f"Successfully replaced file: {OriginalFilePath}", "FileManagerService", "ReplaceFile")
+            return {'Success': True, 'OriginalFilePath': OriginalFilePath}
+            
+        except Exception as e:
+            errorMsg = f"Error replacing file: {str(e)}"
+            LoggingService.LogException(errorMsg, e, "FileManagerService", "ReplaceFile")
+            return {'Success': False, 'ErrorMessage': errorMsg}

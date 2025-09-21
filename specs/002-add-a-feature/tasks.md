@@ -75,15 +75,15 @@
 - [x] T025 Error handling and logging for transcoding operations
 
 ## Phase 3.4: Integration
-- [ ] T026 Connect TranscodingQueueProcessor to database with transaction management
-- [ ] T027 Integrate complete transcoding workflow: copy to c:\MediaVortex\Source, transcode with FFmpeg and aspect ratio preservation
-- [ ] T028 Integrate quality scoring workflow: FFmpeg VMAF analysis with >90 threshold validation
-- [ ] T029 Integrate file replacement logic: delete original and copy transcoded file only on quality pass
-- [ ] T030 Integrate filename resolution: replace 1080p/2160p with target resolution in output filename
-- [ ] T031 File system operations with UTF-8 compatibility
-- [ ] T032 Database logging for all transcoding operations in TranscodeAttempts table
-- [ ] T033 Queue retrieval with proper ordering (top item processing)
-- [ ] T034 Error handling: log failures in TranscodeAttempts, skip file cleanup on quality failure
+- [x] T026 Connect TranscodingQueueProcessor to database with transaction management
+- [x] T027 Integrate complete transcoding workflow: copy to c:\MediaVortex\Source, transcode with FFmpeg and aspect ratio preservation
+- [x] T028 Integrate quality scoring workflow: FFmpeg VMAF analysis with >90 threshold validation
+- [x] T029 Integrate file replacement logic: delete original and copy transcoded file only on quality pass
+- [x] T030 Integrate filename resolution: replace 1080p/2160p with target resolution in output filename
+- [x] T031 File system operations with UTF-8 compatibility
+- [x] T032 Database logging for all transcoding operations in TranscodeAttempts table
+- [x] T033 Queue retrieval with proper ordering (top item processing)
+- [x] T034 Error handling: log failures in TranscodeAttempts, skip file cleanup on quality failure
 
 ## Phase 3.5: Polish
 - [ ] T035 [P] Unit tests for TranscodingQueueProcessor in tests/unit/TestTranscodingQueueProcessor.py

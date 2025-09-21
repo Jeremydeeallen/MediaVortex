@@ -18,7 +18,7 @@ class TranscodeAttemptModel:
     SizeReductionPercent: float = 0.0
     ErrorMessage: Optional[str] = None
     TranscodeDurationSeconds: float = 0.0
-    FFmpegSettings: Optional[str] = None
+    FfpmpegCommand: Optional[str] = None
     AudioBitrateKbps: Optional[int] = None
     VideoBitrateKbps: Optional[int] = None
     ProfileName: Optional[str] = None
