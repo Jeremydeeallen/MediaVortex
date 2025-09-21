@@ -1,5 +1,14 @@
 # Database Schema Visual
 
+## CRITICAL DATA FLOW RULE
+
+**MediaFiles table is ONLY for display and profile assignment. NEVER use MediaFiles data for transcoding decisions.**
+
+**ALL transcoding settings come exclusively from ProfileThresholds based on the assigned profile:**
+- File → Profile Assignment → ProfileThresholds → Transcoding Settings
+- Bitrates, quality, codec, target resolution = ProfileThresholds only
+- MediaFiles resolution, codec, etc. = Display only
+
 ## Queries Used
 
 ### Table and Columns

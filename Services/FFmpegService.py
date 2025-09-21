@@ -176,7 +176,7 @@ class FFmpegService:
                 'Command': CommandString
             }
     
-    def ExecuteFFmpegCommand(self, Arguments: List[str], ProgressCallback=None) -> Dict[str, Any]:
+    def ExecuteFFmpegCommand(self, Arguments: List[str], ProgressCallback=None, WorkingDirectory: str = None) -> Dict[str, Any]:
         """Execute FFmpeg command with optional real-time progress monitoring."""
         try:
             if not self.FFmpegPath:
@@ -197,7 +197,7 @@ class FFmpegService:
             LoggingService.LogInfo(f"Executing FFmpeg command: {' '.join(Command)}", 'ExecuteFFmpegCommand', 'FFmpegService')
             
             if ProgressCallback:
-                return self._ExecuteFFmpegWithProgress(Command, ProgressCallback)
+                return self._ExecuteFFmpegWithProgress(Command, ProgressCallback, WorkingDirectory)
             else:
                 Result = subprocess.run(
                     Command,
@@ -205,7 +205,8 @@ class FFmpegService:
                     text=True,
                     timeout=300,  # 5 minute timeout for FFmpeg operations
                     encoding='utf-8',
-                    errors='replace'
+                    errors='replace',
+                    cwd=WorkingDirectory
                 )
                 
                 return {
@@ -232,127 +233,124 @@ class FFmpegService:
                 'Error': str(e)
             }
 
-    def _ExecuteFFmpegWithProgress(self, Command: List[str], ProgressCallback) -> Dict[str, Any]:
-        """Execute FFmpeg command with real-time progress monitoring."""
-        import threading
-        import time
-        
+    def _ExecuteFFmpegWithProgress(self, Command: List[str], ProgressCallback, WorkingDirectory: str = None) -> Dict[str, Any]:
+        """Execute FFmpeg command with real-time progress monitoring using simple direct stdout reading."""
         try:
-            # Start FFmpeg process with progress output to stdout
-            process = subprocess.Popen(
+            # Start FFmpeg process with progress output to stdout (redirect stderr to stdout like TestFfmpeg.py)
+            Process = subprocess.Popen(
                 Command,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                stderr=subprocess.STDOUT,  # Redirect stderr to stdout like TestFfmpeg.py
                 text=True,
                 encoding='utf-8',
-                errors='replace'
+                errors='replace',
+                cwd=WorkingDirectory
             )
             
-            # Store all FFmpeg output for debugging
+            # Store all FFmpeg output
             AllOutput = []
             
-            # Thread to read progress updates
-            ProgressData = {'frame': 0, 'fps': 0, 'bitrate': 0, 'time': 0, 'speed': 0, 'duration': 0}
+            # Progress data tracking
+            ProgressData = {'frame': 0, 'fps': 0, 'bitrate': 0, 'time': 0, 'speed': 0, 'duration': 0, 'total_frames': 0}
+            LineCount = 0
             
-            def progress_reader():
-                import time
+            LoggingService.LogInfo("Starting direct FFmpeg progress reading", '_ExecuteFFmpegWithProgress', 'FFmpegService')
+            
+            # Read FFmpeg output directly - no threading, simple approach from TestFfmpeg.py
+            while True:
+                Line = Process.stdout.readline()
+                if not Line:
+                    break
                 
-                LoggingService.LogInfo("Progress reader thread started", '_ExecuteFFmpegWithProgress', 'FFmpegService')
-                lineCount = 0
+                Line = Line.strip()
+                LineCount += 1
                 
-                while True:
-                    if process.poll() is not None:
-                        LoggingService.LogInfo(f"Process finished, exiting progress reader. Total lines read: {lineCount}", '_ExecuteFFmpegWithProgress', 'FFmpegService')
-                        break
+                # Store all output
+                AllOutput.append(f"STDOUT: {Line}")
+                
+                # Parse progress lines using simple approach from TestFfmpeg.py
+                if Line.startswith("frame=") or Line.startswith("fps=") or Line.startswith("bitrate=") or Line.startswith("time="):
+                    LoggingService.LogInfo(f"FFmpeg progress line #{LineCount}: {Line}", '_ExecuteFFmpegWithProgress', 'FFmpegService')
                     
-                    line = process.stdout.readline()
-                    if not line:
-                        LoggingService.LogDebug("No more lines from stdout, breaking", '_ExecuteFFmpegWithProgress', 'FFmpegService')
-                        break
-                    
-                    line = line.strip()
-                    lineCount += 1
-                    
-                    # Store all output for debugging
-                    AllOutput.append(f"STDOUT: {line}")
-                    
-                    # Log raw FFmpeg output for debugging
-                    LoggingService.LogInfo(f"Raw FFmpeg line #{lineCount}: '{line}'", '_ExecuteFFmpegWithProgress', 'FFmpegService')
-                    
-                    if '=' in line:
-                        key, value = line.split('=', 1)
-                        key = key.strip()
-                        value = value.strip()
+                    # Simple parsing - extract key=value pairs
+                    if '=' in Line:
+                        Key, Value = Line.split('=', 1)
+                        Key = Key.strip()
+                        Value = Value.strip()
                         
-                        # Log each key-value pair for debugging
-                        LoggingService.LogDebug(f"FFmpeg progress: {key} = {value}", '_ExecuteFFmpegWithProgress', 'FFmpegService')
-                        
-                        if key == 'frame':
-                            ProgressData['frame'] = int(value) if value.isdigit() else 0
-                        elif key == 'fps':
-                            ProgressData['fps'] = float(value) if value.replace('.', '').isdigit() else 0
-                        elif key == 'bitrate':
-                            ProgressData['bitrate'] = value
-                        elif key == 'time':
-                            ProgressData['time'] = value
-                        elif key == 'speed':
-                            ProgressData['speed'] = value
-                        elif key == 'duration':
+                        # Update progress data
+                        if Key == 'frame':
+                            ProgressData['frame'] = int(Value) if Value.isdigit() else 0
+                        elif Key == 'fps':
+                            ProgressData['fps'] = float(Value) if Value.replace('.', '').isdigit() else 0
+                        elif Key == 'bitrate':
+                            ProgressData['bitrate'] = Value
+                        elif Key == 'time':
+                            ProgressData['time'] = Value
+                        elif Key == 'speed':
+                            ProgressData['speed'] = Value
+                        elif Key == 'duration':
                             # Parse duration in seconds
                             try:
-                                if ':' in value:
+                                if ':' in Value:
                                     # Format: HH:MM:SS.mmm
-                                    parts = value.split(':')
-                                    if len(parts) == 3:
-                                        hours = int(parts[0])
-                                        minutes = int(parts[1])
-                                        seconds = float(parts[2])
-                                        ProgressData['duration'] = hours * 3600 + minutes * 60 + seconds
+                                    Parts = Value.split(':')
+                                    if len(Parts) == 3:
+                                        Hours = int(Parts[0])
+                                        Minutes = int(Parts[1])
+                                        Seconds = float(Parts[2])
+                                        ProgressData['duration'] = Hours * 3600 + Minutes * 60 + Seconds
                                 else:
                                     # Format: seconds
-                                    ProgressData['duration'] = float(value)
+                                    ProgressData['duration'] = float(Value)
                             except:
                                 ProgressData['duration'] = 0
                         
-                        # Call progress callback immediately for debugging - no delays
+                        # Call progress callback immediately for each progress line
                         if ProgressCallback:
-                            # Include current FFmpeg output in progress data
                             ProgressDataWithOutput = ProgressData.copy()
                             ProgressDataWithOutput['FFmpegOutput'] = '\n'.join(AllOutput)
-                            LoggingService.LogInfo(f"CALLING PROGRESS CALLBACK with data: {ProgressDataWithOutput}", '_ExecuteFFmpegWithProgress', 'FFmpegService')
+                            LoggingService.LogInfo(f"CALLING PROGRESS CALLBACK: {ProgressDataWithOutput}", '_ExecuteFFmpegWithProgress', 'FFmpegService')
                             ProgressCallback(ProgressDataWithOutput)
                             LoggingService.LogInfo("PROGRESS CALLBACK COMPLETED", '_ExecuteFFmpegWithProgress', 'FFmpegService')
+                
+                # Extract total frame count from FFmpeg metadata (only once)
+                elif 'NUMBER_OF_FRAMES-eng:' in Line and ProgressData['total_frames'] == 0:
+                    try:
+                        # Extract frame count from line like "NUMBER_OF_FRAMES-eng: 85481"
+                        FrameCountStr = Line.split('NUMBER_OF_FRAMES-eng:')[1].strip()
+                        ProgressData['total_frames'] = int(FrameCountStr)
+                        LoggingService.LogInfo(f"Extracted total frame count: {ProgressData['total_frames']}", '_ExecuteFFmpegWithProgress', 'FFmpegService')
+                    except:
+                        LoggingService.LogWarning(f"Failed to parse total frame count from line: {Line}", '_ExecuteFFmpegWithProgress', 'FFmpegService')
+                else:
+                    # Log non-progress lines for debugging
+                    LoggingService.LogDebug(f"FFmpeg line #{LineCount}: {Line}", '_ExecuteFFmpegWithProgress', 'FFmpegService')
             
-            # Start progress reader thread
-            ProgressThread = threading.Thread(target=progress_reader)
-            ProgressThread.daemon = True
-            ProgressThread.start()
-            
-            # Wait for process to complete
-            stdout, stderr = process.communicate()
+            # Get any remaining output
+            Stdout, Stderr = Process.communicate()
             
             # Add stderr to output collection
-            if stderr:
-                AllOutput.append(f"STDERR: {stderr}")
-            
-            # Wait for progress thread to finish
-            ProgressThread.join(timeout=1)
+            if Stderr:
+                AllOutput.append(f"STDERR: {Stderr}")
             
             # Send final progress update
             if ProgressCallback:
-                LoggingService.LogDebug(f"Sending final progress update: {ProgressData}", '_ExecuteFFmpegWithProgress', 'FFmpegService')
                 FinalProgressData = ProgressData.copy()
                 FinalProgressData['FFmpegOutput'] = '\n'.join(AllOutput)
+                LoggingService.LogInfo(f"FINAL PROGRESS UPDATE: {FinalProgressData}", '_ExecuteFFmpegWithProgress', 'FFmpegService')
                 ProgressCallback(FinalProgressData)
             
-            # Combine all output for debugging
+            # Combine all output
             CombinedOutput = '\n'.join(AllOutput)
             
+            LoggingService.LogInfo(f"FFmpeg process completed. Total lines read: {LineCount}, Return code: {Process.returncode}", '_ExecuteFFmpegWithProgress', 'FFmpegService')
+            
             return {
-                'Success': process.returncode == 0,
-                'Output': stdout,
-                'Error': stderr,
-                'ReturnCode': process.returncode,
+                'Success': Process.returncode == 0,
+                'Output': Stdout,
+                'Error': Stderr,
+                'ReturnCode': Process.returncode,
                 'AllOutput': CombinedOutput
             }
             
@@ -361,25 +359,6 @@ class FFmpegService:
             return {
                 'Success': False,
                 'ErrorMessage': f'Exception executing FFmpeg with progress: {str(e)}',
-                'Output': '',
-                'Error': str(e)
-            }
-            
-        except subprocess.TimeoutExpired:
-            ErrorMessage = f"FFmpeg timeout for command: {' '.join(Arguments)}"
-            LoggingService.LogWarning(ErrorMessage, 'ExecuteFFmpegCommand', 'FFmpegService')
-            return {
-                'Success': False,
-                'ErrorMessage': ErrorMessage,
-                'Output': '',
-                'Error': 'Timeout'
-            }
-        except Exception as e:
-            ErrorMessage = f"FFmpeg execution error: {str(e)}"
-            LoggingService.LogException(ErrorMessage, e, 'ExecuteFFmpegCommand', 'FFmpegService')
-            return {
-                'Success': False,
-                'ErrorMessage': ErrorMessage,
                 'Output': '',
                 'Error': str(e)
             }

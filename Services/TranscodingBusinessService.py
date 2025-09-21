@@ -774,47 +774,52 @@ class TranscodingBusinessService:
         """Update transcoding progress in the database."""
         try:
             # Extract progress information
-            frame = ProgressData.get('frame', 0)
-            fps = ProgressData.get('fps', 0)
-            bitrate = ProgressData.get('bitrate', '0kbits/s')
-            time = ProgressData.get('time', '00:00:00')
-            speed = ProgressData.get('speed', '0x')
+            Frame = ProgressData.get('frame', 0)
+            FPS = ProgressData.get('fps', 0)
+            Bitrate = ProgressData.get('bitrate', '0kbits/s')
+            Time = ProgressData.get('time', '00:00:00')
+            Speed = ProgressData.get('speed', '0x')
             
             # Get FFmpeg output from progress data if available
             if 'FFmpegOutput' in ProgressData:
                 FFmpegOutput = ProgressData['FFmpegOutput']
             
-            # Calculate percentage if we have duration info
-            progress_percent = 0
-            if 'duration' in ProgressData and ProgressData['duration'] > 0:
-                current_time = self._ParseTimeToSeconds(time)
-                progress_percent = min(95, int((current_time / ProgressData['duration']) * 100))
+            # Calculate percentage based on frame count (more accurate than duration)
+            ProgressPercent = 0
+            TotalFrames = ProgressData.get('total_frames', 0)
+            if TotalFrames > 0 and Frame > 0:
+                ProgressPercent = min(95, int((Frame / TotalFrames) * 100))
+            elif 'duration' in ProgressData and ProgressData['duration'] > 0:
+                # Fallback to duration-based calculation if frame count not available
+                CurrentTime = self._ParseTimeToSeconds(Time)
+                ProgressPercent = min(95, int((CurrentTime / ProgressData['duration']) * 100))
             
             # Determine current phase based on progress data
-            current_phase = "Transcoding"
+            CurrentPhase = "Transcoding"
             if 'pass' in ProgressData:
                 if ProgressData['pass'] == 1:
-                    current_phase = "Pass 1: Analysis"
+                    CurrentPhase = "Pass 1: Analysis"
                 elif ProgressData['pass'] == 2:
-                    current_phase = "Pass 2: Encoding"
+                    CurrentPhase = "Pass 2: Encoding"
             
             # Log progress information
-            LoggingService.LogInfo(f"Transcode progress (ID: {AttemptId}) - Phase: {current_phase}, Progress: {progress_percent}%, Frame: {frame}, FPS: {fps}, Bitrate: {bitrate}, Time: {time}, Speed: {speed}", "TranscodingBusinessService", "_UpdateTranscodeProgress")
+            LoggingService.LogInfo(f"Transcode progress (ID: {AttemptId}) - Phase: {CurrentPhase}, Progress: {ProgressPercent}%, Frame: {Frame}, FPS: {FPS}, Bitrate: {Bitrate}, Time: {Time}, Speed: {Speed}", "TranscodingBusinessService", "_UpdateTranscodeProgress")
             
             # Save progress to database
-            LoggingService.LogInfo(f"WRITING TO DATABASE - AttemptId: {AttemptId}, Phase: {current_phase}, Progress: {progress_percent}%", "TranscodingBusinessService", "_UpdateTranscodeProgress")
-            result = self.DatabaseManager.SaveTranscodeProgress(
+            LoggingService.LogInfo(f"WRITING TO DATABASE - AttemptId: {AttemptId}, Phase: {CurrentPhase}, Progress: {ProgressPercent}%", "TranscodingBusinessService", "_UpdateTranscodeProgress")
+            Result = self.DatabaseManager.SaveTranscodeProgress(
                 AttemptId,
-                current_phase,
-                progress_percent,
-                frame,
-                fps,
-                bitrate,
-                time,
-                speed,
+                CurrentPhase,
+                ProgressPercent,
+                Frame,
+                TotalFrames,  # TotalFrameCount
+                FPS,
+                Bitrate,
+                Time,
+                Speed,
                 FFmpegOutput
             )
-            LoggingService.LogInfo(f"DATABASE WRITE COMPLETED - Result: {result}", "TranscodingBusinessService", "_UpdateTranscodeProgress")
+            LoggingService.LogInfo(f"DATABASE WRITE COMPLETED - Result: {Result}", "TranscodingBusinessService", "_UpdateTranscodeProgress")
             
         except Exception as e:
             LoggingService.LogException("Exception updating transcode progress", e, "TranscodingBusinessService", "_UpdateTranscodeProgress")
@@ -834,6 +839,7 @@ class TranscodingBusinessService:
                     Phase,
                     CurrentProgress.get('ProgressPercent', 0),
                     CurrentProgress.get('CurrentFrame', 0),
+                    CurrentProgress.get('TotalFrameCount', 0),  # TotalFrameCount
                     CurrentProgress.get('CurrentFPS', 0.0),
                     CurrentProgress.get('CurrentBitrate', '0kbits/s'),
                     CurrentProgress.get('CurrentTime', '00:00:00'),

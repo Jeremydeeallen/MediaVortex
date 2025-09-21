@@ -12,6 +12,7 @@ class TranscodeProgressModel:
     CurrentPhase: str = "Starting"
     ProgressPercent: int = 0
     CurrentFrame: int = 0
+    TotalFrameCount: int = 0
     CurrentFPS: float = 0.0
     CurrentBitrate: str = "0kbits/s"
     CurrentTime: str = "00:00:00"

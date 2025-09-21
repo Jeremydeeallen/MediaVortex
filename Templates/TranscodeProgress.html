@@ -38,6 +38,7 @@
                                     <h6>Started: <span id="CurrentJobStartTime">-</span></h6>
                                 </div>
                                 <div class="col-md-6">
+                                    <h6>Phase: <span id="CurrentJobPhase">-</span></h6>
                                     <h6>Progress: <span id="CurrentJobProgress">0%</span></h6>
                                     <div class="progress mb-2">
                                         <div class="progress-bar progress-bar-striped progress-bar-animated" 
@@ -262,9 +263,8 @@ class TranscodeProgressManager {
             document.getElementById('CurrentJobStatus').textContent = this.currentJob.Status || 'Running';
             document.getElementById('CurrentJobStartTime').textContent = this.formatDate(this.currentJob.DateStarted);
 
-            // Update progress (this would come from FFmpeg output in a real implementation)
-            document.getElementById('CurrentJobProgress').textContent = 'Processing...';
-            document.getElementById('CurrentJobProgressBar').style.width = '50%';
+            // Update progress from real FFmpeg data
+            this.updateJobProgress(this.currentJob.Progress);
             
             // Show FFmpeg progress section
             document.getElementById('FFmpegProgressSection').style.display = 'block';
@@ -381,20 +381,20 @@ class TranscodeProgressManager {
     }
 
     startAutoRefresh() {
-        // Refresh every 10 seconds for real-time updates
+        // Refresh every 2 seconds for real-time updates during transcoding
         setInterval(() => {
             this.loadProgressData();
-        }, 10000);
+        }, 2000);
     }
 
     startFFmpegProgressMonitoring() {
         // Clear any existing monitoring
         this.stopFFmpegProgressMonitoring();
         
-        // Start monitoring FFmpeg progress every 2 seconds
+        // Start monitoring FFmpeg progress every 1 second for real-time updates
         this.ffmpegProgressInterval = setInterval(() => {
             this.updateFFmpegProgress();
-        }, 2000);
+        }, 1000);
     }
 
     stopFFmpegProgressMonitoring() {
@@ -406,25 +406,70 @@ class TranscodeProgressManager {
 
     async updateFFmpegProgress() {
         try {
-            // Get recent transcoding attempts to find current progress
-            const response = await fetch('/api/Transcode/RecentAttempts?Limit=1');
+            // Get current transcoding status to find real progress data
+            const response = await fetch('/api/Transcode/Status');
             const data = await response.json();
             
-            if (data.Success && data.RecentAttempts && data.RecentAttempts.length > 0) {
-                const latestAttempt = data.RecentAttempts[0];
+            if (data.Success && data.CurrentJob && data.CurrentJob.Progress) {
+                const progress = data.CurrentJob.Progress;
                 
-                // TODO: Update FFmpeg progress display with real data from progress callback
-                // For now, show zeros until real progress data is available
+                // Update FFmpeg progress display with real data
                 this.updateFFmpegProgressDisplay({
-                    frame: 0,
-                    fps: 0,
-                    bitrate: '0kbits/s',
-                    time: '00:00:00',
-                    speed: '0x'
+                    frame: progress.CurrentFrame || 0,
+                    fps: progress.CurrentFPS || 0,
+                    bitrate: progress.CurrentBitrate || '0kbits/s',
+                    time: progress.CurrentTime || '00:00:00',
+                    speed: progress.CurrentSpeed || '0x'
                 });
             }
         } catch (error) {
             console.error('Error updating FFmpeg progress:', error);
+        }
+    }
+
+    updateJobProgress(progressData) {
+        if (!progressData) {
+            // No progress data available
+            document.getElementById('CurrentJobPhase').textContent = 'Starting...';
+            document.getElementById('CurrentJobProgress').textContent = '0%';
+            document.getElementById('CurrentJobProgressBar').style.width = '0%';
+            return;
+        }
+
+        const currentPhase = progressData.CurrentPhase || 'Transcoding';
+        const progressPercent = progressData.ProgressPercent || 0;
+        
+        // Determine phase display text and progress calculation
+        let phaseDisplay = currentPhase;
+        let displayProgress = progressPercent;
+        
+        if (currentPhase === 'Pass 1: Analysis') {
+            phaseDisplay = 'Step 1 of 2: Analysis';
+            // For Pass 1, show progress as 0-50% of total
+            displayProgress = Math.min(50, Math.floor(progressPercent / 2));
+        } else if (currentPhase === 'Pass 2: Encoding') {
+            phaseDisplay = 'Step 2 of 2: Encoding';
+            // For Pass 2, show progress as 50-100% of total
+            displayProgress = Math.min(100, 50 + Math.floor(progressPercent / 2));
+        } else if (currentPhase === 'Transcoding') {
+            // Single-pass transcoding
+            phaseDisplay = 'Transcoding';
+            displayProgress = progressPercent;
+        }
+        
+        // Update UI elements
+        document.getElementById('CurrentJobPhase').textContent = phaseDisplay;
+        document.getElementById('CurrentJobProgress').textContent = `${displayProgress}%`;
+        document.getElementById('CurrentJobProgressBar').style.width = `${displayProgress}%`;
+        
+        // Update progress bar color based on phase
+        const progressBar = document.getElementById('CurrentJobProgressBar');
+        if (currentPhase === 'Pass 1: Analysis') {
+            progressBar.className = 'progress-bar progress-bar-striped progress-bar-animated bg-info';
+        } else if (currentPhase === 'Pass 2: Encoding') {
+            progressBar.className = 'progress-bar progress-bar-striped progress-bar-animated bg-success';
+        } else {
+            progressBar.className = 'progress-bar progress-bar-striped progress-bar-animated bg-primary';
         }
     }
 

@@ -11,20 +11,35 @@ Implement real-time FFmpeg progress monitoring and VMAF quality comparison in th
 
 ## Implementation Tasks
 
+### Phase 0: Critical Fix - Two-Pass Transcoding
+**Priority: Critical**
+
+#### 0.1 Replace Single-Pass with Two-Pass
+- [ ] **Issue**: System builds single-pass FFmpeg commands instead of two-pass
+- [ ] **Root Cause**: `FFmpegTranscodingService.BuildFFmpegCommand` method
+- [ ] **Solution**: Use exact two-pass approach from `TestFfmpeg.py`
+- [ ] **Implementation**:
+  - Replace single-pass command building with two-pass
+  - Pass 1: Analysis pass with `-preset ultrafast -x265-params "pass=1" -an -f null -`
+  - Pass 2: Encoding pass with `-preset fast -crf 22 -pass 2`
+  - Use same progress reading approach as `TestFfmpeg.py`
+- [ ] **Files**: `Services/FFmpegTranscodingService.py`
+- [ ] **Expected**: Two-pass transcoding works like `TestFfmpeg.py`
+
 ### Phase 1: FFmpeg Progress Capture
 **Priority: High**
 
 #### 1.1 Replace Progress Callback System
-- [ ] **Issue**: Complex threading/callback system not working
-- [ ] **Root Cause**: Overly complex progress reading with threads and callbacks
-- [ ] **Solution**: Replace with simple direct stdout reading from `TestFfmpeg.py`
-- [ ] **Implementation**: 
+- [x] **Issue**: Complex threading/callback system not working
+- [x] **Root Cause**: Overly complex progress reading with threads and callbacks
+- [x] **Solution**: Replace with simple direct stdout reading from `TestFfmpeg.py`
+- [x] **Implementation**: 
   - Remove threading and callback complexity
   - Use direct `Process.stdout.readline()` loop
   - Parse progress lines with simple `Line.startswith("frame=")`
   - Call progress callback immediately for each progress line
-- [ ] **Files**: `Services/FFmpegService.py` - `_ExecuteFFmpegWithProgress` method
-- [ ] **Expected**: Every FFmpeg progress update creates new `TranscodeProgress` record
+- [x] **Files**: `Services/FFmpegService.py` - `_ExecuteFFmpegWithProgress` method
+- [x] **Expected**: Every FFmpeg progress update creates new `TranscodeProgress` record
 
 #### 1.2 Enhance Progress Data Capture
 - [ ] **Add Fields**: `CurrentFrame`, `CurrentFPS`, `CurrentBitrate`, `CurrentTime`
@@ -33,12 +48,16 @@ Implement real-time FFmpeg progress monitoring and VMAF quality comparison in th
 - [ ] **Implementation**: Use the proven parsing logic from `TestFfmpeg.py`
 - [ ] **Files**: `Services/FFmpegService.py`, `Models/TranscodeProgressModel.py`
 
-#### 1.3 Two-Pass Progress Detection
-- [ ] **Pass Detection**: Identify when Pass 1 ends and Pass 2 begins
-- [ ] **Phase Updates**: Update `CurrentPhase` field appropriately
-- [ ] **Progress Reset**: Reset frame counter for Pass 2
-- [ ] **Implementation**: Use the proven two-pass approach from `TestFfmpeg.py`
-- [ ] **Files**: `Services/FFmpegTranscodingService.py`
+#### 1.3 Fix Two-Pass Transcoding
+- [ ] **Issue**: System is doing single-pass instead of two-pass transcoding
+- [ ] **Root Cause**: `FFmpegTranscodingService.BuildFFmpegCommand` builds single-pass commands
+- [ ] **Solution**: Replace with proven two-pass approach from `TestFfmpeg.py`
+- [ ] **Implementation**: 
+  - Pass 1: `-c:v libx265 -preset ultrafast -x265-params "pass=1" -an -f null -`
+  - Pass 2: `-c:v libx265 -c:a aac -b:a 70k -preset fast -crf 22 -pass 2`
+  - Use exact same command structure as `TestFfmpeg.py`
+- [ ] **Files**: `Services/FFmpegTranscodingService.py` - `BuildFFmpegCommand` method
+- [ ] **Expected**: Two-pass transcoding with proper progress capture
 
 ### Phase 2: VMAF Quality Integration
 **Priority: Medium**

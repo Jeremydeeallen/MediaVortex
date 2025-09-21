@@ -1450,7 +1450,7 @@ class DatabaseManager:
             return PixelDimensions
     
     def SaveTranscodeProgress(self, TranscodeAttemptId: int, CurrentPhase: str, ProgressPercent: int, 
-                             CurrentFrame: int, CurrentFPS: float, CurrentBitrate: str, 
+                             CurrentFrame: int, TotalFrameCount: int, CurrentFPS: float, CurrentBitrate: str, 
                              CurrentTime: str, CurrentSpeed: str, FFmpegOutput: str = "") -> int:
         """Save transcoding progress information in the TranscodeProgress table. Creates new record for each update for debugging."""
         try:
@@ -1459,12 +1459,12 @@ class DatabaseManager:
             # Always insert new record for debugging - this will be noisy but necessary for fixing progress issues
             query = """
                 INSERT INTO TranscodeProgress 
-                (TranscodeAttemptId, CurrentPhase, ProgressPercent, CurrentFrame, CurrentFPS, 
+                (TranscodeAttemptId, CurrentPhase, ProgressPercent, CurrentFrame, TotalFrameCount, CurrentFPS, 
                  CurrentBitrate, CurrentTime, CurrentSpeed, FFmpegOutput, LastProgressUpdate)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """
             
-            parameters = (TranscodeAttemptId, CurrentPhase, ProgressPercent, CurrentFrame, CurrentFPS, 
+            parameters = (TranscodeAttemptId, CurrentPhase, ProgressPercent, CurrentFrame, TotalFrameCount, CurrentFPS, 
                          CurrentBitrate, CurrentTime, CurrentSpeed, FFmpegOutput, datetime.now())
             
             progressId = self.DatabaseService.ExecuteNonQuery(query, parameters)
@@ -1482,7 +1482,7 @@ class DatabaseManager:
             LoggingService.LogFunctionEntry("GetLatestTranscodeProgress", "DatabaseManager", TranscodeAttemptId)
             
             query = """
-                SELECT CurrentPhase, ProgressPercent, CurrentFrame, CurrentFPS, 
+                SELECT CurrentPhase, ProgressPercent, CurrentFrame, TotalFrameCount, CurrentFPS, 
                        CurrentBitrate, CurrentTime, CurrentSpeed, FFmpegOutput, LastProgressUpdate
                 FROM TranscodeProgress 
                 WHERE TranscodeAttemptId = ? 

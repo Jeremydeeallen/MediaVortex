@@ -10,7 +10,17 @@ The database is located at \Data\MediaVortex.db
 The DatabaseManager handles the business logic for data access (e.g., "get all users," "save this transaction"), and the DatabaseService provides the low-level infrastructure for connecting to the database.
 
 - **DatabaseService**: Services/DatabaseService.py (The only file allowed to interact with /Data/MediaVortex.db)
-- **DatabaseManager**: Repositories/DatabaseManager.py 
+- **DatabaseManager**: Repositories/DatabaseManager.py
+
+### Critical Data Flow Principle
+
+**ABSOLUTE RULE: MediaFiles table is ONLY for display and profile assignment**
+
+- **MediaFiles table**: Contains file metadata (size, resolution, codec, etc.) for display purposes only
+- **ProfileThresholds table**: The ONLY source for ALL transcoding configuration settings
+- **Data Flow**: File → Profile Assignment → ProfileThresholds → Transcoding Settings
+
+**NEVER use MediaFiles data for transcoding decisions. ALL transcoding settings (bitrates, quality, codec, target resolution) come exclusively from ProfileThresholds based on the assigned profile.** 
 
 ## Business Logic & Data (Models & Services)
 This is where the most significant changes are needed. The Models should be simple data structures that represent your domain entities (e.g., a TranscodeProfile, a QueueItem). The Services should contain the complex operational logic.
