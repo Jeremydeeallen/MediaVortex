@@ -326,6 +326,11 @@ class FileScanningViewModel:
             # Get media files directly from business service
             MediaFiles = self.BusinessService.GetMediaFiles(RootFolderPath)
             
+            # Apply search filter if provided
+            if Search:
+                SearchLower = Search.lower()
+                MediaFiles = [file for file in MediaFiles if SearchLower in (file.FileName or '').lower()]
+            
             # Sort by size descending (simple)
             MediaFiles.sort(key=lambda x: x.SizeMB or 0, reverse=True)
             

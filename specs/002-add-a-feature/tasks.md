@@ -85,33 +85,51 @@
 - [x] T033 Queue retrieval with proper ordering (top item processing)
 - [x] T034 Error handling: log failures in TranscodeAttempts, skip file cleanup on quality failure
 
-## Phase 3.5: Polish
-- [ ] T035 [P] Unit tests for TranscodingQueueProcessor in tests/unit/TestTranscodingQueueProcessor.py
-- [ ] T036 [P] Unit tests for FFmpegTranscodingService in tests/unit/TestFFmpegTranscodingService.py
-- [ ] T037 [P] Unit tests for FileManagerService in tests/unit/TestFileManager.py
-- [ ] T038 [P] Unit tests for QualityScoringService in tests/unit/TestQualityScoringService.py
-- [ ] T039 [P] Unit tests for FilenameResolutionService in tests/unit/TestFilenameResolutionService.py
-- [ ] T040 Performance tests for large file processing
-- [ ] T041 [P] Update documentation in Docs/TranscodingFeature.md
-- [ ] T042 Remove code duplication and optimize database queries
-- [ ] T043 Run quickstart.md validation scenarios
+## Phase 3.5: FFmpeg Progress Optimization
+- [ ] T035 Optimize FFmpeg progress storage: Use single record per transcode with UPDATE instead of INSERT in Repositories/DatabaseManager.py
+- [ ] T036 Add ETA calculation logic: Calculate remaining time from current speed and progress in Services/TranscodingBusinessService.py
+- [ ] T037 Add ProgressPercent calculation: Calculate percentage from current time / total duration in Services/TranscodingBusinessService.py
+- [ ] T038 Fix FFmpeg progress parsing: Handle out_time field and get input file duration in Services/FFmpegService.py
+- [ ] T039 Update TranscodeProgress GUI: Modify Templates/TranscodeProgress.html to pull all progress data from database instead of real-time parsing
+- [ ] T040 Update TranscodeProgressViewModel: Modify ViewModels/TranscodeProgressViewModel.py to use optimized single-record database queries
+- [ ] T041 Test optimized progress display: Verify real-time updates in frontend with minimal database records and clean GUI display
+
+## Phase 3.6: Polish
+- [ ] T042 [P] Unit tests for TranscodingQueueProcessor in tests/unit/TestTranscodingQueueProcessor.py
+- [ ] T043 [P] Unit tests for FFmpegTranscodingService in tests/unit/TestFFmpegTranscodingService.py
+- [ ] T044 [P] Unit tests for FileManagerService in tests/unit/TestFileManager.py
+- [ ] T045 [P] Unit tests for QualityScoringService in tests/unit/TestQualityScoringService.py
+- [ ] T046 [P] Unit tests for FilenameResolutionService in tests/unit/TestFilenameResolutionService.py
+- [ ] T047 Performance tests for large file processing
+- [ ] T048 [P] Update documentation in Docs/TranscodingFeature.md
+- [ ] T049 Remove code duplication and optimize database queries
+- [ ] T050 Run quickstart.md validation scenarios
 
 ## Dependencies
 - Tests (T006-T011) before implementation (T012-T025)
 - T012-T015 (models) block T016-T020 (services)
 - T016-T020 (services) block T021-T023 (endpoints)
 - T026-T034 (integration) depend on T012-T025 (core implementation)
-- Implementation before polish (T035-T043)
+- T035-T041 (FFmpeg progress optimization) depend on T026-T034 (integration)
+- T039-T040 (GUI updates) depend on T035-T038 (database optimization)
+- Implementation before polish (T042-T050)
 
-## Parallel Example
+## Parallel Examples
 ```
-# Launch T006-T011 together:
+# Launch T006-T011 together (Tests):
 Task: "Contract test POST /api/transcode/start in tests/contract/TestTranscodeStart.py"
 Task: "Contract test GET /api/transcode/status/{JobId} in tests/contract/TestTranscodeStatus.py"
 Task: "Contract test GET /api/transcode/queue in tests/contract/TestQueueGet.py"
 Task: "Integration test transcoding workflow with quality scoring in tests/integration/TestTranscodingWorkflow.py"
 Task: "Integration test filename resolution logic in tests/integration/TestFilenameResolution.py"
 Task: "Integration test quality scoring and file replacement logic in tests/integration/TestQualityScoring.py"
+
+# Launch T042-T046 together (Unit Tests):
+Task: "Unit tests for TranscodingQueueProcessor in tests/unit/TestTranscodingQueueProcessor.py"
+Task: "Unit tests for FFmpegTranscodingService in tests/unit/TestFFmpegTranscodingService.py"
+Task: "Unit tests for FileManagerService in tests/unit/TestFileManager.py"
+Task: "Unit tests for QualityScoringService in tests/unit/TestQualityScoringService.py"
+Task: "Unit tests for FilenameResolutionService in tests/unit/TestFilenameResolutionService.py"
 ```
 
 ## Notes

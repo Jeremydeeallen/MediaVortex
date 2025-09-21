@@ -245,37 +245,24 @@ class FFmpegTranscodingService:
             codec = QualitySettings['Codec']
             quality = QualitySettings['Quality']
             
-            # Build FFmpeg arguments
+            # Build FFmpeg arguments in correct order
             args = [
                 '-i', InputFilePath,                    # Input file
                 '-c:v', codec,                         # Video codec
+                '-crf', str(quality),                  # CRF quality setting
+                '-maxrate', f'{videoBitrate}k',        # Maximum bitrate
+                '-bufsize', f'{videoBitrate * 2}k',    # Buffer size = 2x bitrate
                 '-c:a', 'aac',                         # Audio codec
                 '-b:a', f'{audioBitrate}k',            # Audio bitrate
                 '-preset', 'medium',                   # Encoding preset
-                '-movflags', '+faststart',             # Optimize for streaming
                 '-y',                                  # Overwrite output file
                 OutputFilePath                         # Output file
             ]
             
-            # Add video quality settings - Quality is required and validated above
-            # Use CRF mode (quality-based encoding) as primary method
-            args.insert(-2, '-crf')  # Insert before output file
-            args.insert(-2, str(quality))
-            LoggingService.LogInfo(f"Using CRF mode with quality {quality}", "FFmpegTranscodingService", "BuildFFmpegCommand")
+            LoggingService.LogInfo(f"Using CRF mode with quality {quality}, maxrate {videoBitrate}k, bufsize {videoBitrate * 2}k", "FFmpegTranscodingService", "BuildFFmpegCommand")
             
-            # Also add bitrate as a maximum constraint for better control
-            args.insert(-2, '-maxrate')  # Insert before output file
-            args.insert(-2, f'{videoBitrate}k')
-            args.insert(-2, '-bufsize')  # Insert before output file
-            args.insert(-2, f'{videoBitrate * 2}k')  # Buffer size = 2x bitrate
-            LoggingService.LogInfo(f"Using maxrate {videoBitrate}k with bufsize {videoBitrate * 2}k", "FFmpegTranscodingService", "BuildFFmpegCommand")
-            
-            # Add resolution scaling if needed
-            if targetResolution and targetResolution != 'original':
-                scaleFilter = self.GetScaleFilter(targetResolution)
-                if scaleFilter:
-                    args.insert(-2, '-vf')  # Insert before output file
-                    args.insert(-2, scaleFilter)
+            # Note: Removed scaling filter - let FFmpeg handle resolution automatically
+            # Note: Removed -movflags +faststart (not needed for MKV)
             
             LoggingService.LogInfo(f"Built FFmpeg command with {len(args)} arguments", "FFmpegTranscodingService", "BuildFFmpegCommand")
             return args
@@ -337,18 +324,15 @@ class FFmpegTranscodingService:
                     OutputFilePath                     # Output file
                 ])
                 
-                # Add video quality settings - Quality is required and validated above
-                # Use CRF mode (quality-based encoding) as primary method
-                args.insert(-2, '-crf')  # Insert before output file
-                args.insert(-2, str(quality))
-                LoggingService.LogInfo(f"Pass 2 using CRF mode with quality {quality}", "FFmpegTranscodingService", "BuildFFmpegMultiPassCommand")
-                
-                # Also add bitrate as a maximum constraint for better control
+                # Add video quality settings - Multi-pass uses bitrate-based encoding
+                # Use bitrate mode for multi-pass encoding (no CRF)
+                args.insert(-2, '-b:v')  # Insert before output file
+                args.insert(-2, f'{videoBitrate}k')
                 args.insert(-2, '-maxrate')  # Insert before output file
                 args.insert(-2, f'{videoBitrate}k')
                 args.insert(-2, '-bufsize')  # Insert before output file
                 args.insert(-2, f'{videoBitrate * 2}k')  # Buffer size = 2x bitrate
-                LoggingService.LogInfo(f"Pass 2 using maxrate {videoBitrate}k with bufsize {videoBitrate * 2}k", "FFmpegTranscodingService", "BuildFFmpegMultiPassCommand")
+                LoggingService.LogInfo(f"Pass 2 using bitrate {videoBitrate}k for multi-pass encoding", "FFmpegTranscodingService", "BuildFFmpegMultiPassCommand")
                 
                 # Add resolution scaling if needed
                 if targetResolution and targetResolution != 'original':

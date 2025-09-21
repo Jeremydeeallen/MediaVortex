@@ -251,8 +251,11 @@ class FFmpegService:
             # Store all FFmpeg output for debugging
             AllOutput = []
             
+            # Get input file duration first
+            InputDuration = self.GetInputFileDuration(Command)
+            
             # Thread to read progress updates
-            ProgressData = {'frame': 0, 'fps': 0, 'bitrate': 0, 'time': 0, 'speed': 0, 'duration': 0}
+            ProgressData = {'frame': 0, 'fps': 0, 'bitrate': 0, 'time': 0, 'speed': 0, 'duration': InputDuration}
             
             def progress_reader():
                 import time
@@ -293,7 +296,7 @@ class FFmpegService:
                             ProgressData['fps'] = float(value) if value.replace('.', '').isdigit() else 0
                         elif key == 'bitrate':
                             ProgressData['bitrate'] = value
-                        elif key == 'time':
+                        elif key == 'time' or key == 'out_time':
                             ProgressData['time'] = value
                         elif key == 'speed':
                             ProgressData['speed'] = value
@@ -364,25 +367,42 @@ class FFmpegService:
                 'Output': '',
                 'Error': str(e)
             }
+    
+    def GetInputFileDuration(self, Command: List[str]) -> float:
+        """Get the duration of the input file in seconds."""
+        try:
+            # Find the input file (usually after -i)
+            InputFile = None
+            for i, arg in enumerate(Command):
+                if arg == '-i' and i + 1 < len(Command):
+                    InputFile = Command[i + 1]
+                    break
             
-        except subprocess.TimeoutExpired:
-            ErrorMessage = f"FFmpeg timeout for command: {' '.join(Arguments)}"
-            LoggingService.LogWarning(ErrorMessage, 'ExecuteFFmpegCommand', 'FFmpegService')
-            return {
-                'Success': False,
-                'ErrorMessage': ErrorMessage,
-                'Output': '',
-                'Error': 'Timeout'
-            }
+            if not InputFile:
+                LoggingService.LogWarning("No input file found in FFmpeg command", 'GetInputFileDuration', 'FFmpegService')
+                return 0.0
+            
+            # Use ffprobe to get duration
+            ProbeCommand = [
+                self.FFprobePath,
+                '-v', 'quiet',
+                '-show_entries', 'format=duration',
+                '-of', 'csv=p=0',
+                InputFile
+            ]
+            
+            Result = subprocess.run(ProbeCommand, capture_output=True, text=True, timeout=30)
+            if Result.returncode == 0 and Result.stdout.strip():
+                Duration = float(Result.stdout.strip())
+                LoggingService.LogInfo(f"Input file duration: {Duration} seconds", 'GetInputFileDuration', 'FFmpegService')
+                return Duration
+            else:
+                LoggingService.LogWarning(f"Failed to get duration for {InputFile}: {Result.stderr}", 'GetInputFileDuration', 'FFmpegService')
+                return 0.0
+                
         except Exception as e:
-            ErrorMessage = f"FFmpeg execution error: {str(e)}"
-            LoggingService.LogException(ErrorMessage, e, 'ExecuteFFmpegCommand', 'FFmpegService')
-            return {
-                'Success': False,
-                'ErrorMessage': ErrorMessage,
-                'Output': '',
-                'Error': str(e)
-            }
+            LoggingService.LogException("Exception getting input file duration", e, 'GetInputFileDuration', 'FFmpegService')
+            return 0.0
     
     def ExecuteFFmpeg(self, Arguments: List[str], InputFile: str = None, OutputFile: str = None) -> Dict[str, Any]:
         """Execute FFmpeg command and return results."""

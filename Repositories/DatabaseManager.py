@@ -704,8 +704,8 @@ class DatabaseManager:
                 SizeMB=row['SizeMB'],
                 Priority=row['Priority'],
                 Status=row['Status'],
-                DateAdded=row['DateAdded'],
-                DateStarted=row['DateStarted']
+                DateAdded=self.ConvertStringToDateTime(row['DateAdded']) if row['DateAdded'] else None,
+                DateStarted=self.ConvertStringToDateTime(row['DateStarted']) if row['DateStarted'] else None
             )
             queueItems.append(queueItem)
         
@@ -733,8 +733,8 @@ class DatabaseManager:
             SizeMB=row['SizeMB'],
             Priority=row['Priority'],
             Status=row['Status'],
-            DateAdded=row['DateAdded'],
-            DateStarted=row['DateStarted']
+            DateAdded=self.ConvertStringToDateTime(row['DateAdded']) if row['DateAdded'] else None,
+            DateStarted=self.ConvertStringToDateTime(row['DateStarted']) if row['DateStarted'] else None
         )
     
     def SaveTranscodeQueueItem(self, QueueItem: TranscodeQueueModel) -> int:
@@ -1345,23 +1345,43 @@ class DatabaseManager:
                 LoggingService.LogInfo(f"No TranscodeDownTo set for Profile {ProfileName} and Resolution {SourceResolution}", "DatabaseManager", "GetProfileQualityForTargetResolution")
                 return None
             
-            # Now get the Quality for the target resolution
-            query = """
-                SELECT pt.Quality 
-                FROM ProfileThresholds pt
-                JOIN Profiles p ON pt.ProfileId = p.Id
-                WHERE p.ProfileName = ? AND pt.Resolution = ?
-                LIMIT 1
-            """
-            rows = self.DatabaseService.ExecuteQuery(query, (ProfileName, targetResolution))
-            
-            if rows:
-                quality = rows[0]['Quality']
-                LoggingService.LogInfo(f"Found Quality {quality} for Profile {ProfileName} targeting {targetResolution} (from source {SourceResolution})", "DatabaseManager", "GetProfileQualityForTargetResolution")
-                return quality
+            # Handle "No downscaling" case - use current resolution's settings
+            if targetResolution == 'No downscaling':
+                # Get the Quality from the current resolution entry
+                query = """
+                    SELECT pt.Quality 
+                    FROM ProfileThresholds pt
+                    JOIN Profiles p ON pt.ProfileId = p.Id
+                    WHERE p.ProfileName = ? AND pt.Resolution = ?
+                    LIMIT 1
+                """
+                rows = self.DatabaseService.ExecuteQuery(query, (ProfileName, resolutionCategory))
+                
+                if rows:
+                    quality = rows[0]['Quality']
+                    LoggingService.LogInfo(f"Found Quality {quality} for Profile {ProfileName} with no downscaling (from source {SourceResolution})", "DatabaseManager", "GetProfileQualityForTargetResolution")
+                    return quality
+                else:
+                    LoggingService.LogWarning(f"No Quality found for Profile {ProfileName} and Resolution {resolutionCategory} (no downscaling)", "DatabaseManager", "GetProfileQualityForTargetResolution")
+                    return None
             else:
-                LoggingService.LogWarning(f"No Quality found for Profile {ProfileName} and target Resolution {targetResolution}", "DatabaseManager", "GetProfileQualityForTargetResolution")
-                return None
+                # Now get the Quality for the target resolution
+                query = """
+                    SELECT pt.Quality 
+                    FROM ProfileThresholds pt
+                    JOIN Profiles p ON pt.ProfileId = p.Id
+                    WHERE p.ProfileName = ? AND pt.Resolution = ?
+                    LIMIT 1
+                """
+                rows = self.DatabaseService.ExecuteQuery(query, (ProfileName, targetResolution))
+                
+                if rows:
+                    quality = rows[0]['Quality']
+                    LoggingService.LogInfo(f"Found Quality {quality} for Profile {ProfileName} targeting {targetResolution} (from source {SourceResolution})", "DatabaseManager", "GetProfileQualityForTargetResolution")
+                    return quality
+                else:
+                    LoggingService.LogWarning(f"No Quality found for Profile {ProfileName} and target Resolution {targetResolution}", "DatabaseManager", "GetProfileQualityForTargetResolution")
+                    return None
                 
         except Exception as e:
             LoggingService.LogException("Exception getting profile quality for target resolution", e, "DatabaseManager", "GetProfileQualityForTargetResolution")
@@ -1395,15 +1415,27 @@ class DatabaseManager:
                 LoggingService.LogInfo(f"No TranscodeDownTo set for Profile {ProfileName} and Resolution {SourceResolution}", "DatabaseManager", "GetProfileSettingsForTargetResolution")
                 return None
             
-            # Now get all settings for the target resolution
-            query = """
-                SELECT pt.VideoBitrateKbps, pt.AudioBitrateKbps, pt.Quality, pt.Resolution, pt.Codec
-                FROM ProfileThresholds pt
-                JOIN Profiles p ON pt.ProfileId = p.Id
-                WHERE p.ProfileName = ? AND pt.Resolution = ?
-                LIMIT 1
-            """
-            rows = self.DatabaseService.ExecuteQuery(query, (ProfileName, targetResolution))
+            # Handle "No downscaling" case - use current resolution's settings
+            if targetResolution == 'No downscaling':
+                # Get all settings from the current resolution entry
+                query = """
+                    SELECT pt.VideoBitrateKbps, pt.AudioBitrateKbps, pt.Quality, pt.Resolution, pt.Codec
+                    FROM ProfileThresholds pt
+                    JOIN Profiles p ON pt.ProfileId = p.Id
+                    WHERE p.ProfileName = ? AND pt.Resolution = ?
+                    LIMIT 1
+                """
+                rows = self.DatabaseService.ExecuteQuery(query, (ProfileName, resolutionCategory))
+            else:
+                # Now get all settings for the target resolution
+                query = """
+                    SELECT pt.VideoBitrateKbps, pt.AudioBitrateKbps, pt.Quality, pt.Resolution, pt.Codec
+                    FROM ProfileThresholds pt
+                    JOIN Profiles p ON pt.ProfileId = p.Id
+                    WHERE p.ProfileName = ? AND pt.Resolution = ?
+                    LIMIT 1
+                """
+                rows = self.DatabaseService.ExecuteQuery(query, (ProfileName, targetResolution))
             
             if rows:
                 row = rows[0]
@@ -1414,7 +1446,8 @@ class DatabaseManager:
                     'TargetResolution': row['Resolution'],
                     'Codec': row['Codec']
                 }
-                LoggingService.LogInfo(f"Found ProfileSettings for {ProfileName} targeting {targetResolution}: {settings}", "DatabaseManager", "GetProfileSettingsForTargetResolution")
+                actualResolution = resolutionCategory if targetResolution == 'No downscaling' else targetResolution
+                LoggingService.LogInfo(f"Found ProfileSettings for {ProfileName} targeting {actualResolution}: {settings}", "DatabaseManager", "GetProfileSettingsForTargetResolution")
                 return settings
             else:
                 LoggingService.LogWarning(f"No ProfileSettings found for Profile {ProfileName} and target Resolution {targetResolution}", "DatabaseManager", "GetProfileSettingsForTargetResolution")
@@ -1451,7 +1484,7 @@ class DatabaseManager:
     
     def SaveTranscodeProgress(self, TranscodeAttemptId: int, CurrentPhase: str, ProgressPercent: int, 
                              CurrentFrame: int, CurrentFPS: float, CurrentBitrate: str, 
-                             CurrentTime: str, CurrentSpeed: str, FFmpegOutput: str = "") -> int:
+                             CurrentTime: str, CurrentSpeed: str) -> int:
         """Save transcoding progress information in the TranscodeProgress table. Creates new record for each update for debugging."""
         try:
             LoggingService.LogFunctionEntry("SaveTranscodeProgress", "DatabaseManager", TranscodeAttemptId, CurrentPhase, ProgressPercent)
@@ -1460,12 +1493,12 @@ class DatabaseManager:
             query = """
                 INSERT INTO TranscodeProgress 
                 (TranscodeAttemptId, CurrentPhase, ProgressPercent, CurrentFrame, CurrentFPS, 
-                 CurrentBitrate, CurrentTime, CurrentSpeed, FFmpegOutput, LastProgressUpdate)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 CurrentBitrate, CurrentTime, CurrentSpeed, LastProgressUpdate)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """
             
             parameters = (TranscodeAttemptId, CurrentPhase, ProgressPercent, CurrentFrame, CurrentFPS, 
-                         CurrentBitrate, CurrentTime, CurrentSpeed, FFmpegOutput, datetime.now())
+                         CurrentBitrate, CurrentTime, CurrentSpeed, datetime.now())
             
             progressId = self.DatabaseService.ExecuteNonQuery(query, parameters)
             
@@ -1483,7 +1516,7 @@ class DatabaseManager:
             
             query = """
                 SELECT CurrentPhase, ProgressPercent, CurrentFrame, CurrentFPS, 
-                       CurrentBitrate, CurrentTime, CurrentSpeed, FFmpegOutput, LastProgressUpdate
+                       CurrentBitrate, CurrentTime, CurrentSpeed, LastProgressUpdate
                 FROM TranscodeProgress 
                 WHERE TranscodeAttemptId = ? 
                 ORDER BY LastProgressUpdate DESC 
@@ -1502,7 +1535,6 @@ class DatabaseManager:
                     'CurrentBitrate': row['CurrentBitrate'],
                     'CurrentTime': row['CurrentTime'],
                     'CurrentSpeed': row['CurrentSpeed'],
-                    'FFmpegOutput': row['FFmpegOutput'],
                     'LastProgressUpdate': row['LastProgressUpdate']
                 }
                 LoggingService.LogDebug(f"Retrieved latest progress for attempt {TranscodeAttemptId}: {progress['CurrentPhase']} ({progress['ProgressPercent']}%)", "DatabaseManager", "GetLatestTranscodeProgress")
@@ -1522,7 +1554,7 @@ class DatabaseManager:
             
             query = """
                 SELECT CurrentPhase, ProgressPercent, CurrentFrame, CurrentFPS, 
-                       CurrentBitrate, CurrentTime, CurrentSpeed, FFmpegOutput, LastProgressUpdate
+                       CurrentBitrate, CurrentTime, CurrentSpeed, LastProgressUpdate
                 FROM TranscodeProgress 
                 WHERE TranscodeAttemptId = ? AND CurrentPhase = ?
                 ORDER BY LastProgressUpdate DESC 
@@ -1541,7 +1573,6 @@ class DatabaseManager:
                     'CurrentBitrate': row['CurrentBitrate'],
                     'CurrentTime': row['CurrentTime'],
                     'CurrentSpeed': row['CurrentSpeed'],
-                    'FFmpegOutput': row['FFmpegOutput'],
                     'LastProgressUpdate': row['LastProgressUpdate']
                 }
                 LoggingService.LogDebug(f"Retrieved progress for attempt {TranscodeAttemptId} phase {CurrentPhase}: {progress['ProgressPercent']}%", "DatabaseManager", "GetTranscodeProgressByPhase")
@@ -1572,3 +1603,19 @@ class DatabaseManager:
         except Exception as e:
             LoggingService.LogException("Exception cleaning up old progress data", e, "DatabaseManager", "CleanupOldProgressData")
             return 0
+    
+    def ConvertStringToDateTime(self, DateString: str) -> Optional[datetime]:
+        """Convert date string from database to datetime object."""
+        if not DateString:
+            return None
+        try:
+            if 'T' in DateString:
+                return datetime.fromisoformat(DateString.replace('Z', '+00:00'))
+            else:
+                return datetime.strptime(DateString, '%Y-%m-%d %H:%M:%S.%f')
+        except (ValueError, AttributeError):
+            try:
+                return datetime.strptime(DateString, '%Y-%m-%d %H:%M:%S')
+            except (ValueError, AttributeError):
+                LoggingService.LogWarning(f"Failed to convert date string to datetime: {DateString}", "DatabaseManager", "ConvertStringToDateTime")
+                return None
