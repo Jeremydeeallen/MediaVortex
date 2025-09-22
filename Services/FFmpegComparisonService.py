@@ -1,9 +1,8 @@
 import os
-import json
 from typing import Optional
 from pathlib import Path
 from Models.FFmpegComparisonModel import FFmpegComparisonModel
-from Models.FFmpegVMAFComparisonModel import FFmpegVMAFComparisonModel, VMAFFrameData, VMAFPooledMetrics
+from Models.FFmpegVMAFComparisonModel import FFmpegVMAFComparisonModel
 from Services.FFmpegService import FFmpegService
 from Services.LoggingService import LoggingService
 
@@ -223,51 +222,58 @@ class FFmpegComparisonService:
             VMAFModel.QualityWidth = QualityWidth
             VMAFModel.QualityHeight = QualityHeight
             
-            # Generate output path if not provided
+            # Set output path for compatibility (not used for file generation)
             if not OutputPath:
                 TranscodedDir = os.path.dirname(TranscodedFilePath)
                 TranscodedName = Path(TranscodedFilePath).stem
-                OutputPath = os.path.join(TranscodedDir, f"{TranscodedName}.json")
+                OutputPath = os.path.join(TranscodedDir, f"{TranscodedName}_vmaf_output.txt")
             
             VMAFModel.VMAFResultsPath = OutputPath
             VMAFModel.VMAFResultsFileName = os.path.basename(OutputPath)
             
-            # Set default VMAF model path if not provided
-            if not VMAFModelPath:
-                # Look for VMAF model files in parent directory
-                ParentDir = Path(__file__).parent.parent.parent
-                VMAFModelPath = str(ParentDir / "vmaf-8bit.json")
+            # VMAF model path not needed for basic VMAF comparison
             
-            # Build FFmpeg filter for VMAF comparison
-            FilterComplex = f"[0:v]scale={QualityWidth}:{QualityHeight},setsar=1[ref];[1:v]setsar=1[distorted];[distorted][ref]libvmaf=log_path=\"{OutputPath}\":log_fmt=json:model_path=\"{VMAFModelPath}\""
+            # Build FFmpeg filter for VMAF comparison (output score to stderr only)
+            FilterComplex = f"[0:v]scale={QualityWidth}x{QualityHeight}[dist];[1:v]scale={QualityWidth}x{QualityHeight}[ref];[dist][ref]libvmaf"
             
-            # Build FFmpeg arguments
+            # Build FFmpeg arguments (ExecuteFFmpegCommand will add -progress pipe:2 automatically if callback provided)
             Arguments = [
-                '-i', OriginalFilePath,      # First input (original)
-                '-i', TranscodedFilePath,    # Second input (transcoded)
-                '-filter_complex', FilterComplex,
-                '-an',                       # No audio
+                '-i', TranscodedFilePath,    # First input (transcoded file)
+                '-i', OriginalFilePath,      # Second input (original file)
+                '-lavfi', FilterComplex,     # Use lavfi instead of filter_complex
                 '-f', 'null',                # Null output format
                 '-'                          # Output to stdout
             ]
             
-            # Execute FFmpeg command directly (VMAF results are saved via log_path in filter)
-            Result = self.FFmpegService.ExecuteFFmpegCommand(Arguments)
+            # Log VMAF analysis start
+            LoggingService.LogInfo(f"Starting VMAF quality analysis: {os.path.basename(OriginalFilePath)} vs {os.path.basename(TranscodedFilePath)}", 'CreateVMAFComparison', 'FFmpegComparisonService')
+            
+            # Create progress callback to log VMAF process details
+            def vmaf_progress_callback(progress_data):
+                try:
+                    # Log VMAF progress details to database
+                    LoggingService.LogInfo(f"VMAF Analysis Progress: {progress_data}", 'CreateVMAFComparison', 'FFmpegComparisonService')
+                except Exception as e:
+                    LoggingService.LogException("Exception in VMAF progress callback", e, 'CreateVMAFComparison', 'FFmpegComparisonService')
+            
+            # Execute FFmpeg command with progress monitoring (VMAF score will be extracted from output)
+            Result = self.FFmpegService.ExecuteFFmpegCommand(Arguments, vmaf_progress_callback)
             
             if Result['Success']:
-                # Parse VMAF results from XML file
-                if os.path.exists(OutputPath):
-                    self.ParseVMAFResults(VMAFModel, OutputPath)
+                # Extract VMAF score from FFmpeg output
+                VMAFScore = self.ExtractVMAFScoreFromOutput(Result.get('AllOutput', ''))
+                if VMAFScore is not None:
+                    VMAFModel.OverallVMAFScore = VMAFScore
                     VMAFModel.Success = True
-                    LoggingService.LogInfo(f"Successfully created VMAF comparison: {OutputPath}", 'CreateVMAFComparison', 'FFmpegComparisonService')
+                    LoggingService.LogInfo(f"VMAF analysis completed successfully (extracted from output): Score: {VMAFScore:.2f}", 'CreateVMAFComparison', 'FFmpegComparisonService')
                 else:
                     VMAFModel.Success = False
-                    VMAFModel.ErrorMessage = "VMAF results file was not created"
-                    LoggingService.LogWarning("VMAF results file was not created", 'CreateVMAFComparison', 'FFmpegComparisonService')
+                    VMAFModel.ErrorMessage = "No VMAF score found in FFmpeg output"
+                    LoggingService.LogWarning("No VMAF score found in FFmpeg output", 'CreateVMAFComparison', 'FFmpegComparisonService')
             else:
                 VMAFModel.Success = False
                 VMAFModel.ErrorMessage = Result.get('ErrorMessage', 'VMAF comparison generation failed')
-                LoggingService.LogWarning(f"Failed to create VMAF comparison: {VMAFModel.ErrorMessage}", 'CreateVMAFComparison', 'FFmpegComparisonService')
+                LoggingService.LogWarning(f"VMAF analysis failed: {VMAFModel.ErrorMessage}", 'CreateVMAFComparison', 'FFmpegComparisonService')
             
             return VMAFModel
             
@@ -280,74 +286,36 @@ class FFmpegComparisonService:
             VMAFModel.ErrorMessage = f"VMAF comparison generation error: {str(e)}"
             return VMAFModel
     
-    def ParseVMAFResults(self, VMAFModel: FFmpegVMAFComparisonModel, ResultsPath: str):
-        """Parse VMAF results from JSON file."""
+    def ExtractVMAFScoreFromOutput(self, OutputText: str) -> Optional[float]:
+        """Extract VMAF score from FFmpeg output text."""
         try:
-            if not os.path.exists(ResultsPath):
-                VMAFModel.ErrorMessage = "VMAF results file not found"
-                return
+            import re
             
-            # Parse JSON file
-            with open(ResultsPath, 'r', encoding='utf-8') as File:
-                VMAFData = json.load(File)
+            # Look for VMAF score pattern in the output
+            # Pattern: [Parsed_libvmaf_2 @ 0000017fe03cc300] VMAF score: 92.342158
+            VMAFPattern = r'\[Parsed_libvmaf[^\]]*\]\s*VMAF\s+score:\s*([0-9]+\.?[0-9]*)'
             
-            # Extract VMAF version and parameters
-            VMAFModel.VMAFVersion = VMAFData.get('version', '3.0.0')
+            Match = re.search(VMAFPattern, OutputText, re.IGNORECASE)
+            if Match:
+                VMAFScore = float(Match.group(1))
+                LoggingService.LogInfo(f"Extracted VMAF score from output: {VMAFScore:.6f}", 'ExtractVMAFScoreFromOutput', 'FFmpegComparisonService')
+                return VMAFScore
             
-            # Extract quality parameters
-            Params = VMAFData.get('params', {})
-            VMAFModel.QualityWidth = Params.get('qualityWidth', VMAFModel.QualityWidth)
-            VMAFModel.QualityHeight = Params.get('qualityHeight', VMAFModel.QualityHeight)
+            # Alternative pattern: VMAF score: 92.342158 (without the parsed filter prefix)
+            AlternativePattern = r'VMAF\s+score:\s*([0-9]+\.?[0-9]*)'
+            Match = re.search(AlternativePattern, OutputText, re.IGNORECASE)
+            if Match:
+                VMAFScore = float(Match.group(1))
+                LoggingService.LogInfo(f"Extracted VMAF score from output (alternative pattern): {VMAFScore:.6f}", 'ExtractVMAFScoreFromOutput', 'FFmpegComparisonService')
+                return VMAFScore
             
-            # Extract FPS
-            FYI = VMAFData.get('fyi', {})
-            VMAFModel.FPS = FYI.get('fps', 0.0)
-            
-            # Parse frame data
-            Frames = VMAFData.get('frames', [])
-            for Frame in Frames:
-                FrameData = VMAFFrameData()
-                FrameData.FrameNumber = Frame.get('frameNum', 0)
-                FrameData.VMAFScore = Frame.get('vmaf', 0.0)
-                FrameData.IntegerADM2 = Frame.get('integer_adm2', 0.0)
-                FrameData.IntegerADMScale0 = Frame.get('integer_adm_scale0', 0.0)
-                FrameData.IntegerADMScale1 = Frame.get('integer_adm_scale1', 0.0)
-                FrameData.IntegerADMScale2 = Frame.get('integer_adm_scale2', 0.0)
-                FrameData.IntegerADMScale3 = Frame.get('integer_adm_scale3', 0.0)
-                FrameData.IntegerMotion2 = Frame.get('integer_motion2', 0.0)
-                FrameData.IntegerMotion = Frame.get('integer_motion', 0.0)
-                FrameData.IntegerVIFScale0 = Frame.get('integer_vif_scale0', 0.0)
-                FrameData.IntegerVIFScale1 = Frame.get('integer_vif_scale1', 0.0)
-                FrameData.IntegerVIFScale2 = Frame.get('integer_vif_scale2', 0.0)
-                FrameData.IntegerVIFScale3 = Frame.get('integer_vif_scale3', 0.0)
-                
-                VMAFModel.FrameData.append(FrameData)
-            
-            VMAFModel.TotalFrames = len(VMAFModel.FrameData)
-            
-            # Parse pooled metrics
-            PooledMetrics = VMAFData.get('pooled_metrics', [])
-            for Metric in PooledMetrics:
-                MetricData = VMAFPooledMetrics()
-                MetricData.MetricName = Metric.get('name', '')
-                MetricData.MinValue = Metric.get('min', 0.0)
-                MetricData.MaxValue = Metric.get('max', 0.0)
-                MetricData.MeanValue = Metric.get('mean', 0.0)
-                MetricData.HarmonicMean = Metric.get('harmonic_mean', 0.0)
-                
-                VMAFModel.PooledMetrics.append(MetricData)
-                
-                # Extract overall VMAF score from pooled metrics
-                if MetricData.MetricName == 'vmaf':
-                    VMAFModel.OverallVMAFScore = MetricData.MeanValue
-            
-            LoggingService.LogInfo(f"Successfully parsed VMAF results: {VMAFModel.TotalFrames} frames, Overall VMAF: {VMAFModel.OverallVMAFScore:.2f}", 
-                                 'FFmpegComparisonService', 'ParseVMAFResults')
+            LoggingService.LogWarning("No VMAF score found in FFmpeg output", 'ExtractVMAFScoreFromOutput', 'FFmpegComparisonService')
+            return None
             
         except Exception as e:
-            LoggingService.LogException("Error parsing VMAF results", e, 'ParseVMAFResults', 'FFmpegComparisonService')
-            VMAFModel.ErrorMessage = f"VMAF results parsing error: {str(e)}"
-    
+            LoggingService.LogException("Error extracting VMAF score from output", e, 'ExtractVMAFScoreFromOutput', 'FFmpegComparisonService')
+            return None
+
     def IsAvailable(self) -> bool:
         """Check if FFmpeg is available for comparison generation."""
         return self.FFmpegService.IsFFmpegAvailable()

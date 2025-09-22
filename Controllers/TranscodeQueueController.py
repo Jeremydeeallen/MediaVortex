@@ -39,7 +39,7 @@ def GetQueue():
         result = viewModel.LoadQueueItems(page, pageSize, sortBy, sortOrder)
         
         if result.get("Success", False):
-            LoggingService.LogInfo(f"Retrieved {result.get('Count', 0)} queue items (page {page} of {result.get('TotalPages', 1)})", "TranscodeQueueController", "GetQueue")
+            # Reduced logging verbosity for routine queue retrieval
             return jsonify(result)
         else:
             LoggingService.LogError(f"Failed to get queue: {result.get('ErrorMessage', 'Unknown error')}", "TranscodeQueueController", "GetQueue")
@@ -264,7 +264,7 @@ class TranscodeQueueController:
     def __init__(self):
         """Initialize the controller with required services."""
         self.TranscodingService = TranscodingBusinessService()
-        self.ViewModel = TranscodeQueueViewModel()
+        self.ViewModel = TranscodeQueueViewModel(TranscodingService=self.TranscodingService)
     
     def StartTranscoding(self) -> Tuple[Dict[str, Any], int]:
         """Start transcoding the next item in the queue."""
@@ -303,7 +303,7 @@ class TranscodeQueueController:
             result = self.TranscodingService.GetTranscodeStatus(JobId)
             
             if result.get("Success", False):
-                LoggingService.LogInfo(f"Retrieved status for job {JobId}: {result.get('Status', 'Unknown')}", "TranscodeQueueController", "GetTranscodeStatus")
+                # Reduced logging verbosity for routine status retrieval
                 return result, 200
             else:
                 errorCode = result.get("ErrorCode", "UNKNOWN_ERROR")
@@ -332,7 +332,7 @@ class TranscodeQueueController:
             
             if result.get("Success", False):
                 totalItems = result.get("TotalItems", 0)
-                LoggingService.LogInfo(f"Retrieved transcoding queue with {totalItems} items", "TranscodeQueueController", "GetTranscodeQueue")
+                # Reduced logging verbosity for routine queue retrieval
                 return result, 200
             else:
                 return result, 500

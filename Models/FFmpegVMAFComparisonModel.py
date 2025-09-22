@@ -91,6 +91,11 @@ class FFmpegVMAFComparisonModel:
         scores = [frame.VMAFScore for frame in self.FrameData]
         return (min(scores), max(scores))
     
+    @property
+    def VMAFScore(self) -> float:
+        """Get the VMAF score for compatibility with transcoding business service."""
+        return self.OverallVMAFScore
+    
     def ToDict(self) -> Dict[str, Any]:
         """Convert model to dictionary for JSON response."""
         return {

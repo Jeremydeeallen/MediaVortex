@@ -441,7 +441,7 @@ class HandBrakeTranscodingService:
                 Quality=int(CRF),
                 OldSizeBytes=FileSize,
                 NewSizeBytes=None,
-                Success=False,
+                Success=None,  # Will be updated after transcode and quality analysis
                 SizeReductionBytes=None,
                 SizeReductionPercent=None,
                 ErrorMessage=None,

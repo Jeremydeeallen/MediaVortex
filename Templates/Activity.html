@@ -21,13 +21,13 @@
                 </div>
             </div>
 
-            <!-- Transcode Job Status -->
+            <!-- Current Job Status -->
             <div class="row mb-4">
                 <div class="col-12">
-                    <div class="card" id="TranscodeJobCard" style="display: none;">
+                    <div class="card" id="CurrentJobCard" style="display: none;">
                         <div class="card-header">
                             <h5 class="mb-0">
-                                <i class="fas fa-cog fa-spin"></i> Transcode Job
+                                <i class="fas fa-cog fa-spin"></i> Current Job
                             </h5>
                         </div>
                         <div class="card-body">
@@ -74,58 +74,6 @@
                             <small class="text-muted">Last Update:</small><br>
                             <span id="ActivityLastUpdate" class="fw-bold">-</span>
                         </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Quality Check Status -->
-            <div class="row mb-4">
-                <div class="col-12">
-                    <div class="card" id="QualityCheckCard" style="display: none;">
-                        <div class="card-header">
-                            <h5 class="mb-0">
-                                <i class="fas fa-search fa-spin"></i> Quality Check
-                            </h5>
-                        </div>
-                        <div class="card-body">
-                            <div class="row">
-                                <div class="col-md-6">
-                                    <h6>File: <span id="QualityCheckFileName">-</span></h6>
-                                    <h6>Status: <span class="badge bg-info" id="QualityCheckStatus">Running</span></h6>
-                                    <h6>Started: <span id="QualityCheckStartTime">-</span></h6>
-                                </div>
-                                <div class="col-md-6">
-                                    <h6>VMAF Score: <span id="QualityCheckVMAFScore">-</span></h6>
-                                    <h6>Threshold: <span id="QualityCheckThreshold">90.0</span></h6>
-                                    <h6>Result: <span id="QualityCheckResult">-</span></h6>
-                                </div>
-                            </div>
-                            
-                            <!-- Quality Check Progress -->
-                            <div class="row mt-3" id="QualityCheckProgressSection" style="display: none;">
-                                <div class="col-12">
-                                    <h6><i class="fas fa-chart-line"></i> Quality Analysis Progress</h6>
-                                    <div class="row">
-                                        <div class="col-md-3">
-                                            <small class="text-muted">Phase:</small><br>
-                                            <span id="QualityCheckPhase" class="badge bg-info">Analyzing</span>
-                                        </div>
-                                        <div class="col-md-3">
-                                            <small class="text-muted">Progress:</small><br>
-                                            <span id="QualityCheckProgressPercent" class="fw-bold">0%</span>
-                                        </div>
-                                        <div class="col-md-3">
-                                            <small class="text-muted">Last Update:</small><br>
-                                            <span id="QualityCheckLastUpdate" class="fw-bold">-</span>
-                                        </div>
-                                        <div class="col-md-3">
-                                            <small class="text-muted">ETA:</small><br>
-                                            <span id="QualityCheckETA" class="fw-bold">-</span>
-                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -300,13 +248,12 @@ class ActivityManager {
 
         const startBtn = document.getElementById('StartTranscodingBtn');
         const stopBtn = document.getElementById('StopTranscodingBtn');
-        const transcodeJobCard = document.getElementById('TranscodeJobCard');
-        const qualityCheckCard = document.getElementById('QualityCheckCard');
+        const currentJobCard = document.getElementById('CurrentJobCard');
 
         if (this.isTranscoding && this.currentJob) {
             startBtn.style.display = 'none';
             stopBtn.style.display = 'inline-block';
-            transcodeJobCard.style.display = 'block';
+            currentJobCard.style.display = 'block';
 
             // Show Activity progress section
             document.getElementById('ActivityProgressSection').style.display = 'block';
@@ -317,7 +264,7 @@ class ActivityManager {
         } else {
             startBtn.style.display = 'inline-block';
             stopBtn.style.display = 'none';
-            transcodeJobCard.style.display = 'none';
+            currentJobCard.style.display = 'none';
             
             // Hide Activity progress section
             document.getElementById('ActivityProgressSection').style.display = 'none';

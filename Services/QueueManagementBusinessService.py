@@ -530,7 +530,7 @@ class QueueManagementBusinessService:
             statistics["TotalQueueSizeMB"] = totalSizeMB
             statistics["TotalQueueSizeGB"] = totalSizeMB / 1024.0
             
-            LoggingService.LogInfo(f"Queue statistics: {statistics.get('TotalJobs', 0)} total jobs, {statistics.get('QueueSize', 0)} active", "QueueManagementBusinessService", "GetQueueStatistics")
+            # Reduced logging verbosity for routine queue statistics
             return statistics
             
         except Exception as e:

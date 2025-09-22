@@ -45,10 +45,10 @@ class MediaVortexApp:
             """Transcoding queue management page."""
             return render_template('TranscodeQueue.html')
         
-        @self.App.route('/TranscodeProgress')
-        def transcode_progress():
-            """Transcoding progress monitoring page."""
-            return render_template('TranscodeProgress.html')
+        @self.App.route('/Activity')
+        def activity():
+            """Activity monitoring page for transcoding and VMAF quality analysis."""
+            return render_template('Activity.html')
         
         @self.App.route('/api/health')
         def health_check():

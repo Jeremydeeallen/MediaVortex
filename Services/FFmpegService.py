@@ -44,10 +44,6 @@ class FFmpegService:
             # Check if ffmpeg is in PATH
             FFmpegPath = shutil.which('ffmpeg')
             if FFmpegPath:
-                # Only log once per class, not per instance
-                if not hasattr(FFmpegService, '_ffmpeg_path_logged'):
-                    LoggingService.LogInfo(f"Found FFmpeg in PATH: {FFmpegPath}", 'FindFFmpegPath', 'FFmpegService')
-                    FFmpegService._ffmpeg_path_logged = True
                 return FFmpegPath
             
             # Check common installation paths
@@ -78,10 +74,6 @@ class FFmpegService:
             # Check if ffprobe is in PATH
             FFprobePath = shutil.which('ffprobe')
             if FFprobePath:
-                # Only log once per class, not per instance
-                if not hasattr(FFmpegService, '_ffprobe_path_logged'):
-                    LoggingService.LogInfo(f"Found FFprobe in PATH: {FFprobePath}", 'FindFFprobePath', 'FFmpegService')
-                    FFmpegService._ffprobe_path_logged = True
                 return FFprobePath
             
             # Check common installation paths
@@ -189,8 +181,8 @@ class FFmpegService:
             
             # Add progress reporting if callback is provided
             if ProgressCallback:
-                # Insert -progress pipe:1 before the output file
-                Command = [self.FFmpegPath] + Arguments[:-1] + ['-progress', 'pipe:1'] + Arguments[-1:]
+                # Insert -progress pipe:2 before the output file (send to stderr)
+                Command = [self.FFmpegPath] + Arguments[:-1] + ['-progress', 'pipe:2'] + Arguments[-1:]
             else:
                 Command = [self.FFmpegPath] + Arguments
             
@@ -268,78 +260,100 @@ class FFmpegService:
                         LoggingService.LogInfo(f"Process finished, exiting progress reader. Total lines read: {lineCount}", '_ExecuteFFmpegWithProgress', 'FFmpegService')
                         break
                     
-                    line = process.stdout.readline()
+                    line = process.stderr.readline()
                     if not line:
-                        LoggingService.LogDebug("No more lines from stdout, breaking", '_ExecuteFFmpegWithProgress', 'FFmpegService')
+                        LoggingService.LogDebug(f"No more lines from stderr, breaking. Total lines read: {lineCount}", '_ExecuteFFmpegWithProgress', 'FFmpegService')
                         break
                     
                     line = line.strip()
                     lineCount += 1
                     
                     # Store all output for debugging
-                    AllOutput.append(f"STDOUT: {line}")
+                    AllOutput.append(f"STDERR: {line}")
                     
-                    # Log raw FFmpeg output for debugging
-                    LoggingService.LogInfo(f"Raw FFmpeg line #{lineCount}: '{line}'", '_ExecuteFFmpegWithProgress', 'FFmpegService')
+                    # Log raw FFmpeg output for debugging (only at debug level)
+                    LoggingService.LogDebug(f"Raw FFmpeg line #{lineCount}: '{line}'", '_ExecuteFFmpegWithProgress', 'FFmpegService')
                     
-                    if '=' in line:
-                        key, value = line.split('=', 1)
-                        key = key.strip()
-                        value = value.strip()
+                    # Parse FFmpeg progress line - it contains multiple key=value pairs
+                    # Example: frame=41923 fps=173 q=32.3 Lsize=98359KiB time=00:23:17.43 bitrate=576.6kbits/s speed=5.76x
+                    if '=' in line and ('frame=' in line or 'fps=' in line or 'time=' in line):
+                        # Split by spaces and parse each key=value pair
+                        parts = line.split()
+                        for part in parts:
+                            if '=' in part:
+                                key, value = part.split('=', 1)
+                                key = key.strip()
+                                value = value.strip()
+                                
+                                # Log each key-value pair for debugging
+                                LoggingService.LogDebug(f"FFmpeg progress: {key} = {value}", '_ExecuteFFmpegWithProgress', 'FFmpegService')
+                                
+                                if key == 'frame':
+                                    ProgressData['frame'] = int(value) if value.isdigit() else 0
+                                elif key == 'fps':
+                                    ProgressData['fps'] = float(value) if value.replace('.', '').isdigit() else 0
+                                elif key == 'bitrate':
+                                    ProgressData['bitrate'] = value
+                                elif key == 'time' or key == 'out_time':
+                                    ProgressData['time'] = value
+                                elif key == 'speed':
+                                    ProgressData['speed'] = value
+                                elif key == 'total_size' or key == 'Lsize':
+                                    ProgressData['total_size'] = value
+                                elif key == 'duration':
+                                    # Parse duration in seconds
+                                    try:
+                                        if ':' in value:
+                                            # Format: HH:MM:SS.mmm
+                                            parts = value.split(':')
+                                            if len(parts) == 3:
+                                                hours = int(parts[0])
+                                                minutes = int(parts[1])
+                                                seconds = float(parts[2])
+                                                ProgressData['duration'] = hours * 3600 + minutes * 60 + seconds
+                                        else:
+                                            # Format: seconds
+                                            ProgressData['duration'] = float(value)
+                                    except:
+                                        ProgressData['duration'] = 0
                         
-                        # Log each key-value pair for debugging
-                        LoggingService.LogDebug(f"FFmpeg progress: {key} = {value}", '_ExecuteFFmpegWithProgress', 'FFmpegService')
+                        # Calculate progress percentage and ETA
+                        ProgressData['ProgressPercent'] = 0.0
+                        ProgressData['ETA'] = "Unknown"
                         
-                        if key == 'frame':
-                            ProgressData['frame'] = int(value) if value.isdigit() else 0
-                        elif key == 'fps':
-                            ProgressData['fps'] = float(value) if value.replace('.', '').isdigit() else 0
-                        elif key == 'bitrate':
-                            ProgressData['bitrate'] = value
-                        elif key == 'time' or key == 'out_time':
-                            ProgressData['time'] = value
-                        elif key == 'speed':
-                            ProgressData['speed'] = value
-                        elif key == 'duration':
-                            # Parse duration in seconds
+                        if ProgressData['time'] and ProgressData['duration'] and ProgressData['duration'] > 0:
                             try:
-                                if ':' in value:
-                                    # Format: HH:MM:SS.mmm
-                                    parts = value.split(':')
-                                    if len(parts) == 3:
-                                        hours = int(parts[0])
-                                        minutes = int(parts[1])
-                                        seconds = float(parts[2])
-                                        ProgressData['duration'] = hours * 3600 + minutes * 60 + seconds
-                                else:
-                                    # Format: seconds
-                                    ProgressData['duration'] = float(value)
+                                # Parse current time (format: HH:MM:SS.mmm)
+                                current_time_seconds = self.ParseTimeToSeconds(ProgressData['time'])
+                                if current_time_seconds > 0:
+                                    ProgressData['ProgressPercent'] = min(100.0, (current_time_seconds / ProgressData['duration']) * 100.0)
+                                    
+                                    # Calculate ETA
+                                    if ProgressData['speed'] and 'x' in ProgressData['speed']:
+                                        try:
+                                            speed_multiplier = float(ProgressData['speed'].replace('x', ''))
+                                            if speed_multiplier > 0:
+                                                remaining_seconds = (ProgressData['duration'] - current_time_seconds) / speed_multiplier
+                                                ProgressData['ETA'] = self.FormatSecondsToTime(remaining_seconds)
+                                        except:
+                                            pass
                             except:
-                                ProgressData['duration'] = 0
+                                pass
                         
-                        # Call progress callback immediately for debugging - no delays
+                        # Call progress callback with calculated data
                         if ProgressCallback:
-                            # Include current FFmpeg output in progress data
-                            ProgressDataWithOutput = ProgressData.copy()
-                            ProgressDataWithOutput['FFmpegOutput'] = '\n'.join(AllOutput)
-                            LoggingService.LogInfo(f"CALLING PROGRESS CALLBACK with data: {ProgressDataWithOutput}", '_ExecuteFFmpegWithProgress', 'FFmpegService')
-                            ProgressCallback(ProgressDataWithOutput)
-                            LoggingService.LogInfo("PROGRESS CALLBACK COMPLETED", '_ExecuteFFmpegWithProgress', 'FFmpegService')
+                            ProgressCallback(ProgressData)
             
             # Start progress reader thread
             ProgressThread = threading.Thread(target=progress_reader)
             ProgressThread.daemon = True
             ProgressThread.start()
             
-            # Wait for process to complete
-            stdout, stderr = process.communicate()
-            
-            # Add stderr to output collection
-            if stderr:
-                AllOutput.append(f"STDERR: {stderr}")
+            # Wait for process to complete without consuming stdout (let progress reader handle it)
+            process.wait()
             
             # Wait for progress thread to finish
-            ProgressThread.join(timeout=1)
+            ProgressThread.join(timeout=5)
             
             # Send final progress update
             if ProgressCallback:
@@ -353,8 +367,8 @@ class FFmpegService:
             
             return {
                 'Success': process.returncode == 0,
-                'Output': stdout,
-                'Error': stderr,
+                'Output': CombinedOutput,  # Use the collected output instead of stdout
+                'Error': '',  # stderr is captured in AllOutput
                 'ReturnCode': process.returncode,
                 'AllOutput': CombinedOutput
             }
@@ -403,6 +417,30 @@ class FFmpegService:
         except Exception as e:
             LoggingService.LogException("Exception getting input file duration", e, 'GetInputFileDuration', 'FFmpegService')
             return 0.0
+    
+    def ParseTimeToSeconds(self, TimeString: str) -> float:
+        """Parse time string (HH:MM:SS.mmm) to seconds."""
+        try:
+            if ':' in TimeString:
+                parts = TimeString.split(':')
+                if len(parts) == 3:
+                    hours = int(parts[0])
+                    minutes = int(parts[1])
+                    seconds = float(parts[2])
+                    return hours * 3600 + minutes * 60 + seconds
+            return float(TimeString)
+        except:
+            return 0.0
+    
+    def FormatSecondsToTime(self, Seconds: float) -> str:
+        """Format seconds to HH:MM:SS time string."""
+        try:
+            hours = int(Seconds // 3600)
+            minutes = int((Seconds % 3600) // 60)
+            seconds = int(Seconds % 60)
+            return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+        except:
+            return "00:00:00"
     
     def ExecuteFFmpeg(self, Arguments: List[str], InputFile: str = None, OutputFile: str = None) -> Dict[str, Any]:
         """Execute FFmpeg command and return results."""
