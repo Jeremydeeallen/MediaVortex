@@ -254,15 +254,26 @@ class FFmpegTranscodingService:
                 '-bufsize', f'{videoBitrate * 2}k',    # Buffer size = 2x bitrate
                 '-c:a', 'aac',                         # Audio codec
                 '-b:a', f'{audioBitrate}k',            # Audio bitrate
-                '-preset', 'medium',                   # Encoding preset
+                '-preset', 'faster',                   # Faster encoding preset for better CPU utilization
+                '-threads', '0',                       # Use all available CPU threads (0 = auto-detect)
+                '-movflags', '+faststart',             # Optimize for streaming and faster seeking
                 '-y',                                  # Overwrite output file
                 OutputFilePath                         # Output file
             ]
             
-            LoggingService.LogInfo(f"Using CRF mode with quality {quality}, maxrate {videoBitrate}k, bufsize {videoBitrate * 2}k", "FFmpegTranscodingService", "BuildFFmpegCommand")
+            # Add codec-specific optimizations for better CPU utilization
+            if codec == 'libx264':
+                # x264 specific optimizations
+                args.insert(-2, '-x264-params')  # Insert before output file
+                args.insert(-2, 'threads=0:lookahead-threads=0')  # Use all threads for x264
+            elif codec == 'libx265':
+                # x265 specific optimizations
+                args.insert(-2, '-x265-params')  # Insert before output file
+                args.insert(-2, 'threads=0:frame-threads=0')  # Use all threads for x265
+            
+            LoggingService.LogInfo(f"Using CRF mode with quality {quality}, maxrate {videoBitrate}k, bufsize {videoBitrate * 2}k, threads=0", "FFmpegTranscodingService", "BuildFFmpegCommand")
             
             # Note: Removed scaling filter - let FFmpeg handle resolution automatically
-            # Note: Removed -movflags +faststart (not needed for MKV)
             
             LoggingService.LogInfo(f"Built FFmpeg command with {len(args)} arguments", "FFmpegTranscodingService", "BuildFFmpegCommand")
             return args
@@ -301,28 +312,47 @@ class FFmpegTranscodingService:
                 '-i', InputFilePath,                    # Input file
                 '-c:v', codec,                         # Video codec (HEVC)
                 '-preset', 'faster',                   # Use faster preset for multi-pass
+                '-threads', '0',                       # Use all available CPU threads (0 = auto-detect)
             ]
             
             if pass_number == 1:
                 # Pass 1: Analysis pass (no audio, no output file)
-                args.extend([
-                    '-x265-params', 'pass=1',          # x265 first pass
-                    '-an',                             # No audio in pass 1
-                    '-f', 'null',                      # No output file
-                    '-'                                # Output to null
-                ])
-                LoggingService.LogInfo(f"Built Pass 1 command for analysis", "FFmpegTranscodingService", "BuildFFmpegMultiPassCommand")
+                if codec == 'libx265':
+                    args.extend([
+                        '-x265-params', 'pass=1:threads=0:frame-threads=0',  # x265 first pass with thread optimization
+                        '-an',                             # No audio in pass 1
+                        '-f', 'null',                      # No output file
+                        '-'                                # Output to null
+                    ])
+                else:
+                    args.extend([
+                        '-x264-params', 'pass=1:threads=0:lookahead-threads=0',  # x264 first pass with thread optimization
+                        '-an',                             # No audio in pass 1
+                        '-f', 'null',                      # No output file
+                        '-'                                # Output to null
+                    ])
+                LoggingService.LogInfo(f"Built Pass 1 command for analysis with thread optimization", "FFmpegTranscodingService", "BuildFFmpegMultiPassCommand")
                 
             elif pass_number == 2:
                 # Pass 2: Encoding pass (with audio and output file)
-                args.extend([
-                    '-x265-params', 'pass=2',          # x265 second pass
-                    '-c:a', 'aac',                     # Audio codec
-                    '-b:a', f'{audioBitrate}k',        # Audio bitrate
-                    '-movflags', '+faststart',         # Optimize for streaming
-                    '-y',                              # Overwrite output file
-                    OutputFilePath                     # Output file
-                ])
+                if codec == 'libx265':
+                    args.extend([
+                        '-x265-params', 'pass=2:threads=0:frame-threads=0',  # x265 second pass with thread optimization
+                        '-c:a', 'aac',                     # Audio codec
+                        '-b:a', f'{audioBitrate}k',        # Audio bitrate
+                        '-movflags', '+faststart',         # Optimize for streaming
+                        '-y',                              # Overwrite output file
+                        OutputFilePath                     # Output file
+                    ])
+                else:
+                    args.extend([
+                        '-x264-params', 'pass=2:threads=0:lookahead-threads=0',  # x264 second pass with thread optimization
+                        '-c:a', 'aac',                     # Audio codec
+                        '-b:a', f'{audioBitrate}k',        # Audio bitrate
+                        '-movflags', '+faststart',         # Optimize for streaming
+                        '-y',                              # Overwrite output file
+                        OutputFilePath                     # Output file
+                    ])
                 
                 # Add video quality settings - Multi-pass uses bitrate-based encoding
                 # Use bitrate mode for multi-pass encoding (no CRF)

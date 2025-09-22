@@ -54,7 +54,7 @@ Implement real-time FFmpeg progress monitoring and VMAF quality comparison in th
 - [ ] **Quality Display**: Show VMAF score in transcoding results
 - [ ] **Quality Assessment**: Display "Excellent", "Very Good", etc.
 - [ ] **Comparison View**: Show before/after quality metrics
-- [ ] **Files**: `Templates/TranscodeProgress.html`, `ViewModels/TranscodeProgressViewModel.py`
+- [ ] **Files**: `Templates/TranscodeProgress.html`, `ViewModels/ActivityViewModel.py`
 
 #### 2.3 VMAF Configuration
 - [ ] **Settings UI**: Add VMAF enable/disable option

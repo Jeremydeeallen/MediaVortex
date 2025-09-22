@@ -196,7 +196,7 @@ def GetProgressSummary():
 def GetCurrentProgress():
     """Get current transcoding progress from database."""
     try:
-        LoggingService.LogFunctionEntry("GetCurrentProgress", "TranscodeJobController")
+        # Function entry logging removed for frequent progress calls
         
         # Create ViewModel instance
         viewModel = ActivityViewModel(TranscodingService=SharedTranscodingService)

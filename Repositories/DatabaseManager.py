@@ -1489,7 +1489,7 @@ class DatabaseManager:
                              TotalFrames: int = 0, AverageFPS: float = 0.0) -> int:
         """Save transcoding progress information in the TranscodeProgress table. Uses single record per transcode with UPDATE."""
         try:
-            LoggingService.LogFunctionEntry("SaveTranscodeProgress", "DatabaseManager", TranscodeAttemptId, CurrentPhase, ProgressPercent)
+            # Function entry logging removed for frequent progress updates
             
             # Check if progress record already exists
             existingQuery = "SELECT Id FROM TranscodeProgress WHERE TranscodeAttemptId = ?"
@@ -1678,7 +1678,14 @@ class DatabaseManager:
                     VMAFQueueItem.MaxRetries
                 )
                 
-                VMAFQueueId = self.DatabaseService.ExecuteInsert(query, Parameters)
+                connection = self.DatabaseService.GetConnection()
+                try:
+                    cursor = connection.cursor()
+                    cursor.execute(query, Parameters)
+                    connection.commit()
+                    VMAFQueueId = cursor.lastrowid
+                finally:
+                    connection.close()
                 LoggingService.LogInfo(f"Created new VMAF queue item with ID: {VMAFQueueId}", "DatabaseManager", "SaveVMAFQueueItem")
                 return VMAFQueueId
             else:

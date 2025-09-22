@@ -87,7 +87,7 @@ These layers are organized correctly. The ViewModels prepare data for the UI, th
 - **FFmpegScreenshotViewModel**: Manages FFmpeg screenshot UI state and operations
 - **ProfileManagementViewModel**: Manages profile management UI state and operations
 - **TranscodeQueueViewModel**: Manages transcoding queue UI state and operations
-- **TranscodeProgressViewModel**: Manages real-time transcoding progress UI state
+- **ActivityViewModel**: Manages real-time transcoding progress UI state
 - **TranscodeHistoryViewModel**: Manages transcoding history and results UI state
 
 ### Controllers (API Layer)

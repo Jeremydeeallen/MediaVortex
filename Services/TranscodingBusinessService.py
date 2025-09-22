@@ -205,10 +205,12 @@ class TranscodingBusinessService:
                 # Update queue item
                 QueueItem.Status = "Completed"
                 
-                
                 # Save updated records
                 self.DatabaseManager.SaveTranscodeFile(transcodeFile)
                 self.DatabaseManager.SaveTranscodeQueueItem(QueueItem)
+                
+                # Remove completed item from queue (success or failure, we track outcome in TranscodeAttempts)
+                self.QueueManagementService.RemoveJobFromQueue(QueueItem.Id)
                 
                 result = {
                     "Success": True,
@@ -264,11 +266,11 @@ class TranscodingBusinessService:
             TranscodeFile.TotalAttempts += 1
             TranscodeFile.LastAttemptDate = datetime.now()
             
-            # Handle configuration errors differently - remove from queue permanently
+            # Handle configuration errors differently - mark as failed
             if isConfigurationError:
                 TranscodeFile.AllQualitiesFailed = True
                 QueueItem.Status = "Failed"
-                LoggingService.LogError(f"Configuration error for {QueueItem.FileName}: {ErrorMessage}. Removing from queue permanently.", "TranscodingBusinessService", "HandleJobFailure")
+                LoggingService.LogError(f"Configuration error for {QueueItem.FileName}: {ErrorMessage}. Removing from queue.", "TranscodingBusinessService", "HandleJobFailure")
             else:
                 # Check if we should mark as all qualities failed for non-configuration errors
                 if TranscodeFile.TotalAttempts >= 3:  # Configurable threshold
@@ -276,12 +278,15 @@ class TranscodingBusinessService:
                     QueueItem.Status = "Failed"
                     LoggingService.LogWarning(f"Marking {QueueItem.FileName} as all qualities failed after {TranscodeFile.TotalAttempts} attempts", "TranscodingBusinessService", "HandleJobFailure")
                 else:
-                    QueueItem.Status = "Pending"  # Retry later
-                    LoggingService.LogInfo(f"Job {QueueItem.FileName} will be retried (attempt {TranscodeFile.TotalAttempts})", "TranscodingBusinessService", "HandleJobFailure")
+                    QueueItem.Status = "Failed"  # Still remove from queue, but mark for potential retry later
+                    LoggingService.LogInfo(f"Job {QueueItem.FileName} failed (attempt {TranscodeFile.TotalAttempts}) - removing from queue", "TranscodingBusinessService", "HandleJobFailure")
             
             # Save updated records
             self.DatabaseManager.SaveTranscodeFile(TranscodeFile)
             self.DatabaseManager.SaveTranscodeQueueItem(QueueItem)
+            
+            # Remove from queue regardless of success or failure - outcome is tracked in TranscodeAttempts
+            self.QueueManagementService.RemoveJobFromQueue(QueueItem.Id)
             
             result = {
                 "Success": False,

@@ -91,7 +91,7 @@
 - [ ] T037 Add ProgressPercent calculation: Calculate percentage from current time / total duration in Services/TranscodingBusinessService.py
 - [ ] T038 Fix FFmpeg progress parsing: Handle out_time field and get input file duration in Services/FFmpegService.py
 - [ ] T039 Update TranscodeProgress GUI: Modify Templates/TranscodeProgress.html to pull all progress data from database instead of real-time parsing
-- [ ] T040 Update TranscodeProgressViewModel: Modify ViewModels/TranscodeProgressViewModel.py to use optimized single-record database queries
+- [ ] T040 Update ActivityViewModel: Modify ViewModels/ActivityViewModel.py to use optimized single-record database queries
 - [ ] T041 Test optimized progress display: Verify real-time updates in frontend with minimal database records and clean GUI display
 
 ## Phase 3.6: Polish

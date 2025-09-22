@@ -57,7 +57,7 @@ Implement transcoding functionality to process media files from the queue, apply
 ### ViewModels (Presentation Logic)
 - **TranscodeJobViewModel**: Manages transcoding job UI state and operations
 - **TranscodeQueueViewModel**: Manages queue management UI state and operations
-- **TranscodeProgressViewModel**: Manages real-time progress display UI state
+- **ActivityViewModel**: Manages real-time progress display UI state
 - **TranscodeHistoryViewModel**: Manages transcoding history and results UI state
 
 ### Controllers (API Layer)
@@ -125,7 +125,7 @@ Start with a minimal working slice to prove core transcoding functionality, then
 - [ ] Implement queue display and management with job status and progress MVVM pattern using MVVM architecture
 - [ ] Implement queue population controls and manual job addition MVVM pattern using MVVM architecture
 - [ ] Add queue statistics display and job filtering MVVM pattern using MVVM architecture
-- [ ] Create `ViewModels/TranscodeProgressViewModel.py` - Manage real-time transcoding progress UI state MVVM pattern using MVVM architecture
+- [ ] Create `ViewModels/ActivityViewModel.py` - Manage real-time transcoding progress UI state MVVM pattern using MVVM architecture
 - [ ] Implement progress tracking and status display for active transcoding jobs MVVM pattern using MVVM architecture
 - [ ] Add error reporting and job failure handling MVVM pattern using MVVM architecture
 - [ ] Ensure only PascalCase was used
@@ -194,7 +194,7 @@ Start with a minimal working slice to prove core transcoding functionality, then
 
 ### Phase 14: Complete Feature - Enhanced ViewModels
 - [ ] Create `ViewModels/TranscodeQueueViewModel.py` - Advanced queue management UI state MVVM pattern using MVVM architecture
-- [ ] Create `ViewModels/TranscodeProgressViewModel.py` - Real-time progress display UI state MVVM pattern using MVVM architecture
+- [ ] Create `ViewModels/ActivityViewModel.py` - Real-time progress display UI state MVVM pattern using MVVM architecture
 - [ ] Create `ViewModels/TranscodeHistoryViewModel.py` - Historical data and analytics UI state MVVM pattern using MVVM architecture
 - [ ] Add advanced filtering and sorting capabilities MVVM pattern using MVVM architecture
 - [ ] Add batch operations and bulk management MVVM pattern using MVVM architecture
@@ -249,7 +249,7 @@ MediaVortex/
 ├── ViewModels/
 │   ├── TranscodeJobViewModel.py
 │   ├── TranscodeQueueViewModel.py
-│   ├── TranscodeProgressViewModel.py
+│   ├── ActivityViewModel.py
 │   └── TranscodeHistoryViewModel.py
 ├── Controllers/
 │   ├── TranscodeJobController.py

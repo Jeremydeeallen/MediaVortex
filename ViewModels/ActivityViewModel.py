@@ -25,7 +25,7 @@ class ActivityViewModel:
     def GetTranscodingStatus(self) -> Dict[str, Any]:
         """Get current transcoding status and progress."""
         try:
-            LoggingService.LogFunctionEntry("GetTranscodingStatus", "TranscodeProgressViewModel")
+            LoggingService.LogFunctionEntry("GetTranscodingStatus", "ActivityViewModel")
             
             self.ErrorMessage = ""
             
@@ -60,13 +60,13 @@ class ActivityViewModel:
             
         except Exception as e:
             self.ErrorMessage = f"Error getting transcoding status: {str(e)}"
-            LoggingService.LogException("Exception getting transcoding status", e, "TranscodeProgressViewModel", "GetTranscodingStatus")
+            LoggingService.LogException("Exception getting transcoding status", e, "ActivityViewModel", "GetTranscodingStatus")
             return {"Success": False, "ErrorMessage": self.ErrorMessage}
     
     def StartTranscoding(self, MaxConcurrentJobs: int = 1) -> Dict[str, Any]:
         """Start the transcoding process."""
         try:
-            LoggingService.LogFunctionEntry("StartTranscoding", "TranscodeProgressViewModel", MaxConcurrentJobs)
+            LoggingService.LogFunctionEntry("StartTranscoding", "ActivityViewModel", MaxConcurrentJobs)
             
             self.ErrorMessage = ""
             self.SuccessMessage = ""
@@ -77,22 +77,22 @@ class ActivityViewModel:
             if result.get("Success", False):
                 self.SuccessMessage = "Transcoding process started successfully"
                 self.IsTranscoding = True
-                LoggingService.LogInfo("Transcoding started", "TranscodeProgressViewModel", "StartTranscoding")
+                LoggingService.LogInfo("Transcoding started", "ActivityViewModel", "StartTranscoding")
             else:
                 self.ErrorMessage = result.get("ErrorMessage", "Failed to start transcoding")
-                LoggingService.LogError(self.ErrorMessage, "TranscodeProgressViewModel", "StartTranscoding")
+                LoggingService.LogError(self.ErrorMessage, "ActivityViewModel", "StartTranscoding")
             
             return result
             
         except Exception as e:
             self.ErrorMessage = f"Error starting transcoding: {str(e)}"
-            LoggingService.LogException("Exception starting transcoding", e, "TranscodeProgressViewModel", "StartTranscoding")
+            LoggingService.LogException("Exception starting transcoding", e, "ActivityViewModel", "StartTranscoding")
             return {"Success": False, "ErrorMessage": self.ErrorMessage}
     
     def StopTranscoding(self) -> Dict[str, Any]:
         """Stop the transcoding process."""
         try:
-            LoggingService.LogFunctionEntry("StopTranscoding", "TranscodeProgressViewModel")
+            LoggingService.LogFunctionEntry("StopTranscoding", "ActivityViewModel")
             
             self.ErrorMessage = ""
             self.SuccessMessage = ""
@@ -105,22 +105,22 @@ class ActivityViewModel:
                 self.IsTranscoding = False
                 self.CurrentJob = None
                 self.Progress = {}
-                LoggingService.LogInfo("Transcoding stopped", "TranscodeProgressViewModel", "StopTranscoding")
+                LoggingService.LogInfo("Transcoding stopped", "ActivityViewModel", "StopTranscoding")
             else:
                 self.ErrorMessage = result.get("ErrorMessage", "Failed to stop transcoding")
-                LoggingService.LogError(self.ErrorMessage, "TranscodeProgressViewModel", "StopTranscoding")
+                LoggingService.LogError(self.ErrorMessage, "ActivityViewModel", "StopTranscoding")
             
             return result
             
         except Exception as e:
             self.ErrorMessage = f"Error stopping transcoding: {str(e)}"
-            LoggingService.LogException("Exception stopping transcoding", e, "TranscodeProgressViewModel", "StopTranscoding")
+            LoggingService.LogException("Exception stopping transcoding", e, "ActivityViewModel", "StopTranscoding")
             return {"Success": False, "ErrorMessage": self.ErrorMessage}
     
     def GetTranscodingHistory(self, Limit: int = 50) -> Dict[str, Any]:
         """Get recent transcoding history."""
         try:
-            LoggingService.LogFunctionEntry("GetTranscodingHistory", "TranscodeProgressViewModel", Limit)
+            LoggingService.LogFunctionEntry("GetTranscodingHistory", "ActivityViewModel", Limit)
             
             self.ErrorMessage = ""
             
@@ -135,18 +135,18 @@ class ActivityViewModel:
                 "Count": len(history)
             }
             
-            LoggingService.LogInfo(f"Retrieved {len(history)} history items", "TranscodeProgressViewModel", "GetTranscodingHistory")
+            LoggingService.LogInfo(f"Retrieved {len(history)} history items", "ActivityViewModel", "GetTranscodingHistory")
             return result
             
         except Exception as e:
             self.ErrorMessage = f"Error getting transcoding history: {str(e)}"
-            LoggingService.LogException("Exception getting transcoding history", e, "TranscodeProgressViewModel", "GetTranscodingHistory")
+            LoggingService.LogException("Exception getting transcoding history", e, "ActivityViewModel", "GetTranscodingHistory")
             return {"Success": False, "ErrorMessage": self.ErrorMessage}
     
     def GetRecentAttempts(self, Limit: int = 20) -> List[Dict[str, Any]]:
         """Get recent transcoding attempts for display."""
         try:
-            LoggingService.LogFunctionEntry("GetRecentAttempts", "TranscodeProgressViewModel", Limit)
+            LoggingService.LogFunctionEntry("GetRecentAttempts", "ActivityViewModel", Limit)
             
             # Get recent attempts from database
             attempts = self.TranscodingService.DatabaseManager.GetAllTranscodeAttempts()
@@ -193,13 +193,13 @@ class ActivityViewModel:
             return result
             
         except Exception as e:
-            LoggingService.LogException("Exception getting recent attempts", e, "TranscodeProgressViewModel", "GetRecentAttempts")
+            LoggingService.LogException("Exception getting recent attempts", e, "ActivityViewModel", "GetRecentAttempts")
             return []
     
     def GetCurrentTranscodeProgress(self) -> Dict[str, Any]:
         """Get current transcoding progress from database using optimized single-record approach."""
         try:
-            LoggingService.LogFunctionEntry("GetCurrentTranscodeProgress", "TranscodeProgressViewModel")
+            # Function entry logging removed for frequent progress calls
             
             # Get current running job
             status = self.TranscodingService.GetTranscodingStatus()
@@ -246,17 +246,17 @@ class ActivityViewModel:
                 "LastUpdate": progress.get("LastProgressUpdate")
             }
             
-            LoggingService.LogInfo(f"Retrieved progress for attempt {latestAttempt.Id}: {progressData['CurrentPhase']} ({progressData['ProgressPercent']}%)", "TranscodeProgressViewModel", "GetCurrentTranscodeProgress")
+            # Progress is tracked in TranscodeProgress table, no need to log every retrieval
             return progressData
             
         except Exception as e:
-            LoggingService.LogException("Exception getting current transcode progress", e, "TranscodeProgressViewModel", "GetCurrentTranscodeProgress")
+            LoggingService.LogException("Exception getting current transcode progress", e, "ActivityViewModel", "GetCurrentTranscodeProgress")
             return {"Success": False, "Message": f"Error retrieving progress: {str(e)}"}
 
     def GetProgressSummary(self) -> Dict[str, Any]:
         """Get a summary of transcoding progress."""
         try:
-            LoggingService.LogFunctionEntry("GetProgressSummary", "TranscodeProgressViewModel")
+            LoggingService.LogFunctionEntry("GetProgressSummary", "ActivityViewModel")
             
             # Get queue statistics
             queueStats = self.TranscodingService.QueueManagementService.GetQueueStatistics()
@@ -294,7 +294,7 @@ class ActivityViewModel:
             return summary
             
         except Exception as e:
-            LoggingService.LogException("Exception getting progress summary", e, "TranscodeProgressViewModel", "GetProgressSummary")
+            LoggingService.LogException("Exception getting progress summary", e, "ActivityViewModel", "GetProgressSummary")
             return {}
     
     def ExtractFileName(self, FilePath: str) -> str:
@@ -308,7 +308,7 @@ class ActivityViewModel:
             return pathParts[-1] if pathParts else "Unknown"
             
         except Exception as e:
-            LoggingService.LogException("Exception extracting filename", e, "TranscodeProgressViewModel", "ExtractFileName")
+            LoggingService.LogException("Exception extracting filename", e, "ActivityViewModel", "ExtractFileName")
             return "Unknown"
     
     def ClearMessages(self):
@@ -319,7 +319,7 @@ class ActivityViewModel:
     def RefreshStatus(self) -> Dict[str, Any]:
         """Refresh the current transcoding status."""
         try:
-            LoggingService.LogFunctionEntry("RefreshStatus", "TranscodeProgressViewModel")
+            LoggingService.LogFunctionEntry("RefreshStatus", "ActivityViewModel")
             
             # Get updated status
             statusResult = self.GetTranscodingStatus()
@@ -341,7 +341,7 @@ class ActivityViewModel:
             
         except Exception as e:
             self.ErrorMessage = f"Error refreshing status: {str(e)}"
-            LoggingService.LogException("Exception refreshing status", e, "TranscodeProgressViewModel", "RefreshStatus")
+            LoggingService.LogException("Exception refreshing status", e, "ActivityViewModel", "RefreshStatus")
             return {"Success": False, "ErrorMessage": self.ErrorMessage}
     
     def GetVMAFStatus(self) -> Dict[str, Any]:
