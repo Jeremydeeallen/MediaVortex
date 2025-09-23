@@ -325,15 +325,25 @@
             const CurrentDirectory = response.CurrentDirectory || '';
             const ResponseIsScanning = response.IsScanning || false;
             const Status = response.Status || '';
+            const RunningScans = response.RunningScans || [];
+            const TotalRunningScans = response.TotalRunningScans || 0;
             
             // Update the global IsScanning variable
             IsScanning = ResponseIsScanning;
             
             // Update the current scan status display
             if (ResponseIsScanning) {
-                const RootFolderPath = response.RootFolderPath || CurrentDirectory.split('\\')[0] + '\\' || 'Unknown';
-                $('#CurrentScanText').text(RootFolderPath);
-                $('#CurrentScanStatus').removeClass('alert-info alert-success alert-danger').addClass('alert-warning');
+                if (TotalRunningScans > 1) {
+                    // Multiple scans running - show count and primary scan
+                    const RootFolderPath = response.RootFolderPath || CurrentDirectory.split('\\')[0] + '\\' || 'Unknown';
+                    $('#CurrentScanText').text(`${RootFolderPath} (+${TotalRunningScans - 1} more)`);
+                    $('#CurrentScanStatus').removeClass('alert-info alert-success alert-danger').addClass('alert-warning');
+                } else {
+                    // Single scan running
+                    const RootFolderPath = response.RootFolderPath || CurrentDirectory.split('\\')[0] + '\\' || 'Unknown';
+                    $('#CurrentScanText').text(RootFolderPath);
+                    $('#CurrentScanStatus').removeClass('alert-info alert-success alert-danger').addClass('alert-warning');
+                }
             } else {
                 $('#CurrentScanText').text('None');
                 $('#CurrentScanStatus').removeClass('alert-warning alert-success alert-danger').addClass('alert-info');
@@ -342,19 +352,33 @@
             // Show/hide progress section and update button states
             if (ResponseIsScanning) {
                 $('#ScanProgressSection').show();
-                $('#StartScanBtn').prop('disabled', true);
+                // Only disable start button if we're at the maximum concurrent scans (2)
+                if (TotalRunningScans >= 2) {
+                    $('#StartScanBtn').prop('disabled', true);
+                } else {
+                    $('#StartScanBtn').prop('disabled', false);
+                }
                 $('#StopScanBtn').prop('disabled', false);
             } else {
                 $('#StartScanBtn').prop('disabled', false);
                 $('#StopScanBtn').prop('disabled', true);
             }
             
-            // Update progress bar
-            $('#ScanProgressBar').css('width', Progress + '%').text(Progress.toFixed(1) + '%');
+            // Update progress bar (show average progress if multiple scans)
+            if (TotalRunningScans > 1) {
+                const AvgProgress = RunningScans.reduce((sum, scan) => sum + (scan.Progress || 0), 0) / TotalRunningScans;
+                $('#ScanProgressBar').css('width', AvgProgress + '%').text(`${AvgProgress.toFixed(1)}% (${TotalRunningScans} scans)`);
+            } else {
+                $('#ScanProgressBar').css('width', Progress + '%').text(Progress.toFixed(1) + '%');
+            }
             
             // Update status text based on scan state
             if (ResponseIsScanning) {
-                $('#ScanStatusText').text(`Scanning: ${CurrentDirectory}`);
+                if (TotalRunningScans > 1) {
+                    $('#ScanStatusText').text(`Scanning: ${TotalRunningScans} concurrent scans`);
+                } else {
+                    $('#ScanStatusText').text(`Scanning: ${CurrentDirectory}`);
+                }
             } else {
                 if (Status === 'Completed') {
                     $('#ScanStatusText').text('Scan completed successfully');

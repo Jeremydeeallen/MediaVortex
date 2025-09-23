@@ -17,3 +17,5 @@ Add more options in the profiles selection (Av1 with grain get's better results 
 -crf 27: Constant Rate Factor (quality target)
 -movflags +faststart: Optimize for web streaming
 -vf scale=...: Scale to 720p with aspect ratio preservation and padding
+
+is transcoding using all cores?

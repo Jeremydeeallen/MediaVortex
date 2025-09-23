@@ -1,11 +1,15 @@
 from flask import Blueprint, request, jsonify, render_template
 from typing import Dict, Any
-from ViewModels.TranscodeProgressViewModel import TranscodeProgressViewModel
+from ViewModels.ActivityViewModel import ActivityViewModel
 from Services.LoggingService import LoggingService
+from Services.TranscodingBusinessService import TranscodingBusinessService
 
 
 # Create Blueprint for transcoding job routes
 TranscodeJobBlueprint = Blueprint('TranscodeJob', __name__, url_prefix='/api/Transcode')
+
+# Create shared service instance to avoid multiple initializations
+SharedTranscodingService = TranscodingBusinessService()
 
 
 @TranscodeJobBlueprint.route('/Start', methods=['POST'])
@@ -25,7 +29,7 @@ def StartTranscoding():
             return jsonify({"Success": False, "ErrorMessage": errorMsg}), 400
         
         # Create ViewModel instance
-        viewModel = TranscodeProgressViewModel()
+        viewModel = ActivityViewModel(TranscodingService=SharedTranscodingService)
         
         # Start transcoding
         result = viewModel.StartTranscoding(maxConcurrentJobs)
@@ -50,7 +54,7 @@ def StopTranscoding():
         LoggingService.LogFunctionEntry("StopTranscoding", "TranscodeJobController")
         
         # Create ViewModel instance
-        viewModel = TranscodeProgressViewModel()
+        viewModel = ActivityViewModel(TranscodingService=SharedTranscodingService)
         
         # Stop transcoding
         result = viewModel.StopTranscoding()
@@ -75,13 +79,13 @@ def GetTranscodingStatus():
         LoggingService.LogFunctionEntry("GetTranscodingStatus", "TranscodeJobController")
         
         # Create ViewModel instance
-        viewModel = TranscodeProgressViewModel()
+        viewModel = ActivityViewModel(TranscodingService=SharedTranscodingService)
         
         # Get status
         result = viewModel.GetTranscodingStatus()
         
         if result.get("Success", False):
-            LoggingService.LogInfo("Retrieved transcoding status", "TranscodeJobController", "GetTranscodingStatus")
+            # Reduced logging verbosity for routine status checks
             return jsonify(result)
         else:
             LoggingService.LogError(f"Failed to get transcoding status: {result.get('ErrorMessage', 'Unknown error')}", "TranscodeJobController", "GetTranscodingStatus")
@@ -109,7 +113,7 @@ def GetTranscodingHistory():
             return jsonify({"Success": False, "ErrorMessage": errorMsg}), 400
         
         # Create ViewModel instance
-        viewModel = TranscodeProgressViewModel()
+        viewModel = ActivityViewModel(TranscodingService=SharedTranscodingService)
         
         # Get history
         result = viewModel.GetTranscodingHistory(limit)
@@ -143,7 +147,7 @@ def GetRecentAttempts():
             return jsonify({"Success": False, "ErrorMessage": errorMsg}), 400
         
         # Create ViewModel instance
-        viewModel = TranscodeProgressViewModel()
+        viewModel = ActivityViewModel(TranscodingService=SharedTranscodingService)
         
         # Get recent attempts
         recentAttempts = viewModel.GetRecentAttempts(limit)
@@ -154,7 +158,7 @@ def GetRecentAttempts():
             "Count": len(recentAttempts)
         }
         
-        LoggingService.LogInfo(f"Retrieved {len(recentAttempts)} recent attempts", "TranscodeJobController", "GetRecentAttempts")
+        # Reduced logging verbosity for routine data retrieval
         return jsonify(result)
         
     except Exception as e:
@@ -170,7 +174,7 @@ def GetProgressSummary():
         LoggingService.LogFunctionEntry("GetProgressSummary", "TranscodeJobController")
         
         # Create ViewModel instance
-        viewModel = TranscodeProgressViewModel()
+        viewModel = ActivityViewModel(TranscodingService=SharedTranscodingService)
         
         # Get progress summary
         summary = viewModel.GetProgressSummary()
@@ -180,12 +184,32 @@ def GetProgressSummary():
             "Summary": summary
         }
         
-        LoggingService.LogInfo("Retrieved progress summary", "TranscodeJobController", "GetProgressSummary")
+        # Reduced logging verbosity for routine progress retrieval
         return jsonify(result)
         
     except Exception as e:
         errorMsg = f"Exception getting progress summary: {str(e)}"
         LoggingService.LogException(errorMsg, e, "TranscodeJobController", "GetProgressSummary")
+        return jsonify({"Success": False, "ErrorMessage": errorMsg}), 500
+
+@TranscodeJobBlueprint.route('/CurrentProgress', methods=['GET'])
+def GetCurrentProgress():
+    """Get current transcoding progress from database."""
+    try:
+        # Function entry logging removed for frequent progress calls
+        
+        # Create ViewModel instance
+        viewModel = ActivityViewModel(TranscodingService=SharedTranscodingService)
+        
+        # Get current progress
+        progress = viewModel.GetCurrentTranscodeProgress()
+        
+        # Reduced logging verbosity for routine progress retrieval
+        return jsonify(progress)
+        
+    except Exception as e:
+        errorMsg = f"Exception getting current progress: {str(e)}"
+        LoggingService.LogException(errorMsg, e, "TranscodeJobController", "GetCurrentProgress")
         return jsonify({"Success": False, "ErrorMessage": errorMsg}), 500
 
 
@@ -196,7 +220,7 @@ def RefreshStatus():
         LoggingService.LogFunctionEntry("RefreshStatus", "TranscodeJobController")
         
         # Create ViewModel instance
-        viewModel = TranscodeProgressViewModel()
+        viewModel = ActivityViewModel(TranscodingService=SharedTranscodingService)
         
         # Refresh status
         result = viewModel.RefreshStatus()
@@ -221,7 +245,7 @@ def HealthCheck():
         LoggingService.LogFunctionEntry("HealthCheck", "TranscodeJobController")
         
         # Create ViewModel instance
-        viewModel = TranscodeProgressViewModel()
+        viewModel = ActivityViewModel(TranscodingService=SharedTranscodingService)
         
         # Get basic status
         status = viewModel.GetTranscodingStatus()

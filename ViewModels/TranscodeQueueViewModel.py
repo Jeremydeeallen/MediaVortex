@@ -70,7 +70,7 @@ class TranscodeQueueViewModel:
                 "SortOrder": SortOrder
             }
             
-            LoggingService.LogInfo(f"Loaded {len(pageItems)} queue items (page {Page} of {totalPages})", "TranscodeQueueViewModel", "LoadQueueItems")
+            # Reduced logging verbosity for routine queue loading
             return result
             
         except Exception as e:

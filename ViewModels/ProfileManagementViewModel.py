@@ -101,7 +101,8 @@ class ProfileManagementViewModel:
                     threshold_data['FallbackVideoBitrateKbps'],
                     threshold_data['FallbackAudioBitrateKbps'],
                     threshold_data['TranscodeDownTo'],
-                    threshold_data.get('Quality')
+                    threshold_data.get('Quality'),
+                    threshold_data.get('Grain', False)
                 )
                 LoggingService.LogInfo("Threshold {} added successfully", "ProfileManagementViewModel", "CreateProfileWithThresholds", i+1)
             
@@ -217,7 +218,8 @@ class ProfileManagementViewModel:
                         FallbackVideoBitrateKbps=threshold_data['FallbackVideoBitrateKbps'],
                         FallbackAudioBitrateKbps=threshold_data['FallbackAudioBitrateKbps'],
                         TranscodeDownTo=threshold_data['TranscodeDownTo'],
-                        Quality=threshold_data.get('Quality')
+                        Quality=threshold_data.get('Quality'),
+                        Grain=threshold_data.get('Grain', False)
                     )
                     
                     self.ProfileService.UpdateThreshold(UpdatedThreshold)
@@ -236,7 +238,8 @@ class ProfileManagementViewModel:
                         threshold_data['FallbackVideoBitrateKbps'],
                         threshold_data['FallbackAudioBitrateKbps'],
                         threshold_data['TranscodeDownTo'],
-                        threshold_data.get('Quality')
+                        threshold_data.get('Quality'),
+                        threshold_data.get('Grain', False)
                     )
             
             # Delete thresholds that no longer exist
@@ -289,7 +292,7 @@ class ProfileManagementViewModel:
                     under_30_min_mb: int, under_65_min_mb: int, over_65_min_mb: int,
                     video_bitrate_kbps: int, audio_bitrate_kbps: int,
                     fallback_video_bitrate_kbps: int, fallback_audio_bitrate_kbps: int,
-                    transcode_down_to: str) -> bool:
+                    transcode_down_to: str, quality: int = None, grain: bool = False) -> bool:
         """Add a threshold to a profile."""
         try:
             # Check if resolution already exists for this profile
@@ -301,7 +304,7 @@ class ProfileManagementViewModel:
             threshold = self.ProfileService.AddThreshold(
                 profile_id, resolution, under_30_min_mb, under_65_min_mb, over_65_min_mb,
                 video_bitrate_kbps, audio_bitrate_kbps, fallback_video_bitrate_kbps,
-                fallback_audio_bitrate_kbps, transcode_down_to
+                fallback_audio_bitrate_kbps, transcode_down_to, quality, grain
             )
             
             self.SelectedProfileThresholds.append(threshold)
@@ -399,7 +402,8 @@ class ProfileManagementViewModel:
                     'FallbackVideoBitrateKbps': threshold.FallbackVideoBitrateKbps,
                     'FallbackAudioBitrateKbps': threshold.FallbackAudioBitrateKbps,
                     'TranscodeDownTo': threshold.TranscodeDownTo,
-                    'Quality': threshold.Quality
+                    'Quality': threshold.Quality,
+                    'Grain': threshold.Grain
                 }
                 for threshold in self.SelectedProfileThresholds
             ]

@@ -49,9 +49,9 @@ class FFmpegTranscodingService:
             
             # Choose encoding method
             if UseMultiPass:
-                return self.TranscodeVideoMultiPass(InputFilePath, OutputFilePath, QualitySettings, ProgressCallback)
+                return self._TranscodeVideoMultiPass(InputFilePath, OutputFilePath, QualitySettings, ProgressCallback)
             else:
-                return self.TranscodeVideoSinglePass(InputFilePath, OutputFilePath, QualitySettings, ProgressCallback)
+                return self._TranscodeVideoSinglePass(InputFilePath, OutputFilePath, QualitySettings, ProgressCallback)
             
         except Exception as e:
             LoggingService.LogException("Exception in FFmpeg transcoding", e, "FFmpegTranscodingService", "TranscodeVideo")
@@ -61,101 +61,78 @@ class FFmpegTranscodingService:
                 "ReturnCode": -1
             }
     
-    def TranscodeVideoSinglePass(self, InputFilePath: str, OutputFilePath: str, QualitySettings: Dict[str, Any], ProgressCallback=None) -> Dict[str, Any]:
-        """Transcode video using two-pass encoding (renamed from single-pass for clarity)."""
+    def _TranscodeVideoSinglePass(self, InputFilePath: str, OutputFilePath: str, QualitySettings: Dict[str, Any], ProgressCallback=None) -> Dict[str, Any]:
+        """Transcode video using single-pass encoding."""
         try:
-            # Build two-pass FFmpeg commands
-            ffmpegCommands = self.BuildFFmpegCommand(InputFilePath, OutputFilePath, QualitySettings)
+            # Build FFmpeg command with quality settings
+            ffmpegArgs = self.BuildFFmpegCommand(InputFilePath, OutputFilePath, QualitySettings)
             
-            if not ffmpegCommands:
-                ErrorMsg = "Failed to build two-pass FFmpeg commands"
-                LoggingService.LogError(ErrorMsg, "FFmpegTranscodingService", "TranscodeVideoSinglePass")
+            if not ffmpegArgs:
+                ErrorMsg = "Failed to build FFmpeg command"
+                LoggingService.LogError(ErrorMsg, "FFmpegTranscodingService", "_TranscodeVideoSinglePass")
                 return {"Success": False, "ErrorMessage": ErrorMsg, "ReturnCode": -1}
             
-            Pass1Args = ffmpegCommands['Pass1']
-            Pass2Args = ffmpegCommands['Pass2']
-            
-            LoggingService.LogInfo(f"Starting two-pass transcode - Pass 1: {len(Pass1Args)} args, Pass 2: {len(Pass2Args)} args", "FFmpegTranscodingService", "TranscodeVideoSinglePass")
+            # Execute FFmpeg command
+            CommandString = ' '.join(ffmpegArgs)
+            LoggingService.LogInfo(f"Starting single-pass transcode with command: {CommandString}", "FFmpegTranscodingService", "_TranscodeVideoSinglePass")
             StartTime = time.time()
             
-            # Set working directory for both passes to ensure consistent log file location
-            MediaVortexDir = r'c:\MediaVortex'
-            
-            # Execute Pass 1 - Analysis pass
-            LoggingService.LogInfo("Starting Pass 1 (Analysis)", "FFmpegTranscodingService", "TranscodeVideoSinglePass")
-            Pass1Result = self.FFmpegService.ExecuteFFmpegCommand(Pass1Args, ProgressCallback, MediaVortexDir)
-            
-            if not Pass1Result['Success']:
-                ErrorMsg = f"Pass 1 failed: {Pass1Result.get('ErrorMessage', 'Unknown error')}"
-                LoggingService.LogError(ErrorMsg, "FFmpegTranscodingService", "TranscodeVideoSinglePass")
-                return {
-                    "Success": False,
-                    "ErrorMessage": ErrorMsg,
-                    "ReturnCode": Pass1Result.get('ReturnCode', -1),
-                    "AllOutput": Pass1Result.get('AllOutput', '')
-                }
-            
-            # Execute Pass 2 - Encoding pass
-            LoggingService.LogInfo("Starting Pass 2 (Encoding)", "FFmpegTranscodingService", "TranscodeVideoSinglePass")
-            Pass2Result = self.FFmpegService.ExecuteFFmpegCommand(Pass2Args, ProgressCallback, MediaVortexDir)
-            
+            LoggingService.LogInfo(f"CALLING ExecuteFFmpegCommand with {len(ffmpegArgs)} arguments and progress callback: {ProgressCallback is not None}", "FFmpegTranscodingService", "_TranscodeVideoSinglePass")
+            result = self.FFmpegService.ExecuteFFmpegCommand(ffmpegArgs, ProgressCallback)
+            LoggingService.LogInfo(f"ExecuteFFmpegCommand returned: Success={result.get('Success', False)}", "FFmpegTranscodingService", "_TranscodeVideoSinglePass")
             EndTime = time.time()
             Duration = EndTime - StartTime
             
             # Process result
-            if Pass2Result['Success']:
-                LoggingService.LogInfo(f"Two-pass FFmpeg transcoding completed successfully in {Duration:.2f} seconds", "FFmpegTranscodingService", "TranscodeVideoSinglePass")
-                # Combine output from both passes
-                CombinedOutput = f"PASS 1 OUTPUT:\n{Pass1Result.get('AllOutput', '')}\n\nPASS 2 OUTPUT:\n{Pass2Result.get('AllOutput', '')}"
+            if result['Success']:
+                LoggingService.LogInfo(f"Single-pass FFmpeg transcoding completed successfully in {Duration:.2f} seconds", "FFmpegTranscodingService", "_TranscodeVideoSinglePass")
                 return {
                     "Success": True,
                     "OutputFilePath": OutputFilePath,
                     "Duration": Duration,
-                    "ReturnCode": Pass2Result.get('ReturnCode', 0),
-                    "Command": f"Pass 1: {' '.join(Pass1Args)}\nPass 2: {' '.join(Pass2Args)}",
-                    "EncodingMethod": "two-pass",
-                    "AllOutput": CombinedOutput
+                    "ReturnCode": 0,
+                    "Command": CommandString,
+                    "EncodingMethod": "single-pass",
+                    "AllOutput": result.get('AllOutput', '')
                 }
             else:
-                ErrorMsg = f"Pass 2 failed: {Pass2Result.get('ErrorMessage', 'Unknown error')}"
-                LoggingService.LogError(ErrorMsg, "FFmpegTranscodingService", "TranscodeVideoSinglePass")
-                # Combine output from both passes for debugging
-                CombinedOutput = f"PASS 1 OUTPUT:\n{Pass1Result.get('AllOutput', '')}\n\nPASS 2 OUTPUT:\n{Pass2Result.get('AllOutput', '')}"
+                ErrorMsg = result.get('ErrorMessage', 'FFmpeg transcoding failed')
+                LoggingService.LogError(f"Single-pass FFmpeg transcoding failed: {ErrorMsg}", "FFmpegTranscodingService", "_TranscodeVideoSinglePass")
                 return {
                     "Success": False,
                     "ErrorMessage": ErrorMsg,
                     "Duration": Duration,
-                    "ReturnCode": Pass2Result.get('ReturnCode', -1),
-                    "Command": f"Pass 1: {' '.join(Pass1Args)}\nPass 2: {' '.join(Pass2Args)}",
-                    "EncodingMethod": "two-pass",
-                    "AllOutput": CombinedOutput
+                    "ReturnCode": result.get('ReturnCode', -1),
+                    "Command": CommandString,
+                    "EncodingMethod": "single-pass",
+                    "AllOutput": result.get('AllOutput', '')
                 }
-                
+            
         except Exception as e:
-            LoggingService.LogException("Exception in two-pass FFmpeg transcoding", e, "FFmpegTranscodingService", "TranscodeVideoSinglePass")
+            LoggingService.LogException("Exception in single-pass FFmpeg transcoding", e, "FFmpegTranscodingService", "_TranscodeVideoSinglePass")
             return {
                 "Success": False,
-                "ErrorMessage": f"Two-pass transcoding exception: {str(e)}",
+                "ErrorMessage": f"Single-pass transcoding exception: {str(e)}",
                 "ReturnCode": -1
             }
     
-    def TranscodeVideoMultiPass(self, InputFilePath: str, OutputFilePath: str, QualitySettings: Dict[str, Any], ProgressCallback=None) -> Dict[str, Any]:
+    def _TranscodeVideoMultiPass(self, InputFilePath: str, OutputFilePath: str, QualitySettings: Dict[str, Any], ProgressCallback=None) -> Dict[str, Any]:
         """Transcode video using two-pass encoding for better quality."""
         try:
-            LoggingService.LogInfo("Starting two-pass encoding process", "FFmpegTranscodingService", "TranscodeVideoMultiPass")
+            LoggingService.LogInfo("Starting two-pass encoding process", "FFmpegTranscodingService", "_TranscodeVideoMultiPass")
             startTime = time.time()
             
             # Pass 1: Analysis pass (quick)
-            LoggingService.LogInfo("Starting Pass 1: Analysis", "FFmpegTranscodingService", "TranscodeVideoMultiPass")
+            LoggingService.LogInfo("Starting Pass 1: Analysis", "FFmpegTranscodingService", "_TranscodeVideoMultiPass")
             Pass1Args = self.BuildFFmpegMultiPassCommand(InputFilePath, OutputFilePath, QualitySettings, pass_number=1)
             
             if not Pass1Args:
                 ErrorMsg = "Failed to build Pass 1 FFmpeg command"
-                LoggingService.LogError(ErrorMsg, "FFmpegTranscodingService", "TranscodeVideoMultiPass")
+                LoggingService.LogError(ErrorMsg, "FFmpegTranscodingService", "_TranscodeVideoMultiPass")
                 return {"Success": False, "ErrorMessage": ErrorMsg, "ReturnCode": -1}
             
             Pass1Command = ' '.join(Pass1Args)
-            LoggingService.LogInfo(f"Pass 1 command: {Pass1Command}", "FFmpegTranscodingService", "TranscodeVideoMultiPass")
+            LoggingService.LogInfo(f"Pass 1 command: {Pass1Command}", "FFmpegTranscodingService", "_TranscodeVideoMultiPass")
             
             # Create progress callback for Pass 1 that includes pass number
             def Pass1ProgressCallback(ProgressData):
@@ -168,7 +145,7 @@ class FFmpegTranscodingService:
             
             if not Pass1Result['Success']:
                 ErrorMsg = f"Pass 1 failed: {Pass1Result.get('ErrorMessage', 'Unknown error')}"
-                LoggingService.LogError(ErrorMsg, "FFmpegTranscodingService", "TranscodeVideoMultiPass")
+                LoggingService.LogError(ErrorMsg, "FFmpegTranscodingService", "_TranscodeVideoMultiPass")
                 return {
                     "Success": False, 
                     "ErrorMessage": ErrorMsg, 
@@ -176,15 +153,15 @@ class FFmpegTranscodingService:
                     "AllOutput": Pass1Result.get('AllOutput', '')
                 }
             
-            LoggingService.LogInfo("Pass 1 completed successfully", "FFmpegTranscodingService", "TranscodeVideoMultiPass")
+            LoggingService.LogInfo("Pass 1 completed successfully", "FFmpegTranscodingService", "_TranscodeVideoMultiPass")
             
             # Pass 2: Encoding pass (with progress monitoring)
-            LoggingService.LogInfo("Starting Pass 2: Encoding", "FFmpegTranscodingService", "TranscodeVideoMultiPass")
+            LoggingService.LogInfo("Starting Pass 2: Encoding", "FFmpegTranscodingService", "_TranscodeVideoMultiPass")
             Pass2Args = self.BuildFFmpegMultiPassCommand(InputFilePath, OutputFilePath, QualitySettings, pass_number=2)
             
             if not Pass2Args:
                 ErrorMsg = "Failed to build Pass 2 FFmpeg command"
-                LoggingService.LogError(ErrorMsg, "FFmpegTranscodingService", "TranscodeVideoMultiPass")
+                LoggingService.LogError(ErrorMsg, "FFmpegTranscodingService", "_TranscodeVideoMultiPass")
                 return {
                     "Success": False, 
                     "ErrorMessage": ErrorMsg, 
@@ -193,7 +170,7 @@ class FFmpegTranscodingService:
                 }
             
             Pass2Command = ' '.join(Pass2Args)
-            LoggingService.LogInfo(f"Pass 2 command: {Pass2Command}", "FFmpegTranscodingService", "TranscodeVideoMultiPass")
+            LoggingService.LogInfo(f"Pass 2 command: {Pass2Command}", "FFmpegTranscodingService", "_TranscodeVideoMultiPass")
             
             # Create progress callback for Pass 2 that includes pass number
             def Pass2ProgressCallback(ProgressData):
@@ -208,7 +185,7 @@ class FFmpegTranscodingService:
             
             # Process result
             if Pass2Result['Success']:
-                LoggingService.LogInfo(f"Two-pass FFmpeg transcoding completed successfully in {TotalDuration:.2f} seconds", "FFmpegTranscodingService", "TranscodeVideoMultiPass")
+                LoggingService.LogInfo(f"Two-pass FFmpeg transcoding completed successfully in {TotalDuration:.2f} seconds", "FFmpegTranscodingService", "_TranscodeVideoMultiPass")
                 # Combine output from both passes
                 CombinedOutput = f"=== PASS 1 OUTPUT ===\n{Pass1Result.get('AllOutput', '')}\n\n=== PASS 2 OUTPUT ===\n{Pass2Result.get('AllOutput', '')}"
                 return {
@@ -222,7 +199,7 @@ class FFmpegTranscodingService:
                 }
             else:
                 ErrorMsg = f"Pass 2 failed: {Pass2Result.get('ErrorMessage', 'Unknown error')}"
-                LoggingService.LogError(ErrorMsg, "FFmpegTranscodingService", "TranscodeVideoMultiPass")
+                LoggingService.LogError(ErrorMsg, "FFmpegTranscodingService", "_TranscodeVideoMultiPass")
                 # Combine output from both passes even on failure
                 CombinedOutput = f"=== PASS 1 OUTPUT ===\n{Pass1Result.get('AllOutput', '')}\n\n=== PASS 2 OUTPUT ===\n{Pass2Result.get('AllOutput', '')}"
                 return {
@@ -236,15 +213,15 @@ class FFmpegTranscodingService:
                 }
             
         except Exception as e:
-            LoggingService.LogException("Exception in two-pass FFmpeg transcoding", e, "FFmpegTranscodingService", "TranscodeVideoMultiPass")
+            LoggingService.LogException("Exception in two-pass FFmpeg transcoding", e, "FFmpegTranscodingService", "_TranscodeVideoMultiPass")
             return {
                 "Success": False,
                 "ErrorMessage": f"Two-pass transcoding exception: {str(e)}",
                 "ReturnCode": -1
             }
     
-    def BuildFFmpegCommand(self, InputFilePath: str, OutputFilePath: str, QualitySettings: Dict[str, Any]) -> Optional[Dict[str, List[str]]]:
-        """Build two-pass FFmpeg commands using proven approach from TestFfmpeg.py. Returns both pass commands."""
+    def BuildFFmpegCommand(self, InputFilePath: str, OutputFilePath: str, QualitySettings: Dict[str, Any]) -> Optional[List[str]]:
+        """Build FFmpeg command with quality settings from ProfileThresholds table. Fails if required settings are missing."""
         try:
             LoggingService.LogFunctionEntry("BuildFFmpegCommand", "FFmpegTranscodingService", InputFilePath, OutputFilePath, QualitySettings)
             
@@ -268,56 +245,41 @@ class FFmpegTranscodingService:
             codec = QualitySettings['Codec']
             quality = QualitySettings['Quality']
             
-            # Get scale filter for target resolution
-            scaleFilter = self.GetScaleFilter(targetResolution)
-            if not scaleFilter:
-                LoggingService.LogError(f"Could not generate scale filter for resolution: {targetResolution}", "FFmpegTranscodingService", "BuildFFmpegCommand")
-                return None
-            
-            # Ensure MediaVortex directory exists for pass log files
-            MediaVortexDir = r'c:\MediaVortex'
-            os.makedirs(MediaVortexDir, exist_ok=True)
-            LogFilePath = os.path.join(MediaVortexDir, 'ffmpeg2pass')
-            
-            # Build Pass 1 command - Analysis pass (ultrafast preset, no audio, null output)
-            Pass1Args = [
-                '-y',                                  # Overwrite
-                '-loglevel', 'info',                   # Log level
-                '-i', InputFilePath,                   # Input file
+            # Build FFmpeg arguments in correct order
+            args = [
+                '-i', InputFilePath,                    # Input file
                 '-c:v', codec,                         # Video codec
-                '-preset', 'ultrafast',                # Fast preset for analysis
-                '-x265-params', 'pass=1:10bit=1',      # x265 first pass with 10-bit (EXACT match to TestFfmpeg.py)
-                '-vf', scaleFilter,                    # Scale filter
-                '-an',                                 # No audio
-                '-f', 'null',                          # Null output
-                '-'                                    # Output to null
-            ]
-            
-            # Build Pass 2 command - Encoding pass (fast preset, with audio, actual output)
-            Pass2Args = [
-                '-y',                                  # Overwrite
-                '-loglevel', 'info',                   # Log level
-                '-i', InputFilePath,                   # Input file
-                '-c:v', codec,                         # Video codec
+                '-crf', str(quality),                  # CRF quality setting
+                '-maxrate', f'{videoBitrate}k',        # Maximum bitrate
+                '-bufsize', f'{videoBitrate * 2}k',    # Buffer size = 2x bitrate
                 '-c:a', 'aac',                         # Audio codec
                 '-b:a', f'{audioBitrate}k',            # Audio bitrate
-                '-preset', 'fast',                     # Fast preset for encoding
-                '-crf', str(quality),                  # Quality setting
-                '-x265-params', '10bit=1',             # x265 10-bit encoding (EXACT match to TestFfmpeg.py)
-                '-pass', '2',                          # Generic pass 2 (EXACT match to TestFfmpeg.py)
-                '-vf', scaleFilter,                    # Scale filter
+                '-preset', 'faster',                   # Faster encoding preset for better CPU utilization
+                '-threads', '0',                       # Use all available CPU threads (0 = auto-detect)
+                '-movflags', '+faststart',             # Optimize for streaming and faster seeking
+                '-y',                                  # Overwrite output file
                 OutputFilePath                         # Output file
             ]
             
-            LoggingService.LogInfo(f"Built two-pass FFmpeg commands - Pass 1: {len(Pass1Args)} args, Pass 2: {len(Pass2Args)} args", "FFmpegTranscodingService", "BuildFFmpegCommand")
+            # Add codec-specific optimizations for better CPU utilization
+            if codec == 'libx264':
+                # x264 specific optimizations
+                args.insert(-2, '-x264-params')  # Insert before output file
+                args.insert(-2, 'threads=0:lookahead-threads=0')  # Use all threads for x264
+            elif codec == 'libx265':
+                # x265 specific optimizations
+                args.insert(-2, '-x265-params')  # Insert before output file
+                args.insert(-2, 'threads=0:frame-threads=0')  # Use all threads for x265
             
-            return {
-                'Pass1': Pass1Args,
-                'Pass2': Pass2Args
-            }
+            LoggingService.LogInfo(f"Using CRF mode with quality {quality}, maxrate {videoBitrate}k, bufsize {videoBitrate * 2}k, threads=0", "FFmpegTranscodingService", "BuildFFmpegCommand")
+            
+            # Note: Removed scaling filter - let FFmpeg handle resolution automatically
+            
+            LoggingService.LogInfo(f"Built FFmpeg command with {len(args)} arguments", "FFmpegTranscodingService", "BuildFFmpegCommand")
+            return args
             
         except Exception as e:
-            LoggingService.LogException("Error building two-pass FFmpeg commands", e, "FFmpegTranscodingService", "BuildFFmpegCommand")
+            LoggingService.LogException("Error building FFmpeg command", e, "FFmpegTranscodingService", "BuildFFmpegCommand")
             return None
     
     def BuildFFmpegMultiPassCommand(self, InputFilePath: str, OutputFilePath: str, QualitySettings: Dict[str, Any], pass_number: int) -> Optional[List[str]]:
@@ -350,47 +312,57 @@ class FFmpegTranscodingService:
                 '-i', InputFilePath,                    # Input file
                 '-c:v', codec,                         # Video codec (HEVC)
                 '-preset', 'faster',                   # Use faster preset for multi-pass
+                '-threads', '0',                       # Use all available CPU threads (0 = auto-detect)
             ]
-            
-            # Ensure MediaVortex directory exists for pass log files
-            MediaVortexDir = r'c:\MediaVortex'
-            os.makedirs(MediaVortexDir, exist_ok=True)
-            LogFilePath = os.path.join(MediaVortexDir, 'ffmpeg2pass')
             
             if pass_number == 1:
                 # Pass 1: Analysis pass (no audio, no output file)
-                args.extend([
-                    '-x265-params', 'pass=1:10bit=1',  # x265 first pass with 10-bit (EXACT match to TestFfmpeg.py)
-                    '-an',                             # No audio in pass 1
-                    '-f', 'null',                      # No output file
-                    '-'                                # Output to null
-                ])
-                LoggingService.LogInfo(f"Built Pass 1 command for analysis", "FFmpegTranscodingService", "BuildFFmpegMultiPassCommand")
+                if codec == 'libx265':
+                    args.extend([
+                        '-x265-params', 'pass=1:threads=0:frame-threads=0',  # x265 first pass with thread optimization
+                        '-an',                             # No audio in pass 1
+                        '-f', 'null',                      # No output file
+                        '-'                                # Output to null
+                    ])
+                else:
+                    args.extend([
+                        '-x264-params', 'pass=1:threads=0:lookahead-threads=0',  # x264 first pass with thread optimization
+                        '-an',                             # No audio in pass 1
+                        '-f', 'null',                      # No output file
+                        '-'                                # Output to null
+                    ])
+                LoggingService.LogInfo(f"Built Pass 1 command for analysis with thread optimization", "FFmpegTranscodingService", "BuildFFmpegMultiPassCommand")
                 
             elif pass_number == 2:
                 # Pass 2: Encoding pass (with audio and output file)
-                args.extend([
-                    '-x265-params', '10bit=1',         # x265 10-bit encoding (EXACT match to TestFfmpeg.py)
-                    '-pass', '2',                      # Generic pass 2 (EXACT match to TestFfmpeg.py)
-                    '-c:a', 'aac',                     # Audio codec
-                    '-b:a', f'{audioBitrate}k',        # Audio bitrate
-                    '-movflags', '+faststart',         # Optimize for streaming
-                    '-y',                              # Overwrite output file
-                    OutputFilePath                     # Output file
-                ])
+                if codec == 'libx265':
+                    args.extend([
+                        '-x265-params', 'pass=2:threads=0:frame-threads=0',  # x265 second pass with thread optimization
+                        '-c:a', 'aac',                     # Audio codec
+                        '-b:a', f'{audioBitrate}k',        # Audio bitrate
+                        '-movflags', '+faststart',         # Optimize for streaming
+                        '-y',                              # Overwrite output file
+                        OutputFilePath                     # Output file
+                    ])
+                else:
+                    args.extend([
+                        '-x264-params', 'pass=2:threads=0:lookahead-threads=0',  # x264 second pass with thread optimization
+                        '-c:a', 'aac',                     # Audio codec
+                        '-b:a', f'{audioBitrate}k',        # Audio bitrate
+                        '-movflags', '+faststart',         # Optimize for streaming
+                        '-y',                              # Overwrite output file
+                        OutputFilePath                     # Output file
+                    ])
                 
-                # Add video quality settings - Quality is required and validated above
-                # Use CRF mode (quality-based encoding) as primary method
-                args.insert(-2, '-crf')  # Insert before output file
-                args.insert(-2, str(quality))
-                LoggingService.LogInfo(f"Pass 2 using CRF mode with quality {quality}", "FFmpegTranscodingService", "BuildFFmpegMultiPassCommand")
-                
-                # Also add bitrate as a maximum constraint for better control
+                # Add video quality settings - Multi-pass uses bitrate-based encoding
+                # Use bitrate mode for multi-pass encoding (no CRF)
+                args.insert(-2, '-b:v')  # Insert before output file
+                args.insert(-2, f'{videoBitrate}k')
                 args.insert(-2, '-maxrate')  # Insert before output file
                 args.insert(-2, f'{videoBitrate}k')
                 args.insert(-2, '-bufsize')  # Insert before output file
                 args.insert(-2, f'{videoBitrate * 2}k')  # Buffer size = 2x bitrate
-                LoggingService.LogInfo(f"Pass 2 using maxrate {videoBitrate}k with bufsize {videoBitrate * 2}k", "FFmpegTranscodingService", "BuildFFmpegMultiPassCommand")
+                LoggingService.LogInfo(f"Pass 2 using bitrate {videoBitrate}k for multi-pass encoding", "FFmpegTranscodingService", "BuildFFmpegMultiPassCommand")
                 
                 # Add resolution scaling if needed
                 if targetResolution and targetResolution != 'original':

@@ -326,6 +326,65 @@ class FileScanningController:
                     'Error': f'Error getting scan directories: {str(e)}'
                 }), 500
         
+        @self.Blueprint.route('/ScanDirectories', methods=['POST'])
+        def AddScanDirectory():
+            """Add or update a scan directory in SystemSettings."""
+            try:
+                data = request.get_json() or {}
+                Key = data.get('Key')
+                Path = data.get('Path', '').strip()
+                Description = data.get('Description', '').strip()
+                
+                if not Path:
+                    return jsonify({
+                        'Success': False,
+                        'Error': 'Directory path is required'
+                    }), 400
+                
+                result = self.ViewModel.AddOrUpdateScanDirectory(Key, Path, Description)
+                
+                if result['Success']:
+                    return jsonify({
+                        'Success': True,
+                        'Message': result['Message']
+                    }), 200
+                else:
+                    return jsonify({
+                        'Success': False,
+                        'Error': result['Error']
+                    }), 400
+                    
+            except Exception as e:
+                LoggingService.LogException("Error in AddScanDirectory endpoint", e, "FileScanningController", "AddScanDirectory")
+                return jsonify({
+                    'Success': False,
+                    'Error': f'Error adding scan directory: {str(e)}'
+                }), 500
+        
+        @self.Blueprint.route('/ScanDirectories/<string:key>', methods=['DELETE'])
+        def DeleteScanDirectory(key):
+            """Delete a scan directory from SystemSettings."""
+            try:
+                result = self.ViewModel.DeleteScanDirectory(key)
+                
+                if result['Success']:
+                    return jsonify({
+                        'Success': True,
+                        'Message': result['Message']
+                    }), 200
+                else:
+                    return jsonify({
+                        'Success': False,
+                        'Error': result['Error']
+                    }), 400
+                    
+            except Exception as e:
+                LoggingService.LogException("Error in DeleteScanDirectory endpoint", e, "FileScanningController", "DeleteScanDirectory")
+                return jsonify({
+                    'Success': False,
+                    'Error': f'Error deleting scan directory: {str(e)}'
+                }), 500
+        
         @self.Blueprint.route('/Statistics', methods=['GET'])
         def GetStatistics():
             """Get database statistics for the file scanning page."""

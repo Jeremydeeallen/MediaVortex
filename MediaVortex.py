@@ -2,8 +2,11 @@ from flask import Flask, render_template, jsonify
 from flask_cors import CORS
 from Controllers.ProfileController import ProfileController
 from Controllers.FileScanningController import FileScanningController
+from Controllers.SystemSettingsController import SystemSettingsController
 from Controllers.TranscodeQueueController import TranscodeQueueBlueprint
 from Controllers.TranscodeJobController import TranscodeJobBlueprint
+from Controllers.VMAFJobController import VMAFJobBlueprint
+from Controllers.FileReplacementController import FileReplacementController
 import os
 
 
@@ -18,6 +21,8 @@ class MediaVortexApp:
         # Initialize controllers
         self.ProfileController = ProfileController()
         self.FileScanningController = FileScanningController()
+        self.SystemSettingsController = SystemSettingsController(self.App)
+        self.FileReplacementController = FileReplacementController(self.App)
         
         self._register_routes()
         self._register_blueprints()
@@ -45,10 +50,10 @@ class MediaVortexApp:
             """Transcoding queue management page."""
             return render_template('TranscodeQueue.html')
         
-        @self.App.route('/TranscodeProgress')
-        def transcode_progress():
-            """Transcoding progress monitoring page."""
-            return render_template('TranscodeProgress.html')
+        @self.App.route('/Activity')
+        def activity():
+            """Activity monitoring page for transcoding and VMAF quality analysis."""
+            return render_template('Activity.html')
         
         @self.App.route('/api/health')
         def health_check():
@@ -62,8 +67,10 @@ class MediaVortexApp:
         """Register controller blueprints."""
         self.App.register_blueprint(self.ProfileController.Blueprint, url_prefix='/api')
         self.App.register_blueprint(self.FileScanningController.Blueprint, url_prefix='/api')
+        self.App.register_blueprint(self.FileReplacementController.Blueprint)
         self.App.register_blueprint(TranscodeQueueBlueprint)
         self.App.register_blueprint(TranscodeJobBlueprint)
+        self.App.register_blueprint(VMAFJobBlueprint)
     
     def Run(self, host='0.0.0.0', port=5000, debug=True):
         """Run the Flask application."""

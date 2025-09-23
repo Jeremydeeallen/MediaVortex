@@ -4,6 +4,7 @@ import shutil
 from typing import Optional, Dict, Any, List
 from pathlib import Path
 from Services.LoggingService import LoggingService
+from Repositories.DatabaseManager import DatabaseManager
 
 
 class FFmpegService:
@@ -17,9 +18,9 @@ class FFmpegService:
     def __init__(self):
         # Use cached paths if available, otherwise find them
         if FFmpegService._cached_ffmpeg_path is None:
-            FFmpegService._cached_ffmpeg_path = self.FindFFmpegPath()
+            FFmpegService._cached_ffmpeg_path = self.GetFFmpegPathFromSettings()
         if FFmpegService._cached_ffprobe_path is None:
-            FFmpegService._cached_ffprobe_path = self.FindFFprobePath()
+            FFmpegService._cached_ffprobe_path = self.GetFFprobePathFromSettings()
             
         self.FFmpegPath = FFmpegService._cached_ffmpeg_path
         self.FFprobePath = FFmpegService._cached_ffprobe_path
@@ -28,45 +29,22 @@ class FFmpegService:
         if not FFmpegService._logged_initialization:
             if not self.FFmpegPath:
                 LoggingService.LogWarning("FFmpeg not found. Video processing will not be available.", '__init__', 'FFmpegService')
-            else:
-                LoggingService.LogInfo(f"FFmpeg found at: {self.FFmpegPath}", '__init__', 'FFmpegService')
-                
+            
             if not self.FFprobePath:
                 LoggingService.LogWarning("FFprobe not found. Media analysis will not be available.", '__init__', 'FFmpegService')
-            else:
-                LoggingService.LogInfo(f"FFprobe found at: {self.FFprobePath}", '__init__', 'FFmpegService')
             
             FFmpegService._logged_initialization = True
     
     def FindFFmpegPath(self) -> Optional[str]:
         """Find FFmpeg executable path."""
         try:
-            # Check if ffmpeg is in PATH
-            FFmpegPath = shutil.which('ffmpeg')
-            if FFmpegPath:
-                # Only log once per class, not per instance
-                if not hasattr(FFmpegService, '_ffmpeg_path_logged'):
-                    LoggingService.LogInfo(f"Found FFmpeg in PATH: {FFmpegPath}", 'FindFFmpegPath', 'FFmpegService')
-                    FFmpegService._ffmpeg_path_logged = True
-                return FFmpegPath
-            
-            # Check common installation paths
-            CommonPaths = [
-                'C:\\ffmpeg\\bin\\ffmpeg.exe',
-                'C:\\Program Files\\ffmpeg\\bin\\ffmpeg.exe',
-                'C:\\Program Files (x86)\\ffmpeg\\bin\\ffmpeg.exe',
-                '/usr/bin/ffmpeg',
-                '/usr/local/bin/ffmpeg',
-                '/opt/ffmpeg/bin/ffmpeg'
-            ]
-            
-            for Path in CommonPaths:
-                if os.path.exists(Path):
-                    LoggingService.LogInfo(f"Found FFmpeg at: {Path}", 'FindFFmpegPath', 'FFmpegService')
-                    return Path
-            
-            LoggingService.LogWarning("FFmpeg not found in common paths", 'FindFFmpegPath', 'FFmpegService')
-            return None
+            # Use local project FFmpeg from FFmpegMaster\bin folder
+            ProjectFFmpegPath = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'FFmpegMaster', 'bin', 'ffmpeg.exe')
+            if os.path.exists(ProjectFFmpegPath):
+                return ProjectFFmpegPath
+            else:
+                LoggingService.LogError(f"Project FFmpeg not found at: {ProjectFFmpegPath}", 'FindFFmpegPath', 'FFmpegService')
+                return None
             
         except Exception as e:
             LoggingService.LogException("Error finding FFmpeg path", e, 'FindFFmpegPath', 'FFmpegService')
@@ -75,36 +53,67 @@ class FFmpegService:
     def FindFFprobePath(self) -> Optional[str]:
         """Find FFprobe executable path."""
         try:
-            # Check if ffprobe is in PATH
-            FFprobePath = shutil.which('ffprobe')
-            if FFprobePath:
-                # Only log once per class, not per instance
-                if not hasattr(FFmpegService, '_ffprobe_path_logged'):
-                    LoggingService.LogInfo(f"Found FFprobe in PATH: {FFprobePath}", 'FindFFprobePath', 'FFmpegService')
-                    FFmpegService._ffprobe_path_logged = True
-                return FFprobePath
-            
-            # Check common installation paths
-            CommonPaths = [
-                'C:\\ffmpeg\\bin\\ffprobe.exe',
-                'C:\\Program Files\\ffmpeg\\bin\\ffprobe.exe',
-                'C:\\Program Files (x86)\\ffmpeg\\bin\\ffprobe.exe',
-                '/usr/bin/ffprobe',
-                '/usr/local/bin/ffprobe',
-                '/opt/ffmpeg/bin/ffprobe'
-            ]
-            
-            for Path in CommonPaths:
-                if os.path.exists(Path):
-                    LoggingService.LogInfo(f"Found FFprobe at: {Path}", 'FindFFprobePath', 'FFmpegService')
-                    return Path
-            
-            LoggingService.LogWarning("FFprobe not found in common paths", 'FindFFprobePath', 'FFmpegService')
-            return None
+            # Use local project FFprobe from FFmpegMaster\bin folder
+            ProjectFFprobePath = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'FFmpegMaster', 'bin', 'ffprobe.exe')
+            if os.path.exists(ProjectFFprobePath):
+                return ProjectFFprobePath
+            else:
+                LoggingService.LogError(f"Project FFprobe not found at: {ProjectFFprobePath}", 'FindFFprobePath', 'FFmpegService')
+                return None
             
         except Exception as e:
             LoggingService.LogException("Error finding FFprobe path", e, 'FindFFprobePath', 'FFmpegService')
             return None
+    
+    def GetFFmpegPathFromSettings(self) -> Optional[str]:
+        """Get FFmpeg path from database settings."""
+        try:
+            DatabaseManagerInstance = DatabaseManager()
+            SettingValue = DatabaseManagerInstance.GetSystemSetting('FFmpegPath')
+            
+            if SettingValue:
+                # Convert relative path to absolute path
+                RelativePath = SettingValue
+                ProjectRoot = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                AbsolutePath = os.path.join(ProjectRoot, RelativePath)
+                
+                if os.path.exists(AbsolutePath):
+                    return AbsolutePath
+                else:
+                    LoggingService.LogError(f"FFmpeg path from settings not found: {AbsolutePath}", 'GetFFmpegPathFromSettings', 'FFmpegService')
+                    return None
+            else:
+                LoggingService.LogWarning("No FFmpeg path found in settings, falling back to FindFFmpegPath", 'GetFFmpegPathFromSettings', 'FFmpegService')
+                return self.FindFFmpegPath()
+                
+        except Exception as e:
+            LoggingService.LogException("Error getting FFmpeg path from settings", e, 'GetFFmpegPathFromSettings', 'FFmpegService')
+            return self.FindFFmpegPath()
+    
+    def GetFFprobePathFromSettings(self) -> Optional[str]:
+        """Get FFprobe path from database settings."""
+        try:
+            DatabaseManagerInstance = DatabaseManager()
+            SettingValue = DatabaseManagerInstance.GetSystemSetting('FFprobePath')
+            
+            if SettingValue:
+                # Convert relative path to absolute path
+                RelativePath = SettingValue
+                ProjectRoot = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                AbsolutePath = os.path.join(ProjectRoot, RelativePath)
+                
+                if os.path.exists(AbsolutePath):
+                    return AbsolutePath
+                else:
+                    LoggingService.LogError(f"FFprobe path from settings not found: {AbsolutePath}", 'GetFFprobePathFromSettings', 'FFmpegService')
+                    return None
+            else:
+                LoggingService.LogWarning("No FFprobe path found in settings, falling back to FindFFprobePath", 'GetFFprobePathFromSettings', 'FFmpegService')
+                return self.FindFFprobePath()
+                
+        except Exception as e:
+            LoggingService.LogException("Error getting FFprobe path from settings", e, 'GetFFprobePathFromSettings', 'FFmpegService')
+            return self.FindFFprobePath()
     
     def ExecuteFFprobe(self, FilePath: str, Arguments: List[str] = None) -> Dict[str, Any]:
         """Execute FFprobe command and return results."""
@@ -120,14 +129,14 @@ class FFmpegService:
             if Arguments is None:
                 Arguments = ['-v', 'quiet', '-print_format', 'json', '-show_format', '-show_streams']
             
-            # Use the original file path with proper quoting for special characters
-            # Use just 'ffprobe' since it's in PATH, and only quote the file path
-            CommandString = 'ffprobe'
+            # Use the project-bundled FFprobe path with proper quoting for special characters
+            CommandString = f'"{self.FFprobePath}"'
             for Arg in Arguments:
                 CommandString += f' {Arg}'
-            CommandString += f' "{FilePath}"'
+            # Ensure file path is properly quoted and normalized
+            NormalizedPath = os.path.normpath(FilePath)
+            CommandString += f' "{NormalizedPath}"'
             
-            LoggingService.LogInfo(f"Executing FFprobe command: {CommandString}", 'ExecuteFFprobe', 'FFmpegService')
             
             Result = subprocess.run(
                 CommandString,
@@ -150,8 +159,6 @@ class FFmpegService:
             if not ResultDict['Success']:
                 ResultDict['ErrorMessage'] = f"FFprobe failed: ReturnCode={Result.returncode}, Error={Result.stderr}"
                 LoggingService.LogError(f"FFprobe failed for {FilePath}: ReturnCode={Result.returncode}, Error={Result.stderr}", 'FFmpegService', 'ExecuteFFprobe')
-            else:
-                LoggingService.LogInfo(f"FFprobe succeeded for {FilePath}", 'ExecuteFFprobe', 'FFmpegService')
             
             return ResultDict
             
@@ -176,7 +183,7 @@ class FFmpegService:
                 'Command': CommandString
             }
     
-    def ExecuteFFmpegCommand(self, Arguments: List[str], ProgressCallback=None, WorkingDirectory: str = None) -> Dict[str, Any]:
+    def ExecuteFFmpegCommand(self, Arguments: List[str], ProgressCallback=None) -> Dict[str, Any]:
         """Execute FFmpeg command with optional real-time progress monitoring."""
         try:
             if not self.FFmpegPath:
@@ -189,15 +196,14 @@ class FFmpegService:
             
             # Add progress reporting if callback is provided
             if ProgressCallback:
-                # Insert -progress pipe:1 before the output file
-                Command = [self.FFmpegPath] + Arguments[:-1] + ['-progress', 'pipe:1'] + Arguments[-1:]
+                # Insert -progress pipe:2 before the output file (send to stderr)
+                Command = [self.FFmpegPath] + Arguments[:-1] + ['-progress', 'pipe:2'] + Arguments[-1:]
             else:
                 Command = [self.FFmpegPath] + Arguments
             
-            LoggingService.LogInfo(f"Executing FFmpeg command: {' '.join(Command)}", 'ExecuteFFmpegCommand', 'FFmpegService')
             
             if ProgressCallback:
-                return self._ExecuteFFmpegWithProgress(Command, ProgressCallback, WorkingDirectory)
+                return self._ExecuteFFmpegWithProgress(Command, ProgressCallback)
             else:
                 Result = subprocess.run(
                     Command,
@@ -205,8 +211,7 @@ class FFmpegService:
                     text=True,
                     timeout=300,  # 5 minute timeout for FFmpeg operations
                     encoding='utf-8',
-                    errors='replace',
-                    cwd=WorkingDirectory
+                    errors='replace'
                 )
                 
                 return {
@@ -233,124 +238,150 @@ class FFmpegService:
                 'Error': str(e)
             }
 
-    def _ExecuteFFmpegWithProgress(self, Command: List[str], ProgressCallback, WorkingDirectory: str = None) -> Dict[str, Any]:
-        """Execute FFmpeg command with real-time progress monitoring using simple direct stdout reading."""
+    def _ExecuteFFmpegWithProgress(self, Command: List[str], ProgressCallback) -> Dict[str, Any]:
+        """Execute FFmpeg command with real-time progress monitoring."""
+        import threading
+        import time
+        
         try:
-            # Start FFmpeg process with progress output to stdout (redirect stderr to stdout like TestFfmpeg.py)
-            Process = subprocess.Popen(
+            # Start FFmpeg process with progress output to stdout
+            process = subprocess.Popen(
                 Command,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,  # Redirect stderr to stdout like TestFfmpeg.py
+                stderr=subprocess.PIPE,
                 text=True,
                 encoding='utf-8',
-                errors='replace',
-                cwd=WorkingDirectory
+                errors='replace'
             )
             
-            # Store all FFmpeg output
+            # Store all FFmpeg output for debugging
             AllOutput = []
             
-            # Progress data tracking
-            ProgressData = {'frame': 0, 'fps': 0, 'bitrate': 0, 'time': 0, 'speed': 0, 'duration': 0, 'total_frames': 0}
-            LineCount = 0
+            # Get input file duration first
+            InputDuration = self.GetInputFileDuration(Command)
             
-            LoggingService.LogInfo("Starting direct FFmpeg progress reading", '_ExecuteFFmpegWithProgress', 'FFmpegService')
+            # Thread to read progress updates
+            ProgressData = {'frame': 0, 'fps': 0, 'bitrate': 0, 'time': 0, 'speed': 0, 'duration': InputDuration}
             
-            # Read FFmpeg output directly - no threading, simple approach from TestFfmpeg.py
-            while True:
-                Line = Process.stdout.readline()
-                if not Line:
-                    break
+            def progress_reader():
+                import time
                 
-                Line = Line.strip()
-                LineCount += 1
+                lineCount = 0
                 
-                # Store all output
-                AllOutput.append(f"STDOUT: {Line}")
-                
-                # Parse progress lines using simple approach from TestFfmpeg.py
-                if Line.startswith("frame=") or Line.startswith("fps=") or Line.startswith("bitrate=") or Line.startswith("time="):
-                    LoggingService.LogInfo(f"FFmpeg progress line #{LineCount}: {Line}", '_ExecuteFFmpegWithProgress', 'FFmpegService')
+                while True:
+                    if process.poll() is not None:
+                        break
                     
-                    # Simple parsing - extract key=value pairs
-                    if '=' in Line:
-                        Key, Value = Line.split('=', 1)
-                        Key = Key.strip()
-                        Value = Value.strip()
+                    line = process.stderr.readline()
+                    if not line:
+                        LoggingService.LogDebug(f"No more lines from stderr, breaking. Total lines read: {lineCount}", '_ExecuteFFmpegWithProgress', 'FFmpegService')
+                        break
+                    
+                    line = line.strip()
+                    lineCount += 1
+                    
+                    # Store all output for debugging
+                    AllOutput.append(f"STDERR: {line}")
+                    
+                    # Log raw FFmpeg output for debugging (only at debug level)
+                    LoggingService.LogDebug(f"Raw FFmpeg line #{lineCount}: '{line}'", '_ExecuteFFmpegWithProgress', 'FFmpegService')
+                    
+                    # Parse FFmpeg progress line - it contains multiple key=value pairs
+                    # Example: frame=41923 fps=173 q=32.3 Lsize=98359KiB time=00:23:17.43 bitrate=576.6kbits/s speed=5.76x
+                    if '=' in line and ('frame=' in line or 'fps=' in line or 'time=' in line):
+                        # Split by spaces and parse each key=value pair
+                        parts = line.split()
+                        for part in parts:
+                            if '=' in part:
+                                key, value = part.split('=', 1)
+                                key = key.strip()
+                                value = value.strip()
+                                
+                                # Log each key-value pair for debugging
+                                LoggingService.LogDebug(f"FFmpeg progress: {key} = {value}", '_ExecuteFFmpegWithProgress', 'FFmpegService')
+                                
+                                if key == 'frame':
+                                    ProgressData['frame'] = int(value) if value.isdigit() else 0
+                                elif key == 'fps':
+                                    ProgressData['fps'] = float(value) if value.replace('.', '').isdigit() else 0
+                                elif key == 'bitrate':
+                                    ProgressData['bitrate'] = value
+                                elif key == 'time' or key == 'out_time':
+                                    ProgressData['time'] = value
+                                elif key == 'speed':
+                                    ProgressData['speed'] = value
+                                elif key == 'total_size' or key == 'Lsize':
+                                    ProgressData['total_size'] = value
+                                elif key == 'duration':
+                                    # Parse duration in seconds
+                                    try:
+                                        if ':' in value:
+                                            # Format: HH:MM:SS.mmm
+                                            parts = value.split(':')
+                                            if len(parts) == 3:
+                                                hours = int(parts[0])
+                                                minutes = int(parts[1])
+                                                seconds = float(parts[2])
+                                                ProgressData['duration'] = hours * 3600 + minutes * 60 + seconds
+                                        else:
+                                            # Format: seconds
+                                            ProgressData['duration'] = float(value)
+                                    except:
+                                        ProgressData['duration'] = 0
                         
-                        # Update progress data
-                        if Key == 'frame':
-                            ProgressData['frame'] = int(Value) if Value.isdigit() else 0
-                        elif Key == 'fps':
-                            ProgressData['fps'] = float(Value) if Value.replace('.', '').isdigit() else 0
-                        elif Key == 'bitrate':
-                            ProgressData['bitrate'] = Value
-                        elif Key == 'time':
-                            ProgressData['time'] = Value
-                        elif Key == 'speed':
-                            ProgressData['speed'] = Value
-                        elif Key == 'duration':
-                            # Parse duration in seconds
+                        # Calculate progress percentage and ETA
+                        ProgressData['ProgressPercent'] = 0.0
+                        ProgressData['ETA'] = "Unknown"
+                        
+                        if ProgressData['time'] and ProgressData['duration'] and ProgressData['duration'] > 0:
                             try:
-                                if ':' in Value:
-                                    # Format: HH:MM:SS.mmm
-                                    Parts = Value.split(':')
-                                    if len(Parts) == 3:
-                                        Hours = int(Parts[0])
-                                        Minutes = int(Parts[1])
-                                        Seconds = float(Parts[2])
-                                        ProgressData['duration'] = Hours * 3600 + Minutes * 60 + Seconds
-                                else:
-                                    # Format: seconds
-                                    ProgressData['duration'] = float(Value)
+                                # Parse current time (format: HH:MM:SS.mmm)
+                                current_time_seconds = self.ParseTimeToSeconds(ProgressData['time'])
+                                if current_time_seconds > 0:
+                                    ProgressData['ProgressPercent'] = min(100.0, (current_time_seconds / ProgressData['duration']) * 100.0)
+                                    
+                                    # Calculate ETA
+                                    if ProgressData['speed'] and 'x' in ProgressData['speed']:
+                                        try:
+                                            speed_multiplier = float(ProgressData['speed'].replace('x', ''))
+                                            if speed_multiplier > 0:
+                                                remaining_seconds = (ProgressData['duration'] - current_time_seconds) / speed_multiplier
+                                                ProgressData['ETA'] = self.FormatSecondsToTime(remaining_seconds)
+                                        except:
+                                            pass
                             except:
-                                ProgressData['duration'] = 0
+                                pass
                         
-                        # Call progress callback immediately for each progress line
+                        # Call progress callback with calculated data
                         if ProgressCallback:
-                            ProgressDataWithOutput = ProgressData.copy()
-                            ProgressDataWithOutput['FFmpegOutput'] = '\n'.join(AllOutput)
-                            LoggingService.LogInfo(f"CALLING PROGRESS CALLBACK: {ProgressDataWithOutput}", '_ExecuteFFmpegWithProgress', 'FFmpegService')
-                            ProgressCallback(ProgressDataWithOutput)
-                            LoggingService.LogInfo("PROGRESS CALLBACK COMPLETED", '_ExecuteFFmpegWithProgress', 'FFmpegService')
-                
-                # Extract total frame count from FFmpeg metadata (only once)
-                elif 'NUMBER_OF_FRAMES-eng:' in Line and ProgressData['total_frames'] == 0:
-                    try:
-                        # Extract frame count from line like "NUMBER_OF_FRAMES-eng: 85481"
-                        FrameCountStr = Line.split('NUMBER_OF_FRAMES-eng:')[1].strip()
-                        ProgressData['total_frames'] = int(FrameCountStr)
-                        LoggingService.LogInfo(f"Extracted total frame count: {ProgressData['total_frames']}", '_ExecuteFFmpegWithProgress', 'FFmpegService')
-                    except:
-                        LoggingService.LogWarning(f"Failed to parse total frame count from line: {Line}", '_ExecuteFFmpegWithProgress', 'FFmpegService')
-                else:
-                    # Log non-progress lines for debugging
-                    LoggingService.LogDebug(f"FFmpeg line #{LineCount}: {Line}", '_ExecuteFFmpegWithProgress', 'FFmpegService')
+                            ProgressCallback(ProgressData)
             
-            # Get any remaining output
-            Stdout, Stderr = Process.communicate()
+            # Start progress reader thread
+            ProgressThread = threading.Thread(target=progress_reader)
+            ProgressThread.daemon = True
+            ProgressThread.start()
             
-            # Add stderr to output collection
-            if Stderr:
-                AllOutput.append(f"STDERR: {Stderr}")
+            # Wait for process to complete without consuming stdout (let progress reader handle it)
+            process.wait()
+            
+            # Wait for progress thread to finish
+            ProgressThread.join(timeout=5)
             
             # Send final progress update
             if ProgressCallback:
+                LoggingService.LogDebug(f"Sending final progress update: {ProgressData}", '_ExecuteFFmpegWithProgress', 'FFmpegService')
                 FinalProgressData = ProgressData.copy()
                 FinalProgressData['FFmpegOutput'] = '\n'.join(AllOutput)
-                LoggingService.LogInfo(f"FINAL PROGRESS UPDATE: {FinalProgressData}", '_ExecuteFFmpegWithProgress', 'FFmpegService')
                 ProgressCallback(FinalProgressData)
             
-            # Combine all output
+            # Combine all output for debugging
             CombinedOutput = '\n'.join(AllOutput)
             
-            LoggingService.LogInfo(f"FFmpeg process completed. Total lines read: {LineCount}, Return code: {Process.returncode}", '_ExecuteFFmpegWithProgress', 'FFmpegService')
-            
             return {
-                'Success': Process.returncode == 0,
-                'Output': Stdout,
-                'Error': Stderr,
-                'ReturnCode': Process.returncode,
+                'Success': process.returncode == 0,
+                'Output': CombinedOutput,  # Use the collected output instead of stdout
+                'Error': '',  # stderr is captured in AllOutput
+                'ReturnCode': process.returncode,
                 'AllOutput': CombinedOutput
             }
             
@@ -362,6 +393,65 @@ class FFmpegService:
                 'Output': '',
                 'Error': str(e)
             }
+    
+    def GetInputFileDuration(self, Command: List[str]) -> float:
+        """Get the duration of the input file in seconds."""
+        try:
+            # Find the input file (usually after -i)
+            InputFile = None
+            for i, arg in enumerate(Command):
+                if arg == '-i' and i + 1 < len(Command):
+                    InputFile = Command[i + 1]
+                    break
+            
+            if not InputFile:
+                LoggingService.LogWarning("No input file found in FFmpeg command", 'GetInputFileDuration', 'FFmpegService')
+                return 0.0
+            
+            # Use ffprobe to get duration
+            ProbeCommand = [
+                self.FFprobePath,
+                '-v', 'quiet',
+                '-show_entries', 'format=duration',
+                '-of', 'csv=p=0',
+                InputFile
+            ]
+            
+            Result = subprocess.run(ProbeCommand, capture_output=True, text=True, timeout=30)
+            if Result.returncode == 0 and Result.stdout.strip():
+                Duration = float(Result.stdout.strip())
+                return Duration
+            else:
+                LoggingService.LogWarning(f"Failed to get duration for {InputFile}: {Result.stderr}", 'GetInputFileDuration', 'FFmpegService')
+                return 0.0
+                
+        except Exception as e:
+            LoggingService.LogException("Exception getting input file duration", e, 'GetInputFileDuration', 'FFmpegService')
+            return 0.0
+    
+    def ParseTimeToSeconds(self, TimeString: str) -> float:
+        """Parse time string (HH:MM:SS.mmm) to seconds."""
+        try:
+            if ':' in TimeString:
+                parts = TimeString.split(':')
+                if len(parts) == 3:
+                    hours = int(parts[0])
+                    minutes = int(parts[1])
+                    seconds = float(parts[2])
+                    return hours * 3600 + minutes * 60 + seconds
+            return float(TimeString)
+        except:
+            return 0.0
+    
+    def FormatSecondsToTime(self, Seconds: float) -> str:
+        """Format seconds to HH:MM:SS time string."""
+        try:
+            hours = int(Seconds // 3600)
+            minutes = int((Seconds % 3600) // 60)
+            seconds = int(Seconds % 60)
+            return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+        except:
+            return "00:00:00"
     
     def ExecuteFFmpeg(self, Arguments: List[str], InputFile: str = None, OutputFile: str = None) -> Dict[str, Any]:
         """Execute FFmpeg command and return results."""
@@ -483,10 +573,8 @@ class FFmpegService:
             # Execute FFmpeg command
             Result = self.ExecuteFFmpeg(Arguments, OutputFile=OutputFilePath)
             
-            if Result['Success']:
-                LoggingService.LogInfo(f"Successfully added MediaVortex title: {MediaVortexTitle}", 'AddMediaVortexTitle', 'FFmpegService')
-            else:
-                LoggingService.LogWarning(f"Failed to add MediaVortex title: {Result.get('ErrorMessage', '', 'Unknown error')}", 'FFmpegService', 'AddMediaVortexTitle')
+            if not Result['Success']:
+                LoggingService.LogWarning(f"Failed to add MediaVortex title: {Result.get('ErrorMessage', 'Unknown error')}", 'FFmpegService', 'AddMediaVortexTitle')
             
             return Result
             

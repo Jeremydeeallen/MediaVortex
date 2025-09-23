@@ -13,6 +13,7 @@ from Services.FFmpegComparisonService import FFmpegComparisonService
 from Services.QueueManagementBusinessService import QueueManagementBusinessService
 from Services.LoggingService import LoggingService
 from Services.FileManagerService import FileManagerService
+from Services.VMAFQueueBusinessService import VMAFQueueBusinessService
 
 
 class TranscodingBusinessService:
@@ -27,6 +28,7 @@ class TranscodingBusinessService:
         self.QualityService = FFmpegComparisonService()
         self.QueueManagementService = QueueManagementServiceInstance or QueueManagementBusinessService(self.DatabaseManager)
         self.FileManager = FileManagerService()
+        self.VMAFQueueService = VMAFQueueBusinessService(self.DatabaseManager)
         self.IsRunning = False
         self.CurrentJob = None
         self.QualityThreshold = 90.0
@@ -120,7 +122,10 @@ class TranscodingBusinessService:
             
         except Exception as e:
             LoggingService.LogException("Exception processing transcoding queue", e, "TranscodingBusinessService", "ProcessTranscodingQueue")
+        finally:
+            # Always reset the running flag when queue processing completes
             self.IsRunning = False
+            LoggingService.LogInfo("Transcoding process stopped - IsRunning flag reset", "TranscodingBusinessService", "ProcessTranscodingQueue")
     
     def ProcessTranscodingJob(self, QueueItem: TranscodeQueueModel) -> Dict[str, Any]:
         """Process a single transcoding job."""
@@ -192,6 +197,7 @@ class TranscodingBusinessService:
                 
                 # Update transcode file record
                 transcodeFile.SuccessfullyTranscoded = True
+                transcodeFile.AllQualitiesFailed = False  # Clear the failed flag on success
                 transcodeFile.SuccessDate = datetime.now()
                 transcodeFile.FinalQuality = qualitySettings.get("VideoBitrateKbps", 2000)
                 transcodeFile.FinalSizeBytes = transcodeAttempt.NewSizeBytes if transcodeAttempt else 0
@@ -202,10 +208,12 @@ class TranscodingBusinessService:
                 # Update queue item
                 QueueItem.Status = "Completed"
                 
-                
                 # Save updated records
                 self.DatabaseManager.SaveTranscodeFile(transcodeFile)
                 self.DatabaseManager.SaveTranscodeQueueItem(QueueItem)
+                
+                # Remove completed item from queue (success or failure, we track outcome in TranscodeAttempts)
+                self.QueueManagementService.RemoveJobFromQueue(QueueItem.Id)
                 
                 result = {
                     "Success": True,
@@ -246,11 +254,11 @@ class TranscodingBusinessService:
                     AttemptDate=datetime.now(),
                     Quality=0,  # No quality for failed attempts
                     OldSizeBytes=QueueItem.SizeBytes,
-                    Success=False,
+                    Success=False,  # This is an actual failure, not in-progress
                     ErrorMessage=ErrorMessage
                 )
             else:
-                Attempt.Success = False
+                Attempt.Success = False  # This is an actual failure, not in-progress
                 Attempt.ErrorMessage = ErrorMessage
             
             # Save attempt record
@@ -261,11 +269,11 @@ class TranscodingBusinessService:
             TranscodeFile.TotalAttempts += 1
             TranscodeFile.LastAttemptDate = datetime.now()
             
-            # Handle configuration errors differently - remove from queue permanently
+            # Handle configuration errors differently - mark as failed
             if isConfigurationError:
                 TranscodeFile.AllQualitiesFailed = True
                 QueueItem.Status = "Failed"
-                LoggingService.LogError(f"Configuration error for {QueueItem.FileName}: {ErrorMessage}. Removing from queue permanently.", "TranscodingBusinessService", "HandleJobFailure")
+                LoggingService.LogError(f"Configuration error for {QueueItem.FileName}: {ErrorMessage}. Removing from queue.", "TranscodingBusinessService", "HandleJobFailure")
             else:
                 # Check if we should mark as all qualities failed for non-configuration errors
                 if TranscodeFile.TotalAttempts >= 3:  # Configurable threshold
@@ -273,12 +281,15 @@ class TranscodingBusinessService:
                     QueueItem.Status = "Failed"
                     LoggingService.LogWarning(f"Marking {QueueItem.FileName} as all qualities failed after {TranscodeFile.TotalAttempts} attempts", "TranscodingBusinessService", "HandleJobFailure")
                 else:
-                    QueueItem.Status = "Pending"  # Retry later
-                    LoggingService.LogInfo(f"Job {QueueItem.FileName} will be retried (attempt {TranscodeFile.TotalAttempts})", "TranscodingBusinessService", "HandleJobFailure")
+                    QueueItem.Status = "Failed"  # Still remove from queue, but mark for potential retry later
+                    LoggingService.LogInfo(f"Job {QueueItem.FileName} failed (attempt {TranscodeFile.TotalAttempts}) - removing from queue", "TranscodingBusinessService", "HandleJobFailure")
             
             # Save updated records
             self.DatabaseManager.SaveTranscodeFile(TranscodeFile)
             self.DatabaseManager.SaveTranscodeQueueItem(QueueItem)
+            
+            # Remove from queue regardless of success or failure - outcome is tracked in TranscodeAttempts
+            self.QueueManagementService.RemoveJobFromQueue(QueueItem.Id)
             
             result = {
                 "Success": False,
@@ -611,7 +622,7 @@ class TranscodingBusinessService:
                 VideoBitrateKbps=QualitySettings.get('VideoBitrateKbps'),
                 ProfileName=QualitySettings.get('ProfileName'),
                 FfpmpegCommand=ffmpegCommand,
-                Success=False  # Will be updated after transcode
+                Success=None  # Will be updated after transcode and quality analysis
             )
             
             # Save initial attempt to database
@@ -626,18 +637,32 @@ class TranscodingBusinessService:
             useMultiPass = QualitySettings.get('UseMultiPass', False)
             
             if useMultiPass:
-                self._UpdateProgressPhase(initialAttempt.Id, "Multi-Pass Transcoding", f"Starting two-pass transcode of {fileName}")
+                self.UpdateProgressPhase(initialAttempt.Id, "Multi-Pass Transcoding", f"Starting two-pass transcode of {fileName}")
             else:
-                self._UpdateProgressPhase(initialAttempt.Id, "Transcoding", f"Starting single-pass transcode of {fileName}")
+                self.UpdateProgressPhase(initialAttempt.Id, "Transcoding", f"Starting single-pass transcode of {fileName}")
             
             # Create progress callback to update database
             def progress_callback(progress_data):
-                LoggingService.LogInfo(f"PROGRESS CALLBACK CALLED with data: {progress_data}", "TranscodingBusinessService", "ProcessTranscodingWorkflow")
                 try:
                     self._UpdateTranscodeProgress(initialAttempt.Id, progress_data)
-                    LoggingService.LogInfo("PROGRESS CALLBACK COMPLETED SUCCESSFULLY", "TranscodingBusinessService", "ProcessTranscodingWorkflow")
                 except Exception as e:
                     LoggingService.LogException("Exception in progress callback", e, "TranscodingBusinessService", "ProcessTranscodingWorkflow")
+            
+            # Insert initial progress record before transcoding starts
+            LoggingService.LogInfo(f"Inserting initial progress record for attempt {initialAttempt.Id}", "TranscodingBusinessService", "ProcessTranscodingWorkflow")
+            self.DatabaseManager.SaveTranscodeProgress(
+                initialAttempt.Id,
+                "Single Phase encode",  # CurrentPhase
+                0.0,                   # ProgressPercent
+                0,                     # CurrentFrame
+                0.0,                   # CurrentFPS
+                "0kbits/s",            # CurrentBitrate
+                "00:00:00",            # CurrentTime
+                "0x",                  # CurrentSpeed
+                "Unknown",             # ETA
+                0,                     # TotalFrames
+                0.0                    # AverageFPS
+            )
             
             transcodeResult = self.FFmpegService.TranscodeVideo(
                 sourceFilePath,
@@ -664,7 +689,7 @@ class TranscodingBusinessService:
                         # For single-pass failures, store output for the transcoding phase
                         self._UpdateFFmpegOutput(initialAttempt.Id, "Transcoding", FFmpegOutput)
                 
-                self._UpdateProgressPhase(initialAttempt.Id, "Failed", f"Transcode failed: {transcodeResult.get('ErrorMessage', 'Transcoding failed')}")
+                self.UpdateProgressPhase(initialAttempt.Id, "Failed", f"Transcode failed: {transcodeResult.get('ErrorMessage', 'Transcoding failed')}")
                 LoggingService.LogError(f"Transcode {fileName} failed: {transcodeResult.get('ErrorMessage', 'Transcoding failed')}", "TranscodingBusinessService", "ProcessTranscodingWorkflow")
                 return {
                     'Success': False,
@@ -692,75 +717,36 @@ class TranscodingBusinessService:
                     self._UpdateFFmpegOutput(initialAttempt.Id, "Transcoding", FFmpegOutput)
             
             LoggingService.LogInfo(f"Transcode {fileName} complete", "TranscodingBusinessService", "ProcessTranscodingWorkflow")
-            self._UpdateProgressPhase(initialAttempt.Id, "Transcoding Complete", f"Transcode of {fileName} completed successfully")
+            self.UpdateProgressPhase(initialAttempt.Id, "Transcoding Complete", f"Transcode of {fileName} completed successfully")
             
-            # Perform quality scoring
-            LoggingService.LogInfo(f"Starting quality scoring for {fileName}", "TranscodingBusinessService", "ProcessTranscodingWorkflow")
-            self._UpdateProgressPhase(initialAttempt.Id, "Testing Quality", f"Starting VMAF quality analysis for {fileName}")
-            qualityResult = self.QualityService.CreateVMAFComparison(
-                sourceFilePath,
-                outputFilePath,
-                os.path.join(directoryResult['MediaVortexTempDir'], "VMAFResults.json")
-            )
+            # Mark transcoding phase as complete in TranscodeProgress table
+            self.MarkTranscodeProgressComplete(initialAttempt.Id)
             
-            if not qualityResult.Success:
-                # Quality scoring failed - update attempt with error
-                initialAttempt.ErrorMessage = 'Quality scoring failed'
-                self.DatabaseManager.SaveTranscodeAttempt(initialAttempt)
-                self._UpdateProgressPhase(initialAttempt.Id, "Quality Test Failed", f"VMAF quality analysis failed for {fileName}")
-                LoggingService.LogError(f"Quality scoring failed for {fileName}", "TranscodingBusinessService", "ProcessTranscodingWorkflow")
+            # Add transcoded file to VMAF queue for quality analysis
+            LoggingService.LogInfo(f"Adding {fileName} to VMAF queue for quality analysis", "TranscodingBusinessService", "ProcessTranscodingWorkflow")
+            # Pass the true original path (T:\) and transcoded path (C:\MediaVortex\)
+            vmafQueueResult = self.AddToVMAFQueue(initialAttempt.Id, QueueItem.FilePath, outputFilePath)
+            
+            if not vmafQueueResult.get("Success", False):
+                LoggingService.LogError(f"Failed to add {fileName} to VMAF queue: {vmafQueueResult.get('ErrorMessage', 'Unknown error')}", "TranscodingBusinessService", "ProcessTranscodingWorkflow")
                 return {
                     'Success': False,
                     'Status': 'failed',
-                    'ErrorMessage': 'Quality scoring failed',
+                    'ErrorMessage': f'Failed to add to VMAF queue: {vmafQueueResult.get("ErrorMessage", "Unknown error")}',
                     'TranscodeAttemptId': attemptId
                 }
             
-            # Quality scoring succeeded - update attempt with VMAF score
-            initialAttempt.VMAF = qualityResult.VMAFScore
-            self.DatabaseManager.SaveTranscodeAttempt(initialAttempt)
+            LoggingService.LogInfo(f"Successfully added {fileName} to VMAF queue with ID: {vmafQueueResult.get('VMAFQueueId')}", "TranscodingBusinessService", "ProcessTranscodingWorkflow")
             
-            LoggingService.LogInfo(f"Quality scoring complete for {fileName}: VMAF Score = {qualityResult.VMAFScore:.2f}", "TranscodingBusinessService", "ProcessTranscodingWorkflow")
-            self._UpdateProgressPhase(initialAttempt.Id, "Quality Test Complete", f"VMAF score: {qualityResult.VMAFScore:.2f} for {fileName}")
-            
-            # Check quality threshold
-            if qualityResult.VMAFScore >= self.QualityThreshold:
-                LoggingService.LogInfo(f"Quality threshold passed for {fileName} (VMAF: {qualityResult.VMAFScore:.2f} >= {self.QualityThreshold})", "TranscodingBusinessService", "ProcessTranscodingWorkflow")
-                self._UpdateProgressPhase(initialAttempt.Id, "Finalizing", f"Quality passed ({qualityResult.VMAFScore:.2f}), replacing original file")
-                # Quality passed - process file replacement
-                replacementResult = self.ProcessFileReplacement(
-                    QueueItem.FilePath,  # Original file path
-                    outputFilePath,      # Transcoded file path
-                    initialAttempt,      # Use existing TranscodeAttempt
-                    qualityResult.VMAFScore,
-                    sourceFilePath      # Source file to clean up
-                )
-                
-                if replacementResult.get('Success', False):
-                    LoggingService.LogInfo(f"File replacement complete for {fileName}", "TranscodingBusinessService", "ProcessTranscodingWorkflow")
-                    LoggingService.LogInfo(f"Transcode {fileName} completed successfully (VMAF: {qualityResult.VMAFScore:.2f})", "TranscodingBusinessService", "ProcessTranscodingWorkflow")
-                    self._UpdateProgressPhase(initialAttempt.Id, "Completed", f"Transcode completed successfully (VMAF: {qualityResult.VMAFScore:.2f})")
-                    return {
-                        'Success': True,
-                        'Status': 'completed',
-                        'VMAFScore': qualityResult.VMAFScore,
-                        'OutputFilePath': outputFilePath,
-                        'TranscodeAttempt': replacementResult.get('TranscodeAttempt')
-                    }
-                else:
-                    LoggingService.LogError(f"File replacement failed for {fileName}: {replacementResult.get('ErrorMessage', 'Unknown error')}", "TranscodingBusinessService", "ProcessTranscodingWorkflow")
-                    self._UpdateProgressPhase(initialAttempt.Id, "Failed", f"File replacement failed: {replacementResult.get('ErrorMessage', 'Unknown error')}")
-                    return replacementResult
-            else:
-                # Quality failed
-                LoggingService.LogWarning(f"Quality threshold failed for {fileName} (VMAF: {qualityResult.VMAFScore:.2f} < {self.QualityThreshold})", "TranscodingBusinessService", "ProcessTranscodingWorkflow")
-                self._UpdateProgressPhase(initialAttempt.Id, "Failed", f"Quality threshold failed (VMAF: {qualityResult.VMAFScore:.2f} < {self.QualityThreshold})")
-                return {
-                    'Success': False,
-                    'Status': 'failed',
-                    'VMAFScore': qualityResult.VMAFScore,
-                    'ErrorMessage': f'Quality score {qualityResult.VMAFScore} below threshold {self.QualityThreshold}'
-                }
+            # Transcoding is complete - VMAF analysis will be handled separately
+            return {
+                'Success': True,
+                'Status': 'transcoding_complete',
+                'TranscodeAttemptId': attemptId,
+                'OutputFilePath': outputFilePath,
+                'VMAFQueueId': vmafQueueResult.get('VMAFQueueId'),
+                'Message': f'Transcoding completed successfully. File added to VMAF queue for quality analysis.'
+            }
                 
         except Exception as e:
             LoggingService.LogException("Exception in transcoding workflow", e, "TranscodingBusinessService", "ProcessTranscodingWorkflow")
@@ -774,52 +760,50 @@ class TranscodingBusinessService:
         """Update transcoding progress in the database."""
         try:
             # Extract progress information
-            Frame = ProgressData.get('frame', 0)
-            FPS = ProgressData.get('fps', 0)
-            Bitrate = ProgressData.get('bitrate', '0kbits/s')
-            Time = ProgressData.get('time', '00:00:00')
-            Speed = ProgressData.get('speed', '0x')
+            frame = ProgressData.get('frame', 0)
+            fps = ProgressData.get('fps', 0)
+            bitrate = ProgressData.get('bitrate', '0kbits/s')
+            time = ProgressData.get('time', '00:00:00')
+            speed = ProgressData.get('speed', '0x')
             
             # Get FFmpeg output from progress data if available
             if 'FFmpegOutput' in ProgressData:
                 FFmpegOutput = ProgressData['FFmpegOutput']
             
-            # Calculate percentage based on frame count (more accurate than duration)
-            ProgressPercent = 0
-            TotalFrames = ProgressData.get('total_frames', 0)
-            if TotalFrames > 0 and Frame > 0:
-                ProgressPercent = min(95, int((Frame / TotalFrames) * 100))
-            elif 'duration' in ProgressData and ProgressData['duration'] > 0:
-                # Fallback to duration-based calculation if frame count not available
-                CurrentTime = self._ParseTimeToSeconds(Time)
-                ProgressPercent = min(95, int((CurrentTime / ProgressData['duration']) * 100))
+            # Calculate percentage if we have duration info
+            progress_percent = 0
+            if 'duration' in ProgressData and ProgressData['duration'] > 0:
+                current_time = self._ParseTimeToSeconds(time)
+                progress_percent = min(95, int((current_time / ProgressData['duration']) * 100))
             
             # Determine current phase based on progress data
-            CurrentPhase = "Transcoding"
+            current_phase = "Transcoding"
             if 'pass' in ProgressData:
                 if ProgressData['pass'] == 1:
-                    CurrentPhase = "Pass 1: Analysis"
+                    current_phase = "Pass 1: Analysis"
                 elif ProgressData['pass'] == 2:
-                    CurrentPhase = "Pass 2: Encoding"
+                    current_phase = "Pass 2: Encoding"
             
-            # Log progress information
-            LoggingService.LogInfo(f"Transcode progress (ID: {AttemptId}) - Phase: {CurrentPhase}, Progress: {ProgressPercent}%, Frame: {Frame}, FPS: {FPS}, Bitrate: {Bitrate}, Time: {Time}, Speed: {Speed}", "TranscodingBusinessService", "_UpdateTranscodeProgress")
             
-            # Save progress to database
-            LoggingService.LogInfo(f"WRITING TO DATABASE - AttemptId: {AttemptId}, Phase: {CurrentPhase}, Progress: {ProgressPercent}%", "TranscodingBusinessService", "_UpdateTranscodeProgress")
-            Result = self.DatabaseManager.SaveTranscodeProgress(
+            # Extract additional progress data
+            eta = ProgressData.get('ETA', 'Unknown')
+            total_frames = ProgressData.get('TotalFrames', 0)
+            average_fps = ProgressData.get('AverageFPS', 0.0)
+            
+            # Save progress to database with optimized single-record approach
+            result = self.DatabaseManager.SaveTranscodeProgress(
                 AttemptId,
-                CurrentPhase,
-                ProgressPercent,
-                Frame,
-                TotalFrames,  # TotalFrameCount
-                FPS,
-                Bitrate,
-                Time,
-                Speed,
-                FFmpegOutput
+                current_phase,
+                progress_percent,
+                frame,
+                fps,
+                bitrate,
+                time,
+                speed,
+                eta,
+                total_frames,
+                average_fps
             )
-            LoggingService.LogInfo(f"DATABASE WRITE COMPLETED - Result: {Result}", "TranscodingBusinessService", "_UpdateTranscodeProgress")
             
         except Exception as e:
             LoggingService.LogException("Exception updating transcode progress", e, "TranscodingBusinessService", "_UpdateTranscodeProgress")
@@ -839,7 +823,6 @@ class TranscodingBusinessService:
                     Phase,
                     CurrentProgress.get('ProgressPercent', 0),
                     CurrentProgress.get('CurrentFrame', 0),
-                    CurrentProgress.get('TotalFrameCount', 0),  # TotalFrameCount
                     CurrentProgress.get('CurrentFPS', 0.0),
                     CurrentProgress.get('CurrentBitrate', '0kbits/s'),
                     CurrentProgress.get('CurrentTime', '00:00:00'),
@@ -853,19 +836,42 @@ class TranscodingBusinessService:
         except Exception as e:
             LoggingService.LogException("Exception updating FFmpeg output", e, "TranscodingBusinessService", "_UpdateFFmpegOutput")
     
-    def _UpdateProgressPhase(self, AttemptId: int, Phase: str, Message: str = None) -> None:
+    def UpdateProgressPhase(self, AttemptId: int, Phase: str, Message: str = None) -> None:
         """Update the current phase of the transcoding process."""
         try:
             if Message:
-                LoggingService.LogInfo(f"Progress update (ID: {AttemptId}) - Phase: {Phase}, Message: {Message}", "TranscodingBusinessService", "_UpdateProgressPhase")
+                LoggingService.LogInfo(f"Progress update (ID: {AttemptId}) - Phase: {Phase}, Message: {Message}", "TranscodingBusinessService", "UpdateProgressPhase")
             else:
-                LoggingService.LogInfo(f"Progress update (ID: {AttemptId}) - Phase: {Phase}", "TranscodingBusinessService", "_UpdateProgressPhase")
+                LoggingService.LogInfo(f"Progress update (ID: {AttemptId}) - Phase: {Phase}", "TranscodingBusinessService", "UpdateProgressPhase")
             
             # Note: We could add a ProgressPhase column to the TranscodeAttempts table if needed
             # For now, we'll just log the phase information for monitoring
             
         except Exception as e:
-            LoggingService.LogException("Exception updating progress phase", e, "TranscodingBusinessService", "_UpdateProgressPhase")
+            LoggingService.LogException("Exception updating progress phase", e, "TranscodingBusinessService", "UpdateProgressPhase")
+    
+    def MarkTranscodeProgressComplete(self, AttemptId: int) -> None:
+        """Mark the transcoding progress as complete (100%) in the database."""
+        try:
+            LoggingService.LogInfo(f"Marking transcoding progress as complete for attempt {AttemptId}", "TranscodingBusinessService", "MarkTranscodeProgressComplete")
+            
+            # Update the latest progress record to 100% complete
+            self.DatabaseManager.SaveTranscodeProgress(
+                AttemptId,
+                "Transcoding Complete",  # CurrentPhase
+                100.0,                   # ProgressPercent - Mark as complete
+                0,                       # CurrentFrame
+                0.0,                     # CurrentFPS
+                "0kbits/s",             # CurrentBitrate
+                "00:00:00",             # CurrentTime
+                "0x",                   # CurrentSpeed
+                "00:00:00",             # ETA - No time remaining
+                0,                      # TotalFrames
+                0.0                     # AverageFPS
+            )
+            
+        except Exception as e:
+            LoggingService.LogException("Exception marking transcode progress complete", e, "TranscodingBusinessService", "MarkTranscodeProgressComplete")
     
     def _ParseTimeToSeconds(self, TimeStr: str) -> float:
         """Parse time string (HH:MM:SS.mmm) to seconds."""
@@ -1109,3 +1115,24 @@ class TranscodingBusinessService:
         except Exception as e:
             LoggingService.LogException("Exception getting quality settings", e, "TranscodingBusinessService", "GetQualitySettingsForFile")
             return None
+    
+    def AddToVMAFQueue(self, TranscodeAttemptId: int, OriginalFilePath: str, TranscodedFilePath: str) -> Dict[str, Any]:
+        """Add a completed transcode to the VMAF queue for quality analysis."""
+        try:
+            LoggingService.LogFunctionEntry("AddToVMAFQueue", "TranscodingBusinessService", 
+                                          f"AttemptId: {TranscodeAttemptId}, File: {os.path.basename(OriginalFilePath)}")
+            
+            # Use the VMAF queue service to add the item
+            Result = self.VMAFQueueService.AddToVMAFQueue(
+                TranscodeAttemptId,
+                OriginalFilePath,
+                TranscodedFilePath,
+                self.QualityThreshold
+            )
+            
+            return Result
+            
+        except Exception as e:
+            ErrorMsg = f"Exception adding to VMAF queue: {str(e)}"
+            LoggingService.LogException(ErrorMsg, e, "TranscodingBusinessService", "AddToVMAFQueue")
+            return {"Success": False, "ErrorMessage": ErrorMsg}

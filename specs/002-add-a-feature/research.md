@@ -2,14 +2,21 @@
 
 ## Video Transcoding Library Selection
 
-### Decision: Switch from HandBrake CLI to FFmpeg with Python bindings
+### Decision: Use FFmpeg for transcoding and VMAF analysis
 **Rationale**: 
-- FFmpeg provides better Python integration through ffmpeg-python library
+- FFmpeg provides excellent transcoding capabilities with both CRF and multi-pass options
+- FFmpeg used for VMAF quality analysis (libvmaf filter)
+- Single tool for both transcoding and analysis reduces complexity
+- Better Python integration and error handling
 - More mature and widely used in production environments
-- Better error handling and progress tracking capabilities
-- No external HandBrake dependency required
-- Quality control (CRF) works similarly to HandBrake quality settings
-- More active development and community support
+
+**CRITICAL HANDLING RULE - CRF vs Multi-Pass Incompatibility**:
+- **CRF (Constant Rate Factor) and multi-pass are INCOMPATIBLE in FFmpeg**
+- CRF is single-pass quality-based encoding
+- Multi-pass is for bitrate-based encoding
+- **NEVER use both -crf and -b:v in the same command**
+- **Single-pass: Use -crf for quality-based encoding**
+- **Multi-pass: Use -b:v for bitrate-based encoding**
 
 **Alternatives considered**:
 - HandBrake CLI with subprocess: External dependency, limited Python integration
@@ -18,23 +25,20 @@
 - GStreamer: Powerful but complex setup and steep learning curve
 
 ### Quality Setting Implementation
-**Decision**: Use FFmpeg CRF (Constant Rate Factor) for quality control
+**Decision**: Use FFmpeg CRF (Constant Rate Factor) for single-pass quality control
 **Rationale**:
-- CRF provides same quality control as HandBrake quality setting
+- CRF provides precise quality control for single-pass encoding
 - Scale: CRF 18 (visually lossless) to CRF 30 (poor quality)
-- HandBrake quality 22 ≈ FFmpeg CRF 23 (good quality default)
+- CRF 22-25: Good quality range (default)
 - More precise control over encoding parameters
 - Industry standard for H.264/H.265 encoding
 
-**Quality Scale Conversion**:
-```python
-def ConvertHandBrakeQualityToFFmpegCRF(HandBrakeQuality: int) -> int:
-    if HandBrakeQuality <= 18: return 18      # Visually lossless
-    elif HandBrakeQuality <= 20: return 20    # High quality
-    elif HandBrakeQuality <= 22: return 23    # Good quality (default)
-    elif HandBrakeQuality <= 24: return 26    # Lower quality
-    else: return 30                           # Poor quality
-```
+**CRITICAL**: CRF is single-pass encoding - do NOT use with multi-pass parameters
+
+**Quality Scale**:
+- CRF 18-20: Visually lossless to high quality
+- CRF 22-25: Good quality (default range)
+- CRF 26-30: Lower quality to poor quality
 
 ## File Size-Based Queue Prioritization
 
@@ -213,3 +217,49 @@ def CategorizeResolution(Width: int, Height: int) -> str:
 - Keep original filename: Doesn't indicate resolution change
 - Timestamp-based naming: Unclear and confusing
 - Hash-based naming: No human-readable information
+
+## VMAF Quality Analysis Implementation
+
+### Decision: Use FFmpeg libvmaf filter for perceptual quality scoring
+**Rationale**:
+- VMAF (Video Multi-Method Assessment Fusion) provides industry-standard perceptual quality metrics
+- FFmpeg libvmaf filter integrates seamlessly with existing FFmpeg pipeline
+- Provides objective quality scores (0-100) for transcoded video comparison
+- Enables automated quality validation and optimization
+
+**Working Command Structure**:
+```bash
+ffmpeg -i "transcoded.mkv" -i "source.avi" -lavfi "[0:v]scale=1280x720,format=yuv420p[dist];[1:v]scale=1280x720,format=yuv420p[ref];[dist][ref]libvmaf=log_path=vmaf_results.json:log_fmt=json" -f null -
+```
+
+**Key Implementation Details**:
+- **Input order**: Transcoded file first, source file second
+- **Scaling**: Both inputs scaled to identical resolution (1280x720) for fair comparison
+- **Format conversion**: Both inputs converted to yuv420p for consistent processing
+- **Output**: JSON log file with detailed VMAF metrics
+- **Performance**: ~1.5x real-time processing speed
+
+**VMAF Score Interpretation**:
+- **90-100**: Excellent quality, imperceptible differences
+- **80-90**: High quality, minimal perceptible differences  
+- **70-80**: Good quality, some differences noticeable
+- **60-70**: Fair quality, differences clearly visible
+- **<60**: Poor quality, significant degradation
+
+**Test Results**:
+- **Sample VMAF Score**: 90.793227 (excellent quality)
+- **Processing Speed**: 1.52x real-time
+- **Frame Processing**: 45 fps vs 30 fps video
+- **Total Frames**: 41,923 frames processed successfully
+
+**Implementation Requirements**:
+- Parse JSON output for VMAF score extraction
+- Handle VMAF processing failures gracefully
+- Store VMAF scores in TranscodeAttempt table
+- Separate VMAF analysis from transcoding success/failure
+- Consider separate QualityVMAF queue for parallel processing
+
+**Alternatives considered**:
+- PSNR/SSIM: Less accurate perceptual quality metrics
+- Manual quality assessment: Not scalable or objective
+- No quality analysis: No validation of transcoding results

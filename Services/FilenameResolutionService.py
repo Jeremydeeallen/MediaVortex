@@ -72,8 +72,8 @@ class FilenameResolutionService:
                 fileNameWithoutExt = f"{fileNameWithoutExt}-{TargetResolution}"
                 LoggingService.LogInfo(f"No resolution found, appended {TargetResolution} to filename: {OriginalFileName}", 'GenerateOutputFilename', 'FilenameResolutionService')
             
-            # Construct new filename
-            newFileName = f"{fileNameWithoutExt}{fileExtension}"
+            # Construct new filename with .mkv extension for transcoded files
+            newFileName = f"{fileNameWithoutExt}.mkv"
             
             LoggingService.LogInfo(f"Generated output filename: {newFileName} from original: {OriginalFileName}", 'GenerateOutputFilename', 'FilenameResolutionService')
             return newFileName

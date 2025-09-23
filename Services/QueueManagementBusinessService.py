@@ -226,8 +226,18 @@ class QueueManagementBusinessService:
         
         resolution = Resolution.lower().strip()
         
+        # Handle VR resolutions first (more specific)
+        if "7680x3840" in resolution:
+            return "7680x3840"  # 360° VR
+        elif "3840x3840" in resolution:
+            return "3840x3840"  # 180° VR
+        elif "5760x2880" in resolution:
+            return "5760x2880"  # 360° VR (lower res)
+        elif "2880x2880" in resolution:
+            return "2880x2880"  # 180° VR (lower res)
+        
         # Handle common resolution formats
-        if "3840x2160" in resolution or "2160p" in resolution or "4k" in resolution:
+        elif "3840x2160" in resolution or "2160p" in resolution or "4k" in resolution:
             return "2160p"
         elif "1920x1080" in resolution or "1080p" in resolution:
             return "1080p"
@@ -530,7 +540,7 @@ class QueueManagementBusinessService:
             statistics["TotalQueueSizeMB"] = totalSizeMB
             statistics["TotalQueueSizeGB"] = totalSizeMB / 1024.0
             
-            LoggingService.LogInfo(f"Queue statistics: {statistics.get('TotalJobs', 0)} total jobs, {statistics.get('QueueSize', 0)} active", "QueueManagementBusinessService", "GetQueueStatistics")
+            # Reduced logging verbosity for routine queue statistics
             return statistics
             
         except Exception as e:

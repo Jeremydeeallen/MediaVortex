@@ -172,6 +172,7 @@ ProfileThresholds.FallbackVideoBitrateKbps	INTEGER
 ProfileThresholds.FallbackAudioBitrateKbps	INTEGER
 ProfileThresholds.TranscodeDownTo	TEXT
 ProfileThresholds.Quality	INTEGER
+ProfileThresholds.Codec	TEXT
 Profiles.Id	INTEGER
 Profiles.ProfileName	TEXT
 Profiles.Description	TEXT
@@ -240,15 +241,22 @@ TranscodeFiles.OriginalFilePath	TEXT
 TranscodeFiles.FinalFilePath	TEXT
 TranscodeProgress.Id	INTEGER
 TranscodeProgress.TranscodeAttemptId	INTEGER
+TranscodeProgress.PassNumber	INTEGER
+TranscodeProgress.PassType	TEXT
 TranscodeProgress.CurrentPhase	TEXT
-TranscodeProgress.ProgressPercent	INTEGER
+TranscodeProgress.ProgressPercent	REAL
 TranscodeProgress.CurrentFrame	INTEGER
+TranscodeProgress.TotalFrames	INTEGER
 TranscodeProgress.CurrentFPS	REAL
+TranscodeProgress.AverageFPS	REAL
 TranscodeProgress.CurrentBitrate	TEXT
 TranscodeProgress.CurrentTime	TEXT
+TranscodeProgress.ETA	TEXT
 TranscodeProgress.CurrentSpeed	TEXT
+TranscodeProgress.PassDuration	REAL
 TranscodeProgress.LastProgressUpdate	TIMESTAMP
-TranscodeProgress.FFmpegOutput	TEXT
+TranscodeProgress.HandBrakeOutput	TEXT
+TranscodeProgress.Status	TEXT
 TranscodeQueue.Id	INTEGER
 TranscodeQueue.FilePath	TEXT
 TranscodeQueue.FileName	TEXT
@@ -259,6 +267,33 @@ TranscodeQueue.Priority	INTEGER
 TranscodeQueue.Status	TEXT
 TranscodeQueue.DateAdded	TIMESTAMP
 TranscodeQueue.DateStarted	TIMESTAMP
+VMAFProgress.Id	INTEGER
+VMAFProgress.VMAFQueueId	INTEGER
+VMAFProgress.TranscodeAttemptId	INTEGER
+VMAFProgress.Status	TEXT
+VMAFProgress.ProgressPercentage	INTEGER
+VMAFProgress.CurrentStep	TEXT
+VMAFProgress.StartTime	DATETIME
+VMAFProgress.EndTime	DATETIME
+VMAFProgress.ErrorMessage	TEXT
+VMAFProgress.CreatedAt	DATETIME
+VMAFProgress.UpdatedAt	DATETIME
+VMAFProgress.ETA	TEXT
+VMAFQueue.Id	INTEGER
+VMAFQueue.TranscodeAttemptId	INTEGER
+VMAFQueue.OriginalFilePath	TEXT
+VMAFQueue.TranscodedFilePath	TEXT
+VMAFQueue.FileName	TEXT
+VMAFQueue.Status	TEXT
+VMAFQueue.Priority	INTEGER
+VMAFQueue.DateAdded	DATETIME
+VMAFQueue.DateStarted	DATETIME
+VMAFQueue.DateCompleted	DATETIME
+VMAFQueue.VMAFScore	REAL
+VMAFQueue.QualityThreshold	REAL
+VMAFQueue.ErrorMessage	TEXT
+VMAFQueue.RetryCount	INTEGER
+VMAFQueue.MaxRetries	INTEGER
 
 ### Indexes
 
@@ -294,9 +329,9 @@ RootFolders	sqlite_autoindex_RootFolders_1	1	u	0
 ScanJobs	sqlite_autoindex_ScanJobs_1	1	u	0
 SystemSettings	idx_SystemSettings_SettingKey	0	c	0
 SystemSettings	sqlite_autoindex_SystemSettings_1	1	u	0
-TranscodeAttempts	idx_TranscodeAttempts_Success	0	c	0
-TranscodeAttempts	idx_TranscodeAttempts_AttemptDate	0	c	0
 TranscodeAttempts	idx_TranscodeAttempts_FilePath	0	c	0
+TranscodeAttempts	idx_TranscodeAttempts_AttemptDate	0	c	0
+TranscodeAttempts	idx_TranscodeAttempts_Success	0	c	0
 TranscodeFiles	idx_TranscodeFiles_SuccessfullyTranscoded	0	c	0
 TranscodeFiles	idx_TranscodeFiles_FilePath	0	c	0
 TranscodeFiles	sqlite_autoindex_TranscodeFiles_1	1	u	0
@@ -307,6 +342,10 @@ TranscodeQueue	idx_TranscodeQueue_Priority	0	c	0
 TranscodeQueue	idx_TranscodeQueue_Status	0	c	0
 TranscodeQueue	idx_TranscodeQueue_FilePath	0	c	0
 TranscodeQueue	sqlite_autoindex_TranscodeQueue_1	1	u	0
+VMAFProgress	idx_VMAFProgress_StartTime	0	c	0
+VMAFProgress	idx_VMAFProgress_Status	0	c	0
+VMAFProgress	idx_VMAFProgress_TranscodeAttemptId	0	c	0
+VMAFProgress	idx_VMAFProgress_VMAFQueueId	0	c	0
 
 ### Index Columns
 
@@ -345,9 +384,9 @@ RootFolders	sqlite_autoindex_RootFolders_1	RootFolder	0
 ScanJobs	sqlite_autoindex_ScanJobs_1	JobId	0
 SystemSettings	idx_SystemSettings_SettingKey	SettingKey	0
 SystemSettings	sqlite_autoindex_SystemSettings_1	SettingKey	0
-TranscodeAttempts	idx_TranscodeAttempts_Success	Success	0
-TranscodeAttempts	idx_TranscodeAttempts_AttemptDate	AttemptDate	0
 TranscodeAttempts	idx_TranscodeAttempts_FilePath	FilePath	0
+TranscodeAttempts	idx_TranscodeAttempts_AttemptDate	AttemptDate	0
+TranscodeAttempts	idx_TranscodeAttempts_Success	Success	0
 TranscodeFiles	idx_TranscodeFiles_SuccessfullyTranscoded	SuccessfullyTranscoded	0
 TranscodeFiles	idx_TranscodeFiles_FilePath	FilePath	0
 TranscodeFiles	sqlite_autoindex_TranscodeFiles_1	FilePath	0
@@ -358,3 +397,7 @@ TranscodeQueue	idx_TranscodeQueue_Priority	Priority	0
 TranscodeQueue	idx_TranscodeQueue_Status	Status	0
 TranscodeQueue	idx_TranscodeQueue_FilePath	FilePath	0
 TranscodeQueue	sqlite_autoindex_TranscodeQueue_1	FilePath	0
+VMAFProgress	idx_VMAFProgress_StartTime	StartTime	0
+VMAFProgress	idx_VMAFProgress_Status	Status	0
+VMAFProgress	idx_VMAFProgress_TranscodeAttemptId	TranscodeAttemptId	0
+VMAFProgress	idx_VMAFProgress_VMAFQueueId	VMAFQueueId	0

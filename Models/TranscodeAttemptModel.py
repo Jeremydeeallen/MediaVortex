@@ -13,7 +13,7 @@ class TranscodeAttemptModel:
     Quality: int = 0
     OldSizeBytes: int = 0
     NewSizeBytes: int = 0
-    Success: bool = False
+    Success: Optional[bool] = None
     SizeReductionBytes: int = 0
     SizeReductionPercent: float = 0.0
     ErrorMessage: Optional[str] = None
