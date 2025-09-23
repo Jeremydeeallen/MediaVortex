@@ -122,7 +122,10 @@ class TranscodingBusinessService:
             
         except Exception as e:
             LoggingService.LogException("Exception processing transcoding queue", e, "TranscodingBusinessService", "ProcessTranscodingQueue")
+        finally:
+            # Always reset the running flag when queue processing completes
             self.IsRunning = False
+            LoggingService.LogInfo("Transcoding process stopped - IsRunning flag reset", "TranscodingBusinessService", "ProcessTranscodingQueue")
     
     def ProcessTranscodingJob(self, QueueItem: TranscodeQueueModel) -> Dict[str, Any]:
         """Process a single transcoding job."""
@@ -721,7 +724,8 @@ class TranscodingBusinessService:
             
             # Add transcoded file to VMAF queue for quality analysis
             LoggingService.LogInfo(f"Adding {fileName} to VMAF queue for quality analysis", "TranscodingBusinessService", "ProcessTranscodingWorkflow")
-            vmafQueueResult = self.AddToVMAFQueue(initialAttempt.Id, sourceFilePath, outputFilePath)
+            # Pass the true original path (T:\) and transcoded path (C:\MediaVortex\)
+            vmafQueueResult = self.AddToVMAFQueue(initialAttempt.Id, QueueItem.FilePath, outputFilePath)
             
             if not vmafQueueResult.get("Success", False):
                 LoggingService.LogError(f"Failed to add {fileName} to VMAF queue: {vmafQueueResult.get('ErrorMessage', 'Unknown error')}", "TranscodingBusinessService", "ProcessTranscodingWorkflow")

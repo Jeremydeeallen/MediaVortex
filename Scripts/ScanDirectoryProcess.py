@@ -258,11 +258,8 @@ class ScanDirectoryProcess:
 def main():
     """Main function for the scan process."""
     try:
-        print(f"ScanDirectoryProcess starting with args: {sys.argv}")
-        
         if len(sys.argv) < 2:
             ErrorMsg = f"Usage: ScanDirectoryProcess.py <JobId> [Recursive]. Got {len(sys.argv)} args: {sys.argv}"
-            print(ErrorMsg)
             LoggingService.LogError(ErrorMsg, 'main', 'ScanDirectoryProcess')
             sys.exit(1)
         
@@ -273,22 +270,18 @@ def main():
         RootFolderPath = os.environ.get('MEDIAVORTEX_ROOT_FOLDER_PATH')
         if not RootFolderPath:
             ErrorMsg = "MEDIAVORTEX_ROOT_FOLDER_PATH environment variable not set"
-            print(ErrorMsg)
             LoggingService.LogError(ErrorMsg, 'main', 'ScanDirectoryProcess')
             sys.exit(1)
         
-        print(f"Starting scan process - JobId: {JobId}, Path: {RootFolderPath}, Recursive: {Recursive}")
         LoggingService.LogInfo(f"Starting scan process - JobId: {JobId}, Path: {RootFolderPath}, Recursive: {Recursive}", 'ScanDirectoryProcess', 'main')
         
         Scanner = ScanDirectoryProcess(JobId, RootFolderPath, Recursive)
         Scanner.Run()
         
-        print(f"ScanDirectoryProcess completed successfully for job {JobId}")
         LoggingService.LogInfo(f"ScanDirectoryProcess completed successfully for job {JobId}", 'main', 'ScanDirectoryProcess')
         
     except Exception as e:
         ErrorMsg = f"Fatal error in scan process: {str(e)}"
-        print(ErrorMsg)
         LoggingService.LogException("Fatal error in scan process", e, 'main', 'ScanDirectoryProcess')
         sys.exit(1)
 

@@ -36,6 +36,75 @@
                 </div>
             </div>
         </div>
+
+        <!-- Scan Directory Management Section -->
+        <div class="card mt-4">
+            <div class="card-header bg-light" data-bs-toggle="collapse" data-bs-target="#ScanDirectorySection" style="cursor: pointer;">
+                <div class="d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">
+                        <i class="fas fa-folder-open"></i> Scan Directory Management
+                    </h5>
+                    <i class="fas fa-chevron-up"></i>
+                </div>
+            </div>
+            <div class="collapse show" id="ScanDirectorySection">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <h6 class="mb-0">Scan Directories</h6>
+                        <button class="btn btn-primary" onclick="ShowAddScanDirectoryModal()">
+                            <i class="fas fa-plus"></i> Add Scan Directory
+                        </button>
+                    </div>
+
+                    <!-- Scan Directories List -->
+                    <div id="ScanDirectoriesList">
+                        <!-- Scan directories will be loaded here -->
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- FFmpeg/FFprobe Path Management Section -->
+        <div class="card mt-4">
+            <div class="card-header bg-light" data-bs-toggle="collapse" data-bs-target="#FFmpegPathSection" style="cursor: pointer;">
+                <div class="d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">
+                        <i class="fas fa-video"></i> FFmpeg/FFprobe Path Management
+                    </h5>
+                    <i class="fas fa-chevron-up"></i>
+                </div>
+            </div>
+            <div class="collapse show" id="FFmpegPathSection">
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="FFmpegPath" class="form-label">FFmpeg Path (Relative to Project Root)</label>
+                                <input type="text" class="form-control" id="FFmpegPath" placeholder="FFmpegMaster\bin\ffmpeg.exe">
+                                <div class="form-text">Relative path from the project root directory</div>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="FFprobePath" class="form-label">FFprobe Path (Relative to Project Root)</label>
+                                <input type="text" class="form-control" id="FFprobePath" placeholder="FFmpegMaster\bin\ffprobe.exe">
+                                <div class="form-text">Relative path from the project root directory</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-12">
+                            <button class="btn btn-primary" onclick="SaveFFmpegPaths()">
+                                <i class="fas fa-save"></i> Save FFmpeg Paths
+                            </button>
+                            <button class="btn btn-secondary ms-2" onclick="TestFFmpegPaths()">
+                                <i class="fas fa-play"></i> Test Paths
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 </div>
 
@@ -130,7 +199,17 @@
                                     </select>
                                 </div>
                             </div>
-                            <small class="text-muted">If CRF is set, video bitrate fields are disabled</small>
+                            <div class="row g-2 mt-1">
+                                <div class="col-md-12">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="Grain480p">
+                                        <label class="form-check-label small" for="Grain480p">
+                                            Enable Grain Processing
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
+                            <small class="text-muted">Video bitrate sets the maximum bitrate limit when using CRF</small>
                         </div>
                     </div>
 
@@ -193,7 +272,17 @@
                                     </select>
                                 </div>
                             </div>
-                            <small class="text-muted">If CRF is set, video bitrate fields are disabled</small>
+                            <div class="row g-2 mt-1">
+                                <div class="col-md-12">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="Grain720p">
+                                        <label class="form-check-label small" for="Grain720p">
+                                            Enable Grain Processing
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
+                            <small class="text-muted">Video bitrate sets the maximum bitrate limit when using CRF</small>
                         </div>
                     </div>
 
@@ -257,7 +346,17 @@
                                     </select>
                                 </div>
                             </div>
-                            <small class="text-muted">If CRF is set, video bitrate fields are disabled</small>
+                            <div class="row g-2 mt-1">
+                                <div class="col-md-12">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="Grain1080p">
+                                        <label class="form-check-label small" for="Grain1080p">
+                                            Enable Grain Processing
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
+                            <small class="text-muted">Video bitrate sets the maximum bitrate limit when using CRF</small>
                         </div>
                     </div>
 
@@ -321,7 +420,17 @@
                                     </select>
                                 </div>
                             </div>
-                            <small class="text-muted">If CRF is set, video bitrate fields are disabled</small>
+                            <div class="row g-2 mt-1">
+                                <div class="col-md-12">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="Grain2160p">
+                                        <label class="form-check-label small" for="Grain2160p">
+                                            Enable Grain Processing
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
+                            <small class="text-muted">Video bitrate sets the maximum bitrate limit when using CRF</small>
                         </div>
                     </div>
                 </form>
@@ -335,6 +444,41 @@
         </div>
     </div>
 </div>
+
+<!-- Scan Directory Management Modal -->
+<div class="modal fade" id="ScanDirectoryModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Add Scan Directory</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="ScanDirectoryForm">
+                    <input type="hidden" id="ScanDirectoryKey">
+                    
+                    <div class="mb-3">
+                        <label for="ScanDirectoryPath" class="form-label">Directory Path</label>
+                        <input type="text" class="form-control" id="ScanDirectoryPath" placeholder="e.g., T:\ or C:\Movies" required>
+                        <div class="form-text">Enter the full path to the directory you want to scan for media files</div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="ScanDirectoryDescription" class="form-label">Description</label>
+                        <input type="text" class="form-control" id="ScanDirectoryDescription" placeholder="e.g., TV Shows, Movies, etc.">
+                        <div class="form-text">Optional description for this scan directory</div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="SaveScanDirectory()">
+                    <i class="fas fa-check"></i> Save Directory
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
@@ -342,13 +486,13 @@
 let CurrentProfile = null;
 let IsEditMode = false;
 
-// Load profiles on page load
+// Load profiles and scan directories on page load
 // Function to update bitrate fields state based on Quality field
 function UpdateBitrateFieldsState(resolution) {
     const qualityValue = $(`#Quality${resolution}`).val();
     const hasQuality = qualityValue && qualityValue.trim() !== '';
     
-    // Video bitrate fields (disabled when Quality is set)
+    // Video bitrate fields (always enabled for max bitrate setting)
     const videoBitrateFields = [
         `#VideoBitrate${resolution}`,
         `#FallbackVideo${resolution}`
@@ -360,14 +504,10 @@ function UpdateBitrateFieldsState(resolution) {
         `#FallbackAudio${resolution}`
     ];
     
-    // Disable/enable video bitrate fields based on Quality setting
+    // Video bitrate fields are always enabled (needed for max bitrate setting)
     videoBitrateFields.forEach(fieldId => {
         const field = $(fieldId);
-        if (hasQuality) {
-            field.prop('disabled', true).addClass('text-muted');
-        } else {
-            field.prop('disabled', false).removeClass('text-muted');
-        }
+        field.prop('disabled', false).removeClass('text-muted');
     });
     
     // Audio bitrate fields are always enabled
@@ -380,11 +520,27 @@ function UpdateBitrateFieldsState(resolution) {
 // Add event listeners for Quality fields
 $(document).ready(function() {
     LoadProfiles();
+    LoadScanDirectories();
+    LoadFFmpegPaths();
     
     // Add event listeners for Quality field changes
     $('#Quality480p, #Quality720p, #Quality1080p').on('input', function() {
         const resolution = $(this).attr('id').replace('Quality', '');
         UpdateBitrateFieldsState(resolution);
+    });
+    
+    // Add event delegation for scan directory buttons
+    $(document).on('click', '.edit-scan-dir-btn', function() {
+        const Key = $(this).data('key');
+        const Path = $(this).data('path');
+        const Description = $(this).data('description');
+        EditScanDirectory(Key, Path, Description);
+    });
+    
+    $(document).on('click', '.delete-scan-dir-btn', function() {
+        const Key = $(this).data('key');
+        const Path = $(this).data('path');
+        DeleteScanDirectory(Key, Path);
     });
 });
 
@@ -519,6 +675,7 @@ function PopulateProfileForm(Profile) {
         $('#Under65Min480p').val(Threshold480p.Under65MinMB);
         $('#Over65Min480p').val(Threshold480p.Over65MinMB);
         $('#TranscodeDownTo480p').val(Threshold480p.TranscodeDownTo);
+        $('#Grain480p').prop('checked', Threshold480p.Grain || false);
         UpdateBitrateFieldsState('480p');
     }
     
@@ -534,6 +691,7 @@ function PopulateProfileForm(Profile) {
         $('#Under65Min720p').val(Threshold720p.Under65MinMB);
         $('#Over65Min720p').val(Threshold720p.Over65MinMB);
         $('#TranscodeDownTo720p').val(Threshold720p.TranscodeDownTo);
+        $('#Grain720p').prop('checked', Threshold720p.Grain || false);
         UpdateBitrateFieldsState('720p');
     }
     
@@ -549,6 +707,7 @@ function PopulateProfileForm(Profile) {
         $('#Under65Min1080p').val(Threshold1080p.Under65MinMB);
         $('#Over65Min1080p').val(Threshold1080p.Over65MinMB);
         $('#TranscodeDownTo1080p').val(Threshold1080p.TranscodeDownTo);
+        $('#Grain1080p').prop('checked', Threshold1080p.Grain || false);
         UpdateBitrateFieldsState('1080p');
     }
     
@@ -564,6 +723,7 @@ function PopulateProfileForm(Profile) {
         $('#Under65Min2160p').val(Threshold2160p.Under65MinMB);
         $('#Over65Min2160p').val(Threshold2160p.Over65MinMB);
         $('#TranscodeDownTo2160p').val(Threshold2160p.TranscodeDownTo);
+        $('#Grain2160p').prop('checked', Threshold2160p.Grain || false);
         UpdateBitrateFieldsState('2160p');
     }
 }
@@ -585,6 +745,7 @@ function ClearProfileForm() {
         $(`#Under65Min${Resolution}`).val('');
         $(`#Over65Min${Resolution}`).val('');
         $(`#TranscodeDownTo${Resolution}`).val('No downscaling');
+        $(`#Grain${Resolution}`).prop('checked', false);
         UpdateBitrateFieldsState(Resolution);
     });
 }
@@ -612,7 +773,8 @@ function SaveProfile() {
                 Under30MinMB: parseInt($('#Under30Min480p').val()) || 0,
                 Under65MinMB: parseInt($('#Under65Min480p').val()) || 0,
                 Over65MinMB: parseInt($('#Over65Min480p').val()) || 0,
-                TranscodeDownTo: $('#TranscodeDownTo480p').val()
+                TranscodeDownTo: $('#TranscodeDownTo480p').val(),
+                Grain: $('#Grain480p').is(':checked')
             },
             {
                 Resolution: '720p',
@@ -624,7 +786,8 @@ function SaveProfile() {
                 Under30MinMB: parseInt($('#Under30Min720p').val()) || 0,
                 Under65MinMB: parseInt($('#Under65Min720p').val()) || 0,
                 Over65MinMB: parseInt($('#Over65Min720p').val()) || 0,
-                TranscodeDownTo: $('#TranscodeDownTo720p').val()
+                TranscodeDownTo: $('#TranscodeDownTo720p').val(),
+                Grain: $('#Grain720p').is(':checked')
             },
             {
                 Resolution: '1080p',
@@ -636,7 +799,8 @@ function SaveProfile() {
                 Under30MinMB: parseInt($('#Under30Min1080p').val()) || 0,
                 Under65MinMB: parseInt($('#Under65Min1080p').val()) || 0,
                 Over65MinMB: parseInt($('#Over65Min1080p').val()) || 0,
-                TranscodeDownTo: $('#TranscodeDownTo1080p').val()
+                TranscodeDownTo: $('#TranscodeDownTo1080p').val(),
+                Grain: $('#Grain1080p').is(':checked')
             },
             {
                 Resolution: '2160p',
@@ -648,7 +812,8 @@ function SaveProfile() {
                 Under30MinMB: parseInt($('#Under30Min2160p').val()) || 0,
                 Under65MinMB: parseInt($('#Under65Min2160p').val()) || 0,
                 Over65MinMB: parseInt($('#Over65Min2160p').val()) || 0,
-                TranscodeDownTo: $('#TranscodeDownTo2160p').val()
+                TranscodeDownTo: $('#TranscodeDownTo2160p').val(),
+                Grain: $('#Grain2160p').is(':checked')
             }
         ]
     };
@@ -715,6 +880,235 @@ function DeleteProfile(ProfileId, ProfileName) {
     })
     .fail(function() {
         ShowAlert('Failed to delete profile', 'danger');
+    });
+}
+
+// Scan Directory Management Functions
+function LoadScanDirectories() {
+    $.get('/api/ScanDirectories')
+        .done(function(Response) {
+            if (Response.Success) {
+                DisplayScanDirectories(Response.ScanDirectories);
+            } else {
+                ShowAlert('Failed to load scan directories: ' + Response.Error, 'danger');
+            }
+        })
+        .fail(function() {
+            ShowAlert('Failed to load scan directories', 'danger');
+        });
+}
+
+function DisplayScanDirectories(ScanDirectories) {
+    const ScanDirectoriesList = $('#ScanDirectoriesList');
+    ScanDirectoriesList.empty();
+    
+    if (ScanDirectories.length === 0) {
+        ScanDirectoriesList.append('<p class="text-muted text-center">No scan directories configured</p>');
+        return;
+    }
+    
+    ScanDirectories.forEach(function(ScanDir) {
+        const ScanDirCard = `
+            <div class="card mb-3">
+                <div class="card-body">
+                    <div class="row align-items-center">
+                        <div class="col-md-8">
+                            <h6 class="card-title mb-1">${ScanDir.Path}</h6>
+                            <p class="card-text text-muted mb-1">${ScanDir.Description || 'No description provided'}</p>
+                            <small class="text-muted">Key: ${ScanDir.Key}</small>
+                        </div>
+                        <div class="col-md-4 text-end">
+                            <button class="btn btn-outline-primary btn-sm me-2 edit-scan-dir-btn" 
+                                    data-key="${ScanDir.Key}" 
+                                    data-path="${ScanDir.Path}" 
+                                    data-description="${ScanDir.Description || ''}">
+                                <i class="fas fa-edit"></i> Edit
+                            </button>
+                            <button class="btn btn-outline-danger btn-sm delete-scan-dir-btn" 
+                                    data-key="${ScanDir.Key}" 
+                                    data-path="${ScanDir.Path}">
+                                <i class="fas fa-trash"></i> Delete
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+        ScanDirectoriesList.append(ScanDirCard);
+    });
+}
+
+function ShowAddScanDirectoryModal() {
+    ClearScanDirectoryForm();
+    $('#ScanDirectoryModal .modal-title').text('Add Scan Directory');
+    $('#ScanDirectoryModal').modal('show');
+}
+
+function EditScanDirectory(Key, Path, Description) {
+    $('#ScanDirectoryKey').val(Key);
+    $('#ScanDirectoryPath').val(Path);
+    $('#ScanDirectoryDescription').val(Description);
+    $('#ScanDirectoryModal .modal-title').text('Edit Scan Directory');
+    $('#ScanDirectoryModal').modal('show');
+}
+
+function ClearScanDirectoryForm() {
+    $('#ScanDirectoryKey').val('');
+    $('#ScanDirectoryPath').val('');
+    $('#ScanDirectoryDescription').val('');
+}
+
+function SaveScanDirectory() {
+    const Path = $('#ScanDirectoryPath').val().trim();
+    const Description = $('#ScanDirectoryDescription').val().trim();
+    const Key = $('#ScanDirectoryKey').val();
+    
+    if (!Path) {
+        ShowAlert('Directory path is required', 'warning');
+        return;
+    }
+    
+    const ScanDirectoryData = {
+        Key: Key || null,
+        Path: Path,
+        Description: Description
+    };
+    
+    $.ajax({
+        url: '/api/ScanDirectories',
+        type: 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify(ScanDirectoryData)
+    })
+    .done(function(Response) {
+        if (Response.Success) {
+            $('#ScanDirectoryModal').modal('hide');
+            ShowAlert(Response.Message, 'success');
+            LoadScanDirectories();
+        } else {
+            ShowAlert('Failed to save scan directory: ' + Response.Error, 'danger');
+        }
+    })
+    .fail(function() {
+        ShowAlert('Failed to save scan directory', 'danger');
+    });
+}
+
+function DeleteScanDirectory(Key, Path) {
+    if (!confirm(`Are you sure you want to delete the scan directory "${Path}"?`)) {
+        return;
+    }
+    
+    $.ajax({
+        url: `/api/ScanDirectories/${Key}`,
+        type: 'DELETE'
+    })
+    .done(function(Response) {
+        if (Response.Success) {
+            ShowAlert(Response.Message, 'success');
+            LoadScanDirectories();
+        } else {
+            ShowAlert('Failed to delete scan directory: ' + Response.Error, 'danger');
+        }
+    })
+    .fail(function() {
+        ShowAlert('Failed to delete scan directory', 'danger');
+    });
+}
+
+// FFmpeg Path Management Functions
+function LoadFFmpegPaths() {
+    $.get('/api/SystemSettings/FFmpegPath')
+        .done(function(Response) {
+            if (Response.Success && Response.Value) {
+                $('#FFmpegPath').val(Response.Value);
+            }
+        })
+        .fail(function() {
+            console.log('Failed to load FFmpeg path');
+        });
+    
+    $.get('/api/SystemSettings/FFprobePath')
+        .done(function(Response) {
+            if (Response.Success && Response.Value) {
+                $('#FFprobePath').val(Response.Value);
+            }
+        })
+        .fail(function() {
+            console.log('Failed to load FFprobe path');
+        });
+}
+
+function SaveFFmpegPaths() {
+    const FFmpegPath = $('#FFmpegPath').val().trim();
+    const FFprobePath = $('#FFprobePath').val().trim();
+    
+    if (!FFmpegPath || !FFprobePath) {
+        ShowAlert('Please enter both FFmpeg and FFprobe paths', 'warning');
+        return;
+    }
+    
+    // Save FFmpeg path
+    $.ajax({
+        url: '/api/SystemSettings/FFmpegPath',
+        type: 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify({ Value: FFmpegPath, Description: 'Path to FFmpeg executable' })
+    })
+    .done(function(Response) {
+        if (Response.Success) {
+            // Save FFprobe path
+            $.ajax({
+                url: '/api/SystemSettings/FFprobePath',
+                type: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({ Value: FFprobePath, Description: 'Path to FFprobe executable' })
+            })
+            .done(function(Response) {
+                if (Response.Success) {
+                    ShowAlert('FFmpeg paths saved successfully', 'success');
+                } else {
+                    ShowAlert('Failed to save FFprobe path: ' + Response.Error, 'danger');
+                }
+            })
+            .fail(function() {
+                ShowAlert('Failed to save FFprobe path', 'danger');
+            });
+        } else {
+            ShowAlert('Failed to save FFmpeg path: ' + Response.Error, 'danger');
+        }
+    })
+    .fail(function() {
+        ShowAlert('Failed to save FFmpeg path', 'danger');
+    });
+}
+
+function TestFFmpegPaths() {
+    const FFmpegPath = $('#FFmpegPath').val().trim();
+    const FFprobePath = $('#FFprobePath').val().trim();
+    
+    if (!FFmpegPath || !FFprobePath) {
+        ShowAlert('Please enter both FFmpeg and FFprobe paths', 'warning');
+        return;
+    }
+    
+    ShowAlert('Testing FFmpeg paths...', 'info');
+    
+    $.ajax({
+        url: '/api/SystemSettings/TestFFmpegPaths',
+        type: 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify({ FFmpegPath: FFmpegPath, FFprobePath: FFprobePath })
+    })
+    .done(function(Response) {
+        if (Response.Success) {
+            ShowAlert('FFmpeg paths test successful: ' + Response.Message, 'success');
+        } else {
+            ShowAlert('FFmpeg paths test failed: ' + Response.Error, 'danger');
+        }
+    })
+    .fail(function() {
+        ShowAlert('Failed to test FFmpeg paths', 'danger');
     });
 }
 </script>

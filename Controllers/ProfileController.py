@@ -202,7 +202,9 @@ class ProfileController:
                     int(data['AudioBitrateKbps']),
                     int(data['FallbackVideoBitrateKbps']),
                     int(data['FallbackAudioBitrateKbps']),
-                    data['TranscodeDownTo'].strip()
+                    data['TranscodeDownTo'].strip(),
+                    data.get('Quality'),
+                    data.get('Grain', False)
                 )
                 
                 if success:

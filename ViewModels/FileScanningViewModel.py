@@ -483,3 +483,53 @@ class FileScanningViewModel:
                 'FilesWithMetadata': 0,
                 'FilesWithoutMetadata': 0
             }
+    
+    def AddOrUpdateScanDirectory(self, Key: Optional[str], Path: str, Description: str) -> Dict[str, Any]:
+        """Add or update a scan directory in SystemSettings."""
+        try:
+            from Services.LoggingService import LoggingService
+            
+            LoggingService.LogInfo(f"Adding/updating scan directory: {Path}", "AddOrUpdateScanDirectory", "FileScanningViewModel")
+            
+            result = self.BusinessService.AddOrUpdateScanDirectory(Key, Path, Description)
+            
+            if result['Success']:
+                # Reload scan directories to reflect changes
+                self.LoadScanDirectories()
+                LoggingService.LogInfo(f"Successfully added/updated scan directory: {Path}", "AddOrUpdateScanDirectory", "FileScanningViewModel")
+            else:
+                LoggingService.LogWarning(f"Failed to add/update scan directory: {result.get('Error', 'Unknown error')}", "AddOrUpdateScanDirectory", "FileScanningViewModel")
+            
+            return result
+            
+        except Exception as e:
+            LoggingService.LogException("Error adding/updating scan directory", e, "AddOrUpdateScanDirectory", "FileScanningViewModel")
+            return {
+                'Success': False,
+                'Error': f'Error adding/updating scan directory: {str(e)}'
+            }
+    
+    def DeleteScanDirectory(self, Key: str) -> Dict[str, Any]:
+        """Delete a scan directory from SystemSettings."""
+        try:
+            from Services.LoggingService import LoggingService
+            
+            LoggingService.LogInfo(f"Deleting scan directory with key: {Key}", "DeleteScanDirectory", "FileScanningViewModel")
+            
+            result = self.BusinessService.DeleteScanDirectory(Key)
+            
+            if result['Success']:
+                # Reload scan directories to reflect changes
+                self.LoadScanDirectories()
+                LoggingService.LogInfo(f"Successfully deleted scan directory: {Key}", "DeleteScanDirectory", "FileScanningViewModel")
+            else:
+                LoggingService.LogWarning(f"Failed to delete scan directory: {result.get('Error', 'Unknown error')}", "DeleteScanDirectory", "FileScanningViewModel")
+            
+            return result
+            
+        except Exception as e:
+            LoggingService.LogException("Error deleting scan directory", e, "DeleteScanDirectory", "FileScanningViewModel")
+            return {
+                'Success': False,
+                'Error': f'Error deleting scan directory: {str(e)}'
+            }

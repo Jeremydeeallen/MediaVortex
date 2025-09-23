@@ -69,7 +69,7 @@ class ProfileService:
                     under_30_min_mb: int, under_65_min_mb: int, over_65_min_mb: int,
                     video_bitrate_kbps: int, audio_bitrate_kbps: int,
                     fallback_video_bitrate_kbps: int, fallback_audio_bitrate_kbps: int,
-                    transcode_down_to: str, quality: int = None) -> ProfileThresholdModel:
+                    transcode_down_to: str, quality: int = None, grain: bool = False) -> ProfileThresholdModel:
         """Add a new threshold to a profile."""
         try:
             LoggingService.LogFunctionEntry("AddThreshold", 'ProfileService', profile_id, resolution, 
@@ -88,7 +88,8 @@ class ProfileService:
                 FallbackVideoBitrateKbps=fallback_video_bitrate_kbps,
                 FallbackAudioBitrateKbps=fallback_audio_bitrate_kbps,
                 TranscodeDownTo=transcode_down_to,
-                Quality=quality
+                Quality=quality,
+                Grain=grain
             )
             
             LoggingService.LogInfo("Saving threshold to database...", 'AddThreshold', 'ProfileService')

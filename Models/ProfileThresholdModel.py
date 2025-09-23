@@ -18,3 +18,4 @@ class ProfileThresholdModel:
     FallbackAudioBitrateKbps: int = 0
     TranscodeDownTo: str = ""
     Quality: Optional[int] = None
+    Grain: bool = False

@@ -47,3 +47,7 @@ Thumbs.db
 *.db-journal
 *.db-wal
 *.db-shm
+
+# ffmpegmaster
+FFmpegMaster/
+

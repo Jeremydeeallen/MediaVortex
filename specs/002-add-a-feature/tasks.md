@@ -94,7 +94,18 @@
 - [ ] T040 Update ActivityViewModel: Modify ViewModels/ActivityViewModel.py to use optimized single-record database queries
 - [ ] T041 Test optimized progress display: Verify real-time updates in frontend with minimal database records and clean GUI display
 
-## Phase 3.6: Polish
+## Phase 3.6: VMAF System Fixes
+- [x] T051 Fix VMAF API endpoint indentation error in Controllers/VMAFJobController.py line 71
+- [x] T052 Verify VMAF FFmpeg syntax compatibility with new FFmpegMaster version in Services/FFmpegComparisonService.py
+- [ ] T053 Test VMAF functionality with corrected API endpoint and verify quality analysis works
+
+## Phase 3.7: Resolution Scaling Implementation
+- [ ] T054 Add resolution scaling logic to FFmpegTranscodingService.BuildFFmpegCommand() method
+- [ ] T055 Implement TranscodeDownTo field processing in FFmpeg command generation
+- [ ] T056 Add -vf scale=WIDTH:HEIGHT filter to FFmpeg commands when TranscodeDownTo is set
+- [ ] T057 Test resolution scaling with 4K to 720p transcoding to verify proper scaling
+
+## Phase 3.8: Polish
 - [ ] T042 [P] Unit tests for TranscodingQueueProcessor in tests/unit/TestTranscodingQueueProcessor.py
 - [ ] T043 [P] Unit tests for FFmpegTranscodingService in tests/unit/TestFFmpegTranscodingService.py
 - [ ] T044 [P] Unit tests for FileManagerService in tests/unit/TestFileManager.py

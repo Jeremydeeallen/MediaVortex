@@ -146,12 +146,45 @@
                 </div>
             </div>
 
-            <!-- Recent Attempts -->
-            <div class="row">
+            <!-- Running Quality Checks -->
+            <div class="row mb-4">
                 <div class="col-12">
                     <div class="card">
                         <div class="card-header d-flex justify-content-between align-items-center">
-                            <h5 class="mb-0">Recent Activity</h5>
+                            <h5 class="mb-0">
+                                <i class="fas fa-chart-line"></i> Running Quality Checks
+                            </h5>
+                            <span class="badge bg-info" id="RunningVMAFCount">0 running</span>
+                        </div>
+                        <div class="card-body">
+                            <div class="table-responsive">
+                                <table class="table table-striped table-hover" id="RunningVMAFTable">
+                                    <thead>
+                                        <tr>
+                                            <th>Episode Name</th>
+                                            <th>Start Time</th>
+                                            <th>Progress</th>
+                                            <th>ETA</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="RunningVMAFTableBody">
+                                        <!-- Running VMAF operations will be populated here -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Recent Transcode Attempts -->
+            <div class="row mb-4">
+                <div class="col-12">
+                    <div class="card">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <h5 class="mb-0">
+                                <i class="fas fa-video"></i> Recent Transcode Attempts
+                            </h5>
                             <span class="badge bg-secondary" id="RecentAttemptsCount">0 attempts</span>
                         </div>
                         <div class="card-body">
@@ -171,6 +204,41 @@
                                     </thead>
                                     <tbody id="RecentAttemptsTableBody">
                                         <!-- Recent attempts will be populated here -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Recent VMAF Results -->
+            <div class="row">
+                <div class="col-12">
+                    <div class="card">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <h5 class="mb-0">
+                                <i class="fas fa-chart-line"></i> Recent Quality Tests
+                            </h5>
+                            <span class="badge bg-info" id="RecentVMAFCount">0 results</span>
+                        </div>
+                        <div class="card-body">
+                            <div class="table-responsive">
+                                <table class="table table-striped table-hover" id="RecentVMAFTable">
+                                    <thead>
+                                        <tr>
+                                            <th>File Name</th>
+                                            <th>Date</th>
+                                            <th>VMAF Score</th>
+                                            <th>Quality</th>
+                                            <th>Size Reduction</th>
+                                            <th>Duration</th>
+                                            <th>Profile</th>
+                                            <th>Status</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="RecentVMAFTableBody">
+                                        <!-- Recent VMAF results will be populated here -->
                                     </tbody>
                                 </table>
                             </div>
@@ -214,32 +282,121 @@ class ActivityManager {
     async loadProgressData() {
         try {
             // Get transcoding status
-            const statusResponse = await fetch('/api/Transcode/Status');
-            const statusData = await statusResponse.json();
+            try {
+                const statusResponse = await fetch('/api/Transcode/Status');
+                const contentType = statusResponse.headers.get('content-type');
+                if (!contentType || !contentType.includes('application/json')) {
+                    console.error('Transcode Status API returned HTML instead of JSON. Status:', statusResponse.status);
+                    throw new Error(`API returned HTML instead of JSON (Status: ${statusResponse.status})`);
+                }
+                const statusData = await statusResponse.json();
 
-            if (statusData.Success) {
-                this.updateTranscodingStatus(statusData);
+                if (statusData.Success) {
+                    this.updateTranscodingStatus(statusData);
+                }
+            } catch (error) {
+                console.error('Error loading transcoding status:', error);
+                this.showAlert('Error loading transcoding status: ' + error.message, 'warning');
             }
 
-            // Get recent attempts
-            const historyResponse = await fetch('/api/Transcode/RecentAttempts?Limit=20');
-            const historyData = await historyResponse.json();
+            // Get recent attempts (limited to 5)
+            try {
+                const historyResponse = await fetch('/api/Transcode/RecentAttempts?Limit=5');
+                const contentType = historyResponse.headers.get('content-type');
+                if (!contentType || !contentType.includes('application/json')) {
+                    console.error('Recent Attempts API returned HTML instead of JSON. Status:', historyResponse.status);
+                    throw new Error(`API returned HTML instead of JSON (Status: ${historyResponse.status})`);
+                }
+                const historyData = await historyResponse.json();
 
-            if (historyData.Success) {
-                this.updateRecentAttempts(historyData.RecentAttempts);
+                if (historyData.Success) {
+                    this.updateRecentAttempts(historyData.RecentAttempts);
+                }
+            } catch (error) {
+                console.error('Error loading recent attempts:', error);
+                this.showAlert('Error loading recent attempts: ' + error.message, 'warning');
+            }
+
+            // Get recent VMAF results
+            try {
+                const vmafHistoryResponse = await fetch('/api/VMAF/History?Limit=5');
+                const contentType = vmafHistoryResponse.headers.get('content-type');
+                if (!contentType || !contentType.includes('application/json')) {
+                    console.error('VMAF History API returned HTML instead of JSON. Status:', vmafHistoryResponse.status);
+                    throw new Error(`API returned HTML instead of JSON (Status: ${vmafHistoryResponse.status})`);
+                }
+                const vmafHistoryData = await vmafHistoryResponse.json();
+
+                if (vmafHistoryData.Success) {
+                    this.updateRecentVMAFResults(vmafHistoryData.VMAFResults);
+                }
+            } catch (error) {
+                console.error('Error loading VMAF history:', error);
+                this.showAlert('Error loading VMAF history: ' + error.message, 'warning');
             }
 
             // Get progress summary
-            const summaryResponse = await fetch('/api/Transcode/ProgressSummary');
-            const summaryData = await summaryResponse.json();
+            try {
+                const summaryResponse = await fetch('/api/Transcode/ProgressSummary');
+                const contentType = summaryResponse.headers.get('content-type');
+                if (!contentType || !contentType.includes('application/json')) {
+                    console.error('Progress Summary API returned HTML instead of JSON. Status:', summaryResponse.status);
+                    throw new Error(`API returned HTML instead of JSON (Status: ${summaryResponse.status})`);
+                }
+                const summaryData = await summaryResponse.json();
 
-            if (summaryData.Success) {
-                this.updateStatistics(summaryData.Summary);
+                if (summaryData.Success) {
+                    this.updateStatistics(summaryData.Summary);
+                }
+            } catch (error) {
+                console.error('Error loading progress summary:', error);
+                this.showAlert('Error loading progress summary: ' + error.message, 'warning');
+            }
+
+            // Get running VMAF operations
+            try {
+                const vmafResponse = await fetch('/api/VMAF/Progress');
+                const contentType = vmafResponse.headers.get('content-type');
+                if (!contentType || !contentType.includes('application/json')) {
+                    console.error('VMAF Progress API returned HTML instead of JSON. Status:', vmafResponse.status);
+                    throw new Error(`API returned HTML instead of JSON (Status: ${vmafResponse.status})`);
+                }
+                const vmafData = await vmafResponse.json();
+
+                if (vmafData.Success && vmafData.IsRunning && vmafData.CurrentJob) {
+                    // Convert single current job to array format for consistency
+                    const runningOperations = [{
+                        Id: vmafData.CurrentJob.Id,
+                        VMAFQueueId: vmafData.CurrentJob.Id,
+                        TranscodeAttemptId: vmafData.CurrentJob.TranscodeAttemptId,
+                        Status: "Running",
+                        ProgressPercentage: vmafData.Progress ? vmafData.Progress.ProgressPercentage : 0,
+                        CurrentStep: vmafData.Progress ? vmafData.Progress.CurrentStep : "Processing...",
+                        StartTime: vmafData.Progress ? vmafData.Progress.StartTime : null,
+                        EndTime: vmafData.Progress ? vmafData.Progress.EndTime : null,
+                        ETA: vmafData.Progress ? vmafData.Progress.ETA : "Unknown",
+                        ErrorMessage: vmafData.Progress ? vmafData.Progress.ErrorMessage : null,
+                        FileName: vmafData.CurrentJob.FileName,
+                        OriginalFilePath: vmafData.CurrentJob.OriginalFilePath,
+                        TranscodedFilePath: vmafData.CurrentJob.TranscodedFilePath
+                    }];
+                    this.updateRunningVMAFOperations(runningOperations);
+                } else {
+                    // No running operations
+                    this.updateRunningVMAFOperations([]);
+                }
+            } catch (error) {
+                console.error('Error loading VMAF operations:', error);
+                this.showAlert('Error loading VMAF operations: ' + error.message, 'warning');
             }
 
         } catch (error) {
+            console.error('General error loading progress data:', error);
             this.showAlert('Error loading progress data: ' + error.message, 'danger');
         }
+        
+        // Always ensure the page is in a usable state even if some APIs fail
+        this.ensurePageUsability();
     }
 
     updateTranscodingStatus(statusData) {
@@ -313,6 +470,120 @@ class ActivityManager {
                         `<span class="text-danger" title="${this.escapeHtml(attempt.ErrorMessage)}">Error</span>` : 
                         '<span class="text-muted">-</span>'
                     }
+                </td>
+            `;
+            tbody.appendChild(row);
+        });
+    }
+
+    updateRecentVMAFResults(results) {
+        const tbody = document.getElementById('RecentVMAFTableBody');
+        tbody.innerHTML = '';
+
+        document.getElementById('RecentVMAFCount').textContent = `${results.length} results`;
+
+        if (results.length === 0) {
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td colspan="8" class="text-center text-muted">
+                    <i class="fas fa-info-circle"></i> No quality test results available
+                </td>
+            `;
+            tbody.appendChild(row);
+            return;
+        }
+
+        results.forEach(result => {
+            const row = document.createElement('tr');
+            
+            // Determine VMAF score badge color
+            let vmafBadgeClass = 'bg-secondary';
+            let vmafStatus = 'Unknown';
+            
+            if (result.VMAFScore !== null && result.VMAFScore !== undefined) {
+                if (result.VMAFScore >= 90) {
+                    vmafBadgeClass = 'bg-success';
+                    vmafStatus = 'Excellent';
+                } else if (result.VMAFScore >= 80) {
+                    vmafBadgeClass = 'bg-warning';
+                    vmafStatus = 'Good';
+                } else {
+                    vmafBadgeClass = 'bg-danger';
+                    vmafStatus = 'Poor';
+                }
+            }
+            
+            row.innerHTML = `
+                <td>${this.escapeHtml(result.FileName)}</td>
+                <td>${this.formatDate(result.AttemptDate)}</td>
+                <td>
+                    ${result.VMAFScore !== null && result.VMAFScore !== undefined ? 
+                        `<span class="badge ${vmafBadgeClass}">${result.VMAFScore.toFixed(2)}</span>` : 
+                        '<span class="text-muted">-</span>'
+                    }
+                </td>
+                <td>${result.Quality || '-'}</td>
+                <td>
+                    ${result.Success && result.SizeReductionPercent ? 
+                        `<span class="text-success">${result.SizeReductionPercent.toFixed(1)}%</span>` : 
+                        '<span class="text-muted">-</span>'
+                    }
+                </td>
+                <td>${this.formatDuration(result.TranscodeDurationSeconds)}</td>
+                <td>${this.escapeHtml(result.ProfileName || '-')}</td>
+                <td>
+                    <span class="badge ${result.Success ? 'bg-success' : 'bg-danger'}">
+                        ${result.Success ? 'Success' : 'Failed'}
+                    </span>
+                </td>
+            `;
+            tbody.appendChild(row);
+        });
+    }
+
+    updateRunningVMAFOperations(operations) {
+        const tbody = document.getElementById('RunningVMAFTableBody');
+        tbody.innerHTML = '';
+
+        document.getElementById('RunningVMAFCount').textContent = `${operations.length} running`;
+
+        if (operations.length === 0) {
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td colspan="4" class="text-center text-muted">
+                    <i class="fas fa-info-circle"></i> No quality checks currently running
+                </td>
+            `;
+            tbody.appendChild(row);
+            return;
+        }
+
+        operations.forEach(operation => {
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td>
+                    <strong>${this.escapeHtml(operation.FileName)}</strong>
+                </td>
+                <td>
+                    <small class="text-muted">${this.formatDate(operation.StartTime)}</small>
+                </td>
+                <td>
+                    <div class="d-flex align-items-center">
+                        <div class="progress me-2" style="width: 100px; height: 20px;">
+                            <div class="progress-bar progress-bar-striped progress-bar-animated bg-info" 
+                                 role="progressbar" 
+                                 style="width: ${operation.ProgressPercentage}%"
+                                 aria-valuenow="${operation.ProgressPercentage}" 
+                                 aria-valuemin="0" 
+                                 aria-valuemax="100">
+                            </div>
+                        </div>
+                        <small class="text-muted">${operation.ProgressPercentage}%</small>
+                    </div>
+                    <small class="text-muted d-block">${this.escapeHtml(operation.CurrentStep || 'Processing...')}</small>
+                </td>
+                <td>
+                    <span class="badge bg-secondary">${this.escapeHtml(operation.ETA || 'Unknown')}</span>
                 </td>
             `;
             tbody.appendChild(row);

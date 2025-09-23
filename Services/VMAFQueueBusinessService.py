@@ -1,7 +1,10 @@
 import os
+import shutil
+import threading
 from typing import Optional, Dict, Any, List
 from datetime import datetime
 from Models.VMAFQueueModel import VMAFQueueModel
+from Models.VMAFProgressModel import VMAFProgressModel
 from Models.TranscodeAttemptModel import TranscodeAttemptModel
 from Repositories.DatabaseManager import DatabaseManager
 from Services.FFmpegComparisonService import FFmpegComparisonService
@@ -17,6 +20,8 @@ class VMAFQueueBusinessService:
         self.FFmpegComparisonService = FFmpegComparisonServiceInstance or FFmpegComparisonService()
         self.IsRunning = False
         self.CurrentVMAFJob = None
+        self.ProcessingThread = None
+        self.StopEvent = threading.Event()
     
     def AddToVMAFQueue(self, TranscodeAttemptId: int, OriginalFilePath: str, 
                       TranscodedFilePath: str, QualityThreshold: float = 90.0) -> Dict[str, Any]:
@@ -41,10 +46,20 @@ class VMAFQueueBusinessService:
             LoggingService.LogInfo(f"Added {VMAFQueueItem.FileName} to VMAF queue with ID {VMAFQueueId}", 
                                  "VMAFQueueBusinessService", "AddToVMAFQueue")
             
+            # Automatically start VMAF processing if not already running
+            if not self.IsRunning:
+                LoggingService.LogInfo(f"Auto-starting VMAF processing for {VMAFQueueItem.FileName}", 
+                                     "VMAFQueueBusinessService", "AddToVMAFQueue")
+                startResult = self.StartVMAFProcessing()
+                if not startResult.get("Success", False):
+                    LoggingService.LogError(f"Failed to auto-start VMAF processing: {startResult.get('ErrorMessage', 'Unknown error')}", 
+                                          "VMAFQueueBusinessService", "AddToVMAFQueue")
+            
             return {
                 "Success": True,
                 "VMAFQueueId": VMAFQueueId,
-                "Message": f"Added {VMAFQueueItem.FileName} to VMAF queue"
+                "Message": f"Added {VMAFQueueItem.FileName} to VMAF queue",
+                "AutoStarted": not self.IsRunning
             }
             
         except Exception as e:
@@ -53,7 +68,7 @@ class VMAFQueueBusinessService:
             return {"Success": False, "ErrorMessage": errorMsg}
     
     def StartVMAFProcessing(self, MaxConcurrentJobs: int = 1) -> Dict[str, Any]:
-        """Start processing VMAF queue."""
+        """Start processing VMAF queue asynchronously."""
         try:
             LoggingService.LogFunctionEntry("StartVMAFProcessing", "VMAFQueueBusinessService", MaxConcurrentJobs)
             
@@ -61,11 +76,19 @@ class VMAFQueueBusinessService:
                 LoggingService.LogWarning("VMAF processing is already running", "VMAFQueueBusinessService", "StartVMAFProcessing")
                 return {"Success": False, "ErrorMessage": "VMAF processing is already running"}
             
+            # Reset stop event and set running flag
+            self.StopEvent.clear()
             self.IsRunning = True
-            LoggingService.LogInfo("Starting VMAF processing", "VMAFQueueBusinessService", "StartVMAFProcessing")
             
-            # Start processing queue
-            self.ProcessVMAFQueue(MaxConcurrentJobs)
+            LoggingService.LogInfo("Starting VMAF processing in background thread", "VMAFQueueBusinessService", "StartVMAFProcessing")
+            
+            # Start processing queue in background thread
+            self.ProcessingThread = threading.Thread(
+                target=self._ProcessVMAFQueueThread,
+                args=(MaxConcurrentJobs,),
+                daemon=True
+            )
+            self.ProcessingThread.start()
             
             return {"Success": True, "Message": "VMAF processing started"}
             
@@ -84,6 +107,8 @@ class VMAFQueueBusinessService:
                 LoggingService.LogWarning("VMAF processing is not running", "VMAFQueueBusinessService", "StopVMAFProcessing")
                 return {"Success": False, "ErrorMessage": "VMAF processing is not running"}
             
+            # Signal stop event
+            self.StopEvent.set()
             self.IsRunning = False
             
             # Mark current job as cancelled if running
@@ -94,7 +119,7 @@ class VMAFQueueBusinessService:
                                      "VMAFQueueBusinessService", "StopVMAFProcessing")
                 self.CurrentVMAFJob = None
             
-            LoggingService.LogInfo("VMAF processing stopped", "VMAFQueueBusinessService", "StopVMAFProcessing")
+            LoggingService.LogInfo("VMAF processing stop requested", "VMAFQueueBusinessService", "StopVMAFProcessing")
             return {"Success": True, "Message": "VMAF processing stopped"}
             
         except Exception as e:
@@ -102,16 +127,32 @@ class VMAFQueueBusinessService:
             LoggingService.LogException(errorMsg, e, "VMAFQueueBusinessService", "StopVMAFProcessing")
             return {"Success": False, "ErrorMessage": errorMsg}
     
+    def _ProcessVMAFQueueThread(self, MaxConcurrentJobs: int = 1):
+        """Background thread method for processing VMAF queue."""
+        try:
+            LoggingService.LogInfo("VMAF processing thread started", "VMAFQueueBusinessService", "_ProcessVMAFQueueThread")
+            self.ProcessVMAFQueue(MaxConcurrentJobs)
+        except Exception as e:
+            LoggingService.LogException("Exception in VMAF processing thread", e, "VMAFQueueBusinessService", "_ProcessVMAFQueueThread")
+        finally:
+            self.IsRunning = False
+            LoggingService.LogInfo("VMAF processing thread completed", "VMAFQueueBusinessService", "_ProcessVMAFQueueThread")
+    
     def ProcessVMAFQueue(self, MaxConcurrentJobs: int = 1):
         """Process items from the VMAF queue."""
         try:
             LoggingService.LogFunctionEntry("ProcessVMAFQueue", "VMAFQueueBusinessService", MaxConcurrentJobs)
             
-            while self.IsRunning:
+            while self.IsRunning and not self.StopEvent.is_set():
                 # Get next VMAF job
                 nextJob = self.GetNextVMAFJob()
                 if not nextJob:
                     LoggingService.LogInfo("No VMAF jobs available for processing", "VMAFQueueBusinessService", "ProcessVMAFQueue")
+                    break
+                
+                # Check if stop was requested
+                if self.StopEvent.is_set():
+                    LoggingService.LogInfo("VMAF processing stop requested", "VMAFQueueBusinessService", "ProcessVMAFQueue")
                     break
                 
                 # Process the VMAF job
@@ -124,9 +165,12 @@ class VMAFQueueBusinessService:
                 
                 self.CurrentVMAFJob = None
                 
-                # Small delay between jobs
+                # Small delay between jobs (check stop event during sleep)
                 import time
-                time.sleep(1)
+                for _ in range(10):  # 1 second total, check every 100ms
+                    if self.StopEvent.is_set():
+                        break
+                    time.sleep(0.1)
             
             LoggingService.LogInfo("VMAF queue processing completed", "VMAFQueueBusinessService", "ProcessVMAFQueue")
             
@@ -136,24 +180,55 @@ class VMAFQueueBusinessService:
     
     def ProcessVMAFJob(self, VMAFQueueItem: VMAFQueueModel) -> Dict[str, Any]:
         """Process a single VMAF quality analysis job."""
+        VMAFProgressItem = None
         try:
             LoggingService.LogFunctionEntry("ProcessVMAFJob", "VMAFQueueBusinessService", 
                                           VMAFQueueItem.Id, VMAFQueueItem.FileName)
             
-            # Mark job as running
+            # Mark job as running immediately
             VMAFQueueItem.MarkAsRunning()
             self.DatabaseManager.SaveVMAFQueueItem(VMAFQueueItem)
+            
+            # Create VMAF progress tracking
+            VMAFProgressItem = VMAFProgressModel()
+            VMAFProgressItem.VMAFQueueId = VMAFQueueItem.Id
+            VMAFProgressItem.TranscodeAttemptId = VMAFQueueItem.TranscodeAttemptId
+            VMAFProgressItem.MarkAsRunning("Initializing VMAF analysis")
+            self.DatabaseManager.SaveVMAFProgress(VMAFProgressItem)
             
             # Perform VMAF analysis
             LoggingService.LogInfo(f"Starting VMAF analysis for {VMAFQueueItem.FileName}", 
                                  "VMAFQueueBusinessService", "ProcessVMAFJob")
             
+            # Create progress callback to update VMAFProgress table
+            def vmaf_progress_callback(progress_data):
+                try:
+                    if VMAFProgressItem and 'ProgressPercent' in progress_data:
+                        progress_percent = int(progress_data['ProgressPercent'])
+                        current_step = f"Analyzing frame {progress_data.get('frame', 0)}"
+                        eta = progress_data.get('ETA', 'Unknown')
+                        
+                        VMAFProgressItem.UpdateProgress(progress_percent, current_step, eta)
+                        self.DatabaseManager.SaveVMAFProgress(VMAFProgressItem)
+                        
+                        LoggingService.LogInfo(f"VMAF Analysis Progress: {progress_data}", 
+                                             "VMAFQueueBusinessService", "ProcessVMAFJob")
+                except Exception as e:
+                    LoggingService.LogException("Exception updating VMAF progress", e, 
+                                              "VMAFQueueBusinessService", "ProcessVMAFJob")
+            
             VMAFResult = self.FFmpegComparisonService.CreateVMAFComparison(
                 VMAFQueueItem.OriginalFilePath,
-                VMAFQueueItem.TranscodedFilePath
+                VMAFQueueItem.TranscodedFilePath,
+                ProgressCallback=vmaf_progress_callback
             )
             
             if VMAFResult.Success:
+                # Update progress to completed
+                if VMAFProgressItem:
+                    VMAFProgressItem.MarkAsCompleted()
+                    self.DatabaseManager.SaveVMAFProgress(VMAFProgressItem)
+                
                 # VMAF analysis succeeded
                 VMAFQueueItem.MarkAsCompleted(VMAFResult.OverallVMAFScore)
                 self.DatabaseManager.SaveVMAFQueueItem(VMAFQueueItem)
@@ -167,14 +242,27 @@ class VMAFQueueBusinessService:
                 LoggingService.LogInfo(f"VMAF analysis completed for {VMAFQueueItem.FileName}: Score = {VMAFResult.OverallVMAFScore:.2f}", 
                                      "VMAFQueueBusinessService", "ProcessVMAFJob")
                 
+                # Handle file management based on VMAF score
+                fileManagementResult = self._HandleFileManagement(VMAFQueueItem, VMAFResult.OverallVMAFScore)
+                
+                # Remove completed item from queue
+                self.DatabaseManager.DeleteVMAFQueueItem(VMAFQueueItem.Id)
+                
                 return {
                     "Success": True,
                     "VMAFQueueId": VMAFQueueItem.Id,
                     "VMAFScore": VMAFResult.OverallVMAFScore,
                     "PassesThreshold": VMAFQueueItem.PassesQualityThreshold(),
-                    "Status": "completed"
+                    "Status": "completed",
+                    "FileManagement": fileManagementResult
                 }
             else:
+                # Update progress to failed
+                if VMAFProgressItem:
+                    errorMsg = VMAFResult.ErrorMessage or "VMAF analysis failed"
+                    VMAFProgressItem.MarkAsFailed(errorMsg)
+                    self.DatabaseManager.SaveVMAFProgress(VMAFProgressItem)
+                
                 # VMAF analysis failed
                 errorMsg = VMAFResult.ErrorMessage or "VMAF analysis failed"
                 VMAFQueueItem.MarkAsFailed(errorMsg)
@@ -193,6 +281,11 @@ class VMAFQueueBusinessService:
         except Exception as e:
             errorMsg = f"Exception processing VMAF job: {str(e)}"
             LoggingService.LogException(errorMsg, e, "VMAFQueueBusinessService", "ProcessVMAFJob")
+            
+            # Update progress to failed
+            if VMAFProgressItem:
+                VMAFProgressItem.MarkAsFailed(errorMsg)
+                self.DatabaseManager.SaveVMAFProgress(VMAFProgressItem)
             
             # Mark job as failed
             VMAFQueueItem.MarkAsFailed(errorMsg)
@@ -221,24 +314,33 @@ class VMAFQueueBusinessService:
             
             # Get queue statistics
             queueStats = self.GetVMAFQueueStatistics()
-            isRunning = queueStats.get("RunningJobs", 0) > 0
+            
+            # Check for running jobs in VMAFProgress table (more reliable than VMAFQueue)
+            runningProgressJobs = self.DatabaseManager.GetVMAFProgressByStatus("Running")
+            isRunning = len(runningProgressJobs) > 0
             
             status = {
+                "Success": True,
                 "IsRunning": isRunning,
                 "CurrentVMAFJob": None,
                 "QueueStatistics": queueStats
             }
             
-            # Get current running VMAF job
-            if isRunning:
-                currentJob = self.GetCurrentRunningVMAFJob()
-                if currentJob:
+            # Get current running VMAF job from VMAFProgress table
+            if isRunning and runningProgressJobs:
+                runningProgress = runningProgressJobs[0]  # Get the first running job
+                
+                # Get the corresponding VMAFQueue item
+                vmafQueueItem = self.DatabaseManager.GetVMAFQueueItemById(runningProgress.VMAFQueueId)
+                if vmafQueueItem:
                     status["CurrentVMAFJob"] = {
-                        "Id": currentJob.Id,
-                        "FileName": currentJob.FileName,
-                        "Status": currentJob.Status,
-                        "DateStarted": currentJob.DateStarted.isoformat() if currentJob.DateStarted else None,
-                        "TranscodeAttemptId": currentJob.TranscodeAttemptId
+                        "Id": vmafQueueItem.Id,
+                        "FileName": vmafQueueItem.FileName,
+                        "Status": "Running",  # Force to Running since we found it in VMAFProgress
+                        "DateStarted": vmafQueueItem.DateStarted.isoformat() if vmafQueueItem.DateStarted and hasattr(vmafQueueItem.DateStarted, 'isoformat') else vmafQueueItem.DateStarted,
+                        "TranscodeAttemptId": vmafQueueItem.TranscodeAttemptId,
+                        "OriginalFilePath": vmafQueueItem.OriginalFilePath,
+                        "TranscodedFilePath": vmafQueueItem.TranscodedFilePath
                     }
             
             return status
@@ -290,3 +392,167 @@ class VMAFQueueBusinessService:
                 "FailedJobs": 0,
                 "SuccessRate": 0
             }
+    
+    def _HandleFileManagement(self, VMAFQueueItem: VMAFQueueModel, VMAFScore: float) -> Dict[str, Any]:
+        """Handle file management operations after successful VMAF analysis."""
+        try:
+            LoggingService.LogFunctionEntry("_HandleFileManagement", "VMAFQueueBusinessService", 
+                                          f"VMAFScore: {VMAFScore:.2f}, File: {VMAFQueueItem.FileName}")
+            
+            # Handle file management based on VMAF score
+            if VMAFScore <= 90.0:
+                LoggingService.LogInfo(f"VMAF score {VMAFScore:.2f} <= 90, deleting transcoded file and keeping original for {VMAFQueueItem.FileName}", 
+                                     "VMAFQueueBusinessService", "_HandleFileManagement")
+                return self._HandleLowQualityFileManagement(VMAFQueueItem, VMAFScore)
+            
+            LoggingService.LogInfo(f"VMAF score {VMAFScore:.2f} > 90, proceeding with file management for {VMAFQueueItem.FileName}", 
+                                 "VMAFQueueBusinessService", "_HandleFileManagement")
+            
+            originalFilePath = VMAFQueueItem.OriginalFilePath
+            transcodedFilePath = VMAFQueueItem.TranscodedFilePath
+            
+            # Validate file paths
+            if not os.path.exists(originalFilePath):
+                errorMsg = f"Original file not found: {originalFilePath}"
+                LoggingService.LogError(errorMsg, "VMAFQueueBusinessService", "_HandleFileManagement")
+                return {"Success": False, "ErrorMessage": errorMsg}
+            
+            if not os.path.exists(transcodedFilePath):
+                errorMsg = f"Transcoded file not found: {transcodedFilePath}"
+                LoggingService.LogError(errorMsg, "VMAFQueueBusinessService", "_HandleFileManagement")
+                return {"Success": False, "ErrorMessage": errorMsg}
+            
+            # Step 1: Delete the original file on T: drive
+            originalDeleted = False
+            try:
+                os.remove(originalFilePath)
+                originalDeleted = True
+                LoggingService.LogInfo(f"Successfully deleted original file: {originalFilePath}", 
+                                     "VMAFQueueBusinessService", "_HandleFileManagement")
+            except Exception as e:
+                errorMsg = f"Failed to delete original file {originalFilePath}: {str(e)}"
+                LoggingService.LogError(errorMsg, "VMAFQueueBusinessService", "_HandleFileManagement")
+                return {"Success": False, "ErrorMessage": errorMsg}
+            
+            # Step 2: Move transcoded file from C:\MediaVortex to T:\
+            transcodedMoved = False
+            try:
+                # Extract the directory from original file path (T: drive location)
+                originalDir = os.path.dirname(originalFilePath)
+                transcodedFileName = os.path.basename(transcodedFilePath)
+                newTranscodedPath = os.path.join(originalDir, transcodedFileName)
+                
+                # Move the file (use shutil.move for cross-drive operations)
+                shutil.move(transcodedFilePath, newTranscodedPath)
+                transcodedMoved = True
+                
+                LoggingService.LogInfo(f"Successfully moved transcoded file from {transcodedFilePath} to {newTranscodedPath}", 
+                                     "VMAFQueueBusinessService", "_HandleFileManagement")
+                
+                # Step 3: Clean up the copied source file from C:\MediaVortex\Source\
+                sourceCopyPath = self._GetSourceCopyPath(originalFilePath)
+                sourceCopyDeleted = False
+                if os.path.exists(sourceCopyPath):
+                    try:
+                        os.remove(sourceCopyPath)
+                        sourceCopyDeleted = True
+                        LoggingService.LogInfo(f"Successfully deleted source copy file: {sourceCopyPath}", 
+                                             "VMAFQueueBusinessService", "_HandleFileManagement")
+                    except Exception as e:
+                        LoggingService.LogWarning(f"Failed to delete source copy file {sourceCopyPath}: {str(e)}", 
+                                                "VMAFQueueBusinessService", "_HandleFileManagement")
+                
+                # Update the transcoded file path in the database
+                VMAFQueueItem.TranscodedFilePath = newTranscodedPath
+                self.DatabaseManager.SaveVMAFQueueItem(VMAFQueueItem)
+                
+            except Exception as e:
+                errorMsg = f"Failed to move transcoded file from {transcodedFilePath} to T: drive: {str(e)}"
+                LoggingService.LogError(errorMsg, "VMAFQueueBusinessService", "_HandleFileManagement")
+                return {"Success": False, "ErrorMessage": errorMsg}
+            
+            LoggingService.LogInfo(f"File management completed successfully for {VMAFQueueItem.FileName} (VMAF: {VMAFScore:.2f})", 
+                                 "VMAFQueueBusinessService", "_HandleFileManagement")
+            
+            return {
+                "Success": True,
+                "Action": "completed",
+                "VMAFScore": VMAFScore,
+                "OriginalFileDeleted": originalDeleted,
+                "TranscodedFileMoved": transcodedMoved,
+                "SourceCopyDeleted": sourceCopyDeleted if 'sourceCopyDeleted' in locals() else False,
+                "NewTranscodedPath": newTranscodedPath if transcodedMoved else None
+            }
+            
+        except Exception as e:
+            errorMsg = f"Exception in file management: {str(e)}"
+            LoggingService.LogException(errorMsg, e, "VMAFQueueBusinessService", "_HandleFileManagement")
+            return {"Success": False, "ErrorMessage": errorMsg}
+    
+    def _HandleLowQualityFileManagement(self, VMAFQueueItem: VMAFQueueModel, VMAFScore: float) -> Dict[str, Any]:
+        """Handle file management for low quality VMAF scores (≤ 90)."""
+        try:
+            LoggingService.LogFunctionEntry("_HandleLowQualityFileManagement", "VMAFQueueBusinessService", 
+                                          f"VMAFScore: {VMAFScore:.2f}, File: {VMAFQueueItem.FileName}")
+            
+            transcodedFilePath = VMAFQueueItem.TranscodedFilePath
+            
+            # Validate transcoded file path
+            if not os.path.exists(transcodedFilePath):
+                errorMsg = f"Transcoded file not found: {transcodedFilePath}"
+                LoggingService.LogError(errorMsg, "VMAFQueueBusinessService", "_HandleLowQualityFileManagement")
+                return {"Success": False, "ErrorMessage": errorMsg}
+            
+            # Delete the transcoded file from C:\MediaVortex\
+            transcodedDeleted = False
+            try:
+                os.remove(transcodedFilePath)
+                transcodedDeleted = True
+                LoggingService.LogInfo(f"Successfully deleted low-quality transcoded file: {transcodedFilePath}", 
+                                     "VMAFQueueBusinessService", "_HandleLowQualityFileManagement")
+            except Exception as e:
+                errorMsg = f"Failed to delete transcoded file {transcodedFilePath}: {str(e)}"
+                LoggingService.LogError(errorMsg, "VMAFQueueBusinessService", "_HandleLowQualityFileManagement")
+                return {"Success": False, "ErrorMessage": errorMsg}
+            
+            # Also clean up the source copy from C:\MediaVortex\Source\
+            sourceCopyPath = self._GetSourceCopyPath(VMAFQueueItem.OriginalFilePath)
+            sourceCopyDeleted = False
+            if os.path.exists(sourceCopyPath):
+                try:
+                    os.remove(sourceCopyPath)
+                    sourceCopyDeleted = True
+                    LoggingService.LogInfo(f"Successfully deleted source copy file: {sourceCopyPath}", 
+                                         "VMAFQueueBusinessService", "_HandleLowQualityFileManagement")
+                except Exception as e:
+                    LoggingService.LogWarning(f"Failed to delete source copy file {sourceCopyPath}: {str(e)}", 
+                                            "VMAFQueueBusinessService", "_HandleLowQualityFileManagement")
+            
+            LoggingService.LogInfo(f"Low-quality file management completed for {VMAFQueueItem.FileName} (VMAF: {VMAFScore:.2f})", 
+                                 "VMAFQueueBusinessService", "_HandleLowQualityFileManagement")
+            
+            return {
+                "Success": True,
+                "Action": "low_quality_cleanup",
+                "VMAFScore": VMAFScore,
+                "TranscodedFileDeleted": transcodedDeleted,
+                "SourceCopyDeleted": sourceCopyDeleted,
+                "OriginalFileKept": True
+            }
+            
+        except Exception as e:
+            errorMsg = f"Exception in low-quality file management: {str(e)}"
+            LoggingService.LogException(errorMsg, e, "VMAFQueueBusinessService", "_HandleLowQualityFileManagement")
+            return {"Success": False, "ErrorMessage": errorMsg}
+    
+    def _GetSourceCopyPath(self, OriginalFilePath: str) -> str:
+        """Get the path where the source file was copied for transcoding."""
+        try:
+            # Extract filename from original path (T:\)
+            fileName = os.path.basename(OriginalFilePath)
+            # Construct the source copy path in C:\MediaVortex\Source\
+            sourceCopyPath = os.path.join("C:\\MediaVortex\\Source", fileName)
+            return sourceCopyPath
+        except Exception as e:
+            LoggingService.LogException("Error constructing source copy path", e, "VMAFQueueBusinessService", "_GetSourceCopyPath")
+            return ""

@@ -4,6 +4,7 @@ import shutil
 from typing import Optional, Dict, Any, List
 from pathlib import Path
 from Services.LoggingService import LoggingService
+from Repositories.DatabaseManager import DatabaseManager
 
 
 class FFmpegService:
@@ -17,9 +18,9 @@ class FFmpegService:
     def __init__(self):
         # Use cached paths if available, otherwise find them
         if FFmpegService._cached_ffmpeg_path is None:
-            FFmpegService._cached_ffmpeg_path = self.FindFFmpegPath()
+            FFmpegService._cached_ffmpeg_path = self.GetFFmpegPathFromSettings()
         if FFmpegService._cached_ffprobe_path is None:
-            FFmpegService._cached_ffprobe_path = self.FindFFprobePath()
+            FFmpegService._cached_ffprobe_path = self.GetFFprobePathFromSettings()
             
         self.FFmpegPath = FFmpegService._cached_ffmpeg_path
         self.FFprobePath = FFmpegService._cached_ffprobe_path
@@ -28,41 +29,22 @@ class FFmpegService:
         if not FFmpegService._logged_initialization:
             if not self.FFmpegPath:
                 LoggingService.LogWarning("FFmpeg not found. Video processing will not be available.", '__init__', 'FFmpegService')
-            else:
-                LoggingService.LogInfo(f"FFmpeg found at: {self.FFmpegPath}", '__init__', 'FFmpegService')
-                
+            
             if not self.FFprobePath:
                 LoggingService.LogWarning("FFprobe not found. Media analysis will not be available.", '__init__', 'FFmpegService')
-            else:
-                LoggingService.LogInfo(f"FFprobe found at: {self.FFprobePath}", '__init__', 'FFmpegService')
             
             FFmpegService._logged_initialization = True
     
     def FindFFmpegPath(self) -> Optional[str]:
         """Find FFmpeg executable path."""
         try:
-            # Check if ffmpeg is in PATH
-            FFmpegPath = shutil.which('ffmpeg')
-            if FFmpegPath:
-                return FFmpegPath
-            
-            # Check common installation paths
-            CommonPaths = [
-                'C:\\ffmpeg\\bin\\ffmpeg.exe',
-                'C:\\Program Files\\ffmpeg\\bin\\ffmpeg.exe',
-                'C:\\Program Files (x86)\\ffmpeg\\bin\\ffmpeg.exe',
-                '/usr/bin/ffmpeg',
-                '/usr/local/bin/ffmpeg',
-                '/opt/ffmpeg/bin/ffmpeg'
-            ]
-            
-            for Path in CommonPaths:
-                if os.path.exists(Path):
-                    LoggingService.LogInfo(f"Found FFmpeg at: {Path}", 'FindFFmpegPath', 'FFmpegService')
-                    return Path
-            
-            LoggingService.LogWarning("FFmpeg not found in common paths", 'FindFFmpegPath', 'FFmpegService')
-            return None
+            # Use local project FFmpeg from FFmpegMaster\bin folder
+            ProjectFFmpegPath = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'FFmpegMaster', 'bin', 'ffmpeg.exe')
+            if os.path.exists(ProjectFFmpegPath):
+                return ProjectFFmpegPath
+            else:
+                LoggingService.LogError(f"Project FFmpeg not found at: {ProjectFFmpegPath}", 'FindFFmpegPath', 'FFmpegService')
+                return None
             
         except Exception as e:
             LoggingService.LogException("Error finding FFmpeg path", e, 'FindFFmpegPath', 'FFmpegService')
@@ -71,32 +53,67 @@ class FFmpegService:
     def FindFFprobePath(self) -> Optional[str]:
         """Find FFprobe executable path."""
         try:
-            # Check if ffprobe is in PATH
-            FFprobePath = shutil.which('ffprobe')
-            if FFprobePath:
-                return FFprobePath
-            
-            # Check common installation paths
-            CommonPaths = [
-                'C:\\ffmpeg\\bin\\ffprobe.exe',
-                'C:\\Program Files\\ffmpeg\\bin\\ffprobe.exe',
-                'C:\\Program Files (x86)\\ffmpeg\\bin\\ffprobe.exe',
-                '/usr/bin/ffprobe',
-                '/usr/local/bin/ffprobe',
-                '/opt/ffmpeg/bin/ffprobe'
-            ]
-            
-            for Path in CommonPaths:
-                if os.path.exists(Path):
-                    LoggingService.LogInfo(f"Found FFprobe at: {Path}", 'FindFFprobePath', 'FFmpegService')
-                    return Path
-            
-            LoggingService.LogWarning("FFprobe not found in common paths", 'FindFFprobePath', 'FFmpegService')
-            return None
+            # Use local project FFprobe from FFmpegMaster\bin folder
+            ProjectFFprobePath = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'FFmpegMaster', 'bin', 'ffprobe.exe')
+            if os.path.exists(ProjectFFprobePath):
+                return ProjectFFprobePath
+            else:
+                LoggingService.LogError(f"Project FFprobe not found at: {ProjectFFprobePath}", 'FindFFprobePath', 'FFmpegService')
+                return None
             
         except Exception as e:
             LoggingService.LogException("Error finding FFprobe path", e, 'FindFFprobePath', 'FFmpegService')
             return None
+    
+    def GetFFmpegPathFromSettings(self) -> Optional[str]:
+        """Get FFmpeg path from database settings."""
+        try:
+            DatabaseManagerInstance = DatabaseManager()
+            SettingValue = DatabaseManagerInstance.GetSystemSetting('FFmpegPath')
+            
+            if SettingValue:
+                # Convert relative path to absolute path
+                RelativePath = SettingValue
+                ProjectRoot = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                AbsolutePath = os.path.join(ProjectRoot, RelativePath)
+                
+                if os.path.exists(AbsolutePath):
+                    return AbsolutePath
+                else:
+                    LoggingService.LogError(f"FFmpeg path from settings not found: {AbsolutePath}", 'GetFFmpegPathFromSettings', 'FFmpegService')
+                    return None
+            else:
+                LoggingService.LogWarning("No FFmpeg path found in settings, falling back to FindFFmpegPath", 'GetFFmpegPathFromSettings', 'FFmpegService')
+                return self.FindFFmpegPath()
+                
+        except Exception as e:
+            LoggingService.LogException("Error getting FFmpeg path from settings", e, 'GetFFmpegPathFromSettings', 'FFmpegService')
+            return self.FindFFmpegPath()
+    
+    def GetFFprobePathFromSettings(self) -> Optional[str]:
+        """Get FFprobe path from database settings."""
+        try:
+            DatabaseManagerInstance = DatabaseManager()
+            SettingValue = DatabaseManagerInstance.GetSystemSetting('FFprobePath')
+            
+            if SettingValue:
+                # Convert relative path to absolute path
+                RelativePath = SettingValue
+                ProjectRoot = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                AbsolutePath = os.path.join(ProjectRoot, RelativePath)
+                
+                if os.path.exists(AbsolutePath):
+                    return AbsolutePath
+                else:
+                    LoggingService.LogError(f"FFprobe path from settings not found: {AbsolutePath}", 'GetFFprobePathFromSettings', 'FFmpegService')
+                    return None
+            else:
+                LoggingService.LogWarning("No FFprobe path found in settings, falling back to FindFFprobePath", 'GetFFprobePathFromSettings', 'FFmpegService')
+                return self.FindFFprobePath()
+                
+        except Exception as e:
+            LoggingService.LogException("Error getting FFprobe path from settings", e, 'GetFFprobePathFromSettings', 'FFmpegService')
+            return self.FindFFprobePath()
     
     def ExecuteFFprobe(self, FilePath: str, Arguments: List[str] = None) -> Dict[str, Any]:
         """Execute FFprobe command and return results."""
@@ -112,14 +129,14 @@ class FFmpegService:
             if Arguments is None:
                 Arguments = ['-v', 'quiet', '-print_format', 'json', '-show_format', '-show_streams']
             
-            # Use the original file path with proper quoting for special characters
-            # Use just 'ffprobe' since it's in PATH, and only quote the file path
-            CommandString = 'ffprobe'
+            # Use the project-bundled FFprobe path with proper quoting for special characters
+            CommandString = f'"{self.FFprobePath}"'
             for Arg in Arguments:
                 CommandString += f' {Arg}'
-            CommandString += f' "{FilePath}"'
+            # Ensure file path is properly quoted and normalized
+            NormalizedPath = os.path.normpath(FilePath)
+            CommandString += f' "{NormalizedPath}"'
             
-            LoggingService.LogInfo(f"Executing FFprobe command: {CommandString}", 'ExecuteFFprobe', 'FFmpegService')
             
             Result = subprocess.run(
                 CommandString,
@@ -142,8 +159,6 @@ class FFmpegService:
             if not ResultDict['Success']:
                 ResultDict['ErrorMessage'] = f"FFprobe failed: ReturnCode={Result.returncode}, Error={Result.stderr}"
                 LoggingService.LogError(f"FFprobe failed for {FilePath}: ReturnCode={Result.returncode}, Error={Result.stderr}", 'FFmpegService', 'ExecuteFFprobe')
-            else:
-                LoggingService.LogInfo(f"FFprobe succeeded for {FilePath}", 'ExecuteFFprobe', 'FFmpegService')
             
             return ResultDict
             
@@ -186,7 +201,6 @@ class FFmpegService:
             else:
                 Command = [self.FFmpegPath] + Arguments
             
-            LoggingService.LogInfo(f"Executing FFmpeg command: {' '.join(Command)}", 'ExecuteFFmpegCommand', 'FFmpegService')
             
             if ProgressCallback:
                 return self._ExecuteFFmpegWithProgress(Command, ProgressCallback)
@@ -252,12 +266,10 @@ class FFmpegService:
             def progress_reader():
                 import time
                 
-                LoggingService.LogInfo("Progress reader thread started", '_ExecuteFFmpegWithProgress', 'FFmpegService')
                 lineCount = 0
                 
                 while True:
                     if process.poll() is not None:
-                        LoggingService.LogInfo(f"Process finished, exiting progress reader. Total lines read: {lineCount}", '_ExecuteFFmpegWithProgress', 'FFmpegService')
                         break
                     
                     line = process.stderr.readline()
@@ -408,7 +420,6 @@ class FFmpegService:
             Result = subprocess.run(ProbeCommand, capture_output=True, text=True, timeout=30)
             if Result.returncode == 0 and Result.stdout.strip():
                 Duration = float(Result.stdout.strip())
-                LoggingService.LogInfo(f"Input file duration: {Duration} seconds", 'GetInputFileDuration', 'FFmpegService')
                 return Duration
             else:
                 LoggingService.LogWarning(f"Failed to get duration for {InputFile}: {Result.stderr}", 'GetInputFileDuration', 'FFmpegService')
@@ -562,10 +573,8 @@ class FFmpegService:
             # Execute FFmpeg command
             Result = self.ExecuteFFmpeg(Arguments, OutputFile=OutputFilePath)
             
-            if Result['Success']:
-                LoggingService.LogInfo(f"Successfully added MediaVortex title: {MediaVortexTitle}", 'AddMediaVortexTitle', 'FFmpegService')
-            else:
-                LoggingService.LogWarning(f"Failed to add MediaVortex title: {Result.get('ErrorMessage', '', 'Unknown error')}", 'FFmpegService', 'AddMediaVortexTitle')
+            if not Result['Success']:
+                LoggingService.LogWarning(f"Failed to add MediaVortex title: {Result.get('ErrorMessage', 'Unknown error')}", 'FFmpegService', 'AddMediaVortexTitle')
             
             return Result
             

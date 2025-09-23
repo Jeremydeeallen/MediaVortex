@@ -207,7 +207,8 @@ class FFmpegComparisonService:
     
     def CreateVMAFComparison(self, OriginalFilePath: str, TranscodedFilePath: str,
                             OutputPath: str = None, QualityWidth: int = 1280, 
-                            QualityHeight: int = 720, VMAFModelPath: str = None) -> FFmpegVMAFComparisonModel:
+                            QualityHeight: int = 720, VMAFModelPath: str = None,
+                            ProgressCallback = None) -> FFmpegVMAFComparisonModel:
         """Create a VMAF quality comparison between original and transcoded videos."""
         try:
             LoggingService.LogFunctionEntry("CreateVMAFComparison", 'FFmpegComparisonService', 
@@ -253,6 +254,10 @@ class FFmpegComparisonService:
                 try:
                     # Log VMAF progress details to database
                     LoggingService.LogInfo(f"VMAF Analysis Progress: {progress_data}", 'CreateVMAFComparison', 'FFmpegComparisonService')
+                    
+                    # Call external progress callback if provided
+                    if ProgressCallback:
+                        ProgressCallback(progress_data)
                 except Exception as e:
                     LoggingService.LogException("Exception in VMAF progress callback", e, 'CreateVMAFComparison', 'FFmpegComparisonService')
             

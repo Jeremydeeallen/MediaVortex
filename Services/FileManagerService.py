@@ -627,17 +627,7 @@ class FileManagerService:
                 LoggingService.LogError(errorMsg, "FileManagerService", "ReplaceFile")
                 return {'Success': False, 'ErrorMessage': errorMsg}
             
-            # Create backup of original file if it exists
-            if os.path.exists(OriginalFilePath):
-                backupPath = f"{OriginalFilePath}.backup"
-                try:
-                    import shutil
-                    shutil.copy2(OriginalFilePath, backupPath)
-                    LoggingService.LogInfo(f"Created backup of original file: {backupPath}", "FileManagerService", "ReplaceFile")
-                except Exception as backupError:
-                    LoggingService.LogWarning(f"Failed to create backup: {str(backupError)}", "FileManagerService", "ReplaceFile")
-            
-            # Replace original file with new file
+            # Replace original file with new file (no backup created)
             import shutil
             shutil.move(NewFilePath, OriginalFilePath)
             
