@@ -2215,44 +2215,90 @@ class DatabaseManager:
             LoggingService.LogException("Exception getting recent VMAF results", e, "DatabaseManager", "GetRecentVMAFResults")
             return []
 
-    def GetRecentVMAFResultsFromQueue(self, Limit: int = 5) -> List[VMAFQueueModel]:
-        """Get recent VMAF results from VMAFQueue table (proper VMAF data source)."""
+    def GetRecentVMAFResultsFromQueue(self, Limit: int = 5) -> List[Dict[str, Any]]:
+        """Get recent VMAF results from TranscodeAttempts with VMAF scores and duration from VMAFProgress."""
         try:
             LoggingService.LogFunctionEntry("GetRecentVMAFResultsFromQueue", "DatabaseManager", f"Limit: {Limit}")
             
+            # Get TranscodeAttempts that have VMAF scores (completed VMAF tests)
+            # and join with VMAFProgress to get duration information
             query = """
-                SELECT Id, TranscodeAttemptId, OriginalFilePath, TranscodedFilePath, FileName, Status, Priority,
-                       DateAdded, DateStarted, DateCompleted, VMAFScore, QualityThreshold, ErrorMessage, RetryCount, MaxRetries
-                FROM VMAFQueue 
-                WHERE Status = 'Completed' AND VMAFScore IS NOT NULL
-                ORDER BY DateCompleted DESC
+                SELECT 
+                    ta.Id, ta.FilePath, ta.AttemptDate, ta.Quality, ta.OldSizeBytes, ta.NewSizeBytes, 
+                    ta.Success, ta.SizeReductionBytes, ta.SizeReductionPercent, ta.ErrorMessage, 
+                    ta.TranscodeDurationSeconds, ta.FfpmpegCommand, ta.AudioBitrateKbps, 
+                    ta.VideoBitrateKbps, ta.ProfileName, ta.VMAF,
+                    vp.StartTime, vp.EndTime
+                FROM TranscodeAttempts ta
+                LEFT JOIN VMAFProgress vp ON ta.Id = vp.TranscodeAttemptId
+                WHERE ta.VMAF IS NOT NULL
+                ORDER BY ta.AttemptDate DESC
                 LIMIT ?
             """
             rows = self.DatabaseService.ExecuteQuery(query, (Limit,))
             
             results = []
             for row in rows:
-                vmafItem = VMAFQueueModel()
-                vmafItem.Id = row['Id']
-                vmafItem.TranscodeAttemptId = row['TranscodeAttemptId']
-                vmafItem.OriginalFilePath = row['OriginalFilePath']
-                vmafItem.TranscodedFilePath = row['TranscodedFilePath']
-                vmafItem.FileName = row['FileName']
-                vmafItem.Status = row['Status']
-                vmafItem.Priority = row['Priority']
-                vmafItem.DateAdded = row['DateAdded']
-                vmafItem.DateStarted = row['DateStarted']
-                vmafItem.DateCompleted = row['DateCompleted']
-                vmafItem.VMAFScore = row['VMAFScore']
-                vmafItem.QualityThreshold = row['QualityThreshold']
-                vmafItem.ErrorMessage = row['ErrorMessage']
-                vmafItem.RetryCount = row['RetryCount']
-                vmafItem.MaxRetries = row['MaxRetries']
-                results.append(vmafItem)
+                # Calculate VMAF duration from VMAFProgress if available
+                duration_seconds = None
+                if row['StartTime'] and row['EndTime']:
+                    try:
+                        # Handle both datetime objects and string representations
+                        start_time = row['StartTime']
+                        end_time = row['EndTime']
+                        
+                        # If they're strings, parse them
+                        if isinstance(start_time, str):
+                            from datetime import datetime
+                            start_time = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
+                        if isinstance(end_time, str):
+                            from datetime import datetime
+                            end_time = datetime.fromisoformat(end_time.replace('Z', '+00:00'))
+                        
+                        duration_seconds = (end_time - start_time).total_seconds()
+                    except Exception as e:
+                        LoggingService.LogError(f"Error calculating VMAF duration: {e}", "DatabaseManager", "GetRecentVMAFResultsFromQueue")
+                        duration_seconds = None
+                
+                # Format duration
+                formatted_duration = "N/A"
+                if duration_seconds is not None:
+                    if duration_seconds < 60:
+                        formatted_duration = f"{duration_seconds:.1f}s"
+                    elif duration_seconds < 3600:
+                        minutes = int(duration_seconds // 60)
+                        seconds = int(duration_seconds % 60)
+                        formatted_duration = f"{minutes}m {seconds}s"
+                    else:
+                        hours = int(duration_seconds // 3600)
+                        minutes = int((duration_seconds % 3600) // 60)
+                        formatted_duration = f"{hours}h {minutes}m"
+                
+                result = {
+                    'Id': row['Id'],
+                    'FilePath': row['FilePath'],
+                    'AttemptDate': row['AttemptDate'],
+                    'Quality': row['Quality'],
+                    'OldSizeBytes': row['OldSizeBytes'],
+                    'NewSizeBytes': row['NewSizeBytes'],
+                    'Success': row['Success'],
+                    'SizeReductionBytes': row['SizeReductionBytes'],
+                    'SizeReductionPercent': row['SizeReductionPercent'],
+                    'ErrorMessage': row['ErrorMessage'],
+                    'TranscodeDurationSeconds': row['TranscodeDurationSeconds'],
+                    'FfpmpegCommand': row['FfpmpegCommand'],
+                    'AudioBitrateKbps': row['AudioBitrateKbps'],
+                    'VideoBitrateKbps': row['VideoBitrateKbps'],
+                    'ProfileName': row['ProfileName'],
+                    'VMAF': row['VMAF'],
+                    'VMAFDurationSeconds': duration_seconds,
+                    'FormattedVMAFDuration': formatted_duration
+                }
+                results.append(result)
             
-            LoggingService.LogInfo(f"Retrieved {len(results)} recent VMAF results from queue", "DatabaseManager", "GetRecentVMAFResultsFromQueue")
+            LoggingService.LogInfo(f"Retrieved {len(results)} recent VMAF results with duration", "DatabaseManager", "GetRecentVMAFResultsFromQueue")
             return results
             
         except Exception as e:
-            LoggingService.LogException("Exception getting recent VMAF results from queue", e, "DatabaseManager", "GetRecentVMAFResultsFromQueue")
+            LoggingService.LogException("Exception getting recent VMAF results", e, "DatabaseManager", "GetRecentVMAFResultsFromQueue")
             return []

@@ -529,7 +529,7 @@ class ActivityManager {
                         '<span class="text-muted">-</span>'
                     }
                 </td>
-                <td>${this.formatDuration(result.TranscodeDurationSeconds)}</td>
+                <td>${result.FormattedVMAFDuration || this.formatDuration(result.TranscodeDurationSeconds)}</td>
                 <td>${this.escapeHtml(result.ProfileName || '-')}</td>
                 <td>
                     <span class="badge ${result.Success ? 'bg-success' : 'bg-danger'}">
