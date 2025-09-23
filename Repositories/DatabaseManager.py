@@ -2214,3 +2214,45 @@ class DatabaseManager:
         except Exception as e:
             LoggingService.LogException("Exception getting recent VMAF results", e, "DatabaseManager", "GetRecentVMAFResults")
             return []
+
+    def GetRecentVMAFResultsFromQueue(self, Limit: int = 5) -> List[VMAFQueueModel]:
+        """Get recent VMAF results from VMAFQueue table (proper VMAF data source)."""
+        try:
+            LoggingService.LogFunctionEntry("GetRecentVMAFResultsFromQueue", "DatabaseManager", f"Limit: {Limit}")
+            
+            query = """
+                SELECT Id, TranscodeAttemptId, OriginalFilePath, TranscodedFilePath, FileName, Status, Priority,
+                       DateAdded, DateStarted, DateCompleted, VMAFScore, QualityThreshold, ErrorMessage, RetryCount, MaxRetries
+                FROM VMAFQueue 
+                WHERE Status = 'Completed' AND VMAFScore IS NOT NULL
+                ORDER BY DateCompleted DESC
+                LIMIT ?
+            """
+            rows = self.DatabaseService.ExecuteQuery(query, (Limit,))
+            
+            results = []
+            for row in rows:
+                vmafItem = VMAFQueueModel()
+                vmafItem.Id = row['Id']
+                vmafItem.TranscodeAttemptId = row['TranscodeAttemptId']
+                vmafItem.OriginalFilePath = row['OriginalFilePath']
+                vmafItem.TranscodedFilePath = row['TranscodedFilePath']
+                vmafItem.FileName = row['FileName']
+                vmafItem.Status = row['Status']
+                vmafItem.Priority = row['Priority']
+                vmafItem.DateAdded = row['DateAdded']
+                vmafItem.DateStarted = row['DateStarted']
+                vmafItem.DateCompleted = row['DateCompleted']
+                vmafItem.VMAFScore = row['VMAFScore']
+                vmafItem.QualityThreshold = row['QualityThreshold']
+                vmafItem.ErrorMessage = row['ErrorMessage']
+                vmafItem.RetryCount = row['RetryCount']
+                vmafItem.MaxRetries = row['MaxRetries']
+                results.append(vmafItem)
+            
+            LoggingService.LogInfo(f"Retrieved {len(results)} recent VMAF results from queue", "DatabaseManager", "GetRecentVMAFResultsFromQueue")
+            return results
+            
+        except Exception as e:
+            LoggingService.LogException("Exception getting recent VMAF results from queue", e, "DatabaseManager", "GetRecentVMAFResultsFromQueue")
+            return []

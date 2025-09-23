@@ -331,24 +331,26 @@ def GetVMAFHistory():
             LoggingService.LogError(ErrorMsg, "VMAFJobController", "GetVMAFHistory")
             return jsonify({"Success": False, "ErrorMessage": ErrorMsg}), 400
         
-        # Get recent VMAF results from TranscodeAttempts table
-        RecentVMAFResults = SharedVMAFService.DatabaseManager.GetRecentVMAFResults(Limit)
+        # Get recent VMAF results from VMAFQueue table (proper VMAF data source)
+        RecentVMAFResults = SharedVMAFService.DatabaseManager.GetRecentVMAFResultsFromQueue(Limit)
         
         # Format results for response
         FormattedResults = []
         for Result in RecentVMAFResults:
             FormattedResults.append({
                 'Id': Result.Id,
-                'FileName': os.path.basename(Result.FilePath) if Result.FilePath else 'Unknown',
-                'FilePath': Result.FilePath,
-                'AttemptDate': Result.AttemptDate.isoformat() if Result.AttemptDate and hasattr(Result.AttemptDate, 'isoformat') else Result.AttemptDate,
-                'VMAFScore': Result.VMAF,
-                'Quality': Result.Quality,
-                'ProfileName': Result.ProfileName,
-                'Success': Result.Success,
-                'SizeReductionPercent': Result.SizeReductionPercent,
-                'TranscodeDurationSeconds': Result.TranscodeDurationSeconds,
-                'ErrorMessage': Result.ErrorMessage
+                'FileName': Result.FileName if Result.FileName else 'Unknown',
+                'FilePath': Result.OriginalFilePath,
+                'AttemptDate': Result.DateCompleted.isoformat() if Result.DateCompleted and hasattr(Result.DateCompleted, 'isoformat') else Result.DateCompleted,
+                'VMAFScore': Result.VMAFScore,
+                'Quality': 'VMAF Test',  # VMAF results don't have quality scores, they are quality tests
+                'ProfileName': 'VMAF Analysis',  # VMAF results don't have profile names
+                'Success': Result.Status == 'Completed',
+                'SizeReductionPercent': 0.0,  # VMAF results don't track size reduction
+                'TranscodeDurationSeconds': 0.0,  # VMAF results don't track transcode duration
+                'ErrorMessage': Result.ErrorMessage,
+                'QualityThreshold': Result.QualityThreshold,
+                'PassesThreshold': Result.PassesQualityThreshold()
             })
         
         Result = {
