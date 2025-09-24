@@ -12,11 +12,11 @@ flowchart TD
     C -->|Yes| E[Mark Job as Running<br/>TranscodeQueueItem.MarkAsRunning]
     E --> F[UPDATE TranscodeQueue Status<br/>DatabaseManager.SaveTranscodeQueueItem]
     F -->     G[INSERT TranscodeAttempts Record<br/>DatabaseManager.SaveTranscodeAttempt]
-    G --> G1[Load Profile Threshold Settings<br/>DatabaseManager.GetThresholdsByProfileId]
+    G --> G1[Load Profile Settings for Target Resolution<br/>DatabaseManager.GetProfileSettingsForTargetResolution]
     G1 --> H[Initialize TranscodeProgress<br/>TranscodeProgressModel.MarkAsRunning]
-    H --> I[Generate FFmpeg Command with Profile Settings<br/>FFmpegTranscodingService.GenerateTranscodeCommand]
-    I --> I1[Apply Resolution Scaling if TranscodeDownTo is set<br/>FFmpegTranscodingService.ApplyResolutionScaling]
-    I1 --> I2[Start FFmpeg/HandBrake Process<br/>FFmpegTranscodingService.StartTranscoding]
+    H --> I[Generate FFmpeg Command with Profile Settings<br/>FFmpegTranscodingService.BuildFFmpegCommand]
+    I --> I1[Apply Resolution Scaling if TranscodeDownTo is set<br/>FFmpegTranscodingService.GetScaleFilter]
+    I1 --> I2[Start FFmpeg/HandBrake Process<br/>FFmpegTranscodingService.TranscodeVideo]
     I2 --> J[Monitor Progress<br/>FFmpegTranscodingService.MonitorProgress]
     J --> K[UPDATE TranscodeProgress Table<br/>DatabaseManager.SaveTranscodeProgress]
     K --> L{Process Complete?<br/>Check process exit code}
@@ -33,7 +33,15 @@ flowchart TD
     S -->|Yes| U[UPDATE TranscodeAttempts as Success<br/>TranscodeAttemptModel.MarkAsSuccess]
     U --> V[UPDATE TranscodeQueue Status to Completed<br/>DatabaseManager.SaveTranscodeQueueItem]
     V --> W[Add to VMAFQueue<br/>VMAFQueueBusinessService.AddToVMAFQueue]
-    W --> X[DELETE from TranscodeQueue<br/>DatabaseManager.DeleteTranscodeQueueItem]
+    W --> W5[VMAF Quality Analysis<br/>VMAFQueueBusinessService.ProcessVMAFQueue]
+    W5 --> W6{VMAF Score > 90?}
+    W6 -->|No| W7[Delete Transcoded File<br/>FileManagerService.DeleteFile]
+    W7 --> X[DELETE from TranscodeQueue<br/>DatabaseManager.DeleteTranscodeQueueItem]
+    W6 -->|Yes| W8[Delete Original File from Source Location<br/>FileManagerService.DeleteFile]
+    W8 --> W9[Move Transcoded File to Original Source Directory<br/>FileManagerService.MoveFile]
+    W9 --> W10[Delete Temporary Source File<br/>FileManagerService.DeleteFile]
+    W10 --> W11[UPDATE MediaFiles with New File Information<br/>FFmpegService.ExtractMetadata + DatabaseManager.UpdateMediaFile]
+    W11 --> X
     X --> Y[Continue to Next Job]
     Q --> Z{More Jobs?}
     Y --> Z
@@ -57,11 +65,11 @@ flowchart TD
     classDef vmaf fill:#7b1fa2,stroke:#4a148c,stroke-width:2px,color:#ffffff
     
     class A,AA startEnd
-    class B,E,F,G,G1,H,I,I1,I2,J,K,R,U,V,X,W1,W2,W3,W4 process
-    class C,L,M,S,Z decision
-    class U,V success
-    class N,O,P,T error
-    class W,W1,W2,W3,W4 vmaf
+    class B,E,F,G,G1,H,I,I1,I2,J,K,R,U,V,X,W1,W2,W3,W4,W5,W8,W9,W10,W11 process
+    class C,L,M,S,Z,W6 decision
+    class U,V,W8,W9,W10,W11 success
+    class N,O,P,T,W7 error
+    class W,W1,W2,W3,W4,W5 vmaf
 ```
 
 ## Key Components
@@ -75,26 +83,39 @@ flowchart TD
 
 ### Key Functions Used:
 - **DatabaseManager.GetThresholdsByProfileId()**: Loads profile threshold settings for the assigned profile
-- **FFmpegTranscodingService.GenerateTranscodeCommand()**: Creates base FFmpeg command with profile settings (bitrate, codec, quality)
-- **FFmpegTranscodingService.ApplyResolutionScaling()**: Adds resolution scaling filters when TranscodeDownTo is set
-- **FFmpegTranscodingService.StartTranscoding()**: Executes the complete FFmpeg command with all settings applied
+- **DatabaseManager.GetProfileSettingsForTargetResolution()**: Retrieves transcoding settings based on TranscodeDownTo field
+- **FFmpegTranscodingService.BuildFFmpegCommand()**: Creates single-pass FFmpeg command with profile settings and resolution scaling
+- **FFmpegTranscodingService.BuildFFmpegMultiPassCommand()**: Creates multi-pass FFmpeg command with profile settings and resolution scaling
+- **FFmpegTranscodingService.GetScaleFilter()**: Generates appropriate scaling filters for target resolutions
+- **FFmpegTranscodingService.TranscodeVideo()**: Executes the complete FFmpeg command with all settings applied
+- **VMAFQueueBusinessService.ProcessVMAFQueue()**: Processes VMAF quality analysis on transcoded files
+- **FileManagerService.MoveFile()**: Moves transcoded file to original location after quality check passes
+- **FileManagerService.DeleteFile()**: Deletes original file after successful replacement
+- **FFmpegService.ExtractMetadata()**: Extracts new file metadata from transcoded file
+- **DatabaseManager.UpdateMediaFile()**: Updates MediaFiles table with new file information
 
 ### Key Decision Points:
 1. **Job Availability**: Check for pending jobs in queue
 2. **Process Completion**: Monitor FFmpeg/HandBrake process
 3. **Size Reduction**: Verify file was actually compressed
 4. **VMAF Queue Addition**: Only add successful compressions
+5. **VMAF Quality Check**: Verify transcoded file meets quality threshold (>90 VMAF score)
 
 ### Success Criteria:
 - Transcoding process completes without errors
 - Output file is smaller than input file
 - VMAFQueue record created with proper file paths
+- VMAF quality score exceeds 90 threshold
+- Transcoded file successfully replaces original file
+- MediaFiles table updated with new file information
 
 ### Error Handling:
 - Failed transcodes marked in TranscodeAttempts
 - TranscodeQueue status updated to Failed
 - Error messages logged for debugging
 - Process continues to next job
+- Low VMAF quality scores result in transcoded file deletion
+- File replacement failures are logged and handled gracefully
 
 ### IsRunning Flag Management:
 - **Start**: `IsRunning = True` when transcoding begins
@@ -107,6 +128,19 @@ flowchart TD
 - Successful transcodes automatically added to VMAFQueue
 - Foreign key relationship maintained via TranscodeAttemptId
 - Original and transcoded file paths preserved for quality testing
+- VMAF quality analysis determines if transcoded file meets quality standards
+- Only files with VMAF score > 90 are allowed to replace original files
+
+### MediaFiles Update Process:
+- **Step W8**: Delete original file from source location (using filepath from MediaFiles table)
+- **Step W9**: Move transcoded file from temporary location to original source directory (may have different filename)
+- **Step W10**: Delete temporary source file from C:\MediaVortex\Source
+- **Step W11**: Update MediaFiles table with new file information after successful file replacement
+  - Extract metadata from transcoded file using FFmpegService.ExtractMetadata()
+  - Update file size, resolution, bitrate, codec, and other technical details
+  - Update LastScannedDate to reflect the transcoding completion
+  - Preserve original file information in TranscodeAttempts table for historical tracking
+  - Ensure MediaFiles table always reflects the actual file that exists in the file system
 
 ### Profile Threshold Processing:
 - **Step G1**: Load profile thresholds for the file's assigned profile
@@ -123,9 +157,40 @@ flowchart TD
   - Ensures proper aspect ratio maintenance
 - **Step I2**: Execute complete command with all settings applied
 
-### Resolution Scaling Logic:
-- **2160p → 720p**: `-vf scale=1280:720`
-- **1080p → 720p**: `-vf scale=1280:720` 
-- **720p → 480p**: `-vf scale=854:480`
-- **No scaling**: When TranscodeDownTo is null/empty
+### TranscodeDownTo Feature Implementation:
+The TranscodeDownTo feature allows users to downscale videos to lower resolutions during transcoding. This feature is fully implemented for both single-pass and multi-pass transcoding.
+
+#### Database Processing:
+- **GetProfileSettingsForTargetResolution()**: Retrieves transcoding settings based on the TranscodeDownTo field
+  - Queries ProfileThresholds table for TranscodeDownTo value
+  - Returns settings for the target resolution (e.g., 720p settings when TranscodeDownTo = "720p")
+  - Handles "No downscaling" case by using source resolution settings
+
+#### FFmpeg Command Building:
+- **Single-Pass Commands**: `BuildFFmpegCommand()` now includes resolution scaling
+  - Checks if TargetResolution is set and not 'original'
+  - Calls `GetScaleFilter()` to generate appropriate scaling filter
+  - Adds `-vf` and scaling filter to FFmpeg command
+- **Multi-Pass Commands**: `BuildFFmpegMultiPassCommand()` includes resolution scaling in Pass 2
+  - Same scaling logic applied to encoding pass
+  - Pass 1 (analysis) does not include scaling filters
+
+#### Resolution Scaling Logic:
+- **2160p → 720p**: `-vf scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2`
+- **1080p → 720p**: `-vf scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2`
+- **1080p → 1080p**: `-vf scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2`
+- **720p → 480p**: `-vf scale=854:480:force_original_aspect_ratio=decrease,pad=854:480:(ow-iw)/2:(oh-ih)/2`
+- **No scaling**: When TranscodeDownTo is null/empty or set to "No downscaling"
+
+#### Aspect Ratio Maintenance:
+- Uses `force_original_aspect_ratio=decrease` to maintain proper aspect ratios
+- Adds padding with `pad=WIDTH:HEIGHT:(ow-iw)/2:(oh-ih)/2` to center the video
+- Prevents distortion when scaling between different aspect ratios
+
+#### Supported Resolutions:
+- **720p**: 1280x720 pixels
+- **1080p**: 1920x1080 pixels  
+- **480p**: 854x480 pixels
+- **360p**: 640x360 pixels
+- **Original**: No scaling applied
 

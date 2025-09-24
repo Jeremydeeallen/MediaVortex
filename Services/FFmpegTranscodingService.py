@@ -273,7 +273,15 @@ class FFmpegTranscodingService:
             
             LoggingService.LogInfo(f"Using CRF mode with quality {quality}, maxrate {videoBitrate}k, bufsize {videoBitrate * 2}k, threads=0", "FFmpegTranscodingService", "BuildFFmpegCommand")
             
-            # Note: Removed scaling filter - let FFmpeg handle resolution automatically
+            # Add resolution scaling if TranscodeDownTo is set
+            if targetResolution and targetResolution != 'original':
+                scaleFilter = self.GetScaleFilter(targetResolution)
+                if scaleFilter:
+                    args.insert(-2, '-vf')  # Insert before output file
+                    args.insert(-2, scaleFilter)
+                    LoggingService.LogInfo(f"Added resolution scaling filter: {scaleFilter}", "FFmpegTranscodingService", "BuildFFmpegCommand")
+                else:
+                    LoggingService.LogWarning(f"No scale filter available for target resolution: {targetResolution}", "FFmpegTranscodingService", "BuildFFmpegCommand")
             
             LoggingService.LogInfo(f"Built FFmpeg command with {len(args)} arguments", "FFmpegTranscodingService", "BuildFFmpegCommand")
             return args

@@ -19,3 +19,4 @@ class ProfileThresholdModel:
     TranscodeDownTo: str = ""
     Quality: Optional[int] = None
     Grain: bool = False
+    KeepSource: bool = False

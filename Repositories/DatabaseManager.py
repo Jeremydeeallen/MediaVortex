@@ -119,7 +119,7 @@ class DatabaseManager:
         query = """
             SELECT Id, ProfileId, Resolution, Under30MinMB, Under65MinMB, Over65MinMB,
                    VideoBitrateKbps, AudioBitrateKbps, FallbackVideoBitrateKbps,
-                   FallbackAudioBitrateKbps, TranscodeDownTo, Quality, Grain
+                   FallbackAudioBitrateKbps, TranscodeDownTo, Quality, Grain, KeepSource
             FROM ProfileThresholds 
             WHERE ProfileId = ?
             ORDER BY Resolution
@@ -141,7 +141,8 @@ class DatabaseManager:
                 FallbackAudioBitrateKbps=row['FallbackAudioBitrateKbps'],
                 TranscodeDownTo=row['TranscodeDownTo'],
                 Quality=row['Quality'],
-                Grain=bool(row['Grain'] if 'Grain' in row.keys() else 0)
+                Grain=bool(row['Grain'] if 'Grain' in row.keys() else 0),
+                KeepSource=bool(row['KeepSource'] if 'KeepSource' in row.keys() else 0)
             )
             thresholds.append(threshold)
         
@@ -152,7 +153,7 @@ class DatabaseManager:
         query = """
             SELECT Id, ProfileId, Resolution, Under30MinMB, Under65MinMB, Over65MinMB,
                    VideoBitrateKbps, AudioBitrateKbps, FallbackVideoBitrateKbps,
-                   FallbackAudioBitrateKbps, TranscodeDownTo, Quality, Grain
+                   FallbackAudioBitrateKbps, TranscodeDownTo, Quality, Grain, KeepSource
             FROM ProfileThresholds 
             ORDER BY ProfileId, Resolution
         """
@@ -173,7 +174,8 @@ class DatabaseManager:
                 FallbackAudioBitrateKbps=row['FallbackAudioBitrateKbps'],
                 TranscodeDownTo=row['TranscodeDownTo'],
                 Quality=row['Quality'],
-                Grain=bool(row['Grain'] if 'Grain' in row.keys() else 0)
+                Grain=bool(row['Grain'] if 'Grain' in row.keys() else 0),
+                KeepSource=bool(row['KeepSource'] if 'KeepSource' in row.keys() else 0)
             )
             thresholds.append(threshold)
         
@@ -195,14 +197,14 @@ class DatabaseManager:
                         INSERT INTO ProfileThresholds 
                         (ProfileId, Resolution, Under30MinMB, Under65MinMB, Over65MinMB,
                          VideoBitrateKbps, AudioBitrateKbps, FallbackVideoBitrateKbps,
-                         FallbackAudioBitrateKbps, TranscodeDownTo, Quality, Grain)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                         FallbackAudioBitrateKbps, TranscodeDownTo, Quality, Grain, KeepSource)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """
                     parameters = (
                         Threshold.ProfileId, Threshold.Resolution, Threshold.Under30MinMB,
                         Threshold.Under65MinMB, Threshold.Over65MinMB, Threshold.VideoBitrateKbps,
                         Threshold.AudioBitrateKbps, Threshold.FallbackVideoBitrateKbps,
-                        Threshold.FallbackAudioBitrateKbps, Threshold.TranscodeDownTo, Threshold.Quality, Threshold.Grain
+                        Threshold.FallbackAudioBitrateKbps, Threshold.TranscodeDownTo, Threshold.Quality, Threshold.Grain, Threshold.KeepSource
                     )
                     LoggingService.LogInfo(f"Insert threshold parameters: {parameters}", "SaveThreshold", "DatabaseManager")
                     cursor.execute(query, parameters)
@@ -218,14 +220,14 @@ class DatabaseManager:
                         SET ProfileId = ?, Resolution = ?, Under30MinMB = ?, Under65MinMB = ?,
                             Over65MinMB = ?, VideoBitrateKbps = ?, AudioBitrateKbps = ?,
                             FallbackVideoBitrateKbps = ?, FallbackAudioBitrateKbps = ?,
-                            TranscodeDownTo = ?, Quality = ?, Grain = ?
+                            TranscodeDownTo = ?, Quality = ?, Grain = ?, KeepSource = ?
                         WHERE Id = ?
                     """
                     parameters = (
                         Threshold.ProfileId, Threshold.Resolution, Threshold.Under30MinMB,
                         Threshold.Under65MinMB, Threshold.Over65MinMB, Threshold.VideoBitrateKbps,
                         Threshold.AudioBitrateKbps, Threshold.FallbackVideoBitrateKbps,
-                        Threshold.FallbackAudioBitrateKbps, Threshold.TranscodeDownTo, Threshold.Quality, Threshold.Grain, Threshold.Id
+                        Threshold.FallbackAudioBitrateKbps, Threshold.TranscodeDownTo, Threshold.Quality, Threshold.Grain, Threshold.KeepSource, Threshold.Id
                     )
                     LoggingService.LogInfo(f"Update threshold parameters: {parameters}", "SaveThreshold", "DatabaseManager")
                     cursor.execute(query, parameters)
@@ -1546,15 +1548,16 @@ class DatabaseManager:
             
             if rows:
                 row = rows[0]
+                # Calculate the actual target resolution for transcoding
+                actualTargetResolution = resolutionCategory if targetResolution == 'No downscaling' else targetResolution
                 settings = {
                     'VideoBitrateKbps': row['VideoBitrateKbps'],
                     'AudioBitrateKbps': row['AudioBitrateKbps'],
                     'Quality': row['Quality'],
-                    'TargetResolution': row['Resolution'],
+                    'TargetResolution': actualTargetResolution,  # Use the actual target resolution from TranscodeDownTo
                     'Codec': row['Codec']
                 }
-                actualResolution = resolutionCategory if targetResolution == 'No downscaling' else targetResolution
-                LoggingService.LogInfo(f"Found ProfileSettings for {ProfileName} targeting {actualResolution}: {settings}", "DatabaseManager", "GetProfileSettingsForTargetResolution")
+                LoggingService.LogInfo(f"Found ProfileSettings for {ProfileName} targeting {actualTargetResolution}: {settings}", "DatabaseManager", "GetProfileSettingsForTargetResolution")
                 return settings
             else:
                 LoggingService.LogWarning(f"No ProfileSettings found for Profile {ProfileName} and target Resolution {targetResolution}", "DatabaseManager", "GetProfileSettingsForTargetResolution")

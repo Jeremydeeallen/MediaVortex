@@ -422,15 +422,32 @@ class VMAFQueueBusinessService:
                 LoggingService.LogError(errorMsg, "VMAFQueueBusinessService", "_HandleFileManagement")
                 return {"Success": False, "ErrorMessage": errorMsg}
             
-            # Step 1: Delete the original file on T: drive
-            originalDeleted = False
+            # Check if we should keep the source file based on profile settings
+            shouldKeepSource = self.ShouldKeepSourceFile(VMAFQueueItem)
+            
+            # Step 1: Handle the original file based on KeepSource setting
+            originalHandled = False
             try:
-                os.remove(originalFilePath)
-                originalDeleted = True
-                LoggingService.LogInfo(f"Successfully deleted original file: {originalFilePath}", 
-                                     "VMAFQueueBusinessService", "_HandleFileManagement")
+                if shouldKeepSource:
+                    # Rename original file with _old suffix
+                    originalDir = os.path.dirname(originalFilePath)
+                    originalFileName = os.path.basename(originalFilePath)
+                    name, ext = os.path.splitext(originalFileName)
+                    oldFileName = f"{name}_old{ext}"
+                    oldFilePath = os.path.join(originalDir, oldFileName)
+                    
+                    os.rename(originalFilePath, oldFilePath)
+                    originalHandled = True
+                    LoggingService.LogInfo(f"Successfully renamed original file to: {oldFilePath}", 
+                                         "VMAFQueueBusinessService", "_HandleFileManagement")
+                else:
+                    # Delete the original file (existing behavior)
+                    os.remove(originalFilePath)
+                    originalHandled = True
+                    LoggingService.LogInfo(f"Successfully deleted original file: {originalFilePath}", 
+                                         "VMAFQueueBusinessService", "_HandleFileManagement")
             except Exception as e:
-                errorMsg = f"Failed to delete original file {originalFilePath}: {str(e)}"
+                errorMsg = f"Failed to handle original file {originalFilePath}: {str(e)}"
                 LoggingService.LogError(errorMsg, "VMAFQueueBusinessService", "_HandleFileManagement")
                 return {"Success": False, "ErrorMessage": errorMsg}
             
@@ -556,3 +573,49 @@ class VMAFQueueBusinessService:
         except Exception as e:
             LoggingService.LogException("Error constructing source copy path", e, "VMAFQueueBusinessService", "_GetSourceCopyPath")
             return ""
+    
+    def ShouldKeepSourceFile(self, VMAFQueueItem: VMAFQueueModel) -> bool:
+        """Check if the source file should be kept based on profile settings."""
+        try:
+            LoggingService.LogFunctionEntry("ShouldKeepSourceFile", "VMAFQueueBusinessService", VMAFQueueItem.FileName)
+            
+            # Get the transcode attempt to find the profile name
+            transcodeAttempt = self.DatabaseManager.GetTranscodeAttemptById(VMAFQueueItem.TranscodeAttemptId)
+            if not transcodeAttempt or not transcodeAttempt.ProfileName:
+                LoggingService.LogInfo(f"No profile name found for {VMAFQueueItem.FileName}, defaulting to delete source", 
+                                     "VMAFQueueBusinessService", "_ShouldKeepSourceFile")
+                return False
+            
+            # Get the profile by name
+            profiles = self.DatabaseManager.GetAllProfiles()
+            profile = next((p for p in profiles if p.ProfileName == transcodeAttempt.ProfileName), None)
+            if not profile:
+                LoggingService.LogWarning(f"Profile {transcodeAttempt.ProfileName} not found for {VMAFQueueItem.FileName}, defaulting to delete source", 
+                                        "VMAFQueueBusinessService", "_ShouldKeepSourceFile")
+                return False
+            
+            # Get the media file to determine resolution
+            mediaFiles = self.DatabaseManager.GetAllMediaFiles()
+            mediaFile = next((mf for mf in mediaFiles if mf.FilePath == VMAFQueueItem.OriginalFilePath), None)
+            if not mediaFile:
+                LoggingService.LogWarning(f"Media file not found for {VMAFQueueItem.FileName}, defaulting to delete source", 
+                                        "VMAFQueueBusinessService", "_ShouldKeepSourceFile")
+                return False
+            
+            # Get profile thresholds for this profile and resolution
+            profileThresholds = self.DatabaseManager.GetThresholdsByProfileId(profile.Id)
+            matchingThreshold = next((pt for pt in profileThresholds if pt.Resolution == mediaFile.Resolution), None)
+            
+            if not matchingThreshold:
+                LoggingService.LogWarning(f"No profile threshold found for profile {profile.ProfileName} and resolution {mediaFile.Resolution}, defaulting to delete source", 
+                                        "VMAFQueueBusinessService", "ShouldKeepSourceFile")
+                return False
+            
+            keepSource = matchingThreshold.KeepSource
+            LoggingService.LogInfo(f"Profile {profile.ProfileName} KeepSource setting for {VMAFQueueItem.FileName}: {keepSource}", 
+                                 "VMAFQueueBusinessService", "ShouldKeepSourceFile")
+            return keepSource
+            
+        except Exception as e:
+            LoggingService.LogException("Error checking KeepSource setting", e, "VMAFQueueBusinessService", "ShouldKeepSourceFile")
+            return False

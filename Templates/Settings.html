@@ -200,11 +200,19 @@
                                 </div>
                             </div>
                             <div class="row g-2 mt-1">
-                                <div class="col-md-12">
+                                <div class="col-md-6">
                                     <div class="form-check">
                                         <input class="form-check-input" type="checkbox" id="Grain480p">
                                         <label class="form-check-label small" for="Grain480p">
                                             Enable Grain Processing
+                                        </label>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="KeepSource480p">
+                                        <label class="form-check-label small" for="KeepSource480p">
+                                            Keep Source File
                                         </label>
                                     </div>
                                 </div>
@@ -273,11 +281,19 @@
                                 </div>
                             </div>
                             <div class="row g-2 mt-1">
-                                <div class="col-md-12">
+                                <div class="col-md-6">
                                     <div class="form-check">
                                         <input class="form-check-input" type="checkbox" id="Grain720p">
                                         <label class="form-check-label small" for="Grain720p">
                                             Enable Grain Processing
+                                        </label>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="KeepSource720p">
+                                        <label class="form-check-label small" for="KeepSource720p">
+                                            Keep Source File
                                         </label>
                                     </div>
                                 </div>
@@ -347,11 +363,19 @@
                                 </div>
                             </div>
                             <div class="row g-2 mt-1">
-                                <div class="col-md-12">
+                                <div class="col-md-6">
                                     <div class="form-check">
                                         <input class="form-check-input" type="checkbox" id="Grain1080p">
                                         <label class="form-check-label small" for="Grain1080p">
                                             Enable Grain Processing
+                                        </label>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="KeepSource1080p">
+                                        <label class="form-check-label small" for="KeepSource1080p">
+                                            Keep Source File
                                         </label>
                                     </div>
                                 </div>
@@ -421,11 +445,19 @@
                                 </div>
                             </div>
                             <div class="row g-2 mt-1">
-                                <div class="col-md-12">
+                                <div class="col-md-6">
                                     <div class="form-check">
                                         <input class="form-check-input" type="checkbox" id="Grain2160p">
                                         <label class="form-check-label small" for="Grain2160p">
                                             Enable Grain Processing
+                                        </label>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="KeepSource2160p">
+                                        <label class="form-check-label small" for="KeepSource2160p">
+                                            Keep Source File
                                         </label>
                                     </div>
                                 </div>
@@ -676,6 +708,7 @@ function PopulateProfileForm(Profile) {
         $('#Over65Min480p').val(Threshold480p.Over65MinMB);
         $('#TranscodeDownTo480p').val(Threshold480p.TranscodeDownTo);
         $('#Grain480p').prop('checked', Threshold480p.Grain || false);
+        $('#KeepSource480p').prop('checked', Threshold480p.KeepSource || false);
         UpdateBitrateFieldsState('480p');
     }
     
@@ -692,6 +725,7 @@ function PopulateProfileForm(Profile) {
         $('#Over65Min720p').val(Threshold720p.Over65MinMB);
         $('#TranscodeDownTo720p').val(Threshold720p.TranscodeDownTo);
         $('#Grain720p').prop('checked', Threshold720p.Grain || false);
+        $('#KeepSource720p').prop('checked', Threshold720p.KeepSource || false);
         UpdateBitrateFieldsState('720p');
     }
     
@@ -708,6 +742,7 @@ function PopulateProfileForm(Profile) {
         $('#Over65Min1080p').val(Threshold1080p.Over65MinMB);
         $('#TranscodeDownTo1080p').val(Threshold1080p.TranscodeDownTo);
         $('#Grain1080p').prop('checked', Threshold1080p.Grain || false);
+        $('#KeepSource1080p').prop('checked', Threshold1080p.KeepSource || false);
         UpdateBitrateFieldsState('1080p');
     }
     
@@ -724,6 +759,7 @@ function PopulateProfileForm(Profile) {
         $('#Over65Min2160p').val(Threshold2160p.Over65MinMB);
         $('#TranscodeDownTo2160p').val(Threshold2160p.TranscodeDownTo);
         $('#Grain2160p').prop('checked', Threshold2160p.Grain || false);
+        $('#KeepSource2160p').prop('checked', Threshold2160p.KeepSource || false);
         UpdateBitrateFieldsState('2160p');
     }
 }
@@ -746,6 +782,7 @@ function ClearProfileForm() {
         $(`#Over65Min${Resolution}`).val('');
         $(`#TranscodeDownTo${Resolution}`).val('No downscaling');
         $(`#Grain${Resolution}`).prop('checked', false);
+        $(`#KeepSource${Resolution}`).prop('checked', false);
         UpdateBitrateFieldsState(Resolution);
     });
 }
@@ -774,7 +811,8 @@ function SaveProfile() {
                 Under65MinMB: parseInt($('#Under65Min480p').val()) || 0,
                 Over65MinMB: parseInt($('#Over65Min480p').val()) || 0,
                 TranscodeDownTo: $('#TranscodeDownTo480p').val(),
-                Grain: $('#Grain480p').is(':checked')
+                Grain: $('#Grain480p').is(':checked'),
+                KeepSource: $('#KeepSource480p').is(':checked')
             },
             {
                 Resolution: '720p',
@@ -787,7 +825,8 @@ function SaveProfile() {
                 Under65MinMB: parseInt($('#Under65Min720p').val()) || 0,
                 Over65MinMB: parseInt($('#Over65Min720p').val()) || 0,
                 TranscodeDownTo: $('#TranscodeDownTo720p').val(),
-                Grain: $('#Grain720p').is(':checked')
+                Grain: $('#Grain720p').is(':checked'),
+                KeepSource: $('#KeepSource720p').is(':checked')
             },
             {
                 Resolution: '1080p',
@@ -800,7 +839,8 @@ function SaveProfile() {
                 Under65MinMB: parseInt($('#Under65Min1080p').val()) || 0,
                 Over65MinMB: parseInt($('#Over65Min1080p').val()) || 0,
                 TranscodeDownTo: $('#TranscodeDownTo1080p').val(),
-                Grain: $('#Grain1080p').is(':checked')
+                Grain: $('#Grain1080p').is(':checked'),
+                KeepSource: $('#KeepSource1080p').is(':checked')
             },
             {
                 Resolution: '2160p',
@@ -813,7 +853,8 @@ function SaveProfile() {
                 Under65MinMB: parseInt($('#Under65Min2160p').val()) || 0,
                 Over65MinMB: parseInt($('#Over65Min2160p').val()) || 0,
                 TranscodeDownTo: $('#TranscodeDownTo2160p').val(),
-                Grain: $('#Grain2160p').is(':checked')
+                Grain: $('#Grain2160p').is(':checked'),
+                KeepSource: $('#KeepSource2160p').is(':checked')
             }
         ]
     };
