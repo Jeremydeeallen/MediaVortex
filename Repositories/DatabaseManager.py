@@ -1550,7 +1550,7 @@ class DatabaseManager:
             if targetResolution == 'No downscaling':
                 # Get all settings from the current resolution entry
                 query = """
-                    SELECT pt.VideoBitrateKbps, pt.AudioBitrateKbps, pt.Quality, pt.Resolution, pt.Codec
+                    SELECT pt.VideoBitrateKbps, pt.AudioBitrateKbps, pt.Quality, pt.Resolution, p.Codec
                     FROM ProfileThresholds pt
                     JOIN Profiles p ON pt.ProfileId = p.Id
                     WHERE p.ProfileName = ? AND pt.Resolution = ?
@@ -1560,7 +1560,7 @@ class DatabaseManager:
             else:
                 # Now get all settings for the target resolution
                 query = """
-                    SELECT pt.VideoBitrateKbps, pt.AudioBitrateKbps, pt.Quality, pt.Resolution, pt.Codec
+                    SELECT pt.VideoBitrateKbps, pt.AudioBitrateKbps, pt.Quality, pt.Resolution, p.Codec
                     FROM ProfileThresholds pt
                     JOIN Profiles p ON pt.ProfileId = p.Id
                     WHERE p.ProfileName = ? AND pt.Resolution = ?

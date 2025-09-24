@@ -180,37 +180,25 @@ class QueueManagementBusinessService:
         try:
             LoggingService.LogFunctionEntry("FindMatchingProfileThreshold", "QueueManagementBusinessService", MediaFile.FileName, MediaFile.Resolution)
             
-            # Convert file resolution to standard format for matching
-            fileResolution = MediaFile.Resolution or ""
-            fileResolutionStandard = self.StandardizeResolution(fileResolution)
-            
-            LoggingService.LogInfo(f"Looking for threshold for file resolution: {fileResolution} (standardized: {fileResolutionStandard})", "QueueManagementBusinessService", "FindMatchingProfileThreshold")
-            
-            # First, try exact match by standardized resolution
-            matchingThresholds = []
-            for pt in ProfileThresholds:
-                thresholdResolutionStandard = self.StandardizeResolution(pt.Resolution or "")
-                if thresholdResolutionStandard == fileResolutionStandard:
-                    matchingThresholds.append(pt)
-                    LoggingService.LogInfo(f"Found exact resolution match: {pt.Resolution} -> {thresholdResolutionStandard}", "QueueManagementBusinessService", "FindMatchingProfileThreshold")
+            # Use ResolutionService to find matching threshold
+            from Services.ResolutionService import ResolutionService
+            resolutionService = ResolutionService()
+            matchingThreshold = resolutionService.FindMatchingThreshold(MediaFile.Resolution or "", ProfileThresholds)
             
             # If no exact match and this is a manually assigned profile, use the first available threshold
-            if not matchingThresholds and AllowAssignedProfile:
-                LoggingService.LogInfo(f"No exact resolution match found for {fileResolution}, using first available threshold for manually assigned profile", "QueueManagementBusinessService", "FindMatchingProfileThreshold")
-                matchingThresholds = ProfileThresholds[:1] if ProfileThresholds else []
+            if not matchingThreshold and AllowAssignedProfile:
+                LoggingService.LogInfo(f"No exact resolution match found for {MediaFile.Resolution}, using first available threshold for manually assigned profile", "QueueManagementBusinessService", "FindMatchingProfileThreshold")
+                matchingThreshold = ProfileThresholds[0] if ProfileThresholds else None
             
-            if not matchingThresholds:
-                LoggingService.LogDebug(f"No thresholds found for resolution {fileResolution}", "QueueManagementBusinessService", "FindMatchingProfileThreshold")
+            if not matchingThreshold:
+                LoggingService.LogDebug(f"No thresholds found for resolution {MediaFile.Resolution}", "QueueManagementBusinessService", "FindMatchingProfileThreshold")
                 return None
             
-            # Find threshold based on duration
+            # Check if the matching threshold meets the criteria
             durationMinutes = MediaFile.DurationMinutes or 0
-            
-            for threshold in matchingThresholds:
-                # Check if file meets the threshold criteria
-                if self.EvaluateThresholdCriteria(MediaFile, threshold, durationMinutes, AllowAssignedProfile):
-                    LoggingService.LogInfo(f"Found matching threshold for {MediaFile.FileName}: {threshold.ProfileId} (Resolution: {threshold.Resolution}, TranscodeDownTo: {threshold.TranscodeDownTo})", "QueueManagementBusinessService", "FindMatchingProfileThreshold")
-                    return threshold
+            if self.EvaluateThresholdCriteria(MediaFile, matchingThreshold, durationMinutes, AllowAssignedProfile):
+                LoggingService.LogInfo(f"Found matching threshold for {MediaFile.FileName}: {matchingThreshold.ProfileId} (Resolution: {matchingThreshold.Resolution}, TranscodeDownTo: {matchingThreshold.TranscodeDownTo})", "QueueManagementBusinessService", "FindMatchingProfileThreshold")
+                return matchingThreshold
             
             LoggingService.LogDebug(f"No matching threshold found for {MediaFile.FileName}", "QueueManagementBusinessService", "FindMatchingProfileThreshold")
             return None
@@ -219,34 +207,6 @@ class QueueManagementBusinessService:
             LoggingService.LogException("Exception finding matching profile threshold", e, "QueueManagementBusinessService", "FindMatchingProfileThreshold")
             return None
     
-    def StandardizeResolution(self, Resolution: str) -> str:
-        """Standardize resolution string for consistent matching."""
-        if not Resolution:
-            return ""
-        
-        resolution = Resolution.lower().strip()
-        
-        # Handle VR resolutions first (more specific)
-        if "7680x3840" in resolution:
-            return "7680x3840"  # 360° VR
-        elif "3840x3840" in resolution:
-            return "3840x3840"  # 180° VR
-        elif "5760x2880" in resolution:
-            return "5760x2880"  # 360° VR (lower res)
-        elif "2880x2880" in resolution:
-            return "2880x2880"  # 180° VR (lower res)
-        
-        # Handle common resolution formats
-        elif "3840x2160" in resolution or "2160p" in resolution or "4k" in resolution:
-            return "2160p"
-        elif "1920x1080" in resolution or "1080p" in resolution:
-            return "1080p"
-        elif "1280x720" in resolution or "720p" in resolution:
-            return "720p"
-        elif "854x480" in resolution or "480p" in resolution:
-            return "480p"
-        else:
-            return resolution
     
     def EvaluateThresholdCriteria(self, MediaFile: MediaFileModel, Threshold: ProfileThresholdModel, DurationMinutes: float, AllowAssignedProfile: bool = False) -> bool:
         """Evaluate if a media file meets the threshold criteria for transcoding."""

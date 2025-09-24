@@ -12,8 +12,11 @@ flowchart TD
     C -->|Yes| E[Mark Job as Running<br/>TranscodeQueueItem.MarkAsRunning]
     E --> F[UPDATE TranscodeQueue Status<br/>DatabaseManager.SaveTranscodeQueueItem]
     F -->     G[INSERT TranscodeAttempts Record<br/>DatabaseManager.SaveTranscodeAttempt]
-    G --> G1[Load Profile Settings for Target Resolution<br/>DatabaseManager.GetProfileSettingsForTargetResolution]
-    G1 --> H[Initialize TranscodeProgress<br/>TranscodeProgressModel.MarkAsRunning]
+    G --> G1[Get Profile Threshold for File<br/>TranscodingBusinessService.GetProfileThresholdForFile]
+    G1 --> G1A[Standardize File Resolution<br/>ResolutionService.StandardizeResolution]
+    G1A --> G1B[Find Matching Profile Threshold<br/>ResolutionService.FindMatchingThreshold]
+    G1B --> G1C[Load Profile Settings for Target Resolution<br/>DatabaseManager.GetProfileSettingsForTargetResolution]
+    G1C --> H[Initialize TranscodeProgress<br/>TranscodeProgressModel.MarkAsRunning]
     H --> I[Generate FFmpeg Command with Profile Settings<br/>FFmpegTranscodingService.BuildFFmpegCommand]
     I --> I1[Apply Resolution Scaling if TranscodeDownTo is set<br/>FFmpegTranscodingService.GetScaleFilter]
     I1 --> I2[Start FFmpeg/HandBrake Process<br/>FFmpegTranscodingService.TranscodeVideo]
@@ -65,7 +68,7 @@ flowchart TD
     classDef vmaf fill:#7b1fa2,stroke:#4a148c,stroke-width:2px,color:#ffffff
     
     class A,AA startEnd
-    class B,E,F,G,G1,H,I,I1,I2,J,K,R,U,V,X,W1,W2,W3,W4,W5,W8,W9,W10,W11 process
+    class B,E,F,G,G1,G1A,G1B,G1C,H,I,I1,I2,J,K,R,U,V,X,W1,W2,W3,W4,W5,W8,W9,W10,W11 process
     class C,L,M,S,Z,W6 decision
     class U,V,W8,W9,W10,W11 success
     class N,O,P,T,W7 error
@@ -82,6 +85,9 @@ flowchart TD
 - **ProfileThresholds**: Loaded to determine transcoding parameters
 
 ### Key Functions Used:
+- **TranscodingBusinessService.GetProfileThresholdForFile()**: Gets the appropriate profile threshold for a file using resolution standardization
+- **ResolutionService.StandardizeResolution()**: Converts any resolution format (e.g., '1920x1080') to standard format (e.g., '1080p')
+- **ResolutionService.FindMatchingThreshold()**: Finds profile threshold that matches the standardized file resolution
 - **DatabaseManager.GetThresholdsByProfileId()**: Loads profile threshold settings for the assigned profile
 - **DatabaseManager.GetProfileSettingsForTargetResolution()**: Retrieves transcoding settings based on TranscodeDownTo field
 - **FFmpegTranscodingService.BuildFFmpegCommand()**: Creates single-pass FFmpeg command with profile settings and resolution scaling
@@ -142,8 +148,23 @@ flowchart TD
   - Preserve original file information in TranscodeAttempts table for historical tracking
   - Ensure MediaFiles table always reflects the actual file that exists in the file system
 
+### Resolution Standardization Process:
+- **Step G1**: Get profile threshold for the file using resolution standardization
+  - Calls `TranscodingBusinessService.GetProfileThresholdForFile()` to find appropriate threshold
+  - Uses `ResolutionService.StandardizeResolution()` to convert file resolution to standard format
+  - Handles non-standard resolutions (e.g., '1920x1080' → '1080p', '1280x720' → '720p')
+  - Skips ultra-wide/VR content that should not be transcoded
+- **Step G1A**: Standardize the file's resolution string
+  - Converts pixel dimensions to standard resolution names
+  - Maintains aspect ratio when rounding down to nearest standard height
+  - Returns 'SKIP' for ultra-wide or VR formats
+- **Step G1B**: Find matching profile threshold using standardized resolution
+  - Compares standardized file resolution against profile threshold resolutions
+  - Ensures consistent matching regardless of resolution format variations
+  - Returns the appropriate threshold for transcoding settings
+
 ### Profile Threshold Processing:
-- **Step G1**: Load profile thresholds for the file's assigned profile
+- **Step G1C**: Load profile settings for the target resolution
   - Retrieves VideoBitrateKbps, AudioBitrateKbps, Codec, Quality, Grain settings
   - Determines if TranscodeDownTo field is set (e.g., 2160p → 720p)
 - **Step I**: Generate base FFmpeg command using profile settings
@@ -193,4 +214,32 @@ The TranscodeDownTo feature allows users to downscale videos to lower resolution
 - **480p**: 854x480 pixels
 - **360p**: 640x360 pixels
 - **Original**: No scaling applied
+
+### Resolution Standardization Benefits:
+The resolution standardization process ensures that files with various resolution formats can be properly matched to profile thresholds, regardless of how the resolution is stored in the database.
+
+#### Common Resolution Format Examples:
+- **Pixel Dimensions**: `1920x1080`, `1280x720`, `3840x2160`
+- **Standard Names**: `1080p`, `720p`, `2160p`
+- **Mixed Formats**: `1920x1080p`, `1080p HD`, `4K 2160p`
+
+#### Standardization Process:
+1. **Parse Resolution**: Extract width and height from resolution string
+2. **Ultra-wide/VR Detection**: Skip transcoding for special formats (aspect ratio > 2.0 or VR resolutions)
+3. **Height Rounding**: Round down to nearest standard height (2160, 1080, 720, 480)
+4. **Aspect Ratio Maintenance**: Calculate new width to maintain original aspect ratio
+5. **Standard Mapping**: Map to standard resolution name (e.g., `1080p`)
+
+#### Example Transformations:
+- `1920x1080` → `1080p` (exact match)
+- `1920x1080p` → `1080p` (standardized)
+- `1280x720` → `720p` (exact match)
+- `1366x768` → `720p` (rounded down, width adjusted to 1280)
+- `2560x1080` → `SKIP` (ultra-wide, aspect ratio > 2.0)
+- `3840x3840` → `SKIP` (VR format, square high resolution)
+
+#### Error Prevention:
+- **Before**: `1920x1080` files failed to find `1080p` profile thresholds
+- **After**: All resolution formats properly matched to appropriate profile thresholds
+- **Result**: Transcoding failures eliminated, consistent profile assignment
 

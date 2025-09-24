@@ -583,7 +583,7 @@ class VMAFQueueBusinessService:
             transcodeAttempt = self.DatabaseManager.GetTranscodeAttemptById(VMAFQueueItem.TranscodeAttemptId)
             if not transcodeAttempt or not transcodeAttempt.ProfileName:
                 LoggingService.LogInfo(f"No profile name found for {VMAFQueueItem.FileName}, defaulting to delete source", 
-                                     "VMAFQueueBusinessService", "_ShouldKeepSourceFile")
+                                     "VMAFQueueBusinessService", "ShouldKeepSourceFile")
                 return False
             
             # Get the profile by name
@@ -591,7 +591,7 @@ class VMAFQueueBusinessService:
             profile = next((p for p in profiles if p.ProfileName == transcodeAttempt.ProfileName), None)
             if not profile:
                 LoggingService.LogWarning(f"Profile {transcodeAttempt.ProfileName} not found for {VMAFQueueItem.FileName}, defaulting to delete source", 
-                                        "VMAFQueueBusinessService", "_ShouldKeepSourceFile")
+                                        "VMAFQueueBusinessService", "ShouldKeepSourceFile")
                 return False
             
             # Get the media file to determine resolution
@@ -599,24 +599,16 @@ class VMAFQueueBusinessService:
             mediaFile = next((mf for mf in mediaFiles if mf.FilePath == VMAFQueueItem.OriginalFilePath), None)
             if not mediaFile:
                 LoggingService.LogWarning(f"Media file not found for {VMAFQueueItem.FileName}, defaulting to delete source", 
-                                        "VMAFQueueBusinessService", "_ShouldKeepSourceFile")
+                                        "VMAFQueueBusinessService", "ShouldKeepSourceFile")
                 return False
             
-            # Get profile thresholds for this profile and resolution
+            # Get profile thresholds for this profile
             profileThresholds = self.DatabaseManager.GetThresholdsByProfileId(profile.Id)
             
-            # Standardize the file resolution for matching
-            fileResolutionStandard = self.StandardizeResolution(mediaFile.Resolution or "")
-            LoggingService.LogInfo(f"Looking for KeepSource setting for file resolution: {mediaFile.Resolution} (standardized: {fileResolutionStandard})", "VMAFQueueBusinessService", "ShouldKeepSourceFile")
-            
-            # Find matching threshold using standardized resolution
-            matchingThreshold = None
-            for pt in profileThresholds:
-                thresholdResolutionStandard = self.StandardizeResolution(pt.Resolution or "")
-                if thresholdResolutionStandard == fileResolutionStandard:
-                    matchingThreshold = pt
-                    LoggingService.LogInfo(f"Found resolution match for KeepSource: {pt.Resolution} -> {thresholdResolutionStandard}", "VMAFQueueBusinessService", "ShouldKeepSourceFile")
-                    break
+            # Find the threshold that matches the file's resolution (use ResolutionService for standardization)
+            from Services.ResolutionService import ResolutionService
+            resolutionService = ResolutionService()
+            matchingThreshold = resolutionService.FindMatchingThreshold(mediaFile.Resolution or "", profileThresholds)
             
             if not matchingThreshold:
                 LoggingService.LogWarning(f"No profile threshold found for profile {profile.ProfileName} and resolution {mediaFile.Resolution}, defaulting to delete source", 
@@ -632,31 +624,3 @@ class VMAFQueueBusinessService:
             LoggingService.LogException("Error checking KeepSource setting", e, "VMAFQueueBusinessService", "ShouldKeepSourceFile")
             return False
     
-    def StandardizeResolution(self, Resolution: str) -> str:
-        """Standardize resolution string for consistent matching."""
-        if not Resolution:
-            return ""
-        
-        resolution = Resolution.lower().strip()
-        
-        # Handle VR resolutions first (more specific)
-        if "7680x3840" in resolution:
-            return "7680x3840"  # 360° VR
-        elif "3840x3840" in resolution:
-            return "3840x3840"  # 180° VR
-        elif "5760x2880" in resolution:
-            return "5760x2880"  # 360° VR (lower res)
-        elif "2880x2880" in resolution:
-            return "2880x2880"  # 180° VR (lower res)
-        
-        # Handle common resolution formats
-        elif "3840x2160" in resolution or "2160p" in resolution or "4k" in resolution:
-            return "2160p"
-        elif "1920x1080" in resolution or "1080p" in resolution:
-            return "1080p"
-        elif "1280x720" in resolution or "720p" in resolution:
-            return "720p"
-        elif "854x480" in resolution or "480p" in resolution:
-            return "480p"
-        else:
-            return resolution

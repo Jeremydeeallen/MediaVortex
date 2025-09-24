@@ -987,21 +987,21 @@ class FileScanningBusinessService:
             # Get all profile thresholds to find a matching one
             AllThresholds = self.DatabaseManager.GetAllProfileThresholds()
             
-            # Find thresholds that match this resolution
-            MatchingThresholds = [t for t in AllThresholds if t.Resolution == MediaFile.Resolution]
+            # Use ResolutionService to find matching threshold
+            from Services.ResolutionService import ResolutionService
+            resolutionService = ResolutionService()
+            matchingThreshold = resolutionService.FindMatchingThreshold(MediaFile.Resolution, AllThresholds)
             
-            if MatchingThresholds:
-                # Use the first matching threshold's profile
-                # In the future, this could be enhanced to pick the best profile based on other criteria
-                ProfileId = MatchingThresholds[0].ProfileId
-                Profile = self.DatabaseManager.GetProfileById(ProfileId)
+            if matchingThreshold:
+                # Use the matching threshold's profile
+                Profile = self.DatabaseManager.GetProfileById(matchingThreshold.ProfileId)
                 
                 if Profile:
                     MediaFile.AssignedProfile = Profile.ProfileName
                     LoggingService.LogInfo(f"Assigned profile '{Profile.ProfileName}' to {MediaFile.FileName} based on resolution {MediaFile.Resolution}", "AssignProfileBasedOnResolution", "FileScanningBusinessService")
                 else:
                     MediaFile.AssignedProfile = 'Profile Not Found'
-                    LoggingService.LogWarning(f"Profile with ID {ProfileId} not found for {MediaFile.FileName}", "AssignProfileBasedOnResolution", "FileScanningBusinessService")
+                    LoggingService.LogWarning(f"Profile with ID {matchingThreshold.ProfileId} not found for {MediaFile.FileName}", "AssignProfileBasedOnResolution", "FileScanningBusinessService")
             else:
                 MediaFile.AssignedProfile = 'No Matching Profile'
                 LoggingService.LogWarning(f"No profile threshold found for resolution {MediaFile.Resolution} for {MediaFile.FileName}", "AssignProfileBasedOnResolution", "FileScanningBusinessService")
