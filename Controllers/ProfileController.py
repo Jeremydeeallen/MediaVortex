@@ -67,10 +67,10 @@ class ProfileController:
             try:
                 LoggingService.LogFunctionEntry("create_profile")
                 data = request.get_json()
-                LoggingService.LogInfo("Received data", data)
+                LoggingService.LogInfo(f"Received data: {data}", "create_profile", "ProfileController")
                 
                 if not data or 'ProfileName' not in data:
-                    LoggingService.LogInfo("Missing ProfileName")
+                    LoggingService.LogInfo("Missing ProfileName", "create_profile", "ProfileController")
                     return jsonify({
                         'success': False,
                         'error': 'ProfileName is required'
@@ -80,41 +80,49 @@ class ProfileController:
                 description = data.get('Description', '').strip()
                 thresholds = data.get('Thresholds', [])
                 
-                LoggingService.LogInfo("Profile name: {}, Description: {}, Thresholds count: {}", 
-                               profile_name, description, len(thresholds))
+                # Extract profile-level FFmpeg settings
+                codec = data.get('Codec', 'libsvtav1')
+                preset = data.get('Preset', 6)
+                film_grain = data.get('FilmGrain', 10)
+                yadif_mode = data.get('YadifMode', 1)
+                yadif_parity = data.get('YadifParity', 1)
+                yadif_deint = data.get('YadifDeint', 1)
                 
-                success = self.ViewModel.CreateProfileWithThresholds(profile_name, description, thresholds)
-                LoggingService.LogInfo("CreateProfileWithThresholds result: {}", success)
+                LoggingService.LogInfo(f"Profile name: {profile_name}, Description: {description}, Thresholds count: {len(thresholds)}, Codec: {codec}, Preset: {preset}", "create_profile", "ProfileController")
+                
+                success = self.ViewModel.CreateProfileWithThresholds(profile_name, description, thresholds, 
+                                                                    codec, preset, film_grain, yadif_mode, yadif_parity, yadif_deint)
+                LoggingService.LogInfo(f"CreateProfileWithThresholds result: {success}", "create_profile", "ProfileController")
                 
                 if success:
-                    LoggingService.LogInfo("Success message: {}", self.ViewModel.SuccessMessage)
+                    LoggingService.LogInfo(f"Success message: {self.ViewModel.SuccessMessage}", "create_profile", "ProfileController")
                     return jsonify({
                         'success': True,
                         'message': self.ViewModel.SuccessMessage
                     }), 201
                 else:
-                    LoggingService.LogInfo("Error message: {}", self.ViewModel.ErrorMessage)
+                    LoggingService.LogInfo(f"Error message: {self.ViewModel.ErrorMessage}", "create_profile", "ProfileController")
                     return jsonify({
                         'success': False,
                         'error': self.ViewModel.ErrorMessage
                     }), 400
             except Exception as e:
-                LoggingService.LogInfoException("Exception in create_profile", e)
+                LoggingService.LogException("Exception in create_profile", e, "create_profile", "ProfileController")
                 return jsonify({
                     'success': False,
                     'error': f'Failed to create profile: {str(e)}'
                 }), 500
         
         @self.Blueprint.route('/profiles/<int:profile_id>', methods=['PUT'])
-        def update_profile(profile_id):
+        def UpdateProfile(profile_id):
             """Update an existing profile with thresholds."""
             try:
-                LoggingService.LogFunctionEntry("update_profile", profile_id)
+                LoggingService.LogFunctionEntry("UpdateProfile", profile_id)
                 data = request.get_json()
-                LoggingService.LogInfo("Received data", data)
+                LoggingService.LogInfo(f"Received data: {data}", "UpdateProfile", "ProfileController")
                 
                 if not data:
-                    LoggingService.LogInfo("No data received")
+                    LoggingService.LogInfo("No data received", "UpdateProfile", "ProfileController")
                     return jsonify({
                         'success': False,
                         'error': 'Profile data is required'
@@ -124,26 +132,34 @@ class ProfileController:
                 description = data.get('Description', '').strip()
                 thresholds = data.get('Thresholds', [])
                 
-                LoggingService.LogInfo("Profile name: {}, Description: {}, Thresholds count: {}", 
-                               profile_name, description, len(thresholds))
+                # Extract profile-level FFmpeg settings
+                codec = data.get('Codec', 'libsvtav1')
+                preset = data.get('Preset', 6)
+                film_grain = data.get('FilmGrain', 10)
+                yadif_mode = data.get('YadifMode', 1)
+                yadif_parity = data.get('YadifParity', 1)
+                yadif_deint = data.get('YadifDeint', 1)
                 
-                success = self.ViewModel.UpdateProfileWithThresholds(profile_id, profile_name, description, thresholds)
-                LoggingService.LogInfo("UpdateProfileWithThresholds result: {}", success)
+                LoggingService.LogInfo(f"Profile name: {profile_name}, Description: {description}, Thresholds count: {len(thresholds)}, Codec: {codec}, Preset: {preset}", "UpdateProfile", "ProfileController")
+                
+                success = self.ViewModel.UpdateProfileWithThresholds(profile_id, profile_name, description, thresholds,
+                                                                    codec, preset, film_grain, yadif_mode, yadif_parity, yadif_deint)
+                LoggingService.LogInfo(f"UpdateProfileWithThresholds result: {success}", "UpdateProfile", "ProfileController")
                 
                 if success:
-                    LoggingService.LogInfo("Success message: {}", self.ViewModel.SuccessMessage)
+                    LoggingService.LogInfo(f"Success message: {self.ViewModel.SuccessMessage}", "UpdateProfile", "ProfileController")
                     return jsonify({
                         'success': True,
                         'message': self.ViewModel.SuccessMessage
                     })
                 else:
-                    LoggingService.LogInfo("Error message: {}", self.ViewModel.ErrorMessage)
+                    LoggingService.LogInfo(f"Error message: {self.ViewModel.ErrorMessage}", "UpdateProfile", "ProfileController")
                     return jsonify({
                         'success': False,
                         'error': self.ViewModel.ErrorMessage
                     }), 400
             except Exception as e:
-                LoggingService.LogInfoException("Exception in update_profile", e)
+                LoggingService.LogException("Exception in UpdateProfile", e, "UpdateProfile", "ProfileController")
                 return jsonify({
                     'success': False,
                     'error': f'Failed to update profile: {str(e)}'
@@ -203,8 +219,7 @@ class ProfileController:
                     int(data['FallbackVideoBitrateKbps']),
                     int(data['FallbackAudioBitrateKbps']),
                     data['TranscodeDownTo'].strip(),
-                    data.get('Quality'),
-                    data.get('Grain', False)
+                    data.get('Quality')
                 )
                 
                 if success:
@@ -245,7 +260,8 @@ class ProfileController:
                     AudioBitrateKbps=int(data.get('AudioBitrateKbps', 0)),
                     FallbackVideoBitrateKbps=int(data.get('FallbackVideoBitrateKbps', 0)),
                     FallbackAudioBitrateKbps=int(data.get('FallbackAudioBitrateKbps', 0)),
-                    TranscodeDownTo=data.get('TranscodeDownTo', '').strip()
+                    TranscodeDownTo=data.get('TranscodeDownTo', '').strip(),
+                    Quality=data.get('Quality')
                 )
                 
                 success = self.ViewModel.UpdateThreshold(threshold)
@@ -326,7 +342,7 @@ class ProfileController:
                 result = self.ViewModel.AssignProfileToRootFolder(root_folder_path, profile_id)
                 
                 if result.get('Success', False):
-                    LoggingService.LogInfo(f"Profile assignment successful: {result.get('Message', '')}", "ProfileController", "assign_profile_to_root_folder")
+                    LoggingService.LogInfo(f"Profile assignment successful: {result.get('Message', '')}", "assign_profile_to_root_folder", "ProfileController")
                     return jsonify({
                         'success': True,
                         'message': result.get('Message', 'Profile assigned successfully'),

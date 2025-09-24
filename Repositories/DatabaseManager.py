@@ -24,7 +24,9 @@ class DatabaseManager:
     # Profile Management Methods
     def GetAllProfiles(self) -> List[TranscodeProfileModel]:
         """Get all transcoding profiles."""
-        query = "SELECT Id, ProfileName, Description, CreatedDate, LastModified FROM Profiles ORDER BY ProfileName"
+        query = """SELECT Id, ProfileName, Description, CreatedDate, LastModified, 
+                          Codec, Preset, FilmGrain, YadifMode, YadifParity, YadifDeint 
+                   FROM Profiles ORDER BY ProfileName"""
         rows = self.DatabaseService.ExecuteQuery(query)
         
         profiles = []
@@ -34,7 +36,13 @@ class DatabaseManager:
                 ProfileName=row['ProfileName'],
                 Description=row['Description'],
                 CreatedDate=row['CreatedDate'],
-                LastModified=row['LastModified']
+                LastModified=row['LastModified'],
+                Codec=row['Codec'] if row['Codec'] is not None else 'libsvtav1',
+                Preset=row['Preset'] if row['Preset'] is not None else 6,
+                FilmGrain=row['FilmGrain'] if row['FilmGrain'] is not None else 10,
+                YadifMode=row['YadifMode'] if row['YadifMode'] is not None else 1,
+                YadifParity=row['YadifParity'] if row['YadifParity'] is not None else 1,
+                YadifDeint=row['YadifDeint'] if row['YadifDeint'] is not None else 1
             )
             profiles.append(profile)
         
@@ -42,7 +50,9 @@ class DatabaseManager:
     
     def GetProfileById(self, ProfileId: int) -> Optional[TranscodeProfileModel]:
         """Get a specific profile by ID."""
-        query = "SELECT Id, ProfileName, Description, CreatedDate, LastModified FROM Profiles WHERE Id = ?"
+        query = """SELECT Id, ProfileName, Description, CreatedDate, LastModified, 
+                          Codec, Preset, FilmGrain, YadifMode, YadifParity, YadifDeint 
+                   FROM Profiles WHERE Id = ?"""
         rows = self.DatabaseService.ExecuteQuery(query, (ProfileId,))
         
         if not rows:
@@ -54,7 +64,13 @@ class DatabaseManager:
             ProfileName=row['ProfileName'],
             Description=row['Description'],
             CreatedDate=row['CreatedDate'],
-            LastModified=row['LastModified']
+            LastModified=row['LastModified'],
+            Codec=row['Codec'] if row['Codec'] is not None else 'libsvtav1',
+            Preset=row['Preset'] if row['Preset'] is not None else 6,
+            FilmGrain=row['FilmGrain'] if row['FilmGrain'] is not None else 10,
+            YadifMode=row['YadifMode'] if row['YadifMode'] is not None else 1,
+            YadifParity=row['YadifParity'] if row['YadifParity'] is not None else 1,
+            YadifDeint=row['YadifDeint'] if row['YadifDeint'] is not None else 1
         )
     
     def SaveProfile(self, Profile: TranscodeProfileModel) -> int:
@@ -70,10 +86,13 @@ class DatabaseManager:
                     # Insert new profile
                     LoggingService.LogInfo("Inserting new profile...", "DatabaseManager", "SaveProfile")
                     query = """
-                        INSERT INTO Profiles (ProfileName, Description, CreatedDate, LastModified)
-                        VALUES (?, ?, ?, ?)
+                        INSERT INTO Profiles (ProfileName, Description, CreatedDate, LastModified, 
+                                             Codec, Preset, FilmGrain, YadifMode, YadifParity, YadifDeint)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """
-                    parameters = (Profile.ProfileName, Profile.Description, Profile.CreatedDate, Profile.LastModified)
+                    parameters = (Profile.ProfileName, Profile.Description, Profile.CreatedDate, Profile.LastModified,
+                                 Profile.Codec, Profile.Preset, Profile.FilmGrain, Profile.YadifMode, 
+                                 Profile.YadifParity, Profile.YadifDeint)
                     LoggingService.LogInfo("Insert parameters: {}", "DatabaseManager", "SaveProfile", parameters)
                     cursor.execute(query, parameters)
                     connection.commit()
@@ -85,10 +104,13 @@ class DatabaseManager:
                     LoggingService.LogInfo("Updating existing profile with ID: {}", "DatabaseManager", "SaveProfile", Profile.Id)
                     query = """
                         UPDATE Profiles 
-                        SET ProfileName = ?, Description = ?, LastModified = ?
+                        SET ProfileName = ?, Description = ?, LastModified = ?, 
+                            Codec = ?, Preset = ?, FilmGrain = ?, YadifMode = ?, YadifParity = ?, YadifDeint = ?
                         WHERE Id = ?
                     """
-                    parameters = (Profile.ProfileName, Profile.Description, Profile.LastModified, Profile.Id)
+                    parameters = (Profile.ProfileName, Profile.Description, Profile.LastModified,
+                                 Profile.Codec, Profile.Preset, Profile.FilmGrain, Profile.YadifMode, 
+                                 Profile.YadifParity, Profile.YadifDeint, Profile.Id)
                     LoggingService.LogInfo("Update parameters: {}", "DatabaseManager", "SaveProfile", parameters)
                     cursor.execute(query, parameters)
                     connection.commit()

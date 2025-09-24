@@ -604,7 +604,19 @@ class VMAFQueueBusinessService:
             
             # Get profile thresholds for this profile and resolution
             profileThresholds = self.DatabaseManager.GetThresholdsByProfileId(profile.Id)
-            matchingThreshold = next((pt for pt in profileThresholds if pt.Resolution == mediaFile.Resolution), None)
+            
+            # Standardize the file resolution for matching
+            fileResolutionStandard = self.StandardizeResolution(mediaFile.Resolution or "")
+            LoggingService.LogInfo(f"Looking for KeepSource setting for file resolution: {mediaFile.Resolution} (standardized: {fileResolutionStandard})", "VMAFQueueBusinessService", "ShouldKeepSourceFile")
+            
+            # Find matching threshold using standardized resolution
+            matchingThreshold = None
+            for pt in profileThresholds:
+                thresholdResolutionStandard = self.StandardizeResolution(pt.Resolution or "")
+                if thresholdResolutionStandard == fileResolutionStandard:
+                    matchingThreshold = pt
+                    LoggingService.LogInfo(f"Found resolution match for KeepSource: {pt.Resolution} -> {thresholdResolutionStandard}", "VMAFQueueBusinessService", "ShouldKeepSourceFile")
+                    break
             
             if not matchingThreshold:
                 LoggingService.LogWarning(f"No profile threshold found for profile {profile.ProfileName} and resolution {mediaFile.Resolution}, defaulting to delete source", 
@@ -619,3 +631,32 @@ class VMAFQueueBusinessService:
         except Exception as e:
             LoggingService.LogException("Error checking KeepSource setting", e, "VMAFQueueBusinessService", "ShouldKeepSourceFile")
             return False
+    
+    def StandardizeResolution(self, Resolution: str) -> str:
+        """Standardize resolution string for consistent matching."""
+        if not Resolution:
+            return ""
+        
+        resolution = Resolution.lower().strip()
+        
+        # Handle VR resolutions first (more specific)
+        if "7680x3840" in resolution:
+            return "7680x3840"  # 360° VR
+        elif "3840x3840" in resolution:
+            return "3840x3840"  # 180° VR
+        elif "5760x2880" in resolution:
+            return "5760x2880"  # 360° VR (lower res)
+        elif "2880x2880" in resolution:
+            return "2880x2880"  # 180° VR (lower res)
+        
+        # Handle common resolution formats
+        elif "3840x2160" in resolution or "2160p" in resolution or "4k" in resolution:
+            return "2160p"
+        elif "1920x1080" in resolution or "1080p" in resolution:
+            return "1080p"
+        elif "1280x720" in resolution or "720p" in resolution:
+            return "720p"
+        elif "854x480" in resolution or "480p" in resolution:
+            return "480p"
+        else:
+            return resolution

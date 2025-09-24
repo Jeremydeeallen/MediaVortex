@@ -197,6 +197,18 @@ class FileScanningController:
                     'Error': 'DeleteMediaFileError'
                 }), 500
         
+        @self.Blueprint.route('/MediaFiles/<int:MediaFileId>/Refresh', methods=['POST'])
+        def RefreshMediaFile(MediaFileId):
+            """Refresh a single media file's details."""
+            try:
+                result = self.ViewModel.RefreshMediaFile(MediaFileId)
+                return jsonify(result), 200 if result.get('Success') else 400
+            except Exception as e:
+                return jsonify({
+                    'Success': False,
+                    'Message': f'Error refreshing media file: {str(e)}'
+                }), 500
+        
         @self.Blueprint.route('/Scan/TestUnicode', methods=['POST'])
         def TestUnicodeSupport():
             """Test Unicode character support with sample data."""

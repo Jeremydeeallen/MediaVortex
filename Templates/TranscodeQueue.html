@@ -78,6 +78,43 @@
                     </button>
                 </div>
             </div>
+            
+            <!-- Directory Scan Section -->
+            <div class="row mb-4">
+                <div class="col-12">
+                    <div class="card">
+                        <div class="card-header">
+                            <h5 class="mb-0">
+                                <i class="fas fa-folder-open"></i> Scan Directory
+                            </h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="row">
+                                <div class="col-md-4">
+                                    <label for="RootFolderSelect" class="form-label">Root Folder</label>
+                                    <select class="form-select" id="RootFolderSelect">
+                                        <option value="">Select Root Folder...</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-4">
+                                    <label for="SubdirectorySelect" class="form-label">Subdirectory</label>
+                                    <select class="form-select" id="SubdirectorySelect" disabled>
+                                        <option value="">Select Subdirectory...</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-4">
+                                    <label class="form-label">&nbsp;</label>
+                                    <div class="d-grid">
+                                        <button type="button" class="btn btn-primary" id="ScanDirectoryBtn" disabled>
+                                            <i class="fas fa-search"></i> Scan Directory
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
 
 
 
@@ -424,6 +461,7 @@ class TranscodeQueueManager {
         this.loadMediaFiles();
         this.LoadVMAFQueueData();
         this.loadProfilesForDropdowns();
+        this.loadDirectoryScanOptions();
         this.startAutoRefresh();
     }
 
@@ -546,6 +584,19 @@ class TranscodeQueueManager {
 
         document.getElementById('RefreshVMAFBtn').addEventListener('click', () => {
             this.LoadVMAFQueueData();
+        });
+
+        // Directory Scan event listeners
+        document.getElementById('RootFolderSelect').addEventListener('change', (e) => {
+            this.onRootFolderChange(e.target.value);
+        });
+
+        document.getElementById('SubdirectorySelect').addEventListener('change', (e) => {
+            this.onSubdirectoryChange(e.target.value);
+        });
+
+        document.getElementById('ScanDirectoryBtn').addEventListener('click', () => {
+            this.scanSelectedDirectory();
         });
     }
 
@@ -1125,6 +1176,9 @@ class TranscodeQueueManager {
                         <button class="btn btn-outline-info" onclick="queueManager.viewFileDetails(${file.Id})" title="View Details">
                             <i class="fas fa-info"></i>
                         </button>
+                        <button class="btn btn-outline-success" onclick="queueManager.refreshMediaFile(${file.Id})" title="Refresh File">
+                            <i class="fas fa-sync-alt"></i>
+                        </button>
                     </div>
                 </td>
             `;
@@ -1373,6 +1427,24 @@ class TranscodeQueueManager {
     viewFileDetails(fileId) {
         // Placeholder for file details modal
         this.showAlert('File details feature coming soon', 'info');
+    }
+
+    async refreshMediaFile(fileId) {
+        try {
+            const response = await fetch(`/api/MediaFiles/${fileId}/Refresh`, {
+                method: 'POST'
+            });
+            const data = await response.json();
+            
+            if (data.Success) {
+                this.showAlert('File refreshed successfully', 'success');
+                this.loadMediaFiles();
+            } else {
+                this.showAlert('Error refreshing file: ' + data.Message, 'danger');
+            }
+        } catch (error) {
+            this.showAlert('Error refreshing file: ' + error.message, 'danger');
+        }
     }
 
     async loadProfilesForDropdowns() {
@@ -1660,6 +1732,115 @@ class TranscodeQueueManager {
             // If we can't log to database, at least log to console
             console.error('Failed to log error to database:', logError);
             console.error('Original error:', errorMessage);
+        }
+    }
+
+    async loadDirectoryScanOptions() {
+        try {
+            const response = await fetch('/api/RootFolders');
+            const data = await response.json();
+            
+            if (data.Success) {
+                const rootFolderSelect = document.getElementById('RootFolderSelect');
+                rootFolderSelect.innerHTML = '<option value="">Select Root Folder...</option>';
+                
+                data.RootFolders.forEach(folder => {
+                    const option = document.createElement('option');
+                    option.value = folder.RootFolder;
+                    option.textContent = folder.RootFolder;
+                    rootFolderSelect.appendChild(option);
+                });
+            }
+        } catch (error) {
+            this.showAlert('Error loading root folders: ' + error.message, 'danger');
+        }
+    }
+
+    async onRootFolderChange(rootFolderPath) {
+        const subdirectorySelect = document.getElementById('SubdirectorySelect');
+        const scanButton = document.getElementById('ScanDirectoryBtn');
+        
+        if (!rootFolderPath) {
+            subdirectorySelect.disabled = true;
+            subdirectorySelect.innerHTML = '<option value="">Select Subdirectory...</option>';
+            scanButton.disabled = true;
+            return;
+        }
+        
+        try {
+            subdirectorySelect.disabled = true;
+            subdirectorySelect.innerHTML = '<option value="">Loading...</option>';
+            
+            const response = await fetch(`/api/Scan/GetSubdirectories?path=${encodeURIComponent(rootFolderPath)}`);
+            const data = await response.json();
+            
+            if (data.Success) {
+                subdirectorySelect.innerHTML = '<option value="">Select Subdirectory...</option>';
+                data.Subdirectories.forEach(subdir => {
+                    const option = document.createElement('option');
+                    option.value = subdir;
+                    option.textContent = subdir;
+                    subdirectorySelect.appendChild(option);
+                });
+                subdirectorySelect.disabled = false;
+            } else {
+                subdirectorySelect.innerHTML = '<option value="">Error loading subdirectories</option>';
+            }
+        } catch (error) {
+            subdirectorySelect.innerHTML = '<option value="">Error loading subdirectories</option>';
+            this.showAlert('Error loading subdirectories: ' + error.message, 'danger');
+        }
+    }
+
+    onSubdirectoryChange(subdirectory) {
+        const scanButton = document.getElementById('ScanDirectoryBtn');
+        scanButton.disabled = !subdirectory;
+    }
+
+    async scanSelectedDirectory() {
+        const rootFolder = document.getElementById('RootFolderSelect').value;
+        const subdirectory = document.getElementById('SubdirectorySelect').value;
+        
+        if (!rootFolder || !subdirectory) {
+            this.showAlert('Please select both root folder and subdirectory', 'warning');
+            return;
+        }
+        
+        const scanPath = subdirectory === 'Root' ? rootFolder : `${rootFolder}\\${subdirectory}`;
+        
+        try {
+            const scanButton = document.getElementById('ScanDirectoryBtn');
+            scanButton.disabled = true;
+            scanButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Scanning...';
+            
+            const response = await fetch('/api/Scan/StartScan', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    RootFolderPath: scanPath,
+                    Recursive: true
+                })
+            });
+            
+            const data = await response.json();
+            
+            if (data.Success) {
+                this.showAlert(`Scan started for: ${scanPath}`, 'success');
+                // Refresh media files after a short delay
+                setTimeout(() => {
+                    this.loadMediaFiles();
+                }, 2000);
+            } else {
+                this.showAlert('Error starting scan: ' + data.Message, 'danger');
+            }
+        } catch (error) {
+            this.showAlert('Error starting scan: ' + error.message, 'danger');
+        } finally {
+            const scanButton = document.getElementById('ScanDirectoryBtn');
+            scanButton.disabled = false;
+            scanButton.innerHTML = '<i class="fas fa-search"></i> Scan Directory';
         }
     }
 

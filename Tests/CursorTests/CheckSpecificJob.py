@@ -36,7 +36,7 @@ def CheckSpecificJob():
         
         if all_jobs:
             for row in all_jobs:
-                print(f"Job {row['JobId']}: {row['Status']} - Started: {row['StartTime']} - Ended: {row.get('EndTime', 'N/A')}")
+                print(f"Job {row['JobId']}: {row['Status']} - Started: {row['StartTime']} - Ended: {row['EndTime'] if row['EndTime'] is not None else 'N/A'}")
         else:
             print("No scan jobs found")
             

@@ -20,3 +20,4 @@ class ProfileThresholdModel:
     Quality: Optional[int] = None
     Grain: bool = False
     KeepSource: bool = False
+    # Note: Codec field removed - now stored at profile level in TranscodeProfileModel

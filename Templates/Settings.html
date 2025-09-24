@@ -138,6 +138,85 @@
                         </div>
                     </div>
 
+                    <!-- Profile-Level FFmpeg Settings -->
+                    <div class="card mb-4">
+                        <div class="card-header">
+                            <h6 class="mb-0">
+                                <i class="fas fa-cog"></i> FFmpeg Settings (Apply to All Resolutions)
+                            </h6>
+                        </div>
+                        <div class="card-body">
+                            <div class="row g-3">
+                                <div class="col-md-3">
+                                    <label for="ProfileCodec" class="form-label">Video Codec</label>
+                                    <select class="form-select" id="ProfileCodec">
+                                        <option value="libsvtav1">AV1 (libsvtav1)</option>
+                                        <option value="libx265">H.265 (libx265)</option>
+                                        <option value="libx264">H.264 (libx264)</option>
+                                        <option value="libvpx-vp9">VP9 (libvpx-vp9)</option>
+                                    </select>
+                                    <div class="form-text">Video encoding codec</div>
+                                </div>
+                                <div class="col-md-3">
+                                    <label for="ProfilePreset" class="form-label">Preset</label>
+                                    <select class="form-select" id="ProfilePreset">
+                                        <option value="0">0 - Fastest</option>
+                                        <option value="1">1 - Very Fast</option>
+                                        <option value="2">2 - Faster</option>
+                                        <option value="3">3 - Fast</option>
+                                        <option value="4">4 - Medium</option>
+                                        <option value="5">5 - Slow</option>
+                                        <option value="6" selected>6 - Slower (Default)</option>
+                                        <option value="7">7 - Very Slow</option>
+                                        <option value="8">8 - Placebo</option>
+                                    </select>
+                                    <div class="form-text">Encoding speed vs quality</div>
+                                </div>
+                                <div class="col-md-3">
+                                    <label for="ProfileFilmGrain" class="form-label">Film Grain</label>
+                                    <input type="number" class="form-control" id="ProfileFilmGrain" value="10" min="0" max="50">
+                                    <div class="form-text">Film grain level (0=off)</div>
+                                </div>
+                                <div class="col-md-3">
+                                    <label for="ProfileYadifMode" class="form-label">Deinterlacing</label>
+                                    <select class="form-select" id="ProfileYadifMode">
+                                        <option value="0">Off</option>
+                                        <option value="1" selected>On (Default)</option>
+                                        <option value="2">Spatial</option>
+                                        <option value="3">Temporal</option>
+                                    </select>
+                                    <div class="form-text">Deinterlacing mode</div>
+                                </div>
+                            </div>
+                            <div class="row g-3 mt-2">
+                                <div class="col-md-4">
+                                    <label for="ProfileYadifParity" class="form-label">Deinterlacing Parity</label>
+                                    <select class="form-select" id="ProfileYadifParity">
+                                        <option value="0">Auto</option>
+                                        <option value="1" selected>Top Field First</option>
+                                        <option value="-1">Bottom Field First</option>
+                                    </select>
+                                    <div class="form-text">Field order for deinterlacing</div>
+                                </div>
+                                <div class="col-md-4">
+                                    <label for="ProfileYadifDeint" class="form-label">Deinterlacing Type</label>
+                                    <select class="form-select" id="ProfileYadifDeint">
+                                        <option value="0">All Frames</option>
+                                        <option value="1" selected>Interlaced Only</option>
+                                    </select>
+                                    <div class="form-text">Which frames to deinterlace</div>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="mt-4">
+                                        <small class="text-muted">
+                                            <i class="fas fa-info-circle"></i> These settings apply to all resolution thresholds below.
+                                        </small>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- Profile Thresholds -->
                     <h6 class="mb-3">Profile Thresholds</h6>
                     
@@ -169,13 +248,9 @@
                                     <input type="number" class="form-control form-control-sm" id="Quality480p" placeholder="Empty for bitrate" min="0" max="51">
                                 </div>
                                 <div class="col-md-2">
-                                    <label for="Codec480p" class="form-label small">Video Codec</label>
-                                    <select class="form-select form-select-sm" id="Codec480p">
-                                        <option value="libx265">H.265 (libx265)</option>
-                                        <option value="libx264">H.264 (libx264)</option>
-                                        <option value="libvpx-vp9">VP9 (libvpx-vp9)</option>
-                                        <option value="libaom-av1">AV1 (libaom-av1)</option>
-                                    </select>
+                                    <div class="mt-4">
+                                        <small class="text-muted">Codec set at profile level</small>
+                                    </div>
                                 </div>
                             </div>
                             <div class="row g-2 mt-1">
@@ -200,21 +275,10 @@
                                 </div>
                             </div>
                             <div class="row g-2 mt-1">
-                                <div class="col-md-6">
-                                    <div class="form-check">
-                                        <input class="form-check-input" type="checkbox" id="Grain480p">
-                                        <label class="form-check-label small" for="Grain480p">
-                                            Enable Grain Processing
-                                        </label>
-                                    </div>
-                                </div>
-                                <div class="col-md-6">
-                                    <div class="form-check">
-                                        <input class="form-check-input" type="checkbox" id="KeepSource480p">
-                                        <label class="form-check-label small" for="KeepSource480p">
-                                            Keep Source File
-                                        </label>
-                                    </div>
+                                <div class="col-md-12">
+                                    <small class="text-muted">
+                                        <i class="fas fa-info-circle"></i> Grain processing and source file handling are controlled at the profile level above.
+                                    </small>
                                 </div>
                             </div>
                             <small class="text-muted">Video bitrate sets the maximum bitrate limit when using CRF</small>
@@ -249,13 +313,9 @@
                                     <input type="number" class="form-control form-control-sm" id="Quality720p" placeholder="Empty for bitrate" min="0" max="51">
                                 </div>
                                 <div class="col-md-2">
-                                    <label for="Codec720p" class="form-label small">Video Codec</label>
-                                    <select class="form-select form-select-sm" id="Codec720p">
-                                        <option value="libx265">H.265 (libx265)</option>
-                                        <option value="libx264">H.264 (libx264)</option>
-                                        <option value="libvpx-vp9">VP9 (libvpx-vp9)</option>
-                                        <option value="libaom-av1">AV1 (libaom-av1)</option>
-                                    </select>
+                                    <div class="mt-4">
+                                        <small class="text-muted">Codec set at profile level</small>
+                                    </div>
                                 </div>
                             </div>
                             <div class="row g-2 mt-1">
@@ -281,21 +341,10 @@
                                 </div>
                             </div>
                             <div class="row g-2 mt-1">
-                                <div class="col-md-6">
-                                    <div class="form-check">
-                                        <input class="form-check-input" type="checkbox" id="Grain720p">
-                                        <label class="form-check-label small" for="Grain720p">
-                                            Enable Grain Processing
-                                        </label>
-                                    </div>
-                                </div>
-                                <div class="col-md-6">
-                                    <div class="form-check">
-                                        <input class="form-check-input" type="checkbox" id="KeepSource720p">
-                                        <label class="form-check-label small" for="KeepSource720p">
-                                            Keep Source File
-                                        </label>
-                                    </div>
+                                <div class="col-md-12">
+                                    <small class="text-muted">
+                                        <i class="fas fa-info-circle"></i> Grain processing and source file handling are controlled at the profile level above.
+                                    </small>
                                 </div>
                             </div>
                             <small class="text-muted">Video bitrate sets the maximum bitrate limit when using CRF</small>
@@ -330,13 +379,9 @@
                                     <input type="number" class="form-control form-control-sm" id="Quality1080p" placeholder="Empty for bitrate" min="0" max="51">
                                 </div>
                                 <div class="col-md-2">
-                                    <label for="Codec1080p" class="form-label small">Video Codec</label>
-                                    <select class="form-select form-select-sm" id="Codec1080p">
-                                        <option value="libx265">H.265 (libx265)</option>
-                                        <option value="libx264">H.264 (libx264)</option>
-                                        <option value="libvpx-vp9">VP9 (libvpx-vp9)</option>
-                                        <option value="libaom-av1">AV1 (libaom-av1)</option>
-                                    </select>
+                                    <div class="mt-4">
+                                        <small class="text-muted">Codec set at profile level</small>
+                                    </div>
                                 </div>
                             </div>
                             <div class="row g-2 mt-1">
@@ -363,21 +408,10 @@
                                 </div>
                             </div>
                             <div class="row g-2 mt-1">
-                                <div class="col-md-6">
-                                    <div class="form-check">
-                                        <input class="form-check-input" type="checkbox" id="Grain1080p">
-                                        <label class="form-check-label small" for="Grain1080p">
-                                            Enable Grain Processing
-                                        </label>
-                                    </div>
-                                </div>
-                                <div class="col-md-6">
-                                    <div class="form-check">
-                                        <input class="form-check-input" type="checkbox" id="KeepSource1080p">
-                                        <label class="form-check-label small" for="KeepSource1080p">
-                                            Keep Source File
-                                        </label>
-                                    </div>
+                                <div class="col-md-12">
+                                    <small class="text-muted">
+                                        <i class="fas fa-info-circle"></i> Grain processing and source file handling are controlled at the profile level above.
+                                    </small>
                                 </div>
                             </div>
                             <small class="text-muted">Video bitrate sets the maximum bitrate limit when using CRF</small>
@@ -412,13 +446,9 @@
                                     <input type="number" class="form-control form-control-sm" id="Quality2160p" placeholder="Empty for bitrate" min="0" max="51">
                                 </div>
                                 <div class="col-md-2">
-                                    <label for="Codec2160p" class="form-label small">Video Codec</label>
-                                    <select class="form-select form-select-sm" id="Codec2160p">
-                                        <option value="libx265">H.265 (libx265)</option>
-                                        <option value="libx264">H.264 (libx264)</option>
-                                        <option value="libvpx-vp9">VP9 (libvpx-vp9)</option>
-                                        <option value="libaom-av1">AV1 (libaom-av1)</option>
-                                    </select>
+                                    <div class="mt-4">
+                                        <small class="text-muted">Codec set at profile level</small>
+                                    </div>
                                 </div>
                             </div>
                             <div class="row g-2 mt-1">
@@ -445,21 +475,10 @@
                                 </div>
                             </div>
                             <div class="row g-2 mt-1">
-                                <div class="col-md-6">
-                                    <div class="form-check">
-                                        <input class="form-check-input" type="checkbox" id="Grain2160p">
-                                        <label class="form-check-label small" for="Grain2160p">
-                                            Enable Grain Processing
-                                        </label>
-                                    </div>
-                                </div>
-                                <div class="col-md-6">
-                                    <div class="form-check">
-                                        <input class="form-check-input" type="checkbox" id="KeepSource2160p">
-                                        <label class="form-check-label small" for="KeepSource2160p">
-                                            Keep Source File
-                                        </label>
-                                    </div>
+                                <div class="col-md-12">
+                                    <small class="text-muted">
+                                        <i class="fas fa-info-circle"></i> Grain processing and source file handling are controlled at the profile level above.
+                                    </small>
                                 </div>
                             </div>
                             <small class="text-muted">Video bitrate sets the maximum bitrate limit when using CRF</small>
@@ -691,6 +710,14 @@ function PopulateProfileForm(Profile) {
     $('#ProfileName').val(Profile.ProfileName || '');
     $('#ProfileDescription').val(Profile.Description || '');
     
+    // Populate profile-level FFmpeg settings
+    $('#ProfileCodec').val(Profile.Codec || 'libsvtav1');
+    $('#ProfilePreset').val(Profile.Preset || 6);
+    $('#ProfileFilmGrain').val(Profile.FilmGrain || 10);
+    $('#ProfileYadifMode').val(Profile.YadifMode || 1);
+    $('#ProfileYadifParity').val(Profile.YadifParity || 1);
+    $('#ProfileYadifDeint').val(Profile.YadifDeint || 1);
+    
     // Populate thresholds for each resolution
     const Thresholds = Profile.Thresholds || [];
     
@@ -702,13 +729,10 @@ function PopulateProfileForm(Profile) {
         $('#AudioBitrate480p').val(Threshold480p.AudioBitrateKbps);
         $('#FallbackAudio480p').val(Threshold480p.FallbackAudioBitrateKbps);
         $('#Quality480p').val(Threshold480p.Quality || '');
-        $('#Codec480p').val(Threshold480p.Codec || 'libx265');
         $('#Under30Min480p').val(Threshold480p.Under30MinMB);
         $('#Under65Min480p').val(Threshold480p.Under65MinMB);
         $('#Over65Min480p').val(Threshold480p.Over65MinMB);
         $('#TranscodeDownTo480p').val(Threshold480p.TranscodeDownTo);
-        $('#Grain480p').prop('checked', Threshold480p.Grain || false);
-        $('#KeepSource480p').prop('checked', Threshold480p.KeepSource || false);
         UpdateBitrateFieldsState('480p');
     }
     
@@ -724,8 +748,6 @@ function PopulateProfileForm(Profile) {
         $('#Under65Min720p').val(Threshold720p.Under65MinMB);
         $('#Over65Min720p').val(Threshold720p.Over65MinMB);
         $('#TranscodeDownTo720p').val(Threshold720p.TranscodeDownTo);
-        $('#Grain720p').prop('checked', Threshold720p.Grain || false);
-        $('#KeepSource720p').prop('checked', Threshold720p.KeepSource || false);
         UpdateBitrateFieldsState('720p');
     }
     
@@ -741,8 +763,6 @@ function PopulateProfileForm(Profile) {
         $('#Under65Min1080p').val(Threshold1080p.Under65MinMB);
         $('#Over65Min1080p').val(Threshold1080p.Over65MinMB);
         $('#TranscodeDownTo1080p').val(Threshold1080p.TranscodeDownTo);
-        $('#Grain1080p').prop('checked', Threshold1080p.Grain || false);
-        $('#KeepSource1080p').prop('checked', Threshold1080p.KeepSource || false);
         UpdateBitrateFieldsState('1080p');
     }
     
@@ -758,8 +778,6 @@ function PopulateProfileForm(Profile) {
         $('#Under65Min2160p').val(Threshold2160p.Under65MinMB);
         $('#Over65Min2160p').val(Threshold2160p.Over65MinMB);
         $('#TranscodeDownTo2160p').val(Threshold2160p.TranscodeDownTo);
-        $('#Grain2160p').prop('checked', Threshold2160p.Grain || false);
-        $('#KeepSource2160p').prop('checked', Threshold2160p.KeepSource || false);
         UpdateBitrateFieldsState('2160p');
     }
 }
@@ -768,6 +786,14 @@ function ClearProfileForm() {
     $('#ProfileId').val('');
     $('#ProfileName').val('');
     $('#ProfileDescription').val('');
+    
+    // Clear profile-level FFmpeg settings
+    $('#ProfileCodec').val('libsvtav1');
+    $('#ProfilePreset').val('6');
+    $('#ProfileFilmGrain').val('10');
+    $('#ProfileYadifMode').val('1');
+    $('#ProfileYadifParity').val('1');
+    $('#ProfileYadifDeint').val('1');
     
     // Clear all threshold fields
     const Resolutions = ['480p', '720p', '1080p', '2160p'];
@@ -781,8 +807,6 @@ function ClearProfileForm() {
         $(`#Under65Min${Resolution}`).val('');
         $(`#Over65Min${Resolution}`).val('');
         $(`#TranscodeDownTo${Resolution}`).val('No downscaling');
-        $(`#Grain${Resolution}`).prop('checked', false);
-        $(`#KeepSource${Resolution}`).prop('checked', false);
         UpdateBitrateFieldsState(Resolution);
     });
 }
@@ -799,6 +823,12 @@ function SaveProfile() {
     const ProfileData = {
         ProfileName: ProfileName,
         Description: Description,
+        Codec: $('#ProfileCodec').val(),
+        Preset: parseInt($('#ProfilePreset').val()),
+        FilmGrain: parseInt($('#ProfileFilmGrain').val()),
+        YadifMode: parseInt($('#ProfileYadifMode').val()),
+        YadifParity: parseInt($('#ProfileYadifParity').val()),
+        YadifDeint: parseInt($('#ProfileYadifDeint').val()),
         Thresholds: [
             {
                 Resolution: '480p',
@@ -810,9 +840,7 @@ function SaveProfile() {
                 Under30MinMB: parseInt($('#Under30Min480p').val()) || 0,
                 Under65MinMB: parseInt($('#Under65Min480p').val()) || 0,
                 Over65MinMB: parseInt($('#Over65Min480p').val()) || 0,
-                TranscodeDownTo: $('#TranscodeDownTo480p').val(),
-                Grain: $('#Grain480p').is(':checked'),
-                KeepSource: $('#KeepSource480p').is(':checked')
+                TranscodeDownTo: $('#TranscodeDownTo480p').val()
             },
             {
                 Resolution: '720p',
@@ -824,9 +852,7 @@ function SaveProfile() {
                 Under30MinMB: parseInt($('#Under30Min720p').val()) || 0,
                 Under65MinMB: parseInt($('#Under65Min720p').val()) || 0,
                 Over65MinMB: parseInt($('#Over65Min720p').val()) || 0,
-                TranscodeDownTo: $('#TranscodeDownTo720p').val(),
-                Grain: $('#Grain720p').is(':checked'),
-                KeepSource: $('#KeepSource720p').is(':checked')
+                TranscodeDownTo: $('#TranscodeDownTo720p').val()
             },
             {
                 Resolution: '1080p',
@@ -838,9 +864,7 @@ function SaveProfile() {
                 Under30MinMB: parseInt($('#Under30Min1080p').val()) || 0,
                 Under65MinMB: parseInt($('#Under65Min1080p').val()) || 0,
                 Over65MinMB: parseInt($('#Over65Min1080p').val()) || 0,
-                TranscodeDownTo: $('#TranscodeDownTo1080p').val(),
-                Grain: $('#Grain1080p').is(':checked'),
-                KeepSource: $('#KeepSource1080p').is(':checked')
+                TranscodeDownTo: $('#TranscodeDownTo1080p').val()
             },
             {
                 Resolution: '2160p',
@@ -852,9 +876,7 @@ function SaveProfile() {
                 Under30MinMB: parseInt($('#Under30Min2160p').val()) || 0,
                 Under65MinMB: parseInt($('#Under65Min2160p').val()) || 0,
                 Over65MinMB: parseInt($('#Over65Min2160p').val()) || 0,
-                TranscodeDownTo: $('#TranscodeDownTo2160p').val(),
-                Grain: $('#Grain2160p').is(':checked'),
-                KeepSource: $('#KeepSource2160p').is(':checked')
+                TranscodeDownTo: $('#TranscodeDownTo2160p').val()
             }
         ]
     };

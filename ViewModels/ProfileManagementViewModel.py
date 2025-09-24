@@ -65,7 +65,9 @@ class ProfileManagementViewModel:
             self.ErrorMessage = f"Failed to create profile: {str(e)}"
             return False
     
-    def CreateProfileWithThresholds(self, profile_name: str, description: str, thresholds: List[dict]) -> bool:
+    def CreateProfileWithThresholds(self, profile_name: str, description: str, thresholds: List[dict],
+                                   codec: str = "libsvtav1", preset: int = 6, film_grain: int = 10,
+                                   yadif_mode: int = 1, yadif_parity: int = 1, yadif_deint: int = 1) -> bool:
         """Create a new profile with multiple thresholds."""
         try:
             LoggingService.LogFunctionEntry("CreateProfileWithThresholds", "ProfileManagementViewModel", profile_name, description, len(thresholds))
@@ -83,7 +85,7 @@ class ProfileManagementViewModel:
             
             # Create the profile first
             LoggingService.LogInfo("Creating profile...", "ProfileManagementViewModel", "CreateProfileWithThresholds")
-            new_profile = self.ProfileService.CreateProfile(profile_name, description)
+            new_profile = self.ProfileService.CreateProfile(profile_name, description, codec, preset, film_grain, yadif_mode, yadif_parity, yadif_deint)
             LoggingService.LogInfo("Profile created with ID: {}", "ProfileManagementViewModel", "CreateProfileWithThresholds", new_profile.Id)
             
             # Add all thresholds
@@ -102,7 +104,6 @@ class ProfileManagementViewModel:
                     threshold_data['FallbackAudioBitrateKbps'],
                     threshold_data['TranscodeDownTo'],
                     threshold_data.get('Quality'),
-                    threshold_data.get('Grain', False)
                 )
                 LoggingService.LogInfo("Threshold {} added successfully", "ProfileManagementViewModel", "CreateProfileWithThresholds", i+1)
             
@@ -150,7 +151,9 @@ class ProfileManagementViewModel:
             self.ErrorMessage = f"Failed to update profile: {str(e)}"
             return False
     
-    def UpdateProfileWithThresholds(self, profile_id: int, profile_name: str, description: str, thresholds: List[dict]) -> bool:
+    def UpdateProfileWithThresholds(self, profile_id: int, profile_name: str, description: str, thresholds: List[dict],
+                                   codec: str = "libsvtav1", preset: int = 6, film_grain: int = 10,
+                                   yadif_mode: int = 1, yadif_parity: int = 1, yadif_deint: int = 1) -> bool:
         """Update an existing profile with multiple thresholds."""
         try:
             LoggingService.LogFunctionEntry("UpdateProfileWithThresholds", "ProfileManagementViewModel", profile_id, profile_name, description, len(thresholds))
@@ -182,7 +185,13 @@ class ProfileManagementViewModel:
                 ProfileName=profile_name,
                 Description=description,
                 CreatedDate=existing_profile.CreatedDate,  # Preserve original CreatedDate
-                LastModified=datetime.now()
+                LastModified=datetime.now(),
+                Codec=codec,
+                Preset=preset,
+                FilmGrain=film_grain,
+                YadifMode=yadif_mode,
+                YadifParity=yadif_parity,
+                YadifDeint=yadif_deint
             )
             LoggingService.LogInfo("Updating profile in database...")
             updated_profile = self.ProfileService.UpdateProfile(profile)
@@ -218,8 +227,7 @@ class ProfileManagementViewModel:
                         FallbackVideoBitrateKbps=threshold_data['FallbackVideoBitrateKbps'],
                         FallbackAudioBitrateKbps=threshold_data['FallbackAudioBitrateKbps'],
                         TranscodeDownTo=threshold_data['TranscodeDownTo'],
-                        Quality=threshold_data.get('Quality'),
-                        Grain=threshold_data.get('Grain', False)
+                        Quality=threshold_data.get('Quality')
                     )
                     
                     self.ProfileService.UpdateThreshold(UpdatedThreshold)
@@ -238,8 +246,7 @@ class ProfileManagementViewModel:
                         threshold_data['FallbackVideoBitrateKbps'],
                         threshold_data['FallbackAudioBitrateKbps'],
                         threshold_data['TranscodeDownTo'],
-                        threshold_data.get('Quality'),
-                        threshold_data.get('Grain', False)
+                        threshold_data.get('Quality')
                     )
             
             # Delete thresholds that no longer exist
@@ -292,7 +299,7 @@ class ProfileManagementViewModel:
                     under_30_min_mb: int, under_65_min_mb: int, over_65_min_mb: int,
                     video_bitrate_kbps: int, audio_bitrate_kbps: int,
                     fallback_video_bitrate_kbps: int, fallback_audio_bitrate_kbps: int,
-                    transcode_down_to: str, quality: int = None, grain: bool = False) -> bool:
+                    transcode_down_to: str, quality: int = None) -> bool:
         """Add a threshold to a profile."""
         try:
             # Check if resolution already exists for this profile
@@ -304,7 +311,7 @@ class ProfileManagementViewModel:
             threshold = self.ProfileService.AddThreshold(
                 profile_id, resolution, under_30_min_mb, under_65_min_mb, over_65_min_mb,
                 video_bitrate_kbps, audio_bitrate_kbps, fallback_video_bitrate_kbps,
-                fallback_audio_bitrate_kbps, transcode_down_to, quality, grain
+                fallback_audio_bitrate_kbps, transcode_down_to, quality
             )
             
             self.SelectedProfileThresholds.append(threshold)
@@ -373,7 +380,13 @@ class ProfileManagementViewModel:
                 'ProfileName': profile.ProfileName,
                 'Description': profile.Description,
                 'CreatedDate': profile.CreatedDate if profile.CreatedDate else None,
-                'LastModified': profile.LastModified if profile.LastModified else None
+                'LastModified': profile.LastModified if profile.LastModified else None,
+                'Codec': profile.Codec,
+                'Preset': profile.Preset,
+                'FilmGrain': profile.FilmGrain,
+                'YadifMode': profile.YadifMode,
+                'YadifParity': profile.YadifParity,
+                'YadifDeint': profile.YadifDeint
             }
             for profile in self.Profiles
         ]
@@ -389,6 +402,12 @@ class ProfileManagementViewModel:
             'Description': self.SelectedProfile.Description,
             'CreatedDate': self.SelectedProfile.CreatedDate if self.SelectedProfile.CreatedDate else None,
             'LastModified': self.SelectedProfile.LastModified if self.SelectedProfile.LastModified else None,
+            'Codec': self.SelectedProfile.Codec,
+            'Preset': self.SelectedProfile.Preset,
+            'FilmGrain': self.SelectedProfile.FilmGrain,
+            'YadifMode': self.SelectedProfile.YadifMode,
+            'YadifParity': self.SelectedProfile.YadifParity,
+            'YadifDeint': self.SelectedProfile.YadifDeint,
             'Thresholds': [
                 {
                     'Id': threshold.Id,
@@ -402,8 +421,7 @@ class ProfileManagementViewModel:
                     'FallbackVideoBitrateKbps': threshold.FallbackVideoBitrateKbps,
                     'FallbackAudioBitrateKbps': threshold.FallbackAudioBitrateKbps,
                     'TranscodeDownTo': threshold.TranscodeDownTo,
-                    'Quality': threshold.Quality,
-                    'Grain': threshold.Grain
+                    'Quality': threshold.Quality
                 }
                 for threshold in self.SelectedProfileThresholds
             ]

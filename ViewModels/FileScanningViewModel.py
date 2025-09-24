@@ -1,5 +1,6 @@
 from typing import List, Dict, Any, Optional
 from datetime import datetime
+import os
 from Models.RootFolderModel import RootFolderModel
 from Models.MediaFileModel import MediaFileModel
 from Models.SeasonModel import SeasonModel
@@ -376,6 +377,50 @@ class FileScanningViewModel:
                 'TotalCount': 0,
                 'TotalPages': 0
             }
+    
+    def RefreshMediaFile(self, MediaFileId: int) -> Dict[str, Any]:
+        """Refresh a single media file using existing file scanning process."""
+        try:
+            MediaFile = self.BusinessService.DatabaseManager.GetMediaFileById(MediaFileId)
+            if not MediaFile:
+                return {'Success': False, 'Message': 'Media file not found'}
+            
+            # Step 1: Check if exact file still exists
+            if os.path.exists(MediaFile.FilePath):
+                # File exists - refresh it directly
+                self.BusinessService.ProcessSingleMediaFile(
+                    FilePath=MediaFile.FilePath,
+                    RootFolderId=None,
+                    ExtractMetadata=True
+                )
+                return {'Success': True, 'Message': f'Refreshed {MediaFile.FileName}'}
+            
+            # Step 2: File doesn't exist - scan season directory for same S##E##
+            SeasonDirectory = os.path.dirname(MediaFile.FilePath)
+            if os.path.exists(SeasonDirectory):
+                # Extract season/episode pattern from filename
+                import re
+                SeasonEpisodePattern = re.search(r'S(\d+)E(\d+)', MediaFile.FileName, re.IGNORECASE)
+                if SeasonEpisodePattern:
+                    SeasonNum = SeasonEpisodePattern.group(1)
+                    EpisodeNum = SeasonEpisodePattern.group(2)
+                    Pattern = f"S{SeasonNum.zfill(2)}E{EpisodeNum.zfill(2)}"
+                    
+                    # Scan directory for files with same season/episode
+                    for FileName in os.listdir(SeasonDirectory):
+                        if Pattern.lower() in FileName.lower() and FileName.lower().endswith(('.mp4', '.mkv', '.avi', '.mov')):
+                            NewFilePath = os.path.join(SeasonDirectory, FileName)
+                            # Found matching file - refresh it
+                            self.BusinessService.ProcessSingleMediaFile(
+                                FilePath=NewFilePath,
+                                RootFolderId=None,
+                                ExtractMetadata=True
+                            )
+                            return {'Success': True, 'Message': f'Found and refreshed renamed file: {FileName}'}
+            
+            return {'Success': False, 'Message': f'File not found: {MediaFile.FileName}'}
+        except Exception as e:
+            return {'Success': False, 'Message': str(e)}
     
     def ClearScanState(self):
         """Clear all scan-related state."""

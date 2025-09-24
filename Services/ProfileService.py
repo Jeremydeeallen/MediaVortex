@@ -20,7 +20,9 @@ class ProfileService:
         """Get a specific profile by ID."""
         return self.DatabaseManager.GetProfileById(profile_id)
     
-    def CreateProfile(self, profile_name: str, description: str = "") -> TranscodeProfileModel:
+    def CreateProfile(self, profile_name: str, description: str = "", 
+                     codec: str = "libsvtav1", preset: int = 6, film_grain: int = 10,
+                     yadif_mode: int = 1, yadif_parity: int = 1, yadif_deint: int = 1) -> TranscodeProfileModel:
         """Create a new transcoding profile."""
         try:
             LoggingService.LogFunctionEntry("CreateProfile", 'ProfileService', profile_name, description=description)
@@ -28,7 +30,13 @@ class ProfileService:
                 ProfileName=profile_name,
                 Description=description,
                 CreatedDate=datetime.now(),
-                LastModified=datetime.now()
+                LastModified=datetime.now(),
+                Codec=codec,
+                Preset=preset,
+                FilmGrain=film_grain,
+                YadifMode=yadif_mode,
+                YadifParity=yadif_parity,
+                YadifDeint=yadif_deint
             )
             
             LoggingService.LogInfo("Saving profile to database...", 'CreateProfile', 'ProfileService')
@@ -69,7 +77,7 @@ class ProfileService:
                     under_30_min_mb: int, under_65_min_mb: int, over_65_min_mb: int,
                     video_bitrate_kbps: int, audio_bitrate_kbps: int,
                     fallback_video_bitrate_kbps: int, fallback_audio_bitrate_kbps: int,
-                    transcode_down_to: str, quality: int = None, grain: bool = False) -> ProfileThresholdModel:
+                    transcode_down_to: str, quality: int = None) -> ProfileThresholdModel:
         """Add a new threshold to a profile."""
         try:
             LoggingService.LogFunctionEntry("AddThreshold", 'ProfileService', profile_id, resolution, 
@@ -88,8 +96,7 @@ class ProfileService:
                 FallbackVideoBitrateKbps=fallback_video_bitrate_kbps,
                 FallbackAudioBitrateKbps=fallback_audio_bitrate_kbps,
                 TranscodeDownTo=transcode_down_to,
-                Quality=quality,
-                Grain=grain
+                Quality=quality
             )
             
             LoggingService.LogInfo("Saving threshold to database...", 'AddThreshold', 'ProfileService')

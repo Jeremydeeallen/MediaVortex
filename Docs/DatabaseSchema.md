@@ -57,6 +57,38 @@ ORDER BY m.name, i.seq, ic.seqno;
 
 ### Table and Columns
 
+CodecFlags.Id	INTEGER
+CodecFlags.CodecName	TEXT
+CodecFlags.DisplayName	TEXT
+CodecFlags.PresetType	TEXT
+CodecFlags.PresetMin	INTEGER
+CodecFlags.PresetMax	INTEGER
+CodecFlags.PresetDefault	INTEGER
+CodecFlags.PresetOptions	TEXT
+CodecFlags.FilmGrainType	TEXT
+CodecFlags.FilmGrainMin	INTEGER
+CodecFlags.FilmGrainMax	INTEGER
+CodecFlags.FilmGrainDefault	INTEGER
+CodecFlags.TuneOptions	TEXT
+CodecFlags.CreatedDate	DATETIME
+CodecFlags.LastModified	DATETIME
+CodecParameters.Id	INTEGER
+CodecParameters.CodecFlagsId	INTEGER
+CodecParameters.ParameterName	TEXT
+CodecParameters.ParameterType	TEXT
+CodecParameters.MinValue	REAL
+CodecParameters.MaxValue	REAL
+CodecParameters.DefaultValue	TEXT
+CodecParameters.Description	TEXT
+CodecParameters.FFmpegFlag	TEXT
+CodecParameters.CreatedDate	DATETIME
+PresetOptions.Id	INTEGER
+PresetOptions.CodecFlagsId	INTEGER
+PresetOptions.PresetValue	TEXT
+PresetOptions.PresetName	TEXT
+PresetOptions.Description	TEXT
+PresetOptions.SortOrder	INTEGER
+PresetOptions.CreatedDate	DATETIME
 CompliantFiles.Id	INTEGER
 CompliantFiles.FilePath	TEXT
 CompliantFiles.FileName	TEXT
@@ -149,6 +181,7 @@ MediaFiles.AssignedProfile	TEXT
 MediaFiles.IsInterlaced	BIT
 MediaFiles.ResolutionCategory	TEXT
 MediaFiles.FileModificationTime	DATETIME
+MediaFiles.KeepSource	BOOLEAN
 ProblemFiles.Id	INTEGER
 ProblemFiles.FilePath	TEXT
 ProblemFiles.FileName	TEXT
@@ -172,12 +205,20 @@ ProfileThresholds.FallbackVideoBitrateKbps	INTEGER
 ProfileThresholds.FallbackAudioBitrateKbps	INTEGER
 ProfileThresholds.TranscodeDownTo	TEXT
 ProfileThresholds.Quality	INTEGER
-ProfileThresholds.Codec	TEXT
+ProfileThresholds.Grain	BIT
+ProfileThresholds.KeepSource	BOOLEAN
 Profiles.Id	INTEGER
 Profiles.ProfileName	TEXT
 Profiles.Description	TEXT
 Profiles.CreatedDate	TIMESTAMP
 Profiles.LastModified	TIMESTAMP
+Profiles.Codec	TEXT
+Profiles.Preset	INTEGER
+Profiles.FilmGrain	INTEGER
+Profiles.YadifMode	INTEGER
+Profiles.YadifParity	INTEGER
+Profiles.YadifDeint	INTEGER
+Profiles.CodecFlagsId	INTEGER
 RootFolders.Id	INTEGER
 RootFolders.RootFolder	TEXT
 RootFolders.LastScannedDate	TIMESTAMP
@@ -297,6 +338,8 @@ VMAFQueue.MaxRetries	INTEGER
 
 ### Indexes
 
+CodecFlags	sqlite_autoindex_CodecFlags_1	1	u	0
+CodecParameters	sqlite_autoindex_CodecParameters_1	1	u	0
 CompliantFiles	idx_CompliantFiles_FileName	0	c	0
 CompliantFiles	idx_CompliantFiles_Directory	0	c	0
 CompliantFiles	idx_CompliantFiles_Reason	0	c	0
@@ -323,7 +366,7 @@ Logs	IdxLogsTimestamp	0	c	0
 ProblemFiles	idx_ProblemFiles_Directory	0	c	0
 ProblemFiles	idx_ProblemFiles_ErrorType	0	c	0
 ProblemFiles	idx_ProblemFiles_FilePath	0	c	0
-ProfileThresholds	sqlite_autoindex_ProfileThresholds_1	1	u	0
+ProfileThresholds	idx_ProfileThresholds_ProfileId_Resolution	1	c	0
 Profiles	sqlite_autoindex_Profiles_1	1	u	0
 RootFolders	sqlite_autoindex_RootFolders_1	1	u	0
 ScanJobs	sqlite_autoindex_ScanJobs_1	1	u	0
@@ -349,6 +392,9 @@ VMAFProgress	idx_VMAFProgress_VMAFQueueId	0	c	0
 
 ### Index Columns
 
+CodecFlags	sqlite_autoindex_CodecFlags_1	CodecName	0
+CodecParameters	sqlite_autoindex_CodecParameters_1	CodecFlagsId	0
+CodecParameters	sqlite_autoindex_CodecParameters_1	ParameterName	1
 CompliantFiles	idx_CompliantFiles_FileName	FileName	0
 CompliantFiles	idx_CompliantFiles_Directory	Directory	0
 CompliantFiles	idx_CompliantFiles_Reason	Reason	0
@@ -377,8 +423,8 @@ Logs	IdxLogsTimestamp	Timestamp	0
 ProblemFiles	idx_ProblemFiles_Directory	Directory	0
 ProblemFiles	idx_ProblemFiles_ErrorType	ErrorType	0
 ProblemFiles	idx_ProblemFiles_FilePath	FilePath	0
-ProfileThresholds	sqlite_autoindex_ProfileThresholds_1	ProfileId	0
-ProfileThresholds	sqlite_autoindex_ProfileThresholds_1	Resolution	1
+ProfileThresholds	idx_ProfileThresholds_ProfileId_Resolution	ProfileId	0
+ProfileThresholds	idx_ProfileThresholds_ProfileId_Resolution	Resolution	1
 Profiles	sqlite_autoindex_Profiles_1	ProfileName	0
 RootFolders	sqlite_autoindex_RootFolders_1	RootFolder	0
 ScanJobs	sqlite_autoindex_ScanJobs_1	JobId	0
