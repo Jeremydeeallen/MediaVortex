@@ -1,5 +1,6 @@
 from typing import List, Optional, Dict, Any
 from datetime import datetime
+import os
 from Models.TranscodeProfileModel import TranscodeProfileModel
 from Models.ProfileThresholdModel import ProfileThresholdModel
 from Models.RootFolderModel import RootFolderModel
@@ -893,6 +894,21 @@ class DatabaseManager:
         """Delete a transcoding queue item."""
         affectedRows = self.DatabaseService.ExecuteNonQuery("DELETE FROM TranscodeQueue WHERE Id = ?", (ItemId,))
         return affectedRows > 0
+    
+    def UpdateTranscodeQueueStatus(self, JobId: int, Status: str) -> bool:
+        """Update the status of a transcoding queue item."""
+        try:
+            LoggingService.LogFunctionEntry("UpdateTranscodeQueueStatus", "DatabaseManager", JobId, Status)
+            
+            query = "UPDATE TranscodeQueue SET Status = ? WHERE Id = ?"
+            affectedRows = self.DatabaseService.ExecuteNonQuery(query, (Status, JobId))
+            
+            LoggingService.LogInfo(f"Updated transcoding queue item {JobId} status to {Status}", "DatabaseManager", "UpdateTranscodeQueueStatus")
+            return affectedRows > 0
+            
+        except Exception as e:
+            LoggingService.LogException("Exception updating transcoding queue status", e, "DatabaseManager", "UpdateTranscodeQueueStatus")
+            return False
     
     def GetTranscodeQueueItemsByStatus(self, Status: str) -> List[TranscodeQueueModel]:
         """Get all transcoding queue items with a specific status."""
@@ -1825,7 +1841,7 @@ class DatabaseManager:
                 SELECT tp.TranscodeAttemptId, tp.CurrentPhase, tp.ProgressPercent, tp.CurrentFrame, 
                        tp.TotalFrames, tp.CurrentFPS, tp.AverageFPS, tp.CurrentBitrate, 
                        tp.CurrentTime, tp.CurrentSpeed, tp.ETA, tp.PassDuration, 
-                       tp.LastProgressUpdate, ta.FilePath, ta.Quality, ta.ProfileName
+                       tp.LastProgressUpdate, ta.FilePath, ta.Quality, ta.ProfileName, ta.AttemptDate
                 FROM TranscodeProgress tp
                 INNER JOIN TranscodeAttempts ta ON tp.TranscodeAttemptId = ta.Id
                 ORDER BY tp.LastProgressUpdate DESC 
@@ -1836,7 +1852,13 @@ class DatabaseManager:
             
             if result and len(result) > 0:
                 row = result[0]
+                # Extract filename from filepath
+                FilePath = row[13]
+                FileName = FilePath.split('\\')[-1] if FilePath else "Unknown"
+                
                 progressData = {
+                    'Success': True,
+                    'AttemptId': row[0],  # Frontend expects AttemptId
                     'TranscodeAttemptId': row[0],
                     'CurrentPhase': row[1],
                     'ProgressPercent': row[2],
@@ -1849,13 +1871,16 @@ class DatabaseManager:
                     'CurrentSpeed': row[9],
                     'ETA': row[10],
                     'PassDuration': row[11],
+                    'LastUpdate': row[12],  # Frontend expects LastUpdate
                     'LastProgressUpdate': row[12],
-                    'FilePath': row[13],
+                    'FilePath': FilePath,
+                    'FileName': FileName,  # Frontend expects FileName
+                    'StartTime': row[16],  # Frontend expects StartTime
                     'Quality': row[14],
                     'ProfileName': row[15]
                 }
                 
-                LoggingService.LogDebug(f"Found current progress: {progressData['CurrentPhase']} ({progressData['ProgressPercent']}%) for {progressData['FilePath']}", "DatabaseManager", "GetCurrentTranscodeProgress")
+                LoggingService.LogDebug(f"Found current progress: {progressData['CurrentPhase']} ({progressData['ProgressPercent']}%) for {progressData['FileName']}", "DatabaseManager", "GetCurrentTranscodeProgress")
                 return progressData
             else:
                 LoggingService.LogDebug("No current transcoding progress found", "DatabaseManager", "GetCurrentTranscodeProgress")
@@ -2593,9 +2618,18 @@ class DatabaseManager:
             
             attempts = []
             for row in result:
+                # Extract filename from file path
+                fileName = os.path.basename(row['FilePath']) if row['FilePath'] else '-'
+                
+                # Calculate if file was compressed (size reduction > 0)
+                isCompressed = False
+                if row['SizeReductionBytes'] and row['SizeReductionBytes'] > 0:
+                    isCompressed = True
+                
                 attempt = {
                     'Id': row['Id'],
                     'FilePath': row['FilePath'],
+                    'FileName': fileName,  # Frontend expects this
                     'AttemptDate': row['AttemptDate'],
                     'Quality': row['Quality'],
                     'OldSizeBytes': row['OldSizeBytes'],
@@ -2603,7 +2637,9 @@ class DatabaseManager:
                     'Success': row['Success'],
                     'SizeReductionBytes': row['SizeReductionBytes'],
                     'SizeReductionPercent': row['SizeReductionPercent'],
+                    'IsCompressed': isCompressed,  # Frontend expects this
                     'ErrorMessage': row['ErrorMessage'],
+                    'Duration': row['TranscodeDurationSeconds'],  # Frontend expects this
                     'TranscodeDurationSeconds': row['TranscodeDurationSeconds'],
                     'FfpmpegCommand': row['FfpmpegCommand'],
                     'AudioBitrateKbps': row['AudioBitrateKbps'],

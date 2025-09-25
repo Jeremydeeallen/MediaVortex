@@ -119,11 +119,20 @@ class ProcessTranscodeQueueService:
             # Get current progress from database
             currentProgress = self.DatabaseManager.GetCurrentTranscodeProgress()
             
+            # Get current job info if transcoding is active
+            currentJob = None
+            if self.IsProcessing and currentProgress:
+                # Get the current job from the queue
+                currentJob = self.DatabaseManager.GetTranscodeQueueItemsByStatus("Running")
+                if currentJob:
+                    currentJob = currentJob[0]  # Get the first running job
+            
             return {
                 "Success": True,
                 "IsTranscoding": self.IsProcessing,
                 "MaxConcurrentJobs": self.MaxConcurrentJobs,
                 "ActiveJobsCount": len(self.ActiveJobs),
+                "CurrentJob": currentJob,
                 "CurrentProgress": currentProgress,
                 "Timestamp": datetime.now().isoformat()
             }
@@ -190,6 +199,9 @@ class ProcessTranscodeQueueService:
         try:
             LoggingService.LogInfo(f"Starting job processing for job ID: {Job.Id}", "ProcessTranscodeQueueService", "ProcessJob")
             
+            # Update queue status to Running
+            self.DatabaseManager.UpdateTranscodeQueueStatus(Job.Id, "Running")
+            
             # Step a: Get MediaFile data
             MediaFile = self.GetMediaFileData(Job)
             if not MediaFile:
@@ -218,6 +230,11 @@ class ProcessTranscodeQueueService:
             if not TranscodeAttemptId:
                 self.HandleJobFailure(Job, "Failed to create transcode attempt record")
                 return
+            
+            # Update attempt to indicate it's running (clear any error message)
+            self.DatabaseManager.UpdateTranscodeAttempt(TranscodeAttemptId, {
+                'ErrorMessage': None  # Clear any error message to indicate it's running
+            })
             
             # Step f: Execute transcoding
             TranscodeResult = self.ExecuteTranscoding(Job, TranscodeCommand, TranscodeAttemptId)
@@ -337,21 +354,47 @@ class ProcessTranscodeQueueService:
     def ExecuteTranscoding(self, Job: TranscodeQueueModel, TranscodeCommand: str, TranscodeAttemptId: int) -> Dict[str, Any]:
         """Execute the transcoding command with progress tracking."""
         try:
-            # Create progress callback
+            # Create initial progress record
+            self.DatabaseManager.SaveTranscodeProgress(
+                TranscodeAttemptId=TranscodeAttemptId,
+                CurrentPhase="Transcoding",
+                ProgressPercent=0.0,
+                CurrentFrame=0,
+                CurrentFPS=0.0,
+                CurrentBitrate="0kbits/s",
+                CurrentTime="00:00:00",
+                CurrentSpeed="0x",
+                ETA="Unknown",
+                TotalFrames=0,
+                AverageFPS=0.0
+            )
+            
+            # Create progress callback with throttling (every 5 seconds)
+            LastUpdateTime = time.time()
+            
             def ProgressCallback(ProgressData: Dict[str, Any]):
-                self.DatabaseManager.SaveTranscodeProgress(
-                    TranscodeAttemptId,
-                    ProgressData.get('CurrentPhase', 'Transcoding'),
-                    ProgressData.get('ProgressPercent', 0),
-                    ProgressData.get('CurrentFrame', 0),
-                    ProgressData.get('CurrentFPS', 0),
-                    ProgressData.get('CurrentBitrate', 0),
-                    ProgressData.get('CurrentTime', ''),
-                    ProgressData.get('CurrentSpeed', ''),
-                    ProgressData.get('ETA', ''),
-                    ProgressData.get('TotalFrames', 0),
-                    ProgressData.get('AverageFPS', 0)
-                )
+                nonlocal LastUpdateTime
+                try:
+                    CurrentTime = time.time()
+                    # Throttle updates to every 5 seconds
+                    if CurrentTime - LastUpdateTime >= 5.0:
+                        # Save progress to database
+                        self.DatabaseManager.SaveTranscodeProgress(
+                            TranscodeAttemptId=TranscodeAttemptId,
+                            CurrentPhase=ProgressData.get('CurrentPhase', 'Transcoding'),
+                            ProgressPercent=ProgressData.get('ProgressPercent', 0.0),
+                            CurrentFrame=ProgressData.get('CurrentFrame', 0),
+                            CurrentFPS=ProgressData.get('CurrentFPS', 0.0),
+                            CurrentBitrate=f"{ProgressData.get('CurrentBitrate', 0)}kbits/s",
+                            CurrentTime=ProgressData.get('CurrentTime', '00:00:00'),
+                            CurrentSpeed=ProgressData.get('CurrentSpeed', '0x'),
+                            ETA=ProgressData.get('ETA', 'Unknown'),
+                            TotalFrames=ProgressData.get('TotalFrames', 0),
+                            AverageFPS=ProgressData.get('AverageFPS', 0.0)
+                        )
+                        LastUpdateTime = CurrentTime
+                except Exception as e:
+                    LoggingService.LogException("Exception in progress callback", e, "ProcessTranscodeQueueService", "ExecuteTranscoding")
             
             return self.VideoTranscoding.TranscodeVideo(TranscodeAttemptId, TranscodeCommand, ProgressCallback)
             

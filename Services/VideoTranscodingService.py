@@ -243,10 +243,16 @@ class VideoTranscodingService:
             if SpeedMatch:
                 ProgressData['CurrentSpeed'] = f"{SpeedMatch.group(1)}x"
             
-            # Calculate progress percentage if we have frame and total frames
+            # Calculate progress percentage - use a more conservative approach
             if 'CurrentFrame' in ProgressData:
-                # This is a simplified calculation - in practice, you'd need total frames
-                ProgressData['ProgressPercent'] = min(ProgressData['CurrentFrame'] / 10000 * 100, 100)
+                # Use a conservative estimate: assume video is at least 20 minutes long
+                # This prevents showing 100% too early
+                MinEstimatedFrames = 20 * 60 * 25  # 20 minutes at 25 FPS = 30,000 frames
+                EstimatedFrames = max(MinEstimatedFrames, ProgressData['CurrentFrame'] * 2)  # At least 2x current frames
+                ProgressData['TotalFrames'] = EstimatedFrames
+                ProgressData['ProgressPercent'] = min((ProgressData['CurrentFrame'] / EstimatedFrames) * 100, 90)  # Cap at 90% until actually done
+            else:
+                ProgressData['ProgressPercent'] = 0
             
             # Set current phase
             ProgressData['CurrentPhase'] = 'Transcoding'

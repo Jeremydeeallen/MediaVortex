@@ -204,7 +204,41 @@ d. **Get profile details** → `Repositories/DatabaseManager.py` → `GetProfile
 e. **Build transcoding command** → `Services/CommandBuilderService.py` → `BuildCommand()` → `Models/CommandBuilder.py` → `BuildCommand()`
 f. **Create transcode attempt** → `Services/ProcessTranscodeQueueService.py` → `CreateTranscodeAttempt()` → `Repositories/DatabaseManager.py` → `SaveTranscodeAttempt()`
 g. **Execute transcoding** → `Services/VideoTranscodingService.py` → `TranscodeVideo()` (with real-time progress tracking to TranscodeProgress via `Repositories/DatabaseManager.py` → `SaveTranscodeProgress()`)
+   - **Progress Monitoring**: `Services/VideoTranscodingService.py` → `MonitorProgress()` reads FFmpeg stdout line by line
+   - **Progress Parsing**: `Services/VideoTranscodingService.py` → `ParseProgressLine()` extracts frame, fps, bitrate, time, speed from FFmpeg output
+   - **Progress Saving**: Progress data passed to callback → `Repositories/DatabaseManager.py` → `SaveTranscodeProgress()` updates TranscodeProgress table
 h. **Handle transcoding result** → `Services/ProcessTranscodeQueueService.py` → `HandleTranscodingResult()` (update TranscodeAttempts via `Repositories/DatabaseManager.py` → `UpdateTranscodeAttempt()`, delete from queue via `Repositories/DatabaseManager.py` → `DeleteTranscodeQueueItem()`, add to VMAF queue)
 i. **Continue or complete** → `Services/ProcessTranscodeQueueService.py` → `CleanupOrContinue()` (queue management)
 
 This architecture eliminates the complex 12-step process and replaces it with a clean, maintainable 4-step workflow that follows proper MVVM principles.
+
+## Progress Tracking Implementation
+
+### Current Status
+- ✅ **Progress Monitoring**: `MonitorProgress()` method exists and reads FFmpeg stdout
+- ✅ **Progress Parsing**: `ParseProgressLine()` extracts frame, fps, bitrate, time, speed
+- ✅ **Progress Saving**: Callback implemented to save progress to TranscodeProgress table
+
+### Implementation Details
+1. **Initial Record Creation**: `ProcessTranscodeQueueService.ExecuteTranscoding()` creates initial progress record with default values
+2. **Progress Callback**: Created in `ExecuteTranscoding()` with throttling (every 5 seconds)
+3. **Database Integration**: Uses existing `DatabaseManager.SaveTranscodeProgress()` method
+4. **TranscodeAttemptId**: Progress records linked to TranscodeAttempt via TranscodeAttemptId
+
+### Progress Data Mapping
+- **CurrentFrame** ← FFmpeg `frame=1234`
+- **CurrentFPS** ← FFmpeg `fps=25.0`
+- **CurrentBitrate** ← FFmpeg `bitrate=1000.0kbits/s`
+- **CurrentTime** ← FFmpeg `time=00:01:23.45`
+- **CurrentSpeed** ← FFmpeg `speed=1.0x`
+- **ProgressPercent** ← calculated from frames
+- **CurrentPhase** ← "Transcoding"
+- **PassNumber** ← 1 (CRF encoding)
+- **PassType** ← "CRF encoding"
+- **TotalFrames** ← NULL (until available)
+- **ETA** ← NULL (until calculated)
+
+### Performance Optimization
+- **Throttling**: Progress updates limited to every 5 seconds to reduce database load
+- **Single Record**: Uses UPDATE on existing record instead of multiple INSERTs
+- **Callback-based**: Minimal performance impact on FFmpeg monitoring loop

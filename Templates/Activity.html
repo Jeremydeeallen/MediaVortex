@@ -452,8 +452,8 @@ class ActivityManager {
                 <td>${this.escapeHtml(attempt.FileName)}</td>
                 <td>${this.formatDate(attempt.AttemptDate)}</td>
                 <td>
-                    <span class="badge ${attempt.Success ? 'bg-success' : 'bg-danger'}">
-                        ${attempt.Success ? 'Success' : 'Failed'}
+                    <span class="badge ${attempt.Success ? 'bg-success' : (attempt.ErrorMessage ? 'bg-danger' : 'bg-warning')}">
+                        ${attempt.Success ? 'Success' : (attempt.ErrorMessage ? 'Failed' : 'Running')}
                     </span>
                 </td>
                 <td>${attempt.Quality || '-'}</td>
