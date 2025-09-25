@@ -1815,6 +1815,56 @@ class DatabaseManager:
             LoggingService.LogException("Exception getting transcode progress by phase", e, "DatabaseManager", "GetTranscodeProgressByPhase")
             return None
     
+    def GetCurrentTranscodeProgress(self) -> Optional[Dict[str, Any]]:
+        """Get the current active transcoding progress (latest progress from any active attempt)."""
+        try:
+            LoggingService.LogFunctionEntry("GetCurrentTranscodeProgress", "DatabaseManager")
+            
+            # Get the most recent progress from any transcoding attempt
+            query = """
+                SELECT tp.TranscodeAttemptId, tp.CurrentPhase, tp.ProgressPercent, tp.CurrentFrame, 
+                       tp.TotalFrames, tp.CurrentFPS, tp.AverageFPS, tp.CurrentBitrate, 
+                       tp.CurrentTime, tp.CurrentSpeed, tp.ETA, tp.PassDuration, 
+                       tp.LastProgressUpdate, ta.FilePath, ta.Quality, ta.ProfileName
+                FROM TranscodeProgress tp
+                INNER JOIN TranscodeAttempts ta ON tp.TranscodeAttemptId = ta.Id
+                ORDER BY tp.LastProgressUpdate DESC 
+                LIMIT 1
+            """
+            
+            result = self.DatabaseService.ExecuteQuery(query)
+            
+            if result and len(result) > 0:
+                row = result[0]
+                progressData = {
+                    'TranscodeAttemptId': row[0],
+                    'CurrentPhase': row[1],
+                    'ProgressPercent': row[2],
+                    'CurrentFrame': row[3],
+                    'TotalFrames': row[4],
+                    'CurrentFPS': row[5],
+                    'AverageFPS': row[6],
+                    'CurrentBitrate': row[7],
+                    'CurrentTime': row[8],
+                    'CurrentSpeed': row[9],
+                    'ETA': row[10],
+                    'PassDuration': row[11],
+                    'LastProgressUpdate': row[12],
+                    'FilePath': row[13],
+                    'Quality': row[14],
+                    'ProfileName': row[15]
+                }
+                
+                LoggingService.LogDebug(f"Found current progress: {progressData['CurrentPhase']} ({progressData['ProgressPercent']}%) for {progressData['FilePath']}", "DatabaseManager", "GetCurrentTranscodeProgress")
+                return progressData
+            else:
+                LoggingService.LogDebug("No current transcoding progress found", "DatabaseManager", "GetCurrentTranscodeProgress")
+                return None
+                
+        except Exception as e:
+            LoggingService.LogException("Exception getting current transcode progress", e, "DatabaseManager", "GetCurrentTranscodeProgress")
+            return None
+    
     def CleanupOldProgressData(self, DaysToKeep: int = 7) -> int:
         """Clean up old progress data to keep the table manageable."""
         try:
@@ -2522,5 +2572,51 @@ class DatabaseManager:
             
         except Exception as e:
             LoggingService.LogException("Exception getting all CodecFlags", e, "DatabaseManager", "GetAllCodecFlags")
+            return []
+    
+    def GetRecentTranscodeAttempts(self, Limit: int = 5) -> List[Dict[str, Any]]:
+        """Get recent transcoding attempts for display."""
+        try:
+            LoggingService.LogFunctionEntry("GetRecentTranscodeAttempts", "DatabaseManager", Limit)
+            
+            query = """
+                SELECT ta.Id, ta.FilePath, ta.AttemptDate, ta.Quality, ta.OldSizeBytes, 
+                       ta.NewSizeBytes, ta.Success, ta.SizeReductionBytes, ta.SizeReductionPercent,
+                       ta.ErrorMessage, ta.TranscodeDurationSeconds, ta.FfpmpegCommand,
+                       ta.AudioBitrateKbps, ta.VideoBitrateKbps, ta.ProfileName, ta.VMAF
+                FROM TranscodeAttempts ta
+                ORDER BY ta.AttemptDate DESC
+                LIMIT ?
+            """
+            
+            result = self.DatabaseService.ExecuteQuery(query, (Limit,))
+            
+            attempts = []
+            for row in result:
+                attempt = {
+                    'Id': row['Id'],
+                    'FilePath': row['FilePath'],
+                    'AttemptDate': row['AttemptDate'],
+                    'Quality': row['Quality'],
+                    'OldSizeBytes': row['OldSizeBytes'],
+                    'NewSizeBytes': row['NewSizeBytes'],
+                    'Success': row['Success'],
+                    'SizeReductionBytes': row['SizeReductionBytes'],
+                    'SizeReductionPercent': row['SizeReductionPercent'],
+                    'ErrorMessage': row['ErrorMessage'],
+                    'TranscodeDurationSeconds': row['TranscodeDurationSeconds'],
+                    'FfpmpegCommand': row['FfpmpegCommand'],
+                    'AudioBitrateKbps': row['AudioBitrateKbps'],
+                    'VideoBitrateKbps': row['VideoBitrateKbps'],
+                    'ProfileName': row['ProfileName'],
+                    'VMAF': row['VMAF']
+                }
+                attempts.append(attempt)
+            
+            LoggingService.LogInfo(f"Retrieved {len(attempts)} recent transcode attempts", "DatabaseManager", "GetRecentTranscodeAttempts")
+            return attempts
+            
+        except Exception as e:
+            LoggingService.LogException("Exception getting recent transcode attempts", e, "DatabaseManager", "GetRecentTranscodeAttempts")
             return []
     

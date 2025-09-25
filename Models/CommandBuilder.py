@@ -1,3 +1,4 @@
+import os
 from typing import Dict, Any, Optional
 from Models.TranscodeQueueModel import TranscodeQueueModel
 from Models.MediaFileModel import MediaFileModel
@@ -30,59 +31,55 @@ class CommandBuilder:
                 return None
             
             # Build command components
-            InputPath = f"C:\\MediaVortex\\Source\\{MediaFile.FileName}"
-            OutputPath = f"C:\\MediaVortex\\{MediaFile.FileName}"
+            InputPath = f"C:/MediaVortex/Source/{MediaFile.FileName}"
+            OutputPath = f"C:/MediaVortex/{MediaFile.FileName}"
             
-            # Start building command
-            CommandParts = ['ffmpeg', '-i', f'"{InputPath}"']
+            # Start building command - FFmpeg command structure: ffmpeg -i input [options] output -y
+            # Use relative path to FFmpeg executable from project root
+            # Use Windows backslashes for the executable path
+            CommandParts = ['FFmpegMaster\\bin\\ffmpeg.exe', '-i', f'"{InputPath}"']
             
-            # Add video codec and settings
+            # Add video codec
             VideoCodec = ProfileSettings.get('Codec', 'libsvtav1')
             CommandParts.extend(['-c:v', VideoCodec])
             
-            # Add codec-specific parameters
-            if CodecParameters:
-                for param in CodecParameters:
-                    if param.get('IsEnabled', False):
-                        CommandParts.extend([param.get('Parameter'), str(param.get('Value', ''))])
+            # Add video bitrate control (maxrate) - only if not null/blank
+            VideoBitrate = ProfileSettings.get('VideoBitrateKbps')
+            if VideoBitrate and VideoBitrate != '' and VideoBitrate != 'None':
+                CommandParts.extend(['-maxrate', f'{VideoBitrate}k'])
             
-            # Add preset if specified
+            # Add preset if specified - only if not null/blank
             Preset = ProfileSettings.get('Preset')
-            if Preset is not None:
+            if Preset is not None and Preset != '' and Preset != 'None':
                 CommandParts.extend(['-preset', str(Preset)])
             
-            # Add film grain if specified
-            FilmGrain = ProfileSettings.get('FilmGrain')
-            if FilmGrain is not None:
-                CommandParts.extend(['-film-grain', str(FilmGrain)])
+            # Add CRF/Quality if specified - only if not null/blank
+            Quality = ProfileSettings.get('Quality')
+            if Quality is not None and Quality != '' and Quality != 'None':
+                CommandParts.extend(['-crf', str(Quality)])
             
-            # Add deinterlacing if specified
-            YadifMode = ProfileSettings.get('YadifMode')
-            YadifParity = ProfileSettings.get('YadifParity')
-            YadifDeint = ProfileSettings.get('YadifDeint')
+            # Add film grain if specified (for libsvtav1) - only if not null/blank and > 0
+            FilmGrain = ProfileSettings.get('Grain')
+            if FilmGrain is not None and FilmGrain != '' and FilmGrain != 'None' and FilmGrain > 0:
+                CommandParts.extend(['-svtav1-params', f'film-grain={FilmGrain}'])
             
-            if YadifMode is not None and YadifParity is not None and YadifDeint is not None:
-                YadifFilter = f"yadif=mode={YadifMode}:parity={YadifParity}:deint={YadifDeint}"
-                
-                # Combine with scale filter if needed
-                if ScaleFilter:
-                    VideoFilter = f"{YadifFilter},{ScaleFilter}"
-                else:
-                    VideoFilter = YadifFilter
-                
+            # Add video filters (deinterlacing and scaling)
+            VideoFilter = self._BuildVideoFilters(ProfileSettings, ScaleFilter)
+            if VideoFilter:
                 CommandParts.extend(['-vf', VideoFilter])
-            elif ScaleFilter:
-                # Only scale filter
-                CommandParts.extend(['-vf', ScaleFilter])
             
-            # Add audio codec (copy to preserve quality)
-            CommandParts.extend(['-c:a', 'copy'])
+            # Add audio codec and bitrate - only if not null/blank
+            AudioBitrate = ProfileSettings.get('AudioBitrateKbps')
+            if AudioBitrate and AudioBitrate != '' and AudioBitrate != 'None':
+                CommandParts.extend(['-c:a', 'aac', '-b:a', f'{AudioBitrate}k'])
+            else:
+                CommandParts.extend(['-c:a', 'copy'])
             
-            # Add output path
-            CommandParts.append(f'"{OutputPath}"')
-            
-            # Add overwrite flag
+            # Add overwrite flag (before output path)
             CommandParts.append('-y')
+            
+            # Add output path (must be last)
+            CommandParts.append(f'"{OutputPath}"')
             
             # Join command parts
             CompleteCommand = ' '.join(CommandParts)
@@ -121,12 +118,14 @@ class CommandBuilder:
         """Build video filter string from profile settings and scale filter."""
         Filters = []
         
-        # Add deinterlacing filter
+        # Add deinterlacing filter if specified - only if not null/blank
         YadifMode = ProfileSettings.get('YadifMode')
         YadifParity = ProfileSettings.get('YadifParity')
         YadifDeint = ProfileSettings.get('YadifDeint')
         
-        if YadifMode is not None and YadifParity is not None and YadifDeint is not None:
+        if (YadifMode is not None and YadifMode != '' and YadifMode != 'None' and
+            YadifParity is not None and YadifParity != '' and YadifParity != 'None' and
+            YadifDeint is not None and YadifDeint != '' and YadifDeint != 'None'):
             YadifFilter = f"yadif=mode={YadifMode}:parity={YadifParity}:deint={YadifDeint}"
             Filters.append(YadifFilter)
         

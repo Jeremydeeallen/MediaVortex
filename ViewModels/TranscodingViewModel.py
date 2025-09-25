@@ -114,30 +114,8 @@ class TranscodingViewModel:
         try:
             LoggingService.LogFunctionEntry("GetRecentAttempts", "TranscodingViewModel", Limit)
             
-            # Get recent attempts
-            query = """
-                SELECT ta.Id, ta.JobId, ta.StartTime, ta.EndTime, ta.Duration, 
-                       ta.Success, ta.OutputFilePath, ta.ErrorMessage
-                FROM TranscodeAttempts ta
-                ORDER BY ta.StartTime DESC
-                LIMIT ?
-            """
-            
-            rows = self.DatabaseManager.DatabaseService.ExecuteQuery(query, (Limit,))
-            
-            attempts = []
-            for row in rows:
-                attempt = {
-                    'Id': row['Id'],
-                    'JobId': row['JobId'],
-                    'StartTime': row['StartTime'],
-                    'EndTime': row['EndTime'],
-                    'Duration': row['Duration'],
-                    'Success': bool(row['Success']),
-                    'OutputFilePath': row['OutputFilePath'],
-                    'ErrorMessage': row['ErrorMessage']
-                }
-                attempts.append(attempt)
+            # Get recent attempts from DatabaseManager
+            attempts = self.DatabaseManager.GetRecentTranscodeAttempts(Limit)
             
             return attempts
             

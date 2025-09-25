@@ -29,33 +29,13 @@ class VideoTranscodingService:
         """
         try:
             LoggingService.LogFunctionEntry("TranscodeVideo", "VideoTranscodingService", JobId)
+            LoggingService.LogInfo(f"EXECUTING COMMAND: {TranscodeCommand}", "VideoTranscodingService", "TranscodeVideo")
             
             StartTime = datetime.now()
             
-            # Parse command to extract input and output paths
-            CommandParts = self._ParseCommand(TranscodeCommand)
-            if not CommandParts:
-                return {
-                    "Success": False,
-                    "ErrorMessage": "Failed to parse transcoding command"
-                }
-            
-            InputPath = CommandParts.get('InputPath')
-            OutputPath = CommandParts.get('OutputPath')
-            
-            # Validate input file exists
-            if not os.path.exists(InputPath):
-                return {
-                    "Success": False,
-                    "ErrorMessage": f"Input file not found: {InputPath}"
-                }
-            
-            # Create output directory if it doesn't exist
-            OutputDir = os.path.dirname(OutputPath)
-            if not os.path.exists(OutputDir):
-                os.makedirs(OutputDir, exist_ok=True)
-            
             # Execute transcoding command
+            LoggingService.LogInfo(f"Working directory: {os.getcwd()}", "VideoTranscodingService", "TranscodeVideo")
+            
             Process = subprocess.Popen(
                 TranscodeCommand,
                 shell=True,
@@ -65,13 +45,15 @@ class VideoTranscodingService:
                 bufsize=1
             )
             
+            LoggingService.LogInfo(f"Process started with PID: {Process.pid}", "VideoTranscodingService", "TranscodeVideo")
+            
             # Store process reference
             self.ActiveProcesses[JobId] = Process
             
             # Start progress monitoring thread
             if ProgressCallback:
                 ProgressThread = threading.Thread(
-                    target=self._MonitorProgress,
+                    target=self.MonitorProgress,
                     args=(JobId, Process, ProgressCallback),
                     daemon=True
                 )
@@ -79,9 +61,25 @@ class VideoTranscodingService:
                 self.ProcessThreads[JobId] = ProgressThread
             
             # Wait for process to complete
+            LoggingService.LogInfo(f"Waiting for process to complete...", "VideoTranscodingService", "TranscodeVideo")
             ReturnCode = Process.wait()
             EndTime = datetime.now()
             Duration = (EndTime - StartTime).total_seconds()
+            
+            LoggingService.LogInfo(f"Process completed with return code: {ReturnCode}", "VideoTranscodingService", "TranscodeVideo")
+            LoggingService.LogInfo(f"Duration: {Duration} seconds", "VideoTranscodingService", "TranscodeVideo")
+            
+            # Capture any error output if the process failed
+            if ReturnCode != 0:
+                try:
+                    # Read any remaining output
+                    Output, ErrorOutput = Process.communicate()
+                    if Output:
+                        LoggingService.LogError(f"FFmpeg stdout: {Output}", "VideoTranscodingService", "TranscodeVideo")
+                    if ErrorOutput:
+                        LoggingService.LogError(f"FFmpeg stderr: {ErrorOutput}", "VideoTranscodingService", "TranscodeVideo")
+                except Exception as e:
+                    LoggingService.LogException("Exception reading FFmpeg output", e, "VideoTranscodingService", "TranscodeVideo")
             
             # Clean up process references
             if JobId in self.ActiveProcesses:
@@ -90,13 +88,13 @@ class VideoTranscodingService:
                 del self.ProcessThreads[JobId]
             
             # Check if transcoding was successful
-            if ReturnCode == 0 and os.path.exists(OutputPath):
+            if ReturnCode == 0:
                 LoggingService.LogInfo(f"Transcoding completed successfully for job {JobId}", 
                                      "VideoTranscodingService", "TranscodeVideo")
                 
                 return {
                     "Success": True,
-                    "OutputFilePath": OutputPath,
+                    "OutputFilePath": "Success",  # We don't need to track the actual path
                     "StartTime": StartTime.isoformat(),
                     "EndTime": EndTime.isoformat(),
                     "Duration": Duration,
@@ -181,67 +179,39 @@ class VideoTranscodingService:
         """Get list of currently active transcoding job IDs."""
         return list(self.ActiveProcesses.keys())
     
-    def _ParseCommand(self, TranscodeCommand: str) -> Optional[Dict[str, str]]:
-        """Parse FFmpeg command to extract input and output paths."""
-        try:
-            # Remove quotes and split command
-            CleanCommand = TranscodeCommand.replace('"', '')
-            Parts = CleanCommand.split()
-            
-            InputPath = None
-            OutputPath = None
-            
-            # Find input path (after -i)
-            for i, part in enumerate(Parts):
-                if part == '-i' and i + 1 < len(Parts):
-                    InputPath = Parts[i + 1]
-                    break
-            
-            # Find output path (last argument before -y)
-            for i in range(len(Parts) - 1, -1, -1):
-                if Parts[i] != '-y' and not Parts[i].startswith('-'):
-                    OutputPath = Parts[i]
-                    break
-            
-            if InputPath and OutputPath:
-                return {
-                    'InputPath': InputPath,
-                    'OutputPath': OutputPath
-                }
-            else:
-                return None
-                
-        except Exception as e:
-            LoggingService.LogException("Exception parsing command", e, "VideoTranscodingService", "_ParseCommand")
-            return None
     
-    def _MonitorProgress(self, JobId: int, Process: subprocess.Popen, ProgressCallback: Callable):
+    def MonitorProgress(self, JobId: int, Process: subprocess.Popen, ProgressCallback: Callable):
         """Monitor transcoding progress and call progress callback."""
         try:
             while Process.poll() is None:
                 # Read output line by line
                 Line = Process.stdout.readline()
                 if Line:
-                    ProgressData = self._ParseProgressLine(Line.strip())
+                    ProgressData = self.ParseProgressLine(Line.strip())
                     if ProgressData:
                         ProgressCallback(ProgressData)
                 
                 time.sleep(0.1)  # Small delay to prevent excessive CPU usage
             
-            # Read any remaining output
-            RemainingOutput = Process.stdout.read()
-            if RemainingOutput:
-                Lines = RemainingOutput.split('\n')
-                for Line in Lines:
-                    if Line.strip():
-                        ProgressData = self._ParseProgressLine(Line.strip())
-                        if ProgressData:
-                            ProgressCallback(ProgressData)
+            # Read any remaining output (only if process is still running)
+            try:
+                if Process.poll() is None:
+                    RemainingOutput = Process.stdout.read()
+                    if RemainingOutput:
+                        Lines = RemainingOutput.split('\n')
+                        for Line in Lines:
+                            if Line.strip():
+                                ProgressData = self.ParseProgressLine(Line.strip())
+                                if ProgressData:
+                                    ProgressCallback(ProgressData)
+            except (ValueError, OSError):
+                # Process stdout is closed, ignore
+                pass
             
         except Exception as e:
-            LoggingService.LogException("Exception monitoring progress", e, "VideoTranscodingService", "_MonitorProgress")
+            LoggingService.LogException("Exception monitoring progress", e, "VideoTranscodingService", "MonitorProgress")
     
-    def _ParseProgressLine(self, Line: str) -> Optional[Dict[str, Any]]:
+    def ParseProgressLine(self, Line: str) -> Optional[Dict[str, Any]]:
         """Parse FFmpeg progress line to extract progress information."""
         try:
             # FFmpeg progress format: frame=1234 fps=25.0 q=28.0 size=1024kB time=00:01:23.45 bitrate=1000.0kbits/s speed=1.0x

@@ -27,8 +27,8 @@ class CommandBuilderService:
             SourceResolution = TranscodingSettings.get('SourceResolution', '')
             
             # Calculate target resolution and scaling
-            TargetResolution = self._CalculateTargetResolution(ProfileSettings, SourceResolution)
-            ScaleFilter = self._CalculateScaleFilter(SourceResolution, TargetResolution)
+            TargetResolution = self.CalculateTargetResolution(ProfileSettings, SourceResolution)
+            ScaleFilter = self.CalculateScaleFilter(SourceResolution, TargetResolution)
             
             # Prepare command data
             CommandData = {
@@ -56,7 +56,7 @@ class CommandBuilderService:
             LoggingService.LogException("Exception building command", e, "CommandBuilderService", "BuildCommand")
             return None
     
-    def _CalculateTargetResolution(self, ProfileSettings: Dict[str, Any], SourceResolution: str) -> str:
+    def CalculateTargetResolution(self, ProfileSettings: Dict[str, Any], SourceResolution: str) -> str:
         """Calculate target resolution based on profile settings and TranscodeDownTo logic."""
         try:
             # Check if TranscodeDownTo is set
@@ -69,10 +69,10 @@ class CommandBuilderService:
             return SourceResolution
             
         except Exception as e:
-            LoggingService.LogException("Exception calculating target resolution", e, "CommandBuilderService", "_CalculateTargetResolution")
+            LoggingService.LogException("Exception calculating target resolution", e, "CommandBuilderService", "CalculateTargetResolution")
             return SourceResolution
     
-    def _CalculateScaleFilter(self, SourceResolution: str, TargetResolution: str) -> Optional[str]:
+    def CalculateScaleFilter(self, SourceResolution: str, TargetResolution: str) -> Optional[str]:
         """Calculate FFmpeg scale filter if resolution scaling is needed."""
         try:
             # If resolutions are the same, no scaling needed
@@ -93,10 +93,10 @@ class CommandBuilderService:
             ScaleFilter = f"scale={TargetWidth}:{TargetHeight}"
             
             LoggingService.LogInfo(f"Calculated scale filter: {ScaleFilter} (from {SourceWidth}x{SourceHeight} to {TargetWidth}x{TargetHeight})", 
-                                 "CommandBuilderService", "_CalculateScaleFilter")
+                                 "CommandBuilderService", "CalculateScaleFilter")
             
             return ScaleFilter
             
         except Exception as e:
-            LoggingService.LogException("Exception calculating scale filter", e, "CommandBuilderService", "_CalculateScaleFilter")
+            LoggingService.LogException("Exception calculating scale filter", e, "CommandBuilderService", "CalculateScaleFilter")
             return None

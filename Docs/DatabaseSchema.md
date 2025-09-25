@@ -82,13 +82,6 @@ CodecParameters.DefaultValue	TEXT
 CodecParameters.Description	TEXT
 CodecParameters.FFmpegFlag	TEXT
 CodecParameters.CreatedDate	DATETIME
-PresetOptions.Id	INTEGER
-PresetOptions.CodecFlagsId	INTEGER
-PresetOptions.PresetValue	TEXT
-PresetOptions.PresetName	TEXT
-PresetOptions.Description	TEXT
-PresetOptions.SortOrder	INTEGER
-PresetOptions.CreatedDate	DATETIME
 CompliantFiles.Id	INTEGER
 CompliantFiles.FilePath	TEXT
 CompliantFiles.FileName	TEXT
@@ -182,6 +175,13 @@ MediaFiles.IsInterlaced	BIT
 MediaFiles.ResolutionCategory	TEXT
 MediaFiles.FileModificationTime	DATETIME
 MediaFiles.KeepSource	BOOLEAN
+PresetOptions.Id	INTEGER
+PresetOptions.CodecFlagsId	INTEGER
+PresetOptions.PresetValue	TEXT
+PresetOptions.PresetName	TEXT
+PresetOptions.Description	TEXT
+PresetOptions.SortOrder	INTEGER
+PresetOptions.CreatedDate	DATETIME
 ProblemFiles.Id	INTEGER
 ProblemFiles.FilePath	TEXT
 ProblemFiles.FileName	TEXT
@@ -363,6 +363,7 @@ Logs	IdxLogsComponent	0	c	0
 Logs	IdxLogsLogger	0	c	0
 Logs	IdxLogsLevel	0	c	0
 Logs	IdxLogsTimestamp	0	c	0
+PresetOptions	sqlite_autoindex_PresetOptions_1	1	u	0
 ProblemFiles	idx_ProblemFiles_Directory	0	c	0
 ProblemFiles	idx_ProblemFiles_ErrorType	0	c	0
 ProblemFiles	idx_ProblemFiles_FilePath	0	c	0
@@ -420,6 +421,8 @@ Logs	IdxLogsComponent	Component	0
 Logs	IdxLogsLogger	FunctionName	0
 Logs	IdxLogsLevel	LogLevel	0
 Logs	IdxLogsTimestamp	Timestamp	0
+PresetOptions	sqlite_autoindex_PresetOptions_1	CodecFlagsId	0
+PresetOptions	sqlite_autoindex_PresetOptions_1	PresetValue	1
 ProblemFiles	idx_ProblemFiles_Directory	Directory	0
 ProblemFiles	idx_ProblemFiles_ErrorType	ErrorType	0
 ProblemFiles	idx_ProblemFiles_FilePath	FilePath	0
