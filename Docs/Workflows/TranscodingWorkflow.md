@@ -28,35 +28,35 @@ Controller → Service → Repository → Tool Service
 **File**: `Services/ProcessTranscodeQueueService.py` (NEW - needs creation)
 - **Run()**: Orchestrates the entire transcoding queue processing
 - **ProcessNextJob()**: Handles individual job workflow:
-  [x] a. **GetNextJob()** → calls `DatabaseManager.GetNextPendingTranscodeJob()`
-  [x] b. **GetMediaFileData()** → calls `DatabaseManager.GetMediaFileByPath(job.FilePath)` to get source resolution
-  [x] c. **FilePreparation()** → calls `FileManagerService.SetupTranscodingDirectories()` and `FileManagerService.CopyFile(job.FilePath, destination)`
-  [ ] d. **GetTranscodingSettings()** → calls:
-     [x] - `DatabaseManager.GetProfileSettingsForTargetResolution(job.AssignedProfile, MediaFile.Resolution)` (includes TranscodeDownTo logic)
-     [x] - `DatabaseManager.GetCodecFlagsByCodecName()`
-     [x] - `DatabaseManager.GetCodecParametersByCodecFlagsId()`
-  [ ] e. **BuildTranscodeCommand()** → calls `CommandBuilderService.BuildCommand()`
-  [ ] f. **ExecuteTranscoding()** → calls `VideoTranscodingService.TranscodeVideo()` with progress callback that calls `DatabaseManager.SaveTranscodeProgress()`
-  [ ] g. **HandleTranscodingResult()** → calls `ProcessTranscodeQueueService.HandleTranscodingResult()` (internal method)
-  [ ] h. **CleanupOrContinue()** → calls `ProcessTranscodeQueueService.CleanupOrContinue()` (internal method)
+  [x] a. **GetNextJob()** → `Repositories/DatabaseManager.py` → `GetNextPendingTranscodeJob()`
+  [x] b. **GetMediaFileData()** → `Repositories/DatabaseManager.py` → `GetMediaFileByPath(job.FilePath)` to get source resolution
+  [x] c. **FilePreparation()** → `Services/TranscodingFileManagerService.py` → `SetupTranscodingDirectories()` and `CopyFile(job.FilePath, destination)`
+  [x] d. **GetTranscodingSettings()** → `Repositories/DatabaseManager.py` → calls:
+     [x] - `GetProfileSettingsForTargetResolution(job.AssignedProfile, MediaFile.Resolution)` (includes TranscodeDownTo logic)
+     [x] - `GetCodecFlagsByCodecName()`
+     [x] - `GetCodecParametersByCodecFlagsId()`
+  [x] e. **BuildTranscodeCommand()** → `Services/CommandBuilderService.py` → `BuildCommand()`
+  [x] f. **ExecuteTranscoding()** → `Services/VideoTranscodingService.py` → `TranscodeVideo()` with progress callback that calls `Repositories/DatabaseManager.py` → `SaveTranscodeProgress()`
+  [x] g. **HandleTranscodingResult()** → `Services/ProcessTranscodeQueueService.py` → `_HandleTranscodingResult()` (internal method)
+  [x] h. **CleanupOrContinue()** → `Services/ProcessTranscodeQueueService.py` → `_CleanupOrContinue()` (internal method)
 - **ApplyProfileSettings()**: Maps profile settings to command parameters
 
-**File**: `Services/CommandBuilderService.py` (NEW - needs creation)
+**File**: `Services/CommandBuilderService.py` (CREATED)
 - **BuildCommand()**: Orchestrates command building by:
-  [ ] a. Getting job data from previous steps
-  [ ] b. Getting profile settings, codec flags, and codec parameters
-  [ ] c. Calling `CommandBuilder.BuildCommand()` (Model) for pure transformation
-  [ ] d. Returning complete transcoding command string
-- **Resolution Scaling**: Uses `ResolutionService` to calculate target resolution and FFmpeg scale filter
+  [x] a. Getting job data from previous steps
+  [x] b. Getting profile settings, codec flags, and codec parameters
+  [x] c. Calling `Models/CommandBuilder.py` → `BuildCommand()` (Model) for pure transformation
+  [x] d. Returning complete transcoding command string
+- **Resolution Scaling**: Uses `Services/ResolutionService.py` → `StandardizeResolution()`, `GetStandardHeight()`, `CalculateStandardWidth()` to calculate target resolution and FFmpeg scale filter
 
-**File**: `Models/CommandBuilder.py` (NEW - needs creation)
-- [ ] **BuildCommand()**: Pure data transformation function
-- [ ] **Input**: Job data, profile settings, codec flags, codec parameters, target resolution
-- [ ] **Output**: Complete transcoding command string with resolution scaling
-- [ ] **Resolution Scaling**: Adds `-vf scale=WIDTH:HEIGHT` filter when TranscodeDownTo is set
-- [ ] **No external dependencies**: Pure function
+**File**: `Models/CommandBuilder.py` (CREATED)
+- [x] **BuildCommand()**: Pure data transformation function
+- [x] **Input**: Job data, profile settings, codec flags, codec parameters, target resolution
+- [x] **Output**: Complete transcoding command string with resolution scaling
+- [x] **Resolution Scaling**: Adds `-vf scale=WIDTH:HEIGHT` filter when TranscodeDownTo is set
+- [x] **No external dependencies**: Pure function
 
-**File**: `Services/FileManagerService.py` (EXISTING - called by TranscodeCommandBuilderService)
+**File**: `Services/TranscodingFileManagerService.py` (CREATED - minimal file operations for transcoding)
 - [x] **SetupTranscodingDirectories()**: Creates `C:\MediaVortex\Source` and `C:\MediaVortex` directories
 - [x] **CopyFile(SourcePath, DestinationPath)**: Copies source file from job.FilePath to `C:\MediaVortex\Source`
 - [x] **On Success**: Proceeds to business logic
@@ -71,7 +71,7 @@ Controller → Service → Repository → Tool Service
 - [x] **GetMediaFileByPath()**: Gets MediaFile data by FilePath to retrieve source resolution
 - [x] **SaveTranscodeAttempt()**: Saves attempt record
 - [x] **SaveTranscodeProgress()**: Saves/updates progress tracking during transcoding
-- [ ] **UpdateJobStatus()**: Updates job status in queue
+- [x] **DeleteTranscodeQueueItem()**: Removes completed job from TranscodeQueue
 
 **File**: `Services/ResolutionService.py` (EXISTING - used by CommandBuilder)
 - [x] **StandardizeResolution()**: Converts resolution strings to standard format
@@ -80,34 +80,57 @@ Controller → Service → Repository → Tool Service
 - [x] **FindMatchingThreshold()**: Finds matching profile threshold for resolution
 
 ### 5. Tool Service (Execution)
-**File**: `Services/VideoTranscodingService.py` (RENAMED from FFmpegService.py - needs implementation)
-- [ ] **TranscodeVideo()**: Executes actual transcoding command with progress tracking
-- [ ] **Progress Callback**: Calls `DatabaseManager.SaveTranscodeProgress()` for real-time updates
-- [ ] **Parameters**: TranscodeAttemptId, CurrentPhase, ProgressPercent, CurrentFrame, CurrentFPS, CurrentBitrate, CurrentTime, CurrentSpeed, ETA, TotalFrames, AverageFPS
-- [ ] **Returns**: Success/failure, output file path, duration, error details
+**File**: `Services/VideoTranscodingService.py` (CREATED)
+- [x] **TranscodeVideo()**: Executes actual transcoding command with progress tracking
+- [x] **Progress Callback**: Calls `Repositories/DatabaseManager.py` → `SaveTranscodeProgress()` for real-time updates
+- [x] **Parameters**: TranscodeAttemptId, CurrentPhase, ProgressPercent, CurrentFrame, CurrentFPS, CurrentBitrate, CurrentTime, CurrentSpeed, ETA, TotalFrames, AverageFPS
+- [x] **Returns**: Success/failure, output file path, duration, error details
 
-**File**: `Services/ProcessTranscodeQueueService.py` (NEW - needs creation)
-- [ ] **Run()**: Orchestrates the entire transcoding queue processing
-- [ ] **ProcessNextJob()**: Handles individual job workflow (steps a-g)
-- [ ] **HandleTranscodingResult()**: Processes transcoding results by:
-  [ ] a. **On Success**: Updates job status, saves attempt record, adds to VMAF queue for quality assessment
-  [ ] b. **On Failure**: Updates job status, logs error, marks for retry or removal
-- [ ] **CleanupOrContinue()**: Determines next action by:
-  [ ] a. **If more jobs**: Calls `ProcessNextJob()` to continue processing
-  [ ] b. **If queue empty**: Stops processing and returns completion status
+**File**: `Services/ProcessTranscodeQueueService.py` (CREATED)
+- [x] **Run()**: Orchestrates the entire transcoding queue processing
+- [x] **ProcessNextJob()**: Handles individual job workflow (steps a-g)
+- [x] **HandleTranscodingResult()**: Processes transcoding results by:
+  [x] a. **On Success**: Calls `Repositories/DatabaseManager.py` → `DeleteTranscodeQueueItem()`, saves attempt record, adds to VMAF queue for quality assessment
+  [x] b. **On Failure**: Calls `Repositories/DatabaseManager.py` → `DeleteTranscodeQueueItem()`, logs error, saves attempt record for investigation
+- [x] **CleanupOrContinue()**: Determines next action by:
+  [x] a. **If more jobs**: Calls `ProcessNextJob()` to continue processing
+  [x] b. **If queue empty**: Stops processing and returns completion status
 
 ## Implementation Status
 
-### Missing Files (Need Implementation)
-1. [ ] `Services/ProcessTranscodeQueueService.py` (NEW - needs creation)
-2. [ ] `Services/CommandBuilderService.py` (NEW - needs creation)
-3. [ ] `Models/CommandBuilder.py` (NEW - needs creation)
-4. [ ] `Services/VideoTranscodingService.py` (RENAMED from FFmpegService.py - needs implementation)
+### ✅ Completed Files
+1. [x] `Services/ProcessTranscodeQueueService.py` (CREATED)
+2. [x] `Services/CommandBuilderService.py` (CREATED)
+3. [x] `Models/CommandBuilder.py` (CREATED)
+4. [x] `Services/VideoTranscodingService.py` (CREATED)
+5. [x] `Services/TranscodingFileManagerService.py` (CREATED - minimal file operations, no FFmpeg dependencies)
+6. [x] `Services/TranscodingVMAFQueueService.py` (CREATED - minimal VMAF queue, no FFmpeg dependencies)
+7. [x] `ViewModels/TranscodingViewModel.py` (CREATED - maintains controller contract for starting transcoding)
+8. [x] `ViewModels/ActivityViewModel.py` (CREATED - maintains controller contract for progress updates)
+
+### Required ViewModels (Controller Contract)
+- [x] `ViewModels/TranscodingViewModel.py` - Required because `Controllers/TranscodeJobController.py` imports and uses it to start transcoding
+- [x] `ViewModels/ActivityViewModel.py` - Required because `Controllers/TranscodeJobController.py` imports and uses it for progress updates
 
 ### Files to Remove (Conflicting Architecture)
-- [ ] `ViewModels/TranscodingViewModel.py` (business logic should be in Service)
-- [ ] `ViewModels/ActivityViewModel.py` (redundant wrapper)
 - [ ] `Services/HandBrakeTranscodingService.py` (consolidate into VideoTranscodingService)
+
+## Database Usage Pattern
+
+### TranscodeQueue - Temporary Work Queue
+- **Purpose**: Temporary holding place for jobs waiting to be processed
+- **Lifecycle**: Add → Process → **DELETE** (not update)
+- **Usage**: Simple "to-do list" that gets cleaned up after processing
+
+### TranscodeProgress - Real-time Tracking
+- **Purpose**: Real-time progress tracking during active transcoding
+- **Lifecycle**: Create once → Update repeatedly → Keep for history
+- **Usage**: Single record per job, updated with progress data during transcoding
+
+### TranscodeAttempts - Historical Record
+- **Purpose**: Permanent record of what happened to each job
+- **Lifecycle**: Create once when job completes → Keep forever
+- **Usage**: Audit trail and historical analysis
 
 ## Key Principles
 
@@ -116,6 +139,8 @@ Controller → Service → Repository → Tool Service
 3. **Proper MVVM**: Clear separation between Controller, Service, Repository, and Tool layers
 4. **Correct Order**: Command must be built before execution
 5. **No Code Duplication**: Single transcoding service, single command builder
+6. **Correct Database Usage**: Queue for temporary work, Progress for real-time tracking, Attempts for history
+7. **Decoupled Architecture**: Transcoding workflow is independent of FFmpeg analysis services
 
 ## Complete Flow Diagram
 
@@ -164,13 +189,13 @@ flowchart TD
 
 ## Data Flow
 
-a. **Get job from queue** → DatabaseManager
-b. **Get MediaFile data** → DatabaseManager (to retrieve source resolution)
-c. **Setup directories & copy file** → FileManagerService
-d. **Get profile details** → DatabaseManager (with TranscodeDownTo logic)
-e. **Build transcoding command** → CommandBuilderService → CommandBuilder (Model)
-f. **Execute transcoding** → VideoTranscodingService (with real-time progress tracking)
-g. **Handle transcoding result** → ProcessTranscodeQueue (success/failure processing + VMAF queue)
-h. **Continue or complete** → ProcessTranscodeQueue (queue management)
+a. **Get job from queue** → `Repositories/DatabaseManager.py` → `GetNextPendingTranscodeJob()` (TranscodeQueue)
+b. **Get MediaFile data** → `Repositories/DatabaseManager.py` → `GetMediaFileByPath()` (to retrieve source resolution)
+c. **Setup directories & copy file** → `Services/TranscodingFileManagerService.py` → `SetupTranscodingDirectories()` & `CopyFile()`
+d. **Get profile details** → `Repositories/DatabaseManager.py` → `GetProfileSettingsForTargetResolution()`, `GetCodecFlagsByCodecName()`, `GetCodecParametersByCodecFlagsId()` (with TranscodeDownTo logic)
+e. **Build transcoding command** → `Services/CommandBuilderService.py` → `BuildCommand()` → `Models/CommandBuilder.py` → `BuildCommand()`
+f. **Execute transcoding** → `Services/VideoTranscodingService.py` → `TranscodeVideo()` (with real-time progress tracking to TranscodeProgress via `Repositories/DatabaseManager.py` → `SaveTranscodeProgress()`)
+g. **Handle transcoding result** → `Services/ProcessTranscodeQueueService.py` → `_HandleTranscodingResult()` (delete from queue via `Repositories/DatabaseManager.py` → `DeleteTranscodeQueueItem()`, save to TranscodeAttempts, add to VMAF queue)
+h. **Continue or complete** → `Services/ProcessTranscodeQueueService.py` → `_CleanupOrContinue()` (queue management)
 
 This architecture eliminates the complex 12-step process and replaces it with a clean, maintainable 4-step workflow that follows proper MVVM principles.

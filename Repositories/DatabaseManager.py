@@ -2523,3 +2523,4 @@ class DatabaseManager:
         except Exception as e:
             LoggingService.LogException("Exception getting all CodecFlags", e, "DatabaseManager", "GetAllCodecFlags")
             return []
+    
