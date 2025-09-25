@@ -690,6 +690,7 @@ class ActivityManager {
                 // Update Activity progress display with real data from database
                 const progressData = {
                     frame: data.CurrentFrame || 0,
+                    totalFrames: data.TotalFrames || 0,
                     fps: data.CurrentFPS || 0,
                     speed: data.CurrentSpeed || '0x',
                     phase: data.CurrentPhase || 'Transcoding',
@@ -718,7 +719,15 @@ class ActivityManager {
             speedElement: !!speedElement
         });
         
-        if (frameElement) frameElement.textContent = progressData.frame || '0';
+        if (frameElement) {
+            const currentFrame = progressData.frame || 0;
+            const totalFrames = progressData.totalFrames || 0;
+            if (totalFrames > 0) {
+                frameElement.textContent = `${currentFrame.toLocaleString()} / ${totalFrames.toLocaleString()}`;
+            } else {
+                frameElement.textContent = currentFrame.toLocaleString();
+            }
+        }
         if (fpsElement) fpsElement.textContent = (progressData.fps || 0).toFixed(1);
         if (speedElement) speedElement.textContent = progressData.speed || '0x';
         

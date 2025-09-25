@@ -218,8 +218,20 @@ class VideoTranscodingService:
             
             ProgressData = {}
             
+            # First, check if this line contains the total frame count from FFmpeg metadata
+            if "NUMBER_OF_FRAMES" in Line:
+                FrameCountMatch = re.search(r'NUMBER_OF_FRAMES[^:]*:\s*(\d+)', Line)
+                if FrameCountMatch:
+                    TotalFrames = int(FrameCountMatch.group(1))
+                    # Store the total frame count for use in progress calculation
+                    if not hasattr(self, '_TotalFrameCount'):
+                        self._TotalFrameCount = TotalFrames
+                        LoggingService.LogInfo(f"Extracted total frame count from FFmpeg metadata: {TotalFrames} frames", 
+                                             "VideoTranscodingService", "ParseProgressLine")
+                    return None  # This is metadata, not a progress line
+            
             # Extract frame number
-            FrameMatch = re.search(r'frame=(\d+)', Line)
+            FrameMatch = re.search(r'frame=\s*(\d+)', Line)
             if FrameMatch:
                 ProgressData['CurrentFrame'] = int(FrameMatch.group(1))
             
@@ -243,28 +255,27 @@ class VideoTranscodingService:
             if SpeedMatch:
                 ProgressData['CurrentSpeed'] = f"{SpeedMatch.group(1)}x"
             
-            # Calculate progress percentage - use a more realistic approach
+            # Calculate progress percentage using actual frame count from FFmpeg metadata
             if 'CurrentFrame' in ProgressData:
                 CurrentFrame = ProgressData['CurrentFrame']
                 
-                # Use a more realistic estimation based on current progress
-                # If we have less than 10,000 frames, assume it's a short video (minimum 20,000 frames)
-                # If we have more, use a more conservative multiplier
-                if CurrentFrame < 10000:
-                    EstimatedFrames = max(20000, CurrentFrame * 3)  # Short video estimate
-                elif CurrentFrame < 30000:
-                    EstimatedFrames = max(50000, CurrentFrame * 2.5)  # Medium video estimate
+                # Use the actual frame count extracted from FFmpeg metadata
+                if hasattr(self, '_TotalFrameCount') and self._TotalFrameCount > 0:
+                    TotalFrames = self._TotalFrameCount
+                    ProgressData['TotalFrames'] = TotalFrames
+                    ProgressPercent = (CurrentFrame / TotalFrames) * 100
+                    
+                    # Cap at 95% until actually done (leave some room for completion)
+                    ProgressData['ProgressPercent'] = min(ProgressPercent, 95)
                 else:
-                    # For longer videos, use a more conservative estimate
-                    EstimatedFrames = max(80000, CurrentFrame * 1.8)  # Long video estimate
-                
-                ProgressData['TotalFrames'] = EstimatedFrames
-                ProgressPercent = (CurrentFrame / EstimatedFrames) * 100
-                
-                # Cap at 95% until actually done (leave some room for completion)
-                ProgressData['ProgressPercent'] = min(ProgressPercent, 95)
+                    # Fallback: if we don't have the total frame count yet, show 0% progress
+                    ProgressData['TotalFrames'] = 0
+                    ProgressData['ProgressPercent'] = 0
+                    LoggingService.LogWarning(f"No total frame count available yet. Current frame: {CurrentFrame}", 
+                                            "VideoTranscodingService", "ParseProgressLine")
             else:
                 ProgressData['ProgressPercent'] = 0
+                ProgressData['TotalFrames'] = getattr(self, '_TotalFrameCount', 0)
             
             # Set current phase
             ProgressData['CurrentPhase'] = 'Transcoding'

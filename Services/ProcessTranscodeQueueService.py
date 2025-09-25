@@ -372,30 +372,23 @@ class ProcessTranscodeQueueService:
                 AverageFPS=0.0
             )
             
-            # Create progress callback with throttling (every 1 second)
-            LastUpdateTime = time.time()
-            
+            # Create progress callback for real-time updates
             def ProgressCallback(ProgressData: Dict[str, Any]):
-                nonlocal LastUpdateTime
                 try:
-                    CurrentTime = time.time()
-                    # Throttle updates to every 1 second
-                    if CurrentTime - LastUpdateTime >= 1.0:
-                        # Save progress to database
-                        self.DatabaseManager.SaveTranscodeProgress(
-                            TranscodeAttemptId=TranscodeAttemptId,
-                            CurrentPhase=ProgressData.get('CurrentPhase', 'Transcoding'),
-                            ProgressPercent=ProgressData.get('ProgressPercent', 0.0),
-                            CurrentFrame=ProgressData.get('CurrentFrame', 0),
-                            CurrentFPS=ProgressData.get('CurrentFPS', 0.0),
-                            CurrentBitrate=f"{ProgressData.get('CurrentBitrate', 0)}kbits/s",
-                            CurrentTime=ProgressData.get('CurrentTime', '00:00:00'),
-                            CurrentSpeed=ProgressData.get('CurrentSpeed', '0x'),
-                            ETA=ProgressData.get('ETA', 'Unknown'),
-                            TotalFrames=ProgressData.get('TotalFrames', 0),
-                            AverageFPS=ProgressData.get('AverageFPS', 0.0)
-                        )
-                        LastUpdateTime = CurrentTime
+                    # Save progress to database immediately for real-time updates
+                    self.DatabaseManager.SaveTranscodeProgress(
+                        TranscodeAttemptId=TranscodeAttemptId,
+                        CurrentPhase=ProgressData.get('CurrentPhase', 'Transcoding'),
+                        ProgressPercent=ProgressData.get('ProgressPercent', 0.0),
+                        CurrentFrame=ProgressData.get('CurrentFrame', 0),
+                        CurrentFPS=ProgressData.get('CurrentFPS', 0.0),
+                        CurrentBitrate=f"{ProgressData.get('CurrentBitrate', 0)}kbits/s",
+                        CurrentTime=ProgressData.get('CurrentTime', '00:00:00'),
+                        CurrentSpeed=ProgressData.get('CurrentSpeed', '0x'),
+                        ETA=ProgressData.get('ETA', 'Unknown'),
+                        TotalFrames=ProgressData.get('TotalFrames', 0),
+                        AverageFPS=ProgressData.get('AverageFPS', 0.0)
+                    )
                 except Exception as e:
                     LoggingService.LogException("Exception in progress callback", e, "ProcessTranscodeQueueService", "ExecuteTranscoding")
             
