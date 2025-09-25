@@ -277,6 +277,30 @@ class VideoTranscodingService:
                     
                     # Cap at 95% until actually done (leave some room for completion)
                     ProgressData['ProgressPercent'] = min(ProgressPercent, 95)
+                    
+                    # Calculate ETA based on current FPS and remaining frames
+                    CurrentFPS = ProgressData.get('CurrentFPS', 0)
+                    if CurrentFPS > 0 and CurrentFrame > 0:
+                        RemainingFrames = TotalFrames - CurrentFrame
+                        if RemainingFrames > 0:
+                            # Calculate seconds remaining
+                            SecondsRemaining = RemainingFrames / CurrentFPS
+                            
+                            # Convert to hours:minutes:seconds format
+                            Hours = int(SecondsRemaining // 3600)
+                            Minutes = int((SecondsRemaining % 3600) // 60)
+                            Seconds = int(SecondsRemaining % 60)
+                            
+                            if Hours > 0:
+                                ETA = f"{Hours:02d}:{Minutes:02d}:{Seconds:02d}"
+                            else:
+                                ETA = f"{Minutes:02d}:{Seconds:02d}"
+                            
+                            ProgressData['ETA'] = ETA
+                        else:
+                            ProgressData['ETA'] = "00:00"
+                    else:
+                        ProgressData['ETA'] = "Calculating..."
                 else:
                     # Fallback: if we don't have the total frame count yet, show 0% progress
                     ProgressData['TotalFrames'] = 0

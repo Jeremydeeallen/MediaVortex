@@ -111,6 +111,19 @@ if hasattr(self, '_TotalFrameCount') and self._TotalFrameCount > 0:
     
     # Cap at 95% until actually done
     ProgressData['ProgressPercent'] = min(ProgressPercent, 95)
+    
+    # Calculate ETA based on current FPS and remaining frames
+    CurrentFPS = ProgressData.get('CurrentFPS', 0)
+    if CurrentFPS > 0 and CurrentFrame > 0:
+        RemainingFrames = TotalFrames - CurrentFrame
+        if RemainingFrames > 0:
+            SecondsRemaining = RemainingFrames / CurrentFPS
+            # Convert to HH:MM:SS or MM:SS format
+            ProgressData['ETA'] = format_time(SecondsRemaining)
+        else:
+            ProgressData['ETA'] = "00:00"
+    else:
+        ProgressData['ETA'] = "Calculating..."
 ```
 
 ## Validation and Error Prevention
@@ -176,6 +189,20 @@ if activeJobCount == 0:
 - **No Throttling**: Progress updates are saved immediately to the database
 - **Real-Time**: UI receives updates as soon as FFmpeg provides new progress data
 - **Efficient**: Single record updates instead of multiple inserts
+
+### ETA Calculation
+The system calculates accurate ETA (Estimated Time of Arrival) based on:
+- **Current Frame**: Current position in the video
+- **Total Frames**: Total number of frames (from FFmpeg metadata)
+- **Current FPS**: Current frames per second processing rate
+
+**Formula**: `ETA = (TotalFrames - CurrentFrame) / CurrentFPS`
+
+**Display Format**:
+- **Hours > 0**: `HH:MM:SS` (e.g., "01:23:45")
+- **Hours = 0**: `MM:SS` (e.g., "23:45")
+- **Completed**: `00:00`
+- **No Data**: `Calculating...`
 
 ### UI Display
 The Activity tab displays progress in the format:
