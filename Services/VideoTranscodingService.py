@@ -233,7 +233,13 @@ class VideoTranscodingService:
             # Extract frame number
             FrameMatch = re.search(r'frame=\s*(\d+)', Line)
             if FrameMatch:
-                ProgressData['CurrentFrame'] = int(FrameMatch.group(1))
+                CurrentFrame = int(FrameMatch.group(1))
+                
+                # Ignore frame 0 or null values to prevent UI flashing
+                if CurrentFrame <= 0:
+                    return None  # Skip this progress update
+                
+                ProgressData['CurrentFrame'] = CurrentFrame
             
             # Extract FPS
             FPSMatch = re.search(r'fps=([\d.]+)', Line)
@@ -254,6 +260,10 @@ class VideoTranscodingService:
             SpeedMatch = re.search(r'speed=([\d.]+)x', Line)
             if SpeedMatch:
                 ProgressData['CurrentSpeed'] = f"{SpeedMatch.group(1)}x"
+            
+            # Only proceed if we have valid frame data
+            if 'CurrentFrame' not in ProgressData:
+                return None  # No valid frame data, skip this update
             
             # Calculate progress percentage using actual frame count from FFmpeg metadata
             if 'CurrentFrame' in ProgressData:

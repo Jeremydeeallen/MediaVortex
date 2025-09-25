@@ -886,11 +886,11 @@ class TranscodeQueueManager {
 
 
     startAutoRefresh() {
-        // Refresh every 30 seconds
+        // Refresh every 5 seconds for real-time updates
         setInterval(() => {
             this.loadQueueData();
             this.LoadVMAFQueueData();
-        }, 30000);
+        }, 5000);
     }
 
     // Utility functions

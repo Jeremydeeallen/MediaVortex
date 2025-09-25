@@ -130,11 +130,21 @@ class ProcessTranscodeQueueService:
                 if currentJob:
                     currentJob = currentJob[0]  # Get the first running job
             
+            # More robust transcoding status check
+            # Consider transcoding active only if:
+            # 1. IsProcessing flag is True AND
+            # 2. There are active threads AND
+            # 3. There's current progress data
+            activeJobCount = len([thread for thread in self.ActiveJobs if thread.is_alive()])
+            isActuallyTranscoding = (self.IsProcessing and 
+                                   activeJobCount > 0 and 
+                                   currentProgress is not None)
+            
             return {
                 "Success": True,
-                "IsTranscoding": self.IsProcessing,
+                "IsTranscoding": isActuallyTranscoding,
                 "MaxConcurrentJobs": self.MaxConcurrentJobs,
-                "ActiveJobsCount": len(self.ActiveJobs),
+                "ActiveJobsCount": activeJobCount,
                 "CurrentJob": currentJob,
                 "CurrentProgress": currentProgress,
                 "Timestamp": datetime.now().isoformat()
@@ -446,6 +456,11 @@ class ProcessTranscodeQueueService:
                 # Clean up progress data for completed job
                 self.DatabaseManager.DeleteTranscodeProgress(TranscodeAttemptId)
                 
+                # Mark processing as complete if no more active jobs
+                activeJobCount = len([thread for thread in self.ActiveJobs if thread.is_alive()])
+                if activeJobCount == 0:
+                    self.IsProcessing = False
+                
                 LoggingService.LogInfo(f"Job {Job.Id} completed successfully and removed from queue", "ProcessTranscodeQueueService", "HandleTranscodingResult")
             else:
                 # Handle failure
@@ -496,6 +511,11 @@ class ProcessTranscodeQueueService:
             # Clean up progress data for failed job (if we have an attempt ID)
             if TranscodeAttemptId:
                 self.DatabaseManager.DeleteTranscodeProgress(TranscodeAttemptId)
+            
+            # Mark processing as complete if no more active jobs
+            activeJobCount = len([thread for thread in self.ActiveJobs if thread.is_alive()])
+            if activeJobCount == 0:
+                self.IsProcessing = False
             
             LoggingService.LogError(f"Job {Job.Id} failed and removed from queue: {ErrorMessage}", "ProcessTranscodeQueueService", "HandleJobFailure")
             
