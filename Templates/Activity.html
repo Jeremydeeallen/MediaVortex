@@ -196,7 +196,8 @@
                                             <th>Date</th>
                                             <th>Status</th>
                                             <th>Quality</th>
-                                            <th>Size Reduction</th>
+                                            <th>Before (MB)</th>
+                                            <th>After (MB)</th>
                                             <th>Duration</th>
                                             <th>Profile</th>
                                             <th>Error</th>
@@ -458,8 +459,14 @@ class ActivityManager {
                 </td>
                 <td>${attempt.Quality || '-'}</td>
                 <td>
-                    ${attempt.Success && attempt.IsCompressed ? 
-                        `<span class="text-success">${attempt.SizeReductionPercent.toFixed(1)}%</span>` : 
+                    ${attempt.OldSizeBytes ? 
+                        `<span class="text-primary">${(attempt.OldSizeBytes / 1024 / 1024).toFixed(1)}</span>` : 
+                        '<span class="text-muted">-</span>'
+                    }
+                </td>
+                <td>
+                    ${attempt.Success && attempt.NewSizeBytes ? 
+                        `<span class="text-success">${(attempt.NewSizeBytes / 1024 / 1024).toFixed(1)}</span>` : 
                         '<span class="text-muted">-</span>'
                     }
                 </td>

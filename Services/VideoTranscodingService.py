@@ -243,14 +243,26 @@ class VideoTranscodingService:
             if SpeedMatch:
                 ProgressData['CurrentSpeed'] = f"{SpeedMatch.group(1)}x"
             
-            # Calculate progress percentage - use a more conservative approach
+            # Calculate progress percentage - use a more realistic approach
             if 'CurrentFrame' in ProgressData:
-                # Use a conservative estimate: assume video is at least 20 minutes long
-                # This prevents showing 100% too early
-                MinEstimatedFrames = 20 * 60 * 25  # 20 minutes at 25 FPS = 30,000 frames
-                EstimatedFrames = max(MinEstimatedFrames, ProgressData['CurrentFrame'] * 2)  # At least 2x current frames
+                CurrentFrame = ProgressData['CurrentFrame']
+                
+                # Use a more realistic estimation based on current progress
+                # If we have less than 10,000 frames, assume it's a short video (minimum 20,000 frames)
+                # If we have more, use a more conservative multiplier
+                if CurrentFrame < 10000:
+                    EstimatedFrames = max(20000, CurrentFrame * 3)  # Short video estimate
+                elif CurrentFrame < 30000:
+                    EstimatedFrames = max(50000, CurrentFrame * 2.5)  # Medium video estimate
+                else:
+                    # For longer videos, use a more conservative estimate
+                    EstimatedFrames = max(80000, CurrentFrame * 1.8)  # Long video estimate
+                
                 ProgressData['TotalFrames'] = EstimatedFrames
-                ProgressData['ProgressPercent'] = min((ProgressData['CurrentFrame'] / EstimatedFrames) * 100, 90)  # Cap at 90% until actually done
+                ProgressPercent = (CurrentFrame / EstimatedFrames) * 100
+                
+                # Cap at 95% until actually done (leave some room for completion)
+                ProgressData['ProgressPercent'] = min(ProgressPercent, 95)
             else:
                 ProgressData['ProgressPercent'] = 0
             

@@ -59,13 +59,17 @@ class CommandBuilderService:
     def CalculateTargetResolution(self, ProfileSettings: Dict[str, Any], SourceResolution: str) -> str:
         """Calculate target resolution based on profile settings and TranscodeDownTo logic."""
         try:
-            # Check if TranscodeDownTo is set
-            TranscodeDownTo = ProfileSettings.get('TranscodeDownTo')
-            if TranscodeDownTo and TranscodeDownTo != 'None':
-                # Use the specified target resolution
-                return TranscodeDownTo
+            # The GetProfileSettingsForTargetResolution method already calculates the target resolution
+            # based on TranscodeDownTo logic, so we just use that
+            TargetResolution = ProfileSettings.get('TargetResolution')
+            if TargetResolution:
+                LoggingService.LogInfo(f"Using target resolution from profile settings: {TargetResolution}", 
+                                     "CommandBuilderService", "CalculateTargetResolution")
+                return TargetResolution
             
-            # If no TranscodeDownTo, use source resolution
+            # Fallback to source resolution if no target resolution found
+            LoggingService.LogWarning(f"No target resolution found in profile settings, using source: {SourceResolution}", 
+                                    "CommandBuilderService", "CalculateTargetResolution")
             return SourceResolution
             
         except Exception as e:
@@ -83,16 +87,21 @@ class CommandBuilderService:
             StandardizedSource = self.ResolutionService.StandardizeResolution(SourceResolution)
             StandardizedTarget = self.ResolutionService.StandardizeResolution(TargetResolution)
             
+            # Extract height from standardized resolutions
+            SourceHeight = self._ExtractHeightFromResolution(StandardizedSource)
+            TargetHeight = self._ExtractHeightFromResolution(StandardizedTarget)
+            
             # Get standard dimensions
-            SourceHeight = self.ResolutionService.GetStandardHeight(StandardizedSource)
-            SourceWidth = self.ResolutionService.CalculateStandardWidth(StandardizedSource)
-            TargetHeight = self.ResolutionService.GetStandardHeight(StandardizedTarget)
-            TargetWidth = self.ResolutionService.CalculateStandardWidth(StandardizedTarget)
+            StandardSourceHeight = self.ResolutionService.GetStandardHeight(SourceHeight)
+            StandardTargetHeight = self.ResolutionService.GetStandardHeight(TargetHeight)
             
-            # Build scale filter
-            ScaleFilter = f"scale={TargetWidth}:{TargetHeight}"
+            # Calculate target width maintaining 16:9 aspect ratio
+            TargetWidth = self._CalculateWidthFromHeight(StandardTargetHeight)
             
-            LoggingService.LogInfo(f"Calculated scale filter: {ScaleFilter} (from {SourceWidth}x{SourceHeight} to {TargetWidth}x{TargetHeight})", 
+            # Build scale filter with target dimensions
+            ScaleFilter = f"scale={TargetWidth}:{StandardTargetHeight}"
+            
+            LoggingService.LogInfo(f"Calculated scale filter: {ScaleFilter} (from {StandardizedSource} to {StandardizedTarget})", 
                                  "CommandBuilderService", "CalculateScaleFilter")
             
             return ScaleFilter
@@ -100,3 +109,35 @@ class CommandBuilderService:
         except Exception as e:
             LoggingService.LogException("Exception calculating scale filter", e, "CommandBuilderService", "CalculateScaleFilter")
             return None
+    
+    def _ExtractHeightFromResolution(self, Resolution: str) -> int:
+        """Extract height integer from resolution string (e.g., '1080p' -> 1080)."""
+        try:
+            if Resolution.endswith('p'):
+                return int(Resolution[:-1])
+            elif 'x' in Resolution:
+                return int(Resolution.split('x')[1])
+            else:
+                return int(Resolution)
+        except (ValueError, IndexError):
+            LoggingService.LogWarning(f"Could not extract height from resolution: {Resolution}", "CommandBuilderService", "_ExtractHeightFromResolution")
+            return 720  # Default fallback
+    
+    def _CalculateWidthFromHeight(self, Height: int) -> int:
+        """Calculate width maintaining 16:9 aspect ratio from height."""
+        try:
+            # Standard 16:9 aspect ratio widths for common resolutions
+            if Height == 2160:  # 4K
+                return 3840
+            elif Height == 1080:  # Full HD
+                return 1920
+            elif Height == 720:  # HD
+                return 1280
+            elif Height == 480:  # SD
+                return 854
+            else:
+                # Calculate using 16:9 ratio for any other height
+                return int(Height * 16 / 9)
+        except Exception as e:
+            LoggingService.LogException("Exception calculating width from height", e, "CommandBuilderService", "_CalculateWidthFromHeight")
+            return 1280  # Default fallback to 720p width

@@ -2656,3 +2656,18 @@ class DatabaseManager:
             LoggingService.LogException("Exception getting recent transcode attempts", e, "DatabaseManager", "GetRecentTranscodeAttempts")
             return []
     
+    def DeleteTranscodeProgress(self, TranscodeAttemptId: int) -> bool:
+        """Delete progress data for a completed transcoding attempt."""
+        try:
+            LoggingService.LogFunctionEntry("DeleteTranscodeProgress", "DatabaseManager", TranscodeAttemptId)
+            
+            query = "DELETE FROM TranscodeProgress WHERE TranscodeAttemptId = ?"
+            affectedRows = self.DatabaseService.ExecuteNonQuery(query, (TranscodeAttemptId,))
+            
+            LoggingService.LogInfo(f"Deleted {affectedRows} progress records for attempt {TranscodeAttemptId}", "DatabaseManager", "DeleteTranscodeProgress")
+            return affectedRows > 0
+            
+        except Exception as e:
+            LoggingService.LogException("Exception deleting transcode progress", e, "DatabaseManager", "DeleteTranscodeProgress")
+            return False
+    

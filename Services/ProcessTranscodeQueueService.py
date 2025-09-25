@@ -2,9 +2,12 @@ from typing import Dict, Any, Optional, Callable
 from datetime import datetime
 import threading
 import time
+import os
+import re
 from Models.TranscodeQueueModel import TranscodeQueueModel
 from Models.MediaFileModel import MediaFileModel
 from Models.TranscodeAttemptModel import TranscodeAttemptModel
+from Models.TranscodeFileModel import TranscodeFileModel
 from Repositories.DatabaseManager import DatabaseManager
 from Services.TranscodingFileManagerService import TranscodingFileManagerService
 from Services.CommandBuilderService import CommandBuilderService
@@ -369,15 +372,15 @@ class ProcessTranscodeQueueService:
                 AverageFPS=0.0
             )
             
-            # Create progress callback with throttling (every 5 seconds)
+            # Create progress callback with throttling (every 1 second)
             LastUpdateTime = time.time()
             
             def ProgressCallback(ProgressData: Dict[str, Any]):
                 nonlocal LastUpdateTime
                 try:
                     CurrentTime = time.time()
-                    # Throttle updates to every 5 seconds
-                    if CurrentTime - LastUpdateTime >= 5.0:
+                    # Throttle updates to every 1 second
+                    if CurrentTime - LastUpdateTime >= 1.0:
                         # Save progress to database
                         self.DatabaseManager.SaveTranscodeProgress(
                             TranscodeAttemptId=TranscodeAttemptId,
@@ -409,20 +412,46 @@ class ProcessTranscodeQueueService:
         """Handle transcoding results - success or failure processing."""
         try:
             if TranscodeResult.get("Success", False):
+                # Calculate output file size
+                NewSizeBytes = 0
+                SizeReductionBytes = 0
+                SizeReductionPercent = 0.0
+                
+                # Get output file path from the transcoding command
+                OutputFilePath = self.GetOutputFilePathFromCommand(Job)
+                LoggingService.LogInfo(f"Output file path: {OutputFilePath}", "ProcessTranscodeQueueService", "HandleTranscodingResult")
+                
+                if OutputFilePath and os.path.exists(OutputFilePath):
+                    NewSizeBytes = os.path.getsize(OutputFilePath)
+                    OldSizeBytes = Job.SizeBytes
+                    if OldSizeBytes > 0:
+                        SizeReductionBytes = OldSizeBytes - NewSizeBytes
+                        SizeReductionPercent = (SizeReductionBytes / OldSizeBytes) * 100
+                    LoggingService.LogInfo(f"File sizes - Original: {OldSizeBytes} bytes, Transcoded: {NewSizeBytes} bytes, Reduction: {SizeReductionPercent:.1f}%", 
+                                         "ProcessTranscodeQueueService", "HandleTranscodingResult")
+                else:
+                    LoggingService.LogWarning(f"Output file not found: {OutputFilePath}", "ProcessTranscodeQueueService", "HandleTranscodingResult")
+                
                 # Update attempt record with success details
                 self.DatabaseManager.UpdateTranscodeAttempt(TranscodeAttemptId, {
                     'Success': True,
                     'TranscodeDurationSeconds': TranscodeResult.get('Duration', 0.0),
-                    'NewSizeBytes': TranscodeResult.get('NewSizeBytes', 0),
-                    'SizeReductionBytes': TranscodeResult.get('SizeReductionBytes', 0),
-                    'SizeReductionPercent': TranscodeResult.get('SizeReductionPercent', 0.0)
+                    'NewSizeBytes': NewSizeBytes,
+                    'SizeReductionBytes': SizeReductionBytes,
+                    'SizeReductionPercent': SizeReductionPercent
                 })
+                
+                # Update TranscodeFiles record for overall file status
+                self.UpdateTranscodeFileRecord(Job.FilePath, TranscodeAttemptId, True, OutputFilePath, NewSizeBytes)
                 
                 # Add to VMAF queue for quality assessment
                 self.VMAFQueue.AddToQueue(TranscodeAttemptId, TranscodeResult.get('OutputFilePath'))
                 
                 # Delete job from queue (successful completion)
                 self.DatabaseManager.DeleteTranscodeQueueItem(Job.Id)
+                
+                # Clean up progress data for completed job
+                self.DatabaseManager.DeleteTranscodeProgress(TranscodeAttemptId)
                 
                 LoggingService.LogInfo(f"Job {Job.Id} completed successfully and removed from queue", "ProcessTranscodeQueueService", "HandleTranscodingResult")
             else:
@@ -441,6 +470,9 @@ class ProcessTranscodeQueueService:
                     'Success': False,
                     'ErrorMessage': ErrorMessage
                 })
+                
+                # Update TranscodeFiles record for overall file status (failure)
+                self.UpdateTranscodeFileRecord(Job.FilePath, TranscodeAttemptId, False)
             else:
                 # Create new attempt record for investigation (fallback case)
                 Attempt = TranscodeAttemptModel(
@@ -460,10 +492,17 @@ class ProcessTranscodeQueueService:
                     ProfileName=None,  # Will be set when we have profile info
                     VMAF=None
                 )
-                self.DatabaseManager.SaveTranscodeAttempt(Attempt)
+                AttemptId = self.DatabaseManager.SaveTranscodeAttempt(Attempt)
+                
+                # Update TranscodeFiles record for overall file status (failure)
+                self.UpdateTranscodeFileRecord(Job.FilePath, AttemptId, False)
             
             # Delete job from queue (failed completion)
             self.DatabaseManager.DeleteTranscodeQueueItem(Job.Id)
+            
+            # Clean up progress data for failed job (if we have an attempt ID)
+            if TranscodeAttemptId:
+                self.DatabaseManager.DeleteTranscodeProgress(TranscodeAttemptId)
             
             LoggingService.LogError(f"Job {Job.Id} failed and removed from queue: {ErrorMessage}", "ProcessTranscodeQueueService", "HandleJobFailure")
             
@@ -479,3 +518,200 @@ class ProcessTranscodeQueueService:
             
         except Exception as e:
             LoggingService.LogException("Exception in cleanup", e, "ProcessTranscodeQueueService", "CleanupOrContinue")
+    
+    def GetOutputFilePathFromCommand(self, Job: TranscodeQueueModel) -> Optional[str]:
+        """Get output file path for a transcoding job."""
+        try:
+            # Extract filename from input path
+            InputFileName = os.path.basename(Job.FilePath)
+            
+            # Get the MediaFile to determine source resolution
+            MediaFile = self.DatabaseManager.GetMediaFileByPath(Job.FilePath)
+            if not MediaFile:
+                LoggingService.LogWarning(f"Could not get MediaFile for {Job.FilePath}", "ProcessTranscodeQueueService", "GetOutputFilePathFromCommand")
+                return os.path.join("C:\\MediaVortex", InputFileName)
+            
+            # Get transcoding settings to determine target resolution
+            TranscodingSettings = self.GetTranscodingSettings(Job, MediaFile)
+            if not TranscodingSettings:
+                LoggingService.LogWarning(f"Could not get transcoding settings for {Job.FilePath}", "ProcessTranscodeQueueService", "GetOutputFilePathFromCommand")
+                return os.path.join("C:\\MediaVortex", InputFileName)
+            
+            # Generate output filename with target resolution
+            ProfileSettings = TranscodingSettings.get('ProfileSettings', {})
+            SourceResolution = TranscodingSettings.get('SourceResolution', '')
+            TargetResolution = ProfileSettings.get('TargetResolution', '')
+            
+            OutputFileName = self._GenerateOutputFileName(InputFileName, SourceResolution, TargetResolution)
+            OutputFilePath = os.path.join("C:\\MediaVortex", OutputFileName)
+            
+            LoggingService.LogInfo(f"Calculated output path: {OutputFilePath}", "ProcessTranscodeQueueService", "GetOutputFilePathFromCommand")
+            return OutputFilePath
+            
+        except Exception as e:
+            LoggingService.LogException("Exception getting output file path", e, "ProcessTranscodeQueueService", "GetOutputFilePathFromCommand")
+            return None
+    
+    def UpdateTranscodeFileRecord(self, FilePath: str, TranscodeAttemptId: int, IsSuccess: bool, 
+                                 FinalFilePath: str = None, FinalSizeBytes: int = None):
+        """Update or create TranscodeFiles record for overall file transcoding status."""
+        try:
+            LoggingService.LogFunctionEntry("UpdateTranscodeFileRecord", "ProcessTranscodeQueueService", 
+                                          FilePath, TranscodeAttemptId, IsSuccess)
+            
+            # Get attempt details to extract quality and other info
+            Attempt = self.DatabaseManager.GetTranscodeAttemptById(TranscodeAttemptId)
+            if not Attempt:
+                LoggingService.LogWarning(f"Could not retrieve attempt {TranscodeAttemptId} for TranscodeFiles update", 
+                                        "ProcessTranscodeQueueService", "UpdateTranscodeFileRecord")
+                return
+            
+            # Check if TranscodeFile record already exists
+            ExistingTranscodeFile = self.DatabaseManager.GetTranscodeFileByFilePath(FilePath)
+            
+            if ExistingTranscodeFile:
+                # Update existing record
+                LoggingService.LogInfo(f"Updating existing TranscodeFile record for {FilePath}", 
+                                     "ProcessTranscodeQueueService", "UpdateTranscodeFileRecord")
+                
+                if IsSuccess:
+                    # Success case - update with final details
+                    self.DatabaseManager.UpdateTranscodeFileStatus(
+                        FilePath=FilePath,
+                        SuccessfullyTranscoded=True,
+                        FinalQuality=Attempt.Quality,
+                        FinalSizeBytes=FinalSizeBytes,
+                        FinalFilePath=FinalFilePath
+                    )
+                    # Also update SuccessDate
+                    TranscodeFile = TranscodeFileModel(
+                        Id=ExistingTranscodeFile.Id,
+                        FilePath=FilePath,
+                        AllQualitiesFailed=ExistingTranscodeFile.AllQualitiesFailed,
+                        SuccessfullyTranscoded=True,
+                        FirstAttemptDate=ExistingTranscodeFile.FirstAttemptDate,
+                        LastAttemptDate=datetime.now(),
+                        SuccessDate=datetime.now(),
+                        FinalQuality=Attempt.Quality,
+                        FinalSizeBytes=FinalSizeBytes,
+                        TotalAttempts=ExistingTranscodeFile.TotalAttempts + 1,
+                        OriginalFilePath=ExistingTranscodeFile.OriginalFilePath,
+                        FinalFilePath=FinalFilePath
+                    )
+                    self.DatabaseManager.SaveTranscodeFile(TranscodeFile)
+                else:
+                    # Failure case - increment attempts, update last attempt date
+                    TranscodeFile = TranscodeFileModel(
+                        Id=ExistingTranscodeFile.Id,
+                        FilePath=FilePath,
+                        AllQualitiesFailed=ExistingTranscodeFile.AllQualitiesFailed,
+                        SuccessfullyTranscoded=ExistingTranscodeFile.SuccessfullyTranscoded,
+                        FirstAttemptDate=ExistingTranscodeFile.FirstAttemptDate,
+                        LastAttemptDate=datetime.now(),
+                        SuccessDate=ExistingTranscodeFile.SuccessDate,
+                        FinalQuality=ExistingTranscodeFile.FinalQuality,
+                        FinalSizeBytes=ExistingTranscodeFile.FinalSizeBytes,
+                        TotalAttempts=ExistingTranscodeFile.TotalAttempts + 1,
+                        OriginalFilePath=ExistingTranscodeFile.OriginalFilePath,
+                        FinalFilePath=ExistingTranscodeFile.FinalFilePath
+                    )
+                    self.DatabaseManager.SaveTranscodeFile(TranscodeFile)
+            else:
+                # Create new record
+                LoggingService.LogInfo(f"Creating new TranscodeFile record for {FilePath}", 
+                                     "ProcessTranscodeQueueService", "UpdateTranscodeFileRecord")
+                
+                CurrentTime = datetime.now()
+                TranscodeFile = TranscodeFileModel(
+                    FilePath=FilePath,
+                    AllQualitiesFailed=not IsSuccess,  # If first attempt fails, mark as all qualities failed
+                    SuccessfullyTranscoded=IsSuccess,
+                    FirstAttemptDate=CurrentTime,
+                    LastAttemptDate=CurrentTime,
+                    SuccessDate=CurrentTime if IsSuccess else None,
+                    FinalQuality=Attempt.Quality if IsSuccess else None,
+                    FinalSizeBytes=FinalSizeBytes if IsSuccess else None,
+                    TotalAttempts=1,
+                    OriginalFilePath=FilePath,
+                    FinalFilePath=FinalFilePath if IsSuccess else None
+                )
+                self.DatabaseManager.SaveTranscodeFile(TranscodeFile)
+            
+            LoggingService.LogInfo(f"TranscodeFile record updated for {FilePath}, Success: {IsSuccess}", 
+                                 "ProcessTranscodeQueueService", "UpdateTranscodeFileRecord")
+            
+        except Exception as e:
+            LoggingService.LogException("Exception updating TranscodeFile record", e, 
+                                      "ProcessTranscodeQueueService", "UpdateTranscodeFileRecord")
+    
+    def _GenerateOutputFileName(self, OriginalFileName: str, SourceResolution: str, TargetResolution: str) -> str:
+        """Generate output filename with target resolution if different from source."""
+        try:
+            # If resolutions are the same, use original filename
+            if SourceResolution == TargetResolution:
+                return OriginalFileName
+            
+            # Extract resolution from filename (e.g., "1080p", "720p")
+            SourceResolutionStr = self._ExtractResolutionFromFilename(OriginalFileName)
+            if not SourceResolutionStr:
+                # If no resolution found in filename, just return original
+                return OriginalFileName
+            
+            # Replace source resolution with target resolution
+            TargetResolutionStr = self._FormatResolutionForFilename(TargetResolution)
+            NewFileName = OriginalFileName.replace(SourceResolutionStr, TargetResolutionStr)
+            
+            return NewFileName
+            
+        except Exception:
+            # If anything goes wrong, return original filename
+            return OriginalFileName
+    
+    def _ExtractResolutionFromFilename(self, Filename: str) -> Optional[str]:
+        """Extract resolution string from filename (e.g., '1080p', '720p')."""
+        try:
+            import re
+            # Look for resolution patterns like 1080p, 720p, 480p, 4K, etc.
+            ResolutionPatterns = [
+                r'\b2160p\b',  # 4K
+                r'\b1080p\b',  # Full HD
+                r'\b720p\b',   # HD
+                r'\b480p\b',   # SD
+                r'\b4K\b',     # 4K alternative
+                r'\bHD\b',     # HD alternative
+                r'\bSD\b'      # SD alternative
+            ]
+            
+            for pattern in ResolutionPatterns:
+                match = re.search(pattern, Filename, re.IGNORECASE)
+                if match:
+                    return match.group(0)
+            
+            return None
+            
+        except Exception:
+            return None
+    
+    def _FormatResolutionForFilename(self, Resolution: str) -> str:
+        """Format resolution for use in filename."""
+        try:
+            # Convert resolution categories to standard format
+            if Resolution == '2160p' or Resolution == '4K':
+                return '2160p'
+            elif Resolution == '1080p':
+                return '1080p'
+            elif Resolution == '720p':
+                return '720p'
+            elif Resolution == '480p':
+                return '480p'
+            else:
+                # For any other resolution, try to extract height and add 'p'
+                if 'x' in Resolution:
+                    height = Resolution.split('x')[1]
+                    return f"{height}p"
+                else:
+                    return Resolution
+                    
+        except Exception:
+            return Resolution
+    

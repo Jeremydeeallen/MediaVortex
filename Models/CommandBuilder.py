@@ -32,7 +32,10 @@ class CommandBuilder:
             
             # Build command components
             InputPath = f"C:/MediaVortex/Source/{MediaFile.FileName}"
-            OutputPath = f"C:/MediaVortex/{MediaFile.FileName}"
+            
+            # Generate output filename with target resolution
+            OutputFileName = self._GenerateOutputFileName(MediaFile.FileName, SourceResolution, TargetResolution)
+            OutputPath = f"C:/MediaVortex/{OutputFileName}"
             
             # Start building command - FFmpeg command structure: ffmpeg -i input [options] output -y
             # Use relative path to FFmpeg executable from project root
@@ -99,6 +102,77 @@ class CommandBuilder:
                 return False
         
         return True
+    
+    def _GenerateOutputFileName(self, OriginalFileName: str, SourceResolution: str, TargetResolution: str) -> str:
+        """Generate output filename with target resolution if different from source."""
+        try:
+            # If resolutions are the same, use original filename
+            if SourceResolution == TargetResolution:
+                return OriginalFileName
+            
+            # Extract resolution from filename (e.g., "1080p", "720p")
+            SourceResolutionStr = self._ExtractResolutionFromFilename(OriginalFileName)
+            if not SourceResolutionStr:
+                # If no resolution found in filename, just return original
+                return OriginalFileName
+            
+            # Replace source resolution with target resolution
+            TargetResolutionStr = self._FormatResolutionForFilename(TargetResolution)
+            NewFileName = OriginalFileName.replace(SourceResolutionStr, TargetResolutionStr)
+            
+            return NewFileName
+            
+        except Exception:
+            # If anything goes wrong, return original filename
+            return OriginalFileName
+    
+    def _ExtractResolutionFromFilename(self, Filename: str) -> Optional[str]:
+        """Extract resolution string from filename (e.g., '1080p', '720p')."""
+        try:
+            import re
+            # Look for resolution patterns like 1080p, 720p, 480p, 4K, etc.
+            ResolutionPatterns = [
+                r'\b2160p\b',  # 4K
+                r'\b1080p\b',  # Full HD
+                r'\b720p\b',   # HD
+                r'\b480p\b',   # SD
+                r'\b4K\b',     # 4K alternative
+                r'\bHD\b',     # HD alternative
+                r'\bSD\b'      # SD alternative
+            ]
+            
+            for pattern in ResolutionPatterns:
+                match = re.search(pattern, Filename, re.IGNORECASE)
+                if match:
+                    return match.group(0)
+            
+            return None
+            
+        except Exception:
+            return None
+    
+    def _FormatResolutionForFilename(self, Resolution: str) -> str:
+        """Format resolution for use in filename."""
+        try:
+            # Convert resolution categories to standard format
+            if Resolution == '2160p' or Resolution == '4K':
+                return '2160p'
+            elif Resolution == '1080p':
+                return '1080p'
+            elif Resolution == '720p':
+                return '720p'
+            elif Resolution == '480p':
+                return '480p'
+            else:
+                # For any other resolution, try to extract height and add 'p'
+                if 'x' in Resolution:
+                    height = Resolution.split('x')[1]
+                    return f"{height}p"
+                else:
+                    return Resolution
+                    
+        except Exception:
+            return Resolution
     
     def _BuildVideoCodecParameters(self, CodecParameters: list) -> list:
         """Build video codec parameter list from codec parameters data."""
