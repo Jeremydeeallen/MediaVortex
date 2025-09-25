@@ -2,7 +2,7 @@ from flask import Blueprint, request, jsonify, render_template
 from typing import Dict, Any, Tuple
 from ViewModels.TranscodeQueueViewModel import TranscodeQueueViewModel
 from Services.LoggingService import LoggingService
-from Services.TranscodingBusinessService import TranscodingBusinessService
+from ViewModels.TranscodingViewModel import TranscodingViewModel
 from datetime import datetime
 
 
@@ -263,7 +263,7 @@ class TranscodeQueueController:
     
     def __init__(self):
         """Initialize the controller with required services."""
-        self.TranscodingService = TranscodingBusinessService()
+        self.TranscodingService = TranscodingViewModel()
         self.ViewModel = TranscodeQueueViewModel(TranscodingService=self.TranscodingService)
     
     def StartTranscoding(self) -> Tuple[Dict[str, Any], int]:

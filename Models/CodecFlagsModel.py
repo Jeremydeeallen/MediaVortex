@@ -92,6 +92,51 @@ class CodecFlagsModel:
             return f"-preset {preset_value}"
         return ""
     
+    def GetPresetValue(self, preset_setting: Any) -> Any:
+        """Get validated preset value based on codec type and settings."""
+        if self.PresetType == "numeric":
+            try:
+                preset_value = int(preset_setting)
+                if self.PresetMin <= preset_value <= self.PresetMax:
+                    return preset_value
+                else:
+                    return self.PresetDefault
+            except (ValueError, TypeError):
+                return self.PresetDefault
+        elif self.PresetType == "string":
+            preset_options = self.GetPresetOptionsList()
+            if str(preset_setting) in preset_options:
+                return str(preset_setting)
+            else:
+                # Return default preset from options
+                if preset_options and self.PresetDefault < len(preset_options):
+                    return preset_options[self.PresetDefault]
+                else:
+                    return preset_options[0] if preset_options else "medium"
+        return self.PresetDefault
+    
+    def GetGrainValue(self, grain_setting: Any) -> Any:
+        """Get validated grain value based on codec type and settings."""
+        if self.FilmGrainType == "boolean":
+            if isinstance(grain_setting, bool):
+                return grain_setting
+            elif grain_setting in [0, "0", "false"]:
+                return False
+            elif grain_setting in [1, "1", "true"]:
+                return True
+            else:
+                return bool(grain_setting)
+        elif self.FilmGrainType == "numeric":
+            try:
+                grain_value = int(grain_setting)
+                if self.FilmGrainMin <= grain_value <= self.FilmGrainMax:
+                    return grain_value
+                else:
+                    return self.FilmGrainDefault
+            except (ValueError, TypeError):
+                return self.FilmGrainDefault
+        return self.FilmGrainDefault
+    
     def ToDict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
         return {

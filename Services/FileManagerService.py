@@ -248,6 +248,78 @@ class FileManagerService:
         self.SkippedFiles = 0
         self.EncodingErrors.clear()
     
+    def SetupTranscodingDirectories(self) -> Dict[str, Any]:
+        """Setup transcoding directories and return their paths."""
+        try:
+            import os
+            from Services.LoggingService import LoggingService
+            
+            # Define directory paths
+            mediaVortexSourceDir = r"c:\MediaVortex\Source"
+            mediaVortexTempDir = r"c:\MediaVortex"
+            
+            # Create directories if they don't exist
+            directories_created = 0
+            for directory in [mediaVortexSourceDir, mediaVortexTempDir]:
+                if not os.path.exists(directory):
+                    os.makedirs(directory, exist_ok=True)
+                    directories_created += 1
+                    LoggingService.LogInfo(f"Created directory: {directory}", "FileManagerService", "SetupTranscodingDirectories")
+                else:
+                    LoggingService.LogInfo(f"Directory already exists: {directory}", "FileManagerService", "SetupTranscodingDirectories")
+            
+            LoggingService.LogInfo(f"Transcoding directories setup completed successfully. Created: {directories_created} directories", "FileManagerService", "SetupTranscodingDirectories")
+            
+            return {
+                'Success': True,
+                'MediaVortexSourceDir': mediaVortexSourceDir,
+                'MediaVortexTempDir': mediaVortexTempDir,
+                'DirectoriesCreated': directories_created
+            }
+            
+        except Exception as e:
+            LoggingService.LogException("Exception setting up transcoding directories", e, "FileManagerService", "SetupTranscodingDirectories")
+            return {
+                'Success': False,
+                'ErrorMessage': f"Failed to setup transcoding directories: {str(e)}"
+            }
+    
+    def CopyFile(self, SourcePath: str, DestinationPath: str) -> Dict[str, Any]:
+        """Copy a file from source to destination."""
+        try:
+            import os
+            import shutil
+            from Services.LoggingService import LoggingService
+            
+            fileName = os.path.basename(SourcePath)
+            LoggingService.LogInfo(f"File copy {fileName} to {DestinationPath} started", "FileManagerService", "CopyFile")
+            
+            # Ensure destination directory exists
+            destDir = os.path.dirname(DestinationPath)
+            if destDir and not os.path.exists(destDir):
+                os.makedirs(destDir, exist_ok=True)
+            
+            # Copy the file
+            shutil.copy2(SourcePath, DestinationPath)
+            
+            LoggingService.LogInfo(f"Successfully copied file: {SourcePath} -> {DestinationPath}", "FileManagerService", "CopyFile")
+            LoggingService.LogInfo(f"File copy {fileName} complete", "FileManagerService", "CopyFile")
+            
+            return {
+                'Success': True,
+                'SourcePath': SourcePath,
+                'DestinationPath': DestinationPath
+            }
+            
+        except Exception as e:
+            LoggingService.LogException(f"Exception copying file from {SourcePath} to {DestinationPath}", e, "FileManagerService", "CopyFile")
+            return {
+                'Success': False,
+                'ErrorMessage': f"Failed to copy file: {str(e)}",
+                'SourcePath': SourcePath,
+                'DestinationPath': DestinationPath
+            }
+    
     def ExtractMediaMetadata(self, FilePath: str) -> Dict[str, Any]:
         """Extract metadata from a media file using FFmpegAnalysisService."""
         try:

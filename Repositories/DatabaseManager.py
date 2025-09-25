@@ -922,6 +922,34 @@ class DatabaseManager:
         
         return queueItems
     
+    def GetNextPendingTranscodeJob(self) -> Optional[TranscodeQueueModel]:
+        """Get the next pending transcoding job (highest priority, oldest first)."""
+        query = """
+            SELECT Id, FilePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted
+            FROM TranscodeQueue 
+            WHERE Status = 'Pending'
+            ORDER BY Priority DESC, DateAdded ASC
+            LIMIT 1
+        """
+        rows = self.DatabaseService.ExecuteQuery(query)
+        
+        if rows:
+            row = rows[0]
+            return TranscodeQueueModel(
+                Id=row['Id'],
+                FilePath=row['FilePath'],
+                FileName=row['FileName'],
+                Directory=row['Directory'],
+                SizeBytes=row['SizeBytes'],
+                SizeMB=row['SizeMB'],
+                Priority=row['Priority'],
+                Status=row['Status'],
+                DateAdded=row['DateAdded'],
+                DateStarted=row['DateStarted']
+            )
+        
+        return None
+    
     def ClearAllTranscodeQueueItems(self) -> int:
         """Clear all items from the transcoding queue and return the count of deleted items."""
         try:
@@ -1115,6 +1143,50 @@ class DatabaseManager:
         except Exception as e:
             LoggingService.LogException("Exception in SaveTranscodeAttempt", e, "DatabaseManager", "SaveTranscodeAttempt")
             raise
+    
+    def UpdateTranscodeAttempt(self, AttemptId: int, Updates: Dict[str, Any]) -> bool:
+        """Update specific fields of a transcoding attempt."""
+        try:
+            LoggingService.LogFunctionEntry("UpdateTranscodeAttempt", "DatabaseManager", AttemptId, Updates)
+            
+            # Build dynamic UPDATE query based on provided fields
+            set_clauses = []
+            parameters = []
+            
+            for field, value in Updates.items():
+                if field in ['Success', 'ErrorMessage', 'NewSizeBytes', 'TranscodeDurationSeconds']:
+                    set_clauses.append(f"{field} = ?")
+                    parameters.append(value)
+                elif field == 'FFmpegOutput':
+                    # Map FFmpegOutput to FfpmpegCommand (correct column name)
+                    set_clauses.append("FfpmpegCommand = ?")
+                    parameters.append(value)
+                elif field == 'FFmpegError':
+                    # Map FFmpegError to ErrorMessage (closest equivalent)
+                    set_clauses.append("ErrorMessage = ?")
+                    parameters.append(value)
+            
+            if not set_clauses:
+                LoggingService.LogWarning("No valid fields to update", "DatabaseManager", "UpdateTranscodeAttempt")
+                return False
+            
+            query = f"UPDATE TranscodeAttempts SET {', '.join(set_clauses)} WHERE Id = ?"
+            parameters.append(AttemptId)
+            
+            connection = self.DatabaseService.GetConnection()
+            try:
+                cursor = connection.cursor()
+                cursor.execute(query, parameters)
+                connection.commit()
+                affected_rows = cursor.rowcount
+                LoggingService.LogInfo(f"Updated {affected_rows} rows for attempt {AttemptId}", "DatabaseManager", "UpdateTranscodeAttempt")
+                return affected_rows > 0
+            finally:
+                connection.close()
+                
+        except Exception as e:
+            LoggingService.LogException("Exception in UpdateTranscodeAttempt", e, "DatabaseManager", "UpdateTranscodeAttempt")
+            return False
     
     # TranscodeFiles Management Methods
     def GetAllTranscodeFiles(self) -> List[TranscodeFileModel]:
@@ -1550,7 +1622,7 @@ class DatabaseManager:
             if targetResolution == 'No downscaling':
                 # Get all settings from the current resolution entry
                 query = """
-                    SELECT pt.VideoBitrateKbps, pt.AudioBitrateKbps, pt.Quality, pt.Resolution, p.Codec
+                    SELECT pt.VideoBitrateKbps, pt.AudioBitrateKbps, pt.Quality, pt.Resolution, p.Codec, pt.Grain
                     FROM ProfileThresholds pt
                     JOIN Profiles p ON pt.ProfileId = p.Id
                     WHERE p.ProfileName = ? AND pt.Resolution = ?
@@ -1560,7 +1632,7 @@ class DatabaseManager:
             else:
                 # Now get all settings for the target resolution
                 query = """
-                    SELECT pt.VideoBitrateKbps, pt.AudioBitrateKbps, pt.Quality, pt.Resolution, p.Codec
+                    SELECT pt.VideoBitrateKbps, pt.AudioBitrateKbps, pt.Quality, pt.Resolution, p.Codec, pt.Grain
                     FROM ProfileThresholds pt
                     JOIN Profiles p ON pt.ProfileId = p.Id
                     WHERE p.ProfileName = ? AND pt.Resolution = ?
@@ -1577,7 +1649,8 @@ class DatabaseManager:
                     'AudioBitrateKbps': row['AudioBitrateKbps'],
                     'Quality': row['Quality'],
                     'TargetResolution': actualTargetResolution,  # Use the actual target resolution from TranscodeDownTo
-                    'Codec': row['Codec']
+                    'Codec': row['Codec'],
+                    'Grain': row['Grain']
                 }
                 LoggingService.LogInfo(f"Found ProfileSettings for {ProfileName} targeting {actualTargetResolution}: {settings}", "DatabaseManager", "GetProfileSettingsForTargetResolution")
                 return settings
@@ -2326,4 +2399,127 @@ class DatabaseManager:
             
         except Exception as e:
             LoggingService.LogException("Exception getting recent VMAF results", e, "DatabaseManager", "GetRecentVMAFResultsFromQueue")
+            return []
+
+    def GetCodecFlagsByCodecName(self, CodecName: str) -> Optional[Dict[str, Any]]:
+        """Get CodecFlags configuration for a specific codec."""
+        try:
+            LoggingService.LogFunctionEntry("GetCodecFlagsByCodecName", "DatabaseManager", CodecName)
+            
+            query = """
+                SELECT Id, CodecName, DisplayName, PresetType, PresetMin, PresetMax, PresetDefault,
+                       PresetOptions, FilmGrainType, FilmGrainMin, FilmGrainMax, FilmGrainDefault,
+                       TuneOptions, CreatedDate, LastModified
+                FROM CodecFlags 
+                WHERE CodecName = ?
+                LIMIT 1
+            """
+            rows = self.DatabaseService.ExecuteQuery(query, (CodecName,))
+            
+            if rows:
+                row = rows[0]
+                codecFlags = {
+                    'Id': row['Id'],
+                    'CodecName': row['CodecName'],
+                    'DisplayName': row['DisplayName'],
+                    'PresetType': row['PresetType'],
+                    'PresetMin': row['PresetMin'],
+                    'PresetMax': row['PresetMax'],
+                    'PresetDefault': row['PresetDefault'],
+                    'PresetOptions': row['PresetOptions'],
+                    'FilmGrainType': row['FilmGrainType'],
+                    'FilmGrainMin': row['FilmGrainMin'],
+                    'FilmGrainMax': row['FilmGrainMax'],
+                    'FilmGrainDefault': row['FilmGrainDefault'],
+                    'TuneOptions': row['TuneOptions'],
+                    'CreatedDate': row['CreatedDate'],
+                    'LastModified': row['LastModified']
+                }
+                LoggingService.LogInfo(f"Found CodecFlags for {CodecName}: {codecFlags}", "DatabaseManager", "GetCodecFlagsByCodecName")
+                return codecFlags
+            else:
+                LoggingService.LogWarning(f"No CodecFlags found for codec: {CodecName}", "DatabaseManager", "GetCodecFlagsByCodecName")
+                return None
+                
+        except Exception as e:
+            LoggingService.LogException("Exception getting CodecFlags by codec name", e, "DatabaseManager", "GetCodecFlagsByCodecName")
+            return None
+
+    def GetCodecParametersByCodecFlagsId(self, CodecFlagsId: int) -> List[Dict[str, Any]]:
+        """Get all CodecParameters for a specific CodecFlags ID."""
+        try:
+            LoggingService.LogFunctionEntry("GetCodecParametersByCodecFlagsId", "DatabaseManager", CodecFlagsId)
+            
+            query = """
+                SELECT Id, CodecFlagsId, ParameterName, ParameterType, MinValue, MaxValue,
+                       DefaultValue, Description, FFmpegFlag, CreatedDate
+                FROM CodecParameters 
+                WHERE CodecFlagsId = ?
+                ORDER BY ParameterName
+            """
+            rows = self.DatabaseService.ExecuteQuery(query, (CodecFlagsId,))
+            
+            parameters = []
+            for row in rows:
+                parameter = {
+                    'Id': row['Id'],
+                    'CodecFlagsId': row['CodecFlagsId'],
+                    'ParameterName': row['ParameterName'],
+                    'ParameterType': row['ParameterType'],
+                    'MinValue': row['MinValue'],
+                    'MaxValue': row['MaxValue'],
+                    'DefaultValue': row['DefaultValue'],
+                    'Description': row['Description'],
+                    'FFmpegFlag': row['FFmpegFlag'],
+                    'CreatedDate': row['CreatedDate']
+                }
+                parameters.append(parameter)
+            
+            LoggingService.LogInfo(f"Found {len(parameters)} CodecParameters for CodecFlagsId {CodecFlagsId}", "DatabaseManager", "GetCodecParametersByCodecFlagsId")
+            return parameters
+            
+        except Exception as e:
+            LoggingService.LogException("Exception getting CodecParameters by CodecFlagsId", e, "DatabaseManager", "GetCodecParametersByCodecFlagsId")
+            return []
+
+    def GetAllCodecFlags(self) -> List[Dict[str, Any]]:
+        """Get all CodecFlags configurations."""
+        try:
+            LoggingService.LogFunctionEntry("GetAllCodecFlags", "DatabaseManager")
+            
+            query = """
+                SELECT Id, CodecName, DisplayName, PresetType, PresetMin, PresetMax, PresetDefault,
+                       PresetOptions, FilmGrainType, FilmGrainMin, FilmGrainMax, FilmGrainDefault,
+                       TuneOptions, CreatedDate, LastModified
+                FROM CodecFlags 
+                ORDER BY CodecName
+            """
+            rows = self.DatabaseService.ExecuteQuery(query)
+            
+            codecFlags = []
+            for row in rows:
+                codecFlag = {
+                    'Id': row['Id'],
+                    'CodecName': row['CodecName'],
+                    'DisplayName': row['DisplayName'],
+                    'PresetType': row['PresetType'],
+                    'PresetMin': row['PresetMin'],
+                    'PresetMax': row['PresetMax'],
+                    'PresetDefault': row['PresetDefault'],
+                    'PresetOptions': row['PresetOptions'],
+                    'FilmGrainType': row['FilmGrainType'],
+                    'FilmGrainMin': row['FilmGrainMin'],
+                    'FilmGrainMax': row['FilmGrainMax'],
+                    'FilmGrainDefault': row['FilmGrainDefault'],
+                    'TuneOptions': row['TuneOptions'],
+                    'CreatedDate': row['CreatedDate'],
+                    'LastModified': row['LastModified']
+                }
+                codecFlags.append(codecFlag)
+            
+            LoggingService.LogInfo(f"Retrieved {len(codecFlags)} CodecFlags configurations", "DatabaseManager", "GetAllCodecFlags")
+            return codecFlags
+            
+        except Exception as e:
+            LoggingService.LogException("Exception getting all CodecFlags", e, "DatabaseManager", "GetAllCodecFlags")
             return []

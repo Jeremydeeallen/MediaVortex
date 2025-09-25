@@ -2,7 +2,7 @@ from typing import List, Optional, Dict, Any
 from datetime import datetime
 from Models.TranscodeQueueModel import TranscodeQueueModel
 from Services.QueueManagementBusinessService import QueueManagementBusinessService
-from Services.TranscodingBusinessService import TranscodingBusinessService
+from ViewModels.TranscodingViewModel import TranscodingViewModel
 from Services.LoggingService import LoggingService
 
 
@@ -10,9 +10,9 @@ class TranscodeQueueViewModel:
     """Manages transcoding queue UI state and operations."""
     
     def __init__(self, QueueManagementService: QueueManagementBusinessService = None,
-                 TranscodingService: TranscodingBusinessService = None):
+                 TranscodingService: TranscodingViewModel = None):
         self.QueueManagementService = QueueManagementService or QueueManagementBusinessService()
-        self.TranscodingService = TranscodingService or TranscodingBusinessService()
+        self.TranscodingService = TranscodingService or TranscodingViewModel()
         self.QueueItems = []
         self.QueueStatistics = {}
         self.IsLoading = False

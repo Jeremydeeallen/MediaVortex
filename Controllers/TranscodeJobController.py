@@ -2,14 +2,14 @@ from flask import Blueprint, request, jsonify, render_template
 from typing import Dict, Any
 from ViewModels.ActivityViewModel import ActivityViewModel
 from Services.LoggingService import LoggingService
-from Services.TranscodingBusinessService import TranscodingBusinessService
+from ViewModels.TranscodingViewModel import TranscodingViewModel
 
 
 # Create Blueprint for transcoding job routes
 TranscodeJobBlueprint = Blueprint('TranscodeJob', __name__, url_prefix='/api/Transcode')
 
 # Create shared service instance to avoid multiple initializations
-SharedTranscodingService = TranscodingBusinessService()
+SharedTranscodingService = TranscodingViewModel()
 
 
 @TranscodeJobBlueprint.route('/Start', methods=['POST'])
