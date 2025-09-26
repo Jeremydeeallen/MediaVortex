@@ -550,12 +550,13 @@ class ProcessTranscodeQueueService:
                 LoggingService.LogWarning(f"Could not get transcoding settings for {Job.FilePath}", "ProcessTranscodeQueueService", "GetOutputFilePathFromCommand")
                 return os.path.join("C:\\MediaVortex", InputFileName)
             
-            # Generate output filename with target resolution
+            # Generate output filename with target resolution and container type
             ProfileSettings = TranscodingSettings.get('ProfileSettings', {})
             SourceResolution = TranscodingSettings.get('SourceResolution', '')
             TargetResolution = ProfileSettings.get('TargetResolution', '')
+            ContainerType = ProfileSettings.get('ContainerType', 'mp4')
             
-            OutputFileName = self._GenerateOutputFileName(InputFileName, SourceResolution, TargetResolution)
+            OutputFileName = self._GenerateOutputFileName(InputFileName, SourceResolution, TargetResolution, ContainerType)
             OutputFilePath = os.path.join("C:\\MediaVortex", OutputFileName)
             
             LoggingService.LogInfo(f"Calculated output path: {OutputFilePath}", "ProcessTranscodeQueueService", "GetOutputFilePathFromCommand")
@@ -657,28 +658,35 @@ class ProcessTranscodeQueueService:
             LoggingService.LogException("Exception updating TranscodeFile record", e, 
                                       "ProcessTranscodeQueueService", "UpdateTranscodeFileRecord")
     
-    def _GenerateOutputFileName(self, OriginalFileName: str, SourceResolution: str, TargetResolution: str) -> str:
-        """Generate output filename with target resolution if different from source."""
+    def _GenerateOutputFileName(self, OriginalFileName: str, SourceResolution: str, TargetResolution: str, ContainerType: str = 'mp4') -> str:
+        """Generate output filename with target resolution and container type."""
         try:
-            # If resolutions are the same, use original filename
+            # Get the base filename without extension
+            BaseName = os.path.splitext(OriginalFileName)[0]
+            
+            # If resolutions are the same, just change extension
             if SourceResolution == TargetResolution:
-                return OriginalFileName
+                return f"{BaseName}.{ContainerType}"
             
             # Extract resolution from filename (e.g., "1080p", "720p")
             SourceResolutionStr = self._ExtractResolutionFromFilename(OriginalFileName)
             if not SourceResolutionStr:
-                # If no resolution found in filename, just return original
-                return OriginalFileName
+                # If no resolution found in filename, add target resolution
+                TargetResolutionStr = self._FormatResolutionForFilename(TargetResolution)
+                return f"{BaseName}{TargetResolutionStr}.{ContainerType}"
             
             # Replace source resolution with target resolution
             TargetResolutionStr = self._FormatResolutionForFilename(TargetResolution)
-            NewFileName = OriginalFileName.replace(SourceResolutionStr, TargetResolutionStr)
+            NewBaseName = OriginalFileName.replace(SourceResolutionStr, TargetResolutionStr)
+            NewBaseName = os.path.splitext(NewBaseName)[0]  # Remove old extension
             
-            return NewFileName
+            # Add container type extension
+            return f"{NewBaseName}.{ContainerType}"
             
         except Exception:
-            # If anything goes wrong, return original filename
-            return OriginalFileName
+            # If anything goes wrong, return original filename with container extension
+            BaseName = os.path.splitext(OriginalFileName)[0]
+            return f"{BaseName}.{ContainerType}"
     
     def _ExtractResolutionFromFilename(self, Filename: str) -> Optional[str]:
         """Extract resolution string from filename (e.g., '1080p', '720p')."""

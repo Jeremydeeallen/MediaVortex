@@ -48,7 +48,7 @@ class FilenameResolutionService:
             LoggingService.LogException("Error extracting resolution from filename", e, 'ExtractResolutionFromFilename', 'FilenameResolutionService')
             return None
     
-    def GenerateOutputFilename(self, OriginalFileName: str, TargetResolution: str = "720p") -> str:
+    def GenerateOutputFilename(self, OriginalFileName: str, TargetResolution: str = "720p", ContainerType: str = "mp4") -> str:
         """Generate output filename with resolution-based naming."""
         try:
             LoggingService.LogFunctionEntry("GenerateOutputFilename", 'FilenameResolutionService', OriginalFileName, TargetResolution)
@@ -72,19 +72,19 @@ class FilenameResolutionService:
                 fileNameWithoutExt = f"{fileNameWithoutExt}-{TargetResolution}"
                 LoggingService.LogInfo(f"No resolution found, appended {TargetResolution} to filename: {OriginalFileName}", 'GenerateOutputFilename', 'FilenameResolutionService')
             
-            # Construct new filename with .mkv extension for transcoded files
-            newFileName = f"{fileNameWithoutExt}.mkv"
+            # Construct new filename with specified container type extension
+            newFileName = f"{fileNameWithoutExt}.{ContainerType}"
             
             LoggingService.LogInfo(f"Generated output filename: {newFileName} from original: {OriginalFileName}", 'GenerateOutputFilename', 'FilenameResolutionService')
             return newFileName
             
         except Exception as e:
             LoggingService.LogException("Error generating output filename", e, 'GenerateOutputFilename', 'FilenameResolutionService')
-            # Fallback: return original filename with target resolution appended
+            # Fallback: return original filename with target resolution and container type
             filePath = Path(OriginalFileName)
-            return f"{filePath.stem}-{TargetResolution}{filePath.suffix}"
+            return f"{filePath.stem}-{TargetResolution}.{ContainerType}"
     
-    def GenerateOutputFilePath(self, OriginalFilePath: str, OutputDirectory: str, TargetResolution: str = "720p") -> str:
+    def GenerateOutputFilePath(self, OriginalFilePath: str, OutputDirectory: str, TargetResolution: str = "720p", ContainerType: str = "mp4") -> str:
         """Generate complete output file path with resolution-based naming."""
         try:
             LoggingService.LogFunctionEntry("GenerateOutputFilePath", 'FilenameResolutionService', OriginalFilePath, OutputDirectory, TargetResolution)
@@ -93,7 +93,7 @@ class FilenameResolutionService:
             originalFileName = os.path.basename(OriginalFilePath)
             
             # Generate new filename
-            newFileName = self.GenerateOutputFilename(originalFileName, TargetResolution)
+            newFileName = self.GenerateOutputFilename(originalFileName, TargetResolution, ContainerType)
             
             # Construct full output path
             outputFilePath = os.path.join(OutputDirectory, newFileName)

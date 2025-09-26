@@ -160,15 +160,20 @@
                                 <div class="col-md-3">
                                     <label for="ProfilePreset" class="form-label">Preset</label>
                                     <select class="form-select" id="ProfilePreset">
-                                        <option value="0">0 - Fastest</option>
-                                        <option value="1">1 - Very Fast</option>
-                                        <option value="2">2 - Faster</option>
-                                        <option value="3">3 - Fast</option>
+                                        <option value="0">0 - Placebo (Slowest, Best Quality)</option>
+                                        <option value="1">1 - Very Slow</option>
+                                        <option value="2">2 - Slower</option>
+                                        <option value="3">3 - Slow</option>
                                         <option value="4">4 - Medium</option>
-                                        <option value="5">5 - Slow</option>
-                                        <option value="6" selected>6 - Slower (Default)</option>
-                                        <option value="7">7 - Very Slow</option>
-                                        <option value="8">8 - Placebo</option>
+                                        <option value="5">5 - Fast</option>
+                                        <option value="6" selected>6 - Faster (Default)</option>
+                                        <option value="7">7 - Very Fast</option>
+                                        <option value="8">8 - Ultra Fast</option>
+                                        <option value="9">9 - Super Fast</option>
+                                        <option value="10">10 - Hyper Fast</option>
+                                        <option value="11">11 - Lightning Fast</option>
+                                        <option value="12">12 - Blazing Fast</option>
+                                        <option value="13">13 - Fastest (Lowest Quality)</option>
                                     </select>
                                     <div class="form-text">Encoding speed vs quality</div>
                                 </div>
@@ -713,7 +718,7 @@ function PopulateProfileForm(Profile) {
     // Populate profile-level FFmpeg settings
     $('#ProfileCodec').val(Profile.Codec || 'libsvtav1');
     $('#ProfilePreset').val(Profile.Preset || 6);
-    $('#ProfileFilmGrain').val(Profile.FilmGrain || 10);
+    $('#ProfileFilmGrain').val(Profile.FilmGrain !== undefined ? Profile.FilmGrain : 10);
     $('#ProfileYadifMode').val(Profile.YadifMode || 1);
     $('#ProfileYadifParity').val(Profile.YadifParity || 1);
     $('#ProfileYadifDeint').val(Profile.YadifDeint || 1);

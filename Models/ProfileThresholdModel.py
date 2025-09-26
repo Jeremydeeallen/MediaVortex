@@ -18,6 +18,6 @@ class ProfileThresholdModel:
     FallbackAudioBitrateKbps: int = 0
     TranscodeDownTo: str = ""
     Quality: Optional[int] = None
-    Grain: bool = False
     KeepSource: bool = False
+    ContainerType: str = "mp4"  # Default container type for transcoded files
     # Note: Codec field removed - now stored at profile level in TranscodeProfileModel

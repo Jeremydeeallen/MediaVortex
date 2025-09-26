@@ -22,61 +22,51 @@ class CommandBuilder:
             MediaFile = CommandData.get('MediaFile')
             ProfileSettings = CommandData.get('ProfileSettings', {})
             CodecFlags = CommandData.get('CodecFlags', {})
-            CodecParameters = CommandData.get('CodecParameters', {})
+            CodecParameters = CommandData.get('CodecParameters', [])
             SourceResolution = CommandData.get('SourceResolution', '')
             TargetResolution = CommandData.get('TargetResolution', '')
             ScaleFilter = CommandData.get('ScaleFilter')
+            ContainerType = ProfileSettings.get('ContainerType', 'mp4')  # Default to MP4
             
             if not Job or not MediaFile:
                 return None
             
             # Build command components
-            InputPath = f"C:/MediaVortex/Source/{MediaFile.FileName}"
+            InputPath = f"c:\\MediaVortex\\Source\\{MediaFile.FileName}"
             
-            # Generate output filename with target resolution
-            OutputFileName = self._GenerateOutputFileName(MediaFile.FileName, SourceResolution, TargetResolution)
-            OutputPath = f"C:/MediaVortex/{OutputFileName}"
+            # Generate output filename with target resolution and container type
+            OutputFileName = self._GenerateOutputFileName(MediaFile.FileName, SourceResolution, TargetResolution, ContainerType)
+            OutputPath = f"c:\\MediaVortex\\{OutputFileName}"
             
             # Start building command - FFmpeg command structure: ffmpeg -i input [options] output -y
-            # Use relative path to FFmpeg executable from project root
-            # Use Windows backslashes for the executable path
-            CommandParts = ['FFmpegMaster\\bin\\ffmpeg.exe', '-i', f'"{InputPath}"']
+            # Use full path to FFmpeg executable
+            CommandParts = ['C:\\Code\\Automation\\MediaVortex\\FFmpegMaster\\bin\\ffmpeg.exe', '-i', f'"{InputPath}"']
             
             # Add video codec
             VideoCodec = ProfileSettings.get('Codec', 'libsvtav1')
             CommandParts.extend(['-c:v', VideoCodec])
             
-            # Add video bitrate control (maxrate) - only if not null/blank
-            VideoBitrate = ProfileSettings.get('VideoBitrateKbps')
-            if VideoBitrate and VideoBitrate != '' and VideoBitrate != 'None':
-                CommandParts.extend(['-maxrate', f'{VideoBitrate}k'])
+            # Add parameters using CodecParameters database values
+            self._AddCodecParameters(CommandParts, CodecParameters, ProfileSettings)
             
-            # Add preset if specified - only if not null/blank
-            Preset = ProfileSettings.get('Preset')
-            if Preset is not None and Preset != '' and Preset != 'None':
-                CommandParts.extend(['-preset', str(Preset)])
-            
-            # Add CRF/Quality if specified - only if not null/blank
-            Quality = ProfileSettings.get('Quality')
-            if Quality is not None and Quality != '' and Quality != 'None':
-                CommandParts.extend(['-crf', str(Quality)])
-            
-            # Add film grain if specified (for libsvtav1) - only if not null/blank and > 0
-            FilmGrain = ProfileSettings.get('Grain')
-            if FilmGrain is not None and FilmGrain != '' and FilmGrain != 'None' and FilmGrain > 0:
-                CommandParts.extend(['-svtav1-params', f'film-grain={FilmGrain}'])
-            
-            # Add video filters (deinterlacing and scaling)
-            VideoFilter = self._BuildVideoFilters(ProfileSettings, ScaleFilter)
-            if VideoFilter:
-                CommandParts.extend(['-vf', VideoFilter])
-            
-            # Add audio codec and bitrate - only if not null/blank
+            # Add audio codec and bitrate - only if not null/blank (before video filters)
             AudioBitrate = ProfileSettings.get('AudioBitrateKbps')
             if AudioBitrate and AudioBitrate != '' and AudioBitrate != 'None':
                 CommandParts.extend(['-c:a', 'aac', '-b:a', f'{AudioBitrate}k'])
             else:
                 CommandParts.extend(['-c:a', 'copy'])
+            
+            # Add video filters (deinterlacing and scaling)
+            VideoFilter = self._BuildVideoFilters(ProfileSettings, ScaleFilter)
+            if VideoFilter:
+                CommandParts.extend(['-vf', f'"{VideoFilter}"'])
+            
+            # Add film grain parameter after video filters
+            self._AddFilmGrainParameter(CommandParts, CodecParameters, ProfileSettings)
+            
+            # Add container-specific flags
+            if ContainerType.lower() == 'mp4':
+                CommandParts.extend(['-movflags', '+faststart'])
             
             # Add overwrite flag (before output path)
             CommandParts.append('-y')
@@ -103,28 +93,83 @@ class CommandBuilder:
         
         return True
     
-    def _GenerateOutputFileName(self, OriginalFileName: str, SourceResolution: str, TargetResolution: str) -> str:
-        """Generate output filename with target resolution if different from source."""
+    def _AddCodecParameters(self, CommandParts: list, CodecParameters: list, ProfileSettings: Dict[str, Any]) -> None:
+        """Add codec parameters from database to command parts."""
         try:
-            # If resolutions are the same, use original filename
+            # Create a lookup dictionary for codec parameters
+            ParamLookup = {}
+            for param in CodecParameters:
+                ParamLookup[param['ParameterName']] = param
+            
+            # Add parameters in the correct order to match expected command
+            # 1. CRF (Quality) - should come before preset
+            if 'crf' in ParamLookup:
+                Quality = ProfileSettings.get('Quality')
+                if Quality is not None and Quality != '' and Quality != 'None':
+                    CommandParts.extend(['-crf', str(Quality)])
+            
+            # 2. Preset
+            if 'preset' in ParamLookup:
+                Preset = ProfileSettings.get('Preset')
+                if Preset is not None and Preset != '' and Preset != 'None':
+                    CommandParts.extend(['-preset', str(Preset)])
+            
+            # 3. Video bitrate (maxrate) - only if not null/blank
+            VideoBitrate = ProfileSettings.get('VideoBitrateKbps')
+            if VideoBitrate and VideoBitrate != '' and VideoBitrate != 'None':
+                CommandParts.extend(['-maxrate', f'{VideoBitrate}k'])
+                
+        except Exception:
+            # If anything goes wrong, continue without adding parameters
+            pass
+    
+    def _AddFilmGrainParameter(self, CommandParts: list, CodecParameters: list, ProfileSettings: Dict[str, Any]) -> None:
+        """Add film grain parameter after audio codec."""
+        try:
+            # Create a lookup dictionary for codec parameters
+            ParamLookup = {}
+            for param in CodecParameters:
+                ParamLookup[param['ParameterName']] = param
+            
+            # Add film grain (for libsvtav1) - after audio codec
+            if 'film-grain' in ParamLookup:
+                FilmGrain = ProfileSettings.get('FilmGrain')
+                if FilmGrain is not None and FilmGrain != '' and FilmGrain != 'None' and FilmGrain > 0:
+                    CommandParts.extend(['-svtav1-params', f'film-grain={FilmGrain}'])
+                
+        except Exception:
+            # If anything goes wrong, continue without adding parameters
+            pass
+
+    def _GenerateOutputFileName(self, OriginalFileName: str, SourceResolution: str, TargetResolution: str, ContainerType: str = 'mp4') -> str:
+        """Generate output filename with target resolution and container type."""
+        try:
+            # Get the base filename without extension
+            BaseName = os.path.splitext(OriginalFileName)[0]
+            
+            # If resolutions are the same, just change extension
             if SourceResolution == TargetResolution:
-                return OriginalFileName
+                return f"{BaseName}.{ContainerType}"
             
             # Extract resolution from filename (e.g., "1080p", "720p")
             SourceResolutionStr = self._ExtractResolutionFromFilename(OriginalFileName)
             if not SourceResolutionStr:
-                # If no resolution found in filename, just return original
-                return OriginalFileName
+                # If no resolution found in filename, add target resolution
+                TargetResolutionStr = self._FormatResolutionForFilename(TargetResolution)
+                return f"{BaseName}{TargetResolutionStr}.{ContainerType}"
             
             # Replace source resolution with target resolution
             TargetResolutionStr = self._FormatResolutionForFilename(TargetResolution)
-            NewFileName = OriginalFileName.replace(SourceResolutionStr, TargetResolutionStr)
+            NewBaseName = OriginalFileName.replace(SourceResolutionStr, TargetResolutionStr)
+            NewBaseName = os.path.splitext(NewBaseName)[0]  # Remove old extension
             
-            return NewFileName
+            # Add container type extension
+            return f"{NewBaseName}.{ContainerType}"
             
         except Exception:
-            # If anything goes wrong, return original filename
-            return OriginalFileName
+            # If anything goes wrong, return original filename with container extension
+            BaseName = os.path.splitext(OriginalFileName)[0]
+            return f"{BaseName}.{ContainerType}"
     
     def _ExtractResolutionFromFilename(self, Filename: str) -> Optional[str]:
         """Extract resolution string from filename (e.g., '1080p', '720p')."""
@@ -200,7 +245,7 @@ class CommandBuilder:
         if (YadifMode is not None and YadifMode != '' and YadifMode != 'None' and
             YadifParity is not None and YadifParity != '' and YadifParity != 'None' and
             YadifDeint is not None and YadifDeint != '' and YadifDeint != 'None'):
-            YadifFilter = f"yadif=mode={YadifMode}:parity={YadifParity}:deint={YadifDeint}"
+            YadifFilter = f"yadif={YadifMode}:{YadifParity}:{YadifDeint}"
             Filters.append(YadifFilter)
         
         # Add scale filter if provided

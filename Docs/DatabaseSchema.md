@@ -205,8 +205,8 @@ ProfileThresholds.FallbackVideoBitrateKbps	INTEGER
 ProfileThresholds.FallbackAudioBitrateKbps	INTEGER
 ProfileThresholds.TranscodeDownTo	TEXT
 ProfileThresholds.Quality	INTEGER
-ProfileThresholds.Grain	BIT
 ProfileThresholds.KeepSource	BOOLEAN
+ProfileThresholds.ContainerType	TEXT
 Profiles.Id	INTEGER
 Profiles.ProfileName	TEXT
 Profiles.Description	TEXT
@@ -367,7 +367,7 @@ PresetOptions	sqlite_autoindex_PresetOptions_1	1	u	0
 ProblemFiles	idx_ProblemFiles_Directory	0	c	0
 ProblemFiles	idx_ProblemFiles_ErrorType	0	c	0
 ProblemFiles	idx_ProblemFiles_FilePath	0	c	0
-ProfileThresholds	idx_ProfileThresholds_ProfileId_Resolution	1	c	0
+ProfileThresholds	sqlite_autoindex_ProfileThresholds_1	1	u	0
 Profiles	sqlite_autoindex_Profiles_1	1	u	0
 RootFolders	sqlite_autoindex_RootFolders_1	1	u	0
 ScanJobs	sqlite_autoindex_ScanJobs_1	1	u	0
@@ -426,8 +426,8 @@ PresetOptions	sqlite_autoindex_PresetOptions_1	PresetValue	1
 ProblemFiles	idx_ProblemFiles_Directory	Directory	0
 ProblemFiles	idx_ProblemFiles_ErrorType	ErrorType	0
 ProblemFiles	idx_ProblemFiles_FilePath	FilePath	0
-ProfileThresholds	idx_ProfileThresholds_ProfileId_Resolution	ProfileId	0
-ProfileThresholds	idx_ProfileThresholds_ProfileId_Resolution	Resolution	1
+ProfileThresholds	sqlite_autoindex_ProfileThresholds_1	ProfileId	0
+ProfileThresholds	sqlite_autoindex_ProfileThresholds_1	Resolution	1
 Profiles	sqlite_autoindex_Profiles_1	ProfileName	0
 RootFolders	sqlite_autoindex_RootFolders_1	RootFolder	0
 ScanJobs	sqlite_autoindex_ScanJobs_1	JobId	0

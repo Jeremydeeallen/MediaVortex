@@ -142,7 +142,7 @@ class DatabaseManager:
         query = """
             SELECT Id, ProfileId, Resolution, Under30MinMB, Under65MinMB, Over65MinMB,
                    VideoBitrateKbps, AudioBitrateKbps, FallbackVideoBitrateKbps,
-                   FallbackAudioBitrateKbps, TranscodeDownTo, Quality, Grain, KeepSource
+                   FallbackAudioBitrateKbps, TranscodeDownTo, Quality, KeepSource, ContainerType
             FROM ProfileThresholds 
             WHERE ProfileId = ?
             ORDER BY Resolution
@@ -164,8 +164,8 @@ class DatabaseManager:
                 FallbackAudioBitrateKbps=row['FallbackAudioBitrateKbps'],
                 TranscodeDownTo=row['TranscodeDownTo'],
                 Quality=row['Quality'],
-                Grain=bool(row['Grain'] if 'Grain' in row.keys() else 0),
-                KeepSource=bool(row['KeepSource'] if 'KeepSource' in row.keys() else 0)
+                KeepSource=bool(row['KeepSource'] if 'KeepSource' in row.keys() else 0),
+                ContainerType=row['ContainerType'] if 'ContainerType' in row.keys() else 'mp4'
             )
             thresholds.append(threshold)
         
@@ -176,7 +176,7 @@ class DatabaseManager:
         query = """
             SELECT Id, ProfileId, Resolution, Under30MinMB, Under65MinMB, Over65MinMB,
                    VideoBitrateKbps, AudioBitrateKbps, FallbackVideoBitrateKbps,
-                   FallbackAudioBitrateKbps, TranscodeDownTo, Quality, Grain, KeepSource
+                   FallbackAudioBitrateKbps, TranscodeDownTo, Quality, KeepSource, ContainerType
             FROM ProfileThresholds 
             ORDER BY ProfileId, Resolution
         """
@@ -197,8 +197,8 @@ class DatabaseManager:
                 FallbackAudioBitrateKbps=row['FallbackAudioBitrateKbps'],
                 TranscodeDownTo=row['TranscodeDownTo'],
                 Quality=row['Quality'],
-                Grain=bool(row['Grain'] if 'Grain' in row.keys() else 0),
-                KeepSource=bool(row['KeepSource'] if 'KeepSource' in row.keys() else 0)
+                KeepSource=bool(row['KeepSource'] if 'KeepSource' in row.keys() else 0),
+                ContainerType=row['ContainerType'] if 'ContainerType' in row.keys() else 'mp4'
             )
             thresholds.append(threshold)
         
@@ -220,14 +220,16 @@ class DatabaseManager:
                         INSERT INTO ProfileThresholds 
                         (ProfileId, Resolution, Under30MinMB, Under65MinMB, Over65MinMB,
                          VideoBitrateKbps, AudioBitrateKbps, FallbackVideoBitrateKbps,
-                         FallbackAudioBitrateKbps, TranscodeDownTo, Quality, Grain, KeepSource)
+                         FallbackAudioBitrateKbps, TranscodeDownTo, Quality, KeepSource, ContainerType)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """
                     parameters = (
                         Threshold.ProfileId, Threshold.Resolution, Threshold.Under30MinMB,
                         Threshold.Under65MinMB, Threshold.Over65MinMB, Threshold.VideoBitrateKbps,
                         Threshold.AudioBitrateKbps, Threshold.FallbackVideoBitrateKbps,
-                        Threshold.FallbackAudioBitrateKbps, Threshold.TranscodeDownTo, Threshold.Quality, Threshold.Grain, Threshold.KeepSource
+                        Threshold.FallbackAudioBitrateKbps, 
+                        Threshold.TranscodeDownTo if Threshold.TranscodeDownTo is not None else '', 
+                        Threshold.Quality, Threshold.KeepSource, 'mp4'
                     )
                     LoggingService.LogInfo(f"Insert threshold parameters: {parameters}", "SaveThreshold", "DatabaseManager")
                     cursor.execute(query, parameters)
@@ -243,14 +245,16 @@ class DatabaseManager:
                         SET ProfileId = ?, Resolution = ?, Under30MinMB = ?, Under65MinMB = ?,
                             Over65MinMB = ?, VideoBitrateKbps = ?, AudioBitrateKbps = ?,
                             FallbackVideoBitrateKbps = ?, FallbackAudioBitrateKbps = ?,
-                            TranscodeDownTo = ?, Quality = ?, Grain = ?, KeepSource = ?
+                            TranscodeDownTo = ?, Quality = ?, KeepSource = ?
                         WHERE Id = ?
                     """
                     parameters = (
                         Threshold.ProfileId, Threshold.Resolution, Threshold.Under30MinMB,
                         Threshold.Under65MinMB, Threshold.Over65MinMB, Threshold.VideoBitrateKbps,
                         Threshold.AudioBitrateKbps, Threshold.FallbackVideoBitrateKbps,
-                        Threshold.FallbackAudioBitrateKbps, Threshold.TranscodeDownTo, Threshold.Quality, Threshold.Grain, Threshold.KeepSource, Threshold.Id
+                        Threshold.FallbackAudioBitrateKbps, 
+                        Threshold.TranscodeDownTo if Threshold.TranscodeDownTo is not None else '', 
+                        Threshold.Quality, Threshold.KeepSource, Threshold.Id
                     )
                     LoggingService.LogInfo(f"Update threshold parameters: {parameters}", "SaveThreshold", "DatabaseManager")
                     cursor.execute(query, parameters)
@@ -1638,7 +1642,8 @@ class DatabaseManager:
             if targetResolution == 'No downscaling':
                 # Get all settings from the current resolution entry
                 query = """
-                    SELECT pt.VideoBitrateKbps, pt.AudioBitrateKbps, pt.Quality, pt.Resolution, p.Codec, pt.Grain
+                    SELECT pt.VideoBitrateKbps, pt.AudioBitrateKbps, pt.Quality, pt.Resolution, 
+                           p.Codec, p.Preset, p.FilmGrain, p.YadifMode, p.YadifParity, p.YadifDeint, pt.ContainerType
                     FROM ProfileThresholds pt
                     JOIN Profiles p ON pt.ProfileId = p.Id
                     WHERE p.ProfileName = ? AND pt.Resolution = ?
@@ -1648,7 +1653,8 @@ class DatabaseManager:
             else:
                 # Now get all settings for the target resolution
                 query = """
-                    SELECT pt.VideoBitrateKbps, pt.AudioBitrateKbps, pt.Quality, pt.Resolution, p.Codec, pt.Grain
+                    SELECT pt.VideoBitrateKbps, pt.AudioBitrateKbps, pt.Quality, pt.Resolution, 
+                           p.Codec, p.Preset, p.FilmGrain, p.YadifMode, p.YadifParity, p.YadifDeint, pt.ContainerType
                     FROM ProfileThresholds pt
                     JOIN Profiles p ON pt.ProfileId = p.Id
                     WHERE p.ProfileName = ? AND pt.Resolution = ?
@@ -1666,7 +1672,12 @@ class DatabaseManager:
                     'Quality': row['Quality'],
                     'TargetResolution': actualTargetResolution,  # Use the actual target resolution from TranscodeDownTo
                     'Codec': row['Codec'],
-                    'Grain': row['Grain']
+                    'Preset': row['Preset'],
+                    'FilmGrain': row['FilmGrain'],
+                    'YadifMode': row['YadifMode'],
+                    'YadifParity': row['YadifParity'],
+                    'YadifDeint': row['YadifDeint'],
+                    'ContainerType': row['ContainerType']
                 }
                 LoggingService.LogInfo(f"Found ProfileSettings for {ProfileName} targeting {actualTargetResolution}: {settings}", "DatabaseManager", "GetProfileSettingsForTargetResolution")
                 return settings
