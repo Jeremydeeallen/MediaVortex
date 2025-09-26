@@ -10,10 +10,10 @@ class TranscodingVMAFQueueService:
     def __init__(self, DatabaseManagerInstance: DatabaseManager = None):
         self.DatabaseManager = DatabaseManagerInstance or DatabaseManager()
     
-    def AddToQueue(self, JobId: int, OutputFilePath: str) -> Dict[str, Any]:
+    def AddToQueue(self, JobId: int, OriginalFilePath: str, OutputFilePath: str) -> Dict[str, Any]:
         """Add a completed transcoding job to the VMAF queue for later quality assessment."""
         try:
-            LoggingService.LogFunctionEntry("AddToQueue", "TranscodingVMAFQueueService", JobId, OutputFilePath)
+            LoggingService.LogFunctionEntry("AddToQueue", "TranscodingVMAFQueueService", JobId, OriginalFilePath, OutputFilePath)
             
             # Get file name from output path
             FileName = OutputFilePath.split('\\')[-1] if '\\' in OutputFilePath else OutputFilePath.split('/')[-1]
@@ -27,7 +27,7 @@ class TranscodingVMAFQueueService:
             
             parameters = (
                 JobId,  # TranscodeAttemptId
-                None,   # OriginalFilePath (not available in transcoding context)
+                OriginalFilePath,  # OriginalFilePath (now available from transcoding context)
                 OutputFilePath,  # TranscodedFilePath
                 FileName,  # FileName
                 'Pending',  # Status

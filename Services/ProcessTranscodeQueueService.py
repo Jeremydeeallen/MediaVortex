@@ -448,7 +448,7 @@ class ProcessTranscodeQueueService:
                 self.UpdateTranscodeFileRecord(Job.FilePath, TranscodeAttemptId, True, OutputFilePath, NewSizeBytes)
                 
                 # Add to VMAF queue for quality assessment
-                self.VMAFQueue.AddToQueue(TranscodeAttemptId, TranscodeResult.get('OutputFilePath'))
+                self.VMAFQueue.AddToQueue(TranscodeAttemptId, Job.FilePath, TranscodeResult.get('OutputFilePath'))
                 
                 # Delete job from queue (successful completion)
                 self.DatabaseManager.DeleteTranscodeQueueItem(Job.Id)
