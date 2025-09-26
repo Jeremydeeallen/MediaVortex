@@ -15,8 +15,8 @@ class TranscodingVMAFQueueService:
         try:
             LoggingService.LogFunctionEntry("AddToQueue", "TranscodingVMAFQueueService", JobId, OriginalFilePath, OutputFilePath)
             
-            # Get file name from output path
-            FileName = OutputFilePath.split('\\')[-1] if '\\' in OutputFilePath else OutputFilePath.split('/')[-1]
+            # Get file name from original path
+            FileName = OriginalFilePath.split('\\')[-1] if '\\' in OriginalFilePath else OriginalFilePath.split('/')[-1]
             
             # Add to VMAF queue table
             query = """

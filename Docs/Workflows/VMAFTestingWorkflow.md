@@ -240,3 +240,124 @@ except Exception as e:
 
 **Note**: The original file deletion is the critical first step that must succeed before any other file operations proceed.
 
+## File Path Issue Discovery (2025-01-26)
+
+### Problem Identified:
+The VMAF queue is displaying incorrect filenames in the UI. Files show as "Success" instead of the actual original filename.
+
+### Root Cause:
+There are **TWO** problems in the VMAF queue population:
+
+1. **FileName Issue**: In `Services/TranscodingVMAFQueueService.py`, the `AddToQueue()` method is extracting the filename from the **output path** instead of the **original path**.
+
+2. **TranscodedFilePath Issue**: In `Services/ProcessTranscodeQueueService.py`, the `TranscodeResult.get('OutputFilePath')` returns **"Success"** (hardcoded string) instead of the actual transcoded file path.
+
+**Current Code (Line 19):**
+```python
+FileName = OutputFilePath.split('\\')[-1] if '\\' in OutputFilePath else OutputFilePath.split('/')[-1]
+```
+
+**Problem:**
+- `OutputFilePath` = `C:\MediaVortex\Movie_1080p.mp4` (transcoded file)
+- `FileName` = `Movie_1080p.mp4` (transcoded filename)
+- Should be `Movie.mkv` (original filename)
+
+### File Path Structure in Transcoding:
+1. **Source File (T: drive)**: `T:\<fullpath and file name>` (e.g., `T:\Movies\Movie.mkv`)
+2. **Temp Source (for transcoding)**: `C:\MediaVortex\Source\<filename>` (e.g., `C:\MediaVortex\Source\Movie.mkv`)
+3. **Output (transcoded file)**: `C:\MediaVortex\<transcoded filename>` (e.g., `C:\MediaVortex\Movie_1080p.mp4`)
+
+### Fix Required:
+
+#### Fix 1: FileName Issue
+**File:** `Services/TranscodingVMAFQueueService.py`  
+**Method:** `AddToQueue()`  
+**Line:** 19
+
+**Change from:**
+```python
+FileName = OutputFilePath.split('\\')[-1] if '\\' in OutputFilePath else OutputFilePath.split('/')[-1]
+```
+
+**Change to:**
+```python
+FileName = OriginalFilePath.split('\\')[-1] if '\\' in OriginalFilePath else OriginalFilePath.split('/')[-1]
+```
+
+#### Fix 2: TranscodedFilePath Issue
+**File:** `Services/ProcessTranscodeQueueService.py`  
+**Method:** `HandleTranscodingResult()`  
+**Line:** 451
+
+**Current code:**
+```python
+self.VMAFQueue.AddToQueue(TranscodeAttemptId, Job.FilePath, TranscodeResult.get('OutputFilePath'))
+```
+
+**Problem:** `TranscodeResult.get('OutputFilePath')` returns `"Success"` (hardcoded string from VideoTranscodingService.py line 97)
+
+**Solution:** Use the calculated output path instead:
+```python
+# Get the actual output file path
+OutputFilePath = self.GetOutputFilePathFromCommand(Job)
+self.VMAFQueue.AddToQueue(TranscodeAttemptId, Job.FilePath, OutputFilePath)
+```
+
+**Note:** The `GetOutputFilePathFromCommand()` method already exists and calculates the correct output path (line 535-567 in ProcessTranscodeQueueService.py).
+
+### Impact Assessment:
+- **Transcode Workflow**: No impact - transcoding process is unaffected
+- **VMAF Processing**: No impact - VMAF analysis uses correct file paths
+- **Database Schema**: No impact - only fixes what data gets inserted
+- **UI Display**: Fixes filename display in VMAF queue interface
+
+### Files Involved:
+- `Services/TranscodingVMAFQueueService.py` (line 19 - FileName fix)
+- `Services/ProcessTranscodeQueueService.py` (line 451 - TranscodedFilePath fix)
+- `Services/VideoTranscodingService.py` (line 97 - source of "Success" hardcoded value)
+
+### Testing Required:
+1. Verify VMAF queue shows correct original filenames
+2. Confirm VMAF processing still works with correct file paths
+3. Ensure transcoding workflow remains unaffected
+
+## Implementation Status (2025-01-26)
+
+### ✅ Fixes Implemented:
+
+#### Fix 1: FileName Issue - COMPLETED
+**File:** `Services/TranscodingVMAFQueueService.py`  
+**Line:** 19  
+**Change:** Use `OriginalFilePath` instead of `OutputFilePath` for filename extraction
+
+**Before:**
+```python
+FileName = OutputFilePath.split('\\')[-1] if '\\' in OutputFilePath else OutputFilePath.split('/')[-1]
+```
+
+**After:**
+```python
+FileName = OriginalFilePath.split('\\')[-1] if '\\' in OriginalFilePath else OriginalFilePath.split('/')[-1]
+```
+
+#### Fix 2: TranscodedFilePath Issue - COMPLETED
+**File:** `Services/ProcessTranscodeQueueService.py`  
+**Line:** 451  
+**Change:** Use calculated `OutputFilePath` instead of `TranscodeResult.get('OutputFilePath')`
+
+**Before:**
+```python
+self.VMAFQueue.AddToQueue(TranscodeAttemptId, Job.FilePath, TranscodeResult.get('OutputFilePath'))
+```
+
+**After:**
+```python
+# Use the calculated output file path instead of TranscodeResult.get('OutputFilePath') which returns "Success"
+self.VMAFQueue.AddToQueue(TranscodeAttemptId, Job.FilePath, OutputFilePath)
+```
+
+### Expected Results:
+- **FileName**: Will display correct original filename (e.g., "Movie.mkv")
+- **TranscodedFilePath**: Will display correct transcoded file path (e.g., "C:\MediaVortex\Movie_1080p.mp4")
+- **VMAF Queue**: Will show proper file information instead of "Success"
+
