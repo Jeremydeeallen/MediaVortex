@@ -330,7 +330,15 @@ class FileScanningViewModel:
             # Apply search filter if provided
             if Search:
                 SearchLower = Search.lower()
-                MediaFiles = [file for file in MediaFiles if SearchLower in (file.FileName or '').lower()]
+                
+                # Check if it's a negative filter (starts with !)
+                if SearchLower.startswith('!'):
+                    # Negative filter - exclude files containing the term
+                    ExcludeTerm = SearchLower[1:]  # Remove the ! prefix
+                    MediaFiles = [file for file in MediaFiles if ExcludeTerm not in (file.FileName or '').lower()]
+                else:
+                    # Positive filter - include only files containing the term
+                    MediaFiles = [file for file in MediaFiles if SearchLower in (file.FileName or '').lower()]
             
             # Sort by size descending (simple)
             MediaFiles.sort(key=lambda x: x.SizeMB or 0, reverse=True)
