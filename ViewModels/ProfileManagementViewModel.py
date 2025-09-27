@@ -67,11 +67,11 @@ class ProfileManagementViewModel:
     
     def CreateProfileWithThresholds(self, profile_name: str, description: str, thresholds: List[dict],
                                    codec: str = "libsvtav1", preset: int = 6, film_grain: int = 10,
-                                   yadif_mode: int = 1, yadif_parity: int = 1, yadif_deint: int = 1) -> bool:
+                                   ten_bit_encoding: bool = False, yadif_mode: int = 1, yadif_parity: int = 1, yadif_deint: int = 1) -> bool:
         """Create a new profile with multiple thresholds."""
         try:
             LoggingService.LogFunctionEntry("CreateProfileWithThresholds", "ProfileManagementViewModel", profile_name, description, len(thresholds))
-            LoggingService.LogInfo("Thresholds data: {}", "ProfileManagementViewModel", "CreateProfileWithThresholds", thresholds)
+            LoggingService.LogInfo(f"Thresholds data: {thresholds}", "ProfileManagementViewModel", "CreateProfileWithThresholds")
             
             if not profile_name.strip():
                 self.ErrorMessage = "Profile name is required"
@@ -85,13 +85,13 @@ class ProfileManagementViewModel:
             
             # Create the profile first
             LoggingService.LogInfo("Creating profile...", "ProfileManagementViewModel", "CreateProfileWithThresholds")
-            new_profile = self.ProfileService.CreateProfile(profile_name, description, codec, preset, film_grain, yadif_mode, yadif_parity, yadif_deint)
-            LoggingService.LogInfo("Profile created with ID: {}", "ProfileManagementViewModel", "CreateProfileWithThresholds", new_profile.Id)
+            new_profile = self.ProfileService.CreateProfile(profile_name, description, codec, preset, film_grain, ten_bit_encoding, yadif_mode, yadif_parity, yadif_deint)
+            LoggingService.LogInfo(f"Profile created with ID: {new_profile.Id}", "ProfileManagementViewModel", "CreateProfileWithThresholds")
             
             # Add all thresholds
-            LoggingService.LogInfo("Adding {} thresholds...", "ProfileManagementViewModel", "CreateProfileWithThresholds", len(thresholds))
+            LoggingService.LogInfo(f"Adding {len(thresholds)} thresholds...", "ProfileManagementViewModel", "CreateProfileWithThresholds")
             for i, threshold_data in enumerate(thresholds):
-                LoggingService.LogInfo("Adding threshold {}: {}", "ProfileManagementViewModel", "CreateProfileWithThresholds", i+1, threshold_data)
+                LoggingService.LogInfo(f"Adding threshold {i+1}: {threshold_data}", "ProfileManagementViewModel", "CreateProfileWithThresholds")
                 self.ProfileService.AddThreshold(
                     new_profile.Id,
                     threshold_data['Resolution'],
@@ -105,7 +105,7 @@ class ProfileManagementViewModel:
                     threshold_data['TranscodeDownTo'],
                     threshold_data.get('Quality'),
                 )
-                LoggingService.LogInfo("Threshold {} added successfully", "ProfileManagementViewModel", "CreateProfileWithThresholds", i+1)
+                LoggingService.LogInfo(f"Threshold {i+1} added successfully", "ProfileManagementViewModel", "CreateProfileWithThresholds")
             
             # Reload profiles to get updated data
             LoggingService.LogInfo("Reloading profiles...", "ProfileManagementViewModel", "CreateProfileWithThresholds")
@@ -153,11 +153,11 @@ class ProfileManagementViewModel:
     
     def UpdateProfileWithThresholds(self, profile_id: int, profile_name: str, description: str, thresholds: List[dict],
                                    codec: str = "libsvtav1", preset: int = 6, film_grain: int = 10,
-                                   yadif_mode: int = 1, yadif_parity: int = 1, yadif_deint: int = 1) -> bool:
+                                   ten_bit_encoding: bool = False, yadif_mode: int = 1, yadif_parity: int = 1, yadif_deint: int = 1) -> bool:
         """Update an existing profile with multiple thresholds."""
         try:
             LoggingService.LogFunctionEntry("UpdateProfileWithThresholds", "ProfileManagementViewModel", profile_id, profile_name, description, len(thresholds))
-            LoggingService.LogInfo("Thresholds data: {}", "ProfileManagementViewModel", "CreateProfileWithThresholds", thresholds)
+            LoggingService.LogInfo(f"Thresholds data: {thresholds}", "ProfileManagementViewModel", "UpdateProfileWithThresholds")
             
             if not profile_name.strip():
                 self.ErrorMessage = "Profile name is required"
@@ -189,6 +189,7 @@ class ProfileManagementViewModel:
                 Codec=codec,
                 Preset=preset,
                 FilmGrain=film_grain,
+                TenBitEncoding=ten_bit_encoding,
                 YadifMode=yadif_mode,
                 YadifParity=yadif_parity,
                 YadifDeint=yadif_deint

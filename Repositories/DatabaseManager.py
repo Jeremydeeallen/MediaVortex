@@ -26,7 +26,7 @@ class DatabaseManager:
     def GetAllProfiles(self) -> List[TranscodeProfileModel]:
         """Get all transcoding profiles."""
         query = """SELECT Id, ProfileName, Description, CreatedDate, LastModified, 
-                          Codec, Preset, FilmGrain, YadifMode, YadifParity, YadifDeint 
+                          Codec, Preset, FilmGrain, TenBitEncoding, YadifMode, YadifParity, YadifDeint 
                    FROM Profiles ORDER BY ProfileName"""
         rows = self.DatabaseService.ExecuteQuery(query)
         
@@ -41,6 +41,7 @@ class DatabaseManager:
                 Codec=row['Codec'] if row['Codec'] is not None else 'libsvtav1',
                 Preset=row['Preset'] if row['Preset'] is not None else 6,
                 FilmGrain=row['FilmGrain'] if row['FilmGrain'] is not None else 10,
+                TenBitEncoding=bool(row['TenBitEncoding']) if row['TenBitEncoding'] is not None else False,
                 YadifMode=row['YadifMode'] if row['YadifMode'] is not None else 1,
                 YadifParity=row['YadifParity'] if row['YadifParity'] is not None else 1,
                 YadifDeint=row['YadifDeint'] if row['YadifDeint'] is not None else 1
@@ -52,7 +53,7 @@ class DatabaseManager:
     def GetProfileById(self, ProfileId: int) -> Optional[TranscodeProfileModel]:
         """Get a specific profile by ID."""
         query = """SELECT Id, ProfileName, Description, CreatedDate, LastModified, 
-                          Codec, Preset, FilmGrain, YadifMode, YadifParity, YadifDeint 
+                          Codec, Preset, FilmGrain, TenBitEncoding, YadifMode, YadifParity, YadifDeint 
                    FROM Profiles WHERE Id = ?"""
         rows = self.DatabaseService.ExecuteQuery(query, (ProfileId,))
         
@@ -69,6 +70,7 @@ class DatabaseManager:
             Codec=row['Codec'] if row['Codec'] is not None else 'libsvtav1',
             Preset=row['Preset'] if row['Preset'] is not None else 6,
             FilmGrain=row['FilmGrain'] if row['FilmGrain'] is not None else 10,
+            TenBitEncoding=bool(row['TenBitEncoding']) if row['TenBitEncoding'] is not None else False,
             YadifMode=row['YadifMode'] if row['YadifMode'] is not None else 1,
             YadifParity=row['YadifParity'] if row['YadifParity'] is not None else 1,
             YadifDeint=row['YadifDeint'] if row['YadifDeint'] is not None else 1
@@ -88,11 +90,11 @@ class DatabaseManager:
                     LoggingService.LogInfo("Inserting new profile...", "DatabaseManager", "SaveProfile")
                     query = """
                         INSERT INTO Profiles (ProfileName, Description, CreatedDate, LastModified, 
-                                             Codec, Preset, FilmGrain, YadifMode, YadifParity, YadifDeint)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                             Codec, Preset, FilmGrain, TenBitEncoding, YadifMode, YadifParity, YadifDeint)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """
                     parameters = (Profile.ProfileName, Profile.Description, Profile.CreatedDate, Profile.LastModified,
-                                 Profile.Codec, Profile.Preset, Profile.FilmGrain, Profile.YadifMode, 
+                                 Profile.Codec, Profile.Preset, Profile.FilmGrain, Profile.TenBitEncoding, Profile.YadifMode, 
                                  Profile.YadifParity, Profile.YadifDeint)
                     LoggingService.LogInfo("Insert parameters: {}", "DatabaseManager", "SaveProfile", parameters)
                     cursor.execute(query, parameters)
@@ -106,11 +108,11 @@ class DatabaseManager:
                     query = """
                         UPDATE Profiles 
                         SET ProfileName = ?, Description = ?, LastModified = ?, 
-                            Codec = ?, Preset = ?, FilmGrain = ?, YadifMode = ?, YadifParity = ?, YadifDeint = ?
+                            Codec = ?, Preset = ?, FilmGrain = ?, TenBitEncoding = ?, YadifMode = ?, YadifParity = ?, YadifDeint = ?
                         WHERE Id = ?
                     """
                     parameters = (Profile.ProfileName, Profile.Description, Profile.LastModified,
-                                 Profile.Codec, Profile.Preset, Profile.FilmGrain, Profile.YadifMode, 
+                                 Profile.Codec, Profile.Preset, Profile.FilmGrain, Profile.TenBitEncoding, Profile.YadifMode, 
                                  Profile.YadifParity, Profile.YadifDeint, Profile.Id)
                     LoggingService.LogInfo("Update parameters: {}", "DatabaseManager", "SaveProfile", parameters)
                     cursor.execute(query, parameters)
@@ -1615,11 +1617,7 @@ class DatabaseManager:
         try:
             LoggingService.LogFunctionEntry("GetProfileSettingsForTargetResolution", "DatabaseManager", ProfileName, SourceResolution)
             
-            # Convert pixel dimensions to resolution category
-            resolutionCategory = self._ConvertPixelDimensionsToResolutionCategory(SourceResolution)
-            LoggingService.LogInfo(f"Converted {SourceResolution} to {resolutionCategory}", "DatabaseManager", "GetProfileSettingsForTargetResolution")
-            
-            # First, get the TranscodeDownTo setting for the source resolution
+            # First try to find exact resolution match (for VR resolutions like 7680x3840)
             query = """
                 SELECT pt.TranscodeDownTo 
                 FROM ProfileThresholds pt
@@ -1627,7 +1625,17 @@ class DatabaseManager:
                 WHERE p.ProfileName = ? AND pt.Resolution = ?
                 LIMIT 1
             """
-            rows = self.DatabaseService.ExecuteQuery(query, (ProfileName, resolutionCategory))
+            rows = self.DatabaseService.ExecuteQuery(query, (ProfileName, SourceResolution))
+            foundResolution = SourceResolution
+            
+            # If no exact match found, try standardized resolution
+            if not rows:
+                resolutionCategory = self._ConvertPixelDimensionsToResolutionCategory(SourceResolution)
+                LoggingService.LogInfo(f"No exact match for {SourceResolution}, trying standardized {resolutionCategory}", "DatabaseManager", "GetProfileSettingsForTargetResolution")
+                rows = self.DatabaseService.ExecuteQuery(query, (ProfileName, resolutionCategory))
+                foundResolution = resolutionCategory
+            else:
+                LoggingService.LogInfo(f"Found exact resolution match for {SourceResolution}", "DatabaseManager", "GetProfileSettingsForTargetResolution")
             
             if not rows:
                 LoggingService.LogWarning(f"No TranscodeDownTo found for Profile {ProfileName} and Resolution {SourceResolution}", "DatabaseManager", "GetProfileSettingsForTargetResolution")
@@ -1635,12 +1643,12 @@ class DatabaseManager:
             
             targetResolution = rows[0]['TranscodeDownTo']
             if not targetResolution:
-                LoggingService.LogInfo(f"No TranscodeDownTo set for Profile {ProfileName} and Resolution {SourceResolution}", "DatabaseManager", "GetProfileSettingsForTargetResolution")
-                return None
+                LoggingService.LogInfo(f"No TranscodeDownTo set for Profile {ProfileName} and Resolution {SourceResolution}, treating as 'No downscaling'", "DatabaseManager", "GetProfileSettingsForTargetResolution")
+                targetResolution = 'No downscaling'
             
-            # Handle "No downscaling" case - use current resolution's settings
+            # Handle "No downscaling" case (including empty TranscodeDownTo) - use current resolution's settings
             if targetResolution == 'No downscaling':
-                # Get all settings from the current resolution entry
+                # Get all settings from the current resolution entry (use the resolution that was found)
                 query = """
                     SELECT pt.VideoBitrateKbps, pt.AudioBitrateKbps, pt.Quality, pt.Resolution, 
                            p.Codec, p.Preset, p.FilmGrain, p.YadifMode, p.YadifParity, p.YadifDeint, pt.ContainerType
@@ -1649,7 +1657,7 @@ class DatabaseManager:
                     WHERE p.ProfileName = ? AND pt.Resolution = ?
                     LIMIT 1
                 """
-                rows = self.DatabaseService.ExecuteQuery(query, (ProfileName, resolutionCategory))
+                rows = self.DatabaseService.ExecuteQuery(query, (ProfileName, foundResolution))
             else:
                 # Now get all settings for the target resolution
                 query = """
@@ -1665,7 +1673,7 @@ class DatabaseManager:
             if rows:
                 row = rows[0]
                 # Calculate the actual target resolution for transcoding
-                actualTargetResolution = resolutionCategory if targetResolution == 'No downscaling' else targetResolution
+                actualTargetResolution = SourceResolution if targetResolution == 'No downscaling' else targetResolution
                 settings = {
                     'VideoBitrateKbps': row['VideoBitrateKbps'],
                     'AudioBitrateKbps': row['AudioBitrateKbps'],
@@ -2215,7 +2223,7 @@ class DatabaseManager:
                     VMAFProgressItem.Id
                 ))
                 
-                LoggingService.LogInfo(f"Updated VMAF progress item with ID: {VMAFProgressItem.Id}", "DatabaseManager", "SaveVMAFProgress")
+                #LoggingService.LogInfo(f"Updated VMAF progress item with ID: {VMAFProgressItem.Id}", "DatabaseManager", "SaveVMAFProgress")
                 return VMAFProgressItem.Id
                 
         except Exception as e:

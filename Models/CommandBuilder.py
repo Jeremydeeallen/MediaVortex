@@ -64,6 +64,9 @@ class CommandBuilder:
             # Add film grain parameter after video filters
             self._AddFilmGrainParameter(CommandParts, CodecParameters, ProfileSettings)
             
+            # Add pixel format parameter for 10-bit encoding
+            self._AddPixelFormatParameter(CommandParts, CodecParameters, ProfileSettings)
+            
             # Add container-specific flags
             if ContainerType.lower() == 'mp4':
                 CommandParts.extend(['-movflags', '+faststart'])
@@ -136,6 +139,25 @@ class CommandBuilder:
                 FilmGrain = ProfileSettings.get('FilmGrain')
                 if FilmGrain is not None and FilmGrain != '' and FilmGrain != 'None' and FilmGrain > 0:
                     CommandParts.extend(['-svtav1-params', f'film-grain={FilmGrain}'])
+                
+        except Exception:
+            # If anything goes wrong, continue without adding parameters
+            pass
+    
+    def _AddPixelFormatParameter(self, CommandParts: list, CodecParameters: list, ProfileSettings: Dict[str, Any]) -> None:
+        """Add pixel format parameter for 10-bit encoding."""
+        try:
+            # Create a lookup dictionary for codec parameters
+            ParamLookup = {}
+            for param in CodecParameters:
+                ParamLookup[param['ParameterName']] = param
+            
+            # Add 10-bit encoding pixel format (for libsvtav1)
+            if '10bit-encoding' in ParamLookup:
+                TenBitEncoding = ProfileSettings.get('TenBitEncoding')
+                if TenBitEncoding is not None and TenBitEncoding != '' and TenBitEncoding != 'None' and TenBitEncoding:
+                    # Use yuv420p10le for 10-bit color depth to reduce banding
+                    CommandParts.extend(['-pix_fmt', 'yuv420p10le'])
                 
         except Exception:
             # If anything goes wrong, continue without adding parameters

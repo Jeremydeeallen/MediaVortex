@@ -1,3 +1,20 @@
+# Disable Python bytecode caching for critical modules to prevent schema change issues
+import sys
+import os
+sys.dont_write_bytecode = True
+
+# Clear existing cache for critical modules to ensure fresh code execution
+import shutil
+critical_modules = ['Repositories', 'Models', 'Services']
+for module in critical_modules:
+    cache_dir = f"{module}/__pycache__"
+    if os.path.exists(cache_dir):
+        try:
+            shutil.rmtree(cache_dir)
+            print(f"Cleared cache for {module}")
+        except Exception as e:
+            print(f"Warning: Could not clear cache for {module}: {e}")
+
 from flask import Flask, render_template, jsonify
 from flask_cors import CORS
 from Controllers.ProfileController import ProfileController
@@ -7,7 +24,6 @@ from Controllers.TranscodeQueueController import TranscodeQueueBlueprint
 from Controllers.TranscodeJobController import TranscodeJobBlueprint
 from Controllers.VMAFJobController import VMAFJobBlueprint
 from Controllers.FileReplacementController import FileReplacementController
-import os
 
 
 class MediaVortexApp:

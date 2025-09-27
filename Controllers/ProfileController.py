@@ -136,14 +136,15 @@ class ProfileController:
                 codec = data.get('Codec', 'libsvtav1')
                 preset = data.get('Preset', 6)
                 film_grain = data.get('FilmGrain', 10)
+                ten_bit_encoding = data.get('TenBitEncoding', False)
                 yadif_mode = data.get('YadifMode', 1)
                 yadif_parity = data.get('YadifParity', 1)
                 yadif_deint = data.get('YadifDeint', 1)
                 
-                LoggingService.LogInfo(f"Profile name: {profile_name}, Description: {description}, Thresholds count: {len(thresholds)}, Codec: {codec}, Preset: {preset}", "UpdateProfile", "ProfileController")
+                LoggingService.LogInfo(f"Profile name: {profile_name}, Description: {description}, Thresholds count: {len(thresholds)}, Codec: {codec}, Preset: {preset}, TenBitEncoding: {ten_bit_encoding}", "UpdateProfile", "ProfileController")
                 
                 success = self.ViewModel.UpdateProfileWithThresholds(profile_id, profile_name, description, thresholds,
-                                                                    codec, preset, film_grain, yadif_mode, yadif_parity, yadif_deint)
+                                                                    codec, preset, film_grain, ten_bit_encoding, yadif_mode, yadif_parity, yadif_deint)
                 LoggingService.LogInfo(f"UpdateProfileWithThresholds result: {success}", "UpdateProfile", "ProfileController")
                 
                 if success:

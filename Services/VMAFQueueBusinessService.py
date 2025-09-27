@@ -210,9 +210,6 @@ class VMAFQueueBusinessService:
                         
                         VMAFProgressItem.UpdateProgress(progress_percent, current_step, eta)
                         self.DatabaseManager.SaveVMAFProgress(VMAFProgressItem)
-                        
-                        LoggingService.LogInfo(f"VMAF Analysis Progress: {progress_data}", 
-                                             "VMAFQueueBusinessService", "ProcessVMAFJob")
                 except Exception as e:
                     LoggingService.LogException("Exception updating VMAF progress", e, 
                                               "VMAFQueueBusinessService", "ProcessVMAFJob")

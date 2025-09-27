@@ -151,9 +151,9 @@
                                     <label for="ProfileCodec" class="form-label">Video Codec</label>
                                     <select class="form-select" id="ProfileCodec">
                                         <option value="libsvtav1">AV1 (libsvtav1)</option>
-                                        <option value="libx265">H.265 (libx265)</option>
-                                        <option value="libx264">H.264 (libx264)</option>
-                                        <option value="libvpx-vp9">VP9 (libvpx-vp9)</option>
+                                        <option value="libx265" disabled>H.265 (libx265) - Not Implemented Yet</option>
+                                        <option value="libx264" disabled>H.264 (libx264) - Not Implemented Yet</option>
+                                        <option value="libvpx-vp9" disabled>VP9 (libvpx-vp9) - Not Implemented Yet</option>
                                     </select>
                                     <div class="form-text">Video encoding codec</div>
                                 </div>
@@ -181,6 +181,16 @@
                                     <label for="ProfileFilmGrain" class="form-label">Film Grain</label>
                                     <input type="number" class="form-control" id="ProfileFilmGrain" value="10" min="0" max="50">
                                     <div class="form-text">Film grain level (0=off)</div>
+                                </div>
+                                <div class="col-md-3">
+                                    <label for="ProfileTenBitEncoding" class="form-label">10-bit Encoding</label>
+                                    <div class="form-check form-switch">
+                                        <input class="form-check-input" type="checkbox" id="ProfileTenBitEncoding" value="true">
+                                        <label class="form-check-label" for="ProfileTenBitEncoding">
+                                            Enable 10-bit color
+                                        </label>
+                                    </div>
+                                    <div class="form-text">Reduces color banding, requires compatible devices</div>
                                 </div>
                                 <div class="col-md-3">
                                     <label for="ProfileYadifMode" class="form-label">Deinterlacing</label>
@@ -719,6 +729,7 @@ function PopulateProfileForm(Profile) {
     $('#ProfileCodec').val(Profile.Codec || 'libsvtav1');
     $('#ProfilePreset').val(Profile.Preset || 6);
     $('#ProfileFilmGrain').val(Profile.FilmGrain !== undefined ? Profile.FilmGrain : 10);
+    $('#ProfileTenBitEncoding').prop('checked', Profile.TenBitEncoding || false);
     $('#ProfileYadifMode').val(Profile.YadifMode || 1);
     $('#ProfileYadifParity').val(Profile.YadifParity || 1);
     $('#ProfileYadifDeint').val(Profile.YadifDeint || 1);
@@ -796,6 +807,7 @@ function ClearProfileForm() {
     $('#ProfileCodec').val('libsvtav1');
     $('#ProfilePreset').val('6');
     $('#ProfileFilmGrain').val('10');
+    $('#ProfileTenBitEncoding').prop('checked', false);
     $('#ProfileYadifMode').val('1');
     $('#ProfileYadifParity').val('1');
     $('#ProfileYadifDeint').val('1');
@@ -831,6 +843,7 @@ function SaveProfile() {
         Codec: $('#ProfileCodec').val(),
         Preset: parseInt($('#ProfilePreset').val()),
         FilmGrain: parseInt($('#ProfileFilmGrain').val()),
+        TenBitEncoding: $('#ProfileTenBitEncoding').is(':checked'),
         YadifMode: parseInt($('#ProfileYadifMode').val()),
         YadifParity: parseInt($('#ProfileYadifParity').val()),
         YadifDeint: parseInt($('#ProfileYadifDeint').val()),

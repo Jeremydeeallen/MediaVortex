@@ -22,7 +22,7 @@ class ProfileService:
     
     def CreateProfile(self, profile_name: str, description: str = "", 
                      codec: str = "libsvtav1", preset: int = 6, film_grain: int = 10,
-                     yadif_mode: int = 1, yadif_parity: int = 1, yadif_deint: int = 1) -> TranscodeProfileModel:
+                     ten_bit_encoding: bool = False, yadif_mode: int = 1, yadif_parity: int = 1, yadif_deint: int = 1) -> TranscodeProfileModel:
         """Create a new transcoding profile."""
         try:
             LoggingService.LogFunctionEntry("CreateProfile", 'ProfileService', profile_name, description=description)
@@ -34,6 +34,7 @@ class ProfileService:
                 Codec=codec,
                 Preset=preset,
                 FilmGrain=film_grain,
+                TenBitEncoding=ten_bit_encoding,
                 YadifMode=yadif_mode,
                 YadifParity=yadif_parity,
                 YadifDeint=yadif_deint

@@ -249,12 +249,9 @@ class FFmpegComparisonService:
             # Log VMAF analysis start
             LoggingService.LogInfo(f"Starting VMAF quality analysis: {os.path.basename(OriginalFilePath)} vs {os.path.basename(TranscodedFilePath)}", 'CreateVMAFComparison', 'FFmpegComparisonService')
             
-            # Create progress callback to log VMAF process details
+            # Create progress callback to handle VMAF process details
             def vmaf_progress_callback(progress_data):
                 try:
-                    # Log VMAF progress details to database
-                    LoggingService.LogInfo(f"VMAF Analysis Progress: {progress_data}", 'CreateVMAFComparison', 'FFmpegComparisonService')
-                    
                     # Call external progress callback if provided
                     if ProgressCallback:
                         ProgressCallback(progress_data)

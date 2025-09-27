@@ -48,8 +48,162 @@
     overflow-y: auto;
 }
 
+/* Make table use full width */
+#QueueTable {
+    width: 100%;
+    table-layout: fixed;
+}
+
+/* Column width adjustments */
+#QueueTable th:nth-child(1), #QueueTable td:nth-child(1) { width: 5%; } /* ID */
+#QueueTable th:nth-child(2), #QueueTable td:nth-child(2) { width: 25%; } /* File Name */
+#QueueTable th:nth-child(3), #QueueTable td:nth-child(3) { width: 15%; } /* Directory */
+#QueueTable th:nth-child(4), #QueueTable td:nth-child(4) { width: 8%; } /* Size */
+#QueueTable th:nth-child(5), #QueueTable td:nth-child(5) { width: 8%; } /* Priority */
+#QueueTable th:nth-child(6), #QueueTable td:nth-child(6) { width: 10%; } /* Status */
+#QueueTable th:nth-child(7), #QueueTable td:nth-child(7) { width: 12%; } /* Date Added */
+#QueueTable th:nth-child(8), #QueueTable td:nth-child(8) { width: 12%; } /* Date Started */
+#QueueTable th:nth-child(9), #QueueTable td:nth-child(9) { width: 5%; } /* Actions */
+
+/* Truncate long text in File Name and Directory columns */
+#QueueTable td:nth-child(2), #QueueTable td:nth-child(3) {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Show full text on hover for truncated cells */
+#QueueTable td:nth-child(2):hover, #QueueTable td:nth-child(3):hover {
+    white-space: normal;
+    word-break: break-all;
+    position: relative;
+    z-index: 10;
+    background-color: #f8f9fa;
+    border: 1px solid #dee2e6;
+}
+
+/* VMAF Queue Table styling */
+#VMAFQueueTable {
+    width: 100%;
+    table-layout: fixed;
+}
+
+#VMAFQueueTable th:nth-child(1), #VMAFQueueTable td:nth-child(1) { width: 5%; } /* ID */
+#VMAFQueueTable th:nth-child(2), #VMAFQueueTable td:nth-child(2) { width: 35%; } /* File Name */
+#VMAFQueueTable th:nth-child(3), #VMAFQueueTable td:nth-child(3) { width: 10%; } /* Status */
+#VMAFQueueTable th:nth-child(4), #VMAFQueueTable td:nth-child(4) { width: 10%; } /* VMAF Score */
+#VMAFQueueTable th:nth-child(5), #VMAFQueueTable td:nth-child(5) { width: 10%; } /* Quality Threshold */
+#VMAFQueueTable th:nth-child(6), #VMAFQueueTable td:nth-child(6) { width: 12%; } /* Date Added */
+#VMAFQueueTable th:nth-child(7), #VMAFQueueTable td:nth-child(7) { width: 12%; } /* Date Started */
+#VMAFQueueTable th:nth-child(8), #VMAFQueueTable td:nth-child(8) { width: 12%; } /* Date Completed */
+#VMAFQueueTable th:nth-child(9), #VMAFQueueTable td:nth-child(9) { width: 4%; } /* Actions */
+
+#VMAFQueueTable td:nth-child(2) {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+#VMAFQueueTable td:nth-child(2):hover {
+    white-space: normal;
+    word-break: break-all;
+    position: relative;
+    z-index: 10;
+    background-color: #f8f9fa;
+    border: 1px solid #dee2e6;
+}
+
+/* Media Files Table styling */
+#MediaFilesTable {
+    width: 100% !important;
+    table-layout: fixed !important;
+    min-width: 100% !important;
+}
+
+#MediaFilesTable th:nth-child(1), #MediaFilesTable td:nth-child(1) { width: 5% !important; } /* ID */
+#MediaFilesTable th:nth-child(2), #MediaFilesTable td:nth-child(2) { width: 30% !important; } /* File Name */
+#MediaFilesTable th:nth-child(3), #MediaFilesTable td:nth-child(3) { width: 20% !important; } /* Directory */
+#MediaFilesTable th:nth-child(4), #MediaFilesTable td:nth-child(4) { width: 8% !important; } /* Size */
+#MediaFilesTable th:nth-child(5), #MediaFilesTable td:nth-child(5) { width: 10% !important; } /* Resolution */
+#MediaFilesTable th:nth-child(6), #MediaFilesTable td:nth-child(6) { width: 17% !important; } /* Profile */
+#MediaFilesTable th:nth-child(7), #MediaFilesTable td:nth-child(7) { width: 10% !important; } /* Actions */
+
+#MediaFilesTable td:nth-child(2), #MediaFilesTable td:nth-child(3) {
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+    max-width: 0 !important;
+}
+
+#MediaFilesTable td:nth-child(2):hover, #MediaFilesTable td:nth-child(3):hover {
+    white-space: normal !important;
+    word-break: break-all !important;
+    position: relative !important;
+    z-index: 10 !important;
+    background-color: #f8f9fa !important;
+    border: 1px solid #dee2e6 !important;
+    max-width: none !important;
+}
+
+/* Root Folders Table styling */
+#RootFoldersTable {
+    width: 100%;
+    table-layout: fixed;
+}
+
+#RootFoldersTable th:nth-child(1), #RootFoldersTable td:nth-child(1) { width: 5%; } /* ID */
+#RootFoldersTable th:nth-child(2), #RootFoldersTable td:nth-child(2) { width: 40%; } /* Path */
+#RootFoldersTable th:nth-child(3), #RootFoldersTable td:nth-child(3) { width: 15%; } /* Last Scanned */
+#RootFoldersTable th:nth-child(4), #RootFoldersTable td:nth-child(4) { width: 10%; } /* Total Size */
+#RootFoldersTable th:nth-child(5), #RootFoldersTable td:nth-child(5) { width: 20%; } /* Profile */
+#RootFoldersTable th:nth-child(6), #RootFoldersTable td:nth-child(6) { width: 10%; } /* Actions */
+
+#RootFoldersTable td:nth-child(2) {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+#RootFoldersTable td:nth-child(2):hover {
+    white-space: normal;
+    word-break: break-all;
+    position: relative;
+    z-index: 10;
+    background-color: #f8f9fa;
+    border: 1px solid #dee2e6;
+}
+
 #PaginationInfo {
     font-size: 0.875rem;
+}
+
+/* Force full width for all table containers */
+.container-fluid {
+    max-width: 100% !important;
+    padding-left: 15px !important;
+    padding-right: 15px !important;
+}
+
+/* Ensure table-responsive containers use full width */
+.table-responsive {
+    width: 100% !important;
+    overflow-x: auto !important;
+}
+
+/* Force card bodies to use full width */
+.card-body {
+    padding: 1rem !important;
+}
+
+/* Ensure rows use full width */
+.row {
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+}
+
+.col-12 {
+    padding-left: 0 !important;
+    padding-right: 0 !important;
 }
 </style>
 {% endblock %}

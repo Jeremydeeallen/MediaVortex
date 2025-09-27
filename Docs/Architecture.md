@@ -3,6 +3,31 @@
 ## Traditional MVVM as follows
 We will only use PascalCase for everything!
 
+### Naming Conventions
+
+#### Public Methods
+All public methods use standard PascalCase:
+```python
+def HandleFileManagement(self):
+def ProcessVMAFJob(self):
+def GetVMAFQueueStatus(self):
+```
+
+#### Private Methods
+Private methods use "Private" prefix followed by PascalCase:
+```python
+def PrivateHandleFileManagement(self):
+def PrivateGetSourceCopyPath(self):
+def PrivateCleanupTranscodedFiles(self):
+```
+
+**Benefits:**
+- Follows PascalCase rule (no underscores or hyphens)
+- Clear visual distinction between public and private methods
+- Python-like convention adapted for PascalCase
+- Easy to identify method scope at a glance
+- Copy-paste friendly (no special characters)
+
 ## Database 
 The database is located at \Data\MediaVortex.db
 ### Data Layer 

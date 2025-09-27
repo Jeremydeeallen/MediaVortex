@@ -219,6 +219,7 @@ Profiles.YadifMode	INTEGER
 Profiles.YadifParity	INTEGER
 Profiles.YadifDeint	INTEGER
 Profiles.CodecFlagsId	INTEGER
+Profiles.TenBitEncoding	BOOLEAN
 RootFolders.Id	INTEGER
 RootFolders.RootFolder	TEXT
 RootFolders.LastScannedDate	TIMESTAMP
