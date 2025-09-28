@@ -220,6 +220,67 @@ Profiles.YadifParity	INTEGER
 Profiles.YadifDeint	INTEGER
 Profiles.CodecFlagsId	INTEGER
 Profiles.TenBitEncoding	BOOLEAN
+QualityTestProgress.Id	INTEGER
+QualityTestProgress.VMAFQueueId	INTEGER
+QualityTestProgress.TranscodeAttemptId	INTEGER
+QualityTestProgress.Status	TEXT
+QualityTestProgress.ProgressPercentage	INTEGER
+QualityTestProgress.CurrentStep	TEXT
+QualityTestProgress.StartTime	DATETIME
+QualityTestProgress.EndTime	DATETIME
+QualityTestProgress.ErrorMessage	TEXT
+QualityTestProgress.CreatedAt	DATETIME
+QualityTestProgress.UpdatedAt	DATETIME
+QualityTestProgress.ETA	TEXT
+QualityTestProgress.StrategyType	TEXT
+QualityTestProgress.StrategyId	INTEGER
+QualityTestProgress.QualityTestId	INTEGER
+QualityTestProgress.TestType	TEXT
+QualityTestProgress.VMAFThreshold	REAL
+QualityTestProgress.PassesThreshold	BOOLEAN
+QualityTestResults.Id	INTEGER
+QualityTestResults.VMAFQueueId	INTEGER
+QualityTestResults.TranscodeAttemptId	INTEGER
+QualityTestResults.VMAFScore	REAL
+QualityTestResults.ProfileId	INTEGER
+QualityTestResults.ProfileName	TEXT
+QualityTestResults.FileSize	INTEGER
+QualityTestResults.TestDuration	REAL
+QualityTestResults.PassesThreshold	BOOLEAN
+QualityTestResults.Rank	INTEGER
+QualityTestResults.ErrorMessage	TEXT
+QualityTestResults.DateTested	DATETIME
+QualityTestingQueue.Id	INTEGER
+QualityTestingQueue.TranscodeAttemptId	INTEGER
+QualityTestingQueue.OriginalFilePath	TEXT
+QualityTestingQueue.TranscodedFilePath	TEXT
+QualityTestingQueue.FileName	TEXT
+QualityTestingQueue.Status	TEXT
+QualityTestingQueue.Priority	INTEGER
+QualityTestingQueue.DateAdded	DATETIME
+QualityTestingQueue.DateStarted	DATETIME
+QualityTestingQueue.DateCompleted	DATETIME
+QualityTestingQueue.VMAFScore	REAL
+QualityTestingQueue.QualityThreshold	REAL
+QualityTestingQueue.ErrorMessage	TEXT
+QualityTestingQueue.RetryCount	INTEGER
+QualityTestingQueue.MaxRetries	INTEGER
+QualityTestingQueue.StrategyType	TEXT
+QualityTestingQueue.StrategyId	INTEGER
+QualityTestingQueue.AlternativeProfileIds	TEXT
+QualityTestingQueue.CustomSettings	TEXT
+QualityTestingQueue.Results	TEXT
+QualityTestingQueue.SelectedResultId	INTEGER
+QualityTestingStrategies.Id	INTEGER
+QualityTestingStrategies.ProfileId	INTEGER
+QualityTestingStrategies.StrategyType	TEXT
+QualityTestingStrategies.VMAFThreshold	REAL
+QualityTestingStrategies.MaxAttempts	INTEGER
+QualityTestingStrategies.AlternativeProfileIds	TEXT
+QualityTestingStrategies.CustomSettings	TEXT
+QualityTestingStrategies.IsEnabled	BOOLEAN
+QualityTestingStrategies.CreatedDate	DATETIME
+QualityTestingStrategies.UpdatedDate	DATETIME
 RootFolders.Id	INTEGER
 RootFolders.RootFolder	TEXT
 RootFolders.LastScannedDate	TIMESTAMP
@@ -345,33 +406,6 @@ TranscodeQueue.Priority	INTEGER
 TranscodeQueue.Status	TEXT
 TranscodeQueue.DateAdded	TIMESTAMP
 TranscodeQueue.DateStarted	TIMESTAMP
-VMAFProgress.Id	INTEGER
-VMAFProgress.VMAFQueueId	INTEGER
-VMAFProgress.TranscodeAttemptId	INTEGER
-VMAFProgress.Status	TEXT
-VMAFProgress.ProgressPercentage	INTEGER
-VMAFProgress.CurrentStep	TEXT
-VMAFProgress.StartTime	DATETIME
-VMAFProgress.EndTime	DATETIME
-VMAFProgress.ErrorMessage	TEXT
-VMAFProgress.CreatedAt	DATETIME
-VMAFProgress.UpdatedAt	DATETIME
-VMAFProgress.ETA	TEXT
-VMAFQueue.Id	INTEGER
-VMAFQueue.TranscodeAttemptId	INTEGER
-VMAFQueue.OriginalFilePath	TEXT
-VMAFQueue.TranscodedFilePath	TEXT
-VMAFQueue.FileName	TEXT
-VMAFQueue.Status	TEXT
-VMAFQueue.Priority	INTEGER
-VMAFQueue.DateAdded	DATETIME
-VMAFQueue.DateStarted	DATETIME
-VMAFQueue.DateCompleted	DATETIME
-VMAFQueue.VMAFScore	REAL
-VMAFQueue.QualityThreshold	REAL
-VMAFQueue.ErrorMessage	TEXT
-VMAFQueue.RetryCount	INTEGER
-VMAFQueue.MaxRetries	INTEGER
 
 ### Indexes
 
@@ -406,6 +440,10 @@ ProblemFiles	idx_ProblemFiles_ErrorType	0	c	0
 ProblemFiles	idx_ProblemFiles_FilePath	0	c	0
 ProfileThresholds	sqlite_autoindex_ProfileThresholds_1	1	u	0
 Profiles	sqlite_autoindex_Profiles_1	1	u	0
+QualityTestProgress	idx_VMAFProgress_StartTime	0	c	0
+QualityTestProgress	idx_VMAFProgress_Status	0	c	0
+QualityTestProgress	idx_VMAFProgress_TranscodeAttemptId	0	c	0
+QualityTestProgress	idx_VMAFProgress_VMAFQueueId	0	c	0
 RootFolders	sqlite_autoindex_RootFolders_1	1	u	0
 ScanJobs	sqlite_autoindex_ScanJobs_1	1	u	0
 ServiceCommands	idx_ServiceCommands_TargetService_Status	0	c	0
@@ -425,10 +463,6 @@ TranscodeQueue	idx_TranscodeQueue_Priority	0	c	0
 TranscodeQueue	idx_TranscodeQueue_Status	0	c	0
 TranscodeQueue	idx_TranscodeQueue_FilePath	0	c	0
 TranscodeQueue	sqlite_autoindex_TranscodeQueue_1	1	u	0
-VMAFProgress	idx_VMAFProgress_StartTime	0	c	0
-VMAFProgress	idx_VMAFProgress_Status	0	c	0
-VMAFProgress	idx_VMAFProgress_TranscodeAttemptId	0	c	0
-VMAFProgress	idx_VMAFProgress_VMAFQueueId	0	c	0
 
 ### Index Columns
 
@@ -468,6 +502,10 @@ ProblemFiles	idx_ProblemFiles_FilePath	FilePath	0
 ProfileThresholds	sqlite_autoindex_ProfileThresholds_1	ProfileId	0
 ProfileThresholds	sqlite_autoindex_ProfileThresholds_1	Resolution	1
 Profiles	sqlite_autoindex_Profiles_1	ProfileName	0
+QualityTestProgress	idx_VMAFProgress_StartTime	StartTime	0
+QualityTestProgress	idx_VMAFProgress_Status	Status	0
+QualityTestProgress	idx_VMAFProgress_TranscodeAttemptId	TranscodeAttemptId	0
+QualityTestProgress	idx_VMAFProgress_VMAFQueueId	VMAFQueueId	0
 RootFolders	sqlite_autoindex_RootFolders_1	RootFolder	0
 ScanJobs	sqlite_autoindex_ScanJobs_1	JobId	0
 ServiceCommands	idx_ServiceCommands_TargetService_Status	TargetService	0
@@ -488,7 +526,3 @@ TranscodeQueue	idx_TranscodeQueue_Priority	Priority	0
 TranscodeQueue	idx_TranscodeQueue_Status	Status	0
 TranscodeQueue	idx_TranscodeQueue_FilePath	FilePath	0
 TranscodeQueue	sqlite_autoindex_TranscodeQueue_1	FilePath	0
-VMAFProgress	idx_VMAFProgress_StartTime	StartTime	0
-VMAFProgress	idx_VMAFProgress_Status	Status	0
-VMAFProgress	idx_VMAFProgress_TranscodeAttemptId	TranscodeAttemptId	0
-VMAFProgress	idx_VMAFProgress_VMAFQueueId	VMAFQueueId	0
