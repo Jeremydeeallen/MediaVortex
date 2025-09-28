@@ -214,6 +214,25 @@ class FFmpegComparisonService:
             LoggingService.LogFunctionEntry("CreateVMAFComparison", 'FFmpegComparisonService', 
                                           f"Original: {OriginalFilePath}, Transcoded: {TranscodedFilePath}")
             
+            # Check if both files exist
+            if not os.path.exists(OriginalFilePath):
+                VMAFModel = FFmpegVMAFComparisonModel()
+                VMAFModel.OriginalFilePath = OriginalFilePath
+                VMAFModel.TranscodedFilePath = TranscodedFilePath
+                VMAFModel.Success = False
+                VMAFModel.ErrorMessage = f"Original file does not exist: {OriginalFilePath}"
+                LoggingService.LogError(f"Original file does not exist: {OriginalFilePath}", 'CreateVMAFComparison', 'FFmpegComparisonService')
+                return VMAFModel
+            
+            if not os.path.exists(TranscodedFilePath):
+                VMAFModel = FFmpegVMAFComparisonModel()
+                VMAFModel.OriginalFilePath = OriginalFilePath
+                VMAFModel.TranscodedFilePath = TranscodedFilePath
+                VMAFModel.Success = False
+                VMAFModel.ErrorMessage = f"Transcoded file does not exist: {TranscodedFilePath}"
+                LoggingService.LogError(f"Transcoded file does not exist: {TranscodedFilePath}", 'CreateVMAFComparison', 'FFmpegComparisonService')
+                return VMAFModel
+            
             # Create VMAF comparison model
             VMAFModel = FFmpegVMAFComparisonModel()
             VMAFModel.OriginalFilePath = OriginalFilePath
@@ -234,13 +253,14 @@ class FFmpegComparisonService:
             
             # VMAF model path not needed for basic VMAF comparison
             
-            # Build FFmpeg filter for VMAF comparison (output score to stderr only)
-            FilterComplex = f"[0:v]scale={QualityWidth}x{QualityHeight}[dist];[1:v]scale={QualityWidth}x{QualityHeight}[ref];[dist][ref]libvmaf"
+            # Build FFmpeg filter for VMAF comparison
+            # VMAF expects reference first, then distorted
+            FilterComplex = f"[0:v]scale={QualityWidth}x{QualityHeight}[ref];[1:v]scale={QualityWidth}x{QualityHeight}[dist];[ref][dist]libvmaf"
             
             # Build FFmpeg arguments (ExecuteFFmpegCommand will add -progress pipe:2 automatically if callback provided)
             Arguments = [
-                '-i', TranscodedFilePath,    # First input (transcoded file)
-                '-i', OriginalFilePath,      # Second input (original file)
+                '-i', OriginalFilePath,      # First input (reference/original file)
+                '-i', TranscodedFilePath,    # Second input (distorted/transcoded file)
                 '-lavfi', FilterComplex,     # Use lavfi instead of filter_complex
                 '-f', 'null',                # Null output format
                 '-'                          # Output to stdout
@@ -259,7 +279,9 @@ class FFmpegComparisonService:
                     LoggingService.LogException("Exception in VMAF progress callback", e, 'CreateVMAFComparison', 'FFmpegComparisonService')
             
             # Execute FFmpeg command with progress monitoring (VMAF score will be extracted from output)
+            LoggingService.LogInfo(f"About to execute FFmpeg command with {len(Arguments)} arguments", 'CreateVMAFComparison', 'FFmpegComparisonService')
             Result = self.FFmpegService.ExecuteFFmpegCommand(Arguments, vmaf_progress_callback)
+            LoggingService.LogInfo(f"FFmpeg command result: Success={Result.get('Success', False)}, ReturnCode={Result.get('ReturnCode', 'Unknown')}", 'CreateVMAFComparison', 'FFmpegComparisonService')
             
             if Result['Success']:
                 # Extract VMAF score from FFmpeg output

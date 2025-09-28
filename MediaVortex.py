@@ -1,19 +1,57 @@
-# Disable Python bytecode caching for critical modules to prevent schema change issues
+# Disable Python bytecode caching completely to prevent stale code issues
 import sys
 import os
+import shutil
+
+# Disable bytecode generation completely
+sys.dont_write_bytecode = True
 sys.dont_write_bytecode = True
 
-# Clear existing cache for critical modules to ensure fresh code execution
-import shutil
-critical_modules = ['Repositories', 'Models', 'Services']
-for module in critical_modules:
-    cache_dir = f"{module}/__pycache__"
-    if os.path.exists(cache_dir):
+# Clear ALL existing cache directories to ensure fresh code execution
+CacheDirsToClear = [
+    '__pycache__',
+    'Repositories/__pycache__',
+    'Models/__pycache__', 
+    'Services/__pycache__',
+    'Controllers/__pycache__',
+    'ViewModels/__pycache__',
+    'Scripts/__pycache__',
+    'Tests/__pycache__',
+    'Tests/Contract/__pycache__',
+    'Tests/CursorTests/__pycache__',
+    'Tests/Integration/__pycache__'
+]
+
+print("=== DISABLING PYTHON CACHING ===")
+for CacheDir in CacheDirsToClear:
+    if os.path.exists(CacheDir):
         try:
-            shutil.rmtree(cache_dir)
-            print(f"Cleared cache for {module}")
+            shutil.rmtree(CacheDir)
+            print(f"✅ Cleared cache: {CacheDir}")
         except Exception as e:
-            print(f"Warning: Could not clear cache for {module}: {e}")
+            print(f"⚠️  Warning: Could not clear cache for {CacheDir}: {e}")
+
+# Force reload of critical modules by clearing from sys.modules
+CriticalModules = [
+    'Repositories.DatabaseManager',
+    'Models.QualityTestingQueueModel', 
+    'Models.QualityTestProgressModel',
+    'Models.QualityTestResultModel',
+    'ViewModels.QualityTestingViewModel',
+    'Controllers.QualityTestingController',
+    'Services.QualityTestingOrchestratorService'
+]
+
+for Module in CriticalModules:
+    if Module in sys.modules:
+        del sys.modules[Module]
+        print(f"✅ Cleared module from cache: {Module}")
+
+print("=== CACHING DISABLED - FRESH CODE WILL BE LOADED ===")
+
+# Set development mode to disable all caching
+os.environ['FLASK_ENV'] = 'development'
+os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 
 from flask import Flask, render_template, jsonify
 from flask_cors import CORS
@@ -22,7 +60,7 @@ from Controllers.FileScanningController import FileScanningController
 from Controllers.SystemSettingsController import SystemSettingsController
 from Controllers.TranscodeQueueController import TranscodeQueueBlueprint
 from Controllers.TranscodeJobController import TranscodeJobBlueprint
-from Controllers.VMAFJobController import VMAFJobBlueprint
+from Controllers.QualityTestingController import QualityTestingBlueprint
 from Controllers.FileReplacementController import FileReplacementController
 from Controllers.ServiceStatusController import ServiceStatusBlueprint
 
@@ -87,7 +125,7 @@ class MediaVortexApp:
         self.App.register_blueprint(self.FileReplacementController.Blueprint)
         self.App.register_blueprint(TranscodeQueueBlueprint)
         self.App.register_blueprint(TranscodeJobBlueprint)
-        self.App.register_blueprint(VMAFJobBlueprint)
+        self.App.register_blueprint(QualityTestingBlueprint)
         self.App.register_blueprint(ServiceStatusBlueprint, url_prefix='/api')
     
     def Run(self, host='0.0.0.0', port=5000, debug=False):

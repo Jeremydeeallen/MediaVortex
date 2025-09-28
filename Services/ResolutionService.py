@@ -9,6 +9,8 @@ class ResolutionService:
         """Initialize the ResolutionService."""
         self.StandardResolutions = ['480p', '720p', '1080p', '2160p']
         self.StandardHeights = [480, 720, 1080, 2160]
+        # Cache for standardized resolutions to avoid repeated processing
+        self.ResolutionCache = {}
     
     def StandardizeResolution(self, Resolution: str) -> str:
         """
@@ -21,27 +23,40 @@ class ResolutionService:
             Standardized resolution string (e.g., '1080p', '720p', '480p')
         """
         try:
-            LoggingService.LogFunctionEntry("StandardizeResolution", "ResolutionService", Resolution)
+            # Check cache first to avoid repeated processing
+            if Resolution in self.ResolutionCache:
+                return self.ResolutionCache[Resolution]
+            
+            # Only log function entry for non-standard resolutions to reduce log flooding
+            if not self.IsExactMatch(Resolution):
+                LoggingService.LogFunctionEntry("StandardizeResolution", "ResolutionService", Resolution)
             
             if not Resolution or Resolution.strip() == '':
                 LoggingService.LogWarning("Empty resolution provided, defaulting to 480p", "ResolutionService", "StandardizeResolution")
-                return "480p"
+                result = "480p"
+                self.ResolutionCache[Resolution] = result
+                return result
             
             # Check if already in standard format
             if self.IsExactMatch(Resolution):
-                LoggingService.LogInfo(f"Resolution {Resolution} is already standard", "ResolutionService", "StandardizeResolution")
+                # Remove INFO log for standard resolutions to reduce flooding
+                self.ResolutionCache[Resolution] = Resolution
                 return Resolution
             
             # Parse pixel dimensions
             Width, Height = self.ParseResolution(Resolution)
             if Width is None or Height is None:
                 LoggingService.LogWarning(f"Could not parse resolution {Resolution}, defaulting to 480p", "ResolutionService", "StandardizeResolution")
-                return "480p"
+                result = "480p"
+                self.ResolutionCache[Resolution] = result
+                return result
             
             # Check if ultra-wide or VR (skip these)
             if self.IsUltraWideOrVR(Width, Height):
                 LoggingService.LogInfo(f"Resolution {Resolution} ({Width}x{Height}) is ultra-wide/VR, skipping standardization", "ResolutionService", "StandardizeResolution")
-                return "SKIP"
+                result = "SKIP"
+                self.ResolutionCache[Resolution] = result
+                return result
             
             # Get standard height (round down)
             StandardHeight = self.GetStandardHeight(Height)
@@ -55,6 +70,8 @@ class ResolutionService:
             LoggingService.LogInfo(f"Standardized {Resolution} ({Width}x{Height}) to {StandardResolution} ({StandardWidth}x{StandardHeight})", 
                                  "ResolutionService", "StandardizeResolution")
             
+            # Cache the result
+            self.ResolutionCache[Resolution] = StandardResolution
             return StandardResolution
             
         except Exception as e:
@@ -254,7 +271,13 @@ class ResolutionService:
             # Find matching threshold using standardized resolution
             MatchingThresholds = []
             for Threshold in ProfileThresholds:
-                ThresholdResolutionStandard = self.StandardizeResolution(Threshold.Resolution or "")
+                # Use cached result if available, otherwise standardize
+                ThresholdResolution = Threshold.Resolution or ""
+                if ThresholdResolution in self.ResolutionCache:
+                    ThresholdResolutionStandard = self.ResolutionCache[ThresholdResolution]
+                else:
+                    ThresholdResolutionStandard = self.StandardizeResolution(ThresholdResolution)
+                
                 if ThresholdResolutionStandard == StandardizedResolution:
                     MatchingThresholds.append(Threshold)
                     LoggingService.LogInfo(f"Found resolution match: {Threshold.Resolution} -> {ThresholdResolutionStandard}", 

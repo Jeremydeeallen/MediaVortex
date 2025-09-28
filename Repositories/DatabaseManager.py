@@ -10,8 +10,11 @@ from Models.FileScanResultModel import FileScanResultModel
 from Models.TranscodeQueueModel import TranscodeQueueModel
 from Models.TranscodeAttemptModel import TranscodeAttemptModel
 from Models.TranscodeFileModel import TranscodeFileModel
-from Models.VMAFQueueModel import VMAFQueueModel
-from Models.VMAFProgressModel import VMAFProgressModel
+# VMAF models removed - using QualityTesting models instead
+from Models.QualityTestingQueueModel import QualityTestingQueueModel
+from Models.QualityTestProgressModel import QualityTestProgressModel
+from Models.QualityTestingStrategyModel import QualityTestingStrategyModel
+from Models.QualityTestResultModel import QualityTestResultModel
 from Services.DatabaseService import DatabaseService
 from Services.LoggingService import LoggingService
 
@@ -1909,6 +1912,21 @@ class DatabaseManager:
             LoggingService.LogException("Exception getting current transcode progress", e, "DatabaseManager", "GetCurrentTranscodeProgress")
             return None
     
+    def DeleteTranscodeProgress(self, TranscodeAttemptId: int) -> bool:
+        """Delete all progress records for a specific transcoding attempt."""
+        try:
+            LoggingService.LogFunctionEntry("DeleteTranscodeProgress", "DatabaseManager", TranscodeAttemptId)
+            
+            query = "DELETE FROM TranscodeProgress WHERE TranscodeAttemptId = ?"
+            rowsAffected = self.DatabaseService.ExecuteNonQuery(query, (TranscodeAttemptId,))
+            
+            LoggingService.LogInfo(f"Deleted {rowsAffected} progress records for attempt {TranscodeAttemptId}", "DatabaseManager", "DeleteTranscodeProgress")
+            return True
+                
+        except Exception as e:
+            LoggingService.LogException("Exception deleting transcode progress", e, "DatabaseManager", "DeleteTranscodeProgress")
+            return False
+    
     def CleanupOldProgressData(self, DaysToKeep: int = 7) -> int:
         """Clean up old progress data to keep the table manageable."""
         try:
@@ -1944,711 +1962,755 @@ class DatabaseManager:
                 LoggingService.LogWarning(f"Failed to convert date string to datetime: {DateString}", "DatabaseManager", "ConvertStringToDateTime")
                 return None
     
-    # VMAF Queue Management Methods
-    def SaveVMAFQueueItem(self, VMAFQueueItem: VMAFQueueModel) -> int:
-        """Save a VMAF queue item to the database."""
+    # Quality Testing Database Methods
+    
+    def SaveServiceStatus(self, ServiceStatus: Dict[str, Any]) -> bool:
+        """Save service status to database."""
         try:
-            LoggingService.LogFunctionEntry("SaveVMAFQueueItem", "DatabaseManager", VMAFQueueItem.Id, VMAFQueueItem.FileName)
+            LoggingService.LogFunctionEntry("SaveServiceStatus", "DatabaseManager")
             
-            if VMAFQueueItem.Id is None:
-                # Insert new VMAF queue item
+            # Check if service status already exists
+            ExistingStatus = self.GetServiceStatus(ServiceStatus.get('ServiceName', ''))
+            
+            if ExistingStatus:
+                # Update existing status
                 query = """
-                    INSERT INTO VMAFQueue (
-                        TranscodeAttemptId, OriginalFilePath, TranscodedFilePath, FileName,
-                        Status, Priority, DateAdded, DateStarted, DateCompleted,
-                        VMAFScore, QualityThreshold, ErrorMessage, RetryCount, MaxRetries
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                UPDATE ServiceStatus SET 
+                    Status = ?, HealthStatus = ?, StartTime = ?, LastHealthCheck = ?,
+                    UptimeSeconds = ?, MemoryUsage = ?, CPUUsage = ?, DatabaseConnection = ?,
+                    DiskSpace = ?, ErrorCount = ?, MaxErrors = ?, ActiveJobsCount = ?,
+                    IsProcessing = ?, ProcessId = ?, Version = ?, ServiceType = ?,
+                    UpdatedAt = CURRENT_TIMESTAMP
+                WHERE ServiceName = ?
                 """
-                Parameters = (
-                    VMAFQueueItem.TranscodeAttemptId,
-                    VMAFQueueItem.OriginalFilePath,
-                    VMAFQueueItem.TranscodedFilePath,
-                    VMAFQueueItem.FileName,
-                    VMAFQueueItem.Status,
-                    VMAFQueueItem.Priority,
-                    VMAFQueueItem.DateAdded,
-                    VMAFQueueItem.DateStarted,
-                    VMAFQueueItem.DateCompleted,
-                    VMAFQueueItem.VMAFScore,
-                    VMAFQueueItem.QualityThreshold,
-                    VMAFQueueItem.ErrorMessage,
-                    VMAFQueueItem.RetryCount,
-                    VMAFQueueItem.MaxRetries
+                parameters = (
+                    ServiceStatus.get('Status'),
+                    ServiceStatus.get('HealthStatus'),
+                    ServiceStatus.get('StartTime'),
+                    ServiceStatus.get('LastHealthCheck'),
+                    ServiceStatus.get('UptimeSeconds'),
+                    ServiceStatus.get('MemoryUsage'),
+                    ServiceStatus.get('CPUUsage'),
+                    ServiceStatus.get('DatabaseConnection'),
+                    ServiceStatus.get('DiskSpace'),
+                    ServiceStatus.get('ErrorCount'),
+                    ServiceStatus.get('MaxErrors'),
+                    ServiceStatus.get('ActiveJobsCount'),
+                    ServiceStatus.get('IsProcessing'),
+                    ServiceStatus.get('ProcessId'),
+                    ServiceStatus.get('Version'),
+                    ServiceStatus.get('ServiceType'),
+                    ServiceStatus.get('ServiceName')
                 )
+            else:
+                # Insert new status
+                query = """
+                INSERT INTO ServiceStatus (
+                    ServiceName, Status, HealthStatus, StartTime, LastHealthCheck,
+                    UptimeSeconds, MemoryUsage, CPUUsage, DatabaseConnection, DiskSpace,
+                    ErrorCount, MaxErrors, ActiveJobsCount, IsProcessing, ProcessId,
+                    Version, ServiceType, CreatedAt, UpdatedAt
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                """
+                parameters = (
+                    ServiceStatus.get('ServiceName'),
+                    ServiceStatus.get('Status'),
+                    ServiceStatus.get('HealthStatus'),
+                    ServiceStatus.get('StartTime'),
+                    ServiceStatus.get('LastHealthCheck'),
+                    ServiceStatus.get('UptimeSeconds'),
+                    ServiceStatus.get('MemoryUsage'),
+                    ServiceStatus.get('CPUUsage'),
+                    ServiceStatus.get('DatabaseConnection'),
+                    ServiceStatus.get('DiskSpace'),
+                    ServiceStatus.get('ErrorCount'),
+                    ServiceStatus.get('MaxErrors'),
+                    ServiceStatus.get('ActiveJobsCount'),
+                    ServiceStatus.get('IsProcessing'),
+                    ServiceStatus.get('ProcessId'),
+                    ServiceStatus.get('Version'),
+                    ServiceStatus.get('ServiceType')
+                )
+            
+            self.DatabaseService.ExecuteQuery(query, parameters)
+            LoggingService.LogInfo(f"Service status saved for {ServiceStatus.get('ServiceName')}", "DatabaseManager", "SaveServiceStatus")
+            return True
+            
+        except Exception as e:
+            LoggingService.LogException("Exception saving service status", e, "DatabaseManager", "SaveServiceStatus")
+            return False
+    
+    def UpdateServiceStatus(self, ServiceName: str, StatusData: Dict[str, Any]) -> bool:
+        """Update service status in database."""
+        try:
+            LoggingService.LogFunctionEntry("UpdateServiceStatus", "DatabaseManager", ServiceName)
+            
+            # Build dynamic update query
+            UpdateFields = []
+            Parameters = []
+            
+            for key, value in StatusData.items():
+                UpdateFields.append(f"{key} = ?")
+                Parameters.append(value)
+            
+            if not UpdateFields:
+                LoggingService.LogWarning("No fields to update", "DatabaseManager", "UpdateServiceStatus")
+                return False
+            
+            Parameters.append(ServiceName)
+            query = f"UPDATE ServiceStatus SET {', '.join(UpdateFields)}, UpdatedAt = CURRENT_TIMESTAMP WHERE ServiceName = ?"
+            
+            self.DatabaseService.ExecuteQuery(query, Parameters)
+            LoggingService.LogInfo(f"Service status updated for {ServiceName}", "DatabaseManager", "UpdateServiceStatus")
+            return True
+            
+        except Exception as e:
+            LoggingService.LogException("Exception updating service status", e, "DatabaseManager", "UpdateServiceStatus")
+            return False
+    
+    def GetServiceStatus(self, ServiceName: str) -> Optional[Dict[str, Any]]:
+        """Get current service status."""
+        try:
+            LoggingService.LogFunctionEntry("GetServiceStatus", "DatabaseManager", ServiceName)
+            
+            query = "SELECT * FROM ServiceStatus WHERE ServiceName = ?"
+            rows = self.DatabaseService.ExecuteQuery(query, (ServiceName,))
+            
+            if rows:
+                LoggingService.LogInfo(f"Retrieved service status for {ServiceName}", "DatabaseManager", "GetServiceStatus")
+                return rows[0]
+            else:
+                LoggingService.LogInfo(f"No service status found for {ServiceName}", "DatabaseManager", "GetServiceStatus")
+                return None
                 
+        except Exception as e:
+            LoggingService.LogException("Exception getting service status", e, "DatabaseManager", "GetServiceStatus")
+            return None
+    
+    def GetNextPendingQualityTest(self) -> Optional[QualityTestingQueueModel]:
+        """Get next pending quality test from queue."""
+        try:
+            LoggingService.LogFunctionEntry("GetNextPendingQualityTest", "DatabaseManager")
+            
+            query = """
+            SELECT * FROM QualityTestingQueue 
+            WHERE Status = 'Pending' 
+            ORDER BY Priority DESC, DateAdded ASC 
+            LIMIT 1
+            """
+            rows = self.DatabaseService.ExecuteQuery(query)
+            
+            if rows:
+                row = rows[0]
+                QueueItem = QualityTestingQueueModel()
+                QueueItem.Id = row['Id']
+                QueueItem.TranscodeAttemptId = row['TranscodeAttemptId']
+                QueueItem.OriginalFilePath = row['OriginalFilePath']
+                QueueItem.TranscodedFilePath = row['TranscodedFilePath']
+                QueueItem.FileName = row['FileName']
+                QueueItem.Status = row['Status']
+                QueueItem.Priority = row['Priority']
+                QueueItem.DateAdded = row['DateAdded']
+                QueueItem.DateStarted = row['DateStarted']
+                QueueItem.DateCompleted = row['DateCompleted']
+                QueueItem.QualityThreshold = row['QualityThreshold']
+                QueueItem.StrategyType = row['StrategyType']
+                QueueItem.VMAFScore = row['VMAFScore']
+                QueueItem.Results = row['Results']
+                QueueItem.RetryCount = row['RetryCount']
+                QueueItem.MaxRetries = row['MaxRetries']
+                QueueItem.ErrorMessage = row['ErrorMessage']
+                
+                LoggingService.LogInfo(f"Retrieved pending quality test {QueueItem.Id}", "DatabaseManager", "GetNextPendingQualityTest")
+                return QueueItem
+            else:
+                LoggingService.LogInfo("No pending quality tests found", "DatabaseManager", "GetNextPendingQualityTest")
+                return None
+                
+        except Exception as e:
+            LoggingService.LogException("Exception getting next pending quality test", e, "DatabaseManager", "GetNextPendingQualityTest")
+            return None
+    
+    def SaveQualityTestingQueueItem(self, QueueItem: QualityTestingQueueModel) -> int:
+        """Save quality testing queue item to database."""
+        try:
+            LoggingService.LogFunctionEntry("SaveQualityTestingQueueItem", "DatabaseManager", QueueItem.Id)
+            
+            if QueueItem.Id and QueueItem.Id > 0:
+                # Update existing item
+                query = """
+                UPDATE QualityTestingQueue SET 
+                    TranscodeAttemptId = ?, OriginalFilePath = ?, TranscodedFilePath = ?,
+                    FileName = ?, Status = ?, Priority = ?, DateAdded = ?, DateStarted = ?,
+                    DateCompleted = ?, QualityThreshold = ?, StrategyType = ?, VMAFScore = ?,
+                    Results = ?, RetryCount = ?, MaxRetries = ?, ErrorMessage = ?
+                WHERE Id = ?
+                """
+                parameters = (
+                    QueueItem.TranscodeAttemptId, QueueItem.OriginalFilePath, QueueItem.TranscodedFilePath,
+                    QueueItem.FileName, QueueItem.Status, QueueItem.Priority, QueueItem.DateAdded,
+                    QueueItem.DateStarted, QueueItem.DateCompleted, QueueItem.QualityThreshold,
+                    QueueItem.StrategyType, QueueItem.VMAFScore, QueueItem.Results,
+                    QueueItem.RetryCount, QueueItem.MaxRetries, QueueItem.ErrorMessage, QueueItem.Id
+                )
+                self.DatabaseService.ExecuteNonQuery(query, parameters)
+                LoggingService.LogInfo(f"Updated quality testing queue item {QueueItem.Id}", "DatabaseManager", "SaveQualityTestingQueueItem")
+                return QueueItem.Id
+            else:
+                # Insert new item
+                query = """
+                INSERT INTO QualityTestingQueue (
+                    TranscodeAttemptId, OriginalFilePath, TranscodedFilePath, FileName,
+                    Status, Priority, DateAdded, DateStarted, DateCompleted,
+                    QualityThreshold, StrategyType, VMAFScore, Results,
+                    RetryCount, MaxRetries, ErrorMessage
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """
+                parameters = (
+                    QueueItem.TranscodeAttemptId, QueueItem.OriginalFilePath, QueueItem.TranscodedFilePath,
+                    QueueItem.FileName, QueueItem.Status, QueueItem.Priority, QueueItem.DateAdded,
+                    QueueItem.DateStarted, QueueItem.DateCompleted, QueueItem.QualityThreshold,
+                    QueueItem.StrategyType, QueueItem.VMAFScore, QueueItem.Results,
+                    QueueItem.RetryCount, QueueItem.MaxRetries, QueueItem.ErrorMessage
+                )
+                # Execute the insert and get the last row ID
                 connection = self.DatabaseService.GetConnection()
                 try:
                     cursor = connection.cursor()
-                    cursor.execute(query, Parameters)
+                    cursor.execute(query, parameters)
                     connection.commit()
-                    VMAFQueueId = cursor.lastrowid
+                    QueueId = cursor.lastrowid
+                    QueueItem.Id = QueueId
                 finally:
                     connection.close()
-                LoggingService.LogInfo(f"Created new VMAF queue item with ID: {VMAFQueueId}", "DatabaseManager", "SaveVMAFQueueItem")
-                return VMAFQueueId
-            else:
-                # Update existing VMAF queue item
-                query = """
-                    UPDATE VMAFQueue SET
-                        TranscodeAttemptId = ?, OriginalFilePath = ?, TranscodedFilePath = ?, FileName = ?,
-                        Status = ?, Priority = ?, DateAdded = ?, DateStarted = ?, DateCompleted = ?,
-                        VMAFScore = ?, QualityThreshold = ?, ErrorMessage = ?, RetryCount = ?, MaxRetries = ?
-                    WHERE Id = ?
-                """
-                Parameters = (
-                    VMAFQueueItem.TranscodeAttemptId,
-                    VMAFQueueItem.OriginalFilePath,
-                    VMAFQueueItem.TranscodedFilePath,
-                    VMAFQueueItem.FileName,
-                    VMAFQueueItem.Status,
-                    VMAFQueueItem.Priority,
-                    VMAFQueueItem.DateAdded,
-                    VMAFQueueItem.DateStarted,
-                    VMAFQueueItem.DateCompleted,
-                    VMAFQueueItem.VMAFScore,
-                    VMAFQueueItem.QualityThreshold,
-                    VMAFQueueItem.ErrorMessage,
-                    VMAFQueueItem.RetryCount,
-                    VMAFQueueItem.MaxRetries,
-                    VMAFQueueItem.Id
-                )
-                
-                self.DatabaseService.ExecuteNonQuery(query, Parameters)
-                LoggingService.LogInfo(f"Updated VMAF queue item with ID: {VMAFQueueItem.Id}", "DatabaseManager", "SaveVMAFQueueItem")
-                return VMAFQueueItem.Id
+                LoggingService.LogInfo(f"Created quality testing queue item {QueueId}", "DatabaseManager", "SaveQualityTestingQueueItem")
+                return QueueId
                 
         except Exception as e:
-            LoggingService.LogException("Exception saving VMAF queue item", e, "DatabaseManager", "SaveVMAFQueueItem")
+            LoggingService.LogException("Exception saving quality testing queue item", e, "DatabaseManager", "SaveQualityTestingQueueItem")
             return 0
     
-    def GetVMAFQueueItemById(self, VMAFQueueId: int) -> Optional[VMAFQueueModel]:
-        """Get a VMAF queue item by ID."""
+    def GetRunningQualityTestingJobsCount(self) -> int:
+        """Get count of currently running quality testing jobs."""
         try:
-            LoggingService.LogFunctionEntry("GetVMAFQueueItemById", "DatabaseManager", VMAFQueueId)
+            LoggingService.LogFunctionEntry("GetRunningQualityTestingJobsCount", "DatabaseManager")
             
-            query = """
-                SELECT Id, TranscodeAttemptId, OriginalFilePath, TranscodedFilePath, FileName,
-                       Status, Priority, DateAdded, DateStarted, DateCompleted,
-                       VMAFScore, QualityThreshold, ErrorMessage, RetryCount, MaxRetries
-                FROM VMAFQueue WHERE Id = ?
-            """
+            query = "SELECT COUNT(*) as Count FROM QualityTestingQueue WHERE Status = 'Running'"
+            rows = self.DatabaseService.ExecuteQuery(query)
             
-            Rows = self.DatabaseService.ExecuteQuery(query, (VMAFQueueId,))
-            
-            if not Rows:
-                return None
-            
-            Row = Rows[0]
-            VMAFQueueItem = VMAFQueueModel()
-            VMAFQueueItem.Id = Row['Id']
-            VMAFQueueItem.TranscodeAttemptId = Row['TranscodeAttemptId']
-            VMAFQueueItem.OriginalFilePath = Row['OriginalFilePath']
-            VMAFQueueItem.TranscodedFilePath = Row['TranscodedFilePath']
-            VMAFQueueItem.FileName = Row['FileName']
-            VMAFQueueItem.Status = Row['Status']
-            VMAFQueueItem.Priority = Row['Priority']
-            VMAFQueueItem.DateAdded = Row['DateAdded']
-            VMAFQueueItem.DateStarted = Row['DateStarted']
-            VMAFQueueItem.DateCompleted = Row['DateCompleted']
-            VMAFQueueItem.VMAFScore = Row['VMAFScore']
-            VMAFQueueItem.QualityThreshold = Row['QualityThreshold']
-            VMAFQueueItem.ErrorMessage = Row['ErrorMessage']
-            VMAFQueueItem.RetryCount = Row['RetryCount']
-            VMAFQueueItem.MaxRetries = Row['MaxRetries']
-            
-            return VMAFQueueItem
-            
-        except Exception as e:
-            LoggingService.LogException("Exception getting VMAF queue item by ID", e, "DatabaseManager", "GetVMAFQueueItemById")
-            return None
-    
-    def GetAllVMAFQueueItems(self) -> List[VMAFQueueModel]:
-        """Get all VMAF queue items."""
-        try:
-            LoggingService.LogFunctionEntry("GetAllVMAFQueueItems", "DatabaseManager")
-            
-            query = """
-                SELECT Id, TranscodeAttemptId, OriginalFilePath, TranscodedFilePath, FileName,
-                       Status, Priority, DateAdded, DateStarted, DateCompleted,
-                       VMAFScore, QualityThreshold, ErrorMessage, RetryCount, MaxRetries
-                FROM VMAFQueue ORDER BY Priority DESC, DateAdded ASC
-            """
-            
-            Rows = self.DatabaseService.ExecuteQuery(query)
-            VMAFQueueItems = []
-            
-            for Row in Rows:
-                VMAFQueueItem = VMAFQueueModel()
-                VMAFQueueItem.Id = Row['Id']
-                VMAFQueueItem.TranscodeAttemptId = Row['TranscodeAttemptId']
-                VMAFQueueItem.OriginalFilePath = Row['OriginalFilePath']
-                VMAFQueueItem.TranscodedFilePath = Row['TranscodedFilePath']
-                VMAFQueueItem.FileName = Row['FileName']
-                VMAFQueueItem.Status = Row['Status']
-                VMAFQueueItem.Priority = Row['Priority']
-                VMAFQueueItem.DateAdded = Row['DateAdded']
-                VMAFQueueItem.DateStarted = Row['DateStarted']
-                VMAFQueueItem.DateCompleted = Row['DateCompleted']
-                VMAFQueueItem.VMAFScore = Row['VMAFScore']
-                VMAFQueueItem.QualityThreshold = Row['QualityThreshold']
-                VMAFQueueItem.ErrorMessage = Row['ErrorMessage']
-                VMAFQueueItem.RetryCount = Row['RetryCount']
-                VMAFQueueItem.MaxRetries = Row['MaxRetries']
-                VMAFQueueItems.append(VMAFQueueItem)
-            
-            LoggingService.LogInfo(f"Retrieved {len(VMAFQueueItems)} VMAF queue items", "DatabaseManager", "GetAllVMAFQueueItems")
-            return VMAFQueueItems
-            
-        except Exception as e:
-            LoggingService.LogException("Exception getting all VMAF queue items", e, "DatabaseManager", "GetAllVMAFQueueItems")
-            return []
-    
-    def GetVMAFQueueItemsByStatus(self, Status: str) -> List[VMAFQueueModel]:
-        """Get VMAF queue items by status."""
-        try:
-            LoggingService.LogFunctionEntry("GetVMAFQueueItemsByStatus", "DatabaseManager", Status)
-            
-            query = """
-                SELECT Id, TranscodeAttemptId, OriginalFilePath, TranscodedFilePath, FileName,
-                       Status, Priority, DateAdded, DateStarted, DateCompleted,
-                       VMAFScore, QualityThreshold, ErrorMessage, RetryCount, MaxRetries
-                FROM VMAFQueue WHERE Status = ? ORDER BY Priority DESC, DateAdded ASC
-            """
-            
-            Rows = self.DatabaseService.ExecuteQuery(query, (Status,))
-            VMAFQueueItems = []
-            
-            for Row in Rows:
-                VMAFQueueItem = VMAFQueueModel()
-                VMAFQueueItem.Id = Row['Id']
-                VMAFQueueItem.TranscodeAttemptId = Row['TranscodeAttemptId']
-                VMAFQueueItem.OriginalFilePath = Row['OriginalFilePath']
-                VMAFQueueItem.TranscodedFilePath = Row['TranscodedFilePath']
-                VMAFQueueItem.FileName = Row['FileName']
-                VMAFQueueItem.Status = Row['Status']
-                VMAFQueueItem.Priority = Row['Priority']
-                VMAFQueueItem.DateAdded = Row['DateAdded']
-                VMAFQueueItem.DateStarted = Row['DateStarted']
-                VMAFQueueItem.DateCompleted = Row['DateCompleted']
-                VMAFQueueItem.VMAFScore = Row['VMAFScore']
-                VMAFQueueItem.QualityThreshold = Row['QualityThreshold']
-                VMAFQueueItem.ErrorMessage = Row['ErrorMessage']
-                VMAFQueueItem.RetryCount = Row['RetryCount']
-                VMAFQueueItem.MaxRetries = Row['MaxRetries']
-                VMAFQueueItems.append(VMAFQueueItem)
-            
-            LoggingService.LogInfo(f"Retrieved {len(VMAFQueueItems)} VMAF queue items with status: {Status}", "DatabaseManager", "GetVMAFQueueItemsByStatus")
-            return VMAFQueueItems
-            
-        except Exception as e:
-            LoggingService.LogException("Exception getting VMAF queue items by status", e, "DatabaseManager", "GetVMAFQueueItemsByStatus")
-            return []
-    
-    def DeleteVMAFQueueItem(self, VMAFQueueId: int) -> bool:
-        """Delete a VMAF queue item."""
-        try:
-            LoggingService.LogFunctionEntry("DeleteVMAFQueueItem", "DatabaseManager", VMAFQueueId)
-            
-            query = "DELETE FROM VMAFQueue WHERE Id = ?"
-            self.DatabaseService.ExecuteQuery(query, (VMAFQueueId,))
-            RowsAffected = 1  # Assume success if no exception
-            
-            if RowsAffected > 0:
-                LoggingService.LogInfo(f"Deleted VMAF queue item with ID: {VMAFQueueId}", "DatabaseManager", "DeleteVMAFQueueItem")
-                return True
+            if rows:
+                count = rows[0]['Count']
+                LoggingService.LogInfo(f"Found {count} running quality testing jobs", "DatabaseManager", "GetRunningQualityTestingJobsCount")
+                return count
             else:
-                LoggingService.LogWarning(f"No VMAF queue item found with ID: {VMAFQueueId}", "DatabaseManager", "DeleteVMAFQueueItem")
-                return False
+                return 0
                 
         except Exception as e:
-            LoggingService.LogException("Exception deleting VMAF queue item", e, "DatabaseManager", "DeleteVMAFQueueItem")
-            return False
-
-    # VMAF Progress Management Methods
-    def SaveVMAFProgress(self, VMAFProgressItem: VMAFProgressModel) -> int:
-        """Save VMAF progress item to database."""
-        try:
-            LoggingService.LogFunctionEntry("SaveVMAFProgress", "DatabaseManager", VMAFProgressItem.Id, VMAFProgressItem.VMAFQueueId)
-            
-            # Check if progress record already exists for this VMAFQueueId
-            existingProgress = self.GetVMAFProgressByQueueId(VMAFProgressItem.VMAFQueueId)
-            
-            if existingProgress is None:
-                # Insert new VMAF progress item
-                query = """
-                    INSERT INTO VMAFProgress (
-                        VMAFQueueId, TranscodeAttemptId, Status, ProgressPercentage,
-                        CurrentStep, StartTime, EndTime, ETA, ErrorMessage, CreatedAt, UpdatedAt
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """
-                VMAFProgressItem.CreatedAt = datetime.now()
-                VMAFProgressItem.UpdatedAt = datetime.now()
-                
-                VMAFProgressId = self.DatabaseService.ExecuteNonQuery(query, (
-                    VMAFProgressItem.VMAFQueueId,
-                    VMAFProgressItem.TranscodeAttemptId,
-                    VMAFProgressItem.Status,
-                    VMAFProgressItem.ProgressPercentage,
-                    VMAFProgressItem.CurrentStep,
-                    VMAFProgressItem.StartTime,
-                    VMAFProgressItem.EndTime,
-                    VMAFProgressItem.ETA,
-                    VMAFProgressItem.ErrorMessage,
-                    VMAFProgressItem.CreatedAt,
-                    VMAFProgressItem.UpdatedAt
-                ))
-                
-                LoggingService.LogInfo(f"Created new VMAF progress item with ID: {VMAFProgressId}", "DatabaseManager", "SaveVMAFProgress")
-                return VMAFProgressId
-            else:
-                # Update existing VMAF progress item
-                VMAFProgressItem.Id = existingProgress.Id
-                query = """
-                    UPDATE VMAFProgress SET
-                        Status = ?, ProgressPercentage = ?, CurrentStep = ?, 
-                        StartTime = ?, EndTime = ?, ETA = ?, ErrorMessage = ?, UpdatedAt = ?
-                    WHERE Id = ?
-                """
-                VMAFProgressItem.UpdatedAt = datetime.now()
-                
-                self.DatabaseService.ExecuteNonQuery(query, (
-                    VMAFProgressItem.Status,
-                    VMAFProgressItem.ProgressPercentage,
-                    VMAFProgressItem.CurrentStep,
-                    VMAFProgressItem.StartTime,
-                    VMAFProgressItem.EndTime,
-                    VMAFProgressItem.ETA,
-                    VMAFProgressItem.ErrorMessage,
-                    VMAFProgressItem.UpdatedAt,
-                    VMAFProgressItem.Id
-                ))
-                
-                #LoggingService.LogInfo(f"Updated VMAF progress item with ID: {VMAFProgressItem.Id}", "DatabaseManager", "SaveVMAFProgress")
-                return VMAFProgressItem.Id
-                
-        except Exception as e:
-            LoggingService.LogException("Exception saving VMAF progress item", e, "DatabaseManager", "SaveVMAFProgress")
+            LoggingService.LogException("Exception getting running quality testing jobs count", e, "DatabaseManager", "GetRunningQualityTestingJobsCount")
             return 0
-
-    def GetVMAFProgressByQueueId(self, VMAFQueueId: int) -> Optional[VMAFProgressModel]:
-        """Get VMAF progress item by VMAF queue ID."""
+    
+    def GetRunningQualityTestingJobs(self) -> List[QualityTestingQueueModel]:
+        """Get all running quality testing jobs."""
         try:
-            LoggingService.LogFunctionEntry("GetVMAFProgressByQueueId", "DatabaseManager", VMAFQueueId)
+            LoggingService.LogFunctionEntry("GetRunningQualityTestingJobs", "DatabaseManager")
             
             query = """
-                SELECT Id, VMAFQueueId, TranscodeAttemptId, Status, ProgressPercentage,
-                       CurrentStep, StartTime, EndTime, ETA, ErrorMessage, CreatedAt, UpdatedAt
-                FROM VMAFProgress WHERE VMAFQueueId = ?
-                ORDER BY CreatedAt DESC LIMIT 1
+                SELECT Id, TranscodeAttemptId, OriginalFilePath, TranscodedFilePath, FileName,
+                       Status, Priority, DateAdded, DateStarted, DateCompleted, QualityThreshold,
+                       StrategyType, VMAFScore, Results, RetryCount, MaxRetries, ErrorMessage,
+                       StrategyId, AlternativeProfileIds, CustomSettings, SelectedResultId
+                FROM QualityTestingQueue 
+                WHERE Status = 'Running'
+                ORDER BY DateStarted ASC
             """
             
-            Rows = self.DatabaseService.ExecuteQuery(query, (VMAFQueueId,))
+            rows = self.DatabaseService.ExecuteQuery(query)
             
-            if not Rows:
-                return None
+            jobs = []
+            for row in rows:
+                job = QualityTestingQueueModel()
+                job.Id = row['Id']
+                job.TranscodeAttemptId = row['TranscodeAttemptId']
+                job.OriginalFilePath = row['OriginalFilePath']
+                job.TranscodedFilePath = row['TranscodedFilePath']
+                job.FileName = row['FileName']
+                job.Status = row['Status']
+                job.Priority = row['Priority']
+                job.DateAdded = row['DateAdded']
+                job.DateStarted = row['DateStarted']
+                job.DateCompleted = row['DateCompleted']
+                job.QualityThreshold = row['QualityThreshold']
+                job.StrategyType = row['StrategyType']
+                job.VMAFScore = row['VMAFScore']
+                job.Results = row['Results']
+                job.RetryCount = row['RetryCount']
+                job.MaxRetries = row['MaxRetries']
+                job.ErrorMessage = row['ErrorMessage']
+                job.StrategyId = row['StrategyId']
+                job.AlternativeProfileIds = row['AlternativeProfileIds']
+                job.CustomSettings = row['CustomSettings']
+                job.SelectedResultId = row['SelectedResultId']
+                jobs.append(job)
             
-            Row = Rows[0]
-            VMAFProgressItem = VMAFProgressModel()
-            VMAFProgressItem.Id = Row['Id']
-            VMAFProgressItem.VMAFQueueId = Row['VMAFQueueId']
-            VMAFProgressItem.TranscodeAttemptId = Row['TranscodeAttemptId']
-            VMAFProgressItem.Status = Row['Status']
-            VMAFProgressItem.ProgressPercentage = Row['ProgressPercentage']
-            VMAFProgressItem.CurrentStep = Row['CurrentStep']
-            VMAFProgressItem.StartTime = Row['StartTime']
-            VMAFProgressItem.EndTime = Row['EndTime']
-            VMAFProgressItem.ETA = Row['ETA']
-            VMAFProgressItem.ErrorMessage = Row['ErrorMessage']
-            VMAFProgressItem.CreatedAt = Row['CreatedAt']
-            VMAFProgressItem.UpdatedAt = Row['UpdatedAt']
-            
-            return VMAFProgressItem
-            
-        except Exception as e:
-            LoggingService.LogException("Exception getting VMAF progress by queue ID", e, "DatabaseManager", "GetVMAFProgressByQueueId")
-            return None
-
-    def GetVMAFProgressById(self, VMAFProgressId: int) -> Optional[VMAFProgressModel]:
-        """Get VMAF progress item by ID."""
-        try:
-            LoggingService.LogFunctionEntry("GetVMAFProgressById", "DatabaseManager", VMAFProgressId)
-            
-            query = """
-                SELECT Id, VMAFQueueId, TranscodeAttemptId, Status, ProgressPercentage,
-                       CurrentStep, StartTime, EndTime, ETA, ErrorMessage, CreatedAt, UpdatedAt
-                FROM VMAFProgress WHERE Id = ?
-            """
-            
-            Rows = self.DatabaseService.ExecuteQuery(query, (VMAFProgressId,))
-            
-            if not Rows:
-                return None
-            
-            Row = Rows[0]
-            VMAFProgressItem = VMAFProgressModel()
-            VMAFProgressItem.Id = Row['Id']
-            VMAFProgressItem.VMAFQueueId = Row['VMAFQueueId']
-            VMAFProgressItem.TranscodeAttemptId = Row['TranscodeAttemptId']
-            VMAFProgressItem.Status = Row['Status']
-            VMAFProgressItem.ProgressPercentage = Row['ProgressPercentage']
-            VMAFProgressItem.CurrentStep = Row['CurrentStep']
-            VMAFProgressItem.StartTime = Row['StartTime']
-            VMAFProgressItem.EndTime = Row['EndTime']
-            VMAFProgressItem.ETA = Row['ETA']
-            VMAFProgressItem.ErrorMessage = Row['ErrorMessage']
-            VMAFProgressItem.CreatedAt = Row['CreatedAt']
-            VMAFProgressItem.UpdatedAt = Row['UpdatedAt']
-            
-            return VMAFProgressItem
+            LoggingService.LogInfo(f"Retrieved {len(jobs)} running quality testing jobs", "DatabaseManager", "GetRunningQualityTestingJobs")
+            return jobs
             
         except Exception as e:
-            LoggingService.LogException("Exception getting VMAF progress by ID", e, "DatabaseManager", "GetVMAFProgressById")
-            return None
-
-    def GetVMAFProgressByStatus(self, Status: str) -> List[VMAFProgressModel]:
-        """Get VMAF progress items by status."""
-        try:
-            LoggingService.LogFunctionEntry("GetVMAFProgressByStatus", "DatabaseManager", Status)
-            
-            query = """
-                SELECT Id, VMAFQueueId, TranscodeAttemptId, Status, ProgressPercentage,
-                       CurrentStep, StartTime, EndTime, ETA, ErrorMessage, CreatedAt, UpdatedAt
-                FROM VMAFProgress WHERE Status = ?
-                ORDER BY StartTime ASC
-            """
-            
-            Rows = self.DatabaseService.ExecuteQuery(query, (Status,))
-            ProgressItems = []
-            
-            for Row in Rows:
-                VMAFProgressItem = VMAFProgressModel()
-                VMAFProgressItem.Id = Row['Id']
-                VMAFProgressItem.VMAFQueueId = Row['VMAFQueueId']
-                VMAFProgressItem.TranscodeAttemptId = Row['TranscodeAttemptId']
-                VMAFProgressItem.Status = Row['Status']
-                VMAFProgressItem.ProgressPercentage = Row['ProgressPercentage']
-                VMAFProgressItem.CurrentStep = Row['CurrentStep']
-                VMAFProgressItem.StartTime = Row['StartTime']
-                VMAFProgressItem.EndTime = Row['EndTime']
-                VMAFProgressItem.ETA = Row['ETA']
-                VMAFProgressItem.ErrorMessage = Row['ErrorMessage']
-                VMAFProgressItem.CreatedAt = Row['CreatedAt']
-                VMAFProgressItem.UpdatedAt = Row['UpdatedAt']
-                
-                ProgressItems.append(VMAFProgressItem)
-            
-            return ProgressItems
-            
-        except Exception as e:
-            LoggingService.LogException("Exception getting VMAF progress by status", e, "DatabaseManager", "GetVMAFProgressByStatus")
+            LoggingService.LogException("Exception getting running quality testing jobs", e, "DatabaseManager", "GetRunningQualityTestingJobs")
             return []
-
-    def DeleteVMAFProgress(self, VMAFProgressId: int) -> bool:
-        """Delete VMAF progress item by ID."""
+    
+    def GetQualityTestingQueueStatistics(self) -> Dict[str, Any]:
+        """Get quality testing queue statistics."""
         try:
-            LoggingService.LogFunctionEntry("DeleteVMAFProgress", "DatabaseManager", VMAFProgressId)
+            LoggingService.LogFunctionEntry("GetQualityTestingQueueStatistics", "DatabaseManager")
             
-            query = "DELETE FROM VMAFProgress WHERE Id = ?"
-            RowsAffected = self.DatabaseService.ExecuteNonQuery(query, (VMAFProgressId,))
+            query = """
+            SELECT 
+                Status,
+                COUNT(*) as Count
+            FROM QualityTestingQueue 
+            GROUP BY Status
+            """
+            rows = self.DatabaseService.ExecuteQuery(query)
             
-            if RowsAffected > 0:
-                LoggingService.LogInfo(f"Deleted VMAF progress item with ID: {VMAFProgressId}", "DatabaseManager", "DeleteVMAFProgress")
-                return True
+            statistics = {}
+            for row in rows:
+                statistics[row['Status']] = row['Count']
+            
+            LoggingService.LogInfo(f"Retrieved quality testing queue statistics: {statistics}", "DatabaseManager", "GetQualityTestingQueueStatistics")
+            return statistics
+            
+        except Exception as e:
+            LoggingService.LogException("Exception getting quality testing queue statistics", e, "DatabaseManager", "GetQualityTestingQueueStatistics")
+            return {}
+    
+    def GetQualityTestingStrategyForProfile(self, ProfileId: int) -> Optional[QualityTestingStrategyModel]:
+        """Get quality testing strategy for specific profile."""
+        try:
+            LoggingService.LogFunctionEntry("GetQualityTestingStrategyForProfile", "DatabaseManager", ProfileId)
+            
+            query = """
+            SELECT * FROM QualityTestingStrategies 
+            WHERE ProfileId = ? AND IsEnabled = 1
+            """
+            rows = self.DatabaseService.ExecuteQuery(query, (ProfileId,))
+            
+            if rows:
+                row = rows[0]
+                Strategy = QualityTestingStrategyModel()
+                Strategy.Id = row['Id']
+                Strategy.ProfileId = row['ProfileId']
+                Strategy.StrategyType = row['StrategyType']
+                Strategy.VMAFThreshold = row['VMAFThreshold']
+                Strategy.MaxAttempts = row['MaxAttempts']
+                Strategy.AlternativeProfileIds = row['AlternativeProfileIds']
+                Strategy.CustomSettings = row['CustomSettings']
+                Strategy.IsEnabled = bool(row['IsEnabled'])
+                Strategy.CreatedDate = row['CreatedDate']
+                Strategy.UpdatedDate = row['UpdatedDate']
+                
+                LoggingService.LogInfo(f"Retrieved quality testing strategy for profile {ProfileId}", "DatabaseManager", "GetQualityTestingStrategyForProfile")
+                return Strategy
             else:
-                LoggingService.LogWarning(f"No VMAF progress item found with ID: {VMAFProgressId}", "DatabaseManager", "DeleteVMAFProgress")
-                return False
+                LoggingService.LogInfo(f"No quality testing strategy found for profile {ProfileId}", "DatabaseManager", "GetQualityTestingStrategyForProfile")
+                return None
                 
         except Exception as e:
-            LoggingService.LogException("Exception deleting VMAF progress item", e, "DatabaseManager", "DeleteVMAFProgress")
-            return False
-
-    def GetRecentVMAFResults(self, Limit: int = 5) -> List[TranscodeAttemptModel]:
-        """Get recent transcoding attempts that have VMAF scores."""
+            LoggingService.LogException("Exception getting quality testing strategy for profile", e, "DatabaseManager", "GetQualityTestingStrategyForProfile")
+            return None
+    
+    def SaveQualityTestingStrategy(self, Strategy: QualityTestingStrategyModel) -> int:
+        """Save quality testing strategy to database."""
         try:
-            LoggingService.LogFunctionEntry("GetRecentVMAFResults", "DatabaseManager", f"Limit: {Limit}")
+            LoggingService.LogFunctionEntry("SaveQualityTestingStrategy", "DatabaseManager", Strategy.Id)
             
-            query = """
-                SELECT Id, FilePath, AttemptDate, Quality, OldSizeBytes, NewSizeBytes, Success,
-                       SizeReductionBytes, SizeReductionPercent, ErrorMessage, TranscodeDurationSeconds,
-                       FfpmpegCommand, AudioBitrateKbps, VideoBitrateKbps, ProfileName, VMAF
-                FROM TranscodeAttempts 
-                WHERE VMAF IS NOT NULL
-                ORDER BY AttemptDate DESC
-                LIMIT ?
-            """
-            rows = self.DatabaseService.ExecuteQuery(query, (Limit,))
-            
-            results = []
-            for row in rows:
-                result = TranscodeAttemptModel(
-                    Id=row['Id'],
-                    FilePath=row['FilePath'],
-                    AttemptDate=row['AttemptDate'],
-                    Quality=row['Quality'],
-                    OldSizeBytes=row['OldSizeBytes'],
-                    NewSizeBytes=row['NewSizeBytes'],
-                    Success=row['Success'],
-                    SizeReductionBytes=row['SizeReductionBytes'],
-                    SizeReductionPercent=row['SizeReductionPercent'],
-                    ErrorMessage=row['ErrorMessage'],
-                    TranscodeDurationSeconds=row['TranscodeDurationSeconds'],
-                    FfpmpegCommand=row['FfpmpegCommand'],
-                    AudioBitrateKbps=row['AudioBitrateKbps'],
-                    VideoBitrateKbps=row['VideoBitrateKbps'],
-                    ProfileName=row['ProfileName'],
-                    VMAF=row['VMAF']
+            if Strategy.Id and Strategy.Id > 0:
+                # Update existing strategy
+                query = """
+                UPDATE QualityTestingStrategies SET 
+                    ProfileId = ?, StrategyType = ?, VMAFThreshold = ?, MaxAttempts = ?,
+                    AlternativeProfileIds = ?, CustomSettings = ?, IsEnabled = ?,
+                    UpdatedDate = CURRENT_TIMESTAMP
+                WHERE Id = ?
+                """
+                parameters = (
+                    Strategy.ProfileId, Strategy.StrategyType, Strategy.VMAFThreshold,
+                    Strategy.MaxAttempts, Strategy.AlternativeProfileIds, Strategy.CustomSettings,
+                    Strategy.IsEnabled, Strategy.Id
                 )
-                results.append(result)
-            
-            LoggingService.LogInfo(f"Retrieved {len(results)} recent VMAF results", "DatabaseManager", "GetRecentVMAFResults")
-            return results
-            
+                self.DatabaseService.ExecuteQuery(query, parameters)
+                LoggingService.LogInfo(f"Updated quality testing strategy {Strategy.Id}", "DatabaseManager", "SaveQualityTestingStrategy")
+                return Strategy.Id
+            else:
+                # Insert new strategy
+                query = """
+                INSERT INTO QualityTestingStrategies (
+                    ProfileId, StrategyType, VMAFThreshold, MaxAttempts,
+                    AlternativeProfileIds, CustomSettings, IsEnabled,
+                    CreatedDate, UpdatedDate
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                """
+                parameters = (
+                    Strategy.ProfileId, Strategy.StrategyType, Strategy.VMAFThreshold,
+                    Strategy.MaxAttempts, Strategy.AlternativeProfileIds, Strategy.CustomSettings,
+                    Strategy.IsEnabled
+                )
+                cursor = self.DatabaseService.GetCursor()
+                cursor.execute(query, parameters)
+                StrategyId = cursor.lastrowid
+                Strategy.Id = StrategyId
+                LoggingService.LogInfo(f"Created quality testing strategy {StrategyId}", "DatabaseManager", "SaveQualityTestingStrategy")
+                return StrategyId
+                
         except Exception as e:
-            LoggingService.LogException("Exception getting recent VMAF results", e, "DatabaseManager", "GetRecentVMAFResults")
-            return []
-
-    def GetRecentVMAFResultsFromQueue(self, Limit: int = 5) -> List[Dict[str, Any]]:
-        """Get recent VMAF results from TranscodeAttempts with VMAF scores and duration from VMAFProgress."""
+            LoggingService.LogException("Exception saving quality testing strategy", e, "DatabaseManager", "SaveQualityTestingStrategy")
+            return 0
+    
+    def GetPendingCommandsForService(self, ServiceName: str) -> List[Dict[str, Any]]:
+        """Get pending commands for specific service."""
         try:
-            LoggingService.LogFunctionEntry("GetRecentVMAFResultsFromQueue", "DatabaseManager", f"Limit: {Limit}")
+            LoggingService.LogFunctionEntry("GetPendingCommandsForService", "DatabaseManager", ServiceName)
             
-            # Get TranscodeAttempts that have VMAF scores (completed VMAF tests)
-            # and join with VMAFProgress to get duration information
             query = """
-                SELECT 
-                    ta.Id, ta.FilePath, ta.AttemptDate, ta.Quality, ta.OldSizeBytes, ta.NewSizeBytes, 
-                    ta.Success, ta.SizeReductionBytes, ta.SizeReductionPercent, ta.ErrorMessage, 
-                    ta.TranscodeDurationSeconds, ta.FfpmpegCommand, ta.AudioBitrateKbps, 
-                    ta.VideoBitrateKbps, ta.ProfileName, ta.VMAF,
-                    vp.StartTime, vp.EndTime
-                FROM TranscodeAttempts ta
-                LEFT JOIN VMAFProgress vp ON ta.Id = vp.TranscodeAttemptId
-                WHERE ta.VMAF IS NOT NULL
-                ORDER BY ta.AttemptDate DESC
-                LIMIT ?
+            SELECT * FROM ServiceCommands 
+            WHERE TargetService = ? AND Status = 'Pending'
+            ORDER BY Priority DESC, CreatedAt ASC
             """
-            rows = self.DatabaseService.ExecuteQuery(query, (Limit,))
+            rows = self.DatabaseService.ExecuteQuery(query, (ServiceName,))
             
-            results = []
-            for row in rows:
-                # Calculate VMAF duration from VMAFProgress if available
-                duration_seconds = None
-                if row['StartTime'] and row['EndTime']:
-                    try:
-                        # Handle both datetime objects and string representations
-                        start_time = row['StartTime']
-                        end_time = row['EndTime']
-                        
-                        # If they're strings, parse them
-                        if isinstance(start_time, str):
-                            from datetime import datetime
-                            start_time = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
-                        if isinstance(end_time, str):
-                            from datetime import datetime
-                            end_time = datetime.fromisoformat(end_time.replace('Z', '+00:00'))
-                        
-                        duration_seconds = (end_time - start_time).total_seconds()
-                    except Exception as e:
-                        LoggingService.LogError(f"Error calculating VMAF duration: {e}", "DatabaseManager", "GetRecentVMAFResultsFromQueue")
-                        duration_seconds = None
-                
-                # Format duration
-                formatted_duration = "N/A"
-                if duration_seconds is not None:
-                    if duration_seconds < 60:
-                        formatted_duration = f"{duration_seconds:.1f}s"
-                    elif duration_seconds < 3600:
-                        minutes = int(duration_seconds // 60)
-                        seconds = int(duration_seconds % 60)
-                        formatted_duration = f"{minutes}m {seconds}s"
-                    else:
-                        hours = int(duration_seconds // 3600)
-                        minutes = int((duration_seconds % 3600) // 60)
-                        formatted_duration = f"{hours}h {minutes}m"
-                
-                result = {
-                    'Id': row['Id'],
-                    'FilePath': row['FilePath'],
-                    'AttemptDate': row['AttemptDate'],
-                    'Quality': row['Quality'],
-                    'OldSizeBytes': row['OldSizeBytes'],
-                    'NewSizeBytes': row['NewSizeBytes'],
-                    'Success': row['Success'],
-                    'SizeReductionBytes': row['SizeReductionBytes'],
-                    'SizeReductionPercent': row['SizeReductionPercent'],
-                    'ErrorMessage': row['ErrorMessage'],
-                    'TranscodeDurationSeconds': row['TranscodeDurationSeconds'],
-                    'FfpmpegCommand': row['FfpmpegCommand'],
-                    'AudioBitrateKbps': row['AudioBitrateKbps'],
-                    'VideoBitrateKbps': row['VideoBitrateKbps'],
-                    'ProfileName': row['ProfileName'],
-                    'VMAF': row['VMAF'],
-                    'VMAFDurationSeconds': duration_seconds,
-                    'FormattedVMAFDuration': formatted_duration
-                }
-                results.append(result)
-            
-            LoggingService.LogInfo(f"Retrieved {len(results)} recent VMAF results with duration", "DatabaseManager", "GetRecentVMAFResultsFromQueue")
-            return results
+            LoggingService.LogInfo(f"Retrieved {len(rows)} pending commands for {ServiceName}", "DatabaseManager", "GetPendingCommandsForService")
+            return rows
             
         except Exception as e:
-            LoggingService.LogException("Exception getting recent VMAF results", e, "DatabaseManager", "GetRecentVMAFResultsFromQueue")
+            LoggingService.LogException("Exception getting pending commands for service", e, "DatabaseManager", "GetPendingCommandsForService")
             return []
-
+    
     def GetCodecFlagsByCodecName(self, CodecName: str) -> Optional[Dict[str, Any]]:
-        """Get CodecFlags configuration for a specific codec."""
+        """Get codec flags by codec name."""
         try:
             LoggingService.LogFunctionEntry("GetCodecFlagsByCodecName", "DatabaseManager", CodecName)
             
             query = """
-                SELECT Id, CodecName, DisplayName, PresetType, PresetMin, PresetMax, PresetDefault,
-                       PresetOptions, FilmGrainType, FilmGrainMin, FilmGrainMax, FilmGrainDefault,
-                       TuneOptions, CreatedDate, LastModified
-                FROM CodecFlags 
-                WHERE CodecName = ?
-                LIMIT 1
+            SELECT Id, CodecName, DisplayName, PresetType, PresetMin, PresetMax, PresetDefault, 
+                   PresetOptions, FilmGrainType, FilmGrainMin, FilmGrainMax, FilmGrainDefault, 
+                   TuneOptions, CreatedDate, LastModified
+            FROM CodecFlags 
+            WHERE CodecName = ?
             """
             rows = self.DatabaseService.ExecuteQuery(query, (CodecName,))
             
-            if rows:
-                row = rows[0]
-                codecFlags = {
-                    'Id': row['Id'],
-                    'CodecName': row['CodecName'],
-                    'DisplayName': row['DisplayName'],
-                    'PresetType': row['PresetType'],
-                    'PresetMin': row['PresetMin'],
-                    'PresetMax': row['PresetMax'],
-                    'PresetDefault': row['PresetDefault'],
-                    'PresetOptions': row['PresetOptions'],
-                    'FilmGrainType': row['FilmGrainType'],
-                    'FilmGrainMin': row['FilmGrainMin'],
-                    'FilmGrainMax': row['FilmGrainMax'],
-                    'FilmGrainDefault': row['FilmGrainDefault'],
-                    'TuneOptions': row['TuneOptions'],
-                    'CreatedDate': row['CreatedDate'],
-                    'LastModified': row['LastModified']
-                }
-                LoggingService.LogInfo(f"Found CodecFlags for {CodecName}: {codecFlags}", "DatabaseManager", "GetCodecFlagsByCodecName")
-                return codecFlags
-            else:
-                LoggingService.LogWarning(f"No CodecFlags found for codec: {CodecName}", "DatabaseManager", "GetCodecFlagsByCodecName")
+            if not rows:
+                LoggingService.LogWarning(f"No codec flags found for codec: {CodecName}", "DatabaseManager", "GetCodecFlagsByCodecName")
                 return None
-                
+            
+            row = rows[0]
+            LoggingService.LogInfo(f"Retrieved codec flags for {CodecName}", "DatabaseManager", "GetCodecFlagsByCodecName")
+            return dict(row)
+            
         except Exception as e:
-            LoggingService.LogException("Exception getting CodecFlags by codec name", e, "DatabaseManager", "GetCodecFlagsByCodecName")
+            LoggingService.LogException("Exception getting codec flags by codec name", e, "DatabaseManager", "GetCodecFlagsByCodecName")
             return None
-
+    
     def GetCodecParametersByCodecFlagsId(self, CodecFlagsId: int) -> List[Dict[str, Any]]:
-        """Get all CodecParameters for a specific CodecFlags ID."""
+        """Get codec parameters by codec flags ID."""
         try:
             LoggingService.LogFunctionEntry("GetCodecParametersByCodecFlagsId", "DatabaseManager", CodecFlagsId)
             
             query = """
-                SELECT Id, CodecFlagsId, ParameterName, ParameterType, MinValue, MaxValue,
-                       DefaultValue, Description, FFmpegFlag, CreatedDate
-                FROM CodecParameters 
-                WHERE CodecFlagsId = ?
-                ORDER BY ParameterName
+            SELECT Id, CodecFlagsId, ParameterName, ParameterType, MinValue, MaxValue, 
+                   DefaultValue, Description, FFmpegFlag, CreatedDate
+            FROM CodecParameters 
+            WHERE CodecFlagsId = ?
+            ORDER BY ParameterName
             """
             rows = self.DatabaseService.ExecuteQuery(query, (CodecFlagsId,))
             
-            parameters = []
-            for row in rows:
-                parameter = {
-                    'Id': row['Id'],
-                    'CodecFlagsId': row['CodecFlagsId'],
-                    'ParameterName': row['ParameterName'],
-                    'ParameterType': row['ParameterType'],
-                    'MinValue': row['MinValue'],
-                    'MaxValue': row['MaxValue'],
-                    'DefaultValue': row['DefaultValue'],
-                    'Description': row['Description'],
-                    'FFmpegFlag': row['FFmpegFlag'],
-                    'CreatedDate': row['CreatedDate']
-                }
-                parameters.append(parameter)
-            
-            LoggingService.LogInfo(f"Found {len(parameters)} CodecParameters for CodecFlagsId {CodecFlagsId}", "DatabaseManager", "GetCodecParametersByCodecFlagsId")
-            return parameters
+            LoggingService.LogInfo(f"Retrieved {len(rows)} codec parameters for CodecFlagsId {CodecFlagsId}", "DatabaseManager", "GetCodecParametersByCodecFlagsId")
+            return [dict(row) for row in rows]
             
         except Exception as e:
-            LoggingService.LogException("Exception getting CodecParameters by CodecFlagsId", e, "DatabaseManager", "GetCodecParametersByCodecFlagsId")
+            LoggingService.LogException("Exception getting codec parameters by codec flags ID", e, "DatabaseManager", "GetCodecParametersByCodecFlagsId")
             return []
 
-    def GetAllCodecFlags(self) -> List[Dict[str, Any]]:
-        """Get all CodecFlags configurations."""
+    def CheckDatabaseConnection(self) -> bool:
+        """Check if database connection is available."""
         try:
-            LoggingService.LogFunctionEntry("GetAllCodecFlags", "DatabaseManager")
+            LoggingService.LogFunctionEntry("CheckDatabaseConnection", "DatabaseManager")
+            
+            # Test database connection with simple query
+            testResult = self.DatabaseService.ExecuteQuery("SELECT 1")
+            if testResult:
+                LoggingService.LogInfo("Database connection successful", "DatabaseManager", "CheckDatabaseConnection")
+                return True
+            else:
+                LoggingService.LogError("Database connection test failed", "DatabaseManager", "CheckDatabaseConnection")
+                return False
+                
+        except Exception as e:
+            LoggingService.LogException("Exception checking database connection", e, "DatabaseManager", "CheckDatabaseConnection")
+            return False
+    
+    # Quality Test Progress Management Methods
+    def SaveQualityTestProgress(self, VMAFQueueId: int, TranscodeAttemptId: int, Status: str, ProgressPercent: float, 
+                               CurrentPhase: str, StartTime: datetime = None, EndTime: datetime = None,
+                               ErrorMessage: str = None, StrategyType: str = None, ETA: str = None,
+                               CurrentTime: str = None, CurrentFrame: int = None, TotalFrames: int = None,
+                               ProcessingSpeed: str = None) -> int:
+        """Save quality test progress to database."""
+        try:
+            LoggingService.LogFunctionEntry("SaveQualityTestProgress", "DatabaseManager", VMAFQueueId, TranscodeAttemptId, Status, ProgressPercent, CurrentPhase)
+            
+            # Check if progress record already exists for this quality test
+            existingQuery = "SELECT Id FROM QualityTestProgress WHERE VMAFQueueId = ? AND TranscodeAttemptId = ?"
+            existingRows = self.DatabaseService.ExecuteQuery(existingQuery, (VMAFQueueId, TranscodeAttemptId))
+            
+            if existingRows:
+                # Update existing record - preserve original StartTime, only update changed fields
+                updateQuery = """
+                    UPDATE QualityTestProgress SET 
+                        Status = ?, ProgressPercentage = ?, CurrentStep = ?, 
+                        EndTime = ?, ErrorMessage = ?, 
+                        StrategyType = ?, ETA = ?, CurrentTime = ?, 
+                        CurrentFrame = ?, TotalFrames = ?, ProcessingSpeed = ?, UpdatedAt = ?
+                    WHERE VMAFQueueId = ? AND TranscodeAttemptId = ?
+                """
+                parameters = (Status, ProgressPercent, CurrentPhase, EndTime, 
+                            ErrorMessage, StrategyType, ETA, CurrentTime, 
+                            CurrentFrame, TotalFrames, ProcessingSpeed, datetime.now(), VMAFQueueId, TranscodeAttemptId)
+                
+                result = self.DatabaseService.ExecuteNonQuery(updateQuery, parameters)
+                LoggingService.LogDebug(f"Updated quality test progress for VMAFQueue {VMAFQueueId}, TranscodeAttempt {TranscodeAttemptId}: {CurrentPhase} ({ProgressPercent}%)", "DatabaseManager", "SaveQualityTestProgress")
+                return result
+            else:
+                # Insert new record
+                insertQuery = """
+                    INSERT INTO QualityTestProgress 
+                    (VMAFQueueId, TranscodeAttemptId, Status, ProgressPercentage, CurrentStep, StartTime, EndTime, 
+                     ErrorMessage, StrategyType, ETA, CurrentTime, CurrentFrame, TotalFrames, ProcessingSpeed, CreatedAt, UpdatedAt)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """
+                # Ensure StartTime is provided (required field)
+                if StartTime is None:
+                    StartTime = datetime.now()
+                
+                parameters = (VMAFQueueId, TranscodeAttemptId, Status, ProgressPercent, CurrentPhase, StartTime, EndTime,
+                            ErrorMessage, StrategyType, ETA, CurrentTime, CurrentFrame, TotalFrames, ProcessingSpeed, datetime.now(), datetime.now())
+                
+                progressId = self.DatabaseService.ExecuteNonQuery(insertQuery, parameters)
+                LoggingService.LogDebug(f"Inserted new quality test progress for VMAFQueue {VMAFQueueId}, TranscodeAttempt {TranscodeAttemptId}: {CurrentPhase} ({ProgressPercent}%)", "DatabaseManager", "SaveQualityTestProgress")
+                return progressId
+                
+        except Exception as e:
+            LoggingService.LogException("Exception saving quality test progress", e, "DatabaseManager", "SaveQualityTestProgress")
+            return 0
+    
+    def GetQualityTestProgress(self, VMAFQueueId: int, TranscodeAttemptId: int) -> Optional[Dict[str, Any]]:
+        """Get progress information for a quality test."""
+        try:
+            LoggingService.LogFunctionEntry("GetQualityTestProgress", "DatabaseManager", VMAFQueueId, TranscodeAttemptId)
             
             query = """
-                SELECT Id, CodecName, DisplayName, PresetType, PresetMin, PresetMax, PresetDefault,
-                       PresetOptions, FilmGrainType, FilmGrainMin, FilmGrainMax, FilmGrainDefault,
-                       TuneOptions, CreatedDate, LastModified
-                FROM CodecFlags 
-                ORDER BY CodecName
+                SELECT Status, ProgressPercentage, CurrentStep, StartTime, EndTime, 
+                       ErrorMessage, StrategyType, ETA, CurrentTime, CurrentFrame, 
+                       TotalFrames, ProcessingSpeed, CreatedAt, UpdatedAt
+                FROM QualityTestProgress 
+                WHERE VMAFQueueId = ? AND TranscodeAttemptId = ? 
+                ORDER BY UpdatedAt DESC 
+                LIMIT 1
             """
-            rows = self.DatabaseService.ExecuteQuery(query)
             
-            codecFlags = []
-            for row in rows:
-                codecFlag = {
-                    'Id': row['Id'],
-                    'CodecName': row['CodecName'],
-                    'DisplayName': row['DisplayName'],
-                    'PresetType': row['PresetType'],
-                    'PresetMin': row['PresetMin'],
-                    'PresetMax': row['PresetMax'],
-                    'PresetDefault': row['PresetDefault'],
-                    'PresetOptions': row['PresetOptions'],
-                    'FilmGrainType': row['FilmGrainType'],
-                    'FilmGrainMin': row['FilmGrainMin'],
-                    'FilmGrainMax': row['FilmGrainMax'],
-                    'FilmGrainDefault': row['FilmGrainDefault'],
-                    'TuneOptions': row['TuneOptions'],
-                    'CreatedDate': row['CreatedDate'],
-                    'LastModified': row['LastModified']
+            rows = self.DatabaseService.ExecuteQuery(query, (VMAFQueueId, TranscodeAttemptId))
+            
+            if rows:
+                row = rows[0]
+                progress = {
+                    'Status': row['Status'],
+                    'ProgressPercentage': row['ProgressPercentage'],
+                    'CurrentStep': row['CurrentStep'],
+                    'StartTime': row['StartTime'],
+                    'EndTime': row['EndTime'],
+                    'ErrorMessage': row['ErrorMessage'],
+                    'StrategyType': row['StrategyType'],
+                    'ETA': row['ETA'],
+                    'CurrentTime': row['CurrentTime'],
+                    'CurrentFrame': row['CurrentFrame'],
+                    'TotalFrames': row['TotalFrames'],
+                    'ProcessingSpeed': row['ProcessingSpeed'],
+                    'CreatedAt': row['CreatedAt'],
+                    'UpdatedAt': row['UpdatedAt']
                 }
-                codecFlags.append(codecFlag)
+                LoggingService.LogDebug(f"Retrieved progress for VMAFQueue {VMAFQueueId}, TranscodeAttempt {TranscodeAttemptId}: {progress['CurrentStep']} ({progress['ProgressPercentage']}%)", "DatabaseManager", "GetQualityTestProgress")
+                return progress
+            else:
+                LoggingService.LogDebug(f"No progress found for VMAFQueue {VMAFQueueId}, TranscodeAttempt {TranscodeAttemptId}", "DatabaseManager", "GetQualityTestProgress")
+                return None
+                
+        except Exception as e:
+            LoggingService.LogException("Exception getting quality test progress", e, "DatabaseManager", "GetQualityTestProgress")
+            return None
+    
+    # Quality Test Results Management Methods
+    def SaveQualityTestResult(self, VMAFQueueId: int, TranscodeAttemptId: int, VMAFScore: float, 
+                             ProfileId: int = 0, ProfileName: str = "Unknown", FileSize: int = 0,
+                             TestDuration: float = 0.0, PassesThreshold: bool = False, 
+                             Rank: int = None, ErrorMessage: str = None) -> int:
+        """Save quality test result to database."""
+        try:
+            LoggingService.LogFunctionEntry("SaveQualityTestResult", "DatabaseManager", VMAFQueueId, TranscodeAttemptId, VMAFScore)
             
-            LoggingService.LogInfo(f"Retrieved {len(codecFlags)} CodecFlags configurations", "DatabaseManager", "GetAllCodecFlags")
-            return codecFlags
+            # Use direct database connection to get the inserted row ID
+            connection = self.DatabaseService.GetConnection()
+            try:
+                cursor = connection.cursor()
+                
+                query = """
+                    INSERT INTO QualityTestResults 
+                    (VMAFQueueId, TranscodeAttemptId, VMAFScore, ProfileId, ProfileName, FileSize,
+                     TestDuration, PassesThreshold, Rank, ErrorMessage, DateTested)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """
+                parameters = (VMAFQueueId, TranscodeAttemptId, VMAFScore, ProfileId, ProfileName, FileSize,
+                             TestDuration, PassesThreshold, Rank, ErrorMessage, datetime.now())
+                
+                cursor.execute(query, parameters)
+                connection.commit()
+                resultId = cursor.lastrowid
+                
+                LoggingService.LogInfo(f"Saved quality test result for VMAFQueue {VMAFQueueId}, TranscodeAttempt {TranscodeAttemptId}: VMAF Score {VMAFScore}, Result ID: {resultId}", "DatabaseManager", "SaveQualityTestResult")
+                
+                # CRITICAL: Update the TranscodeAttempts table with the VMAF score
+                self.UpdateTranscodeAttemptVMAF(TranscodeAttemptId, VMAFScore)
+                
+                return resultId
+                
+            finally:
+                connection.close()
             
         except Exception as e:
-            LoggingService.LogException("Exception getting all CodecFlags", e, "DatabaseManager", "GetAllCodecFlags")
-            return []
+            LoggingService.LogException("Exception saving quality test result", e, "DatabaseManager", "SaveQualityTestResult")
+            return 0
     
-    def GetRecentTranscodeAttempts(self, Limit: int = 5) -> List[Dict[str, Any]]:
-        """Get recent transcoding attempts for display."""
+    def UpdateTranscodeAttemptVMAF(self, TranscodeAttemptId: int, VMAFScore: float) -> bool:
+        """Update the VMAF score in the TranscodeAttempts table."""
         try:
-            LoggingService.LogFunctionEntry("GetRecentTranscodeAttempts", "DatabaseManager", Limit)
+            LoggingService.LogFunctionEntry("UpdateTranscodeAttemptVMAF", "DatabaseManager", TranscodeAttemptId, VMAFScore)
             
             query = """
-                SELECT ta.Id, ta.FilePath, ta.AttemptDate, ta.Quality, ta.OldSizeBytes, 
-                       ta.NewSizeBytes, ta.Success, ta.SizeReductionBytes, ta.SizeReductionPercent,
-                       ta.ErrorMessage, ta.TranscodeDurationSeconds, ta.FfpmpegCommand,
-                       ta.AudioBitrateKbps, ta.VideoBitrateKbps, ta.ProfileName, ta.VMAF
-                FROM TranscodeAttempts ta
-                ORDER BY ta.AttemptDate DESC
+                UPDATE TranscodeAttempts 
+                SET VMAF = ?
+                WHERE Id = ?
+            """
+            parameters = (VMAFScore, TranscodeAttemptId)
+            
+            result = self.DatabaseService.ExecuteNonQuery(query, parameters)
+            LoggingService.LogInfo(f"Updated TranscodeAttempts.VMAF for attempt {TranscodeAttemptId} with score {VMAFScore}", "DatabaseManager", "UpdateTranscodeAttemptVMAF")
+            return result > 0
+            
+        except Exception as e:
+            LoggingService.LogException("Exception updating TranscodeAttempts VMAF", e, "DatabaseManager", "UpdateTranscodeAttemptVMAF")
+            return False
+    
+    def GetQualityTestingHistory(self, Limit: int = 50) -> List[QualityTestingQueueModel]:
+        """Get quality testing history from completed jobs."""
+        try:
+            LoggingService.LogFunctionEntry("GetQualityTestingHistory", "DatabaseManager", Limit)
+            
+            query = """
+                SELECT Id, TranscodeAttemptId, OriginalFilePath, TranscodedFilePath, FileName,
+                       Status, Priority, DateAdded, DateStarted, DateCompleted, VMAFScore,
+                       QualityThreshold, StrategyType, Results, RetryCount, MaxRetries,
+                       ErrorMessage, StrategyId, SelectedResultId, DateCreated
+                FROM QualityTestingQueue
+                WHERE Status IN ('Completed', 'Failed', 'Skipped')
+                ORDER BY DateCompleted DESC
                 LIMIT ?
             """
             
-            result = self.DatabaseService.ExecuteQuery(query, (Limit,))
+            rows = self.DatabaseService.ExecuteQuery(query, (Limit,))
+            historyItems = []
             
-            attempts = []
-            for row in result:
-                # Extract filename from file path
-                fileName = os.path.basename(row['FilePath']) if row['FilePath'] else '-'
+            for row in rows:
+                item = QualityTestingQueueModel()
+                item.Id = row[0]
+                item.TranscodeAttemptId = row[1]
+                item.OriginalFilePath = row[2]
+                item.TranscodedFilePath = row[3]
+                item.FileName = row[4]
+                item.Status = row[5]
+                item.Priority = row[6]
+                item.DateAdded = row[7]
+                item.DateStarted = row[8]
+                item.DateCompleted = row[9]
+                item.VMAFScore = row[10]
+                item.QualityThreshold = row[11]
+                item.StrategyType = row[12]
+                item.Results = row[13]
+                item.RetryCount = row[14]
+                item.MaxRetries = row[15]
+                item.ErrorMessage = row[16]
+                item.StrategyId = row[17]
+                item.SelectedResultId = row[18]
+                item.DateCreated = row[19]
                 
-                # Calculate if file was compressed (size reduction > 0)
-                isCompressed = False
-                if row['SizeReductionBytes'] and row['SizeReductionBytes'] > 0:
-                    isCompressed = True
-                
-                attempt = {
+                historyItems.append(item)
+            
+            LoggingService.LogDebug(f"Retrieved {len(historyItems)} quality testing history items", "DatabaseManager", "GetQualityTestingHistory")
+            return historyItems
+            
+        except Exception as e:
+            LoggingService.LogException("Exception getting quality testing history", e, "DatabaseManager", "GetQualityTestingHistory")
+            return []
+
+    def GetQualityTestResults(self, VMAFQueueId: int = None, TranscodeAttemptId: int = None, Limit: int = 50) -> List[Dict[str, Any]]:
+        """Get quality test results."""
+        try:
+            LoggingService.LogFunctionEntry("GetQualityTestResults", "DatabaseManager", VMAFQueueId, TranscodeAttemptId, Limit)
+            
+            if VMAFQueueId and TranscodeAttemptId:
+                query = """
+                    SELECT qtr.Id, qtr.VMAFQueueId, qtr.TranscodeAttemptId, qtr.VMAFScore, qtr.ProfileId, qtr.ProfileName,
+                           qtr.FileSize, qtr.TestDuration, qtr.PassesThreshold, qtr.Rank, qtr.ErrorMessage, qtr.DateTested,
+                           ta.FilePath, ta.AttemptDate, ta.Quality, ta.OldSizeBytes, ta.NewSizeBytes, ta.Success,
+                           ta.SizeReductionBytes, ta.SizeReductionPercent, ta.TranscodeDurationSeconds, ta.FfpmpegCommand,
+                           ta.AudioBitrateKbps, ta.VideoBitrateKbps, ta.ProfileName as TranscodeProfileName
+                    FROM QualityTestResults qtr
+                    JOIN TranscodeAttempts ta ON qtr.TranscodeAttemptId = ta.Id
+                    WHERE qtr.VMAFQueueId = ? AND qtr.TranscodeAttemptId = ?
+                    ORDER BY qtr.DateTested DESC
+                """
+                parameters = (VMAFQueueId, TranscodeAttemptId)
+            else:
+                query = """
+                    SELECT qtr.Id, qtr.VMAFQueueId, qtr.TranscodeAttemptId, qtr.VMAFScore, qtr.ProfileId, qtr.ProfileName,
+                           qtr.FileSize, qtr.TestDuration, qtr.PassesThreshold, qtr.Rank, qtr.ErrorMessage, qtr.DateTested,
+                           ta.FilePath, ta.AttemptDate, ta.Quality, ta.OldSizeBytes, ta.NewSizeBytes, ta.Success,
+                           ta.SizeReductionBytes, ta.SizeReductionPercent, ta.TranscodeDurationSeconds, ta.FfpmpegCommand,
+                           ta.AudioBitrateKbps, ta.VideoBitrateKbps, ta.ProfileName as TranscodeProfileName
+                    FROM QualityTestResults qtr
+                    JOIN TranscodeAttempts ta ON qtr.TranscodeAttemptId = ta.Id
+                    ORDER BY qtr.DateTested DESC
+                    LIMIT ?
+                """
+                parameters = (Limit,)
+            
+            rows = self.DatabaseService.ExecuteQuery(query, parameters)
+            
+            results = []
+            for row in rows:
+                result = {
                     'Id': row['Id'],
+                    'VMAFQueueId': row['VMAFQueueId'],
+                    'TranscodeAttemptId': row['TranscodeAttemptId'],
+                    'VMAFScore': row['VMAFScore'],
+                    'ProfileId': row['ProfileId'],
+                    'ProfileName': row['ProfileName'],
+                    'FileSize': row['FileSize'],
+                    'TestDuration': row['TestDuration'],
+                    'PassesThreshold': row['PassesThreshold'],
+                    'Rank': row['Rank'],
+                    'ErrorMessage': row['ErrorMessage'],
+                    'DateTested': row['DateTested'],
                     'FilePath': row['FilePath'],
-                    'FileName': fileName,  # Frontend expects this
                     'AttemptDate': row['AttemptDate'],
                     'Quality': row['Quality'],
                     'OldSizeBytes': row['OldSizeBytes'],
@@ -2656,37 +2718,113 @@ class DatabaseManager:
                     'Success': row['Success'],
                     'SizeReductionBytes': row['SizeReductionBytes'],
                     'SizeReductionPercent': row['SizeReductionPercent'],
-                    'IsCompressed': isCompressed,  # Frontend expects this
-                    'ErrorMessage': row['ErrorMessage'],
-                    'Duration': row['TranscodeDurationSeconds'],  # Frontend expects this
                     'TranscodeDurationSeconds': row['TranscodeDurationSeconds'],
                     'FfpmpegCommand': row['FfpmpegCommand'],
                     'AudioBitrateKbps': row['AudioBitrateKbps'],
                     'VideoBitrateKbps': row['VideoBitrateKbps'],
-                    'ProfileName': row['ProfileName'],
-                    'VMAF': row['VMAF']
+                    'TranscodeProfileName': row['TranscodeProfileName']
+                }
+                results.append(result)
+            
+            LoggingService.LogInfo(f"Retrieved {len(results)} quality test results", "DatabaseManager", "GetQualityTestResults")
+            return results
+            
+        except Exception as e:
+            LoggingService.LogException("Exception getting quality test results", e, "DatabaseManager", "GetQualityTestResults")
+            return []
+
+    def GetAllQualityTestingQueueItems(self) -> List[QualityTestingQueueModel]:
+        """Get all quality testing queue items."""
+        try:
+            LoggingService.LogFunctionEntry("GetAllQualityTestingQueueItems", "DatabaseManager")
+            
+            query = """
+                SELECT Id, TranscodeAttemptId, OriginalFilePath, TranscodedFilePath, FileName, 
+                       Status, Priority, DateAdded, DateStarted, DateCompleted, VMAFScore, 
+                       QualityThreshold, ErrorMessage, RetryCount, MaxRetries, StrategyType, 
+                       StrategyId, AlternativeProfileIds, CustomSettings, Results, SelectedResultId
+                FROM QualityTestingQueue
+                ORDER BY DateAdded DESC
+            """
+            
+            rows = self.DatabaseService.ExecuteQuery(query)
+            queueItems = []
+            
+            for row in rows:
+                queueItem = QualityTestingQueueModel()
+                queueItem.Id = row[0]
+                queueItem.TranscodeAttemptId = row[1]
+                queueItem.OriginalFilePath = row[2]
+                queueItem.TranscodedFilePath = row[3]
+                queueItem.FileName = row[4]
+                queueItem.Status = row[5]
+                queueItem.Priority = row[6]
+                queueItem.DateAdded = row[7]
+                queueItem.DateStarted = row[8]
+                queueItem.DateCompleted = row[9]
+                queueItem.VMAFScore = row[10]
+                queueItem.QualityThreshold = row[11]
+                queueItem.ErrorMessage = row[12]
+                queueItem.RetryCount = row[13]
+                queueItem.MaxRetries = row[14]
+                queueItem.StrategyType = row[15]
+                queueItem.StrategyId = row[16]
+                queueItem.AlternativeProfileIds = row[17]
+                queueItem.CustomSettings = row[18]
+                queueItem.Results = row[19]
+                queueItem.SelectedResultId = row[20]
+                
+                queueItems.append(queueItem)
+            
+            LoggingService.LogDebug(f"Retrieved {len(queueItems)} quality testing queue items", "DatabaseManager", "GetAllQualityTestingQueueItems")
+            return queueItems
+            
+        except Exception as e:
+            LoggingService.LogException("Exception getting all quality testing queue items", e, "DatabaseManager", "GetAllQualityTestingQueueItems")
+            return []
+
+    def GetRecentTranscodeAttempts(self, Limit: int = 20) -> List[Dict[str, Any]]:
+        """Get recent transcoding attempts."""
+        try:
+            LoggingService.LogFunctionEntry("GetRecentTranscodeAttempts", "DatabaseManager", Limit)
+            
+            query = """
+                SELECT Id, FilePath, AttemptDate, Quality, OldSizeBytes, NewSizeBytes, 
+                       Success, SizeReductionBytes, SizeReductionPercent, ErrorMessage, 
+                       TranscodeDurationSeconds, FfpmpegCommand, AudioBitrateKbps, 
+                       VideoBitrateKbps, ProfileName, VMAF
+                FROM TranscodeAttempts
+                ORDER BY AttemptDate DESC
+                LIMIT ?
+            """
+            
+            rows = self.DatabaseService.ExecuteQuery(query, (Limit,))
+            attempts = []
+            
+            for row in rows:
+                attempt = {
+                    "Id": row[0],
+                    "FilePath": row[1],
+                    "AttemptDate": row[2],
+                    "Quality": row[3],
+                    "OldSizeBytes": row[4],
+                    "NewSizeBytes": row[5],
+                    "Success": row[6],
+                    "SizeReductionBytes": row[7],
+                    "SizeReductionPercent": row[8],
+                    "ErrorMessage": row[9],
+                    "TranscodeDurationSeconds": row[10],
+                    "FfpmpegCommand": row[11],
+                    "AudioBitrateKbps": row[12],
+                    "VideoBitrateKbps": row[13],
+                    "ProfileName": row[14],
+                    "VMAF": row[15]
                 }
                 attempts.append(attempt)
             
-            LoggingService.LogInfo(f"Retrieved {len(attempts)} recent transcode attempts", "DatabaseManager", "GetRecentTranscodeAttempts")
+            LoggingService.LogDebug(f"Retrieved {len(attempts)} recent transcoding attempts", "DatabaseManager", "GetRecentTranscodeAttempts")
             return attempts
             
         except Exception as e:
-            LoggingService.LogException("Exception getting recent transcode attempts", e, "DatabaseManager", "GetRecentTranscodeAttempts")
+            LoggingService.LogException("Exception getting recent transcoding attempts", e, "DatabaseManager", "GetRecentTranscodeAttempts")
             return []
-    
-    def DeleteTranscodeProgress(self, TranscodeAttemptId: int) -> bool:
-        """Delete progress data for a completed transcoding attempt."""
-        try:
-            LoggingService.LogFunctionEntry("DeleteTranscodeProgress", "DatabaseManager", TranscodeAttemptId)
-            
-            query = "DELETE FROM TranscodeProgress WHERE TranscodeAttemptId = ?"
-            affectedRows = self.DatabaseService.ExecuteNonQuery(query, (TranscodeAttemptId,))
-            
-            LoggingService.LogInfo(f"Deleted {affectedRows} progress records for attempt {TranscodeAttemptId}", "DatabaseManager", "DeleteTranscodeProgress")
-            return affectedRows > 0
-            
-        except Exception as e:
-            LoggingService.LogException("Exception deleting transcode progress", e, "DatabaseManager", "DeleteTranscodeProgress")
-            return False
-    

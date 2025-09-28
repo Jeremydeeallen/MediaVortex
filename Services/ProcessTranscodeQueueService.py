@@ -12,7 +12,7 @@ from Repositories.DatabaseManager import DatabaseManager
 from Services.TranscodingFileManagerService import TranscodingFileManagerService
 from Services.CommandBuilderService import CommandBuilderService
 from Services.VideoTranscodingService import VideoTranscodingService
-from Services.TranscodingVMAFQueueService import TranscodingVMAFQueueService
+from Services.QualityTestingOrchestratorService import QualityTestingOrchestratorService
 from Services.LoggingService import LoggingService
 
 
@@ -23,12 +23,12 @@ class ProcessTranscodeQueueService:
                  FileManagerInstance: TranscodingFileManagerService = None,
                  CommandBuilderInstance: CommandBuilderService = None,
                  VideoTranscodingInstance: VideoTranscodingService = None,
-                 VMAFQueueInstance: TranscodingVMAFQueueService = None):
+                 QualityTestingInstance: QualityTestingOrchestratorService = None):
         self.DatabaseManager = DatabaseManagerInstance or DatabaseManager()
         self.FileManager = FileManagerInstance or TranscodingFileManagerService()
         self.CommandBuilder = CommandBuilderInstance or CommandBuilderService()
         self.VideoTranscoding = VideoTranscodingInstance or VideoTranscodingService()
-        self.VMAFQueue = VMAFQueueInstance or TranscodingVMAFQueueService()
+        self.QualityTesting = QualityTestingInstance or QualityTestingOrchestratorService()
         
         # Processing state
         self.IsProcessing = False
@@ -469,9 +469,11 @@ class ProcessTranscodeQueueService:
                 # Update TranscodeFiles record for overall file status
                 self.UpdateTranscodeFileRecord(Job.FilePath, TranscodeAttemptId, True, OutputFilePath, NewSizeBytes)
                 
-                # Add to VMAF queue for quality assessment
+                # Add to quality testing queue for quality assessment
                 # Use the calculated output file path instead of TranscodeResult.get('OutputFilePath') which returns "Success"
-                self.VMAFQueue.AddToQueue(TranscodeAttemptId, Job.FilePath, OutputFilePath)
+                # Extract filename from the output path for the FileName parameter
+                OutputFileName = os.path.basename(OutputFilePath)
+                self.QualityTesting.AddToQueue(TranscodeAttemptId, Job.FilePath, OutputFilePath, OutputFileName)
                 
                 # Delete job from queue (successful completion)
                 self.DatabaseManager.DeleteTranscodeQueueItem(Job.Id)

@@ -956,9 +956,6 @@ class FileScanningBusinessService:
                 MediaFile.CompressionPotential = MetadataResult.get('CompressionPotential')
                 MediaFile.AssignedProfile = MetadataResult.get('AssignedProfile')
                 
-                # Assign profile based on resolution if not already assigned
-                if not MediaFile.AssignedProfile or MediaFile.AssignedProfile == 'Default':
-                    self.AssignProfileBasedOnResolution(MediaFile)
                 
                 LoggingService.LogDebug(f"Successfully extracted metadata for: {FilePath}", 'ExtractAndUpdateMetadata', 'FileScanningBusinessService')
             else:
@@ -973,42 +970,6 @@ class FileScanningBusinessService:
             # Set default values on error
             MediaFile.CompressionPotential = 'Unknown'
             MediaFile.AssignedProfile = 'Default'
-    
-    def AssignProfileBasedOnResolution(self, MediaFile: MediaFileModel):
-        """Assign a profile to a media file based on its resolution."""
-        try:
-            LoggingService.LogFunctionEntry("AssignProfileBasedOnResolution", "FileScanningBusinessService", MediaFile.FileName, MediaFile.Resolution)
-            
-            if not MediaFile.Resolution:
-                LoggingService.LogWarning(f"Cannot assign profile for {MediaFile.FileName} - no resolution detected", "AssignProfileBasedOnResolution", "FileScanningBusinessService")
-                MediaFile.AssignedProfile = 'Needs Analysis'
-                return
-            
-            # Get all profile thresholds to find a matching one
-            AllThresholds = self.DatabaseManager.GetAllProfileThresholds()
-            
-            # Use ResolutionService to find matching threshold
-            from Services.ResolutionService import ResolutionService
-            resolutionService = ResolutionService()
-            matchingThreshold = resolutionService.FindMatchingThreshold(MediaFile.Resolution, AllThresholds)
-            
-            if matchingThreshold:
-                # Use the matching threshold's profile
-                Profile = self.DatabaseManager.GetProfileById(matchingThreshold.ProfileId)
-                
-                if Profile:
-                    MediaFile.AssignedProfile = Profile.ProfileName
-                    LoggingService.LogInfo(f"Assigned profile '{Profile.ProfileName}' to {MediaFile.FileName} based on resolution {MediaFile.Resolution}", "AssignProfileBasedOnResolution", "FileScanningBusinessService")
-                else:
-                    MediaFile.AssignedProfile = 'Profile Not Found'
-                    LoggingService.LogWarning(f"Profile with ID {matchingThreshold.ProfileId} not found for {MediaFile.FileName}", "AssignProfileBasedOnResolution", "FileScanningBusinessService")
-            else:
-                MediaFile.AssignedProfile = 'No Matching Profile'
-                LoggingService.LogWarning(f"No profile threshold found for resolution {MediaFile.Resolution} for {MediaFile.FileName}", "AssignProfileBasedOnResolution", "FileScanningBusinessService")
-                
-        except Exception as e:
-            LoggingService.LogException("Error assigning profile based on resolution", e, "AssignProfileBasedOnResolution", "FileScanningBusinessService")
-            MediaFile.AssignedProfile = 'Assignment Error'
     
     def ProcessMediaFilesWithMetadata(self, MediaFiles: List[str], RootFolderId: Optional[int], RootFolderPath: str = "", ExtractMetadata: bool = True):
         """Process media files with optional metadata extraction."""

@@ -1,9 +1,10 @@
-# StartTranscodeService.ps1
-# PowerShell script to start the TranscodeService microservice
+# StartQualityCompareService.ps1
+# PowerShell script to start the QualityCompareService microservice
 
 param(
     [switch]$Verbose,
-    [switch]$Background
+    [switch]$Background,
+    [switch]$Force
 )
 
 # Set error action preference
@@ -12,15 +13,15 @@ $ErrorActionPreference = "Stop"
 # Get script directory and store original location
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $OriginalLocation = Get-Location
-$TranscodeServiceDir = Join-Path $ScriptDir "TranscodeService"
-$VenvPath = Join-Path $TranscodeServiceDir "venv"
-$MainScript = Join-Path $TranscodeServiceDir "Main.py"
+$QualityCompareServiceDir = Join-Path $ScriptDir "QualityCompareService"
+$VenvPath = Join-Path $QualityCompareServiceDir "venv"
+$MainScript = Join-Path $QualityCompareServiceDir "Main.py"
 
-Write-Host "Starting TranscodeService..." -ForegroundColor Green
+Write-Host "Starting QualityCompareService..." -ForegroundColor Green
 
-# Check if TranscodeService directory exists
-if (-not (Test-Path $TranscodeServiceDir)) {
-    Write-Error "TranscodeService directory not found: $TranscodeServiceDir"
+# Check if QualityCompareService directory exists
+if (-not (Test-Path $QualityCompareServiceDir)) {
+    Write-Error "QualityCompareService directory not found: $QualityCompareServiceDir"
     exit 1
 }
 
@@ -28,7 +29,7 @@ if (-not (Test-Path $TranscodeServiceDir)) {
 if (-not (Test-Path $VenvPath)) {
     Write-Error "Virtual environment not found: $VenvPath"
     Write-Host "Please create the virtual environment first:" -ForegroundColor Yellow
-    Write-Host "  cd TranscodeService" -ForegroundColor Yellow
+    Write-Host "  cd QualityCompareService" -ForegroundColor Yellow
     Write-Host "  python -m venv venv" -ForegroundColor Yellow
     exit 1
 }
@@ -47,8 +48,8 @@ $ExistingProcess = Get-Process -Name $ProcessName -ErrorAction SilentlyContinue 
 }
 
 if ($ExistingProcess) {
-    Write-Warning "TranscodeService appears to be already running (PID: $($ExistingProcess.Id))"
-    Write-Host "Use StopTranscodeService.ps1 to stop it first, or use -Force to restart" -ForegroundColor Yellow
+    Write-Warning "QualityCompareService appears to be already running (PID: $($ExistingProcess.Id))"
+    Write-Host "Use StopQualityCompareService.ps1 to stop it first, or use -Force to restart" -ForegroundColor Yellow
     if (-not $Force) {
         exit 1
     }
@@ -68,36 +69,36 @@ if (Test-Path $ActivateScript) {
 }
 
 # Install dependencies if needed
-$RequirementsFile = Join-Path $TranscodeServiceDir "requirements.txt"
+$RequirementsFile = Join-Path $QualityCompareServiceDir "requirements.txt"
 if (Test-Path $RequirementsFile) {
     Write-Host "Installing dependencies..." -ForegroundColor Cyan
     pip install -r $RequirementsFile
 }
 
-# Change to TranscodeService directory
-Set-Location $TranscodeServiceDir
+# Change to QualityCompareService directory
+Set-Location $QualityCompareServiceDir
 
 try {
     # Start the service
-    Write-Host "Starting TranscodeService..." -ForegroundColor Green
-    Write-Host "Working Directory: $TranscodeServiceDir" -ForegroundColor Gray
+    Write-Host "Starting QualityCompareService..." -ForegroundColor Green
+    Write-Host "Working Directory: $QualityCompareServiceDir" -ForegroundColor Gray
     Write-Host "Python Script: $MainScript" -ForegroundColor Gray
 
     if ($Background) {
         Write-Host "Starting in background..." -ForegroundColor Yellow
-        Start-Process -FilePath "python" -ArgumentList $MainScript -WorkingDirectory $TranscodeServiceDir -WindowStyle Hidden
-        Write-Host "TranscodeService started in background" -ForegroundColor Green
+        Start-Process -FilePath "python" -ArgumentList $MainScript -WorkingDirectory $QualityCompareServiceDir -WindowStyle Hidden
+        Write-Host "QualityCompareService started in background" -ForegroundColor Green
     } else {
         Write-Host "Starting in foreground (Ctrl+C to stop)..." -ForegroundColor Yellow
         try {
             python $MainScript
         } catch {
-            Write-Error "Failed to start TranscodeService: $_"
+            Write-Error "Failed to start QualityCompareService: $_"
             throw
         }
     }
 
-    Write-Host "TranscodeService startup complete" -ForegroundColor Green
+    Write-Host "QualityCompareService startup complete" -ForegroundColor Green
 } finally {
     # Always restore original directory
     Set-Location $OriginalLocation

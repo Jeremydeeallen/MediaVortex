@@ -43,16 +43,16 @@ class FileReplacementBusinessService:
             LoggingService.LogFunctionEntry("GetFailedFileReplacements", "FileReplacementBusinessService")
             
             # Get transcoded files that passed VMAF but may have failed replacement
-            # Join with VMAFQueue to get the actual transcoded file paths
+            # Join with QualityTestingQueue to get the actual transcoded file paths
             query = '''
             SELECT ta.Id, ta.FilePath, ta.VMAF, ta.AttemptDate, ta.Success,
-                   vq.TranscodedFilePath, vq.Status as VMAFStatus
+                   qtq.TranscodedFilePath, qtq.Status as VMAFStatus
             FROM TranscodeAttempts ta
-            LEFT JOIN VMAFQueue vq ON ta.Id = vq.TranscodeAttemptId
+            LEFT JOIN QualityTestingQueue qtq ON ta.Id = qtq.TranscodeAttemptId
             WHERE ta.VMAF IS NOT NULL 
             AND ta.VMAF >= 90
             AND ta.Success = 1
-            AND vq.TranscodedFilePath IS NOT NULL
+            AND qtq.TranscodedFilePath IS NOT NULL
             ORDER BY ta.AttemptDate DESC
             LIMIT 20
             '''
@@ -107,9 +107,9 @@ class FileReplacementBusinessService:
                     'ErrorMessage': f'Transcode attempt {TranscodeAttemptId} not found'
                 }
             
-            # Get the actual transcoded file path from VMAFQueue
+            # Get the actual transcoded file path from QualityTestingQueue
             vmaf_query = '''
-            SELECT TranscodedFilePath FROM VMAFQueue 
+            SELECT TranscodedFilePath FROM QualityTestingQueue 
             WHERE TranscodeAttemptId = ?
             '''
             vmaf_result = self.DatabaseManager.DatabaseService.ExecuteQuery(vmaf_query, (TranscodeAttemptId,))
@@ -192,9 +192,9 @@ class FileReplacementBusinessService:
                     'ErrorMessage': f'Transcode attempt {TranscodeAttemptId} not found'
                 }
             
-            # Get the actual transcoded file path from VMAFQueue
+            # Get the actual transcoded file path from QualityTestingQueue
             vmaf_query = '''
-            SELECT TranscodedFilePath FROM VMAFQueue 
+            SELECT TranscodedFilePath FROM QualityTestingQueue 
             WHERE TranscodeAttemptId = ?
             '''
             vmaf_result = self.DatabaseManager.DatabaseService.ExecuteQuery(vmaf_query, (TranscodeAttemptId,))

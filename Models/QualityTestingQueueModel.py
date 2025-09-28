@@ -14,46 +14,75 @@ class QualityTestingQueueModel:
     def __init__(self):
         self.Id: Optional[int] = None
         self.TranscodeAttemptId: int = 0
-        self.StrategyId: int = 0
+        self.OriginalFilePath: Optional[str] = None
+        self.TranscodedFilePath: Optional[str] = None
+        self.FileName: Optional[str] = None
         self.Status: str = "Pending"  # "Pending", "Testing", "Completed", "Skipped", "Failed"
-        self.Results: List[QualityTestResultModel] = []
+        self.Priority: int = 50
+        self.DateAdded: Optional[datetime] = None
+        self.DateStarted: Optional[datetime] = None
+        self.DateCompleted: Optional[datetime] = None
+        self.QualityThreshold: float = 90.0
+        self.StrategyType: str = "Single"  # "Single", "Multi", "Custom", "Skip"
+        self.VMAFScore: Optional[float] = None
+        self.Results: Optional[str] = None  # JSON string of results
+        self.RetryCount: int = 0
+        self.MaxRetries: int = 3
+        self.ErrorMessage: Optional[str] = None
+        # Legacy attributes for compatibility
+        self.StrategyId: int = 0
         self.SelectedResultId: Optional[int] = None
         self.DateCreated: Optional[datetime] = None
-        self.DateCompleted: Optional[datetime] = None
-        self.ErrorMessage: Optional[str] = None
     
     def ToDict(self) -> dict:
         """Convert model to dictionary for database storage."""
         return {
             'Id': self.Id,
             'TranscodeAttemptId': self.TranscodeAttemptId,
-            'StrategyId': self.StrategyId,
+            'OriginalFilePath': self.OriginalFilePath,
+            'TranscodedFilePath': self.TranscodedFilePath,
+            'FileName': self.FileName,
             'Status': self.Status,
-            'Results': [result.ToDict() for result in self.Results],
-            'SelectedResultId': self.SelectedResultId,
-            'DateCreated': self.DateCreated,
+            'Priority': self.Priority,
+            'DateAdded': self.DateAdded,
+            'DateStarted': self.DateStarted,
             'DateCompleted': self.DateCompleted,
-            'ErrorMessage': self.ErrorMessage
+            'QualityThreshold': self.QualityThreshold,
+            'StrategyType': self.StrategyType,
+            'VMAFScore': self.VMAFScore,
+            'Results': self.Results,
+            'RetryCount': self.RetryCount,
+            'MaxRetries': self.MaxRetries,
+            'ErrorMessage': self.ErrorMessage,
+            # Legacy attributes
+            'StrategyId': self.StrategyId,
+            'SelectedResultId': self.SelectedResultId,
+            'DateCreated': self.DateCreated
         }
     
     def FromDict(self, data: dict) -> 'QualityTestingQueueModel':
         """Create model from dictionary data."""
         self.Id = data.get('Id')
         self.TranscodeAttemptId = data.get('TranscodeAttemptId', 0)
-        self.StrategyId = data.get('StrategyId', 0)
+        self.OriginalFilePath = data.get('OriginalFilePath')
+        self.TranscodedFilePath = data.get('TranscodedFilePath')
+        self.FileName = data.get('FileName')
         self.Status = data.get('Status', 'Pending')
+        self.Priority = data.get('Priority', 50)
+        self.DateAdded = data.get('DateAdded')
+        self.DateStarted = data.get('DateStarted')
+        self.DateCompleted = data.get('DateCompleted')
+        self.QualityThreshold = data.get('QualityThreshold', 90.0)
+        self.StrategyType = data.get('StrategyType', 'Single')
+        self.VMAFScore = data.get('VMAFScore')
+        self.Results = data.get('Results')
+        self.RetryCount = data.get('RetryCount', 0)
+        self.MaxRetries = data.get('MaxRetries', 3)
+        self.ErrorMessage = data.get('ErrorMessage')
+        # Legacy attributes
+        self.StrategyId = data.get('StrategyId', 0)
         self.SelectedResultId = data.get('SelectedResultId')
         self.DateCreated = data.get('DateCreated')
-        self.DateCompleted = data.get('DateCompleted')
-        self.ErrorMessage = data.get('ErrorMessage')
-        
-        # Convert results from dict list to model list
-        results_data = data.get('Results', [])
-        self.Results = []
-        for result_data in results_data:
-            result = QualityTestResultModel()
-            result.FromDict(result_data)
-            self.Results.append(result)
         
         return self
     

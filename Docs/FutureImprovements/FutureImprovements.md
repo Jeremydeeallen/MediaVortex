@@ -1,3 +1,6 @@
+During file scanning can we capture number of frames? (Or the quick check before the transcoding starts? So that we don't have to hope that we capture the output from ffmpeg transcode.)
+
+
 Change hardcoded FFmpeg path to configurable in the services.
 Profile service has a bunch of snake case. It needs to be fixed to PascalCase
 
@@ -19,3 +22,7 @@ Add more options in the profiles selection (Av1 with grain get's better results 
 -vf scale=...: Scale to 720p with aspect ratio preservation and padding
 
 is transcoding using all cores?
+
+Add smart profile assignment during file scanning
+
+

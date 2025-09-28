@@ -30,10 +30,10 @@ class DatabaseHelper:
             return {row['Status']: row['Count'] for row in cursor.fetchall()}
     
     def GetVMAFProgressStatus(self) -> Dict[str, int]:
-        """Get current VMAFProgress status counts."""
+        """Get current QualityTestProgress status counts."""
         with self.GetConnection() as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT Status, COUNT(*) as Count FROM VMAFProgress GROUP BY Status")
+            cursor.execute("SELECT Status, COUNT(*) as Count FROM QualityTestProgress GROUP BY Status")
             return {row['Status']: row['Count'] for row in cursor.fetchall()}
     
     def GetRecentTranscodeAttempts(self, Limit: int = 5) -> List[Dict[str, Any]]:
@@ -61,12 +61,12 @@ class DatabaseHelper:
             return [dict(row) for row in cursor.fetchall()]
     
     def GetRecentVMAFProgressItems(self, Limit: int = 5) -> List[Dict[str, Any]]:
-        """Get recent VMAFProgress items."""
+        """Get recent QualityTestProgress items."""
         with self.GetConnection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT Id, VMAFQueueId, Status, ProgressPercentage, CurrentStep, StartTime, EndTime, ETA
-                FROM VMAFProgress 
+                FROM QualityTestProgress 
                 ORDER BY CreatedAt DESC 
                 LIMIT ?
             """, (Limit,))

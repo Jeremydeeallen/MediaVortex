@@ -186,7 +186,11 @@ class FFmpegService:
     def ExecuteFFmpegCommand(self, Arguments: List[str], ProgressCallback=None) -> Dict[str, Any]:
         """Execute FFmpeg command with optional real-time progress monitoring."""
         try:
+            LoggingService.LogInfo(f"ExecuteFFmpegCommand called with {len(Arguments)} arguments", 'ExecuteFFmpegCommand', 'FFmpegService')
+            LoggingService.LogInfo(f"FFmpegPath: {self.FFmpegPath}", 'ExecuteFFmpegCommand', 'FFmpegService')
+            
             if not self.FFmpegPath:
+                LoggingService.LogError("FFmpeg not available - FFmpegPath is None or empty", 'ExecuteFFmpegCommand', 'FFmpegService')
                 return {
                     'Success': False,
                     'ErrorMessage': 'FFmpeg not available',
@@ -201,6 +205,16 @@ class FFmpegService:
             else:
                 Command = [self.FFmpegPath] + Arguments
             
+            # Log the command with proper quoting for display
+            DisplayCommand = []
+            for arg in Command:
+                if ' ' in arg and not arg.startswith('"') and not arg.startswith("'"):
+                    DisplayCommand.append(f'"{arg}"')
+                else:
+                    DisplayCommand.append(arg)
+            
+            LoggingService.LogInfo(f"Executing FFmpeg command: {' '.join(DisplayCommand)}", 'ExecuteFFmpegCommand', 'FFmpegService')
+            
             
             if ProgressCallback:
                 return self._ExecuteFFmpegWithProgress(Command, ProgressCallback)
@@ -213,6 +227,10 @@ class FFmpegService:
                     encoding='utf-8',
                     errors='replace'
                 )
+                
+                LoggingService.LogInfo(f"FFmpeg command completed with return code: {Result.returncode}", 'ExecuteFFmpegCommand', 'FFmpegService')
+                if Result.returncode != 0:
+                    LoggingService.LogError(f"FFmpeg command failed with error: {Result.stderr}", 'ExecuteFFmpegCommand', 'FFmpegService')
                 
                 return {
                     'Success': Result.returncode == 0,
@@ -376,6 +394,10 @@ class FFmpegService:
             
             # Combine all output for debugging
             CombinedOutput = '\n'.join(AllOutput)
+            
+            LoggingService.LogInfo(f"FFmpeg command completed with return code: {process.returncode}", '_ExecuteFFmpegWithProgress', 'FFmpegService')
+            if process.returncode != 0:
+                LoggingService.LogError(f"FFmpeg command failed with error: {CombinedOutput}", '_ExecuteFFmpegWithProgress', 'FFmpegService')
             
             return {
                 'Success': process.returncode == 0,

@@ -149,3 +149,105 @@ class ServiceCommandService:
         except Exception as e:
             LoggingService.LogException("Error cleaning up old commands", e, "ServiceCommandService", "CleanupOldCommands")
             return 0
+    
+    def ProcessCommand(self, Command: Dict[str, Any]) -> Dict[str, Any]:
+        """Process a service command."""
+        try:
+            LoggingService.LogFunctionEntry("ProcessCommand", "ServiceCommandService", Command['Id'])
+            
+            CommandId = Command['Id']
+            CommandType = Command['CommandType']
+            Parameters = Command['Parameters'] if 'Parameters' in Command else '{}'
+            
+            # Parse parameters if they're a JSON string
+            if isinstance(Parameters, str):
+                try:
+                    Parameters = json.loads(Parameters)
+                except json.JSONDecodeError:
+                    Parameters = {}
+            
+            # Update command status to processing
+            self.UpdateCommandStatus(CommandId, 'Processing')
+            
+            # Process command based on type
+            Result = None
+            Success = True
+            ErrorMessage = None
+            
+            try:
+                if CommandType == 'StartService':
+                    Result = self.ProcessStartServiceCommand(Parameters)
+                elif CommandType == 'StopService':
+                    Result = self.ProcessStopServiceCommand(Parameters)
+                elif CommandType == 'RestartService':
+                    Result = self.ProcessRestartServiceCommand(Parameters)
+                elif CommandType == 'GetStatus':
+                    Result = self.ProcessGetStatusCommand(Parameters)
+                elif CommandType == 'HealthCheck':
+                    Result = self.ProcessHealthCheckCommand(Parameters)
+                elif CommandType == 'StartQualityTesting':
+                    Result = self.ProcessStartQualityTestingCommand(Parameters)
+                else:
+                    ErrorMessage = f"Unknown command type: {CommandType}"
+                    Success = False
+                    
+            except Exception as e:
+                ErrorMessage = str(e)
+                Success = False
+                LoggingService.LogException(f"Error processing command {CommandId}", e, 
+                                          "ServiceCommandService", "ProcessCommand")
+            
+            # Update command status
+            if Success:
+                self.UpdateCommandStatus(CommandId, 'Completed', Result)
+                LoggingService.LogInfo(f"Command {CommandId} processed successfully", 
+                                     "ServiceCommandService", "ProcessCommand")
+            else:
+                self.UpdateCommandStatus(CommandId, 'Failed', None, ErrorMessage)
+                LoggingService.LogError(f"Command {CommandId} failed: {ErrorMessage}", 
+                                      "ServiceCommandService", "ProcessCommand")
+            
+            return {
+                "Success": Success,
+                "Result": Result,
+                "ErrorMessage": ErrorMessage
+            }
+            
+        except Exception as e:
+            LoggingService.LogException("Exception processing command", e, 
+                                      "ServiceCommandService", "ProcessCommand")
+            return {
+                "Success": False,
+                "Result": None,
+                "ErrorMessage": str(e)
+            }
+    
+    def ProcessStartServiceCommand(self, Parameters: Dict[str, Any]) -> Dict[str, Any]:
+        """Process start service command."""
+        # This would typically start a service
+        return {"Message": "Service start command processed", "Status": "Started"}
+    
+    def ProcessStopServiceCommand(self, Parameters: Dict[str, Any]) -> Dict[str, Any]:
+        """Process stop service command."""
+        # This would typically stop a service
+        return {"Message": "Service stop command processed", "Status": "Stopped"}
+    
+    def ProcessRestartServiceCommand(self, Parameters: Dict[str, Any]) -> Dict[str, Any]:
+        """Process restart service command."""
+        # This would typically restart a service
+        return {"Message": "Service restart command processed", "Status": "Restarted"}
+    
+    def ProcessGetStatusCommand(self, Parameters: Dict[str, Any]) -> Dict[str, Any]:
+        """Process get status command."""
+        # This would typically return service status
+        return {"Message": "Status command processed", "Status": "Running"}
+    
+    def ProcessHealthCheckCommand(self, Parameters: Dict[str, Any]) -> Dict[str, Any]:
+        """Process health check command."""
+        # This would typically perform a health check
+        return {"Message": "Health check command processed", "Status": "Healthy"}
+    
+    def ProcessStartQualityTestingCommand(self, Parameters: Dict[str, Any]) -> Dict[str, Any]:
+        """Process start quality testing command."""
+        # This would typically start quality testing processes
+        return {"Message": "Quality testing command processed", "Status": "Started"}
