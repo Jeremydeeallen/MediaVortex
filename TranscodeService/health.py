@@ -24,18 +24,18 @@ class HealthMonitor:
         self.ErrorCount = 0
         self.MaxErrors = 5
         
-    def check_health(self) -> Dict[str, Any]:
+    def CheckHealth(self) -> Dict[str, Any]:
         """Perform comprehensive health check."""
         try:
             health_data = {
                 "ServiceName": "TranscodeService",
                 "Status": "Healthy",
                 "Timestamp": datetime.now().isoformat(),
-                "Uptime": self._get_uptime(),
-                "MemoryUsage": self._get_memory_usage(),
-                "CPUUsage": self._get_cpu_usage(),
-                "DatabaseConnection": self._check_database_connection(),
-                "DiskSpace": self._check_disk_space(),
+                "Uptime": self.GetUptime(),
+                "MemoryUsage": self.GetMemoryUsage(),
+                "CPUUsage": self.GetCPUUsage(),
+                "DatabaseConnection": self.CheckDatabaseConnection(),
+                "DiskSpace": self.CheckDiskSpace(),
                 "LastHealthCheck": self.LastHealthCheck,
                 "ErrorCount": self.ErrorCount
             }
@@ -74,7 +74,7 @@ class HealthMonitor:
                 "ErrorCount": self.ErrorCount
             }
     
-    def _get_uptime(self) -> str:
+    def GetUptime(self) -> str:
         """Get service uptime."""
         try:
             uptime = datetime.now() - self.StartTime
@@ -88,7 +88,7 @@ class HealthMonitor:
         except Exception:
             return "Unknown"
     
-    def _get_memory_usage(self) -> float:
+    def GetMemoryUsage(self) -> float:
         """Get current memory usage percentage."""
         try:
             process = psutil.Process()
@@ -102,7 +102,7 @@ class HealthMonitor:
             logger.warning(f"Could not get memory usage: {str(e)}")
             return 0.0
     
-    def _get_cpu_usage(self) -> float:
+    def GetCPUUsage(self) -> float:
         """Get current CPU usage percentage."""
         try:
             return round(psutil.cpu_percent(interval=1), 2)
@@ -110,7 +110,7 @@ class HealthMonitor:
             logger.warning(f"Could not get CPU usage: {str(e)}")
             return 0.0
     
-    def _check_database_connection(self) -> bool:
+    def CheckDatabaseConnection(self) -> bool:
         """Check if database connection is healthy."""
         try:
             if self.DatabaseManager:
@@ -122,7 +122,7 @@ class HealthMonitor:
             logger.warning(f"Database connection check failed: {str(e)}")
             return False
     
-    def _check_disk_space(self) -> float:
+    def CheckDiskSpace(self) -> float:
         """Check available disk space percentage."""
         try:
             disk_usage = psutil.disk_usage('/')
@@ -134,28 +134,28 @@ class HealthMonitor:
             logger.warning(f"Could not check disk space: {str(e)}")
             return 0.0
     
-    def is_healthy(self) -> bool:
+    def IsHealthy(self) -> bool:
         """Check if service is considered healthy."""
         return self.HealthStatus == "Healthy" and self.ErrorCount < self.MaxErrors
     
-    def get_status_summary(self) -> str:
+    def GetStatusSummary(self) -> str:
         """Get a brief status summary."""
-        if self.is_healthy():
-            return f"Healthy (Uptime: {self._get_uptime()})"
+        if self.IsHealthy():
+            return f"Healthy (Uptime: {self.GetUptime()})"
         else:
             return f"Unhealthy (Status: {self.HealthStatus}, Errors: {self.ErrorCount})"
     
-    def log_health_status(self):
+    def LogHealthStatus(self):
         """Log current health status."""
         try:
-            health_data = self.check_health()
+            health_data = self.CheckHealth()
             
             if health_data["Status"] == "Healthy":
-                logger.info(f"Health check passed: {self.get_status_summary()}")
+                logger.info(f"Health check passed: {self.GetStatusSummary()}")
             elif health_data["Status"] == "Warning":
-                logger.warning(f"Health check warning: {self.get_status_summary()}")
+                logger.warning(f"Health check warning: {self.GetStatusSummary()}")
             else:
-                logger.error(f"Health check failed: {self.get_status_summary()}")
+                logger.error(f"Health check failed: {self.GetStatusSummary()}")
                 
         except Exception as e:
             logger.error(f"Error logging health status: {str(e)}")
@@ -163,11 +163,11 @@ class HealthMonitor:
 # Global health monitor instance
 health_monitor = None
 
-def get_health_monitor() -> Optional[HealthMonitor]:
+def GetHealthMonitor() -> Optional[HealthMonitor]:
     """Get the global health monitor instance."""
     return health_monitor
 
-def initialize_health_monitor(database_manager=None):
+def InitializeHealthMonitor(database_manager=None):
     """Initialize the global health monitor."""
     global health_monitor
     health_monitor = HealthMonitor(database_manager)

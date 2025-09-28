@@ -47,11 +47,39 @@ class TranscodingViewModel:
             }
     
     def GetTranscodingStatus(self) -> Dict[str, Any]:
-        """Get current transcoding status and progress."""
+        """Get current transcoding status and progress from ServiceStatus table."""
         try:
             LoggingService.LogFunctionEntry("GetTranscodingStatus", "TranscodingViewModel")
             
-            return self.ProcessTranscodeQueue.GetStatus()
+            # Get status from ServiceStatus table instead of ProcessTranscodeQueueService
+            query = """
+                SELECT Status, HealthStatus, IsProcessing, ActiveJobsCount, LastHealthCheck
+                FROM ServiceStatus
+                WHERE ServiceName = 'TranscodeService'
+            """
+            
+            result = self.DatabaseManager.DatabaseService.ExecuteQuery(query)
+            
+            if result and len(result) > 0:
+                row = result[0]
+                return {
+                    "Success": True,
+                    "IsTranscoding": row['IsProcessing'] == 1,
+                    "Status": row['Status'],
+                    "HealthStatus": row['HealthStatus'],
+                    "ActiveJobsCount": row['ActiveJobsCount'],
+                    "LastHealthCheck": row['LastHealthCheck']
+                }
+            else:
+                # TranscodeService not found in ServiceStatus table
+                return {
+                    "Success": True,
+                    "IsTranscoding": False,
+                    "Status": "Stopped",
+                    "HealthStatus": "Unknown",
+                    "ActiveJobsCount": 0,
+                    "LastHealthCheck": None
+                }
             
         except Exception as e:
             errorMsg = f"Exception getting transcoding status: {str(e)}"
@@ -134,11 +162,14 @@ class TranscodingViewModel:
             # Get queue statistics
             queueStats = self.GetQueueStatistics()
             
+            # Get status from ServiceStatus table
+            status = self.GetTranscodingStatus()
+            
             return {
                 'CurrentProgress': currentProgress,
                 'QueueStatistics': queueStats,
-                'IsTranscoding': self.ProcessTranscodeQueue.IsProcessing,
-                'ActiveJobs': len(self.ProcessTranscodeQueue.ActiveJobs)
+                'IsTranscoding': status.get('IsTranscoding', False),
+                'ActiveJobs': status.get('ActiveJobsCount', 0)
             }
             
         except Exception as e:
@@ -158,12 +189,16 @@ class TranscodingViewModel:
         try:
             LoggingService.LogFunctionEntry("RefreshStatus", "TranscodingViewModel")
             
-            # Get current status
+            # Get current status from ServiceStatus table
             status = self.GetTranscodingStatus()
+            
+            # Get current progress from database
+            currentProgress = self.DatabaseManager.GetCurrentTranscodeProgress()
             
             return {
                 "Success": True,
                 "Status": status,
+                "CurrentProgress": currentProgress,
                 "Timestamp": datetime.now().isoformat()
             }
             

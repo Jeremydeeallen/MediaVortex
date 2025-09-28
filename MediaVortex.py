@@ -24,6 +24,7 @@ from Controllers.TranscodeQueueController import TranscodeQueueBlueprint
 from Controllers.TranscodeJobController import TranscodeJobBlueprint
 from Controllers.VMAFJobController import VMAFJobBlueprint
 from Controllers.FileReplacementController import FileReplacementController
+from Controllers.ServiceStatusController import ServiceStatusBlueprint
 
 
 class MediaVortexApp:
@@ -87,8 +88,9 @@ class MediaVortexApp:
         self.App.register_blueprint(TranscodeQueueBlueprint)
         self.App.register_blueprint(TranscodeJobBlueprint)
         self.App.register_blueprint(VMAFJobBlueprint)
+        self.App.register_blueprint(ServiceStatusBlueprint, url_prefix='/api')
     
-    def Run(self, host='0.0.0.0', port=5000, debug=True):
+    def Run(self, host='0.0.0.0', port=5000, debug=False):
         """Run the Flask application."""
         print(f"Starting MediaVortex on http://{host}:{port}")
         print(f"Settings page: http://{host}:{port}/settings")

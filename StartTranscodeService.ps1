@@ -13,7 +13,7 @@ $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $TranscodeServiceDir = Join-Path $ScriptDir "TranscodeService"
 $VenvPath = Join-Path $TranscodeServiceDir "venv"
-$MainScript = Join-Path $TranscodeServiceDir "main.py"
+$MainScript = Join-Path $TranscodeServiceDir "Main.py"
 
 Write-Host "Starting TranscodeService..." -ForegroundColor Green
 

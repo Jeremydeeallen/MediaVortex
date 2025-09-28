@@ -3,18 +3,20 @@ from typing import Dict, Any
 from ViewModels.ActivityViewModel import ActivityViewModel
 from Services.LoggingService import LoggingService
 from ViewModels.TranscodingViewModel import TranscodingViewModel
+from Services.ServiceCommandService import ServiceCommandService
 
 
 # Create Blueprint for transcoding job routes
 TranscodeJobBlueprint = Blueprint('TranscodeJob', __name__, url_prefix='/api/Transcode')
 
-# Create shared service instance to avoid multiple initializations
+# Create shared service instances
 SharedTranscodingService = TranscodingViewModel()
+SharedCommandService = ServiceCommandService()
 
 
 @TranscodeJobBlueprint.route('/Start', methods=['POST'])
 def StartTranscoding():
-    """Start transcoding jobs."""
+    """Start transcoding jobs via database command."""
     try:
         LoggingService.LogFunctionEntry("StartTranscoding", "TranscodeJobController")
         
@@ -28,17 +30,30 @@ def StartTranscoding():
             LoggingService.LogError(errorMsg, "TranscodeJobController", "StartTranscoding")
             return jsonify({"Success": False, "ErrorMessage": errorMsg}), 400
         
-        # Create ViewModel instance
-        viewModel = ActivityViewModel(TranscodingService=SharedTranscodingService)
-        
-        # Start transcoding
-        result = viewModel.StartTranscoding(maxConcurrentJobs)
+        # Create database command instead of direct service call
+        Parameters = {"MaxConcurrentJobs": maxConcurrentJobs}
+        result = SharedCommandService.CreateCommand(
+            CommandType="StartTranscoding",
+            SourceService="MediaVortex",
+            TargetService="TranscodeService",
+            Parameters=Parameters,
+            Priority=5,
+            CreatedBy="TranscodeJobController"
+        )
         
         if result.get("Success", False):
-            LoggingService.LogInfo(f"Started transcoding with {maxConcurrentJobs} concurrent jobs", "TranscodeJobController", "StartTranscoding")
-            return jsonify(result)
+            CommandId = result.get("CommandId")
+            LoggingService.LogInfo(f"Queued StartTranscoding command {CommandId} with {maxConcurrentJobs} concurrent jobs", 
+                                 "TranscodeJobController", "StartTranscoding")
+            return jsonify({
+                "Success": True,
+                "Message": f"Transcoding command queued (ID: {CommandId})",
+                "CommandId": CommandId,
+                "Status": "Queued"
+            })
         else:
-            LoggingService.LogError(f"Failed to start transcoding: {result.get('ErrorMessage', 'Unknown error')}", "TranscodeJobController", "StartTranscoding")
+            LoggingService.LogError(f"Failed to queue transcoding command: {result.get('ErrorMessage', 'Unknown error')}", 
+                                   "TranscodeJobController", "StartTranscoding")
             return jsonify(result), 500
             
     except Exception as e:
@@ -49,21 +64,33 @@ def StartTranscoding():
 
 @TranscodeJobBlueprint.route('/Stop', methods=['POST'])
 def StopTranscoding():
-    """Stop transcoding jobs."""
+    """Stop transcoding jobs via database command."""
     try:
         LoggingService.LogFunctionEntry("StopTranscoding", "TranscodeJobController")
         
-        # Create ViewModel instance
-        viewModel = ActivityViewModel(TranscodingService=SharedTranscodingService)
-        
-        # Stop transcoding
-        result = viewModel.StopTranscoding()
+        # Create database command instead of direct service call
+        result = SharedCommandService.CreateCommand(
+            CommandType="StopTranscoding",
+            SourceService="MediaVortex",
+            TargetService="TranscodeService",
+            Parameters={},
+            Priority=5,
+            CreatedBy="TranscodeJobController"
+        )
         
         if result.get("Success", False):
-            LoggingService.LogInfo("Stopped transcoding", "TranscodeJobController", "StopTranscoding")
-            return jsonify(result)
+            CommandId = result.get("CommandId")
+            LoggingService.LogInfo(f"Queued StopTranscoding command {CommandId}", 
+                                 "TranscodeJobController", "StopTranscoding")
+            return jsonify({
+                "Success": True,
+                "Message": f"Stop transcoding command queued (ID: {CommandId})",
+                "CommandId": CommandId,
+                "Status": "Queued"
+            })
         else:
-            LoggingService.LogError(f"Failed to stop transcoding: {result.get('ErrorMessage', 'Unknown error')}", "TranscodeJobController", "StopTranscoding")
+            LoggingService.LogError(f"Failed to queue stop command: {result.get('ErrorMessage', 'Unknown error')}", 
+                                   "TranscodeJobController", "StopTranscoding")
             return jsonify(result), 500
             
     except Exception as e:

@@ -24,10 +24,10 @@
             <!-- Current Job Status -->
             <div class="row mb-4">
                 <div class="col-12">
-                    <div class="card" id="CurrentJobCard" style="display: none;">
+                    <div class="card" id="CurrentJobCard">
                         <div class="card-header">
                             <h5 class="mb-0">
-                                <i class="fas fa-cog fa-spin"></i> Current Job
+                                <i class="fas fa-cog fa-spin"></i> Transcode Job
                             </h5>
                         </div>
                         <div class="card-body">
@@ -47,33 +47,27 @@
                                 </div>
                             </div>
                             
-                            <!-- Real-time Activity Progress -->
-                            <div class="row mt-3" id="ActivityProgressSection" style="display: none;">
+                            <!-- Transcode Progress -->
+                            <div class="row mt-3" id="ActivityProgressSection">
                                 <div class="col-12">
-                                    <h6><i class="fas fa-video"></i> Activity Progress</h6>
+                                    <h6><i class="fas fa-video"></i> Transcode Progress</h6>
                                     <div class="row">
-                                        <div class="col-md-2">
+                                        <div class="col-md-3">
                                             <small class="text-muted">Frame:</small><br>
                                             <span id="TranscodeFrame" class="fw-bold">0</span>
                                         </div>
-                                        <div class="col-md-2">
+                                        <div class="col-md-3">
                                             <small class="text-muted">FPS:</small><br>
                                             <span id="TranscodeFPS" class="fw-bold">0</span>
                                         </div>
-                                        <div class="col-md-2">
+                                        <div class="col-md-3">
                                             <small class="text-muted">Speed:</small><br>
                                             <span id="TranscodeSpeed" class="fw-bold">0x</span>
                                         </div>
-                        <div class="col-md-2">
-                            <small class="text-muted">Phase:</small><br>
-                            <span id="ActivityPhase" class="badge bg-info">Transcoding</span>
-                        </div>
-                                    </div>
-                                    <div class="row mt-2">
-                        <div class="col-md-6">
-                            <small class="text-muted">Last Update:</small><br>
-                            <span id="ActivityLastUpdate" class="fw-bold">-</span>
-                        </div>
+                                        <div class="col-md-3">
+                                            <small class="text-muted">Phase:</small><br>
+                                            <span id="ActivityPhase" class="badge bg-info">Transcoding</span>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -282,6 +276,9 @@ class ActivityManager {
 
     async loadProgressData() {
         try {
+            // Always start progress monitoring to show the card
+            this.startFFmpegProgressMonitoring();
+            
             // Get transcoding status
             try {
                 const statusResponse = await fetch('/api/Transcode/Status');
@@ -293,7 +290,7 @@ class ActivityManager {
                 const statusData = await statusResponse.json();
 
                 if (statusData.Success) {
-                    this.updateTranscodingStatus(statusData);
+                    await this.updateTranscodingStatus(statusData);
                 }
             } catch (error) {
                 console.error('Error loading transcoding status:', error);
@@ -400,35 +397,19 @@ class ActivityManager {
         this.ensurePageUsability();
     }
 
-    updateTranscodingStatus(statusData) {
+    async updateTranscodingStatus(statusData) {
         this.isTranscoding = statusData.IsTranscoding;
-        this.currentJob = statusData.CurrentJob;
 
         const startBtn = document.getElementById('StartTranscodingBtn');
         const stopBtn = document.getElementById('StopTranscodingBtn');
-        const currentJobCard = document.getElementById('CurrentJobCard');
 
-        if (this.isTranscoding && this.currentJob) {
+        // Just manage the start/stop buttons
+        if (this.isTranscoding) {
             startBtn.style.display = 'none';
             stopBtn.style.display = 'inline-block';
-            currentJobCard.style.display = 'block';
-
-            // Show Activity progress section
-            document.getElementById('ActivityProgressSection').style.display = 'block';
-            
-            // Start FFmpeg progress monitoring (this will update both current job and FFmpeg progress)
-            this.startFFmpegProgressMonitoring();
-
         } else {
             startBtn.style.display = 'inline-block';
             stopBtn.style.display = 'none';
-            currentJobCard.style.display = 'none';
-            
-            // Hide Activity progress section
-            document.getElementById('ActivityProgressSection').style.display = 'none';
-            
-            // Stop FFmpeg progress monitoring
-            this.stopFFmpegProgressMonitoring();
         }
     }
 
@@ -672,33 +653,38 @@ class ActivityManager {
 
     async updateFFmpegProgress() {
         try {
-            // Get current transcoding progress from the database
             const response = await fetch('/api/Transcode/CurrentProgress');
             const data = await response.json();
             
             console.log('Progress API response:', data);
             
-            if (data.Success && data.AttemptId) {
-                // Update current job card with real data from database
-                document.getElementById('CurrentFileName').textContent = data.FileName || '-';
+            // Always update the card content
+            if (data.Success) {
+                // Update with real data
+                document.getElementById('CurrentFileName').textContent = data.FileName || 'Processing...';
                 document.getElementById('CurrentJobStatus').textContent = 'Running';
                 document.getElementById('CurrentJobStartTime').textContent = this.formatDate(data.StartTime);
                 document.getElementById('CurrentJobProgress').textContent = `${(data.ProgressPercent || 0).toFixed(1)}%`;
                 document.getElementById('CurrentJobProgressBar').style.width = `${data.ProgressPercent || 0}%`;
                 document.getElementById('CurrentJobETA').textContent = data.ETA || 'Calculating...';
                 
-                // Update Activity progress display with real data from database
-                const progressData = {
+                // Update progress display
+                this.updateActivityProgressDisplay({
                     frame: data.CurrentFrame || 0,
                     totalFrames: data.TotalFrames || 0,
                     fps: data.CurrentFPS || 0,
                     speed: data.CurrentSpeed || '0x',
                     phase: data.CurrentPhase || 'Transcoding',
                     lastUpdate: data.LastUpdate || null
-                };
-                
-                console.log('Updating progress display with:', progressData);
-                this.updateActivityProgressDisplay(progressData);
+                });
+            } else {
+                // Show "No active job" when no progress data
+                document.getElementById('CurrentFileName').textContent = 'No active job';
+                document.getElementById('CurrentJobStatus').textContent = 'Idle';
+                document.getElementById('CurrentJobStartTime').textContent = '-';
+                document.getElementById('CurrentJobProgress').textContent = '0%';
+                document.getElementById('CurrentJobProgressBar').style.width = '0%';
+                document.getElementById('CurrentJobETA').textContent = '-';
             }
         } catch (error) {
             console.error('Error updating FFmpeg progress:', error);

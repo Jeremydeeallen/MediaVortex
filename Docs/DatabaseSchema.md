@@ -247,6 +247,21 @@ ScanJobs.ScanType	TEXT
 Seasons.Id	INTEGER
 Seasons.RootFolderId	INTEGER
 Seasons.SeasonName	TEXT
+ServiceCommands.Id	INTEGER
+ServiceCommands.CommandType	TEXT
+ServiceCommands.SourceService	TEXT
+ServiceCommands.TargetService	TEXT
+ServiceCommands.Parameters	TEXT
+ServiceCommands.Status	TEXT
+ServiceCommands.CreatedAt	TIMESTAMP
+ServiceCommands.ProcessedAt	TIMESTAMP
+ServiceCommands.Result	TEXT
+ServiceCommands.ErrorMessage	TEXT
+ServiceCommands.RetryCount	INTEGER
+ServiceCommands.MaxRetries	INTEGER
+ServiceCommands.Priority	INTEGER
+ServiceCommands.CreatedBy	TEXT
+ServiceCommands.UpdatedAt	TIMESTAMP
 ServiceStatus.Id	INTEGER
 ServiceStatus.ServiceName	TEXT
 ServiceStatus.Status	TEXT
@@ -393,6 +408,7 @@ ProfileThresholds	sqlite_autoindex_ProfileThresholds_1	1	u	0
 Profiles	sqlite_autoindex_Profiles_1	1	u	0
 RootFolders	sqlite_autoindex_RootFolders_1	1	u	0
 ScanJobs	sqlite_autoindex_ScanJobs_1	1	u	0
+ServiceCommands	idx_ServiceCommands_TargetService_Status	0	c	0
 ServiceStatus	sqlite_autoindex_ServiceStatus_1	1	u	0
 SystemSettings	idx_SystemSettings_SettingKey	0	c	0
 SystemSettings	sqlite_autoindex_SystemSettings_1	1	u	0
@@ -454,6 +470,8 @@ ProfileThresholds	sqlite_autoindex_ProfileThresholds_1	Resolution	1
 Profiles	sqlite_autoindex_Profiles_1	ProfileName	0
 RootFolders	sqlite_autoindex_RootFolders_1	RootFolder	0
 ScanJobs	sqlite_autoindex_ScanJobs_1	JobId	0
+ServiceCommands	idx_ServiceCommands_TargetService_Status	TargetService	0
+ServiceCommands	idx_ServiceCommands_TargetService_Status	Status	1
 ServiceStatus	sqlite_autoindex_ServiceStatus_1	ServiceName	0
 SystemSettings	idx_SystemSettings_SettingKey	SettingKey	0
 SystemSettings	sqlite_autoindex_SystemSettings_1	SettingKey	0

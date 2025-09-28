@@ -6,54 +6,47 @@ Standalone transcoding microservice for MediaVortex
 
 import sys
 import signal
-import logging
-from app import TranscodeServiceApp
+import os
+from App import TranscodeServiceApp
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('TranscodeService.log'),
-        logging.StreamHandler(sys.stdout)
-    ]
-)
+# Add parent directory to path to import shared services
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-logger = logging.getLogger(__name__)
+from Services.LoggingService import LoggingService
 
-def signal_handler(signum, frame):
+def SignalHandler(signum, frame):
     """Handle shutdown signals gracefully."""
-    logger.info(f"Received signal {signum}, shutting down gracefully...")
-    if hasattr(main, 'app') and main.app:
-        main.app.shutdown()
+    LoggingService.LogInfo(f"Received signal {signum}, shutting down gracefully...", "TranscodeService", "SignalHandler")
+    if hasattr(Main, 'app') and Main.app:
+        Main.app.Shutdown()
     sys.exit(0)
 
-def main():
+def Main():
     """Main entry point for TranscodeService."""
     try:
-        logger.info("Starting TranscodeService...")
+        LoggingService.LogInfo("Starting TranscodeService...", "TranscodeService", "main")
         
         # Initialize the application
         app = TranscodeServiceApp()
-        main.app = app  # Store reference for signal handler
+        Main.app = app  # Store reference for signal handler
         
         # Register signal handlers
-        signal.signal(signal.SIGINT, signal_handler)
-        signal.signal(signal.SIGTERM, signal_handler)
+        signal.signal(signal.SIGINT, SignalHandler)
+        signal.signal(signal.SIGTERM, SignalHandler)
         
         # Start the service (this will run indefinitely)
-        logger.info("TranscodeService is now running. Press Ctrl+C to stop.")
-        app.run()
+        LoggingService.LogInfo("TranscodeService is now running. Press Ctrl+C to stop.", "TranscodeService", "main")
+        app.Run()
         
     except KeyboardInterrupt:
-        logger.info("Received keyboard interrupt, shutting down...")
-        if hasattr(main, 'app') and main.app:
-            main.app.shutdown()
+        LoggingService.LogInfo("Received keyboard interrupt, shutting down...", "TranscodeService", "main")
+        if hasattr(Main, 'app') and Main.app:
+            Main.app.Shutdown()
     except Exception as e:
-        logger.error(f"Fatal error in TranscodeService: {str(e)}", exc_info=True)
+        LoggingService.LogException("Fatal error in TranscodeService", e, "TranscodeService", "main")
         sys.exit(1)
     finally:
-        logger.info("TranscodeService stopped.")
+        LoggingService.LogInfo("TranscodeService stopped.", "TranscodeService", "main")
 
 if __name__ == "__main__":
-    main()
+    Main()
