@@ -98,6 +98,12 @@ class ProcessTranscodeQueueService:
             if self.ProcessingThread and self.ProcessingThread.is_alive():
                 self.ProcessingThread.join(timeout=10)
             
+            # Stop any active video transcoding processes
+            self.StopAllActiveTranscodingProcesses()
+            
+            # Clean up any stale progress data from database
+            self.CleanupStaleProgressData()
+            
             self.IsProcessing = False
             self.ActiveJobs.clear()
             
@@ -134,11 +140,27 @@ class ProcessTranscodeQueueService:
             # Consider transcoding active only if:
             # 1. IsProcessing flag is True AND
             # 2. There are active threads AND
-            # 3. There's current progress data
+            # 3. There's current progress data AND
+            # 4. There are actually jobs in the queue
             activeJobCount = len([thread for thread in self.ActiveJobs if thread.is_alive()])
+            
+            # Check if there are any pending jobs in the queue
+            pendingJobs = self.DatabaseManager.GetTranscodeQueueItemsByStatus("Pending")
+            runningJobs = self.DatabaseManager.GetTranscodeQueueItemsByStatus("Running")
+            hasJobsInQueue = len(pendingJobs) > 0 or len(runningJobs) > 0
+            
             isActuallyTranscoding = (self.IsProcessing and 
                                    activeJobCount > 0 and 
-                                   currentProgress is not None)
+                                   currentProgress is not None and
+                                   hasJobsInQueue)
+            
+            # If no jobs in queue but IsProcessing is True, clean up stale state
+            if self.IsProcessing and not hasJobsInQueue:
+                LoggingService.LogInfo("No jobs in queue but IsProcessing=True, cleaning up stale state", "ProcessTranscodeQueueService", "GetStatus")
+                self.CleanupStaleProgressData()
+                self.IsProcessing = False
+                self.ActiveJobs.clear()
+                isActuallyTranscoding = False
             
             return {
                 "Success": True,
@@ -736,4 +758,43 @@ class ProcessTranscodeQueueService:
                     
         except Exception:
             return Resolution
+    
+    def StopAllActiveTranscodingProcesses(self):
+        """Stop all active video transcoding processes."""
+        try:
+            LoggingService.LogFunctionEntry("StopAllActiveTranscodingProcesses", "ProcessTranscodeQueueService")
+            
+            # Get all active job IDs from VideoTranscoding service
+            activeJobIds = self.VideoTranscoding.GetActiveJobs()
+            
+            for jobId in activeJobIds:
+                try:
+                    result = self.VideoTranscoding.StopTranscoding(jobId)
+                    if result.get("Success", False):
+                        LoggingService.LogInfo(f"Stopped transcoding process for job {jobId}", "ProcessTranscodeQueueService", "StopAllActiveTranscodingProcesses")
+                    else:
+                        LoggingService.LogWarning(f"Failed to stop transcoding process for job {jobId}: {result.get('ErrorMessage', 'Unknown error')}", "ProcessTranscodeQueueService", "StopAllActiveTranscodingProcesses")
+                except Exception as e:
+                    LoggingService.LogException(f"Exception stopping transcoding process for job {jobId}", e, "ProcessTranscodeQueueService", "StopAllActiveTranscodingProcesses")
+            
+            LoggingService.LogInfo(f"Stopped {len(activeJobIds)} active transcoding processes", "ProcessTranscodeQueueService", "StopAllActiveTranscodingProcesses")
+            
+        except Exception as e:
+            LoggingService.LogException("Exception stopping active transcoding processes", e, "ProcessTranscodeQueueService", "StopAllActiveTranscodingProcesses")
+    
+    def CleanupStaleProgressData(self):
+        """Clean up any stale progress data from the database."""
+        try:
+            LoggingService.LogFunctionEntry("CleanupStaleProgressData", "ProcessTranscodeQueueService")
+            
+            # Get all current progress records
+            currentProgress = self.DatabaseManager.GetCurrentTranscodeProgress()
+            if currentProgress:
+                # Delete all progress records to clean up stale data
+                query = "DELETE FROM TranscodeProgress"
+                affectedRows = self.DatabaseManager.DatabaseService.ExecuteNonQuery(query)
+                LoggingService.LogInfo(f"Cleaned up {affectedRows} stale progress records", "ProcessTranscodeQueueService", "CleanupStaleProgressData")
+            
+        except Exception as e:
+            LoggingService.LogException("Exception cleaning up stale progress data", e, "ProcessTranscodeQueueService", "CleanupStaleProgressData")
     

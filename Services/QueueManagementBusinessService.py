@@ -17,17 +17,20 @@ class QueueManagementBusinessService:
         self.DatabaseManager = DatabaseManagerInstance or DatabaseManager()
         self.FileManager = FileManagerService()
     
-    def PopulateQueueFromMediaFiles(self, MaxItems: int = 10) -> Dict[str, Any]:
+    def PopulateQueueFromMediaFiles(self, MaxItems: int = 10, RootFolderPath: str = None) -> Dict[str, Any]:
         """Populate transcoding queue from MediaFiles that have assigned profiles, ordered by largest disk space."""
         try:
-            LoggingService.LogFunctionEntry("PopulateQueueFromMediaFiles", "QueueManagementBusinessService", MaxItems)
+            LoggingService.LogFunctionEntry("PopulateQueueFromMediaFiles", "QueueManagementBusinessService", MaxItems, RootFolderPath)
             
             # Get media files with assigned profiles, ordered by size (largest first)
-            mediaFilesWithProfiles = self.GetMediaFilesWithProfilesOrderedBySize()
+            mediaFilesWithProfiles = self.GetMediaFilesWithProfilesOrderedBySize(RootFolderPath)
             LoggingService.LogInfo(f"Found {len(mediaFilesWithProfiles)} media files with assigned profiles", "QueueManagementBusinessService", "PopulateQueueFromMediaFiles")
             
             if not mediaFilesWithProfiles:
-                friendlyMessage = "No media files found with assigned profiles. Please assign profiles to your media files in Settings > Profile Management before adding them to the transcoding queue."
+                if RootFolderPath:
+                    friendlyMessage = f"No media files found with assigned profiles in folder '{RootFolderPath}'. Please assign profiles to your media files in Settings > Profile Management before adding them to the transcoding queue."
+                else:
+                    friendlyMessage = "No media files found with assigned profiles. Please assign profiles to your media files in Settings > Profile Management before adding them to the transcoding queue."
                 LoggingService.LogWarning("No media files with assigned profiles found", "QueueManagementBusinessService", "PopulateQueueFromMediaFiles")
                 return {"Success": False, "ErrorMessage": friendlyMessage, "ItemsAdded": 0}
             
@@ -93,16 +96,24 @@ class QueueManagementBusinessService:
             LoggingService.LogException(errorMsg, e, "QueueManagementBusinessService", "PopulateQueueFromMediaFiles")
             return {"Success": False, "ErrorMessage": errorMsg, "ItemsAdded": 0}
     
-    def GetMediaFilesWithProfilesOrderedBySize(self) -> List[MediaFileModel]:
+    def GetMediaFilesWithProfilesOrderedBySize(self, RootFolderPath: str = None) -> List[MediaFileModel]:
         """Get media files that have assigned profiles, ordered by size (largest first)."""
         try:
-            LoggingService.LogFunctionEntry("GetMediaFilesWithProfilesOrderedBySize", "QueueManagementBusinessService")
+            LoggingService.LogFunctionEntry("GetMediaFilesWithProfilesOrderedBySize", "QueueManagementBusinessService", RootFolderPath)
             
             # Get all media files
             allMediaFiles = self.DatabaseManager.GetAllMediaFiles()
             
             # Filter to only files with assigned profiles
             filesWithProfiles = [mf for mf in allMediaFiles if mf.AssignedProfile and mf.AssignedProfile.strip()]
+            
+            # If RootFolderPath is specified, filter to only files in that folder
+            if RootFolderPath:
+                # Normalize the root folder path for comparison
+                normalizedRootPath = RootFolderPath.replace('\\', '/').rstrip('/')
+                filesWithProfiles = [mf for mf in filesWithProfiles 
+                                   if mf.FilePath.replace('\\', '/').startswith(normalizedRootPath)]
+                LoggingService.LogInfo(f"Filtered to {len(filesWithProfiles)} files in folder: {RootFolderPath}", "QueueManagementBusinessService", "GetMediaFilesWithProfilesOrderedBySize")
             
             # Sort by size (largest first)
             filesWithProfiles.sort(key=lambda x: x.SizeMB or 0, reverse=True)

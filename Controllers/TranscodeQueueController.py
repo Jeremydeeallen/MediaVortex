@@ -60,6 +60,7 @@ def PopulateQueue():
         # Get parameters from request
         data = request.get_json() or {}
         maxItems = data.get('MaxItems', 100)
+        rootFolderPath = data.get('RootFolderPath')
         
         # Validate parameters
         if not isinstance(maxItems, int) or maxItems < 1 or maxItems > 1000:
@@ -71,7 +72,7 @@ def PopulateQueue():
         viewModel = TranscodeQueueViewModel()
         
         # Populate queue
-        result = viewModel.PopulateQueue(maxItems)
+        result = viewModel.PopulateQueue(maxItems, rootFolderPath)
         
         if result.get("Success", False):
             itemsAdded = result.get("ItemsAdded", 0)

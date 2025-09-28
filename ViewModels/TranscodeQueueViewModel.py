@@ -79,17 +79,17 @@ class TranscodeQueueViewModel:
             LoggingService.LogException("Exception loading queue items", e, "TranscodeQueueViewModel", "LoadQueueItems")
             return {"Success": False, "ErrorMessage": self.ErrorMessage}
     
-    def PopulateQueue(self, MaxItems: int = 100) -> Dict[str, Any]:
+    def PopulateQueue(self, MaxItems: int = 100, RootFolderPath: str = None) -> Dict[str, Any]:
         """Populate the transcoding queue from MediaFiles."""
         try:
-            LoggingService.LogFunctionEntry("PopulateQueue", "TranscodeQueueViewModel", MaxItems)
+            LoggingService.LogFunctionEntry("PopulateQueue", "TranscodeQueueViewModel", MaxItems, RootFolderPath)
             
             self.IsLoading = True
             self.ErrorMessage = ""
             self.SuccessMessage = ""
             
             # Populate queue using business service
-            result = self.QueueManagementService.PopulateQueueFromMediaFiles(MaxItems)
+            result = self.QueueManagementService.PopulateQueueFromMediaFiles(MaxItems, RootFolderPath)
             
             if result.get("Success", False):
                 itemsAdded = result.get("ItemsAdded", 0)

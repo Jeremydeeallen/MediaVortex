@@ -247,6 +247,27 @@ ScanJobs.ScanType	TEXT
 Seasons.Id	INTEGER
 Seasons.RootFolderId	INTEGER
 Seasons.SeasonName	TEXT
+ServiceStatus.Id	INTEGER
+ServiceStatus.ServiceName	TEXT
+ServiceStatus.Status	TEXT
+ServiceStatus.HealthStatus	TEXT
+ServiceStatus.StartTime	TIMESTAMP
+ServiceStatus.LastHealthCheck	TIMESTAMP
+ServiceStatus.UptimeSeconds	INTEGER
+ServiceStatus.MemoryUsage	REAL
+ServiceStatus.CPUUsage	REAL
+ServiceStatus.DatabaseConnection	BOOLEAN
+ServiceStatus.DiskSpace	REAL
+ServiceStatus.ErrorCount	INTEGER
+ServiceStatus.MaxErrors	INTEGER
+ServiceStatus.ActiveJobsCount	INTEGER
+ServiceStatus.IsProcessing	BOOLEAN
+ServiceStatus.LastErrorMessage	TEXT
+ServiceStatus.ProcessId	INTEGER
+ServiceStatus.Version	TEXT
+ServiceStatus.ServiceType	TEXT
+ServiceStatus.CreatedAt	TIMESTAMP
+ServiceStatus.UpdatedAt	TIMESTAMP
 SystemSettings.Id	INTEGER
 SystemSettings.SettingKey	TEXT
 SystemSettings.SettingValue	TEXT
@@ -372,6 +393,7 @@ ProfileThresholds	sqlite_autoindex_ProfileThresholds_1	1	u	0
 Profiles	sqlite_autoindex_Profiles_1	1	u	0
 RootFolders	sqlite_autoindex_RootFolders_1	1	u	0
 ScanJobs	sqlite_autoindex_ScanJobs_1	1	u	0
+ServiceStatus	sqlite_autoindex_ServiceStatus_1	1	u	0
 SystemSettings	idx_SystemSettings_SettingKey	0	c	0
 SystemSettings	sqlite_autoindex_SystemSettings_1	1	u	0
 TranscodeAttempts	idx_TranscodeAttempts_FilePath	0	c	0
@@ -432,6 +454,7 @@ ProfileThresholds	sqlite_autoindex_ProfileThresholds_1	Resolution	1
 Profiles	sqlite_autoindex_Profiles_1	ProfileName	0
 RootFolders	sqlite_autoindex_RootFolders_1	RootFolder	0
 ScanJobs	sqlite_autoindex_ScanJobs_1	JobId	0
+ServiceStatus	sqlite_autoindex_ServiceStatus_1	ServiceName	0
 SystemSettings	idx_SystemSettings_SettingKey	SettingKey	0
 SystemSettings	sqlite_autoindex_SystemSettings_1	SettingKey	0
 TranscodeAttempts	idx_TranscodeAttempts_FilePath	FilePath	0

@@ -188,6 +188,7 @@
 .table-responsive {
     width: 100% !important;
     overflow-x: auto !important;
+    margin-bottom: 0 !important;
 }
 
 /* Force card bodies to use full width */
@@ -205,13 +206,49 @@
     padding-left: 0 !important;
     padding-right: 0 !important;
 }
+
+/* Ensure all tables use full width */
+.table {
+    width: 100% !important;
+    table-layout: fixed !important;
+    margin-bottom: 0 !important;
+}
+
+/* Improve table responsiveness */
+.table-responsive {
+    border: none !important;
+    box-shadow: none !important;
+}
+
+/* Ensure proper spacing for full-width layout */
+.card {
+    margin-bottom: 1rem !important;
+}
+
+/* Optimize column widths for better full-width display */
+#QueueTable th:nth-child(1), #QueueTable td:nth-child(1) { width: 4%; } /* ID */
+#QueueTable th:nth-child(2), #QueueTable td:nth-child(2) { width: 30%; } /* File Name */
+#QueueTable th:nth-child(3), #QueueTable td:nth-child(3) { width: 20%; } /* Directory */
+#QueueTable th:nth-child(4), #QueueTable td:nth-child(4) { width: 8%; } /* Size */
+#QueueTable th:nth-child(5), #QueueTable td:nth-child(5) { width: 8%; } /* Priority */
+#QueueTable th:nth-child(6), #QueueTable td:nth-child(6) { width: 10%; } /* Status */
+#QueueTable th:nth-child(7), #QueueTable td:nth-child(7) { width: 10%; } /* Date Added */
+#QueueTable th:nth-child(8), #QueueTable td:nth-child(8) { width: 10%; } /* Date Started */
+#QueueTable th:nth-child(9), #QueueTable td:nth-child(9) { width: 5%; } /* Actions */
+
+#MediaFilesTable th:nth-child(1), #MediaFilesTable td:nth-child(1) { width: 4% !important; } /* ID */
+#MediaFilesTable th:nth-child(2), #MediaFilesTable td:nth-child(2) { width: 35% !important; } /* File Name */
+#MediaFilesTable th:nth-child(3), #MediaFilesTable td:nth-child(3) { width: 25% !important; } /* Directory */
+#MediaFilesTable th:nth-child(4), #MediaFilesTable td:nth-child(4) { width: 8% !important; } /* Size */
+#MediaFilesTable th:nth-child(5), #MediaFilesTable td:nth-child(5) { width: 10% !important; } /* Resolution */
+#MediaFilesTable th:nth-child(6), #MediaFilesTable td:nth-child(6) { width: 13% !important; } /* Profile */
+#MediaFilesTable th:nth-child(7), #MediaFilesTable td:nth-child(7) { width: 5% !important; } /* Actions */
 </style>
 {% endblock %}
 
 {% block content %}
-<div class="container-fluid">
-    <div class="row">
-        <div class="col-12">
+<div class="row">
+    <div class="col-12">
             <div class="d-flex justify-content-between align-items-center mb-4">
                 <h1 class="h3 mb-0">Queue</h1>
                 <div class="btn-group" role="group">
@@ -567,8 +604,6 @@
             </div>
         </div>
     </div>
-</div>
-
 
 <!-- Alert Container -->
 <div id="AlertContainer" class="position-fixed top-0 end-0 p-3" style="z-index: 1050;"></div>
