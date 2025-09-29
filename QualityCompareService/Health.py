@@ -3,6 +3,7 @@ QualityCompareService Health Monitoring
 Handles health checks, status reporting, and performance monitoring.
 """
 
+import os
 import psutil
 import time
 import threading
@@ -239,7 +240,7 @@ class HealthMonitor:
             print(f"Exception updating performance metrics: {str(e)}")
     
     def UpdateServiceStatus(self):
-        """Update service status in database."""
+        """Update service status in database - handles both insert and update."""
         try:
             uptime = (datetime.now() - self.StartTime).total_seconds()
             
@@ -252,6 +253,7 @@ class HealthMonitor:
                 'ServiceName': 'QualityCompareService',
                 'Status': 'Running',
                 'HealthStatus': self.HealthStatus,
+                'StartTime': self.StartTime,
                 'LastHealthCheck': self.LastHealthCheck,
                 'UptimeSeconds': int(uptime),
                 'MemoryUsage': currentMemory,
@@ -261,10 +263,14 @@ class HealthMonitor:
                 'ErrorCount': self.ErrorCount,
                 'MaxErrors': self.MaxErrors,
                 'ActiveJobsCount': self.GetActiveJobsCount(),
-                'IsProcessing': self.IsMonitoring
+                'IsProcessing': self.IsMonitoring,
+                'ProcessId': os.getpid(),
+                'Version': '1.0.0',
+                'ServiceType': 'QualityTesting'
             }
             
-            self.DatabaseManager.UpdateServiceStatus('QualityCompareService', serviceStatus)
+            # Use SaveServiceStatus which handles both insert and update
+            self.DatabaseManager.SaveServiceStatus(serviceStatus)
             
         except Exception as e:
             print(f"Exception updating service status: {str(e)}")

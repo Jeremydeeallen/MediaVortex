@@ -2013,7 +2013,7 @@ class TranscodeQueueManager {
 
     async LogErrorToDatabase(errorMessage, context, requestUrl) {
         try {
-            await fetch('/api/VMAF/LogError', {
+            await fetch('/api/QualityTesting/LogError', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'

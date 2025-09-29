@@ -39,7 +39,7 @@ def GetQualityTestingQueue():
         Result = SharedQualityTestingViewModel.GetQualityTestingQueue(Page, PageSize, SortBy, SortOrder)
         
         if Result.get("Success", False):
-            LoggingService.LogInfo(f"Retrieved {Result.get('Count', 0)} quality testing queue items", "QualityTestingController", "GetQualityTestingQueue")
+            LoggingService.LogDebug(f"Retrieved {Result.get('Count', 0)} quality testing queue items", "QualityTestingController", "GetQualityTestingQueue")
             return jsonify(Result)
         else:
             LoggingService.LogError(f"Failed to get quality testing queue: {Result.get('ErrorMessage', 'Unknown error')}", "QualityTestingController", "GetQualityTestingQueue")
@@ -288,4 +288,43 @@ def GetQualityTestingDetails(QueueId):
     except Exception as e:
         ErrorMsg = f"Exception getting quality testing details for job {QueueId}: {str(e)}"
         LoggingService.LogException(ErrorMsg, e, "QualityTestingController", "GetQualityTestingDetails")
+        return jsonify({"Success": False, "ErrorMessage": ErrorMsg}), 500
+
+
+@QualityTestingBlueprint.route('/LogError', methods=['POST'])
+def LogVMAFError():
+    """Log VMAF processing errors to database."""
+    try:
+        LoggingService.LogFunctionEntry("LogVMAFError", "QualityTestingController")
+        
+        # Get error data from request
+        Data = request.get_json() or {}
+        ErrorMessage = Data.get('ErrorMessage', '')
+        ErrorContext = Data.get('ErrorContext', '')
+        RequestUrl = Data.get('RequestUrl', '')
+        
+        # Validate required fields
+        if not ErrorMessage:
+            ErrorMsg = "ErrorMessage is required"
+            LoggingService.LogError(ErrorMsg, "QualityTestingController", "LogVMAFError")
+            return jsonify({"Success": False, "ErrorMessage": ErrorMsg}), 400
+        
+        # Log the error using LoggingService
+        LoggingService.LogError(
+            f"VMAF Error - {ErrorMessage}",
+            "LogVMAFError",
+            "QualityTestingController",
+            f"Context: {ErrorContext}, URL: {RequestUrl}"
+        )
+        
+        LoggingService.LogInfo(f"VMAF error logged successfully: {ErrorMessage[:100]}...", "QualityTestingController", "LogVMAFError")
+        
+        return jsonify({
+            "Success": True,
+            "Message": "VMAF error logged successfully"
+        })
+        
+    except Exception as e:
+        ErrorMsg = f"Exception logging VMAF error: {str(e)}"
+        LoggingService.LogException(ErrorMsg, e, "QualityTestingController", "LogVMAFError")
         return jsonify({"Success": False, "ErrorMessage": ErrorMsg}), 500

@@ -63,6 +63,7 @@ from Controllers.TranscodeJobController import TranscodeJobBlueprint
 from Controllers.QualityTestingController import QualityTestingBlueprint
 from Controllers.FileReplacementController import FileReplacementController
 from Controllers.ServiceStatusController import ServiceStatusBlueprint
+from Controllers.FailureTrackingController import FailureTrackingBlueprint
 from Controllers.QueueResetController import QueueResetBlueprint
 
 
@@ -111,6 +112,11 @@ class MediaVortexApp:
             """Activity monitoring page for transcoding and VMAF quality analysis."""
             return render_template('Activity.html')
         
+        @self.App.route('/Status')
+        def status():
+            """Service status page for monitoring microservices."""
+            return render_template('Status.html')
+        
         @self.App.route('/api/health')
         def health_check():
             """Health check endpoint."""
@@ -128,6 +134,7 @@ class MediaVortexApp:
         self.App.register_blueprint(TranscodeJobBlueprint)
         self.App.register_blueprint(QualityTestingBlueprint)
         self.App.register_blueprint(ServiceStatusBlueprint, url_prefix='/api')
+        self.App.register_blueprint(FailureTrackingBlueprint, url_prefix='/api/FailureTracking')
         self.App.register_blueprint(QueueResetBlueprint)
     
     def Run(self, host='0.0.0.0', port=5000, debug=False):
@@ -136,7 +143,8 @@ class MediaVortexApp:
         print(f"Settings page: http://{host}:{port}/settings")
         print(f"File Scanning page: http://{host}:{port}/Scanning")
         print(f"Transcoding Queue page: http://{host}:{port}/TranscodeQueue")
-        print(f"Transcoding Progress page: http://{host}:{port}/TranscodeProgress")
+        print(f"Activity page: http://{host}:{port}/Activity")
+        print(f"Service Status page: http://{host}:{port}/Status")
         self.App.run(host=host, port=port, debug=debug)
 
 

@@ -19,6 +19,7 @@ from Services.QualityTestingStrategyService import QualityTestingStrategyService
 from Services.LoggingService import LoggingService
 from Services.ServiceCommandService import ServiceCommandService
 from Repositories.DatabaseManager import DatabaseManager
+# Using uniform pattern like TranscodeService - no separate HealthMonitor needed
 
 
 class QualityCompareServiceApp:
@@ -51,13 +52,18 @@ class QualityCompareServiceApp:
                 return False
             
             # Register service status
-            self.RegisterServiceStatus()
+            self.UpdateServiceStatus("Starting")
             
             # Start processing threads
             self.StartProcessingThreads()
             
+            # Start health check thread - same pattern as TranscodeService
+            self.HealthCheckThread = threading.Thread(target=self.HealthCheckLoop, daemon=True)
+            self.HealthCheckThread.start()
+            
             # Mark as running
             self.IsRunning = True
+            self.UpdateServiceStatus("Running")
             
             LoggingService.LogInfo("QualityCompareService started successfully", "QualityCompareService", "Run")
             
@@ -88,35 +94,7 @@ class QualityCompareServiceApp:
                                       "QualityCompareService", "CheckDatabaseConnection")
             return False
     
-    def RegisterServiceStatus(self):
-        """Register service status in database."""
-        try:
-            serviceStatus = {
-                'ServiceName': 'QualityCompareService',
-                'Status': 'Starting',
-                'HealthStatus': 'Healthy',
-                'StartTime': self.StartTime,
-                'LastHealthCheck': datetime.now(),
-                'UptimeSeconds': 0,
-                'MemoryUsage': psutil.Process().memory_info().rss / 1024 / 1024,  # MB
-                'CPUUsage': 0.0,
-                'DatabaseConnection': True,
-                'DiskSpace': psutil.disk_usage('/').free / 1024 / 1024 / 1024,  # GB
-                'ErrorCount': 0,
-                'MaxErrors': 10,
-                'ActiveJobsCount': 0,
-                'IsProcessing': False,
-                'ProcessId': self.ProcessId,
-                'Version': '1.0.0',
-                'ServiceType': 'QualityTesting'
-            }
-            
-            self.DatabaseManager.SaveServiceStatus(serviceStatus)
-            LoggingService.LogInfo("Service status registered", "QualityCompareService", "RegisterServiceStatus")
-            
-        except Exception as e:
-            LoggingService.LogException("Exception registering service status", e, 
-                                      "QualityCompareService", "RegisterServiceStatus")
+    # RegisterServiceStatus method removed - using uniform UpdateServiceStatus pattern
     
     def StartProcessingThreads(self):
         """Start background processing threads."""
@@ -176,14 +154,14 @@ class QualityCompareServiceApp:
                                       "QualityCompareService", "ProcessQualityTestingQueue")
     
     def HealthCheckLoop(self):
-        """Perform regular health checks."""
+        """Perform regular health checks - same pattern as TranscodeService."""
         try:
             LoggingService.LogInfo("Health check loop started", "QualityCompareService", "HealthCheckLoop")
             
             while not self.ShutdownEvent.is_set():
                 try:
                     # Update service status
-                    self.UpdateServiceStatus()
+                    self.UpdateServiceStatus("Running", "Healthy")
                     
                     # Wait before next health check
                     time.sleep(30)  # Check every 30 seconds
@@ -235,29 +213,82 @@ class QualityCompareServiceApp:
             LoggingService.LogException("Exception in command processor loop", e, 
                                       "QualityCompareService", "ProcessCommands")
     
-    def UpdateServiceStatus(self):
-        """Update service status in database."""
+    def UpdateServiceStatus(self, status: str = "Running", health_status: str = "Healthy", 
+                              active_jobs: int = 0, is_processing: bool = False, 
+                              error_message: str = None):
+        """Update service status in ServiceStatus table - same pattern as TranscodeService."""
         try:
-            uptime = (datetime.now() - self.StartTime).total_seconds()
+            # Calculate uptime
+            uptime_seconds = int((datetime.now() - self.StartTime).total_seconds())
             
-            serviceStatus = {
-                'ServiceName': 'QualityCompareService',
-                'Status': 'Running' if self.IsRunning else 'Stopped',
-                'HealthStatus': 'Healthy',
-                'LastHealthCheck': datetime.now(),
-                'UptimeSeconds': int(uptime),
-                'MemoryUsage': psutil.Process().memory_info().rss / 1024 / 1024,  # MB
-                'CPUUsage': psutil.Process().cpu_percent(),
-                'DatabaseConnection': self.CheckDatabaseConnection(),
-                'DiskSpace': psutil.disk_usage('/').free / 1024 / 1024 / 1024,  # GB
-                'IsProcessing': self.IsRunning
-            }
+            # Get system metrics
+            memory_usage = self.GetMemoryUsage()
+            cpu_usage = self.GetCPUUsage()
+            disk_space = self.GetDiskSpace()
             
-            self.DatabaseManager.UpdateServiceStatus('QualityCompareService', serviceStatus)
+            # Check database connection
+            database_connection = self.CheckDatabaseConnection()
+            
+            # Insert or update service status - same pattern as TranscodeService
+            query = """
+            INSERT OR REPLACE INTO ServiceStatus (
+                ServiceName, Status, HealthStatus, StartTime, LastHealthCheck,
+                UptimeSeconds, MemoryUsage, CPUUsage, DatabaseConnection, DiskSpace,
+                ErrorCount, MaxErrors, ActiveJobsCount, IsProcessing, LastErrorMessage,
+                ProcessId, Version, ServiceType, CreatedAt, UpdatedAt
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """
+            
+            now = datetime.now()
+            params = (
+                "QualityCompareService",  # ServiceName
+                status,                   # Status
+                health_status,            # HealthStatus
+                self.StartTime,           # StartTime
+                now,                      # LastHealthCheck
+                uptime_seconds,           # UptimeSeconds
+                memory_usage,             # MemoryUsage
+                cpu_usage,                # CPUUsage
+                database_connection,      # DatabaseConnection
+                disk_space,               # DiskSpace
+                0,                        # ErrorCount
+                10,                       # MaxErrors
+                active_jobs,              # ActiveJobsCount
+                is_processing,            # IsProcessing
+                error_message,            # LastErrorMessage
+                self.ProcessId,           # ProcessId
+                "1.0.0",                 # Version
+                "QualityTesting",        # ServiceType
+                now,                     # CreatedAt
+                now                      # UpdatedAt
+            )
+            
+            self.DatabaseManager.DatabaseService.ExecuteNonQuery(query, params)
+            LoggingService.LogDebug(f"Service status updated: {status}", "QualityCompareService", "UpdateServiceStatus")
             
         except Exception as e:
-            LoggingService.LogException("Exception updating service status", e, 
-                                      "QualityCompareService", "UpdateServiceStatus")
+            LoggingService.LogException("Error updating service status", e, "QualityCompareService", "UpdateServiceStatus")
+    
+    def GetMemoryUsage(self) -> float:
+        """Get current memory usage in MB."""
+        try:
+            return psutil.Process().memory_info().rss / 1024 / 1024
+        except Exception:
+            return 0.0
+    
+    def GetCPUUsage(self) -> float:
+        """Get current CPU usage percentage."""
+        try:
+            return psutil.Process().cpu_percent()
+        except Exception:
+            return 0.0
+    
+    def GetDiskSpace(self) -> float:
+        """Get available disk space in GB."""
+        try:
+            return psutil.disk_usage('/').free / 1024 / 1024 / 1024
+        except Exception:
+            return 0.0
     
     def MainProcessingLoop(self):
         """Main processing loop."""
@@ -279,8 +310,12 @@ class QualityCompareServiceApp:
             self.IsRunning = False
             self.ShutdownEvent.set()
             
+            # Stop health check thread
+            if self.HealthCheckThread and self.HealthCheckThread.is_alive():
+                self.HealthCheckThread.join(timeout=5)
+            
             # Update service status
-            self.UpdateServiceStatus()
+            self.UpdateServiceStatus("Stopping")
             
             LoggingService.LogInfo("QualityCompareService shutdown initiated", "QualityCompareService", "Shutdown")
             
@@ -294,10 +329,7 @@ class QualityCompareServiceApp:
             LoggingService.LogInfo("Cleaning up QualityCompareService resources", "QualityCompareService", "Cleanup")
             
             # Update final status
-            self.DatabaseManager.UpdateServiceStatus('QualityCompareService', {
-                'Status': 'Stopped',
-                'HealthStatus': 'Stopped'
-            })
+            self.UpdateServiceStatus("Stopped", "Stopped")
             
             LoggingService.LogInfo("QualityCompareService cleanup complete", "QualityCompareService", "Cleanup")
             

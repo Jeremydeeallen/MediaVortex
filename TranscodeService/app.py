@@ -108,7 +108,7 @@ class TranscodeServiceApp:
         try:
             # Try to get a simple query to test connection
             result = self.DatabaseManager.DatabaseService.ExecuteQuery("SELECT 1")
-            LoggingService.LogInfo("Database connection successful", "TranscodeService", "CheckDatabaseConnection")
+            LoggingService.LogDebug("Database connection successful", "TranscodeService", "CheckDatabaseConnection")
             return True
         except Exception as e:
             LoggingService.LogError(f"Database connection failed: {str(e)}", "TranscodeService", "CheckDatabaseConnection")
@@ -165,7 +165,7 @@ class TranscodeServiceApp:
             )
             
             self.DatabaseManager.DatabaseService.ExecuteNonQuery(query, params)
-            LoggingService.LogInfo(f"Service status updated: {status}", "TranscodeService", "UpdateServiceStatus")
+            LoggingService.LogDebug(f"Service status updated: {status}", "TranscodeService", "UpdateServiceStatus")
             
         except Exception as e:
             LoggingService.LogException("Error updating service status", e, "TranscodeService", "UpdateServiceStatus")

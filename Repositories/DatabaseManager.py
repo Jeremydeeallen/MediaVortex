@@ -2138,7 +2138,7 @@ class DatabaseManager:
                 LoggingService.LogInfo(f"Retrieved pending quality test {QueueItem.Id}", "DatabaseManager", "GetNextPendingQualityTest")
                 return QueueItem
             else:
-                LoggingService.LogInfo("No pending quality tests found", "DatabaseManager", "GetNextPendingQualityTest")
+                LoggingService.LogDebug("No pending quality tests found", "DatabaseManager", "GetNextPendingQualityTest")
                 return None
                 
         except Exception as e:
@@ -2392,7 +2392,7 @@ class DatabaseManager:
             """
             rows = self.DatabaseService.ExecuteQuery(query, (ServiceName,))
             
-            LoggingService.LogInfo(f"Retrieved {len(rows)} pending commands for {ServiceName}", "DatabaseManager", "GetPendingCommandsForService")
+            LoggingService.LogDebug(f"Retrieved {len(rows)} pending commands for {ServiceName}", "DatabaseManager", "GetPendingCommandsForService")
             return rows
             
         except Exception as e:
