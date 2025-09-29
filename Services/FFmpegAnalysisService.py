@@ -69,6 +69,61 @@ class FFmpegAnalysisService:
             AnalysisModel.ErrorMessage = f"Analysis error: {str(e)}"
             return AnalysisModel
     
+    def ExtractTotalFrames(self, VideoStream: Dict[str, Any], Format: Dict[str, Any]) -> Optional[int]:
+        """Extract total frames with codec-specific fallback strategies."""
+        try:
+            codec = VideoStream.get('codec_name', '').lower()
+            
+            # Strategy 1: Direct nb_frames (MPEG4, some others)
+            totalFrames = VideoStream.get('nb_frames')
+            if totalFrames:
+                try:
+                    return int(totalFrames)
+                except (ValueError, TypeError):
+                    pass
+            
+            # Strategy 2: AV1 - Extract from tags
+            if codec == 'av1':
+                tags = VideoStream.get('tags', {})
+                numberFrames = tags.get('NUMBER_OF_FRAMES')
+                if numberFrames:
+                    try:
+                        return int(numberFrames)
+                    except (ValueError, TypeError):
+                        pass
+            
+            # Strategy 3: Calculate from duration × frame rate (H264, HEVC, others)
+            duration = Format.get('duration')
+            frameRate = VideoStream.get('r_frame_rate')
+            if duration and frameRate and '/' in frameRate:
+                try:
+                    numerator, denominator = frameRate.split('/')
+                    fps = float(numerator) / float(denominator)
+                    calculatedFrames = int(float(duration) * fps)
+                    LoggingService.LogInfo(f"Calculated frames from duration×fps: {calculatedFrames} (duration: {duration}s, fps: {fps})", 'ExtractTotalFrames', 'FFmpegAnalysisService')
+                    return calculatedFrames
+                except (ValueError, TypeError, ZeroDivisionError) as e:
+                    LoggingService.LogWarning(f"Failed to calculate frames from duration×fps: {e}", 'ExtractTotalFrames', 'FFmpegAnalysisService')
+            
+            # Strategy 4: Try avg_frame_rate as fallback
+            avgFrameRate = VideoStream.get('avg_frame_rate')
+            if duration and avgFrameRate and '/' in avgFrameRate:
+                try:
+                    numerator, denominator = avgFrameRate.split('/')
+                    fps = float(numerator) / float(denominator)
+                    calculatedFrames = int(float(duration) * fps)
+                    LoggingService.LogInfo(f"Calculated frames from duration×avg_fps: {calculatedFrames} (duration: {duration}s, avg_fps: {fps})", 'ExtractTotalFrames', 'FFmpegAnalysisService')
+                    return calculatedFrames
+                except (ValueError, TypeError, ZeroDivisionError) as e:
+                    LoggingService.LogWarning(f"Failed to calculate frames from duration×avg_fps: {e}", 'ExtractTotalFrames', 'FFmpegAnalysisService')
+            
+            LoggingService.LogWarning(f"Could not extract total frames for codec: {codec}", 'ExtractTotalFrames', 'FFmpegAnalysisService')
+            return None
+            
+        except Exception as e:
+            LoggingService.LogException("Error extracting total frames", e, 'ExtractTotalFrames', 'FFmpegAnalysisService')
+            return None
+    
     def ParseFFprobeOutput(self, AnalysisModel: FFmpegAnalysisModel, MediaInfo: Dict[str, Any]):
         """Parse FFprobe JSON output and populate analysis model."""
         try:
@@ -86,11 +141,12 @@ class FFmpegAnalysisService:
             # Container format
             AnalysisModel.ContainerFormat = Format.get('format_name', '')
             
-            # Try to get overall bitrate from format level as fallback
+            # Overall bitrate from format level
             FormatBitrate = Format.get('bit_rate')
             if FormatBitrate:
                 try:
-                    FormatBitrateKbps = int(FormatBitrate) // 1000
+                    AnalysisModel.OverallBitrate = int(FormatBitrate)
+                    FormatBitrateKbps = AnalysisModel.OverallBitrate // 1000
                     LoggingService.LogInfo(f"Found format bitrate: {FormatBitrateKbps} kbps for {AnalysisModel.FilePath}", 'ParseFFprobeOutput', 'FFmpegAnalysisService')
                     # If we don't have video bitrate, use format bitrate as video bitrate
                     if not AnalysisModel.VideoBitrateKbps:
@@ -156,6 +212,16 @@ class FFmpegAnalysisService:
                         pass
                 else:
                     LoggingService.LogInfo(f"No bitrate in video stream, keeping existing: {AnalysisModel.VideoBitrateKbps} kbps", 'FFmpegAnalysisService', 'ParseFFprobeOutput')
+                
+                # Extract new metadata fields from video stream
+                AnalysisModel.TotalFrames = self.ExtractTotalFrames(VideoStream, Format)
+                AnalysisModel.CodecProfile = VideoStream.get('profile', '')
+                AnalysisModel.ColorRange = VideoStream.get('color_range', '')
+                AnalysisModel.FieldOrder = VideoStream.get('field_order', '')
+                AnalysisModel.HasBFrames = VideoStream.get('has_b_frames', 0)
+                AnalysisModel.RefFrames = VideoStream.get('refs', 0)
+                AnalysisModel.PixelFormat = VideoStream.get('pix_fmt', '')
+                AnalysisModel.Level = VideoStream.get('level', 0)
             
             # Process audio stream
             if AudioStream:
@@ -178,6 +244,12 @@ class FFmpegAnalysisService:
                 Language = AudioStream.get('tags', {}).get('language')
                 if Language:
                     AnalysisModel.Language = Language
+                
+                # Extract new audio metadata fields
+                AnalysisModel.AudioChannels = AudioStream.get('channels', 0)
+                AnalysisModel.AudioSampleRate = AudioStream.get('sample_rate', 0)
+                AnalysisModel.AudioSampleFormat = AudioStream.get('sample_fmt', '')
+                AnalysisModel.AudioChannelLayout = AudioStream.get('channel_layout', '')
             
             # Process subtitle streams
             if SubtitleStreams:

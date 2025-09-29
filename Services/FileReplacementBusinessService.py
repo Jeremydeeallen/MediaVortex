@@ -142,17 +142,26 @@ class FileReplacementBusinessService:
                     'ErrorMessage': f'VMAF score {transcode_attempt.VMAF} does not meet quality threshold (90)'
                 }
             
-            # Attempt file replacement
-            replace_result = self.FileManager.ReplaceFile(transcode_attempt.FilePath, transcoded_path)
+            # Get KeepSource setting from profile threshold
+            keep_source = self._GetKeepSourceSetting(transcode_attempt)
+            if keep_source is None:
+                return {
+                    'Success': False,
+                    'ErrorMessage': 'Could not determine KeepSource setting for this transcode attempt'
+                }
             
-            if replace_result.get('Success', False):
+            # Process the complete 3-step file replacement
+            replacement_result = self._ProcessCompleteFileReplacement(
+                transcode_attempt.FilePath, 
+                transcoded_path, 
+                keep_source
+            )
+            
+            if replacement_result.get('Success', False):
                 # Update transcode attempt to mark replacement as completed
                 transcode_attempt.FileReplaced = True
                 transcode_attempt.FileReplacementDate = datetime.now()
                 self.DatabaseManager.SaveTranscodeAttempt(transcode_attempt)
-                
-                # Clean up temporary transcoded file and directory
-                self._CleanupTranscodedFiles(transcoded_path)
                 
                 LoggingService.LogInfo(f"Successfully replaced file for attempt {TranscodeAttemptId}", 
                                      "FileReplacementBusinessService", "ProcessFileReplacement")
@@ -162,10 +171,12 @@ class FileReplacementBusinessService:
                     'Message': 'File replacement completed successfully',
                     'OriginalFilePath': transcode_attempt.FilePath,
                     'TranscodedFilePath': transcoded_path,
-                    'VMAFScore': transcode_attempt.VMAF
+                    'VMAFScore': transcode_attempt.VMAF,
+                    'KeepSource': keep_source,
+                    'StepsCompleted': replacement_result.get('StepsCompleted', [])
                 }
             else:
-                error_message = replace_result.get('ErrorMessage', 'Unknown error during file replacement')
+                error_message = replacement_result.get('ErrorMessage', 'Unknown error during file replacement')
                 LoggingService.LogError(f"File replacement failed for attempt {TranscodeAttemptId}: {error_message}", 
                                       "FileReplacementBusinessService", "ProcessFileReplacement")
                 
@@ -228,6 +239,223 @@ class FileReplacementBusinessService:
             return {
                 'Success': False,
                 'ErrorMessage': f'Exception getting status: {str(e)}'
+            }
+    
+    def _GetKeepSourceSetting(self, TranscodeAttempt) -> Optional[bool]:
+        """Get the KeepSource setting for a transcode attempt."""
+        try:
+            # Get the media file to find the assigned profile
+            media_file_query = '''
+            SELECT mf.AssignedProfile, mf.Resolution 
+            FROM MediaFiles mf
+            JOIN TranscodeAttempts ta ON mf.FilePath = ta.FilePath
+            WHERE ta.Id = ?
+            '''
+            media_file_result = self.DatabaseManager.DatabaseService.ExecuteQuery(media_file_query, (TranscodeAttempt.Id,))
+            
+            if not media_file_result:
+                LoggingService.LogWarning(f"No media file found for transcode attempt {TranscodeAttempt.Id}", 
+                                        "FileReplacementBusinessService", "_GetKeepSourceSetting")
+                return None
+            
+            assigned_profile = media_file_result[0]['AssignedProfile']
+            resolution = media_file_result[0]['Resolution']
+            
+            if not assigned_profile:
+                LoggingService.LogWarning(f"No assigned profile for transcode attempt {TranscodeAttempt.Id}", 
+                                        "FileReplacementBusinessService", "_GetKeepSourceSetting")
+                return None
+            
+            # Get the profile threshold for this profile and resolution
+            threshold_query = '''
+            SELECT KeepSource FROM ProfileThresholds 
+            WHERE ProfileId = (SELECT Id FROM Profiles WHERE ProfileName = ?) 
+            AND Resolution = ?
+            '''
+            threshold_result = self.DatabaseManager.DatabaseService.ExecuteQuery(threshold_query, (assigned_profile, resolution))
+            
+            if not threshold_result:
+                LoggingService.LogWarning(f"No threshold found for profile {assigned_profile} and resolution {resolution}", 
+                                        "FileReplacementBusinessService", "_GetKeepSourceSetting")
+                return None
+            
+            keep_source = bool(threshold_result[0]['KeepSource'])
+            LoggingService.LogInfo(f"KeepSource setting for profile {assigned_profile}, resolution {resolution}: {keep_source}", 
+                                 "FileReplacementBusinessService", "_GetKeepSourceSetting")
+            return keep_source
+            
+        except Exception as e:
+            LoggingService.LogException(f"Exception getting KeepSource setting for transcode attempt {TranscodeAttempt.Id}", e, 
+                                      "FileReplacementBusinessService", "_GetKeepSourceSetting")
+            return None
+    
+    def _ProcessCompleteFileReplacement(self, OriginalFilePath: str, TranscodedFilePath: str, KeepSource: bool) -> Dict[str, Any]:
+        """Process the complete 3-step file replacement process."""
+        try:
+            LoggingService.LogFunctionEntry("_ProcessCompleteFileReplacement", "FileReplacementBusinessService", 
+                                          OriginalFilePath, TranscodedFilePath, KeepSource)
+            
+            steps_completed = []
+            
+            # Step 1: Delete the temporary original file from c:\mediavortex\source
+            temp_source_path = f"C:\\MediaVortex\\Source\\{os.path.basename(OriginalFilePath)}"
+            if os.path.exists(temp_source_path):
+                try:
+                    os.remove(temp_source_path)
+                    steps_completed.append("Deleted temporary source file")
+                    LoggingService.LogInfo(f"Successfully deleted temporary source file: {temp_source_path}", 
+                                         "FileReplacementBusinessService", "_ProcessCompleteFileReplacement")
+                except Exception as e:
+                    LoggingService.LogWarning(f"Could not delete temporary source file {temp_source_path}: {str(e)}", 
+                                            "FileReplacementBusinessService", "_ProcessCompleteFileReplacement")
+            else:
+                LoggingService.LogInfo(f"Temporary source file not found (may have been cleaned up): {temp_source_path}", 
+                                     "FileReplacementBusinessService", "_ProcessCompleteFileReplacement")
+            
+            # Step 2: Handle original file based on KeepSource setting
+            if KeepSource:
+                # Rename original file to .old
+                original_dir = os.path.dirname(OriginalFilePath)
+                original_filename = os.path.basename(OriginalFilePath)
+                original_name, original_ext = os.path.splitext(original_filename)
+                renamed_path = os.path.join(original_dir, f"{original_name}.old{original_ext}")
+                
+                try:
+                    os.rename(OriginalFilePath, renamed_path)
+                    steps_completed.append(f"Renamed original file to {renamed_path}")
+                    LoggingService.LogInfo(f"Successfully renamed original file to: {renamed_path}", 
+                                         "FileReplacementBusinessService", "_ProcessCompleteFileReplacement")
+                except Exception as e:
+                    error_msg = f"Failed to rename original file to .old: {str(e)}"
+                    LoggingService.LogError(error_msg, "FileReplacementBusinessService", "_ProcessCompleteFileReplacement")
+                    return {'Success': False, 'ErrorMessage': error_msg}
+            else:
+                # Delete original file
+                try:
+                    os.remove(OriginalFilePath)
+                    steps_completed.append("Deleted original file")
+                    LoggingService.LogInfo(f"Successfully deleted original file: {OriginalFilePath}", 
+                                         "FileReplacementBusinessService", "_ProcessCompleteFileReplacement")
+                except Exception as e:
+                    error_msg = f"Failed to delete original file: {str(e)}"
+                    LoggingService.LogError(error_msg, "FileReplacementBusinessService", "_ProcessCompleteFileReplacement")
+                    return {'Success': False, 'ErrorMessage': error_msg}
+            
+            # Step 3: Move transcoded file to original location
+            try:
+                import shutil
+                shutil.move(TranscodedFilePath, OriginalFilePath)
+                steps_completed.append("Moved transcoded file to original location")
+                LoggingService.LogInfo(f"Successfully moved transcoded file to: {OriginalFilePath}", 
+                                     "FileReplacementBusinessService", "_ProcessCompleteFileReplacement")
+            except Exception as e:
+                error_msg = f"Failed to move transcoded file to original location: {str(e)}"
+                LoggingService.LogError(error_msg, "FileReplacementBusinessService", "_ProcessCompleteFileReplacement")
+                return {'Success': False, 'ErrorMessage': error_msg}
+            
+            # Clean up any empty transcoded directories
+            self._CleanupTranscodedFiles(TranscodedFilePath)
+            
+            # Step 4: Update MediaFiles table with new file information
+            update_result = self._UpdateMediaFilesAfterReplacement(OriginalFilePath, TranscodedFilePath)
+            if update_result.get('Success', False):
+                steps_completed.append("Updated MediaFiles table")
+                LoggingService.LogInfo("Successfully updated MediaFiles table", 
+                                     "FileReplacementBusinessService", "_ProcessCompleteFileReplacement")
+            else:
+                LoggingService.LogWarning(f"Failed to update MediaFiles table: {update_result.get('ErrorMessage', 'Unknown error')}", 
+                                        "FileReplacementBusinessService", "_ProcessCompleteFileReplacement")
+                # Don't fail the entire process for this, but log the warning
+            
+            return {
+                'Success': True,
+                'StepsCompleted': steps_completed,
+                'Message': f'File replacement completed successfully. Steps: {", ".join(steps_completed)}'
+            }
+            
+        except Exception as e:
+            LoggingService.LogException(f"Exception in complete file replacement process", e, 
+                                      "FileReplacementBusinessService", "_ProcessCompleteFileReplacement")
+            return {
+                'Success': False,
+                'ErrorMessage': f'Exception during file replacement: {str(e)}'
+            }
+    
+    def _UpdateMediaFilesAfterReplacement(self, OriginalFilePath: str, TranscodedFilePath: str) -> Dict[str, Any]:
+        """Update MediaFiles table with new file information after successful replacement."""
+        try:
+            LoggingService.LogFunctionEntry("_UpdateMediaFilesAfterReplacement", "FileReplacementBusinessService", 
+                                          OriginalFilePath, TranscodedFilePath)
+            
+            # Get the existing MediaFile record
+            media_file = self.DatabaseManager.GetMediaFileByPath(OriginalFilePath)
+            if not media_file:
+                return {
+                    'Success': False,
+                    'ErrorMessage': f'MediaFile record not found for path: {OriginalFilePath}'
+                }
+            
+            # Extract new metadata from the transcoded file (now at OriginalFilePath)
+            metadata = self.FileManager.ExtractMediaMetadata(OriginalFilePath)
+            if not metadata.get('Success', False):
+                return {
+                    'Success': False,
+                    'ErrorMessage': f'Failed to extract metadata from transcoded file: {metadata.get("ErrorMessage", "Unknown error")}'
+                }
+            
+            # Update the MediaFile with new information
+            media_file.FilePath = OriginalFilePath  # File path remains the same (file was moved to original location)
+            media_file.FileName = os.path.basename(OriginalFilePath)  # Update filename if it changed
+            
+            # Update all FFProbe columns with new transcoded file data
+            media_file.SizeMB = metadata.get('FileSizeMB', media_file.SizeMB)
+            media_file.VideoBitrateKbps = metadata.get('VideoBitrateKbps')
+            media_file.AudioBitrateKbps = metadata.get('AudioBitrateKbps')
+            media_file.Resolution = metadata.get('Resolution')
+            media_file.Codec = metadata.get('VideoCodec')
+            media_file.DurationMinutes = metadata.get('DurationMinutes')
+            media_file.FrameRate = metadata.get('FrameRate')
+            
+            # Update new metadata fields
+            media_file.TotalFrames = metadata.get('TotalFrames')
+            media_file.CodecProfile = metadata.get('CodecProfile')
+            media_file.ColorRange = metadata.get('ColorRange')
+            media_file.FieldOrder = metadata.get('FieldOrder')
+            media_file.HasBFrames = metadata.get('HasBFrames')
+            media_file.RefFrames = metadata.get('RefFrames')
+            media_file.PixelFormat = metadata.get('PixelFormat')
+            media_file.Level = metadata.get('Level')
+            media_file.AudioChannels = metadata.get('AudioChannels')
+            media_file.AudioSampleRate = metadata.get('AudioSampleRate')
+            media_file.AudioSampleFormat = metadata.get('AudioSampleFormat')
+            media_file.AudioChannelLayout = metadata.get('AudioChannelLayout')
+            media_file.ContainerFormat = metadata.get('ContainerFormat')
+            media_file.OverallBitrate = metadata.get('OverallBitrate')
+            
+            # Set TranscodedByMediaVortex to True
+            media_file.TranscodedByMediaVortex = True
+            
+            # Update LastScannedDate to current time
+            from datetime import datetime
+            media_file.LastScannedDate = datetime.now()
+            
+            # Save the updated MediaFile
+            self.DatabaseManager.SaveMediaFile(media_file)
+            
+            LoggingService.LogInfo(f"Successfully updated MediaFiles record for: {OriginalFilePath}", 
+                                 "FileReplacementBusinessService", "_UpdateMediaFilesAfterReplacement")
+            
+            return {
+                'Success': True,
+                'Message': 'MediaFiles table updated successfully'
+            }
+            
+        except Exception as e:
+            LoggingService.LogException(f"Exception updating MediaFiles after replacement", e, 
+                                      "FileReplacementBusinessService", "_UpdateMediaFilesAfterReplacement")
+            return {
+                'Success': False,
+                'ErrorMessage': f'Exception updating MediaFiles: {str(e)}'
             }
     
     def _CleanupTranscodedFiles(self, TranscodedFilePath: str) -> None:

@@ -25,6 +25,22 @@ class MediaFileModel:
     ResolutionCategory: Optional[str] = None
     FileModificationTime: Optional[datetime] = None
     
+    # New metadata fields
+    TotalFrames: Optional[int] = None
+    CodecProfile: Optional[str] = None
+    ColorRange: Optional[str] = None
+    FieldOrder: Optional[str] = None
+    HasBFrames: Optional[int] = None
+    RefFrames: Optional[int] = None
+    PixelFormat: Optional[str] = None
+    Level: Optional[int] = None
+    AudioChannels: Optional[int] = None
+    AudioSampleRate: Optional[int] = None
+    AudioSampleFormat: Optional[str] = None
+    AudioChannelLayout: Optional[str] = None
+    ContainerFormat: Optional[str] = None
+    OverallBitrate: Optional[int] = None
+    TranscodedByMediaVortex: Optional[bool] = None
     
     def __post_init__(self):
         if self.LastScannedDate is None:

@@ -27,6 +27,21 @@ class FFmpegAnalysisModel:
     AudioChannels: Optional[str] = None
     Language: Optional[str] = None
     
+    # New metadata fields
+    TotalFrames: Optional[int] = None
+    CodecProfile: Optional[str] = None
+    ColorRange: Optional[str] = None
+    FieldOrder: Optional[str] = None
+    HasBFrames: Optional[int] = None
+    RefFrames: Optional[int] = None
+    PixelFormat: Optional[str] = None
+    Level: Optional[int] = None
+    AudioChannels: Optional[int] = None
+    AudioSampleRate: Optional[int] = None
+    AudioSampleFormat: Optional[str] = None
+    AudioChannelLayout: Optional[str] = None
+    OverallBitrate: Optional[int] = None
+    
     # Subtitle Information
     Subtitles: Optional[str] = None
     
@@ -89,7 +104,20 @@ class FFmpegAnalysisModel:
             'ModificationDate': self.ModificationDate,
             'AnalysisDate': self.AnalysisDate,
             'Success': self.Success,
-            'ErrorMessage': self.ErrorMessage
+            'ErrorMessage': self.ErrorMessage,
+            'TotalFrames': self.TotalFrames,
+            'CodecProfile': self.CodecProfile,
+            'ColorRange': self.ColorRange,
+            'FieldOrder': self.FieldOrder,
+            'HasBFrames': self.HasBFrames,
+            'RefFrames': self.RefFrames,
+            'PixelFormat': self.PixelFormat,
+            'Level': self.Level,
+            'AudioChannels': self.AudioChannels,
+            'AudioSampleRate': self.AudioSampleRate,
+            'AudioSampleFormat': self.AudioSampleFormat,
+            'AudioChannelLayout': self.AudioChannelLayout,
+            'OverallBitrate': self.OverallBitrate
         }
     
     @classmethod

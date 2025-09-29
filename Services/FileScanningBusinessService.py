@@ -956,6 +956,22 @@ class FileScanningBusinessService:
                 MediaFile.CompressionPotential = MetadataResult.get('CompressionPotential')
                 MediaFile.AssignedProfile = MetadataResult.get('AssignedProfile')
                 
+                # Extract new metadata fields
+                MediaFile.TotalFrames = MetadataResult.get('TotalFrames')
+                MediaFile.CodecProfile = MetadataResult.get('CodecProfile')
+                MediaFile.ColorRange = MetadataResult.get('ColorRange')
+                MediaFile.FieldOrder = MetadataResult.get('FieldOrder')
+                MediaFile.HasBFrames = MetadataResult.get('HasBFrames')
+                MediaFile.RefFrames = MetadataResult.get('RefFrames')
+                MediaFile.PixelFormat = MetadataResult.get('PixelFormat')
+                MediaFile.Level = MetadataResult.get('Level')
+                MediaFile.AudioChannels = MetadataResult.get('AudioChannels')
+                MediaFile.AudioSampleRate = MetadataResult.get('AudioSampleRate')
+                MediaFile.AudioSampleFormat = MetadataResult.get('AudioSampleFormat')
+                MediaFile.AudioChannelLayout = MetadataResult.get('AudioChannelLayout')
+                MediaFile.ContainerFormat = MetadataResult.get('ContainerFormat')
+                MediaFile.OverallBitrate = MetadataResult.get('OverallBitrate')
+                
                 
                 LoggingService.LogDebug(f"Successfully extracted metadata for: {FilePath}", 'ExtractAndUpdateMetadata', 'FileScanningBusinessService')
             else:

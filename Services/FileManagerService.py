@@ -356,7 +356,20 @@ class FileManagerService:
                     'FileExtension': None,
                     'Quality': None,
                     'Source': None,
-                    'ReleaseGroup': None
+                    'ReleaseGroup': None,
+                    'TotalFrames': None,
+                    'CodecProfile': None,
+                    'ColorRange': None,
+                    'FieldOrder': None,
+                    'HasBFrames': None,
+                    'RefFrames': None,
+                    'PixelFormat': None,
+                    'Level': None,
+                    'AudioChannels': None,
+                    'AudioSampleRate': None,
+                    'AudioSampleFormat': None,
+                    'AudioChannelLayout': None,
+                    'OverallBitrate': None
                 }
             
             # Use FFmpegAnalysisService to analyze the file

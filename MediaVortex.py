@@ -63,6 +63,7 @@ from Controllers.TranscodeJobController import TranscodeJobBlueprint
 from Controllers.QualityTestingController import QualityTestingBlueprint
 from Controllers.FileReplacementController import FileReplacementController
 from Controllers.ServiceStatusController import ServiceStatusBlueprint
+from Controllers.QueueResetController import QueueResetBlueprint
 
 
 class MediaVortexApp:
@@ -127,6 +128,7 @@ class MediaVortexApp:
         self.App.register_blueprint(TranscodeJobBlueprint)
         self.App.register_blueprint(QualityTestingBlueprint)
         self.App.register_blueprint(ServiceStatusBlueprint, url_prefix='/api')
+        self.App.register_blueprint(QueueResetBlueprint)
     
     def Run(self, host='0.0.0.0', port=5000, debug=False):
         """Run the Flask application."""

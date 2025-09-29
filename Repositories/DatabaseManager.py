@@ -460,15 +460,22 @@ class DatabaseManager:
                         INSERT INTO MediaFiles 
                         (SeasonId, FilePath, FileName, SizeMB, VideoBitrateKbps, AudioBitrateKbps,
                          Resolution, Codec, DurationMinutes, FrameRate, LastScannedDate,
-                         CompressionPotential, AssignedProfile, FileModificationTime)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                         CompressionPotential, AssignedProfile, FileModificationTime,
+                         TotalFrames, CodecProfile, ColorRange, FieldOrder, HasBFrames, RefFrames,
+                         PixelFormat, Level, AudioChannels, AudioSampleRate, AudioSampleFormat,
+                         AudioChannelLayout, ContainerFormat, OverallBitrate, TranscodedByMediaVortex)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """
                     parameters = (
                         MediaFile.SeasonId, MediaFile.FilePath, MediaFile.FileName, MediaFile.SizeMB,
                         MediaFile.VideoBitrateKbps, MediaFile.AudioBitrateKbps, MediaFile.Resolution,
                         MediaFile.Codec, MediaFile.DurationMinutes, MediaFile.FrameRate,
                         MediaFile.LastScannedDate, MediaFile.CompressionPotential, MediaFile.AssignedProfile,
-                        MediaFile.FileModificationTime
+                        MediaFile.FileModificationTime, MediaFile.TotalFrames, MediaFile.CodecProfile,
+                        MediaFile.ColorRange, MediaFile.FieldOrder, MediaFile.HasBFrames, MediaFile.RefFrames,
+                        MediaFile.PixelFormat, MediaFile.Level, MediaFile.AudioChannels, MediaFile.AudioSampleRate,
+                        MediaFile.AudioSampleFormat, MediaFile.AudioChannelLayout, MediaFile.ContainerFormat,
+                        MediaFile.OverallBitrate, MediaFile.TranscodedByMediaVortex
                     )
                     LoggingService.LogInfo(f"Insert media file parameters: {parameters}", "DatabaseManager", "SaveMediaFile")
                     cursor.execute(query, parameters)
@@ -484,7 +491,10 @@ class DatabaseManager:
                         SET SeasonId = ?, FilePath = ?, FileName = ?, SizeMB = ?, VideoBitrateKbps = ?,
                             AudioBitrateKbps = ?, Resolution = ?, Codec = ?, DurationMinutes = ?,
                             FrameRate = ?, LastScannedDate = ?, CompressionPotential = ?, AssignedProfile = ?,
-                            FileModificationTime = ?
+                            FileModificationTime = ?, TotalFrames = ?, CodecProfile = ?, ColorRange = ?,
+                            FieldOrder = ?, HasBFrames = ?, RefFrames = ?, PixelFormat = ?, Level = ?,
+                            AudioChannels = ?, AudioSampleRate = ?, AudioSampleFormat = ?,
+                            AudioChannelLayout = ?, ContainerFormat = ?, OverallBitrate = ?, TranscodedByMediaVortex = ?
                         WHERE Id = ?
                     """
                     parameters = (
@@ -492,7 +502,11 @@ class DatabaseManager:
                         MediaFile.VideoBitrateKbps, MediaFile.AudioBitrateKbps, MediaFile.Resolution,
                         MediaFile.Codec, MediaFile.DurationMinutes, MediaFile.FrameRate,
                         MediaFile.LastScannedDate, MediaFile.CompressionPotential, MediaFile.AssignedProfile,
-                        MediaFile.FileModificationTime, MediaFile.Id
+                        MediaFile.FileModificationTime, MediaFile.TotalFrames, MediaFile.CodecProfile,
+                        MediaFile.ColorRange, MediaFile.FieldOrder, MediaFile.HasBFrames, MediaFile.RefFrames,
+                        MediaFile.PixelFormat, MediaFile.Level, MediaFile.AudioChannels, MediaFile.AudioSampleRate,
+                        MediaFile.AudioSampleFormat, MediaFile.AudioChannelLayout, MediaFile.ContainerFormat,
+                        MediaFile.OverallBitrate, MediaFile.TranscodedByMediaVortex, MediaFile.Id
                     )
                     LoggingService.LogInfo(f"Update media file parameters: {parameters}", "DatabaseManager", "SaveMediaFile")
                     cursor.execute(query, parameters)
