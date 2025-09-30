@@ -25,4 +25,5 @@ is transcoding using all cores?
 
 Add smart profile assignment during file scanning
 
+File replacement is currently event driven - We could make it more scaleable by changing it to a queue system and we could add files to it without checking their VMAF score.
 

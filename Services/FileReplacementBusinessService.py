@@ -143,7 +143,7 @@ class FileReplacementBusinessService:
                 }
             
             # Get KeepSource setting from profile threshold
-            keep_source = self._GetKeepSourceSetting(transcode_attempt)
+            keep_source = self.DatabaseManager.GetKeepSourceSetting(transcode_attempt.Id)
             if keep_source is None:
                 return {
                     'Success': False,
@@ -241,53 +241,6 @@ class FileReplacementBusinessService:
                 'ErrorMessage': f'Exception getting status: {str(e)}'
             }
     
-    def _GetKeepSourceSetting(self, TranscodeAttempt) -> Optional[bool]:
-        """Get the KeepSource setting for a transcode attempt."""
-        try:
-            # Get the media file to find the assigned profile
-            media_file_query = '''
-            SELECT mf.AssignedProfile, mf.Resolution 
-            FROM MediaFiles mf
-            JOIN TranscodeAttempts ta ON mf.FilePath = ta.FilePath
-            WHERE ta.Id = ?
-            '''
-            media_file_result = self.DatabaseManager.DatabaseService.ExecuteQuery(media_file_query, (TranscodeAttempt.Id,))
-            
-            if not media_file_result:
-                LoggingService.LogWarning(f"No media file found for transcode attempt {TranscodeAttempt.Id}", 
-                                        "FileReplacementBusinessService", "_GetKeepSourceSetting")
-                return None
-            
-            assigned_profile = media_file_result[0]['AssignedProfile']
-            resolution = media_file_result[0]['Resolution']
-            
-            if not assigned_profile:
-                LoggingService.LogWarning(f"No assigned profile for transcode attempt {TranscodeAttempt.Id}", 
-                                        "FileReplacementBusinessService", "_GetKeepSourceSetting")
-                return None
-            
-            # Get the profile threshold for this profile and resolution
-            threshold_query = '''
-            SELECT KeepSource FROM ProfileThresholds 
-            WHERE ProfileId = (SELECT Id FROM Profiles WHERE ProfileName = ?) 
-            AND Resolution = ?
-            '''
-            threshold_result = self.DatabaseManager.DatabaseService.ExecuteQuery(threshold_query, (assigned_profile, resolution))
-            
-            if not threshold_result:
-                LoggingService.LogWarning(f"No threshold found for profile {assigned_profile} and resolution {resolution}", 
-                                        "FileReplacementBusinessService", "_GetKeepSourceSetting")
-                return None
-            
-            keep_source = bool(threshold_result[0]['KeepSource'])
-            LoggingService.LogInfo(f"KeepSource setting for profile {assigned_profile}, resolution {resolution}: {keep_source}", 
-                                 "FileReplacementBusinessService", "_GetKeepSourceSetting")
-            return keep_source
-            
-        except Exception as e:
-            LoggingService.LogException(f"Exception getting KeepSource setting for transcode attempt {TranscodeAttempt.Id}", e, 
-                                      "FileReplacementBusinessService", "_GetKeepSourceSetting")
-            return None
     
     def _ProcessCompleteFileReplacement(self, OriginalFilePath: str, TranscodedFilePath: str, KeepSource: bool) -> Dict[str, Any]:
         """Process the complete 3-step file replacement process."""
@@ -344,20 +297,26 @@ class FileReplacementBusinessService:
             # Step 3: Move transcoded file to original location
             try:
                 import shutil
-                shutil.move(TranscodedFilePath, OriginalFilePath)
+                # Move transcoded file to same directory as original, but keep transcoded filename
+                original_dir = os.path.dirname(OriginalFilePath)
+                transcoded_filename = os.path.basename(TranscodedFilePath)
+                new_path = os.path.join(original_dir, transcoded_filename)
+                shutil.move(TranscodedFilePath, new_path)
                 steps_completed.append("Moved transcoded file to original location")
-                LoggingService.LogInfo(f"Successfully moved transcoded file to: {OriginalFilePath}", 
+                LoggingService.LogInfo(f"Successfully moved transcoded file to: {new_path}", 
                                      "FileReplacementBusinessService", "_ProcessCompleteFileReplacement")
             except Exception as e:
                 error_msg = f"Failed to move transcoded file to original location: {str(e)}"
                 LoggingService.LogError(error_msg, "FileReplacementBusinessService", "_ProcessCompleteFileReplacement")
                 return {'Success': False, 'ErrorMessage': error_msg}
             
-            # Clean up any empty transcoded directories
-            self._CleanupTranscodedFiles(TranscodedFilePath)
             
             # Step 4: Update MediaFiles table with new file information
-            update_result = self._UpdateMediaFilesAfterReplacement(OriginalFilePath, TranscodedFilePath)
+            # Calculate the new file path where the transcoded file was moved
+            original_dir = os.path.dirname(OriginalFilePath)
+            transcoded_filename = os.path.basename(TranscodedFilePath)
+            new_file_path = os.path.join(original_dir, transcoded_filename)
+            update_result = self._UpdateMediaFilesAfterReplacement(OriginalFilePath, new_file_path)
             if update_result.get('Success', False):
                 steps_completed.append("Updated MediaFiles table")
                 LoggingService.LogInfo("Successfully updated MediaFiles table", 
@@ -381,13 +340,13 @@ class FileReplacementBusinessService:
                 'ErrorMessage': f'Exception during file replacement: {str(e)}'
             }
     
-    def _UpdateMediaFilesAfterReplacement(self, OriginalFilePath: str, TranscodedFilePath: str) -> Dict[str, Any]:
+    def _UpdateMediaFilesAfterReplacement(self, OriginalFilePath: str, NewFilePath: str) -> Dict[str, Any]:
         """Update MediaFiles table with new file information after successful replacement."""
         try:
             LoggingService.LogFunctionEntry("_UpdateMediaFilesAfterReplacement", "FileReplacementBusinessService", 
-                                          OriginalFilePath, TranscodedFilePath)
+                                          OriginalFilePath, NewFilePath)
             
-            # Get the existing MediaFile record
+            # Get the existing MediaFile record using the original path
             media_file = self.DatabaseManager.GetMediaFileByPath(OriginalFilePath)
             if not media_file:
                 return {
@@ -395,17 +354,17 @@ class FileReplacementBusinessService:
                     'ErrorMessage': f'MediaFile record not found for path: {OriginalFilePath}'
                 }
             
-            # Extract new metadata from the transcoded file (now at OriginalFilePath)
-            metadata = self.FileManager.ExtractMediaMetadata(OriginalFilePath)
+            # Extract new metadata from the transcoded file at its new location
+            metadata = self.FileManager.ExtractMediaMetadata(NewFilePath)
             if not metadata.get('Success', False):
                 return {
                     'Success': False,
                     'ErrorMessage': f'Failed to extract metadata from transcoded file: {metadata.get("ErrorMessage", "Unknown error")}'
                 }
             
-            # Update the MediaFile with new information
-            media_file.FilePath = OriginalFilePath  # File path remains the same (file was moved to original location)
-            media_file.FileName = os.path.basename(OriginalFilePath)  # Update filename if it changed
+            # Update the MediaFile with new file path and filename
+            media_file.FilePath = NewFilePath  # Update to new file path
+            media_file.FileName = os.path.basename(NewFilePath)  # Update to new filename
             
             # Update all FFProbe columns with new transcoded file data
             media_file.SizeMB = metadata.get('FileSizeMB', media_file.SizeMB)
@@ -458,30 +417,3 @@ class FileReplacementBusinessService:
                 'ErrorMessage': f'Exception updating MediaFiles: {str(e)}'
             }
     
-    def _CleanupTranscodedFiles(self, TranscodedFilePath: str) -> None:
-        """Clean up temporary transcoded files and directories after successful replacement."""
-        try:
-            LoggingService.LogFunctionEntry("_CleanupTranscodedFiles", "FileReplacementBusinessService", TranscodedFilePath)
-            
-            # The transcoded file should already be moved to the original location by ReplaceFile
-            # But we need to clean up the _transcoded directory if it's empty
-            transcoded_dir = os.path.dirname(TranscodedFilePath)
-            
-            if os.path.exists(transcoded_dir) and transcoded_dir.endswith('_transcoded'):
-                # Check if directory is empty
-                try:
-                    if not os.listdir(transcoded_dir):
-                        # Directory is empty, remove it
-                        os.rmdir(transcoded_dir)
-                        LoggingService.LogInfo(f"Removed empty transcoded directory: {transcoded_dir}", 
-                                             "FileReplacementBusinessService", "_CleanupTranscodedFiles")
-                    else:
-                        LoggingService.LogInfo(f"Transcoded directory not empty, keeping: {transcoded_dir}", 
-                                             "FileReplacementBusinessService", "_CleanupTranscodedFiles")
-                except Exception as dir_error:
-                    LoggingService.LogWarning(f"Could not remove transcoded directory {transcoded_dir}: {str(dir_error)}", 
-                                            "FileReplacementBusinessService", "_CleanupTranscodedFiles")
-            
-        except Exception as e:
-            LoggingService.LogException(f"Exception during cleanup of transcoded files: {TranscodedFilePath}", e, 
-                                      "FileReplacementBusinessService", "_CleanupTranscodedFiles")

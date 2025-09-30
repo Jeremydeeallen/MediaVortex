@@ -183,6 +183,9 @@ class QualityTestingOrchestratorService:
             
             while not self.StopRequested:
                 try:
+                    # Check for stuck jobs first (jobs running for more than 2 hours)
+                    self.PrivateCheckForStuckJobs()
+                    
                     # Get next pending job
                     NextJob = self.DatabaseManager.GetNextPendingQualityTest()
                     
@@ -203,6 +206,62 @@ class QualityTestingOrchestratorService:
         except Exception as e:
             LoggingService.LogException("Fatal error in queue processing", e, "QualityTestingOrchestratorService", "PrivateProcessQueue")
             self.IsRunning = False
+    
+    def PrivateCheckForStuckJobs(self):
+        """Private method to check for and fix stuck quality testing jobs."""
+        try:
+            from datetime import datetime
+            
+            # Find jobs that have been running for more than 2 hours
+            stuck_jobs = self.DatabaseManager.GetStuckQualityTestingJobs(HoursThreshold=2)
+            
+            if stuck_jobs:
+                LoggingService.LogWarning(f"Found {len(stuck_jobs)} stuck quality testing jobs", "QualityTestingOrchestratorService", "PrivateCheckForStuckJobs")
+                
+                for job in stuck_jobs:
+                    job_id = job['Id']
+                    transcode_attempt_id = job['TranscodeAttemptId']
+                    file_name = job['FileName']
+                    date_started = job['DateStarted']
+                    
+                    LoggingService.LogWarning(f"Fixing stuck job {job_id} for file: {file_name}", "QualityTestingOrchestratorService", "PrivateCheckForStuckJobs")
+                    
+                    # Update the job status to Failed with appropriate error message
+                    update_query = """
+                        UPDATE QualityTestingQueue 
+                        SET Status = 'Failed', 
+                            DateCompleted = ?, 
+                            ErrorMessage = ?
+                        WHERE Id = ?
+                    """
+                    
+                    error_message = f"Job stuck in running state since {date_started}. Automatically marked as failed due to timeout."
+                    current_time = datetime.now()
+                    
+                    result = self.DatabaseManager.DatabaseService.ExecuteNonQuery(update_query, (current_time, error_message, job_id))
+                    
+                    if result > 0:
+                        LoggingService.LogInfo(f"Successfully marked stuck job {job_id} as failed", "QualityTestingOrchestratorService", "PrivateCheckForStuckJobs")
+                        
+                        # Also create a progress record to show the failure
+                        self.DatabaseManager.SaveQualityTestProgress(
+                            VMAFQueueId=job_id,
+                            TranscodeAttemptId=transcode_attempt_id,
+                            Status="Failed",
+                            ProgressPercent=0.0,
+                            CurrentPhase="Job Timeout - Automatically Failed",
+                            StartTime=date_started,
+                            EndTime=current_time,
+                            ErrorMessage=error_message,
+                            StrategyType="Unknown"
+                        )
+                        
+                        LoggingService.LogInfo(f"Created failure progress record for stuck job {job_id}", "QualityTestingOrchestratorService", "PrivateCheckForStuckJobs")
+                    else:
+                        LoggingService.LogError(f"Failed to update stuck job {job_id}", "QualityTestingOrchestratorService", "PrivateCheckForStuckJobs")
+                        
+        except Exception as e:
+            LoggingService.LogException("Error checking for stuck jobs", e, "QualityTestingOrchestratorService", "PrivateCheckForStuckJobs")
     
     def PrivateProcessJob(self, Job: QualityTestingQueueModel):
         """Private method to process a single quality testing job."""
@@ -274,6 +333,24 @@ class QualityTestingOrchestratorService:
                 )
                 
                 LoggingService.LogInfo(f"Saved quality test result for job {Job.Id}: VMAF Score {Job.VMAFScore}, Passes Threshold: {PassesThreshold}", "QualityTestingOrchestratorService", "PrivateProcessJob")
+                
+                # Automatically attempt file replacement if VMAF score passes threshold
+                if PassesThreshold and Job.VMAFScore >= 90:
+                    try:
+                        from Services.FileReplacementBusinessService import FileReplacementBusinessService
+                        file_replacement_service = FileReplacementBusinessService()
+                        
+                        LoggingService.LogInfo(f"VMAF score {Job.VMAFScore} passed threshold, attempting automatic file replacement for attempt {Job.TranscodeAttemptId}", "QualityTestingOrchestratorService", "PrivateProcessJob")
+                        
+                        replacement_result = file_replacement_service.ProcessFileReplacement(Job.TranscodeAttemptId)
+                        
+                        if replacement_result.get('Success', False):
+                            LoggingService.LogInfo(f"Automatic file replacement completed successfully for attempt {Job.TranscodeAttemptId}", "QualityTestingOrchestratorService", "PrivateProcessJob")
+                        else:
+                            LoggingService.LogWarning(f"Automatic file replacement failed for attempt {Job.TranscodeAttemptId}: {replacement_result.get('ErrorMessage', 'Unknown error')}. File will appear in manual replacement queue.", "QualityTestingOrchestratorService", "PrivateProcessJob")
+                            
+                    except Exception as replacement_error:
+                        LoggingService.LogException(f"Exception during automatic file replacement for attempt {Job.TranscodeAttemptId}", replacement_error, "QualityTestingOrchestratorService", "PrivateProcessJob")
             
             LoggingService.LogInfo(f"Quality testing job {Job.Id} completed successfully", "QualityTestingOrchestratorService", "PrivateProcessJob")
             

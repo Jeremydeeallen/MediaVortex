@@ -2313,6 +2313,40 @@ class DatabaseManager:
             LoggingService.LogException("Exception getting quality testing queue statistics", e, "DatabaseManager", "GetQualityTestingQueueStatistics")
             return {}
     
+    def GetStuckQualityTestingJobs(self, HoursThreshold: int = 2) -> List[Dict[str, Any]]:
+        """Get quality testing jobs that have been running for more than the specified hours."""
+        try:
+            LoggingService.LogFunctionEntry("GetStuckQualityTestingJobs", "DatabaseManager", HoursThreshold)
+            
+            from datetime import datetime, timedelta
+            cutoff_time = datetime.now() - timedelta(hours=HoursThreshold)
+            
+            query = """
+                SELECT Id, TranscodeAttemptId, FileName, DateStarted, Status 
+                FROM QualityTestingQueue 
+                WHERE Status = 'Running' AND DateStarted < ?
+                ORDER BY DateStarted ASC
+            """
+            
+            rows = self.DatabaseService.ExecuteQuery(query, (cutoff_time,))
+            
+            stuck_jobs = []
+            for row in rows:
+                stuck_jobs.append({
+                    'Id': row['Id'],
+                    'TranscodeAttemptId': row['TranscodeAttemptId'],
+                    'FileName': row['FileName'],
+                    'DateStarted': row['DateStarted'],
+                    'Status': row['Status']
+                })
+            
+            LoggingService.LogInfo(f"Found {len(stuck_jobs)} stuck quality testing jobs", "DatabaseManager", "GetStuckQualityTestingJobs")
+            return stuck_jobs
+            
+        except Exception as e:
+            LoggingService.LogException("Exception getting stuck quality testing jobs", e, "DatabaseManager", "GetStuckQualityTestingJobs")
+            return []
+    
     def GetQualityTestingStrategyForProfile(self, ProfileId: int) -> Optional[QualityTestingStrategyModel]:
         """Get quality testing strategy for specific profile."""
         try:
@@ -2929,3 +2963,26 @@ class DatabaseManager:
         except Exception as e:
             LoggingService.LogException("Exception deleting quality testing queue item", e, "DatabaseManager", "DeleteQualityTestingQueueItem")
             return False
+    
+    def GetKeepSourceSetting(self, TranscodeAttemptId: int) -> Optional[bool]:
+        """Get the KeepSource setting for a transcode attempt."""
+        try:
+            # Get the assigned profile from the transcode attempt
+            query = '''
+            SELECT pt.KeepSource 
+            FROM ProfileThresholds pt
+            JOIN Profiles p ON pt.ProfileId = p.Id
+            JOIN MediaFiles mf ON p.ProfileName = mf.AssignedProfile
+            JOIN TranscodeAttempts ta ON mf.FilePath = ta.FilePath
+            WHERE ta.Id = ?
+            '''
+            result = self.DatabaseService.ExecuteQuery(query, (TranscodeAttemptId,))
+            
+            if result:
+                return bool(result[0]['KeepSource'])
+            return None
+            
+        except Exception as e:
+            LoggingService.LogException(f"Exception getting KeepSource setting for transcode attempt {TranscodeAttemptId}", e, 
+                                      "DatabaseManager", "GetKeepSourceSetting")
+            return None
