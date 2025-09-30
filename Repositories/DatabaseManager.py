@@ -1188,22 +1188,33 @@ class DatabaseManager:
         try:
             LoggingService.LogFunctionEntry("UpdateTranscodeAttempt", "DatabaseManager", AttemptId, Updates)
             
+            # Define all valid fields from TranscodeAttemptModel (excluding Id which is the key)
+            valid_fields = [
+                'FilePath', 'AttemptDate', 'Quality', 'OldSizeBytes', 'NewSizeBytes',
+                'Success', 'SizeReductionBytes', 'SizeReductionPercent', 'ErrorMessage',
+                'TranscodeDurationSeconds', 'FfpmpegCommand', 'AudioBitrateKbps',
+                'VideoBitrateKbps', 'ProfileName', 'VMAF'
+            ]
+            
             # Build dynamic UPDATE query based on provided fields
             set_clauses = []
             parameters = []
             
             for field, value in Updates.items():
-                if field in ['Success', 'ErrorMessage', 'NewSizeBytes', 'TranscodeDurationSeconds']:
+                if field in valid_fields:
                     set_clauses.append(f"{field} = ?")
                     parameters.append(value)
                 elif field == 'FFmpegOutput':
-                    # Map FFmpegOutput to FfpmpegCommand (correct column name)
+                    # Map FFmpegOutput to FfpmpegCommand (correct column name) - legacy support
                     set_clauses.append("FfpmpegCommand = ?")
                     parameters.append(value)
                 elif field == 'FFmpegError':
-                    # Map FFmpegError to ErrorMessage (closest equivalent)
+                    # Map FFmpegError to ErrorMessage (closest equivalent) - legacy support
                     set_clauses.append("ErrorMessage = ?")
                     parameters.append(value)
+                else:
+                    LoggingService.LogWarning(f"Unknown field '{field}' ignored in UpdateTranscodeAttempt", 
+                                            "DatabaseManager", "UpdateTranscodeAttempt")
             
             if not set_clauses:
                 LoggingService.LogWarning("No valid fields to update", "DatabaseManager", "UpdateTranscodeAttempt")
@@ -1218,7 +1229,8 @@ class DatabaseManager:
                 cursor.execute(query, parameters)
                 connection.commit()
                 affected_rows = cursor.rowcount
-                LoggingService.LogInfo(f"Updated {affected_rows} rows for attempt {AttemptId}", "DatabaseManager", "UpdateTranscodeAttempt")
+                LoggingService.LogInfo(f"Updated {affected_rows} rows for attempt {AttemptId} with fields: {list(Updates.keys())}", 
+                                     "DatabaseManager", "UpdateTranscodeAttempt")
                 return affected_rows > 0
             finally:
                 connection.close()
