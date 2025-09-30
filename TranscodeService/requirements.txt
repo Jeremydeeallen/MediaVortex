@@ -4,6 +4,9 @@
 # System monitoring
 psutil>=5.9.0
 
+# Process naming
+setproctitle
+
 # Database (SQLite is built-in, but we might need additional drivers)
 # sqlite3 is built-in to Python
 

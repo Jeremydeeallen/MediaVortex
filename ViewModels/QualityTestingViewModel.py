@@ -369,9 +369,18 @@ class QualityTestingViewModel:
                     }
                 else:
                     # Fallback to time-based estimate if no progress data
-                    ElapsedTime = datetime.now() - Job.DateStarted
-                    EstimatedProgress = min(90, int((ElapsedTime.total_seconds() / 3600) * 20))  # Rough estimate
-                    return {"ProgressPercentage": EstimatedProgress, "Percentage": EstimatedProgress, "Status": "Running", "CurrentStep": "Processing...", "ETA": "Unknown"}
+                    try:
+                        # Convert string to datetime if needed
+                        if isinstance(Job.DateStarted, str):
+                            DateStarted = datetime.fromisoformat(Job.DateStarted.replace('Z', '+00:00'))
+                        else:
+                            DateStarted = Job.DateStarted
+                        ElapsedTime = datetime.now() - DateStarted
+                        EstimatedProgress = min(90, int((ElapsedTime.total_seconds() / 3600) * 20))  # Rough estimate
+                        return {"ProgressPercentage": EstimatedProgress, "Percentage": EstimatedProgress, "Status": "Running", "CurrentStep": "Processing...", "ETA": "Unknown"}
+                    except (ValueError, TypeError) as e:
+                        LoggingService.LogWarning(f"Could not parse DateStarted: {Job.DateStarted}, error: {e}", "QualityTestingViewModel", "PrivateCalculateJobProgress")
+                        return {"ProgressPercentage": 0, "Percentage": 0, "Status": "Running", "CurrentStep": "Processing...", "ETA": "Unknown"}
             else:
                 return {"ProgressPercentage": 0, "Percentage": 0, "Status": Job.Status or "Unknown", "ETA": "Unknown"}
                 

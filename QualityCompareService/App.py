@@ -28,6 +28,11 @@ class QualityCompareServiceApp:
     def __init__(self):
         """Initialize the QualityCompareService application."""
         self.DatabaseManager = DatabaseManager()
+        
+        # Check if another instance is already running
+        if self.PrivateIsServiceAlreadyRunning():
+            LoggingService.LogError("QualityCompareService is already running. Preventing duplicate instance.", "QualityCompareServiceApp", "__init__")
+            sys.exit(1)
         self.OrchestratorService = QualityTestingOrchestratorService(self.DatabaseManager)
         self.StrategyService = QualityTestingStrategyService(self.DatabaseManager)
         self.CommandService = ServiceCommandService(DatabaseManagerInstance=self.DatabaseManager)
@@ -40,6 +45,29 @@ class QualityCompareServiceApp:
         self.ProcessId = os.getpid()
         
         LoggingService.LogInfo("QualityCompareServiceApp initialized", "QualityCompareService", "__init__")
+    
+    def PrivateIsServiceAlreadyRunning(self) -> bool:
+        """Check if another QualityCompareService instance is already running."""
+        try:
+            current_pid = os.getpid()
+            quality_compare_processes = []
+            
+            for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+                try:
+                    if proc.info['name'] == 'QualityCompareService' and proc.info['pid'] != current_pid:
+                        quality_compare_processes.append(proc.info['pid'])
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+            
+            if quality_compare_processes:
+                LoggingService.LogError(f"Found {len(quality_compare_processes)} existing QualityCompareService processes: {quality_compare_processes}", "QualityCompareServiceApp", "PrivateIsServiceAlreadyRunning")
+                return True
+            
+            return False
+            
+        except Exception as e:
+            LoggingService.LogException("Exception checking for existing QualityCompareService instances", e, "QualityCompareServiceApp", "PrivateIsServiceAlreadyRunning")
+            return False
     
     def Run(self):
         """Start the quality comparison service."""

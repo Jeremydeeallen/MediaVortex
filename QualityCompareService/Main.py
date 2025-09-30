@@ -8,6 +8,10 @@ import os
 import signal
 import threading
 from datetime import datetime
+import setproctitle
+
+# Set process title for better visibility in Task Manager
+setproctitle.setproctitle("QualityCompareService")
 
 # Add parent directory to path to import shared services
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

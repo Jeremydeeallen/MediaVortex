@@ -16,13 +16,14 @@ class VideoTranscodingService:
         self.ProcessThreads = {}
     
     def TranscodeVideo(self, JobId: int, TranscodeCommand: str, 
-                      ProgressCallback: Optional[Callable] = None) -> Dict[str, Any]:
+                      ProgressCallback: Optional[Callable] = None, TotalFramesFromMediaFile: int = 0) -> Dict[str, Any]:
         """Execute transcoding command with real-time progress tracking.
         
         Args:
             JobId: ID of the transcoding job
             TranscodeCommand: Complete FFmpeg command string
             ProgressCallback: Optional callback function for progress updates
+            TotalFramesFromMediaFile: Total frames from MediaFiles table (preferred over FFmpeg extraction)
             
         Returns:
             Dictionary with success status, output file path, duration, and error details
@@ -49,6 +50,12 @@ class VideoTranscodingService:
             
             # Store process reference
             self.ActiveProcesses[JobId] = Process
+            
+            # Set TotalFrames from MediaFile if provided
+            if TotalFramesFromMediaFile > 0:
+                self._TotalFrameCount = TotalFramesFromMediaFile
+                LoggingService.LogInfo(f"Using TotalFrames from MediaFile: {TotalFramesFromMediaFile} frames", 
+                                     "VideoTranscodingService", "TranscodeVideo")
             
             # Start progress monitoring thread
             if ProgressCallback:
@@ -219,15 +226,15 @@ class VideoTranscodingService:
             ProgressData = {}
             
             # First, check if this line contains the total frame count from FFmpeg metadata
-            if "NUMBER_OF_FRAMES" in Line:
+            # Only use FFmpeg extraction if we don't already have TotalFrames from MediaFile
+            if "NUMBER_OF_FRAMES" in Line and not hasattr(self, '_TotalFrameCount'):
                 FrameCountMatch = re.search(r'NUMBER_OF_FRAMES[^:]*:\s*(\d+)', Line)
                 if FrameCountMatch:
                     TotalFrames = int(FrameCountMatch.group(1))
                     # Store the total frame count for use in progress calculation
-                    if not hasattr(self, '_TotalFrameCount'):
-                        self._TotalFrameCount = TotalFrames
-                        LoggingService.LogInfo(f"Extracted total frame count from FFmpeg metadata: {TotalFrames} frames", 
-                                             "VideoTranscodingService", "ParseProgressLine")
+                    self._TotalFrameCount = TotalFrames
+                    LoggingService.LogInfo(f"Extracted total frame count from FFmpeg metadata: {TotalFrames} frames", 
+                                         "VideoTranscodingService", "ParseProgressLine")
                     return None  # This is metadata, not a progress line
             
             # Extract frame number
@@ -265,51 +272,13 @@ class VideoTranscodingService:
             if 'CurrentFrame' not in ProgressData:
                 return None  # No valid frame data, skip this update
             
-            # Calculate progress percentage using actual frame count from FFmpeg metadata
+            # Don't calculate progress percentage here - let the database/frontend handle it
+            # Just ensure we have the basic frame data
             if 'CurrentFrame' in ProgressData:
-                CurrentFrame = ProgressData['CurrentFrame']
-                
-                # Use the actual frame count extracted from FFmpeg metadata
-                if hasattr(self, '_TotalFrameCount') and self._TotalFrameCount > 0:
-                    TotalFrames = self._TotalFrameCount
-                    ProgressData['TotalFrames'] = TotalFrames
-                    ProgressPercent = (CurrentFrame / TotalFrames) * 100
-                    
-                    # Cap at 95% until actually done (leave some room for completion)
-                    ProgressData['ProgressPercent'] = min(ProgressPercent, 95)
-                    
-                    # Calculate ETA based on current FPS and remaining frames
-                    CurrentFPS = ProgressData.get('CurrentFPS', 0)
-                    if CurrentFPS > 0 and CurrentFrame > 0:
-                        RemainingFrames = TotalFrames - CurrentFrame
-                        if RemainingFrames > 0:
-                            # Calculate seconds remaining
-                            SecondsRemaining = RemainingFrames / CurrentFPS
-                            
-                            # Convert to hours:minutes:seconds format
-                            Hours = int(SecondsRemaining // 3600)
-                            Minutes = int((SecondsRemaining % 3600) // 60)
-                            Seconds = int(SecondsRemaining % 60)
-                            
-                            if Hours > 0:
-                                ETA = f"{Hours:02d}:{Minutes:02d}:{Seconds:02d}"
-                            else:
-                                ETA = f"{Minutes:02d}:{Seconds:02d}"
-                            
-                            ProgressData['ETA'] = ETA
-                        else:
-                            ProgressData['ETA'] = "00:00"
-                    else:
-                        ProgressData['ETA'] = "Calculating..."
-                else:
-                    # Fallback: if we don't have the total frame count yet, show 0% progress
-                    ProgressData['TotalFrames'] = 0
-                    ProgressData['ProgressPercent'] = 0
-                    LoggingService.LogWarning(f"No total frame count available yet. Current frame: {CurrentFrame}", 
-                                            "VideoTranscodingService", "ParseProgressLine")
-            else:
-                ProgressData['ProgressPercent'] = 0
-                ProgressData['TotalFrames'] = getattr(self, '_TotalFrameCount', 0)
+                # Set default values for fields that will be calculated elsewhere
+                ProgressData['TotalFrames'] = 0  # Will be populated from MediaFiles table
+                ProgressData['ProgressPercent'] = 0  # Will be calculated in database/frontend
+                ProgressData['ETA'] = "Calculating..."  # Will be calculated in database/frontend
             
             # Set current phase
             ProgressData['CurrentPhase'] = 'Transcoding'

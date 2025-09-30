@@ -2,6 +2,11 @@
 import sys
 import os
 import shutil
+import setproctitle
+import psutil
+
+# Set process title for better visibility in Task Manager
+setproctitle.setproctitle("MediaVortex")
 
 # Disable bytecode generation completely
 sys.dont_write_bytecode = True
@@ -71,6 +76,11 @@ class MediaVortexApp:
     """Main Flask application for MediaVortex."""
     
     def __init__(self):
+        # Check if another instance is already running
+        if self.PrivateIsServiceAlreadyRunning():
+            print("ERROR: MediaVortex is already running. Preventing duplicate instance.")
+            sys.exit(1)
+            
         self.App = Flask(__name__)
         self.App.config['SECRET_KEY'] = 'mediavortex-secret-key-2024'
         CORS(self.App)
@@ -83,6 +93,29 @@ class MediaVortexApp:
         
         self._register_routes()
         self._register_blueprints()
+    
+    def PrivateIsServiceAlreadyRunning(self) -> bool:
+        """Check if another MediaVortex instance is already running."""
+        try:
+            current_pid = os.getpid()
+            mediavortex_processes = []
+            
+            for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+                try:
+                    if proc.info['name'] == 'MediaVortex' and proc.info['pid'] != current_pid:
+                        mediavortex_processes.append(proc.info['pid'])
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+            
+            if mediavortex_processes:
+                print(f"ERROR: Found {len(mediavortex_processes)} existing MediaVortex processes: {mediavortex_processes}")
+                return True
+            
+            return False
+            
+        except Exception as e:
+            print(f"ERROR: Exception checking for existing MediaVortex instances: {e}")
+            return False
     
     def _register_routes(self):
         """Register main application routes."""

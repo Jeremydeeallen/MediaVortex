@@ -237,50 +237,85 @@ class ProcessTranscodeQueueService:
             # Update queue status to Running
             self.DatabaseManager.UpdateTranscodeQueueStatus(Job.Id, "Running")
             
-            # Step a: Get MediaFile data
-            MediaFile = self.GetMediaFileData(Job)
-            if not MediaFile:
-                self.HandleJobFailure(Job, "Failed to get media file data")
-                return
-            
-            # Step b: Setup directories and copy file
-            if not self.SetupFilePreparation(Job, MediaFile):
-                self.HandleJobFailure(Job, "Failed to setup file preparation")
-                return
-            
-            # Step c: Get transcoding settings
-            TranscodingSettings = self.GetTranscodingSettings(Job, MediaFile)
-            if not TranscodingSettings:
-                self.HandleJobFailure(Job, "Failed to get transcoding settings")
-                return
-            
-            # Step d: Build transcoding command
-            TranscodeCommand = self.BuildTranscodeCommand(Job, MediaFile, TranscodingSettings)
-            if not TranscodeCommand:
-                self.HandleJobFailure(Job, "Failed to build transcoding command")
-                return
-            
-            # Step e: Create transcode attempt record for progress tracking
-            TranscodeAttemptId = self.CreateTranscodeAttempt(Job, MediaFile, TranscodingSettings, TranscodeCommand)
+            # Create transcode attempt record early for progress tracking
+            TranscodeAttemptId = self.CreateTranscodeAttempt(Job, None, None, None)
             if not TranscodeAttemptId:
                 self.HandleJobFailure(Job, "Failed to create transcode attempt record")
                 return
             
-            # Update attempt to indicate it's running (clear any error message)
+            # Phase 1: Initializing
+            self.UpdateTranscodeProgress(TranscodeAttemptId, "Initializing", 0.0, "Job started, getting ready")
+            
+            # Step a: Get MediaFile data
+            MediaFile = self.GetMediaFileData(Job)
+            if not MediaFile:
+                self.HandleJobFailure(Job, "Failed to get media file data", TranscodeAttemptId)
+                return
+            
+            # Phase 2: Loading Media Data
+            self.UpdateTranscodeProgress(TranscodeAttemptId, "Loading Media Data", 0.0, f"Retrieved metadata for {MediaFile.FileName}")
+            
+            # Step c: Get transcoding settings
+            TranscodingSettings = self.GetTranscodingSettings(Job, MediaFile)
+            if not TranscodingSettings:
+                self.HandleJobFailure(Job, "Failed to get transcoding settings", TranscodeAttemptId)
+                return
+            
+            # Phase 3: Loading Settings
+            self.UpdateTranscodeProgress(TranscodeAttemptId, "Loading Settings", 0.0, f"Retrieved settings for {MediaFile.AssignedProfile}")
+            
+            # Step d: Build transcoding command
+            TranscodeCommand = self.BuildTranscodeCommand(Job, MediaFile, TranscodingSettings)
+            if not TranscodeCommand:
+                self.HandleJobFailure(Job, "Failed to build transcoding command", TranscodeAttemptId)
+                return
+            
+            # Phase 4: Building Command
+            self.UpdateTranscodeProgress(TranscodeAttemptId, "Building Command", 0.0, "Generated FFmpeg command")
+            
+            # Step b: Setup directories and copy file
+            if not self.SetupFilePreparation(Job, MediaFile):
+                self.HandleJobFailure(Job, "Failed to setup file preparation", TranscodeAttemptId)
+                return
+            
+            # Phase 5: Preparing Files
+            self.UpdateTranscodeProgress(TranscodeAttemptId, "Preparing Files", 0.0, f"Copied {MediaFile.FileName} to working directory")
+            
+            # Update attempt record with complete information
             self.DatabaseManager.UpdateTranscodeAttempt(TranscodeAttemptId, {
-                'ErrorMessage': None  # Clear any error message to indicate it's running
+                'FilePath': Job.FilePath,
+                'AttemptDate': datetime.now(),
+                'Quality': TranscodingSettings.get('ProfileSettings', {}).get('Quality', 0),
+                'OldSizeBytes': Job.SizeBytes,
+                'NewSizeBytes': 0,
+                'Success': False,
+                'SizeReductionBytes': 0,
+                'SizeReductionPercent': 0.0,
+                'ErrorMessage': None,
+                'TranscodeDurationSeconds': 0.0,
+                'FfpmpegCommand': TranscodeCommand,
+                'AudioBitrateKbps': TranscodingSettings.get('ProfileSettings', {}).get('AudioBitrateKbps'),
+                'VideoBitrateKbps': TranscodingSettings.get('ProfileSettings', {}).get('VideoBitrateKbps'),
+                'ProfileName': MediaFile.AssignedProfile,
+                'VMAF': None
             })
             
+            # Phase 6: Starting Transcode
+            self.UpdateTranscodeProgress(TranscodeAttemptId, "Starting Transcode", 0.0, "About to begin actual transcoding")
+            
             # Step f: Execute transcoding
-            TranscodeResult = self.ExecuteTranscoding(Job, TranscodeCommand, TranscodeAttemptId)
+            TranscodeResult = self.ExecuteTranscoding(Job, TranscodeCommand, TranscodeAttemptId, MediaFile)
             if not TranscodeResult.get("Success", False):
                 self.HandleJobFailure(Job, f"Transcoding failed: {TranscodeResult.get('ErrorMessage', 'Unknown error')}", TranscodeAttemptId)
                 return
             
+            # Phase 7: Finalizing
+            self.UpdateTranscodeProgress(TranscodeAttemptId, "Finalizing", 0.0, "Processing results and cleanup")
+            
             # Step g: Handle transcoding result
             self.HandleTranscodingResult(Job, TranscodeResult, TranscodeAttemptId)
             
-            # Step g: Cleanup or continue
+            # Step h: Cleanup or continue
             self.CleanupOrContinue(Job)
             
             LoggingService.LogInfo(f"Completed job processing for job ID: {Job.Id}", "ProcessTranscodeQueueService", "ProcessJob")
@@ -354,10 +389,16 @@ class ProcessTranscodeQueueService:
             LoggingService.LogException("Exception building transcode command", e, "ProcessTranscodeQueueService", "BuildTranscodeCommand")
             return None
     
-    def CreateTranscodeAttempt(self, Job: TranscodeQueueModel, MediaFile: MediaFileModel, 
-                              TranscodingSettings: Dict[str, Any], TranscodeCommand: str) -> Optional[int]:
+    def CreateTranscodeAttempt(self, Job: TranscodeQueueModel, MediaFile: MediaFileModel = None, 
+                              TranscodingSettings: Dict[str, Any] = None, TranscodeCommand: str = None) -> Optional[int]:
         """Create a transcode attempt record for progress tracking."""
         try:
+            # Handle None parameters for early creation
+            if TranscodingSettings is None:
+                TranscodingSettings = {}
+            if MediaFile is None:
+                MediaFile = type('MockMediaFile', (), {'AssignedProfile': None})()
+            
             ProfileSettings = TranscodingSettings.get('ProfileSettings', {})
             CodecFlags = TranscodingSettings.get('CodecFlags', {})
             
@@ -368,7 +409,7 @@ class ProcessTranscodeQueueService:
                 Quality=ProfileSettings.get('Quality', 0),
                 OldSizeBytes=Job.SizeBytes,
                 NewSizeBytes=0,  # Will be updated after transcoding
-                Success=False,  # Will be updated after transcoding
+                Success=None,  # Will be updated after transcoding
                 SizeReductionBytes=0,  # Will be calculated after transcoding
                 SizeReductionPercent=0.0,  # Will be calculated after transcoding
                 ErrorMessage=None,
@@ -376,7 +417,7 @@ class ProcessTranscodeQueueService:
                 FfpmpegCommand=TranscodeCommand,
                 AudioBitrateKbps=ProfileSettings.get('AudioBitrateKbps'),
                 VideoBitrateKbps=ProfileSettings.get('VideoBitrateKbps'),
-                ProfileName=MediaFile.AssignedProfile,
+                ProfileName=MediaFile.AssignedProfile if hasattr(MediaFile, 'AssignedProfile') else None,
                 VMAF=None  # Will be set after VMAF analysis
             )
             
@@ -386,10 +427,13 @@ class ProcessTranscodeQueueService:
             LoggingService.LogException("Exception creating transcode attempt", e, "ProcessTranscodeQueueService", "CreateTranscodeAttempt")
             return None
     
-    def ExecuteTranscoding(self, Job: TranscodeQueueModel, TranscodeCommand: str, TranscodeAttemptId: int) -> Dict[str, Any]:
+    def ExecuteTranscoding(self, Job: TranscodeQueueModel, TranscodeCommand: str, TranscodeAttemptId: int, MediaFile: MediaFileModel = None) -> Dict[str, Any]:
         """Execute the transcoding command with progress tracking."""
         try:
-            # Create initial progress record
+            # Get TotalFrames from MediaFile if available
+            TotalFramesFromMediaFile = MediaFile.TotalFrames if MediaFile and MediaFile.TotalFrames else 0
+            
+            # Create initial progress record with TotalFrames from MediaFile
             self.DatabaseManager.SaveTranscodeProgress(
                 TranscodeAttemptId=TranscodeAttemptId,
                 CurrentPhase="Transcoding",
@@ -400,7 +444,7 @@ class ProcessTranscodeQueueService:
                 CurrentTime="00:00:00",
                 CurrentSpeed="0x",
                 ETA="Unknown",
-                TotalFrames=0,
+                TotalFrames=TotalFramesFromMediaFile,
                 AverageFPS=0.0
             )
             
@@ -418,13 +462,13 @@ class ProcessTranscodeQueueService:
                         CurrentTime=ProgressData.get('CurrentTime', '00:00:00'),
                         CurrentSpeed=ProgressData.get('CurrentSpeed', '0x'),
                         ETA=ProgressData.get('ETA', 'Unknown'),
-                        TotalFrames=ProgressData.get('TotalFrames', 0),
+                        TotalFrames=ProgressData.get('TotalFrames', TotalFramesFromMediaFile),
                         AverageFPS=ProgressData.get('AverageFPS', 0.0)
                     )
                 except Exception as e:
                     LoggingService.LogException("Exception in progress callback", e, "ProcessTranscodeQueueService", "ExecuteTranscoding")
             
-            return self.VideoTranscoding.TranscodeVideo(TranscodeAttemptId, TranscodeCommand, ProgressCallback)
+            return self.VideoTranscoding.TranscodeVideo(TranscodeAttemptId, TranscodeCommand, ProgressCallback, TotalFramesFromMediaFile)
             
         except Exception as e:
             LoggingService.LogException("Exception executing transcoding", e, "ProcessTranscodeQueueService", "ExecuteTranscoding")
@@ -799,4 +843,30 @@ class ProcessTranscodeQueueService:
             
         except Exception as e:
             LoggingService.LogException("Exception cleaning up stale progress data", e, "ProcessTranscodeQueueService", "CleanupStaleProgressData")
+    
+    def UpdateTranscodeProgress(self, TranscodeAttemptId: int, CurrentPhase: str, 
+                              ProgressPercent: float = 0.0, AdditionalInfo: str = ""):
+        """Update transcoding progress with current phase and optional progress."""
+        try:
+            LoggingService.LogInfo(f"Updating progress: {CurrentPhase} ({ProgressPercent}%) - {AdditionalInfo}", 
+                                 "ProcessTranscodeQueueService", "UpdateTranscodeProgress")
+            
+            # Save progress to database
+            self.DatabaseManager.SaveTranscodeProgress(
+                TranscodeAttemptId=TranscodeAttemptId,
+                CurrentPhase=CurrentPhase,
+                ProgressPercent=ProgressPercent,
+                CurrentFrame=0,  # Will be updated during transcoding phase
+                CurrentFPS=0.0,
+                CurrentBitrate="0kbits/s",
+                CurrentTime="00:00:00",
+                CurrentSpeed="0x",
+                ETA="Unknown",
+                TotalFrames=0,  # Will be updated during transcoding phase
+                AverageFPS=0.0
+            )
+            
+        except Exception as e:
+            LoggingService.LogException("Exception updating transcoding progress", e, 
+                                      "ProcessTranscodeQueueService", "UpdateTranscodeProgress")
     

@@ -1872,14 +1872,16 @@ class DatabaseManager:
         try:
             LoggingService.LogFunctionEntry("GetCurrentTranscodeProgress", "DatabaseManager")
             
-            # Get the most recent progress from any transcoding attempt
+            # Get the most recent progress from any transcoding attempt with MediaFiles TotalFrames
             query = """
                 SELECT tp.TranscodeAttemptId, tp.CurrentPhase, tp.ProgressPercent, tp.CurrentFrame, 
                        tp.TotalFrames, tp.CurrentFPS, tp.AverageFPS, tp.CurrentBitrate, 
                        tp.CurrentTime, tp.CurrentSpeed, tp.ETA, tp.PassDuration, 
-                       tp.LastProgressUpdate, ta.FilePath, ta.Quality, ta.ProfileName, ta.AttemptDate
+                       tp.LastProgressUpdate, ta.FilePath, ta.Quality, ta.ProfileName, ta.AttemptDate,
+                       mf.TotalFrames as MediaFileTotalFrames
                 FROM TranscodeProgress tp
                 INNER JOIN TranscodeAttempts ta ON tp.TranscodeAttemptId = ta.Id
+                LEFT JOIN MediaFiles mf ON ta.FilePath = mf.FilePath
                 ORDER BY tp.LastProgressUpdate DESC 
                 LIMIT 1
             """
@@ -1892,14 +1894,25 @@ class DatabaseManager:
                 FilePath = row[13]
                 FileName = FilePath.split('\\')[-1] if FilePath else "Unknown"
                 
+                # Use MediaFiles TotalFrames if available, fallback to TranscodeProgress TotalFrames
+                MediaFileTotalFrames = row[17]  # mf.TotalFrames
+                ProgressTotalFrames = row[4]    # tp.TotalFrames
+                ActualTotalFrames = MediaFileTotalFrames if MediaFileTotalFrames else ProgressTotalFrames
+                
+                # Recalculate progress percentage if we have better TotalFrames data
+                CurrentFrame = row[3]
+                RecalculatedProgress = 0.0
+                if ActualTotalFrames and ActualTotalFrames > 0 and CurrentFrame > 0:
+                    RecalculatedProgress = min((CurrentFrame / ActualTotalFrames) * 100, 95.0)
+                
                 progressData = {
                     'Success': True,
                     'AttemptId': row[0],  # Frontend expects AttemptId
                     'TranscodeAttemptId': row[0],
                     'CurrentPhase': row[1],
-                    'ProgressPercent': row[2],
+                    'ProgressPercent': RecalculatedProgress if RecalculatedProgress > 0 else row[2],
                     'CurrentFrame': row[3],
-                    'TotalFrames': row[4],
+                    'TotalFrames': ActualTotalFrames,
                     'CurrentFPS': row[5],
                     'AverageFPS': row[6],
                     'CurrentBitrate': row[7],
@@ -1913,7 +1926,9 @@ class DatabaseManager:
                     'FileName': FileName,  # Frontend expects FileName
                     'StartTime': row[16],  # Frontend expects StartTime
                     'Quality': row[14],
-                    'ProfileName': row[15]
+                    'ProfileName': row[15],
+                    'MediaFileTotalFrames': MediaFileTotalFrames,  # For debugging
+                    'RecalculatedProgress': RecalculatedProgress > 0  # Flag for debugging
                 }
                 
                 LoggingService.LogDebug(f"Found current progress: {progressData['CurrentPhase']} ({progressData['ProgressPercent']}%) for {progressData['FileName']}", "DatabaseManager", "GetCurrentTranscodeProgress")
@@ -2842,3 +2857,75 @@ class DatabaseManager:
         except Exception as e:
             LoggingService.LogException("Exception getting recent transcoding attempts", e, "DatabaseManager", "GetRecentTranscodeAttempts")
             return []
+    
+    def GetQualityTestingQueueItemByTranscodeAttemptId(self, TranscodeAttemptId: int) -> Optional[QualityTestingQueueModel]:
+        """Get quality testing queue item by TranscodeAttemptId if it exists."""
+        try:
+            LoggingService.LogFunctionEntry("GetQualityTestingQueueItemByTranscodeAttemptId", "DatabaseManager", TranscodeAttemptId)
+            
+            query = """
+                SELECT Id, TranscodeAttemptId, OriginalFilePath, TranscodedFilePath, FileName, 
+                       Status, Priority, DateAdded, DateStarted, DateCompleted, VMAFScore, 
+                       QualityThreshold, ErrorMessage, RetryCount, MaxRetries, StrategyType, 
+                       StrategyId, AlternativeProfileIds, CustomSettings, Results, SelectedResultId
+                FROM QualityTestingQueue
+                WHERE TranscodeAttemptId = ?
+                ORDER BY DateAdded DESC
+                LIMIT 1
+            """
+            
+            rows = self.DatabaseService.ExecuteQuery(query, (TranscodeAttemptId,))
+            
+            if rows:
+                row = rows[0]
+                queueItem = QualityTestingQueueModel()
+                queueItem.Id = row[0]
+                queueItem.TranscodeAttemptId = row[1]
+                queueItem.OriginalFilePath = row[2] or ""
+                queueItem.TranscodedFilePath = row[3] or ""
+                queueItem.FileName = row[4] or ""
+                queueItem.Status = row[5] or "Pending"
+                queueItem.Priority = row[6] or 50
+                queueItem.DateAdded = row[7]
+                queueItem.DateStarted = row[8]
+                queueItem.DateCompleted = row[9]
+                queueItem.VMAFScore = row[10]
+                queueItem.QualityThreshold = row[11] or 90.0
+                queueItem.ErrorMessage = row[12]
+                queueItem.RetryCount = row[13] or 0
+                queueItem.MaxRetries = row[14] or 3
+                queueItem.StrategyType = row[15] or "Single"
+                queueItem.StrategyId = row[16]
+                queueItem.AlternativeProfileIds = row[17]
+                queueItem.CustomSettings = row[18]
+                queueItem.Results = row[19]
+                queueItem.SelectedResultId = row[20]
+                
+                LoggingService.LogDebug(f"Found existing quality test entry for TranscodeAttemptId {TranscodeAttemptId}", "DatabaseManager", "GetQualityTestingQueueItemByTranscodeAttemptId")
+                return queueItem
+            else:
+                LoggingService.LogDebug(f"No existing quality test entry found for TranscodeAttemptId {TranscodeAttemptId}", "DatabaseManager", "GetQualityTestingQueueItemByTranscodeAttemptId")
+                return None
+                
+        except Exception as e:
+            LoggingService.LogException("Exception getting quality testing queue item by TranscodeAttemptId", e, "DatabaseManager", "GetQualityTestingQueueItemByTranscodeAttemptId")
+            return None
+    
+    def DeleteQualityTestingQueueItem(self, QueueId: int) -> bool:
+        """Delete a quality testing queue item by ID."""
+        try:
+            LoggingService.LogFunctionEntry("DeleteQualityTestingQueueItem", "DatabaseManager", QueueId)
+            
+            query = "DELETE FROM QualityTestingQueue WHERE Id = ?"
+            rowsAffected = self.DatabaseService.ExecuteNonQuery(query, (QueueId,))
+            
+            if rowsAffected > 0:
+                LoggingService.LogInfo(f"Deleted quality testing queue item {QueueId}", "DatabaseManager", "DeleteQualityTestingQueueItem")
+                return True
+            else:
+                LoggingService.LogWarning(f"Quality testing queue item {QueueId} not found for deletion", "DatabaseManager", "DeleteQualityTestingQueueItem")
+                return False
+                
+        except Exception as e:
+            LoggingService.LogException("Exception deleting quality testing queue item", e, "DatabaseManager", "DeleteQualityTestingQueueItem")
+            return False

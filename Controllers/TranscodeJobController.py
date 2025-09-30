@@ -219,7 +219,7 @@ def GetProgressSummary():
         LoggingService.LogException(errorMsg, e, "TranscodeJobController", "GetProgressSummary")
         return jsonify({"Success": False, "ErrorMessage": errorMsg}), 500
 
-@TranscodeJobBlueprint.route('/CurrentProgress', methods=['GET'])
+@TranscodeJobBlueprint.route('/Progress', methods=['GET'])
 def GetCurrentProgress():
     """Get current transcoding progress from database."""
     try:

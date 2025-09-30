@@ -25,6 +25,11 @@ class TranscodeServiceApp:
     def __init__(self):
         """Initialize the TranscodeService application."""
         self.DatabaseManager = DatabaseManager()
+        
+        # Check if another instance is already running
+        if self.PrivateIsServiceAlreadyRunning():
+            LoggingService.LogError("TranscodeService is already running. Preventing duplicate instance.", "TranscodeServiceApp", "__init__")
+            sys.exit(1)
         self.ProcessTranscodeQueue = ProcessTranscodeQueueService(
             DatabaseManagerInstance=self.DatabaseManager
         )
@@ -38,6 +43,29 @@ class TranscodeServiceApp:
         self.ProcessId = os.getpid()
         
         LoggingService.LogInfo("TranscodeServiceApp initialized", "TranscodeService", "__init__")
+    
+    def PrivateIsServiceAlreadyRunning(self) -> bool:
+        """Check if another TranscodeService instance is already running."""
+        try:
+            current_pid = os.getpid()
+            transcode_processes = []
+            
+            for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+                try:
+                    if proc.info['name'] == 'TranscodeService' and proc.info['pid'] != current_pid:
+                        transcode_processes.append(proc.info['pid'])
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+            
+            if transcode_processes:
+                LoggingService.LogError(f"Found {len(transcode_processes)} existing TranscodeService processes: {transcode_processes}", "TranscodeServiceApp", "PrivateIsServiceAlreadyRunning")
+                return True
+            
+            return False
+            
+        except Exception as e:
+            LoggingService.LogException("Exception checking for existing TranscodeService instances", e, "TranscodeServiceApp", "PrivateIsServiceAlreadyRunning")
+            return False
     
     def Run(self):
         """Start the transcoding service."""

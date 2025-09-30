@@ -7,7 +7,11 @@ Standalone transcoding microservice for MediaVortex
 import sys
 import signal
 import os
+import setproctitle
 from App import TranscodeServiceApp
+
+# Set process title for better visibility in Task Manager
+setproctitle.setproctitle("TranscodeService")
 
 # Add parent directory to path to import shared services
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

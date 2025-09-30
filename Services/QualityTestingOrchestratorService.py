@@ -128,6 +128,16 @@ class QualityTestingOrchestratorService:
         try:
             LoggingService.LogFunctionEntry("AddToQueue", "QualityTestingOrchestratorService", TranscodeAttemptId, OriginalFilePath, TranscodedFilePath, FileName, StrategyType, QualityThreshold)
             
+            # Check if quality test already exists for this TranscodeAttemptId
+            ExistingItem = self.DatabaseManager.GetQualityTestingQueueItemByTranscodeAttemptId(TranscodeAttemptId)
+            if ExistingItem:
+                LoggingService.LogWarning(f"Quality test already exists for TranscodeAttemptId {TranscodeAttemptId} (ID: {ExistingItem.Id}, Status: {ExistingItem.Status})", "QualityTestingOrchestratorService", "AddToQueue")
+                return {
+                    "Success": False,
+                    "ErrorMessage": f"Quality test already exists for TranscodeAttemptId {TranscodeAttemptId}",
+                    "ExistingQueueId": ExistingItem.Id
+                }
+            
             # Create quality testing queue item
             QueueItem = QualityTestingQueueModel()
             QueueItem.TranscodeAttemptId = TranscodeAttemptId
