@@ -28,13 +28,14 @@ class ServiceInfo:
 class SystemOrchestratorApp:
     """Simple process manager for MediaVortex services."""
     
-    def __init__(self):
+    def __init__(self, Background=False):
         """Initialize the SystemOrchestratorService application."""
         # Check if another instance is already running
         if self.PrivateIsServiceAlreadyRunning():
             print("ERROR: SystemOrchestratorService is already running. Preventing duplicate instance.")
             sys.exit(1)
         
+        self.Background = Background
         self.ShutdownEvent = False
         self.StartTime = datetime.now()
         
@@ -127,16 +128,29 @@ class SystemOrchestratorApp:
             else:
                 python_exe = os.path.join(service_info.Directory, "venv", "bin", "python")
             
-            if service_info.Name == 'MediaVortex':
-                # MediaVortex runs with venv python MediaVortex.py
-                service_info.Process = subprocess.Popen(
-                    [python_exe, service_info.MainScript],
-                    cwd=service_info.Directory
-                )
+            # Configure subprocess based on background mode
+            if self.Background:
+                # Background mode - hide windows and redirect output
+                if platform.system() == "Windows":
+                    service_info.Process = subprocess.Popen(
+                        [python_exe, service_info.MainScript if service_info.Name == 'MediaVortex' else "Main.py"],
+                        cwd=service_info.Directory,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        creationflags=subprocess.CREATE_NEW_PROCESS_GROUP
+                    )
+                else:
+                    service_info.Process = subprocess.Popen(
+                        [python_exe, service_info.MainScript if service_info.Name == 'MediaVortex' else "Main.py"],
+                        cwd=service_info.Directory,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        start_new_session=True
+                    )
             else:
-                # Microservices run with venv python Main.py
+                # Foreground mode - show output
                 service_info.Process = subprocess.Popen(
-                    [python_exe, "Main.py"],
+                    [python_exe, service_info.MainScript if service_info.Name == 'MediaVortex' else "Main.py"],
                     cwd=service_info.Directory
                 )
             
@@ -154,9 +168,12 @@ class SystemOrchestratorApp:
             while not self.ShutdownEvent:
                 # Check if any service has died
                 for service_name, service_info in self.ManagedServices.items():
-                    if service_info.Process and service_info.Process.poll() is not None:
-                        print(f"⚠️  {service_name} has stopped, restarting...")
-                        self.PrivateStartService(service_info)
+                    if service_info.Process:
+                        # poll() returns None if process is still running, returncode if it has terminated
+                        returncode = service_info.Process.poll()
+                        if returncode is not None:
+                            print(f"⚠️  {service_name} has stopped (exit code: {returncode}), restarting...")
+                            self.PrivateStartService(service_info)
                 
                 # Wait a bit before checking again
                 time.sleep(10)

@@ -22,18 +22,24 @@ def Main():
     """Main entry point for SystemOrchestratorService."""
     global app
     
+    # Check for background argument
+    background = "--background" in sys.argv or "-b" in sys.argv
+    
     try:
         print("Starting SystemOrchestratorService...")
         
         # Initialize the application
-        app = SystemOrchestratorApp()
+        app = SystemOrchestratorApp(Background=background)
         
         # Register signal handlers
         signal.signal(signal.SIGINT, SignalHandler)
         signal.signal(signal.SIGTERM, SignalHandler)
         
         # Start the orchestrator (this will run indefinitely)
-        print("SystemOrchestratorService is now running. Press Ctrl+C to stop.")
+        if background:
+            print("SystemOrchestratorService is now running in background mode.")
+        else:
+            print("SystemOrchestratorService is now running. Press Ctrl+C to stop.")
         app.Run()
         
     except KeyboardInterrupt:
