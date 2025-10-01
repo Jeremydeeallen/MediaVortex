@@ -3,41 +3,7 @@
 {% block title %}File Scanning - MediaVortex{% endblock %}
 
 {% block content %}
-<style>
-    .scan-progress {
-        height: 25px;
-        background-color: #e9ecef;
-        border-radius: 5px;
-        overflow: hidden;
-    }
-    .scan-progress-bar {
-        height: 100%;
-        background: linear-gradient(90deg, #28a745, #20c997);
-        transition: width 0.3s ease;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        color: white;
-        font-weight: bold;
-        font-size: 0.875rem;
-    }
-    .file-list {
-        max-height: 400px;
-        overflow-y: auto;
-    }
-    .unicode-test {
-        background-color: #f8f9fa;
-        border: 1px solid #dee2e6;
-        border-radius: 0.375rem;
-        padding: 1rem;
-    }
-    .error-display {
-        background-color: #f8d7da;
-        border: 1px solid #f5c6cb;
-        border-radius: 0.375rem;
-        padding: 1rem;
-    }
-</style>
+<!-- Page-specific styles moved to common.css for better architecture -->
 
 <div class="row">
     <div class="col-12">
@@ -55,32 +21,10 @@
                 <h5><i class="fas fa-play-circle"></i> Scan Control</h5>
             </div>
             <div class="card-body">
-                <div class="row">
-                    <div class="col-md-8">
-                        <div class="mb-3">
-                            <label for="RootFolderPath" class="form-label">Scan Directory:</label>
-                            <select class="form-select" id="RootFolderPath">
-                                <option value="">Select a scan directory...</option>
-                            </select>
-                        </div>
-                        <div class="form-check mb-3">
-                            <input class="form-check-input" type="checkbox" id="RecursiveScan" checked>
-                            <label class="form-check-label" for="RecursiveScan">
-                                Recursive Scan (include subdirectories)
-                            </label>
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">Currently Running Scan:</label>
-                            <div class="alert alert-info" id="CurrentScanStatus">
-                                <i class="fas fa-info-circle"></i> <span id="CurrentScanText">None</span>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="col-md-4">
-                        <div class="d-grid gap-2">
-                            <button class="btn btn-success" id="StartScanBtn">
-                                <i class="fas fa-play"></i> Start Scan
-                            </button>
+                <!-- Control Buttons at Top -->
+                <div class="row mb-4">
+                    <div class="col-12">
+                        <div class="d-flex gap-2 justify-content-end">
                             <button class="btn btn-danger" id="StopScanBtn" disabled>
                                 <i class="fas fa-stop"></i> Stop Scan
                             </button>
@@ -90,6 +34,72 @@
                             <button class="btn btn-info" id="ExtractMetadataBtn" title="Extract metadata for files that need it (happens automatically after scanning)">
                                 <i class="fas fa-cogs"></i> Extract Metadata
                             </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Two Column Scan Options -->
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="card">
+                            <div class="card-header">
+                                <h6 class="mb-0"><i class="fas fa-folder"></i> Root Folder Scan</h6>
+                            </div>
+                            <div class="card-body">
+                                <div class="mb-3">
+                                    <label for="RootFolderSelect" class="form-label">Select Root Folder:</label>
+                                    <select class="form-select" id="RootFolderSelect">
+                                        <option value="">Select Root Folder...</option>
+                                    </select>
+                                </div>
+                                <div class="form-check mb-3">
+                                    <input class="form-check-input" type="checkbox" id="RecursiveScan1" checked>
+                                    <label class="form-check-label" for="RecursiveScan1">
+                                        Recursive Scan (include subdirectories)
+                                    </label>
+                                </div>
+                                <div class="d-grid">
+                                    <button class="btn btn-primary" id="StartRootFolderScanBtn" disabled>
+                                        <i class="fas fa-play"></i> Scan Root Folder
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="card">
+                            <div class="card-header">
+                                <h6 class="mb-0"><i class="fas fa-folder-open"></i> Browse Folder Scan</h6>
+                            </div>
+                            <div class="card-body">
+                                <div class="mb-3">
+                                    <label for="BrowseDirectoryPath" class="form-label">Directory Path:</label>
+                                    <input type="text" class="form-control" id="BrowseDirectoryPath" placeholder="Enter directory path (e.g., z:\videos\Couple)">
+                                </div>
+                                <div class="form-check mb-3">
+                                    <input class="form-check-input" type="checkbox" id="RecursiveScan2" checked>
+                                    <label class="form-check-label" for="RecursiveScan2">
+                                        Recursive Scan (include subdirectories)
+                                    </label>
+                                </div>
+                                <div class="d-grid">
+                                    <button class="btn btn-success" id="StartBrowseScanBtn" disabled>
+                                        <i class="fas fa-play"></i> Scan Selected Folder
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Scan Status -->
+                <div class="row mt-4">
+                    <div class="col-12">
+                        <div class="mb-3">
+                            <label class="form-label">Currently Running Scan:</label>
+                            <div class="alert alert-info" id="CurrentScanStatus">
+                                <i class="fas fa-info-circle"></i> <span id="CurrentScanText">None</span>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -229,22 +239,27 @@
         }
 
         function SetupEventHandlers() {
-            $('#StartScanBtn').click(StartScan);
+            $('#StartRootFolderScanBtn').click(StartRootFolderScan);
+            $('#StartBrowseScanBtn').click(StartBrowseScan);
             $('#StopScanBtn').click(StopScan);
             $('#RefreshBtn').click(RefreshData);
             $('#ExtractMetadataBtn').click(ExtractMetadata);
             $('#TestUnicodeBtn').click(TestUnicode);
             $('#RefreshStatisticsBtn').click(LoadStatistics);
             
+            // Directory selection event handlers
+            $('#RootFolderSelect').change(OnRootFolderChange);
+            $('#BrowseDirectoryPath').on('input', OnBrowseDirectoryChange);
+            
             $('#ConfirmDeleteBtn').click(() => window.DeleteServiceInstance.ExecuteDelete());
         }
 
-        function StartScan() {
-            const RootFolderPath = $('#RootFolderPath').val().trim();
-            const Recursive = $('#RecursiveScan').is(':checked');
+        function StartRootFolderScan() {
+            const RootFolder = $('#RootFolderSelect').val();
+            const Recursive = $('#RecursiveScan1').is(':checked');
 
-            if (!RootFolderPath) {
-                ShowError('Please select a scan directory');
+            if (!RootFolder) {
+                ShowError('Please select a root folder');
                 return;
             }
 
@@ -253,23 +268,71 @@
                 method: 'POST',
                 contentType: 'application/json',
                 data: JSON.stringify({
-                    RootFolderPath: RootFolderPath,
+                    RootFolderPath: RootFolder,
                     Recursive: Recursive
                 }),
                 success: function(response) {
                     if (response.Success) {
                         IsScanning = true;
-                        $('#StartScanBtn').prop('disabled', true);
+                        $('#StartRootFolderScanBtn').prop('disabled', true);
+                        $('#StartBrowseScanBtn').prop('disabled', true);
                         $('#StopScanBtn').prop('disabled', false);
                         $('#ScanProgressSection').show();
                         StartProgressPolling();
-                        ShowSuccess('Scan started successfully');
+                        ShowSuccess('Root folder scan started successfully');
                     } else {
-                        ShowError('Error starting scan: ' + response.Error);
+                        ShowError('Error starting scan: ' + (response.Message || response.Error || 'Unknown error'));
                     }
                 },
                 error: function(xhr, status, error) {
                     ShowError('Error starting scan: ' + error);
+                }
+            });
+        }
+
+        function StartBrowseScan() {
+            const BrowseDirectoryPath = $('#BrowseDirectoryPath').val().trim();
+            const Recursive = $('#RecursiveScan2').is(':checked');
+
+            console.log('StartBrowseScan called with:', {
+                BrowseDirectoryPath: BrowseDirectoryPath,
+                Recursive: Recursive
+            });
+
+            if (!BrowseDirectoryPath) {
+                ShowError('Please select a directory to scan');
+                return;
+            }
+
+            $.ajax({
+                url: '/api/Scan/Start',
+                method: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({
+                    RootFolderPath: BrowseDirectoryPath,
+                    Recursive: Recursive
+                }),
+                success: function(response) {
+                    if (response.Success) {
+                        IsScanning = true;
+                        $('#StartRootFolderScanBtn').prop('disabled', true);
+                        $('#StartBrowseScanBtn').prop('disabled', true);
+                        $('#StopScanBtn').prop('disabled', false);
+                        $('#ScanProgressSection').show();
+                        StartProgressPolling();
+                        ShowSuccess('Browse scan started successfully');
+                    } else {
+                        ShowError('Error starting scan: ' + (response.Message || response.Error || 'Unknown error'));
+                    }
+                },
+                error: function(xhr, status, error) {
+                    console.error('Browse Scan AJAX Error Details:', {
+                        status: xhr.status,
+                        statusText: xhr.statusText,
+                        responseText: xhr.responseText,
+                        error: error
+                    });
+                    ShowError('Error starting scan: ' + error + ' (Status: ' + xhr.status + ')');
                 }
             });
         }
@@ -281,13 +344,14 @@
                 success: function(response) {
                     if (response.Success) {
                         IsScanning = false;
-                        $('#StartScanBtn').prop('disabled', false);
+                        $('#StartRootFolderScanBtn').prop('disabled', false);
+                        $('#StartBrowseScanBtn').prop('disabled', false);
                         $('#StopScanBtn').prop('disabled', true);
                         $('#ScanProgressSection').hide();
                         StopProgressPolling();
                         ShowSuccess('Scan stopped successfully');
                     } else {
-                        ShowError('Error stopping scan: ' + response.Error);
+                        ShowError('Error stopping scan: ' + (response.Message || response.Error || 'Unknown error'));
                     }
                 },
                 error: function(xhr, status, error) {
@@ -450,6 +514,7 @@
         }
 
 
+
         function LoadScanDirectories() {
             console.log('Loading scan directories...');
             $.ajax({
@@ -471,13 +536,30 @@
         }
 
         function PopulateScanDirectoryDropdown(scanDirectories) {
-            const dropdown = $('#RootFolderPath');
+            const dropdown = $('#RootFolderSelect');
             dropdown.empty();
-            dropdown.append('<option value="">Select a scan directory...</option>');
+            dropdown.append('<option value="">Select Root Folder...</option>');
             
             scanDirectories.forEach(function(directory) {
                 dropdown.append(`<option value="${directory.Path}">${directory.DisplayText}</option>`);
             });
+        }
+
+        function OnRootFolderChange() {
+            const RootFolder = $('#RootFolderSelect').val();
+            const StartRootFolderScanBtn = $('#StartRootFolderScanBtn');
+            
+            // Enable scan button if root folder is selected
+            StartRootFolderScanBtn.prop('disabled', !RootFolder);
+        }
+
+
+        function OnBrowseDirectoryChange() {
+            const BrowseDirectoryPath = $('#BrowseDirectoryPath').val().trim();
+            const StartBrowseScanBtn = $('#StartBrowseScanBtn');
+            
+            // Enable scan button if directory path is provided
+            StartBrowseScanBtn.prop('disabled', !BrowseDirectoryPath);
         }
 
 

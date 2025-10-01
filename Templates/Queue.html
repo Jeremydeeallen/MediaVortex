@@ -3,312 +3,36 @@
 {% block title %}Queue - MediaVortex{% endblock %}
 
 {% block head %}
-<style>
-.sortable {
-    cursor: pointer;
-    user-select: none;
-    position: relative;
-}
-
-.sortable:hover {
-    background-color: rgba(0, 0, 0, 0.05);
-}
-
-.sortable i {
-    margin-left: 5px;
-    opacity: 0.5;
-}
-
-.sortable:hover i {
-    opacity: 0.8;
-}
-
-.pagination {
-    margin-bottom: 0;
-}
-
-.pagination .page-link {
-    color: #0d6efd;
-    border: 1px solid #dee2e6;
-}
-
-.pagination .page-item.active .page-link {
-    background-color: #0d6efd;
-    border-color: #0d6efd;
-}
-
-.pagination .page-item.disabled .page-link {
-    color: #6c757d;
-    background-color: #fff;
-    border-color: #dee2e6;
-}
-
-.table-responsive {
-    max-height: 600px;
-    overflow-y: auto;
-}
-
-/* Make table use full width */
-#QueueTable {
-    width: 100%;
-    table-layout: fixed;
-}
-
-/* Column width adjustments */
-#QueueTable th:nth-child(1), #QueueTable td:nth-child(1) { width: 5%; } /* ID */
-#QueueTable th:nth-child(2), #QueueTable td:nth-child(2) { width: 25%; } /* File Name */
-#QueueTable th:nth-child(3), #QueueTable td:nth-child(3) { width: 15%; } /* Directory */
-#QueueTable th:nth-child(4), #QueueTable td:nth-child(4) { width: 8%; } /* Size */
-#QueueTable th:nth-child(5), #QueueTable td:nth-child(5) { width: 8%; } /* Priority */
-#QueueTable th:nth-child(6), #QueueTable td:nth-child(6) { width: 10%; } /* Status */
-#QueueTable th:nth-child(7), #QueueTable td:nth-child(7) { width: 12%; } /* Date Added */
-#QueueTable th:nth-child(8), #QueueTable td:nth-child(8) { width: 12%; } /* Date Started */
-#QueueTable th:nth-child(9), #QueueTable td:nth-child(9) { width: 5%; } /* Actions */
-
-/* Truncate long text in File Name and Directory columns */
-#QueueTable td:nth-child(2), #QueueTable td:nth-child(3) {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-/* Show full text on hover for truncated cells */
-#QueueTable td:nth-child(2):hover, #QueueTable td:nth-child(3):hover {
-    white-space: normal;
-    word-break: break-all;
-    position: relative;
-    z-index: 10;
-    background-color: #f8f9fa;
-    border: 1px solid #dee2e6;
-}
-
-/* Quality Testing Queue Table styling */
-#QualityTestingQueueTable {
-    width: 100%;
-    table-layout: fixed;
-}
-
-#QualityTestingQueueTable th:nth-child(1), #QualityTestingQueueTable td:nth-child(1) { width: 5%; } /* ID */
-#QualityTestingQueueTable th:nth-child(2), #QualityTestingQueueTable td:nth-child(2) { width: 35%; } /* File Name */
-#QualityTestingQueueTable th:nth-child(3), #QualityTestingQueueTable td:nth-child(3) { width: 10%; } /* Status */
-#QualityTestingQueueTable th:nth-child(4), #QualityTestingQueueTable td:nth-child(4) { width: 10%; } /* Quality Score */
-#QualityTestingQueueTable th:nth-child(5), #QualityTestingQueueTable td:nth-child(5) { width: 10%; } /* Quality Threshold */
-#QualityTestingQueueTable th:nth-child(6), #QualityTestingQueueTable td:nth-child(6) { width: 12%; } /* Date Added */
-#QualityTestingQueueTable th:nth-child(7), #QualityTestingQueueTable td:nth-child(7) { width: 12%; } /* Date Started */
-#QualityTestingQueueTable th:nth-child(8), #QualityTestingQueueTable td:nth-child(8) { width: 12%; } /* Date Completed */
-#QualityTestingQueueTable th:nth-child(9), #QualityTestingQueueTable td:nth-child(9) { width: 4%; } /* Actions */
-
-#QualityTestingQueueTable td:nth-child(2) {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-#QualityTestingQueueTable td:nth-child(2):hover {
-    white-space: normal;
-    word-break: break-all;
-    position: relative;
-    z-index: 10;
-    background-color: #f8f9fa;
-    border: 1px solid #dee2e6;
-}
-
-/* Media Files Table styling */
-#MediaFilesTable {
-    width: 100% !important;
-    table-layout: fixed !important;
-    min-width: 100% !important;
-}
-
-#MediaFilesTable th:nth-child(1), #MediaFilesTable td:nth-child(1) { width: 5% !important; } /* ID */
-#MediaFilesTable th:nth-child(2), #MediaFilesTable td:nth-child(2) { width: 30% !important; } /* File Name */
-#MediaFilesTable th:nth-child(3), #MediaFilesTable td:nth-child(3) { width: 20% !important; } /* Directory */
-#MediaFilesTable th:nth-child(4), #MediaFilesTable td:nth-child(4) { width: 8% !important; } /* Size */
-#MediaFilesTable th:nth-child(5), #MediaFilesTable td:nth-child(5) { width: 10% !important; } /* Resolution */
-#MediaFilesTable th:nth-child(6), #MediaFilesTable td:nth-child(6) { width: 17% !important; } /* Profile */
-#MediaFilesTable th:nth-child(7), #MediaFilesTable td:nth-child(7) { width: 10% !important; } /* Actions */
-
-#MediaFilesTable td:nth-child(2), #MediaFilesTable td:nth-child(3) {
-    overflow: hidden !important;
-    text-overflow: ellipsis !important;
-    white-space: nowrap !important;
-    max-width: 0 !important;
-}
-
-#MediaFilesTable td:nth-child(2):hover, #MediaFilesTable td:nth-child(3):hover {
-    white-space: normal !important;
-    word-break: break-all !important;
-    position: relative !important;
-    z-index: 10 !important;
-    background-color: #f8f9fa !important;
-    border: 1px solid #dee2e6 !important;
-    max-width: none !important;
-}
-
-/* Root Folders Table styling */
-#RootFoldersTable {
-    width: 100%;
-    table-layout: fixed;
-}
-
-#RootFoldersTable th:nth-child(1), #RootFoldersTable td:nth-child(1) { width: 5%; } /* ID */
-#RootFoldersTable th:nth-child(2), #RootFoldersTable td:nth-child(2) { width: 40%; } /* Path */
-#RootFoldersTable th:nth-child(3), #RootFoldersTable td:nth-child(3) { width: 15%; } /* Last Scanned */
-#RootFoldersTable th:nth-child(4), #RootFoldersTable td:nth-child(4) { width: 10%; } /* Total Size */
-#RootFoldersTable th:nth-child(5), #RootFoldersTable td:nth-child(5) { width: 20%; } /* Profile */
-#RootFoldersTable th:nth-child(6), #RootFoldersTable td:nth-child(6) { width: 10%; } /* Actions */
-
-#RootFoldersTable td:nth-child(2) {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-#RootFoldersTable td:nth-child(2):hover {
-    white-space: normal;
-    word-break: break-all;
-    position: relative;
-    z-index: 10;
-    background-color: #f8f9fa;
-    border: 1px solid #dee2e6;
-}
-
-#PaginationInfo {
-    font-size: 0.875rem;
-}
-
-/* Force full width for all table containers */
-.container-fluid {
-    max-width: 100% !important;
-    padding-left: 15px !important;
-    padding-right: 15px !important;
-}
-
-/* Ensure table-responsive containers use full width */
-.table-responsive {
-    width: 100% !important;
-    overflow-x: auto !important;
-    margin-bottom: 0 !important;
-}
-
-/* Force card bodies to use full width */
-.card-body {
-    padding: 1rem !important;
-}
-
-/* Ensure rows use full width */
-.row {
-    margin-left: 0 !important;
-    margin-right: 0 !important;
-}
-
-.col-12 {
-    padding-left: 0 !important;
-    padding-right: 0 !important;
-}
-
-/* Ensure all tables use full width */
-.table {
-    width: 100% !important;
-    table-layout: fixed !important;
-    margin-bottom: 0 !important;
-}
-
-/* Improve table responsiveness */
-.table-responsive {
-    border: none !important;
-    box-shadow: none !important;
-}
-
-/* Ensure proper spacing for full-width layout */
-.card {
-    margin-bottom: 1rem !important;
-}
-
-/* Optimize column widths for better full-width display */
-#QueueTable th:nth-child(1), #QueueTable td:nth-child(1) { width: 4%; } /* ID */
-#QueueTable th:nth-child(2), #QueueTable td:nth-child(2) { width: 30%; } /* File Name */
-#QueueTable th:nth-child(3), #QueueTable td:nth-child(3) { width: 20%; } /* Directory */
-#QueueTable th:nth-child(4), #QueueTable td:nth-child(4) { width: 8%; } /* Size */
-#QueueTable th:nth-child(5), #QueueTable td:nth-child(5) { width: 8%; } /* Priority */
-#QueueTable th:nth-child(6), #QueueTable td:nth-child(6) { width: 10%; } /* Status */
-#QueueTable th:nth-child(7), #QueueTable td:nth-child(7) { width: 10%; } /* Date Added */
-#QueueTable th:nth-child(8), #QueueTable td:nth-child(8) { width: 10%; } /* Date Started */
-#QueueTable th:nth-child(9), #QueueTable td:nth-child(9) { width: 5%; } /* Actions */
-
-#MediaFilesTable th:nth-child(1), #MediaFilesTable td:nth-child(1) { width: 4% !important; } /* ID */
-#MediaFilesTable th:nth-child(2), #MediaFilesTable td:nth-child(2) { width: 35% !important; } /* File Name */
-#MediaFilesTable th:nth-child(3), #MediaFilesTable td:nth-child(3) { width: 25% !important; } /* Directory */
-#MediaFilesTable th:nth-child(4), #MediaFilesTable td:nth-child(4) { width: 8% !important; } /* Size */
-#MediaFilesTable th:nth-child(5), #MediaFilesTable td:nth-child(5) { width: 10% !important; } /* Resolution */
-#MediaFilesTable th:nth-child(6), #MediaFilesTable td:nth-child(6) { width: 13% !important; } /* Profile */
-#MediaFilesTable th:nth-child(7), #MediaFilesTable td:nth-child(7) { width: 5% !important; } /* Actions */
-</style>
+<!-- Page-specific styles moved to common.css for better architecture -->
 {% endblock %}
 
 {% block content %}
 <div class="row">
     <div class="col-12">
-            <div class="d-flex justify-content-between align-items-center mb-4">
-                <h1 class="h3 mb-0">Queue</h1>
-                <div class="btn-group" role="group">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h1 class="h3 mb-0">Queue</h1>
+            <div class="page-action-buttons">
                     <button type="button" class="btn btn-primary" id="PopulateQueueBtn">
-                        <i class="fas fa-plus"></i> Populate Queue
+                        <i class="fas fa-plus"></i> <span class="btn-text">Populate Queue</span>
                     </button>
                     <button type="button" class="btn btn-warning" id="ClearQueueBtn">
-                        <i class="fas fa-trash"></i> Clear Queue
+                        <i class="fas fa-trash"></i> <span class="btn-text">Clear Queue</span>
                     </button>
                     <button type="button" class="btn btn-success" id="StartTranscodingBtn">
-                        <i class="fas fa-play"></i> Start Transcoding
+                        <i class="fas fa-play"></i> <span class="btn-text">Start Transcoding</span>
                     </button>
                     <button type="button" class="btn btn-warning" id="StopTranscodingBtn" style="display: none;">
-                        <i class="fas fa-stop"></i> Stop Transcoding
+                        <i class="fas fa-stop"></i> <span class="btn-text">Stop Transcoding</span>
                     </button>
                     <button type="button" class="btn btn-danger" id="ResetAllQueuesBtn">
-                        <i class="fas fa-redo"></i> Reset Running Tasks
+                        <i class="fas fa-redo"></i> <span class="btn-text">Reset Running Tasks</span>
                     </button>
                     <button type="button" class="btn btn-secondary" id="RefreshBtn">
-                        <i class="fas fa-sync-alt"></i> Refresh
+                        <i class="fas fa-sync-alt"></i> <span class="btn-text">Refresh</span>
                     </button>
                 </div>
             </div>
             
-            <!-- Directory Scan Section -->
-            <div class="row mb-4">
-                <div class="col-12">
-                    <div class="card">
-                        <div class="card-header">
-                            <h5 class="mb-0">
-                                <i class="fas fa-folder-open"></i> Scan Directory
-                            </h5>
-                        </div>
-                        <div class="card-body">
-                            <div class="row">
-                                <div class="col-md-4">
-                                    <label for="RootFolderSelect" class="form-label">Root Folder</label>
-                                    <select class="form-select" id="RootFolderSelect">
-                                        <option value="">Select Root Folder...</option>
-                                    </select>
-                                </div>
-                                <div class="col-md-4">
-                                    <label for="SubdirectorySelect" class="form-label">Subdirectory</label>
-                                    <select class="form-select" id="SubdirectorySelect" disabled>
-                                        <option value="">Select Subdirectory...</option>
-                                    </select>
-                                </div>
-                                <div class="col-md-4">
-                                    <label class="form-label">&nbsp;</label>
-                                    <div class="d-grid">
-                                        <button type="button" class="btn btn-primary" id="ScanDirectoryBtn" disabled>
-                                            <i class="fas fa-search"></i> Scan Directory
-                                        </button>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
 
 
 
@@ -657,6 +381,7 @@
             </div>
         </div>
     </div>
+</div>
 
 <!-- Alert Container -->
 <div id="AlertContainer" class="position-fixed top-0 end-0 p-3" style="z-index: 1050;"></div>
@@ -703,13 +428,24 @@ class TranscodeQueueManager {
         this.loadMediaFiles();
         this.LoadQualityTestingQueueData();
         this.loadProfilesForDropdowns();
-        this.loadDirectoryScanOptions();
         this.startAutoRefresh();
     }
 
     initializeEventListeners() {
-        // Populate Queue
-        document.getElementById('PopulateQueueBtn').addEventListener('click', () => {
+        console.log('Initializing event listeners...');
+        
+        // Check if elements exist
+        const populateBtn = document.getElementById('PopulateQueueBtn');
+        console.log('PopulateQueueBtn element:', populateBtn);
+        
+        if (!populateBtn) {
+            console.error('PopulateQueueBtn not found!');
+            return;
+        }
+        
+        // Populate Queue button
+        document.getElementById('PopulateQueueBtn').addEventListener('click', (e) => {
+            console.log('PopulateQueueBtn clicked', e);
             const modal = new bootstrap.Modal(document.getElementById('PopulateQueueModal'));
             modal.show();
         });
@@ -844,18 +580,6 @@ class TranscodeQueueManager {
             this.LoadQualityTestingQueueData();
         });
 
-        // Directory Scan event listeners
-        document.getElementById('RootFolderSelect').addEventListener('change', (e) => {
-            this.onRootFolderChange(e.target.value);
-        });
-
-        document.getElementById('SubdirectorySelect').addEventListener('change', (e) => {
-            this.onSubdirectoryChange(e.target.value);
-        });
-
-        document.getElementById('ScanDirectoryBtn').addEventListener('click', () => {
-            this.scanSelectedDirectory();
-        });
     }
 
     async loadQueueData() {
@@ -2031,114 +1755,7 @@ class TranscodeQueueManager {
         }
     }
 
-    async loadDirectoryScanOptions() {
-        try {
-            const response = await fetch('/api/RootFolders');
-            const data = await response.json();
-            
-            if (data.Success) {
-                const rootFolderSelect = document.getElementById('RootFolderSelect');
-                rootFolderSelect.innerHTML = '<option value="">Select Root Folder...</option>';
-                
-                data.RootFolders.forEach(folder => {
-                    const option = document.createElement('option');
-                    option.value = folder.RootFolder;
-                    option.textContent = folder.RootFolder;
-                    rootFolderSelect.appendChild(option);
-                });
-            }
-        } catch (error) {
-            this.showAlert('Error loading root folders: ' + error.message, 'danger');
-        }
-    }
 
-    async onRootFolderChange(rootFolderPath) {
-        const subdirectorySelect = document.getElementById('SubdirectorySelect');
-        const scanButton = document.getElementById('ScanDirectoryBtn');
-        
-        if (!rootFolderPath) {
-            subdirectorySelect.disabled = true;
-            subdirectorySelect.innerHTML = '<option value="">Select Subdirectory...</option>';
-            scanButton.disabled = true;
-            return;
-        }
-        
-        try {
-            subdirectorySelect.disabled = true;
-            subdirectorySelect.innerHTML = '<option value="">Loading...</option>';
-            
-            const response = await fetch(`/api/Scan/GetSubdirectories?path=${encodeURIComponent(rootFolderPath)}`);
-            const data = await response.json();
-            
-            if (data.Success) {
-                subdirectorySelect.innerHTML = '<option value="">Select Subdirectory...</option>';
-                data.Subdirectories.forEach(subdir => {
-                    const option = document.createElement('option');
-                    option.value = subdir;
-                    option.textContent = subdir;
-                    subdirectorySelect.appendChild(option);
-                });
-                subdirectorySelect.disabled = false;
-            } else {
-                subdirectorySelect.innerHTML = '<option value="">Error loading subdirectories</option>';
-            }
-        } catch (error) {
-            subdirectorySelect.innerHTML = '<option value="">Error loading subdirectories</option>';
-            this.showAlert('Error loading subdirectories: ' + error.message, 'danger');
-        }
-    }
-
-    onSubdirectoryChange(subdirectory) {
-        const scanButton = document.getElementById('ScanDirectoryBtn');
-        scanButton.disabled = !subdirectory;
-    }
-
-    async scanSelectedDirectory() {
-        const rootFolder = document.getElementById('RootFolderSelect').value;
-        const subdirectory = document.getElementById('SubdirectorySelect').value;
-        
-        if (!rootFolder || !subdirectory) {
-            this.showAlert('Please select both root folder and subdirectory', 'warning');
-            return;
-        }
-        
-        const scanPath = subdirectory === 'Root' ? rootFolder : `${rootFolder}\\${subdirectory}`;
-        
-        try {
-            const scanButton = document.getElementById('ScanDirectoryBtn');
-            scanButton.disabled = true;
-            scanButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Scanning...';
-            
-            const response = await fetch('/api/Scan/StartScan', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    RootFolderPath: scanPath,
-                    Recursive: true
-                })
-            });
-            
-            const data = await response.json();
-            
-            if (data.Success) {
-                this.showAlert(`Scan started for: ${scanPath}`, 'success');
-                // Refresh media files after a short delay
-                setTimeout(() => {
-                    this.loadMediaFiles();
-                }, 2000);
-            } else {
-                this.showAlert('Error starting scan: ' + data.Message, 'danger');
-            }
-        } catch (error) {
-            this.showAlert('Error starting scan: ' + error.message, 'danger');
-        } finally {
-            const scanButton = document.getElementById('ScanDirectoryBtn');
-            scanButton.disabled = false;
-            scanButton.innerHTML = '<i class="fas fa-search"></i> Scan Directory';
-        }
-    }
 
     showAlert(message, type) {
         const alertContainer = document.getElementById('AlertContainer');
@@ -2166,6 +1783,7 @@ class TranscodeQueueManager {
 // Initialize the queue manager when the page loads
 let queueManager;
 document.addEventListener('DOMContentLoaded', function() {
+    console.log('DOM Content Loaded - Initializing Queue Manager');
     queueManager = new TranscodeQueueManager();
     
     // Initialize file replacement functionality

@@ -1,0 +1,138 @@
+/* MediaVortex Menu Standards */
+/* Consistent menu design and interactions across all pages */
+
+/* Navigation Menu Standards */
+.navbar-nav .nav-link {
+    transition: all 0.2s ease;
+    border-radius: 4px;
+    margin: 0 2px;
+}
+
+.navbar-nav .nav-link:hover {
+    background-color: rgba(0, 123, 255, 0.1);
+    transform: translateY(-1px);
+}
+
+.navbar-nav .nav-link.active {
+    background-color: #007bff !important;
+    color: white !important;
+    box-shadow: 0 2px 4px rgba(0, 123, 255, 0.3);
+}
+
+/* Page Action Button Standards */
+.page-action-buttons {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    align-items: center;
+}
+
+.page-action-buttons .btn {
+    min-width: 120px;
+    transition: all 0.2s ease;
+    position: relative;
+    overflow: hidden;
+}
+
+.page-action-buttons .btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+}
+
+.page-action-buttons .btn:active {
+    transform: translateY(0);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+/* Button State Indicators */
+.btn-loading {
+    position: relative;
+    pointer-events: none;
+}
+
+.btn-loading::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 16px;
+    height: 16px;
+    margin: -8px 0 0 -8px;
+    border: 2px solid transparent;
+    border-top: 2px solid currentColor;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* Consistent Button Colors */
+.btn-primary { background-color: #007bff; border-color: #007bff; }
+.btn-success { background-color: #28a745; border-color: #28a745; }
+.btn-warning { background-color: #ffc107; border-color: #ffc107; color: #212529; }
+.btn-danger { background-color: #dc3545; border-color: #dc3545; }
+.btn-info { background-color: #17a2b8; border-color: #17a2b8; }
+.btn-secondary { background-color: #6c757d; border-color: #6c757d; }
+
+/* Button Hover States */
+.btn-primary:hover { background-color: #0056b3; border-color: #0056b3; }
+.btn-success:hover { background-color: #218838; border-color: #1e7e34; }
+.btn-warning:hover { background-color: #e0a800; border-color: #d39e00; }
+.btn-danger:hover { background-color: #c82333; border-color: #bd2130; }
+.btn-info:hover { background-color: #138496; border-color: #117a8b; }
+.btn-secondary:hover { background-color: #5a6268; border-color: #545b62; }
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    .page-action-buttons {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    
+    .page-action-buttons .btn {
+        min-width: auto;
+        width: 100%;
+    }
+}
+
+/* Focus States for Accessibility */
+.btn:focus {
+    outline: 2px solid #007bff;
+    outline-offset: 2px;
+}
+
+/* Disabled State */
+.btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none !important;
+}
+
+/* Icon Spacing */
+.btn i {
+    margin-right: 0.5rem;
+}
+
+/* Tooltip Integration */
+.btn[title] {
+    position: relative;
+}
+
+/* Loading State */
+.btn-loading .btn-text {
+    opacity: 0.7;
+}
+
+/* Success/Error States */
+.btn-success-state {
+    background-color: #28a745 !important;
+    border-color: #28a745 !important;
+}
+
+.btn-error-state {
+    background-color: #dc3545 !important;
+    border-color: #dc3545 !important;
+}

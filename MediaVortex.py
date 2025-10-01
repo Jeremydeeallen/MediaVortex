@@ -4,6 +4,9 @@ import os
 import shutil
 import setproctitle
 import psutil
+import time
+import threading
+from datetime import datetime
 
 # Set process title for better visibility in Task Manager
 setproctitle.setproctitle("MediaVortex")
@@ -85,6 +88,11 @@ class MediaVortexApp:
         self.App.config['SECRET_KEY'] = 'mediavortex-secret-key-2024'
         CORS(self.App)
         
+        # Initialize service tracking
+        self.StartTime = datetime.now()
+        self.ServiceStatusThread = None
+        self.ShutdownEvent = False
+        
         # Initialize controllers
         self.ProfileController = ProfileController()
         self.FileScanningController = FileScanningController()
@@ -93,6 +101,9 @@ class MediaVortexApp:
         
         self._register_routes()
         self._register_blueprints()
+        
+        # Start service status tracking
+        self.PrivateStartServiceStatusTracking()
     
     def PrivateIsServiceAlreadyRunning(self) -> bool:
         """Check if another MediaVortex instance is already running."""
@@ -138,7 +149,7 @@ class MediaVortexApp:
         @self.App.route('/TranscodeQueue')
         def transcode_queue():
             """Transcoding queue management page."""
-            return render_template('TranscodeQueue.html')
+            return render_template('Queue.html')
         
         @self.App.route('/Activity')
         def activity():
@@ -149,6 +160,7 @@ class MediaVortexApp:
         def status():
             """Service status page for monitoring microservices."""
             return render_template('Status.html')
+        
         
         @self.App.route('/api/health')
         def health_check():
@@ -170,6 +182,110 @@ class MediaVortexApp:
         self.App.register_blueprint(FailureTrackingBlueprint, url_prefix='/api/FailureTracking')
         self.App.register_blueprint(QueueResetBlueprint)
     
+    def PrivateStartServiceStatusTracking(self):
+        """Start the service status tracking thread."""
+        try:
+            self.ServiceStatusThread = threading.Thread(target=self.PrivateServiceStatusLoop, daemon=True)
+            self.ServiceStatusThread.start()
+            print("✅ MediaVortex service status tracking started")
+        except Exception as e:
+            print(f"❌ Failed to start service status tracking: {e}")
+    
+    def PrivateServiceStatusLoop(self):
+        """Background thread to update service status."""
+        while not self.ShutdownEvent:
+            try:
+                self.PrivateUpdateServiceStatus()
+                time.sleep(30)  # Update every 30 seconds
+            except Exception as e:
+                print(f"Error updating service status: {e}")
+                time.sleep(60)  # Wait longer on error
+    
+    def PrivateUpdateServiceStatus(self):
+        """Update MediaVortex service status in database."""
+        try:
+            from Repositories.DatabaseManager import DatabaseManager
+            from Services.LoggingService import LoggingService
+            
+            # Calculate uptime
+            uptime_seconds = int((datetime.now() - self.StartTime).total_seconds())
+            
+            # Get system metrics
+            memory_usage = self.PrivateGetMemoryUsage()
+            cpu_usage = self.PrivateGetCPUUsage()
+            disk_space = self.PrivateGetDiskSpace()
+            
+            # Check database connection
+            database_connection = self.PrivateCheckDatabaseConnection()
+            
+            # Prepare service status data
+            service_status = {
+                'ServiceName': 'MediaVortex',
+                'Status': 'Running',
+                'HealthStatus': 'Healthy',
+                'StartTime': self.StartTime.isoformat(),
+                'LastHealthCheck': datetime.now().isoformat(),
+                'UptimeSeconds': uptime_seconds,
+                'MemoryUsage': memory_usage,
+                'CPUUsage': cpu_usage,
+                'DatabaseConnection': database_connection,
+                'DiskSpace': disk_space,
+                'ErrorCount': 0,
+                'MaxErrors': 10,
+                'ActiveJobsCount': 0,  # MediaVortex doesn't process jobs directly
+                'IsProcessing': False,
+                'LastErrorMessage': None,
+                'ProcessId': os.getpid(),
+                'Version': '1.0.0',
+                'ServiceType': 'WebApplication'
+            }
+            
+            # Save to database
+            db_manager = DatabaseManager()
+            success = db_manager.SaveServiceStatus(service_status)
+            
+            if success:
+                LoggingService.LogInfo("MediaVortex service status updated", "MediaVortexApp", "PrivateUpdateServiceStatus")
+            else:
+                LoggingService.LogWarning("Failed to update MediaVortex service status", "MediaVortexApp", "PrivateUpdateServiceStatus")
+                
+        except Exception as e:
+            print(f"Exception updating MediaVortex service status: {e}")
+    
+    def PrivateGetMemoryUsage(self) -> float:
+        """Get current memory usage in MB."""
+        try:
+            process = psutil.Process(os.getpid())
+            memory_info = process.memory_info()
+            return memory_info.rss / 1024 / 1024  # Convert to MB
+        except Exception:
+            return 0.0
+    
+    def PrivateGetCPUUsage(self) -> float:
+        """Get current CPU usage percentage."""
+        try:
+            process = psutil.Process(os.getpid())
+            return process.cpu_percent()
+        except Exception:
+            return 0.0
+    
+    def PrivateGetDiskSpace(self) -> float:
+        """Get available disk space in GB."""
+        try:
+            disk_usage = psutil.disk_usage('.')
+            return disk_usage.free / 1024 / 1024 / 1024  # Convert to GB
+        except Exception:
+            return 0.0
+    
+    def PrivateCheckDatabaseConnection(self) -> bool:
+        """Check if database connection is working."""
+        try:
+            from Repositories.DatabaseManager import DatabaseManager
+            db_manager = DatabaseManager()
+            return db_manager.DatabaseService.CheckConnection()
+        except Exception:
+            return False
+    
     def Run(self, host='0.0.0.0', port=5000, debug=False):
         """Run the Flask application."""
         print(f"Starting MediaVortex on http://{host}:{port}")
@@ -178,9 +294,16 @@ class MediaVortexApp:
         print(f"Transcoding Queue page: http://{host}:{port}/TranscodeQueue")
         print(f"Activity page: http://{host}:{port}/Activity")
         print(f"Service Status page: http://{host}:{port}/Status")
-        self.App.run(host=host, port=port, debug=debug)
+        
+        try:
+            self.App.run(host=host, port=port, debug=debug)
+        finally:
+            # Cleanup on shutdown
+            self.ShutdownEvent = True
+            if self.ServiceStatusThread and self.ServiceStatusThread.is_alive():
+                self.ServiceStatusThread.join(timeout=5)
 
 
 if __name__ == '__main__':
     app = MediaVortexApp()
-    app.Run()
+    app.Run(debug=True)

@@ -56,6 +56,11 @@ class VideoTranscodingService:
                 self._TotalFrameCount = TotalFramesFromMediaFile
                 LoggingService.LogInfo(f"Using TotalFrames from MediaFile: {TotalFramesFromMediaFile} frames", 
                                      "VideoTranscodingService", "TranscodeVideo")
+            else:
+                LoggingService.LogWarning(f"TotalFramesFromMediaFile is 0 or not provided for JobId {JobId}. " +
+                                        "Progress percentage calculation will be limited. Will attempt to extract from FFmpeg output.", 
+                                        "VideoTranscodingService", "TranscodeVideo")
+                self._TotalFrameCount = 0
             
             # Start progress monitoring thread
             if ProgressCallback:
@@ -272,13 +277,29 @@ class VideoTranscodingService:
             if 'CurrentFrame' not in ProgressData:
                 return None  # No valid frame data, skip this update
             
-            # Don't calculate progress percentage here - let the database/frontend handle it
-            # Just ensure we have the basic frame data
+            # Calculate progress percentage if we have TotalFrames available
             if 'CurrentFrame' in ProgressData:
-                # Set default values for fields that will be calculated elsewhere
-                ProgressData['TotalFrames'] = 0  # Will be populated from MediaFiles table
-                ProgressData['ProgressPercent'] = 0  # Will be calculated in database/frontend
-                ProgressData['ETA'] = "Calculating..."  # Will be calculated in database/frontend
+                CurrentFrame = ProgressData['CurrentFrame']
+                TotalFrames = getattr(self, '_TotalFrameCount', 0)
+                
+                if TotalFrames > 0 and CurrentFrame > 0:
+                    # Calculate progress percentage (cap at 95% to avoid showing 100% before completion)
+                    ProgressPercent = min((CurrentFrame / TotalFrames) * 100, 95.0)
+                    ProgressData['ProgressPercent'] = ProgressPercent
+                    ProgressData['TotalFrames'] = TotalFrames
+                    
+                    # Calculate ETA if we have FPS data
+                    if 'CurrentFPS' in ProgressData and ProgressData['CurrentFPS'] > 0:
+                        RemainingFrames = TotalFrames - CurrentFrame
+                        EtaSeconds = RemainingFrames / ProgressData['CurrentFPS']
+                        ProgressData['ETA'] = self.FormatTime(round(EtaSeconds))
+                    else:
+                        ProgressData['ETA'] = "Calculating..."
+                else:
+                    # No TotalFrames available, set defaults
+                    ProgressData['TotalFrames'] = TotalFrames
+                    ProgressData['ProgressPercent'] = 0
+                    ProgressData['ETA'] = "Calculating..."
             
             # Set current phase
             ProgressData['CurrentPhase'] = 'Transcoding'
@@ -293,3 +314,13 @@ class VideoTranscodingService:
         except Exception as e:
             # Don't log parsing errors as they're frequent and not critical
             return None
+    
+    def FormatTime(self, Seconds: int) -> str:
+        """Format seconds into HH:MM:SS format."""
+        try:
+            Hours = Seconds // 3600
+            Minutes = (Seconds % 3600) // 60
+            Seconds = Seconds % 60
+            return f"{Hours:02d}:{Minutes:02d}:{Seconds:02d}"
+        except Exception:
+            return "00:00:00"

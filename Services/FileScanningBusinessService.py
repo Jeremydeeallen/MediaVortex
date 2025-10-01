@@ -1,7 +1,5 @@
 import os
-import subprocess
 import uuid
-import psutil
 import re
 from typing import List, Optional, Dict, Any
 from datetime import datetime
@@ -22,8 +20,6 @@ class FileScanningBusinessService:
         self.DatabaseManager = DatabaseManagerInstance or DatabaseManager()
         self.FileManager = FileManagerInstance or FileManagerService()
         self.CurrentJobId = None
-        self.ScanProcess = None
-        self.ScriptPath = Path(__file__).parent.parent / "Scripts" / "ScanDirectoryProcess.py"
         self.ScanProgress = 0.0
         self.ScanResults = FileScanResultModel()
         self.ScanErrors = []
@@ -47,7 +43,7 @@ class FileScanningBusinessService:
             LoggingService.LogException("Error checking for existing running scans", e, 'FileScanningBusinessService', 'CheckForExistingRunningScan')
     
     def StartScanning(self, RootFolderPath: str, Recursive: bool = True) -> Dict[str, Any]:
-        """Start scanning a root folder for media files using subprocess."""
+        """Start scanning a root folder for media files directly in the main process."""
         try:
             LoggingService.LogFunctionEntry("StartScanning", 'FileScanningBusinessService', RootFolderPath, Recursive=Recursive)
             
@@ -82,48 +78,23 @@ class FileScanningBusinessService:
             # Create scan job record
             self.CreateScanJob(JobId, RootFolderPath, Recursive)
             
-            # Start subprocess with environment variables to preserve Unicode characters
-            ProcessArgs = [
-                'py', str(self.ScriptPath), JobId, str(Recursive)
-            ]
+            # Set scanning state
+            self.IsScanning = True
+            self.ScanProgress = 0.0
+            self.CurrentScanDirectory = RootFolderPath
             
-            # Set environment variables to preserve Unicode characters in paths
-            env = os.environ.copy()
-            env['MEDIAVORTEX_ROOT_FOLDER_PATH'] = RootFolderPath
-            env['PYTHONIOENCODING'] = 'utf-8'
+            LoggingService.LogInfo(f"Starting direct scan for {RootFolderPath}", 'FileScanningBusinessService', 'StartScanning')
             
-            LoggingService.LogInfo(f"Starting scan for {RootFolderPath}", 'FileScanningBusinessService', 'StartScanning')
+            # Perform the scan directly
+            result = self.PerformScan(RootFolderPath, Recursive)
             
-            try:
-                self.ScanProcess = subprocess.Popen(
-                    ProcessArgs,
-                    stdout=None,  # Don't capture stdout so we can see errors
-                    stderr=None,  # Don't capture stderr so we can see errors
-                    cwd=Path(__file__).parent.parent,
-                    env=env
-                )
-                
-                # Set scanning state
-                self.IsScanning = True
-                self.ScanProgress = 0.0
-                self.CurrentScanDirectory = RootFolderPath
-                
-                LoggingService.LogInfo(f"Scan process started (PID: {self.ScanProcess.pid})", 'FileScanningBusinessService', 'StartScanning')
-                
-                return {
-                    'Success': True,
-                    'Message': 'Scan started successfully',
-                    'JobId': JobId,
-                    'ProcessId': self.ScanProcess.pid
-                }
-                
-            except Exception as subprocessError:
-                LoggingService.LogException(f"Error starting subprocess for job {JobId}", subprocessError, 'FileScanningBusinessService', 'StartScanning')
-                return {
-                    'Success': False,
-                    'Message': f'Error starting subprocess: {str(subprocessError)}',
-                    'Error': 'SubprocessStartError'
-                }
+            # Update job status based on result
+            if result.get('Success', False):
+                self.UpdateJobStatus(JobId, 'Completed', Progress=100.0, EndTime=datetime.now())
+            else:
+                self.UpdateJobStatus(JobId, 'Failed', ErrorMessage=result.get('Message', 'Unknown error'), EndTime=datetime.now())
+            
+            return result
             
         except Exception as e:
             LoggingService.LogException("Error starting scan", e, 'FileScanningBusinessService', 'StartScanning')
@@ -138,7 +109,7 @@ class FileScanningBusinessService:
         try:
             Query = """
             INSERT INTO ScanJobs (JobId, RootFolderPath, Recursive, Status, StartTime, LastUpdated, ScanType)
-            VALUES (?, ?, ?, 'Pending', ?, ?, 'File')
+            VALUES (?, ?, ?, 'Running', ?, ?, 'File')
             """
             Now = datetime.now()
             self.DatabaseManager.DatabaseService.ExecuteNonQuery(Query, (JobId, RootFolderPath, Recursive, Now, Now))
@@ -146,6 +117,69 @@ class FileScanningBusinessService:
         except Exception as e:
             LoggingService.LogException(f"Error creating scan job {JobId}", e, 'FileScanningBusinessService', 'CreateScanJob')
             raise
+    
+    def UpdateJobStatus(self, JobId: str, Status: str, Progress: float = None, CurrentDirectory: str = None, 
+                       ProcessId: str = None, StartTime: datetime = None, EndTime: datetime = None, 
+                       ErrorMessage: str = None, ScanResults: FileScanResultModel = None):
+        """Update the status of a scan job."""
+        try:
+            UpdateFields = []
+            UpdateValues = []
+            
+            if Status:
+                UpdateFields.append("Status = ?")
+                UpdateValues.append(Status)
+            
+            if Progress is not None:
+                UpdateFields.append("Progress = ?")
+                UpdateValues.append(Progress)
+            
+            if CurrentDirectory is not None:
+                UpdateFields.append("CurrentDirectory = ?")
+                UpdateValues.append(CurrentDirectory)
+            
+            if ProcessId is not None:
+                UpdateFields.append("ProcessId = ?")
+                UpdateValues.append(ProcessId)
+            
+            if StartTime is not None:
+                UpdateFields.append("StartTime = ?")
+                UpdateValues.append(StartTime)
+            
+            if EndTime is not None:
+                UpdateFields.append("EndTime = ?")
+                UpdateValues.append(EndTime)
+            
+            if ErrorMessage is not None:
+                UpdateFields.append("ErrorMessage = ?")
+                UpdateValues.append(ErrorMessage)
+            
+            if ScanResults is not None:
+                UpdateFields.extend([
+                    "TotalFiles = ?",
+                    "ProcessedFiles = ?", 
+                    "SkippedFiles = ?",
+                    "EncodingErrors = ?"
+                ])
+                UpdateValues.extend([
+                    ScanResults.TotalFilesFound,
+                    ScanResults.TotalFilesProcessed,
+                    ScanResults.TotalFilesSkipped,
+                    ScanResults.TotalFilesWithErrors
+                ])
+            
+            # Always update LastUpdated
+            UpdateFields.append("LastUpdated = ?")
+            UpdateValues.append(datetime.now())
+            
+            # Add JobId for WHERE clause
+            UpdateValues.append(JobId)
+            
+            Query = f"UPDATE ScanJobs SET {', '.join(UpdateFields)} WHERE JobId = ?"
+            self.DatabaseManager.DatabaseService.ExecuteNonQuery(Query, UpdateValues)
+            
+        except Exception as e:
+            LoggingService.LogException(f"Error updating job status for {JobId}", e, 'UpdateJobStatus', 'FileScanningBusinessService')
     
     
     def IsScanRunning(self) -> bool:
@@ -325,29 +359,10 @@ class FileScanningBusinessService:
                 }
             
             # Update job status to stopped
-            Query = "UPDATE ScanJobs SET Status = 'Stopped', EndTime = ?, LastUpdated = ? WHERE JobId = ?"
-            Now = datetime.now()
-            self.DatabaseManager.DatabaseService.ExecuteNonQuery(Query, (Now, Now, self.CurrentJobId))
-            
-            # Terminate the subprocess if it's still running
-            if self.ScanProcess and self.ScanProcess.poll() is None:
-                try:
-                    self.ScanProcess.terminate()
-                    # Wait a bit for graceful termination
-                    try:
-                        self.ScanProcess.wait(timeout=5)
-                    except subprocess.TimeoutExpired:
-                        # Force kill if it doesn't terminate gracefully
-                        self.ScanProcess.kill()
-                        self.ScanProcess.wait()
-                    
-                    LoggingService.LogInfo(f"Terminated scan process {self.ScanProcess.pid}")
-                except Exception as e:
-                    LoggingService.LogException("Error terminating scan process", e)
+            self.UpdateJobStatus(self.CurrentJobId, 'Stopped', EndTime=datetime.now())
             
             # Clear current job and update scanning state
             self.CurrentJobId = None
-            self.ScanProcess = None
             self.IsScanning = False
             self.ScanProgress = 0.0
             self.CurrentScanDirectory = ""
@@ -829,7 +844,6 @@ class FileScanningBusinessService:
         """Reset the scan state to allow new scans."""
         # Clear current job reference
         self.CurrentJobId = None
-        self.ScanProcess = None
         # Clean up old completed jobs
         self.CleanupCompletedJobs()
     
@@ -1033,10 +1047,8 @@ class FileScanningBusinessService:
                 }
             
             # Get files that need metadata extraction
-            if RootFolderId:
-                FilesNeedingMetadata = self.DatabaseManager.GetMediaFilesByRootFolder(RootFolderId)
-            else:
-                FilesNeedingMetadata = self.DatabaseManager.GetAllMediaFiles()
+            # Always get all files and filter by metadata needs, not by root folder
+            FilesNeedingMetadata = self.DatabaseManager.GetAllMediaFiles()
             
             # Filter files that need metadata
             FilesToProcess = []
@@ -1158,4 +1170,5 @@ class FileScanningBusinessService:
                 'Success': False,
                 'Error': f'Error deleting scan directory: {str(e)}'
             }
+    
     

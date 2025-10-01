@@ -304,7 +304,7 @@ class ServiceStatusManager {
             <div class="card h-100">
                 <div class="card-header d-flex justify-content-between align-items-center">
                     <h6 class="card-title mb-0">
-                        <i class="fas fa-server me-2"></i>${service.ServiceName}
+                        <i class="${this.getServiceIcon(service.ServiceName)} me-2"></i>${service.ServiceName}
                     </h6>
                     <div>
                         ${statusBadge}
@@ -568,10 +568,20 @@ class ServiceStatusManager {
     getServiceBadge(serviceType) {
         const badgeMap = {
             'Transcode': 'primary',
-            'Quality': 'info'
+            'Quality': 'info',
+            'WebApplication': 'success'
         };
         const badgeClass = badgeMap[serviceType] || 'secondary';
         return `<span class="badge bg-${badgeClass}">${serviceType}</span>`;
+    }
+
+    getServiceIcon(serviceName) {
+        const iconMap = {
+            'MediaVortex': 'fas fa-globe',
+            'TranscodeService': 'fas fa-video',
+            'QualityCompareService': 'fas fa-chart-line'
+        };
+        return iconMap[serviceName] || 'fas fa-server';
     }
 
     getFailureTypeBadge(failureType) {
@@ -650,7 +660,7 @@ class ServiceStatusManager {
             <div class="card h-100">
                 <div class="card-header d-flex justify-content-between align-items-center">
                     <h6 class="card-title mb-0">
-                        <i class="fas fa-server me-2"></i>${service.ServiceName}
+                        <i class="${this.getServiceIcon(service.ServiceName)} me-2"></i>${service.ServiceName}
                     </h6>
                     <div>
                         ${statusBadge}

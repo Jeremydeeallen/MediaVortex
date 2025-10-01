@@ -427,11 +427,51 @@ class ProcessTranscodeQueueService:
             LoggingService.LogException("Exception creating transcode attempt", e, "ProcessTranscodeQueueService", "CreateTranscodeAttempt")
             return None
     
+    def GetTotalFramesWithFallback(self, Job: TranscodeQueueModel, MediaFile: MediaFileModel = None) -> int:
+        """Get TotalFrames using ffprobe fallback since MediaFile.TotalFrames is empty."""
+        try:
+            # We're here because MediaFile.TotalFrames is empty/0, so go straight to ffprobe
+            LoggingService.LogInfo(f"MediaFile.TotalFrames is empty for {Job.FilePath}, attempting ffprobe fallback", 
+                                 "ProcessTranscodeQueueService", "GetTotalFramesWithFallback")
+            
+            # Import FFmpegAnalysisService for fallback
+            from Services.FFmpegAnalysisService import FFmpegAnalysisService
+            
+            AnalysisService = FFmpegAnalysisService()
+            AnalysisResult = AnalysisService.AnalyzeMediaFile(Job.FilePath)
+            
+            if AnalysisResult.Success and AnalysisResult.TotalFrames and AnalysisResult.TotalFrames > 0:
+                LoggingService.LogInfo(f"Successfully extracted TotalFrames via ffprobe: {AnalysisResult.TotalFrames} frames", 
+                                     "ProcessTranscodeQueueService", "GetTotalFramesWithFallback")
+                
+                # Update MediaFile with the extracted TotalFrames for future use
+                if MediaFile:
+                    MediaFile.TotalFrames = AnalysisResult.TotalFrames
+                    self.DatabaseManager.SaveMediaFile(MediaFile)
+                    LoggingService.LogInfo(f"Updated MediaFile.TotalFrames to {AnalysisResult.TotalFrames} for future transcodes", 
+                                         "ProcessTranscodeQueueService", "GetTotalFramesWithFallback")
+                
+                return AnalysisResult.TotalFrames
+            else:
+                LoggingService.LogWarning(f"Both MediaFile.TotalFrames and ffprobe failed to extract TotalFrames for {Job.FilePath}. " +
+                                        f"MediaFile.TotalFrames: {MediaFile.TotalFrames if MediaFile else 'N/A'}, " +
+                                        f"FFprobe result: {AnalysisResult.TotalFrames if AnalysisResult else 'Failed'}", 
+                                        "ProcessTranscodeQueueService", "GetTotalFramesWithFallback")
+                return 0
+                
+        except Exception as e:
+            LoggingService.LogException("Exception getting TotalFrames with fallback", e, "ProcessTranscodeQueueService", "GetTotalFramesWithFallback")
+            return 0
+
     def ExecuteTranscoding(self, Job: TranscodeQueueModel, TranscodeCommand: str, TranscodeAttemptId: int, MediaFile: MediaFileModel = None) -> Dict[str, Any]:
         """Execute the transcoding command with progress tracking."""
         try:
-            # Get TotalFrames from MediaFile if available
+            # Get TotalFrames from MediaFile if available, otherwise use fallback
             TotalFramesFromMediaFile = MediaFile.TotalFrames if MediaFile and MediaFile.TotalFrames else 0
+            
+            # If MediaFile.TotalFrames is empty, try ffprobe fallback
+            if TotalFramesFromMediaFile == 0:
+                TotalFramesFromMediaFile = self.GetTotalFramesWithFallback(Job, MediaFile)
             
             # Create initial progress record with TotalFrames from MediaFile
             self.DatabaseManager.SaveTranscodeProgress(

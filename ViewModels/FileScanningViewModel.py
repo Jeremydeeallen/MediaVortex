@@ -484,6 +484,7 @@ class FileScanningViewModel:
             })
         return DisplayDirectories
     
+    
     def ExtractMetadataForExistingFiles(self, RootFolderId: Optional[int] = None) -> Dict[str, Any]:
         """Extract metadata for existing files that need it."""
         try:

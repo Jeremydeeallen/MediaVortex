@@ -35,7 +35,7 @@ class CommandBuilder:
             InputPath = f"c:\\MediaVortex\\Source\\{MediaFile.FileName}"
             
             # Generate output filename with target resolution and container type
-            OutputFileName = self._GenerateOutputFileName(MediaFile.FileName, SourceResolution, TargetResolution, ContainerType)
+            OutputFileName = self.GenerateOutputFileName(MediaFile.FileName, SourceResolution, TargetResolution, ContainerType)
             OutputPath = f"c:\\MediaVortex\\{OutputFileName}"
             
             # Start building command - FFmpeg command structure: ffmpeg -i input [options] output -y
@@ -47,7 +47,7 @@ class CommandBuilder:
             CommandParts.extend(['-c:v', VideoCodec])
             
             # Add parameters using CodecParameters database values
-            self._AddCodecParameters(CommandParts, CodecParameters, ProfileSettings)
+            self.AddCodecParameters(CommandParts, CodecParameters, ProfileSettings)
             
             # Add audio codec and bitrate - only if not null/blank (before video filters)
             AudioBitrate = ProfileSettings.get('AudioBitrateKbps')
@@ -56,16 +56,21 @@ class CommandBuilder:
             else:
                 CommandParts.extend(['-c:a', 'copy'])
             
+            # Add audio filters (normalization)
+            AudioFilter = self.BuildAudioFilters(ProfileSettings)
+            if AudioFilter:
+                CommandParts.extend(['-af', f'"{AudioFilter}"'])
+            
             # Add video filters (deinterlacing and scaling)
-            VideoFilter = self._BuildVideoFilters(ProfileSettings, ScaleFilter)
+            VideoFilter = self.BuildVideoFilters(ProfileSettings, ScaleFilter)
             if VideoFilter:
                 CommandParts.extend(['-vf', f'"{VideoFilter}"'])
             
             # Add film grain parameter after video filters
-            self._AddFilmGrainParameter(CommandParts, CodecParameters, ProfileSettings)
+            self.AddFilmGrainParameter(CommandParts, CodecParameters, ProfileSettings)
             
             # Add pixel format parameter for 10-bit encoding
-            self._AddPixelFormatParameter(CommandParts, CodecParameters, ProfileSettings)
+            self.AddPixelFormatParameter(CommandParts, CodecParameters, ProfileSettings)
             
             # Add container-specific flags
             if ContainerType.lower() == 'mp4':
@@ -86,7 +91,7 @@ class CommandBuilder:
             # Pure function should not log, just return None on error
             return None
     
-    def _ValidateCommandData(self, CommandData: Dict[str, Any]) -> bool:
+    def ValidateCommandData(self, CommandData: Dict[str, Any]) -> bool:
         """Validate that all required data is present for command building."""
         RequiredKeys = ['Job', 'MediaFile', 'ProfileSettings']
         
@@ -96,7 +101,7 @@ class CommandBuilder:
         
         return True
     
-    def _AddCodecParameters(self, CommandParts: list, CodecParameters: list, ProfileSettings: Dict[str, Any]) -> None:
+    def AddCodecParameters(self, CommandParts: list, CodecParameters: list, ProfileSettings: Dict[str, Any]) -> None:
         """Add codec parameters from database to command parts."""
         try:
             # Create a lookup dictionary for codec parameters
@@ -126,7 +131,7 @@ class CommandBuilder:
             # If anything goes wrong, continue without adding parameters
             pass
     
-    def _AddFilmGrainParameter(self, CommandParts: list, CodecParameters: list, ProfileSettings: Dict[str, Any]) -> None:
+    def AddFilmGrainParameter(self, CommandParts: list, CodecParameters: list, ProfileSettings: Dict[str, Any]) -> None:
         """Add film grain parameter after audio codec."""
         try:
             # Create a lookup dictionary for codec parameters
@@ -144,7 +149,7 @@ class CommandBuilder:
             # If anything goes wrong, continue without adding parameters
             pass
     
-    def _AddPixelFormatParameter(self, CommandParts: list, CodecParameters: list, ProfileSettings: Dict[str, Any]) -> None:
+    def AddPixelFormatParameter(self, CommandParts: list, CodecParameters: list, ProfileSettings: Dict[str, Any]) -> None:
         """Add pixel format parameter for 10-bit encoding."""
         try:
             # Create a lookup dictionary for codec parameters
@@ -163,7 +168,7 @@ class CommandBuilder:
             # If anything goes wrong, continue without adding parameters
             pass
 
-    def _GenerateOutputFileName(self, OriginalFileName: str, SourceResolution: str, TargetResolution: str, ContainerType: str = 'mp4') -> str:
+    def GenerateOutputFileName(self, OriginalFileName: str, SourceResolution: str, TargetResolution: str, ContainerType: str = 'mp4') -> str:
         """Generate output filename with target resolution and container type."""
         try:
             # Get the base filename without extension
@@ -174,14 +179,14 @@ class CommandBuilder:
                 return f"{BaseName}.{ContainerType}"
             
             # Extract resolution from filename (e.g., "1080p", "720p")
-            SourceResolutionStr = self._ExtractResolutionFromFilename(OriginalFileName)
+            SourceResolutionStr = self.ExtractResolutionFromFilename(OriginalFileName)
             if not SourceResolutionStr:
                 # If no resolution found in filename, add target resolution
-                TargetResolutionStr = self._FormatResolutionForFilename(TargetResolution)
+                TargetResolutionStr = self.FormatResolutionForFilename(TargetResolution)
                 return f"{BaseName}{TargetResolutionStr}.{ContainerType}"
             
             # Replace source resolution with target resolution
-            TargetResolutionStr = self._FormatResolutionForFilename(TargetResolution)
+            TargetResolutionStr = self.FormatResolutionForFilename(TargetResolution)
             NewBaseName = OriginalFileName.replace(SourceResolutionStr, TargetResolutionStr)
             NewBaseName = os.path.splitext(NewBaseName)[0]  # Remove old extension
             
@@ -193,7 +198,7 @@ class CommandBuilder:
             BaseName = os.path.splitext(OriginalFileName)[0]
             return f"{BaseName}.{ContainerType}"
     
-    def _ExtractResolutionFromFilename(self, Filename: str) -> Optional[str]:
+    def ExtractResolutionFromFilename(self, Filename: str) -> Optional[str]:
         """Extract resolution string from filename (e.g., '1080p', '720p')."""
         try:
             import re
@@ -218,7 +223,7 @@ class CommandBuilder:
         except Exception:
             return None
     
-    def _FormatResolutionForFilename(self, Resolution: str) -> str:
+    def FormatResolutionForFilename(self, Resolution: str) -> str:
         """Format resolution for use in filename."""
         try:
             # Convert resolution categories to standard format
@@ -241,7 +246,7 @@ class CommandBuilder:
         except Exception:
             return Resolution
     
-    def _BuildVideoCodecParameters(self, CodecParameters: list) -> list:
+    def BuildVideoCodecParameters(self, CodecParameters: list) -> list:
         """Build video codec parameter list from codec parameters data."""
         Parameters = []
         
@@ -255,7 +260,49 @@ class CommandBuilder:
         
         return Parameters
     
-    def _BuildVideoFilters(self, ProfileSettings: Dict[str, Any], ScaleFilter: Optional[str]) -> Optional[str]:
+    def BuildAudioFilters(self, ProfileSettings: Dict[str, Any]) -> Optional[str]:
+        """Build audio filter string from system settings."""
+        Filters = []
+        
+        # Get system settings for audio compression
+        try:
+            from Repositories.DatabaseManager import DatabaseManager
+            DatabaseManagerInstance = DatabaseManager()
+            
+            # Check if audio compression is enabled system-wide
+            AudioCompressionEnabled = DatabaseManagerInstance.GetSystemSetting('AudioCompressionEnabled')
+            if AudioCompressionEnabled and AudioCompressionEnabled.lower() in ['1', 'true', 'yes']:
+                # Get compression parameters from system settings with defaults
+                Threshold = int(DatabaseManagerInstance.GetSystemSetting('CompressionThreshold') or -15)
+                Ratio = int(DatabaseManagerInstance.GetSystemSetting('CompressionRatio') or 3)
+                Attack = int(DatabaseManagerInstance.GetSystemSetting('CompressionAttack') or 10)
+                Release = int(DatabaseManagerInstance.GetSystemSetting('CompressionRelease') or 100)
+                Makeup = int(DatabaseManagerInstance.GetSystemSetting('CompressionMakeup') or 3)
+                
+                # Build acompressor filter for dynamic range reduction
+                CompressorFilter = f"acompressor=threshold={Threshold}dB:ratio={Ratio}:attack={Attack}:release={Release}:makeup={Makeup}dB"
+                Filters.append(CompressorFilter)
+            
+            # Check if audio normalization is enabled system-wide
+            AudioNormalizationEnabled = DatabaseManagerInstance.GetSystemSetting('AudioNormalizationEnabled')
+            if AudioNormalizationEnabled and AudioNormalizationEnabled.lower() in ['1', 'true', 'yes']:
+                # Get normalization parameters from system settings with defaults
+                TargetLoudness = int(DatabaseManagerInstance.GetSystemSetting('TargetLoudness') or -23)
+                LoudnessRange = int(DatabaseManagerInstance.GetSystemSetting('LoudnessRange') or 7)
+                TruePeak = int(DatabaseManagerInstance.GetSystemSetting('TruePeak') or -2)
+                
+                # Build loudnorm filter
+                LoudnormFilter = f"loudnorm=I={TargetLoudness}:LRA={LoudnessRange}:TP={TruePeak}"
+                Filters.append(LoudnormFilter)
+                
+        except Exception:
+            # If system settings fail, continue without audio filters
+            pass
+        
+        # Return combined filters or None if no filters
+        return ','.join(Filters) if Filters else None
+
+    def BuildVideoFilters(self, ProfileSettings: Dict[str, Any], ScaleFilter: Optional[str]) -> Optional[str]:
         """Build video filter string from profile settings and scale filter."""
         Filters = []
         

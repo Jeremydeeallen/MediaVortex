@@ -9,6 +9,8 @@ import time
 import subprocess
 import signal
 import platform
+import threading
+import select
 from typing import Dict, Any, Optional
 from datetime import datetime
 
@@ -162,7 +164,14 @@ class SystemOrchestratorApp:
     
     def PrivateMainLoop(self):
         """Main monitoring loop."""
-        print("SystemOrchestratorService is now running. Press Ctrl+C to stop.")
+        print("SystemOrchestratorService is now running.")
+        print("Commands:")
+        print("  Press 1 to reset TranscodeService")
+        print("  Press 2 to reset QualityCompareService")
+        print("  Press 3 to reset MediaVortex")
+        print("  Press q to quit")
+        print("  Press Ctrl+C to stop")
+        print()
         
         try:
             while not self.ShutdownEvent:
@@ -175,8 +184,11 @@ class SystemOrchestratorApp:
                             print(f"⚠️  {service_name} has stopped (exit code: {returncode}), restarting...")
                             self.PrivateStartService(service_info)
                 
+                # Handle user input
+                self.PrivateHandleUserInput()
+                
                 # Wait a bit before checking again
-                time.sleep(10)
+                time.sleep(1)  # Reduced sleep time for more responsive input handling
                 
         except KeyboardInterrupt:
             print("\nReceived keyboard interrupt, shutting down...")
@@ -201,6 +213,69 @@ class SystemOrchestratorApp:
                     print(f"Error stopping {service_name}: {e}")
         
         print("All services stopped")
+    
+    def PrivateResetService(self, service_name: str):
+        """Reset a specific service by stopping and restarting it."""
+        if service_name not in self.ManagedServices:
+            print(f"❌ Unknown service: {service_name}")
+            return False
+        
+        service_info = self.ManagedServices[service_name]
+        print(f"🔄 Resetting {service_name}...")
+        
+        # Stop the service if it's running
+        if service_info.Process:
+            print(f"Stopping {service_name}...")
+            try:
+                service_info.Process.terminate()
+                service_info.Process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                print(f"Force killing {service_name}...")
+                service_info.Process.kill()
+            except Exception as e:
+                print(f"Error stopping {service_name}: {e}")
+        
+        # Wait a moment before restarting
+        time.sleep(2)
+        
+        # Restart the service
+        self.PrivateStartService(service_info)
+        return True
+    
+    def PrivateHandleUserInput(self):
+        """Handle user input for service management commands."""
+        try:
+            # Check if input is available (non-blocking)
+            if platform.system() == "Windows":
+                # Windows doesn't support select() for stdin, so we'll use a different approach
+                import msvcrt
+                if msvcrt.kbhit():
+                    key = msvcrt.getch().decode('utf-8').lower()
+                    if key == '1':
+                        self.PrivateResetService('TranscodeService')
+                    elif key == '2':
+                        self.PrivateResetService('QualityCompareService')
+                    elif key == '3':
+                        self.PrivateResetService('MediaVortex')
+                    elif key == 'q':
+                        print("\nShutdown requested by user")
+                        self.ShutdownEvent = True
+            else:
+                # Unix-like systems can use select()
+                if select.select([sys.stdin], [], [], 0) == ([sys.stdin], [], []):
+                    line = sys.stdin.readline().strip().lower()
+                    if line == '1':
+                        self.PrivateResetService('TranscodeService')
+                    elif line == '2':
+                        self.PrivateResetService('QualityCompareService')
+                    elif line == '3':
+                        self.PrivateResetService('MediaVortex')
+                    elif line == 'q':
+                        print("\nShutdown requested by user")
+                        self.ShutdownEvent = True
+        except Exception as e:
+            # Ignore input errors to prevent crashes
+            pass
     
     def Shutdown(self):
         """Gracefully shutdown the orchestrator."""
