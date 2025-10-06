@@ -247,7 +247,3 @@ class ServiceCommandService:
         # This would typically perform a health check
         return {"Message": "Health check command processed", "Status": "Healthy"}
     
-    def ProcessStartQualityTestingCommand(self, Parameters: Dict[str, Any]) -> Dict[str, Any]:
-        """Process start quality testing command."""
-        # This would typically start quality testing processes
-        return {"Message": "Quality testing command processed", "Status": "Started"}

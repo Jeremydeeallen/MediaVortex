@@ -3,7 +3,7 @@ from typing import Dict, Any
 from ViewModels.ActivityViewModel import ActivityViewModel
 from Services.LoggingService import LoggingService
 from ViewModels.TranscodingViewModel import TranscodingViewModel
-from Services.ServiceCommandService import ServiceCommandService
+from Services.ServiceStatusHelperService import ServiceStatusHelperService
 
 
 # Create Blueprint for transcoding job routes
@@ -11,12 +11,12 @@ TranscodeJobBlueprint = Blueprint('TranscodeJob', __name__, url_prefix='/api/Tra
 
 # Create shared service instances
 SharedTranscodingService = TranscodingViewModel()
-SharedCommandService = ServiceCommandService()
+SharedStatusHelper = ServiceStatusHelperService()
 
 
 @TranscodeJobBlueprint.route('/Start', methods=['POST'])
 def StartTranscoding():
-    """Start transcoding jobs via database command."""
+    """Start transcoding jobs via direct ServiceStatus update."""
     try:
         LoggingService.LogFunctionEntry("StartTranscoding", "TranscodeJobController")
         
@@ -30,31 +30,24 @@ def StartTranscoding():
             LoggingService.LogError(errorMsg, "TranscodeJobController", "StartTranscoding")
             return jsonify({"Success": False, "ErrorMessage": errorMsg}), 400
         
-        # Create database command instead of direct service call
-        Parameters = {"MaxConcurrentJobs": maxConcurrentJobs}
-        result = SharedCommandService.CreateCommand(
-            CommandType="StartTranscoding",
-            SourceService="MediaVortex",
-            TargetService="TranscodeService",
-            Parameters=Parameters,
-            Priority=5,
-            CreatedBy="TranscodeJobController"
-        )
+        # Update ServiceStatus directly
+        success = SharedStatusHelper.SetTranscodingStarted(maxConcurrentJobs)
         
-        if result.get("Success", False):
-            CommandId = result.get("CommandId")
-            LoggingService.LogInfo(f"Queued StartTranscoding command {CommandId} with {maxConcurrentJobs} concurrent jobs", 
+        if success:
+            LoggingService.LogInfo(f"Set transcoding status to started with {maxConcurrentJobs} concurrent jobs", 
                                  "TranscodeJobController", "StartTranscoding")
             return jsonify({
                 "Success": True,
-                "Message": f"Transcoding command queued (ID: {CommandId})",
-                "CommandId": CommandId,
-                "Status": "Queued"
+                "Message": "Transcoding started successfully",
+                "MaxConcurrentJobs": maxConcurrentJobs,
+                "Status": "Started"
             })
         else:
-            LoggingService.LogError(f"Failed to queue transcoding command: {result.get('ErrorMessage', 'Unknown error')}", 
-                                   "TranscodeJobController", "StartTranscoding")
-            return jsonify(result), 500
+            LoggingService.LogError("Failed to start transcoding", "TranscodeJobController", "StartTranscoding")
+            return jsonify({
+                "Success": False,
+                "ErrorMessage": "Failed to start transcoding"
+            }), 500
             
     except Exception as e:
         errorMsg = f"Exception starting transcoding: {str(e)}"
@@ -64,38 +57,110 @@ def StartTranscoding():
 
 @TranscodeJobBlueprint.route('/Stop', methods=['POST'])
 def StopTranscoding():
-    """Stop transcoding jobs via database command."""
+    """Graceful stop - allow current transcoding to complete before stopping."""
     try:
         LoggingService.LogFunctionEntry("StopTranscoding", "TranscodeJobController")
         
-        # Create database command instead of direct service call
-        result = SharedCommandService.CreateCommand(
-            CommandType="StopTranscoding",
-            SourceService="MediaVortex",
-            TargetService="TranscodeService",
-            Parameters={},
-            Priority=5,
-            CreatedBy="TranscodeJobController"
-        )
+        # Step 1: Immediately set status to Stopped to prevent restart
+        SharedStatusHelper.SetTranscodingStopped()
         
-        if result.get("Success", False):
-            CommandId = result.get("CommandId")
-            LoggingService.LogInfo(f"Queued StopTranscoding command {CommandId}", 
+        # Step 2: Update ServiceStatus to GracefulStop to signal TranscodeService
+        success = SharedStatusHelper.UpdateTranscodingStatus("GracefulStop", IsProcessing=False, ActiveJobsCount=0)
+        
+        if success:
+            LoggingService.LogInfo("Graceful stop requested - transcoding will complete current job before stopping", 
                                  "TranscodeJobController", "StopTranscoding")
             return jsonify({
                 "Success": True,
-                "Message": f"Stop transcoding command queued (ID: {CommandId})",
-                "CommandId": CommandId,
-                "Status": "Queued"
+                "Message": "Graceful stop requested - transcoding will complete current job before stopping",
+                "Status": "GracefulStop"
             })
         else:
-            LoggingService.LogError(f"Failed to queue stop command: {result.get('ErrorMessage', 'Unknown error')}", 
-                                   "TranscodeJobController", "StopTranscoding")
-            return jsonify(result), 500
+            LoggingService.LogError("Failed to request graceful stop", "TranscodeJobController", "StopTranscoding")
+            return jsonify({
+                "Success": False,
+                "ErrorMessage": "Failed to request graceful stop"
+            }), 500
             
     except Exception as e:
-        errorMsg = f"Exception stopping transcoding: {str(e)}"
+        errorMsg = f"Exception requesting graceful stop: {str(e)}"
         LoggingService.LogException(errorMsg, e, "TranscodeJobController", "StopTranscoding")
+        return jsonify({"Success": False, "ErrorMessage": errorMsg}), 500
+
+
+@TranscodeJobBlueprint.route('/TerminateNow', methods=['POST'])
+def TerminateTranscodingNow():
+    """Terminate transcoding immediately - kill processes and reset queue."""
+    try:
+        LoggingService.LogFunctionEntry("TerminateTranscodingNow", "TranscodeJobController")
+        
+        # Step 1: Immediately set status to Stopped to prevent restart
+        SharedStatusHelper.SetTranscodingStopped()
+        
+        # Step 2: Terminate any active transcoding processes immediately
+        try:
+            from Services.VideoTranscodingService import VideoTranscodingService
+            videoService = VideoTranscodingService()
+            activeJobs = videoService.GetActiveJobs()
+            
+            for jobId in activeJobs:
+                LoggingService.LogInfo(f"Terminating active transcoding process for job {jobId}", 
+                                     "TranscodeJobController", "TerminateTranscodingNow")
+                videoService.StopTranscoding(jobId)
+        except Exception as e:
+            LoggingService.LogException("Error terminating active transcoding processes", e, "TranscodeJobController", "TerminateTranscodingNow")
+        
+        # Step 3: Reset any running jobs to Pending status
+        try:
+            from Services.QueueManagementService import QueueManagementService
+            queueManager = QueueManagementService()
+            resetResult = queueManager.ResetRunningJobsToPending("TranscodeQueue", "Transcoding terminated by user - immediate stop request")
+            
+            if not resetResult.get("Success", False):
+                LoggingService.LogWarning(f"Failed to reset running jobs: {resetResult.get('ErrorMessage', 'Unknown error')}", 
+                                        "TranscodeJobController", "TerminateTranscodingNow")
+        except Exception as e:
+            LoggingService.LogException("Error resetting running jobs", e, "TranscodeJobController", "TerminateTranscodingNow")
+        
+        # Step 4: Update progress records for cancelled jobs
+        try:
+            from Repositories.DatabaseManager import DatabaseManager
+            dbManager = DatabaseManager()
+            
+            # Update any running transcode attempts to cancelled
+            updateQuery = """
+                UPDATE TranscodeAttempts 
+                SET Status = 'Cancelled', 
+                    EndTime = CURRENT_TIMESTAMP,
+                    ErrorMessage = 'Transcoding terminated by user - immediate stop request'
+                WHERE Status = 'Running'
+            """
+            dbManager.DatabaseService.ExecuteNonQuery(updateQuery)
+            
+            # Update any running progress records to cancelled
+            progressQuery = """
+                UPDATE TranscodeProgress 
+                SET Status = 'Cancelled',
+                    EndTime = CURRENT_TIMESTAMP,
+                    ErrorMessage = 'Transcoding terminated by user - immediate stop request'
+                WHERE Status = 'Running'
+            """
+            dbManager.DatabaseService.ExecuteNonQuery(progressQuery)
+            
+        except Exception as e:
+            LoggingService.LogException("Error updating progress records", e, "TranscodeJobController", "TerminateTranscodingNow")
+        
+        LoggingService.LogInfo("Transcoding terminated immediately with process kill and queue reset", 
+                             "TranscodeJobController", "TerminateTranscodingNow")
+        return jsonify({
+            "Success": True,
+            "Message": "Transcoding terminated immediately",
+            "Status": "Stopped"
+        })
+            
+    except Exception as e:
+        errorMsg = f"Exception terminating transcoding: {str(e)}"
+        LoggingService.LogException(errorMsg, e, "TranscodeJobController", "TerminateTranscodingNow")
         return jsonify({"Success": False, "ErrorMessage": errorMsg}), 500
 
 

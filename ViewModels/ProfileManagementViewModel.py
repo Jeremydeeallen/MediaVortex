@@ -67,7 +67,7 @@ class ProfileManagementViewModel:
     
     def CreateProfileWithThresholds(self, profile_name: str, description: str, thresholds: List[dict],
                                    codec: str = "libsvtav1", preset: int = 6, film_grain: int = 10,
-                                   ten_bit_encoding: bool = False, yadif_mode: int = 1, yadif_parity: int = 1, yadif_deint: int = 1) -> bool:
+                                   yadif_mode: int = 1, yadif_parity: int = 1, yadif_deint: int = 1) -> bool:
         """Create a new profile with multiple thresholds."""
         try:
             LoggingService.LogFunctionEntry("CreateProfileWithThresholds", "ProfileManagementViewModel", profile_name, description, len(thresholds))
@@ -85,7 +85,7 @@ class ProfileManagementViewModel:
             
             # Create the profile first
             LoggingService.LogInfo("Creating profile...", "ProfileManagementViewModel", "CreateProfileWithThresholds")
-            new_profile = self.ProfileService.CreateProfile(profile_name, description, codec, preset, film_grain, ten_bit_encoding, yadif_mode, yadif_parity, yadif_deint)
+            new_profile = self.ProfileService.CreateProfile(profile_name, description, codec, preset, film_grain, yadif_mode, yadif_parity, yadif_deint)
             LoggingService.LogInfo(f"Profile created with ID: {new_profile.Id}", "ProfileManagementViewModel", "CreateProfileWithThresholds")
             
             # Add all thresholds
@@ -153,7 +153,7 @@ class ProfileManagementViewModel:
     
     def UpdateProfileWithThresholds(self, profile_id: int, profile_name: str, description: str, thresholds: List[dict],
                                    codec: str = "libsvtav1", preset: int = 6, film_grain: int = 10,
-                                   ten_bit_encoding: bool = False, yadif_mode: int = 1, yadif_parity: int = 1, yadif_deint: int = 1) -> bool:
+                                   yadif_mode: int = 1, yadif_parity: int = 1, yadif_deint: int = 1) -> bool:
         """Update an existing profile with multiple thresholds."""
         try:
             LoggingService.LogFunctionEntry("UpdateProfileWithThresholds", "ProfileManagementViewModel", profile_id, profile_name, description, len(thresholds))
@@ -189,7 +189,6 @@ class ProfileManagementViewModel:
                 Codec=codec,
                 Preset=preset,
                 FilmGrain=film_grain,
-                TenBitEncoding=ten_bit_encoding,
                 YadifMode=yadif_mode,
                 YadifParity=yadif_parity,
                 YadifDeint=yadif_deint

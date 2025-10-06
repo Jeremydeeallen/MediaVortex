@@ -21,9 +21,14 @@
                     <button type="button" class="btn btn-success" id="StartTranscodingBtn">
                         <i class="fas fa-play"></i> <span class="btn-text">Start Transcoding</span>
                     </button>
-                    <button type="button" class="btn btn-warning" id="StopTranscodingBtn" style="display: none;">
-                        <i class="fas fa-stop"></i> <span class="btn-text">Stop Transcoding</span>
-                    </button>
+                    <div class="btn-group" id="StopTranscodingGroup" style="display: none;">
+                        <button type="button" class="btn btn-warning" id="StopTranscodingBtn">
+                            <i class="fas fa-stop"></i> <span class="btn-text">Graceful Stop</span>
+                        </button>
+                        <button type="button" class="btn btn-danger" id="TerminateTranscodingBtn">
+                            <i class="fas fa-times"></i> <span class="btn-text">Terminate Now</span>
+                        </button>
+                    </div>
                     <button type="button" class="btn btn-danger" id="ResetAllQueuesBtn">
                         <i class="fas fa-redo"></i> <span class="btn-text">Reset Running Tasks</span>
                     </button>
@@ -474,6 +479,10 @@ class TranscodeQueueManager {
             this.stopTranscoding();
         });
 
+        document.getElementById('TerminateTranscodingBtn').addEventListener('click', () => {
+            this.terminateTranscoding();
+        });
+
         // Refresh
         document.getElementById('RefreshBtn').addEventListener('click', () => {
             this.loadQueueData();
@@ -661,26 +670,26 @@ class TranscodeQueueManager {
             if (data.Success) {
                 this.isTranscoding = data.IsTranscoding;
                 const startBtn = document.getElementById('StartTranscodingBtn');
-                const stopBtn = document.getElementById('StopTranscodingBtn');
+                const stopGroup = document.getElementById('StopTranscodingGroup');
 
                 if (this.isTranscoding) {
-                    // Show disabled/grayed out Start button and show Stop button
+                    // Show disabled/grayed out Start button and show Stop button group
                     startBtn.style.display = 'inline-block';
                     startBtn.disabled = true;
                     startBtn.classList.remove('btn-success');
                     startBtn.classList.add('btn-secondary');
                     startBtn.innerHTML = '<i class="fas fa-play"></i> Transcoding...';
                     
-                    stopBtn.style.display = 'inline-block';
+                    stopGroup.style.display = 'inline-block';
                 } else {
-                    // Show enabled Start button and hide Stop button
+                    // Show enabled Start button and hide Stop button group
                     startBtn.style.display = 'inline-block';
                     startBtn.disabled = false;
                     startBtn.classList.remove('btn-secondary');
                     startBtn.classList.add('btn-success');
                     startBtn.innerHTML = '<i class="fas fa-play"></i> Start Transcoding';
                     
-                    stopBtn.style.display = 'none';
+                    stopGroup.style.display = 'none';
                 }
             }
         } catch (error) {
@@ -831,13 +840,40 @@ class TranscodeQueueManager {
             const data = await response.json();
 
             if (data.Success) {
-                this.showAlert('Transcoding stopped successfully', 'success');
+                this.showAlert('Graceful stop requested - transcoding will complete current job before stopping', 'success');
                 this.updateTranscodingStatus();
             } else {
-                this.showAlert('Error stopping transcoding: ' + data.ErrorMessage, 'danger');
+                this.showAlert('Error requesting graceful stop: ' + data.ErrorMessage, 'danger');
             }
         } catch (error) {
-            this.showAlert('Error stopping transcoding: ' + error.message, 'danger');
+            this.showAlert('Error requesting graceful stop: ' + error.message, 'danger');
+        }
+    }
+
+    async terminateTranscoding() {
+        if (!confirm('Are you sure you want to terminate transcoding immediately? This will cancel any current transcoding job and reset the queue to Pending status.')) {
+            return;
+        }
+
+        try {
+            const response = await fetch('/api/Transcode/TerminateNow', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            const data = await response.json();
+
+            if (data.Success) {
+                this.showAlert('Transcoding terminated immediately', 'success');
+                this.updateTranscodingStatus();
+                this.loadQueueData(); // Refresh queue to show updated statuses
+            } else {
+                this.showAlert('Error terminating transcoding: ' + data.ErrorMessage, 'danger');
+            }
+        } catch (error) {
+            this.showAlert('Error terminating transcoding: ' + error.message, 'danger');
         }
     }
 
@@ -1502,7 +1538,7 @@ class TranscodeQueueManager {
     // Quality Testing Queue Methods
     async LoadQualityTestingQueueData() {
         try {
-            const response = await fetch('/api/QualityTesting/Queue');
+            const response = await fetch('/api/QualityTest/Queue');
             
             // Check if response is HTML (error page) instead of JSON
             const contentType = response.headers.get('content-type');
@@ -1511,7 +1547,7 @@ class TranscodeQueueManager {
                 await this.LogErrorToDatabase(
                     `Quality Testing API returned HTML instead of JSON. Status: ${response.status}`,
                     'LoadQualityTestingQueueData',
-                    '/api/QualityTesting/Queue'
+                    '/api/QualityTest/Queue'
                 );
                 return;
             }
@@ -1520,21 +1556,21 @@ class TranscodeQueueManager {
             console.log('Quality Testing API Response:', data); // Debug logging
 
             if (data.Success) {
-                console.log('Quality Testing Queue Items:', data.QueueItems); // Debug logging
-                this.UpdateQualityTestingQueueTable(data.QueueItems);
+                console.log('Quality Testing Queue Items:', data.Jobs); // Debug logging
+                this.UpdateQualityTestingQueueTable(data.Jobs);
                 this.UpdateQualityTestingStatus();
             } else {
                 await this.LogErrorToDatabase(
-                    `Quality Testing API error: ${data.ErrorMessage}`,
+                    `Quality Testing API error: ${data.Message}`,
                     'LoadQualityTestingQueueData',
-                    '/api/QualityTesting/Queue'
+                    '/api/QualityTest/Queue'
                 );
             }
         } catch (error) {
             await this.LogErrorToDatabase(
                 `Quality Testing queue data fetch error: ${error.message}`,
                 'LoadQualityTestingQueueData',
-                '/api/QualityTesting/Queue'
+                '/api/QualityTest/Queue'
             );
         }
     }
@@ -1561,23 +1597,23 @@ class TranscodeQueueManager {
                 const row = document.createElement('tr');
                 row.innerHTML = `
                     <td>${item.Id}</td>
-                    <td>${this.escapeHtml(item.FileName)}</td>
+                    <td>${this.escapeHtml(item.OriginalFilePath ? item.OriginalFilePath.split('\\').pop() : 'Unknown')}</td>
                     <td>
                         <span class="badge ${this.GetQualityTestingStatusBadgeClass(item.Status)}">${item.Status}</span>
                     </td>
-                    <td>${item.QualityScore ? item.QualityScore.toFixed(2) : '-'}</td>
-                    <td>${item.QualityThreshold}</td>
-                    <td>${this.formatDate(item.DateAdded)}</td>
-                    <td>${this.formatDate(item.DateStarted)}</td>
-                    <td>${this.formatDate(item.DateCompleted)}</td>
+                    <td>${item.VMAFScore ? item.VMAFScore.toFixed(2) : '-'}</td>
+                    <td>-</td>
+                    <td>${this.formatDate(item.CreatedDate)}</td>
+                    <td>-</td>
+                    <td>-</td>
                     <td>
                         <div class="btn-group btn-group-sm" role="group">
                             <button type="button" class="btn btn-outline-info" onclick="queueManager.ViewQualityTestingDetails(${item.Id})" title="View Details">
                                 <i class="fas fa-info"></i>
                             </button>
-                            ${item.Status === 'Failed' && item.CanRetry ? 
-                                `<button type="button" class="btn btn-outline-warning" onclick="queueManager.RetryQualityTestingJob(${item.Id})" title="Retry">
-                                    <i class="fas fa-redo"></i>
+                            ${item.Status === 'Pending' ? 
+                                `<button type="button" class="btn btn-outline-success" onclick="queueManager.StartQualityTest(${item.Id})" title="Start Quality Test">
+                                    <i class="fas fa-play"></i>
                                 </button>` : ''
                             }
                         </div>
@@ -1590,14 +1626,14 @@ class TranscodeQueueManager {
 
     async UpdateQualityTestingStatus() {
         try {
-            const response = await fetch('/api/QualityTesting/Status');
+            const response = await fetch('/api/QualityTest/Status');
             
             const contentType = response.headers.get('content-type');
             if (!contentType || !contentType.includes('application/json')) {
                 await this.LogErrorToDatabase(
                     `Quality Testing Status API returned HTML instead of JSON. Status: ${response.status}`,
                     'UpdateQualityTestingStatus',
-                    '/api/QualityTesting/Status'
+                    '/api/QualityTest/Status'
                 );
                 return;
             }
@@ -1624,21 +1660,21 @@ class TranscodeQueueManager {
                 await this.LogErrorToDatabase(
                     `Quality Testing Status API error: ${errorMessage}`,
                     'UpdateQualityTestingStatus',
-                    '/api/QualityTesting/Status'
+                    '/api/QualityTest/Status'
                 );
             }
         } catch (error) {
             await this.LogErrorToDatabase(
                 `Quality Testing status update error: ${error.message}`,
                 'UpdateQualityTestingStatus',
-                '/api/QualityTesting/Status'
+                '/api/QualityTest/Status'
             );
         }
     }
 
     async StartQualityTestingProcessing() {
         try {
-            const response = await fetch('/api/QualityTesting/Start', {
+            const response = await fetch('/api/QualityTest/Start', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
@@ -1649,9 +1685,9 @@ class TranscodeQueueManager {
             const contentType = response.headers.get('content-type');
             if (!contentType || !contentType.includes('application/json')) {
                 await this.LogErrorToDatabase(
-                    `VMAF Start API returned HTML instead of JSON. Status: ${response.status}`,
-                    'StartVMAFProcessing',
-                    '/api/VMAF/Start'
+                    `Quality Testing Start API returned HTML instead of JSON. Status: ${response.status}`,
+                    'StartQualityTestingProcessing',
+                    '/api/QualityTest/Start'
                 );
                 return;
             }
@@ -1659,27 +1695,27 @@ class TranscodeQueueManager {
             const data = await response.json();
 
             if (data.Success) {
-                this.showAlert('VMAF processing started successfully', 'success');
-                this.UpdateVMAFStatus();
+                this.showAlert('Quality testing started successfully', 'success');
+                this.UpdateQualityTestingStatus();
             } else {
                 await this.LogErrorToDatabase(
-                    `VMAF Start API error: ${data.ErrorMessage}`,
-                    'StartVMAFProcessing',
-                    '/api/VMAF/Start'
+                    `Quality Testing Start API error: ${data.ErrorMessage}`,
+                    'StartQualityTestingProcessing',
+                    '/api/QualityTest/Start'
                 );
             }
         } catch (error) {
             await this.LogErrorToDatabase(
-                `VMAF start processing error: ${error.message}`,
-                'startVMAFProcessing',
-                '/api/VMAF/Start'
+                `Quality testing start processing error: ${error.message}`,
+                'StartQualityTestingProcessing',
+                '/api/QualityTest/Start'
             );
         }
     }
 
-    async StopVMAFProcessing() {
+    async StopQualityTestingProcessing() {
         try {
-            const response = await fetch('/api/VMAF/Stop', {
+            const response = await fetch('/api/QualityTest/Stop', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
@@ -1689,9 +1725,9 @@ class TranscodeQueueManager {
             const contentType = response.headers.get('content-type');
             if (!contentType || !contentType.includes('application/json')) {
                 await this.LogErrorToDatabase(
-                    `VMAF Stop API returned HTML instead of JSON. Status: ${response.status}`,
-                    'StopVMAFProcessing',
-                    '/api/VMAF/Stop'
+                    `Quality Testing Stop API returned HTML instead of JSON. Status: ${response.status}`,
+                    'StopQualityTestingProcessing',
+                    '/api/QualityTesting/Stop'
                 );
                 return;
             }
@@ -1699,25 +1735,68 @@ class TranscodeQueueManager {
             const data = await response.json();
 
             if (data.Success) {
-                this.showAlert('VMAF processing stopped successfully', 'success');
-                this.UpdateVMAFStatus();
+                this.showAlert('Quality testing stopped successfully', 'success');
+                this.UpdateQualityTestingStatus();
             } else {
                 await this.LogErrorToDatabase(
-                    `VMAF Stop API error: ${data.ErrorMessage}`,
-                    'StopVMAFProcessing',
-                    '/api/VMAF/Stop'
+                    `Quality Testing Stop API error: ${data.ErrorMessage}`,
+                    'StopQualityTestingProcessing',
+                    '/api/QualityTesting/Stop'
                 );
             }
         } catch (error) {
             await this.LogErrorToDatabase(
-                `VMAF stop processing error: ${error.message}`,
-                'stopVMAFProcessing',
-                '/api/VMAF/Stop'
+                `Quality testing stop processing error: ${error.message}`,
+                'StopQualityTestingProcessing',
+                '/api/QualityTesting/Stop'
             );
         }
     }
 
-    GetVMAFStatusBadgeClass(status) {
+    async StartQualityTest(jobId) {
+        try {
+            const response = await fetch('/api/QualityTest/Start', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ JobId: jobId })
+            });
+
+            const contentType = response.headers.get('content-type');
+            if (!contentType || !contentType.includes('application/json')) {
+                await this.LogErrorToDatabase(
+                    `Quality Test Start API returned HTML instead of JSON. Status: ${response.status}`,
+                    'StartQualityTest',
+                    '/api/QualityTest/Start'
+                );
+                return;
+            }
+
+            const data = await response.json();
+
+            if (data.Success) {
+                this.showAlert(`Quality test started successfully for job ${jobId}`, 'success');
+                this.LoadQualityTestingQueueData();
+            } else {
+                this.showAlert(`Failed to start quality test: ${data.Message}`, 'danger');
+                await this.LogErrorToDatabase(
+                    `Quality test start error: ${data.Message}`,
+                    'StartQualityTest',
+                    '/api/QualityTest/Start'
+                );
+            }
+        } catch (error) {
+            this.showAlert(`Error starting quality test: ${error.message}`, 'danger');
+            await this.LogErrorToDatabase(
+                `Quality test start error: ${error.message}`,
+                'StartQualityTest',
+                '/api/QualityTest/Start'
+            );
+        }
+    }
+
+    GetQualityTestingStatusBadgeClass(status) {
         const classes = {
             'Pending': 'bg-warning',
             'Running': 'bg-info',
@@ -1727,12 +1806,12 @@ class TranscodeQueueManager {
         return classes[status] || 'bg-secondary';
     }
 
-    ViewVMAFDetails(vmafId) {
-        this.showAlert('VMAF details feature coming soon', 'info');
+    ViewQualityTestingDetails(qualityTestId) {
+        this.showAlert('Quality testing details feature coming soon', 'info');
     }
 
-    async RetryVMAFJob(vmafId) {
-        this.showAlert('VMAF retry feature coming soon', 'info');
+    async RetryQualityTestingJob(qualityTestId) {
+        this.showAlert('Quality testing retry feature coming soon', 'info');
     }
 
     async LogErrorToDatabase(errorMessage, context, requestUrl) {

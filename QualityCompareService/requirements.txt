@@ -1,5 +1,0 @@
-# System monitoring
-psutil>=5.9.0
-
-# Process naming
-setproctitle

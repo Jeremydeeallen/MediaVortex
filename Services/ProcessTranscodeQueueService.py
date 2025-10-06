@@ -12,7 +12,7 @@ from Repositories.DatabaseManager import DatabaseManager
 from Services.TranscodingFileManagerService import TranscodingFileManagerService
 from Services.CommandBuilderService import CommandBuilderService
 from Services.VideoTranscodingService import VideoTranscodingService
-from Services.QualityTestingOrchestratorService import QualityTestingOrchestratorService
+from Services.QueueManagementService import QueueManagementService
 from Services.LoggingService import LoggingService
 
 
@@ -23,12 +23,12 @@ class ProcessTranscodeQueueService:
                  FileManagerInstance: TranscodingFileManagerService = None,
                  CommandBuilderInstance: CommandBuilderService = None,
                  VideoTranscodingInstance: VideoTranscodingService = None,
-                 QualityTestingInstance: QualityTestingOrchestratorService = None):
+                 QueueManagementInstance: QueueManagementService = None):
         self.DatabaseManager = DatabaseManagerInstance or DatabaseManager()
         self.FileManager = FileManagerInstance or TranscodingFileManagerService()
         self.CommandBuilder = CommandBuilderInstance or CommandBuilderService()
         self.VideoTranscoding = VideoTranscodingInstance or VideoTranscodingService()
-        self.QualityTesting = QualityTestingInstance or QualityTestingOrchestratorService()
+        self.QueueManagement = QueueManagementInstance or QueueManagementService(DatabaseManagerInstance=self.DatabaseManager)
         
         # Processing state
         self.IsProcessing = False
@@ -100,6 +100,15 @@ class ProcessTranscodeQueueService:
             
             # Stop any active video transcoding processes
             self.StopAllActiveTranscodingProcesses()
+            
+            # Reset running jobs to pending status using shared service
+            resetResult = self.QueueManagement.ResetRunningJobsToPending("TranscodeQueue", "Transcoding cancelled by user stop request")
+            if resetResult.get("Success", False):
+                LoggingService.LogInfo(f"Queue reset completed: {resetResult.get('Message', '')}", 
+                                     "ProcessTranscodeQueueService", "Stop")
+            else:
+                LoggingService.LogWarning(f"Queue reset failed: {resetResult.get('ErrorMessage', 'Unknown error')}", 
+                                        "ProcessTranscodeQueueService", "Stop")
             
             # Clean up any stale progress data from database
             self.CleanupStaleProgressData()
@@ -251,6 +260,9 @@ class ProcessTranscodeQueueService:
             if not MediaFile:
                 self.HandleJobFailure(Job, "Failed to get media file data", TranscodeAttemptId)
                 return
+            
+            # Archive original file details before transcoding
+            self.ArchiveOriginalFileDetails(MediaFile, TranscodeAttemptId)
             
             # Phase 2: Loading Media Data
             self.UpdateTranscodeProgress(TranscodeAttemptId, "Loading Media Data", 0.0, f"Retrieved metadata for {MediaFile.FileName}")
@@ -547,17 +559,16 @@ class ProcessTranscodeQueueService:
                     'TranscodeDurationSeconds': TranscodeResult.get('Duration', 0.0),
                     'NewSizeBytes': NewSizeBytes,
                     'SizeReductionBytes': SizeReductionBytes,
-                    'SizeReductionPercent': SizeReductionPercent
+                    'SizeReductionPercent': SizeReductionPercent,
+                    'QualityTestRequired': True  # Mark for quality testing
                 })
                 
                 # Update TranscodeFiles record for overall file status
                 self.UpdateTranscodeFileRecord(Job.FilePath, TranscodeAttemptId, True, OutputFilePath, NewSizeBytes)
                 
-                # Add to quality testing queue for quality assessment
-                # Use the calculated output file path instead of TranscodeResult.get('OutputFilePath') which returns "Success"
-                # Extract filename from the output path for the FileName parameter
-                OutputFileName = os.path.basename(OutputFilePath)
-                self.QualityTesting.AddToQueue(TranscodeAttemptId, Job.FilePath, OutputFilePath, OutputFileName)
+                # Quality testing will be handled by the new QualityTestingViewModel
+                # The QualityTestRequired flag is already set above, which will trigger
+                # the QualityTestingViewModel to create quality testing jobs
                 
                 # Delete job from queue (successful completion)
                 self.DatabaseManager.DeleteTranscodeQueueItem(Job.Id)
@@ -868,6 +879,7 @@ class ProcessTranscodeQueueService:
         except Exception as e:
             LoggingService.LogException("Exception stopping active transcoding processes", e, "ProcessTranscodeQueueService", "StopAllActiveTranscodingProcesses")
     
+    
     def CleanupStaleProgressData(self):
         """Clean up any stale progress data from the database."""
         try:
@@ -909,4 +921,27 @@ class ProcessTranscodeQueueService:
         except Exception as e:
             LoggingService.LogException("Exception updating transcoding progress", e, 
                                       "ProcessTranscodeQueueService", "UpdateTranscodeProgress")
+    
+    def ArchiveOriginalFileDetails(self, MediaFile: MediaFileModel, TranscodeAttemptId: int) -> bool:
+        """Archive original file details before transcoding to preserve source data."""
+        try:
+            LoggingService.LogFunctionEntry("ArchiveOriginalFileDetails", "ProcessTranscodeQueueService", 
+                                          MediaFile.Id, TranscodeAttemptId)
+            
+            # Archive original file details using INSERT SELECT
+            ArchiveId = self.DatabaseManager.SaveMediaFileArchive(MediaFile.Id, TranscodeAttemptId)
+            
+            if ArchiveId:
+                LoggingService.LogInfo(f"Successfully archived original file details for MediaFile {MediaFile.Id}, Archive ID: {ArchiveId}", 
+                                     "ProcessTranscodeQueueService", "ArchiveOriginalFileDetails")
+                return True
+            else:
+                LoggingService.LogError(f"Failed to archive original file details for MediaFile {MediaFile.Id}", 
+                                      "ProcessTranscodeQueueService", "ArchiveOriginalFileDetails")
+                return False
+                
+        except Exception as e:
+            LoggingService.LogException("Exception archiving original file details", e, 
+                                      "ProcessTranscodeQueueService", "ArchiveOriginalFileDetails")
+            return False
     

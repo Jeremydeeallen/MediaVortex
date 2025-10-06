@@ -1,0 +1,581 @@
+{% extends "Base.html" %}
+
+{% block title %}SQL Queries - MediaVortex{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="row">
+        <div class="col-12">
+            <h1 class="mb-4">
+                <i class="fas fa-database"></i> SQL Queries & Troubleshooting
+            </h1>
+            <p class="text-muted">Execute custom SQL queries and access common troubleshooting data for MediaVortex services.</p>
+        </div>
+    </div>
+
+    <!-- Quick Actions Row -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0">
+                        <i class="fas fa-bolt"></i> Quick Actions
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="row g-3">
+                        <div class="col-md-3">
+                            <button class="btn btn-primary w-100" onclick="LoadServiceStatus()">
+                                <i class="fas fa-server"></i> Service Status
+                            </button>
+                        </div>
+                        <div class="col-md-3">
+                            <button class="btn btn-info w-100" onclick="LoadActiveJobs()">
+                                <i class="fas fa-tasks"></i> Active Jobs
+                            </button>
+                        </div>
+                        <div class="col-md-3">
+                            <button class="btn btn-warning w-100" onclick="LoadErrorSummary()">
+                                <i class="fas fa-exclamation-triangle"></i> Error Summary
+                            </button>
+                        </div>
+                        <div class="col-md-3">
+                            <button class="btn btn-success w-100" onclick="LoadDatabaseInfo()">
+                                <i class="fas fa-table"></i> Database Info
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Service-Specific Logs Row -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0">
+                        <i class="fas fa-file-alt"></i> Service Logs
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="row g-3">
+                        <div class="col-md-3">
+                            <select class="form-select" id="ServiceNameSelect">
+                                <option value="">All Services</option>
+                                <option value="MediaVortex">MediaVortex (Web App)</option>
+                                <option value="TranscodeService">TranscodeService</option>
+                                <option value="SystemOrchestratorService">SystemOrchestratorService</option>
+                                <option value="QualityTestingService">QualityTestingService</option>
+                                <option value="QualityCompareService">QualityCompareService</option>
+                            </select>
+                        </div>
+                        <div class="col-md-2">
+                            <select class="form-select" id="LogLevelSelect">
+                                <option value="">All Levels</option>
+                                <option value="ERROR">ERROR</option>
+                                <option value="WARNING">WARNING</option>
+                                <option value="INFO">INFO</option>
+                                <option value="DEBUG">DEBUG</option>
+                            </select>
+                        </div>
+                        <div class="col-md-2">
+                            <select class="form-select" id="HoursSelect">
+                                <option value="1">Last 1 Hour</option>
+                                <option value="2" selected>Last 2 Hours</option>
+                                <option value="6">Last 6 Hours</option>
+                                <option value="24">Last 24 Hours</option>
+                            </select>
+                        </div>
+                        <div class="col-md-2">
+                            <input type="number" class="form-control" id="LogLimit" placeholder="Limit" value="50" min="1" max="500">
+                        </div>
+                        <div class="col-md-3">
+                            <button class="btn btn-secondary w-100" onclick="LoadServiceLogs()">
+                                <i class="fas fa-search"></i> Load Logs
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Queue Status Row -->
+    <div class="row mb-4">
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0">
+                        <i class="fas fa-list"></i> Transcode Queue
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <button class="btn btn-outline-primary w-100" onclick="LoadTranscodeQueue()">
+                        <i class="fas fa-refresh"></i> Refresh Transcode Queue
+                    </button>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0">
+                        <i class="fas fa-chart-line"></i> Quality Test Queue
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <button class="btn btn-outline-primary w-100" onclick="LoadQualityTestQueue()">
+                        <i class="fas fa-refresh"></i> Refresh Quality Test Queue
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Custom Query Section -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0">
+                        <i class="fas fa-code"></i> Custom SQL Query
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label for="CustomQuery" class="form-label">SQL Query (SELECT only for security):</label>
+                        <textarea class="form-control" id="CustomQuery" rows="4" placeholder="SELECT * FROM Logs WHERE LogLevel = 'ERROR' ORDER BY Timestamp DESC LIMIT 10"></textarea>
+                    </div>
+                    <div class="row g-3">
+                        <div class="col-md-8">
+                            <input type="text" class="form-control" id="QueryParameters" placeholder="Parameters (comma-separated, optional)">
+                        </div>
+                        <div class="col-md-4">
+                            <button class="btn btn-primary w-100" onclick="ExecuteCustomQuery()">
+                                <i class="fas fa-play"></i> Execute Query
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Common Queries Section -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0">
+                        <i class="fas fa-bookmark"></i> Common Troubleshooting Queries
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="row g-2">
+                        <div class="col-md-4">
+                            <button class="btn btn-outline-secondary w-100" onclick="LoadCommonQuery('recent_errors')">
+                                Recent Errors (24h)
+                            </button>
+                        </div>
+                        <div class="col-md-4">
+                            <button class="btn btn-outline-secondary w-100" onclick="LoadCommonQuery('stuck_jobs')">
+                                Stuck Jobs
+                            </button>
+                        </div>
+                        <div class="col-md-4">
+                            <button class="btn btn-outline-secondary w-100" onclick="LoadCommonQuery('service_health')">
+                                Service Health
+                            </button>
+                        </div>
+                        <div class="col-md-4">
+                            <button class="btn btn-outline-secondary w-100" onclick="LoadCommonQuery('transcode_failures')">
+                                Transcode Failures
+                            </button>
+                        </div>
+                        <div class="col-md-4">
+                            <button class="btn btn-outline-secondary w-100" onclick="LoadCommonQuery('quality_test_results')">
+                                Quality Test Results
+                            </button>
+                        </div>
+                        <div class="col-md-4">
+                            <button class="btn btn-outline-secondary w-100" onclick="LoadCommonQuery('database_size')">
+                                Database Size
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Results Section -->
+    <div class="row">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">
+                        <i class="fas fa-table"></i> Query Results
+                    </h5>
+                    <div>
+                        <span class="badge bg-secondary" id="ResultCount">0 rows</span>
+                        <button class="btn btn-sm btn-outline-secondary ms-2" onclick="ClearResults()">
+                            <i class="fas fa-trash"></i> Clear
+                        </button>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div id="LoadingSpinner" class="text-center" style="display: none;">
+                        <div class="spinner-border text-primary" role="status">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                        <p class="mt-2">Executing query...</p>
+                    </div>
+                    <div id="ResultsContainer">
+                        <div class="text-muted text-center py-4">
+                            <i class="fas fa-database fa-3x mb-3"></i>
+                            <p>No results to display. Use the buttons above or enter a custom query.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Common query templates
+const CommonQueries = {
+    'recent_errors': "SELECT LogLevel, Message, Timestamp, Component, FunctionName FROM Logs WHERE LogLevel IN ('ERROR', 'CRITICAL') AND Timestamp >= datetime('now', '-24 hours') ORDER BY Timestamp DESC LIMIT 50",
+    'stuck_jobs': "SELECT Id, ServiceName, JobType, Status, StartedAt, CreatedAt, UpdatedAt FROM ActiveJobs WHERE Status = 'Running' AND StartedAt < datetime('now', '-1 hour') ORDER BY StartedAt ASC",
+    'service_health': "SELECT ServiceName, Status, HealthStatus, ErrorCount, LastErrorMessage, LastHealthCheck FROM ServiceStatus ORDER BY ServiceName",
+    'transcode_failures': "SELECT Id, FilePath, FileName, Status, ErrorMessage, DateAdded, DateStarted FROM TranscodeQueue WHERE Status = 'Failed' ORDER BY DateAdded DESC LIMIT 20",
+    'quality_test_results': "SELECT Id, OriginalFilePath, TranscodedFilePath, Status, VMAFScore, DateAdded, DateCompleted FROM QualityTestingQueue WHERE Status = 'Completed' ORDER BY DateCompleted DESC LIMIT 20",
+    'database_size': "SELECT name, (SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=t.name) as row_count FROM sqlite_master t WHERE type='table' ORDER BY name"
+};
+
+function ShowLoading() {
+    document.getElementById('LoadingSpinner').style.display = 'block';
+    document.getElementById('ResultsContainer').style.display = 'none';
+}
+
+function HideLoading() {
+    document.getElementById('LoadingSpinner').style.display = 'none';
+    document.getElementById('ResultsContainer').style.display = 'block';
+}
+
+function DisplayResults(data, title = 'Query Results') {
+    HideLoading();
+    
+    const container = document.getElementById('ResultsContainer');
+    const countElement = document.getElementById('ResultCount');
+    
+    if (!data || data.length === 0) {
+        container.innerHTML = `
+            <div class="text-muted text-center py-4">
+                <i class="fas fa-info-circle fa-2x mb-3"></i>
+                <p>No results found.</p>
+            </div>
+        `;
+        countElement.textContent = '0 rows';
+        return;
+    }
+    
+    // Create table
+    const table = document.createElement('table');
+    table.className = 'table table-striped table-hover';
+    
+    // Create header
+    const thead = document.createElement('thead');
+    const headerRow = document.createElement('tr');
+    const columns = Object.keys(data[0]);
+    
+    columns.forEach(column => {
+        const th = document.createElement('th');
+        th.textContent = column;
+        th.style.cursor = 'pointer';
+        th.onclick = () => SortTable(table, Array.from(thead.children[0].children).indexOf(th));
+        headerRow.appendChild(th);
+    });
+    
+    thead.appendChild(headerRow);
+    table.appendChild(thead);
+    
+    // Create body
+    const tbody = document.createElement('tbody');
+    data.forEach(row => {
+        const tr = document.createElement('tr');
+        columns.forEach(column => {
+            const td = document.createElement('td');
+            const value = row[column];
+            if (value === null || value === undefined) {
+                td.textContent = '';
+                td.className = 'text-muted';
+            } else if (typeof value === 'boolean') {
+                td.innerHTML = value ? '<span class="badge bg-success">True</span>' : '<span class="badge bg-secondary">False</span>';
+            } else if (typeof value === 'string' && value.length > 100) {
+                td.innerHTML = `<span title="${value}">${value.substring(0, 100)}...</span>`;
+            } else {
+                td.textContent = value;
+            }
+            tr.appendChild(td);
+        });
+        tbody.appendChild(tr);
+    });
+    
+    table.appendChild(tbody);
+    
+    // Clear container and add table
+    container.innerHTML = '';
+    container.appendChild(table);
+    
+    countElement.textContent = `${data.length} rows`;
+}
+
+function SortTable(table, columnIndex) {
+    const tbody = table.querySelector('tbody');
+    const rows = Array.from(tbody.querySelectorAll('tr'));
+    
+    rows.sort((a, b) => {
+        const aVal = a.children[columnIndex].textContent.trim();
+        const bVal = b.children[columnIndex].textContent.trim();
+        
+        // Try to parse as numbers
+        const aNum = parseFloat(aVal);
+        const bNum = parseFloat(bVal);
+        
+        if (!isNaN(aNum) && !isNaN(bNum)) {
+            return aNum - bNum;
+        }
+        
+        return aVal.localeCompare(bVal);
+    });
+    
+    rows.forEach(row => tbody.appendChild(row));
+}
+
+function ClearResults() {
+    document.getElementById('ResultsContainer').innerHTML = `
+        <div class="text-muted text-center py-4">
+            <i class="fas fa-database fa-3x mb-3"></i>
+            <p>No results to display. Use the buttons above or enter a custom query.</p>
+        </div>
+    `;
+    document.getElementById('ResultCount').textContent = '0 rows';
+}
+
+// API Functions
+async function ExecuteCustomQuery() {
+    const query = document.getElementById('CustomQuery').value.trim();
+    const parametersText = document.getElementById('QueryParameters').value.trim();
+    
+    if (!query) {
+        alert('Please enter a SQL query');
+        return;
+    }
+    
+    ShowLoading();
+    
+    try {
+        const parameters = parametersText ? parametersText.split(',').map(p => p.trim()) : [];
+        
+        const response = await fetch('/api/SQLQueries/ExecuteQuery', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                Query: query,
+                Parameters: parameters
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.Success) {
+            DisplayResults(data.Results);
+        } else {
+            alert('Error: ' + data.ErrorMessage);
+            HideLoading();
+        }
+    } catch (error) {
+        alert('Error executing query: ' + error.message);
+        HideLoading();
+    }
+}
+
+async function LoadServiceLogs() {
+    const serviceName = document.getElementById('ServiceNameSelect').value;
+    const logLevel = document.getElementById('LogLevelSelect').value;
+    const hours = document.getElementById('HoursSelect').value;
+    const limit = document.getElementById('LogLimit').value;
+    
+    ShowLoading();
+    
+    try {
+        const params = new URLSearchParams({
+            Hours: hours,
+            Limit: limit
+        });
+        
+        if (serviceName) params.append('ServiceName', serviceName);
+        if (logLevel) params.append('LogLevel', logLevel);
+        
+        const response = await fetch(`/api/SQLQueries/GetServiceLogs?${params}`);
+        const data = await response.json();
+        
+        if (data.Success) {
+            DisplayResults(data.Logs);
+        } else {
+            alert('Error: ' + data.ErrorMessage);
+            HideLoading();
+        }
+    } catch (error) {
+        alert('Error loading logs: ' + error.message);
+        HideLoading();
+    }
+}
+
+async function LoadServiceStatus() {
+    ShowLoading();
+    
+    try {
+        const response = await fetch('/api/SQLQueries/GetServiceStatus');
+        const data = await response.json();
+        
+        if (data.Success) {
+            DisplayResults(data.Services);
+        } else {
+            alert('Error: ' + data.ErrorMessage);
+            HideLoading();
+        }
+    } catch (error) {
+        alert('Error loading service status: ' + error.message);
+        HideLoading();
+    }
+}
+
+async function LoadActiveJobs() {
+    ShowLoading();
+    
+    try {
+        const response = await fetch('/api/SQLQueries/GetActiveJobs');
+        const data = await response.json();
+        
+        if (data.Success) {
+            DisplayResults(data.ActiveJobs);
+        } else {
+            alert('Error: ' + data.ErrorMessage);
+            HideLoading();
+        }
+    } catch (error) {
+        alert('Error loading active jobs: ' + error.message);
+        HideLoading();
+    }
+}
+
+async function LoadErrorSummary() {
+    ShowLoading();
+    
+    try {
+        const response = await fetch('/api/SQLQueries/GetErrorSummary?Hours=24');
+        const data = await response.json();
+        
+        if (data.Success) {
+            // Combine error summary and recent errors
+            const combinedData = [
+                ...data.ErrorSummary.map(item => ({
+                    ...item,
+                    Type: 'Summary'
+                })),
+                ...data.RecentErrors.map(item => ({
+                    ...item,
+                    Type: 'Recent Error'
+                }))
+            ];
+            DisplayResults(combinedData);
+        } else {
+            alert('Error: ' + data.ErrorMessage);
+            HideLoading();
+        }
+    } catch (error) {
+        alert('Error loading error summary: ' + error.message);
+        HideLoading();
+    }
+}
+
+async function LoadDatabaseInfo() {
+    ShowLoading();
+    
+    try {
+        const response = await fetch('/api/SQLQueries/GetDatabaseInfo');
+        const data = await response.json();
+        
+        if (data.Success) {
+            DisplayResults(data.Tables);
+        } else {
+            alert('Error: ' + data.ErrorMessage);
+            HideLoading();
+        }
+    } catch (error) {
+        alert('Error loading database info: ' + error.message);
+        HideLoading();
+    }
+}
+
+async function LoadTranscodeQueue() {
+    ShowLoading();
+    
+    try {
+        const response = await fetch('/api/SQLQueries/GetTranscodeQueue');
+        const data = await response.json();
+        
+        if (data.Success) {
+            DisplayResults(data.QueueItems);
+        } else {
+            alert('Error: ' + data.ErrorMessage);
+            HideLoading();
+        }
+    } catch (error) {
+        alert('Error loading transcode queue: ' + error.message);
+        HideLoading();
+    }
+}
+
+async function LoadQualityTestQueue() {
+    ShowLoading();
+    
+    try {
+        const response = await fetch('/api/SQLQueries/GetQualityTestQueue');
+        const data = await response.json();
+        
+        if (data.Success) {
+            DisplayResults(data.QueueItems);
+        } else {
+            alert('Error: ' + data.ErrorMessage);
+            HideLoading();
+        }
+    } catch (error) {
+        alert('Error loading quality test queue: ' + error.message);
+        HideLoading();
+    }
+}
+
+function LoadCommonQuery(queryType) {
+    const query = CommonQueries[queryType];
+    if (query) {
+        document.getElementById('CustomQuery').value = query;
+        ExecuteCustomQuery();
+    }
+}
+
+// Initialize page
+document.addEventListener('DOMContentLoaded', function() {
+    // Load service status by default
+    LoadServiceStatus();
+});
+</script>
+{% endblock %}

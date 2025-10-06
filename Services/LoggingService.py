@@ -84,26 +84,42 @@ class LoggingService:
     @classmethod
     def LogInfo(cls, Message: str, FunctionName: str = '', Component: str = 'System', Operation: str = ''):
         """Log an info message."""
-        print(f"INFO: {Message}")
+        try:
+            print(f"INFO: {Message}")
+        except OSError:
+            # Ignore OSError when stdout is not available (e.g., in service context)
+            pass
         cls.LogToDatabase('INFO', Message, FunctionName, Component, Operation)
     
     @classmethod
     def LogError(cls, Message: str, FunctionName: str = '', Component: str = 'System', Operation: str = ''):
         """Log an error message."""
-        print(f"ERROR: {Message}")
+        try:
+            print(f"ERROR: {Message}")
+        except OSError:
+            # Ignore OSError when stdout is not available (e.g., in service context)
+            pass
         cls.LogToDatabase('ERROR', Message, FunctionName, Component, Operation)
     
     @classmethod
     def LogWarning(cls, Message: str, FunctionName: str = '', Component: str = 'System', Operation: str = ''):
         """Log a warning message."""
-        print(f"WARNING: {Message}")
+        try:
+            print(f"WARNING: {Message}")
+        except OSError:
+            # Ignore OSError when stdout is not available (e.g., in service context)
+            pass
         cls.LogToDatabase('WARNING', Message, FunctionName, Component, Operation)
     
     @classmethod
     def LogDebug(cls, Message: str, FunctionName: str = '', Component: str = 'System', Operation: str = ''):
         """Log a debug message if debugging is enabled."""
         if cls._DebugEnabled:
-            print(f"DEBUG: {Message}")
+            try:
+                print(f"DEBUG: {Message}")
+            except OSError:
+                # Ignore OSError when stdout is not available (e.g., in service context)
+                pass
             cls.LogToDatabase('DEBUG', Message, FunctionName, Component, Operation)
     
     @classmethod

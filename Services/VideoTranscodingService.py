@@ -254,7 +254,7 @@ class VideoTranscodingService:
                 ProgressData['CurrentFrame'] = CurrentFrame
             
             # Extract FPS
-            FPSMatch = re.search(r'fps=([\d.]+)', Line)
+            FPSMatch = re.search(r'fps=\s*([\d.]+)', Line)
             if FPSMatch:
                 ProgressData['CurrentFPS'] = float(FPSMatch.group(1))
             

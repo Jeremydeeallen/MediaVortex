@@ -254,13 +254,13 @@ class FFmpegComparisonService:
             # VMAF model path not needed for basic VMAF comparison
             
             # Build FFmpeg filter for VMAF comparison
-            # VMAF expects reference first, then distorted
-            FilterComplex = f"[0:v]scale={QualityWidth}x{QualityHeight}[ref];[1:v]scale={QualityWidth}x{QualityHeight}[dist];[ref][dist]libvmaf"
+            # VMAF expects distorted first, then reference (correct order)
+            FilterComplex = f"[0:v]scale={QualityWidth}x{QualityHeight}[dist];[1:v]scale={QualityWidth}x{QualityHeight}[ref];[dist][ref]libvmaf"
             
             # Build FFmpeg arguments (ExecuteFFmpegCommand will add -progress pipe:2 automatically if callback provided)
             Arguments = [
-                '-i', OriginalFilePath,      # First input (reference/original file)
-                '-i', TranscodedFilePath,    # Second input (distorted/transcoded file)
+                '-i', TranscodedFilePath,    # First input (distorted/transcoded file)
+                '-i', OriginalFilePath,      # Second input (reference/original file)
                 '-lavfi', FilterComplex,     # Use lavfi instead of filter_complex
                 '-f', 'null',                # Null output format
                 '-'                          # Output to stdout

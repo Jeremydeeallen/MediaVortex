@@ -57,6 +57,16 @@ ORDER BY m.name, i.seq, ic.seqno;
 
 ### Table and Columns
 
+ActiveJobs.Id	INTEGER
+ActiveJobs.ServiceName	TEXT
+ActiveJobs.JobType	TEXT
+ActiveJobs.QueueId	INTEGER
+ActiveJobs.ProcessId	INTEGER
+ActiveJobs.ThreadId	INTEGER
+ActiveJobs.StartedAt	TIMESTAMP
+ActiveJobs.Status	TEXT
+ActiveJobs.CreatedAt	TIMESTAMP
+ActiveJobs.UpdatedAt	TIMESTAMP
 CodecFlags.Id	INTEGER
 CodecFlags.CodecName	TEXT
 CodecFlags.DisplayName	TEXT
@@ -189,6 +199,42 @@ MediaFiles.AudioSampleFormat	TEXT
 MediaFiles.AudioChannelLayout	TEXT
 MediaFiles.ContainerFormat	TEXT
 MediaFiles.OverallBitrate	INTEGER
+MediaFiles.TranscodedByMediaVortex	BOOLEAN
+MediaFilesArchive.Id	INTEGER
+MediaFilesArchive.SeasonId	INTEGER
+MediaFilesArchive.FilePath	TEXT
+MediaFilesArchive.FileName	TEXT
+MediaFilesArchive.SizeMB	REAL
+MediaFilesArchive.VideoBitrateKbps	INTEGER
+MediaFilesArchive.AudioBitrateKbps	INTEGER
+MediaFilesArchive.Resolution	TEXT
+MediaFilesArchive.Codec	TEXT
+MediaFilesArchive.DurationMinutes	REAL
+MediaFilesArchive.FrameRate	REAL
+MediaFilesArchive.LastScannedDate	TIMESTAMP
+MediaFilesArchive.CompressionPotential	TEXT
+MediaFilesArchive.AssignedProfile	TEXT
+MediaFilesArchive.IsInterlaced	BIT
+MediaFilesArchive.ResolutionCategory	TEXT
+MediaFilesArchive.FileModificationTime	DATETIME
+MediaFilesArchive.KeepSource	BOOLEAN
+MediaFilesArchive.TotalFrames	INTEGER
+MediaFilesArchive.CodecProfile	TEXT
+MediaFilesArchive.ColorRange	TEXT
+MediaFilesArchive.FieldOrder	TEXT
+MediaFilesArchive.HasBFrames	INTEGER
+MediaFilesArchive.RefFrames	INTEGER
+MediaFilesArchive.PixelFormat	TEXT
+MediaFilesArchive.Level	INTEGER
+MediaFilesArchive.AudioChannels	INTEGER
+MediaFilesArchive.AudioSampleRate	INTEGER
+MediaFilesArchive.AudioSampleFormat	TEXT
+MediaFilesArchive.AudioChannelLayout	TEXT
+MediaFilesArchive.ContainerFormat	TEXT
+MediaFilesArchive.OverallBitrate	INTEGER
+MediaFilesArchive.TranscodedByMediaVortex	BOOLEAN
+MediaFilesArchive.ArchiveDate	DATETIME
+MediaFilesArchive.TranscodeAttemptId	INTEGER
 PresetOptions.Id	INTEGER
 PresetOptions.CodecFlagsId	INTEGER
 PresetOptions.PresetValue	TEXT
@@ -233,9 +279,8 @@ Profiles.YadifMode	INTEGER
 Profiles.YadifParity	INTEGER
 Profiles.YadifDeint	INTEGER
 Profiles.CodecFlagsId	INTEGER
-Profiles.TenBitEncoding	BOOLEAN
 QualityTestProgress.Id	INTEGER
-QualityTestProgress.VMAFQueueId	INTEGER
+QualityTestProgress.QualityTestQueueId	INTEGER
 QualityTestProgress.TranscodeAttemptId	INTEGER
 QualityTestProgress.Status	TEXT
 QualityTestProgress.ProgressPercentage	INTEGER
@@ -250,12 +295,14 @@ QualityTestProgress.StrategyType	TEXT
 QualityTestProgress.StrategyId	INTEGER
 QualityTestProgress.QualityTestId	INTEGER
 QualityTestProgress.TestType	TEXT
-QualityTestProgress.VMAFThreshold	REAL
+QualityTestProgress.QualityThreshold	REAL
 QualityTestProgress.PassesThreshold	BOOLEAN
 QualityTestProgress.CurrentTime	TEXT
 QualityTestProgress.CurrentFrame	INTEGER
 QualityTestProgress.TotalFrames	INTEGER
 QualityTestProgress.ProcessingSpeed	TEXT
+QualityTestProgress.SubprocessPID	INTEGER
+QualityTestProgress.SubprocessStartTime	TIMESTAMP
 QualityTestResults.Id	INTEGER
 QualityTestResults.VMAFQueueId	INTEGER
 QualityTestResults.TranscodeAttemptId	INTEGER
@@ -278,8 +325,6 @@ QualityTestingQueue.Priority	INTEGER
 QualityTestingQueue.DateAdded	DATETIME
 QualityTestingQueue.DateStarted	DATETIME
 QualityTestingQueue.DateCompleted	DATETIME
-QualityTestingQueue.VMAFScore	REAL
-QualityTestingQueue.QualityThreshold	REAL
 QualityTestingQueue.ErrorMessage	TEXT
 QualityTestingQueue.RetryCount	INTEGER
 QualityTestingQueue.MaxRetries	INTEGER
@@ -287,8 +332,29 @@ QualityTestingQueue.StrategyType	TEXT
 QualityTestingQueue.StrategyId	INTEGER
 QualityTestingQueue.AlternativeProfileIds	TEXT
 QualityTestingQueue.CustomSettings	TEXT
-QualityTestingQueue.Results	TEXT
-QualityTestingQueue.SelectedResultId	INTEGER
+QualityTestingQueue.VMAFScore	REAL
+QualityTestingQueue.CreatedDate	DATETIME
+QualityTestingQueue.CompletedDate	DATETIME
+QualityTestingQueueBackup.Id	INT
+QualityTestingQueueBackup.TranscodeAttemptId	INT
+QualityTestingQueueBackup.OriginalFilePath	TEXT
+QualityTestingQueueBackup.TranscodedFilePath	TEXT
+QualityTestingQueueBackup.FileName	TEXT
+QualityTestingQueueBackup.Status	TEXT
+QualityTestingQueueBackup.Priority	INT
+QualityTestingQueueBackup.DateAdded	NUM
+QualityTestingQueueBackup.DateStarted	NUM
+QualityTestingQueueBackup.DateCompleted	NUM
+QualityTestingQueueBackup.ErrorMessage	TEXT
+QualityTestingQueueBackup.RetryCount	INT
+QualityTestingQueueBackup.MaxRetries	INT
+QualityTestingQueueBackup.StrategyType	TEXT
+QualityTestingQueueBackup.StrategyId	INT
+QualityTestingQueueBackup.AlternativeProfileIds	TEXT
+QualityTestingQueueBackup.CustomSettings	TEXT
+QualityTestingQueueBackup.VMAFScore	REAL
+QualityTestingQueueBackup.CreatedDate	NUM
+QualityTestingQueueBackup.CompletedDate	NUM
 QualityTestingStrategies.Id	INTEGER
 QualityTestingStrategies.ProfileId	INTEGER
 QualityTestingStrategies.StrategyType	TEXT
@@ -362,6 +428,8 @@ ServiceStatus.Version	TEXT
 ServiceStatus.ServiceType	TEXT
 ServiceStatus.CreatedAt	TIMESTAMP
 ServiceStatus.UpdatedAt	TIMESTAMP
+ServiceStatus.MaxConcurrentJobs	INTEGER
+ServiceStatus.MicroServiceStatus	bool
 SystemSettings.Id	INTEGER
 SystemSettings.SettingKey	TEXT
 SystemSettings.SettingValue	TEXT
@@ -384,6 +452,9 @@ TranscodeAttempts.AudioBitrateKbps	INTEGER
 TranscodeAttempts.VideoBitrateKbps	INTEGER
 TranscodeAttempts.ProfileName	TEXT
 TranscodeAttempts.VMAF	REAL
+TranscodeAttempts.QualityTestRequired	BOOLEAN
+TranscodeAttempts.QualityTestSkipped	BOOLEAN
+TranscodeAttempts.QualityTestCompleted	BOOLEAN
 TranscodeFiles.Id	INTEGER
 TranscodeFiles.FilePath	TEXT
 TranscodeFiles.AllQualitiesFailed	BOOLEAN
@@ -427,6 +498,11 @@ TranscodeQueue.DateStarted	TIMESTAMP
 
 ### Indexes
 
+ActiveJobs	idx_ActiveJobs_StartedAt	0	c	0
+ActiveJobs	idx_ActiveJobs_QueueId	0	c	0
+ActiveJobs	idx_ActiveJobs_ProcessId	0	c	0
+ActiveJobs	idx_ActiveJobs_Status	0	c	0
+ActiveJobs	idx_ActiveJobs_ServiceName	0	c	0
 CodecFlags	sqlite_autoindex_CodecFlags_1	1	u	0
 CodecParameters	sqlite_autoindex_CodecParameters_1	1	u	0
 CompliantFiles	idx_CompliantFiles_FileName	0	c	0
@@ -468,6 +544,8 @@ ServiceCommands	idx_ServiceCommands_TargetService_Status	0	c	0
 ServiceStatus	sqlite_autoindex_ServiceStatus_1	1	u	0
 SystemSettings	idx_SystemSettings_SettingKey	0	c	0
 SystemSettings	sqlite_autoindex_SystemSettings_1	1	u	0
+TranscodeAttempts	idx_TranscodeAttempts_QualityTestCompleted	0	c	0
+TranscodeAttempts	idx_TranscodeAttempts_QualityTestRequired	0	c	0
 TranscodeAttempts	idx_TranscodeAttempts_FilePath	0	c	0
 TranscodeAttempts	idx_TranscodeAttempts_AttemptDate	0	c	0
 TranscodeAttempts	idx_TranscodeAttempts_Success	0	c	0
@@ -484,6 +562,11 @@ TranscodeQueue	sqlite_autoindex_TranscodeQueue_1	1	u	0
 
 ### Index Columns
 
+ActiveJobs	idx_ActiveJobs_StartedAt	StartedAt	0
+ActiveJobs	idx_ActiveJobs_QueueId	QueueId	0
+ActiveJobs	idx_ActiveJobs_ProcessId	ProcessId	0
+ActiveJobs	idx_ActiveJobs_Status	Status	0
+ActiveJobs	idx_ActiveJobs_ServiceName	ServiceName	0
 CodecFlags	sqlite_autoindex_CodecFlags_1	CodecName	0
 CodecParameters	sqlite_autoindex_CodecParameters_1	CodecFlagsId	0
 CodecParameters	sqlite_autoindex_CodecParameters_1	ParameterName	1
@@ -523,7 +606,7 @@ Profiles	sqlite_autoindex_Profiles_1	ProfileName	0
 QualityTestProgress	idx_VMAFProgress_StartTime	StartTime	0
 QualityTestProgress	idx_VMAFProgress_Status	Status	0
 QualityTestProgress	idx_VMAFProgress_TranscodeAttemptId	TranscodeAttemptId	0
-QualityTestProgress	idx_VMAFProgress_VMAFQueueId	VMAFQueueId	0
+QualityTestProgress	idx_VMAFProgress_VMAFQueueId	QualityTestQueueId	0
 RootFolders	sqlite_autoindex_RootFolders_1	RootFolder	0
 ScanJobs	sqlite_autoindex_ScanJobs_1	JobId	0
 ServiceCommands	idx_ServiceCommands_TargetService_Status	TargetService	0
@@ -531,6 +614,8 @@ ServiceCommands	idx_ServiceCommands_TargetService_Status	Status	1
 ServiceStatus	sqlite_autoindex_ServiceStatus_1	ServiceName	0
 SystemSettings	idx_SystemSettings_SettingKey	SettingKey	0
 SystemSettings	sqlite_autoindex_SystemSettings_1	SettingKey	0
+TranscodeAttempts	idx_TranscodeAttempts_QualityTestCompleted	QualityTestCompleted	0
+TranscodeAttempts	idx_TranscodeAttempts_QualityTestRequired	QualityTestRequired	0
 TranscodeAttempts	idx_TranscodeAttempts_FilePath	FilePath	0
 TranscodeAttempts	idx_TranscodeAttempts_AttemptDate	AttemptDate	0
 TranscodeAttempts	idx_TranscodeAttempts_Success	Success	0

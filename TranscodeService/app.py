@@ -16,7 +16,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from Services.ProcessTranscodeQueueService import ProcessTranscodeQueueService
 from Services.LoggingService import LoggingService
-from Services.ServiceCommandService import ServiceCommandService
+from Services.ServiceStatusHelperService import ServiceStatusHelperService
 from Repositories.DatabaseManager import DatabaseManager
 
 class TranscodeServiceApp:
@@ -33,14 +33,16 @@ class TranscodeServiceApp:
         self.ProcessTranscodeQueue = ProcessTranscodeQueueService(
             DatabaseManagerInstance=self.DatabaseManager
         )
-        self.CommandService = ServiceCommandService(DatabaseManagerInstance=self.DatabaseManager)
+        self.StatusHelper = ServiceStatusHelperService(DatabaseManagerInstance=self.DatabaseManager)
         self.IsRunning = False
         self.ProcessingThread = None
         self.HealthCheckThread = None
-        self.CommandProcessingThread = None
+        self.StatusPollingThread = None
         self.ShutdownEvent = threading.Event()
         self.StartTime = datetime.now()
         self.ProcessId = os.getpid()
+        self.CurrentStatus = "Stopped"  # Track current transcoding status
+        self.ManuallyStopped = False  # Track if transcoding was manually stopped
         
         LoggingService.LogInfo("TranscodeServiceApp initialized", "TranscodeService", "__init__")
     
@@ -86,8 +88,8 @@ class TranscodeServiceApp:
             # Start health monitoring
             self.StartHealthMonitoring()
             
-            # Start command processing
-            self._StartCommandProcessing()
+            # Start status polling
+            self.PrivateStartStatusPolling()
             
             # Start transcoding processing
             self.StartTranscodingProcessing()
@@ -303,8 +305,8 @@ class TranscodeServiceApp:
                 pending_jobs = self.DatabaseManager.GetTranscodeQueueItemsByStatus("Pending")
                 
                 if pending_jobs and len(pending_jobs) > 0:
-                    # Start transcoding if not already running
-                    if not self.ProcessTranscodeQueue.IsProcessing:
+                    # Start transcoding if not already running and not manually stopped
+                    if not self.ProcessTranscodeQueue.IsProcessing and not self.ManuallyStopped:
                         LoggingService.LogInfo(f"Found {len(pending_jobs)} pending jobs, starting transcoding...", "TranscodeService", "TranscodingProcessingLoop")
                         result = self.ProcessTranscodeQueue.Run(MaxConcurrentJobs=1)
                         if not result.get("Success", False):
@@ -333,6 +335,11 @@ class TranscodeServiceApp:
             
             # Keep the main thread alive
             while self.IsRunning and not self.ShutdownEvent.is_set():
+                # Check for graceful shutdown request
+                if self.PrivateCheckForGracefulShutdown():
+                    LoggingService.LogInfo("Graceful shutdown requested, stopping service...", "TranscodeService", "MainLoop")
+                    break
+                
                 self.ShutdownEvent.wait(1)
                 
         except KeyboardInterrupt:
@@ -341,6 +348,28 @@ class TranscodeServiceApp:
             LoggingService.LogException("Error in main loop", e, "TranscodeService", "MainLoop")
         finally:
             self.IsRunning = False
+            # If shutdown was requested, exit the process
+            if self.ShutdownEvent.is_set():
+                LoggingService.LogInfo("Shutdown event set, exiting TranscodeService process", "TranscodeService", "MainLoop")
+                sys.exit(0)
+    
+    def PrivateCheckForGracefulShutdown(self) -> bool:
+        """Check if graceful shutdown has been requested via database status."""
+        try:
+            from Repositories.DatabaseManager import DatabaseManager
+            
+            db_manager = DatabaseManager()
+            service_status = db_manager.GetServiceStatus("TranscodeService")
+            
+            if service_status and service_status.get('Status') == 'GracefulStop':
+                LoggingService.LogInfo("Graceful shutdown detected in database", "TranscodeService", "PrivateCheckForGracefulShutdown")
+                return True
+            
+            return False
+            
+        except Exception as e:
+            LoggingService.LogException("Error checking graceful shutdown status", e, "TranscodeService", "PrivateCheckForGracefulShutdown")
+            return False
     
     def ResetStuckJobs(self):
         """Reset any stuck 'Running' jobs from previous sessions."""
@@ -372,234 +401,136 @@ class TranscodeServiceApp:
         except Exception as e:
             LoggingService.LogException("Error resetting stuck jobs", e, "TranscodeService", "ResetStuckJobs")
     
-    def _StartCommandProcessing(self):
-        """Start command processing thread."""
+    def PrivateStartStatusPolling(self):
+        """Start status polling thread."""
         try:
-            self.CommandProcessingThread = threading.Thread(
-                target=self._CommandProcessingLoop,
+            self.StatusPollingThread = threading.Thread(
+                target=self.PrivateStatusPollingLoop,
                 daemon=True,
-                name="CommandProcessor"
+                name="StatusPoller"
             )
-            self.CommandProcessingThread.start()
-            LoggingService.LogInfo("Command processing started", "TranscodeService", "_StartCommandProcessing")
+            self.StatusPollingThread.start()
+            LoggingService.LogInfo("Status polling started", "TranscodeService", "PrivateStartStatusPolling")
         except Exception as e:
-            LoggingService.LogException("Error starting command processing", e, "TranscodeService", "_StartCommandProcessing")
+            LoggingService.LogException("Error starting status polling", e, "TranscodeService", "PrivateStartStatusPolling")
     
-    def _CommandProcessingLoop(self):
-        """Command processing loop - polls for and executes database commands."""
+    def PrivateStatusPollingLoop(self):
+        """Status polling loop - checks ServiceStatus table for transcoding commands."""
         while not self.ShutdownEvent.is_set():
             try:
-                # Get pending commands for TranscodeService
-                PendingCommands = self.CommandService.GetPendingCommands("TranscodeService")
+                # Get current transcoding status from ServiceStatus table
+                statusResult = self.StatusHelper.GetTranscodingStatus()
                 
-                for Command in PendingCommands:
-                    try:
-                        CommandId = Command["Id"]
-                        CommandType = Command["CommandType"]
-                        Parameters = Command["Parameters"]
+                if statusResult.get("Success", False):
+                    newStatus = statusResult.get("Status", "Stopped")
+                    isProcessing = statusResult.get("IsProcessing", False)
+                    
+                    # Check if status has changed
+                    if newStatus != self.CurrentStatus:
+                        LoggingService.LogInfo(f"Transcoding status changed from {self.CurrentStatus} to {newStatus}", 
+                                             "TranscodeService", "PrivateStatusPollingLoop")
                         
-                        LoggingService.LogInfo(f"Processing command {CommandId}: {CommandType}", 
-                                             "TranscodeService", "_CommandProcessingLoop")
-                        
-                        # Mark command as processing
-                        self.CommandService.UpdateCommandStatus(CommandId, "Processing")
-                        
-                        # Execute the command
-                        Result = self._ExecuteCommand(CommandType, Parameters)
-                        
-                        # Update command with result
-                        if Result.get("Success", False):
-                            self.CommandService.UpdateCommandStatus(
-                                CommandId, "Completed", 
-                                Result=Result, ErrorMessage=None
-                            )
-                            LoggingService.LogInfo(f"Command {CommandId} completed successfully", 
-                                                 "TranscodeService", "_CommandProcessingLoop")
-                        else:
-                            self.CommandService.UpdateCommandStatus(
-                                CommandId, "Failed", 
-                                Result=Result, ErrorMessage=Result.get("ErrorMessage", "Unknown error")
-                            )
-                            LoggingService.LogError(f"Command {CommandId} failed: {Result.get('ErrorMessage', 'Unknown error')}", 
-                                                   "TranscodeService", "_CommandProcessingLoop")
-                            
-                    except Exception as e:
-                        LoggingService.LogException(f"Error processing command {Command.get('Id', 'Unknown')}", 
-                                                 e, "TranscodeService", "_CommandProcessingLoop")
-                        # Mark command as failed
-                        self.CommandService.UpdateCommandStatus(
-                            Command.get("Id", 0), "Failed", 
-                            ErrorMessage=str(e)
-                        )
+                        # Handle status change
+                        self.PrivateHandleStatusChange(newStatus, isProcessing)
+                        self.CurrentStatus = newStatus
                 
-                # Wait 5 seconds before checking for new commands
+                # Wait 5 seconds before next check
                 self.ShutdownEvent.wait(5)
                 
             except Exception as e:
-                LoggingService.LogException("Error in command processing loop", e, "TranscodeService", "_CommandProcessingLoop")
+                LoggingService.LogException("Error in status polling loop", e, "TranscodeService", "PrivateStatusPollingLoop")
                 self.ShutdownEvent.wait(10)
     
-    def _ExecuteCommand(self, CommandType: str, Parameters: dict) -> dict:
-        """Execute a specific command."""
+    def PrivateHandleStatusChange(self, NewStatus: str, IsProcessing: bool):
+        """Handle transcoding status changes."""
         try:
-            if CommandType == "StartTranscoding":
-                return self._ExecuteStartTranscoding(Parameters)
-            elif CommandType == "StopTranscoding":
-                return self._ExecuteStopTranscoding(Parameters)
-            elif CommandType == "PauseTranscoding":
-                return self._ExecutePauseTranscoding(Parameters)
-            elif CommandType == "ResumeTranscoding":
-                return self._ExecuteResumeTranscoding(Parameters)
-            elif CommandType == "GetStatus":
-                return self._ExecuteGetStatus(Parameters)
-            elif CommandType == "HealthCheck":
-                return self._ExecuteHealthCheck(Parameters)
+            LoggingService.LogFunctionEntry("PrivateHandleStatusChange", "TranscodeService", NewStatus)
+            
+            if NewStatus == "Starting":
+                # Service is starting up - update status to Running
+                LoggingService.LogInfo("Service starting up, updating status to Running", "TranscodeService", "PrivateHandleStatusChange")
+                self.UpdateServiceStatus("Running", "Healthy", 0, False)
+                
+            elif NewStatus == "Running" and not IsProcessing:
+                # Start transcoding
+                LoggingService.LogInfo("Starting transcoding based on status change", "TranscodeService", "PrivateHandleStatusChange")
+                result = self.ProcessTranscodeQueue.Run(MaxConcurrentJobs=1)
+                if result.get("Success", False):
+                    LoggingService.LogInfo("Transcoding started successfully", "TranscodeService", "PrivateHandleStatusChange")
+                else:
+                    LoggingService.LogError(f"Failed to start transcoding: {result.get('ErrorMessage', 'Unknown error')}", 
+                                          "TranscodeService", "PrivateHandleStatusChange")
+                    
+            elif NewStatus == "Stopped" and IsProcessing:
+                # Stop transcoding
+                LoggingService.LogInfo("Stopping transcoding based on status change", "TranscodeService", "PrivateHandleStatusChange")
+                result = self.ProcessTranscodeQueue.Stop()
+                if result.get("Success", False):
+                    LoggingService.LogInfo("Transcoding stopped successfully", "TranscodeService", "PrivateHandleStatusChange")
+                else:
+                    LoggingService.LogError(f"Failed to stop transcoding: {result.get('ErrorMessage', 'Unknown error')}", 
+                                          "TranscodeService", "PrivateHandleStatusChange")
+                    
+            elif NewStatus == "GracefulStop":
+                # Handle graceful stop request - allow current job to complete, then stop
+                LoggingService.LogInfo("Graceful stop requested - will complete current job before stopping", 
+                                     "TranscodeService", "PrivateHandleStatusChange")
+                
+                # Set a flag to stop accepting new jobs but allow current job to complete
+                self.ProcessTranscodeQueue.StopRequested = True
+                
+                # Update service status to indicate graceful stop is in progress
+                self.UpdateServiceStatus("GracefulStop", "Stopping", 0, True, "Completing current job before stopping")
+                
+                # Start a monitoring thread to check when current job completes
+                threading.Thread(
+                    target=self.PrivateMonitorGracefulStop,
+                    daemon=True,
+                    name="GracefulStopMonitor"
+                ).start()
+                    
+            elif NewStatus == "Paused" and IsProcessing:
+                # Pause transcoding (same as stop for now)
+                LoggingService.LogInfo("Pausing transcoding based on status change", "TranscodeService", "PrivateHandleStatusChange")
+                result = self.ProcessTranscodeQueue.Stop()
+                if result.get("Success", False):
+                    LoggingService.LogInfo("Transcoding paused successfully", "TranscodeService", "PrivateHandleStatusChange")
+                else:
+                    LoggingService.LogError(f"Failed to pause transcoding: {result.get('ErrorMessage', 'Unknown error')}", 
+                                          "TranscodeService", "PrivateHandleStatusChange")
+                    
+        except Exception as e:
+            LoggingService.LogException("Error handling status change", e, "TranscodeService", "PrivateHandleStatusChange")
+    
+    def PrivateMonitorGracefulStop(self):
+        """Monitor graceful stop progress and complete shutdown when current job finishes."""
+        try:
+            LoggingService.LogInfo("Starting graceful stop monitoring", "TranscodeService", "PrivateMonitorGracefulStop")
+            
+            # Wait for current transcoding to complete
+            while self.ProcessTranscodeQueue.IsProcessing and not self.ShutdownEvent.is_set():
+                LoggingService.LogInfo("Waiting for current transcoding job to complete...", "TranscodeService", "PrivateMonitorGracefulStop")
+                time.sleep(5)  # Check every 5 seconds
+            
+            # Current job has completed, now stop transcoding processing
+            LoggingService.LogInfo("Current job completed, stopping transcoding processing", "TranscodeService", "PrivateMonitorGracefulStop")
+            result = self.ProcessTranscodeQueue.Stop()
+            
+            if result.get("Success", False):
+                LoggingService.LogInfo("Transcoding stopped successfully for graceful shutdown", "TranscodeService", "PrivateMonitorGracefulStop")
             else:
-                return {
-                    "Success": False,
-                    "ErrorMessage": f"Unknown command type: {CommandType}"
-                }
+                LoggingService.LogError(f"Failed to stop transcoding for graceful shutdown: {result.get('ErrorMessage', 'Unknown error')}", 
+                                      "TranscodeService", "PrivateMonitorGracefulStop")
+            
+            # Update service status to Stopped
+            self.UpdateServiceStatus("Stopped", "Stopped", 0, False, "Graceful stop completed")
+            
+            # Signal shutdown event to trigger service termination
+            LoggingService.LogInfo("Graceful stop completed, signaling shutdown", "TranscodeService", "PrivateMonitorGracefulStop")
+            self.ShutdownEvent.set()
+            
         except Exception as e:
-            LoggingService.LogException(f"Error executing command {CommandType}", e, "TranscodeService", "_ExecuteCommand")
-            return {
-                "Success": False,
-                "ErrorMessage": str(e)
-            }
+            LoggingService.LogException("Error in graceful stop monitoring", e, "TranscodeService", "PrivateMonitorGracefulStop")
+            # Force shutdown on error
+            self.ShutdownEvent.set()
     
-    def _ExecuteStartTranscoding(self, Parameters: dict) -> dict:
-        """Execute StartTranscoding command."""
-        try:
-            MaxConcurrentJobs = Parameters.get("MaxConcurrentJobs", 1)
-            
-            # Start transcoding with ProcessTranscodeQueueService
-            Result = self.ProcessTranscodeQueue.Run(MaxConcurrentJobs=MaxConcurrentJobs)
-            
-            if Result.get("Success", False):
-                LoggingService.LogInfo(f"Started transcoding with {MaxConcurrentJobs} concurrent jobs", 
-                                     "TranscodeService", "_ExecuteStartTranscoding")
-                return {
-                    "Success": True,
-                    "Message": f"Transcoding started with {MaxConcurrentJobs} concurrent jobs",
-                    "MaxConcurrentJobs": MaxConcurrentJobs
-                }
-            else:
-                return {
-                    "Success": False,
-                    "ErrorMessage": Result.get("ErrorMessage", "Failed to start transcoding")
-                }
-        except Exception as e:
-            LoggingService.LogException("Error starting transcoding", e, "TranscodeService", "_ExecuteStartTranscoding")
-            return {
-                "Success": False,
-                "ErrorMessage": str(e)
-            }
-    
-    def _ExecuteStopTranscoding(self, Parameters: dict) -> dict:
-        """Execute StopTranscoding command."""
-        try:
-            # Stop transcoding
-            self.ProcessTranscodeQueue.Stop()
-            
-            LoggingService.LogInfo("Stopped transcoding", "TranscodeService", "_ExecuteStopTranscoding")
-            return {
-                "Success": True,
-                "Message": "Transcoding stopped"
-            }
-        except Exception as e:
-            LoggingService.LogException("Error stopping transcoding", e, "TranscodeService", "_ExecuteStopTranscoding")
-            return {
-                "Success": False,
-                "ErrorMessage": str(e)
-            }
-    
-    def _ExecutePauseTranscoding(self, Parameters: dict) -> dict:
-        """Execute PauseTranscoding command."""
-        try:
-            # Pause transcoding (if supported by ProcessTranscodeQueueService)
-            # For now, we'll stop it as pause functionality may not be implemented
-            self.ProcessTranscodeQueue.Stop()
-            
-            LoggingService.LogInfo("Paused transcoding", "TranscodeService", "_ExecutePauseTranscoding")
-            return {
-                "Success": True,
-                "Message": "Transcoding paused"
-            }
-        except Exception as e:
-            LoggingService.LogException("Error pausing transcoding", e, "TranscodeService", "_ExecutePauseTranscoding")
-            return {
-                "Success": False,
-                "ErrorMessage": str(e)
-            }
-    
-    def _ExecuteResumeTranscoding(self, Parameters: dict) -> dict:
-        """Execute ResumeTranscoding command."""
-        try:
-            MaxConcurrentJobs = Parameters.get("MaxConcurrentJobs", 1)
-            
-            # Resume transcoding
-            Result = self.ProcessTranscodeQueue.Run(MaxConcurrentJobs=MaxConcurrentJobs)
-            
-            if Result.get("Success", False):
-                LoggingService.LogInfo(f"Resumed transcoding with {MaxConcurrentJobs} concurrent jobs", 
-                                     "TranscodeService", "_ExecuteResumeTranscoding")
-                return {
-                    "Success": True,
-                    "Message": f"Transcoding resumed with {MaxConcurrentJobs} concurrent jobs"
-                }
-            else:
-                return {
-                    "Success": False,
-                    "ErrorMessage": Result.get("ErrorMessage", "Failed to resume transcoding")
-                }
-        except Exception as e:
-            LoggingService.LogException("Error resuming transcoding", e, "TranscodeService", "_ExecuteResumeTranscoding")
-            return {
-                "Success": False,
-                "ErrorMessage": str(e)
-            }
-    
-    def _ExecuteGetStatus(self, Parameters: dict) -> dict:
-        """Execute GetStatus command."""
-        try:
-            # Get current status
-            Status = self.ProcessTranscodeQueue.GetStatus()
-            
-            return {
-                "Success": True,
-                "Status": Status,
-                "Message": "Status retrieved successfully"
-            }
-        except Exception as e:
-            LoggingService.LogException("Error getting status", e, "TranscodeService", "_ExecuteGetStatus")
-            return {
-                "Success": False,
-                "ErrorMessage": str(e)
-            }
-    
-    def _ExecuteHealthCheck(self, Parameters: dict) -> dict:
-        """Execute HealthCheck command."""
-        try:
-            # Perform health check
-            HealthStatus = "Healthy"
-            if not self.CheckDatabaseConnection():
-                HealthStatus = "Unhealthy"
-            elif self.GetMemoryUsage() > 90:
-                HealthStatus = "Warning"
-            elif self.GetDiskSpace() < 10:
-                HealthStatus = "Warning"
-            
-            return {
-                "Success": True,
-                "HealthStatus": HealthStatus,
-                "MemoryUsage": self.GetMemoryUsage(),
-                "CPUUsage": self.GetCPUUsage(),
-                "DiskSpace": self.GetDiskSpace(),
-                "DatabaseConnection": self.CheckDatabaseConnection(),
-                "Message": f"Health check completed: {HealthStatus}"
-            }
-        except Exception as e:
-            LoggingService.LogException("Error performing health check", e, "TranscodeService", "_ExecuteHealthCheck")
-            return {
-                "Success": False,
-                "ErrorMessage": str(e)
-            }

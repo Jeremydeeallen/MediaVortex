@@ -289,9 +289,6 @@ class ActivityManager {
             console.error('General error loading progress data:', error);
             this.showAlert('Error loading progress data: ' + error.message, 'danger');
         }
-        
-        // Always ensure the page is in a usable state even if some APIs fail
-        this.ensurePageUsability();
     }
 
     async updateTranscodingStatus(statusData) {
@@ -334,8 +331,8 @@ class ActivityManager {
                 <td>${this.escapeHtml(fileName)}</td>
                 <td>${this.formatDate(attempt.AttemptDate)}</td>
                 <td>
-                    <span class="badge ${attempt.Success ? 'bg-success' : (attempt.ErrorMessage ? 'bg-danger' : 'bg-warning')}">
-                        ${attempt.Success ? 'Success' : (attempt.ErrorMessage ? 'Failed' : 'Running')}
+                    <span class="badge ${attempt.Status === 'Success' ? 'bg-success' : (attempt.Status === 'Failed' ? 'bg-danger' : (attempt.Status === 'Running' ? 'bg-warning' : 'bg-secondary'))}">
+                        ${attempt.Status}
                     </span>
                 </td>
                 <td>${attempt.Quality || '-'}</td>

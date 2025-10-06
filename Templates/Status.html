@@ -393,9 +393,14 @@ class ServiceStatusManager {
                     ` : ''}
                 </div>
                 <div class="card-footer">
-                    <small class="text-muted">
-                        Started: ${this.formatDateTime(service.StartTime)}
-                    </small>
+                    <div class="d-flex justify-content-between align-items-center">
+                        <small class="text-muted">
+                            Started: ${this.formatDateTime(service.StartTime)}
+                        </small>
+                        <div class="btn-group btn-group-sm" role="group">
+                            ${this.getServiceControlButtons(service.ServiceName, service.Status)}
+                        </div>
+                    </div>
                 </div>
             </div>
         `;
@@ -584,6 +589,51 @@ class ServiceStatusManager {
         return iconMap[serviceName] || 'fas fa-server';
     }
 
+    getServiceControlButtons(serviceName, status) {
+        let buttons = '';
+        
+        if (status === 'Stopped' || status === 'Error') {
+            // Show Start button for stopped services
+            buttons += `
+                <button type="button" class="btn btn-outline-success" 
+                        onclick="serviceControl('${serviceName}', 'Start')"
+                        title="Start service">
+                    <i class="fas fa-play"></i>
+                </button>
+            `;
+        } else if (status === 'Running' || status === 'Starting') {
+            // Show Stop, GracefulStop, and Restart buttons for running services
+            buttons += `
+                <button type="button" class="btn btn-outline-danger" 
+                        onclick="serviceControl('${serviceName}', 'Stop')"
+                        title="Stop service immediately">
+                    <i class="fas fa-stop"></i>
+                </button>
+                <button type="button" class="btn btn-outline-warning" 
+                        onclick="serviceControl('${serviceName}', 'GracefulStop')"
+                        title="Graceful stop - allow current process to finish">
+                    <i class="fas fa-hand-paper"></i>
+                </button>
+                <button type="button" class="btn btn-outline-primary" 
+                        onclick="serviceControl('${serviceName}', 'Restart')"
+                        title="Restart service">
+                    <i class="fas fa-redo"></i>
+                </button>
+            `;
+        } else if (status === 'GracefulStop' || status === 'Stopping') {
+            // Show only Restart button for services that are stopping
+            buttons += `
+                <button type="button" class="btn btn-outline-primary" 
+                        onclick="serviceControl('${serviceName}', 'Restart')"
+                        title="Restart service">
+                    <i class="fas fa-redo"></i>
+                </button>
+            `;
+        }
+        
+        return buttons;
+    }
+
     getFailureTypeBadge(failureType) {
         return `<span class="badge bg-danger">${failureType}</span>`;
     }
@@ -707,12 +757,17 @@ class ServiceStatusManager {
                     ` : ''}
                 </div>
                 <div class="card-footer">
-                    <small class="text-muted">
-                        <i class="fas fa-database me-1"></i>DB: ${service.DatabaseConnection ? 'Connected' : 'Disconnected'}
-                        <span class="ms-2">
-                            <i class="fas fa-hdd me-1"></i>Disk: ${service.DiskSpace ? service.DiskSpace.toFixed(1) + ' GB' : 'N/A'}
-                        </span>
-                    </small>
+                    <div class="d-flex justify-content-between align-items-center">
+                        <small class="text-muted">
+                            <i class="fas fa-database me-1"></i>DB: ${service.DatabaseConnection ? 'Connected' : 'Disconnected'}
+                            <span class="ms-2">
+                                <i class="fas fa-hdd me-1"></i>Disk: ${service.DiskSpace ? service.DiskSpace.toFixed(1) + ' GB' : 'N/A'}
+                            </span>
+                        </small>
+                        <div class="btn-group btn-group-sm" role="group">
+                            ${this.getServiceControlButtons(service.ServiceName, service.Status)}
+                        </div>
+                    </div>
                 </div>
             </div>
         `;
@@ -846,9 +901,92 @@ class ServiceStatusManager {
     }
 }
 
+// Global function for service control buttons
+async function serviceControl(serviceName, action) {
+    try {
+        // Show confirmation for destructive actions
+        if (action === 'Stop' || action === 'GracefulStop') {
+            const actionText = action === 'Stop' ? 'immediately stop' : 'gracefully stop';
+            if (!confirm(`Are you sure you want to ${actionText} ${serviceName}?`)) {
+                return;
+            }
+        }
+        
+        // Show loading state
+        const button = event.target.closest('button');
+        const originalContent = button.innerHTML;
+        button.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+        button.disabled = true;
+        
+        // Make API call
+        const response = await fetch(`/api/ServiceControl/${serviceName}/${action}`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        // Check if response is JSON
+        const contentType = response.headers.get('content-type');
+        if (!contentType || !contentType.includes('application/json')) {
+            const htmlText = await response.text();
+            console.error('API returned HTML instead of JSON:', htmlText.substring(0, 200));
+            throw new Error(`API returned HTML instead of JSON. Status: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        
+        if (data.Success) {
+            // Show success message
+            showServiceAlert(`Successfully ${action.toLowerCase()}ed ${serviceName}`, 'success');
+            
+            // Refresh the service status
+            if (window.serviceStatusManager) {
+                window.serviceStatusManager.loadServiceStatus();
+            }
+        } else {
+            // Show error message
+            showServiceAlert(`Failed to ${action.toLowerCase()} ${serviceName}: ${data.ErrorMessage || 'Unknown error'}`, 'danger');
+        }
+        
+    } catch (error) {
+        console.error('Error controlling service:', error);
+        showServiceAlert(`Error controlling ${serviceName}: ${error.message}`, 'danger');
+    } finally {
+        // Restore button state
+        if (button) {
+            button.innerHTML = originalContent;
+            button.disabled = false;
+        }
+    }
+}
+
+// Global function to show service alerts
+function showServiceAlert(message, type = 'info') {
+    const alertContainer = document.getElementById('AlertContainer');
+    const alertId = 'alert-' + Date.now();
+    
+    const alertHtml = `
+        <div class="alert alert-${type} alert-dismissible fade show" role="alert" id="${alertId}">
+            ${message}
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        </div>
+    `;
+    
+    alertContainer.insertAdjacentHTML('beforeend', alertHtml);
+    
+    // Auto-remove after 5 seconds
+    setTimeout(() => {
+        const alertElement = document.getElementById(alertId);
+        if (alertElement) {
+            alertElement.remove();
+        }
+    }, 5000);
+}
+
 // Initialize when page loads
 document.addEventListener('DOMContentLoaded', function() {
-    new ServiceStatusManager();
+    window.serviceStatusManager = new ServiceStatusManager();
 });
 </script>
 {% endblock %}

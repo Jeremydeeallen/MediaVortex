@@ -150,6 +150,9 @@ class FileReplacementBusinessService:
                     'ErrorMessage': 'Could not determine KeepSource setting for this transcode attempt'
                 }
             
+            # Archive original file details before replacement
+            self._ArchiveOriginalFileDetails(transcode_attempt.FilePath, TranscodeAttemptId)
+            
             # Process the complete 3-step file replacement
             replacement_result = self._ProcessCompleteFileReplacement(
                 transcode_attempt.FilePath, 
@@ -416,4 +419,34 @@ class FileReplacementBusinessService:
                 'Success': False,
                 'ErrorMessage': f'Exception updating MediaFiles: {str(e)}'
             }
+    
+    def _ArchiveOriginalFileDetails(self, FilePath: str, TranscodeAttemptId: int) -> bool:
+        """Archive original file details before replacement to preserve source data."""
+        try:
+            LoggingService.LogFunctionEntry("_ArchiveOriginalFileDetails", "FileReplacementBusinessService", 
+                                          FilePath, TranscodeAttemptId)
+            
+            # Get the MediaFile record for the original file
+            media_file = self.DatabaseManager.GetMediaFileByPath(FilePath)
+            if not media_file:
+                LoggingService.LogWarning(f"MediaFile record not found for path: {FilePath}", 
+                                        "FileReplacementBusinessService", "_ArchiveOriginalFileDetails")
+                return False
+            
+            # Archive original file details using INSERT SELECT
+            ArchiveId = self.DatabaseManager.SaveMediaFileArchive(media_file.Id, TranscodeAttemptId)
+            
+            if ArchiveId:
+                LoggingService.LogInfo(f"Successfully archived original file details for MediaFile {media_file.Id}, Archive ID: {ArchiveId}", 
+                                     "FileReplacementBusinessService", "_ArchiveOriginalFileDetails")
+                return True
+            else:
+                LoggingService.LogError(f"Failed to archive original file details for MediaFile {media_file.Id}", 
+                                      "FileReplacementBusinessService", "_ArchiveOriginalFileDetails")
+                return False
+                
+        except Exception as e:
+            LoggingService.LogException("Exception archiving original file details", e, 
+                                      "FileReplacementBusinessService", "_ArchiveOriginalFileDetails")
+            return False
     

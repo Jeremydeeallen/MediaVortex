@@ -50,14 +50,6 @@ def ResetAllQueues():
             progressResult = ResetTranscodeProgress(databaseManager)
             resetResults['TranscodeProgress'] = progressResult
         
-        if resetType in ['All', 'Quality']:
-            # Reset Quality Testing Queue
-            qualityResult = ResetQualityTestingQueue(databaseManager)
-            resetResults['QualityTestingQueue'] = qualityResult
-            
-            # Reset Quality Test Progress
-            qualityProgressResult = ResetQualityTestProgress(databaseManager)
-            resetResults['QualityTestProgress'] = qualityProgressResult
         
         if resetType in ['All', 'Service']:
             # Reset Service Commands
@@ -203,74 +195,8 @@ def ResetTranscodeProgress(databaseManager: DatabaseManager) -> Dict[str, Any]:
         return {"Success": False, "ErrorMessage": errorMsg}
 
 
-def ResetQualityTestingQueue(databaseManager: DatabaseManager) -> Dict[str, Any]:
-    """Reset the QualityTestingQueue table by putting testing items back to pending."""
-    try:
-        LoggingService.LogFunctionEntry("ResetQualityTestingQueue", "QueueResetController")
-        
-        # Get count of testing items to be reset
-        countQuery = "SELECT COUNT(*) as Count FROM QualityTestingQueue WHERE Status = 'Testing'"
-        countResult = databaseManager.DatabaseService.ExecuteQuery(countQuery)
-        
-        if not countResult:
-            return {"Success": False, "ErrorMessage": "Failed to count testing queue items"}
-        
-        itemsToReset = countResult[0]['Count'] if countResult else 0
-        
-        # Reset testing items back to pending status
-        resetQuery = "UPDATE QualityTestingQueue SET Status = 'Pending', DateStarted = NULL WHERE Status = 'Testing'"
-        resetResult = databaseManager.DatabaseService.ExecuteNonQuery(resetQuery)
-        
-        if resetResult is not None:
-            LoggingService.LogInfo(f"Reset {itemsToReset} testing items back to pending in QualityTestingQueue", 
-                                 "QueueResetController", "ResetQualityTestingQueue")
-            return {
-                "Success": True,
-                "ItemsReset": itemsToReset,
-                "Message": f"Reset {itemsToReset} testing items back to pending in QualityTestingQueue"
-            }
-        else:
-            return {"Success": False, "ErrorMessage": "Failed to reset QualityTestingQueue"}
-            
-    except Exception as e:
-        errorMsg = f"Exception resetting QualityTestingQueue: {str(e)}"
-        LoggingService.LogException(errorMsg, e, "QueueResetController", "ResetQualityTestingQueue")
-        return {"Success": False, "ErrorMessage": errorMsg}
 
 
-def ResetQualityTestProgress(databaseManager: DatabaseManager) -> Dict[str, Any]:
-    """Reset QualityTestProgress entries."""
-    try:
-        LoggingService.LogFunctionEntry("ResetQualityTestProgress", "QueueResetController")
-        
-        # Get count of active progress entries
-        countQuery = "SELECT COUNT(*) as Count FROM QualityTestProgress WHERE Status = 'Running'"
-        countResult = databaseManager.DatabaseService.ExecuteQuery(countQuery)
-        
-        if not countResult:
-            return {"Success": False, "ErrorMessage": "Failed to count quality test progress entries"}
-        
-        itemsToReset = countResult[0]['Count'] if countResult else 0
-        
-        # Clear all running progress entries
-        clearQuery = "DELETE FROM QualityTestProgress WHERE Status = 'Running'"
-        clearResult = databaseManager.DatabaseService.ExecuteNonQuery(clearQuery)
-        
-        if clearResult is not None:
-            LoggingService.LogInfo(f"Cleared {itemsToReset} quality test progress entries", 
-                                 "QueueResetController", "ResetQualityTestProgress")
-            return {
-                "Success": True,
-                "ItemsReset": itemsToReset,
-                "Message": f"Cleared {itemsToReset} quality test progress entries"
-            }
-        else:
-            return {"Success": False, "ErrorMessage": "Failed to clear QualityTestProgress"}
-            
-    except Exception as e:
-        errorMsg = f"Exception resetting QualityTestProgress: {str(e)}"
-        LoggingService.LogException(errorMsg, e, "QueueResetController", "ResetQualityTestProgress")
-        return {"Success": False, "ErrorMessage": errorMsg}
 
 
 def ResetServiceCommands(databaseManager: DatabaseManager) -> Dict[str, Any]:
@@ -332,13 +258,6 @@ def GetQueueStatus():
         else:
             queueStatus['TranscodeQueue'] = {'Error': 'Failed to get status'}
         
-        # QualityTestingQueue status
-        qualityQuery = "SELECT Status, COUNT(*) as Count FROM QualityTestingQueue GROUP BY Status"
-        qualityResult = databaseManager.DatabaseService.ExecuteQuery(qualityQuery)
-        if qualityResult:
-            queueStatus['QualityTestingQueue'] = {item['Status']: item['Count'] for item in qualityResult}
-        else:
-            queueStatus['QualityTestingQueue'] = {'Error': 'Failed to get status'}
         
         # ServiceCommands status
         serviceQuery = "SELECT Status, COUNT(*) as Count FROM ServiceCommands GROUP BY Status"
@@ -400,9 +319,6 @@ class QueueResetController:
                 resetResults['TranscodeAttempts'] = ResetTranscodeAttempts(self.DatabaseManager)
                 resetResults['TranscodeProgress'] = ResetTranscodeProgress(self.DatabaseManager)
             
-            if resetType in ['All', 'Quality']:
-                resetResults['QualityTestingQueue'] = ResetQualityTestingQueue(self.DatabaseManager)
-                resetResults['QualityTestProgress'] = ResetQualityTestProgress(self.DatabaseManager)
             
             if resetType in ['All', 'Service']:
                 resetResults['ServiceCommands'] = ResetServiceCommands(self.DatabaseManager)

@@ -21,9 +21,21 @@ Add more options in the profiles selection (Av1 with grain get's better results 
 -movflags +faststart: Optimize for web streaming
 -vf scale=...: Scale to 720p with aspect ratio preservation and padding
 
-is transcoding using all cores?
-
 Add smart profile assignment during file scanning
 
 File replacement is currently event driven - We could make it more scaleable by changing it to a queue system and we could add files to it without checking their VMAF score.
+
+Thread suspension: Use thread suspension to pause transcode jobs
+
+## Quality Testing Service Improvements
+
+Service startup recovery: Check for orphaned processes on service start, reattach to running processes if they exist, reset status of jobs that were running.
+
+Advanced error handling: Implement retry logic for failed quality tests, timeout handling for hung processes, and advanced error recovery patterns.
+
+Performance optimizations: Job prioritization, resource monitoring, and advanced queue management.
+
+Manual quality test controls: GUI for manually triggering quality tests, batch operations for skipping multiple tests, and manual override capabilities.
+
+Database transaction management: Implement proper transaction handling for cross-service data updates and rollback mechanisms for partial failures.
 

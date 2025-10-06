@@ -49,6 +49,9 @@ class DatabaseService:
             cursor = connection.cursor()
             cursor.execute(query, parameters)
             connection.commit()
+            # Capture last insert ID for INSERT operations
+            if query.strip().upper().startswith('INSERT'):
+                self.LastInsertId = cursor.lastrowid
             return cursor.rowcount
         finally:
             connection.close()
@@ -66,6 +69,9 @@ class DatabaseService:
     
     def GetLastInsertId(self) -> int:
         """Get the ID of the last inserted row."""
-        # This method is no longer needed since we close connections immediately
-        # The lastrowid should be captured right after the insert
-        return 0
+        try:
+            if hasattr(self, 'LastInsertId'):
+                return self.LastInsertId
+            return 0
+        except Exception:
+            return 0

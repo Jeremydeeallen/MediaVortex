@@ -17,7 +17,6 @@ class TranscodeProfileModel:
     Codec: str = "libsvtav1"  # Video codec (libsvtav1, libx265, libx264, libvpx-vp9)
     Preset: int = 6  # Encoding preset (0-13, higher = slower but better quality)
     FilmGrain: int = 10  # Film grain level (0-50, 0=off)
-    TenBitEncoding: bool = False  # 10-bit color encoding to reduce banding
     YadifMode: int = 1  # Deinterlacing mode (0=off, 1=on, 2=spatial, 3=temporal)
     YadifParity: int = 1  # Deinterlacing parity (0=auto, 1=top, -1=bottom)
     YadifDeint: int = 1  # Deinterlacing type (0=all, 1=interlaced)

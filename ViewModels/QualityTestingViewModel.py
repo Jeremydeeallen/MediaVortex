@@ -1,389 +1,131 @@
-from typing import List, Optional, Dict, Any
+#!/usr/bin/env python3
+"""
+Quality Testing ViewModel
+Presentation logic layer for quality testing using MVVM architecture
+"""
+
+import sys
+import os
 from datetime import datetime
-from Models.QualityTestingQueueModel import QualityTestingQueueModel
-from Services.QualityTestingOrchestratorService import QualityTestingOrchestratorService
+
+# Add the project root to the Python path
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, project_root)
+
+from Services.QualityTestingBusinessService import QualityTestingBusinessService
 from Services.LoggingService import LoggingService
-from Repositories.DatabaseManager import DatabaseManager
 
 
 class QualityTestingViewModel:
-    """Manages quality testing UI state and operations."""
+    """Quality Testing ViewModel - Presentation logic layer."""
     
-    def __init__(self, QualityTestingService: QualityTestingOrchestratorService = None):
-        self.QualityTestingService = QualityTestingService or QualityTestingOrchestratorService()
-        self.DatabaseManager = DatabaseManager()
-        self.QueueItems = []
-        self.QueueStatistics = {}
-        self.IsLoading = False
-        self.ErrorMessage = ""
-        self.SuccessMessage = ""
+    def __init__(self, DatabaseManagerInstance=None, QualityTestingInstance=None, ThreadingInstance=None):
+        """Initialize the ViewModel with dependencies."""
+        self.DatabaseManager = DatabaseManagerInstance
+        self.QualityTestingBusinessService = QualityTestingBusinessService(DatabaseManagerInstance)
+        self.ThreadingService = ThreadingInstance
+        
+        # LoggingService.LogInfo("QualityTestingViewModel initialized", "QualityTestingViewModel", "__init__")
     
-    def GetQualityTestingQueue(self, Page: int = 1, PageSize: int = 25, SortBy: str = "DateAdded", SortOrder: str = "DESC") -> Dict[str, Any]:
-        """Get quality testing queue items with pagination and sorting."""
+    def ProcessQueue(self) -> dict:
+        """Process the quality testing queue."""
         try:
-            LoggingService.LogFunctionEntry("GetQualityTestingQueue", "QualityTestingViewModel", Page, PageSize, SortBy, SortOrder)
+            LoggingService.LogInfo("Processing quality testing queue", "QualityTestingViewModel", "ProcessQueue")
             
-            self.IsLoading = True
-            self.ErrorMessage = ""
+            # Delegate to business service
+            result = self.QualityTestingBusinessService.ProcessQualityTestQueue()
             
-            # Get all queue items from database
-            AllQueueItems = self.DatabaseManager.GetAllQualityTestingQueueItems()
-            
-            # Sort items based on SortBy parameter
-            if SortBy == "DateAdded":
-                AllQueueItems.sort(key=lambda x: x.DateAdded or datetime.min, reverse=(SortOrder == "DESC"))
-            elif SortBy == "Priority":
-                AllQueueItems.sort(key=lambda x: x.Priority or 0, reverse=(SortOrder == "DESC"))
-            elif SortBy == "Status":
-                AllQueueItems.sort(key=lambda x: x.Status or "", reverse=(SortOrder == "DESC"))
-            elif SortBy == "FileName":
-                AllQueueItems.sort(key=lambda x: x.FileName or "", reverse=(SortOrder == "DESC"))
-            elif SortBy == "VMAFScore":
-                AllQueueItems.sort(key=lambda x: x.VMAFScore or 0, reverse=(SortOrder == "DESC"))
-            
-            # Calculate pagination
-            TotalItems = len(AllQueueItems)
-            TotalPages = (TotalItems + PageSize - 1) // PageSize
-            StartIndex = (Page - 1) * PageSize
-            EndIndex = min(StartIndex + PageSize, TotalItems)
-            
-            # Get page items
-            PageItems = AllQueueItems[StartIndex:EndIndex]
-            
-            # Convert to dictionaries for JSON response
-            QueueItemsDict = []
-            for item in PageItems:
-                QueueItemsDict.append({
-                    "Id": item.Id,
-                    "TranscodeAttemptId": item.TranscodeAttemptId,
-                    "OriginalFilePath": item.OriginalFilePath,
-                    "TranscodedFilePath": item.TranscodedFilePath,
-                    "FileName": item.FileName,
-                    "Status": item.Status,
-                    "Priority": item.Priority,
-                    "DateAdded": item.DateAdded.isoformat() if item.DateAdded and hasattr(item.DateAdded, 'isoformat') else str(item.DateAdded) if item.DateAdded else None,
-                    "DateStarted": item.DateStarted.isoformat() if item.DateStarted and hasattr(item.DateStarted, 'isoformat') else str(item.DateStarted) if item.DateStarted else None,
-                    "DateCompleted": item.DateCompleted.isoformat() if item.DateCompleted and hasattr(item.DateCompleted, 'isoformat') else str(item.DateCompleted) if item.DateCompleted else None,
-                    "VMAFScore": item.VMAFScore,
-                    "QualityThreshold": item.QualityThreshold,
-                    "ErrorMessage": item.ErrorMessage,
-                    "RetryCount": item.RetryCount,
-                    "MaxRetries": item.MaxRetries,
-                    "StrategyType": item.StrategyType,
-                    "StrategyId": item.StrategyId,
-                    "AlternativeProfileIds": item.AlternativeProfileIds,
-                    "CustomSettings": item.CustomSettings,
-                    "Results": item.Results,
-                    "SelectedResultId": item.SelectedResultId
-                })
-            
-            # Calculate statistics
-            StatusCounts = {}
-            for item in AllQueueItems:
-                Status = item.Status or "Unknown"
-                StatusCounts[Status] = StatusCounts.get(Status, 0) + 1
-            
-            self.QueueStatistics = {
-                "TotalItems": TotalItems,
-                "TotalPages": TotalPages,
-                "CurrentPage": Page,
-                "PageSize": PageSize,
-                "StatusCounts": StatusCounts
-            }
-            
-            self.IsLoading = False
-            
-            return {
-                "Success": True,
-                "QueueItems": QueueItemsDict,
-                "Statistics": self.QueueStatistics,
-                "Count": len(QueueItemsDict)
-            }
+            LoggingService.LogInfo(f"Queue processing result: {result}", "QualityTestingViewModel", "ProcessQueue")
+            return result
             
         except Exception as e:
-            self.IsLoading = False
-            self.ErrorMessage = f"Failed to get quality testing queue: {str(e)}"
-            LoggingService.LogException(self.ErrorMessage, e, "QualityTestingViewModel", "GetQualityTestingQueue")
-            return {
-                "Success": False,
-                "ErrorMessage": self.ErrorMessage,
-                "QueueItems": [],
-                "Statistics": {},
-                "Count": 0
-            }
+            LoggingService.LogException("Error processing queue", e, "QualityTestingViewModel", "ProcessQueue")
+            return {"Success": False, "Message": str(e)}
     
-    def GetQualityTestingStatus(self) -> Dict[str, Any]:
-        """Get current quality testing service status."""
+    def GetActiveJobs(self) -> dict:
+        """Get list of active quality testing jobs."""
         try:
-            LoggingService.LogFunctionEntry("GetQualityTestingStatus", "QualityTestingViewModel")
+            LoggingService.LogInfo("Getting active quality testing jobs", "QualityTestingViewModel", "GetActiveJobs")
             
-            # Get running jobs count
-            RunningJobs = self.DatabaseManager.GetRunningQualityTestingJobsCount()
+            # Delegate to business service
+            result = self.QualityTestingBusinessService.GetActiveJobs()
             
-            # Get queue statistics
-            QueueStats = self.DatabaseManager.GetQualityTestingQueueStatistics()
-            
-            # Check if service is running (this would be implemented based on your service monitoring)
-            IsQualityTesting = RunningJobs > 0
-            
-            return {
-                "Success": True,
-                "IsQualityTesting": IsQualityTesting,
-                "RunningJobs": RunningJobs,
-                "QueueStatistics": QueueStats,
-                "Timestamp": self.DatabaseManager.DatabaseService.GetCurrentTimestamp()
-            }
+            LoggingService.LogInfo(f"Active jobs result: {result}", "QualityTestingViewModel", "GetActiveJobs")
+            return result
             
         except Exception as e:
-            ErrorMsg = f"Failed to get quality testing status: {str(e)}"
-            LoggingService.LogException(ErrorMsg, e, "QualityTestingViewModel", "GetQualityTestingStatus")
-            return {
-                "Success": False,
-                "ErrorMessage": ErrorMsg,
-                "IsQualityTesting": False,
-                "RunningJobs": 0,
-                "QueueStatistics": {},
-                "Timestamp": None
-            }
+            LoggingService.LogException("Error getting active jobs", e, "QualityTestingViewModel", "GetActiveJobs")
+            return {"Success": False, "Message": str(e)}
     
-    def GetQualityTestingHistory(self, Limit: int = 50) -> Dict[str, Any]:
-        """Get quality testing history."""
+    def CheckMicroServiceStatus(self) -> bool:
+        """Check if microservice is enabled."""
         try:
-            LoggingService.LogFunctionEntry("GetQualityTestingHistory", "QualityTestingViewModel", Limit)
+            # Check if MicroServiceStatus is enabled (assuming it's in ServiceStatus table)
+            microservice_status = self.DatabaseManager.DatabaseService.ExecuteQuery(
+                "SELECT MicroServiceStatus FROM ServiceStatus WHERE ServiceName = ?", 
+                ('QualityTestingService',)
+            )
             
-            # Get recent completed jobs
-            HistoryItems = self.DatabaseManager.GetQualityTestingHistory(Limit)
+            if microservice_status and len(microservice_status) > 0:
+                return bool(microservice_status[0][0])
             
-            # Convert to dictionaries for JSON response
-            HistoryItemsDict = []
-            for item in HistoryItems:
-                HistoryItemsDict.append({
-                    "Id": item.Id,
-                    "TranscodeAttemptId": item.TranscodeAttemptId,
-                    "FileName": item.FileName,
-                    "Status": item.Status,
-                    "VMAFScore": item.VMAFScore,
-                    "QualityThreshold": item.QualityThreshold,
-                    "DateCompleted": item.DateCompleted.isoformat() if item.DateCompleted else None,
-                    "ErrorMessage": item.ErrorMessage
-                })
-            
-            return {
-                "Success": True,
-                "HistoryItems": HistoryItemsDict,
-                "Count": len(HistoryItemsDict)
-            }
+            return False
             
         except Exception as e:
-            ErrorMsg = f"Failed to get quality testing history: {str(e)}"
-            LoggingService.LogException(ErrorMsg, e, "QualityTestingViewModel", "GetQualityTestingHistory")
-            return {
-                "Success": False,
-                "ErrorMessage": ErrorMsg,
-                "HistoryItems": [],
-                "Count": 0
-            }
+            LoggingService.LogException("Error checking microservice status", e, "QualityTestingViewModel", "CheckMicroServiceStatus")
+            return False
     
-    def GetQualityTestingProgress(self) -> Dict[str, Any]:
-        """Get current quality testing progress."""
+    def CheckServiceStatus(self) -> dict:
+        """Check if the service should be running."""
         try:
-            LoggingService.LogFunctionEntry("GetQualityTestingProgress", "QualityTestingViewModel")
+            # Get service status from database
+            service_status = self.DatabaseManager.GetServiceStatus('QualityTestingService')
             
-            # Get running jobs
-            RunningJobs = self.DatabaseManager.GetRunningQualityTestingJobs()
-            
-            # Convert to dictionaries for JSON response
-            RunningJobsDict = []
-            for job in RunningJobs:
-                RunningJobsDict.append({
-                    "Id": job.Id,
-                    "TranscodeAttemptId": job.TranscodeAttemptId,
-                    "FileName": job.FileName,
-                    "Status": job.Status,
-                    "DateStarted": job.DateStarted.isoformat() if job.DateStarted and hasattr(job.DateStarted, 'isoformat') else str(job.DateStarted) if job.DateStarted else None,
-                    "Progress": self.PrivateCalculateJobProgress(job)
-                })
-            
-            # Check if there are any running jobs
-            IsRunning = len(RunningJobsDict) > 0
-            CurrentJob = RunningJobsDict[0] if RunningJobsDict else None
-            
-            # Get progress details for the current job if running
-            Progress = None
-            if CurrentJob:
-                Progress = CurrentJob.get("Progress", {})
-            
-            return {
-                "Success": True,
-                "IsRunning": IsRunning,
-                "CurrentJob": CurrentJob,
-                "Progress": Progress,
-                "RunningJobs": RunningJobsDict,
-                "Count": len(RunningJobsDict)
-            }
+            return service_status
             
         except Exception as e:
-            ErrorMsg = f"Failed to get quality testing progress: {str(e)}"
-            LoggingService.LogException(ErrorMsg, e, "QualityTestingViewModel", "GetQualityTestingProgress")
-            return {
-                "Success": False,
-                "ErrorMessage": ErrorMsg,
-                "RunningJobs": [],
-                "Count": 0
-            }
+            LoggingService.LogException("Error checking service status", e, "QualityTestingViewModel", "CheckServiceStatus")
+            return None
     
-    def GetQualityTestingHistory(self, Limit: int = 5) -> Dict[str, Any]:
-        """Get quality testing history/results."""
+    def StartQualityTest(self, JobId: int) -> dict:
+        """Start a quality test for the specified job."""
         try:
-            LoggingService.LogFunctionEntry("GetQualityTestingHistory", "QualityTestingViewModel", Limit)
+            LoggingService.LogInfo(f"Starting quality test for job {JobId}", "QualityTestingViewModel", "StartQualityTest")
             
-            # Get recent quality test results
-            Results = self.DatabaseManager.GetQualityTestResults(Limit=Limit)
+            # Delegate to business service
+            result = self.QualityTestingBusinessService.StartQualityTest(JobId)
             
-            return {
-                "Success": True,
-                "QualityTestingResults": Results,
-                "Count": len(Results)
-            }
+            LoggingService.LogInfo(f"Start quality test result: {result}", "QualityTestingViewModel", "StartQualityTest")
+            return result
             
         except Exception as e:
-            ErrorMsg = f"Failed to get quality testing history: {str(e)}"
-            LoggingService.LogException(ErrorMsg, e, "QualityTestingViewModel", "GetQualityTestingHistory")
-            return {
-                "Success": False,
-                "ErrorMessage": ErrorMsg,
-                "QualityTestingResults": [],
-                "Count": 0
-            }
+            LoggingService.LogException("Error starting quality test", e, "QualityTestingViewModel", "StartQualityTest")
+            return {"Success": False, "Message": str(e)}
     
-    def RetryQualityTestingJob(self, QueueId: int) -> Dict[str, Any]:
-        """Retry a failed quality testing job."""
+    def GetQualityTestStatus(self, JobId: int) -> dict:
+        """Get status of a specific quality test."""
         try:
-            LoggingService.LogFunctionEntry("RetryQualityTestingJob", "QualityTestingViewModel", QueueId)
+            LoggingService.LogInfo(f"Getting quality test status for job {JobId}", "QualityTestingViewModel", "GetQualityTestStatus")
             
-            # Reset job status and retry count
-            Success = self.DatabaseManager.ResetQualityTestingJobForRetry(QueueId)
+            # Delegate to business service
+            result = self.QualityTestingBusinessService.GetQualityTestStatus(JobId)
             
-            if Success:
-                return {
-                    "Success": True,
-                    "Message": f"Quality testing job {QueueId} reset for retry"
-                }
-            else:
-                return {
-                    "Success": False,
-                    "ErrorMessage": f"Failed to reset quality testing job {QueueId} for retry"
-                }
+            LoggingService.LogInfo(f"Quality test status result: {result}", "QualityTestingViewModel", "GetQualityTestStatus")
+            return result
             
         except Exception as e:
-            ErrorMsg = f"Failed to retry quality testing job {QueueId}: {str(e)}"
-            LoggingService.LogException(ErrorMsg, e, "QualityTestingViewModel", "RetryQualityTestingJob")
-            return {
-                "Success": False,
-                "ErrorMessage": ErrorMsg
-            }
+            LoggingService.LogException("Error getting quality test status", e, "QualityTestingViewModel", "GetQualityTestStatus")
+            return {"Success": False, "Message": str(e)}
     
-    def GetQualityTestingDetails(self, QueueId: int) -> Dict[str, Any]:
-        """Get detailed information about a quality testing job."""
+    def Shutdown(self) -> bool:
+        """Graceful shutdown of the ViewModel."""
         try:
-            LoggingService.LogFunctionEntry("GetQualityTestingDetails", "QualityTestingViewModel", QueueId)
+            LoggingService.LogInfo("Shutting down QualityTestingViewModel", "QualityTestingViewModel", "Shutdown")
             
-            # Get job details
-            JobDetails = self.DatabaseManager.GetQualityTestingJobDetails(QueueId)
-            
-            if JobDetails:
-                return {
-                    "Success": True,
-                    "JobDetails": {
-                        "Id": JobDetails.Id,
-                        "TranscodeAttemptId": JobDetails.TranscodeAttemptId,
-                        "OriginalFilePath": JobDetails.OriginalFilePath,
-                        "TranscodedFilePath": JobDetails.TranscodedFilePath,
-                        "FileName": JobDetails.FileName,
-                        "Status": JobDetails.Status,
-                        "Priority": JobDetails.Priority,
-                        "DateAdded": JobDetails.DateAdded.isoformat() if JobDetails.DateAdded else None,
-                        "DateStarted": JobDetails.DateStarted.isoformat() if JobDetails.DateStarted else None,
-                        "DateCompleted": JobDetails.DateCompleted.isoformat() if JobDetails.DateCompleted else None,
-                        "VMAFScore": JobDetails.VMAFScore,
-                        "QualityThreshold": JobDetails.QualityThreshold,
-                        "ErrorMessage": JobDetails.ErrorMessage,
-                        "RetryCount": JobDetails.RetryCount,
-                        "MaxRetries": JobDetails.MaxRetries,
-                        "StrategyType": JobDetails.StrategyType,
-                        "StrategyId": JobDetails.StrategyId,
-                        "AlternativeProfileIds": JobDetails.AlternativeProfileIds,
-                        "CustomSettings": JobDetails.CustomSettings,
-                        "Results": JobDetails.Results,
-                        "SelectedResultId": JobDetails.SelectedResultId
-                    }
-                }
-            else:
-                return {
-                    "Success": False,
-                    "ErrorMessage": f"Quality testing job {QueueId} not found"
-                }
+            # Just log completion - the worker handles the actual shutdown
+            LoggingService.LogInfo("QualityTestingViewModel shutdown completed", "QualityTestingViewModel", "Shutdown")
+            return True
             
         except Exception as e:
-            ErrorMsg = f"Failed to get quality testing details for job {QueueId}: {str(e)}"
-            LoggingService.LogException(ErrorMsg, e, "QualityTestingViewModel", "GetQualityTestingDetails")
-            return {
-                "Success": False,
-                "ErrorMessage": ErrorMsg
-            }
-    
-    def PrivateCalculateJobProgress(self, Job: QualityTestingQueueModel) -> Dict[str, Any]:
-        """Calculate progress for a quality testing job using real progress data."""
-        try:
-            if not Job.DateStarted:
-                return {"ProgressPercentage": 0, "Percentage": 0, "Status": "Pending", "ETA": "Unknown"}
-            
-            if Job.Status == "Completed":
-                return {"ProgressPercentage": 100, "Percentage": 100, "Status": "Completed", "ETA": "Complete"}
-            elif Job.Status == "Failed":
-                return {"ProgressPercentage": 0, "Percentage": 0, "Status": "Failed", "ETA": "Failed"}
-            elif Job.Status == "Running":
-                # Get real progress data from QualityTestProgress table
-                ProgressData = self.DatabaseManager.GetQualityTestProgress(Job.Id, Job.TranscodeAttemptId)
-                
-                if ProgressData:
-                    # Format percentage to remove decimal points
-                    RawPercentage = ProgressData.get("ProgressPercentage", 0)
-                    FormattedPercentage = int(round(RawPercentage))
-                    
-                    return {
-                        "ProgressPercentage": FormattedPercentage,
-                        "Percentage": FormattedPercentage,  # Keep both for compatibility
-                        "Status": ProgressData.get("Status", "Running"),
-                        "CurrentStep": ProgressData.get("CurrentStep", "Processing..."),
-                        "StartTime": ProgressData.get("StartTime"),
-                        "EndTime": ProgressData.get("EndTime"),
-                        "ErrorMessage": ProgressData.get("ErrorMessage"),
-                        "StrategyType": ProgressData.get("StrategyType"),
-                        "ETA": ProgressData.get("ETA"),
-                        "CurrentTime": ProgressData.get("CurrentTime"),
-                        "CurrentFrame": ProgressData.get("CurrentFrame"),
-                        "TotalFrames": ProgressData.get("TotalFrames"),
-                        "ProcessingSpeed": ProgressData.get("ProcessingSpeed"),
-                        "UpdatedAt": ProgressData.get("UpdatedAt")
-                    }
-                else:
-                    # Fallback to time-based estimate if no progress data
-                    try:
-                        # Convert string to datetime if needed
-                        if isinstance(Job.DateStarted, str):
-                            DateStarted = datetime.fromisoformat(Job.DateStarted.replace('Z', '+00:00'))
-                        else:
-                            DateStarted = Job.DateStarted
-                        ElapsedTime = datetime.now() - DateStarted
-                        EstimatedProgress = min(90, int((ElapsedTime.total_seconds() / 3600) * 20))  # Rough estimate
-                        return {"ProgressPercentage": EstimatedProgress, "Percentage": EstimatedProgress, "Status": "Running", "CurrentStep": "Processing...", "ETA": "Unknown"}
-                    except (ValueError, TypeError) as e:
-                        LoggingService.LogWarning(f"Could not parse DateStarted: {Job.DateStarted}, error: {e}", "QualityTestingViewModel", "PrivateCalculateJobProgress")
-                        return {"ProgressPercentage": 0, "Percentage": 0, "Status": "Running", "CurrentStep": "Processing...", "ETA": "Unknown"}
-            else:
-                return {"ProgressPercentage": 0, "Percentage": 0, "Status": Job.Status or "Unknown", "ETA": "Unknown"}
-                
-        except Exception as e:
-            LoggingService.LogException(f"Error calculating job progress: {str(e)}", e, "QualityTestingViewModel", "PrivateCalculateJobProgress")
-            return {"ProgressPercentage": 0, "Percentage": 0, "Status": "Unknown", "ETA": "Unknown"}
+            LoggingService.LogException("Error during ViewModel shutdown", e, "QualityTestingViewModel", "Shutdown")
+            return False

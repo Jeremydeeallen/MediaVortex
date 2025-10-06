@@ -152,17 +152,9 @@ class CommandBuilder:
     def AddPixelFormatParameter(self, CommandParts: list, CodecParameters: list, ProfileSettings: Dict[str, Any]) -> None:
         """Add pixel format parameter for 10-bit encoding."""
         try:
-            # Create a lookup dictionary for codec parameters
-            ParamLookup = {}
-            for param in CodecParameters:
-                ParamLookup[param['ParameterName']] = param
-            
-            # Add 10-bit encoding pixel format (for libsvtav1)
-            if '10bit-encoding' in ParamLookup:
-                TenBitEncoding = ProfileSettings.get('TenBitEncoding')
-                if TenBitEncoding is not None and TenBitEncoding != '' and TenBitEncoding != 'None' and TenBitEncoding:
-                    # Use yuv420p10le for 10-bit color depth to reduce banding
-                    CommandParts.extend(['-pix_fmt', 'yuv420p10le'])
+            # Always add 10-bit encoding for SVT-AV1 to improve quality and VMAF scores
+            # Use yuv420p10le for 10-bit color depth to reduce banding and improve compression efficiency
+            CommandParts.extend(['-pix_fmt', 'yuv420p10le'])
                 
         except Exception:
             # If anything goes wrong, continue without adding parameters

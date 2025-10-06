@@ -47,7 +47,6 @@ CriticalModules = [
     'Models.QualityTestResultModel',
     'ViewModels.QualityTestingViewModel',
     'Controllers.QualityTestingController',
-    'Services.QualityTestingOrchestratorService'
 ]
 
 for Module in CriticalModules:
@@ -68,11 +67,13 @@ from Controllers.FileScanningController import FileScanningController
 from Controllers.SystemSettingsController import SystemSettingsController
 from Controllers.TranscodeQueueController import TranscodeQueueBlueprint
 from Controllers.TranscodeJobController import TranscodeJobBlueprint
-from Controllers.QualityTestingController import QualityTestingBlueprint
+from Controllers.QualityTestController import QualityTestBlueprint
 from Controllers.FileReplacementController import FileReplacementController
 from Controllers.ServiceStatusController import ServiceStatusBlueprint
+from Controllers.ServiceControlController import ServiceControlBlueprint
 from Controllers.FailureTrackingController import FailureTrackingBlueprint
 from Controllers.QueueResetController import QueueResetBlueprint
+from Controllers.SQLQueriesController import SQLQueriesBlueprint
 
 
 class MediaVortexApp:
@@ -91,7 +92,9 @@ class MediaVortexApp:
         # Initialize service tracking
         self.StartTime = datetime.now()
         self.ServiceStatusThread = None
+        self.StatusPollingThread = None
         self.ShutdownEvent = False
+        self.CurrentStatus = "Stopped"  # Track current service status
         
         # Initialize controllers
         self.ProfileController = ProfileController()
@@ -104,6 +107,56 @@ class MediaVortexApp:
         
         # Start service status tracking
         self.PrivateStartServiceStatusTracking()
+        
+        # Start status polling for service control
+        self.PrivateStartStatusPolling()
+    
+    def PrivateRegisterMediaVortexService(self):
+        """Register MediaVortex service in the ServiceStatus table."""
+        try:
+            print("Registering MediaVortex service in database...")
+            
+            # Create service status entry in database
+            service_status = {
+                'ServiceName': 'MediaVortex',
+                'Status': 'Starting',
+                'HealthStatus': 'Unknown',
+                'StartTime': self.StartTime.isoformat(),
+                'LastHealthCheck': datetime.now().isoformat(),
+                'UptimeSeconds': 0,
+                'MemoryUsage': 0.0,
+                'CPUUsage': 0.0,
+                'DatabaseConnection': True,
+                'DiskSpace': 0.0,
+                'ErrorCount': 0,
+                'MaxErrors': 10,
+                'ActiveJobsCount': 0,
+                'IsProcessing': False,
+                'LastErrorMessage': None,
+                'ProcessId': os.getpid(),
+                'Version': '1.0.0',
+                'ServiceType': 'WebApplication',
+                'MaxConcurrentJobs': 1
+            }
+            
+            print(f"Service status data: {service_status}")
+            
+            # Save to database using DatabaseManager
+            from Repositories.DatabaseManager import DatabaseManager
+            db_manager = DatabaseManager()
+            print("DatabaseManager created, calling SaveServiceStatus...")
+            success = db_manager.SaveServiceStatus(service_status)
+            print(f"SaveServiceStatus returned: {success}")
+            
+            if success:
+                print("✅ MediaVortex service registered in database")
+            else:
+                print("❌ Failed to register MediaVortex service in database")
+                
+        except Exception as e:
+            print(f"❌ Error registering MediaVortex service in database: {e}")
+            import traceback
+            traceback.print_exc()
     
     def PrivateIsServiceAlreadyRunning(self) -> bool:
         """Check if another MediaVortex instance is already running."""
@@ -161,6 +214,11 @@ class MediaVortexApp:
             """Service status page for monitoring microservices."""
             return render_template('Status.html')
         
+        @self.App.route('/SQLQueries')
+        def sqlqueries():
+            """SQL Queries page for database troubleshooting."""
+            return render_template('SQLQueries.html')
+        
         
         @self.App.route('/api/health')
         def health_check():
@@ -177,10 +235,12 @@ class MediaVortexApp:
         self.App.register_blueprint(self.FileReplacementController.Blueprint)
         self.App.register_blueprint(TranscodeQueueBlueprint)
         self.App.register_blueprint(TranscodeJobBlueprint)
-        self.App.register_blueprint(QualityTestingBlueprint)
+        self.App.register_blueprint(QualityTestBlueprint, url_prefix='/api')
         self.App.register_blueprint(ServiceStatusBlueprint, url_prefix='/api')
+        self.App.register_blueprint(ServiceControlBlueprint)
         self.App.register_blueprint(FailureTrackingBlueprint, url_prefix='/api/FailureTracking')
         self.App.register_blueprint(QueueResetBlueprint)
+        self.App.register_blueprint(SQLQueriesBlueprint, url_prefix='/api/SQLQueries')
     
     def PrivateStartServiceStatusTracking(self):
         """Start the service status tracking thread."""
@@ -191,6 +251,19 @@ class MediaVortexApp:
         except Exception as e:
             print(f"❌ Failed to start service status tracking: {e}")
     
+    def PrivateStartStatusPolling(self):
+        """Start status polling thread for service control."""
+        try:
+            self.StatusPollingThread = threading.Thread(
+                target=self.PrivateStatusPollingLoop,
+                daemon=True,
+                name="StatusPoller"
+            )
+            self.StatusPollingThread.start()
+            print("✅ MediaVortex status polling started")
+        except Exception as e:
+            print(f"❌ Failed to start status polling: {e}")
+    
     def PrivateServiceStatusLoop(self):
         """Background thread to update service status."""
         while not self.ShutdownEvent:
@@ -200,6 +273,77 @@ class MediaVortexApp:
             except Exception as e:
                 print(f"Error updating service status: {e}")
                 time.sleep(60)  # Wait longer on error
+    
+    def PrivateStatusPollingLoop(self):
+        """Status polling loop - checks ServiceStatus table for service control commands."""
+        while not self.ShutdownEvent:
+            try:
+                # Get current service status from ServiceStatus table
+                from Repositories.DatabaseManager import DatabaseManager
+                db_manager = DatabaseManager()
+                service_status = db_manager.GetServiceStatus("MediaVortex")
+                
+                if service_status:
+                    new_status = service_status.get('Status', 'Stopped')
+                    
+                    # Check if status has changed
+                    if new_status != self.CurrentStatus:
+                        print(f"MediaVortex service status changed from {self.CurrentStatus} to {new_status}")
+                        
+                        # Handle status change
+                        self.PrivateHandleStatusChange(new_status)
+                        self.CurrentStatus = new_status
+                
+                # Wait 5 seconds before next check
+                time.sleep(5)
+                
+            except Exception as e:
+                print(f"Error in status polling loop: {e}")
+                time.sleep(10)
+    
+    def PrivateHandleStatusChange(self, new_status: str):
+        """Handle service status changes."""
+        try:
+            print(f"Handling MediaVortex status change to: {new_status}")
+            
+            if new_status == "Running":
+                # Service should be running - ensure web server is active
+                print("MediaVortex service status set to Running")
+                self.PrivateUpdateServiceStatus()
+                
+            elif new_status == "Stopped":
+                # Service should be stopped
+                print("MediaVortex service status set to Stopped")
+                self.PrivateUpdateServiceStatus()
+                
+            elif new_status == "GracefulStop":
+                # Handle graceful stop request
+                print("Graceful stop requested for MediaVortex - will complete current requests before stopping")
+                self.PrivateUpdateServiceStatus()
+                
+                # Start a monitoring thread to check when current requests complete
+                threading.Thread(
+                    target=self.PrivateMonitorGracefulStop,
+                    daemon=True,
+                    name="GracefulStopMonitor"
+                ).start()
+                    
+        except Exception as e:
+            print(f"Error handling status change: {e}")
+    
+    def PrivateMonitorGracefulStop(self):
+        """Monitor graceful stop progress and complete shutdown when current requests finish."""
+        try:
+            print("Starting graceful stop monitoring for MediaVortex")
+            # For a web service, we can't easily track "current requests" like transcoding jobs
+            # So we'll just wait a short time for any pending requests to complete
+            time.sleep(5)  # Give 5 seconds for any pending requests
+            print("Graceful stop completed for MediaVortex")
+            self.PrivateUpdateServiceStatus()
+            self.ShutdownEvent = True
+        except Exception as e:
+            print(f"Error in graceful stop monitoring: {e}")
+            self.ShutdownEvent = True
     
     def PrivateUpdateServiceStatus(self):
         """Update MediaVortex service status in database."""
@@ -221,7 +365,7 @@ class MediaVortexApp:
             # Prepare service status data
             service_status = {
                 'ServiceName': 'MediaVortex',
-                'Status': 'Running',
+                'Status': self.CurrentStatus,
                 'HealthStatus': 'Healthy',
                 'StartTime': self.StartTime.isoformat(),
                 'LastHealthCheck': datetime.now().isoformat(),
@@ -294,14 +438,41 @@ class MediaVortexApp:
         print(f"Transcoding Queue page: http://{host}:{port}/TranscodeQueue")
         print(f"Activity page: http://{host}:{port}/Activity")
         print(f"Service Status page: http://{host}:{port}/Status")
+        print(f"SQL Queries page: http://{host}:{port}/SQLQueries")
+        
+        # Register MediaVortex service in database before starting
+        self.PrivateRegisterMediaVortexService()
+        
+        # Set initial status to Running and update database
+        self.CurrentStatus = "Running"
+        self.PrivateUpdateServiceStatus()
         
         try:
             self.App.run(host=host, port=port, debug=debug)
+        except KeyboardInterrupt:
+            print("\n🛑 MediaVortex shutdown requested")
+            self.Shutdown()
+        except Exception as e:
+            print(f"❌ Error running MediaVortex: {e}")
+            self.Shutdown()
         finally:
             # Cleanup on shutdown
             self.ShutdownEvent = True
             if self.ServiceStatusThread and self.ServiceStatusThread.is_alive():
                 self.ServiceStatusThread.join(timeout=5)
+            if self.StatusPollingThread and self.StatusPollingThread.is_alive():
+                self.StatusPollingThread.join(timeout=5)
+    
+    def Shutdown(self):
+        """Shutdown the MediaVortex service gracefully."""
+        try:
+            print("🛑 Initiating MediaVortex shutdown...")
+            self.CurrentStatus = "Stopped"
+            self.PrivateUpdateServiceStatus()
+            self.ShutdownEvent = True
+            print("✅ MediaVortex shutdown complete")
+        except Exception as e:
+            print(f"❌ Error during MediaVortex shutdown: {e}")
 
 
 if __name__ == '__main__':
