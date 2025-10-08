@@ -404,7 +404,7 @@ class QualityTestingBusinessService:
             start_time = time.time()
             
             # Debug: Capture raw FFmpeg output to file
-            debug_file = open('ffmpeg_debug_output.txt', 'w')
+            # debug_file = open('ffmpeg_debug_output.txt', 'w')
             
             while True:
                 # Read a line from stderr (where FFmpeg outputs progress)
@@ -413,8 +413,8 @@ class QualityTestingBusinessService:
                     break
                 
                 # Debug: Write raw output to file
-                debug_file.write(line)
-                debug_file.flush()
+                # debug_file.write(line)
+                # debug_file.flush()
                 
                 # Parse progress from FFmpeg output
                 if 'frame=' in line and 'fps=' in line:
@@ -450,17 +450,17 @@ class QualityTestingBusinessService:
             stdout, stderr = process.communicate()
             
             # Write any remaining output to debug file
-            if stderr:
-                debug_file.write("=== FINAL STDERR ===\n")
-                debug_file.write(stderr)
-                debug_file.write("\n")
-            if stdout:
-                debug_file.write("=== FINAL STDOUT ===\n")
-                debug_file.write(stdout)
-                debug_file.write("\n")
+            # if stderr:
+            #     debug_file.write("=== FINAL STDERR ===\n")
+            #     debug_file.write(stderr)
+            #     debug_file.write("\n")
+            # if stdout:
+            #     debug_file.write("=== FINAL STDOUT ===\n")
+            #     debug_file.write(stdout)
+            #     debug_file.write("\n")
             
             # Close debug file
-            debug_file.close()
+            # debug_file.close()
             
             # Create a result object similar to subprocess.run
             class FFmpegResult:
