@@ -120,7 +120,7 @@ class QualityTestingBusinessService:
             return {"Success": False, "Message": str(e)}
     
     def RunFFmpegVMAF(self, JobDetails: dict, ProgressId: int = None) -> dict:
-        """Run FFmpeg VMAF comparison."""
+        """Run FFmpeg VMAF comparison with resolution scaling."""
         try:
             original_file = JobDetails["LocalSourcePath"]
             transcoded_file = JobDetails["TranscodedFilePath"]
@@ -139,13 +139,27 @@ class QualityTestingBusinessService:
             if not os.path.exists(ffmpeg_path):
                 return {"Success": False, "Error": f"FFmpeg executable not found: {ffmpeg_path}"}
             
-            # Build FFmpeg command for VMAF comparison with threading
+            # Get video resolutions to check if scaling is needed
+            original_resolution = self.GetVideoResolution(original_file, ffmpeg_path)
+            transcoded_resolution = self.GetVideoResolution(transcoded_file, ffmpeg_path)
+            
+            # Check if resolutions match
+            if original_resolution == transcoded_resolution:
+                # Resolutions match - use direct VMAF comparison without scaling
+                vmaf_filter = "[0:v][1:v]libvmaf=log_path=vmaf_output.xml:log_fmt=xml:n_threads=6"
+                LoggingService.LogInfo(f"Resolutions match ({original_resolution[0]}x{original_resolution[1]}) - using direct VMAF comparison", "QualityTestingBusinessService", "RunFFmpegVMAF")
+            else:
+                # Resolutions don't match - determine target resolution and scale both videos
+                target_width, target_height = self.DetermineVMAFTargetResolution(original_resolution, transcoded_resolution)
+                vmaf_filter = f"[0:v]scale={target_width}:{target_height}[dist];[1:v]scale={target_width}:{target_height}[ref];[dist][ref]libvmaf=log_path=vmaf_output.xml:log_fmt=xml:n_threads=6"
+                LoggingService.LogInfo(f"Resolutions don't match (Original: {original_resolution[0]}x{original_resolution[1]}, Transcoded: {transcoded_resolution[0]}x{transcoded_resolution[1]}) - scaling to {target_width}x{target_height}", "QualityTestingBusinessService", "RunFFmpegVMAF")
+            
             command = [
                 ffmpeg_path,
                 "-threads", "6",  # Use 6 threads for faster processing
                 "-i", transcoded_file,
                 "-i", original_file,
-                "-lavfi", "[0:v][1:v]libvmaf=log_path=vmaf_output.xml:log_fmt=xml:n_threads=6",
+                "-lavfi", vmaf_filter,
                 "-f", "null",
                 "-"
             ]
@@ -188,6 +202,79 @@ class QualityTestingBusinessService:
             return {"Success": False, "Error": "FFmpeg timeout (this should not happen as timeout was removed)"}
         except Exception as e:
             return {"Success": False, "Error": str(e)}
+    
+    def GetVideoResolution(self, VideoFilePath: str, FFmpegPath: str) -> tuple:
+        """Get video resolution (width, height) from video file."""
+        try:
+            import subprocess
+            import re
+            
+            # Use FFprobe to get video resolution
+            probe_command = [
+                FFmpegPath.replace("ffmpeg.exe", "ffprobe.exe"),
+                "-v", "quiet",
+                "-select_streams", "v:0",
+                "-show_entries", "stream=width,height",
+                "-of", "csv=p=0",
+                VideoFilePath
+            ]
+            
+            result = subprocess.run(probe_command, capture_output=True, text=True, timeout=30)
+            
+            if result.returncode == 0 and result.stdout.strip():
+                # Parse width,height from output
+                resolution_line = result.stdout.strip()
+                if ',' in resolution_line:
+                    width, height = resolution_line.split(',')
+                    return (int(width), int(height))
+            
+            # Fallback: try to parse from ffmpeg info
+            info_command = [FFmpegPath, "-i", VideoFilePath, "-f", "null", "-"]
+            result = subprocess.run(info_command, capture_output=True, text=True, timeout=30)
+            
+            if result.stderr:
+                # Look for resolution in stderr output
+                resolution_match = re.search(r'(\d+)x(\d+)', result.stderr)
+                if resolution_match:
+                    width = int(resolution_match.group(1))
+                    height = int(resolution_match.group(2))
+                    return (width, height)
+            
+            # Default fallback
+            LoggingService.LogWarning(f"Could not determine resolution for {VideoFilePath}, using default 1920x1080", "QualityTestingBusinessService", "GetVideoResolution")
+            return (1920, 1080)
+            
+        except Exception as e:
+            LoggingService.LogException(f"Error getting video resolution for {VideoFilePath}", e, "QualityTestingBusinessService", "GetVideoResolution")
+            return (1920, 1080)  # Default fallback
+    
+    def DetermineVMAFTargetResolution(self, OriginalResolution: tuple, TranscodedResolution: tuple) -> tuple:
+        """Determine target resolution for VMAF comparison (use smaller resolution)."""
+        try:
+            original_width, original_height = OriginalResolution
+            transcoded_width, transcoded_height = TranscodedResolution
+            
+            # Use the smaller resolution to avoid upscaling
+            if (transcoded_width * transcoded_height) <= (original_width * original_height):
+                target_width = transcoded_width
+                target_height = transcoded_height
+                LoggingService.LogInfo(f"Using transcoded resolution for VMAF: {target_width}x{target_height}", "QualityTestingBusinessService", "DetermineVMAFTargetResolution")
+            else:
+                target_width = original_width
+                target_height = original_height
+                LoggingService.LogInfo(f"Using original resolution for VMAF: {target_width}x{target_height}", "QualityTestingBusinessService", "DetermineVMAFTargetResolution")
+            
+            # Ensure dimensions are even numbers (required by some codecs)
+            if target_width % 2 != 0:
+                target_width -= 1
+            if target_height % 2 != 0:
+                target_height -= 1
+            
+            return (target_width, target_height)
+            
+        except Exception as e:
+            LoggingService.LogException("Error determining VMAF target resolution", e, "QualityTestingBusinessService", "DetermineVMAFTargetResolution")
+            return (1920, 1080)  # Default fallback
     
     def ParseVMAFScore(self, Output: str) -> float:
         """Parse VMAF score from FFmpeg output."""
@@ -427,6 +514,10 @@ class QualityTestingBusinessService:
                         speed = progress_info.get('speed', 0.0)
                         eta = progress_info.get('eta', '')
                         
+                        # Debug logging for ETA calculation
+                        if current_frame % 100 == 0:  # Log every 100 frames to avoid spam
+                            LoggingService.LogInfo(f"VMAF Progress - Frame: {current_frame}, Progress: {progress_percent:.1f}%, ETA: {eta}, Speed: {speed:.2f}x", "QualityTestingBusinessService", "ExecuteFFmpegWithProgress")
+                        
                         # Update progress for every frame - real-time updates
                         if current_frame > 0:
                             # Create a simple current step description
@@ -542,20 +633,41 @@ class QualityTestingBusinessService:
                             if video_duration > 0:
                                 progress_percent = min(95, (total_seconds / video_duration) * 100)
                                 
-                                # Calculate ETA based on actual video duration and processing speed
-                                if speed > 0:
-                                    # Total processing time = video duration / speed
-                                    total_processing_time = video_duration / speed
-                                    remaining_time = total_processing_time - total_seconds
-                                    
-                                    if remaining_time > 0:
-                                        eta_hours = int(remaining_time // 3600)
-                                        eta_minutes = int((remaining_time % 3600) // 60)
-                                        eta_seconds = int(remaining_time % 60)
+                                # Calculate ETA based on processing speed and remaining time
+                                if speed > 0 and total_seconds > 0:
+                                    # For VMAF processing, estimate based on current progress and speed
+                                    # VMAF typically processes at a fraction of real-time speed
+                                    if progress_percent > 0:
+                                        # Estimate total time based on current progress and speed
+                                        estimated_total_time = total_seconds / (progress_percent / 100.0)
+                                        remaining_time = estimated_total_time - total_seconds
+                                        
+                                        if remaining_time > 0:
+                                            eta_hours = int(remaining_time // 3600)
+                                            eta_minutes = int((remaining_time % 3600) // 60)
+                                            eta_seconds = int(remaining_time % 60)
+                                            eta = f"{eta_hours:02d}:{eta_minutes:02d}:{eta_seconds:02d}"
+                                            LoggingService.LogDebug(f"ETA calculated: {eta} (remaining_time: {remaining_time:.1f}s, total_time: {estimated_total_time:.1f}s)", "QualityTestingBusinessService", "ParseFFmpegProgressLine")
+                                        else:
+                                            eta = "00:00:01"  # Almost done
+                                    else:
+                                        # Very early in processing, use a rough estimate
+                                        eta = "Calculating..."
+                                else:
+                                    # Fallback ETA calculation
+                                    if total_seconds > 0:
+                                        # Rough estimate: assume VMAF takes 2-3x video duration
+                                        estimated_remaining = max(30, video_duration * 2 - total_seconds)
+                                        eta_hours = int(estimated_remaining // 3600)
+                                        eta_minutes = int((estimated_remaining % 3600) // 60)
+                                        eta_seconds = int(estimated_remaining % 60)
                                         eta = f"{eta_hours:02d}:{eta_minutes:02d}:{eta_seconds:02d}"
+                                    else:
+                                        eta = "Calculating..."
                             else:
                                 # Fallback: rough estimate based on time elapsed
                                 progress_percent = min(90, (total_seconds / 30) * 10)
+                                eta = "Calculating..."
                             
                     except (ValueError, IndexError):
                         pass

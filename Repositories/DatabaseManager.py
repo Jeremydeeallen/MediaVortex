@@ -3025,12 +3025,14 @@ class DatabaseManager:
             return None
     
     def GetQualityTestQueue(self) -> list:
-        """Get pending quality test jobs in queue ordered by priority and date"""
+        """Get all quality test jobs in queue ordered by priority and date"""
         try:
             query = """
-                SELECT Id, OriginalFilePath, TranscodedFilePath, Status, VMAFScore, CreatedDate, Priority, DateAdded
+                SELECT Id, TranscodeAttemptId, OriginalFilePath, TranscodedFilePath, FileName, Status, Priority, 
+                       DateAdded, DateStarted, DateCompleted, ErrorMessage, RetryCount, MaxRetries, 
+                       StrategyType, StrategyId, AlternativeProfileIds, CustomSettings, VMAFScore, 
+                       CreatedDate, CompletedDate, LocalSourcePath
                 FROM QualityTestingQueue 
-                WHERE Status = 'Pending'
                 ORDER BY Priority DESC, DateAdded ASC, CreatedDate ASC
             """
             rows = self.DatabaseService.ExecuteQuery(query)
@@ -3039,13 +3041,26 @@ class DatabaseManager:
             for row in rows:
                 jobs.append({
                     "Id": row["Id"],
+                    "TranscodeAttemptId": row["TranscodeAttemptId"],
                     "OriginalFilePath": row["OriginalFilePath"],
                     "TranscodedFilePath": row["TranscodedFilePath"],
+                    "FileName": row["FileName"],
                     "Status": row["Status"],
+                    "Priority": row["Priority"],
+                    "DateAdded": row["DateAdded"],
+                    "DateStarted": row["DateStarted"],
+                    "DateCompleted": row["DateCompleted"],
+                    "ErrorMessage": row["ErrorMessage"],
+                    "RetryCount": row["RetryCount"],
+                    "MaxRetries": row["MaxRetries"],
+                    "StrategyType": row["StrategyType"],
+                    "StrategyId": row["StrategyId"],
+                    "AlternativeProfileIds": row["AlternativeProfileIds"],
+                    "CustomSettings": row["CustomSettings"],
                     "VMAFScore": row["VMAFScore"],
                     "CreatedDate": row["CreatedDate"],
-                    "Priority": row["Priority"],
-                    "DateAdded": row["DateAdded"]
+                    "CompletedDate": row["CompletedDate"],
+                    "LocalSourcePath": row["LocalSourcePath"]
                 })
             return jobs
             
@@ -3070,6 +3085,130 @@ class DatabaseManager:
         except Exception as e:
             LoggingService.LogException("Exception updating quality test status", e, "DatabaseManager", "UpdateQualityTestStatus")
             return False
+    
+    def ResetQualityTestJobForRetry(self, JobId: int) -> bool:
+        """Reset a quality test job for retry by setting status to Pending and incrementing retry count"""
+        try:
+            query = """UPDATE QualityTestingQueue 
+                       SET Status = 'Pending', 
+                           RetryCount = COALESCE(RetryCount, 0) + 1,
+                           ErrorMessage = NULL,
+                           DateStarted = NULL,
+                           DateCompleted = NULL,
+                           CompletedDate = NULL
+                       WHERE Id = ?"""
+            
+            rows_affected = self.DatabaseService.ExecuteNonQuery(query, (JobId,))
+            return rows_affected > 0
+            
+        except Exception as e:
+            LoggingService.LogException("Exception resetting quality test job for retry", e, "DatabaseManager", "ResetQualityTestJobForRetry")
+            return False
+    
+    def GetQualityTestResults(self, Limit: int = 10) -> list:
+        """Get recent quality test results from QualityTestResults table joined with TranscodeAttempts"""
+        try:
+            query = """
+                SELECT 
+                    qtr.Id, qtr.VMAFQueueId, qtr.TranscodeAttemptId, qtr.VMAFScore, 
+                    qtr.ProfileId, qtr.ProfileName, qtr.FileSize, qtr.TestDuration, 
+                    qtr.PassesThreshold, qtr.Rank, qtr.ErrorMessage, qtr.DateTested,
+                    ta.FilePath, ta.OldSizeBytes, ta.NewSizeBytes, ta.SizeReductionBytes, 
+                    ta.SizeReductionPercent, ta.TranscodeDurationSeconds, ta.ProfileName as TranscodeProfileName,
+                    ta.Quality, ta.AttemptDate
+                FROM QualityTestResults qtr
+                LEFT JOIN TranscodeAttempts ta ON qtr.TranscodeAttemptId = ta.Id
+                ORDER BY qtr.DateTested DESC 
+                LIMIT ?
+            """
+            rows = self.DatabaseService.ExecuteQuery(query, (Limit,))
+            
+            results = []
+            for row in rows:
+                results.append({
+                    "Id": row["Id"],
+                    "VMAFQueueId": row["VMAFQueueId"],
+                    "TranscodeAttemptId": row["TranscodeAttemptId"],
+                    "VMAFScore": row["VMAFScore"],
+                    "ProfileId": row["ProfileId"],
+                    "ProfileName": row["ProfileName"],
+                    "FileSize": row["FileSize"],
+                    "TestDuration": row["TestDuration"],
+                    "PassesThreshold": row["PassesThreshold"],
+                    "Rank": row["Rank"],
+                    "ErrorMessage": row["ErrorMessage"],
+                    "DateTested": row["DateTested"],
+                    "FilePath": row["FilePath"],
+                    "OldSizeBytes": row["OldSizeBytes"],
+                    "NewSizeBytes": row["NewSizeBytes"],
+                    "SizeReductionBytes": row["SizeReductionBytes"],
+                    "SizeReductionPercent": row["SizeReductionPercent"],
+                    "TranscodeDurationSeconds": row["TranscodeDurationSeconds"],
+                    "Quality": row["Quality"],
+                    "TranscodeProfileName": row["TranscodeProfileName"],
+                    "AttemptDate": row["AttemptDate"],
+                    "Success": row["PassesThreshold"] and not row["ErrorMessage"]
+                })
+            return results
+            
+        except Exception as e:
+            LoggingService.LogException("Exception getting quality test results", e, "DatabaseManager", "GetQualityTestResults")
+            return []
+    
+    def GetRunningQualityTestProgress(self) -> dict:
+        """Get running quality test progress from QualityTestProgress table with file information"""
+        try:
+            query = """
+                SELECT 
+                    qtp.Id, 
+                    qtp.TranscodeAttemptId, 
+                    qtp.Status, 
+                    qtp.ProgressPercentage, 
+                    qtp.CurrentStep, 
+                    qtp.CurrentFrame, 
+                    qtp.CurrentTime, 
+                    qtp.ProcessingSpeed, 
+                    qtp.ETA, 
+                    qtp.StartTime, 
+                    qtp.UpdatedAt,
+                    qtq.FileName,
+                    qtq.OriginalFilePath,
+                    qtq.TranscodedFilePath,
+                    qtq.LocalSourcePath
+                FROM QualityTestProgress qtp
+                LEFT JOIN QualityTestingQueue qtq ON qtp.TranscodeAttemptId = qtq.TranscodeAttemptId
+                WHERE qtp.Status = 'Processing' 
+                ORDER BY qtp.StartTime DESC 
+                LIMIT 1
+            """
+            rows = self.DatabaseService.ExecuteQuery(query)
+            
+            if rows and len(rows) > 0:
+                row = rows[0]
+                return {
+                    "Id": row["Id"],
+                    "TranscodeAttemptId": row["TranscodeAttemptId"],
+                    "Status": row["Status"],
+                    "ProgressPercentage": row["ProgressPercentage"],
+                    "CurrentStep": row["CurrentStep"],
+                    "CurrentFrame": row["CurrentFrame"],
+                    "CurrentTime": row["CurrentTime"],
+                    "ProcessingSpeed": row["ProcessingSpeed"],
+                    "ETA": row["ETA"],
+                    "StartTime": row["StartTime"],
+                    "UpdatedAt": row["UpdatedAt"],
+                    "FileName": row["FileName"] or f"TranscodeAttempt_{row['TranscodeAttemptId']}",
+                    "OriginalFilePath": row["OriginalFilePath"] or f"TranscodeAttempt_{row['TranscodeAttemptId']}",
+                    "TranscodedFilePath": row["TranscodedFilePath"] or f"TranscodeAttempt_{row['TranscodeAttemptId']}",
+                    "LocalSourcePath": row["LocalSourcePath"],
+                    "EndTime": None,
+                    "ErrorMessage": None
+                }
+            return None
+            
+        except Exception as e:
+            LoggingService.LogException("Exception getting running quality test progress", e, "DatabaseManager", "GetRunningQualityTestProgress")
+            return None
     
     def ClaimQualityTestJob(self) -> dict:
         """Atomically claim a pending quality test job to prevent race conditions."""

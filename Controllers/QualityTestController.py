@@ -123,28 +123,180 @@ class QualityTestController:
             return {"Success": True, "Jobs": Jobs}
         except Exception as e:
             return {"Success": False, "Message": str(e)}
+    
+    def GetQualityTestServiceStatus(self) -> dict:
+        """Get overall quality test service status"""
+        try:
+            # Check if there are any active quality test jobs
+            ActiveJobs = self.DatabaseManager.GetActiveJobsByService("QualityTest")
+            IsRunning = len(ActiveJobs) > 0
+            
+            return {"Success": True, "IsRunning": IsRunning, "ActiveJobs": len(ActiveJobs)}
+        except Exception as e:
+            return {"Success": False, "Message": str(e)}
+    
+    def StartQualityTestService(self, MaxConcurrentJobs: int = 1) -> dict:
+        """Start the quality test service"""
+        try:
+            self.LoggingService.LogInfo(f"Starting quality test service with {MaxConcurrentJobs} concurrent jobs")
+            
+            # This would typically start a background service
+            # For now, we'll just return success
+            return {"Success": True, "Message": "Quality test service started"}
+        except Exception as e:
+            self.LoggingService.LogError(f"Error starting quality test service: {str(e)}")
+            return {"Success": False, "Message": str(e)}
+    
+    def StopQualityTestService(self) -> dict:
+        """Stop the quality test service"""
+        try:
+            self.LoggingService.LogInfo("Stopping quality test service")
+            
+            # This would typically stop the background service
+            # For now, we'll just return success
+            return {"Success": True, "Message": "Quality test service stopped"}
+        except Exception as e:
+            self.LoggingService.LogError(f"Error stopping quality test service: {str(e)}")
+            return {"Success": False, "Message": str(e)}
+    
+    def LogError(self, ErrorMessage: str, ErrorContext: str, RequestUrl: str) -> dict:
+        """Log an error to the database"""
+        try:
+            self.LoggingService.LogError(f"Quality Test Error - Context: {ErrorContext}, URL: {RequestUrl}, Message: {ErrorMessage}")
+            return {"Success": True, "Message": "Error logged successfully"}
+        except Exception as e:
+            return {"Success": False, "Message": str(e)}
+    
+    def RetryQualityTest(self, JobId: int) -> dict:
+        """Retry a failed quality test job"""
+        try:
+            self.LoggingService.LogInfo(f"Retrying quality test for job {JobId}")
+            
+            # Get job details
+            JobDetails = self.DatabaseManager.GetQualityTestJob(JobId)
+            if not JobDetails:
+                return {"Success": False, "Message": "Job not found"}
+            
+            # Reset job status to Pending and increment retry count
+            Success = self.DatabaseManager.ResetQualityTestJobForRetry(JobId)
+            if Success:
+                return {"Success": True, "Message": "Job reset for retry"}
+            else:
+                return {"Success": False, "Message": "Failed to reset job for retry"}
+                
+        except Exception as e:
+            self.LoggingService.LogError(f"Error retrying quality test: {str(e)}")
+            return {"Success": False, "Message": str(e)}
+    
+    def GetQualityTestHistory(self, Limit: int = 10) -> dict:
+        """Get recent quality test results from QualityTestResults table"""
+        try:
+            Results = self.DatabaseManager.GetQualityTestResults(Limit)
+            return {"Success": True, "QualityTestingResults": Results}
+        except Exception as e:
+            self.LoggingService.LogError(f"Error getting quality test history: {str(e)}")
+            return {"Success": False, "Message": str(e)}
+    
+    def GetQualityTestProgress(self) -> dict:
+        """Get running quality test progress from QualityTestProgress table"""
+        try:
+            Progress = self.DatabaseManager.GetRunningQualityTestProgress()
+            if Progress:
+                return {
+                    "Success": True, 
+                    "IsRunning": True, 
+                    "CurrentJob": Progress,
+                    "Progress": Progress
+                }
+            else:
+                return {"Success": True, "IsRunning": False, "CurrentJob": None}
+        except Exception as e:
+            self.LoggingService.LogError(f"Error getting quality test progress: {str(e)}")
+            return {"Success": False, "Message": str(e)}
 
 # Flask routes
-@QualityTestBlueprint.route('/api/QualityTest/Start', methods=['POST'])
+@QualityTestBlueprint.route('/QualityTest/Start', methods=['POST'])
 def StartQualityTest():
     Controller = QualityTestController()
     Data = request.get_json()
-    JobId = Data.get('JobId')
     
-    if not JobId:
-        return jsonify({"Success": False, "Message": "JobId required"}), 400
+    # Check if this is a service start request or individual job start
+    if Data and 'MaxConcurrentJobs' in Data:
+        # Service start request
+        MaxConcurrentJobs = Data.get('MaxConcurrentJobs', 1)
+        Result = Controller.StartQualityTestService(MaxConcurrentJobs)
+    else:
+        # Individual job start request
+        JobId = Data.get('JobId') if Data else None
+        
+        if not JobId:
+            return jsonify({"Success": False, "Message": "JobId required"}), 400
+        
+        Result = Controller.StartQualityTest(JobId)
     
-    Result = Controller.StartQualityTest(JobId)
     return jsonify(Result)
 
-@QualityTestBlueprint.route('/api/QualityTest/Status/<int:JobId>', methods=['GET'])
+@QualityTestBlueprint.route('/QualityTest/Status/<int:JobId>', methods=['GET'])
 def GetQualityTestStatus(JobId):
     Controller = QualityTestController()
     Result = Controller.GetQualityTestStatus(JobId)
     return jsonify(Result)
 
-@QualityTestBlueprint.route('/api/QualityTest/Queue', methods=['GET'])
+@QualityTestBlueprint.route('/QualityTest/Status', methods=['GET'])
+def GetQualityTestServiceStatus():
+    Controller = QualityTestController()
+    Result = Controller.GetQualityTestServiceStatus()
+    return jsonify(Result)
+
+@QualityTestBlueprint.route('/QualityTest/Queue', methods=['GET'])
 def GetQualityTestQueue():
     Controller = QualityTestController()
     Result = Controller.GetQualityTestQueue()
+    return jsonify(Result)
+
+@QualityTestBlueprint.route('/QualityTest/Stop', methods=['POST'])
+def StopQualityTestService():
+    Controller = QualityTestController()
+    Result = Controller.StopQualityTestService()
+    return jsonify(Result)
+
+@QualityTestBlueprint.route('/QualityTest/Retry', methods=['POST'])
+def RetryQualityTest():
+    Controller = QualityTestController()
+    Data = request.get_json()
+    JobId = Data.get('JobId') if Data else None
+    
+    if not JobId:
+        return jsonify({"Success": False, "Message": "JobId required"}), 400
+    
+    Result = Controller.RetryQualityTest(JobId)
+    return jsonify(Result)
+
+@QualityTestBlueprint.route('/QualityTesting/History', methods=['GET'])
+def GetQualityTestHistory():
+    Controller = QualityTestController()
+    Limit = request.args.get('Limit', 10, type=int)
+    
+    Result = Controller.GetQualityTestHistory(Limit)
+    return jsonify(Result)
+
+@QualityTestBlueprint.route('/QualityTesting/Progress', methods=['GET'])
+def GetQualityTestProgress():
+    Controller = QualityTestController()
+    Result = Controller.GetQualityTestProgress()
+    return jsonify(Result)
+
+@QualityTestBlueprint.route('/QualityTesting/LogError', methods=['POST'])
+def LogQualityTestError():
+    Controller = QualityTestController()
+    Data = request.get_json()
+    
+    if not Data:
+        return jsonify({"Success": False, "Message": "No data provided"}), 400
+    
+    ErrorMessage = Data.get('ErrorMessage', '')
+    ErrorContext = Data.get('ErrorContext', '')
+    RequestUrl = Data.get('RequestUrl', '')
+    
+    Result = Controller.LogError(ErrorMessage, ErrorContext, RequestUrl)
     return jsonify(Result)

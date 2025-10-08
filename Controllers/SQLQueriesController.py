@@ -224,40 +224,7 @@ def GetTranscodeQueue():
         LoggingService.LogException(error_msg, e, "SQLQueriesController", "GetTranscodeQueue")
         return jsonify({"Success": False, "ErrorMessage": error_msg}), 500
 
-@SQLQueriesBlueprint.route('/GetQualityTestQueue', methods=['GET'])
-def GetQualityTestQueue():
-    """Get quality testing queue status."""
-    try:
-        LoggingService.LogFunctionEntry("GetQualityTestQueue", "SQLQueriesController")
-        
-        query = """
-        SELECT Id, TranscodeAttemptId, OriginalFilePath, TranscodedFilePath, FileName, 
-               Status, Priority, DateAdded, DateStarted, DateCompleted, 
-               VMAFScore, ErrorMessage, RetryCount, MaxRetries, StrategyType, StrategyId
-        FROM QualityTestingQueue
-        ORDER BY Priority DESC, DateAdded ASC
-        LIMIT 100
-        """
-        
-        results = SharedDatabaseManager.DatabaseService.ExecuteQuery(query)
-        
-        if results:
-            rows = [dict(row) for row in results]
-        else:
-            rows = []
-        
-        LoggingService.LogInfo(f"Retrieved {len(rows)} quality test queue items", "SQLQueriesController", "GetQualityTestQueue")
-        
-        return jsonify({
-            "Success": True,
-            "QueueItems": rows,
-            "Count": len(rows)
-        })
-        
-    except Exception as e:
-        error_msg = f"Exception getting quality test queue: {str(e)}"
-        LoggingService.LogException(error_msg, e, "SQLQueriesController", "GetQualityTestQueue")
-        return jsonify({"Success": False, "ErrorMessage": error_msg}), 500
+# GetQualityTestQueue endpoint removed - now handled by QualityTestController at /api/QualityTest/Queue
 
 @SQLQueriesBlueprint.route('/GetErrorSummary', methods=['GET'])
 def GetErrorSummary():

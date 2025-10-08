@@ -365,7 +365,7 @@ class MediaVortexApp:
             # Prepare service status data
             service_status = {
                 'ServiceName': 'MediaVortex',
-                'Status': self.CurrentStatus,
+                'Status': 'Running',  # MediaVortex is always running when this method is called
                 'HealthStatus': 'Healthy',
                 'StartTime': self.StartTime.isoformat(),
                 'LastHealthCheck': datetime.now().isoformat(),

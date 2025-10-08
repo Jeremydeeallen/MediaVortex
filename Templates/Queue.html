@@ -129,11 +129,14 @@
                                 <th>ID</th>
                                 <th>File Name</th>
                                 <th>Status</th>
-                                <th>Quality Score</th>
-                                <th>Quality Threshold</th>
+                                <th>Priority</th>
+                                <th>VMAF Score</th>
+                                <th>Strategy</th>
+                                <th>Retry</th>
                                 <th>Date Added</th>
                                 <th>Date Started</th>
                                 <th>Date Completed</th>
+                                <th>Error</th>
                                 <th>Actions</th>
                             </tr>
                         </thead>
@@ -1585,7 +1588,7 @@ class TranscodeQueueManager {
             console.log('No quality testing queue items to display'); // Debug logging
             const row = document.createElement('tr');
             row.innerHTML = `
-                <td colspan="9" class="text-center text-muted py-4">
+                <td colspan="12" class="text-center text-muted py-4">
                     <i class="fas fa-inbox fa-2x mb-2"></i><br>
                     No quality testing queue items found
                 </td>
@@ -1597,15 +1600,43 @@ class TranscodeQueueManager {
                 const row = document.createElement('tr');
                 row.innerHTML = `
                     <td>${item.Id}</td>
-                    <td>${this.escapeHtml(item.OriginalFilePath ? item.OriginalFilePath.split('\\').pop() : 'Unknown')}</td>
+                    <td>
+                        <div class="text-truncate" style="max-width: 200px;" title="${this.escapeHtml(item.OriginalFilePath || '')}">
+                            ${this.escapeHtml(item.FileName || (item.OriginalFilePath ? item.OriginalFilePath.split('\\').pop() : 'Unknown'))}
+                        </div>
+                    </td>
                     <td>
                         <span class="badge ${this.GetQualityTestingStatusBadgeClass(item.Status)}">${item.Status}</span>
                     </td>
-                    <td>${item.VMAFScore ? item.VMAFScore.toFixed(2) : '-'}</td>
-                    <td>-</td>
-                    <td>${this.formatDate(item.CreatedDate)}</td>
-                    <td>-</td>
-                    <td>-</td>
+                    <td>
+                        <span class="badge ${this.getPriorityBadgeClass(item.Priority || 50)}">${item.Priority || 50}</span>
+                    </td>
+                    <td>
+                        ${item.VMAFScore ? 
+                            `<span class="badge ${item.VMAFScore >= 80 ? 'bg-success' : item.VMAFScore >= 60 ? 'bg-warning' : 'bg-danger'}">${item.VMAFScore.toFixed(2)}</span>` : 
+                            '-'
+                        }
+                    </td>
+                    <td>
+                        <small class="text-muted">${item.StrategyType || '-'}</small>
+                    </td>
+                    <td>
+                        ${item.RetryCount > 0 ? 
+                            `<span class="badge bg-warning">${item.RetryCount}/${item.MaxRetries || 3}</span>` : 
+                            '<span class="badge bg-secondary">0</span>'
+                        }
+                    </td>
+                    <td>${this.formatDate(item.DateAdded || item.CreatedDate)}</td>
+                    <td>${this.formatDate(item.DateStarted)}</td>
+                    <td>${this.formatDate(item.DateCompleted || item.CompletedDate)}</td>
+                    <td>
+                        ${item.ErrorMessage ? 
+                            `<span class="text-danger" title="${this.escapeHtml(item.ErrorMessage)}">
+                                <i class="fas fa-exclamation-triangle"></i>
+                            </span>` : 
+                            '-'
+                        }
+                    </td>
                     <td>
                         <div class="btn-group btn-group-sm" role="group">
                             <button type="button" class="btn btn-outline-info" onclick="queueManager.ViewQualityTestingDetails(${item.Id})" title="View Details">
@@ -1614,6 +1645,11 @@ class TranscodeQueueManager {
                             ${item.Status === 'Pending' ? 
                                 `<button type="button" class="btn btn-outline-success" onclick="queueManager.StartQualityTest(${item.Id})" title="Start Quality Test">
                                     <i class="fas fa-play"></i>
+                                </button>` : ''
+                            }
+                            ${item.Status === 'Failed' && (item.RetryCount || 0) < (item.MaxRetries || 3) ? 
+                                `<button type="button" class="btn btn-outline-warning" onclick="queueManager.RetryQualityTest(${item.Id})" title="Retry Quality Test">
+                                    <i class="fas fa-redo"></i>
                                 </button>` : ''
                             }
                         </div>
@@ -1810,8 +1846,52 @@ class TranscodeQueueManager {
         this.showAlert('Quality testing details feature coming soon', 'info');
     }
 
+    async RetryQualityTest(qualityTestId) {
+        try {
+            const response = await fetch('/api/QualityTest/Retry', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ JobId: qualityTestId })
+            });
+
+            const contentType = response.headers.get('content-type');
+            if (!contentType || !contentType.includes('application/json')) {
+                await this.LogErrorToDatabase(
+                    `Quality Test Retry API returned HTML instead of JSON. Status: ${response.status}`,
+                    'RetryQualityTest',
+                    '/api/QualityTest/Retry'
+                );
+                return;
+            }
+
+            const data = await response.json();
+
+            if (data.Success) {
+                this.showAlert(`Quality test retry initiated for job ${qualityTestId}`, 'success');
+                this.LoadQualityTestingQueueData();
+            } else {
+                this.showAlert(`Failed to retry quality test: ${data.Message}`, 'danger');
+                await this.LogErrorToDatabase(
+                    `Quality test retry error: ${data.Message}`,
+                    'RetryQualityTest',
+                    '/api/QualityTest/Retry'
+                );
+            }
+        } catch (error) {
+            this.showAlert(`Error retrying quality test: ${error.message}`, 'danger');
+            await this.LogErrorToDatabase(
+                `Quality test retry error: ${error.message}`,
+                'RetryQualityTest',
+                '/api/QualityTest/Retry'
+            );
+        }
+    }
+
     async RetryQualityTestingJob(qualityTestId) {
-        this.showAlert('Quality testing retry feature coming soon', 'info');
+        // Legacy method - redirect to new method
+        await this.RetryQualityTest(qualityTestId);
     }
 
     async LogErrorToDatabase(errorMessage, context, requestUrl) {

@@ -26,7 +26,7 @@ class LogReader:
     def ReadLogs(self, LogLevel: str = None, FunctionName: str = None, 
                  Component: str = None, StartDate: str = None, 
                  EndDate: str = None, Limit: int = 100, 
-                 OrderBy: str = "DESC") -> List[Dict[str, Any]]:
+                 OrderBy: str = "DESC", Message: str = None) -> List[Dict[str, Any]]:
         """
         Read logs from database with optional filters.
         
@@ -38,6 +38,7 @@ class LogReader:
             EndDate: End date filter (YYYY-MM-DD format)
             Limit: Maximum number of records to return
             OrderBy: Sort order (ASC or DESC)
+            Message: Filter by message content (partial match)
         
         Returns:
             List of log records
@@ -66,6 +67,10 @@ class LogReader:
             if EndDate:
                 query += " AND Timestamp <= ?"
                 params.append(f"{EndDate} 23:59:59")
+            
+            if Message:
+                query += " AND Message LIKE ?"
+                params.append(f"%{Message}%")
             
             # Add ordering and limit
             query += f" ORDER BY Timestamp {OrderBy}"
@@ -304,6 +309,7 @@ def main():
     parser.add_argument("--end-date", help="End date filter (YYYY-MM-DD)")
     parser.add_argument("--limit", type=int, default=100, help="Maximum number of records")
     parser.add_argument("--order", choices=["ASC", "DESC"], default="DESC", help="Sort order")
+    parser.add_argument("--message", help="Filter by message content (partial match)")
     parser.add_argument("--summary", action="store_true", help="Show error summary")
     parser.add_argument("--hours", type=int, default=24, help="Hours to look back for summary")
     parser.add_argument("--recent-errors", action="store_true", help="Show recent errors only")
@@ -353,7 +359,8 @@ def main():
                 StartDate=args.start_date,
                 EndDate=args.end_date,
                 Limit=args.limit,
-                OrderBy=args.order
+                OrderBy=args.order,
+                Message=args.message
             )
             reader.PrintLogs(logs, not args.no_details)
     
