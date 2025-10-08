@@ -57,4 +57,5 @@ FFmpegMaster/
 
 # VMAF XML files
 xml/
+vmaf_debug_output.txt
 
