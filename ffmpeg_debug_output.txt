@@ -1,0 +1,107 @@
+ffmpeg version N-121164-gced4a6ebc9-20250922 Copyright (c) 2000-2025 the FFmpeg developers
+  built with gcc 15.2.0 (crosstool-NG 1.28.0.1_403899e)
+  configuration: --prefix=/ffbuild/prefix --pkg-config-flags=--static --pkg-config=pkg-config --cross-prefix=x86_64-w64-mingw32- --arch=x86_64 --target-os=mingw32 --enable-gpl --enable-version3 --disable-debug --enable-shared --disable-static --disable-w32threads --enable-pthreads --enable-iconv --enable-zlib --enable-libxml2 --enable-libvmaf --enable-fontconfig --enable-libharfbuzz --enable-libfreetype --enable-libfribidi --enable-vulkan --enable-libshaderc --enable-libvorbis --disable-libxcb --disable-xlib --disable-libpulse --enable-opencl --enable-gmp --enable-lzma --enable-amf --enable-libaom --enable-libaribb24 --enable-avisynth --enable-chromaprint --enable-libdav1d --enable-libdavs2 --enable-libdvdread --enable-libdvdnav --disable-libfdk-aac --enable-ffnvcodec --enable-cuda-llvm --enable-frei0r --enable-libgme --enable-libkvazaar --enable-libaribcaption --enable-libass --enable-libbluray --enable-libjxl --enable-libmp3lame --enable-libopus --enable-libplacebo --enable-librist --enable-libssh --enable-libtheora --enable-libvpx --enable-libwebp --enable-libzmq --enable-lv2 --enable-libvpl --enable-openal --enable-liboapv --enable-libopencore-amrnb --enable-libopencore-amrwb --enable-libopenh264 --enable-libopenjpeg --enable-libopenmpt --enable-librav1e --enable-librubberband --enable-schannel --enable-sdl2 --enable-libsnappy --enable-libsoxr --enable-libsrt --enable-libsvtav1 --enable-libtwolame --enable-libuavs3d --disable-libdrm --enable-vaapi --enable-libvidstab --enable-libvvenc --enable-whisper --enable-libx264 --enable-libx265 --enable-libxavs2 --enable-libxvid --enable-libzimg --enable-libzvbi --extra-cflags=-DLIBTWOLAME_STATIC --extra-cxxflags= --extra-libs=-lgomp --extra-ldflags=-pthread --extra-ldexeflags= --cc=x86_64-w64-mingw32-gcc --cxx=x86_64-w64-mingw32-g++ --ar=x86_64-w64-mingw32-gcc-ar --ranlib=x86_64-w64-mingw32-gcc-ranlib --nm=x86_64-w64-mingw32-gcc-nm --extra-version=20250922
+  libavutil      60. 13.100 / 60. 13.100
+  libavcodec     62. 15.100 / 62. 15.100
+  libavformat    62.  6.100 / 62.  6.100
+  libavdevice    62.  2.100 / 62.  2.100
+  libavfilter    11.  9.100 / 11.  9.100
+  libswscale      9.  3.100 /  9.  3.100
+  libswresample   6.  2.100 /  6.  2.100
+Input #0, mov,mp4,m4a,3gp,3g2,mj2, from 'C:\MediaVortex\LillyMaysClip.mp4':
+  Metadata:
+    major_brand     : isom
+    minor_version   : 512
+    compatible_brands: isomav01iso2mp41
+    encoder         : Lavf62.6.100
+  Duration: 00:01:00.14, start: 0.000000, bitrate: 7867 kb/s
+  Stream #0:0[0x1](und): Video: av1 (libdav1d) (Main) (av01 / 0x31307661), yuv420p10le(tv, bt709, progressive), 3840x2160, 8015 kb/s, SAR 1:1 DAR 16:9, 29.93 fps, 29.97 tbr, 60k tbn, start 1.768000 (default)
+    Metadata:
+      handler_name    : VideoHandler
+      vendor_id       : [0][0][0][0]
+      encoder         : Lavc62.15.100 libsvtav1
+  Stream #0:1[0x2](und): Audio: aac (LC) (mp4a / 0x6134706D), 96000 Hz, stereo, fltp, 81 kb/s (default)
+    Metadata:
+      handler_name    : SoundHandler
+      vendor_id       : [0][0][0][0]
+Input #1, mov,mp4,m4a,3gp,3g2,mj2, from 'C:\MediaVortex\Source\LillyMaysClip.mp4':
+  Metadata:
+    major_brand     : isom
+    minor_version   : 512
+    compatible_brands: isomiso2avc1mp41
+    encoder         : Lavf62.6.100
+  Duration: 00:01:00.06, start: 0.008000, bitrate: 23309 kb/s
+  Stream #1:0[0x1](und): Video: h264 (High) (avc1 / 0x31637661), yuv420p(tv, bt709, progressive), 3840x2160 [SAR 1:1 DAR 16:9], 23964 kb/s, 29.97 fps, 29.97 tbr, 90k tbn, start 1.781000 (default)
+    Metadata:
+      handler_name    : VideoHandler
+      vendor_id       : [0][0][0][0]
+  Stream #1:1[0x2](und): Audio: aac (LC) (mp4a / 0x6134706D), 32000 Hz, stereo, fltp, 46 kb/s, start 0.008000 (default)
+    Metadata:
+      handler_name    : SoundHandler
+      vendor_id       : [0][0][0][0]
+Stream mapping:
+  Stream #0:0 (libdav1d) -> libvmaf
+  Stream #1:0 (h264) -> libvmaf
+  libvmaf:default -> Stream #0:0 (wrapped_avframe)
+  Stream #0:1 -> #0:1 (aac (native) -> pcm_s16le (native))
+Press [q] to stop, [?] for help
+Output #0, null, to 'pipe:':
+  Metadata:
+    major_brand     : isom
+    minor_version   : 512
+    compatible_brands: isomav01iso2mp41
+    encoder         : Lavf62.6.100
+  Stream #0:0: Video: wrapped_avframe, yuv420p10le(tv, bt709, progressive), 3840x2160 [SAR 1:1 DAR 16:9], q=2-31, 200 kb/s, 29.97 fps, 29.97 tbn
+    Metadata:
+      encoder         : Lavc62.15.100 wrapped_avframe
+  Stream #0:1(und): Audio: pcm_s16le, 96000 Hz, stereo, s16, 3072 kb/s (default)
+    Metadata:
+      encoder         : Lavc62.15.100 pcm_s16le
+      handler_name    : SoundHandler
+      vendor_id       : [0][0][0][0]
+frame=   11 fps=0.0 q=-0.0 size=N/A time=00:00:02.13 bitrate=N/A speed=4.12x elapsed=0:00:00.51    
+frame=   22 fps= 21 q=-0.0 size=N/A time=00:00:02.50 bitrate=N/A speed=2.44x elapsed=0:00:01.02    
+frame=   33 fps= 21 q=-0.0 size=N/A time=00:00:02.86 bitrate=N/A speed=1.85x elapsed=0:00:01.55    
+frame=   45 fps= 22 q=-0.0 size=N/A time=00:00:03.26 bitrate=N/A speed=1.58x elapsed=0:00:02.06    
+frame=   55 fps= 21 q=-0.0 size=N/A time=00:00:03.60 bitrate=N/A speed= 1.4x elapsed=0:00:02.57    
+frame=   67 fps= 22 q=-0.0 size=N/A time=00:00:04.00 bitrate=N/A speed=1.29x elapsed=0:00:03.10    
+frame=   78 fps= 22 q=-0.0 size=N/A time=00:00:04.37 bitrate=N/A speed=1.21x elapsed=0:00:03.60    
+frame=   89 fps= 22 q=-0.0 size=N/A time=00:00:04.73 bitrate=N/A speed=1.15x elapsed=0:00:04.11    
+frame=  102 fps= 22 q=-0.0 size=N/A time=00:00:05.17 bitrate=N/A speed=1.11x elapsed=0:00:04.64    
+frame=  113 fps= 22 q=-0.0 size=N/A time=00:00:05.53 bitrate=N/A speed=1.07x elapsed=0:00:05.15    
+frame=  125 fps= 22 q=-0.0 size=N/A time=00:00:05.93 bitrate=N/A speed=1.05x elapsed=0:00:05.66    
+frame=  137 fps= 22 q=-0.0 size=N/A time=00:00:06.33 bitrate=N/A speed=1.02x elapsed=0:00:06.19    
+frame=  149 fps= 22 q=-0.0 size=N/A time=00:00:06.74 bitrate=N/A speed=1.01x elapsed=0:00:06.70    
+frame=  161 fps= 22 q=-0.0 size=N/A time=00:00:07.14 bitrate=N/A speed=0.99x elapsed=0:00:07.21    
+frame=  173 fps= 22 q=-0.0 size=N/A time=00:00:07.54 bitrate=N/A speed=0.975x elapsed=0:00:07.73    
+frame=  184 fps= 22 q=-0.0 size=N/A time=00:00:07.90 bitrate=N/A speed=0.959x elapsed=0:00:08.24    
+frame=  197 fps= 22 q=-0.0 size=N/A time=00:00:08.34 bitrate=N/A speed=0.952x elapsed=0:00:08.76    
+frame=  208 fps= 22 q=-0.0 size=N/A time=00:00:08.70 bitrate=N/A speed=0.939x elapsed=0:00:09.27    
+frame=  221 fps= 23 q=-0.0 size=N/A time=00:00:09.14 bitrate=N/A speed=0.933x elapsed=0:00:09.80    
+frame=  232 fps= 22 q=-0.0 size=N/A time=00:00:09.50 bitrate=N/A speed=0.922x elapsed=0:00:10.31    
+frame=  244 fps= 23 q=-0.0 size=N/A time=00:00:09.90 bitrate=N/A speed=0.916x elapsed=0:00:10.82    
+frame=  255 fps= 22 q=-0.0 size=N/A time=00:00:10.27 bitrate=N/A speed=0.906x elapsed=0:00:11.34    
+frame=  267 fps= 23 q=-0.0 size=N/A time=00:00:10.67 bitrate=N/A speed= 0.9x elapsed=0:00:11.85    
+frame=  279 fps= 23 q=-0.0 size=N/A time=00:00:11.07 bitrate=N/A speed=0.896x elapsed=0:00:12.36    
+frame=  290 fps= 22 q=-0.0 size=N/A time=00:00:11.44 bitrate=N/A speed=0.888x elapsed=0:00:12.89    
+frame=  302 fps= 23 q=-0.0 size=N/A time=00:00:11.84 bitrate=N/A speed=0.884x elapsed=0:00:13.40    
+frame=  313 fps= 22 q=-0.0 size=N/A time=00:00:12.21 bitrate=N/A speed=0.878x elapsed=0:00:13.91    
+frame=  325 fps= 23 q=-0.0 size=N/A time=00:00:12.61 bitrate=N/A speed=0.873x elapsed=0:00:14.44    
+frame=  337 fps= 23 q=-0.0 size=N/A time=00:00:13.01 bitrate=N/A speed=0.87x elapsed=0:00:14.95    
+frame=  349 fps= 23 q=-0.0 size=N/A time=00:00:13.41 bitrate=N/A speed=0.867x elapsed=0:00:15.46    
+frame=  359 fps= 22 q=-0.0 size=N/A time=00:00:13.74 bitrate=N/A speed=0.86x elapsed=0:00:15.99    
+frame=  369 fps= 22 q=-0.0 size=N/A time=00:00:14.08 bitrate=N/A speed=0.853x elapsed=0:00:16.50    
+frame=  379 fps= 22 q=-0.0 size=N/A time=00:00:14.41 bitrate=N/A speed=0.847x elapsed=0:00:17.01    
+frame=  390 fps= 22 q=-0.0 size=N/A time=00:00:14.78 bitrate=N/A speed=0.843x elapsed=0:00:17.53    
+frame=  401 fps= 22 q=-0.0 size=N/A time=00:00:15.14 bitrate=N/A speed=0.839x elapsed=0:00:18.04    
+frame=  412 fps= 22 q=-0.0 size=N/A time=00:00:15.51 bitrate=N/A speed=0.836x elapsed=0:00:18.55    
+frame=  423 fps= 22 q=-0.0 size=N/A time=00:00:15.88 bitrate=N/A speed=0.832x elapsed=0:00:19.08    
+frame=  432 fps= 22 q=-0.0 size=N/A time=00:00:16.18 bitrate=N/A speed=0.826x elapsed=0:00:19.58    
+frame=  443 fps= 22 q=-0.0 size=N/A time=00:00:16.54 bitrate=N/A speed=0.823x elapsed=0:00:20.11    
+frame=  453 fps= 22 q=-0.0 size=N/A time=00:00:16.88 bitrate=N/A speed=0.819x elapsed=0:00:20.62    
+frame=  460 fps= 22 q=-0.0 size=N/A time=00:00:17.11 bitrate=N/A speed=0.809x elapsed=0:00:21.14    
+frame=  470 fps= 22 q=-0.0 size=N/A time=00:00:17.45 bitrate=N/A speed=0.805x elapsed=0:00:21.67    
+frame=  482 fps= 22 q=-0.0 size=N/A time=00:00:17.85 bitrate=N/A speed=0.805x elapsed=0:00:22.18    
+frame=  491 fps= 22 q=-0.0 size=N/A time=00:00:18.15 bitrate=N/A speed=0.799x elapsed=0:00:22.70    
+frame=  501 fps= 22 q=-0.0 size=N/A time=00:00:18.48 bitrate=N/A speed=0.796x elapsed=0:00:23.22    
+frame=  511 fps= 22 q=-0.0 size=N/A time=00:00:18.81 bitrate=N/A speed=0.793x elapsed=0:00:23.73    

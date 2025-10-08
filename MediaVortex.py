@@ -389,7 +389,7 @@ class MediaVortexApp:
             success = db_manager.SaveServiceStatus(service_status)
             
             if success:
-                LoggingService.LogInfo("MediaVortex service status updated", "MediaVortexApp", "PrivateUpdateServiceStatus")
+                LoggingService.LogDebug("MediaVortex service status updated", "MediaVortexApp", "PrivateUpdateServiceStatus")
             else:
                 LoggingService.LogWarning("Failed to update MediaVortex service status", "MediaVortexApp", "PrivateUpdateServiceStatus")
                 

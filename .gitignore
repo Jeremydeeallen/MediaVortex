@@ -55,3 +55,6 @@ Thumbs.db
 # ffmpegmaster
 FFmpegMaster/
 
+# VMAF XML files
+xml/
+

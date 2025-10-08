@@ -75,16 +75,13 @@ class SystemOrchestratorApp:
             Port=None
         )
         
-        # QualityCompareService
-        services['QualityCompareService'] = ServiceInfo(
-            Name='QualityCompareService',
-            Directory=os.path.join(script_dir, 'QualityCompareService'),
-            MainScript=os.path.join(script_dir, 'QualityCompareService', 'Main.py'),
+        # QualityTestingService (replaces deprecated QualityCompareService)
+        services['QualityTestingService'] = ServiceInfo(
+            Name='QualityTestingService',
+            Directory=os.path.join(script_dir, 'MicroServiceQualityTest'),
+            MainScript=os.path.join(script_dir, 'MicroServiceQualityTest', 'QualityTestingService.py'),
             Port=None
         )
-        
-        # QualityCompareService handles quality testing
-        # (QualityTestingService was renamed to QualityCompareService)
         
         return services
     
@@ -164,9 +161,9 @@ class SystemOrchestratorApp:
         time.sleep(5)
         
         # Initialize other services in database as "Stopped" - they will be started via web GUI
-        print("Initializing TranscodeService and QualityCompareService in database as 'Stopped'...")
+        print("Initializing TranscodeService and QualityTestingService in database as 'Stopped'...")
         self.PrivateInitializeServiceInDatabase('TranscodeService')
-        self.PrivateInitializeServiceInDatabase('QualityCompareService')
+        self.PrivateInitializeServiceInDatabase('QualityTestingService')
         
         print("MediaVortex started. Other services can be started via web GUI.")
     
@@ -290,11 +287,11 @@ class SystemOrchestratorApp:
         print("SystemOrchestratorService is now running.")
         print("Commands:")
         print("  Press 1 to reset TranscodeService")
-        print("  Press 2 to reset QualityCompareService")
+        print("  Press 2 to reset QualityTestingService")
         print("  Press 3 to reset SystemOrchestratorService")
         print("  Press 4 to reset MediaVortex")
         print("  Press 5 to graceful stop TranscodeService")
-        print("  Press 6 to graceful stop QualityCompareService")
+        print("  Press 6 to graceful stop QualityTestingService")
         print("  Press 7 to graceful stop SystemOrchestratorService")
         print("  Press 8 to graceful stop MediaVortex")
         print("  Press 9 to graceful stop all services")
@@ -406,8 +403,8 @@ class SystemOrchestratorApp:
                         print("[ACTION] Resetting TranscodeService...")
                         self.PrivateResetService('TranscodeService')
                     elif key == '2':
-                        print("[ACTION] Resetting QualityCompareService...")
-                        self.PrivateResetService('QualityCompareService')
+                        print("[ACTION] Resetting QualityTestingService...")
+                        self.PrivateResetService('QualityTestingService')
                     elif key == '3':
                         print("[ACTION] Resetting SystemOrchestratorService...")
                         self.PrivateResetService('SystemOrchestratorService')
@@ -418,8 +415,8 @@ class SystemOrchestratorApp:
                         print("[ACTION] Graceful stop TranscodeService...")
                         self.PrivateGracefulStopService('TranscodeService')
                     elif key == '6':
-                        print("[ACTION] Graceful stop QualityCompareService...")
-                        self.PrivateGracefulStopService('QualityCompareService')
+                        print("[ACTION] Graceful stop QualityTestingService...")
+                        self.PrivateGracefulStopService('QualityTestingService')
                     elif key == '7':
                         print("[ACTION] Graceful stop SystemOrchestratorService...")
                         self.PrivateGracefulStopService('SystemOrchestratorService')
@@ -438,11 +435,11 @@ class SystemOrchestratorApp:
                     # Show the menu again after command
                     print("\nCommands:")
                     print("  Press 1 to reset TranscodeService")
-                    print("  Press 2 to reset QualityCompareService")
+                    print("  Press 2 to reset QualityTestingService")
                     print("  Press 3 to reset SystemOrchestratorService")
                     print("  Press 4 to reset MediaVortex")
                     print("  Press 5 to graceful stop TranscodeService")
-                    print("  Press 6 to graceful stop QualityCompareService")
+                    print("  Press 6 to graceful stop QualityTestingService")
                     print("  Press 7 to graceful stop SystemOrchestratorService")
                     print("  Press 8 to graceful stop MediaVortex")
                     print("  Press 9 to graceful stop all services")
@@ -459,8 +456,8 @@ class SystemOrchestratorApp:
                         print("[ACTION] Resetting TranscodeService...")
                         self.PrivateResetService('TranscodeService')
                     elif line == '2':
-                        print("[ACTION] Resetting QualityCompareService...")
-                        self.PrivateResetService('QualityCompareService')
+                        print("[ACTION] Resetting QualityTestingService...")
+                        self.PrivateResetService('QualityTestingService')
                     elif line == '3':
                         print("[ACTION] Resetting SystemOrchestratorService...")
                         self.PrivateResetService('SystemOrchestratorService')
@@ -471,8 +468,8 @@ class SystemOrchestratorApp:
                         print("[ACTION] Graceful stop TranscodeService...")
                         self.PrivateGracefulStopService('TranscodeService')
                     elif line == '6':
-                        print("[ACTION] Graceful stop QualityCompareService...")
-                        self.PrivateGracefulStopService('QualityCompareService')
+                        print("[ACTION] Graceful stop QualityTestingService...")
+                        self.PrivateGracefulStopService('QualityTestingService')
                     elif line == '7':
                         print("[ACTION] Graceful stop SystemOrchestratorService...")
                         self.PrivateGracefulStopService('SystemOrchestratorService')
@@ -491,11 +488,11 @@ class SystemOrchestratorApp:
                     # Show the menu again after command
                     print("\nCommands:")
                     print("  Press 1 to reset TranscodeService")
-                    print("  Press 2 to reset QualityCompareService")
+                    print("  Press 2 to reset QualityTestingService")
                     print("  Press 3 to reset SystemOrchestratorService")
                     print("  Press 4 to reset MediaVortex")
                     print("  Press 5 to graceful stop TranscodeService")
-                    print("  Press 6 to graceful stop QualityCompareService")
+                    print("  Press 6 to graceful stop QualityTestingService")
                     print("  Press 7 to graceful stop SystemOrchestratorService")
                     print("  Press 8 to graceful stop MediaVortex")
                     print("  Press 9 to graceful stop all services")

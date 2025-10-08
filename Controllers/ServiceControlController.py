@@ -30,7 +30,7 @@ def ControlService(service_name: str, action: str):
         LoggingService.LogInfo(f"Processing service control request for {service_name} with action {action}", "ServiceControlController", "ControlService")
         
         # Validate service name
-        valid_services = ['MediaVortex', 'TranscodeService', 'QualityCompareService', 'SystemOrchestratorService']
+        valid_services = ['MediaVortex', 'TranscodeService', 'QualityTestingService', 'SystemOrchestratorService']
         if service_name not in valid_services:
             LoggingService.LogError(f"Invalid service name: {service_name}", "ServiceControlController", "ControlService")
             return jsonify({
@@ -151,9 +151,9 @@ def PrivateStartServiceProcess(service_name: str) -> bool:
         script_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         
         # Determine service directory and main script
-        if service_name == "QualityCompareService":
-            service_dir = os.path.join(script_dir, "QualityCompareService")
-            main_script = "Main.py"
+        if service_name == "QualityTestingService":
+            service_dir = os.path.join(script_dir, "MicroServiceQualityTest")
+            main_script = "QualityTestWorker.py"
         elif service_name == "TranscodeService":
             service_dir = os.path.join(script_dir, "TranscodeService")
             main_script = "Main.py"

@@ -2070,7 +2070,7 @@ class DatabaseManager:
                 )
             
             self.DatabaseService.ExecuteNonQuery(query, parameters)
-            LoggingService.LogInfo(f"Service status saved for {ServiceStatus.get('ServiceName')}", "DatabaseManager", "SaveServiceStatus")
+            LoggingService.LogDebug(f"Service status saved for {ServiceStatus.get('ServiceName')}", "DatabaseManager", "SaveServiceStatus")
             return True
             
         except Exception as e:
@@ -2098,7 +2098,7 @@ class DatabaseManager:
             query = f"UPDATE ServiceStatus SET {', '.join(UpdateFields)}, UpdatedAt = CURRENT_TIMESTAMP WHERE ServiceName = ?"
             
             self.DatabaseService.ExecuteNonQuery(query, Parameters)
-            LoggingService.LogInfo(f"Service status updated for {ServiceName}", "DatabaseManager", "UpdateServiceStatus")
+            LoggingService.LogDebug(f"Service status updated for {ServiceName}", "DatabaseManager", "UpdateServiceStatus")
             return True
             
         except Exception as e:
@@ -2114,12 +2114,12 @@ class DatabaseManager:
             rows = self.DatabaseService.ExecuteQuery(query, (ServiceName,))
             
             if rows:
-                LoggingService.LogInfo(f"Retrieved service status for {ServiceName}", "DatabaseManager", "GetServiceStatus")
+                LoggingService.LogDebug(f"Retrieved service status for {ServiceName}", "DatabaseManager", "GetServiceStatus")
                 # Convert sqlite3.Row to dictionary
                 row = rows[0]
                 return dict(row)
             else:
-                LoggingService.LogInfo(f"No service status found for {ServiceName}", "DatabaseManager", "GetServiceStatus")
+                LoggingService.LogDebug(f"No service status found for {ServiceName}", "DatabaseManager", "GetServiceStatus")
                 return None
                 
         except Exception as e:
@@ -2632,66 +2632,54 @@ class DatabaseManager:
             LoggingService.LogException("Exception saving quality testing queue item", e, "DatabaseManager", "SaveQualityTestingQueueItem")
             return False
     
-    def SaveQualityTestProgress(self, job_id: int, progress_data: Dict[str, Any]) -> bool:
+    def SaveQualityTestProgress(self, transcode_attempt_id: int, progress_data: Dict[str, Any]) -> bool:
         """Save quality test progress - updates existing record or creates new one"""
         try:
-            # First, check if a record exists for this job
-            check_query = "SELECT Id FROM QualityTestProgress WHERE QualityTestQueueId = ?"
-            existing_records = self.DatabaseService.ExecuteQuery(check_query, (job_id,))
+            # First, check if a record exists for this transcode attempt
+            check_query = "SELECT Id FROM QualityTestProgress WHERE TranscodeAttemptId = ?"
+            existing_records = self.DatabaseService.ExecuteQuery(check_query, (transcode_attempt_id,))
             
             if existing_records:
                 # Update existing record
                 query = """
                     UPDATE QualityTestProgress SET
-                        TranscodeAttemptId = ?, Status = ?, ProgressPercentage = ?, 
-                        CurrentStep = ?, StartTime = ?, EndTime = ?, ErrorMessage = ?, 
+                        Status = ?, ProgressPercentage = ?, CurrentStep = ?, 
                         UpdatedAt = CURRENT_TIMESTAMP, CurrentTime = ?, CurrentFrame = ?, 
-                        TotalFrames = ?, ProcessingSpeed = ?, SubprocessPID = ?, SubprocessStartTime = ?
-                    WHERE QualityTestQueueId = ?
+                        ProcessingSpeed = ?, ETA = ?
+                    WHERE TranscodeAttemptId = ?
                 """
                 
                 parameters = (
-                    progress_data.get('TranscodeAttemptId', 0),
                     progress_data.get('Status', 'Running'),
                     progress_data.get('ProgressPercentage', 0),
                     progress_data.get('CurrentStep', 'Processing'),
-                    progress_data.get('StartTime'),
-                    progress_data.get('EndTime'),
-                    progress_data.get('ErrorMessage'),
                     progress_data.get('CurrentTime'),
                     progress_data.get('CurrentFrame', 0),
-                    progress_data.get('TotalFrames', 0),
                     progress_data.get('ProcessingSpeed'),
-                    progress_data.get('SubprocessPID'),
-                    progress_data.get('SubprocessStartTime'),
-                    job_id
+                    progress_data.get('ETA'),
+                    transcode_attempt_id
                 )
             else:
                 # Insert new record
                 query = """
                     INSERT INTO QualityTestProgress 
-                    (QualityTestQueueId, TranscodeAttemptId, Status, ProgressPercentage, 
-                     CurrentStep, StartTime, EndTime, ErrorMessage, CreatedAt, UpdatedAt,
-                     CurrentTime, CurrentFrame, TotalFrames, ProcessingSpeed, SubprocessPID, SubprocessStartTime)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP,
-                            ?, ?, ?, ?, ?, ?)
+                    (TranscodeAttemptId, Status, ProgressPercentage, CurrentStep, 
+                     StartTime, UpdatedAt, CreatedAt, CurrentTime, CurrentFrame, 
+                     ProcessingSpeed, ETA)
+                    VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP,
+                            ?, ?, ?, ?)
                 """
                 
                 parameters = (
-                    job_id,
-                    progress_data.get('TranscodeAttemptId', 0),
+                    transcode_attempt_id,
                     progress_data.get('Status', 'Running'),
                     progress_data.get('ProgressPercentage', 0),
                     progress_data.get('CurrentStep', 'Processing'),
                     progress_data.get('StartTime'),
-                    progress_data.get('EndTime'),
-                    progress_data.get('ErrorMessage'),
                     progress_data.get('CurrentTime'),
                     progress_data.get('CurrentFrame', 0),
-                    progress_data.get('TotalFrames', 0),
                     progress_data.get('ProcessingSpeed'),
-                    progress_data.get('SubprocessPID'),
-                    progress_data.get('SubprocessStartTime')
+                    progress_data.get('ETA')
                 )
             
             rows_affected = self.DatabaseService.ExecuteNonQuery(query, parameters)
@@ -2701,9 +2689,45 @@ class DatabaseManager:
             LoggingService.LogException("Exception saving quality test progress", e, "DatabaseManager", "SaveQualityTestProgress")
             return False
     
-    def StoreQualityTestResult(self, JobId: int, JobDetails: dict, VMAFScore: float) -> bool:
+    def StoreQualityTestResult(self, JobId: int, JobDetails: dict, VMAFScore: float, ErrorMessage: str = None, TestDuration: float = 0.0) -> bool:
         """Store quality test result in QualityTestResults table."""
         try:
+            LoggingService.LogFunctionEntry("StoreQualityTestResult", "DatabaseManager", JobId, VMAFScore)
+            
+            TranscodeAttemptId = JobDetails.get('TranscodeAttemptId', 0)
+            if not TranscodeAttemptId:
+                LoggingService.LogError("TranscodeAttemptId not provided in JobDetails", "DatabaseManager", "StoreQualityTestResult")
+                return False
+            
+            # Get ProfileName from TranscodeAttempt, then get ProfileId from Profiles table
+            ProfileQuery = """
+                SELECT ta.ProfileName
+                FROM TranscodeAttempts ta
+                WHERE ta.Id = ?
+            """
+            ProfileResults = self.DatabaseService.ExecuteQuery(ProfileQuery, (TranscodeAttemptId,))
+            
+            if not ProfileResults:
+                LoggingService.LogError(f"TranscodeAttempt {TranscodeAttemptId} not found", "DatabaseManager", "StoreQualityTestResult")
+                return False
+            
+            ProfileName = ProfileResults[0]['ProfileName'] if ProfileResults[0]['ProfileName'] else 'Unknown'
+            
+            # Get ProfileId from Profiles table using ProfileName
+            ProfileIdQuery = """
+                SELECT Id FROM Profiles WHERE ProfileName = ?
+            """
+            ProfileIdResults = self.DatabaseService.ExecuteQuery(ProfileIdQuery, (ProfileName,))
+            ProfileId = ProfileIdResults[0]['Id'] if ProfileIdResults else 0
+            
+            # Get file size
+            file_size = 0
+            if JobDetails.get('TranscodedFilePath') and os.path.exists(JobDetails['TranscodedFilePath']):
+                file_size = os.path.getsize(JobDetails['TranscodedFilePath'])
+                LoggingService.LogInfo(f"File size for {JobDetails['TranscodedFilePath']}: {file_size} bytes", "DatabaseManager", "StoreQualityTestResult")
+            else:
+                LoggingService.LogWarning(f"TranscodedFilePath not found or file doesn't exist: {JobDetails.get('TranscodedFilePath')}", "DatabaseManager", "StoreQualityTestResult")
+            
             query = """
                 INSERT INTO QualityTestResults 
                 (VMAFQueueId, TranscodeAttemptId, VMAFScore, ProfileId, ProfileName, 
@@ -2711,22 +2735,17 @@ class DatabaseManager:
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             """
             
-            # Get file size
-            file_size = 0
-            if JobDetails.get('TranscodedFilePath') and os.path.exists(JobDetails['TranscodedFilePath']):
-                file_size = os.path.getsize(JobDetails['TranscodedFilePath'])
-            
             parameters = (
                 JobId,
-                JobDetails.get('TranscodeAttemptId', 0),
+                TranscodeAttemptId,
                 VMAFScore,
-                JobDetails.get('ProfileId', 0),
-                JobDetails.get('ProfileName', 'Unknown'),
+                ProfileId,
+                ProfileName,
                 file_size,
-                0.0,  # TestDuration - could be calculated from progress
+                TestDuration,  # TestDuration - actual duration from FFmpeg process
                 VMAFScore >= 90.0,  # PassesThreshold - assuming 90+ is good
                 1,  # Rank - could be calculated based on other results
-                None,  # ErrorMessage
+                ErrorMessage,  # ErrorMessage - None for success, error text for failures
             )
             
             rows_affected = self.DatabaseService.ExecuteNonQuery(query, parameters)
@@ -2983,7 +3002,7 @@ class DatabaseManager:
     def GetQualityTestJob(self, JobId: int) -> dict:
         """Get a quality test job by ID"""
         try:
-            query = """SELECT Id, OriginalFilePath, TranscodedFilePath, Status, VMAFScore, CreatedDate 
+            query = """SELECT Id, TranscodeAttemptId, OriginalFilePath, LocalSourcePath, TranscodedFilePath, Status, VMAFScore, CreatedDate 
                        FROM QualityTestingQueue WHERE Id = ?"""
             rows = self.DatabaseService.ExecuteQuery(query, (JobId,))
             
@@ -2991,7 +3010,9 @@ class DatabaseManager:
                 row = rows[0]
                 return {
                     "Id": row["Id"],
+                    "TranscodeAttemptId": row["TranscodeAttemptId"],
                     "OriginalFilePath": row["OriginalFilePath"],
+                    "LocalSourcePath": row["LocalSourcePath"],
                     "TranscodedFilePath": row["TranscodedFilePath"],
                     "Status": row["Status"],
                     "VMAFScore": row["VMAFScore"],
@@ -3004,10 +3025,14 @@ class DatabaseManager:
             return None
     
     def GetQualityTestQueue(self) -> list:
-        """Get all quality test jobs in queue"""
+        """Get pending quality test jobs in queue ordered by priority and date"""
         try:
-            query = """SELECT Id, OriginalFilePath, TranscodedFilePath, Status, VMAFScore, CreatedDate 
-                       FROM QualityTestingQueue ORDER BY CreatedDate"""
+            query = """
+                SELECT Id, OriginalFilePath, TranscodedFilePath, Status, VMAFScore, CreatedDate, Priority, DateAdded
+                FROM QualityTestingQueue 
+                WHERE Status = 'Pending'
+                ORDER BY Priority DESC, DateAdded ASC, CreatedDate ASC
+            """
             rows = self.DatabaseService.ExecuteQuery(query)
             
             jobs = []
@@ -3018,7 +3043,9 @@ class DatabaseManager:
                     "TranscodedFilePath": row["TranscodedFilePath"],
                     "Status": row["Status"],
                     "VMAFScore": row["VMAFScore"],
-                    "CreatedDate": row["CreatedDate"]
+                    "CreatedDate": row["CreatedDate"],
+                    "Priority": row["Priority"],
+                    "DateAdded": row["DateAdded"]
                 })
             return jobs
             
@@ -3043,3 +3070,336 @@ class DatabaseManager:
         except Exception as e:
             LoggingService.LogException("Exception updating quality test status", e, "DatabaseManager", "UpdateQualityTestStatus")
             return False
+    
+    def ClaimQualityTestJob(self) -> dict:
+        """Atomically claim a pending quality test job to prevent race conditions."""
+        try:
+            # First, get the job to claim
+            select_query = """
+                SELECT Id, TranscodeAttemptId, OriginalFilePath, LocalSourcePath, TranscodedFilePath, Status, VMAFScore, CreatedDate
+                FROM QualityTestingQueue 
+                WHERE Status = 'Pending' 
+                ORDER BY Priority DESC, DateAdded ASC, CreatedDate ASC 
+                LIMIT 1
+            """
+            
+            jobs = self.DatabaseService.ExecuteQuery(select_query)
+            if not jobs or len(jobs) == 0:
+                LoggingService.LogDebug("No pending quality test jobs available to claim", "DatabaseManager", "ClaimQualityTestJob")
+                return None
+            
+            job_to_claim = jobs[0]
+            job_id = job_to_claim["Id"]
+            
+            # Now atomically claim the job
+            update_query = """
+                UPDATE QualityTestingQueue 
+                SET Status = 'Running', DateStarted = CURRENT_TIMESTAMP
+                WHERE Id = ? AND Status = 'Pending'
+            """
+            
+            rows_affected = self.DatabaseService.ExecuteNonQuery(update_query, (job_id,))
+            
+            if rows_affected > 0:
+                LoggingService.LogInfo(f"Successfully claimed quality test job {job_id}", "DatabaseManager", "ClaimQualityTestJob")
+                return {
+                    "Id": job_to_claim["Id"],
+                    "TranscodeAttemptId": job_to_claim["TranscodeAttemptId"],
+                    "OriginalFilePath": job_to_claim["OriginalFilePath"],
+                    "LocalSourcePath": job_to_claim["LocalSourcePath"],
+                    "TranscodedFilePath": job_to_claim["TranscodedFilePath"],
+                    "Status": "Running",  # We know it's now Running
+                    "VMAFScore": job_to_claim["VMAFScore"],
+                    "CreatedDate": job_to_claim["CreatedDate"]
+                }
+            else:
+                LoggingService.LogDebug(f"Job {job_id} was already claimed by another worker", "DatabaseManager", "ClaimQualityTestJob")
+                return None
+                
+        except Exception as e:
+            LoggingService.LogException("Exception claiming quality test job", e, "DatabaseManager", "ClaimQualityTestJob")
+            return None
+    
+    def CreateQualityTestQueueEntry(self, TranscodeAttemptId: int, OriginalFilePath: str, LocalSourcePath: str, TranscodedFilePath: str) -> Optional[int]:
+        """Create a new quality test queue entry with all three file paths."""
+        try:
+            LoggingService.LogFunctionEntry("CreateQualityTestQueueEntry", "DatabaseManager", 
+                                          TranscodeAttemptId, OriginalFilePath, LocalSourcePath, TranscodedFilePath)
+            
+            # Normalize paths to use single backslashes
+            NormalizedOriginalFilePath = self.PrivateNormalizeFilePath(OriginalFilePath)
+            NormalizedTranscodedFilePath = self.PrivateNormalizeFilePath(TranscodedFilePath)
+            
+            # Extract filename from normalized original path
+            FileName = os.path.basename(NormalizedOriginalFilePath)
+            
+            # If LocalSourcePath is not provided or empty, construct it from SystemSettings
+            if not LocalSourcePath or LocalSourcePath.strip() == "":
+                TemporarySourceDir = self.GetSystemSetting("TemporarySourceDirectory")
+                if TemporarySourceDir:
+                    # Ensure path ends with backslash
+                    if not TemporarySourceDir.endswith('\\'):
+                        TemporarySourceDir += '\\'
+                    NormalizedLocalSourcePath = self.PrivateNormalizeFilePath(TemporarySourceDir + FileName)
+                    LoggingService.LogInfo(f"Constructed LocalSourcePath from SystemSettings: {NormalizedLocalSourcePath}", 
+                                         "DatabaseManager", "CreateQualityTestQueueEntry")
+                else:
+                    LoggingService.LogError("TemporarySourceDirectory not found in SystemSettings, using OriginalFilePath as fallback", 
+                                          "DatabaseManager", "CreateQualityTestQueueEntry")
+                    NormalizedLocalSourcePath = NormalizedOriginalFilePath
+            else:
+                NormalizedLocalSourcePath = self.PrivateNormalizeFilePath(LocalSourcePath)
+            
+            query = """
+                INSERT INTO QualityTestingQueue (
+                    TranscodeAttemptId, OriginalFilePath, TranscodedFilePath, FileName, Status, 
+                    Priority, DateAdded, DateStarted, DateCompleted, ErrorMessage, RetryCount, MaxRetries,
+                    StrategyType, StrategyId, AlternativeProfileIds, CustomSettings, VMAFScore,
+                    CreatedDate, CompletedDate, LocalSourcePath
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """
+            
+            params = (
+                TranscodeAttemptId,
+                NormalizedOriginalFilePath,
+                NormalizedTranscodedFilePath,
+                FileName,
+                'Pending',
+                0,  # Priority
+                datetime.now(),  # DateAdded
+                None,  # DateStarted
+                None,  # DateCompleted
+                None,  # ErrorMessage
+                0,  # RetryCount
+                3,  # MaxRetries
+                'Single',  # StrategyType
+                None,  # StrategyId
+                None,  # AlternativeProfileIds
+                None,  # CustomSettings
+                None,  # VMAFScore
+                datetime.now(),  # CreatedDate
+                None,  # CompletedDate
+                NormalizedLocalSourcePath  # LocalSourcePath - LAST!
+            )
+            
+            JobId = self.DatabaseService.ExecuteNonQuery(query, params)
+            
+            if JobId:
+                LoggingService.LogInfo(f"Created quality test queue entry with ID {JobId} for TranscodeAttempt {TranscodeAttemptId}", 
+                                     "DatabaseManager", "CreateQualityTestQueueEntry")
+                return JobId
+            else:
+                LoggingService.LogError(f"Failed to create quality test queue entry for TranscodeAttempt {TranscodeAttemptId}", 
+                                      "DatabaseManager", "CreateQualityTestQueueEntry")
+                return None
+                
+        except Exception as e:
+            LoggingService.LogException("Exception creating quality test queue entry", e, "DatabaseManager", "CreateQualityTestQueueEntry")
+            return None
+    
+    def CreateTemporaryFilePath(self, TranscodeAttemptId: int, OriginalPath: str, LocalSourcePath: str) -> Optional[int]:
+        """Create a new temporary file path record."""
+        try:
+            LoggingService.LogFunctionEntry("CreateTemporaryFilePath", "DatabaseManager", 
+                                          TranscodeAttemptId, OriginalPath, LocalSourcePath)
+            
+            # Validate TranscodeAttemptId exists
+            if not self.PrivateValidateTranscodeAttemptId(TranscodeAttemptId):
+                LoggingService.LogError(f"Invalid TranscodeAttemptId: {TranscodeAttemptId}", "DatabaseManager", "CreateTemporaryFilePath")
+                return None
+            
+            # Normalize paths to use single backslashes
+            NormalizedOriginalPath = self.PrivateNormalizeFilePath(OriginalPath)
+            NormalizedLocalSourcePath = self.PrivateNormalizeFilePath(LocalSourcePath)
+            
+            query = """
+                INSERT INTO TemporaryFilePaths (
+                    TranscodeAttemptId, OriginalPath, LocalSourcePath, CreatedDate
+                ) VALUES (?, ?, ?, ?)
+            """
+            
+            params = (TranscodeAttemptId, NormalizedOriginalPath, NormalizedLocalSourcePath, datetime.now())
+            
+            RecordId = self.DatabaseService.ExecuteNonQuery(query, params)
+            
+            if RecordId:
+                LoggingService.LogInfo(f"Created temporary file path record with ID {RecordId} for TranscodeAttempt {TranscodeAttemptId}", 
+                                     "DatabaseManager", "CreateTemporaryFilePath")
+                self.PrivateLogTemporaryFilePathOperation("CREATE", TranscodeAttemptId, RecordId, "SUCCESS")
+                return RecordId
+            else:
+                LoggingService.LogError(f"Failed to create temporary file path record for TranscodeAttempt {TranscodeAttemptId}", 
+                                      "DatabaseManager", "CreateTemporaryFilePath")
+                self.PrivateLogTemporaryFilePathOperation("CREATE", TranscodeAttemptId, None, "FAILED")
+                return None
+                
+        except Exception as e:
+            LoggingService.LogException("Exception creating temporary file path record", e, "DatabaseManager", "CreateTemporaryFilePath")
+            self.PrivateLogTemporaryFilePathOperation("CREATE", TranscodeAttemptId, None, "EXCEPTION", str(e))
+            return None
+    
+    def UpdateTemporaryFilePath(self, TranscodeAttemptId: int, LocalOutputPath: str) -> bool:
+        """Update temporary file path record with local output path."""
+        try:
+            LoggingService.LogFunctionEntry("UpdateTemporaryFilePath", "DatabaseManager", 
+                                          TranscodeAttemptId, LocalOutputPath)
+            
+            # Validate TranscodeAttemptId exists
+            if not self.PrivateValidateTranscodeAttemptId(TranscodeAttemptId):
+                LoggingService.LogError(f"Invalid TranscodeAttemptId: {TranscodeAttemptId}", "DatabaseManager", "UpdateTemporaryFilePath")
+                return False
+            
+            # Normalize path to use single backslashes
+            NormalizedLocalOutputPath = self.PrivateNormalizeFilePath(LocalOutputPath)
+            
+            query = """
+                UPDATE TemporaryFilePaths 
+                SET LocalOutputPath = ?
+                WHERE TranscodeAttemptId = ?
+            """
+            
+            params = (NormalizedLocalOutputPath, TranscodeAttemptId)
+            
+            RowsAffected = self.DatabaseService.ExecuteNonQuery(query, params)
+            
+            if RowsAffected > 0:
+                LoggingService.LogInfo(f"Updated temporary file path record for TranscodeAttempt {TranscodeAttemptId} with LocalOutputPath: {LocalOutputPath}", 
+                                     "DatabaseManager", "UpdateTemporaryFilePath")
+                self.PrivateLogTemporaryFilePathOperation("UPDATE", TranscodeAttemptId, None, "SUCCESS")
+                return True
+            else:
+                LoggingService.LogWarning(f"No temporary file path record found for TranscodeAttempt {TranscodeAttemptId}", 
+                                        "DatabaseManager", "UpdateTemporaryFilePath")
+                self.PrivateLogTemporaryFilePathOperation("UPDATE", TranscodeAttemptId, None, "NOT_FOUND")
+                return False
+                
+        except Exception as e:
+            LoggingService.LogException("Exception updating temporary file path record", e, "DatabaseManager", "UpdateTemporaryFilePath")
+            self.PrivateLogTemporaryFilePathOperation("UPDATE", TranscodeAttemptId, None, "EXCEPTION", str(e))
+            return False
+    
+    def GetTemporaryFilePath(self, TranscodeAttemptId: int) -> Optional[Dict[str, Any]]:
+        """Get temporary file path record by TranscodeAttemptId."""
+        try:
+            LoggingService.LogFunctionEntry("GetTemporaryFilePath", "DatabaseManager", TranscodeAttemptId)
+            
+            query = """
+                SELECT Id, TranscodeAttemptId, OriginalPath, LocalSourcePath, LocalOutputPath, CreatedDate
+                FROM TemporaryFilePaths 
+                WHERE TranscodeAttemptId = ?
+            """
+            
+            results = self.DatabaseService.ExecuteQuery(query, (TranscodeAttemptId,))
+            
+            if results:
+                Record = results[0]
+                LoggingService.LogInfo(f"Retrieved temporary file path record for TranscodeAttempt {TranscodeAttemptId}", 
+                                     "DatabaseManager", "GetTemporaryFilePath")
+                self.PrivateLogTemporaryFilePathOperation("SELECT", TranscodeAttemptId, Record.get('Id'), "SUCCESS")
+                return Record
+            else:
+                LoggingService.LogWarning(f"No temporary file path record found for TranscodeAttempt {TranscodeAttemptId}", 
+                                        "DatabaseManager", "GetTemporaryFilePath")
+                self.PrivateLogTemporaryFilePathOperation("SELECT", TranscodeAttemptId, None, "NOT_FOUND")
+                return None
+                
+        except Exception as e:
+            LoggingService.LogException("Exception getting temporary file path record", e, "DatabaseManager", "GetTemporaryFilePath")
+            self.PrivateLogTemporaryFilePathOperation("SELECT", TranscodeAttemptId, None, "EXCEPTION", str(e))
+            return None
+    
+    def DeleteTemporaryFilePath(self, TranscodeAttemptId: int) -> bool:
+        """Delete temporary file path record by TranscodeAttemptId."""
+        try:
+            LoggingService.LogFunctionEntry("DeleteTemporaryFilePath", "DatabaseManager", TranscodeAttemptId)
+            
+            query = """
+                DELETE FROM TemporaryFilePaths 
+                WHERE TranscodeAttemptId = ?
+            """
+            
+            RowsAffected = self.DatabaseService.ExecuteNonQuery(query, (TranscodeAttemptId,))
+            
+            if RowsAffected > 0:
+                LoggingService.LogInfo(f"Deleted temporary file path record for TranscodeAttempt {TranscodeAttemptId}", 
+                                     "DatabaseManager", "DeleteTemporaryFilePath")
+                self.PrivateLogTemporaryFilePathOperation("DELETE", TranscodeAttemptId, None, "SUCCESS")
+                return True
+            else:
+                LoggingService.LogWarning(f"No temporary file path record found to delete for TranscodeAttempt {TranscodeAttemptId}", 
+                                        "DatabaseManager", "DeleteTemporaryFilePath")
+                self.PrivateLogTemporaryFilePathOperation("DELETE", TranscodeAttemptId, None, "NOT_FOUND")
+                return False
+                
+        except Exception as e:
+            LoggingService.LogException("Exception deleting temporary file path record", e, "DatabaseManager", "DeleteTemporaryFilePath")
+            self.PrivateLogTemporaryFilePathOperation("DELETE", TranscodeAttemptId, None, "EXCEPTION", str(e))
+            return False
+    
+    def PrivateValidateTranscodeAttemptId(self, TranscodeAttemptId: int) -> bool:
+        """Private method to validate TranscodeAttemptId exists."""
+        try:
+            query = "SELECT COUNT(*) as Count FROM TranscodeAttempts WHERE Id = ?"
+            results = self.DatabaseService.ExecuteQuery(query, (TranscodeAttemptId,))
+            return results[0]['Count'] > 0 if results else False
+        except Exception as e:
+            LoggingService.LogException("Exception validating TranscodeAttemptId", e, "DatabaseManager", "PrivateValidateTranscodeAttemptId")
+            return False
+    
+    def PrivateLogTemporaryFilePathOperation(self, Operation: str, TranscodeAttemptId: int, RecordId: Optional[int], Status: str, ErrorMessage: str = None):
+        """Private method to log temporary file path operations."""
+        try:
+            Message = f"TemporaryFilePath {Operation} - TranscodeAttemptId: {TranscodeAttemptId}"
+            if RecordId:
+                Message += f", RecordId: {RecordId}"
+            Message += f", Status: {Status}"
+            if ErrorMessage:
+                Message += f", Error: {ErrorMessage}"
+            
+            LogLevel = "ERROR" if Status in ["FAILED", "EXCEPTION"] else "INFO"
+            LoggingService.Log(LogLevel, Message, "DatabaseManager", "PrivateLogTemporaryFilePathOperation")
+        except Exception as e:
+            LoggingService.LogException("Exception logging temporary file path operation", e, "DatabaseManager", "PrivateLogTemporaryFilePathOperation")
+    
+    def GetSystemSetting(self, SettingKey: str) -> Optional[str]:
+        """Get a system setting value by key."""
+        try:
+            LoggingService.LogFunctionEntry("GetSystemSetting", "DatabaseManager", SettingKey)
+            
+            query = "SELECT SettingValue FROM SystemSettings WHERE SettingKey = ?"
+            results = self.DatabaseService.ExecuteQuery(query, (SettingKey,))
+            
+            if results:
+                SettingValue = results[0]['SettingValue']
+                LoggingService.LogInfo(f"Retrieved system setting '{SettingKey}': '{SettingValue}'", 
+                                     "DatabaseManager", "GetSystemSetting")
+                return SettingValue
+            else:
+                LoggingService.LogWarning(f"System setting not found: {SettingKey}", 
+                                        "DatabaseManager", "GetSystemSetting")
+                return None
+                
+        except Exception as e:
+            LoggingService.LogException("Exception getting system setting", e, "DatabaseManager", "GetSystemSetting")
+            return None
+
+    def PrivateNormalizeFilePath(self, FilePath: str) -> str:
+        """Private method to normalize file paths to use single backslashes."""
+        try:
+            if not FilePath:
+                return FilePath
+
+            # Replace double backslashes with single backslashes
+            # This handles cases where paths might be escaped
+            NormalizedPath = FilePath.replace('\\\\', '\\')
+
+            # Log the normalization for debugging
+            if NormalizedPath != FilePath:
+                LoggingService.LogInfo(f"Normalized file path: '{FilePath}' -> '{NormalizedPath}'",
+                                     "DatabaseManager", "PrivateNormalizeFilePath")
+
+            return NormalizedPath
+
+        except Exception as e:
+            LoggingService.LogException("Exception normalizing file path", e, "DatabaseManager", "PrivateNormalizeFilePath")
+            return FilePath

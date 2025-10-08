@@ -340,7 +340,7 @@ class TranscodeServiceApp:
                     LoggingService.LogInfo("Graceful shutdown requested, stopping service...", "TranscodeService", "MainLoop")
                     break
                 
-                self.ShutdownEvent.wait(1)
+                self.ShutdownEvent.wait(5)  # Check for graceful shutdown every 5 seconds instead of every second
                 
         except KeyboardInterrupt:
             LoggingService.LogInfo("Received keyboard interrupt", "TranscodeService", "MainLoop")

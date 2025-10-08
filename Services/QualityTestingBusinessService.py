@@ -1,22 +1,15 @@
 #!/usr/bin/env python3
 """
 Quality Testing Business Service
-Business logic layer for quality testing using MVVM architecture
+Business logic layer for quality testing using VMAF analysis
+Implements MVVM pattern using MVVM architecture
 """
 
-import sys
 import os
 import subprocess
-import threading
-import re
-import xml.etree.ElementTree as ET
 import time
+import threading
 from datetime import datetime
-
-# Add the project root to the Python path
-project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, project_root)
-
 from Services.LoggingService import LoggingService
 
 
@@ -26,141 +19,378 @@ class QualityTestingBusinessService:
     def __init__(self, DatabaseManagerInstance=None):
         """Initialize the business service with dependencies."""
         self.DatabaseManager = DatabaseManagerInstance
-        self.ActiveFFmpegProcess = None  # Track active FFmpeg process
+        self.ActiveFFmpegProcess = None
+        self.ActiveFFmpegThread = None
         
-        LoggingService.LogInfo("QualityTestingBusinessService initialized", "QualityTestingBusinessService", "__init__")
     
     def ProcessQualityTestQueue(self) -> dict:
-        """Process pending quality test jobs from the queue."""
+        """Process the quality testing queue."""
         try:
-            LoggingService.LogInfo("Processing quality test queue", "QualityTestingBusinessService", "ProcessQualityTestQueue")
+            LoggingService.LogDebug("Processing quality testing queue", "QualityTestingBusinessService", "ProcessQualityTestQueue")
             
-            # Get pending jobs
+            # Get pending jobs from queue
             pending_jobs = self.DatabaseManager.GetQualityTestQueue()
+            
             if not pending_jobs:
-                LoggingService.LogInfo("No pending quality test jobs found", "QualityTestingBusinessService", "ProcessQualityTestQueue")
                 return {"Success": True, "Message": "No pending jobs", "JobsProcessed": 0}
             
-            # Check concurrency limit
-            max_concurrent = self.CheckConcurrencyLimit()
-            active_jobs = self.GetActiveJobs()
-            
-            if len(active_jobs) >= max_concurrent:
-                LoggingService.LogInfo(f"At concurrency limit ({max_concurrent}), waiting", "QualityTestingBusinessService", "ProcessQualityTestQueue")
-                return {"Success": True, "Message": "At concurrency limit", "JobsProcessed": 0}
-            
-            # Process jobs up to the limit
-            jobs_to_process = max_concurrent - len(active_jobs)
-            processed_count = 0
-            
-            for job in pending_jobs[:jobs_to_process]:
-                if job.get('Status') == 'Pending':
-                    LoggingService.LogInfo(f"Processing quality test job {job['Id']}", "QualityTestingBusinessService", "ProcessQualityTestQueue")
+            jobs_processed = 0
+            for job in pending_jobs:
+                try:
+                    # Process each job
                     result = self.StartQualityTest(job['Id'])
                     if result.get('Success'):
-                        processed_count += 1
-                    LoggingService.LogInfo(f"Job {job['Id']} result: {result}", "QualityTestingBusinessService", "ProcessQualityTestQueue")
+                        jobs_processed += 1
+                    else:
+                        LoggingService.LogError(f"Failed to process job {job['Id']}: {result.get('Message', 'Unknown error')}", "QualityTestingBusinessService", "ProcessQualityTestQueue")
+                        
+                except Exception as e:
+                    LoggingService.LogException(f"Error processing job {job['Id']}", e, "QualityTestingBusinessService", "ProcessQualityTestQueue")
             
-            LoggingService.LogInfo(f"Processed {processed_count} quality test jobs", "QualityTestingBusinessService", "ProcessQualityTestQueue")
-            return {"Success": True, "Message": f"Processed {processed_count} jobs", "JobsProcessed": processed_count}
+            return {"Success": True, "Message": f"Processed {jobs_processed} jobs", "JobsProcessed": jobs_processed}
             
         except Exception as e:
             LoggingService.LogException("Error processing quality test queue", e, "QualityTestingBusinessService", "ProcessQualityTestQueue")
             return {"Success": False, "Message": str(e)}
     
+    def ProcessClaimedJob(self, job: dict) -> dict:
+        """Process a claimed quality test job."""
+        try:
+            
+            # Start quality test for the claimed job
+            result = self.StartQualityTest(job['Id'])
+            
+            LoggingService.LogDebug(f"Job {job['Id']} processing result: {result}", "QualityTestingBusinessService", "ProcessClaimedJob")
+            return result
+            
+        except Exception as e:
+            LoggingService.LogException(f"Error processing claimed job {job['Id']}", e, "QualityTestingBusinessService", "ProcessClaimedJob")
+            return {"Success": False, "Message": str(e)}
+    
     def StartQualityTest(self, JobId: int) -> dict:
         """Start a quality test for the specified job."""
         try:
-            LoggingService.LogInfo(f"Starting quality test for job {JobId}", "QualityTestingBusinessService", "StartQualityTest")
             
             # Get job details from QualityTestingQueue
-            JobDetails = self.DatabaseManager.GetQualityTestJob(JobId)
-            if not JobDetails:
+            job_details = self.DatabaseManager.GetQualityTestJob(JobId)
+            if not job_details:
                 return {"Success": False, "Message": "Job not found"}
             
             # Create active job record
-            ActiveJobId = self.DatabaseManager.CreateActiveJob(
-                ServiceName="QualityTest",
+            active_job_id = self.DatabaseManager.CreateActiveJob(
+                ServiceName="QualityTestingService",
                 JobType="QualityTest", 
                 QueueId=JobId,
                 ProcessId=os.getpid(),
-                ThreadId=0
+                ThreadId=threading.get_ident()
             )
             
-            if ActiveJobId == 0:
+            if active_job_id == 0:
                 return {"Success": False, "Message": "Failed to create active job"}
             
-            # Run FFmpeg VMAF comparison
-            Result = self.RunFFmpegVMAF(JobDetails)
-            
-            # Update job status and store results
-            if Result["Success"]:
-                LoggingService.LogInfo(f"Quality test completed successfully for job {JobId}, VMAF score: {Result['VMAFScore']}", "QualityTestingBusinessService", "StartQualityTest")
+            try:
+                # Create single progress tracking record
+                progress_id = self.CreateProgressRecord(JobId, job_details)
                 
-                # Store VMAF score in QualityTestResults table
-                store_result = self.DatabaseManager.StoreQualityTestResult(JobId, JobDetails, Result["VMAFScore"])
-                if not store_result:
-                    LoggingService.LogError(f"Failed to store quality test result for job {JobId}", "QualityTestingBusinessService", "StartQualityTest")
-                    return {"Success": False, "Message": "Failed to store quality test result"}
+                # Run FFmpeg VMAF comparison with progress tracking
+                result = self.RunFFmpegVMAF(job_details, progress_id)
                 
-                # Remove from queue (revolving door)
-                remove_result = self.DatabaseManager.RemoveFromQualityTestQueue(JobId)
-                if not remove_result:
-                    LoggingService.LogError(f"Failed to remove job {JobId} from quality test queue", "QualityTestingBusinessService", "StartQualityTest")
-                    return {"Success": False, "Message": "Failed to remove job from queue"}
-                
-                # Complete active job
-                complete_result = self.DatabaseManager.CompleteActiveJob(ActiveJobId)
-                if not complete_result:
-                    LoggingService.LogError(f"Failed to complete active job {ActiveJobId} for job {JobId}", "QualityTestingBusinessService", "StartQualityTest")
-                    return {"Success": False, "Message": "Failed to complete active job"}
-                
-                LoggingService.LogInfo(f"Quality test job {JobId} fully completed and cleaned up", "QualityTestingBusinessService", "StartQualityTest")
-                return {"Success": True, "VMAFScore": Result["VMAFScore"]}
-            else:
-                # Check if this is a process termination vs actual failure
-                error_message = Result.get("Error", "")
-                if "process terminated" in error_message.lower() or "interrupted" in error_message.lower():
-                    # Don't remove from queue if process was terminated - leave for retry
-                    LoggingService.LogInfo(f"Job {JobId} interrupted, leaving in queue for retry", "QualityTestingBusinessService", "StartQualityTest")
-                    self.DatabaseManager.CompleteActiveJob(ActiveJobId, success=False, error_message="Process interrupted")
-                    return {"Success": False, "Message": "Process interrupted, job left in queue for retry"}
+                # Update job status
+                if result["Success"]:
+                    self.DatabaseManager.UpdateQualityTestStatus(JobId, "Completed", result["VMAFScore"])
+                    self.UpdateProgressRecord(progress_id, "Completed", 100, "VMAF analysis completed successfully", result["VMAFScore"])
+                    self.DatabaseManager.CompleteActiveJob(active_job_id, True)
+                    return {"Success": True, "VMAFScore": result["VMAFScore"]}
                 else:
-                    # Remove failed job from queue only for actual FFmpeg failures
-                    self.DatabaseManager.RemoveFromQualityTestQueue(JobId)
-                    self.DatabaseManager.CompleteActiveJob(ActiveJobId, success=False, error_message=Result["Error"])
-                    return {"Success": False, "Message": Result["Error"]}
+                    self.DatabaseManager.UpdateQualityTestStatus(JobId, "Failed", None)
+                    self.UpdateProgressRecord(progress_id, "Failed", 0, result.get("Error", "Unknown error"))
+                    self.DatabaseManager.CompleteActiveJob(active_job_id, False, result.get("Error", "Unknown error"))
+                    return {"Success": False, "Message": result.get("Error", "Unknown error")}
+                    
+            except Exception as e:
+                # Clean up on error
+                self.DatabaseManager.UpdateQualityTestStatus(JobId, "Failed", None)
+                if 'progress_id' in locals():
+                    self.UpdateProgressRecord(progress_id, "Failed", 0, str(e))
+                self.DatabaseManager.CompleteActiveJob(active_job_id, False, str(e))
+                raise
                 
         except Exception as e:
-            LoggingService.LogException("Error starting quality test", e, "QualityTestingBusinessService", "StartQualityTest")
+            LoggingService.LogException(f"Error starting quality test for job {JobId}", e, "QualityTestingBusinessService", "StartQualityTest")
             return {"Success": False, "Message": str(e)}
     
-    def RunFFmpegVMAF(self, JobDetails: dict) -> dict:
-        """Run FFmpeg VMAF comparison asynchronously with progress tracking."""
+    def RunFFmpegVMAF(self, JobDetails: dict, ProgressId: int = None) -> dict:
+        """Run FFmpeg VMAF comparison."""
         try:
-            OriginalFile = JobDetails["OriginalFilePath"]
-            TranscodedFile = JobDetails["TranscodedFilePath"]
-            JobId = JobDetails["Id"]
+            original_file = JobDetails["LocalSourcePath"]
+            transcoded_file = JobDetails["TranscodedFilePath"]
             
-            # Get FFmpeg path
-            project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            ffmpeg_path = os.path.join(project_root, "FFmpegMaster", "bin", "ffmpeg.exe")
+            # Verify files exist
+            if not os.path.exists(original_file):
+                return {"Success": False, "Error": f"Original file not found: {original_file}"}
             
-            # Build FFmpeg command for VMAF comparison (using working format)
-            Command = [
+            if not os.path.exists(transcoded_file):
+                return {"Success": False, "Error": f"Transcoded file not found: {transcoded_file}"}
+            
+            # Get the full path to FFmpeg executable
+            ffmpeg_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "FFmpegMaster", "bin", "ffmpeg.exe")
+            
+            # Verify FFmpeg exists
+            if not os.path.exists(ffmpeg_path):
+                return {"Success": False, "Error": f"FFmpeg executable not found: {ffmpeg_path}"}
+            
+            # Build FFmpeg command for VMAF comparison with threading
+            command = [
                 ffmpeg_path,
-                "-i", TranscodedFile,
-                "-i", OriginalFile,
-                "-lavfi", "[1:v]scale=1280x720[ref];[0:v][ref]libvmaf=log_fmt=xml:log_path=vmaf_results.xml",
+                "-threads", "6",  # Use 6 threads for faster processing
+                "-i", transcoded_file,
+                "-i", original_file,
+                "-lavfi", "[0:v][1:v]libvmaf=log_path=vmaf_output.xml:log_fmt=xml:n_threads=6",
                 "-f", "null",
                 "-"
             ]
             
-            LoggingService.LogInfo(f"Running FFmpeg VMAF: {' '.join(Command)}", "QualityTestingBusinessService", "RunFFmpegVMAF")
             
-            # Start FFmpeg process asynchronously
-            Process = subprocess.Popen(
-                Command,
+            # Update progress - starting VMAF analysis
+            if ProgressId:
+                self.UpdateProgressRecord(ProgressId, "Processing", 0, "Starting VMAF analysis")
+            
+            # Update progress - FFmpeg is running
+            if ProgressId:
+                self.UpdateProgressRecord(ProgressId, "Processing", 50, "FFmpeg VMAF analysis in progress...")
+            
+            # Execute FFmpeg with real-time progress monitoring
+            result = self.ExecuteFFmpegWithProgress(command, ProgressId, JobDetails)
+            
+            # Update progress - VMAF analysis completed
+            if ProgressId:
+                self.UpdateProgressRecord(ProgressId, "Processing", 95, "VMAF analysis completed, parsing results")
+            
+            if result.returncode == 0:
+                # Parse VMAF score from output (check both stdout and stderr)
+                vmaf_score = self.ParseVMAFScore(result.stderr)
+                
+                # If not found in stderr, try stdout
+                if vmaf_score == 0.0:
+                    vmaf_score = self.ParseVMAFScore(result.stdout)
+                
+                
+                # Update QualityTestResults table
+                if ProgressId:
+                    self.UpdateQualityTestResults(JobDetails, vmaf_score, result)
+                
+                return {"Success": True, "VMAFScore": vmaf_score}
+            else:
+                error_msg = result.stderr if result.stderr else "FFmpeg failed with no error output"
+                return {"Success": False, "Error": error_msg}
+                
+        except subprocess.TimeoutExpired:
+            return {"Success": False, "Error": "FFmpeg timeout (this should not happen as timeout was removed)"}
+        except Exception as e:
+            return {"Success": False, "Error": str(e)}
+    
+    def ParseVMAFScore(self, Output: str) -> float:
+        """Parse VMAF score from FFmpeg output."""
+        try:
+            
+            # Look for VMAF score in output
+            lines = Output.split('\n')
+            for line in lines:
+                if 'VMAF score:' in line:
+                    score = float(line.split('VMAF score:')[1].strip())
+                    return score
+                elif 'VMAF' in line and 'score' in line:
+                    # Alternative parsing for different output formats
+                    parts = line.split()
+                    for i, part in enumerate(parts):
+                        if 'VMAF' in part and i + 1 < len(parts):
+                            try:
+                                score = float(parts[i + 1])
+                                return score
+                            except ValueError:
+                                continue
+            
+            # Try to parse from XML output file if it exists
+            try:
+                import xml.etree.ElementTree as ET
+                if os.path.exists('vmaf_output.xml'):
+                    tree = ET.parse('vmaf_output.xml')
+                    root = tree.getroot()
+                    
+                    # Look for VMAF score in the pooled_metrics section
+                    for metric in root.findall('.//metric[@name="vmaf"]'):
+                        mean_score = metric.get('mean')
+                        if mean_score:
+                            return float(mean_score)
+                    
+            except Exception as xml_error:
+                LoggingService.LogException("Error parsing VMAF XML file", xml_error, "QualityTestingBusinessService", "ParseVMAFScore")
+            
+            return 0.0
+            
+        except Exception as e:
+            LoggingService.LogException("Error parsing VMAF score", e, "QualityTestingBusinessService", "ParseVMAFScore")
+            return 0.0
+    
+    def GetActiveJobs(self) -> dict:
+        """Get list of active quality testing jobs."""
+        try:
+            LoggingService.LogDebug("Getting active quality testing jobs", "QualityTestingBusinessService", "GetActiveJobs")
+            
+            # Get active jobs from database
+            active_jobs = self.DatabaseManager.GetActiveJobs("QualityTestingService")
+            
+            return {"Success": True, "ActiveJobs": active_jobs}
+            
+        except Exception as e:
+            LoggingService.LogException("Error getting active jobs", e, "QualityTestingBusinessService", "GetActiveJobs")
+            return {"Success": False, "Message": str(e)}
+    
+    def GetQualityTestStatus(self, JobId: int) -> dict:
+        """Get status of a specific quality test."""
+        try:
+            LoggingService.LogDebug(f"Getting quality test status for job {JobId}", "QualityTestingBusinessService", "GetQualityTestStatus")
+            
+            # Get job details from database
+            job_details = self.DatabaseManager.GetQualityTestJob(JobId)
+            
+            if job_details:
+                return {
+                    "Success": True, 
+                    "Status": job_details["Status"], 
+                    "VMAFScore": job_details.get("VMAFScore"),
+                    "JobId": JobId
+                }
+            else:
+                return {"Success": False, "Message": "Job not found"}
+                
+        except Exception as e:
+            LoggingService.LogException(f"Error getting quality test status for job {JobId}", e, "QualityTestingBusinessService", "GetQualityTestStatus")
+            return {"Success": False, "Message": str(e)}
+    
+    def CheckConcurrencyLimit(self) -> bool:
+        """Check if we're within the MaxConcurrentJobs limit."""
+        try:
+            # Get current active jobs count
+            active_jobs_result = self.GetActiveJobs()
+            if not active_jobs_result.get("Success"):
+                return False
+            
+            current_jobs = len(active_jobs_result.get("ActiveJobs", []))
+            
+            # Get MaxConcurrentJobs from settings
+            max_jobs_result = self.DatabaseManager.DatabaseService.ExecuteQuery(
+                "SELECT SettingValue FROM SystemSettings WHERE SettingKey = 'MaxConcurrentJobs'"
+            )
+            
+            max_jobs = 1  # Default
+            if max_jobs_result and max_jobs_result[0]['SettingValue']:
+                max_jobs = int(max_jobs_result[0]['SettingValue'])
+            
+            return current_jobs < max_jobs
+            
+        except Exception as e:
+            LoggingService.LogException("Error checking concurrency limit", e, "QualityTestingBusinessService", "CheckConcurrencyLimit")
+            return False
+    
+    def TerminateActiveFFmpegProcess(self):
+        """Terminate any active FFmpeg process."""
+        try:
+            if self.ActiveFFmpegProcess and self.ActiveFFmpegProcess.poll() is None:
+                self.ActiveFFmpegProcess.terminate()
+                
+                # Wait for graceful termination
+                try:
+                    self.ActiveFFmpegProcess.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    # Force kill if it doesn't terminate gracefully
+                    self.ActiveFFmpegProcess.kill()
+                    self.ActiveFFmpegProcess.wait()
+                
+                self.ActiveFFmpegProcess = None
+                
+        except Exception as e:
+            LoggingService.LogException("Error terminating FFmpeg process", e, "QualityTestingBusinessService", "TerminateActiveFFmpegProcess")
+    
+    def MonitorProgress(self, Process, JobId: int):
+        """Monitor FFmpeg progress and update database."""
+        try:
+            
+            # This would be implemented for real-time progress tracking
+            # For now, we'll just wait for the process to complete
+            while Process.poll() is None:
+                time.sleep(1)
+            
+            
+        except Exception as e:
+            LoggingService.LogException(f"Error monitoring progress for job {JobId}", e, "QualityTestingBusinessService", "MonitorProgress")
+    
+    def CreateProgressRecord(self, JobId: int, JobDetails: dict) -> int:
+        """Create a progress tracking record for the quality test."""
+        try:
+            # Insert progress record
+            query = """
+                INSERT INTO QualityTestProgress (
+                    TranscodeAttemptId, Status, ProgressPercentage, CurrentStep,
+                    StartTime, UpdatedAt, CreatedAt
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """
+            
+            current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            transcode_attempt_id = JobDetails.get('TranscodeAttemptId', 0)
+            
+            result = self.DatabaseManager.DatabaseService.ExecuteNonQuery(query, (
+                transcode_attempt_id,
+                "Started",
+                0,
+                "Initializing VMAF analysis",
+                current_time,
+                current_time,
+                current_time
+            ))
+            
+            if result:
+                progress_id = self.DatabaseManager.DatabaseService.GetLastInsertId()
+            else:
+                progress_id = 0
+            
+            return progress_id
+            
+        except Exception as e:
+            LoggingService.LogException(f"Error creating progress record for job {JobId}", e, "QualityTestingBusinessService", "CreateProgressRecord")
+            return 0
+    
+    def UpdateProgressRecord(self, ProgressId: int, Status: str, ProgressPercentage: int, CurrentStep: str, ETA: str = None, CurrentFrame: int = None, CurrentTime: str = None, ProcessingSpeed: str = None):
+        """Update a progress tracking record."""
+        try:
+            
+            if ProgressId == 0:
+                return
+                
+            current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            
+            # Update progress record (VMAF scores go to QualityTestResults, not here)
+            query = """
+                UPDATE QualityTestProgress 
+                SET Status = ?, ProgressPercentage = ?, CurrentStep = ?, UpdatedAt = ?, 
+                    ETA = ?, CurrentFrame = ?, CurrentTime = ?, ProcessingSpeed = ?
+                WHERE Id = ?
+            """
+            result = self.DatabaseManager.DatabaseService.ExecuteNonQuery(query, (Status, ProgressPercentage, CurrentStep, current_time, ETA, CurrentFrame, CurrentTime, ProcessingSpeed, ProgressId))
+            
+        except Exception as e:
+            LoggingService.LogException(f"Error updating progress record {ProgressId}", e, "QualityTestingBusinessService", "UpdateProgressRecord")
+    
+    def ExecuteFFmpegWithProgress(self, command: list, ProgressId: int = None, JobDetails: dict = None):
+        """Execute FFmpeg with real-time progress monitoring."""
+        try:
+            import subprocess
+            import re
+            import time
+            
+            # Start FFmpeg process
+            process = subprocess.Popen(
+                command,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
@@ -168,299 +398,269 @@ class QualityTestingBusinessService:
                 universal_newlines=True
             )
             
-            # Track the active process for shutdown handling
-            self.ActiveFFmpegProcess = Process
+            # Monitor progress in real-time
+            last_frame_count = 0
+            last_progress_percent = 0
+            start_time = time.time()
             
-            # Start progress monitoring thread
-            ProgressThread = threading.Thread(
-                target=self.MonitorFFmpegProgress,
-                args=(Process, JobId, JobDetails),
-                daemon=True
-            )
-            ProgressThread.start()
+            # Debug: Capture raw FFmpeg output to file
+            debug_file = open('ffmpeg_debug_output.txt', 'w')
             
-            # Wait for process to complete with timeout checks
-            while Process.poll() is None:
-                time.sleep(0.1)  # Check every 100ms instead of blocking
-            
-            # Clear the active process reference
-            self.ActiveFFmpegProcess = None
-            
-            # Check if process was terminated during shutdown
-            if Process.returncode == 0:
-                # Parse VMAF score from XML output
-                VMAFScore = self.ParseVMAFScoreFromXML()
-                return {"Success": True, "VMAFScore": VMAFScore}
-            else:
-                # Check if this was a process termination
-                if Process.returncode == 255 or Process.returncode < 0:
-                    return {"Success": False, "Error": f"Process terminated with return code {Process.returncode}"}
-                else:
-                    return {"Success": False, "Error": f"FFmpeg failed with return code {Process.returncode}"}
+            while True:
+                # Read a line from stderr (where FFmpeg outputs progress)
+                line = process.stderr.readline()
+                if not line:
+                    break
                 
-        except KeyboardInterrupt:
-            return {"Success": False, "Error": "Process interrupted by user"}
-        except Exception as e:
-            return {"Success": False, "Error": str(e)}
-    
-    def MonitorFFmpegProgress(self, Process, JobId: int, JobDetails: dict):
-        """Monitor FFmpeg progress and update database."""
-        try:
-            # Get total frames from MediaFiles table
-            total_frames = self.GetTotalFramesFromMediaFiles(JobDetails)
-            
-            # Initial progress record
-            current_time = datetime.now().isoformat()
-            progress_data = {
-                'TranscodeAttemptId': 0,  # We don't have this in the test
-                'Status': 'Running',
-                'CurrentStep': 'VMAF analysis starting',
-                'StartTime': current_time,
-                'ProgressPercentage': 0,
-                'CurrentFrame': 0,
-                'TotalFrames': total_frames,
-                'FramesPerSecond': 0.0,
-                'EstimatedTimeRemaining': 0,
-                'ErrorMessage': None,
-                'SubprocessPID': Process.pid,
-                'SubprocessStartTime': current_time
-            }
-            self.DatabaseManager.SaveQualityTestProgress(JobId, progress_data)
-            
-            # Store duration when we first see it
-            total_duration_seconds = None
-            
-            # Monitor stderr for progress updates
-            while Process.poll() is None:
-                line = Process.stderr.readline()
-                if line:
-                    # Parse frame information
-                    frame_match = re.search(r'frame=\s*(\d+)', line)
-                    fps_match = re.search(r'fps=\s*([\d.]+)', line)
-                    time_match = re.search(r'time=(\d{1,2}:\d{2}:\d{2}\.\d{2})', line)
-                    duration_match = re.search(r'Duration: (\d{1,2}:\d{2}:\d{2}\.\d{2})', line)
-                    speed_match = re.search(r'speed=\s*([\d.]+)x', line)
-                    
-                    # Capture duration when we first see it
-                    if duration_match and total_duration_seconds is None:
-                        try:
-                            duration_str = duration_match.group(1)
-                            total_duration_seconds = self._time_to_seconds(duration_str)
-                        except:
-                            pass
-                    
-                    if frame_match:
-                        current_frame = int(frame_match.group(1))
-                        fps = float(fps_match.group(1)) if fps_match else 0.0
-                        speed = float(speed_match.group(1)) if speed_match else 0.0
+                # Debug: Write raw output to file
+                debug_file.write(line)
+                debug_file.flush()
+                
+                # Parse progress from FFmpeg output
+                if 'frame=' in line and 'fps=' in line:
+                    progress_info = self.ParseFFmpegProgressLine(line, JobDetails)
+                    if progress_info and ProgressId:
+                        progress_percent = progress_info.get('progress_percent', 0)
+                        current_time = progress_info.get('current_time', '')
+                        current_frame = progress_info.get('current_frame', 0)
+                        fps = progress_info.get('fps', 0.0)
+                        speed = progress_info.get('speed', 0.0)
+                        eta = progress_info.get('eta', '')
                         
-                        # Calculate progress percentage (prefer frame-based if available, fallback to time-based)
-                        progress_percentage = 0
-                        eta_seconds = 0
-                        
-                        if total_frames > 0:
-                            # Frame-based progress (more accurate)
-                            progress_percentage = min(95, int((current_frame / total_frames) * 100))
+                        # Update progress for every frame - real-time updates
+                        if current_frame > 0:
+                            # Create a simple current step description
+                            current_step = f"Processing VMAF analysis - {fps:.1f} fps"
                             
-                            # Calculate ETA based on frames
-                            if fps > 0:
-                                remaining_frames = total_frames - current_frame
-                                eta_seconds = remaining_frames / fps
-                        elif time_match and total_duration_seconds is not None:
-                            # Time-based progress (fallback)
-                            try:
-                                current_time_str = time_match.group(1)
-                                current_seconds = self._time_to_seconds(current_time_str)
-                                
-                                if total_duration_seconds > 0:
-                                    progress_percentage = min(95, int((current_seconds / total_duration_seconds) * 100))
-                                    eta_seconds = total_duration_seconds - current_seconds
-                            except:
-                                progress_percentage = 0
-                        
-                        # Format ETA
-                        eta_formatted = self._format_eta(eta_seconds) if eta_seconds > 0 else None
-                        
-                        # Update progress
-                        progress_data.update({
-                            'Status': 'Running',
-                            'CurrentStep': f'VMAF analysis in progress - Frame {current_frame}',
-                            'CurrentFrame': current_frame,
-                            'TotalFrames': total_frames,
-                            'FramesPerSecond': fps,
-                            'ProcessingSpeed': f"{speed}x" if speed > 0 else None,
-                            'ProgressPercentage': progress_percentage,
-                            'ETA': eta_formatted
-                        })
-                        self.DatabaseManager.SaveQualityTestProgress(JobId, progress_data)
-                        
+                            # Format processing speed as string
+                            processing_speed = f"{speed:.2f}x"
+                            
+                            self.UpdateProgressRecord(
+                                ProgressId, 
+                                "Processing", 
+                                int(progress_percent), 
+                                current_step, 
+                                ETA=eta,
+                                CurrentFrame=current_frame,
+                                CurrentTime=current_time,
+                                ProcessingSpeed=processing_speed
+                            )
+            
+            # Wait for process to complete
+            stdout, stderr = process.communicate()
+            
+            # Write any remaining output to debug file
+            if stderr:
+                debug_file.write("=== FINAL STDERR ===\n")
+                debug_file.write(stderr)
+                debug_file.write("\n")
+            if stdout:
+                debug_file.write("=== FINAL STDOUT ===\n")
+                debug_file.write(stdout)
+                debug_file.write("\n")
+            
+            # Close debug file
+            debug_file.close()
+            
+            # Create a result object similar to subprocess.run
+            class FFmpegResult:
+                def __init__(self, returncode, stdout, stderr):
+                    self.returncode = returncode
+                    self.stdout = stdout
+                    self.stderr = stderr
+            
+            return FFmpegResult(process.returncode, stdout, stderr)
+            
         except Exception as e:
-            LoggingService.LogException("Error monitoring FFmpeg progress", e, "QualityTestingBusinessService", "MonitorFFmpegProgress")
+            LoggingService.LogException("Error executing FFmpeg with progress monitoring", e, "QualityTestingBusinessService", "ExecuteFFmpegWithProgress")
+            # Let it fail - don't run a second FFmpeg process
+            raise
     
-    def GetTotalFramesFromMediaFiles(self, JobDetails: dict) -> int:
-        """Get total frames from MediaFiles table by joining on file path."""
+    def ParseFFmpegProgressLine(self, line: str, JobDetails: dict = None) -> dict:
+        """Parse progress information from FFmpeg output line."""
         try:
-            # Try to get total frames from MediaFiles table
-            query = """
-                SELECT mf.TotalFrames 
-                FROM MediaFiles mf 
-                WHERE mf.FilePath = ? OR mf.FilePath = ?
-            """
-            result = self.DatabaseManager.DatabaseService.ExecuteQuery(
-                query, (JobDetails.get('OriginalFilePath'), JobDetails.get('TranscodedFilePath'))
+            import re
+            
+            # More flexible regex pattern that handles various FFmpeg output formats
+            PROGRESS_RE = re.compile(
+                # frame=    34
+                r'frame=\s*(?P<frame>\S+)\s+'
+                # fps= 22
+                r'fps=\s*(?P<fps>\S+)\s+'
+                # q=-0.0
+                r'q=\s*(?P<q>\S+)\s+'
+                # size=N/A (using [^\s]+ to capture N/A or a byte size)
+                r'size=\s*(?P<size>[^\s]+)\s+'
+                # time=00:00:02.90
+                r'time=\s*(?P<time>\S+)\s+'
+                # bitrate=N/A
+                r'bitrate=\s*(?P<bitrate>\S+)\s+'
+                # speed=1.87x
+                r'speed=\s*(?P<speed>\S+)\s*'
+                # elapsed=0:00:01.55 (MAKE THIS WHOLE SECTION OPTIONAL)
+                r'(?:elapsed=\s*(?P<elapsed>\S+)\s*)?'
+                # Handles potential extra characters at the end
+                r'.*'
             )
             
-            if result and len(result) > 0:
-                return result[0][0] or 0
+            match = PROGRESS_RE.search(line)
+            if match:
+                current_frame = int(match.group('frame'))
+                fps = float(match.group('fps'))
+                quality = float(match.group('q'))
+                
+                # Handle N/A values for size and bitrate
+                size_str = match.group('size')
+                size_kb = 0 if size_str == 'N/A' else int(size_str)
+                
+                current_time = match.group('time')
+                
+                bitrate_str = match.group('bitrate')
+                bitrate = 0.0 if bitrate_str == 'N/A' else float(bitrate_str)
+                
+                speed_str = match.group('speed')
+                # Remove 'x' from speed if present
+                speed = float(speed_str.rstrip('x'))
+                
+                # Calculate progress percentage based on time elapsed
+                # This is an approximation since VMAF doesn't give us total duration
+                progress_percent = 0
+                eta = ""
+                
+                # Try to parse time format (HH:MM:SS.mmm)
+                time_parts = current_time.split(':')
+                if len(time_parts) >= 3:
+                    try:
+                        hours = int(time_parts[0])
+                        minutes = int(time_parts[1])
+                        seconds = float(time_parts[2])
+                        total_seconds = hours * 3600 + minutes * 60 + seconds
+                        
+                        # Calculate progress percentage based on video duration
+                        if JobDetails:
+                            video_duration = self.GetVideoDuration(JobDetails)
+                            if video_duration > 0:
+                                progress_percent = min(95, (total_seconds / video_duration) * 100)
+                                
+                                # Calculate ETA based on actual video duration and processing speed
+                                if speed > 0:
+                                    # Total processing time = video duration / speed
+                                    total_processing_time = video_duration / speed
+                                    remaining_time = total_processing_time - total_seconds
+                                    
+                                    if remaining_time > 0:
+                                        eta_hours = int(remaining_time // 3600)
+                                        eta_minutes = int((remaining_time % 3600) // 60)
+                                        eta_seconds = int(remaining_time % 60)
+                                        eta = f"{eta_hours:02d}:{eta_minutes:02d}:{eta_seconds:02d}"
+                            else:
+                                # Fallback: rough estimate based on time elapsed
+                                progress_percent = min(90, (total_seconds / 30) * 10)
+                            
+                    except (ValueError, IndexError):
+                        pass
+                
+                return {
+                    'current_frame': current_frame,
+                    'fps': fps,
+                    'current_time': current_time,
+                    'progress_percent': progress_percent,
+                    'eta': eta,
+                    'quality': quality,
+                    'size_kb': size_kb,
+                    'bitrate': bitrate,
+                    'speed': speed
+                }
             
-            return 0
+            return None
+            
         except Exception as e:
-            LoggingService.LogException("Error getting total frames from MediaFiles", e, "QualityTestingBusinessService", "GetTotalFramesFromMediaFiles")
-            return 0
+            LoggingService.LogException("Error parsing FFmpeg progress line", e, "QualityTestingBusinessService", "ParseFFmpegProgressLine")
+            return None
     
-    def _time_to_seconds(self, time_str: str) -> float:
-        """Convert time string (HH:MM:SS.mm) to seconds."""
+    def UpdateQualityTestResults(self, JobDetails: dict, VMAFScore: float, FFmpegResult):
+        """Update QualityTestResults table with VMAF analysis results."""
         try:
-            parts = time_str.split(':')
-            hours = int(parts[0])
-            minutes = int(parts[1])
-            seconds = float(parts[2])
-            return hours * 3600 + minutes * 60 + seconds
-        except:
-            return 0.0
+            query = """
+                INSERT INTO QualityTestResults (
+                    VMAFQueueId, TranscodeAttemptId, VMAFScore, ProfileId, ProfileName,
+                    FileSize, TestDuration, PassesThreshold, Rank, ErrorMessage, DateTested
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """
+            
+            current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            queue_id = JobDetails.get('Id', 0)
+            transcode_attempt_id = JobDetails.get('TranscodeAttemptId', 0)
+            profile_id = JobDetails.get('ProfileId', 0)
+            profile_name = JobDetails.get('ProfileName', 'Unknown')
+            
+            # Get file size
+            file_size = 0
+            transcoded_file = JobDetails.get('TranscodedFilePath', '')
+            if transcoded_file and os.path.exists(transcoded_file):
+                file_size = os.path.getsize(transcoded_file)
+            
+            # Calculate test duration (rough estimate)
+            test_duration = 0.0  # We could track this if needed
+            
+            # Determine if it passes threshold (assuming 80 is the threshold)
+            passes_threshold = VMAFScore >= 80.0
+            
+            # Set rank (could be based on VMAF score)
+            rank = 1 if passes_threshold else 0
+            
+            result = self.DatabaseManager.DatabaseService.ExecuteNonQuery(query, (
+                queue_id,
+                transcode_attempt_id,
+                VMAFScore,
+                profile_id,
+                profile_name,
+                file_size,
+                test_duration,
+                passes_threshold,
+                rank,
+                None,  # No error message for successful tests
+                current_time
+            ))
+            
+            if not result:
+                LoggingService.LogError(f"Failed to update QualityTestResults for queue {queue_id}", "QualityTestingBusinessService", "UpdateQualityTestResults")
+                
+        except Exception as e:
+            LoggingService.LogException(f"Error updating QualityTestResults for queue {JobDetails.get('Id', 0)}", e, "QualityTestingBusinessService", "UpdateQualityTestResults")
     
-    def _format_eta(self, eta_seconds: float) -> str:
-        """Format ETA seconds into HH:MM:SS format."""
+    def GetVideoDuration(self, JobDetails: dict) -> float:
+        """Get video duration in seconds from the transcoded file."""
         try:
-            if eta_seconds <= 0:
-                return "00:00:00"
+            import subprocess
             
-            hours = int(eta_seconds // 3600)
-            minutes = int((eta_seconds % 3600) // 60)
-            seconds = int(eta_seconds % 60)
-            
-            return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
-        except:
-            return "00:00:00"
-    
-    def ParseVMAFScoreFromXML(self) -> float:
-        """Parse VMAF score from XML output file."""
-        try:
-            project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            xml_file = os.path.join(project_root, "vmaf_results.xml")
-            
-            if not os.path.exists(xml_file):
-                LoggingService.LogError(f"VMAF results XML file not found: {xml_file}", "QualityTestingBusinessService", "ParseVMAFScoreFromXML")
+            transcoded_file = JobDetails.get('TranscodedFilePath', '')
+            if not transcoded_file or not os.path.exists(transcoded_file):
                 return 0.0
             
-            tree = ET.parse(xml_file)
-            root = tree.getroot()
+            # Get the full path to FFprobe executable
+            ffprobe_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "FFmpegMaster", "bin", "ffprobe.exe")
             
-            # Look for VMAF score in XML
-            for frame in root.findall('.//frame'):
-                vmaf_elem = frame.find('metrics/vmaf')
-                if vmaf_elem is not None:
-                    score = float(vmaf_elem.text)
-                    LoggingService.LogInfo(f"Parsed VMAF score from frame data: {score}", "QualityTestingBusinessService", "ParseVMAFScoreFromXML")
-                    return score
+            if not os.path.exists(ffprobe_path):
+                return 0.0
             
-            # If no frame-by-frame, look for overall score
-            for metrics in root.findall('.//metrics'):
-                vmaf_elem = metrics.find('vmaf')
-                if vmaf_elem is not None:
-                    score = float(vmaf_elem.text)
-                    LoggingService.LogInfo(f"Parsed VMAF score from overall metrics: {score}", "QualityTestingBusinessService", "ParseVMAFScoreFromXML")
-                    return score
+            # Use FFprobe to get video duration
+            command = [
+                ffprobe_path,
+                "-v", "quiet",
+                "-show_entries", "format=duration",
+                "-of", "csv=p=0",
+                transcoded_file
+            ]
             
-            LoggingService.LogError("No VMAF score found in XML file", "QualityTestingBusinessService", "ParseVMAFScoreFromXML")
+            result = subprocess.run(command, capture_output=True, text=True, timeout=10)
+            
+            if result.returncode == 0 and result.stdout.strip():
+                duration = float(result.stdout.strip())
+                return duration
+            
             return 0.0
             
         except Exception as e:
-            LoggingService.LogException("Error parsing VMAF score from XML", e, "QualityTestingBusinessService", "ParseVMAFScoreFromXML")
+            LoggingService.LogException(f"Error getting video duration for {JobDetails.get('TranscodedFilePath', '')}", e, "QualityTestingBusinessService", "GetVideoDuration")
             return 0.0
-    
-    def ParseVMAFScore(self, Output: str) -> float:
-        """Parse VMAF score from FFmpeg output (legacy method)."""
-        try:
-            # Look for VMAF score in output
-            Lines = Output.split('\n')
-            for Line in Lines:
-                if 'VMAF score:' in Line:
-                    Score = float(Line.split('VMAF score:')[1].strip())
-                    return Score
-            return 0.0
-        except:
-            return 0.0
-    
-    def GetActiveJobs(self) -> list:
-        """Get list of active quality testing jobs."""
-        try:
-            # Get active jobs from database
-            active_jobs = self.DatabaseManager.DatabaseService.ExecuteQuery(
-                "SELECT * FROM ActiveJobs WHERE ServiceName = ? AND Status = ?", 
-                ('QualityTest', 'Running')
-            )
-            return active_jobs
-        except Exception as e:
-            LoggingService.LogException("Error getting active jobs", e, "QualityTestingBusinessService", "GetActiveJobs")
-            return []
-    
-    def CheckConcurrencyLimit(self) -> int:
-        """Check the maximum concurrent jobs limit."""
-        try:
-            return self.DatabaseManager.GetMaxConcurrentJobs()
-        except Exception as e:
-            LoggingService.LogException("Error checking concurrency limit", e, "QualityTestingBusinessService", "CheckConcurrencyLimit")
-            return 1  # Default to 1
-    
-    def GetQualityTestStatus(self, JobId: int) -> dict:
-        """Get status of a specific quality test."""
-        try:
-            # Get job details
-            job = self.DatabaseManager.GetQualityTestJob(JobId)
-            if not job:
-                return {"Success": False, "Message": "Job not found"}
-            
-            # Get progress information
-            progress = self.DatabaseManager.DatabaseService.ExecuteQuery(
-                "SELECT * FROM QualityTestProgress WHERE QualityTestQueueId = ? ORDER BY UpdatedAt DESC LIMIT 1",
-                (JobId,)
-            )
-            
-            return {
-                "Success": True,
-                "Job": job,
-                "Progress": progress[0] if progress else None
-            }
-        except Exception as e:
-            LoggingService.LogException("Error getting quality test status", e, "QualityTestingBusinessService", "GetQualityTestStatus")
-            return {"Success": False, "Message": str(e)}
-    
-    def TerminateActiveFFmpegProcess(self):
-        """Terminate any active FFmpeg process during shutdown."""
-        try:
-            if self.ActiveFFmpegProcess and self.ActiveFFmpegProcess.poll() is None:
-                LoggingService.LogInfo("Terminating active FFmpeg process during shutdown", "QualityTestingBusinessService", "TerminateActiveFFmpegProcess")
-                self.ActiveFFmpegProcess.terminate()
-                # Give it a moment to terminate gracefully
-                try:
-                    self.ActiveFFmpegProcess.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    # Force kill if it doesn't terminate gracefully
-                    LoggingService.LogInfo("Force killing FFmpeg process", "QualityTestingBusinessService", "TerminateActiveFFmpegProcess")
-                    self.ActiveFFmpegProcess.kill()
-                self.ActiveFFmpegProcess = None
-        except Exception as e:
-            LoggingService.LogException("Error terminating FFmpeg process", e, "QualityTestingBusinessService", "TerminateActiveFFmpegProcess")
-    
-    def Shutdown(self) -> bool:
-        """Graceful shutdown of the business service."""
-        try:
-            LoggingService.LogInfo("Shutting down QualityTestingBusinessService", "QualityTestingBusinessService", "Shutdown")
-            
-            # Just log completion - the worker handles FFmpeg termination
-            LoggingService.LogInfo("QualityTestingBusinessService shutdown completed", "QualityTestingBusinessService", "Shutdown")
-            return True
-        except Exception as e:
-            LoggingService.LogException("Error during business service shutdown", e, "QualityTestingBusinessService", "Shutdown")
-            return False

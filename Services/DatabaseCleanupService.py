@@ -94,12 +94,12 @@ class DatabaseCleanupService:
     def CleanupOrphanedProgressRecords(self) -> int:
         """Clean up orphaned progress records that are stuck in 'Running' state."""
         try:
-            # Find progress records that are running but have no corresponding active job
+            # Find progress records that are running but have no corresponding transcode attempt
             query = """
                 DELETE FROM QualityTestProgress 
                 WHERE Status = 'Running' 
-                AND QualityTestQueueId NOT IN (
-                    SELECT Id FROM QualityTestingQueue WHERE Status = 'Running'
+                AND TranscodeAttemptId NOT IN (
+                    SELECT Id FROM TranscodeAttempts WHERE Success IS NULL
                 )
             """
             rows_affected = self.DatabaseManager.DatabaseService.ExecuteNonQuery(query)
@@ -165,8 +165,8 @@ class DatabaseCleanupService:
             query = """
                 SELECT COUNT(*) FROM QualityTestProgress 
                 WHERE Status = 'Running' 
-                AND QualityTestQueueId NOT IN (
-                    SELECT Id FROM QualityTestingQueue WHERE Status = 'Running'
+                AND TranscodeAttemptId NOT IN (
+                    SELECT Id FROM TranscodeAttempts WHERE Success IS NULL
                 )
             """
             result = self.DatabaseManager.DatabaseService.ExecuteQuery(query)

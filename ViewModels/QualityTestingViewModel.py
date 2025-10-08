@@ -30,27 +30,53 @@ class QualityTestingViewModel:
     def ProcessQueue(self) -> dict:
         """Process the quality testing queue."""
         try:
-            LoggingService.LogInfo("Processing quality testing queue", "QualityTestingViewModel", "ProcessQueue")
+            LoggingService.LogDebug("Processing quality testing queue", "QualityTestingViewModel", "ProcessQueue")
             
             # Delegate to business service
             result = self.QualityTestingBusinessService.ProcessQualityTestQueue()
             
-            LoggingService.LogInfo(f"Queue processing result: {result}", "QualityTestingViewModel", "ProcessQueue")
+            LoggingService.LogDebug(f"Queue processing result: {result}", "QualityTestingViewModel", "ProcessQueue")
             return result
             
         except Exception as e:
             LoggingService.LogException("Error processing queue", e, "QualityTestingViewModel", "ProcessQueue")
             return {"Success": False, "Message": str(e)}
     
+    def ClaimJob(self) -> dict:
+        """Atomically claim a pending quality test job."""
+        try:
+            # Use the new atomic job claiming method
+            job = self.DatabaseManager.ClaimQualityTestJob()
+            return job
+            
+        except Exception as e:
+            LoggingService.LogException("Error claiming job", e, "QualityTestingViewModel", "ClaimJob")
+            return None
+    
+    def ProcessJob(self, job: dict) -> dict:
+        """Process a claimed quality test job."""
+        try:
+            LoggingService.LogInfo(f"Processing claimed job {job['Id']}", "QualityTestingViewModel", "ProcessJob")
+            
+            # Delegate to business service to process the specific job
+            result = self.QualityTestingBusinessService.ProcessClaimedJob(job)
+            
+            LoggingService.LogDebug(f"Job {job['Id']} processing result: {result}", "QualityTestingViewModel", "ProcessJob")
+            return result
+            
+        except Exception as e:
+            LoggingService.LogException(f"Error processing job {job['Id']}", e, "QualityTestingViewModel", "ProcessJob")
+            return {"Success": False, "Message": str(e)}
+    
     def GetActiveJobs(self) -> dict:
         """Get list of active quality testing jobs."""
         try:
-            LoggingService.LogInfo("Getting active quality testing jobs", "QualityTestingViewModel", "GetActiveJobs")
+            # LoggingService.LogInfo("Getting active quality testing jobs", "QualityTestingViewModel", "GetActiveJobs")
             
             # Delegate to business service
             result = self.QualityTestingBusinessService.GetActiveJobs()
             
-            LoggingService.LogInfo(f"Active jobs result: {result}", "QualityTestingViewModel", "GetActiveJobs")
+            # LoggingService.LogInfo(f"Active jobs result: {result}", "QualityTestingViewModel", "GetActiveJobs")
             return result
             
         except Exception as e:
@@ -90,12 +116,12 @@ class QualityTestingViewModel:
     def StartQualityTest(self, JobId: int) -> dict:
         """Start a quality test for the specified job."""
         try:
-            LoggingService.LogInfo(f"Starting quality test for job {JobId}", "QualityTestingViewModel", "StartQualityTest")
+            # LoggingService.LogInfo(f"Starting quality test for job {JobId}", "QualityTestingViewModel", "StartQualityTest")
             
             # Delegate to business service
             result = self.QualityTestingBusinessService.StartQualityTest(JobId)
             
-            LoggingService.LogInfo(f"Start quality test result: {result}", "QualityTestingViewModel", "StartQualityTest")
+            # LoggingService.LogInfo(f"Start quality test result: {result}", "QualityTestingViewModel", "StartQualityTest")
             return result
             
         except Exception as e:
@@ -105,12 +131,12 @@ class QualityTestingViewModel:
     def GetQualityTestStatus(self, JobId: int) -> dict:
         """Get status of a specific quality test."""
         try:
-            LoggingService.LogInfo(f"Getting quality test status for job {JobId}", "QualityTestingViewModel", "GetQualityTestStatus")
+            # LoggingService.LogInfo(f"Getting quality test status for job {JobId}", "QualityTestingViewModel", "GetQualityTestStatus")
             
             # Delegate to business service
             result = self.QualityTestingBusinessService.GetQualityTestStatus(JobId)
             
-            LoggingService.LogInfo(f"Quality test status result: {result}", "QualityTestingViewModel", "GetQualityTestStatus")
+            # LoggingService.LogInfo(f"Quality test status result: {result}", "QualityTestingViewModel", "GetQualityTestStatus")
             return result
             
         except Exception as e:
@@ -120,10 +146,10 @@ class QualityTestingViewModel:
     def Shutdown(self) -> bool:
         """Graceful shutdown of the ViewModel."""
         try:
-            LoggingService.LogInfo("Shutting down QualityTestingViewModel", "QualityTestingViewModel", "Shutdown")
+            # LoggingService.LogInfo("Shutting down QualityTestingViewModel", "QualityTestingViewModel", "Shutdown")
             
             # Just log completion - the worker handles the actual shutdown
-            LoggingService.LogInfo("QualityTestingViewModel shutdown completed", "QualityTestingViewModel", "Shutdown")
+            # LoggingService.LogInfo("QualityTestingViewModel shutdown completed", "QualityTestingViewModel", "Shutdown")
             return True
             
         except Exception as e:

@@ -39,3 +39,4 @@ Manual quality test controls: GUI for manually triggering quality tests, batch o
 
 Database transaction management: Implement proper transaction handling for cross-service data updates and rollback mechanisms for partial failures.
 
+Hard Coded FileManagerService 

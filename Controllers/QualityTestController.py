@@ -59,23 +59,26 @@ class QualityTestController:
     def RunFFmpegVMAF(self, JobDetails: dict) -> dict:
         """Run FFmpeg VMAF comparison"""
         try:
-            OriginalFile = JobDetails["OriginalFilePath"]
+            OriginalFile = JobDetails["LocalSourcePath"]
             TranscodedFile = JobDetails["TranscodedFilePath"]
+            
+            # Get the full path to FFmpeg executable
+            ffmpeg_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "FFmpegMaster", "bin", "ffmpeg.exe")
             
             # Build FFmpeg command for VMAF comparison
             Command = [
-                "ffmpeg",
+                ffmpeg_path,
                 "-i", TranscodedFile,
                 "-i", OriginalFile,
-                "-lavfi", "libvmaf=model_path=model/vmaf_v0.6.1.pkl",
+                "-lavfi", "[0:v][1:v]libvmaf=log_path=vmaf_output.xml:log_fmt=xml",
                 "-f", "null",
                 "-"
             ]
             
             self.LoggingService.LogInfo(f"Running FFmpeg VMAF: {' '.join(Command)}")
             
-            # Execute FFmpeg
-            Result = subprocess.run(Command, capture_output=True, text=True, timeout=300)
+            # Execute FFmpeg without timeout (VMAF calculations can take a long time)
+            Result = subprocess.run(Command, capture_output=True, text=True)
             
             if Result.returncode == 0:
                 # Parse VMAF score from output
@@ -85,7 +88,7 @@ class QualityTestController:
                 return {"Success": False, "Error": Result.stderr}
                 
         except subprocess.TimeoutExpired:
-            return {"Success": False, "Error": "FFmpeg timeout"}
+            return {"Success": False, "Error": "FFmpeg timeout (this should not happen as timeout was removed)"}
         except Exception as e:
             return {"Success": False, "Error": str(e)}
     
