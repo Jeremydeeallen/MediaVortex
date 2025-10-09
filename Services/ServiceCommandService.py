@@ -26,7 +26,7 @@ class ServiceCommandService:
             INSERT INTO ServiceCommands (
                 CommandType, SourceService, TargetService, Parameters, 
                 Status, Priority, CreatedBy, CreatedAt, UpdatedAt
-            ) VALUES (?, ?, ?, ?, 'Pending', ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            ) VALUES (?, ?, ?, ?, 'Pending', ?, ?, datetime('now', 'localtime'), datetime('now', 'localtime'))
             """
             
             params = (CommandType, SourceService, TargetService, ParametersJson, 
@@ -86,8 +86,8 @@ class ServiceCommandService:
             
             query = """
             UPDATE ServiceCommands 
-            SET Status = ?, ProcessedAt = CURRENT_TIMESTAMP, Result = ?, 
-                ErrorMessage = ?, UpdatedAt = CURRENT_TIMESTAMP
+            SET Status = ?, ProcessedAt = datetime('now', 'localtime'), Result = ?, 
+                ErrorMessage = ?, UpdatedAt = datetime('now', 'localtime')
             WHERE Id = ?
             """
             

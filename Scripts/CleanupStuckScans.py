@@ -38,9 +38,9 @@ def CleanupStuckScans():
         UpdateQuery = """
         UPDATE ScanJobs 
         SET Status = 'Failed', 
-            EndTime = CURRENT_TIMESTAMP,
+            EndTime = datetime('now', 'localtime'),
             ErrorMessage = 'Cleaned up by CleanupStuckScans script - job was stuck',
-            LastUpdated = CURRENT_TIMESTAMP
+            LastUpdated = datetime('now', 'localtime')
         WHERE Status IN ('Pending', 'Running')
         """
         

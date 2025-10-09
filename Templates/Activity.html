@@ -138,12 +138,9 @@
                                     <thead>
                                         <tr>
                                             <th>File Name</th>
-                                            <th>Date</th>
                                             <th>Quality Score</th>
-                                            <th>Quality</th>
-                                            <th>Size Reduction</th>
-                                            <th>Duration</th>
                                             <th>Profile</th>
+                                            <th>Size Reduction</th>
                                             <th>Status</th>
                                         </tr>
                                     </thead>
@@ -398,7 +395,7 @@ class ActivityManager {
         if (results.length === 0) {
             const row = document.createElement('tr');
             row.innerHTML = `
-                <td colspan="8" class="text-center text-muted">
+                <td colspan="5" class="text-center text-muted">
                     <i class="fas fa-info-circle"></i> No quality test results available
                 </td>
             `;
@@ -432,23 +429,18 @@ class ActivityManager {
             const statusText = isSuccess ? 'Success' : 'Failed';
             
             row.innerHTML = `
-                <td>${this.escapeHtml(this.getFileNameFromPath(result.FilePath) || '-')}</td>
-                <td>${this.formatDate(result.DateTested)}</td>
+                <td>${this.escapeHtml(result.TranscodedFileName || this.getFileNameFromPath(result.FilePath) || '-')}</td>
                 <td>
                     ${result.VMAFScore !== null && result.VMAFScore !== undefined ? 
                         `<span class="badge ${vmafBadgeClass}">${result.VMAFScore.toFixed(2)}</span>` : 
                         '<span class="text-muted">-</span>'
                     }
                 </td>
-                <td>${result.Quality || '-'}</td>
-                <td>
-                    ${this.calculateSizeReduction(result)}
-                </td>
-                <td>
-                    ${result.TestDuration ? `${result.TestDuration.toFixed(1)}s` : '-'}
-                </td>
                 <td>
                     ${this.escapeHtml(result.TranscodeProfileName || '-')}
+                </td>
+                <td>
+                    ${this.calculateSizeReduction(result)}
                 </td>
                 <td>
                     <span class="badge ${statusBadge}">

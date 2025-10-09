@@ -770,7 +770,7 @@ class DatabaseManager:
                 # Update existing setting
                 query = """
                     UPDATE SystemSettings 
-                    SET SettingValue = ?, Description = ?, DataType = ?, LastModified = CURRENT_TIMESTAMP
+                    SET SettingValue = ?, Description = ?, DataType = ?, LastModified = datetime('now', 'localtime')
                     WHERE SettingKey = ?
                 """
                 self.DatabaseService.ExecuteNonQuery(query, (SettingValue, Description, DataType, SettingKey))
@@ -778,7 +778,7 @@ class DatabaseManager:
                 # Insert new setting
                 query = """
                     INSERT INTO SystemSettings (SettingKey, SettingValue, Description, DataType, LastModified)
-                    VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    VALUES (?, ?, ?, ?, datetime('now', 'localtime'))
                 """
                 self.DatabaseService.ExecuteNonQuery(query, (SettingKey, SettingValue, Description, DataType))
             
@@ -1390,7 +1390,7 @@ class DatabaseManager:
                 return False
             
             # Add LastAttemptDate update
-            updateFields.append("LastAttemptDate = CURRENT_TIMESTAMP")
+            updateFields.append("LastAttemptDate = datetime('now', 'localtime')")
             
             # Add FilePath to parameters for WHERE clause
             parameters.append(FilePath)
@@ -1762,7 +1762,7 @@ class DatabaseManager:
                     UPDATE TranscodeProgress SET
                         CurrentPhase = ?, ProgressPercent = ?, CurrentFrame = ?, CurrentFPS = ?,
                         CurrentBitrate = ?, CurrentTime = ?, CurrentSpeed = ?, ETA = ?,
-                        TotalFrames = ?, AverageFPS = ?, LastProgressUpdate = CURRENT_TIMESTAMP
+                        TotalFrames = ?, AverageFPS = ?, LastProgressUpdate = datetime('now', 'localtime')
                     WHERE TranscodeAttemptId = ?
                 """
                 parameters = (CurrentPhase, ProgressPercent, CurrentFrame, CurrentFPS,
@@ -1778,7 +1778,7 @@ class DatabaseManager:
                     INSERT INTO TranscodeProgress 
                     (TranscodeAttemptId, PassNumber, PassType, CurrentPhase, ProgressPercent, CurrentFrame, CurrentFPS, 
                      CurrentBitrate, CurrentTime, CurrentSpeed, ETA, TotalFrames, AverageFPS, LastProgressUpdate)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'))
                 """
                 parameters = (TranscodeAttemptId, 1, "Encoding", CurrentPhase, ProgressPercent, CurrentFrame, CurrentFPS,
                              CurrentBitrate, CurrentTime, CurrentSpeed, ETA, TotalFrames, AverageFPS)
@@ -2014,7 +2014,7 @@ class DatabaseManager:
                     UptimeSeconds = ?, MemoryUsage = ?, CPUUsage = ?, DatabaseConnection = ?,
                     DiskSpace = ?, ErrorCount = ?, MaxErrors = ?, ActiveJobsCount = ?,
                     IsProcessing = ?, ProcessId = ?, Version = ?, ServiceType = ?,
-                    MaxConcurrentJobs = ?, UpdatedAt = CURRENT_TIMESTAMP
+                    MaxConcurrentJobs = ?, UpdatedAt = datetime('now', 'localtime')
                 WHERE ServiceName = ?
                 """
                 parameters = (
@@ -2045,7 +2045,7 @@ class DatabaseManager:
                     UptimeSeconds, MemoryUsage, CPUUsage, DatabaseConnection, DiskSpace,
                     ErrorCount, MaxErrors, ActiveJobsCount, IsProcessing, ProcessId,
                     Version, ServiceType, MaxConcurrentJobs, CreatedAt, UpdatedAt
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'), datetime('now', 'localtime'))
                 """
                 parameters = (
                     ServiceStatus.get('ServiceName'),
@@ -2094,7 +2094,7 @@ class DatabaseManager:
                 return False
             
             Parameters.append(ServiceName)
-            query = f"UPDATE ServiceStatus SET {', '.join(UpdateFields)}, UpdatedAt = CURRENT_TIMESTAMP WHERE ServiceName = ?"
+            query = f"UPDATE ServiceStatus SET {', '.join(UpdateFields)}, UpdatedAt = datetime('now', 'localtime') WHERE ServiceName = ?"
             
             self.DatabaseService.ExecuteNonQuery(query, Parameters)
             LoggingService.LogDebug(f"Service status updated for {ServiceName}", "DatabaseManager", "UpdateServiceStatus")
@@ -2142,7 +2142,7 @@ class DatabaseManager:
                 INSERT INTO ServiceCommands (
                 CommandType, SourceService, TargetService, Parameters, Status, 
                 Priority, CreatedBy, CreatedAt, UpdatedAt
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'), datetime('now', 'localtime'))
             """
             
             import json
@@ -2178,7 +2178,7 @@ class DatabaseManager:
             
             query = """
             UPDATE ServiceCommands 
-            SET Status = ?, Result = ?, UpdatedAt = CURRENT_TIMESTAMP
+            SET Status = ?, Result = ?, UpdatedAt = datetime('now', 'localtime')
             WHERE Id = ?
             """
             
@@ -2319,7 +2319,7 @@ class DatabaseManager:
             
             query = """
                 INSERT INTO MediaFilesArchive 
-                SELECT *, CURRENT_TIMESTAMP, ? 
+                SELECT *, datetime('now', 'localtime'), ? 
                 FROM MediaFiles 
                 WHERE Id = ?
             """
@@ -2354,7 +2354,7 @@ class DatabaseManager:
             
             query = """
                 INSERT INTO ActiveJobs (ServiceName, JobType, QueueId, ProcessId, ThreadId, Status, StartedAt)
-                VALUES (?, ?, ?, ?, ?, 'Running', CURRENT_TIMESTAMP)
+                VALUES (?, ?, ?, ?, ?, 'Running', datetime('now', 'localtime'))
             """
             
             result = self.DatabaseService.ExecuteNonQuery(query, (ServiceName, JobType, QueueId, ProcessId, ThreadId))
@@ -2383,7 +2383,7 @@ class DatabaseManager:
             # Update the job status first
             update_query = """
                 UPDATE ActiveJobs 
-                SET Status = ?, UpdatedAt = CURRENT_TIMESTAMP
+                SET Status = ?, UpdatedAt = datetime('now', 'localtime')
                 WHERE Id = ?
             """
             
@@ -2469,7 +2469,7 @@ class DatabaseManager:
             # Update job status to cancelled
             update_query = """
                 UPDATE ActiveJobs 
-                SET Status = 'Cancelled', UpdatedAt = CURRENT_TIMESTAMP
+                SET Status = 'Cancelled', UpdatedAt = datetime('now', 'localtime')
                 WHERE Id = ?
             """
             
@@ -2513,7 +2513,7 @@ class DatabaseManager:
                 INSERT INTO QualityTestingQueue (
                     TranscodeAttemptId, OriginalFilePath, TranscodedFilePath, FileName,
                     Status, Priority, DateAdded, QualityThreshold, StrategyType
-                ) VALUES (?, ?, ?, ?, 'Pending', 50, CURRENT_TIMESTAMP, 90.0, 'Single')
+                ) VALUES (?, ?, ?, ?, 'Pending', 50, datetime('now', 'localtime'), 90.0, 'Single')
             """
             
             # Extract file paths and name
@@ -2615,7 +2615,7 @@ class DatabaseManager:
                 query = """
                     UPDATE QualityTestProgress SET
                         Status = ?, ProgressPercentage = ?, CurrentStep = ?, 
-                        UpdatedAt = CURRENT_TIMESTAMP, CurrentTime = ?, CurrentFrame = ?, 
+                        UpdatedAt = datetime('now', 'localtime'), CurrentTime = ?, CurrentFrame = ?, 
                         ProcessingSpeed = ?, ETA = ?
                     WHERE TranscodeAttemptId = ?
                 """
@@ -2637,7 +2637,7 @@ class DatabaseManager:
                     (TranscodeAttemptId, Status, ProgressPercentage, CurrentStep, 
                      StartTime, UpdatedAt, CreatedAt, CurrentTime, CurrentFrame, 
                      ProcessingSpeed, ETA)
-                    VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP,
+                    VALUES (?, ?, ?, ?, ?, datetime('now', 'localtime'), datetime('now', 'localtime'),
                             ?, ?, ?, ?)
                 """
                 
@@ -2691,7 +2691,7 @@ class DatabaseManager:
             Query = """
                 INSERT INTO QualityTestResults 
                 (TranscodeAttemptId, TestDuration, PassesThreshold, Rank, ErrorMessage, DateTested, FFmpegCommand, Status, VMAFScore)
-                VALUES (?, NULL, NULL, NULL, NULL, CURRENT_TIMESTAMP, ?, 'Running', NULL)
+                VALUES (?, NULL, NULL, NULL, NULL, datetime('now', 'localtime'), ?, 'Running', NULL)
             """
             
             Parameters = (TranscodeAttemptId, FFmpegCommand)
@@ -2764,7 +2764,7 @@ class DatabaseManager:
             query = """
                 INSERT INTO QualityTestResults 
                 (TranscodeAttemptId, TestDuration, PassesThreshold, Rank, ErrorMessage, DateTested, FFmpegCommand, Status, VMAFScore)
-                VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, 'Success', ?)
+                VALUES (?, ?, ?, ?, ?, datetime('now', 'localtime'), ?, 'Success', ?)
             """
             
             parameters = (
@@ -2869,7 +2869,7 @@ class DatabaseManager:
         try:
             query = """
                 UPDATE ActiveJobs 
-                SET ThreadId = ?, UpdatedAt = CURRENT_TIMESTAMP
+                SET ThreadId = ?, UpdatedAt = datetime('now', 'localtime')
                 WHERE Id = ?
             """
             
@@ -3106,7 +3106,7 @@ class DatabaseManager:
                     qtr.FFmpegCommand, qtr.Status,
                     ta.ProfileName, ta.FilePath, ta.OldSizeBytes, ta.NewSizeBytes, ta.SizeReductionBytes, 
                     ta.SizeReductionPercent, ta.TranscodeDurationSeconds, ta.ProfileName as TranscodeProfileName,
-                    ta.Quality, ta.AttemptDate, ta.NewSizeBytes as FileSize
+                    ta.Quality, ta.AttemptDate, ta.NewSizeBytes as FileSize, ta.FfpmpegCommand
                 FROM QualityTestResults qtr
                 LEFT JOIN TranscodeAttempts ta ON qtr.TranscodeAttemptId = ta.Id
                 ORDER BY qtr.DateTested DESC 
@@ -3116,6 +3116,17 @@ class DatabaseManager:
             
             results = []
             for row in rows:
+                # Parse FFmpeg command to get transcoded file path
+                TranscodedFilePath = None
+                TranscodedFileName = None
+                if row["FfpmpegCommand"] is not None and row["FfpmpegCommand"] != "":
+                    _, OutputPath = self.ParseFFmpegCommand(row["FfpmpegCommand"])
+                    if OutputPath:
+                        TranscodedFilePath = OutputPath
+                        # Extract just the filename from the full path
+                        import os
+                        TranscodedFileName = os.path.basename(OutputPath)
+                
                 results.append({
                     "Id": row["Id"],
                     "TranscodeAttemptId": row["TranscodeAttemptId"],
@@ -3130,6 +3141,8 @@ class DatabaseManager:
                     "FFmpegCommand": row["FFmpegCommand"],
                     "Status": row["Status"],
                     "FilePath": row["FilePath"],
+                    "TranscodedFilePath": TranscodedFilePath,
+                    "TranscodedFileName": TranscodedFileName,
                     "OldSizeBytes": row["OldSizeBytes"],
                     "NewSizeBytes": row["NewSizeBytes"],
                     "SizeReductionBytes": row["SizeReductionBytes"],
@@ -3223,7 +3236,7 @@ class DatabaseManager:
             # Now atomically claim the job
             update_query = """
                 UPDATE QualityTestingQueue 
-                SET DateStarted = CURRENT_TIMESTAMP
+                SET DateStarted = datetime('now', 'localtime')
                 WHERE Id = ? AND DateStarted IS NULL
             """
             
@@ -3281,7 +3294,7 @@ class DatabaseManager:
                 INSERT INTO QualityTestingQueue (
                     TranscodeAttemptId, OriginalFilePath, TranscodedFilePath, LocalSourcePath,
                     DateAdded, DateStarted, DateCompleted
-                ) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?)
+                ) VALUES (?, ?, ?, ?, datetime('now', 'localtime'), ?, ?)
             """
             
             params = (
@@ -3401,7 +3414,7 @@ class DatabaseManager:
             query = """
                 INSERT INTO TemporaryFilePaths (
                     TranscodeAttemptId, OriginalPath, LocalSourcePath, CreatedDate
-                ) VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+                ) VALUES (?, ?, ?, datetime('now', 'localtime'))
             """
             
             params = (TranscodeAttemptId, NormalizedOriginalPath, NormalizedLocalSourcePath)
@@ -3687,7 +3700,7 @@ class DatabaseManager:
         try:
             LoggingService.LogFunctionEntry("UpdateActiveJobProcessId", "DatabaseManager", ActiveJobId, ProcessId)
             
-            query = "UPDATE ActiveJobs SET ProcessId = ?, UpdatedAt = CURRENT_TIMESTAMP WHERE Id = ?"
+            query = "UPDATE ActiveJobs SET ProcessId = ?, UpdatedAt = datetime('now', 'localtime') WHERE Id = ?"
             affected_rows = self.DatabaseService.ExecuteNonQuery(query, (ProcessId, ActiveJobId))
             
             if affected_rows > 0:
@@ -3734,7 +3747,7 @@ class DatabaseManager:
             query = """
                 INSERT INTO QualityTestResults 
                 (TranscodeAttemptId, TestDuration, PassesThreshold, Rank, ErrorMessage, DateTested, FFmpegCommand, Status, VMAFScore)
-                VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, datetime('now', 'localtime'), ?, ?, ?)
             """
             
             params = (
@@ -3779,44 +3792,25 @@ class DatabaseManager:
                                        "DatabaseManager", "CreateQualityTestResult")
             return 0
     
-    def UpdateQualityTestResult(self, ResultId: int, Status: str = None, VMAF: float = None, ErrorMessage: str = None) -> bool:
-        """Update a quality test result with completion details."""
+    def UpdateQualityTestResultFailure(self, ResultId: int, ErrorMessage: str) -> bool:
+        """Update a quality test result with failure details."""
         try:
-            LoggingService.LogFunctionEntry("UpdateQualityTestResult", "DatabaseManager", ResultId, Status, VMAF, ErrorMessage)
+            LoggingService.LogFunctionEntry("UpdateQualityTestResultFailure", "DatabaseManager", ResultId, ErrorMessage)
             
-            updates = []
-            params = []
-            
-            if Status:
-                updates.append("Status = ?")
-                params.append(Status)
-            if VMAF is not None:
-                updates.append("VMAFScore = ?")
-                params.append(VMAF)
-            if ErrorMessage is not None:
-                updates.append("ErrorMessage = ?")
-                params.append(ErrorMessage)
-            
-            if not updates:
-                LoggingService.LogWarning("No updates provided for QualityTestResult", "DatabaseManager", "UpdateQualityTestResult")
-                return False
-            
-            query = f"UPDATE QualityTestResults SET {', '.join(updates)} WHERE Id = ?"
-            params.append(ResultId)
-            
-            affected_rows = self.DatabaseService.ExecuteNonQuery(query, tuple(params))
+            query = "UPDATE QualityTestResults SET Status = 'Failed', ErrorMessage = ? WHERE Id = ?"
+            affected_rows = self.DatabaseService.ExecuteNonQuery(query, (ErrorMessage, ResultId))
             
             if affected_rows > 0:
-                LoggingService.LogInfo(f"Updated QualityTestResult {ResultId}", "DatabaseManager", "UpdateQualityTestResult")
+                LoggingService.LogInfo(f"Updated QualityTestResult {ResultId} with failure status", "DatabaseManager", "UpdateQualityTestResultFailure")
                 return True
             else:
                 LoggingService.LogWarning(f"No rows updated for QualityTestResult {ResultId}", 
-                                         "DatabaseManager", "UpdateQualityTestResult")
+                                         "DatabaseManager", "UpdateQualityTestResultFailure")
                 return False
                 
         except Exception as e:
-            LoggingService.LogException("Error updating quality test result", e, 
-                                       "DatabaseManager", "UpdateQualityTestResult")
+            LoggingService.LogException("Error updating quality test failure", e, 
+                                       "DatabaseManager", "UpdateQualityTestResultFailure")
             return False
     
     def DeleteQualityTestQueueItem(self, JobId: int) -> bool:

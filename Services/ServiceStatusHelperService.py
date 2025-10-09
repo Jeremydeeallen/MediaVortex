@@ -22,7 +22,7 @@ class ServiceStatusHelperService:
             LoggingService.LogFunctionEntry("UpdateTranscodingStatus", "ServiceStatusHelperService")
             
             # Build update query dynamically based on provided parameters
-            updateFields = ["Status = ?", "UpdatedAt = CURRENT_TIMESTAMP"]
+            updateFields = ["Status = ?", "UpdatedAt = datetime('now', 'localtime')"]
             params = [Status]
             
             if IsProcessing is not None:

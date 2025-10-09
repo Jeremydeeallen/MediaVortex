@@ -131,7 +131,7 @@ def TerminateTranscodingNow():
             updateQuery = """
                 UPDATE TranscodeAttempts 
                 SET Status = 'Cancelled', 
-                    EndTime = CURRENT_TIMESTAMP,
+                    EndTime = datetime('now', 'localtime'),
                     ErrorMessage = 'Transcoding terminated by user - immediate stop request'
                 WHERE Status = 'Running'
             """
@@ -141,7 +141,7 @@ def TerminateTranscodingNow():
             progressQuery = """
                 UPDATE TranscodeProgress 
                 SET Status = 'Cancelled',
-                    EndTime = CURRENT_TIMESTAMP,
+                    EndTime = datetime('now', 'localtime'),
                     ErrorMessage = 'Transcoding terminated by user - immediate stop request'
                 WHERE Status = 'Running'
             """

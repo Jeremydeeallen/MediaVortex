@@ -113,13 +113,7 @@ class QualityTestingBusinessService:
                 
                 # Update QualityTestResult with completion details
                 if result["Success"]:
-                    # Update result with success
-                    self.DatabaseManager.UpdateQualityTestResult(
-                        result_id,
-                        Status="Success",
-                        VMAF=result["VMAFScore"],
-                        ErrorMessage=None
-                    )
+                    # VMAF score and Status='Success' are already updated by UpdateQualityTestResultsWithScore
                     # Update TranscodeAttempt
                     self.DatabaseManager.UpdateTranscodeAttempt(
                         job_details['TranscodeAttemptId'],
@@ -130,11 +124,9 @@ class QualityTestingBusinessService:
                     return {"Success": True, "VMAFScore": result["VMAFScore"]}
                 else:
                     # Update result with failure
-                    self.DatabaseManager.UpdateQualityTestResult(
+                    self.DatabaseManager.UpdateQualityTestResultFailure(
                         result_id,
-                        Status="Failed",
-                        VMAF=None,
-                        ErrorMessage=result.get("Error", "Unknown error")
+                        result.get("Error", "Unknown error")
                     )
                     self.UpdateProgressRecord(progress_id, "Failed", 0, result.get("Error", "Unknown error"))
                     self.DatabaseManager.CompleteActiveJob(active_job_id, False, result.get("Error", "Unknown error"))
@@ -143,10 +135,9 @@ class QualityTestingBusinessService:
             except Exception as e:
                 # Update result with exception
                 if result_id:
-                    self.DatabaseManager.UpdateQualityTestResult(
+                    self.DatabaseManager.UpdateQualityTestResultFailure(
                         result_id,
-                        Status="Failed",
-                        ErrorMessage=str(e)
+                        str(e)
                     )
                 if 'progress_id' in locals():
                     self.UpdateProgressRecord(progress_id, "Failed", 0, str(e))
@@ -768,7 +759,8 @@ class QualityTestingBusinessService:
                     TestDuration = ?, 
                     PassesThreshold = ?, 
                     Rank = ?,
-                    DateTested = ?
+                    DateTested = ?,
+                    Status = 'Success'
                 WHERE Id = ?
             """
             

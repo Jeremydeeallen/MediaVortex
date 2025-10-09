@@ -136,7 +136,7 @@ def MigrateQualityTestingQueue():
                 OriginalFilePath TEXT,
                 TranscodedFilePath TEXT,
                 LocalSourcePath TEXT,
-                DateAdded TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                DateAdded TIMESTAMP DEFAULT datetime('now', 'localtime'),
                 DateStarted TIMESTAMP,
                 DateCompleted TIMESTAMP
             )
