@@ -243,8 +243,24 @@ class ProcessTranscodeQueueService:
     
     def ProcessJob(self, Job: TranscodeQueueModel):
         """Process a single transcoding job through the complete workflow."""
+        ActiveJobId = None  # Initialize for error handling
         try:
             LoggingService.LogInfo(f"Starting job processing for job ID: {Job.Id}", "ProcessTranscodeQueueService", "ProcessJob")
+            
+            # CREATE ACTIVE JOB RECORD
+            ActiveJobId = self.DatabaseManager.CreateActiveJob(
+                ServiceName="TranscodeService",
+                JobType="Transcode",
+                QueueId=Job.Id,
+                ProcessId=os.getpid(),
+                ThreadId=threading.get_ident()
+            )
+            
+            if ActiveJobId == 0:
+                LoggingService.LogError(f"Failed to create active job for queue ID {Job.Id}", 
+                                       "ProcessTranscodeQueueService", "ProcessJob")
+                self.HandleJobFailure(Job, "Failed to create active job record", None, ActiveJobId)
+                return
             
             # Update queue status to Running
             self.DatabaseManager.UpdateTranscodeQueueStatus(Job.Id, "Running")
@@ -252,7 +268,7 @@ class ProcessTranscodeQueueService:
             # Create transcode attempt record early for progress tracking
             TranscodeAttemptId = self.CreateTranscodeAttempt(Job, None, None, None)
             if not TranscodeAttemptId:
-                self.HandleJobFailure(Job, "Failed to create transcode attempt record")
+                self.HandleJobFailure(Job, "Failed to create transcode attempt record", None, ActiveJobId)
                 return
             
             # Phase 1: Initializing
@@ -261,7 +277,7 @@ class ProcessTranscodeQueueService:
             # Step a: Get MediaFile data
             MediaFile = self.GetMediaFileData(Job)
             if not MediaFile:
-                self.HandleJobFailure(Job, "Failed to get media file data", TranscodeAttemptId)
+                self.HandleJobFailure(Job, "Failed to get media file data", TranscodeAttemptId, ActiveJobId)
                 return
             
             # Archive original file details before transcoding
@@ -273,7 +289,7 @@ class ProcessTranscodeQueueService:
             # Step c: Get transcoding settings
             TranscodingSettings = self.GetTranscodingSettings(Job, MediaFile)
             if not TranscodingSettings:
-                self.HandleJobFailure(Job, "Failed to get transcoding settings", TranscodeAttemptId)
+                self.HandleJobFailure(Job, "Failed to get transcoding settings", TranscodeAttemptId, ActiveJobId)
                 return
             
             # Phase 3: Loading Settings
@@ -282,7 +298,7 @@ class ProcessTranscodeQueueService:
             # Step d: Build transcoding command
             TranscodeCommand = self.BuildTranscodeCommand(Job, MediaFile, TranscodingSettings)
             if not TranscodeCommand:
-                self.HandleJobFailure(Job, "Failed to build transcoding command", TranscodeAttemptId)
+                self.HandleJobFailure(Job, "Failed to build transcoding command", TranscodeAttemptId, ActiveJobId)
                 return
             
             # Phase 4: Building Command
@@ -290,7 +306,7 @@ class ProcessTranscodeQueueService:
             
             # Step b: Setup directories and copy file
             if not self.SetupFilePreparation(Job, MediaFile, TranscodeAttemptId):
-                self.HandleJobFailure(Job, "Failed to setup file preparation", TranscodeAttemptId)
+                self.HandleJobFailure(Job, "Failed to setup file preparation", TranscodeAttemptId, ActiveJobId)
                 return
             
             # Phase 5: Preparing Files
@@ -319,16 +335,16 @@ class ProcessTranscodeQueueService:
             self.UpdateTranscodeProgress(TranscodeAttemptId, "Starting Transcode", 0.0, "About to begin actual transcoding")
             
             # Step f: Execute transcoding
-            TranscodeResult = self.ExecuteTranscoding(Job, TranscodeCommand, TranscodeAttemptId, MediaFile)
+            TranscodeResult = self.ExecuteTranscoding(Job, TranscodeCommand, TranscodeAttemptId, MediaFile, ActiveJobId)
             if not TranscodeResult.get("Success", False):
-                self.HandleJobFailure(Job, f"Transcoding failed: {TranscodeResult.get('ErrorMessage', 'Unknown error')}", TranscodeAttemptId)
+                self.HandleJobFailure(Job, f"Transcoding failed: {TranscodeResult.get('ErrorMessage', 'Unknown error')}", TranscodeAttemptId, ActiveJobId)
                 return
             
             # Phase 7: Finalizing
             self.UpdateTranscodeProgress(TranscodeAttemptId, "Finalizing", 0.0, "Processing results and cleanup")
             
             # Step g: Handle transcoding result
-            self.HandleTranscodingResult(Job, TranscodeResult, TranscodeAttemptId)
+            self.HandleTranscodingResult(Job, TranscodeResult, TranscodeAttemptId, ActiveJobId)
             
             # Step h: Cleanup or continue
             self.CleanupOrContinue(Job)
@@ -446,7 +462,9 @@ class ProcessTranscodeQueueService:
                 AudioBitrateKbps=ProfileSettings.get('AudioBitrateKbps'),
                 VideoBitrateKbps=ProfileSettings.get('VideoBitrateKbps'),
                 ProfileName=MediaFile.AssignedProfile if hasattr(MediaFile, 'AssignedProfile') else None,
-                VMAF=None  # Will be set after VMAF analysis
+                VMAF=None,  # Will be set after VMAF analysis
+                QualityTestRequired=1,  # Default to 1 (required)
+                QualityTestCompleted=0  # Default to 0 (not completed)
             )
             
             return self.DatabaseManager.SaveTranscodeAttempt(Attempt)
@@ -491,7 +509,7 @@ class ProcessTranscodeQueueService:
             LoggingService.LogException("Exception getting TotalFrames with fallback", e, "ProcessTranscodeQueueService", "GetTotalFramesWithFallback")
             return 0
 
-    def ExecuteTranscoding(self, Job: TranscodeQueueModel, TranscodeCommand: str, TranscodeAttemptId: int, MediaFile: MediaFileModel = None) -> Dict[str, Any]:
+    def ExecuteTranscoding(self, Job: TranscodeQueueModel, TranscodeCommand: str, TranscodeAttemptId: int, MediaFile: MediaFileModel = None, ActiveJobId: int = None) -> Dict[str, Any]:
         """Execute the transcoding command with progress tracking."""
         try:
             # Get TotalFrames from MediaFile if available, otherwise use fallback
@@ -536,7 +554,7 @@ class ProcessTranscodeQueueService:
                 except Exception as e:
                     LoggingService.LogException("Exception in progress callback", e, "ProcessTranscodeQueueService", "ExecuteTranscoding")
             
-            return self.VideoTranscoding.TranscodeVideo(TranscodeAttemptId, TranscodeCommand, ProgressCallback, TotalFramesFromMediaFile)
+            return self.VideoTranscoding.TranscodeVideo(TranscodeAttemptId, TranscodeCommand, ProgressCallback, TotalFramesFromMediaFile, ActiveJobId, self.DatabaseManager)
             
         except Exception as e:
             LoggingService.LogException("Exception executing transcoding", e, "ProcessTranscodeQueueService", "ExecuteTranscoding")
@@ -545,7 +563,7 @@ class ProcessTranscodeQueueService:
                 "ErrorMessage": f"Exception during transcoding: {str(e)}"
             }
     
-    def HandleTranscodingResult(self, Job: TranscodeQueueModel, TranscodeResult: Dict[str, Any], TranscodeAttemptId: int):
+    def HandleTranscodingResult(self, Job: TranscodeQueueModel, TranscodeResult: Dict[str, Any], TranscodeAttemptId: int, ActiveJobId: int = None):
         """Handle transcoding results - success or failure processing."""
         try:
             if TranscodeResult.get("Success", False):
@@ -608,6 +626,12 @@ class ProcessTranscodeQueueService:
                 # Clean up progress data for completed job
                 self.DatabaseManager.DeleteTranscodeProgress(TranscodeAttemptId)
                 
+                # Complete active job if it exists
+                if ActiveJobId:
+                    self.DatabaseManager.CompleteActiveJob(ActiveJobId, Success=True)
+                    LoggingService.LogInfo(f"Completed active job {ActiveJobId} for queue ID {Job.Id}", 
+                                          "ProcessTranscodeQueueService", "HandleTranscodingResult")
+                
                 # Mark processing as complete if no more active jobs
                 activeJobCount = len([thread for thread in self.ActiveJobs if thread.is_alive()])
                 if activeJobCount == 0:
@@ -616,12 +640,12 @@ class ProcessTranscodeQueueService:
                 LoggingService.LogInfo(f"Job {Job.Id} completed successfully and removed from queue", "ProcessTranscodeQueueService", "HandleTranscodingResult")
             else:
                 # Handle failure
-                self.HandleJobFailure(Job, TranscodeResult.get('ErrorMessage', 'Unknown error'), TranscodeAttemptId)
+                self.HandleJobFailure(Job, TranscodeResult.get('ErrorMessage', 'Unknown error'), TranscodeAttemptId, ActiveJobId)
                 
         except Exception as e:
             LoggingService.LogException("Exception handling transcoding result", e, "ProcessTranscodeQueueService", "HandleTranscodingResult")
     
-    def HandleJobFailure(self, Job: TranscodeQueueModel, ErrorMessage: str, TranscodeAttemptId: int = None):
+    def HandleJobFailure(self, Job: TranscodeQueueModel, ErrorMessage: str, TranscodeAttemptId: int = None, ActiveJobId: int = None):
         """Handle job failure by updating attempt record and removing from queue."""
         try:
             if TranscodeAttemptId:
@@ -668,6 +692,12 @@ class ProcessTranscodeQueueService:
             activeJobCount = len([thread for thread in self.ActiveJobs if thread.is_alive()])
             if activeJobCount == 0:
                 self.IsProcessing = False
+            
+            # Complete active job if it exists
+            if ActiveJobId:
+                self.DatabaseManager.CompleteActiveJob(ActiveJobId, Success=False, ErrorMessage=ErrorMessage)
+                LoggingService.LogInfo(f"Completed failed active job {ActiveJobId}", 
+                                      "ProcessTranscodeQueueService", "HandleJobFailure")
             
             LoggingService.LogError(f"Job {Job.Id} failed and removed from queue: {ErrorMessage}", "ProcessTranscodeQueueService", "HandleJobFailure")
             

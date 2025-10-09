@@ -107,17 +107,6 @@ class ActivityViewModel:
                 "ErrorMessage": errorMsg
             }
     
-    def GetRecentAttempts(self, Limit: int = 20) -> List[Dict[str, Any]]:
-        """Get recent transcoding attempts."""
-        try:
-            LoggingService.LogFunctionEntry("GetRecentAttempts", "ActivityViewModel", Limit)
-            
-            return self.TranscodingService.GetRecentAttempts(Limit)
-            
-        except Exception as e:
-            LoggingService.LogException("Exception getting recent attempts", e, "ActivityViewModel", "GetRecentAttempts")
-            return []
-    
     def GetProgressSummary(self) -> Dict[str, Any]:
         """Get transcoding progress summary."""
         try:

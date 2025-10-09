@@ -82,8 +82,8 @@ class TranscodeServiceApp:
             # Update service status in database
             self.UpdateServiceStatus("Starting")
             
-            # Reset any stuck "Running" jobs from previous sessions
-            self.ResetStuckJobs()
+            # Recover from previous crash (reset stuck jobs and kill orphaned processes)
+            self.RecoverFromCrash()
             
             # Start health monitoring
             self.StartHealthMonitoring()
@@ -371,35 +371,29 @@ class TranscodeServiceApp:
             LoggingService.LogException("Error checking graceful shutdown status", e, "TranscodeService", "PrivateCheckForGracefulShutdown")
             return False
     
-    def ResetStuckJobs(self):
-        """Reset any stuck 'Running' jobs from previous sessions."""
+    def RecoverFromCrash(self):
+        """Recover from previous crash using CrashRecoveryService."""
         try:
-            LoggingService.LogInfo("Checking for stuck jobs from previous sessions...", "TranscodeService", "ResetStuckJobs")
+            LoggingService.LogInfo("Starting crash recovery for TranscodeService...", "TranscodeService", "RecoverFromCrash")
             
-            # Find stuck "Running" jobs
-            query = "SELECT Id, FileName FROM TranscodeQueue WHERE Status = 'Running'"
-            stuck_jobs = self.DatabaseManager.DatabaseService.ExecuteQuery(query)
+            # Import and use the new CrashRecoveryService
+            from Services.CrashRecoveryService import CrashRecoveryService
+            recovery_service = CrashRecoveryService(self.DatabaseManager)
             
-            if stuck_jobs:
-                LoggingService.LogInfo(f"Found {len(stuck_jobs)} stuck jobs from previous session", "TranscodeService", "ResetStuckJobs")
-                
-                # Reset them to Pending
-                reset_query = "UPDATE TranscodeQueue SET Status = 'Pending', DateStarted = NULL WHERE Status = 'Running'"
-                self.DatabaseManager.DatabaseService.ExecuteNonQuery(reset_query)
-                
-                # Clear associated progress records
-                progress_query = "DELETE FROM TranscodeProgress WHERE TranscodeAttemptId IN (SELECT Id FROM TranscodeAttempts WHERE FilePath IN (SELECT FilePath FROM TranscodeQueue WHERE Status = 'Pending' AND DateStarted IS NULL))"
-                self.DatabaseManager.DatabaseService.ExecuteNonQuery(progress_query)
-                
-                LoggingService.LogInfo(f"Reset {len(stuck_jobs)} stuck jobs to Pending status", "TranscodeService", "ResetStuckJobs")
-                
-                for job in stuck_jobs:
-                    LoggingService.LogInfo(f"  - Reset job {job[0]}: {job[1]}", "TranscodeService", "ResetStuckJobs")
+            # Perform crash recovery
+            result = recovery_service.RecoverServiceJobs("TranscodeService")
+            
+            if result.get("Success", False):
+                jobs_recovered = result.get("JobsRecovered", 0)
+                orphaned_killed = result.get("OrphanedProcessesKilled", 0)
+                LoggingService.LogInfo(f"Crash recovery completed: {jobs_recovered} jobs recovered, {orphaned_killed} orphaned processes killed", 
+                                     "TranscodeService", "RecoverFromCrash")
             else:
-                LoggingService.LogInfo("No stuck jobs found", "TranscodeService", "ResetStuckJobs")
+                LoggingService.LogError(f"Crash recovery failed: {result.get('Message', 'Unknown error')}", 
+                                      "TranscodeService", "RecoverFromCrash")
                 
         except Exception as e:
-            LoggingService.LogException("Error resetting stuck jobs", e, "TranscodeService", "ResetStuckJobs")
+            LoggingService.LogException("Error during crash recovery", e, "TranscodeService", "RecoverFromCrash")
     
     def PrivateStartStatusPolling(self):
         """Start status polling thread."""

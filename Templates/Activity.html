@@ -109,6 +109,7 @@
                                             <th>Duration</th>
                                             <th>Profile</th>
                                             <th>Error</th>
+                                            <th>Actions</th>
                                         </tr>
                                     </thead>
                                     <tbody id="RecentAttemptsTableBody">
@@ -354,6 +355,12 @@ class ActivityManager {
                 <td>
                     ${attempt.ErrorMessage ? 
                         `<span class="text-danger" title="${this.escapeHtml(attempt.ErrorMessage)}">Error</span>` : 
+                        '<span class="text-muted">-</span>'
+                    }
+                </td>
+                <td>
+                    ${attempt.Success ? 
+                        `<button class="btn btn-sm btn-primary" onclick="activityManager.RunQualityTest(${attempt.Id})">Run Quality Test</button>` : 
                         '<span class="text-muted">-</span>'
                     }
                 </td>
@@ -697,6 +704,34 @@ class ActivityManager {
                 alert.remove();
             }
         }, 5000);
+    }
+
+    async RunQualityTest(AttemptId) {
+        try {
+            // Show loading indicator
+            this.showAlert('Queuing quality test...', 'info');
+            
+            const response = await fetch('/api/QualityTest/RequeueAttempt', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ TranscodeAttemptId: AttemptId })
+            });
+
+            const data = await response.json();
+
+            if (data.Success) {
+                this.showAlert('Quality test queued successfully', 'success');
+                // Refresh the page data
+                this.loadProgressData();
+            } else {
+                this.showAlert(data.Message || 'Failed to queue quality test', 'danger');
+            }
+        } catch (error) {
+            console.error('Error running quality test:', error);
+            this.showAlert('Error running quality test: ' + error.message, 'danger');
+        }
     }
 }
 

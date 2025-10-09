@@ -23,6 +23,8 @@ class TranscodeAttemptModel:
     VideoBitrateKbps: Optional[int] = None
     ProfileName: Optional[str] = None
     VMAF: Optional[float] = None
+    QualityTestRequired: int = 1  # Default to 1 (required)
+    QualityTestCompleted: int = 0  # Default to 0 (not completed)
     
     def __post_init__(self):
         if self.AttemptDate is None:

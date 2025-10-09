@@ -69,12 +69,26 @@ class QualityTestingBusinessService:
     
     def StartQualityTest(self, JobId: int) -> dict:
         """Start a quality test for the specified job."""
+        result_id = None
+        active_job_id = None
+        
         try:
-            
             # Get job details from QualityTestingQueue
             job_details = self.DatabaseManager.GetQualityTestJob(JobId)
             if not job_details:
                 return {"Success": False, "Message": "Job not found"}
+            
+            # Create QualityTestResult record immediately (Status="Running")
+            result_id = self.DatabaseManager.CreateQualityTestResult(
+                TranscodeAttemptId=job_details['TranscodeAttemptId'],
+                Status="Running",
+                TestDate=datetime.now()
+            )
+            
+            if result_id == 0:
+                error_msg = f"Failed to create quality test result for TranscodeAttempt {job_details['TranscodeAttemptId']}"
+                LoggingService.LogError(error_msg, "QualityTestingBusinessService", "StartQualityTest")
+                return {"Success": False, "Message": "Failed to create quality test result"}
             
             # Create active job record
             active_job_id = self.DatabaseManager.CreateActiveJob(
@@ -93,23 +107,47 @@ class QualityTestingBusinessService:
                 progress_id = self.CreateProgressRecord(JobId, job_details)
                 
                 # Run FFmpeg VMAF comparison with progress tracking
+                # Pass active_job_id so we can track the FFmpeg child process
+                job_details['active_job_id'] = active_job_id
                 result = self.RunFFmpegVMAF(job_details, progress_id)
                 
-                # Update job status
+                # Update QualityTestResult with completion details
                 if result["Success"]:
-                    self.DatabaseManager.UpdateQualityTestStatus(JobId, "Completed", result["VMAFScore"])
+                    # Update result with success
+                    self.DatabaseManager.UpdateQualityTestResult(
+                        result_id,
+                        Status="Success",
+                        VMAF=result["VMAFScore"],
+                        ErrorMessage=None
+                    )
+                    # Update TranscodeAttempt
+                    self.DatabaseManager.UpdateTranscodeAttempt(
+                        job_details['TranscodeAttemptId'],
+                        {"QualityTestCompleted": 1, "VMAF": result["VMAFScore"]}
+                    )
                     self.UpdateProgressRecord(progress_id, "Completed", 100, "VMAF analysis completed successfully", result["VMAFScore"])
                     self.DatabaseManager.CompleteActiveJob(active_job_id, True)
                     return {"Success": True, "VMAFScore": result["VMAFScore"]}
                 else:
-                    self.DatabaseManager.UpdateQualityTestStatus(JobId, "Failed", None)
+                    # Update result with failure
+                    self.DatabaseManager.UpdateQualityTestResult(
+                        result_id,
+                        Status="Failed",
+                        VMAF=None,
+                        ErrorMessage=result.get("Error", "Unknown error")
+                    )
                     self.UpdateProgressRecord(progress_id, "Failed", 0, result.get("Error", "Unknown error"))
                     self.DatabaseManager.CompleteActiveJob(active_job_id, False, result.get("Error", "Unknown error"))
                     return {"Success": False, "Message": result.get("Error", "Unknown error")}
                     
             except Exception as e:
-                # Clean up on error
-                self.DatabaseManager.UpdateQualityTestStatus(JobId, "Failed", None)
+                # Update result with exception
+                if result_id:
+                    self.DatabaseManager.UpdateQualityTestResult(
+                        result_id,
+                        Status="Failed",
+                        ErrorMessage=str(e)
+                    )
                 if 'progress_id' in locals():
                     self.UpdateProgressRecord(progress_id, "Failed", 0, str(e))
                 self.DatabaseManager.CompleteActiveJob(active_job_id, False, str(e))
@@ -118,6 +156,9 @@ class QualityTestingBusinessService:
         except Exception as e:
             LoggingService.LogException(f"Error starting quality test for job {JobId}", e, "QualityTestingBusinessService", "StartQualityTest")
             return {"Success": False, "Message": str(e)}
+        finally:
+            # Delete from queue (regardless of success/failure)
+            self.DatabaseManager.DeleteQualityTestQueueItem(JobId)
     
     def RunFFmpegVMAF(self, JobDetails: dict, ProgressId: int = None) -> dict:
         """Run FFmpeg VMAF comparison with resolution scaling."""
@@ -146,23 +187,33 @@ class QualityTestingBusinessService:
             # Check if resolutions match
             if original_resolution == transcoded_resolution:
                 # Resolutions match - use direct VMAF comparison without scaling
-                vmaf_filter = "[0:v][1:v]libvmaf=log_path=vmaf_output.xml:log_fmt=xml:n_threads=6"
+                vmaf_filter = "[0:v][1:v]libvmaf=log_path=vmaf_output.xml:log_fmt=xml:n_threads=2:n_subsample=10"
                 LoggingService.LogInfo(f"Resolutions match ({original_resolution[0]}x{original_resolution[1]}) - using direct VMAF comparison", "QualityTestingBusinessService", "RunFFmpegVMAF")
             else:
                 # Resolutions don't match - determine target resolution and scale both videos
                 target_width, target_height = self.DetermineVMAFTargetResolution(original_resolution, transcoded_resolution)
-                vmaf_filter = f"[0:v]scale={target_width}:{target_height}[dist];[1:v]scale={target_width}:{target_height}[ref];[dist][ref]libvmaf=log_path=vmaf_output.xml:log_fmt=xml:n_threads=6"
+                vmaf_filter = f"[0:v]scale={target_width}:{target_height}[dist];[1:v]scale={target_width}:{target_height}[ref];[dist][ref]libvmaf=log_path=vmaf_output.xml:log_fmt=xml:n_threads=2:n_subsample=10"
                 LoggingService.LogInfo(f"Resolutions don't match (Original: {original_resolution[0]}x{original_resolution[1]}, Transcoded: {transcoded_resolution[0]}x{transcoded_resolution[1]}) - scaling to {target_width}x{target_height}", "QualityTestingBusinessService", "RunFFmpegVMAF")
             
             command = [
                 ffmpeg_path,
-                "-threads", "6",  # Use 6 threads for faster processing
+                "-threads", "2",  # Use 2 threads for reduced CPU usage
                 "-i", transcoded_file,
                 "-i", original_file,
                 "-lavfi", vmaf_filter,
                 "-f", "null",
                 "-"
             ]
+            
+            # Convert command to string for storage
+            FFmpegCommandString = ' '.join(command)
+            
+            # Create initial QualityTestResults record with FFmpeg command
+            ResultId = self.DatabaseManager.CreateInitialQualityTestResult(
+                JobDetails.get('Id', 0), 
+                JobDetails, 
+                FFmpegCommandString
+            )
             
             
             # Update progress - starting VMAF analysis
@@ -189,11 +240,11 @@ class QualityTestingBusinessService:
                     vmaf_score = self.ParseVMAFScore(result.stdout)
                 
                 
-                # Update QualityTestResults table
-                if ProgressId:
-                    self.UpdateQualityTestResults(JobDetails, vmaf_score, result)
+                # Update QualityTestResults table with VMAF score
+                if ProgressId and ResultId:
+                    self.UpdateQualityTestResultsWithScore(ResultId, vmaf_score, result)
                 
-                return {"Success": True, "VMAFScore": vmaf_score}
+                return {"Success": True, "VMAFScore": vmaf_score, "FFmpegCommand": FFmpegCommandString}
             else:
                 error_msg = result.stderr if result.stderr else "FFmpeg failed with no error output"
                 return {"Success": False, "Error": error_msg}
@@ -485,6 +536,15 @@ class QualityTestingBusinessService:
                 universal_newlines=True
             )
             
+            # Update ActiveJob with FFmpeg child process PID
+            if JobDetails and 'active_job_id' in JobDetails and JobDetails['active_job_id']:
+                self.DatabaseManager.UpdateActiveJobProcessId(
+                    JobDetails['active_job_id'], 
+                    process.pid
+                )
+                LoggingService.LogInfo(f"Updated ActiveJob {JobDetails['active_job_id']} with FFmpeg PID {process.pid}", 
+                                      "QualityTestingBusinessService", "ExecuteFFmpegWithProgress")
+            
             # Monitor progress in real-time
             last_frame_count = 0
             last_progress_percent = 0
@@ -690,56 +750,47 @@ class QualityTestingBusinessService:
             LoggingService.LogException("Error parsing FFmpeg progress line", e, "QualityTestingBusinessService", "ParseFFmpegProgressLine")
             return None
     
-    def UpdateQualityTestResults(self, JobDetails: dict, VMAFScore: float, FFmpegResult):
-        """Update QualityTestResults table with VMAF analysis results."""
+    def UpdateQualityTestResultsWithScore(self, ResultId: int, VMAFScore: float, FFmpegResult):
+        """Update QualityTestResults record with VMAF score and test results."""
         try:
-            query = """
-                INSERT INTO QualityTestResults (
-                    VMAFQueueId, TranscodeAttemptId, VMAFScore, ProfileId, ProfileName,
-                    FileSize, TestDuration, PassesThreshold, Rank, ErrorMessage, DateTested
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            CurrentTime = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            
+            # Calculate test duration from FFmpegResult if available
+            TestDuration = 0.0  # Could extract from FFmpegResult if needed
+            
+            # Determine if it passes threshold
+            PassesThreshold = VMAFScore >= 80.0
+            Rank = 1 if PassesThreshold else 0
+            
+            Query = """
+                UPDATE QualityTestResults 
+                SET VMAFScore = ?, 
+                    TestDuration = ?, 
+                    PassesThreshold = ?, 
+                    Rank = ?,
+                    DateTested = ?
+                WHERE Id = ?
             """
             
-            current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            queue_id = JobDetails.get('Id', 0)
-            transcode_attempt_id = JobDetails.get('TranscodeAttemptId', 0)
-            profile_id = JobDetails.get('ProfileId', 0)
-            profile_name = JobDetails.get('ProfileName', 'Unknown')
-            
-            # Get file size
-            file_size = 0
-            transcoded_file = JobDetails.get('TranscodedFilePath', '')
-            if transcoded_file and os.path.exists(transcoded_file):
-                file_size = os.path.getsize(transcoded_file)
-            
-            # Calculate test duration (rough estimate)
-            test_duration = 0.0  # We could track this if needed
-            
-            # Determine if it passes threshold (assuming 80 is the threshold)
-            passes_threshold = VMAFScore >= 80.0
-            
-            # Set rank (could be based on VMAF score)
-            rank = 1 if passes_threshold else 0
-            
-            result = self.DatabaseManager.DatabaseService.ExecuteNonQuery(query, (
-                queue_id,
-                transcode_attempt_id,
+            Result = self.DatabaseManager.DatabaseService.ExecuteNonQuery(Query, (
                 VMAFScore,
-                profile_id,
-                profile_name,
-                file_size,
-                test_duration,
-                passes_threshold,
-                rank,
-                None,  # No error message for successful tests
-                current_time
+                TestDuration,
+                PassesThreshold,
+                Rank,
+                CurrentTime,
+                ResultId
             ))
             
-            if not result:
-                LoggingService.LogError(f"Failed to update QualityTestResults for queue {queue_id}", "QualityTestingBusinessService", "UpdateQualityTestResults")
+            if not Result:
+                LoggingService.LogError(f"Failed to update QualityTestResults for record {ResultId}", 
+                                      "QualityTestingBusinessService", "UpdateQualityTestResultsWithScore")
+            else:
+                LoggingService.LogInfo(f"Successfully updated QualityTestResults record {ResultId} with VMAF score {VMAFScore}", 
+                                     "QualityTestingBusinessService", "UpdateQualityTestResultsWithScore")
                 
         except Exception as e:
-            LoggingService.LogException(f"Error updating QualityTestResults for queue {JobDetails.get('Id', 0)}", e, "QualityTestingBusinessService", "UpdateQualityTestResults")
+            LoggingService.LogException(f"Error updating QualityTestResults for record {ResultId}", e, 
+                                       "QualityTestingBusinessService", "UpdateQualityTestResultsWithScore")
     
     def GetVideoDuration(self, JobDetails: dict) -> float:
         """Get video duration in seconds from the transcoded file."""

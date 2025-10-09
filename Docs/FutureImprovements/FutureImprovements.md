@@ -31,6 +31,31 @@ Thread suspension: Use thread suspension to pause transcode jobs
 
 Service startup recovery: Check for orphaned processes on service start, reattach to running processes if they exist, reset status of jobs that were running.
 
+## Smart Crash Recovery with Process Resume
+
+Implement intelligent crash recovery that can resume orphaned FFmpeg processes instead of killing and restarting them. This would preserve work already completed and provide better user experience.
+
+**Key Components:**
+- **FFmpeg Log File Integration**: Start FFmpeg with log file redirection (`ffmpeg ... 2> /tmp/mediavortex_job_{QueueId}.log`)
+- **Process Resume Detection**: On service startup, detect orphaned FFmpeg processes and read their log files to determine current progress
+- **Progress Recovery**: Parse log files to extract current frame count, processing speed, and ETA
+- **Database Sync**: Update TranscodeProgress/QualityTestProgress tables with recovered progress information
+- **Monitoring Thread**: Spawn background thread to monitor log file and update progress in real-time
+- **Cleanup on Completion**: Remove log files when FFmpeg processes complete naturally
+
+**Benefits:**
+- No wasted work from crashes (could save hours of transcoding)
+- Better user experience with preserved progress
+- More efficient resource utilization
+- Maintains PID tracking purpose for intelligent recovery
+
+**Implementation Considerations:**
+- Log file location strategy (temp directory vs project directory)
+- Log file parsing for different FFmpeg output formats
+- Cross-platform log file handling
+- Cleanup of old log files
+- Error handling for corrupted log files
+
 Advanced error handling: Implement retry logic for failed quality tests, timeout handling for hung processes, and advanced error recovery patterns.
 
 Performance optimizations: Job prioritization, resource monitoring, and advanced queue management.

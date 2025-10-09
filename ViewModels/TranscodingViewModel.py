@@ -96,12 +96,11 @@ class TranscodingViewModel:
             
             # Get recent transcoding attempts
             query = """
-                SELECT ta.Id, ta.JobId, ta.StartTime, ta.EndTime, ta.Duration, 
-                       ta.Success, ta.OutputFilePath, ta.ErrorMessage,
-                       tq.FilePath, tq.AssignedProfile
+                SELECT ta.Id, ta.FilePath, ta.AttemptDate, ta.TranscodeDurationSeconds, 
+                       ta.Success, ta.ErrorMessage, ta.Quality, ta.ProfileName,
+                       ta.OldSizeBytes, ta.NewSizeBytes, ta.SizeReductionPercent, ta.VMAF
                 FROM TranscodeAttempts ta
-                JOIN TranscodeQueue tq ON ta.JobId = tq.Id
-                ORDER BY ta.StartTime DESC
+                ORDER BY ta.AttemptDate DESC
                 LIMIT ?
             """
             
@@ -111,15 +110,17 @@ class TranscodingViewModel:
             for row in rows:
                 historyItem = {
                     'Id': row['Id'],
-                    'JobId': row['JobId'],
-                    'StartTime': row['StartTime'],
-                    'EndTime': row['EndTime'],
-                    'Duration': row['Duration'],
-                    'Success': bool(row['Success']),
-                    'OutputFilePath': row['OutputFilePath'],
-                    'ErrorMessage': row['ErrorMessage'],
                     'FilePath': row['FilePath'],
-                    'AssignedProfile': row['AssignedProfile']
+                    'AttemptDate': row['AttemptDate'],
+                    'Duration': row['TranscodeDurationSeconds'],
+                    'Success': bool(row['Success']),
+                    'ErrorMessage': row['ErrorMessage'],
+                    'Quality': row['Quality'],
+                    'ProfileName': row['ProfileName'],
+                    'OldSizeBytes': row['OldSizeBytes'],
+                    'NewSizeBytes': row['NewSizeBytes'],
+                    'SizeReductionPercent': row['SizeReductionPercent'],
+                    'VMAF': row['VMAF']
                 }
                 history.append(historyItem)
             
@@ -136,20 +137,6 @@ class TranscodingViewModel:
                 "Success": False,
                 "ErrorMessage": errorMsg
             }
-    
-    def GetRecentAttempts(self, Limit: int = 20) -> List[Dict[str, Any]]:
-        """Get recent transcoding attempts."""
-        try:
-            LoggingService.LogFunctionEntry("GetRecentAttempts", "TranscodingViewModel", Limit)
-            
-            # Get recent attempts from DatabaseManager
-            attempts = self.DatabaseManager.GetRecentTranscodeAttempts(Limit)
-            
-            return attempts
-            
-        except Exception as e:
-            LoggingService.LogException("Exception getting recent attempts", e, "TranscodingViewModel", "GetRecentAttempts")
-            return []
     
     def GetProgressSummary(self) -> Dict[str, Any]:
         """Get transcoding progress summary."""

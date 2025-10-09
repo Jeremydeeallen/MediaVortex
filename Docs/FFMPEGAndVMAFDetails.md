@@ -31,6 +31,8 @@ Usage Details: https://github.com/Netflix/vmaf/blob/master/resource/doc/ffmpeg.m
   - `n_threads=<int>` — Number of threads  
   - `n_subsample=<int>` — Frame subsampling interval  
   - `pool=<string>` — Pooling method (mean, harmonic_mean, etc.)
+  - `n_subsample=10` — Analyze every 10th frame (90% CPU reduction, maintains accuracy)
+  - Recommended settings for efficiency: `n_threads=2:n_subsample=10`
 
 ---
 

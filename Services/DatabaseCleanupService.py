@@ -68,17 +68,21 @@ class DatabaseCleanupService:
             }
     
     def ResetRunningQualityTestJobs(self) -> int:
-        """Reset any running quality test jobs back to pending."""
+        """Delete any running quality test jobs (they'll be recreated by RecoverMissedQualityTests if needed).
+        
+        NOTE: This method has the same issue as the old CrashRecoveryService - it deletes ALL jobs with DateStarted.
+        CrashRecoveryService is now preferred as it only deletes jobs that were actually crashed.
+        This method is kept for backward compatibility.
+        """
         try:
             query = """
-                UPDATE QualityTestingQueue 
-                SET Status = 'Pending', DateStarted = NULL, DateCompleted = NULL
-                WHERE Status = 'Running'
+                DELETE FROM QualityTestingQueue 
+                WHERE DateStarted IS NOT NULL
             """
             rows_affected = self.DatabaseManager.DatabaseService.ExecuteNonQuery(query)
             return rows_affected
         except Exception as e:
-            LoggingService.LogException("Error resetting running quality test jobs", e, "DatabaseCleanupService", "ResetRunningQualityTestJobs")
+            LoggingService.LogException("Error deleting running quality test jobs", e, "DatabaseCleanupService", "ResetRunningQualityTestJobs")
             return 0
     
     def RemoveActiveJobs(self, ServiceName: str) -> int:
@@ -149,7 +153,7 @@ class DatabaseCleanupService:
             }
             
             # Count running quality test jobs
-            query = "SELECT COUNT(*) FROM QualityTestingQueue WHERE Status = 'Running'"
+            query = "SELECT COUNT(*) FROM QualityTestingQueue WHERE DateStarted IS NOT NULL"
             result = self.DatabaseManager.DatabaseService.ExecuteQuery(query)
             if result:
                 summary["RunningQualityTestJobs"] = result[0][0]

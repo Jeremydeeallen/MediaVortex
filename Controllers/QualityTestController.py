@@ -70,7 +70,7 @@ class QualityTestController:
                 ffmpeg_path,
                 "-i", TranscodedFile,
                 "-i", OriginalFile,
-                "-lavfi", "[0:v][1:v]libvmaf=log_path=vmaf_output.xml:log_fmt=xml",
+                "-lavfi", "[0:v][1:v]libvmaf=log_path=vmaf_output.xml:log_fmt=xml:n_threads=2:n_subsample=10",
                 "-f", "null",
                 "-"
             ]
@@ -213,6 +213,58 @@ class QualityTestController:
         except Exception as e:
             self.LoggingService.LogError(f"Error getting quality test progress: {str(e)}")
             return {"Success": False, "Message": str(e)}
+    
+    def RequeueAttempt(self, TranscodeAttemptId: int) -> dict:
+        """Requeue a transcode attempt for quality testing."""
+        try:
+            self.LoggingService.LogInfo(f"Requeuing transcode attempt {TranscodeAttemptId} for quality testing", "QualityTestController", "RequeueAttempt")
+            
+            # Get transcode attempt by ID
+            Attempt = self.DatabaseManager.GetTranscodeAttemptById(TranscodeAttemptId)
+            if not Attempt:
+                return {"Success": False, "Message": "Transcode attempt not found"}
+            
+            # Verify it was successful
+            if not Attempt.Success:
+                return {"Success": False, "Message": "Cannot run quality test on failed transcode attempt"}
+            
+            # Parse FFmpeg command to get file paths
+            InputFilePath, OutputFilePath = self.DatabaseManager.ParseFFmpegCommand(Attempt.FfpmpegCommand)
+            if not InputFilePath or not OutputFilePath:
+                return {"Success": False, "Message": "Could not parse file paths from FFmpeg command"}
+            
+            # Check if both files exist on disk
+            import os
+            if not os.path.exists(InputFilePath):
+                return {"Success": False, "Message": "Cannot run quality test: Original file path no longer exists"}
+            
+            if not os.path.exists(OutputFilePath):
+                return {"Success": False, "Message": "Cannot run quality test: Transcoded file path no longer exists"}
+            
+            # Delete existing quality test records for this attempt
+            DeleteSuccess = self.DatabaseManager.DeleteQualityTestRecordsByAttemptId(TranscodeAttemptId)
+            if not DeleteSuccess:
+                return {"Success": False, "Message": "Failed to clean up existing quality test records"}
+            
+            # Create new quality test queue entry
+            JobId = self.DatabaseManager.CreateQualityTestQueueEntry(
+                TranscodeAttemptId, 
+                Attempt.FilePath,  # Original file path
+                InputFilePath,     # Local source path (from FFmpeg command)
+                OutputFilePath     # Transcoded file path (from FFmpeg command)
+            )
+            
+            if JobId:
+                self.LoggingService.LogInfo(f"Successfully queued quality test job {JobId} for transcode attempt {TranscodeAttemptId}", 
+                                          "QualityTestController", "RequeueAttempt")
+                return {"Success": True, "Message": "Quality test queued successfully", "JobId": JobId}
+            else:
+                return {"Success": False, "Message": "Failed to create quality test queue entry"}
+                
+        except Exception as e:
+            ErrorMsg = f"Exception requeuing transcode attempt {TranscodeAttemptId}: {str(e)}"
+            self.LoggingService.LogException(ErrorMsg, e, "QualityTestController", "RequeueAttempt")
+            return {"Success": False, "Message": ErrorMsg}
 
 # Flask routes
 @QualityTestBlueprint.route('/QualityTest/Start', methods=['POST'])
@@ -299,4 +351,19 @@ def LogQualityTestError():
     RequestUrl = Data.get('RequestUrl', '')
     
     Result = Controller.LogError(ErrorMessage, ErrorContext, RequestUrl)
+    return jsonify(Result)
+
+@QualityTestBlueprint.route('/QualityTest/RequeueAttempt', methods=['POST'])
+def RequeueAttempt():
+    Controller = QualityTestController()
+    Data = request.get_json()
+    
+    if not Data:
+        return jsonify({"Success": False, "Message": "No data provided"}), 400
+    
+    TranscodeAttemptId = Data.get('TranscodeAttemptId')
+    if not TranscodeAttemptId:
+        return jsonify({"Success": False, "Message": "TranscodeAttemptId required"}), 400
+    
+    Result = Controller.RequeueAttempt(TranscodeAttemptId)
     return jsonify(Result)

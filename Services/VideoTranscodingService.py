@@ -16,7 +16,8 @@ class VideoTranscodingService:
         self.ProcessThreads = {}
     
     def TranscodeVideo(self, JobId: int, TranscodeCommand: str, 
-                      ProgressCallback: Optional[Callable] = None, TotalFramesFromMediaFile: int = 0) -> Dict[str, Any]:
+                      ProgressCallback: Optional[Callable] = None, TotalFramesFromMediaFile: int = 0,
+                      ActiveJobId: int = None, DatabaseManager = None) -> Dict[str, Any]:
         """Execute transcoding command with real-time progress tracking.
         
         Args:
@@ -47,6 +48,12 @@ class VideoTranscodingService:
             )
             
             LoggingService.LogInfo(f"Process started with PID: {Process.pid}", "VideoTranscodingService", "TranscodeVideo")
+            
+            # Update ActiveJob with FFmpeg PID if provided
+            if ActiveJobId and DatabaseManager:
+                DatabaseManager.UpdateActiveJobProcessId(ActiveJobId, Process.pid)
+                LoggingService.LogInfo(f"Updated ActiveJob {ActiveJobId} with FFmpeg PID {Process.pid}", 
+                                      "VideoTranscodingService", "TranscodeVideo")
             
             # Store process reference
             self.ActiveProcesses[JobId] = Process

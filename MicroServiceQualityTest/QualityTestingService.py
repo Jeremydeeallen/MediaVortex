@@ -52,15 +52,24 @@ class QualityTestingService:
             # Initialize dependencies
             database_manager = DatabaseManager()
             
-            # Clean up any orphaned state from previous runs
+            # Enhanced crash recovery using CrashRecoveryService
+            from Services.CrashRecoveryService import CrashRecoveryService
+            recovery_service = CrashRecoveryService(database_manager)
+            recovery_result = recovery_service.RecoverServiceJobs("QualityTestingService")
+            LoggingService.LogInfo(f"Crash recovery result: {recovery_result}", "QualityTestingService", "Initialize")
+            
+            # Also run the existing cleanup for any additional cleanup needed
             cleanup_service = DatabaseCleanupService(database_manager)
             cleanup_result = cleanup_service.CleanupMicroserviceState("QualityTestingService")
-            LoggingService.LogInfo(f"Startup cleanup result: {cleanup_result}", "QualityTestingService", "Initialize")
+            LoggingService.LogInfo(f"Additional cleanup result: {cleanup_result}", "QualityTestingService", "Initialize")
             
             # Initialize ViewModel
             self.ViewModel = QualityTestingViewModel(
                 DatabaseManagerInstance=database_manager
             )
+            
+            # NEW: Check for missed quality tests
+            self.RecoverMissedQualityTests()
             
             # Read MaxConcurrentJobs from settings
             self.LoadConfiguration()
@@ -203,6 +212,52 @@ class QualityTestingService:
         except Exception as e:
             LoggingService.LogException("Error during shutdown", e, "QualityTestingService", "Shutdown")
             return False
+    
+    def RecoverMissedQualityTests(self):
+        """Find successful transcodes that need quality testing but aren't in the queue."""
+        try:
+            LoggingService.LogInfo("Checking for missed quality tests...", 
+                                  "QualityTestingService", "RecoverMissedQualityTests")
+            
+            # Get successful transcode attempts that need quality testing
+            # but don't have a successful quality test result record
+            MissedTests = self.ViewModel.DatabaseManager.GetMissedQualityTests(100)
+            
+            if MissedTests:
+                LoggingService.LogInfo(f"Found {len(MissedTests)} missed quality tests, queueing them...", 
+                                      "QualityTestingService", "RecoverMissedQualityTests")
+                
+                for Test in MissedTests:
+                    # Parse FFmpeg command to get file paths
+                    InputFilePath, OutputFilePath = self.ViewModel.DatabaseManager.ParseFFmpegCommand(
+                        Test['FfpmpegCommand']
+                    )
+                    
+                    if InputFilePath and OutputFilePath:
+                        # Check if files still exist
+                        import os
+                        if os.path.exists(InputFilePath) and os.path.exists(OutputFilePath):
+                            # Create quality test queue entry
+                            JobId = self.ViewModel.DatabaseManager.CreateQualityTestQueueEntry(
+                                Test['Id'],
+                                Test['FilePath'],
+                                InputFilePath,
+                                OutputFilePath
+                            )
+                            
+                            if JobId:
+                                LoggingService.LogInfo(f"Queued missed quality test for attempt {Test['Id']}", 
+                                                      "QualityTestingService", "RecoverMissedQualityTests")
+                        else:
+                            LoggingService.LogWarning(f"Files no longer exist for attempt {Test['Id']}, skipping", 
+                                                     "QualityTestingService", "RecoverMissedQualityTests")
+            else:
+                LoggingService.LogInfo("No missed quality tests found", 
+                                      "QualityTestingService", "RecoverMissedQualityTests")
+                                      
+        except Exception as e:
+            LoggingService.LogException("Error recovering missed quality tests", e, 
+                                       "QualityTestingService", "RecoverMissedQualityTests")
 
 
 def main():

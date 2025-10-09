@@ -89,6 +89,24 @@ def GenerateDatabaseSchema():
             f.write("    AND m.name NOT LIKE 'sqlite_%'\n")
             f.write("ORDER BY m.name, i.seq, ic.seqno;\n")
             f.write("```\n\n")
+            f.write("### Foreign Key Constraints\n")
+            f.write("```sql\n")
+            f.write("SELECT \n")
+            f.write("    m.name AS TableName,\n")
+            f.write("    fk.id AS ConstraintId,\n")
+            f.write("    fk.seq AS ColumnSequence,\n")
+            f.write("    fk.\"table\" AS ReferencedTable,\n")
+            f.write("    fk.\"from\" AS ColumnName,\n")
+            f.write("    fk.\"to\" AS ReferencedColumn,\n")
+            f.write("    fk.on_update AS OnUpdate,\n")
+            f.write("    fk.on_delete AS OnDelete,\n")
+            f.write("    fk.match AS MatchType\n")
+            f.write("FROM sqlite_master m\n")
+            f.write("CROSS JOIN pragma_foreign_key_list(m.name) fk\n")
+            f.write("WHERE m.type = 'table' \n")
+            f.write("    AND m.name NOT LIKE 'sqlite_%'\n")
+            f.write("ORDER BY m.name, fk.id, fk.seq;\n")
+            f.write("```\n\n")
             f.write("## Results\n\n")
             
             # Get table and columns
@@ -147,6 +165,30 @@ def GenerateDatabaseSchema():
             index_columns = ExecuteQuery(cursor, index_columns_query)
             for row in index_columns:
                 f.write(f"{row[0]}\t{row[1]}\t{row[2]}\t{row[3]}\n")
+            
+            # Get foreign key constraints
+            f.write("\n### Foreign Key Constraints\n\n")
+            foreign_keys_query = """
+            SELECT 
+                m.name AS TableName,
+                fk.id AS ConstraintId,
+                fk.seq AS ColumnSequence,
+                fk."table" AS ReferencedTable,
+                fk."from" AS ColumnName,
+                fk."to" AS ReferencedColumn,
+                fk.on_update AS OnUpdate,
+                fk.on_delete AS OnDelete,
+                fk.match AS MatchType
+            FROM sqlite_master m
+            CROSS JOIN pragma_foreign_key_list(m.name) fk
+            WHERE m.type = 'table' 
+                AND m.name NOT LIKE 'sqlite_%'
+            ORDER BY m.name, fk.id, fk.seq;
+            """
+            
+            foreign_keys = ExecuteQuery(cursor, foreign_keys_query)
+            for row in foreign_keys:
+                f.write(f"{row[0]}\t{row[1]}\t{row[2]}\t{row[3]}\t{row[4]}\t{row[5]}\t{row[6]}\t{row[7]}\t{row[8]}\n")
         
         conn.close()
         print(f"DatabaseSchema.md updated successfully at: {output_path}")

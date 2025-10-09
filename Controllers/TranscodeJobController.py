@@ -241,14 +241,20 @@ def GetRecentAttempts():
         # Create ViewModel instance
         viewModel = ActivityViewModel(TranscodingService=SharedTranscodingService)
         
-        # Get recent attempts
-        recentAttempts = viewModel.GetRecentAttempts(limit)
+        # Get recent attempts using GetTranscodingHistory
+        historyResult = viewModel.GetTranscodingHistory(limit)
         
-        result = {
-            "Success": True,
-            "RecentAttempts": recentAttempts,
-            "Count": len(recentAttempts)
-        }
+        if historyResult.get("Success", False):
+            result = {
+                "Success": True,
+                "RecentAttempts": historyResult.get("History", []),
+                "Count": historyResult.get("Count", 0)
+            }
+        else:
+            result = {
+                "Success": False,
+                "ErrorMessage": historyResult.get("ErrorMessage", "Failed to get recent attempts")
+            }
         
         # Reduced logging verbosity for routine data retrieval
         return jsonify(result)

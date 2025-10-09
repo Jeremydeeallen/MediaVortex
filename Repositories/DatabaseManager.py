@@ -1390,8 +1390,7 @@ class DatabaseManager:
                 return False
             
             # Add LastAttemptDate update
-            updateFields.append("LastAttemptDate = ?")
-            parameters.append(datetime.now())
+            updateFields.append("LastAttemptDate = CURRENT_TIMESTAMP")
             
             # Add FilePath to parameters for WHERE clause
             parameters.append(FilePath)
@@ -1763,12 +1762,12 @@ class DatabaseManager:
                     UPDATE TranscodeProgress SET
                         CurrentPhase = ?, ProgressPercent = ?, CurrentFrame = ?, CurrentFPS = ?,
                         CurrentBitrate = ?, CurrentTime = ?, CurrentSpeed = ?, ETA = ?,
-                        TotalFrames = ?, AverageFPS = ?, LastProgressUpdate = ?
+                        TotalFrames = ?, AverageFPS = ?, LastProgressUpdate = CURRENT_TIMESTAMP
                     WHERE TranscodeAttemptId = ?
                 """
                 parameters = (CurrentPhase, ProgressPercent, CurrentFrame, CurrentFPS,
                              CurrentBitrate, CurrentTime, CurrentSpeed, ETA,
-                             TotalFrames, AverageFPS, datetime.now(), TranscodeAttemptId)
+                             TotalFrames, AverageFPS, TranscodeAttemptId)
                 
                 result = self.DatabaseService.ExecuteNonQuery(updateQuery, parameters)
                 LoggingService.LogDebug(f"Updated progress record for attempt {TranscodeAttemptId}: {CurrentPhase} ({ProgressPercent}%) - Frame: {CurrentFrame}, FPS: {CurrentFPS}, ETA: {ETA}", "DatabaseManager", "SaveTranscodeProgress")
@@ -1779,10 +1778,10 @@ class DatabaseManager:
                     INSERT INTO TranscodeProgress 
                     (TranscodeAttemptId, PassNumber, PassType, CurrentPhase, ProgressPercent, CurrentFrame, CurrentFPS, 
                      CurrentBitrate, CurrentTime, CurrentSpeed, ETA, TotalFrames, AverageFPS, LastProgressUpdate)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                 """
                 parameters = (TranscodeAttemptId, 1, "Encoding", CurrentPhase, ProgressPercent, CurrentFrame, CurrentFPS,
-                             CurrentBitrate, CurrentTime, CurrentSpeed, ETA, TotalFrames, AverageFPS, datetime.now())
+                             CurrentBitrate, CurrentTime, CurrentSpeed, ETA, TotalFrames, AverageFPS)
                 
                 progressId = self.DatabaseService.ExecuteNonQuery(insertQuery, parameters)
                 LoggingService.LogDebug(f"Inserted new progress record for attempt {TranscodeAttemptId}: {CurrentPhase} ({ProgressPercent}%) - Frame: {CurrentFrame}, FPS: {CurrentFPS}, ETA: {ETA}", "DatabaseManager", "SaveTranscodeProgress")
@@ -2140,14 +2139,13 @@ class DatabaseManager:
             LoggingService.LogFunctionEntry("CreateServiceCommand", "DatabaseManager")
             
             query = """
-            INSERT INTO ServiceCommands (
+                INSERT INTO ServiceCommands (
                 CommandType, SourceService, TargetService, Parameters, Status, 
                 Priority, CreatedBy, CreatedAt, UpdatedAt
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
             """
             
             import json
-            now = datetime.now()
             parameters = (
                 CommandData.get('CommandType'),
                 CommandData.get('SourceService', 'ServiceControlController'),
@@ -2155,9 +2153,7 @@ class DatabaseManager:
                 json.dumps(CommandData.get('Parameters', {})),
                 CommandData.get('Status', 'Pending'),
                 CommandData.get('Priority', 1),
-                CommandData.get('CreatedBy', 'Unknown'),
-                now,
-                now
+                CommandData.get('CreatedBy', 'Unknown')
             )
             
             result = self.DatabaseService.ExecuteNonQuery(query, parameters)
@@ -2584,11 +2580,8 @@ class DatabaseManager:
             LoggingService.LogInfo(f"Retrieving quality testing job {job_id}", "DatabaseManager", "GetQualityTestingJob")
             
             query = """
-                SELECT Id, TranscodeAttemptId, OriginalFilePath, TranscodedFilePath, 
-                       FileName, Status, Priority, DateAdded, DateStarted, DateCompleted,
-                       QualityScore, QualityThreshold, ErrorMessage, RetryCount, MaxRetries,
-                       StrategyType, StrategyId, AlternativeProfileIds, CustomSettings,
-                       Results, SelectedResultId
+                SELECT Id, TranscodeAttemptId, OriginalFilePath, TranscodedFilePath, LocalSourcePath,
+                       DateAdded, DateStarted, DateCompleted
                 FROM QualityTestingQueue 
                 WHERE Id = ?
             """
@@ -2606,31 +2599,9 @@ class DatabaseManager:
             LoggingService.LogException(f"Critical error getting quality testing job {job_id}", e, "DatabaseManager", "GetQualityTestingJob")
             return None
     
-    def SaveQualityTestingQueueItem(self, job_id: int, status: str, result: Optional[Dict[str, Any]] = None) -> bool:
-        """Update a quality testing queue item"""
-        try:
-            if result:
-                query = """
-                    UPDATE QualityTestingQueue 
-                    SET Status = ?, DateCompleted = CURRENT_TIMESTAMP, 
-                        QualityScore = ?, Results = ?
-                    WHERE Id = ?
-                """
-                parameters = (status, result.get('VMAFScore', 0.0), str(result), job_id)
-            else:
-                query = """
-                    UPDATE QualityTestingQueue 
-                    SET Status = ?, DateStarted = CURRENT_TIMESTAMP
-                    WHERE Id = ?
-                """
-                parameters = (status, job_id)
-            
-            rows_affected = self.DatabaseService.ExecuteNonQuery(query, parameters)
-            return rows_affected > 0
-            
-        except Exception as e:
-            LoggingService.LogException("Exception saving quality testing queue item", e, "DatabaseManager", "SaveQualityTestingQueueItem")
-            return False
+    # Note: SaveQualityTestingQueueItem method removed
+    # because QualityTestingQueue no longer has Status, QualityScore, or Results columns
+    # Status tracking is now handled in QualityTestResults table
     
     def SaveQualityTestProgress(self, transcode_attempt_id: int, progress_data: Dict[str, Any]) -> bool:
         """Save quality test progress - updates existing record or creates new one"""
@@ -2689,7 +2660,69 @@ class DatabaseManager:
             LoggingService.LogException("Exception saving quality test progress", e, "DatabaseManager", "SaveQualityTestProgress")
             return False
     
-    def StoreQualityTestResult(self, JobId: int, JobDetails: dict, VMAFScore: float, ErrorMessage: str = None, TestDuration: float = 0.0) -> bool:
+    def CreateInitialQualityTestResult(self, JobId: int, JobDetails: dict, FFmpegCommand: str) -> int:
+        """Create initial QualityTestResults record before test starts."""
+        try:
+            LoggingService.LogFunctionEntry("CreateInitialQualityTestResult", "DatabaseManager", JobId)
+            
+            TranscodeAttemptId = JobDetails.get('TranscodeAttemptId', 0)
+            if not TranscodeAttemptId:
+                LoggingService.LogError("TranscodeAttemptId not provided in JobDetails", "DatabaseManager", "CreateInitialQualityTestResult")
+                return 0
+            
+            # Get ProfileName and ProfileId
+            ProfileQuery = "SELECT ta.ProfileName FROM TranscodeAttempts ta WHERE ta.Id = ?"
+            ProfileResults = self.DatabaseService.ExecuteQuery(ProfileQuery, (TranscodeAttemptId,))
+            ProfileName = ProfileResults[0]['ProfileName'] if ProfileResults else 'Unknown'
+            
+            ProfileIdQuery = "SELECT Id FROM Profiles WHERE ProfileName = ?"
+            ProfileIdResults = self.DatabaseService.ExecuteQuery(ProfileIdQuery, (ProfileName,))
+            ProfileId = ProfileIdResults[0]['Id'] if ProfileIdResults else 0
+            
+            # Get file size
+            FileSize = 0
+            if JobDetails.get('TranscodedFilePath') and os.path.exists(JobDetails['TranscodedFilePath']):
+                FileSize = os.path.getsize(JobDetails['TranscodedFilePath'])
+                LoggingService.LogInfo(f"File size for {JobDetails['TranscodedFilePath']}: {FileSize} bytes", "DatabaseManager", "CreateInitialQualityTestResult")
+            else:
+                LoggingService.LogWarning(f"TranscodedFilePath not found or file doesn't exist: {JobDetails.get('TranscodedFilePath')}", "DatabaseManager", "CreateInitialQualityTestResult")
+            
+            # Insert with NULL values for fields we don't have yet
+            Query = """
+                INSERT INTO QualityTestResults 
+                (TranscodeAttemptId, TestDuration, PassesThreshold, Rank, ErrorMessage, DateTested, FFmpegCommand, Status, VMAFScore)
+                VALUES (?, NULL, NULL, NULL, NULL, CURRENT_TIMESTAMP, ?, 'Running', NULL)
+            """
+            
+            Parameters = (TranscodeAttemptId, FFmpegCommand)
+            
+            try:
+                RowsAffected = self.DatabaseService.ExecuteNonQuery(Query, Parameters)
+                
+                # Get the ID of the inserted record using lastrowid (more reliable than rowcount for INSERTs)
+                ResultId = self.DatabaseService.GetLastInsertId()
+                
+                if ResultId > 0:
+                    LoggingService.LogInfo(f"Successfully created initial quality test result record {ResultId} for job {JobId}", "DatabaseManager", "CreateInitialQualityTestResult")
+                    return ResultId
+                else:
+                    LoggingService.LogError(
+                        f"INSERT failed - no record ID returned. Query: {Query}, Params: {Parameters}, ParamCount: {len(Parameters)}, RowCount: {RowsAffected}",
+                        "DatabaseManager", "CreateInitialQualityTestResult"
+                    )
+                    return 0
+            except Exception as e:
+                LoggingService.LogException(
+                    f"Database error during INSERT. Query: {Query}, Params: {Parameters}, ParamCount: {len(Parameters)}",
+                    e, "DatabaseManager", "CreateInitialQualityTestResult"
+                )
+                return 0
+            
+        except Exception as e:
+            LoggingService.LogException("Exception creating initial quality test result", e, "DatabaseManager", "CreateInitialQualityTestResult")
+            return 0
+
+    def StoreQualityTestResult(self, JobId: int, JobDetails: dict, VMAFScore: float, ErrorMessage: str = None, TestDuration: float = 0.0, FFmpegCommand: str = None) -> bool:
         """Store quality test result in QualityTestResults table."""
         try:
             LoggingService.LogFunctionEntry("StoreQualityTestResult", "DatabaseManager", JobId, VMAFScore)
@@ -2730,30 +2763,36 @@ class DatabaseManager:
             
             query = """
                 INSERT INTO QualityTestResults 
-                (VMAFQueueId, TranscodeAttemptId, VMAFScore, ProfileId, ProfileName, 
-                 FileSize, TestDuration, PassesThreshold, Rank, ErrorMessage, DateTested)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                (TranscodeAttemptId, TestDuration, PassesThreshold, Rank, ErrorMessage, DateTested, FFmpegCommand, Status, VMAFScore)
+                VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, 'Success', ?)
             """
             
             parameters = (
-                JobId,
                 TranscodeAttemptId,
-                VMAFScore,
-                ProfileId,
-                ProfileName,
-                file_size,
                 TestDuration,  # TestDuration - actual duration from FFmpeg process
                 VMAFScore >= 90.0,  # PassesThreshold - assuming 90+ is good
                 1,  # Rank - could be calculated based on other results
                 ErrorMessage,  # ErrorMessage - None for success, error text for failures
+                FFmpegCommand,  # Add the FFmpeg command
+                VMAFScore
             )
             
-            rows_affected = self.DatabaseService.ExecuteNonQuery(query, parameters)
-            if rows_affected > 0:
-                LoggingService.LogInfo(f"Successfully stored quality test result for job {JobId}, VMAF score: {VMAFScore}", "DatabaseManager", "StoreQualityTestResult")
-                return True
-            else:
-                LoggingService.LogError(f"Failed to store quality test result for job {JobId} - no rows affected", "DatabaseManager", "StoreQualityTestResult")
+            try:
+                rows_affected = self.DatabaseService.ExecuteNonQuery(query, parameters)
+                if rows_affected > 0:
+                    LoggingService.LogInfo(f"Successfully stored quality test result for job {JobId}, VMAF score: {VMAFScore}", "DatabaseManager", "StoreQualityTestResult")
+                    return True
+                else:
+                    LoggingService.LogError(
+                        f"INSERT returned 0 rows. Query: {query}, Params: {parameters}, ParamCount: {len(parameters)}",
+                        "DatabaseManager", "StoreQualityTestResult"
+                    )
+                    return False
+            except Exception as e:
+                LoggingService.LogException(
+                    f"Database error during INSERT. Query: {query}, Params: {parameters}, ParamCount: {len(parameters)}",
+                    e, "DatabaseManager", "StoreQualityTestResult"
+                )
                 return False
             
         except Exception as e:
@@ -3002,7 +3041,7 @@ class DatabaseManager:
     def GetQualityTestJob(self, JobId: int) -> dict:
         """Get a quality test job by ID"""
         try:
-            query = """SELECT Id, TranscodeAttemptId, OriginalFilePath, LocalSourcePath, TranscodedFilePath, Status, VMAFScore, CreatedDate 
+            query = """SELECT Id, TranscodeAttemptId, OriginalFilePath, LocalSourcePath, TranscodedFilePath, DateAdded, DateStarted, DateCompleted 
                        FROM QualityTestingQueue WHERE Id = ?"""
             rows = self.DatabaseService.ExecuteQuery(query, (JobId,))
             
@@ -3014,9 +3053,9 @@ class DatabaseManager:
                     "OriginalFilePath": row["OriginalFilePath"],
                     "LocalSourcePath": row["LocalSourcePath"],
                     "TranscodedFilePath": row["TranscodedFilePath"],
-                    "Status": row["Status"],
-                    "VMAFScore": row["VMAFScore"],
-                    "CreatedDate": row["CreatedDate"]
+                    "DateAdded": row["DateAdded"],
+                    "DateStarted": row["DateStarted"],
+                    "DateCompleted": row["DateCompleted"]
                 }
             return None
             
@@ -3028,12 +3067,10 @@ class DatabaseManager:
         """Get all quality test jobs in queue ordered by priority and date"""
         try:
             query = """
-                SELECT Id, TranscodeAttemptId, OriginalFilePath, TranscodedFilePath, FileName, Status, Priority, 
-                       DateAdded, DateStarted, DateCompleted, ErrorMessage, RetryCount, MaxRetries, 
-                       StrategyType, StrategyId, AlternativeProfileIds, CustomSettings, VMAFScore, 
-                       CreatedDate, CompletedDate, LocalSourcePath
+                SELECT Id, TranscodeAttemptId, OriginalFilePath, TranscodedFilePath, LocalSourcePath,
+                       DateAdded, DateStarted, DateCompleted
                 FROM QualityTestingQueue 
-                ORDER BY Priority DESC, DateAdded ASC, CreatedDate ASC
+                ORDER BY DateAdded ASC
             """
             rows = self.DatabaseService.ExecuteQuery(query)
             
@@ -3044,23 +3081,10 @@ class DatabaseManager:
                     "TranscodeAttemptId": row["TranscodeAttemptId"],
                     "OriginalFilePath": row["OriginalFilePath"],
                     "TranscodedFilePath": row["TranscodedFilePath"],
-                    "FileName": row["FileName"],
-                    "Status": row["Status"],
-                    "Priority": row["Priority"],
+                    "LocalSourcePath": row["LocalSourcePath"],
                     "DateAdded": row["DateAdded"],
                     "DateStarted": row["DateStarted"],
-                    "DateCompleted": row["DateCompleted"],
-                    "ErrorMessage": row["ErrorMessage"],
-                    "RetryCount": row["RetryCount"],
-                    "MaxRetries": row["MaxRetries"],
-                    "StrategyType": row["StrategyType"],
-                    "StrategyId": row["StrategyId"],
-                    "AlternativeProfileIds": row["AlternativeProfileIds"],
-                    "CustomSettings": row["CustomSettings"],
-                    "VMAFScore": row["VMAFScore"],
-                    "CreatedDate": row["CreatedDate"],
-                    "CompletedDate": row["CompletedDate"],
-                    "LocalSourcePath": row["LocalSourcePath"]
+                    "DateCompleted": row["DateCompleted"]
                 })
             return jobs
             
@@ -3068,54 +3092,21 @@ class DatabaseManager:
             LoggingService.LogException("Exception getting quality test queue", e, "DatabaseManager", "GetQualityTestQueue")
             return []
     
-    def UpdateQualityTestStatus(self, JobId: int, Status: str, VMAFScore: float = None) -> bool:
-        """Update quality test job status and VMAF score"""
-        try:
-            if VMAFScore is not None:
-                query = """UPDATE QualityTestingQueue SET Status = ?, VMAFScore = ?, CompletedDate = ? 
-                           WHERE Id = ?"""
-                params = (Status, VMAFScore, datetime.now(), JobId)
-            else:
-                query = """UPDATE QualityTestingQueue SET Status = ?, CompletedDate = ? WHERE Id = ?"""
-                params = (Status, datetime.now(), JobId)
-            
-            rows_affected = self.DatabaseService.ExecuteNonQuery(query, params)
-            return rows_affected > 0
-            
-        except Exception as e:
-            LoggingService.LogException("Exception updating quality test status", e, "DatabaseManager", "UpdateQualityTestStatus")
-            return False
-    
-    def ResetQualityTestJobForRetry(self, JobId: int) -> bool:
-        """Reset a quality test job for retry by setting status to Pending and incrementing retry count"""
-        try:
-            query = """UPDATE QualityTestingQueue 
-                       SET Status = 'Pending', 
-                           RetryCount = COALESCE(RetryCount, 0) + 1,
-                           ErrorMessage = NULL,
-                           DateStarted = NULL,
-                           DateCompleted = NULL,
-                           CompletedDate = NULL
-                       WHERE Id = ?"""
-            
-            rows_affected = self.DatabaseService.ExecuteNonQuery(query, (JobId,))
-            return rows_affected > 0
-            
-        except Exception as e:
-            LoggingService.LogException("Exception resetting quality test job for retry", e, "DatabaseManager", "ResetQualityTestJobForRetry")
-            return False
+    # Note: UpdateQualityTestStatus and ResetQualityTestJobForRetry methods removed
+    # because QualityTestingQueue no longer has Status, VMAFScore, RetryCount, or ErrorMessage columns
+    # Status tracking is now handled in QualityTestResults table
     
     def GetQualityTestResults(self, Limit: int = 10) -> list:
         """Get recent quality test results from QualityTestResults table joined with TranscodeAttempts"""
         try:
             query = """
                 SELECT 
-                    qtr.Id, qtr.VMAFQueueId, qtr.TranscodeAttemptId, qtr.VMAFScore, 
-                    qtr.ProfileId, qtr.ProfileName, qtr.FileSize, qtr.TestDuration, 
-                    qtr.PassesThreshold, qtr.Rank, qtr.ErrorMessage, qtr.DateTested,
-                    ta.FilePath, ta.OldSizeBytes, ta.NewSizeBytes, ta.SizeReductionBytes, 
+                    qtr.Id, qtr.TranscodeAttemptId, qtr.VMAFScore, 
+                    qtr.TestDuration, qtr.PassesThreshold, qtr.Rank, qtr.ErrorMessage, qtr.DateTested,
+                    qtr.FFmpegCommand, qtr.Status,
+                    ta.ProfileName, ta.FilePath, ta.OldSizeBytes, ta.NewSizeBytes, ta.SizeReductionBytes, 
                     ta.SizeReductionPercent, ta.TranscodeDurationSeconds, ta.ProfileName as TranscodeProfileName,
-                    ta.Quality, ta.AttemptDate
+                    ta.Quality, ta.AttemptDate, ta.NewSizeBytes as FileSize
                 FROM QualityTestResults qtr
                 LEFT JOIN TranscodeAttempts ta ON qtr.TranscodeAttemptId = ta.Id
                 ORDER BY qtr.DateTested DESC 
@@ -3127,10 +3118,8 @@ class DatabaseManager:
             for row in rows:
                 results.append({
                     "Id": row["Id"],
-                    "VMAFQueueId": row["VMAFQueueId"],
                     "TranscodeAttemptId": row["TranscodeAttemptId"],
                     "VMAFScore": row["VMAFScore"],
-                    "ProfileId": row["ProfileId"],
                     "ProfileName": row["ProfileName"],
                     "FileSize": row["FileSize"],
                     "TestDuration": row["TestDuration"],
@@ -3138,6 +3127,8 @@ class DatabaseManager:
                     "Rank": row["Rank"],
                     "ErrorMessage": row["ErrorMessage"],
                     "DateTested": row["DateTested"],
+                    "FFmpegCommand": row["FFmpegCommand"],
+                    "Status": row["Status"],
                     "FilePath": row["FilePath"],
                     "OldSizeBytes": row["OldSizeBytes"],
                     "NewSizeBytes": row["NewSizeBytes"],
@@ -3160,18 +3151,17 @@ class DatabaseManager:
         try:
             query = """
                 SELECT 
-                    qtp.Id, 
-                    qtp.TranscodeAttemptId, 
-                    qtp.Status, 
-                    qtp.ProgressPercentage, 
-                    qtp.CurrentStep, 
-                    qtp.CurrentFrame, 
-                    qtp.CurrentTime, 
-                    qtp.ProcessingSpeed, 
+                    qtp.Id,
+                    qtp.TranscodeAttemptId,
+                    qtp.Status,
+                    qtp.ProgressPercentage,
+                    qtp.CurrentStep,
+                    qtp.CurrentFrame,
+                    qtp.CurrentTime,
+                    qtp.ProcessingSpeed,
                     qtp.ETA, 
                     qtp.StartTime, 
                     qtp.UpdatedAt,
-                    qtq.FileName,
                     qtq.OriginalFilePath,
                     qtq.TranscodedFilePath,
                     qtq.LocalSourcePath
@@ -3197,7 +3187,7 @@ class DatabaseManager:
                     "ETA": row["ETA"],
                     "StartTime": row["StartTime"],
                     "UpdatedAt": row["UpdatedAt"],
-                    "FileName": row["FileName"] or f"TranscodeAttempt_{row['TranscodeAttemptId']}",
+                    "FileName": os.path.basename(row["OriginalFilePath"]) if row["OriginalFilePath"] else f"TranscodeAttempt_{row['TranscodeAttemptId']}",
                     "OriginalFilePath": row["OriginalFilePath"] or f"TranscodeAttempt_{row['TranscodeAttemptId']}",
                     "TranscodedFilePath": row["TranscodedFilePath"] or f"TranscodeAttempt_{row['TranscodeAttemptId']}",
                     "LocalSourcePath": row["LocalSourcePath"],
@@ -3215,10 +3205,10 @@ class DatabaseManager:
         try:
             # First, get the job to claim
             select_query = """
-                SELECT Id, TranscodeAttemptId, OriginalFilePath, LocalSourcePath, TranscodedFilePath, Status, VMAFScore, CreatedDate
+                SELECT Id, TranscodeAttemptId, OriginalFilePath, LocalSourcePath, TranscodedFilePath, DateAdded
                 FROM QualityTestingQueue 
-                WHERE Status = 'Pending' 
-                ORDER BY Priority DESC, DateAdded ASC, CreatedDate ASC 
+                WHERE DateStarted IS NULL 
+                ORDER BY DateAdded ASC 
                 LIMIT 1
             """
             
@@ -3233,8 +3223,8 @@ class DatabaseManager:
             # Now atomically claim the job
             update_query = """
                 UPDATE QualityTestingQueue 
-                SET Status = 'Running', DateStarted = CURRENT_TIMESTAMP
-                WHERE Id = ? AND Status = 'Pending'
+                SET DateStarted = CURRENT_TIMESTAMP
+                WHERE Id = ? AND DateStarted IS NULL
             """
             
             rows_affected = self.DatabaseService.ExecuteNonQuery(update_query, (job_id,))
@@ -3247,9 +3237,7 @@ class DatabaseManager:
                     "OriginalFilePath": job_to_claim["OriginalFilePath"],
                     "LocalSourcePath": job_to_claim["LocalSourcePath"],
                     "TranscodedFilePath": job_to_claim["TranscodedFilePath"],
-                    "Status": "Running",  # We know it's now Running
-                    "VMAFScore": job_to_claim["VMAFScore"],
-                    "CreatedDate": job_to_claim["CreatedDate"]
+                    "DateAdded": job_to_claim["DateAdded"]
                 }
             else:
                 LoggingService.LogDebug(f"Job {job_id} was already claimed by another worker", "DatabaseManager", "ClaimQualityTestJob")
@@ -3291,34 +3279,18 @@ class DatabaseManager:
             
             query = """
                 INSERT INTO QualityTestingQueue (
-                    TranscodeAttemptId, OriginalFilePath, TranscodedFilePath, FileName, Status, 
-                    Priority, DateAdded, DateStarted, DateCompleted, ErrorMessage, RetryCount, MaxRetries,
-                    StrategyType, StrategyId, AlternativeProfileIds, CustomSettings, VMAFScore,
-                    CreatedDate, CompletedDate, LocalSourcePath
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    TranscodeAttemptId, OriginalFilePath, TranscodedFilePath, LocalSourcePath,
+                    DateAdded, DateStarted, DateCompleted
+                ) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?)
             """
             
             params = (
                 TranscodeAttemptId,
                 NormalizedOriginalFilePath,
                 NormalizedTranscodedFilePath,
-                FileName,
-                'Pending',
-                0,  # Priority
-                datetime.now(),  # DateAdded
+                NormalizedLocalSourcePath,
                 None,  # DateStarted
-                None,  # DateCompleted
-                None,  # ErrorMessage
-                0,  # RetryCount
-                3,  # MaxRetries
-                'Single',  # StrategyType
-                None,  # StrategyId
-                None,  # AlternativeProfileIds
-                None,  # CustomSettings
-                None,  # VMAFScore
-                datetime.now(),  # CreatedDate
-                None,  # CompletedDate
-                NormalizedLocalSourcePath  # LocalSourcePath - LAST!
+                None   # DateCompleted
             )
             
             JobId = self.DatabaseService.ExecuteNonQuery(query, params)
@@ -3335,6 +3307,81 @@ class DatabaseManager:
         except Exception as e:
             LoggingService.LogException("Exception creating quality test queue entry", e, "DatabaseManager", "CreateQualityTestQueueEntry")
             return None
+    
+    def ParseFFmpegCommand(self, FfpmpegCommand: str) -> tuple:
+        """
+        Parse FFmpeg command to extract input and output file paths.
+        
+        Args:
+            FfpmpegCommand: The full FFmpeg command string
+            
+        Returns:
+            tuple: (InputFilePath, OutputFilePath) or (None, None) if parsing fails
+        """
+        try:
+            import re
+            
+            if not FfpmpegCommand or FfpmpegCommand.strip() == "":
+                LoggingService.LogWarning("Empty FFmpeg command provided", "DatabaseManager", "ParseFFmpegCommand")
+                return None, None
+            
+            # Find input file path after -i flag
+            InputMatch = re.search(r'-i\s+"([^"]+)"', FfpmpegCommand)
+            InputPath = InputMatch.group(1) if InputMatch else None
+            
+            # Find output file path (last quoted string in the command)
+            OutputMatches = re.findall(r'"([^"]+)"', FfpmpegCommand)
+            OutputPath = OutputMatches[-1] if OutputMatches else None
+            
+            if InputPath and OutputPath:
+                LoggingService.LogInfo(f"Successfully parsed FFmpeg command - Input: {InputPath}, Output: {OutputPath}", 
+                                     "DatabaseManager", "ParseFFmpegCommand")
+                return InputPath, OutputPath
+            else:
+                LoggingService.LogWarning(f"Could not parse FFmpeg command: {FfpmpegCommand}", 
+                                        "DatabaseManager", "ParseFFmpegCommand")
+                return None, None
+            
+        except Exception as e:
+            LoggingService.LogException("Exception parsing FFmpeg command", e, "DatabaseManager", "ParseFFmpegCommand")
+            return None, None
+    
+    def DeleteQualityTestRecordsByAttemptId(self, TranscodeAttemptId: int) -> bool:
+        """
+        Delete existing quality test records for a specific transcode attempt.
+        
+        Args:
+            TranscodeAttemptId: The ID of the transcode attempt
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            LoggingService.LogFunctionEntry("DeleteQualityTestRecordsByAttemptId", "DatabaseManager", TranscodeAttemptId)
+            
+            # Delete from QualityTestingQueue
+            QueueQuery = "DELETE FROM QualityTestingQueue WHERE TranscodeAttemptId = ?"
+            QueueRowsAffected = self.DatabaseService.ExecuteNonQuery(QueueQuery, (TranscodeAttemptId,))
+            
+            # Delete from QualityTestProgress
+            ProgressQuery = "DELETE FROM QualityTestProgress WHERE TranscodeAttemptId = ?"
+            ProgressRowsAffected = self.DatabaseService.ExecuteNonQuery(ProgressQuery, (TranscodeAttemptId,))
+            
+            TotalRowsAffected = QueueRowsAffected + ProgressRowsAffected
+            
+            if TotalRowsAffected > 0:
+                LoggingService.LogInfo(f"Deleted {TotalRowsAffected} quality test records for TranscodeAttempt {TranscodeAttemptId} "
+                                     f"(Queue: {QueueRowsAffected}, Progress: {ProgressRowsAffected})", 
+                                     "DatabaseManager", "DeleteQualityTestRecordsByAttemptId")
+                return True
+            else:
+                LoggingService.LogInfo(f"No quality test records found for TranscodeAttempt {TranscodeAttemptId}", 
+                                     "DatabaseManager", "DeleteQualityTestRecordsByAttemptId")
+                return True  # Still return True as this is not an error condition
+                
+        except Exception as e:
+            LoggingService.LogException("Exception deleting quality test records", e, "DatabaseManager", "DeleteQualityTestRecordsByAttemptId")
+            return False
     
     def CreateTemporaryFilePath(self, TranscodeAttemptId: int, OriginalPath: str, LocalSourcePath: str) -> Optional[int]:
         """Create a new temporary file path record."""
@@ -3354,10 +3401,10 @@ class DatabaseManager:
             query = """
                 INSERT INTO TemporaryFilePaths (
                     TranscodeAttemptId, OriginalPath, LocalSourcePath, CreatedDate
-                ) VALUES (?, ?, ?, ?)
+                ) VALUES (?, ?, ?, CURRENT_TIMESTAMP)
             """
             
-            params = (TranscodeAttemptId, NormalizedOriginalPath, NormalizedLocalSourcePath, datetime.now())
+            params = (TranscodeAttemptId, NormalizedOriginalPath, NormalizedLocalSourcePath)
             
             RecordId = self.DatabaseService.ExecuteNonQuery(query, params)
             
@@ -3542,3 +3589,291 @@ class DatabaseManager:
         except Exception as e:
             LoggingService.LogException("Exception normalizing file path", e, "DatabaseManager", "PrivateNormalizeFilePath")
             return FilePath
+    
+    # Crash Recovery Methods
+    
+    def GetActiveJobDetails(self, JobId: int) -> Optional[Dict[str, Any]]:
+        """Get detailed information about a specific active job."""
+        try:
+            LoggingService.LogFunctionEntry("GetActiveJobDetails", "DatabaseManager", JobId)
+            
+            query = """
+                SELECT Id, ServiceName, JobType, QueueId, ProcessId, ThreadId, 
+                       StartedAt, Status, CreatedAt, UpdatedAt
+                FROM ActiveJobs 
+                WHERE Id = ?
+            """
+            
+            rows = self.DatabaseService.ExecuteQuery(query, (JobId,))
+            
+            if rows:
+                job_details = dict(rows[0])
+                LoggingService.LogInfo(f"Retrieved active job details for ID {JobId}", "DatabaseManager", "GetActiveJobDetails")
+                return job_details
+            else:
+                LoggingService.LogWarning(f"Active job not found: {JobId}", "DatabaseManager", "GetActiveJobDetails")
+                return None
+                
+        except Exception as e:
+            LoggingService.LogException("Exception getting active job details", e, "DatabaseManager", "GetActiveJobDetails")
+            return None
+    
+    def DeleteActiveJob(self, JobId: int) -> bool:
+        """Delete a specific active job record."""
+        try:
+            LoggingService.LogFunctionEntry("DeleteActiveJob", "DatabaseManager", JobId)
+            
+            query = "DELETE FROM ActiveJobs WHERE Id = ?"
+            affected_rows = self.DatabaseService.ExecuteNonQuery(query, (JobId,))
+            
+            if affected_rows > 0:
+                LoggingService.LogInfo(f"Deleted active job {JobId}", "DatabaseManager", "DeleteActiveJob")
+                return True
+            else:
+                LoggingService.LogWarning(f"Active job {JobId} not found for deletion", "DatabaseManager", "DeleteActiveJob")
+                return False
+                
+        except Exception as e:
+            LoggingService.LogException("Exception deleting active job", e, "DatabaseManager", "DeleteActiveJob")
+            return False
+    
+    def DeleteActiveJobsByService(self, ServiceName: str) -> int:
+        """Delete all active jobs for a specific service. Returns count of deleted jobs."""
+        try:
+            LoggingService.LogFunctionEntry("DeleteActiveJobsByService", "DatabaseManager", ServiceName)
+            
+            query = "DELETE FROM ActiveJobs WHERE ServiceName = ?"
+            affected_rows = self.DatabaseService.ExecuteNonQuery(query, (ServiceName,))
+            
+            LoggingService.LogInfo(f"Deleted {affected_rows} active jobs for service {ServiceName}", "DatabaseManager", "DeleteActiveJobsByService")
+            return affected_rows
+            
+        except Exception as e:
+            LoggingService.LogException("Exception deleting active jobs by service", e, "DatabaseManager", "DeleteActiveJobsByService")
+            return 0
+    
+    def ResetQueueJobsToPending(self, QueueIds: List[int], QueueTable: str) -> int:
+        """Reset multiple queue jobs to Pending status. Returns count of reset jobs."""
+        try:
+            LoggingService.LogFunctionEntry("ResetQueueJobsToPending", "DatabaseManager", QueueIds, QueueTable)
+            
+            if not QueueIds:
+                return 0
+            
+            # Validate queue table name to prevent SQL injection
+            valid_tables = ['TranscodeQueue', 'QualityTestingQueue']
+            if QueueTable not in valid_tables:
+                LoggingService.LogError(f"Invalid queue table name: {QueueTable}", "DatabaseManager", "ResetQueueJobsToPending")
+                return 0
+            
+            # Reset status to Pending and clear DateStarted
+            query = f"""
+                UPDATE {QueueTable} 
+                SET Status = 'Pending', DateStarted = NULL 
+                WHERE Id IN ({','.join('?' * len(QueueIds))})
+            """
+            
+            affected_rows = self.DatabaseService.ExecuteNonQuery(query, QueueIds)
+            
+            LoggingService.LogInfo(f"Reset {affected_rows} jobs to Pending in {QueueTable}", "DatabaseManager", "ResetQueueJobsToPending")
+            return affected_rows
+            
+        except Exception as e:
+            LoggingService.LogException("Exception resetting queue jobs to pending", e, "DatabaseManager", "ResetQueueJobsToPending")
+            return 0
+    
+    def UpdateActiveJobProcessId(self, ActiveJobId: int, ProcessId: int) -> bool:
+        """Update the ProcessId for an active job (for FFmpeg PID tracking)."""
+        try:
+            LoggingService.LogFunctionEntry("UpdateActiveJobProcessId", "DatabaseManager", ActiveJobId, ProcessId)
+            
+            query = "UPDATE ActiveJobs SET ProcessId = ?, UpdatedAt = CURRENT_TIMESTAMP WHERE Id = ?"
+            affected_rows = self.DatabaseService.ExecuteNonQuery(query, (ProcessId, ActiveJobId))
+            
+            if affected_rows > 0:
+                LoggingService.LogInfo(f"Updated ActiveJob {ActiveJobId} with ProcessId {ProcessId}", 
+                                      "DatabaseManager", "UpdateActiveJobProcessId")
+                return True
+            else:
+                LoggingService.LogWarning(f"No rows updated for ActiveJob {ActiveJobId}", 
+                                         "DatabaseManager", "UpdateActiveJobProcessId")
+                return False
+                
+        except Exception as e:
+            LoggingService.LogException("Exception updating active job process ID", e, 
+                                       "DatabaseManager", "UpdateActiveJobProcessId")
+            return False
+    
+    def CreateQualityTestResult(self, TranscodeAttemptId: int, Status: str = "Running", TestDate: datetime = None) -> int:
+        """Create a quality test result record at the start of testing."""
+        try:
+            LoggingService.LogFunctionEntry("CreateQualityTestResult", "DatabaseManager", TranscodeAttemptId, Status)
+            
+            from Models.QualityTestResultModel import QualityTestResultModel
+            
+            result = QualityTestResultModel(
+                TranscodeAttemptId=TranscodeAttemptId,
+                Status=Status,
+                DateTested=TestDate or datetime.now(),
+                VMAFScore=0.0 if Status == "Running" else None,  # Use 0.0 for running tests
+                ErrorMessage=None
+            )
+            
+            # Verify TranscodeAttemptId exists
+            check_query = "SELECT Id FROM TranscodeAttempts WHERE Id = ?"
+            check_result = self.DatabaseService.ExecuteQuery(check_query, (TranscodeAttemptId,))
+            
+            if not check_result:
+                LoggingService.LogError(
+                    f"TranscodeAttemptId {TranscodeAttemptId} does not exist in TranscodeAttempts table",
+                    "DatabaseManager", "CreateQualityTestResult"
+                )
+                return 0
+            
+            # Insert into database with all required fields
+            query = """
+                INSERT INTO QualityTestResults 
+                (TranscodeAttemptId, TestDuration, PassesThreshold, Rank, ErrorMessage, DateTested, FFmpegCommand, Status, VMAFScore)
+                VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?)
+            """
+            
+            params = (
+                result.TranscodeAttemptId,
+                0.0,  # TestDuration
+                False,  # PassesThreshold
+                0,  # Rank
+                result.ErrorMessage,
+                # DateTested removed - using CURRENT_TIMESTAMP in SQL
+                "",  # FFmpegCommand
+                result.Status,
+                result.VMAFScore
+            )
+            
+            LoggingService.LogInfo(f"Inserting QualityTestResult with params: {params}", "DatabaseManager", "CreateQualityTestResult")
+            
+            try:
+                affected_rows = self.DatabaseService.ExecuteNonQuery(query, params)
+                
+                # Get the ID of the inserted record using lastrowid (more reliable than rowcount for INSERTs)
+                result_id = self.DatabaseService.GetLastInsertId()
+                
+                if result_id > 0:
+                    LoggingService.LogInfo(f"Created QualityTestResult {result_id} for TranscodeAttempt {TranscodeAttemptId}", 
+                                          "DatabaseManager", "CreateQualityTestResult")
+                    return result_id
+                else:
+                    LoggingService.LogError(
+                        f"INSERT failed - no record ID returned. Query: {query}, Params: {params}, ParamCount: {len(params)}, RowCount: {affected_rows}",
+                        "DatabaseManager", "CreateQualityTestResult"
+                    )
+                    return 0
+            except Exception as e:
+                LoggingService.LogException(
+                    f"Database error during INSERT. Query: {query}, Params: {params}, ParamCount: {len(params)}",
+                    e, "DatabaseManager", "CreateQualityTestResult"
+                )
+                return 0
+                
+        except Exception as e:
+            LoggingService.LogException("Error creating quality test result", e, 
+                                       "DatabaseManager", "CreateQualityTestResult")
+            return 0
+    
+    def UpdateQualityTestResult(self, ResultId: int, Status: str = None, VMAF: float = None, ErrorMessage: str = None) -> bool:
+        """Update a quality test result with completion details."""
+        try:
+            LoggingService.LogFunctionEntry("UpdateQualityTestResult", "DatabaseManager", ResultId, Status, VMAF, ErrorMessage)
+            
+            updates = []
+            params = []
+            
+            if Status:
+                updates.append("Status = ?")
+                params.append(Status)
+            if VMAF is not None:
+                updates.append("VMAFScore = ?")
+                params.append(VMAF)
+            if ErrorMessage is not None:
+                updates.append("ErrorMessage = ?")
+                params.append(ErrorMessage)
+            
+            if not updates:
+                LoggingService.LogWarning("No updates provided for QualityTestResult", "DatabaseManager", "UpdateQualityTestResult")
+                return False
+            
+            query = f"UPDATE QualityTestResults SET {', '.join(updates)} WHERE Id = ?"
+            params.append(ResultId)
+            
+            affected_rows = self.DatabaseService.ExecuteNonQuery(query, tuple(params))
+            
+            if affected_rows > 0:
+                LoggingService.LogInfo(f"Updated QualityTestResult {ResultId}", "DatabaseManager", "UpdateQualityTestResult")
+                return True
+            else:
+                LoggingService.LogWarning(f"No rows updated for QualityTestResult {ResultId}", 
+                                         "DatabaseManager", "UpdateQualityTestResult")
+                return False
+                
+        except Exception as e:
+            LoggingService.LogException("Error updating quality test result", e, 
+                                       "DatabaseManager", "UpdateQualityTestResult")
+            return False
+    
+    def DeleteQualityTestQueueItem(self, JobId: int) -> bool:
+        """Delete a job from the quality testing queue."""
+        try:
+            LoggingService.LogFunctionEntry("DeleteQualityTestQueueItem", "DatabaseManager", JobId)
+            
+            query = "DELETE FROM QualityTestingQueue WHERE Id = ?"
+            affected_rows = self.DatabaseService.ExecuteNonQuery(query, (JobId,))
+            
+            if affected_rows > 0:
+                LoggingService.LogInfo(f"Deleted QualityTestingQueue item {JobId}", "DatabaseManager", "DeleteQualityTestQueueItem")
+                return True
+            else:
+                LoggingService.LogWarning(f"No rows deleted for QualityTestingQueue item {JobId}", 
+                                         "DatabaseManager", "DeleteQualityTestQueueItem")
+                return False
+                
+        except Exception as e:
+            LoggingService.LogException("Error deleting quality test queue item", e, 
+                                       "DatabaseManager", "DeleteQualityTestQueueItem")
+            return False
+    
+    def GetMissedQualityTests(self, Limit: int = 100) -> List[Dict[str, Any]]:
+        """Get successful transcode attempts that need quality testing but don't have successful quality test results."""
+        try:
+            LoggingService.LogFunctionEntry("GetMissedQualityTests", "DatabaseManager", Limit)
+            
+            query = """
+                SELECT ta.Id, ta.FilePath, ta.FfpmpegCommand
+                FROM TranscodeAttempts ta
+                WHERE ta.Success = 1
+                  AND ta.QualityTestRequired = 1
+                  AND ta.QualityTestCompleted = 0
+                  AND ta.Id NOT IN (
+                      SELECT TranscodeAttemptId 
+                      FROM QualityTestResults 
+                      WHERE TranscodeAttemptId IS NOT NULL
+                        AND Status = 'Success'
+                  )
+                ORDER BY ta.AttemptDate DESC
+                LIMIT ?
+            """
+            
+            Rows = self.DatabaseService.ExecuteQuery(query, (Limit,))
+            
+            Results = []
+            for Row in Rows:
+                Results.append({
+                    "Id": Row["Id"],
+                    "FilePath": Row["FilePath"],
+                    "FfpmpegCommand": Row["FfpmpegCommand"]
+                })
+            
+            LoggingService.LogInfo(f"Found {len(Results)} missed quality tests", "DatabaseManager", "GetMissedQualityTests")
+            return Results
+            
+        except Exception as e:
+            LoggingService.LogException("Exception getting missed quality tests", e, "DatabaseManager", "GetMissedQualityTests")
+            return []

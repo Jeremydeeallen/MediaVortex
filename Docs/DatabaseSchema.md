@@ -53,6 +53,25 @@ WHERE m.type = 'table'
 ORDER BY m.name, i.seq, ic.seqno;
 ```
 
+### Foreign Key Constraints
+```sql
+SELECT 
+    m.name AS TableName,
+    fk.id AS ConstraintId,
+    fk.seq AS ColumnSequence,
+    fk."table" AS ReferencedTable,
+    fk."from" AS ColumnName,
+    fk."to" AS ReferencedColumn,
+    fk.on_update AS OnUpdate,
+    fk.on_delete AS OnDelete,
+    fk.match AS MatchType
+FROM sqlite_master m
+CROSS JOIN pragma_foreign_key_list(m.name) fk
+WHERE m.type = 'table' 
+    AND m.name NOT LIKE 'sqlite_%'
+ORDER BY m.name, fk.id, fk.seq;
+```
+
 ## Results
 
 ### Table and Columns
@@ -292,38 +311,23 @@ QualityTestProgress.StartTime	DATETIME
 QualityTestProgress.UpdatedAt	DATETIME
 QualityTestProgress.CreatedAt	DATETIME
 QualityTestResults.Id	INTEGER
-QualityTestResults.VMAFQueueId	INTEGER
 QualityTestResults.TranscodeAttemptId	INTEGER
-QualityTestResults.VMAFScore	REAL
-QualityTestResults.ProfileId	INTEGER
-QualityTestResults.ProfileName	TEXT
-QualityTestResults.FileSize	INTEGER
 QualityTestResults.TestDuration	REAL
 QualityTestResults.PassesThreshold	BOOLEAN
 QualityTestResults.Rank	INTEGER
 QualityTestResults.ErrorMessage	TEXT
 QualityTestResults.DateTested	DATETIME
+QualityTestResults.FFmpegCommand	TEXT
+QualityTestResults.Status	TEXT
+QualityTestResults.VMAFScore	REAL
 QualityTestingQueue.Id	INTEGER
 QualityTestingQueue.TranscodeAttemptId	INTEGER
 QualityTestingQueue.OriginalFilePath	TEXT
 QualityTestingQueue.TranscodedFilePath	TEXT
-QualityTestingQueue.FileName	TEXT
-QualityTestingQueue.Status	TEXT
-QualityTestingQueue.Priority	INTEGER
-QualityTestingQueue.DateAdded	DATETIME
-QualityTestingQueue.DateStarted	DATETIME
-QualityTestingQueue.DateCompleted	DATETIME
-QualityTestingQueue.ErrorMessage	TEXT
-QualityTestingQueue.RetryCount	INTEGER
-QualityTestingQueue.MaxRetries	INTEGER
-QualityTestingQueue.StrategyType	TEXT
-QualityTestingQueue.StrategyId	INTEGER
-QualityTestingQueue.AlternativeProfileIds	TEXT
-QualityTestingQueue.CustomSettings	TEXT
-QualityTestingQueue.VMAFScore	REAL
-QualityTestingQueue.CreatedDate	DATETIME
-QualityTestingQueue.CompletedDate	DATETIME
 QualityTestingQueue.LocalSourcePath	TEXT
+QualityTestingQueue.DateAdded	TIMESTAMP
+QualityTestingQueue.DateStarted	TIMESTAMP
+QualityTestingQueue.DateCompleted	TIMESTAMP
 QualityTestingQueueBackup.Id	INT
 QualityTestingQueueBackup.TranscodeAttemptId	INT
 QualityTestingQueueBackup.OriginalFilePath	TEXT
@@ -637,3 +641,17 @@ TranscodeQueue	idx_TranscodeQueue_Priority	Priority	0
 TranscodeQueue	idx_TranscodeQueue_Status	Status	0
 TranscodeQueue	idx_TranscodeQueue_FilePath	FilePath	0
 TranscodeQueue	sqlite_autoindex_TranscodeQueue_1	FilePath	0
+
+### Foreign Key Constraints
+
+CodecParameters	0	0	CodecFlags	CodecFlagsId	Id	NO ACTION	NO ACTION	NONE
+MediaFiles	0	0	Seasons	SeasonId	Id	NO ACTION	NO ACTION	NONE
+MediaFilesArchive	0	0	TranscodeAttempts	TranscodeAttemptId	Id	NO ACTION	NO ACTION	NONE
+PresetOptions	0	0	CodecFlags	CodecFlagsId	Id	NO ACTION	NO ACTION	NONE
+ProfileThresholds	0	0	Profiles	ProfileId	Id	NO ACTION	CASCADE	NONE
+QualityTestProgress	0	0	TranscodeAttempts	TranscodeAttemptId	Id	NO ACTION	NO ACTION	NONE
+QualityTestResults	0	0	TranscodeAttempts	TranscodeAttemptId	Id	NO ACTION	NO ACTION	NONE
+QualityTestingStrategies	0	0	Profiles	ProfileId	Id	NO ACTION	NO ACTION	NONE
+Seasons	0	0	RootFolders	RootFolderId	Id	NO ACTION	NO ACTION	NONE
+TemporaryFilePaths	0	0	TranscodeAttempts	TranscodeAttemptId	Id	NO ACTION	NO ACTION	NONE
+TranscodeProgress	0	0	TranscodeAttempts	TranscodeAttemptId	Id	NO ACTION	NO ACTION	NONE

@@ -49,10 +49,22 @@ class DatabaseService:
             cursor = connection.cursor()
             cursor.execute(query, parameters)
             connection.commit()
+            
             # Capture last insert ID for INSERT operations
             if query.strip().upper().startswith('INSERT'):
                 self.LastInsertId = cursor.lastrowid
+            
             return cursor.rowcount
+            
+        except Exception as e:
+            # Log the exact database error
+            from Services.LoggingService import LoggingService
+            LoggingService.LogException(
+                f"ExecuteNonQuery failed. Query: {query}, Parameters: {parameters}, ParamCount: {len(parameters)}",
+                e, "DatabaseService", "ExecuteNonQuery"
+            )
+            # Re-raise the exception so it can be caught by calling code
+            raise
         finally:
             connection.close()
     

@@ -255,7 +255,7 @@ class FFmpegComparisonService:
             
             # Build FFmpeg filter for VMAF comparison
             # VMAF expects distorted first, then reference (correct order)
-            FilterComplex = f"[0:v]scale={QualityWidth}x{QualityHeight}[dist];[1:v]scale={QualityWidth}x{QualityHeight}[ref];[dist][ref]libvmaf"
+            FilterComplex = f"[0:v]scale={QualityWidth}x{QualityHeight}[dist];[1:v]scale={QualityWidth}x{QualityHeight}[ref];[dist][ref]libvmaf=n_threads=2:n_subsample=10"
             
             # Build FFmpeg arguments (ExecuteFFmpegCommand will add -progress pipe:2 automatically if callback provided)
             Arguments = [
