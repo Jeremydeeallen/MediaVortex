@@ -1673,7 +1673,7 @@ class DatabaseManager:
                 # Get all settings from the current resolution entry (use the resolution that was found)
                 query = """
                     SELECT pt.VideoBitrateKbps, pt.AudioBitrateKbps, pt.Quality, pt.Resolution, 
-                           p.Codec, p.Preset, p.FilmGrain, p.YadifMode, p.YadifParity, p.YadifDeint, pt.ContainerType
+                           p.Codec, p.Preset, p.FilmGrain, p.YadifMode, p.YadifParity, p.YadifDeint, pt.ContainerType, p.Id as ProfileId
                     FROM ProfileThresholds pt
                     JOIN Profiles p ON pt.ProfileId = p.Id
                     WHERE p.ProfileName = ? AND pt.Resolution = ?
@@ -1684,7 +1684,7 @@ class DatabaseManager:
                 # Now get all settings for the target resolution
                 query = """
                     SELECT pt.VideoBitrateKbps, pt.AudioBitrateKbps, pt.Quality, pt.Resolution, 
-                           p.Codec, p.Preset, p.FilmGrain, p.YadifMode, p.YadifParity, p.YadifDeint, pt.ContainerType
+                           p.Codec, p.Preset, p.FilmGrain, p.YadifMode, p.YadifParity, p.YadifDeint, pt.ContainerType, p.Id as ProfileId
                     FROM ProfileThresholds pt
                     JOIN Profiles p ON pt.ProfileId = p.Id
                     WHERE p.ProfileName = ? AND pt.Resolution = ?
@@ -1707,7 +1707,8 @@ class DatabaseManager:
                     'YadifMode': row['YadifMode'],
                     'YadifParity': row['YadifParity'],
                     'YadifDeint': row['YadifDeint'],
-                    'ContainerType': row['ContainerType']
+                    'ContainerType': row['ContainerType'],
+                    'ProfileId': row['ProfileId']
                 }
                 LoggingService.LogInfo(f"Found ProfileSettings for {ProfileName} targeting {actualTargetResolution}: {settings}", "DatabaseManager", "GetProfileSettingsForTargetResolution")
                 return settings
@@ -2660,67 +2661,6 @@ class DatabaseManager:
             LoggingService.LogException("Exception saving quality test progress", e, "DatabaseManager", "SaveQualityTestProgress")
             return False
     
-    def CreateInitialQualityTestResult(self, JobId: int, JobDetails: dict, FFmpegCommand: str) -> int:
-        """Create initial QualityTestResults record before test starts."""
-        try:
-            LoggingService.LogFunctionEntry("CreateInitialQualityTestResult", "DatabaseManager", JobId)
-            
-            TranscodeAttemptId = JobDetails.get('TranscodeAttemptId', 0)
-            if not TranscodeAttemptId:
-                LoggingService.LogError("TranscodeAttemptId not provided in JobDetails", "DatabaseManager", "CreateInitialQualityTestResult")
-                return 0
-            
-            # Get ProfileName and ProfileId
-            ProfileQuery = "SELECT ta.ProfileName FROM TranscodeAttempts ta WHERE ta.Id = ?"
-            ProfileResults = self.DatabaseService.ExecuteQuery(ProfileQuery, (TranscodeAttemptId,))
-            ProfileName = ProfileResults[0]['ProfileName'] if ProfileResults else 'Unknown'
-            
-            ProfileIdQuery = "SELECT Id FROM Profiles WHERE ProfileName = ?"
-            ProfileIdResults = self.DatabaseService.ExecuteQuery(ProfileIdQuery, (ProfileName,))
-            ProfileId = ProfileIdResults[0]['Id'] if ProfileIdResults else 0
-            
-            # Get file size
-            FileSize = 0
-            if JobDetails.get('TranscodedFilePath') and os.path.exists(JobDetails['TranscodedFilePath']):
-                FileSize = os.path.getsize(JobDetails['TranscodedFilePath'])
-                LoggingService.LogInfo(f"File size for {JobDetails['TranscodedFilePath']}: {FileSize} bytes", "DatabaseManager", "CreateInitialQualityTestResult")
-            else:
-                LoggingService.LogWarning(f"TranscodedFilePath not found or file doesn't exist: {JobDetails.get('TranscodedFilePath')}", "DatabaseManager", "CreateInitialQualityTestResult")
-            
-            # Insert with NULL values for fields we don't have yet
-            Query = """
-                INSERT INTO QualityTestResults 
-                (TranscodeAttemptId, TestDuration, PassesThreshold, Rank, ErrorMessage, DateTested, FFmpegCommand, Status, VMAFScore)
-                VALUES (?, NULL, NULL, NULL, NULL, datetime('now', 'localtime'), ?, 'Running', NULL)
-            """
-            
-            Parameters = (TranscodeAttemptId, FFmpegCommand)
-            
-            try:
-                RowsAffected = self.DatabaseService.ExecuteNonQuery(Query, Parameters)
-                
-                # Get the ID of the inserted record using lastrowid (more reliable than rowcount for INSERTs)
-                ResultId = self.DatabaseService.GetLastInsertId()
-                
-                if ResultId > 0:
-                    LoggingService.LogInfo(f"Successfully created initial quality test result record {ResultId} for job {JobId}", "DatabaseManager", "CreateInitialQualityTestResult")
-                    return ResultId
-                else:
-                    LoggingService.LogError(
-                        f"INSERT failed - no record ID returned. Query: {Query}, Params: {Parameters}, ParamCount: {len(Parameters)}, RowCount: {RowsAffected}",
-                        "DatabaseManager", "CreateInitialQualityTestResult"
-                    )
-                    return 0
-            except Exception as e:
-                LoggingService.LogException(
-                    f"Database error during INSERT. Query: {Query}, Params: {Parameters}, ParamCount: {len(Parameters)}",
-                    e, "DatabaseManager", "CreateInitialQualityTestResult"
-                )
-                return 0
-            
-        except Exception as e:
-            LoggingService.LogException("Exception creating initial quality test result", e, "DatabaseManager", "CreateInitialQualityTestResult")
-            return 0
 
     def StoreQualityTestResult(self, JobId: int, JobDetails: dict, VMAFScore: float, ErrorMessage: str = None, TestDuration: float = 0.0, FFmpegCommand: str = None) -> bool:
         """Store quality test result in QualityTestResults table."""
@@ -2880,44 +2820,6 @@ class DatabaseManager:
             LoggingService.LogException("Exception updating active job thread ID", e, "DatabaseManager", "UpdateActiveJobThreadId")
             return False
     
-    def CompleteActiveJob(self, job_id: int, success: bool = True, error_message: Optional[str] = None) -> bool:
-        """Complete an active job and log the result"""
-        try:
-            # Get job details before deletion
-            get_job_query = """
-                SELECT ServiceName, JobType, QueueId, ProcessId, ThreadId, StartedAt
-                FROM ActiveJobs WHERE Id = ?
-            """
-            job_rows = self.DatabaseService.ExecuteQuery(get_job_query, (job_id,))
-            
-            if not job_rows:
-                return False
-            
-            job = job_rows[0]
-            
-            # Log the result
-            if success:
-                LoggingService.LogInfo(f"Job completed successfully: {job['ServiceName']} {job['JobType']} QueueId={job['QueueId']}", 
-                             "DatabaseManager", "CompleteActiveJob")
-            else:
-                error_msg = error_message or "Job failed"
-                LoggingService.LogError(f"Job failed: {job['ServiceName']} {job['JobType']} QueueId={job['QueueId']} - {error_msg}", 
-                             "DatabaseManager", "CompleteActiveJob")
-            
-            # Delete from ActiveJobs
-            delete_query = "DELETE FROM ActiveJobs WHERE Id = ?"
-            rows_affected = self.DatabaseService.ExecuteNonQuery(delete_query, (job_id,))
-            
-            if rows_affected > 0:
-                LoggingService.LogInfo(f"Successfully removed active job {job_id} from ActiveJobs table", "DatabaseManager", "CompleteActiveJob")
-                return True
-            else:
-                LoggingService.LogError(f"Failed to remove active job {job_id} from ActiveJobs table - no rows affected", "DatabaseManager", "CompleteActiveJob")
-                return False
-            
-        except Exception as e:
-            LoggingService.LogException("Exception completing active job", e, "DatabaseManager", "CompleteActiveJob")
-            return False
     
     def GetActiveJobByQueueId(self, service_name: str, queue_id: int) -> Optional[Dict[str, Any]]:
         """Get active job by service and queue ID"""
@@ -3106,9 +3008,12 @@ class DatabaseManager:
                     qtr.FFmpegCommand, qtr.Status,
                     ta.ProfileName, ta.FilePath, ta.OldSizeBytes, ta.NewSizeBytes, ta.SizeReductionBytes, 
                     ta.SizeReductionPercent, ta.TranscodeDurationSeconds, ta.ProfileName as TranscodeProfileName,
-                    ta.Quality, ta.AttemptDate, ta.NewSizeBytes as FileSize, ta.FfpmpegCommand
+                    ta.Quality, ta.AttemptDate, ta.NewSizeBytes as FileSize,
+                    tfp.LocalOutputPath as TranscodedFilePath,
+                    tfp.LocalSourcePath
                 FROM QualityTestResults qtr
                 LEFT JOIN TranscodeAttempts ta ON qtr.TranscodeAttemptId = ta.Id
+                LEFT JOIN TemporaryFilePaths tfp ON qtr.TranscodeAttemptId = tfp.TranscodeAttemptId
                 ORDER BY qtr.DateTested DESC 
                 LIMIT ?
             """
@@ -3116,16 +3021,13 @@ class DatabaseManager:
             
             results = []
             for row in rows:
-                # Parse FFmpeg command to get transcoded file path
-                TranscodedFilePath = None
+                # Get transcoded file path from TemporaryFilePaths table (database-driven approach)
+                TranscodedFilePath = row["TranscodedFilePath"]
                 TranscodedFileName = None
-                if row["FfpmpegCommand"] is not None and row["FfpmpegCommand"] != "":
-                    _, OutputPath = self.ParseFFmpegCommand(row["FfpmpegCommand"])
-                    if OutputPath:
-                        TranscodedFilePath = OutputPath
-                        # Extract just the filename from the full path
-                        import os
-                        TranscodedFileName = os.path.basename(OutputPath)
+                if TranscodedFilePath:
+                    # Extract just the filename from the full path
+                    import os
+                    TranscodedFileName = os.path.basename(TranscodedFilePath)
                 
                 results.append({
                     "Id": row["Id"],
@@ -3323,7 +3225,10 @@ class DatabaseManager:
     
     def ParseFFmpegCommand(self, FfpmpegCommand: str) -> tuple:
         """
-        Parse FFmpeg command to extract input and output file paths.
+        DEPRECATED: Parse FFmpeg command to extract input and output file paths.
+        
+        This method is deprecated in favor of using the TemporaryFilePaths table
+        which provides a database-driven approach to file path management.
         
         Args:
             FfpmpegCommand: The full FFmpeg command string
@@ -3840,11 +3745,14 @@ class DatabaseManager:
             LoggingService.LogFunctionEntry("GetMissedQualityTests", "DatabaseManager", Limit)
             
             query = """
-                SELECT ta.Id, ta.FilePath, ta.FfpmpegCommand
+                SELECT ta.Id, ta.FilePath, 
+                       tfp.LocalSourcePath, tfp.LocalOutputPath
                 FROM TranscodeAttempts ta
+                INNER JOIN TemporaryFilePaths tfp ON ta.Id = tfp.TranscodeAttemptId
                 WHERE ta.Success = 1
                   AND ta.QualityTestRequired = 1
                   AND ta.QualityTestCompleted = 0
+                  AND tfp.LocalOutputPath IS NOT NULL
                   AND ta.Id NOT IN (
                       SELECT TranscodeAttemptId 
                       FROM QualityTestResults 
@@ -3862,7 +3770,8 @@ class DatabaseManager:
                 Results.append({
                     "Id": Row["Id"],
                     "FilePath": Row["FilePath"],
-                    "FfpmpegCommand": Row["FfpmpegCommand"]
+                    "LocalSourcePath": Row["LocalSourcePath"],
+                    "LocalOutputPath": Row["LocalOutputPath"]
                 })
             
             LoggingService.LogInfo(f"Found {len(Results)} missed quality tests", "DatabaseManager", "GetMissedQualityTests")
@@ -3870,4 +3779,88 @@ class DatabaseManager:
             
         except Exception as e:
             LoggingService.LogException("Exception getting missed quality tests", e, "DatabaseManager", "GetMissedQualityTests")
+            return []
+    
+    def ResetFailedQualityTestResultsForRetry(self) -> int:
+        """Reset failed quality test results for interrupted tests so they can be retried."""
+        try:
+            LoggingService.LogFunctionEntry("ResetFailedQualityTestResultsForRetry", "DatabaseManager")
+            
+            # Delete failed quality test results for interrupted tests so they can be retried
+            # This allows the RecoverMissedQualityTests method to pick them up again
+            Query = """
+                DELETE FROM QualityTestResults 
+                WHERE TranscodeAttemptId IN (
+                    SELECT ta.Id 
+                    FROM TranscodeAttempts ta
+                    INNER JOIN TemporaryFilePaths tfp ON ta.Id = tfp.TranscodeAttemptId
+                    WHERE ta.Success = 1
+                      AND ta.QualityTestRequired = 1
+                      AND ta.QualityTestCompleted = 0
+                      AND tfp.LocalOutputPath IS NOT NULL
+                      AND ta.Id NOT IN (
+                          SELECT TranscodeAttemptId 
+                          FROM QualityTestResults 
+                          WHERE TranscodeAttemptId IS NOT NULL
+                            AND Status = 'Success'
+                      )
+                )
+                AND Status IN ('Failed', 'Running')
+            """
+            
+            AffectedRows = self.DatabaseService.ExecuteNonQuery(Query)
+            
+            if AffectedRows > 0:
+                LoggingService.LogInfo(f"Reset {AffectedRows} failed quality test results for retry", "DatabaseManager", "ResetFailedQualityTestResultsForRetry")
+            else:
+                LoggingService.LogInfo("No failed quality test results found to reset", "DatabaseManager", "ResetFailedQualityTestResultsForRetry")
+            
+            return AffectedRows
+            
+        except Exception as e:
+            LoggingService.LogException("Exception resetting failed quality test results for retry", e, "DatabaseManager", "ResetFailedQualityTestResultsForRetry")
+            return 0
+    
+    def GetFailedFileReplacements(self, Limit: int = 20) -> List[Dict[str, Any]]:
+        """Get transcoded files that passed VMAF but may have failed file replacement."""
+        try:
+            LoggingService.LogFunctionEntry("GetFailedFileReplacements", "DatabaseManager", Limit)
+            
+            query = """
+                SELECT ta.Id, ta.FilePath, ta.VMAF, ta.AttemptDate, ta.Success,
+                       tfp.LocalOutputPath as TranscodedFilePath,
+                       qtr.Status as VMAFStatus
+                FROM TranscodeAttempts ta
+                INNER JOIN TemporaryFilePaths tfp ON ta.Id = tfp.TranscodeAttemptId
+                INNER JOIN QualityTestResults qtr ON ta.Id = qtr.TranscodeAttemptId
+                WHERE ta.VMAF IS NOT NULL 
+                AND ta.VMAF >= 90
+                AND ta.Success = 1
+                AND tfp.LocalOutputPath IS NOT NULL
+                AND qtr.Status = 'Success'
+                AND ta.QualityTestRequired = 1
+                AND qtr.DateTested IS NOT NULL
+                ORDER BY ta.AttemptDate DESC
+                LIMIT ?
+            """
+            
+            Rows = self.DatabaseService.ExecuteQuery(query, (Limit,))
+            
+            Results = []
+            for Row in Rows:
+                Results.append({
+                    "Id": Row["Id"],
+                    "FilePath": Row["FilePath"],
+                    "VMAF": Row["VMAF"],
+                    "AttemptDate": Row["AttemptDate"],
+                    "Success": Row["Success"],
+                    "TranscodedFilePath": Row["TranscodedFilePath"],
+                    "VMAFStatus": Row["VMAFStatus"]
+                })
+            
+            LoggingService.LogInfo(f"Found {len(Results)} failed file replacements", "DatabaseManager", "GetFailedFileReplacements")
+            return Results
+            
+        except Exception as e:
+            LoggingService.LogException("Exception getting failed file replacements", e, "DatabaseManager", "GetFailedFileReplacements")
             return []

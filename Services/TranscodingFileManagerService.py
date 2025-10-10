@@ -40,6 +40,11 @@ class TranscodingFileManagerService:
         try:
             LoggingService.LogFunctionEntry("CopyFile", "TranscodingFileManagerService", SourcePath, DestinationPath)
             
+            # Check if file already exists at destination
+            if os.path.exists(DestinationPath):
+                LoggingService.LogInfo(f"File already exists at destination, skipping copy: {DestinationPath}", "TranscodingFileManagerService", "CopyFile")
+                return True
+            
             # Ensure destination directory exists
             DestinationDir = os.path.dirname(DestinationPath)
             if not os.path.exists(DestinationDir):

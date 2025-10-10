@@ -107,8 +107,9 @@ class QualityTestingBusinessService:
                 progress_id = self.CreateProgressRecord(JobId, job_details)
                 
                 # Run FFmpeg VMAF comparison with progress tracking
-                # Pass active_job_id so we can track the FFmpeg child process
+                # Pass active_job_id and result_id so we can track the FFmpeg child process
                 job_details['active_job_id'] = active_job_id
+                job_details['result_id'] = result_id
                 result = self.RunFFmpegVMAF(job_details, progress_id)
                 
                 # Update QualityTestResult with completion details
@@ -178,17 +179,16 @@ class QualityTestingBusinessService:
             # Check if resolutions match
             if original_resolution == transcoded_resolution:
                 # Resolutions match - use direct VMAF comparison without scaling
-                vmaf_filter = "[0:v][1:v]libvmaf=log_path=vmaf_output.xml:log_fmt=xml:n_threads=2:n_subsample=10"
+                vmaf_filter = "[0:v][1:v]libvmaf=log_path=vmaf_output.xml:n_subsample=10"
                 LoggingService.LogInfo(f"Resolutions match ({original_resolution[0]}x{original_resolution[1]}) - using direct VMAF comparison", "QualityTestingBusinessService", "RunFFmpegVMAF")
             else:
                 # Resolutions don't match - determine target resolution and scale both videos
                 target_width, target_height = self.DetermineVMAFTargetResolution(original_resolution, transcoded_resolution)
-                vmaf_filter = f"[0:v]scale={target_width}:{target_height}[dist];[1:v]scale={target_width}:{target_height}[ref];[dist][ref]libvmaf=log_path=vmaf_output.xml:log_fmt=xml:n_threads=2:n_subsample=10"
+                vmaf_filter = f"[0:v]scale={target_width}:{target_height}[dist];[1:v]scale={target_width}:{target_height}[ref];[dist][ref]libvmaf=log_path=vmaf_output.xml:n_subsample=10"
                 LoggingService.LogInfo(f"Resolutions don't match (Original: {original_resolution[0]}x{original_resolution[1]}, Transcoded: {transcoded_resolution[0]}x{transcoded_resolution[1]}) - scaling to {target_width}x{target_height}", "QualityTestingBusinessService", "RunFFmpegVMAF")
             
             command = [
                 ffmpeg_path,
-                "-threads", "2",  # Use 2 threads for reduced CPU usage
                 "-i", transcoded_file,
                 "-i", original_file,
                 "-lavfi", vmaf_filter,
@@ -199,12 +199,13 @@ class QualityTestingBusinessService:
             # Convert command to string for storage
             FFmpegCommandString = ' '.join(command)
             
-            # Create initial QualityTestResults record with FFmpeg command
-            ResultId = self.DatabaseManager.CreateInitialQualityTestResult(
-                JobDetails.get('Id', 0), 
-                JobDetails, 
-                FFmpegCommandString
-            )
+            # Update the existing QualityTestResults record with FFmpeg command
+            result_id = JobDetails.get('result_id')
+            if result_id:
+                self.DatabaseManager.DatabaseService.ExecuteNonQuery(
+                    "UPDATE QualityTestResults SET FFmpegCommand = ? WHERE Id = ?",
+                    (FFmpegCommandString, result_id)
+                )
             
             
             # Update progress - starting VMAF analysis
@@ -232,8 +233,9 @@ class QualityTestingBusinessService:
                 
                 
                 # Update QualityTestResults table with VMAF score
-                if ProgressId and ResultId:
-                    self.UpdateQualityTestResultsWithScore(ResultId, vmaf_score, result)
+                result_id = JobDetails.get('result_id')
+                if ProgressId and result_id:
+                    self.UpdateQualityTestResultsWithScore(result_id, vmaf_score, result)
                 
                 return {"Success": True, "VMAFScore": vmaf_score, "FFmpegCommand": FFmpegCommandString}
             else:

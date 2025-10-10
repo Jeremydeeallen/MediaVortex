@@ -274,6 +274,9 @@ class ProcessTranscodeQueueService:
             # Phase 1: Initializing
             self.UpdateTranscodeProgress(TranscodeAttemptId, "Initializing", 0.0, "Job started, getting ready")
             
+            # Phase 2: Loading Media Data
+            self.UpdateTranscodeProgress(TranscodeAttemptId, "Loading Media Data", 0.0, "Loading file metadata...")
+            
             # Step a: Get MediaFile data
             MediaFile = self.GetMediaFileData(Job)
             if not MediaFile:
@@ -283,8 +286,8 @@ class ProcessTranscodeQueueService:
             # Archive original file details before transcoding
             self.ArchiveOriginalFileDetails(MediaFile, TranscodeAttemptId)
             
-            # Phase 2: Loading Media Data
-            self.UpdateTranscodeProgress(TranscodeAttemptId, "Loading Media Data", 0.0, f"Retrieved metadata for {MediaFile.FileName}")
+            # Phase 3: Loading Settings
+            self.UpdateTranscodeProgress(TranscodeAttemptId, "Loading Settings", 0.0, "Loading transcoding profile settings...")
             
             # Step c: Get transcoding settings
             TranscodingSettings = self.GetTranscodingSettings(Job, MediaFile)
@@ -292,8 +295,8 @@ class ProcessTranscodeQueueService:
                 self.HandleJobFailure(Job, "Failed to get transcoding settings", TranscodeAttemptId, ActiveJobId)
                 return
             
-            # Phase 3: Loading Settings
-            self.UpdateTranscodeProgress(TranscodeAttemptId, "Loading Settings", 0.0, f"Retrieved settings for {MediaFile.AssignedProfile}")
+            # Phase 4: Building Command
+            self.UpdateTranscodeProgress(TranscodeAttemptId, "Building Command", 0.0, "Building FFmpeg command...")
             
             # Step d: Build transcoding command
             TranscodeCommand = self.BuildTranscodeCommand(Job, MediaFile, TranscodingSettings)
@@ -301,16 +304,13 @@ class ProcessTranscodeQueueService:
                 self.HandleJobFailure(Job, "Failed to build transcoding command", TranscodeAttemptId, ActiveJobId)
                 return
             
-            # Phase 4: Building Command
-            self.UpdateTranscodeProgress(TranscodeAttemptId, "Building Command", 0.0, "Generated FFmpeg command")
+            # Phase 5: Preparing Files
+            self.UpdateTranscodeProgress(TranscodeAttemptId, "Preparing Files", 0.0, "Preparing files for transcoding...")
             
             # Step b: Setup directories and copy file
             if not self.SetupFilePreparation(Job, MediaFile, TranscodeAttemptId):
                 self.HandleJobFailure(Job, "Failed to setup file preparation", TranscodeAttemptId, ActiveJobId)
                 return
-            
-            # Phase 5: Preparing Files
-            self.UpdateTranscodeProgress(TranscodeAttemptId, "Preparing Files", 0.0, f"Copied {MediaFile.FileName} to working directory")
             
             # Update attempt record with complete information
             self.DatabaseManager.UpdateTranscodeAttempt(TranscodeAttemptId, {
@@ -332,7 +332,7 @@ class ProcessTranscodeQueueService:
             })
             
             # Phase 6: Starting Transcode
-            self.UpdateTranscodeProgress(TranscodeAttemptId, "Starting Transcode", 0.0, "About to begin actual transcoding")
+            self.UpdateTranscodeProgress(TranscodeAttemptId, "Starting Transcode", 0.0, "Starting video processing...")
             
             # Step f: Execute transcoding
             TranscodeResult = self.ExecuteTranscoding(Job, TranscodeCommand, TranscodeAttemptId, MediaFile, ActiveJobId)
@@ -341,7 +341,7 @@ class ProcessTranscodeQueueService:
                 return
             
             # Phase 7: Finalizing
-            self.UpdateTranscodeProgress(TranscodeAttemptId, "Finalizing", 0.0, "Processing results and cleanup")
+            self.UpdateTranscodeProgress(TranscodeAttemptId, "Finalizing", 0.0, "Processing results and cleanup...")
             
             # Step g: Handle transcoding result
             self.HandleTranscodingResult(Job, TranscodeResult, TranscodeAttemptId, ActiveJobId)

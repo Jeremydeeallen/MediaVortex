@@ -70,7 +70,7 @@ class QualityTestController:
                 ffmpeg_path,
                 "-i", TranscodedFile,
                 "-i", OriginalFile,
-                "-lavfi", "[0:v][1:v]libvmaf=log_path=vmaf_output.xml:log_fmt=xml:n_threads=2:n_subsample=10",
+                "-lavfi", "[0:v][1:v]libvmaf=log_path=vmaf_output.xml:n_subsample=10",
                 "-f", "null",
                 "-"
             ]

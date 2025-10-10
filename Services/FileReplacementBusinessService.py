@@ -42,22 +42,8 @@ class FileReplacementBusinessService:
         try:
             LoggingService.LogFunctionEntry("GetFailedFileReplacements", "FileReplacementBusinessService")
             
-            # Get transcoded files that passed VMAF but may have failed replacement
-            # Join with QualityTestingQueue to get the actual transcoded file paths
-            query = '''
-            SELECT ta.Id, ta.FilePath, ta.VMAF, ta.AttemptDate, ta.Success,
-                   qtq.TranscodedFilePath, qtq.Status as VMAFStatus
-            FROM TranscodeAttempts ta
-            LEFT JOIN QualityTestingQueue qtq ON ta.Id = qtq.TranscodeAttemptId
-            WHERE ta.VMAF IS NOT NULL 
-            AND ta.VMAF >= 90
-            AND ta.Success = 1
-            AND qtq.TranscodedFilePath IS NOT NULL
-            ORDER BY ta.AttemptDate DESC
-            LIMIT 20
-            '''
-            
-            results = self.DatabaseManager.DatabaseService.ExecuteQuery(query)
+            # Get transcoded files that passed VMAF from database
+            results = self.DatabaseManager.GetFailedFileReplacements(20)
             failed_replacements = []
             
             for row in results:
@@ -91,7 +77,7 @@ class FileReplacementBusinessService:
             
         except Exception as e:
             LoggingService.LogException("Exception getting failed file replacements", e, 
-                                      "FileReplacementBusinessService", "GetFailedFileReplacements")
+                                     "FileReplacementBusinessService", "GetFailedFileReplacements")
             return []
     
     def ProcessFileReplacement(self, TranscodeAttemptId: int) -> Dict[str, Any]:
@@ -107,9 +93,9 @@ class FileReplacementBusinessService:
                     'ErrorMessage': f'Transcode attempt {TranscodeAttemptId} not found'
                 }
             
-            # Get the actual transcoded file path from QualityTestingQueue
+            # Get the actual transcoded file path from TemporaryFilePaths
             vmaf_query = '''
-            SELECT TranscodedFilePath FROM QualityTestingQueue 
+            SELECT LocalOutputPath FROM TemporaryFilePaths 
             WHERE TranscodeAttemptId = ?
             '''
             vmaf_result = self.DatabaseManager.DatabaseService.ExecuteQuery(vmaf_query, (TranscodeAttemptId,))
@@ -117,10 +103,10 @@ class FileReplacementBusinessService:
             if not vmaf_result:
                 return {
                     'Success': False,
-                    'ErrorMessage': f'No VMAF queue entry found for transcode attempt {TranscodeAttemptId}'
+                    'ErrorMessage': f'No temporary file path found for transcode attempt {TranscodeAttemptId}'
                 }
             
-            transcoded_path = vmaf_result[0]['TranscodedFilePath']
+            transcoded_path = vmaf_result[0]['LocalOutputPath']
             
             # Validate files exist
             if not self.FileManager.ValidateFileExists(transcode_attempt.FilePath):

@@ -228,10 +228,9 @@ class QualityTestingService:
                                       "QualityTestingService", "RecoverMissedQualityTests")
                 
                 for Test in MissedTests:
-                    # Parse FFmpeg command to get file paths
-                    InputFilePath, OutputFilePath = self.ViewModel.DatabaseManager.ParseFFmpegCommand(
-                        Test['FfpmpegCommand']
-                    )
+                    # Get file paths from TemporaryFilePaths table (database-driven approach)
+                    InputFilePath = Test.get('LocalSourcePath')
+                    OutputFilePath = Test.get('LocalOutputPath')
                     
                     if InputFilePath and OutputFilePath:
                         # Check if files still exist

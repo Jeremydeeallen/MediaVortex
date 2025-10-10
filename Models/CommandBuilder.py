@@ -35,12 +35,18 @@ class CommandBuilder:
             InputPath = f"c:\\MediaVortex\\Source\\{MediaFile.FileName}"
             
             # Generate output filename with target resolution and container type
-            OutputFileName = self.GenerateOutputFileName(MediaFile.FileName, SourceResolution, TargetResolution, ContainerType)
+            ProfileId = ProfileSettings.get('ProfileId')
+            OutputFileName = self.GenerateOutputFileName(MediaFile.FileName, SourceResolution, TargetResolution, ContainerType, ProfileId)
             OutputPath = f"c:\\MediaVortex\\{OutputFileName}"
             
             # Start building command - FFmpeg command structure: ffmpeg -i input [options] output -y
             # Use full path to FFmpeg executable
             CommandParts = ['C:\\Code\\Automation\\MediaVortex\\FFmpegMaster\\bin\\ffmpeg.exe', '-i', f'"{InputPath}"']
+            
+            # Add CPU thread limit to prevent system overload
+            MaxCpuThreads = self.GetMaxCpuThreads()
+            if MaxCpuThreads and MaxCpuThreads > 0:
+                CommandParts.extend(['-threads', str(MaxCpuThreads)])
             
             # Add video codec
             VideoCodec = ProfileSettings.get('Codec', 'libsvtav1')
@@ -49,12 +55,13 @@ class CommandBuilder:
             # Add parameters using CodecParameters database values
             self.AddCodecParameters(CommandParts, CodecParameters, ProfileSettings)
             
-            # Add audio codec and bitrate - only if not null/blank (before video filters)
+            # Add audio codec and bitrate - always use AAC for normalization compatibility
             AudioBitrate = ProfileSettings.get('AudioBitrateKbps')
             if AudioBitrate and AudioBitrate != '' and AudioBitrate != 'None':
                 CommandParts.extend(['-c:a', 'aac', '-b:a', f'{AudioBitrate}k'])
             else:
-                CommandParts.extend(['-c:a', 'copy'])
+                # Use default AAC bitrate when none specified (never use copy for audio normalization)
+                CommandParts.extend(['-c:a', 'aac', '-b:a', '128k'])
             
             # Add audio filters (normalization)
             AudioFilter = self.BuildAudioFilters(ProfileSettings)
@@ -132,18 +139,31 @@ class CommandBuilder:
             pass
     
     def AddFilmGrainParameter(self, CommandParts: list, CodecParameters: list, ProfileSettings: Dict[str, Any]) -> None:
-        """Add film grain parameter after audio codec."""
+        """Add film grain parameter and SVT-AV1 thread control after audio codec."""
         try:
+            # Get CPU thread limit for SVT-AV1
+            MaxCpuThreads = self.GetMaxCpuThreads()
+            
             # Create a lookup dictionary for codec parameters
             ParamLookup = {}
             for param in CodecParameters:
                 ParamLookup[param['ParameterName']] = param
             
+            # Build SVT-AV1 parameters string
+            SvtAv1Params = []
+            
             # Add film grain (for libsvtav1) - after audio codec
             if 'film-grain' in ParamLookup:
                 FilmGrain = ProfileSettings.get('FilmGrain')
                 if FilmGrain is not None and FilmGrain != '' and FilmGrain != 'None' and FilmGrain > 0:
-                    CommandParts.extend(['-svtav1-params', f'film-grain={FilmGrain}'])
+                    SvtAv1Params.append(f'film-grain={FilmGrain}')
+            
+            # Always add thread control to prevent SVT-AV1 from using all cores
+            SvtAv1Params.append(f'threads={MaxCpuThreads}')
+            
+            # Add SVT-AV1 parameters if we have any
+            if SvtAv1Params:
+                CommandParts.extend(['-svtav1-params', ':'.join(SvtAv1Params)])
                 
         except Exception:
             # If anything goes wrong, continue without adding parameters
@@ -160,7 +180,7 @@ class CommandBuilder:
             # If anything goes wrong, continue without adding parameters
             pass
 
-    def GenerateOutputFileName(self, OriginalFileName: str, SourceResolution: str, TargetResolution: str, ContainerType: str = 'mp4') -> str:
+    def GenerateOutputFileName(self, OriginalFileName: str, SourceResolution: str, TargetResolution: str, ContainerType: str = 'mp4', ProfileId: int = None) -> str:
         """Generate output filename with target resolution and container type."""
         try:
             # Get the base filename without extension
@@ -168,6 +188,8 @@ class CommandBuilder:
             
             # If resolutions are the same, just change extension
             if SourceResolution == TargetResolution:
+                if ProfileId:
+                    return f"{BaseName}.{ProfileId}.{ContainerType}"
                 return f"{BaseName}.{ContainerType}"
             
             # Extract resolution from filename (e.g., "1080p", "720p")
@@ -175,6 +197,8 @@ class CommandBuilder:
             if not SourceResolutionStr:
                 # If no resolution found in filename, add target resolution
                 TargetResolutionStr = self.FormatResolutionForFilename(TargetResolution)
+                if ProfileId:
+                    return f"{BaseName}{TargetResolutionStr}.{ProfileId}.{ContainerType}"
                 return f"{BaseName}{TargetResolutionStr}.{ContainerType}"
             
             # Replace source resolution with target resolution
@@ -183,11 +207,15 @@ class CommandBuilder:
             NewBaseName = os.path.splitext(NewBaseName)[0]  # Remove old extension
             
             # Add container type extension
+            if ProfileId:
+                return f"{NewBaseName}.{ProfileId}.{ContainerType}"
             return f"{NewBaseName}.{ContainerType}"
             
         except Exception:
             # If anything goes wrong, return original filename with container extension
             BaseName = os.path.splitext(OriginalFileName)[0]
+            if ProfileId:
+                return f"{BaseName}.{ProfileId}.{ContainerType}"
             return f"{BaseName}.{ContainerType}"
     
     def ExtractResolutionFromFilename(self, Filename: str) -> Optional[str]:
@@ -315,3 +343,24 @@ class CommandBuilder:
         
         # Return combined filters or None if no filters
         return ','.join(Filters) if Filters else None
+    
+    def GetMaxCpuThreads(self) -> int:
+        """Get maximum CPU threads from system settings or use default."""
+        try:
+            from Repositories.DatabaseManager import DatabaseManager
+            DatabaseManagerInstance = DatabaseManager()
+            
+            # Get CPU thread limit from system settings
+            MaxCpuThreads = DatabaseManagerInstance.GetSystemSetting('MaxCpuThreads')
+            if MaxCpuThreads and MaxCpuThreads.isdigit():
+                ThreadCount = int(MaxCpuThreads)
+                # Validate thread count (1-32 for safety)
+                if 1 <= ThreadCount <= 32:
+                    return ThreadCount
+            
+            # Default to 16 threads for i9-14900KF (half of 32 cores to prevent overload)
+            return 16
+            
+        except Exception:
+            # If system settings fail, use safe default
+            return 16

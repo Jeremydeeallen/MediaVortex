@@ -14,6 +14,7 @@ class TranscodeServiceConfig:
         self.DatabasePath = self.GetDatabasePath()
         self.LogLevel = self.GetLogLevel()
         self.MaxConcurrentJobs = self.GetMaxConcurrentJobs()
+        self.MaxCpuThreads = self.GetMaxCpuThreads()
         self.HealthCheckInterval = self.GetHealthCheckInterval()
         self.ProcessingCheckInterval = self.GetProcessingCheckInterval()
         self.LogFile = self.GetLogFile()
@@ -34,6 +35,13 @@ class TranscodeServiceConfig:
             return int(os.environ.get('TRANSCODE_MAX_JOBS', '1'))
         except ValueError:
             return 1
+    
+    def GetMaxCpuThreads(self) -> int:
+        """Get max CPU threads for FFmpeg from environment or use default."""
+        try:
+            return int(os.environ.get('TRANSCODE_MAX_CPU_THREADS', '16'))
+        except ValueError:
+            return 16
     
     def GetHealthCheckInterval(self) -> int:
         """Get health check interval from environment or use default."""
@@ -59,6 +67,7 @@ class TranscodeServiceConfig:
             'DatabasePath': self.DatabasePath,
             'LogLevel': self.LogLevel,
             'MaxConcurrentJobs': self.MaxConcurrentJobs,
+            'MaxCpuThreads': self.MaxCpuThreads,
             'HealthCheckInterval': self.HealthCheckInterval,
             'ProcessingCheckInterval': self.ProcessingCheckInterval,
             'LogFile': self.LogFile,
@@ -84,6 +93,10 @@ class TranscodeServiceConfig:
                 print(f"Warning: MaxConcurrentJobs must be between 1-5, using 1")
                 self.MaxConcurrentJobs = 1
             
+            if self.MaxCpuThreads < 1 or self.MaxCpuThreads > 32:
+                print(f"Warning: MaxCpuThreads must be between 1-32, using 16")
+                self.MaxCpuThreads = 16
+            
             if self.HealthCheckInterval < 10:
                 print(f"Warning: HealthCheckInterval too low, using 30")
                 self.HealthCheckInterval = 30
@@ -104,6 +117,7 @@ class TranscodeServiceConfig:
         print(f"  Database Path: {self.DatabasePath}")
         print(f"  Log Level: {self.LogLevel}")
         print(f"  Max Concurrent Jobs: {self.MaxConcurrentJobs}")
+        print(f"  Max CPU Threads: {self.MaxCpuThreads}")
         print(f"  Health Check Interval: {self.HealthCheckInterval}s")
         print(f"  Processing Check Interval: {self.ProcessingCheckInterval}s")
         print(f"  Log File: {self.LogFile}")

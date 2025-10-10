@@ -28,7 +28,7 @@ class CommandBuilderService:
             
             # Calculate target resolution and scaling
             TargetResolution = self.CalculateTargetResolution(ProfileSettings, SourceResolution)
-            ScaleFilter = self.CalculateScaleFilter(SourceResolution, TargetResolution)
+            ScaleFilter = self.CalculateScaleFilter(SourceResolution, TargetResolution, MediaFile)
             
             # Prepare command data
             CommandData = {
@@ -76,8 +76,8 @@ class CommandBuilderService:
             LoggingService.LogException("Exception calculating target resolution", e, "CommandBuilderService", "CalculateTargetResolution")
             return SourceResolution
     
-    def CalculateScaleFilter(self, SourceResolution: str, TargetResolution: str) -> Optional[str]:
-        """Calculate FFmpeg scale filter if resolution scaling is needed."""
+    def CalculateScaleFilter(self, SourceResolution: str, TargetResolution: str, MediaFile) -> Optional[str]:
+        """Calculate FFmpeg scale filter if resolution scaling is needed, maintaining source aspect ratio."""
         try:
             # If resolutions are the same, no scaling needed
             if SourceResolution == TargetResolution:
@@ -95,13 +95,17 @@ class CommandBuilderService:
             StandardSourceHeight = self.ResolutionService.GetStandardHeight(SourceHeight)
             StandardTargetHeight = self.ResolutionService.GetStandardHeight(TargetHeight)
             
-            # Calculate target width maintaining 16:9 aspect ratio
-            TargetWidth = self._CalculateWidthFromHeight(StandardTargetHeight)
+            # Get source dimensions to calculate aspect ratio
+            SourceWidth, SourceHeight = self._GetSourceDimensions(MediaFile)
+            SourceAspectRatio = SourceWidth / SourceHeight
+            
+            # Calculate target width maintaining source aspect ratio
+            TargetWidth = self._CalculateWidthFromHeight(StandardTargetHeight, SourceAspectRatio)
             
             # Build scale filter with target dimensions
             ScaleFilter = f"scale={TargetWidth}:{StandardTargetHeight}"
             
-            LoggingService.LogInfo(f"Calculated scale filter: {ScaleFilter} (from {StandardizedSource} to {StandardizedTarget})", 
+            LoggingService.LogInfo(f"Calculated scale filter: {ScaleFilter} (from {StandardizedSource} to {StandardizedTarget}, maintaining {SourceWidth}x{SourceHeight} aspect ratio)", 
                                  "CommandBuilderService", "CalculateScaleFilter")
             
             return ScaleFilter
@@ -123,9 +127,50 @@ class CommandBuilderService:
             LoggingService.LogWarning(f"Could not extract height from resolution: {Resolution}", "CommandBuilderService", "_ExtractHeightFromResolution")
             return 720  # Default fallback
     
-    def _CalculateWidthFromHeight(self, Height: int) -> int:
-        """Calculate width maintaining 16:9 aspect ratio from height."""
+    def _GetSourceDimensions(self, MediaFile) -> tuple:
+        """Get source video width and height from MediaFile.Resolution."""
         try:
+            if not MediaFile or not MediaFile.Resolution:
+                return (1920, 1080)  # Default fallback
+            
+            Resolution = MediaFile.Resolution
+            
+            # Check if it's already in pixel format (e.g., "1920x1080")
+            if 'x' in Resolution:
+                try:
+                    Width, Height = Resolution.split('x')
+                    return (int(Width), int(Height))
+                except (ValueError, IndexError):
+                    pass
+            
+            # If it's in standard format (e.g., "1080p"), use standard dimensions
+            if Resolution == '2160p' or Resolution == '4K':
+                return (3840, 2160)
+            elif Resolution == '1080p':
+                return (1920, 1080)
+            elif Resolution == '720p':
+                return (1280, 720)
+            elif Resolution == '480p':
+                return (854, 480)
+            else:
+                # Try to extract height and assume 16:9
+                Height = self._ExtractHeightFromResolution(Resolution)
+                Width = self._CalculateWidthFromHeight(Height)
+                return (Width, Height)
+                
+        except Exception as e:
+            LoggingService.LogException("Exception getting source dimensions", e, "CommandBuilderService", "_GetSourceDimensions")
+            return (1920, 1080)  # Default fallback
+    
+    def _CalculateWidthFromHeight(self, Height: int, AspectRatio: float = None) -> int:
+        """Calculate width from height, optionally using custom aspect ratio."""
+        try:
+            if AspectRatio:
+                # Use custom aspect ratio
+                Width = int(Height * AspectRatio)
+                # Ensure even number (required by codecs)
+                return Width - (Width % 2)
+            
             # Standard 16:9 aspect ratio widths for common resolutions
             if Height == 2160:  # 4K
                 return 3840

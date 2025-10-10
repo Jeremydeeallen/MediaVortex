@@ -40,9 +40,9 @@ class CrashRecoveryService:
             
             LoggingService.LogInfo(f"Found {len(active_jobs)} active jobs for service {ServiceName}", "CrashRecoveryService", "RecoverServiceJobs")
             
-            jobs_recovered = 0
-            orphaned_processes_killed = 0
-            recovery_details = []
+            JobsRecovered = 0
+            OrphanedProcessesKilled = 0
+            RecoveryDetails = []
             
             # Process each active job
             for job in active_jobs:
@@ -69,18 +69,18 @@ class CrashRecoveryService:
                 else:
                     LoggingService.LogInfo(f"Process {process_id} for job {job_id} is not running", "CrashRecoveryService", "RecoverServiceJobs")
                 
+                # Clean up progress records BEFORE resetting/deleting queue records
+                self.CleanupProgressRecords(queue_id, job_type)
+                
                 # Reset the job in the appropriate queue
                 if self.ResetJobInQueue(queue_id, job_type):
-                    jobs_recovered += 1
+                    JobsRecovered += 1
                     LoggingService.LogInfo(f"Reset job {job_id} in queue (QueueId: {queue_id})", "CrashRecoveryService", "RecoverServiceJobs")
                 else:
                     LoggingService.LogError(f"Failed to reset job {job_id} in queue (QueueId: {queue_id})", "CrashRecoveryService", "RecoverServiceJobs")
                 
-                # Clean up progress records
-                self.CleanupProgressRecords(queue_id, job_type)
-                
                 # Record recovery details
-                recovery_details.append({
+                RecoveryDetails.append({
                     "JobId": job_id,
                     "ProcessId": process_id,
                     "QueueId": queue_id,
@@ -90,37 +90,44 @@ class CrashRecoveryService:
                 })
             
             # Clean up ActiveJobs records
-            deleted_active_jobs = self.CleanupActiveJobs(ServiceName)
+            DeletedActiveJobs = self.CleanupActiveJobs(ServiceName)
             
-            # Special handling for QualityTestingService: Delete only crashed jobs
+            # Special handling for QualityTestingService: Delete only crashed jobs and reset interrupted tests
             if ServiceName == "QualityTestingService":
                 # Only delete jobs that were in ActiveJobs (actually crashed)
-                crashed_queue_ids = [detail['QueueId'] for detail in recovery_details]
-                if crashed_queue_ids:
-                    placeholders = ','.join('?' * len(crashed_queue_ids))
-                    delete_query = f"DELETE FROM QualityTestingQueue WHERE Id IN ({placeholders})"
-                    deleted_count = self.DatabaseManager.DatabaseService.ExecuteNonQuery(
-                        delete_query, crashed_queue_ids
+                CrashedQueueIds = [detail['QueueId'] for detail in RecoveryDetails]
+                if CrashedQueueIds:
+                    Placeholders = ','.join('?' * len(CrashedQueueIds))
+                    DeleteQuery = f"DELETE FROM QualityTestingQueue WHERE Id IN ({Placeholders})"
+                    DeletedCount = self.DatabaseManager.DatabaseService.ExecuteNonQuery(
+                        DeleteQuery, CrashedQueueIds
                     )
                     LoggingService.LogInfo(
-                        f"Deleted {deleted_count} crashed quality test queue items", 
+                        f"Deleted {DeletedCount} crashed quality test queue items", 
                         "CrashRecoveryService", "RecoverServiceJobs"
                     )
+                    
+                    # Reset failed quality test results for interrupted tests so they can be restarted
+                    ResetCount = self.ResetInterruptedQualityTests(CrashedQueueIds)
                 else:
                     LoggingService.LogInfo("No crashed quality test queue items to delete", 
                                           "CrashRecoveryService", "RecoverServiceJobs")
             
             # Log recovery summary
-            self.LogRecoverySummary(ServiceName, jobs_recovered, orphaned_processes_killed, recovery_details)
+            self.LogRecoverySummary(ServiceName, JobsRecovered, OrphanedProcessesKilled, RecoveryDetails)
             
             result = {
                 "Success": True,
-                "Message": f"Recovered {jobs_recovered} jobs, killed {orphaned_processes_killed} orphaned processes",
-                "JobsRecovered": jobs_recovered,
-                "OrphanedProcessesKilled": orphaned_processes_killed,
-                "ActiveJobsCleaned": deleted_active_jobs,
-                "RecoveryDetails": recovery_details
+                "Message": f"Recovered {JobsRecovered} jobs, killed {OrphanedProcessesKilled} orphaned processes",
+                "JobsRecovered": JobsRecovered,
+                "OrphanedProcessesKilled": OrphanedProcessesKilled,
+                "ActiveJobsCleaned": DeletedActiveJobs,
+                "RecoveryDetails": RecoveryDetails
             }
+            
+            # Add quality test reset count for QualityTestingService
+            if ServiceName == "QualityTestingService" and 'ResetCount' in locals():
+                result["QualityTestsReset"] = ResetCount
             
             LoggingService.LogInfo(f"Crash recovery completed for {ServiceName}: {result['Message']}", "CrashRecoveryService", "RecoverServiceJobs")
             return result
@@ -238,6 +245,32 @@ class CrashRecoveryService:
             
         except Exception as e:
             LoggingService.LogException(f"Error cleaning up ActiveJobs for service {ServiceName}", e, "CrashRecoveryService", "CleanupActiveJobs")
+            return 0
+    
+    def ResetInterruptedQualityTests(self, CrashedQueueIds: List[int]) -> int:
+        """Reset failed quality test results for interrupted tests so they can be retried."""
+        try:
+            if not CrashedQueueIds:
+                return 0
+            
+            # Use DatabaseManager method to reset failed quality test results
+            AffectedRows = self.DatabaseManager.ResetFailedQualityTestResultsForRetry()
+            
+            if AffectedRows > 0:
+                LoggingService.LogInfo(
+                    f"Reset {AffectedRows} failed quality test results for retry", 
+                    "CrashRecoveryService", "ResetInterruptedQualityTests"
+                )
+            else:
+                LoggingService.LogInfo(
+                    "No failed quality test results found to reset", 
+                    "CrashRecoveryService", "ResetInterruptedQualityTests"
+                )
+            
+            return AffectedRows
+            
+        except Exception as e:
+            LoggingService.LogException(f"Error resetting interrupted quality tests", e, "CrashRecoveryService", "ResetInterruptedQualityTests")
             return 0
     
     def LogRecoverySummary(self, ServiceName: str, JobsRecovered: int, OrphanedProcessesKilled: int, RecoveryDetails: List[Dict]):

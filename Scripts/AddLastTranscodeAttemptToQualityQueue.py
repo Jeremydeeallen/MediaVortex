@@ -17,32 +17,6 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from Repositories.DatabaseManager import DatabaseManager
 from Services.ShouldQualityTestService import ShouldQualityTestService
 from Services.LoggingService import LoggingService
-import re
-
-def ParseFFmpegCommand(ffmpeg_command: str) -> tuple:
-    """
-    Parse FFmpeg command to extract input and output file paths.
-    
-    Args:
-        ffmpeg_command: The full FFmpeg command string
-        
-    Returns:
-        tuple: (input_file_path, output_file_path) or (None, None) if parsing fails
-    """
-    try:
-        # Find input file path after -i flag
-        input_match = re.search(r'-i\s+"([^"]+)"', ffmpeg_command)
-        input_path = input_match.group(1) if input_match else None
-        
-        # Find output file path (last quoted string in the command)
-        output_matches = re.findall(r'"([^"]+)"', ffmpeg_command)
-        output_path = output_matches[-1] if output_matches else None
-        
-        return input_path, output_path
-        
-    except Exception as e:
-        LoggingService.LogException("Error parsing FFmpeg command", e, "ParseFFmpegCommand", "ParseFFmpegCommand")
-        return None, None
 
 def AddLastTranscodeAttemptToQualityQueue():
     """Add the last transcode attempt to quality test queue if it should be tested."""
@@ -57,10 +31,12 @@ def AddLastTranscodeAttemptToQualityQueue():
         print("Getting the most recent successful transcode attempt...")
         
         query = """
-            SELECT Id, FilePath, AttemptDate, Success, ProfileName, OldSizeBytes, NewSizeBytes, FfpmpegCommand
-            FROM TranscodeAttempts 
-            WHERE Success = 1 AND FfpmpegCommand IS NOT NULL
-            ORDER BY AttemptDate DESC 
+            SELECT ta.Id, ta.FilePath, ta.AttemptDate, ta.Success, ta.ProfileName, ta.OldSizeBytes, ta.NewSizeBytes,
+                   tfp.LocalSourcePath, tfp.LocalOutputPath
+            FROM TranscodeAttempts ta
+            INNER JOIN TemporaryFilePaths tfp ON ta.Id = tfp.TranscodeAttemptId
+            WHERE ta.Success = 1 AND tfp.LocalOutputPath IS NOT NULL
+            ORDER BY ta.AttemptDate DESC 
             LIMIT 1
         """
         
@@ -74,7 +50,8 @@ def AddLastTranscodeAttemptToQualityQueue():
         attempt = dict(attempts[0])
         TranscodeAttemptId = attempt['Id']
         OriginalFilePath = attempt['FilePath']  # FilePath is the original file path
-        FFmpegCommand = attempt['FfpmpegCommand']
+        InputFilePath = attempt['LocalSourcePath']
+        OutputFilePath = attempt['LocalOutputPath']
         
         print(f"Found most recent transcode attempt:")
         print(f"  ID: {TranscodeAttemptId}")
@@ -83,17 +60,14 @@ def AddLastTranscodeAttemptToQualityQueue():
         print(f"  Profile: {attempt['ProfileName']}")
         print(f"  Size Reduction: {attempt['NewSizeBytes']} / {attempt['OldSizeBytes']} bytes")
         
-        # Parse FFmpeg command to extract input and output file paths
-        InputFilePath, OutputFilePath = ParseFFmpegCommand(FFmpegCommand)
-        
+        # Get file paths from TemporaryFilePaths table (database-driven approach)
         if not InputFilePath or not OutputFilePath:
-            LoggingService.LogError(f"Could not parse FFmpeg command to extract file paths", "AddLastTranscodeAttemptToQualityQueue")
-            print("ERROR: Could not parse FFmpeg command to extract file paths.")
-            print(f"FFmpeg Command: {FFmpegCommand}")
+            LoggingService.LogError(f"Could not get file paths from TemporaryFilePaths table", "AddLastTranscodeAttemptToQualityQueue")
+            print("ERROR: Could not get file paths from TemporaryFilePaths table.")
             return False
         
-        print(f"  Parsed Input: {InputFilePath}")
-        print(f"  Parsed Output: {OutputFilePath}")
+        print(f"  Local Source: {InputFilePath}")
+        print(f"  Local Output: {OutputFilePath}")
         
         # Check if this file should undergo quality testing
         print(f"\nChecking if file should undergo quality testing...")
