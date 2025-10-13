@@ -299,10 +299,14 @@ class ProcessTranscodeQueueService:
             self.UpdateTranscodeProgress(TranscodeAttemptId, "Building Command", 0.0, "Building FFmpeg command...")
             
             # Step d: Build transcoding command
-            TranscodeCommand = self.BuildTranscodeCommand(Job, MediaFile, TranscodingSettings)
-            if not TranscodeCommand:
+            CommandResult = self.BuildTranscodeCommand(Job, MediaFile, TranscodingSettings)
+            if not CommandResult:
                 self.HandleJobFailure(Job, "Failed to build transcoding command", TranscodeAttemptId, ActiveJobId)
                 return
+            
+            # Extract command and output path from result
+            TranscodeCommand = CommandResult['Command']
+            OutputPath = CommandResult['OutputPath']
             
             # Phase 5: Preparing Files
             self.UpdateTranscodeProgress(TranscodeAttemptId, "Preparing Files", 0.0, "Preparing files for transcoding...")
@@ -311,6 +315,14 @@ class ProcessTranscodeQueueService:
             if not self.SetupFilePreparation(Job, MediaFile, TranscodeAttemptId):
                 self.HandleJobFailure(Job, "Failed to setup file preparation", TranscodeAttemptId, ActiveJobId)
                 return
+            
+            # Create TemporaryFilePaths record with all three paths (single source of truth)
+            LocalSourcePath = f"C:\\MediaVortex\\Source\\{MediaFile.FileName}"
+            TemporaryFilePathId = self.PrivateCreateTemporaryFilePathRecord(TranscodeAttemptId, Job.FilePath, LocalSourcePath, OutputPath)
+            if not TemporaryFilePathId:
+                LoggingService.LogWarning(f"Failed to create TemporaryFilePath record for TranscodeAttempt {TranscodeAttemptId}, but file preparation succeeded", 
+                                        "ProcessTranscodeQueueService", "ProcessJob")
+                # Don't fail the entire operation if TemporaryFilePath creation fails
             
             # Update attempt record with complete information
             self.DatabaseManager.UpdateTranscodeAttempt(TranscodeAttemptId, {
@@ -379,13 +391,6 @@ class ProcessTranscodeQueueService:
             if not CopyResult:
                 return False
             
-            # Create TemporaryFilePaths record after successful file copy
-            TemporaryFilePathId = self.PrivateCreateTemporaryFilePathRecord(TranscodeAttemptId, SourcePath, DestinationPath)
-            if not TemporaryFilePathId:
-                LoggingService.LogWarning(f"Failed to create TemporaryFilePath record for TranscodeAttempt {TranscodeAttemptId}, but file copy succeeded", 
-                                        "ProcessTranscodeQueueService", "SetupFilePreparation")
-                # Don't fail the entire operation if TemporaryFilePath creation fails
-            
             return True
             
         except Exception as e:
@@ -425,7 +430,7 @@ class ProcessTranscodeQueueService:
             return None
     
     def BuildTranscodeCommand(self, Job: TranscodeQueueModel, MediaFile: MediaFileModel, 
-                              TranscodingSettings: Dict[str, Any]) -> Optional[str]:
+                              TranscodingSettings: Dict[str, Any]) -> Optional[Dict[str, str]]:
         """Build the complete transcoding command."""
         try:
             return self.CommandBuilder.BuildCommand(Job, MediaFile, TranscodingSettings)
@@ -572,8 +577,8 @@ class ProcessTranscodeQueueService:
                 SizeReductionBytes = 0
                 SizeReductionPercent = 0.0
                 
-                # Get output file path from the transcoding command
-                OutputFilePath = self.GetOutputFilePathFromCommand(Job)
+                # Get output file path from the transcoding command (use table as source of truth)
+                OutputFilePath = self.GetOutputFilePathFromCommand(Job, TranscodeAttemptId)
                 LoggingService.LogInfo(f"Output file path: {OutputFilePath}", "ProcessTranscodeQueueService", "HandleTranscodingResult")
                 
                 if OutputFilePath and os.path.exists(OutputFilePath):
@@ -600,11 +605,7 @@ class ProcessTranscodeQueueService:
                 # Update TranscodeFiles record for overall file status
                 self.UpdateTranscodeFileRecord(Job.FilePath, TranscodeAttemptId, True, OutputFilePath, NewSizeBytes)
                 
-                # Update TemporaryFilePaths record with LocalOutputPath
-                UpdateResult = self.PrivateUpdateTemporaryFilePathRecord(TranscodeAttemptId, OutputFilePath)
-                if not UpdateResult:
-                    LoggingService.LogWarning(f"Failed to update TemporaryFilePath record for TranscodeAttempt {TranscodeAttemptId}, but transcoding succeeded", 
-                                            "ProcessTranscodeQueueService", "HandleTranscodingResult")
+                # LocalOutputPath was already set during command building (single source of truth)
                 
                 # Let ShouldQualityTest service handle the complete process
                 QualityTestResult = self.ShouldQualityTest.ProcessTranscodedFile(TranscodeAttemptId, Job.FilePath, OutputFilePath)
@@ -714,9 +715,25 @@ class ProcessTranscodeQueueService:
         except Exception as e:
             LoggingService.LogException("Exception in cleanup", e, "ProcessTranscodeQueueService", "CleanupOrContinue")
     
-    def GetOutputFilePathFromCommand(self, Job: TranscodeQueueModel) -> Optional[str]:
-        """Get output file path for a transcoding job."""
+    def GetOutputFilePathFromCommand(self, Job: TranscodeQueueModel, TranscodeAttemptId: int = None) -> Optional[str]:
+        """Get output file path for a transcoding job. Uses TemporaryFilePaths table as source of truth if TranscodeAttemptId provided."""
         try:
+            # If TranscodeAttemptId is provided, try to get the actual output path from TemporaryFilePaths table first
+            if TranscodeAttemptId:
+                try:
+                    TemporaryFilePathRecord = self.DatabaseManager.GetTemporaryFilePath(TranscodeAttemptId)
+                    if TemporaryFilePathRecord and TemporaryFilePathRecord.get('LocalOutputPath'):
+                        OutputPath = TemporaryFilePathRecord['LocalOutputPath']
+                        LoggingService.LogInfo(f"Retrieved output path from TemporaryFilePaths table: {OutputPath}", "ProcessTranscodeQueueService", "GetOutputFilePathFromCommand")
+                        return OutputPath
+                    else:
+                        LoggingService.LogWarning(f"No LocalOutputPath found in TemporaryFilePaths for TranscodeAttempt {TranscodeAttemptId}, falling back to calculation", 
+                                                "ProcessTranscodeQueueService", "GetOutputFilePathFromCommand")
+                except Exception as e:
+                    LoggingService.LogWarning(f"Failed to retrieve output path from TemporaryFilePaths table for TranscodeAttempt {TranscodeAttemptId}: {str(e)}, falling back to calculation", 
+                                            "ProcessTranscodeQueueService", "GetOutputFilePathFromCommand")
+            
+            # Fallback to calculation method (legacy behavior)
             # Extract filename from input path
             InputFileName = os.path.basename(Job.FilePath)
             
@@ -741,7 +758,7 @@ class ProcessTranscodeQueueService:
             OutputFileName = self._GenerateOutputFileName(InputFileName, SourceResolution, TargetResolution, ContainerType)
             OutputFilePath = os.path.join("C:\\MediaVortex", OutputFileName)
             
-            LoggingService.LogInfo(f"Calculated output path: {OutputFilePath}", "ProcessTranscodeQueueService", "GetOutputFilePathFromCommand")
+            LoggingService.LogInfo(f"Calculated output path (fallback): {OutputFilePath}", "ProcessTranscodeQueueService", "GetOutputFilePathFromCommand")
             return OutputFilePath
             
         except Exception as e:
@@ -1007,13 +1024,13 @@ class ProcessTranscodeQueueService:
                                       "ProcessTranscodeQueueService", "ArchiveOriginalFileDetails")
             return False
     
-    def PrivateCreateTemporaryFilePathRecord(self, TranscodeAttemptId: int, OriginalPath: str, LocalSourcePath: str) -> Optional[int]:
+    def PrivateCreateTemporaryFilePathRecord(self, TranscodeAttemptId: int, OriginalPath: str, LocalSourcePath: str, LocalOutputPath: str = None) -> Optional[int]:
         """Private method to create TemporaryFilePath record."""
         try:
             LoggingService.LogFunctionEntry("PrivateCreateTemporaryFilePathRecord", "ProcessTranscodeQueueService", 
-                                          TranscodeAttemptId, OriginalPath, LocalSourcePath)
+                                          TranscodeAttemptId, OriginalPath, LocalSourcePath, LocalOutputPath)
             
-            TemporaryFilePathId = self.DatabaseManager.CreateTemporaryFilePath(TranscodeAttemptId, OriginalPath, LocalSourcePath)
+            TemporaryFilePathId = self.DatabaseManager.CreateTemporaryFilePath(TranscodeAttemptId, OriginalPath, LocalSourcePath, LocalOutputPath)
             
             if TemporaryFilePathId:
                 LoggingService.LogInfo(f"Successfully created TemporaryFilePath record {TemporaryFilePathId} for TranscodeAttempt {TranscodeAttemptId}", 
@@ -1045,80 +1062,4 @@ class ProcessTranscodeQueueService:
             LoggingService.LogException("Exception handling file preparation failure", e, 
                                       "ProcessTranscodeQueueService", "PrivateHandleFilePreparationFailure")
     
-    def PrivateUpdateTemporaryFilePathRecord(self, TranscodeAttemptId: int, LocalOutputPath: str) -> bool:
-        """Private method to update TemporaryFilePath record with LocalOutputPath."""
-        try:
-            LoggingService.LogFunctionEntry("PrivateUpdateTemporaryFilePathRecord", "ProcessTranscodeQueueService", 
-                                          TranscodeAttemptId, LocalOutputPath)
-            
-            UpdateResult = self.DatabaseManager.UpdateTemporaryFilePath(TranscodeAttemptId, LocalOutputPath)
-            
-            if UpdateResult:
-                LoggingService.LogInfo(f"Successfully updated TemporaryFilePath record for TranscodeAttempt {TranscodeAttemptId} with LocalOutputPath: {LocalOutputPath}", 
-                                     "ProcessTranscodeQueueService", "PrivateUpdateTemporaryFilePathRecord")
-                return True
-            else:
-                LoggingService.LogError(f"Failed to update TemporaryFilePath record for TranscodeAttempt {TranscodeAttemptId}", 
-                                      "ProcessTranscodeQueueService", "PrivateUpdateTemporaryFilePathRecord")
-                return False
-                
-        except Exception as e:
-            LoggingService.LogException("Exception updating TemporaryFilePath record", e, 
-                                      "ProcessTranscodeQueueService", "PrivateUpdateTemporaryFilePathRecord")
-            return False
-    
-    def PrivateGetTemporaryFilePaths(self, TranscodeAttemptId: int) -> Optional[Dict[str, Any]]:
-        """Private method to get TemporaryFilePath record."""
-        try:
-            LoggingService.LogFunctionEntry("PrivateGetTemporaryFilePaths", "ProcessTranscodeQueueService", TranscodeAttemptId)
-            
-            TemporaryFilePathRecord = self.DatabaseManager.GetTemporaryFilePath(TranscodeAttemptId)
-            
-            if TemporaryFilePathRecord:
-                LoggingService.LogInfo(f"Retrieved TemporaryFilePath record for TranscodeAttempt {TranscodeAttemptId}", 
-                                     "ProcessTranscodeQueueService", "PrivateGetTemporaryFilePaths")
-                return TemporaryFilePathRecord
-            else:
-                LoggingService.LogWarning(f"No TemporaryFilePath record found for TranscodeAttempt {TranscodeAttemptId}", 
-                                        "ProcessTranscodeQueueService", "PrivateGetTemporaryFilePaths")
-                return None
-                
-        except Exception as e:
-            LoggingService.LogException("Exception getting TemporaryFilePath record", e, 
-                                      "ProcessTranscodeQueueService", "PrivateGetTemporaryFilePaths")
-            return None
-    
-    def PrivateCreateQualityTestWithCorrectPaths(self, TranscodeAttemptId: int, TemporaryFilePathRecord: Dict[str, Any]) -> Optional[int]:
-        """Private method to create quality test with correct file paths from TemporaryFilePaths table."""
-        try:
-            LoggingService.LogFunctionEntry("PrivateCreateQualityTestWithCorrectPaths", "ProcessTranscodeQueueService", 
-                                          TranscodeAttemptId, TemporaryFilePathRecord)
-            
-            # Use LocalSourcePath and LocalOutputPath from TemporaryFilePaths table
-            LocalSourcePath = TemporaryFilePathRecord.get('LocalSourcePath')
-            LocalOutputPath = TemporaryFilePathRecord.get('LocalOutputPath')
-            
-            if not LocalSourcePath or not LocalOutputPath:
-                LoggingService.LogError(f"Missing LocalSourcePath or LocalOutputPath in TemporaryFilePath record for TranscodeAttempt {TranscodeAttemptId}", 
-                                      "ProcessTranscodeQueueService", "PrivateCreateQualityTestWithCorrectPaths")
-                return None
-            
-            # Create quality test queue entry with all three file paths
-            QualityTestJobId = self.DatabaseManager.CreateQualityTestQueueEntry(
-                TranscodeAttemptId, TemporaryFilePathRecord.get('OriginalPath'), LocalSourcePath, LocalOutputPath
-            )
-            
-            if QualityTestJobId:
-                LoggingService.LogInfo(f"Created quality test job {QualityTestJobId} with correct local file paths for TranscodeAttempt {TranscodeAttemptId}", 
-                                     "ProcessTranscodeQueueService", "PrivateCreateQualityTestWithCorrectPaths")
-                return QualityTestJobId
-            else:
-                LoggingService.LogError(f"Failed to create quality test job with correct paths for TranscodeAttempt {TranscodeAttemptId}", 
-                                      "ProcessTranscodeQueueService", "PrivateCreateQualityTestWithCorrectPaths")
-                return None
-                
-        except Exception as e:
-            LoggingService.LogException("Exception creating quality test with correct paths", e, 
-                                      "ProcessTranscodeQueueService", "PrivateCreateQualityTestWithCorrectPaths")
-            return None
     

@@ -8,6 +8,7 @@ import os
 from typing import Optional, Dict, Any
 from Services.LoggingService import LoggingService
 from Repositories.DatabaseManager import DatabaseManager
+from Services.QualityTestQueueService import QualityTestQueueService
 
 
 class ShouldQualityTestService:
@@ -16,6 +17,7 @@ class ShouldQualityTestService:
     def __init__(self):
         """Initialize the service."""
         self.DatabaseManager = DatabaseManager()
+        self.QualityTestQueue = QualityTestQueueService(self.DatabaseManager)
             # LoggingService.LogInfo("ShouldQualityTestService initialized", "ShouldQualityTestService", "__init__")
     
     def ShouldTestFile(self, FilePath: str) -> bool:
@@ -70,22 +72,8 @@ class ShouldQualityTestService:
                     "QualityTestJobId": None
                 }
             
-            # Construct LocalSourcePath from SystemSettings
-            TemporarySourceDir = self.DatabaseManager.GetSystemSetting("TemporarySourceDirectory")
-            if TemporarySourceDir:
-                FileName = os.path.basename(OriginalFilePath)
-                LocalSourcePath = TemporarySourceDir + "\\" + FileName
-                              # LoggingService.LogInfo(f"Constructed LocalSourcePath: {LocalSourcePath}", 
-                              #                    "ShouldQualityTestService", "ProcessTranscodedFile")
-            else:
-                LoggingService.LogError("TemporarySourceDirectory not found in SystemSettings", 
-                                      "ShouldQualityTestService", "ProcessTranscodedFile")
-                LocalSourcePath = OriginalFilePath  # Fallback
-            
-            # Create quality test queue entry
-            QualityTestJobId = self.DatabaseManager.CreateQualityTestQueueEntry(
-                TranscodeAttemptId, OriginalFilePath, LocalSourcePath, TranscodedFilePath
-            )
+            # Use QualityTestQueueService to add to queue (handles all file path resolution)
+            QualityTestJobId = self.QualityTestQueue.AddToQualityTestQueue(TranscodeAttemptId)
             
             if QualityTestJobId:
                               # LoggingService.LogInfo(f"Created quality test job {QualityTestJobId} for TranscodeAttempt {TranscodeAttemptId}", 

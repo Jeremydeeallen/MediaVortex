@@ -9,6 +9,7 @@ import json
 from flask import Blueprint, request, jsonify
 from Repositories.DatabaseManager import DatabaseManager
 from Services.LoggingService import LoggingService
+from Services.QualityTestQueueService import QualityTestQueueService
 
 QualityTestBlueprint = Blueprint('QualityTest', __name__)
 
@@ -16,6 +17,7 @@ class QualityTestController:
     def __init__(self):
         self.DatabaseManager = DatabaseManager()
         self.LoggingService = LoggingService()
+        self.QualityTestQueueService = QualityTestQueueService(self.DatabaseManager)
     
     def StartQualityTest(self, JobId: int) -> dict:
         """Start a quality test for the specified job"""
@@ -219,40 +221,13 @@ class QualityTestController:
         try:
             self.LoggingService.LogInfo(f"Requeuing transcode attempt {TranscodeAttemptId} for quality testing", "QualityTestController", "RequeueAttempt")
             
-            # Get transcode attempt by ID
-            Attempt = self.DatabaseManager.GetTranscodeAttemptById(TranscodeAttemptId)
-            if not Attempt:
-                return {"Success": False, "Message": "Transcode attempt not found"}
-            
-            # Verify it was successful
-            if not Attempt.Success:
-                return {"Success": False, "Message": "Cannot run quality test on failed transcode attempt"}
-            
-            # Parse FFmpeg command to get file paths
-            InputFilePath, OutputFilePath = self.DatabaseManager.ParseFFmpegCommand(Attempt.FfpmpegCommand)
-            if not InputFilePath or not OutputFilePath:
-                return {"Success": False, "Message": "Could not parse file paths from FFmpeg command"}
-            
-            # Check if both files exist on disk
-            import os
-            if not os.path.exists(InputFilePath):
-                return {"Success": False, "Message": "Cannot run quality test: Original file path no longer exists"}
-            
-            if not os.path.exists(OutputFilePath):
-                return {"Success": False, "Message": "Cannot run quality test: Transcoded file path no longer exists"}
-            
             # Delete existing quality test records for this attempt
             DeleteSuccess = self.DatabaseManager.DeleteQualityTestRecordsByAttemptId(TranscodeAttemptId)
             if not DeleteSuccess:
                 return {"Success": False, "Message": "Failed to clean up existing quality test records"}
             
-            # Create new quality test queue entry
-            JobId = self.DatabaseManager.CreateQualityTestQueueEntry(
-                TranscodeAttemptId, 
-                Attempt.FilePath,  # Original file path
-                InputFilePath,     # Local source path (from FFmpeg command)
-                OutputFilePath     # Transcoded file path (from FFmpeg command)
-            )
+            # Use QualityTestQueueService to add to queue (handles all validation and file path resolution)
+            JobId = self.QualityTestQueueService.AddToQualityTestQueue(TranscodeAttemptId)
             
             if JobId:
                 self.LoggingService.LogInfo(f"Successfully queued quality test job {JobId} for transcode attempt {TranscodeAttemptId}", 

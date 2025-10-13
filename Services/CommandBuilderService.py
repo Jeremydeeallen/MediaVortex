@@ -15,7 +15,7 @@ class CommandBuilderService:
         self.ResolutionService = ResolutionServiceInstance or ResolutionService()
     
     def BuildCommand(self, Job: TranscodeQueueModel, MediaFile: MediaFileModel, 
-                    TranscodingSettings: Dict[str, Any]) -> Optional[str]:
+                    TranscodingSettings: Dict[str, Any]) -> Optional[Dict[str, str]]:
         """Build complete transcoding command by orchestrating data preparation and command construction."""
         try:
             LoggingService.LogFunctionEntry("BuildCommand", "CommandBuilderService", Job.Id)
@@ -43,11 +43,11 @@ class CommandBuilderService:
             }
             
             # Build the command using the pure model
-            TranscodeCommand = self.CommandBuilder.BuildCommand(CommandData)
+            CommandResult = self.CommandBuilder.BuildCommand(CommandData)
             
-            if TranscodeCommand:
+            if CommandResult:
                 LoggingService.LogInfo(f"Successfully built command for job {Job.Id}", "CommandBuilderService", "BuildCommand")
-                return TranscodeCommand
+                return CommandResult
             else:
                 LoggingService.LogError(f"Failed to build command for job {Job.Id}", "CommandBuilderService", "BuildCommand")
                 return None

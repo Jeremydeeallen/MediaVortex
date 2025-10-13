@@ -19,6 +19,7 @@ from ViewModels.QualityTestingViewModel import QualityTestingViewModel
 from Repositories.DatabaseManager import DatabaseManager
 from Services.LoggingService import LoggingService
 from Services.DatabaseCleanupService import DatabaseCleanupService
+from Services.QualityTestQueueService import QualityTestQueueService
 
 
 class QualityTestingService:
@@ -33,6 +34,7 @@ class QualityTestingService:
         self.ProcessingThread = None
         self.WorkerThreads = []
         self.MaxConcurrentJobs = 1
+        self.QualityTestQueueService = None
         
         # Setup signal handlers for graceful shutdown
         signal.signal(signal.SIGINT, self.PrivateSignalHandler)
@@ -67,6 +69,9 @@ class QualityTestingService:
             self.ViewModel = QualityTestingViewModel(
                 DatabaseManagerInstance=database_manager
             )
+            
+            # Initialize QualityTestQueueService
+            self.QualityTestQueueService = QualityTestQueueService(database_manager)
             
             # NEW: Check for missed quality tests
             self.RecoverMissedQualityTests()
@@ -228,28 +233,15 @@ class QualityTestingService:
                                       "QualityTestingService", "RecoverMissedQualityTests")
                 
                 for Test in MissedTests:
-                    # Get file paths from TemporaryFilePaths table (database-driven approach)
-                    InputFilePath = Test.get('LocalSourcePath')
-                    OutputFilePath = Test.get('LocalOutputPath')
+                    # Use QualityTestQueueService to add to queue (handles all validation and file path resolution)
+                    JobId = self.QualityTestQueueService.AddToQualityTestQueue(Test['Id'])
                     
-                    if InputFilePath and OutputFilePath:
-                        # Check if files still exist
-                        import os
-                        if os.path.exists(InputFilePath) and os.path.exists(OutputFilePath):
-                            # Create quality test queue entry
-                            JobId = self.ViewModel.DatabaseManager.CreateQualityTestQueueEntry(
-                                Test['Id'],
-                                Test['FilePath'],
-                                InputFilePath,
-                                OutputFilePath
-                            )
-                            
-                            if JobId:
-                                LoggingService.LogInfo(f"Queued missed quality test for attempt {Test['Id']}", 
-                                                      "QualityTestingService", "RecoverMissedQualityTests")
-                        else:
-                            LoggingService.LogWarning(f"Files no longer exist for attempt {Test['Id']}, skipping", 
-                                                     "QualityTestingService", "RecoverMissedQualityTests")
+                    if JobId:
+                        LoggingService.LogInfo(f"Queued missed quality test for attempt {Test['Id']}", 
+                                              "QualityTestingService", "RecoverMissedQualityTests")
+                    else:
+                        LoggingService.LogWarning(f"Failed to queue quality test for attempt {Test['Id']}", 
+                                                 "QualityTestingService", "RecoverMissedQualityTests")
             else:
                 LoggingService.LogInfo("No missed quality tests found", 
                                       "QualityTestingService", "RecoverMissedQualityTests")

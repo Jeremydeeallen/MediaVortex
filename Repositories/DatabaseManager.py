@@ -347,7 +347,7 @@ class DatabaseManager:
                         WHERE Id = ?
                     """
                     parameters = (RootFolder.RootFolder, RootFolder.LastScannedDate, RootFolder.TotalSizeGB, RootFolder.Id)
-                    LoggingService.LogInfo("Update root folder parameters: {}", "DatabaseManager", "SaveRootFolder", parameters)
+                    LoggingService.LogInfo(f"Update root folder parameters: {parameters}", "DatabaseManager", "SaveRootFolder")
                     cursor.execute(query, parameters)
                     connection.commit()
                     affectedRows = cursor.rowcount
@@ -529,6 +529,50 @@ class DatabaseManager:
             WHERE FilePath LIKE ?
         """
         rows = self.DatabaseService.ExecuteQuery(query, (f"{RootFolderPath}%",))
+        
+        mediaFiles = []
+        for row in rows:
+            mediaFile = MediaFileModel(
+                Id=row['Id'],
+                SeasonId=row['SeasonId'],
+                FilePath=row['FilePath'],
+                FileName=row['FileName'],
+                SizeMB=row['SizeMB'],
+                VideoBitrateKbps=row['VideoBitrateKbps'],
+                AudioBitrateKbps=row['AudioBitrateKbps'],
+                Resolution=row['Resolution'],
+                Codec=row['Codec'],
+                DurationMinutes=row['DurationMinutes'],
+                FrameRate=row['FrameRate'],
+                LastScannedDate=row['LastScannedDate'],
+                CompressionPotential=row['CompressionPotential'],
+                AssignedProfile=row['AssignedProfile'],
+                FileModificationTime=row['FileModificationTime']
+            )
+            mediaFiles.append(mediaFile)
+        
+        return mediaFiles
+    
+    def GetMediaFilesByRootFolderId(self, RootFolderId: int) -> List[MediaFileModel]:
+        """Get all media files for a specific root folder by ID."""
+        # First get the root folder path from the ID
+        rootFolderQuery = "SELECT RootFolder FROM RootFolders WHERE Id = ?"
+        rootFolderRows = self.DatabaseService.ExecuteQuery(rootFolderQuery, (RootFolderId,))
+        
+        if not rootFolderRows:
+            return []
+        
+        rootFolderPath = rootFolderRows[0]['RootFolder']
+        
+        # Then get files that start with that path
+        query = """
+            SELECT Id, SeasonId, FilePath, FileName, SizeMB, VideoBitrateKbps, AudioBitrateKbps,
+                   Resolution, Codec, DurationMinutes, FrameRate, LastScannedDate,
+                   CompressionPotential, AssignedProfile, FileModificationTime
+            FROM MediaFiles 
+            WHERE FilePath LIKE ?
+        """
+        rows = self.DatabaseService.ExecuteQuery(query, (f"{rootFolderPath}%",))
         
         mediaFiles = []
         for row in rows:
@@ -2489,54 +2533,6 @@ class DatabaseManager:
     
     # Quality Testing Workflow Methods
     
-    def CreateQualityTestingJob(self, TranscodeAttemptId: int) -> int:
-        """Create a quality testing job from a completed transcode attempt."""
-        try:
-            LoggingService.LogFunctionEntry("CreateQualityTestingJob", "DatabaseManager", TranscodeAttemptId)
-            
-            # Get the transcode attempt details
-            attempt_query = """
-                SELECT Id, FilePath, ProfileName, VMAF
-                FROM TranscodeAttempts 
-                WHERE Id = ? AND Success = 1
-            """
-            
-            attempt_rows = self.DatabaseService.ExecuteQuery(attempt_query, (TranscodeAttemptId,))
-            
-            if not attempt_rows:
-                LoggingService.LogError(f"TranscodeAttempt {TranscodeAttemptId} not found or not successful", "DatabaseManager", "CreateQualityTestingJob")
-                return 0
-            
-            attempt = dict(attempt_rows[0])
-            
-            # Create quality testing queue item
-            insert_query = """
-                INSERT INTO QualityTestingQueue (
-                    TranscodeAttemptId, OriginalFilePath, TranscodedFilePath, FileName,
-                    Status, Priority, DateAdded, QualityThreshold, StrategyType
-                ) VALUES (?, ?, ?, ?, 'Pending', 50, datetime('now', 'localtime'), 90.0, 'Single')
-            """
-            
-            # Extract file paths and name
-            transcoded_path = attempt['FilePath']
-            original_path = transcoded_path.replace('.transcoded', '')  # Assume original is without .transcoded
-            file_name = os.path.basename(transcoded_path)
-            
-            result = self.DatabaseService.ExecuteNonQuery(insert_query, (
-                TranscodeAttemptId, original_path, transcoded_path, file_name
-            ))
-            
-            if result > 0:
-                LoggingService.LogInfo(f"Created quality testing job for TranscodeAttempt {TranscodeAttemptId}", "DatabaseManager", "CreateQualityTestingJob")
-                return result
-            else:
-                LoggingService.LogError(f"Failed to create quality testing job for TranscodeAttempt {TranscodeAttemptId}", "DatabaseManager", "CreateQualityTestingJob")
-                return 0
-                
-        except Exception as e:
-            LoggingService.LogException("Exception creating quality testing job", e, "DatabaseManager", "CreateQualityTestingJob")
-            return 0
-    
     def UpdateTranscodeAttemptVMAF(self, TranscodeAttemptId: int, VMAFScore: float) -> bool:
         """Update VMAF score for a transcode attempt."""
         try:
@@ -2659,84 +2655,6 @@ class DatabaseManager:
             
         except Exception as e:
             LoggingService.LogException("Exception saving quality test progress", e, "DatabaseManager", "SaveQualityTestProgress")
-            return False
-    
-
-    def StoreQualityTestResult(self, JobId: int, JobDetails: dict, VMAFScore: float, ErrorMessage: str = None, TestDuration: float = 0.0, FFmpegCommand: str = None) -> bool:
-        """Store quality test result in QualityTestResults table."""
-        try:
-            LoggingService.LogFunctionEntry("StoreQualityTestResult", "DatabaseManager", JobId, VMAFScore)
-            
-            TranscodeAttemptId = JobDetails.get('TranscodeAttemptId', 0)
-            if not TranscodeAttemptId:
-                LoggingService.LogError("TranscodeAttemptId not provided in JobDetails", "DatabaseManager", "StoreQualityTestResult")
-                return False
-            
-            # Get ProfileName from TranscodeAttempt, then get ProfileId from Profiles table
-            ProfileQuery = """
-                SELECT ta.ProfileName
-                FROM TranscodeAttempts ta
-                WHERE ta.Id = ?
-            """
-            ProfileResults = self.DatabaseService.ExecuteQuery(ProfileQuery, (TranscodeAttemptId,))
-            
-            if not ProfileResults:
-                LoggingService.LogError(f"TranscodeAttempt {TranscodeAttemptId} not found", "DatabaseManager", "StoreQualityTestResult")
-                return False
-            
-            ProfileName = ProfileResults[0]['ProfileName'] if ProfileResults[0]['ProfileName'] else 'Unknown'
-            
-            # Get ProfileId from Profiles table using ProfileName
-            ProfileIdQuery = """
-                SELECT Id FROM Profiles WHERE ProfileName = ?
-            """
-            ProfileIdResults = self.DatabaseService.ExecuteQuery(ProfileIdQuery, (ProfileName,))
-            ProfileId = ProfileIdResults[0]['Id'] if ProfileIdResults else 0
-            
-            # Get file size
-            file_size = 0
-            if JobDetails.get('TranscodedFilePath') and os.path.exists(JobDetails['TranscodedFilePath']):
-                file_size = os.path.getsize(JobDetails['TranscodedFilePath'])
-                LoggingService.LogInfo(f"File size for {JobDetails['TranscodedFilePath']}: {file_size} bytes", "DatabaseManager", "StoreQualityTestResult")
-            else:
-                LoggingService.LogWarning(f"TranscodedFilePath not found or file doesn't exist: {JobDetails.get('TranscodedFilePath')}", "DatabaseManager", "StoreQualityTestResult")
-            
-            query = """
-                INSERT INTO QualityTestResults 
-                (TranscodeAttemptId, TestDuration, PassesThreshold, Rank, ErrorMessage, DateTested, FFmpegCommand, Status, VMAFScore)
-                VALUES (?, ?, ?, ?, ?, datetime('now', 'localtime'), ?, 'Success', ?)
-            """
-            
-            parameters = (
-                TranscodeAttemptId,
-                TestDuration,  # TestDuration - actual duration from FFmpeg process
-                VMAFScore >= 90.0,  # PassesThreshold - assuming 90+ is good
-                1,  # Rank - could be calculated based on other results
-                ErrorMessage,  # ErrorMessage - None for success, error text for failures
-                FFmpegCommand,  # Add the FFmpeg command
-                VMAFScore
-            )
-            
-            try:
-                rows_affected = self.DatabaseService.ExecuteNonQuery(query, parameters)
-                if rows_affected > 0:
-                    LoggingService.LogInfo(f"Successfully stored quality test result for job {JobId}, VMAF score: {VMAFScore}", "DatabaseManager", "StoreQualityTestResult")
-                    return True
-                else:
-                    LoggingService.LogError(
-                        f"INSERT returned 0 rows. Query: {query}, Params: {parameters}, ParamCount: {len(parameters)}",
-                        "DatabaseManager", "StoreQualityTestResult"
-                    )
-                    return False
-            except Exception as e:
-                LoggingService.LogException(
-                    f"Database error during INSERT. Query: {query}, Params: {parameters}, ParamCount: {len(parameters)}",
-                    e, "DatabaseManager", "StoreQualityTestResult"
-                )
-                return False
-            
-        except Exception as e:
-            LoggingService.LogException("Exception storing quality test result", e, "DatabaseManager", "StoreQualityTestResult")
             return False
     
     def RemoveFromQualityTestQueue(self, JobId: int) -> bool:
@@ -3163,34 +3081,15 @@ class DatabaseManager:
             return None
     
     def CreateQualityTestQueueEntry(self, TranscodeAttemptId: int, OriginalFilePath: str, LocalSourcePath: str, TranscodedFilePath: str) -> Optional[int]:
-        """Create a new quality test queue entry with all three file paths."""
+        """Create a new quality test queue entry with all three file paths (data access only)."""
         try:
             LoggingService.LogFunctionEntry("CreateQualityTestQueueEntry", "DatabaseManager", 
                                           TranscodeAttemptId, OriginalFilePath, LocalSourcePath, TranscodedFilePath)
             
-            # Normalize paths to use single backslashes
+            # Normalize paths to use single backslashes (data formatting is acceptable in data layer)
             NormalizedOriginalFilePath = self.PrivateNormalizeFilePath(OriginalFilePath)
             NormalizedTranscodedFilePath = self.PrivateNormalizeFilePath(TranscodedFilePath)
-            
-            # Extract filename from normalized original path
-            FileName = os.path.basename(NormalizedOriginalFilePath)
-            
-            # If LocalSourcePath is not provided or empty, construct it from SystemSettings
-            if not LocalSourcePath or LocalSourcePath.strip() == "":
-                TemporarySourceDir = self.GetSystemSetting("TemporarySourceDirectory")
-                if TemporarySourceDir:
-                    # Ensure path ends with backslash
-                    if not TemporarySourceDir.endswith('\\'):
-                        TemporarySourceDir += '\\'
-                    NormalizedLocalSourcePath = self.PrivateNormalizeFilePath(TemporarySourceDir + FileName)
-                    LoggingService.LogInfo(f"Constructed LocalSourcePath from SystemSettings: {NormalizedLocalSourcePath}", 
-                                         "DatabaseManager", "CreateQualityTestQueueEntry")
-                else:
-                    LoggingService.LogError("TemporarySourceDirectory not found in SystemSettings, using OriginalFilePath as fallback", 
-                                          "DatabaseManager", "CreateQualityTestQueueEntry")
-                    NormalizedLocalSourcePath = NormalizedOriginalFilePath
-            else:
-                NormalizedLocalSourcePath = self.PrivateNormalizeFilePath(LocalSourcePath)
+            NormalizedLocalSourcePath = self.PrivateNormalizeFilePath(LocalSourcePath)
             
             query = """
                 INSERT INTO QualityTestingQueue (
@@ -3301,11 +3200,11 @@ class DatabaseManager:
             LoggingService.LogException("Exception deleting quality test records", e, "DatabaseManager", "DeleteQualityTestRecordsByAttemptId")
             return False
     
-    def CreateTemporaryFilePath(self, TranscodeAttemptId: int, OriginalPath: str, LocalSourcePath: str) -> Optional[int]:
+    def CreateTemporaryFilePath(self, TranscodeAttemptId: int, OriginalPath: str, LocalSourcePath: str, LocalOutputPath: str = None) -> Optional[int]:
         """Create a new temporary file path record."""
         try:
             LoggingService.LogFunctionEntry("CreateTemporaryFilePath", "DatabaseManager", 
-                                          TranscodeAttemptId, OriginalPath, LocalSourcePath)
+                                          TranscodeAttemptId, OriginalPath, LocalSourcePath, LocalOutputPath)
             
             # Validate TranscodeAttemptId exists
             if not self.PrivateValidateTranscodeAttemptId(TranscodeAttemptId):
@@ -3315,14 +3214,22 @@ class DatabaseManager:
             # Normalize paths to use single backslashes
             NormalizedOriginalPath = self.PrivateNormalizeFilePath(OriginalPath)
             NormalizedLocalSourcePath = self.PrivateNormalizeFilePath(LocalSourcePath)
+            NormalizedLocalOutputPath = self.PrivateNormalizeFilePath(LocalOutputPath) if LocalOutputPath else None
             
-            query = """
-                INSERT INTO TemporaryFilePaths (
-                    TranscodeAttemptId, OriginalPath, LocalSourcePath, CreatedDate
-                ) VALUES (?, ?, ?, datetime('now', 'localtime'))
-            """
-            
-            params = (TranscodeAttemptId, NormalizedOriginalPath, NormalizedLocalSourcePath)
+            if LocalOutputPath:
+                query = """
+                    INSERT INTO TemporaryFilePaths (
+                        TranscodeAttemptId, OriginalPath, LocalSourcePath, LocalOutputPath, CreatedDate
+                    ) VALUES (?, ?, ?, ?, datetime('now', 'localtime'))
+                """
+                params = (TranscodeAttemptId, NormalizedOriginalPath, NormalizedLocalSourcePath, NormalizedLocalOutputPath)
+            else:
+                query = """
+                    INSERT INTO TemporaryFilePaths (
+                        TranscodeAttemptId, OriginalPath, LocalSourcePath, CreatedDate
+                    ) VALUES (?, ?, ?, datetime('now', 'localtime'))
+                """
+                params = (TranscodeAttemptId, NormalizedOriginalPath, NormalizedLocalSourcePath)
             
             RecordId = self.DatabaseService.ExecuteNonQuery(query, params)
             

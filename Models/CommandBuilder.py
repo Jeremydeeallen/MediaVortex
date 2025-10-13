@@ -7,14 +7,14 @@ from Models.MediaFileModel import MediaFileModel
 class CommandBuilder:
     """Pure data transformation model for building FFmpeg transcoding commands."""
     
-    def BuildCommand(self, CommandData: Dict[str, Any]) -> Optional[str]:
+    def BuildCommand(self, CommandData: Dict[str, Any]) -> Optional[Dict[str, str]]:
         """Build complete FFmpeg transcoding command from provided data.
         
         Args:
             CommandData: Dictionary containing all necessary data for command building
             
         Returns:
-            Complete FFmpeg command string or None if building fails
+            Dictionary with 'Command' and 'OutputPath' keys, or None if building fails
         """
         try:
             # Extract data
@@ -35,8 +35,8 @@ class CommandBuilder:
             InputPath = f"c:\\MediaVortex\\Source\\{MediaFile.FileName}"
             
             # Generate output filename with target resolution and container type
-            ProfileId = ProfileSettings.get('ProfileId')
-            OutputFileName = self.GenerateOutputFileName(MediaFile.FileName, SourceResolution, TargetResolution, ContainerType, ProfileId)
+            CrfValue = ProfileSettings.get('Quality')
+            OutputFileName = self.GenerateOutputFileName(MediaFile.FileName, SourceResolution, TargetResolution, ContainerType, CrfValue)
             OutputPath = f"c:\\MediaVortex\\{OutputFileName}"
             
             # Start building command - FFmpeg command structure: ffmpeg -i input [options] output -y
@@ -92,7 +92,10 @@ class CommandBuilder:
             # Join command parts
             CompleteCommand = ' '.join(CommandParts)
             
-            return CompleteCommand
+            return {
+                'Command': CompleteCommand,
+                'OutputPath': OutputPath
+            }
             
         except Exception as e:
             # Pure function should not log, just return None on error
@@ -180,7 +183,7 @@ class CommandBuilder:
             # If anything goes wrong, continue without adding parameters
             pass
 
-    def GenerateOutputFileName(self, OriginalFileName: str, SourceResolution: str, TargetResolution: str, ContainerType: str = 'mp4', ProfileId: int = None) -> str:
+    def GenerateOutputFileName(self, OriginalFileName: str, SourceResolution: str, TargetResolution: str, ContainerType: str = 'mp4', CrfValue: int = None) -> str:
         """Generate output filename with target resolution and container type."""
         try:
             # Get the base filename without extension
@@ -188,8 +191,8 @@ class CommandBuilder:
             
             # If resolutions are the same, just change extension
             if SourceResolution == TargetResolution:
-                if ProfileId:
-                    return f"{BaseName}.{ProfileId}.{ContainerType}"
+                if CrfValue:
+                    return f"{BaseName}.{CrfValue}.{ContainerType}"
                 return f"{BaseName}.{ContainerType}"
             
             # Extract resolution from filename (e.g., "1080p", "720p")
@@ -197,8 +200,8 @@ class CommandBuilder:
             if not SourceResolutionStr:
                 # If no resolution found in filename, add target resolution
                 TargetResolutionStr = self.FormatResolutionForFilename(TargetResolution)
-                if ProfileId:
-                    return f"{BaseName}{TargetResolutionStr}.{ProfileId}.{ContainerType}"
+                if CrfValue:
+                    return f"{BaseName}{TargetResolutionStr}.{CrfValue}.{ContainerType}"
                 return f"{BaseName}{TargetResolutionStr}.{ContainerType}"
             
             # Replace source resolution with target resolution
@@ -207,15 +210,15 @@ class CommandBuilder:
             NewBaseName = os.path.splitext(NewBaseName)[0]  # Remove old extension
             
             # Add container type extension
-            if ProfileId:
-                return f"{NewBaseName}.{ProfileId}.{ContainerType}"
+            if CrfValue:
+                return f"{NewBaseName}.{CrfValue}.{ContainerType}"
             return f"{NewBaseName}.{ContainerType}"
             
         except Exception:
             # If anything goes wrong, return original filename with container extension
             BaseName = os.path.splitext(OriginalFileName)[0]
-            if ProfileId:
-                return f"{BaseName}.{ProfileId}.{ContainerType}"
+            if CrfValue:
+                return f"{BaseName}.{CrfValue}.{ContainerType}"
             return f"{BaseName}.{ContainerType}"
     
     def ExtractResolutionFromFilename(self, Filename: str) -> Optional[str]:

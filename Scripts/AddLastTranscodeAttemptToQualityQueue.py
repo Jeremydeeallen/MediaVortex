@@ -15,7 +15,7 @@ from datetime import datetime
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from Repositories.DatabaseManager import DatabaseManager
-from Services.ShouldQualityTestService import ShouldQualityTestService
+from Services.QualityTestQueueService import QualityTestQueueService
 from Services.LoggingService import LoggingService
 
 def AddLastTranscodeAttemptToQualityQueue():
@@ -25,17 +25,15 @@ def AddLastTranscodeAttemptToQualityQueue():
         
         # Initialize services
         DatabaseManagerInstance = DatabaseManager()
-        ShouldQualityTest = ShouldQualityTestService()
+        QualityTestQueueService = QualityTestQueueService(DatabaseManagerInstance)
         
         # Get the most recent successful transcode attempt
         print("Getting the most recent successful transcode attempt...")
         
         query = """
-            SELECT ta.Id, ta.FilePath, ta.AttemptDate, ta.Success, ta.ProfileName, ta.OldSizeBytes, ta.NewSizeBytes,
-                   tfp.LocalSourcePath, tfp.LocalOutputPath
+            SELECT ta.Id, ta.FilePath, ta.AttemptDate, ta.Success, ta.ProfileName, ta.OldSizeBytes, ta.NewSizeBytes
             FROM TranscodeAttempts ta
-            INNER JOIN TemporaryFilePaths tfp ON ta.Id = tfp.TranscodeAttemptId
-            WHERE ta.Success = 1 AND tfp.LocalOutputPath IS NOT NULL
+            WHERE ta.Success = 1
             ORDER BY ta.AttemptDate DESC 
             LIMIT 1
         """
@@ -50,8 +48,6 @@ def AddLastTranscodeAttemptToQualityQueue():
         attempt = dict(attempts[0])
         TranscodeAttemptId = attempt['Id']
         OriginalFilePath = attempt['FilePath']  # FilePath is the original file path
-        InputFilePath = attempt['LocalSourcePath']
-        OutputFilePath = attempt['LocalOutputPath']
         
         print(f"Found most recent transcode attempt:")
         print(f"  ID: {TranscodeAttemptId}")
@@ -60,55 +56,16 @@ def AddLastTranscodeAttemptToQualityQueue():
         print(f"  Profile: {attempt['ProfileName']}")
         print(f"  Size Reduction: {attempt['NewSizeBytes']} / {attempt['OldSizeBytes']} bytes")
         
-        # Get file paths from TemporaryFilePaths table (database-driven approach)
-        if not InputFilePath or not OutputFilePath:
-            LoggingService.LogError(f"Could not get file paths from TemporaryFilePaths table", "AddLastTranscodeAttemptToQualityQueue")
-            print("ERROR: Could not get file paths from TemporaryFilePaths table.")
-            return False
+        # Use QualityTestQueueService to add to queue (handles all validation and file path resolution)
+        print(f"\nAdding to quality test queue...")
         
-        print(f"  Local Source: {InputFilePath}")
-        print(f"  Local Output: {OutputFilePath}")
-        
-        # Check if this file should undergo quality testing
-        print(f"\nChecking if file should undergo quality testing...")
-        ShouldTest = ShouldQualityTest.ShouldTestFile(OriginalFilePath)
-        
-        if not ShouldTest:
-            LoggingService.LogInfo(f"File {OriginalFilePath} should not undergo quality testing", "AddLastTranscodeAttemptToQualityQueue")
-            print(f"File should NOT undergo quality testing (excluded by ShouldQualityTestService rules).")
-            return False
-        
-        print(f"File SHOULD undergo quality testing.")
-        
-        # Check if quality test queue entry already exists for this transcode attempt
-        existing_query = """
-            SELECT Id FROM QualityTestingQueue 
-            WHERE TranscodeAttemptId = ?
-        """
-        
-        existing_entries = DatabaseManagerInstance.DatabaseService.ExecuteQuery(existing_query, (TranscodeAttemptId,))
-        
-        if existing_entries:
-            LoggingService.LogWarning(f"Quality test queue entry already exists for TranscodeAttempt {TranscodeAttemptId}", "AddLastTranscodeAttemptToQualityQueue")
-            print(f"Quality test queue entry already exists for this transcode attempt (ID: {existing_entries[0]['Id']}).")
-            return False
-        
-        # Create quality test queue entry with parsed paths from FFmpeg command
-        print(f"\nCreating quality test queue entry...")
-        print(f"  Original File: {OriginalFilePath}")
-        print(f"  Local Source: {InputFilePath}")
-        print(f"  Transcoded File: {OutputFilePath}")
-        
-        QualityTestJobId = DatabaseManagerInstance.CreateQualityTestQueueEntry(
-            TranscodeAttemptId, OriginalFilePath, InputFilePath, OutputFilePath
-        )
+        QualityTestJobId = QualityTestQueueService.AddToQualityTestQueue(TranscodeAttemptId)
         
         if QualityTestJobId:
             LoggingService.LogInfo(f"Successfully created quality test job {QualityTestJobId} for TranscodeAttempt {TranscodeAttemptId}", "AddLastTranscodeAttemptToQualityQueue")
             print(f"SUCCESS: Quality test queue entry created with ID {QualityTestJobId}")
             print(f"Transcode Attempt ID: {TranscodeAttemptId}")
             print(f"Original File: {OriginalFilePath}")
-            print(f"Transcoded File: {OutputFilePath}")
             return True
         else:
             LoggingService.LogError(f"Failed to create quality test queue entry for TranscodeAttempt {TranscodeAttemptId}", "AddLastTranscodeAttemptToQualityQueue")

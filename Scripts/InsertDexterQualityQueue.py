@@ -1,5 +1,8 @@
 """
-Script to manually insert the Dexter S06E07 quality testing record into the queue.
+DEPRECATED: Script to manually insert the Dexter S06E07 quality testing record into the queue.
+This script is deprecated because it uses the old SaveQualityTestingQueueItem method that no longer exists.
+Use QualityTestQueueService.AddToQualityTestQueue() instead.
+
 This prevents having to retranscode the file.
 """
 
@@ -15,7 +18,11 @@ from Models.QualityTestingQueueModel import QualityTestingQueueModel
 from Services.LoggingService import LoggingService
 
 def InsertDexterQualityQueueRecord():
-    """Insert the Dexter S06E07 quality testing record into the queue."""
+    """DEPRECATED: Insert the Dexter S06E07 quality testing record into the queue."""
+    print("WARNING: This script is deprecated and will not work with the current database schema.")
+    print("Use QualityTestQueueService.AddToQualityTestQueue() instead.")
+    return False
+    
     try:
         LoggingService.LogInfo("Starting manual insertion of Dexter S06E07 quality queue record", "InsertDexterQualityQueueRecord")
         

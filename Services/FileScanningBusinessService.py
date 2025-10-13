@@ -409,6 +409,14 @@ class FileScanningBusinessService:
             self.ScanProgress = 20.0
             RootFolder = self.GetOrCreateRootFolder(RootFolderPath, TotalSizeGB)
             
+            if not RootFolder or not RootFolder.Id:
+                LoggingService.LogError(f"Failed to create or get root folder for: {RootFolderPath}", 'PerformScan', 'FileScanningBusinessService')
+                return {
+                    'Success': False,
+                    'Message': f'Failed to create root folder record for: {RootFolderPath}',
+                    'Error': 'RootFolderCreationFailed'
+                }
+            
             # Step 3: Scan for media files
             self.ScanProgress = 30.0
             MediaFiles = self.FileManager.ScanDirectory(RootFolderPath, Recursive)
@@ -430,7 +438,12 @@ class FileScanningBusinessService:
             
             # Step 7: Automatically trigger metadata extraction for the scanned files
             try:
-                metadataResult = self.ExtractMetadataForExistingFiles(RootFolder.Id)
+                if RootFolder and RootFolder.Id:
+                    LoggingService.LogInfo(f"Starting automatic metadata extraction for RootFolderId: {RootFolder.Id}", 'PerformScan', 'FileScanningBusinessService')
+                    metadataResult = self.ExtractMetadataForExistingFiles(RootFolder.Id)
+                else:
+                    LoggingService.LogWarning("No RootFolderId available - skipping automatic metadata extraction", 'PerformScan', 'FileScanningBusinessService')
+                    metadataResult = {'Success': True, 'Message': 'No RootFolderId - metadata extraction skipped', 'ProcessedFiles': 0}
                 if metadataResult.get('Success', False):
                     processedFiles = metadataResult.get('ProcessedFiles', 0)
                     LoggingService.LogInfo(f"Metadata extraction completed: {processedFiles} files processed")
@@ -644,6 +657,7 @@ class FileScanningBusinessService:
                     ExistingFile.FileModificationTime = FileModificationTime
                     ExistingFile.SeasonId = None  # Season functionality disabled
                     ExistingFile.LastScannedDate = datetime.now()
+                    # Note: RootFolderId is not stored in MediaFiles table - files are associated by FilePath
                     
                     # Extract metadata if requested and not already present
                     if ExtractMetadata and self.ShouldExtractMetadata(ExistingFile):
@@ -671,6 +685,7 @@ class FileScanningBusinessService:
                     FuzzyMatch.FileModificationTime = FileModificationTime
                     FuzzyMatch.SeasonId = None  # Season functionality disabled
                     FuzzyMatch.LastScannedDate = datetime.now()
+                    # Note: RootFolderId is not stored in MediaFiles table - files are associated by FilePath
                     
                     # Extract metadata if requested and not already present
                     if ExtractMetadata and self.ShouldExtractMetadata(FuzzyMatch):
@@ -688,6 +703,7 @@ class FileScanningBusinessService:
                         FileModificationTime=FileModificationTime,
                         LastScannedDate=datetime.now()
                     )
+                    # Note: RootFolderId is not stored in MediaFiles table - files are associated by FilePath
                     
                     # Extract metadata if requested
                     if ExtractMetadata:
@@ -719,11 +735,7 @@ class FileScanningBusinessService:
             # Add encoding errors to scan errors
             self.ScanErrors.extend(EncodingErrors)
             
-            LoggingService.LogInfo("Scan results updated: TotalFiles={}, Processed={}, Skipped={}, Errors={}", 
-                                 self.ScanResults.TotalFilesFound, 
-                                 self.ScanResults.TotalFilesProcessed,
-                                 self.ScanResults.TotalFilesSkipped,
-                                 self.ScanResults.TotalFilesWithErrors)
+            LoggingService.LogInfo(f"Scan results updated: TotalFiles={self.ScanResults.TotalFilesFound}, Processed={self.ScanResults.TotalFilesProcessed}, Skipped={self.ScanResults.TotalFilesSkipped}, Errors={self.ScanResults.TotalFilesWithErrors}")
             
         except Exception as e:
             LoggingService.LogException("Error updating scan results", e)
@@ -852,7 +864,10 @@ class FileScanningBusinessService:
         try:
             # Don't extract if media analysis is not available
             if not self.FileManager.IsMediaAnalysisAvailable():
+                LoggingService.LogWarning("Media analysis not available - skipping metadata extraction", 'ShouldExtractMetadata', 'FileScanningBusinessService')
                 return False
+            
+            LoggingService.LogDebug(f"Media analysis is available for file: {MediaFile.FilePath}", 'ShouldExtractMetadata', 'FileScanningBusinessService')
             
             # Always extract for new files (no metadata at all)
             if (MediaFile.VideoBitrateKbps is None and 
@@ -861,10 +876,17 @@ class FileScanningBusinessService:
                 MediaFile.Codec is None and 
                 MediaFile.DurationMinutes is None and 
                 MediaFile.FrameRate is None):
+                LoggingService.LogDebug(f"File needs metadata extraction (new file): {MediaFile.FilePath}", 'ShouldExtractMetadata', 'FileScanningBusinessService')
                 return True
             
             # Always extract if resolution is None (FFprobe analysis failed or never ran)
             if MediaFile.Resolution is None:
+                LoggingService.LogDebug(f"File needs metadata extraction (no resolution): {MediaFile.FilePath}", 'ShouldExtractMetadata', 'FileScanningBusinessService')
+                return True
+            
+            # Always extract if TotalFrames is missing (critical for transcode progress tracking)
+            if MediaFile.TotalFrames is None:
+                LoggingService.LogDebug(f"File needs metadata extraction (no TotalFrames): {MediaFile.FilePath}", 'ShouldExtractMetadata', 'FileScanningBusinessService')
                 return True
             
             # Check if file has changed (size or name)
@@ -1047,14 +1069,21 @@ class FileScanningBusinessService:
                 }
             
             # Get files that need metadata extraction
-            # Always get all files and filter by metadata needs, not by root folder
-            FilesNeedingMetadata = self.DatabaseManager.GetAllMediaFiles()
+            # Filter by root folder if RootFolderId is provided, otherwise get all files
+            if RootFolderId is not None:
+                FilesNeedingMetadata = self.DatabaseManager.GetMediaFilesByRootFolderId(RootFolderId)
+                LoggingService.LogInfo(f"Found {len(FilesNeedingMetadata)} files for RootFolderId: {RootFolderId}", 'ExtractMetadataForExistingFiles', 'FileScanningBusinessService')
+            else:
+                FilesNeedingMetadata = self.DatabaseManager.GetAllMediaFiles()
+                LoggingService.LogInfo(f"Found {len(FilesNeedingMetadata)} total files for metadata extraction", 'ExtractMetadataForExistingFiles', 'FileScanningBusinessService')
             
             # Filter files that need metadata
             FilesToProcess = []
             for File in FilesNeedingMetadata:
                 if self.ShouldExtractMetadata(File):
                     FilesToProcess.append(File)
+            
+            LoggingService.LogInfo(f"Files needing metadata extraction: {len(FilesToProcess)} out of {len(FilesNeedingMetadata)}", 'ExtractMetadataForExistingFiles', 'FileScanningBusinessService')
             
             if not FilesToProcess:
                 return {
