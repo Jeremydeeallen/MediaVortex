@@ -1,2 +1,0 @@
-# SystemOrchestratorService Requirements
-# Simple process manager - no external dependencies needed

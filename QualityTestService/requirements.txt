@@ -1,0 +1,10 @@
+# QualityTestService Dependencies
+# Core dependencies for quality testing microservice
+
+# System monitoring
+psutil>=5.9.0
+
+# Process naming
+setproctitle
+
+# Note: FFmpeg is standalone, all other functionality uses built-in Python modules

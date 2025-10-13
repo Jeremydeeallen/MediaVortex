@@ -1,64 +1,18 @@
-# Disable Python bytecode caching completely to prevent stale code issues
+"""
+WebService Application Logic
+Main Flask web application for MediaVortex
+"""
+
 import sys
 import os
-import shutil
-import setproctitle
-import psutil
 import time
 import threading
+import psutil
 from datetime import datetime
 
-# Set process title for better visibility in Task Manager
-setproctitle.setproctitle("MediaVortex")
-
-# Disable bytecode generation completely
-sys.dont_write_bytecode = True
-sys.dont_write_bytecode = True
-
-# Clear ALL existing cache directories to ensure fresh code execution
-CacheDirsToClear = [
-    '__pycache__',
-    'Repositories/__pycache__',
-    'Models/__pycache__', 
-    'Services/__pycache__',
-    'Controllers/__pycache__',
-    'ViewModels/__pycache__',
-    'Scripts/__pycache__',
-    'Tests/__pycache__',
-    'Tests/Contract/__pycache__',
-    'Tests/CursorTests/__pycache__',
-    'Tests/Integration/__pycache__'
-]
-
-print("=== DISABLING PYTHON CACHING ===")
-for CacheDir in CacheDirsToClear:
-    if os.path.exists(CacheDir):
-        try:
-            shutil.rmtree(CacheDir)
-            print(f"✅ Cleared cache: {CacheDir}")
-        except Exception as e:
-            print(f"⚠️  Warning: Could not clear cache for {CacheDir}: {e}")
-
-# Force reload of critical modules by clearing from sys.modules
-CriticalModules = [
-    'Repositories.DatabaseManager',
-    'Models.QualityTestingQueueModel', 
-    'Models.QualityTestProgressModel',
-    'Models.QualityTestResultModel',
-    'ViewModels.QualityTestingViewModel',
-    'Controllers.QualityTestingController',
-]
-
-for Module in CriticalModules:
-    if Module in sys.modules:
-        del sys.modules[Module]
-        print(f"✅ Cleared module from cache: {Module}")
-
-print("=== CACHING DISABLED - FRESH CODE WILL BE LOADED ===")
-
-# Set development mode to disable all caching
-os.environ['FLASK_ENV'] = 'development'
-os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
+# Add the project root to the Python path
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, project_root)
 
 from flask import Flask, render_template, jsonify
 from flask_cors import CORS
@@ -76,16 +30,22 @@ from Controllers.QueueResetController import QueueResetBlueprint
 from Controllers.SQLQueriesController import SQLQueriesBlueprint
 
 
-class MediaVortexApp:
-    """Main Flask application for MediaVortex."""
+class WebServiceApp:
+    """Main Flask application for MediaVortex WebService."""
     
     def __init__(self):
         # Check if another instance is already running
         if self.PrivateIsServiceAlreadyRunning():
-            print("ERROR: MediaVortex is already running. Preventing duplicate instance.")
+            print("ERROR: WebService is already running. Preventing duplicate instance.")
             sys.exit(1)
             
-        self.App = Flask(__name__)
+        # Set template and static folders to parent directory
+        template_dir = os.path.join(project_root, 'Templates')
+        static_dir = os.path.join(project_root, 'static')
+        
+        self.App = Flask(__name__, 
+                        template_folder=template_dir,
+                        static_folder=static_dir)
         self.App.config['SECRET_KEY'] = 'mediavortex-secret-key-2024'
         CORS(self.App)
         
@@ -111,14 +71,14 @@ class MediaVortexApp:
         # Start status polling for service control
         self.PrivateStartStatusPolling()
     
-    def PrivateRegisterMediaVortexService(self):
-        """Register MediaVortex service in the ServiceStatus table."""
+    def PrivateRegisterWebService(self):
+        """Register WebService in the ServiceStatus table."""
         try:
-            print("Registering MediaVortex service in database...")
+            print("Registering WebService in database...")
             
             # Create service status entry in database
             service_status = {
-                'ServiceName': 'MediaVortex',
+                'ServiceName': 'WebService',
                 'Status': 'Starting',
                 'HealthStatus': 'Unknown',
                 'StartTime': self.StartTime.isoformat(),
@@ -149,36 +109,36 @@ class MediaVortexApp:
             print(f"SaveServiceStatus returned: {success}")
             
             if success:
-                print("✅ MediaVortex service registered in database")
+                print("WebService registered in database")
             else:
-                print("❌ Failed to register MediaVortex service in database")
+                print("Failed to register WebService in database")
                 
         except Exception as e:
-            print(f"❌ Error registering MediaVortex service in database: {e}")
+            print(f"Error registering WebService in database: {e}")
             import traceback
             traceback.print_exc()
     
     def PrivateIsServiceAlreadyRunning(self) -> bool:
-        """Check if another MediaVortex instance is already running."""
+        """Check if another WebService instance is already running."""
         try:
             current_pid = os.getpid()
-            mediavortex_processes = []
+            webservice_processes = []
             
             for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
                 try:
-                    if proc.info['name'] == 'MediaVortex' and proc.info['pid'] != current_pid:
-                        mediavortex_processes.append(proc.info['pid'])
+                    if proc.info['name'] == 'WebService' and proc.info['pid'] != current_pid:
+                        webservice_processes.append(proc.info['pid'])
                 except (psutil.NoSuchProcess, psutil.AccessDenied):
                     continue
             
-            if mediavortex_processes:
-                print(f"ERROR: Found {len(mediavortex_processes)} existing MediaVortex processes: {mediavortex_processes}")
+            if webservice_processes:
+                print(f"ERROR: Found {len(webservice_processes)} existing WebService processes: {webservice_processes}")
                 return True
             
             return False
             
         except Exception as e:
-            print(f"ERROR: Exception checking for existing MediaVortex instances: {e}")
+            print(f"ERROR: Exception checking for existing WebService instances: {e}")
             return False
     
     def _register_routes(self):
@@ -225,7 +185,7 @@ class MediaVortexApp:
             """Health check endpoint."""
             return jsonify({
                 'status': 'healthy',
-                'message': 'MediaVortex is running'
+                'message': 'WebService is running'
             })
     
     def _register_blueprints(self):
@@ -247,9 +207,9 @@ class MediaVortexApp:
         try:
             self.ServiceStatusThread = threading.Thread(target=self.PrivateServiceStatusLoop, daemon=True)
             self.ServiceStatusThread.start()
-            print("✅ MediaVortex service status tracking started")
+            print("WebService service status tracking started")
         except Exception as e:
-            print(f"❌ Failed to start service status tracking: {e}")
+            print(f"Failed to start service status tracking: {e}")
     
     def PrivateStartStatusPolling(self):
         """Start status polling thread for service control."""
@@ -260,9 +220,9 @@ class MediaVortexApp:
                 name="StatusPoller"
             )
             self.StatusPollingThread.start()
-            print("✅ MediaVortex status polling started")
+            print("WebService status polling started")
         except Exception as e:
-            print(f"❌ Failed to start status polling: {e}")
+            print(f"Failed to start status polling: {e}")
     
     def PrivateServiceStatusLoop(self):
         """Background thread to update service status."""
@@ -281,14 +241,14 @@ class MediaVortexApp:
                 # Get current service status from ServiceStatus table
                 from Repositories.DatabaseManager import DatabaseManager
                 db_manager = DatabaseManager()
-                service_status = db_manager.GetServiceStatus("MediaVortex")
+                service_status = db_manager.GetServiceStatus("WebService")
                 
                 if service_status:
                     new_status = service_status.get('Status', 'Stopped')
                     
                     # Check if status has changed
                     if new_status != self.CurrentStatus:
-                        print(f"MediaVortex service status changed from {self.CurrentStatus} to {new_status}")
+                        print(f"WebService service status changed from {self.CurrentStatus} to {new_status}")
                         
                         # Handle status change
                         self.PrivateHandleStatusChange(new_status)
@@ -304,21 +264,21 @@ class MediaVortexApp:
     def PrivateHandleStatusChange(self, new_status: str):
         """Handle service status changes."""
         try:
-            print(f"Handling MediaVortex status change to: {new_status}")
+            print(f"Handling WebService status change to: {new_status}")
             
             if new_status == "Running":
                 # Service should be running - ensure web server is active
-                print("MediaVortex service status set to Running")
+                print("WebService service status set to Running")
                 self.PrivateUpdateServiceStatus()
                 
             elif new_status == "Stopped":
                 # Service should be stopped
-                print("MediaVortex service status set to Stopped")
+                print("WebService service status set to Stopped")
                 self.PrivateUpdateServiceStatus()
                 
             elif new_status == "GracefulStop":
                 # Handle graceful stop request
-                print("Graceful stop requested for MediaVortex - will complete current requests before stopping")
+                print("Graceful stop requested for WebService - will complete current requests before stopping")
                 self.PrivateUpdateServiceStatus()
                 
                 # Start a monitoring thread to check when current requests complete
@@ -334,11 +294,11 @@ class MediaVortexApp:
     def PrivateMonitorGracefulStop(self):
         """Monitor graceful stop progress and complete shutdown when current requests finish."""
         try:
-            print("Starting graceful stop monitoring for MediaVortex")
+            print("Starting graceful stop monitoring for WebService")
             # For a web service, we can't easily track "current requests" like transcoding jobs
             # So we'll just wait a short time for any pending requests to complete
             time.sleep(5)  # Give 5 seconds for any pending requests
-            print("Graceful stop completed for MediaVortex")
+            print("Graceful stop completed for WebService")
             self.PrivateUpdateServiceStatus()
             self.ShutdownEvent = True
         except Exception as e:
@@ -346,7 +306,7 @@ class MediaVortexApp:
             self.ShutdownEvent = True
     
     def PrivateUpdateServiceStatus(self):
-        """Update MediaVortex service status in database."""
+        """Update WebService service status in database."""
         try:
             from Repositories.DatabaseManager import DatabaseManager
             from Services.LoggingService import LoggingService
@@ -364,8 +324,8 @@ class MediaVortexApp:
             
             # Prepare service status data
             service_status = {
-                'ServiceName': 'MediaVortex',
-                'Status': 'Running',  # MediaVortex is always running when this method is called
+                'ServiceName': 'WebService',
+                'Status': 'Running',  # WebService is always running when this method is called
                 'HealthStatus': 'Healthy',
                 'StartTime': self.StartTime.isoformat(),
                 'LastHealthCheck': datetime.now().isoformat(),
@@ -376,7 +336,7 @@ class MediaVortexApp:
                 'DiskSpace': disk_space,
                 'ErrorCount': 0,
                 'MaxErrors': 10,
-                'ActiveJobsCount': 0,  # MediaVortex doesn't process jobs directly
+                'ActiveJobsCount': 0,  # WebService doesn't process jobs directly
                 'IsProcessing': False,
                 'LastErrorMessage': None,
                 'ProcessId': os.getpid(),
@@ -389,12 +349,12 @@ class MediaVortexApp:
             success = db_manager.SaveServiceStatus(service_status)
             
             if success:
-                LoggingService.LogDebug("MediaVortex service status updated", "MediaVortexApp", "PrivateUpdateServiceStatus")
+                LoggingService.LogDebug("WebService service status updated", "WebServiceApp", "PrivateUpdateServiceStatus")
             else:
-                LoggingService.LogWarning("Failed to update MediaVortex service status", "MediaVortexApp", "PrivateUpdateServiceStatus")
+                LoggingService.LogWarning("Failed to update WebService service status", "WebServiceApp", "PrivateUpdateServiceStatus")
                 
         except Exception as e:
-            print(f"Exception updating MediaVortex service status: {e}")
+            print(f"Exception updating WebService service status: {e}")
     
     def PrivateGetMemoryUsage(self) -> float:
         """Get current memory usage in MB."""
@@ -432,7 +392,7 @@ class MediaVortexApp:
     
     def Run(self, host='0.0.0.0', port=5000, debug=False):
         """Run the Flask application."""
-        print(f"Starting MediaVortex on http://{host}:{port}")
+        print(f"Starting WebService on http://{host}:{port}")
         print(f"Settings page: http://{host}:{port}/settings")
         print(f"File Scanning page: http://{host}:{port}/Scanning")
         print(f"Transcoding Queue page: http://{host}:{port}/TranscodeQueue")
@@ -440,8 +400,8 @@ class MediaVortexApp:
         print(f"Service Status page: http://{host}:{port}/Status")
         print(f"SQL Queries page: http://{host}:{port}/SQLQueries")
         
-        # Register MediaVortex service in database before starting
-        self.PrivateRegisterMediaVortexService()
+        # Register WebService in database before starting
+        self.PrivateRegisterWebService()
         
         # Set initial status to Running and update database
         self.CurrentStatus = "Running"
@@ -450,10 +410,10 @@ class MediaVortexApp:
         try:
             self.App.run(host=host, port=port, debug=debug)
         except KeyboardInterrupt:
-            print("\n🛑 MediaVortex shutdown requested")
+            print("\nWebService shutdown requested")
             self.Shutdown()
         except Exception as e:
-            print(f"❌ Error running MediaVortex: {e}")
+            print(f"Error running WebService: {e}")
             self.Shutdown()
         finally:
             # Cleanup on shutdown
@@ -464,17 +424,12 @@ class MediaVortexApp:
                 self.StatusPollingThread.join(timeout=5)
     
     def Shutdown(self):
-        """Shutdown the MediaVortex service gracefully."""
+        """Shutdown the WebService gracefully."""
         try:
-            print("🛑 Initiating MediaVortex shutdown...")
+            print("Initiating WebService shutdown...")
             self.CurrentStatus = "Stopped"
             self.PrivateUpdateServiceStatus()
             self.ShutdownEvent = True
-            print("✅ MediaVortex shutdown complete")
+            print("WebService shutdown complete")
         except Exception as e:
-            print(f"❌ Error during MediaVortex shutdown: {e}")
-
-
-if __name__ == '__main__':
-    app = MediaVortexApp()
-    app.Run(debug=True)
+            print(f"Error during WebService shutdown: {e}")

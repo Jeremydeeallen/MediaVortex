@@ -8,64 +8,49 @@ MediaVortex uses a microservices architecture with multiple services that need t
 
 ### Services
 
-1. **MediaVortex** - Main Flask web application (port 5000)
+1. **WebService** - Main Flask web application (port 5000) - replaces MediaVortex.py
 2. **TranscodeService** - Microservice for transcoding operations
-3. **QualityCompareService** - Microservice for quality testing operations
-4. **SystemOrchestratorService** - Master controller for all services (optional)
+3. **QualityTestService** - Microservice for quality testing operations - replaces MicroServiceQualityTest
 
 ### Service Dependencies
 
 ```
-MediaVortex (Web UI)
+WebService (Web UI)
     ↓
-TranscodeService (depends on MediaVortex)
+TranscodeService (depends on WebService)
     ↓
-QualityCompareService (depends on MediaVortex)
+QualityTestService (depends on WebService)
 ```
 
 ## Startup Options
 
-### Option 1: SystemOrchestratorService (Recommended)
+### Option 1: Simple Orchestrator (Recommended)
 
-The SystemOrchestratorService acts as a master controller that manages all other services.
+The new simple orchestrator provides easy startup and shutdown of all services.
 
 #### Benefits:
-- **Centralized Management** - Single point of control
-- **Health Monitoring** - Continuous monitoring and auto-restart
-- **Dependency Management** - Ensures services start in correct order
-- **Unified Logging** - Centralized logging for entire system
-- **Graceful Shutdown** - Coordinated shutdown of all services
+- **Simple Management** - Easy to understand and use
+- **Cross-platform** - Works on Windows, Linux, and macOS
+- **PID Tracking** - Tracks service processes for clean shutdown
+- **No Database Coupling** - Independent of database state
+- **Fast Startup** - Minimal overhead
 
 #### Usage:
 
 **Cross-platform Python (Recommended):**
 ```bash
-# Start all services with orchestrator
-python StartSystemOrchestrator.py
-
-# Start in background
-python StartSystemOrchestrator.py --background
-
-# Force restart if already running
-python StartSystemOrchestrator.py --force
+# Start all services
+python StartMediaVortex.py
 
 # Stop all services
-python StopSystemOrchestrator.py
+python StopMediaVortex.py
+
+# Check service status
+python StopMediaVortex.py --status
 ```
 
-**Windows PowerShell (Legacy):**
-```powershell
-# Start orchestrator
-.\StartSystemOrchestrator.ps1
 
-# Start in background
-.\StartSystemOrchestrator.ps1 -Background
-
-# Stop orchestrator
-.\StopSystemOrchestrator.ps1
-```
-
-### Option 2: Individual Service Management
+### Option 3: Individual Service Management
 
 For manual control or debugging, you can start services individually.
 
@@ -73,20 +58,14 @@ For manual control or debugging, you can start services individually.
 
 **Cross-platform Python:**
 ```bash
-# Start all services individually
-python StartAllServices.py
+# Start WebService
+cd WebService && python Main.py
 
-# Start only MediaVortex
-python StartAllServices.py --mediavortex-only
+# Start TranscodeService
+cd TranscodeService && python Main.py
 
-# Start only TranscodeService
-python StartAllServices.py --transcode-only
-
-# Start only QualityCompareService
-python StartAllServices.py --quality-only
-
-# Start in background
-python StartAllServices.py --background
+# Start QualityTestService
+cd QualityTestService && python Main.py
 
 # Stop all services
 python StopAllServices.py
@@ -98,18 +77,18 @@ python StopAllServices.py
 ```powershell
 # Start individual services
 .\StartTranscodeService.ps1
-.\StartQualityCompareService.ps1
+.\StartQualityTestService.ps1
 
 # Stop individual services
 .\StopTranscodeService.ps1
-.\StopQualityCompareService.ps1
+.\StopQualityTestService.ps1
 ```
 
 **Cross-platform Python:**
 ```bash
 # Start individual services (if you create individual scripts)
 python StartTranscodeService.py
-python StartQualityCompareService.py
+python StartQualityTestService.py
 ```
 
 ## Cross-Platform Support
@@ -129,11 +108,10 @@ python StartQualityCompareService.py
 
 ### Health Monitoring
 
-The SystemOrchestratorService provides:
-- **Port Health Checks** - Verifies services are responding on their ports
-- **Process Monitoring** - Ensures processes are still running
-- **Auto-Restart** - Automatically restarts failed services
-- **Dependency Checking** - Ensures dependent services are running
+The simple orchestrator provides:
+- **Process Management** - Starts and stops services cleanly
+- **Cross-platform Support** - Works on Windows, Linux, and macOS
+- **Simple Operation** - Easy to understand and maintain
 
 ### Logging
 
@@ -208,8 +186,7 @@ export MEDIAVORTEX_MAX_SERVICE_RESTARTS=3
 - Use `--verbose` flag for detailed logging
 
 ### Production
-- Use `SystemOrchestratorService` for production
-- Start with `--background` flag
+- Use `StartMediaVortex.py` for production
 - Monitor logs regularly
 - Set up proper process monitoring
 
@@ -223,38 +200,27 @@ export MEDIAVORTEX_MAX_SERVICE_RESTARTS=3
 
 ```
 MediaVortex/
-├── SystemOrchestratorService/          # Master controller
-│   ├── App.py                         # Orchestrator application
-│   ├── Main.py                        # Entry point
-│   ├── Config.py                      # Configuration
-│   └── requirements.txt               # Dependencies
+├── WebService/                        # Web interface
+│   ├── App.py
+│   ├── Main.py
+│   └── requirements.txt
 ├── TranscodeService/                  # Transcoding microservice
 │   ├── App.py
 │   ├── Main.py
 │   └── requirements.txt
-├── QualityCompareService/             # Quality testing microservice
+├── QualityTestService/                # Quality testing microservice
 │   ├── App.py
 │   ├── Main.py
 │   └── requirements.txt
-├── StartSystemOrchestrator.py         # Cross-platform startup
-├── StopSystemOrchestrator.py          # Cross-platform shutdown
-├── StartAllServices.py                # Individual service startup
-├── StopAllServices.py                 # Individual service shutdown
-├── StartSystemOrchestrator.ps1         # Windows PowerShell (legacy)
-├── StopSystemOrchestrator.ps1         # Windows PowerShell (legacy)
-├── StartTranscodeService.ps1          # Windows PowerShell (legacy)
-├── StopTranscodeService.ps1           # Windows PowerShell (legacy)
-├── StartQualityCompareService.ps1     # Windows PowerShell (legacy)
-└── StopQualityCompareService.ps1     # Windows PowerShell (legacy)
+├── StartMediaVortex.py                # Simple orchestrator startup
+├── StopMediaVortex.py                 # Simple orchestrator shutdown
 ```
 
 ## Summary
 
-The MediaVortex system orchestration provides multiple options for managing the microservices architecture:
+The MediaVortex system orchestration provides a simple approach for managing the microservices architecture:
 
-1. **SystemOrchestratorService** - Recommended for production use
+1. **Simple Orchestrator** - Recommended for all use cases
 2. **Individual Service Management** - Useful for development and debugging
-3. **Cross-platform Python Scripts** - Works on both Windows and Linux
-4. **Legacy PowerShell Scripts** - Windows-only, maintained for compatibility
 
-Choose the approach that best fits your needs, with SystemOrchestratorService being the recommended solution for most use cases.
+Choose the approach that best fits your needs, with the simple orchestrator being the recommended solution for most use cases.

@@ -1,12 +1,12 @@
 """
-SystemOrchestratorService Configuration
+QualityTestService Configuration
 """
 
 import os
 from typing import Dict, Any
 
-class SystemOrchestratorConfig:
-    """Configuration for SystemOrchestratorService."""
+class QualityTestServiceConfig:
+    """Configuration for QualityTestService."""
     
     def __init__(self):
         """Initialize configuration with default values."""
@@ -16,28 +16,19 @@ class SystemOrchestratorConfig:
         self.ServiceStartupTimeout = int(os.getenv('MEDIAVORTEX_SERVICE_STARTUP_TIMEOUT', '60'))
         self.MaxServiceRestarts = int(os.getenv('MEDIAVORTEX_MAX_SERVICE_RESTARTS', '3'))
         
+        # Quality testing specific settings
+        self.MaxConcurrentJobs = int(os.getenv('MEDIAVORTEX_MAX_CONCURRENT_JOBS', '1'))
+        self.VMAFTimeout = int(os.getenv('MEDIAVORTEX_VMAF_TIMEOUT', '300'))  # 5 minutes
+        self.WorkerSleepInterval = int(os.getenv('MEDIAVORTEX_WORKER_SLEEP_INTERVAL', '5'))
+        
         # Service configurations
-        self.Services = {
-            'MediaVortex': {
-                'Port': 5000,
-                'Dependencies': [],
-                'StartupTimeout': 30
-            },
-            'TranscodeService': {
-                'Port': None,
-                'Dependencies': ['MediaVortex'],
-                'StartupTimeout': 45
-            },
-            'QualityCompareService': {
-                'Port': None,
-                'Dependencies': ['MediaVortex'],
-                'StartupTimeout': 45
-            }
+        self.ServiceInfo = {
+            'Name': 'QualityTestService',
+            'ServiceType': 'Microservice',
+            'Version': '1.0.0',
+            'Dependencies': ['MediaVortex'],
+            'StartupTimeout': 45
         }
-    
-    def GetServiceConfig(self, service_name: str) -> Dict[str, Any]:
-        """Get configuration for a specific service."""
-        return self.Services.get(service_name, {})
     
     def GetDatabasePath(self) -> str:
         """Get the database path."""
@@ -58,3 +49,19 @@ class SystemOrchestratorConfig:
     def GetMaxServiceRestarts(self) -> int:
         """Get the maximum number of service restarts."""
         return self.MaxServiceRestarts
+    
+    def GetMaxConcurrentJobs(self) -> int:
+        """Get the maximum number of concurrent quality test jobs."""
+        return self.MaxConcurrentJobs
+    
+    def GetVMAFTimeout(self) -> int:
+        """Get the VMAF analysis timeout in seconds."""
+        return self.VMAFTimeout
+    
+    def GetWorkerSleepInterval(self) -> int:
+        """Get the worker sleep interval in seconds."""
+        return self.WorkerSleepInterval
+    
+    def GetServiceInfo(self) -> Dict[str, Any]:
+        """Get service information."""
+        return self.ServiceInfo

@@ -1,0 +1,17 @@
+# WebService Dependencies
+# Core dependencies for the web interface
+
+# Web framework
+flask>=2.3.0
+flask-cors
+
+# HTTP requests
+requests
+
+# System monitoring
+psutil>=5.9.0
+
+# Process naming
+setproctitle
+
+# Note: pathlib, shutil, os, tempfile, subprocess, logging, json, configparser are built-in Python modules

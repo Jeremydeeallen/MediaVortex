@@ -27,8 +27,7 @@ class PythonServiceStopper:
         self.ServicesToStop = [
             "MediaVortex",
             "TranscodeService", 
-            "QualityTestingService",
-            "SystemOrchestratorService"
+            "QualityTestingService"
         ]
         self.StoppedServices = []
         self.FailedServices = []
@@ -93,9 +92,6 @@ class PythonServiceStopper:
                 # QualityTestingService
                 return ('qualitytestingservice' in CmdLineLower and 'main.py' in CmdLineLower)
             
-            elif ServiceName == "SystemOrchestratorService":
-                # SystemOrchestratorService
-                return ('systemorchestratorservice' in CmdLineLower and 'main.py' in CmdLineLower)
             
             return False
             

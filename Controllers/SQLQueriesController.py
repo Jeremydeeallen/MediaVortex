@@ -88,10 +88,8 @@ def GetServiceLogs():
             # Use more specific wildcard patterns for better matching
             if service_name == "TranscodeService":
                 parameters.append("%Transcode%")
-            elif service_name == "QualityTestingService" or service_name == "QualityCompareService":
+            elif service_name == "QualityTestService" or service_name == "QualityCompareService":
                 parameters.append("%Quality%")
-            elif service_name == "SystemOrchestratorService":
-                parameters.append("%SystemOrchestrator%")
             else:
                 parameters.append(f"%{service_name}%")
         
@@ -334,4 +332,255 @@ def GetDatabaseInfo():
     except Exception as e:
         error_msg = f"Exception getting database info: {str(e)}"
         LoggingService.LogException(error_msg, e, "SQLQueriesController", "GetDatabaseInfo")
+        return jsonify({"Success": False, "ErrorMessage": error_msg}), 500
+
+@SQLQueriesBlueprint.route('/GetMediaFileComparison', methods=['GET'])
+def GetMediaFileComparison():
+    """Get side-by-side comparison of original vs transcoded media file."""
+    try:
+        LoggingService.LogFunctionEntry("GetMediaFileComparison", "SQLQueriesController")
+        
+        FileId = request.args.get('FileId', '')
+        FilePath = request.args.get('FilePath', '')
+        
+        if not FileId and not FilePath:
+            return jsonify({
+                "Success": False,
+                "ErrorMessage": "FileId or FilePath parameter is required"
+            }), 400
+        
+        # Build query to get original file info
+        OriginalQuery = """
+        SELECT Id, FilePath, FileName, SizeMB, VideoBitrateKbps, AudioBitrateKbps, 
+               Resolution, Codec, DurationMinutes, FrameRate, TotalFrames, CodecProfile,
+               ColorRange, FieldOrder, HasBFrames, RefFrames, PixelFormat, Level,
+               AudioChannels, AudioSampleRate, AudioSampleFormat, AudioChannelLayout,
+               ContainerFormat, OverallBitrate, AssignedProfile
+        FROM MediaFiles 
+        WHERE """
+        
+        if FileId:
+            OriginalQuery += "Id = ?"
+            OriginalParams = (FileId,)
+        else:
+            OriginalQuery += "FilePath LIKE ?"
+            OriginalParams = (f"%{FilePath}%",)
+        
+        OriginalResults = SharedDatabaseManager.DatabaseService.ExecuteQuery(OriginalQuery, OriginalParams)
+        
+        if not OriginalResults:
+            return jsonify({
+                "Success": False,
+                "ErrorMessage": "Original file not found"
+            }), 404
+        
+        OriginalFile = dict(OriginalResults[0])
+        
+        # Get transcoded version info from TranscodeAttempts
+        TranscodedQuery = """
+        SELECT ta.Id, ta.FilePath, ta.OldSizeBytes, ta.NewSizeBytes, ta.SizeReductionBytes,
+               ta.SizeReductionPercent, ta.VideoBitrateKbps, ta.AudioBitrateKbps,
+               ta.ProfileName, ta.Quality, ta.AttemptDate, ta.Success, ta.ErrorMessage,
+               ta.TranscodeDurationSeconds, ta.FfpmpegCommand, ta.VMAF,
+               qtr.VMAFScore, qtr.PassesThreshold, qtr.TestDuration, qtr.DateTested,
+               qtr.Status as QualityTestStatus, qtr.ErrorMessage as QualityTestError
+        FROM TranscodeAttempts ta
+        LEFT JOIN QualityTestResults qtr ON ta.Id = qtr.TranscodeAttemptId
+        WHERE ta.FilePath = ?
+        ORDER BY ta.AttemptDate DESC
+        LIMIT 1
+        """
+        
+        TranscodedResults = SharedDatabaseManager.DatabaseService.ExecuteQuery(TranscodedQuery, (OriginalFile['FilePath'],))
+        
+        TranscodedFile = None
+        if TranscodedResults:
+            TranscodedFile = dict(TranscodedResults[0])
+        
+        # Get archived version if available
+        ArchivedQuery = """
+        SELECT Id, FilePath, FileName, SizeMB, VideoBitrateKbps, AudioBitrateKbps,
+               Resolution, Codec, DurationMinutes, FrameRate, TotalFrames, CodecProfile,
+               ColorRange, FieldOrder, HasBFrames, RefFrames, PixelFormat, Level,
+               AudioChannels, AudioSampleRate, AudioSampleFormat, AudioChannelLayout,
+               ContainerFormat, OverallBitrate, TranscodeAttemptId
+        FROM MediaFilesArchive
+        WHERE FilePath = ?
+        ORDER BY ArchiveDate DESC
+        LIMIT 1
+        """
+        
+        ArchivedResults = SharedDatabaseManager.DatabaseService.ExecuteQuery(ArchivedQuery, (OriginalFile['FilePath'],))
+        
+        ArchivedFile = None
+        if ArchivedResults:
+            ArchivedFile = dict(ArchivedResults[0])
+        
+        LoggingService.LogInfo(f"Retrieved media file comparison for: {OriginalFile['FilePath']}", "SQLQueriesController", "GetMediaFileComparison")
+        
+        return jsonify({
+            "Success": True,
+            "OriginalFile": OriginalFile,
+            "TranscodedFile": TranscodedFile,
+            "ArchivedFile": ArchivedFile
+        })
+        
+    except Exception as e:
+        error_msg = f"Exception getting media file comparison: {str(e)}"
+        LoggingService.LogException(error_msg, e, "SQLQueriesController", "GetMediaFileComparison")
+        return jsonify({"Success": False, "ErrorMessage": error_msg}), 500
+
+@SQLQueriesBlueprint.route('/GetStuckJobs', methods=['GET'])
+def GetStuckJobs():
+    """Get jobs stuck in processing."""
+    try:
+        LoggingService.LogFunctionEntry("GetStuckJobs", "SQLQueriesController")
+        
+        StuckJobs = []
+        
+        # Get stuck transcode queue items
+        TranscodeQuery = """
+        SELECT 'TranscodeQueue' as JobType, Id, FilePath, FileName, Status, DateStarted,
+               datetime('now') - DateStarted as Duration
+        FROM TranscodeQueue 
+        WHERE Status = 'Processing' AND DateStarted < datetime('now', '-1 hour')
+        ORDER BY DateStarted ASC
+        """
+        
+        TranscodeResults = SharedDatabaseManager.DatabaseService.ExecuteQuery(TranscodeQuery)
+        
+        for row in TranscodeResults:
+            StuckJobs.append({
+                "JobType": row[0],
+                "JobId": row[1],
+                "FilePath": row[2],
+                "FileName": row[3],
+                "Status": row[4],
+                "StartedAt": row[5],
+                "Duration": row[6]
+            })
+        
+        # Get stuck active jobs
+        ActiveJobsQuery = """
+        SELECT 'ActiveJob' as JobType, Id, ServiceName, JobType as JobTypeName, Status, StartedAt,
+               datetime('now') - StartedAt as Duration
+        FROM ActiveJobs 
+        WHERE Status = 'Running' AND StartedAt < datetime('now', '-1 hour')
+        ORDER BY StartedAt ASC
+        """
+        
+        ActiveJobsResults = SharedDatabaseManager.DatabaseService.ExecuteQuery(ActiveJobsQuery)
+        
+        for row in ActiveJobsResults:
+            StuckJobs.append({
+                "JobType": row[0],
+                "JobId": row[1],
+                "FilePath": row[2],  # ServiceName
+                "FileName": row[3],  # JobTypeName
+                "Status": row[4],
+                "StartedAt": row[5],
+                "Duration": row[6]
+            })
+        
+        # Get stuck quality testing jobs
+        QualityTestQuery = """
+        SELECT 'QualityTest' as JobType, Id, TranscodeAttemptId, OriginalFilePath, 
+               Status, DateStarted, datetime('now') - DateStarted as Duration
+        FROM QualityTestingQueue 
+        WHERE DateStarted IS NOT NULL AND DateStarted < datetime('now', '-2 hours')
+        ORDER BY DateStarted ASC
+        """
+        
+        QualityTestResults = SharedDatabaseManager.DatabaseService.ExecuteQuery(QualityTestQuery)
+        
+        for row in QualityTestResults:
+            StuckJobs.append({
+                "JobType": row[0],
+                "JobId": row[1],
+                "FilePath": row[3],  # OriginalFilePath
+                "FileName": f"QualityTest-{row[2]}",  # TranscodeAttemptId
+                "Status": row[4],
+                "StartedAt": row[5],
+                "Duration": row[6]
+            })
+        
+        LoggingService.LogInfo(f"Retrieved {len(StuckJobs)} stuck jobs", "SQLQueriesController", "GetStuckJobs")
+        
+        return jsonify({
+            "Success": True,
+            "StuckJobs": StuckJobs,
+            "Count": len(StuckJobs)
+        })
+        
+    except Exception as e:
+        error_msg = f"Exception getting stuck jobs: {str(e)}"
+        LoggingService.LogException(error_msg, e, "SQLQueriesController", "GetStuckJobs")
+        return jsonify({"Success": False, "ErrorMessage": error_msg}), 500
+
+@SQLQueriesBlueprint.route('/GetQualityTestResultsFiltered', methods=['GET'])
+def GetQualityTestResultsFiltered():
+    """Get quality test results filtered by pass/fail status."""
+    try:
+        LoggingService.LogFunctionEntry("GetQualityTestResultsFiltered", "SQLQueriesController")
+        
+        PassFailFilter = request.args.get('PassFailFilter', 'All')  # All, Passed, Failed
+        Limit = int(request.args.get('Limit', 50))
+        
+        if Limit < 1 or Limit > 200:
+            Limit = 50
+        
+        # Build query with optional filter
+        Query = """
+        SELECT qtr.Id, qtr.TranscodeAttemptId, qtr.VMAFScore, qtr.PassesThreshold,
+               qtr.TestDuration, qtr.DateTested, qtr.Status, qtr.ErrorMessage,
+               ta.FilePath, ta.ProfileName, ta.Quality, ta.AttemptDate,
+               ta.OldSizeBytes, ta.NewSizeBytes, ta.SizeReductionPercent
+        FROM QualityTestResults qtr
+        LEFT JOIN TranscodeAttempts ta ON qtr.TranscodeAttemptId = ta.Id
+        """
+        
+        Parameters = []
+        
+        if PassFailFilter == 'Passed':
+            Query += " WHERE qtr.PassesThreshold = 1"
+        elif PassFailFilter == 'Failed':
+            Query += " WHERE qtr.PassesThreshold = 0"
+        
+        Query += " ORDER BY qtr.DateTested DESC LIMIT ?"
+        Parameters.append(Limit)
+        
+        Results = SharedDatabaseManager.DatabaseService.ExecuteQuery(Query, Parameters)
+        
+        QualityTestResults = []
+        for row in Results:
+            QualityTestResults.append({
+                "Id": row[0],
+                "TranscodeAttemptId": row[1],
+                "VMAFScore": row[2],
+                "PassesThreshold": bool(row[3]),
+                "TestDuration": row[4],
+                "DateTested": row[5],
+                "Status": row[6],
+                "ErrorMessage": row[7],
+                "FilePath": row[8],
+                "ProfileName": row[9],
+                "Quality": row[10],
+                "AttemptDate": row[11],
+                "OldSizeBytes": row[12],
+                "NewSizeBytes": row[13],
+                "SizeReductionPercent": row[14]
+            })
+        
+        LoggingService.LogInfo(f"Retrieved {len(QualityTestResults)} quality test results with filter: {PassFailFilter}", "SQLQueriesController", "GetQualityTestResultsFiltered")
+        
+        return jsonify({
+            "Success": True,
+            "QualityTestResults": QualityTestResults,
+            "Count": len(QualityTestResults),
+            "Filter": PassFailFilter
+        })
+        
+    except Exception as e:
+        error_msg = f"Exception getting quality test results: {str(e)}"
+        LoggingService.LogException(error_msg, e, "SQLQueriesController", "GetQualityTestResultsFiltered")
         return jsonify({"Success": False, "ErrorMessage": error_msg}), 500

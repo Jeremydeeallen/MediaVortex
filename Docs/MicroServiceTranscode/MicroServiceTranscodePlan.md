@@ -509,7 +509,7 @@ python MediaVortex.py
 
 If migration fails:
 1. Keep existing TranscodeJobController in MediaVortex
-2. Disable MicroServiceTranscode in SystemOrchestrator
+2. Disable MicroServiceTranscode
 3. Revert MediaVortex.py changes
 4. Revert Template changes
 5. Continue using embedded transcoding

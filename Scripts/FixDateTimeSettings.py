@@ -64,7 +64,6 @@ def FindFilesWithCurrentTimestamp() -> list:
         'ViewModels',
         'Scripts',
         'TranscodeService',
-        'SystemOrchestratorService',
         'MicroServiceQualityTest'
     ]
     

@@ -30,7 +30,7 @@ def ControlService(service_name: str, action: str):
         LoggingService.LogInfo(f"Processing service control request for {service_name} with action {action}", "ServiceControlController", "ControlService")
         
         # Validate service name
-        valid_services = ['MediaVortex', 'TranscodeService', 'QualityTestingService', 'SystemOrchestratorService']
+        valid_services = ['WebService', 'TranscodeService', 'QualityTestService']
         if service_name not in valid_services:
             LoggingService.LogError(f"Invalid service name: {service_name}", "ServiceControlController", "ControlService")
             return jsonify({
@@ -79,12 +79,12 @@ def ControlService(service_name: str, action: str):
         return jsonify({"Success": False, "ErrorMessage": errorMsg}), 500
 
 def PrivateStartService(service_name: str) -> Dict[str, Any]:
-    """Start a service by creating a ServiceCommand for SystemOrchestratorService."""
+    """Start a service by creating a ServiceCommand."""
     try:
         LoggingService.LogInfo(f"Starting {service_name} via ServiceCommand queue", "ServiceControlController", "PrivateStartService")
         
-        # For MediaVortex, just update database status (it's already running)
-        if service_name == "MediaVortex":
+        # For WebService, just update database status (it's already running)
+        if service_name == "WebService":
             success = SharedDatabaseManager.UpdateServiceStatus(service_name, {
                 'Status': 'Running',
                 'IsProcessing': False,
@@ -151,9 +151,9 @@ def PrivateStartServiceProcess(service_name: str) -> bool:
         script_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         
         # Determine service directory and main script
-        if service_name == "QualityTestingService":
-            service_dir = os.path.join(script_dir, "MicroServiceQualityTest")
-            main_script = "QualityTestWorker.py"
+        if service_name == "QualityTestService":
+            service_dir = os.path.join(script_dir, "QualityTestService")
+            main_script = "Main.py"
         elif service_name == "TranscodeService":
             service_dir = os.path.join(script_dir, "TranscodeService")
             main_script = "Main.py"

@@ -92,8 +92,8 @@ class CrashRecoveryService:
             # Clean up ActiveJobs records
             DeletedActiveJobs = self.CleanupActiveJobs(ServiceName)
             
-            # Special handling for QualityTestingService: Delete only crashed jobs and reset interrupted tests
-            if ServiceName == "QualityTestingService":
+            # Special handling for QualityTestService: Delete only crashed jobs and reset interrupted tests
+            if ServiceName == "QualityTestService":
                 # Only delete jobs that were in ActiveJobs (actually crashed)
                 CrashedQueueIds = [detail['QueueId'] for detail in RecoveryDetails]
                 if CrashedQueueIds:
@@ -125,8 +125,8 @@ class CrashRecoveryService:
                 "RecoveryDetails": RecoveryDetails
             }
             
-            # Add quality test reset count for QualityTestingService
-            if ServiceName == "QualityTestingService" and 'ResetCount' in locals():
+            # Add quality test reset count for QualityTestService
+            if ServiceName == "QualityTestService" and 'ResetCount' in locals():
                 result["QualityTestsReset"] = ResetCount
             
             LoggingService.LogInfo(f"Crash recovery completed for {ServiceName}: {result['Message']}", "CrashRecoveryService", "RecoverServiceJobs")

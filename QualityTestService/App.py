@@ -1,7 +1,6 @@
-#!/usr/bin/env python3
 """
-Quality Testing MicroService
-Standalone microservice for quality testing using VMAF analysis
+QualityTestService Application Logic
+Standalone quality testing microservice for MediaVortex
 """
 
 import sys
@@ -22,7 +21,7 @@ from Services.DatabaseCleanupService import DatabaseCleanupService
 from Services.QualityTestQueueService import QualityTestQueueService
 
 
-class QualityTestingService:
+class QualityTestServiceApp:
     """Quality Testing MicroService - Self-contained with worker management."""
     
     def __init__(self):
@@ -40,11 +39,11 @@ class QualityTestingService:
         signal.signal(signal.SIGINT, self.PrivateSignalHandler)
         signal.signal(signal.SIGTERM, self.PrivateSignalHandler)
         
-        LoggingService.LogInfo("QualityTestingService initialized", "QualityTestingService", "__init__")
+        LoggingService.LogInfo("QualityTestServiceApp initialized", "QualityTestServiceApp", "__init__")
     
     def PrivateSignalHandler(self, signum, frame):
         """Handle shutdown signals."""
-        LoggingService.LogInfo(f"Received signal {signum}, initiating shutdown", "QualityTestingService", "PrivateSignalHandler")
+        LoggingService.LogInfo(f"Received signal {signum}, initiating shutdown", "QualityTestServiceApp", "PrivateSignalHandler")
         self.ShutdownRequested = True
         self.StopRequested = True
     
@@ -58,12 +57,12 @@ class QualityTestingService:
             from Services.CrashRecoveryService import CrashRecoveryService
             recovery_service = CrashRecoveryService(database_manager)
             recovery_result = recovery_service.RecoverServiceJobs("QualityTestingService")
-            LoggingService.LogInfo(f"Crash recovery result: {recovery_result}", "QualityTestingService", "Initialize")
+            LoggingService.LogInfo(f"Crash recovery result: {recovery_result}", "QualityTestServiceApp", "Initialize")
             
             # Also run the existing cleanup for any additional cleanup needed
             cleanup_service = DatabaseCleanupService(database_manager)
             cleanup_result = cleanup_service.CleanupMicroserviceState("QualityTestingService")
-            LoggingService.LogInfo(f"Additional cleanup result: {cleanup_result}", "QualityTestingService", "Initialize")
+            LoggingService.LogInfo(f"Additional cleanup result: {cleanup_result}", "QualityTestServiceApp", "Initialize")
             
             # Initialize ViewModel
             self.ViewModel = QualityTestingViewModel(
@@ -82,7 +81,7 @@ class QualityTestingService:
             return True
             
         except Exception as e:
-            LoggingService.LogException("Error initializing QualityTestingService", e, "QualityTestingService", "Initialize")
+            LoggingService.LogException("Error initializing QualityTestServiceApp", e, "QualityTestServiceApp", "Initialize")
             return False
     
     def LoadConfiguration(self):
@@ -95,27 +94,27 @@ class QualityTestingService:
                 
                 if rows and rows[0]['SettingValue']:
                     self.MaxConcurrentJobs = int(rows[0]['SettingValue'])
-                    LoggingService.LogInfo(f"Loaded MaxConcurrentJobs: {self.MaxConcurrentJobs}", "QualityTestingService", "LoadConfiguration")
+                    LoggingService.LogInfo(f"Loaded MaxConcurrentJobs: {self.MaxConcurrentJobs}", "QualityTestServiceApp", "LoadConfiguration")
                 else:
-                    LoggingService.LogWarning("MaxConcurrentJobs not found in settings, using default: 1", "QualityTestingService", "LoadConfiguration")
+                    LoggingService.LogWarning("MaxConcurrentJobs not found in settings, using default: 1", "QualityTestServiceApp", "LoadConfiguration")
                     self.MaxConcurrentJobs = 1
         except Exception as e:
-            LoggingService.LogException("Error loading configuration", e, "QualityTestingService", "LoadConfiguration")
+            LoggingService.LogException("Error loading configuration", e, "QualityTestServiceApp", "LoadConfiguration")
             self.MaxConcurrentJobs = 1
     
     def Run(self) -> bool:
         """Main entry point for the microservice."""
         try:
-            LoggingService.LogInfo("Starting QualityTestingService", "QualityTestingService", "Run")
+            LoggingService.LogInfo("Starting QualityTestServiceApp", "QualityTestServiceApp", "Run")
             
             # Initialize
             if not self.Initialize():
-                LoggingService.LogError("Failed to initialize QualityTestingService", "QualityTestingService", "Run")
+                LoggingService.LogError("Failed to initialize QualityTestServiceApp", "QualityTestServiceApp", "Run")
                 return False
             
             # Start processing
             if not self.StartProcessing():
-                LoggingService.LogError("Failed to start quality testing processing", "QualityTestingService", "Run")
+                LoggingService.LogError("Failed to start quality testing processing", "QualityTestServiceApp", "Run")
                 return False
             
             # Keep running until shutdown
@@ -125,18 +124,18 @@ class QualityTestingService:
             # Shutdown
             self.Shutdown()
             
-            LoggingService.LogInfo("QualityTestingService completed", "QualityTestingService", "Run")
+            LoggingService.LogInfo("QualityTestServiceApp completed", "QualityTestServiceApp", "Run")
             return True
             
         except Exception as e:
-            LoggingService.LogException("Fatal error in QualityTestingService", e, "QualityTestingService", "Run")
+            LoggingService.LogException("Fatal error in QualityTestServiceApp", e, "QualityTestServiceApp", "Run")
             return False
     
     def StartProcessing(self) -> bool:
         """Start the quality testing processing with multiple worker threads."""
         try:
             if not self.ViewModel:
-                LoggingService.LogError("ViewModel not initialized", "QualityTestingService", "StartProcessing")
+                LoggingService.LogError("ViewModel not initialized", "QualityTestServiceApp", "StartProcessing")
                 return False
             
             # Create worker threads based on MaxConcurrentJobs
@@ -149,19 +148,19 @@ class QualityTestingService:
                 )
                 worker_thread.start()
                 self.WorkerThreads.append(worker_thread)
-                LoggingService.LogInfo(f"Started worker thread {i}", "QualityTestingService", "StartProcessing")
+                LoggingService.LogInfo(f"Started worker thread {i}", "QualityTestServiceApp", "StartProcessing")
             
-            LoggingService.LogInfo(f"Started QualityTestingService with {self.MaxConcurrentJobs} worker threads", "QualityTestingService", "StartProcessing")
+            LoggingService.LogInfo(f"Started QualityTestServiceApp with {self.MaxConcurrentJobs} worker threads", "QualityTestServiceApp", "StartProcessing")
             return True
             
         except Exception as e:
-            LoggingService.LogException("Error starting quality testing processing", e, "QualityTestingService", "StartProcessing")
+            LoggingService.LogException("Error starting quality testing processing", e, "QualityTestServiceApp", "StartProcessing")
             return False
     
     def WorkerLoop(self, worker_id: int):
         """Individual worker thread loop that claims and processes jobs."""
         try:
-            LoggingService.LogInfo(f"Worker {worker_id} started", "QualityTestingService", "WorkerLoop")
+            LoggingService.LogInfo(f"Worker {worker_id} started", "QualityTestServiceApp", "WorkerLoop")
             
             while not self.StopRequested:
                 try:
@@ -169,32 +168,32 @@ class QualityTestingService:
                     job = self.ViewModel.ClaimJob()
                     
                     if job:
-                        LoggingService.LogInfo(f"Worker {worker_id} claimed job {job['Id']}", "QualityTestingService", "WorkerLoop")
+                        LoggingService.LogInfo(f"Worker {worker_id} claimed job {job['Id']}", "QualityTestServiceApp", "WorkerLoop")
                         
                         # Process the claimed job
                         result = self.ViewModel.ProcessJob(job)
                         
                         if result.get('Success'):
-                            LoggingService.LogInfo(f"Worker {worker_id} completed job {job['Id']} with VMAF score {result.get('VMAFScore', 'N/A')}", "QualityTestingService", "WorkerLoop")
+                            LoggingService.LogInfo(f"Worker {worker_id} completed job {job['Id']} with VMAF score {result.get('VMAFScore', 'N/A')}", "QualityTestServiceApp", "WorkerLoop")
                         else:
-                            LoggingService.LogError(f"Worker {worker_id} failed job {job['Id']}: {result.get('Message', 'Unknown error')}", "QualityTestingService", "WorkerLoop")
+                            LoggingService.LogError(f"Worker {worker_id} failed job {job['Id']}: {result.get('Message', 'Unknown error')}", "QualityTestServiceApp", "WorkerLoop")
                     else:
                         # No jobs available, wait a bit
                         time.sleep(5)
                     
                 except Exception as e:
-                    LoggingService.LogException(f"Error in worker {worker_id} loop iteration", e, "QualityTestingService", "WorkerLoop")
+                    LoggingService.LogException(f"Error in worker {worker_id} loop iteration", e, "QualityTestServiceApp", "WorkerLoop")
                     time.sleep(5)  # Wait on error
             
-            LoggingService.LogInfo(f"Worker {worker_id} stopped", "QualityTestingService", "WorkerLoop")
+            LoggingService.LogInfo(f"Worker {worker_id} stopped", "QualityTestServiceApp", "WorkerLoop")
             
         except Exception as e:
-            LoggingService.LogException(f"Fatal error in worker {worker_id} loop", e, "QualityTestingService", "WorkerLoop")
+            LoggingService.LogException(f"Fatal error in worker {worker_id} loop", e, "QualityTestServiceApp", "WorkerLoop")
     
     def Shutdown(self) -> bool:
         """Graceful shutdown of the service."""
         try:
-            LoggingService.LogInfo("Initiating QualityTestingService shutdown", "QualityTestingService", "Shutdown")
+            LoggingService.LogInfo("Initiating QualityTestServiceApp shutdown", "QualityTestServiceApp", "Shutdown")
             
             # Set stop flags
             self.StopRequested = True
@@ -208,21 +207,21 @@ class QualityTestingService:
             # Wait for all worker threads to finish
             for i, worker_thread in enumerate(self.WorkerThreads):
                 if worker_thread.is_alive():
-                    LoggingService.LogInfo(f"Waiting for worker thread {i} to finish", "QualityTestingService", "Shutdown")
+                    LoggingService.LogInfo(f"Waiting for worker thread {i} to finish", "QualityTestServiceApp", "Shutdown")
                     worker_thread.join(timeout=10)
             
-            LoggingService.LogInfo("QualityTestingService shutdown completed", "QualityTestingService", "Shutdown")
+            LoggingService.LogInfo("QualityTestServiceApp shutdown completed", "QualityTestServiceApp", "Shutdown")
             return True
             
         except Exception as e:
-            LoggingService.LogException("Error during shutdown", e, "QualityTestingService", "Shutdown")
+            LoggingService.LogException("Error during shutdown", e, "QualityTestServiceApp", "Shutdown")
             return False
     
     def RecoverMissedQualityTests(self):
         """Find successful transcodes that need quality testing but aren't in the queue."""
         try:
             LoggingService.LogInfo("Checking for missed quality tests...", 
-                                  "QualityTestingService", "RecoverMissedQualityTests")
+                                  "QualityTestServiceApp", "RecoverMissedQualityTests")
             
             # Get successful transcode attempts that need quality testing
             # but don't have a successful quality test result record
@@ -230,7 +229,7 @@ class QualityTestingService:
             
             if MissedTests:
                 LoggingService.LogInfo(f"Found {len(MissedTests)} missed quality tests, queueing them...", 
-                                      "QualityTestingService", "RecoverMissedQualityTests")
+                                      "QualityTestServiceApp", "RecoverMissedQualityTests")
                 
                 for Test in MissedTests:
                     # Use QualityTestQueueService to add to queue (handles all validation and file path resolution)
@@ -238,36 +237,14 @@ class QualityTestingService:
                     
                     if JobId:
                         LoggingService.LogInfo(f"Queued missed quality test for attempt {Test['Id']}", 
-                                              "QualityTestingService", "RecoverMissedQualityTests")
+                                              "QualityTestServiceApp", "RecoverMissedQualityTests")
                     else:
                         LoggingService.LogWarning(f"Failed to queue quality test for attempt {Test['Id']}", 
-                                                 "QualityTestingService", "RecoverMissedQualityTests")
+                                                 "QualityTestServiceApp", "RecoverMissedQualityTests")
             else:
                 LoggingService.LogInfo("No missed quality tests found", 
-                                      "QualityTestingService", "RecoverMissedQualityTests")
+                                      "QualityTestServiceApp", "RecoverMissedQualityTests")
                                       
         except Exception as e:
             LoggingService.LogException("Error recovering missed quality tests", e, 
-                                       "QualityTestingService", "RecoverMissedQualityTests")
-
-
-def main():
-    """Main entry point for standalone execution."""
-    try:
-        service = QualityTestingService()
-        success = service.Run()
-        
-        if success:
-            print("QualityTestingService completed successfully")
-            sys.exit(0)
-        else:
-            print("QualityTestingService failed")
-            sys.exit(1)
-            
-    except Exception as e:
-        print(f"Fatal error in QualityTestingService: {e}")
-        sys.exit(1)
-
-
-if __name__ == "__main__":
-    main()
+                                       "QualityTestServiceApp", "RecoverMissedQualityTests")

@@ -47,8 +47,7 @@
 **One responsibility per component:**
 - **QualityTestController**: Direct quality testing with FFmpeg
 - **TranscodeService**: Transcoding only
-- **MediaVortex**: Web interface only
-- **SystemOrchestratorService**: Start/stop other services
+- **WebService**: Web interface only
 
 **Simple Quality Testing Architecture:**
 - **Maximum 4 method calls**: Frontend → Controller → DatabaseManager → Database → FFmpeg

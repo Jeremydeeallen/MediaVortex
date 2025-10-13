@@ -92,7 +92,7 @@ class QualityTestingBusinessService:
             
             # Create active job record
             active_job_id = self.DatabaseManager.CreateActiveJob(
-                ServiceName="QualityTestingService",
+                ServiceName="QualityTestService",
                 JobType="QualityTest", 
                 QueueId=JobId,
                 ProcessId=os.getpid(),
@@ -369,7 +369,7 @@ class QualityTestingBusinessService:
             LoggingService.LogDebug("Getting active quality testing jobs", "QualityTestingBusinessService", "GetActiveJobs")
             
             # Get active jobs from database
-            active_jobs = self.DatabaseManager.GetActiveJobs("QualityTestingService")
+            active_jobs = self.DatabaseManager.GetActiveJobs("QualityTestService")
             
             return {"Success": True, "ActiveJobs": active_jobs}
             

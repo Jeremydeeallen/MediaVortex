@@ -7,37 +7,6 @@ psutil>=5.9.0
 # Process naming
 setproctitle
 
-# Database (SQLite is built-in, but we might need additional drivers)
-# sqlite3 is built-in to Python
-
-# Logging (built-in to Python)
-# logging is built-in to Python
-
-# Threading (built-in to Python)
-# threading is built-in to Python
-
-# File operations (built-in to Python)
-# os, pathlib are built-in to Python
-
-# Date/time operations (built-in to Python)
-# datetime is built-in to Python
-
-# Type hints (built-in to Python 3.5+)
-# typing is built-in to Python 3.5+
-
-# JSON handling (built-in to Python)
-# json is built-in to Python
-
-# Environment variables (built-in to Python)
-# os.environ is built-in to Python
-
-# Signal handling (built-in to Python)
-# signal is built-in to Python
-
-# Time operations (built-in to Python)
-# time is built-in to Python
-
-# Note: The main dependencies (ProcessTranscodeQueueService, DatabaseManager, etc.)
-# are imported from the parent MediaVortex project, so we don't need to duplicate
-# their dependencies here. This service will run from the MediaVortex directory
-# and import the shared services.
+# Note: All other functionality uses built-in Python modules
+# The main dependencies (ProcessTranscodeQueueService, DatabaseManager, etc.)
+# are imported from the parent MediaVortex project

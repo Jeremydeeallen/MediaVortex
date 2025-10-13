@@ -40,7 +40,7 @@ class DatabaseCleanupService:
             }
             
             # 1. Reset any "Running" jobs back to "Pending" in QualityTestingQueue
-            if ServiceName == "QualityTestingService":
+            if ServiceName == "QualityTestService":
                 jobs_reset = self.ResetRunningQualityTestJobs()
                 cleanup_results["JobsReset"] = jobs_reset
                 LoggingService.LogInfo(f"Reset {jobs_reset} running quality test jobs to pending", "DatabaseCleanupService", "CleanupMicroserviceState")
@@ -51,7 +51,7 @@ class DatabaseCleanupService:
             LoggingService.LogInfo(f"Removed {active_jobs_removed} active jobs for {ServiceName}", "DatabaseCleanupService", "CleanupMicroserviceState")
             
             # 3. Clean up orphaned progress records
-            if ServiceName == "QualityTestingService":
+            if ServiceName == "QualityTestService":
                 progress_cleaned = self.CleanupOrphanedProgressRecords()
                 cleanup_results["ProgressRecordsCleaned"] = progress_cleaned
                 LoggingService.LogInfo(f"Cleaned up {progress_cleaned} orphaned progress records", "DatabaseCleanupService", "CleanupMicroserviceState")
@@ -119,10 +119,9 @@ class DatabaseCleanupService:
             
             # List of known microservices
             microservices = [
-                "QualityTestingService",
+                "QualityTestService",
                 "TranscodeService", 
-                "FileScanningService",
-                "SystemOrchestratorService"
+                "FileScanningService"
             ]
             
             results = {}

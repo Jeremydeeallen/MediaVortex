@@ -14,24 +14,15 @@ Launch these three processes in separate terminal windows:
 
 ```bash
 # Terminal 1: Web Interface / Dashboard
-py MediaVortex.py
+cd WebService && py Main.py
 
 # Terminal 2: Transcoding Service
-py TranscodeService/Main.py
+cd TranscodeService && py Main.py
 
 # Terminal 3: Quality Testing Service
-py MicroServiceQualityTest/QualityTestingService.py
+cd QualityTestService && py Main.py
 ```
 
-### Why Not Use SystemOrchestratorService?
-
-The `SystemOrchestratorService` exists in the codebase but is **not currently used** due to a critical issue: it would spawn duplicate service instances, causing:
-- Database lock conflicts
-- Multiple services competing for the same jobs
-- Resource exhaustion
-- Unpredictable behavior
-
-**Current Approach**: Manual startup of each service ensures only one instance of each service runs at a time. Each service has built-in duplicate instance prevention.
 
 ### Verifying Single Instance Operation
 
@@ -48,9 +39,9 @@ ps aux | grep python
 ```
 
 You should see exactly three Python processes:
-1. MediaVortex (port 5000)
+1. WebService (port 5000)
 2. TranscodeService
-3. QualityTestingService
+3. QualityTestService
 
 ### Duplicate Instance Prevention
 
@@ -67,7 +58,7 @@ Each service includes duplicate instance detection in its startup code:
 - **Recovery**: Reset all "Running" jobs to "Pending" status for restart
 
 ### 2. Service Crash (Orphaned FFmpeg Processes)
-- **Scenario**: TranscodeService or QualityTestingService crashes but FFmpeg continues running
+- **Scenario**: TranscodeService or QualityTestService crashes but FFmpeg continues running
 - **Impact**: FFmpeg processes consume resources but are not monitored
 - **Recovery**: Kill orphaned FFmpeg processes, reset jobs to "Pending"
 
@@ -178,13 +169,13 @@ All recovery actions are logged to the `Logs` table with detailed information:
 - Provides comprehensive recovery for transcoding operations
 - Launch with: `py TranscodeService/Main.py`
 
-### QualityTestingService Integration
-**File**: `MicroServiceQualityTest/QualityTestingService.py` (entry point and recovery logic)
+### QualityTestService Integration
+**File**: `QualityTestService/Main.py` (entry point and recovery logic)
 
 - Enhanced existing cleanup in `Initialize()` method
 - Maintains compatibility with existing `DatabaseCleanupService`
 - Provides recovery for quality testing operations
-- Launch with: `py MicroServiceQualityTest/QualityTestingService.py`
+- Launch with: `py QualityTestService/Main.py`
 
 ## Logging and Monitoring
 
@@ -218,9 +209,9 @@ Comprehensive test suite that validates:
 ### Manual Testing Scenarios
 
 **Important**: Before testing, ensure you have the complete system running:
-- `py MediaVortex.py`
-- `py TranscodeService/Main.py`
-- `py MicroServiceQualityTest/QualityTestingService.py`
+- `cd WebService && py Main.py`
+- `cd TranscodeService && py Main.py`
+- `cd QualityTestService && py Main.py`
 
 #### Scenario 1: Computer Crash Simulation
 1. Start a transcoding job via the web interface
@@ -261,7 +252,7 @@ Comprehensive test suite that validates:
 ### Service Names
 The system uses these service identifiers:
 - `"TranscodeService"` - For transcoding operations
-- `"QualityTestingService"` - For quality testing operations
+- `"QualityTestService"` - For quality testing operations
 
 ### Process Management
 - **Graceful Termination**: 10-second timeout before force kill
