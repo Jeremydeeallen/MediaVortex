@@ -559,7 +559,10 @@ class ProcessTranscodeQueueService:
                 except Exception as e:
                     LoggingService.LogException("Exception in progress callback", e, "ProcessTranscodeQueueService", "ExecuteTranscoding")
             
-            return self.VideoTranscoding.TranscodeVideo(TranscodeAttemptId, TranscodeCommand, ProgressCallback, TotalFramesFromMediaFile, ActiveJobId, self.DatabaseManager)
+            TranscodeResult = self.VideoTranscoding.TranscodeVideo(TranscodeAttemptId, TranscodeCommand, ProgressCallback, TotalFramesFromMediaFile, ActiveJobId, self.DatabaseManager)
+            
+            # File size calculation is now handled in VideoTranscodingService.TranscodeVideo()
+            return TranscodeResult
             
         except Exception as e:
             LoggingService.LogException("Exception executing transcoding", e, "ProcessTranscodeQueueService", "ExecuteTranscoding")
@@ -572,25 +575,23 @@ class ProcessTranscodeQueueService:
         """Handle transcoding results - success or failure processing."""
         try:
             if TranscodeResult.get("Success", False):
-                # Calculate output file size
-                NewSizeBytes = 0
+                # Use pre-calculated file size from ExecuteTranscoding (captured immediately after transcode)
+                NewSizeBytes = TranscodeResult.get("NewSizeBytes", 0)
+                OutputFilePath = TranscodeResult.get("OutputFilePath", "")
+                
+                # Calculate size reduction metrics
                 SizeReductionBytes = 0
                 SizeReductionPercent = 0.0
+                OldSizeBytes = Job.SizeBytes
                 
-                # Get output file path from the transcoding command (use table as source of truth)
-                OutputFilePath = self.GetOutputFilePathFromCommand(Job, TranscodeAttemptId)
-                LoggingService.LogInfo(f"Output file path: {OutputFilePath}", "ProcessTranscodeQueueService", "HandleTranscodingResult")
-                
-                if OutputFilePath and os.path.exists(OutputFilePath):
-                    NewSizeBytes = os.path.getsize(OutputFilePath)
-                    OldSizeBytes = Job.SizeBytes
-                    if OldSizeBytes > 0:
-                        SizeReductionBytes = OldSizeBytes - NewSizeBytes
-                        SizeReductionPercent = (SizeReductionBytes / OldSizeBytes) * 100
+                if NewSizeBytes > 0 and OldSizeBytes > 0:
+                    SizeReductionBytes = OldSizeBytes - NewSizeBytes
+                    SizeReductionPercent = (SizeReductionBytes / OldSizeBytes) * 100
                     LoggingService.LogInfo(f"File sizes - Original: {OldSizeBytes} bytes, Transcoded: {NewSizeBytes} bytes, Reduction: {SizeReductionPercent:.1f}%", 
                                          "ProcessTranscodeQueueService", "HandleTranscodingResult")
                 else:
-                    LoggingService.LogWarning(f"Output file not found: {OutputFilePath}", "ProcessTranscodeQueueService", "HandleTranscodingResult")
+                    LoggingService.LogWarning(f"Invalid file size data - NewSizeBytes: {NewSizeBytes}, OldSizeBytes: {OldSizeBytes}", 
+                                            "ProcessTranscodeQueueService", "HandleTranscodingResult")
                 
                 # Update attempt record with success details
                 self.DatabaseManager.UpdateTranscodeAttempt(TranscodeAttemptId, {

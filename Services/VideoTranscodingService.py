@@ -111,9 +111,35 @@ class VideoTranscodingService:
                 LoggingService.LogInfo(f"Transcoding completed successfully for job {JobId}", 
                                      "VideoTranscodingService", "TranscodeVideo")
                 
+                # Extract output file path from command and calculate file size
+                OutputFilePath = self.ExtractOutputPathFromCommand(TranscodeCommand)
+                NewSizeBytes = 0
+                
+                if OutputFilePath and os.path.exists(OutputFilePath):
+                    NewSizeBytes = os.path.getsize(OutputFilePath)
+                    LoggingService.LogInfo(f"Captured file size immediately after transcode: {NewSizeBytes} bytes", 
+                                         "VideoTranscodingService", "TranscodeVideo")
+                else:
+                    # Add retry logic for file system flushing delays
+                    import time
+                    LoggingService.LogInfo(f"Output file not found immediately, retrying for file system flush: {OutputFilePath}", 
+                                         "VideoTranscodingService", "TranscodeVideo")
+                    
+                    for attempt in range(3):  # Try 3 times
+                        time.sleep(0.1)  # Wait 100ms between attempts
+                        if OutputFilePath and os.path.exists(OutputFilePath):
+                            NewSizeBytes = os.path.getsize(OutputFilePath)
+                            LoggingService.LogInfo(f"Captured file size after retry {attempt + 1}: {NewSizeBytes} bytes", 
+                                                 "VideoTranscodingService", "TranscodeVideo")
+                            break
+                    else:
+                        LoggingService.LogWarning(f"Output file still not found after 3 retries: {OutputFilePath}", 
+                                               "VideoTranscodingService", "TranscodeVideo")
+                
                 return {
                     "Success": True,
-                    "OutputFilePath": "Success",  # We don't need to track the actual path
+                    "OutputFilePath": OutputFilePath,
+                    "NewSizeBytes": NewSizeBytes,
                     "StartTime": StartTime.isoformat(),
                     "EndTime": EndTime.isoformat(),
                     "Duration": Duration,
@@ -320,6 +346,31 @@ class VideoTranscodingService:
             
         except Exception as e:
             # Don't log parsing errors as they're frequent and not critical
+            return None
+    def ExtractOutputPathFromCommand(self, TranscodeCommand: str) -> Optional[str]:
+        """Extract the output file path from the FFmpeg command string."""
+        try:
+            # FFmpeg commands typically end with the output file path
+            # Look for the last quoted string in the command
+            import re
+            
+            # Find all quoted strings in the command
+            QuotedStrings = re.findall(r'"([^"]*)"', TranscodeCommand)
+            
+            if QuotedStrings:
+                # The last quoted string should be the output file
+                OutputPath = QuotedStrings[-1]
+                LoggingService.LogInfo(f"Extracted output path from command: {OutputPath}", 
+                                     "VideoTranscodingService", "ExtractOutputPathFromCommand")
+                return OutputPath
+            else:
+                LoggingService.LogWarning("No quoted strings found in command, cannot extract output path", 
+                                       "VideoTranscodingService", "ExtractOutputPathFromCommand")
+                return None
+                
+        except Exception as e:
+            LoggingService.LogException("Exception extracting output path from command", e, 
+                                      "VideoTranscodingService", "ExtractOutputPathFromCommand")
             return None
     
     def FormatTime(self, Seconds: int) -> str:

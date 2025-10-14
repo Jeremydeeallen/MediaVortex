@@ -720,14 +720,14 @@ class DatabaseManager:
     
     # Advanced MediaFile Operations for Fuzzy Matching
     def GetMediaFileByPath(self, FilePath: str) -> Optional[MediaFileModel]:
-        """Get a media file by exact path match."""
+        """Get a media file by exact path match (case-insensitive)."""
         query = """
             SELECT Id, SeasonId, FilePath, FileName, SizeMB, VideoBitrateKbps, AudioBitrateKbps,
                    Resolution, Codec, DurationMinutes, FrameRate, LastScannedDate,
                    CompressionPotential, AssignedProfile, IsInterlaced,
                    ResolutionCategory, FileModificationTime
             FROM MediaFiles 
-            WHERE FilePath = ?
+            WHERE LOWER(FilePath) = LOWER(?)
         """
         rows = self.DatabaseService.ExecuteQuery(query, (FilePath,))
         
@@ -755,8 +755,8 @@ class DatabaseManager:
     
     
     def DeleteMediaFileByPath(self, FilePath: str) -> bool:
-        """Delete a media file by path."""
-        affectedRows = self.DatabaseService.ExecuteNonQuery("DELETE FROM MediaFiles WHERE FilePath = ?", (FilePath,))
+        """Delete a media file by path (case-insensitive)."""
+        affectedRows = self.DatabaseService.ExecuteNonQuery("DELETE FROM MediaFiles WHERE LOWER(FilePath) = LOWER(?)", (FilePath,))
         return affectedRows > 0
     
     # System Settings Management Methods
@@ -1122,13 +1122,13 @@ class DatabaseManager:
         return None
     
     def GetTranscodeAttemptsByFilePath(self, FilePath: str) -> List[TranscodeAttemptModel]:
-        """Get all transcoding attempts for a specific file."""
+        """Get all transcoding attempts for a specific file (case-insensitive)."""
         query = """
             SELECT Id, FilePath, AttemptDate, Quality, OldSizeBytes, NewSizeBytes, Success,
                    SizeReductionBytes, SizeReductionPercent, ErrorMessage, TranscodeDurationSeconds,
                    FfpmpegCommand, AudioBitrateKbps, VideoBitrateKbps, ProfileName, VMAF
             FROM TranscodeAttempts 
-            WHERE FilePath = ?
+            WHERE LOWER(FilePath) = LOWER(?)
             ORDER BY AttemptDate DESC
         """
         rows = self.DatabaseService.ExecuteQuery(query, (FilePath,))
@@ -1310,13 +1310,13 @@ class DatabaseManager:
         return transcodeFiles
     
     def GetTranscodeFileByFilePath(self, FilePath: str) -> Optional[TranscodeFileModel]:
-        """Get transcoding file record by file path."""
+        """Get transcoding file record by file path (case-insensitive)."""
         query = """
             SELECT Id, FilePath, AllQualitiesFailed, SuccessfullyTranscoded, FirstAttemptDate,
                    LastAttemptDate, SuccessDate, FinalQuality, FinalSizeBytes, TotalAttempts,
                    OriginalFilePath, FinalFilePath
             FROM TranscodeFiles 
-            WHERE FilePath = ?
+            WHERE LOWER(FilePath) = LOWER(?)
         """
         rows = self.DatabaseService.ExecuteQuery(query, (FilePath,))
         
@@ -1439,7 +1439,7 @@ class DatabaseManager:
             # Add FilePath to parameters for WHERE clause
             parameters.append(FilePath)
             
-            query = f"UPDATE TranscodeFiles SET {', '.join(updateFields)} WHERE FilePath = ?"
+            query = f"UPDATE TranscodeFiles SET {', '.join(updateFields)} WHERE LOWER(FilePath) = LOWER(?)"
             
             affectedRows = self.DatabaseService.ExecuteNonQuery(query, parameters)
             LoggingService.LogInfo(f"Updated transcode file status for {FilePath}, affected {affectedRows} rows", "DatabaseManager", "UpdateTranscodeFileStatus")
