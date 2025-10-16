@@ -25,6 +25,9 @@ class TranscodeAttemptModel:
     VMAF: Optional[float] = None
     QualityTestRequired: int = 1  # Default to 1 (required)
     QualityTestCompleted: int = 0  # Default to 0 (not completed)
+    FileReplaced: bool = False
+    FileReplacedDate: Optional[datetime] = None
+    ReplacementType: Optional[str] = None
     
     def __post_init__(self):
         if self.AttemptDate is None:

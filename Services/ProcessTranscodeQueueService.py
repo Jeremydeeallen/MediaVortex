@@ -1063,4 +1063,157 @@ class ProcessTranscodeQueueService:
             LoggingService.LogException("Exception handling file preparation failure", e, 
                                       "ProcessTranscodeQueueService", "PrivateHandleFilePreparationFailure")
     
+    def CancelActiveTranscodeJob(self) -> Dict[str, Any]:
+        """Cancel the currently running transcode job and reset queue status to pending."""
+        try:
+            LoggingService.LogFunctionEntry("CancelActiveTranscodeJob", "ProcessTranscodeQueueService")
+            
+            # Get active transcode job from TranscodeQueue (Status='Running')
+            active_jobs = self.DatabaseManager.GetTranscodeQueueItemsByStatus("Running")
+            if not active_jobs:
+                return {"Success": False, "Message": "No active transcode job found"}
+            
+            active_job = active_jobs[0]  # Get the first running job
+            job_id = active_job.Id
+            
+            LoggingService.LogInfo(f"Cancelling active transcode job {job_id} for file: {active_job.FileName}", 
+                                 "ProcessTranscodeQueueService", "CancelActiveTranscodeJob")
+            
+            # Get the TranscodeAttemptId from the active job context
+            # We need to find the TranscodeAttemptId associated with this queue job
+            transcode_attempt_id = self.PrivateGetTranscodeAttemptIdForJob(job_id)
+            if not transcode_attempt_id:
+                LoggingService.LogWarning(f"Could not find TranscodeAttemptId for job {job_id}", 
+                                        "ProcessTranscodeQueueService", "CancelActiveTranscodeJob")
+            
+            # Kill FFmpeg process using VideoTranscodingService.StopTranscoding()
+            try:
+                from Services.VideoTranscodingService import VideoTranscodingService
+                video_service = VideoTranscodingService()
+                
+                # Get list of active jobs and stop them
+                active_job_ids = video_service.GetActiveJobs()
+                for active_job_id in active_job_ids:
+                    LoggingService.LogInfo(f"Stopping FFmpeg process for job {active_job_id}", 
+                                         "ProcessTranscodeQueueService", "CancelActiveTranscodeJob")
+                    stop_result = video_service.StopTranscoding(active_job_id)
+                    if stop_result.get("Success", False):
+                        LoggingService.LogInfo(f"Successfully stopped FFmpeg process for job {active_job_id}", 
+                                             "ProcessTranscodeQueueService", "CancelActiveTranscodeJob")
+                    else:
+                        LoggingService.LogWarning(f"Failed to stop FFmpeg process for job {active_job_id}: {stop_result.get('ErrorMessage', 'Unknown error')}", 
+                                                "ProcessTranscodeQueueService", "CancelActiveTranscodeJob")
+                        
+            except Exception as e:
+                LoggingService.LogException("Error stopping FFmpeg processes", e, 
+                                          "ProcessTranscodeQueueService", "CancelActiveTranscodeJob")
+            
+            # Update TranscodeAttempts: Set Success=False, ErrorMessage='Cancelled by user'
+            if transcode_attempt_id:
+                try:
+                    update_success = self.DatabaseManager.UpdateTranscodeAttempt(transcode_attempt_id, {
+                        'Success': False,
+                        'ErrorMessage': 'Cancelled by user'
+                    })
+                    
+                    if update_success:
+                        LoggingService.LogInfo(f"Updated TranscodeAttempt {transcode_attempt_id} as cancelled", 
+                                             "ProcessTranscodeQueueService", "CancelActiveTranscodeJob")
+                    else:
+                        LoggingService.LogWarning(f"Failed to update TranscodeAttempt {transcode_attempt_id}", 
+                                                "ProcessTranscodeQueueService", "CancelActiveTranscodeJob")
+                        
+                except Exception as e:
+                    LoggingService.LogException(f"Error updating TranscodeAttempt {transcode_attempt_id}", e, 
+                                              "ProcessTranscodeQueueService", "CancelActiveTranscodeJob")
+            
+            # Update TranscodeQueue: Set Status='Pending' (NOT deleted, so it can be retried)
+            try:
+                queue_update_success = self.DatabaseManager.UpdateTranscodeQueueStatus(job_id, "Pending")
+                if queue_update_success:
+                    # Also reset DateStarted to NULL
+                    self.DatabaseManager.DatabaseService.ExecuteNonQuery(
+                        "UPDATE TranscodeQueue SET DateStarted = NULL WHERE Id = ?", 
+                        (job_id,)
+                    )
+                    LoggingService.LogInfo(f"Reset TranscodeQueue job {job_id} status to Pending", 
+                                         "ProcessTranscodeQueueService", "CancelActiveTranscodeJob")
+                else:
+                    LoggingService.LogWarning(f"Failed to update TranscodeQueue job {job_id} status", 
+                                            "ProcessTranscodeQueueService", "CancelActiveTranscodeJob")
+                    
+            except Exception as e:
+                LoggingService.LogException(f"Error updating TranscodeQueue job {job_id}", e, 
+                                          "ProcessTranscodeQueueService", "CancelActiveTranscodeJob")
+            
+            # Delete from TranscodeProgress table using TranscodeAttemptId
+            if transcode_attempt_id:
+                try:
+                    progress_deleted = self.DatabaseManager.DatabaseService.ExecuteNonQuery(
+                        "DELETE FROM TranscodeProgress WHERE TranscodeAttemptId = ?", 
+                        (transcode_attempt_id,)
+                    )
+                    
+                    if progress_deleted:
+                        LoggingService.LogInfo(f"Deleted TranscodeProgress records for TranscodeAttempt {transcode_attempt_id}", 
+                                             "ProcessTranscodeQueueService", "CancelActiveTranscodeJob")
+                    else:
+                        LoggingService.LogInfo(f"No TranscodeProgress records found for TranscodeAttempt {transcode_attempt_id}", 
+                                             "ProcessTranscodeQueueService", "CancelActiveTranscodeJob")
+                        
+                except Exception as e:
+                    LoggingService.LogException(f"Error deleting TranscodeProgress for TranscodeAttempt {transcode_attempt_id}", e, 
+                                              "ProcessTranscodeQueueService", "CancelActiveTranscodeJob")
+            
+            # Complete any ActiveJobs records via DatabaseManager.CompleteActiveJob()
+            try:
+                # Get active jobs for TranscodeService
+                active_jobs = self.DatabaseManager.GetActiveJobsByService("TranscodeService")
+                for active_job in active_jobs:
+                    self.DatabaseManager.CompleteActiveJob(active_job['Id'], False, "Cancelled by user")
+                    LoggingService.LogInfo(f"Completed active job {active_job['Id']} as cancelled", 
+                                         "ProcessTranscodeQueueService", "CancelActiveTranscodeJob")
+                    
+            except Exception as e:
+                LoggingService.LogException("Error completing active jobs", e, 
+                                          "ProcessTranscodeQueueService", "CancelActiveTranscodeJob")
+            
+            LoggingService.LogInfo(f"Successfully cancelled transcode job {job_id} for file: {active_job.FileName}", 
+                                 "ProcessTranscodeQueueService", "CancelActiveTranscodeJob")
+            
+            return {
+                "Success": True, 
+                "Message": f"Active transcode job cancelled successfully. File: {active_job.FileName}",
+                "JobId": job_id,
+                "TranscodeAttemptId": transcode_attempt_id
+            }
+            
+        except Exception as e:
+            LoggingService.LogException("Error cancelling active transcode job", e, 
+                                      "ProcessTranscodeQueueService", "CancelActiveTranscodeJob")
+            return {"Success": False, "Message": str(e)}
+    
+    def PrivateGetTranscodeAttemptIdForJob(self, JobId: int) -> Optional[int]:
+        """Private method to get TranscodeAttemptId for a given TranscodeQueue job."""
+        try:
+            # Query to find the most recent TranscodeAttempt for this file
+            query = """
+                SELECT ta.Id 
+                FROM TranscodeAttempts ta
+                JOIN TranscodeQueue tq ON ta.FilePath = tq.FilePath
+                WHERE tq.Id = ? 
+                ORDER BY ta.AttemptDate DESC
+                LIMIT 1
+            """
+            
+            result = self.DatabaseManager.DatabaseService.ExecuteQuery(query, (JobId,))
+            if result:
+                return result[0]['Id']
+            return None
+            
+        except Exception as e:
+            LoggingService.LogException(f"Error getting TranscodeAttemptId for job {JobId}", e, 
+                                      "ProcessTranscodeQueueService", "PrivateGetTranscodeAttemptIdForJob")
+            return None
+    
     

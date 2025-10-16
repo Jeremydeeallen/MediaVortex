@@ -8,7 +8,7 @@ class FileScanningController:
     """Provides REST API endpoints for scanning operations with Unicode character support."""
     
     def __init__(self):
-        self.Blueprint = Blueprint('FileScanning', __name__)
+        self.Blueprint = Blueprint('FileScanning', __name__, url_prefix='/api')
         self.ViewModel = FileScanningViewModel()
         self.SetupRoutes()
     

@@ -372,3 +372,34 @@ def HealthCheck():
             "Status": "Unhealthy",
             "ErrorMessage": errorMsg
         }), 500
+
+
+@TranscodeJobBlueprint.route('/CancelActive', methods=['POST'])
+def CancelActiveTranscode():
+    """Cancel the currently running transcode job."""
+    try:
+        LoggingService.LogFunctionEntry("CancelActiveTranscode", "TranscodeJobController")
+        
+        # Get ProcessTranscodeQueueService instance
+        from Services.ProcessTranscodeQueueService import ProcessTranscodeQueueService
+        from Repositories.DatabaseManager import DatabaseManager
+        
+        database_manager = DatabaseManager()
+        transcode_service = ProcessTranscodeQueueService(DatabaseManagerInstance=database_manager)
+        
+        # Call CancelActiveTranscodeJob()
+        result = transcode_service.CancelActiveTranscodeJob()
+        
+        if result.get("Success", False):
+            LoggingService.LogInfo(f"Successfully cancelled active transcode job: {result.get('Message', '')}", 
+                                 "TranscodeJobController", "CancelActiveTranscode")
+        else:
+            LoggingService.LogWarning(f"Failed to cancel active transcode job: {result.get('Message', 'Unknown error')}", 
+                                    "TranscodeJobController", "CancelActiveTranscode")
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        errorMsg = f"Exception cancelling active transcode job: {str(e)}"
+        LoggingService.LogException(errorMsg, e, "TranscodeJobController", "CancelActiveTranscode")
+        return jsonify({"Success": False, "ErrorMessage": errorMsg}), 500

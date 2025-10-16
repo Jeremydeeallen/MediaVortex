@@ -190,11 +190,35 @@ class QualityTestController:
             self.LoggingService.LogError(f"Error retrying quality test: {str(e)}")
             return {"Success": False, "Message": str(e)}
     
-    def GetQualityTestHistory(self, Limit: int = 10) -> dict:
-        """Get recent quality test results from QualityTestResults table"""
+    def GetQualityTestHistory(self, Page: int = 1, Limit: int = 10) -> dict:
+        """Get recent quality test results from QualityTestResults table with pagination"""
         try:
-            Results = self.DatabaseManager.GetQualityTestResults(Limit)
-            return {"Success": True, "QualityTestingResults": Results}
+            # Calculate offset for pagination
+            Offset = (Page - 1) * Limit
+            
+            # Get results with pagination
+            Results = self.DatabaseManager.GetQualityTestResults(Limit, Offset)
+            
+            # Get total count for pagination info
+            TotalCount = self.DatabaseManager.GetQualityTestResultsCount()
+            
+            # Calculate pagination info
+            TotalPages = (TotalCount + Limit - 1) // Limit  # Ceiling division
+            HasNextPage = Page < TotalPages
+            HasPreviousPage = Page > 1
+            
+            return {
+                "Success": True, 
+                "QualityTestingResults": Results,
+                "Pagination": {
+                    "CurrentPage": Page,
+                    "PageSize": Limit,
+                    "TotalCount": TotalCount,
+                    "TotalPages": TotalPages,
+                    "HasNextPage": HasNextPage,
+                    "HasPreviousPage": HasPreviousPage
+                }
+            }
         except Exception as e:
             self.LoggingService.LogError(f"Error getting quality test history: {str(e)}")
             return {"Success": False, "Message": str(e)}
@@ -269,13 +293,13 @@ def GetQualityTestStatus(JobId):
     Result = Controller.GetQualityTestStatus(JobId)
     return jsonify(Result)
 
-@QualityTestBlueprint.route('/QualityTest/Status', methods=['GET'])
+@QualityTestBlueprint.route('/api/QualityTest/Status', methods=['GET'])
 def GetQualityTestServiceStatus():
     Controller = QualityTestController()
     Result = Controller.GetQualityTestServiceStatus()
     return jsonify(Result)
 
-@QualityTestBlueprint.route('/QualityTest/Queue', methods=['GET'])
+@QualityTestBlueprint.route('/api/QualityTest/Queue', methods=['GET'])
 def GetQualityTestQueue():
     Controller = QualityTestController()
     Result = Controller.GetQualityTestQueue()
@@ -299,21 +323,28 @@ def RetryQualityTest():
     Result = Controller.RetryQualityTest(JobId)
     return jsonify(Result)
 
-@QualityTestBlueprint.route('/QualityTesting/History', methods=['GET'])
+@QualityTestBlueprint.route('/api/QualityTesting/History', methods=['GET'])
 def GetQualityTestHistory():
     Controller = QualityTestController()
+    Page = request.args.get('Page', 1, type=int)
     Limit = request.args.get('Limit', 10, type=int)
     
-    Result = Controller.GetQualityTestHistory(Limit)
+    # Validate parameters
+    if Page < 1:
+        Page = 1
+    if Limit < 1 or Limit > 50:  # Max 50 per page
+        Limit = 10
+    
+    Result = Controller.GetQualityTestHistory(Page, Limit)
     return jsonify(Result)
 
-@QualityTestBlueprint.route('/QualityTesting/Progress', methods=['GET'])
+@QualityTestBlueprint.route('/api/QualityTesting/Progress', methods=['GET'])
 def GetQualityTestProgress():
     Controller = QualityTestController()
     Result = Controller.GetQualityTestProgress()
     return jsonify(Result)
 
-@QualityTestBlueprint.route('/QualityTesting/LogError', methods=['POST'])
+@QualityTestBlueprint.route('/api/QualityTesting/LogError', methods=['POST'])
 def LogQualityTestError():
     Controller = QualityTestController()
     Data = request.get_json()
@@ -328,7 +359,7 @@ def LogQualityTestError():
     Result = Controller.LogError(ErrorMessage, ErrorContext, RequestUrl)
     return jsonify(Result)
 
-@QualityTestBlueprint.route('/QualityTest/RequeueAttempt', methods=['POST'])
+@QualityTestBlueprint.route('/api/QualityTest/RequeueAttempt', methods=['POST'])
 def RequeueAttempt():
     Controller = QualityTestController()
     Data = request.get_json()
@@ -341,4 +372,36 @@ def RequeueAttempt():
         return jsonify({"Success": False, "Message": "TranscodeAttemptId required"}), 400
     
     Result = Controller.RequeueAttempt(TranscodeAttemptId)
+    return jsonify(Result)
+
+@QualityTestBlueprint.route('/QualityTest/Skip', methods=['POST'])
+def SkipQualityTest():
+    """Skip quality test for a transcode attempt"""
+    Controller = QualityTestController()
+    Data = request.get_json()
+    
+    if not Data:
+        return jsonify({"Success": False, "Message": "No data provided"}), 400
+    
+    TranscodeAttemptId = Data.get('TranscodeAttemptId')
+    if not TranscodeAttemptId:
+        return jsonify({"Success": False, "Message": "TranscodeAttemptId required"}), 400
+    
+    # Use the business service to handle the skip logic
+    from Services.QualityTestingBusinessService import QualityTestingBusinessService
+    business_service = QualityTestingBusinessService(Controller.DatabaseManager)
+    Result = business_service.SkipQualityTest(TranscodeAttemptId)
+    
+    return jsonify(Result)
+
+@QualityTestBlueprint.route('/QualityTest/CancelActive', methods=['POST'])
+def CancelActiveQualityTest():
+    """Cancel the currently running quality test"""
+    Controller = QualityTestController()
+    
+    # Use the business service to handle the cancel logic
+    from Services.QualityTestingBusinessService import QualityTestingBusinessService
+    business_service = QualityTestingBusinessService(Controller.DatabaseManager)
+    Result = business_service.CancelActiveQualityTest()
+    
     return jsonify(Result)

@@ -12,12 +12,44 @@ import os
 import signal
 import platform
 import time
+import psutil
 
 # Create Blueprint for service control routes
 ServiceControlBlueprint = Blueprint('ServiceControl', __name__, url_prefix='/api/ServiceControl')
 
 # Shared database manager
 SharedDatabaseManager = DatabaseManager()
+
+def IsServiceProcessRunning(ServiceName: str) -> bool:
+    """Check if a service process is already running using ServiceStatusService."""
+    try:
+        from Services.ServiceStatusService import ServiceStatusService
+        status_service = ServiceStatusService()
+        
+        # Get service status from database
+        service_status = status_service.GetServiceStatus(ServiceName)
+        if not service_status:
+            LoggingService.LogInfo(f"No ServiceStatus record found for {ServiceName}", "ServiceControlController", "IsServiceProcessRunning")
+            return False
+        
+        # Check if service is marked as running
+        status = service_status.get('Status', 'Stopped')
+        process_id = service_status.get('ProcessId', 0)
+        
+        if status in ['Running', 'Starting'] and process_id > 0:
+            # Verify process is actually running
+            is_running = status_service.IsServiceProcessActuallyRunning(ServiceName, process_id)
+            LoggingService.LogInfo(f"Service {ServiceName} database status: {status}, PID: {process_id}, actually running: {is_running}", 
+                                 "ServiceControlController", "IsServiceProcessRunning")
+            return is_running
+        else:
+            LoggingService.LogInfo(f"Service {ServiceName} not running (status: {status}, PID: {process_id})", 
+                                 "ServiceControlController", "IsServiceProcessRunning")
+            return False
+            
+    except Exception as e:
+        LoggingService.LogException(f"Error checking if {ServiceName} is running", e, "ServiceControlController", "IsServiceProcessRunning")
+        return False
 
 @ServiceControlBlueprint.route('/<service_name>/<action>', methods=['POST'])
 def ControlService(service_name: str, action: str):
@@ -146,6 +178,11 @@ def PrivateStartServiceProcess(service_name: str) -> bool:
         import platform
         
         LoggingService.LogInfo(f"Starting {service_name} process directly", "ServiceControlController", "PrivateStartServiceProcess")
+        
+        # Check if service is already running
+        if IsServiceProcessRunning(service_name):
+            LoggingService.LogWarning(f"{service_name} is already running, skipping start", "ServiceControlController", "PrivateStartServiceProcess")
+            return True  # Return success since service is already running
         
         # Get the script directory
         script_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

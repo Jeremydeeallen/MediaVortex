@@ -40,6 +40,7 @@
                                             <th>Start Time</th>
                                             <th>Progress</th>
                                             <th>ETA</th>
+                                            <th>Action</th>
                                         </tr>
                                     </thead>
                                     <tbody id="TranscodeJobTableBody">
@@ -72,6 +73,7 @@
                                             <th>Start Time</th>
                                             <th>Progress</th>
                                             <th>ETA</th>
+                                            <th>Action</th>
                                         </tr>
                                     </thead>
                                     <tbody id="RunningQualityTestingTableBody">
@@ -122,6 +124,37 @@
                 </div>
             </div>
 
+            <!-- Quality Test Queue -->
+            <div class="row mb-4">
+                <div class="col-12">
+                    <div class="card">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <h5 class="mb-0">
+                                <i class="fas fa-list"></i> Quality Test Queue
+                            </h5>
+                            <span class="badge bg-warning" id="QualityTestQueueCount">0 pending</span>
+                        </div>
+                        <div class="card-body">
+                            <div class="table-responsive">
+                                <table class="table table-striped table-hover" id="QualityTestQueueTable">
+                                    <thead>
+                                        <tr>
+                                            <th>File Name</th>
+                                            <th>Date Added</th>
+                                            <th>Priority</th>
+                                            <th>Action</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="QualityTestQueueTableBody">
+                                        <!-- Quality test queue items will be populated here -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <!-- Recent Quality Testing Results -->
             <div class="row">
                 <div class="col-12">
@@ -141,13 +174,25 @@
                                             <th>Quality Score</th>
                                             <th>Profile</th>
                                             <th>Size Reduction</th>
-                                            <th>Status</th>
+                                            <th>Replacement Status</th>
+                                            <th>Action</th>
                                         </tr>
                                     </thead>
                                     <tbody id="RecentQualityTestingTableBody">
                                         <!-- Recent quality testing results will be populated here -->
                                     </tbody>
                                 </table>
+                            </div>
+                            <!-- Pagination Controls -->
+                            <div class="d-flex justify-content-between align-items-center mt-3">
+                                <div class="pagination-info">
+                                    <span id="QualityTestPaginationInfo">Showing 0-0 of 0 results</span>
+                                </div>
+                                <nav aria-label="Quality test results pagination">
+                                    <ul class="pagination pagination-sm mb-0" id="QualityTestPagination">
+                                        <!-- Pagination buttons will be populated here -->
+                                    </ul>
+                                </nav>
                             </div>
                         </div>
                     </div>
@@ -165,6 +210,12 @@ class ActivityManager {
     constructor() {
         this.isTranscoding = false;
         this.currentJob = null;
+        this.qualityTestPagination = {
+            currentPage: 1,
+            pageSize: 10,
+            totalCount: 0,
+            totalPages: 0
+        };
         this.initializeEventListeners();
         this.loadProgressData();
         this.startAutoRefresh();
@@ -227,9 +278,11 @@ class ActivityManager {
                 this.showAlert('Error loading recent attempts: ' + error.message, 'warning');
             }
 
-            // Get recent quality testing results
+            // Get recent quality testing results with pagination
             try {
-                const qualityTestingHistoryResponse = await fetch('/api/QualityTesting/History?Limit=5');
+                const page = this.qualityTestPagination.currentPage;
+                const limit = this.qualityTestPagination.pageSize;
+                const qualityTestingHistoryResponse = await fetch(`/api/QualityTesting/History?Page=${page}&Limit=${limit}`);
                 const contentType = qualityTestingHistoryResponse.headers.get('content-type');
                 if (!contentType || !contentType.includes('application/json')) {
                     console.error('Quality Testing History API returned HTML instead of JSON. Status:', qualityTestingHistoryResponse.status);
@@ -238,13 +291,30 @@ class ActivityManager {
                 const qualityTestingHistoryData = await qualityTestingHistoryResponse.json();
 
                 if (qualityTestingHistoryData.Success) {
-                    this.updateRecentQualityTestingResults(qualityTestingHistoryData.QualityTestingResults);
+                    this.updateRecentQualityTestingResults(qualityTestingHistoryData.QualityTestingResults, qualityTestingHistoryData.Pagination);
                 }
             } catch (error) {
                 console.error('Error loading quality testing history:', error);
                 this.showAlert('Error loading quality testing history: ' + error.message, 'warning');
             }
 
+            // Get quality test queue
+            try {
+                const qualityTestQueueResponse = await fetch('/api/QualityTest/Queue');
+                const contentType = qualityTestQueueResponse.headers.get('content-type');
+                if (!contentType || !contentType.includes('application/json')) {
+                    console.error('Quality Test Queue API returned HTML instead of JSON. Status:', qualityTestQueueResponse.status);
+                    throw new Error(`API returned HTML instead of JSON (Status: ${qualityTestQueueResponse.status})`);
+                }
+                const qualityTestQueueData = await qualityTestQueueResponse.json();
+
+                if (qualityTestQueueData.Success) {
+                    this.updateQualityTestQueue(qualityTestQueueData.Jobs);
+                }
+            } catch (error) {
+                console.error('Error loading quality test queue:', error);
+                this.showAlert('Error loading quality test queue: ' + error.message, 'warning');
+            }
 
             // Get running quality testing operations
             try {
@@ -386,16 +456,33 @@ class ActivityManager {
         return '-';
     }
 
-    updateRecentQualityTestingResults(results) {
+    updateRecentQualityTestingResults(results, pagination = null) {
         const tbody = document.getElementById('RecentQualityTestingTableBody');
         tbody.innerHTML = '';
 
-        document.getElementById('RecentQualityTestingCount').textContent = `${results.length} results`;
+        // Update pagination state if provided
+        if (pagination) {
+            this.qualityTestPagination = {
+                currentPage: pagination.CurrentPage,
+                pageSize: pagination.PageSize,
+                totalCount: pagination.TotalCount,
+                totalPages: pagination.TotalPages
+            };
+        }
+
+        // Update count display
+        const startItem = (this.qualityTestPagination.currentPage - 1) * this.qualityTestPagination.pageSize + 1;
+        const endItem = Math.min(startItem + results.length - 1, this.qualityTestPagination.totalCount);
+        document.getElementById('RecentQualityTestingCount').textContent = `${this.qualityTestPagination.totalCount} results`;
+        
+        // Update pagination info
+        document.getElementById('QualityTestPaginationInfo').textContent = 
+            `Showing ${startItem}-${endItem} of ${this.qualityTestPagination.totalCount} results`;
 
         if (results.length === 0) {
             const row = document.createElement('tr');
             row.innerHTML = `
-                <td colspan="5" class="text-center text-muted">
+                <td colspan="6" class="text-center text-muted">
                     <i class="fas fa-info-circle"></i> No quality test results available
                 </td>
             `;
@@ -406,14 +493,18 @@ class ActivityManager {
         results.forEach(result => {
             const row = document.createElement('tr');
             
-            // Determine VMAF score badge color
+            // Determine VMAF score badge color based on auto-replace thresholds (88-94)
             let vmafBadgeClass = 'bg-secondary';
             let vmafStatus = 'Unknown';
+            let shouldShowReplaceButton = false;
             
             if (result.VMAFScore !== null && result.VMAFScore !== undefined) {
-                if (result.VMAFScore >= 90) {
+                if (result.VMAFScore >= 88 && result.VMAFScore <= 94) {
                     vmafBadgeClass = 'bg-success';
-                    vmafStatus = 'Excellent';
+                    vmafStatus = 'Auto-Replace Range';
+                } else if (result.VMAFScore > 94) {
+                    vmafBadgeClass = 'bg-warning';
+                    vmafStatus = 'High Quality';
                 } else if (result.VMAFScore >= 80) {
                     vmafBadgeClass = 'bg-warning';
                     vmafStatus = 'Good';
@@ -423,16 +514,46 @@ class ActivityManager {
                 }
             }
             
+            // Show manual replace button for all files that haven't been replaced yet
+            // This gives users the option to manually replace any file, regardless of VMAF score
+            if (result.FileReplaced !== true && result.FileReplaced !== 1) {
+                shouldShowReplaceButton = true;
+            }
+            
             // Determine status badge
-            const isSuccess = result.Success && !result.ErrorMessage;
+            const isSuccess = (result.Success === true || result.Success === 1) && !result.ErrorMessage;
             const statusBadge = isSuccess ? 'bg-success' : 'bg-danger';
             const statusText = isSuccess ? 'Success' : 'Failed';
+            
+            // Determine replacement status
+            let replacementStatus = '';
+            let replacementBadge = '';
+            if (result.FileReplaced === true || result.FileReplaced === 1) {
+                replacementStatus = result.ReplacementType === 'Auto' ? 'Auto-Replaced' : 'Manually Replaced';
+                replacementBadge = 'bg-success';
+            } else {
+                replacementStatus = 'Not Replaced';
+                replacementBadge = 'bg-secondary';
+            }
+            
+            // Create replacement action button
+            let replacementAction = '';
+            if (result.FileReplaced === true || result.FileReplaced === 1) {
+                replacementAction = `<span class="badge bg-success"><i class="fas fa-check"></i> Replaced</span>`;
+            } else if (shouldShowReplaceButton) {
+                // Show manual replace button for any file that hasn't been replaced, regardless of quality test success
+                replacementAction = `<button class="btn btn-sm btn-primary" onclick="activityManager.ReplaceFile(${result.TranscodeAttemptId})">
+                    <i class="fas fa-exchange-alt"></i> Replace File
+                </button>`;
+            } else {
+                replacementAction = '<span class="text-muted">-</span>';
+            }
             
             row.innerHTML = `
                 <td>${this.escapeHtml(result.TranscodedFileName || this.getFileNameFromPath(result.FilePath) || '-')}</td>
                 <td>
                     ${result.VMAFScore !== null && result.VMAFScore !== undefined ? 
-                        `<span class="badge ${vmafBadgeClass}">${result.VMAFScore.toFixed(2)}</span>` : 
+                        `<span class="badge ${vmafBadgeClass}" title="${vmafStatus}">${result.VMAFScore.toFixed(2)}</span>` : 
                         '<span class="text-muted">-</span>'
                     }
                 </td>
@@ -443,13 +564,19 @@ class ActivityManager {
                     ${this.calculateSizeReduction(result)}
                 </td>
                 <td>
-                    <span class="badge ${statusBadge}">
-                        ${statusText}
+                    <span class="badge ${replacementBadge}">
+                        ${replacementStatus}
                     </span>
+                </td>
+                <td>
+                    ${replacementAction}
                 </td>
             `;
             tbody.appendChild(row);
         });
+        
+        // Update pagination controls
+        this.updateQualityTestPaginationControls();
     }
 
     updateRunningQualityTestingOperations(operations) {
@@ -495,6 +622,52 @@ class ActivityManager {
                 </td>
                 <td>
                     <span class="badge bg-secondary">${this.escapeHtml(operation.ETA || 'Unknown')}</span>
+                </td>
+                <td>
+                    <button class="btn btn-sm btn-danger" onclick="activityManager.CancelActiveQualityTest()">
+                        <i class="fas fa-stop"></i> Cancel
+                    </button>
+                </td>
+            `;
+            tbody.appendChild(row);
+        });
+    }
+
+    updateQualityTestQueue(queueItems) {
+        const tbody = document.getElementById('QualityTestQueueTableBody');
+        tbody.innerHTML = '';
+
+        document.getElementById('QualityTestQueueCount').textContent = `${queueItems.length} pending`;
+
+        if (queueItems.length === 0) {
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td colspan="4" class="text-center text-muted">
+                    <i class="fas fa-info-circle"></i> No quality tests in queue
+                </td>
+            `;
+            tbody.appendChild(row);
+            return;
+        }
+
+        queueItems.forEach(item => {
+            const row = document.createElement('tr');
+            
+            // Extract filename from file path
+            const fileName = item.OriginalFilePath ? item.OriginalFilePath.split('/').pop().split('\\').pop() : '-';
+            
+            row.innerHTML = `
+                <td>${this.escapeHtml(fileName)}</td>
+                <td>
+                    <small class="text-muted">${this.formatDate(item.DateAdded)}</small>
+                </td>
+                <td>
+                    <span class="badge bg-warning">Normal</span>
+                </td>
+                <td>
+                    <button class="btn btn-sm btn-warning" onclick="activityManager.SkipQualityTest(${item.TranscodeAttemptId})">
+                        <i class="fas fa-forward"></i> Skip
+                    </button>
                 </td>
             `;
             tbody.appendChild(row);
@@ -622,6 +795,11 @@ class ActivityManager {
                 <td>
                     <span class="badge bg-secondary">${this.escapeHtml(progressData.ETA || 'Unknown')}</span>
                 </td>
+                <td>
+                    <button type="button" class="btn btn-danger btn-sm" onclick="cancelTranscodeJob()">
+                        <i class="fas fa-times"></i> Cancel
+                    </button>
+                </td>
             `;
             tbody.appendChild(row);
         } else {
@@ -630,7 +808,7 @@ class ActivityManager {
             
             const row = document.createElement('tr');
             row.innerHTML = `
-                <td colspan="4" class="text-center text-muted">
+                <td colspan="5" class="text-center text-muted">
                     <i class="fas fa-info-circle"></i> No transcode job currently running
                 </td>
             `;
@@ -724,6 +902,184 @@ class ActivityManager {
             console.error('Error running quality test:', error);
             this.showAlert('Error running quality test: ' + error.message, 'danger');
         }
+    }
+
+    async ReplaceFile(TranscodeAttemptId) {
+        try {
+            // Show loading indicator
+            this.showAlert('Processing file replacement...', 'info');
+            
+            const response = await fetch(`/api/FileReplacement/Process/${TranscodeAttemptId}`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            const data = await response.json();
+
+            if (data.Success) {
+                this.showAlert('File replacement completed successfully', 'success');
+                // Refresh the page data
+                this.loadProgressData();
+            } else {
+                this.showAlert(data.ErrorMessage || 'Failed to replace file', 'danger');
+            }
+        } catch (error) {
+            console.error('Error replacing file:', error);
+            this.showAlert('Error replacing file: ' + error.message, 'danger');
+        }
+    }
+
+    async SkipQualityTest(TranscodeAttemptId) {
+        try {
+            // Show loading indicator
+            this.showAlert('Skipping quality test...', 'info');
+            
+            const response = await fetch('/api/QualityTest/Skip', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ TranscodeAttemptId: TranscodeAttemptId })
+            });
+
+            const data = await response.json();
+
+            if (data.Success) {
+                this.showAlert('Quality test skipped successfully', 'success');
+                // Refresh the page data
+                this.loadProgressData();
+            } else {
+                this.showAlert(data.Message || 'Failed to skip quality test', 'danger');
+            }
+        } catch (error) {
+            console.error('Error skipping quality test:', error);
+            this.showAlert('Error skipping quality test: ' + error.message, 'danger');
+        }
+    }
+
+    async CancelActiveQualityTest() {
+        try {
+            // Show loading indicator
+            this.showAlert('Cancelling active quality test...', 'info');
+            
+            const response = await fetch('/api/QualityTest/CancelActive', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            const data = await response.json();
+
+            if (data.Success) {
+                this.showAlert('Active quality test cancelled successfully', 'success');
+                // Refresh the page data
+                this.loadProgressData();
+            } else {
+                this.showAlert(data.Message || 'Failed to cancel quality test', 'danger');
+            }
+        } catch (error) {
+            console.error('Error cancelling quality test:', error);
+            this.showAlert('Error cancelling quality test: ' + error.message, 'danger');
+        }
+    }
+
+    updateQualityTestPaginationControls() {
+        const paginationContainer = document.getElementById('QualityTestPagination');
+        paginationContainer.innerHTML = '';
+
+        const { currentPage, totalPages, hasPreviousPage, hasNextPage } = this.qualityTestPagination;
+
+        // Previous button
+        const prevButton = document.createElement('li');
+        prevButton.className = `page-item ${!hasPreviousPage ? 'disabled' : ''}`;
+        prevButton.innerHTML = `<a class="page-link" href="#" onclick="activityManager.goToQualityTestPage(${currentPage - 1})">Previous</a>`;
+        paginationContainer.appendChild(prevButton);
+
+        // Page numbers
+        const startPage = Math.max(1, currentPage - 2);
+        const endPage = Math.min(totalPages, currentPage + 2);
+
+        if (startPage > 1) {
+            const firstButton = document.createElement('li');
+            firstButton.className = 'page-item';
+            firstButton.innerHTML = `<a class="page-link" href="#" onclick="activityManager.goToQualityTestPage(1)">1</a>`;
+            paginationContainer.appendChild(firstButton);
+
+            if (startPage > 2) {
+                const ellipsis = document.createElement('li');
+                ellipsis.className = 'page-item disabled';
+                ellipsis.innerHTML = '<span class="page-link">...</span>';
+                paginationContainer.appendChild(ellipsis);
+            }
+        }
+
+        for (let i = startPage; i <= endPage; i++) {
+            const pageButton = document.createElement('li');
+            pageButton.className = `page-item ${i === currentPage ? 'active' : ''}`;
+            pageButton.innerHTML = `<a class="page-link" href="#" onclick="activityManager.goToQualityTestPage(${i})">${i}</a>`;
+            paginationContainer.appendChild(pageButton);
+        }
+
+        if (endPage < totalPages) {
+            if (endPage < totalPages - 1) {
+                const ellipsis = document.createElement('li');
+                ellipsis.className = 'page-item disabled';
+                ellipsis.innerHTML = '<span class="page-link">...</span>';
+                paginationContainer.appendChild(ellipsis);
+            }
+
+            const lastButton = document.createElement('li');
+            lastButton.className = 'page-item';
+            lastButton.innerHTML = `<a class="page-link" href="#" onclick="activityManager.goToQualityTestPage(${totalPages})">${totalPages}</a>`;
+            paginationContainer.appendChild(lastButton);
+        }
+
+        // Next button
+        const nextButton = document.createElement('li');
+        nextButton.className = `page-item ${!hasNextPage ? 'disabled' : ''}`;
+        nextButton.innerHTML = `<a class="page-link" href="#" onclick="activityManager.goToQualityTestPage(${currentPage + 1})">Next</a>`;
+        paginationContainer.appendChild(nextButton);
+    }
+
+    async goToQualityTestPage(page) {
+        if (page < 1 || page > this.qualityTestPagination.totalPages) {
+            return;
+        }
+
+        this.qualityTestPagination.currentPage = page;
+        await this.loadProgressData();
+    }
+}
+
+// Global function for cancel button
+async function cancelTranscodeJob() {
+    try {
+        if (!confirm('Are you sure you want to cancel the current transcode job?')) {
+            return;
+        }
+        
+        const response = await fetch('/api/Transcode/CancelActive', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        const result = await response.json();
+        
+        if (result.Success) {
+            alert('Transcode job cancelled successfully');
+            // Refresh the page to update the display
+            location.reload();
+        } else {
+            alert('Failed to cancel transcode job: ' + (result.ErrorMessage || 'Unknown error'));
+        }
+    } catch (error) {
+        console.error('Error cancelling transcode job:', error);
+        alert('Error cancelling transcode job: ' + error.message);
     }
 }
 

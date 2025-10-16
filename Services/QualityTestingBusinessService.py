@@ -237,7 +237,10 @@ class QualityTestingBusinessService:
                 if ProgressId and result_id:
                     self.UpdateQualityTestResultsWithScore(result_id, vmaf_score, result)
                 
-                return {"Success": True, "VMAFScore": vmaf_score, "FFmpegCommand": FFmpegCommandString}
+                # Check if auto-replace should be triggered based on VMAF score
+                auto_replace_result = self.CheckAndTriggerAutoReplace(JobDetails, vmaf_score)
+                
+                return {"Success": True, "VMAFScore": vmaf_score, "FFmpegCommand": FFmpegCommandString, "AutoReplaceTriggered": auto_replace_result.get('Triggered', False)}
             else:
                 error_msg = result.stderr if result.stderr else "FFmpeg failed with no error output"
                 return {"Success": False, "Error": error_msg}
@@ -786,6 +789,91 @@ class QualityTestingBusinessService:
             LoggingService.LogException(f"Error updating QualityTestResults for record {ResultId}", e, 
                                        "QualityTestingBusinessService", "UpdateQualityTestResultsWithScore")
     
+    def CheckAndTriggerAutoReplace(self, JobDetails: dict, VMAFScore: float) -> dict:
+        """Check VMAF score against thresholds and trigger auto-replace if within range."""
+        try:
+            LoggingService.LogFunctionEntry("CheckAndTriggerAutoReplace", "QualityTestingBusinessService", VMAFScore)
+            
+            # Get VMAF thresholds from database
+            thresholds = self.DatabaseManager.GetVMAFThresholds()
+            min_threshold = thresholds.get('MinThreshold', 88.0)
+            max_threshold = thresholds.get('MaxThreshold', 94.0)
+            
+            LoggingService.LogInfo(f"Checking VMAF score {VMAFScore} against thresholds: Min={min_threshold}, Max={max_threshold}", 
+                                 "QualityTestingBusinessService", "CheckAndTriggerAutoReplace")
+            
+            # Check if VMAF score is within auto-replace range
+            if min_threshold <= VMAFScore <= max_threshold:
+                LoggingService.LogInfo(f"VMAF score {VMAFScore} is within auto-replace range, triggering file replacement", 
+                                     "QualityTestingBusinessService", "CheckAndTriggerAutoReplace")
+                
+                # Get transcode attempt ID
+                transcode_attempt_id = JobDetails.get('TranscodeAttemptId')
+                if not transcode_attempt_id:
+                    LoggingService.LogError("No TranscodeAttemptId found in job details for auto-replace", 
+                                           "QualityTestingBusinessService", "CheckAndTriggerAutoReplace")
+                    return {"Triggered": False, "Error": "No TranscodeAttemptId found"}
+                
+                # Trigger file replacement
+                from Services.FileReplacementBusinessService import FileReplacementBusinessService
+                file_replacement_service = FileReplacementBusinessService(self.DatabaseManager)
+                
+                # Pass the VMAF score directly to avoid race condition with database update
+                replacement_result = file_replacement_service.ProcessFileReplacementWithVMAF(transcode_attempt_id, VMAFScore, BypassVMAFCheck=False)
+                
+                if replacement_result.get('Success', False):
+                    # Update TranscodeAttempts table with replacement info
+                    self.UpdateTranscodeAttemptReplacementStatus(transcode_attempt_id, True, "Auto")
+                    
+                    LoggingService.LogInfo(f"Auto-replace completed successfully for TranscodeAttempt {transcode_attempt_id}", 
+                                         "QualityTestingBusinessService", "CheckAndTriggerAutoReplace")
+                    return {"Triggered": True, "Success": True}
+                else:
+                    LoggingService.LogError(f"Auto-replace failed for TranscodeAttempt {transcode_attempt_id}: {replacement_result.get('ErrorMessage', 'Unknown error')}", 
+                                           "QualityTestingBusinessService", "CheckAndTriggerAutoReplace")
+                    return {"Triggered": True, "Success": False, "Error": replacement_result.get('ErrorMessage', 'Unknown error')}
+            else:
+                LoggingService.LogInfo(f"VMAF score {VMAFScore} is outside auto-replace range (Min={min_threshold}, Max={max_threshold}), manual review required", 
+                                     "QualityTestingBusinessService", "CheckAndTriggerAutoReplace")
+                return {"Triggered": False, "Reason": "VMAF score outside auto-replace range"}
+                
+        except Exception as e:
+            LoggingService.LogException("Error checking and triggering auto-replace", e, "QualityTestingBusinessService", "CheckAndTriggerAutoReplace")
+            return {"Triggered": False, "Error": str(e)}
+    
+    def UpdateTranscodeAttemptReplacementStatus(self, TranscodeAttemptId: int, FileReplaced: bool, ReplacementType: str) -> bool:
+        """Update TranscodeAttempts table with file replacement status."""
+        try:
+            LoggingService.LogFunctionEntry("UpdateTranscodeAttemptReplacementStatus", "QualityTestingBusinessService", TranscodeAttemptId, FileReplaced, ReplacementType)
+            
+            current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            
+            query = """
+                UPDATE TranscodeAttempts 
+                SET FileReplaced = ?, FileReplacedDate = ?, ReplacementType = ?
+                WHERE Id = ?
+            """
+            
+            result = self.DatabaseManager.DatabaseService.ExecuteNonQuery(query, (
+                FileReplaced,
+                current_time if FileReplaced else None,
+                ReplacementType,
+                TranscodeAttemptId
+            ))
+            
+            if result:
+                LoggingService.LogInfo(f"Updated replacement status for TranscodeAttempt {TranscodeAttemptId}: FileReplaced={FileReplaced}, Type={ReplacementType}", 
+                                     "QualityTestingBusinessService", "UpdateTranscodeAttemptReplacementStatus")
+                return True
+            else:
+                LoggingService.LogError(f"Failed to update replacement status for TranscodeAttempt {TranscodeAttemptId}", 
+                                       "QualityTestingBusinessService", "UpdateTranscodeAttemptReplacementStatus")
+                return False
+                
+        except Exception as e:
+            LoggingService.LogException("Error updating transcode attempt replacement status", e, "QualityTestingBusinessService", "UpdateTranscodeAttemptReplacementStatus")
+            return False
+
     def GetVideoDuration(self, JobDetails: dict) -> float:
         """Get video duration in seconds from the transcoded file."""
         try:
@@ -821,3 +909,104 @@ class QualityTestingBusinessService:
         except Exception as e:
             LoggingService.LogException(f"Error getting video duration for {JobDetails.get('TranscodedFilePath', '')}", e, "QualityTestingBusinessService", "GetVideoDuration")
             return 0.0
+    
+    def SkipQualityTest(self, TranscodeAttemptId: int) -> dict:
+        """Skip quality test for a transcode attempt - handles both queued and running tests"""
+        try:
+            LoggingService.LogFunctionEntry("SkipQualityTest", "QualityTestingBusinessService", TranscodeAttemptId)
+            
+            # Check if there's an active quality test for this attempt
+            active_job = self.DatabaseManager.GetActiveQualityTestJob()
+            is_running = False
+            
+            if active_job and active_job.get('TranscodeAttemptId') == TranscodeAttemptId:
+                is_running = True
+                LoggingService.LogInfo(f"Active quality test found for TranscodeAttempt {TranscodeAttemptId}, will cancel it", 
+                                     "QualityTestingBusinessService", "SkipQualityTest")
+            
+            # If running, kill the FFmpeg process first
+            if is_running:
+                kill_success = self.DatabaseManager.KillActiveQualityTestProcess(active_job['Id'])
+                if not kill_success:
+                    LoggingService.LogWarning(f"Failed to kill FFmpeg process for active job {active_job['Id']}", 
+                                            "QualityTestingBusinessService", "SkipQualityTest")
+            
+            # Delete from QualityTestingQueue (if exists)
+            queue_deleted = self.DatabaseManager.DeleteQualityTestQueueItem(active_job['QueueId'] if is_running else None)
+            
+            # Update TranscodeAttempts to skip quality test
+            skip_success = self.DatabaseManager.SkipQualityTest(TranscodeAttemptId)
+            
+            if not skip_success:
+                return {"Success": False, "Message": "Failed to update TranscodeAttempts record"}
+            
+            # Clean up progress and active job records if it was running
+            if is_running:
+                # Clean up QualityTestProgress
+                self.DatabaseManager.DatabaseService.ExecuteNonQuery(
+                    "DELETE FROM QualityTestProgress WHERE TranscodeAttemptId = ?", 
+                    (TranscodeAttemptId,)
+                )
+                
+                # Complete the active job
+                self.DatabaseManager.CompleteActiveJob(active_job['Id'], False, "Cancelled by user skip request")
+            
+            LoggingService.LogInfo(f"Successfully skipped quality test for TranscodeAttempt {TranscodeAttemptId}", 
+                                 "QualityTestingBusinessService", "SkipQualityTest")
+            
+            return {"Success": True, "Message": "Quality test skipped successfully"}
+            
+        except Exception as e:
+            LoggingService.LogException(f"Error skipping quality test for TranscodeAttempt {TranscodeAttemptId}", e, 
+                                      "QualityTestingBusinessService", "SkipQualityTest")
+            return {"Success": False, "Message": str(e)}
+    
+    def CancelActiveQualityTest(self) -> dict:
+        """Cancel the currently running quality test and trigger next job"""
+        try:
+            LoggingService.LogFunctionEntry("CancelActiveQualityTest", "QualityTestingBusinessService")
+            
+            # Get active quality test job
+            active_job = self.DatabaseManager.GetActiveQualityTestJob()
+            if not active_job:
+                return {"Success": False, "Message": "No active quality test found"}
+            
+            transcode_attempt_id = active_job.get('TranscodeAttemptId')
+            if not transcode_attempt_id:
+                return {"Success": False, "Message": "No TranscodeAttemptId found in active job"}
+            
+            LoggingService.LogInfo(f"Cancelling active quality test for TranscodeAttempt {transcode_attempt_id}", 
+                                 "QualityTestingBusinessService", "CancelActiveQualityTest")
+            
+            # Kill FFmpeg process
+            kill_success = self.DatabaseManager.KillActiveQualityTestProcess(active_job['Id'])
+            if not kill_success:
+                LoggingService.LogWarning(f"Failed to kill FFmpeg process for active job {active_job['Id']}", 
+                                        "QualityTestingBusinessService", "CancelActiveQualityTest")
+            
+            # Delete from QualityTestingQueue
+            queue_deleted = self.DatabaseManager.DeleteQualityTestQueueItem(active_job['QueueId'])
+            
+            # Update TranscodeAttempts to skip quality test
+            skip_success = self.DatabaseManager.SkipQualityTest(transcode_attempt_id)
+            if not skip_success:
+                return {"Success": False, "Message": "Failed to update TranscodeAttempts record"}
+            
+            # Clean up progress and active job records
+            self.DatabaseManager.DatabaseService.ExecuteNonQuery(
+                "DELETE FROM QualityTestProgress WHERE TranscodeAttemptId = ?", 
+                (transcode_attempt_id,)
+            )
+            
+            # Complete the active job
+            self.DatabaseManager.CompleteActiveJob(active_job['Id'], False, "Cancelled by user")
+            
+            LoggingService.LogInfo(f"Successfully cancelled quality test for TranscodeAttempt {transcode_attempt_id}", 
+                                 "QualityTestingBusinessService", "CancelActiveQualityTest")
+            
+            return {"Success": True, "Message": "Active quality test cancelled successfully"}
+            
+        except Exception as e:
+            LoggingService.LogException("Error cancelling active quality test", e, 
+                                      "QualityTestingBusinessService", "CancelActiveQualityTest")
+            return {"Success": False, "Message": str(e)}

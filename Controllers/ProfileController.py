@@ -11,7 +11,7 @@ class ProfileController:
     
     def __init__(self, view_model: ProfileManagementViewModel = None):
         self.ViewModel = view_model or ProfileManagementViewModel()
-        self.Blueprint = Blueprint('profiles', __name__)
+        self.Blueprint = Blueprint('profiles', __name__, url_prefix='/api')
         self._register_routes()
     
     def _register_routes(self):

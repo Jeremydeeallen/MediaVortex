@@ -1093,7 +1093,8 @@ class DatabaseManager:
         query = """
             SELECT Id, FilePath, AttemptDate, Quality, OldSizeBytes, NewSizeBytes, Success,
                    SizeReductionBytes, SizeReductionPercent, ErrorMessage, TranscodeDurationSeconds,
-                   FfpmpegCommand, AudioBitrateKbps, VideoBitrateKbps, ProfileName, VMAF
+                   FfpmpegCommand, AudioBitrateKbps, VideoBitrateKbps, ProfileName, VMAF,
+                   FileReplaced, FileReplacedDate, ReplacementType
             FROM TranscodeAttempts 
             WHERE Id = ?
         """
@@ -1117,7 +1118,10 @@ class DatabaseManager:
                 AudioBitrateKbps=row['AudioBitrateKbps'],
                 VideoBitrateKbps=row['VideoBitrateKbps'],
                 ProfileName=row['ProfileName'],
-                VMAF=row['VMAF']
+                VMAF=row['VMAF'],
+                FileReplaced=row['FileReplaced'],
+                FileReplacedDate=row['FileReplacedDate'],
+                ReplacementType=row['ReplacementType']
             )
         return None
     
@@ -1173,8 +1177,9 @@ class DatabaseManager:
                         INSERT INTO TranscodeAttempts 
                         (FilePath, AttemptDate, Quality, OldSizeBytes, NewSizeBytes, Success,
                          SizeReductionBytes, SizeReductionPercent, ErrorMessage, TranscodeDurationSeconds,
-                         FfpmpegCommand, AudioBitrateKbps, VideoBitrateKbps, ProfileName, VMAF)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                         FfpmpegCommand, AudioBitrateKbps, VideoBitrateKbps, ProfileName, VMAF,
+                         FileReplaced, FileReplacedDate, ReplacementType)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """
                     parameters = (
                         Attempt.FilePath, Attempt.AttemptDate, Attempt.Quality,
@@ -1182,7 +1187,8 @@ class DatabaseManager:
                         Attempt.SizeReductionBytes, Attempt.SizeReductionPercent, Attempt.ErrorMessage,
                         Attempt.TranscodeDurationSeconds,
                         Attempt.FfpmpegCommand,
-                        Attempt.AudioBitrateKbps, Attempt.VideoBitrateKbps, Attempt.ProfileName, Attempt.VMAF
+                        Attempt.AudioBitrateKbps, Attempt.VideoBitrateKbps, Attempt.ProfileName, Attempt.VMAF,
+                        Attempt.FileReplaced, Attempt.FileReplacedDate, Attempt.ReplacementType
                     )
                     LoggingService.LogInfo(f"Insert attempt parameters: {parameters}", "DatabaseManager", "SaveTranscodeAttempt")
                     cursor.execute(query, parameters)
@@ -1198,7 +1204,8 @@ class DatabaseManager:
                         SET FilePath = ?, AttemptDate = ?, Quality = ?, OldSizeBytes = ?, NewSizeBytes = ?,
                             Success = ?, SizeReductionBytes = ?, SizeReductionPercent = ?, ErrorMessage = ?,
                             TranscodeDurationSeconds = ?, FfpmpegCommand = ?, AudioBitrateKbps = ?,
-                            VideoBitrateKbps = ?, ProfileName = ?, VMAF = ?
+                            VideoBitrateKbps = ?, ProfileName = ?, VMAF = ?,
+                            FileReplaced = ?, FileReplacedDate = ?, ReplacementType = ?
                         WHERE Id = ?
                     """
                     parameters = (
@@ -1207,7 +1214,8 @@ class DatabaseManager:
                         Attempt.SizeReductionBytes, Attempt.SizeReductionPercent, Attempt.ErrorMessage,
                         Attempt.TranscodeDurationSeconds,
                         Attempt.FfpmpegCommand,
-                        Attempt.AudioBitrateKbps, Attempt.VideoBitrateKbps, Attempt.ProfileName, Attempt.VMAF, Attempt.Id
+                        Attempt.AudioBitrateKbps, Attempt.VideoBitrateKbps, Attempt.ProfileName, Attempt.VMAF,
+                        Attempt.FileReplaced, Attempt.FileReplacedDate, Attempt.ReplacementType, Attempt.Id
                     )
                     LoggingService.LogInfo(f"Update attempt parameters: {parameters}", "DatabaseManager", "SaveTranscodeAttempt")
                     cursor.execute(query, parameters)
@@ -2337,19 +2345,17 @@ class DatabaseManager:
     def GetKeepSourceSetting(self, TranscodeAttemptId: int) -> Optional[bool]:
         """Get the KeepSource setting for a transcode attempt."""
         try:
-            # Get the assigned profile from the transcode attempt
+            # Get the KeepSource setting directly from MediaFiles table
             query = '''
-            SELECT pt.KeepSource 
-            FROM ProfileThresholds pt
-            JOIN Profiles p ON pt.ProfileId = p.Id
-            JOIN MediaFiles mf ON p.ProfileName = mf.AssignedProfile
+            SELECT mf.KeepSource 
+            FROM MediaFiles mf
             JOIN TranscodeAttempts ta ON mf.FilePath = ta.FilePath
             WHERE ta.Id = ?
             '''
             result = self.DatabaseService.ExecuteQuery(query, (TranscodeAttemptId,))
             
             if result:
-                return bool(result[0]['KeepSource'])
+                return bool(result[0][0])  # KeepSource is the first column
             return None
             
         except Exception as e:
@@ -2552,6 +2558,73 @@ class DatabaseManager:
             LoggingService.LogException("Exception updating transcode attempt VMAF", e, "DatabaseManager", "UpdateTranscodeAttemptVMAF")
             return False
     
+    def GetVMAFThresholds(self) -> dict:
+        """Get VMAF auto-replace thresholds from SystemSettings."""
+        try:
+            LoggingService.LogFunctionEntry("GetVMAFThresholds", "DatabaseManager")
+            
+            min_threshold_query = "SELECT SettingValue FROM SystemSettings WHERE SettingKey = 'VMAFAutoReplaceMinThreshold'"
+            max_threshold_query = "SELECT SettingValue FROM SystemSettings WHERE SettingKey = 'VMAFAutoReplaceMaxThreshold'"
+            
+            min_result = self.DatabaseService.ExecuteQuery(min_threshold_query)
+            max_result = self.DatabaseService.ExecuteQuery(max_threshold_query)
+            
+            min_threshold = 88.0  # Default value
+            max_threshold = 94.0  # Default value
+            
+            if min_result and len(min_result) > 0:
+                min_threshold = float(min_result[0][0])  # SettingValue is the first column
+            
+            if max_result and len(max_result) > 0:
+                max_threshold = float(max_result[0][0])  # SettingValue is the first column
+            
+            LoggingService.LogInfo(f"Retrieved VMAF thresholds: Min={min_threshold}, Max={max_threshold}", 
+                                 "DatabaseManager", "GetVMAFThresholds")
+            
+            return {
+                'MinThreshold': min_threshold,
+                'MaxThreshold': max_threshold
+            }
+            
+        except Exception as e:
+            LoggingService.LogException("Error getting VMAF thresholds", e, "DatabaseManager", "GetVMAFThresholds")
+            return {'MinThreshold': 88.0, 'MaxThreshold': 94.0}  # Return defaults on error
+    
+    def UpdateVMAFThresholds(self, MinThreshold: float, MaxThreshold: float) -> bool:
+        """Update VMAF auto-replace thresholds in SystemSettings."""
+        try:
+            LoggingService.LogFunctionEntry("UpdateVMAFThresholds", "DatabaseManager", MinThreshold, MaxThreshold)
+            
+            current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            
+            # Update min threshold
+            min_query = """
+                UPDATE SystemSettings 
+                SET SettingValue = ?, LastModified = ?
+                WHERE SettingKey = 'VMAFAutoReplaceMinThreshold'
+            """
+            min_result = self.DatabaseService.ExecuteNonQuery(min_query, (str(MinThreshold), current_time))
+            
+            # Update max threshold
+            max_query = """
+                UPDATE SystemSettings 
+                SET SettingValue = ?, LastModified = ?
+                WHERE SettingKey = 'VMAFAutoReplaceMaxThreshold'
+            """
+            max_result = self.DatabaseService.ExecuteNonQuery(max_query, (str(MaxThreshold), current_time))
+            
+            if min_result and max_result:
+                LoggingService.LogInfo(f"Updated VMAF thresholds: Min={MinThreshold}, Max={MaxThreshold}", 
+                                     "DatabaseManager", "UpdateVMAFThresholds")
+                return True
+            else:
+                LoggingService.LogError("Failed to update VMAF thresholds", "DatabaseManager", "UpdateVMAFThresholds")
+                return False
+                
+        except Exception as e:
+            LoggingService.LogException("Error updating VMAF thresholds", e, "DatabaseManager", "UpdateVMAFThresholds")
+            return False
+
     def MarkQualityTestCompleted(self, TranscodeAttemptId: int) -> bool:
         """Mark quality test as completed for a transcode attempt."""
         try:
@@ -2706,11 +2779,11 @@ class DatabaseManager:
             return False
     
     def SkipQualityTest(self, transcode_attempt_id: int) -> bool:
-        """Skip quality test for a transcode attempt"""
+        """Skip quality test for a transcode attempt - marks QualityTestRequired = 0"""
         try:
             query = """
                 UPDATE TranscodeAttempts 
-                SET QualityTestSkipped = 1, QualityTestCompleted = 1
+                SET QualityTestRequired = 0, QualityTestCompleted = 1
                 WHERE Id = ?
             """
             
@@ -2896,16 +2969,7 @@ class DatabaseManager:
             
             jobs = []
             for row in rows:
-                jobs.append({
-                    "Id": row["Id"],
-                    "TranscodeAttemptId": row["TranscodeAttemptId"],
-                    "OriginalFilePath": row["OriginalFilePath"],
-                    "TranscodedFilePath": row["TranscodedFilePath"],
-                    "LocalSourcePath": row["LocalSourcePath"],
-                    "DateAdded": row["DateAdded"],
-                    "DateStarted": row["DateStarted"],
-                    "DateCompleted": row["DateCompleted"]
-                })
+                jobs.append(dict(row))
             return jobs
             
         except Exception as e:
@@ -2916,7 +2980,7 @@ class DatabaseManager:
     # because QualityTestingQueue no longer has Status, VMAFScore, RetryCount, or ErrorMessage columns
     # Status tracking is now handled in QualityTestResults table
     
-    def GetQualityTestResults(self, Limit: int = 10) -> list:
+    def GetQualityTestResults(self, Limit: int = 10, Offset: int = 0) -> list:
         """Get recent quality test results from QualityTestResults table joined with TranscodeAttempts"""
         try:
             query = """
@@ -2927,15 +2991,16 @@ class DatabaseManager:
                     ta.ProfileName, ta.FilePath, ta.OldSizeBytes, ta.NewSizeBytes, ta.SizeReductionBytes, 
                     ta.SizeReductionPercent, ta.TranscodeDurationSeconds, ta.ProfileName as TranscodeProfileName,
                     ta.Quality, ta.AttemptDate, ta.NewSizeBytes as FileSize,
+                    ta.FileReplaced, ta.FileReplacedDate, ta.ReplacementType,
                     tfp.LocalOutputPath as TranscodedFilePath,
                     tfp.LocalSourcePath
                 FROM QualityTestResults qtr
                 LEFT JOIN TranscodeAttempts ta ON qtr.TranscodeAttemptId = ta.Id
                 LEFT JOIN TemporaryFilePaths tfp ON qtr.TranscodeAttemptId = tfp.TranscodeAttemptId
                 ORDER BY qtr.DateTested DESC 
-                LIMIT ?
+                LIMIT ? OFFSET ?
             """
-            rows = self.DatabaseService.ExecuteQuery(query, (Limit,))
+            rows = self.DatabaseService.ExecuteQuery(query, (Limit, Offset))
             
             results = []
             for row in rows:
@@ -2971,6 +3036,9 @@ class DatabaseManager:
                     "Quality": row["Quality"],
                     "TranscodeProfileName": row["TranscodeProfileName"],
                     "AttemptDate": row["AttemptDate"],
+                    "FileReplaced": row["FileReplaced"],
+                    "FileReplacedDate": row["FileReplacedDate"],
+                    "ReplacementType": row["ReplacementType"],
                     "Success": row["PassesThreshold"] and not row["ErrorMessage"]
                 })
             return results
@@ -2978,6 +3046,20 @@ class DatabaseManager:
         except Exception as e:
             LoggingService.LogException("Exception getting quality test results", e, "DatabaseManager", "GetQualityTestResults")
             return []
+    
+    def GetQualityTestResultsCount(self) -> int:
+        """Get total count of quality test results"""
+        try:
+            query = "SELECT COUNT(*) as TotalCount FROM QualityTestResults"
+            result = self.DatabaseService.ExecuteQuery(query)
+            
+            if result:
+                return result[0][0]  # TotalCount is the first column
+            return 0
+            
+        except Exception as e:
+            LoggingService.LogException("Exception getting quality test results count", e, "DatabaseManager", "GetQualityTestResultsCount")
+            return 0
     
     def GetRunningQualityTestProgress(self) -> dict:
         """Get running quality test progress from QualityTestProgress table with file information"""
@@ -3771,3 +3853,71 @@ class DatabaseManager:
         except Exception as e:
             LoggingService.LogException("Exception getting failed file replacements", e, "DatabaseManager", "GetFailedFileReplacements")
             return []
+    
+    def GetActiveQualityTestJob(self) -> Optional[Dict[str, Any]]:
+        """Get the currently running quality test job details"""
+        try:
+            query = """
+                SELECT aj.Id, aj.QueueId, aj.ProcessId, aj.ThreadId, aj.StartedAt,
+                       qtq.TranscodeAttemptId, qtq.OriginalFilePath, qtq.TranscodedFilePath, qtq.LocalSourcePath
+                FROM ActiveJobs aj
+                INNER JOIN QualityTestingQueue qtq ON aj.QueueId = qtq.Id
+                WHERE aj.ServiceName = 'QualityTestService' 
+                  AND aj.Status = 'Running'
+                ORDER BY aj.StartedAt DESC
+                LIMIT 1
+            """
+            
+            result = self.DatabaseService.ExecuteQuery(query)
+            if result:
+                return dict(result[0])
+            return None
+            
+        except Exception as e:
+            LoggingService.LogException("Exception getting active quality test job", e, "DatabaseManager", "GetActiveQualityTestJob")
+            return None
+    
+    def KillActiveQualityTestProcess(self, ActiveJobId: int) -> bool:
+        """Terminate FFmpeg process by PID from ActiveJobs table"""
+        try:
+            import psutil
+            
+            # Get the process ID from ActiveJobs
+            query = "SELECT ProcessId FROM ActiveJobs WHERE Id = ?"
+            result = self.DatabaseService.ExecuteQuery(query, (ActiveJobId,))
+            
+            if not result:
+                LoggingService.LogWarning(f"No active job found with ID {ActiveJobId}", "DatabaseManager", "KillActiveQualityTestProcess")
+                return False
+            
+            process_id = result[0][0]  # ProcessId is the first (and only) column
+            if not process_id:
+                LoggingService.LogWarning(f"No process ID found for active job {ActiveJobId}", "DatabaseManager", "KillActiveQualityTestProcess")
+                return False
+            
+            # Kill the process
+            try:
+                process = psutil.Process(process_id)
+                process.terminate()
+                
+                # Wait for graceful termination
+                try:
+                    process.wait(timeout=5)
+                except psutil.TimeoutExpired:
+                    # Force kill if it doesn't terminate gracefully
+                    process.kill()
+                    process.wait()
+                
+                LoggingService.LogInfo(f"Successfully terminated FFmpeg process {process_id}", "DatabaseManager", "KillActiveQualityTestProcess")
+                return True
+                
+            except psutil.NoSuchProcess:
+                LoggingService.LogInfo(f"Process {process_id} was already terminated", "DatabaseManager", "KillActiveQualityTestProcess")
+                return True
+            except Exception as e:
+                LoggingService.LogException(f"Error terminating process {process_id}", e, "DatabaseManager", "KillActiveQualityTestProcess")
+                return False
+                
+        except Exception as e:
+            LoggingService.LogException("Exception killing active quality test process", e, "DatabaseManager", "KillActiveQualityTestProcess")
+            return False
