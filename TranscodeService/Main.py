@@ -21,7 +21,6 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from Services.LoggingService import LoggingService
 from Services.ProcessTranscodeQueueService import ProcessTranscodeQueueService
-from Services.ServiceStatusHelperService import ServiceStatusHelperService
 from Repositories.DatabaseManager import DatabaseManager
 
 class TranscodeServiceApp:
@@ -29,17 +28,17 @@ class TranscodeServiceApp:
     
     def __init__(self):
         """Initialize the TranscodeService application."""
+        current_pid = os.getpid()
+        LoggingService.LogInfo(f"TranscodeServiceApp __init__ started. PID: {current_pid}", "TranscodeService", "__init__")
         self.DatabaseManager = DatabaseManager()
+        LoggingService.LogInfo(f"DatabaseManager created. PID: {current_pid}", "TranscodeService", "__init__")
         
-        # Check if another instance is already running
-        if self.PrivateIsServiceAlreadyRunning():
-            LoggingService.LogError("TranscodeService is already running. Preventing duplicate instance.", "TranscodeServiceApp", "__init__")
-            sys.exit(1)
+        # Duplicate prevention is now handled in Main() function
+        LoggingService.LogInfo(f"Creating ProcessTranscodeQueueService. PID: {current_pid}", "TranscodeService", "__init__")
         self.ProcessTranscodeQueue = ProcessTranscodeQueueService(
             DatabaseManagerInstance=self.DatabaseManager
         )
-        self.StatusHelper = ServiceStatusHelperService(DatabaseManagerInstance=self.DatabaseManager)
-        self.IsRunning = False
+        LoggingService.LogInfo(f"ProcessTranscodeQueueService created. PID: {current_pid}", "TranscodeService", "__init__")
         self.ProcessingThread = None
         self.HealthCheckThread = None
         self.StatusPollingThread = None
@@ -47,38 +46,22 @@ class TranscodeServiceApp:
         self.StartTime = datetime.now()
         self.ProcessId = os.getpid()
         self.CurrentStatus = "Stopped"  # Track current transcoding status
+        LoggingService.LogInfo(f"TranscodeServiceApp __init__ completed. PID: {current_pid}", "TranscodeService", "__init__")
         self.ManuallyStopped = False  # Track if transcoding was manually stopped
         
         LoggingService.LogInfo("TranscodeServiceApp initialized", "TranscodeService", "__init__")
     
-    def PrivateIsServiceAlreadyRunning(self) -> bool:
-        """Check if another TranscodeService instance is already running using ServiceStatusService."""
-        try:
-            from Services.ServiceStatusService import ServiceStatusService
-            status_service = ServiceStatusService()
-            return status_service.RegisterServiceStartup("TranscodeService", MaxConcurrentJobs=1)
-        except Exception as e:
-            LoggingService.LogException("Exception checking for existing TranscodeService instances", e, "TranscodeServiceApp", "PrivateIsServiceAlreadyRunning")
-            return True  # Prevent startup on error
     
     def Run(self):
         """Start the transcoding service."""
         try:
             LoggingService.LogInfo("Starting TranscodeService...", "TranscodeService", "run")
             
-            # Check database connection
-            if not self.CheckDatabaseConnection():
-                LoggingService.LogError("Database connection failed, exiting...", "TranscodeService", "run")
-                return False
-            
-            # Ensure service status record exists in database
+            # Ensure service status record exists
             self.EnsureServiceStatusExists()
-
+            
             # Update service status in database
             self.UpdateServiceStatus("Starting")
-            
-            # Recover from previous crash (reset stuck jobs and kill orphaned processes)
-            self.RecoverFromCrash()
             
             # Start health monitoring
             self.StartHealthMonitoring()
@@ -204,20 +187,20 @@ class TranscodeServiceApp:
         while not self.ShutdownEvent.is_set():
             try:
                 # Get current transcoding status from ServiceStatus table
-                statusResult = self.StatusHelper.GetTranscodingStatus()
+                service_status = self.DatabaseManager.GetServiceStatus("TranscodeService")
                 
-                if statusResult.get("Success", False):
-                    newStatus = statusResult.get("Status", "Stopped")
-                    isProcessing = statusResult.get("IsProcessing", False)
+                if service_status:
+                    new_status = service_status.get('Status', 'Stopped')
+                    is_processing = service_status.get('IsProcessing', False)
                     
                     # Check if status has changed
-                    if newStatus != self.CurrentStatus:
-                        LoggingService.LogInfo(f"Transcoding status changed from {self.CurrentStatus} to {newStatus}", 
+                    if new_status != self.CurrentStatus:
+                        LoggingService.LogInfo(f"Transcoding status changed from {self.CurrentStatus} to {new_status}", 
                                              "TranscodeService", "PrivateStatusPollingLoop")
                         
                         # Handle status change
-                        self.PrivateHandleStatusChange(newStatus, isProcessing)
-                        self.CurrentStatus = newStatus
+                        self.PrivateHandleStatusChange(new_status, is_processing)
+                        self.CurrentStatus = new_status
                 
                 # Wait 5 seconds before next check
                 self.ShutdownEvent.wait(5)
@@ -226,17 +209,17 @@ class TranscodeServiceApp:
                 LoggingService.LogException("Error in status polling loop", e, "TranscodeService", "PrivateStatusPollingLoop")
                 self.ShutdownEvent.wait(10)
     
-    def PrivateHandleStatusChange(self, NewStatus: str, IsProcessing: bool):
+    def PrivateHandleStatusChange(self, new_status: str, is_processing: bool):
         """Handle transcoding status changes."""
         try:
-            LoggingService.LogFunctionEntry("PrivateHandleStatusChange", "TranscodeService", NewStatus)
+            LoggingService.LogFunctionEntry("PrivateHandleStatusChange", "TranscodeService", new_status)
             
-            if NewStatus == "Starting":
+            if new_status == "Starting":
                 # Service is starting up - update status to Running
                 LoggingService.LogInfo("Service starting up, updating status to Running", "TranscodeService", "PrivateHandleStatusChange")
                 self.UpdateServiceStatus("Running", "Healthy", 0, False)
                 
-            elif NewStatus == "Running" and not IsProcessing:
+            elif new_status == "Running" and not is_processing:
                 # Start transcoding
                 LoggingService.LogInfo("Starting transcoding based on status change", "TranscodeService", "PrivateHandleStatusChange")
                 result = self.ProcessTranscodeQueue.Run(MaxConcurrentJobs=1)
@@ -245,8 +228,8 @@ class TranscodeServiceApp:
                 else:
                     LoggingService.LogError(f"Failed to start transcoding: {result.get('ErrorMessage', 'Unknown error')}", 
                                           "TranscodeService", "PrivateHandleStatusChange")
-                    
-            elif NewStatus == "Stopped" and IsProcessing:
+                
+            elif new_status == "Stopped" and is_processing:
                 # Stop transcoding
                 LoggingService.LogInfo("Stopping transcoding based on status change", "TranscodeService", "PrivateHandleStatusChange")
                 result = self.ProcessTranscodeQueue.Stop()
@@ -272,7 +255,7 @@ class TranscodeServiceApp:
         try:
             LoggingService.LogInfo("TranscodeService main loop started", "TranscodeService", "MainLoop")
             while not self.ShutdownEvent.is_set():
-                self.ShutdownEvent.wait(1)  # Check every second
+                self.ShutdownEvent.wait(10)  # Check every 10 seconds
         except Exception as e:
             LoggingService.LogException("Error in main loop", e, "TranscodeService", "MainLoop")
     
@@ -280,6 +263,16 @@ class TranscodeServiceApp:
         """Gracefully shutdown the service."""
         try:
             LoggingService.LogInfo("Shutting down TranscodeService...", "TranscodeService", "Shutdown")
+            
+            # Update service status to Stopped and clear ProcessId
+            self.UpdateServiceStatus("Stopped", "Stopped", 0, False)
+            self.DatabaseManager.UpdateServiceStatus("TranscodeService", {
+                'Status': 'Stopped',
+                'ProcessId': 0,
+                'IsProcessing': False,
+                'ActiveJobsCount': 0
+            })
+            
             self.ShutdownEvent.set()
             LoggingService.LogInfo("TranscodeService shutdown complete", "TranscodeService", "Shutdown")
         except Exception as e:

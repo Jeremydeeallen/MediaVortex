@@ -268,24 +268,37 @@ class QualityTestController:
 # Flask routes
 @QualityTestBlueprint.route('/QualityTest/Start', methods=['POST'])
 def StartQualityTest():
-    Controller = QualityTestController()
-    Data = request.get_json()
-    
-    # Check if this is a service start request or individual job start
-    if Data and 'MaxConcurrentJobs' in Data:
-        # Service start request
-        MaxConcurrentJobs = Data.get('MaxConcurrentJobs', 1)
-        Result = Controller.StartQualityTestService(MaxConcurrentJobs)
-    else:
-        # Individual job start request
-        JobId = Data.get('JobId') if Data else None
+    try:
+        LoggingService.LogFunctionEntry("StartQualityTest", "QualityTestController")
         
-        if not JobId:
-            return jsonify({"Success": False, "Message": "JobId required"}), 400
+        Controller = QualityTestController()
+        Data = request.get_json()
         
-        Result = Controller.StartQualityTest(JobId)
-    
-    return jsonify(Result)
+        # Check if this is a service start request or individual job start
+        if Data and 'MaxConcurrentJobs' in Data:
+            # Service start request
+            MaxConcurrentJobs = Data.get('MaxConcurrentJobs', 1)
+            Result = Controller.StartQualityTestService(MaxConcurrentJobs)
+        else:
+            # Individual job start request
+            JobId = Data.get('JobId') if Data else None
+            
+            if not JobId:
+                return jsonify({"Success": False, "Message": "JobId required"}), 400
+            
+            Result = Controller.StartQualityTest(JobId)
+        
+        LoggingService.LogInfo(f"StartQualityTest completed: {Result.get('Success', False)}", "QualityTestController", "StartQualityTest")
+        return jsonify(Result)
+        
+    except Exception as e:
+        ErrorMsg = f"Exception in StartQualityTest endpoint: {str(e)}"
+        LoggingService.LogException(ErrorMsg, e, "QualityTestController", "StartQualityTest")
+        return jsonify({
+            "Success": False, 
+            "Message": "Failed to start quality test",
+            "Error": ErrorMsg
+        }), 500
 
 @QualityTestBlueprint.route('/QualityTest/Status/<int:JobId>', methods=['GET'])
 def GetQualityTestStatus(JobId):
@@ -307,21 +320,49 @@ def GetQualityTestQueue():
 
 @QualityTestBlueprint.route('/QualityTest/Stop', methods=['POST'])
 def StopQualityTestService():
-    Controller = QualityTestController()
-    Result = Controller.StopQualityTestService()
-    return jsonify(Result)
+    try:
+        LoggingService.LogFunctionEntry("StopQualityTestService", "QualityTestController")
+        
+        Controller = QualityTestController()
+        Result = Controller.StopQualityTestService()
+        
+        LoggingService.LogInfo(f"StopQualityTestService completed: {Result.get('Success', False)}", "QualityTestController", "StopQualityTestService")
+        return jsonify(Result)
+        
+    except Exception as e:
+        ErrorMsg = f"Exception in StopQualityTestService endpoint: {str(e)}"
+        LoggingService.LogException(ErrorMsg, e, "QualityTestController", "StopQualityTestService")
+        return jsonify({
+            "Success": False, 
+            "Message": "Failed to stop quality test service",
+            "Error": ErrorMsg
+        }), 500
 
 @QualityTestBlueprint.route('/QualityTest/Retry', methods=['POST'])
 def RetryQualityTest():
-    Controller = QualityTestController()
-    Data = request.get_json()
-    JobId = Data.get('JobId') if Data else None
-    
-    if not JobId:
-        return jsonify({"Success": False, "Message": "JobId required"}), 400
-    
-    Result = Controller.RetryQualityTest(JobId)
-    return jsonify(Result)
+    try:
+        LoggingService.LogFunctionEntry("RetryQualityTest", "QualityTestController")
+        
+        Controller = QualityTestController()
+        Data = request.get_json()
+        JobId = Data.get('JobId') if Data else None
+        
+        if not JobId:
+            return jsonify({"Success": False, "Message": "JobId required"}), 400
+        
+        Result = Controller.RetryQualityTest(JobId)
+        
+        LoggingService.LogInfo(f"RetryQualityTest completed: {Result.get('Success', False)}", "QualityTestController", "RetryQualityTest")
+        return jsonify(Result)
+        
+    except Exception as e:
+        ErrorMsg = f"Exception in RetryQualityTest endpoint: {str(e)}"
+        LoggingService.LogException(ErrorMsg, e, "QualityTestController", "RetryQualityTest")
+        return jsonify({
+            "Success": False, 
+            "Message": "Failed to retry quality test",
+            "Error": ErrorMsg
+        }), 500
 
 @QualityTestBlueprint.route('/api/QualityTesting/History', methods=['GET'])
 def GetQualityTestHistory():
@@ -397,11 +438,24 @@ def SkipQualityTest():
 @QualityTestBlueprint.route('/QualityTest/CancelActive', methods=['POST'])
 def CancelActiveQualityTest():
     """Cancel the currently running quality test"""
-    Controller = QualityTestController()
-    
-    # Use the business service to handle the cancel logic
-    from Services.QualityTestingBusinessService import QualityTestingBusinessService
-    business_service = QualityTestingBusinessService(Controller.DatabaseManager)
-    Result = business_service.CancelActiveQualityTest()
-    
-    return jsonify(Result)
+    try:
+        LoggingService.LogFunctionEntry("CancelActiveQualityTest", "QualityTestController")
+        
+        Controller = QualityTestController()
+        
+        # Use the business service to handle the cancel logic
+        from Services.QualityTestingBusinessService import QualityTestingBusinessService
+        business_service = QualityTestingBusinessService(Controller.DatabaseManager)
+        Result = business_service.CancelActiveQualityTest()
+        
+        LoggingService.LogInfo(f"CancelActiveQualityTest completed: {Result.get('Success', False)}", "QualityTestController", "CancelActiveQualityTest")
+        return jsonify(Result)
+        
+    except Exception as e:
+        ErrorMsg = f"Exception in CancelActiveQualityTest endpoint: {str(e)}"
+        LoggingService.LogException(ErrorMsg, e, "QualityTestController", "CancelActiveQualityTest")
+        return jsonify({
+            "Success": False, 
+            "Message": "Failed to cancel quality test",
+            "Error": ErrorMsg
+        }), 500

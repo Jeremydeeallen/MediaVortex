@@ -8,6 +8,7 @@ import sys
 import os
 import platform
 import time
+from datetime import datetime
 
 class MediaVortexOrchestrator:
     """Simple orchestrator for MediaVortex services."""
@@ -71,6 +72,7 @@ class MediaVortexOrchestrator:
         return True
     
     def StartService(self, service_name: str):
+        print(f"DEBUG: StartService called for {service_name} at {datetime.now()}")
         """Start a service and detach it."""
         config = self.ServiceConfigs[service_name]
         
@@ -82,14 +84,14 @@ class MediaVortexOrchestrator:
         
         try:
             # Start service as detached process
-            subprocess.Popen(
+            process = subprocess.Popen(
                 [python_exe, config['MainScript']],
                 cwd=config['Directory'],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if platform.system() == "Windows" else 0
             )
-            print(f"Started {service_name}")
+            print(f"Started {service_name} with PID {process.pid}")
         except Exception as e:
             print(f"Failed to start {service_name}: {e}")
 

@@ -71,11 +71,11 @@ def ControlService(service_name: str, action: str):
             }), 400
         
         # Validate action
-        valid_actions = ['Start', 'Stop', 'GracefulStop', 'TerminateNow', 'Restart']
+        valid_actions = ['Stop', 'GracefulStop', 'TerminateNow']
         if action not in valid_actions:
             return jsonify({
                 "Success": False,
-                "ErrorMessage": f"Invalid action: {action}. Valid actions: {', '.join(valid_actions)}"
+                "ErrorMessage": f"Invalid action: {action}. Valid actions: {', '.join(valid_actions)}. Note: Start and Restart are only available via the orchestrator (StartMediaVortex.py)"
             }), 400
         
         # Get service status from database
@@ -88,7 +88,11 @@ def ControlService(service_name: str, action: str):
         
         # Handle different actions
         if action == "Start":
-            result = PrivateStartService(service_name)
+            # Service starting is now handled only by the orchestrator
+            return jsonify({
+                "Success": False,
+                "ErrorMessage": f"Service starting is only allowed via the orchestrator (StartMediaVortex.py). Use the orchestrator to start {service_name}."
+            }), 400
         elif action == "Stop":
             result = PrivateStopService(service_name)
         elif action == "GracefulStop":
@@ -96,7 +100,11 @@ def ControlService(service_name: str, action: str):
         elif action == "TerminateNow":
             result = PrivateTerminateService(service_name)
         elif action == "Restart":
-            result = PrivateRestartService(service_name)
+            # Restart is also not allowed - use orchestrator
+            return jsonify({
+                "Success": False,
+                "ErrorMessage": f"Service restart is only allowed via the orchestrator (StartMediaVortex.py). Use the orchestrator to restart {service_name}."
+            }), 400
         else:
             return jsonify({
                 "Success": False,
@@ -110,124 +118,9 @@ def ControlService(service_name: str, action: str):
         LoggingService.LogException(errorMsg, e, "ServiceControlController", "ControlService")
         return jsonify({"Success": False, "ErrorMessage": errorMsg}), 500
 
-def PrivateStartService(service_name: str) -> Dict[str, Any]:
-    """Start a service by creating a ServiceCommand."""
-    try:
-        LoggingService.LogInfo(f"Starting {service_name} via ServiceCommand queue", "ServiceControlController", "PrivateStartService")
-        
-        # For WebService, just update database status (it's already running)
-        if service_name == "WebService":
-            success = SharedDatabaseManager.UpdateServiceStatus(service_name, {
-                'Status': 'Running',
-                'IsProcessing': False,
-                'ActiveJobsCount': 0
-            })
-            
-            if success:
-                LoggingService.LogInfo(f"Successfully started {service_name}", "ServiceControlController", "PrivateStartService")
-                return {
-                    "Success": True,
-                    "Message": f"{service_name} started successfully",
-                    "Status": "Running"
-                }
-            else:
-                return {
-                    "Success": False,
-                    "ErrorMessage": f"Failed to start {service_name}"
-                }
-        
-        # Directly start the service process
-        LoggingService.LogInfo(f"Directly starting {service_name} process", "ServiceControlController", "PrivateStartService")
-        
-        # Update service status to indicate start is requested
-        LoggingService.LogInfo(f"Updating {service_name} status to 'Starting'", "ServiceControlController", "PrivateStartService")
-        update_success = SharedDatabaseManager.UpdateServiceStatus(service_name, {
-            'Status': 'Starting',
-            'IsProcessing': False,
-            'ActiveJobsCount': 0
-        })
-        LoggingService.LogInfo(f"UpdateServiceStatus result for {service_name}: {update_success}", "ServiceControlController", "PrivateStartService")
-        
-        # Start the service process directly
-        success = PrivateStartServiceProcess(service_name)
-        
-        if success:
-            return {
-                "Success": True,
-                "Message": f"{service_name} started successfully",
-                "Status": "Running"
-            }
-        else:
-            return {
-                "Success": False,
-                "ErrorMessage": f"Failed to start {service_name} process"
-            }
-            
-    except Exception as e:
-        LoggingService.LogException(f"Error starting {service_name}", e, "ServiceControlController", "PrivateStartService")
-        return {
-            "Success": False,
-            "ErrorMessage": f"Error starting {service_name}: {str(e)}"
-        }
+# PrivateStartService function removed - service starting is now only handled by the orchestrator
 
-def PrivateStartServiceProcess(service_name: str) -> bool:
-    """Directly start a service process."""
-    try:
-        import subprocess
-        import os
-        import platform
-        
-        LoggingService.LogInfo(f"Starting {service_name} process directly", "ServiceControlController", "PrivateStartServiceProcess")
-        
-        # Check if service is already running
-        if IsServiceProcessRunning(service_name):
-            LoggingService.LogWarning(f"{service_name} is already running, skipping start", "ServiceControlController", "PrivateStartServiceProcess")
-            return True  # Return success since service is already running
-        
-        # Get the script directory
-        script_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        
-        # Determine service directory and main script
-        if service_name == "QualityTestService":
-            service_dir = os.path.join(script_dir, "QualityTestService")
-            main_script = "Main.py"
-        elif service_name == "TranscodeService":
-            service_dir = os.path.join(script_dir, "TranscodeService")
-            main_script = "Main.py"
-        else:
-            LoggingService.LogError(f"Unknown service: {service_name}", "ServiceControlController", "PrivateStartServiceProcess")
-            return False
-        
-        # Determine Python executable
-        if platform.system() == "Windows":
-            python_exe = os.path.join(service_dir, "venv", "Scripts", "python.exe")
-        else:
-            python_exe = os.path.join(service_dir, "venv", "bin", "python")
-        
-        # Start the service process
-        process = subprocess.Popen(
-            [python_exe, main_script],
-            cwd=service_dir,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if platform.system() == "Windows" else 0
-        )
-        
-        LoggingService.LogInfo(f"Started {service_name} process with PID {process.pid}", "ServiceControlController", "PrivateStartServiceProcess")
-        
-        # Update service status with process ID
-        SharedDatabaseManager.UpdateServiceStatus(service_name, {
-            'Status': 'Running',
-            'ProcessId': process.pid,
-            'IsProcessing': False,
-            'ActiveJobsCount': 0
-        })
-        
-        return True
-        
-    except Exception as e:
-        LoggingService.LogException(f"Error starting {service_name} process", e, "ServiceControlController", "PrivateStartServiceProcess")
-        return False
+# PrivateStartServiceProcess function removed - service starting is now only handled by the orchestrator
 
 def PrivateStopService(service_name: str) -> Dict[str, Any]:
     """Stop a service by updating its status in the database."""
@@ -429,43 +322,7 @@ def PrivateTerminateService(service_name: str) -> Dict[str, Any]:
             "ErrorMessage": f"Error terminating {service_name}: {str(e)}"
         }
 
-def PrivateRestartService(service_name: str) -> Dict[str, Any]:
-    """Restart a service by stopping it first, then starting it."""
-    try:
-        LoggingService.LogInfo(f"Restart requested for {service_name}", "ServiceControlController", "PrivateRestartService")
-        
-        # First stop the service
-        stop_result = PrivateStopService(service_name)
-        if not stop_result.get("Success", False):
-            return {
-                "Success": False,
-                "ErrorMessage": f"Failed to stop {service_name} for restart: {stop_result.get('ErrorMessage', 'Unknown error')}"
-            }
-        
-        # Wait a moment for the service to stop
-        time.sleep(2)
-        
-        # Then start the service
-        start_result = PrivateStartService(service_name)
-        if not start_result.get("Success", False):
-            return {
-                "Success": False,
-                "ErrorMessage": f"Failed to start {service_name} after restart: {start_result.get('ErrorMessage', 'Unknown error')}"
-            }
-        
-        LoggingService.LogInfo(f"Successfully restarted {service_name}", "ServiceControlController", "PrivateRestartService")
-        return {
-            "Success": True,
-            "Message": f"{service_name} restarted successfully",
-            "Status": "Running"
-        }
-        
-    except Exception as e:
-        LoggingService.LogException(f"Error restarting {service_name}", e, "ServiceControlController", "PrivateRestartService")
-        return {
-            "Success": False,
-            "ErrorMessage": f"Error restarting {service_name}: {str(e)}"
-        }
+# PrivateRestartService function removed - service restart is now only handled by the orchestrator
 
 @ServiceControlBlueprint.route('/Status', methods=['GET'])
 def GetAllServiceStatus():

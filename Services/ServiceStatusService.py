@@ -136,11 +136,12 @@ class ServiceStatusService:
         Returns True if service is already running (prevent duplicate), False if safe to start.
         """
         try:
-            LoggingService.LogFunctionEntry("RegisterServiceStartup", "ServiceStatusService", ServiceName)
+            current_pid = os.getpid()
+            LoggingService.LogFunctionEntry("RegisterServiceStartup", "ServiceStatusService", f"{ServiceName} (PID: {current_pid})")
             
             # Step 1: Ensure ServiceStatus record exists
             if not self.EnsureServiceStatusExists(ServiceName, MaxConcurrentJobs):
-                LoggingService.LogError(f"Failed to ensure ServiceStatus record exists for {ServiceName}", 
+                LoggingService.LogError(f"Failed to ensure ServiceStatus record exists for {ServiceName} (PID: {current_pid})", 
                                       "ServiceStatusService", "RegisterServiceStartup")
                 return True  # Prevent startup if we can't create record
             
@@ -149,15 +150,17 @@ class ServiceStatusService:
                 # Get the ProcessId from database
                 service_status = self.DatabaseManager.GetServiceStatus(ServiceName)
                 process_id = service_status.get('ProcessId', 0) if service_status else 0
+                LoggingService.LogInfo(f"Service {ServiceName} marked as running in database with PID {process_id}. Current PID: {current_pid}", 
+                                     "ServiceStatusService", "RegisterServiceStartup")
                 
                 # Step 3: Verify if process is actually running
                 if self.IsServiceProcessActuallyRunning(ServiceName, process_id):
-                    LoggingService.LogInfo(f"Service {ServiceName} is already running with PID {process_id}", 
+                    LoggingService.LogInfo(f"Service {ServiceName} is already running with PID {process_id}. Current PID: {current_pid} - PREVENTING DUPLICATE", 
                                          "ServiceStatusService", "RegisterServiceStartup")
                     return True  # Service already running, prevent duplicate
                 else:
                     # Process not running, clean up stale record
-                    LoggingService.LogInfo(f"Cleaning up stale ServiceStatus record for {ServiceName} (PID {process_id} not running)", 
+                    LoggingService.LogInfo(f"Cleaning up stale ServiceStatus record for {ServiceName} (PID {process_id} not running). Current PID: {current_pid}", 
                                          "ServiceStatusService", "RegisterServiceStartup")
                     self.DatabaseManager.UpdateServiceStatus(ServiceName, {
                         'Status': 'Stopped',
@@ -165,9 +168,11 @@ class ServiceStatusService:
                         'IsProcessing': False,
                         'ActiveJobsCount': 0
                     })
+            else:
+                LoggingService.LogInfo(f"Service {ServiceName} not marked as running in database. Current PID: {current_pid}", 
+                                     "ServiceStatusService", "RegisterServiceStartup")
             
             # Step 4: Register this service startup
-            current_pid = os.getpid()
             self.DatabaseManager.UpdateServiceStatus(ServiceName, {
                 'Status': 'Starting',
                 'ProcessId': current_pid,
@@ -175,7 +180,7 @@ class ServiceStatusService:
                 'ActiveJobsCount': 0
             })
             
-            LoggingService.LogInfo(f"Service {ServiceName} startup registered with PID {current_pid}", 
+            LoggingService.LogInfo(f"Service {ServiceName} startup registered with PID {current_pid} - ALLOWING STARTUP", 
                                  "ServiceStatusService", "RegisterServiceStartup")
             return False  # Safe to start
             
