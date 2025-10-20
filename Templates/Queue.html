@@ -71,6 +71,7 @@
                                     </th>
                                     <th class="sortable" data-sort="Priority">Priority</th>
                                     <th>Status</th>
+                                    <th>Start Time</th>
                                     <th class="sortable" data-sort="DateAdded">Date Added</th>
                                     <th>Date Started</th>
                                     <th>Actions</th>
@@ -242,6 +243,34 @@
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
                 <button type="button" class="btn btn-primary" id="ConfirmPriorityBtn">Update Priority</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Add Job with Options Modal -->
+<div class="modal fade" id="AddJobOptionsModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Add Job with Options</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <label for="StartTimeInput" class="form-label">Start Time (Optional)</label>
+                    <input type="text" class="form-control" id="StartTimeInput" placeholder="HH:MM:SS or seconds (e.g., 00:02:30 or 150)">
+                    <div class="form-text">Time offset to start transcoding from (e.g., 00:02:30 for 2 minutes 30 seconds, or 150 for 150 seconds)</div>
+                </div>
+                <div class="mb-3">
+                    <label for="JobPriorityInput" class="form-label">Priority (Optional)</label>
+                    <input type="number" class="form-control" id="JobPriorityInput" min="1" max="100" placeholder="50">
+                    <div class="form-text">Priority from 1 (lowest) to 100 (highest). Leave empty for default.</div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" id="ConfirmAddJobBtn">Add to Queue</button>
             </div>
         </div>
     </div>
@@ -497,6 +526,11 @@ class TranscodeQueueManager {
             this.updatePriority();
         });
 
+        // Add Job with Options
+        document.getElementById('ConfirmAddJobBtn').addEventListener('click', () => {
+            this.addJobWithOptions();
+        });
+
         // Reset All Queues Modal Controls
         document.getElementById('ConfirmResetCheckbox').addEventListener('change', (e) => {
             const confirmBtn = document.getElementById('ConfirmResetBtn');
@@ -627,7 +661,7 @@ class TranscodeQueueManager {
         if (queueItems.length === 0) {
             const row = document.createElement('tr');
             row.innerHTML = `
-                <td colspan="9" class="text-center text-muted py-4">
+                <td colspan="10" class="text-center text-muted py-4">
                     <i class="fas fa-inbox fa-2x mb-2"></i><br>
                     No queue items found
                 </td>
@@ -647,6 +681,7 @@ class TranscodeQueueManager {
                     <td>
                         <span class="badge ${this.getStatusBadgeClass(item.Status)}">${item.Status}</span>
                     </td>
+                    <td>${item.StartTime || '-'}</td>
                     <td>${this.formatDate(item.DateAdded)}</td>
                     <td>${this.formatDate(item.DateStarted)}</td>
                     <td>
@@ -1232,6 +1267,9 @@ class TranscodeQueueManager {
                         <button class="btn btn-outline-primary" onclick="queueManager.addFileToQueueWithProfile(${file.Id})" title="Add to Queue">
                             <i class="fas fa-plus"></i>
                         </button>
+                        <button class="btn btn-outline-secondary" onclick="queueManager.showAddJobOptions(${file.Id})" title="Advanced Options">
+                            <i class="fas fa-cog"></i>
+                        </button>
                         <button class="btn btn-outline-info" onclick="queueManager.viewFileDetails(${file.Id})" title="View Details">
                             <i class="fas fa-info"></i>
                         </button>
@@ -1450,11 +1488,17 @@ class TranscodeQueueManager {
         await this.addFileToQueueDirectly(fileId, parseInt(profileId));
     }
     
-    async addFileToQueueDirectly(fileId, profileId = null) {
+    async addFileToQueueDirectly(fileId, profileId = null, startTime = null, priority = null) {
         try {
             const requestBody = { MediaFileId: fileId };
             if (profileId) {
                 requestBody.ProfileId = profileId;
+            }
+            if (startTime) {
+                requestBody.StartTime = startTime;
+            }
+            if (priority) {
+                requestBody.Priority = priority;
             }
             
             const response = await fetch('/api/TranscodeQueue/AddJob', {
@@ -1481,6 +1525,59 @@ class TranscodeQueueManager {
         } catch (error) {
             this.showAlert('Error adding file to queue: ' + error.message, 'danger');
         }
+    }
+
+    showAddJobOptions(fileId) {
+        // Store the current file ID for the modal
+        this.currentFileId = fileId;
+        
+        // Clear the form
+        document.getElementById('StartTimeInput').value = '';
+        document.getElementById('JobPriorityInput').value = '';
+        
+        // Show the modal
+        const modal = new bootstrap.Modal(document.getElementById('AddJobOptionsModal'));
+        modal.show();
+    }
+
+    async addJobWithOptions() {
+        if (!this.currentFileId) {
+            this.showAlert('No file selected', 'danger');
+            return;
+        }
+
+        const startTime = document.getElementById('StartTimeInput').value.trim();
+        const priority = document.getElementById('JobPriorityInput').value.trim();
+
+        // Validate start time format if provided
+        if (startTime) {
+            const timeRegex = /^(\d{2}:\d{2}:\d{2}|\d+)$/;
+            if (!timeRegex.test(startTime)) {
+                this.showAlert('Start time must be in HH:MM:SS format or seconds (e.g., 00:02:30 or 150)', 'danger');
+                return;
+            }
+        }
+
+        // Validate priority if provided
+        if (priority) {
+            const priorityNum = parseInt(priority);
+            if (isNaN(priorityNum) || priorityNum < 1 || priorityNum > 100) {
+                this.showAlert('Priority must be a number between 1 and 100', 'danger');
+                return;
+            }
+        }
+
+        // Close the modal
+        const modal = bootstrap.Modal.getInstance(document.getElementById('AddJobOptionsModal'));
+        modal.hide();
+
+        // Add the job with options
+        await this.addFileToQueueDirectly(
+            this.currentFileId, 
+            null, // profileId - will use existing profile
+            startTime || null, 
+            priority ? parseInt(priority) : null
+        );
     }
 
     viewFileDetails(fileId) {

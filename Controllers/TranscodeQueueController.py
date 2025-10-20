@@ -127,6 +127,7 @@ def AddJob():
         mediaFileId = data.get('MediaFileId')
         priority = data.get('Priority')
         profileId = data.get('ProfileId')
+        startTime = data.get('StartTime')
         
         # Validate parameters
         if not mediaFileId:
@@ -148,7 +149,7 @@ def AddJob():
         viewModel = TranscodeQueueViewModel()
         
         # Add job to queue
-        result = viewModel.AddJobToQueue(mediaFileId, priority, profileId)
+        result = viewModel.AddJobToQueue(mediaFileId, priority, profileId, startTime)
         
         if result.get("Success", False):
             itemId = result.get("ItemId")

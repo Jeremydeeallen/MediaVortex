@@ -338,7 +338,7 @@ class QueueManagementBusinessService:
             LoggingService.LogException("Exception calculating priority", e, "QueueManagementBusinessService", "CalculatePriority")
             return 50  # Default priority
     
-    def AddJobToQueue(self, MediaFileId: int, Priority: int = None, ProfileId: int = None) -> Dict[str, Any]:
+    def AddJobToQueue(self, MediaFileId: int, Priority: int = None, ProfileId: int = None, StartTime: str = None) -> Dict[str, Any]:
         """Add a specific media file to the transcoding queue. Simple logic: if it has a profile or user selects one, add it."""
         try:
             LoggingService.LogFunctionEntry("AddJobToQueue", "QueueManagementBusinessService", MediaFileId, Priority)

@@ -187,14 +187,35 @@ class QualityTestingBusinessService:
                 vmaf_filter = f"[0:v]scale={target_width}:{target_height}[dist];[1:v]scale={target_width}:{target_height}[ref];[dist][ref]libvmaf=log_path=vmaf_output.xml:n_subsample=10"
                 LoggingService.LogInfo(f"Resolutions don't match (Original: {original_resolution[0]}x{original_resolution[1]}, Transcoded: {transcoded_resolution[0]}x{transcoded_resolution[1]}) - scaling to {target_width}x{target_height}", "QualityTestingBusinessService", "RunFFmpegVMAF")
             
-            command = [
-                ffmpeg_path,
-                "-i", transcoded_file,
-                "-i", original_file,
-                "-lavfi", vmaf_filter,
-                "-f", "null",
-                "-"
-            ]
+            # Get StartTime from TranscodeAttempts table if available
+            StartTime = None
+            if JobDetails.get('TranscodeAttemptId'):
+                try:
+                    # Query TranscodeAttempts table for StartTime
+                    StartTimeResult = self.DatabaseManager.DatabaseService.ExecuteQuery(
+                        "SELECT StartTime FROM TranscodeAttempts WHERE Id = ?",
+                        (JobDetails['TranscodeAttemptId'],)
+                    )
+                    if StartTimeResult and StartTimeResult[0]['StartTime']:
+                        StartTime = StartTimeResult[0]['StartTime']
+                        LoggingService.LogInfo(f"Retrieved StartTime {StartTime} for TranscodeAttempt {JobDetails['TranscodeAttemptId']}", 
+                                             "QualityTestingBusinessService", "RunFFmpegVMAF")
+                except Exception as e:
+                    LoggingService.LogException("Error retrieving StartTime from TranscodeAttempts", e, 
+                                             "QualityTestingBusinessService", "RunFFmpegVMAF")
+            
+            # Build command with optional start time on original file
+            # VMAF structure: ffmpeg -i original_file -i transcoded_file -lavfi [vmaf filter]
+            command = [ffmpeg_path]
+            
+            LoggingService.LogInfo(f"Quality Test FFmpeg command: {' '.join(command)}", "QualityTestingBusinessService", "RunFFmpegVMAF")
+            LoggingService.LogInfo(f"Command execution mode: shell=False (PID will be FFmpeg process)", "QualityTestingBusinessService", "RunFFmpegVMAF")
+            
+            # Add start time parameter to original file input if specified
+            if StartTime and StartTime.strip():
+                command.extend(["-ss", StartTime.strip()])
+            
+            command.extend(["-i", original_file, "-i", transcoded_file, "-lavfi", vmaf_filter, "-f", "null", "-"])
             
             # Convert command to string for storage
             FFmpegCommandString = ' '.join(command)
@@ -531,6 +552,18 @@ class QualityTestingBusinessService:
                 bufsize=1,
                 universal_newlines=True
             )
+            
+            # Set CPU affinity to cores 12-15 (4 cores for quality testing)
+            try:
+                import psutil
+                CurrentProcess = psutil.Process(process.pid)
+                AffinityCores = [12, 13, 14, 15]
+                CurrentProcess.cpu_affinity(AffinityCores)
+                LoggingService.LogDebug(f"Set Quality Test FFmpeg CPU affinity to cores: {AffinityCores}", 
+                                       "QualityTestingBusinessService", "ExecuteFFmpegWithProgress")
+            except Exception as AffinityError:
+                LoggingService.LogWarning(f"Failed to set CPU affinity: {AffinityError}", 
+                                         "QualityTestingBusinessService", "ExecuteFFmpegWithProgress")
             
             # Update ActiveJob with FFmpeg child process PID
             if JobDetails and 'active_job_id' in JobDetails and JobDetails['active_job_id']:

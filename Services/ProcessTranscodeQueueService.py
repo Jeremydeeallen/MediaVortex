@@ -40,6 +40,10 @@ class ProcessTranscodeQueueService:
         self.ProcessingThread = None
         self.StopRequested = False
         
+        # Stuck job monitoring
+        self.StuckJobMonitoringThread = None
+        self.StuckJobMonitoringActive = False
+        
     def Run(self, MaxConcurrentJobs: int = 1) -> Dict[str, Any]:
         """Start processing the transcoding queue with specified concurrent jobs."""
         try:
@@ -62,9 +66,15 @@ class ProcessTranscodeQueueService:
             self.StopRequested = False
             self.IsProcessing = True
             
+            # Clean up any stuck jobs before starting
+            self.DetectAndCleanStuckJobsBeforeStart()
+            
             # Start processing in background thread
             self.ProcessingThread = threading.Thread(target=self.ProcessQueueLoop, daemon=True)
             self.ProcessingThread.start()
+            
+            # Start stuck job monitoring thread
+            self.StartStuckJobMonitoring()
             
             LoggingService.LogInfo(f"Started transcoding queue processing with {MaxConcurrentJobs} concurrent jobs", 
                                  "ProcessTranscodeQueueService", "Run")
@@ -115,6 +125,9 @@ class ProcessTranscodeQueueService:
             
             # Clean up any stale progress data from database
             self.CleanupStaleProgressData()
+            
+            # Stop stuck job monitoring
+            self.StopStuckJobMonitoring()
             
             self.IsProcessing = False
             self.ActiveJobs.clear()
@@ -418,11 +431,28 @@ class ProcessTranscodeQueueService:
             if not CodecParameters:
                 return None
             
+            # Get StartTime from TranscodeAttempts if available
+            StartTime = None
+            try:
+                # Query for StartTime from the most recent TranscodeAttempt for this file
+                StartTimeResult = self.DatabaseManager.DatabaseService.ExecuteQuery(
+                    "SELECT StartTime FROM TranscodeAttempts WHERE FilePath = ? ORDER BY AttemptDate DESC LIMIT 1",
+                    (Job.FilePath,)
+                )
+                if StartTimeResult and StartTimeResult[0]['StartTime']:
+                    StartTime = StartTimeResult[0]['StartTime']
+                    LoggingService.LogInfo(f"Retrieved StartTime {StartTime} for file {Job.FilePath}", 
+                                         "ProcessTranscodeQueueService", "GetTranscodingSettings")
+            except Exception as e:
+                LoggingService.LogException("Error retrieving StartTime from TranscodeAttempts", e, 
+                                         "ProcessTranscodeQueueService", "GetTranscodingSettings")
+            
             return {
                 'ProfileSettings': ProfileSettings,
                 'CodecFlags': CodecFlags,
                 'CodecParameters': CodecParameters,
-                'SourceResolution': MediaFile.Resolution
+                'SourceResolution': MediaFile.Resolution,
+                'StartTime': StartTime
             }
             
         except Exception as e:
@@ -469,7 +499,8 @@ class ProcessTranscodeQueueService:
                 ProfileName=MediaFile.AssignedProfile if hasattr(MediaFile, 'AssignedProfile') else None,
                 VMAF=None,  # Will be set after VMAF analysis
                 QualityTestRequired=1,  # Default to 1 (required)
-                QualityTestCompleted=0  # Default to 0 (not completed)
+                QualityTestCompleted=0,  # Default to 0 (not completed)
+                StartTime=TranscodingSettings.get('StartTime') if TranscodingSettings else None
             )
             
             return self.DatabaseManager.SaveTranscodeAttempt(Attempt)
@@ -1215,5 +1246,122 @@ class ProcessTranscodeQueueService:
             LoggingService.LogException(f"Error getting TranscodeAttemptId for job {JobId}", e, 
                                       "ProcessTranscodeQueueService", "PrivateGetTranscodeAttemptIdForJob")
             return None
+    
+    def DetectAndCleanStuckJobsBeforeStart(self):
+        """Detect and clean up stuck jobs before starting transcoding."""
+        try:
+            LoggingService.LogInfo("Checking for stuck jobs before starting transcoding", 
+                                 "ProcessTranscodeQueueService", "DetectAndCleanStuckJobsBeforeStart")
+            
+            from Services.StuckJobDetectionService import StuckJobDetectionService
+            detection_service = StuckJobDetectionService(self.DatabaseManager)
+            
+            result = detection_service.DetectAndCleanStuckTranscodeJobs()
+            
+            if result.get("Success", False):
+                stuck_found = result.get("StuckJobsFound", 0)
+                jobs_cleaned = result.get("JobsCleaned", 0)
+                if stuck_found > 0:
+                    LoggingService.LogInfo(f"Pre-start stuck job detection: {stuck_found} stuck jobs found, {jobs_cleaned} jobs cleaned", 
+                                         "ProcessTranscodeQueueService", "DetectAndCleanStuckJobsBeforeStart")
+                else:
+                    LoggingService.LogInfo("Pre-start stuck job detection: No stuck jobs found", 
+                                         "ProcessTranscodeQueueService", "DetectAndCleanStuckJobsBeforeStart")
+            else:
+                LoggingService.LogWarning(f"Pre-start stuck job detection failed: {result.get('ErrorMessage', 'Unknown error')}", 
+                                        "ProcessTranscodeQueueService", "DetectAndCleanStuckJobsBeforeStart")
+                
+        except Exception as e:
+            LoggingService.LogException("Error during pre-start stuck job detection", e, 
+                                      "ProcessTranscodeQueueService", "DetectAndCleanStuckJobsBeforeStart")
+    
+    def StartStuckJobMonitoring(self):
+        """Start background monitoring for stuck jobs."""
+        try:
+            if self.StuckJobMonitoringActive:
+                LoggingService.LogInfo("Stuck job monitoring already active", 
+                                     "ProcessTranscodeQueueService", "StartStuckJobMonitoring")
+                return
+            
+            self.StuckJobMonitoringActive = True
+            self.StuckJobMonitoringThread = threading.Thread(
+                target=self.StuckJobMonitoringLoop,
+                daemon=True,
+                name="StuckJobMonitor"
+            )
+            self.StuckJobMonitoringThread.start()
+            
+            LoggingService.LogInfo("Started stuck job monitoring thread", 
+                                 "ProcessTranscodeQueueService", "StartStuckJobMonitoring")
+            
+        except Exception as e:
+            LoggingService.LogException("Error starting stuck job monitoring", e, 
+                                      "ProcessTranscodeQueueService", "StartStuckJobMonitoring")
+    
+    def StopStuckJobMonitoring(self):
+        """Stop background monitoring for stuck jobs."""
+        try:
+            if not self.StuckJobMonitoringActive:
+                return
+            
+            self.StuckJobMonitoringActive = False
+            
+            if self.StuckJobMonitoringThread and self.StuckJobMonitoringThread.is_alive():
+                self.StuckJobMonitoringThread.join(timeout=5)
+            
+            LoggingService.LogInfo("Stopped stuck job monitoring thread", 
+                                 "ProcessTranscodeQueueService", "StopStuckJobMonitoring")
+            
+        except Exception as e:
+            LoggingService.LogException("Error stopping stuck job monitoring", e, 
+                                      "ProcessTranscodeQueueService", "StopStuckJobMonitoring")
+    
+    def StuckJobMonitoringLoop(self):
+        """Background monitoring loop for stuck jobs - runs every 5 minutes."""
+        try:
+            LoggingService.LogInfo("Stuck job monitoring loop started", 
+                                 "ProcessTranscodeQueueService", "StuckJobMonitoringLoop")
+            
+            while self.StuckJobMonitoringActive and not self.StopRequested:
+                try:
+                    # Check for stuck jobs
+                    from Services.StuckJobDetectionService import StuckJobDetectionService
+                    detection_service = StuckJobDetectionService(self.DatabaseManager)
+                    
+                    result = detection_service.DetectAndCleanStuckTranscodeJobs()
+                    
+                    if result.get("Success", False):
+                        stuck_found = result.get("StuckJobsFound", 0)
+                        jobs_cleaned = result.get("JobsCleaned", 0)
+                        
+                        if stuck_found > 0:
+                            LoggingService.LogInfo(f"Periodic stuck job detection: {stuck_found} stuck jobs found, {jobs_cleaned} jobs cleaned", 
+                                                 "ProcessTranscodeQueueService", "StuckJobMonitoringLoop")
+                        else:
+                            # Log periodic check even when no stuck jobs found (for audit trail)
+                            LoggingService.LogInfo("Periodic stuck job detection: No stuck jobs found", 
+                                                 "ProcessTranscodeQueueService", "StuckJobMonitoringLoop")
+                    else:
+                        LoggingService.LogWarning(f"Periodic stuck job detection failed: {result.get('ErrorMessage', 'Unknown error')}", 
+                                                "ProcessTranscodeQueueService", "StuckJobMonitoringLoop")
+                    
+                except Exception as e:
+                    LoggingService.LogException("Error in periodic stuck job detection", e, 
+                                              "ProcessTranscodeQueueService", "StuckJobMonitoringLoop")
+                
+                # Wait 5 minutes before next check
+                for _ in range(300):  # 5 minutes = 300 seconds
+                    if not self.StuckJobMonitoringActive or self.StopRequested:
+                        break
+                    time.sleep(1)
+            
+            LoggingService.LogInfo("Stuck job monitoring loop completed", 
+                                 "ProcessTranscodeQueueService", "StuckJobMonitoringLoop")
+            
+        except Exception as e:
+            LoggingService.LogException("Error in stuck job monitoring loop", e, 
+                                      "ProcessTranscodeQueueService", "StuckJobMonitoringLoop")
+        finally:
+            self.StuckJobMonitoringActive = False
     
     

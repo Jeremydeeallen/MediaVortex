@@ -32,6 +32,7 @@ class VideoTranscodingService:
         try:
             LoggingService.LogFunctionEntry("TranscodeVideo", "VideoTranscodingService", JobId)
             LoggingService.LogInfo(f"EXECUTING COMMAND: {TranscodeCommand}", "VideoTranscodingService", "TranscodeVideo")
+            LoggingService.LogInfo(f"Command execution mode: shell=True (PID will be shell process)", "VideoTranscodingService", "TranscodeVideo")
             
             StartTime = datetime.now()
             
@@ -48,6 +49,34 @@ class VideoTranscodingService:
             )
             
             LoggingService.LogInfo(f"Process started with PID: {Process.pid}", "VideoTranscodingService", "TranscodeVideo")
+            
+            # Set CPU affinity on child FFmpeg process (not shell process)
+            try:
+                import psutil
+                import time
+                
+                # Wait briefly for child process to spawn
+                time.sleep(0.1)
+                
+                ShellProcess = psutil.Process(Process.pid)
+                MaxCpuThreads = self.GetMaxCpuThreads()
+                AffinityCores = list(range(MaxCpuThreads))
+                
+                # Find the child FFmpeg process
+                FFmpegProcess = None
+                for child in ShellProcess.children(recursive=True):
+                    if 'ffmpeg' in child.name().lower():
+                        FFmpegProcess = child
+                        break
+                
+                if FFmpegProcess:
+                    FFmpegProcess.cpu_affinity(AffinityCores)
+                    LoggingService.LogInfo(f"Set Transcode FFmpeg CPU affinity to cores: {AffinityCores} (MaxCpuThreads: {MaxCpuThreads}, Shell PID: {Process.pid}, FFmpeg PID: {FFmpegProcess.pid})", "VideoTranscodingService", "TranscodeVideo")
+                else:
+                    LoggingService.LogWarning(f"Could not find child FFmpeg process for shell PID {Process.pid}. CPU affinity not set.", "VideoTranscodingService", "TranscodeVideo")
+                    
+            except Exception as AffinityError:
+                LoggingService.LogWarning(f"Failed to set CPU affinity: {AffinityError}", "VideoTranscodingService", "TranscodeVideo")
             
             # Update ActiveJob with FFmpeg PID if provided
             if ActiveJobId and DatabaseManager:
@@ -372,6 +401,27 @@ class VideoTranscodingService:
             LoggingService.LogException("Exception extracting output path from command", e, 
                                       "VideoTranscodingService", "ExtractOutputPathFromCommand")
             return None
+    
+    def GetMaxCpuThreads(self) -> int:
+        """Get maximum CPU threads from system settings or use default."""
+        try:
+            from Repositories.DatabaseManager import DatabaseManager
+            DatabaseManagerInstance = DatabaseManager()
+            
+            # Get CPU thread limit from system settings
+            MaxCpuThreads = DatabaseManagerInstance.GetSystemSetting('MaxCpuThreads')
+            if MaxCpuThreads and MaxCpuThreads.isdigit():
+                ThreadCount = int(MaxCpuThreads)
+                # Validate thread count (1-32 for safety)
+                if 1 <= ThreadCount <= 32:
+                    return ThreadCount
+            
+            # Default to 16 threads for i9-14900KF (half of 32 cores to prevent overload)
+            return 16
+            
+        except Exception:
+            # If system settings fail, use safe default
+            return 16
     
     def FormatTime(self, Seconds: int) -> str:
         """Format seconds into HH:MM:SS format."""

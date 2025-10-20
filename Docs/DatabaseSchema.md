@@ -475,6 +475,10 @@ TranscodeAttempts.VMAF	REAL
 TranscodeAttempts.QualityTestRequired	BOOLEAN
 TranscodeAttempts.QualityTestSkipped	BOOLEAN
 TranscodeAttempts.QualityTestCompleted	BOOLEAN
+TranscodeAttempts.FileReplaced	BOOLEAN
+TranscodeAttempts.FileReplacedDate	DATETIME
+TranscodeAttempts.ReplacementType	TEXT
+TranscodeAttempts.StartTime	TEXT
 TranscodeFiles.Id	INTEGER
 TranscodeFiles.FilePath	TEXT
 TranscodeFiles.AllQualitiesFailed	BOOLEAN

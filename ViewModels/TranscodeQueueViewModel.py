@@ -113,7 +113,7 @@ class TranscodeQueueViewModel:
             LoggingService.LogException("Exception populating queue", e, "TranscodeQueueViewModel", "PopulateQueue")
             return {"Success": False, "ErrorMessage": self.ErrorMessage}
     
-    def AddJobToQueue(self, MediaFileId: int, Priority: int = None, ProfileId: int = None) -> Dict[str, Any]:
+    def AddJobToQueue(self, MediaFileId: int, Priority: int = None, ProfileId: int = None, StartTime: str = None) -> Dict[str, Any]:
         """Add a specific media file to the transcoding queue."""
         try:
             LoggingService.LogFunctionEntry("AddJobToQueue", "TranscodeQueueViewModel", MediaFileId, Priority)
@@ -122,7 +122,7 @@ class TranscodeQueueViewModel:
             self.SuccessMessage = ""
             
             # Add job using business service
-            result = self.QueueManagementService.AddJobToQueue(MediaFileId, Priority, ProfileId)
+            result = self.QueueManagementService.AddJobToQueue(MediaFileId, Priority, ProfileId, StartTime)
             
             if result.get("Success", False):
                 fileName = result.get("FileName", "Unknown")

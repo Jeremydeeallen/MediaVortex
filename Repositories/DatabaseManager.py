@@ -1178,8 +1178,8 @@ class DatabaseManager:
                         (FilePath, AttemptDate, Quality, OldSizeBytes, NewSizeBytes, Success,
                          SizeReductionBytes, SizeReductionPercent, ErrorMessage, TranscodeDurationSeconds,
                          FfpmpegCommand, AudioBitrateKbps, VideoBitrateKbps, ProfileName, VMAF,
-                         FileReplaced, FileReplacedDate, ReplacementType)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                         FileReplaced, FileReplacedDate, ReplacementType, StartTime)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """
                     parameters = (
                         Attempt.FilePath, Attempt.AttemptDate, Attempt.Quality,
@@ -1188,7 +1188,7 @@ class DatabaseManager:
                         Attempt.TranscodeDurationSeconds,
                         Attempt.FfpmpegCommand,
                         Attempt.AudioBitrateKbps, Attempt.VideoBitrateKbps, Attempt.ProfileName, Attempt.VMAF,
-                        Attempt.FileReplaced, Attempt.FileReplacedDate, Attempt.ReplacementType
+                        Attempt.FileReplaced, Attempt.FileReplacedDate, Attempt.ReplacementType, Attempt.StartTime
                     )
                     LoggingService.LogInfo(f"Insert attempt parameters: {parameters}", "DatabaseManager", "SaveTranscodeAttempt")
                     cursor.execute(query, parameters)
@@ -1705,14 +1705,14 @@ class DatabaseManager:
             # If no exact match found, try standardized resolution
             if not rows:
                 resolutionCategory = self._ConvertPixelDimensionsToResolutionCategory(SourceResolution)
-                LoggingService.LogInfo(f"No exact match for {SourceResolution}, trying standardized {resolutionCategory}", "DatabaseManager", "GetProfileSettingsForTargetResolution")
+                LoggingService.LogInfo(f"Resolution {SourceResolution} not found in database, using standardized resolution {resolutionCategory}", "DatabaseManager", "GetProfileSettingsForTargetResolution")
                 rows = self.DatabaseService.ExecuteQuery(query, (ProfileName, resolutionCategory))
                 foundResolution = resolutionCategory
             else:
                 LoggingService.LogInfo(f"Found exact resolution match for {SourceResolution}", "DatabaseManager", "GetProfileSettingsForTargetResolution")
             
             if not rows:
-                LoggingService.LogWarning(f"No TranscodeDownTo found for Profile {ProfileName} and Resolution {SourceResolution}", "DatabaseManager", "GetProfileSettingsForTargetResolution")
+                LoggingService.LogWarning(f"No profile settings found for Profile '{ProfileName}' and Resolution '{foundResolution}' (original: {SourceResolution})", "DatabaseManager", "GetProfileSettingsForTargetResolution")
                 return None
             
             targetResolution = rows[0]['TranscodeDownTo']
@@ -2510,6 +2510,22 @@ class DatabaseManager:
             
         except Exception as e:
             LoggingService.LogException("Exception getting all active jobs", e, "DatabaseManager", "GetAllActiveJobs")
+            return []
+    
+    def GetAllActiveJobProcessIds(self) -> List[int]:
+        """Get all ProcessIds from active jobs for orphaned process detection."""
+        try:
+            query = """
+                SELECT ProcessId 
+                FROM ActiveJobs 
+                WHERE Status = 'Running' AND ProcessId IS NOT NULL
+            """
+            
+            rows = self.DatabaseService.ExecuteQuery(query)
+            return [row[0] for row in rows if row[0] is not None]
+            
+        except Exception as e:
+            LoggingService.LogException("Exception getting active job process IDs", e, "DatabaseManager", "GetAllActiveJobProcessIds")
             return []
     
     def CancelActiveJob(self, JobId: int) -> bool:

@@ -73,6 +73,30 @@ class QualityTestServiceApp:
         except Exception as e:
             LoggingService.LogException("Error ensuring ServiceStatus exists", e, "QualityTestService", "EnsureServiceStatusExists")
     
+    def DetectAndCleanStuckJobs(self):
+        """Detect and clean up stuck quality test jobs where FFmpeg VMAF processes have died."""
+        try:
+            LoggingService.LogInfo("Starting stuck job detection for QualityTestService...", "QualityTestService", "DetectAndCleanStuckJobs")
+            
+            # Import and use the StuckJobDetectionService
+            from Services.StuckJobDetectionService import StuckJobDetectionService
+            detection_service = StuckJobDetectionService(self.DatabaseManager)
+            
+            # Perform stuck job detection and cleanup
+            result = detection_service.DetectAndCleanStuckQualityTestJobs()
+            
+            if result.get("Success", False):
+                stuck_found = result.get("StuckJobsFound", 0)
+                jobs_cleaned = result.get("JobsCleaned", 0)
+                LoggingService.LogInfo(f"Stuck job detection completed: {stuck_found} stuck jobs found, {jobs_cleaned} jobs cleaned", 
+                                     "QualityTestService", "DetectAndCleanStuckJobs")
+            else:
+                LoggingService.LogError(f"Stuck job detection failed: {result.get('ErrorMessage', 'Unknown error')}", 
+                                      "QualityTestService", "DetectAndCleanStuckJobs")
+                
+        except Exception as e:
+            LoggingService.LogException("Error during stuck job detection", e, "QualityTestService", "DetectAndCleanStuckJobs")
+    
     def Run(self):
         """Start the quality test service."""
         try:
@@ -83,6 +107,9 @@ class QualityTestServiceApp:
             
             # Update service status in database
             self.UpdateServiceStatus("Starting")
+            
+            # Detect and clean up stuck jobs
+            self.DetectAndCleanStuckJobs()
             
             # Start health monitoring
             self.StartHealthMonitoring()

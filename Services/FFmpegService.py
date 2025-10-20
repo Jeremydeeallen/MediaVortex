@@ -1,6 +1,7 @@
 import os
 import subprocess
 import shutil
+import psutil
 from typing import Optional, Dict, Any, List
 from pathlib import Path
 from Services.LoggingService import LoggingService
@@ -16,6 +17,9 @@ class FFmpegService:
     _logged_initialization = False
     
     def __init__(self):
+        # Initialize DatabaseManager
+        self.DatabaseManager = DatabaseManager()
+        
         # Use cached paths if available, otherwise find them
         if FFmpegService._cached_ffmpeg_path is None:
             FFmpegService._cached_ffmpeg_path = self.GetFFmpegPathFromSettings()
@@ -494,32 +498,48 @@ class FFmpegService:
             
             LoggingService.LogDebug(f"Executing FFmpeg command: {' '.join(Command)}", 'ExecuteFFmpeg', 'FFmpegService')
             
-            Result = subprocess.run(
+            # Change subprocess.run to Popen so we can set affinity before execution
+            Process = subprocess.Popen(
                 Command,
-                capture_output=True,
-                text=True,
-                timeout=300,  # 5 minute timeout for FFmpeg operations
-                encoding='utf-8',
-                errors='replace'
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
             )
             
+            # Set CPU affinity based on MaxCpuThreads setting
+            try:
+                CurrentProcess = psutil.Process(Process.pid)
+                MaxCpuThreads = self.GetMaxCpuThreads()
+                AffinityCores = list(range(MaxCpuThreads))
+                CurrentProcess.cpu_affinity(AffinityCores)
+                LoggingService.LogDebug(f"Set FFmpeg CPU affinity to cores: {AffinityCores} (MaxCpuThreads: {MaxCpuThreads})", 'ExecuteFFmpeg', 'FFmpegService')
+            except Exception as AffinityError:
+                LoggingService.LogWarning(f"Failed to set CPU affinity: {AffinityError}", 'ExecuteFFmpeg', 'FFmpegService')
+            
+            # Wait for process with timeout
+            try:
+                Stdout, Stderr = Process.communicate(timeout=300)  # 5 minute timeout
+                ReturnCode = Process.returncode
+            except subprocess.TimeoutExpired:
+                Process.kill()
+                Process.wait()
+                ErrorMessage = "FFmpeg timeout"
+                LoggingService.LogWarning(ErrorMessage, 'ExecuteFFmpeg', 'FFmpegService')
+                return {
+                    'Success': False,
+                    'ErrorMessage': ErrorMessage,
+                    'Output': '',
+                    'Error': 'Timeout'
+                }
+            
             return {
-                'Success': Result.returncode == 0,
-                'ReturnCode': Result.returncode,
-                'Output': Result.stdout,
-                'Error': Result.stderr,
+                'Success': ReturnCode == 0,
+                'ReturnCode': ReturnCode,
+                'Output': Stdout,
+                'Error': Stderr,
                 'Command': ' '.join(Command)
             }
             
-        except subprocess.TimeoutExpired:
-            ErrorMessage = f"FFmpeg timeout for command: {' '.join(Arguments)}"
-            LoggingService.LogWarning(ErrorMessage, 'ExecuteFFmpeg', 'FFmpegService')
-            return {
-                'Success': False,
-                'ErrorMessage': ErrorMessage,
-                'Output': '',
-                'Error': 'Timeout'
-            }
         except Exception as e:
             ErrorMessage = f"FFmpeg execution error: {str(e)}"
             LoggingService.LogException(ErrorMessage, e, 'ExecuteFFmpeg', 'FFmpegService')
@@ -564,6 +584,24 @@ class FFmpegService:
             LoggingService.LogException("Error getting FFmpeg versions", e, 'GetVersion', 'FFmpegService')
         
         return Versions
+    
+    def GetMaxCpuThreads(self) -> int:
+        """Get maximum CPU threads from system settings or use default."""
+        try:
+            # Get CPU thread limit from system settings
+            MaxCpuThreads = self.DatabaseManager.GetSystemSetting('MaxCpuThreads')
+            if MaxCpuThreads and MaxCpuThreads.isdigit():
+                ThreadCount = int(MaxCpuThreads)
+                # Validate thread count (1-32 for safety)
+                if 1 <= ThreadCount <= 32:
+                    return ThreadCount
+            
+            # Default to 16 threads for i9-14900KF (half of 32 cores to prevent overload)
+            return 16
+            
+        except Exception:
+            # If system settings fail, use safe default
+            return 16
     
     def AddMediaVortexTitle(self, InputFilePath: str, OutputFilePath: str, 
                            Title: str = None, ShowTitle: str = None, 

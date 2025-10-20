@@ -63,6 +63,12 @@ class TranscodeServiceApp:
             # Update service status in database
             self.UpdateServiceStatus("Starting")
             
+            # Perform crash recovery
+            self.RecoverFromCrash()
+            
+            # Detect and clean up stuck jobs
+            self.DetectAndCleanStuckJobs()
+            
             # Start health monitoring
             self.StartHealthMonitoring()
             
@@ -144,6 +150,30 @@ class TranscodeServiceApp:
                 
         except Exception as e:
             LoggingService.LogException("Error during crash recovery", e, "TranscodeService", "RecoverFromCrash")
+    
+    def DetectAndCleanStuckJobs(self):
+        """Detect and clean up stuck transcode jobs where FFmpeg processes have died."""
+        try:
+            LoggingService.LogInfo("Starting stuck job detection for TranscodeService...", "TranscodeService", "DetectAndCleanStuckJobs")
+            
+            # Import and use the StuckJobDetectionService
+            from Services.StuckJobDetectionService import StuckJobDetectionService
+            detection_service = StuckJobDetectionService(self.DatabaseManager)
+            
+            # Perform stuck job detection and cleanup
+            result = detection_service.DetectAndCleanStuckTranscodeJobs()
+            
+            if result.get("Success", False):
+                stuck_found = result.get("StuckJobsFound", 0)
+                jobs_cleaned = result.get("JobsCleaned", 0)
+                LoggingService.LogInfo(f"Stuck job detection completed: {stuck_found} stuck jobs found, {jobs_cleaned} jobs cleaned", 
+                                     "TranscodeService", "DetectAndCleanStuckJobs")
+            else:
+                LoggingService.LogError(f"Stuck job detection failed: {result.get('ErrorMessage', 'Unknown error')}", 
+                                      "TranscodeService", "DetectAndCleanStuckJobs")
+                
+        except Exception as e:
+            LoggingService.LogException("Error during stuck job detection", e, "TranscodeService", "DetectAndCleanStuckJobs")
     
     def StartHealthMonitoring(self):
         """Start health monitoring thread."""

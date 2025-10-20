@@ -29,6 +29,10 @@ class ProcessQualityTestQueueService:
         self.ProcessingThread = None
         self.StopRequested = False
         
+        # Stuck job monitoring
+        self.StuckJobMonitoringThread = None
+        self.StuckJobMonitoringActive = False
+        
     def Run(self, MaxConcurrentJobs: int = 1) -> Dict[str, Any]:
         """Start processing the quality testing queue with specified concurrent jobs."""
         try:
@@ -51,9 +55,15 @@ class ProcessQualityTestQueueService:
             self.StopRequested = False
             self.IsProcessing = True
             
+            # Clean up any stuck jobs before starting
+            self.DetectAndCleanStuckJobsBeforeStart()
+            
             # Start processing in background thread
             self.ProcessingThread = threading.Thread(target=self.ProcessQueueLoop, daemon=True)
             self.ProcessingThread.start()
+            
+            # Start stuck job monitoring thread
+            self.StartStuckJobMonitoring()
             
             LoggingService.LogInfo(f"Started quality testing queue processing with {MaxConcurrentJobs} concurrent jobs", 
                                  "ProcessQualityTestQueueService", "Run")
@@ -89,6 +99,9 @@ class ProcessQualityTestQueueService:
             # Wait for processing to stop
             if self.ProcessingThread and self.ProcessingThread.is_alive():
                 self.ProcessingThread.join(timeout=10)
+            
+            # Stop stuck job monitoring
+            self.StopStuckJobMonitoring()
             
             self.IsProcessing = False
             self.ActiveJobs = []
@@ -221,3 +234,120 @@ class ProcessQualityTestQueueService:
     def IsStopRequested(self) -> bool:
         """Check if stop was requested."""
         return self.StopRequested
+    
+    def DetectAndCleanStuckJobsBeforeStart(self):
+        """Detect and clean up stuck jobs before starting quality testing."""
+        try:
+            LoggingService.LogInfo("Checking for stuck quality test jobs before starting", 
+                                 "ProcessQualityTestQueueService", "DetectAndCleanStuckJobsBeforeStart")
+            
+            from Services.StuckJobDetectionService import StuckJobDetectionService
+            detection_service = StuckJobDetectionService(self.DatabaseManager)
+            
+            result = detection_service.DetectAndCleanStuckQualityTestJobs()
+            
+            if result.get("Success", False):
+                stuck_found = result.get("StuckJobsFound", 0)
+                jobs_cleaned = result.get("JobsCleaned", 0)
+                if stuck_found > 0:
+                    LoggingService.LogInfo(f"Pre-start stuck quality test job detection: {stuck_found} stuck jobs found, {jobs_cleaned} jobs cleaned", 
+                                         "ProcessQualityTestQueueService", "DetectAndCleanStuckJobsBeforeStart")
+                else:
+                    LoggingService.LogInfo("Pre-start stuck quality test job detection: No stuck jobs found", 
+                                         "ProcessQualityTestQueueService", "DetectAndCleanStuckJobsBeforeStart")
+            else:
+                LoggingService.LogWarning(f"Pre-start stuck quality test job detection failed: {result.get('ErrorMessage', 'Unknown error')}", 
+                                        "ProcessQualityTestQueueService", "DetectAndCleanStuckJobsBeforeStart")
+                
+        except Exception as e:
+            LoggingService.LogException("Error during pre-start stuck quality test job detection", e, 
+                                      "ProcessQualityTestQueueService", "DetectAndCleanStuckJobsBeforeStart")
+    
+    def StartStuckJobMonitoring(self):
+        """Start background monitoring for stuck quality test jobs."""
+        try:
+            if self.StuckJobMonitoringActive:
+                LoggingService.LogInfo("Stuck quality test job monitoring already active", 
+                                     "ProcessQualityTestQueueService", "StartStuckJobMonitoring")
+                return
+            
+            self.StuckJobMonitoringActive = True
+            self.StuckJobMonitoringThread = threading.Thread(
+                target=self.StuckJobMonitoringLoop,
+                daemon=True,
+                name="StuckQualityTestJobMonitor"
+            )
+            self.StuckJobMonitoringThread.start()
+            
+            LoggingService.LogInfo("Started stuck quality test job monitoring thread", 
+                                 "ProcessQualityTestQueueService", "StartStuckJobMonitoring")
+            
+        except Exception as e:
+            LoggingService.LogException("Error starting stuck quality test job monitoring", e, 
+                                      "ProcessQualityTestQueueService", "StartStuckJobMonitoring")
+    
+    def StopStuckJobMonitoring(self):
+        """Stop background monitoring for stuck quality test jobs."""
+        try:
+            if not self.StuckJobMonitoringActive:
+                return
+            
+            self.StuckJobMonitoringActive = False
+            
+            if self.StuckJobMonitoringThread and self.StuckJobMonitoringThread.is_alive():
+                self.StuckJobMonitoringThread.join(timeout=5)
+            
+            LoggingService.LogInfo("Stopped stuck quality test job monitoring thread", 
+                                 "ProcessQualityTestQueueService", "StopStuckJobMonitoring")
+            
+        except Exception as e:
+            LoggingService.LogException("Error stopping stuck quality test job monitoring", e, 
+                                      "ProcessQualityTestQueueService", "StopStuckJobMonitoring")
+    
+    def StuckJobMonitoringLoop(self):
+        """Background monitoring loop for stuck quality test jobs - runs every 5 minutes."""
+        try:
+            LoggingService.LogInfo("Stuck quality test job monitoring loop started", 
+                                 "ProcessQualityTestQueueService", "StuckJobMonitoringLoop")
+            
+            while self.StuckJobMonitoringActive and not self.StopRequested:
+                try:
+                    # Check for stuck quality test jobs
+                    from Services.StuckJobDetectionService import StuckJobDetectionService
+                    detection_service = StuckJobDetectionService(self.DatabaseManager)
+                    
+                    result = detection_service.DetectAndCleanStuckQualityTestJobs()
+                    
+                    if result.get("Success", False):
+                        stuck_found = result.get("StuckJobsFound", 0)
+                        jobs_cleaned = result.get("JobsCleaned", 0)
+                        
+                        if stuck_found > 0:
+                            LoggingService.LogInfo(f"Periodic stuck quality test job detection: {stuck_found} stuck jobs found, {jobs_cleaned} jobs cleaned", 
+                                                 "ProcessQualityTestQueueService", "StuckJobMonitoringLoop")
+                        else:
+                            # Log periodic check even when no stuck jobs found (for audit trail)
+                            LoggingService.LogInfo("Periodic stuck quality test job detection: No stuck jobs found", 
+                                                 "ProcessQualityTestQueueService", "StuckJobMonitoringLoop")
+                    else:
+                        LoggingService.LogWarning(f"Periodic stuck quality test job detection failed: {result.get('ErrorMessage', 'Unknown error')}", 
+                                                "ProcessQualityTestQueueService", "StuckJobMonitoringLoop")
+                    
+                except Exception as e:
+                    LoggingService.LogException("Error in periodic stuck quality test job detection", e, 
+                                              "ProcessQualityTestQueueService", "StuckJobMonitoringLoop")
+                
+                # Wait 5 minutes before next check
+                for _ in range(300):  # 5 minutes = 300 seconds
+                    if not self.StuckJobMonitoringActive or self.StopRequested:
+                        break
+                    time.sleep(1)
+            
+            LoggingService.LogInfo("Stuck quality test job monitoring loop completed", 
+                                 "ProcessQualityTestQueueService", "StuckJobMonitoringLoop")
+            
+        except Exception as e:
+            LoggingService.LogException("Error in stuck quality test job monitoring loop", e, 
+                                      "ProcessQualityTestQueueService", "StuckJobMonitoringLoop")
+        finally:
+            self.StuckJobMonitoringActive = False

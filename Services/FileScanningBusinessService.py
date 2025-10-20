@@ -989,8 +989,6 @@ class FileScanningBusinessService:
                 MediaFile.Codec = MetadataResult.get('VideoCodec')
                 MediaFile.DurationMinutes = MetadataResult.get('DurationMinutes')
                 MediaFile.FrameRate = MetadataResult.get('FrameRate')
-                MediaFile.CompressionPotential = MetadataResult.get('CompressionPotential')
-                MediaFile.AssignedProfile = MetadataResult.get('AssignedProfile')
                 
                 # Extract new metadata fields
                 MediaFile.TotalFrames = MetadataResult.get('TotalFrames')
@@ -1012,16 +1010,12 @@ class FileScanningBusinessService:
                 LoggingService.LogDebug(f"Successfully extracted metadata for: {FilePath}", 'ExtractAndUpdateMetadata', 'FileScanningBusinessService')
             else:
                 # Set default values for failed extraction
-                MediaFile.CompressionPotential = 'Unknown'
-                MediaFile.AssignedProfile = 'Default'
                 ErrorMessage = MetadataResult.get('ErrorMessage', 'Unknown error')
                 LoggingService.LogWarning(f"Failed to extract metadata for {FilePath}: {ErrorMessage}", 'ExtractAndUpdateMetadata', 'FileScanningBusinessService')
             
         except Exception as e:
             LoggingService.LogException("Error extracting and updating metadata", e, 'ExtractAndUpdateMetadata', 'FileScanningBusinessService')
             # Set default values on error
-            MediaFile.CompressionPotential = 'Unknown'
-            MediaFile.AssignedProfile = 'Default'
     
     def ProcessMediaFilesWithMetadata(self, MediaFiles: List[str], RootFolderId: Optional[int], RootFolderPath: str = "", ExtractMetadata: bool = True):
         """Process media files with optional metadata extraction."""

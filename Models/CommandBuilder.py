@@ -26,6 +26,7 @@ class CommandBuilder:
             SourceResolution = CommandData.get('SourceResolution', '')
             TargetResolution = CommandData.get('TargetResolution', '')
             ScaleFilter = CommandData.get('ScaleFilter')
+            StartTime = CommandData.get('StartTime')
             ContainerType = ProfileSettings.get('ContainerType', 'mp4')  # Default to MP4
             
             if not Job or not MediaFile:
@@ -41,12 +42,14 @@ class CommandBuilder:
             
             # Start building command - FFmpeg command structure: ffmpeg -i input [options] output -y
             # Use full path to FFmpeg executable
-            CommandParts = ['C:\\Code\\Automation\\MediaVortex\\FFmpegMaster\\bin\\ffmpeg.exe', '-i', f'"{InputPath}"']
+            CommandParts = ['C:\\Code\\Automation\\MediaVortex\\FFmpegMaster\\bin\\ffmpeg.exe']
             
-            # Add CPU thread limit to prevent system overload
-            MaxCpuThreads = self.GetMaxCpuThreads()
-            if MaxCpuThreads and MaxCpuThreads > 0:
-                CommandParts.extend(['-threads', str(MaxCpuThreads)])
+            # Add start time parameter if specified (must come before -i input)
+            if StartTime and StartTime.strip():
+                CommandParts.extend(['-ss', StartTime.strip()])
+            
+            # Add input file
+            CommandParts.extend(['-i', f'"{InputPath}"'])
             
             # Add video codec
             VideoCodec = ProfileSettings.get('Codec', 'libsvtav1')
@@ -142,31 +145,19 @@ class CommandBuilder:
             pass
     
     def AddFilmGrainParameter(self, CommandParts: list, CodecParameters: list, ProfileSettings: Dict[str, Any]) -> None:
-        """Add film grain parameter and SVT-AV1 thread control after audio codec."""
+        """Add film grain parameter for SVT-AV1."""
         try:
-            # Get CPU thread limit for SVT-AV1
-            MaxCpuThreads = self.GetMaxCpuThreads()
-            
             # Create a lookup dictionary for codec parameters
             ParamLookup = {}
             for param in CodecParameters:
                 ParamLookup[param['ParameterName']] = param
             
-            # Build SVT-AV1 parameters string
-            SvtAv1Params = []
-            
-            # Add film grain (for libsvtav1) - after audio codec
+            # Add film grain (for libsvtav1)
             if 'film-grain' in ParamLookup:
                 FilmGrain = ProfileSettings.get('FilmGrain')
                 if FilmGrain is not None and FilmGrain != '' and FilmGrain != 'None' and FilmGrain > 0:
-                    SvtAv1Params.append(f'film-grain={FilmGrain}')
-            
-            # Always add thread control to prevent SVT-AV1 from using all cores
-            SvtAv1Params.append(f'threads={MaxCpuThreads}')
-            
-            # Add SVT-AV1 parameters if we have any
-            if SvtAv1Params:
-                CommandParts.extend(['-svtav1-params', ':'.join(SvtAv1Params)])
+                    SvtAv1Params = [f'film-grain={FilmGrain}']
+                    CommandParts.extend(['-svtav1-params', ':'.join(SvtAv1Params)])
                 
         except Exception:
             # If anything goes wrong, continue without adding parameters

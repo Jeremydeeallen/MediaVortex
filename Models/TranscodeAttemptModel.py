@@ -28,6 +28,7 @@ class TranscodeAttemptModel:
     FileReplaced: bool = False
     FileReplacedDate: Optional[datetime] = None
     ReplacementType: Optional[str] = None
+    StartTime: Optional[str] = None  # Start time offset in HH:MM:SS format or seconds
     
     def __post_init__(self):
         if self.AttemptDate is None:

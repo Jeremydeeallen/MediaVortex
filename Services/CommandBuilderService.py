@@ -39,7 +39,8 @@ class CommandBuilderService:
                 'CodecParameters': CodecParameters,
                 'SourceResolution': SourceResolution,
                 'TargetResolution': TargetResolution,
-                'ScaleFilter': ScaleFilter
+                'ScaleFilter': ScaleFilter,
+                'StartTime': TranscodingSettings.get('StartTime')
             }
             
             # Build the command using the pure model
