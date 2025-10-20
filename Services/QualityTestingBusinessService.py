@@ -1025,6 +1025,12 @@ class QualityTestingBusinessService:
             if not skip_success:
                 return {"Success": False, "Message": "Failed to update TranscodeAttempts record"}
             
+            # Update QualityTestResults to mark as cancelled
+            self.DatabaseManager.DatabaseService.ExecuteNonQuery(
+                "UPDATE QualityTestResults SET Status = 'Cancelled', ErrorMessage = 'Cancelled by user' WHERE TranscodeAttemptId = ? AND Status = 'Running'",
+                (transcode_attempt_id,)
+            )
+            
             # Clean up progress and active job records
             self.DatabaseManager.DatabaseService.ExecuteNonQuery(
                 "DELETE FROM QualityTestProgress WHERE TranscodeAttemptId = ?", 

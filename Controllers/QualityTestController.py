@@ -415,7 +415,7 @@ def RequeueAttempt():
     Result = Controller.RequeueAttempt(TranscodeAttemptId)
     return jsonify(Result)
 
-@QualityTestBlueprint.route('/QualityTest/Skip', methods=['POST'])
+@QualityTestBlueprint.route('/api/QualityTest/Skip', methods=['POST'])
 def SkipQualityTest():
     """Skip quality test for a transcode attempt"""
     Controller = QualityTestController()
@@ -435,7 +435,7 @@ def SkipQualityTest():
     
     return jsonify(Result)
 
-@QualityTestBlueprint.route('/QualityTest/CancelActive', methods=['POST'])
+@QualityTestBlueprint.route('/api/QualityTest/CancelActive', methods=['POST'])
 def CancelActiveQualityTest():
     """Cancel the currently running quality test"""
     try:
