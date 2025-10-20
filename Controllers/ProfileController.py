@@ -87,11 +87,12 @@ class ProfileController:
                 yadif_mode = data.get('YadifMode', 1)
                 yadif_parity = data.get('YadifParity', 1)
                 yadif_deint = data.get('YadifDeint', 1)
+                use_nvidia_hardware = data.get('UseNvidiaHardware', 0)
                 
                 LoggingService.LogInfo(f"Profile name: {profile_name}, Description: {description}, Thresholds count: {len(thresholds)}, Codec: {codec}, Preset: {preset}", "create_profile", "ProfileController")
                 
                 success = self.ViewModel.CreateProfileWithThresholds(profile_name, description, thresholds, 
-                                                                    codec, preset, film_grain, yadif_mode, yadif_parity, yadif_deint)
+                                                                    codec, preset, film_grain, yadif_mode, yadif_parity, yadif_deint, use_nvidia_hardware)
                 LoggingService.LogInfo(f"CreateProfileWithThresholds result: {success}", "create_profile", "ProfileController")
                 
                 if success:
@@ -139,11 +140,12 @@ class ProfileController:
                 yadif_mode = data.get('YadifMode', 1)
                 yadif_parity = data.get('YadifParity', 1)
                 yadif_deint = data.get('YadifDeint', 1)
+                use_nvidia_hardware = data.get('UseNvidiaHardware', 0)
                 
                 LoggingService.LogInfo(f"Profile name: {profile_name}, Description: {description}, Thresholds count: {len(thresholds)}, Codec: {codec}, Preset: {preset}", "UpdateProfile", "ProfileController")
                 
                 success = self.ViewModel.UpdateProfileWithThresholds(profile_id, profile_name, description, thresholds,
-                                                                    codec, preset, film_grain, yadif_mode, yadif_parity, yadif_deint)
+                                                                    codec, preset, film_grain, yadif_mode, yadif_parity, yadif_deint, use_nvidia_hardware)
                 LoggingService.LogInfo(f"UpdateProfileWithThresholds result: {success}", "UpdateProfile", "ProfileController")
                 
                 if success:

@@ -67,7 +67,8 @@ class ProfileManagementViewModel:
     
     def CreateProfileWithThresholds(self, profile_name: str, description: str, thresholds: List[dict],
                                    codec: str = "libsvtav1", preset: int = 6, film_grain: int = 10,
-                                   yadif_mode: int = 1, yadif_parity: int = 1, yadif_deint: int = 1) -> bool:
+                                   yadif_mode: int = 1, yadif_parity: int = 1, yadif_deint: int = 1, 
+                                   use_nvidia_hardware: int = 0) -> bool:
         """Create a new profile with multiple thresholds."""
         try:
             LoggingService.LogFunctionEntry("CreateProfileWithThresholds", "ProfileManagementViewModel", profile_name, description, len(thresholds))
@@ -85,7 +86,7 @@ class ProfileManagementViewModel:
             
             # Create the profile first
             LoggingService.LogInfo("Creating profile...", "ProfileManagementViewModel", "CreateProfileWithThresholds")
-            new_profile = self.ProfileService.CreateProfile(profile_name, description, codec, preset, film_grain, yadif_mode, yadif_parity, yadif_deint)
+            new_profile = self.ProfileService.CreateProfile(profile_name, description, codec, preset, film_grain, yadif_mode, yadif_parity, yadif_deint, use_nvidia_hardware)
             LoggingService.LogInfo(f"Profile created with ID: {new_profile.Id}", "ProfileManagementViewModel", "CreateProfileWithThresholds")
             
             # Add all thresholds
@@ -153,7 +154,8 @@ class ProfileManagementViewModel:
     
     def UpdateProfileWithThresholds(self, profile_id: int, profile_name: str, description: str, thresholds: List[dict],
                                    codec: str = "libsvtav1", preset: int = 6, film_grain: int = 10,
-                                   yadif_mode: int = 1, yadif_parity: int = 1, yadif_deint: int = 1) -> bool:
+                                   yadif_mode: int = 1, yadif_parity: int = 1, yadif_deint: int = 1, 
+                                   use_nvidia_hardware: int = 0) -> bool:
         """Update an existing profile with multiple thresholds."""
         try:
             LoggingService.LogFunctionEntry("UpdateProfileWithThresholds", "ProfileManagementViewModel", profile_id, profile_name, description, len(thresholds))
@@ -191,7 +193,8 @@ class ProfileManagementViewModel:
                 FilmGrain=film_grain,
                 YadifMode=yadif_mode,
                 YadifParity=yadif_parity,
-                YadifDeint=yadif_deint
+                YadifDeint=yadif_deint,
+                UseNvidiaHardware=use_nvidia_hardware
             )
             LoggingService.LogInfo("Updating profile in database...")
             updated_profile = self.ProfileService.UpdateProfile(profile)
@@ -386,10 +389,11 @@ class ProfileManagementViewModel:
                 'FilmGrain': profile.FilmGrain,
                 'YadifMode': profile.YadifMode,
                 'YadifParity': profile.YadifParity,
-                'YadifDeint': profile.YadifDeint
-            }
-            for profile in self.Profiles
-        ]
+            'YadifDeint': profile.YadifDeint,
+            'UseNvidiaHardware': profile.UseNvidiaHardware
+        }
+        for profile in self.Profiles
+    ]
     
     def GetSelectedProfileAsDict(self) -> Optional[Dict[str, Any]]:
         """Get selected profile as dictionary for JSON serialization."""
@@ -408,6 +412,7 @@ class ProfileManagementViewModel:
             'YadifMode': self.SelectedProfile.YadifMode,
             'YadifParity': self.SelectedProfile.YadifParity,
             'YadifDeint': self.SelectedProfile.YadifDeint,
+            'UseNvidiaHardware': self.SelectedProfile.UseNvidiaHardware,
             'Thresholds': [
                 {
                     'Id': threshold.Id,

@@ -298,6 +298,7 @@ Profiles.YadifMode	INTEGER
 Profiles.YadifParity	INTEGER
 Profiles.YadifDeint	INTEGER
 Profiles.CodecFlagsId	INTEGER
+Profiles.UseNvidiaHardware	INTEGER
 QualityTestProgress.Id	INTEGER
 QualityTestProgress.TranscodeAttemptId	INTEGER
 QualityTestProgress.Status	TEXT

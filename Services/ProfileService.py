@@ -22,7 +22,8 @@ class ProfileService:
     
     def CreateProfile(self, profile_name: str, description: str = "", 
                      codec: str = "libsvtav1", preset: int = 6, film_grain: int = 10,
-                     yadif_mode: int = 1, yadif_parity: int = 1, yadif_deint: int = 1) -> TranscodeProfileModel:
+                     yadif_mode: int = 1, yadif_parity: int = 1, yadif_deint: int = 1, 
+                     use_nvidia_hardware: int = 0) -> TranscodeProfileModel:
         """Create a new transcoding profile."""
         try:
             LoggingService.LogFunctionEntry("CreateProfile", 'ProfileService', profile_name, description=description)
@@ -36,7 +37,8 @@ class ProfileService:
                 FilmGrain=film_grain,
                 YadifMode=yadif_mode,
                 YadifParity=yadif_parity,
-                YadifDeint=yadif_deint
+                YadifDeint=yadif_deint,
+                UseNvidiaHardware=use_nvidia_hardware
             )
             
             LoggingService.LogInfo("Saving profile to database...", 'CreateProfile', 'ProfileService')

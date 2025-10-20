@@ -51,8 +51,16 @@ class CommandBuilder:
             # Add input file
             CommandParts.extend(['-i', f'"{InputPath}"'])
             
-            # Add video codec
-            VideoCodec = ProfileSettings.get('Codec', 'libsvtav1')
+            # Simple decision: NVIDIA or Software
+            UseNvidiaHardware = ProfileSettings.get('UseNvidiaHardware', 0)
+            
+            if UseNvidiaHardware == 1:
+                # NVIDIA hardware encoding
+                VideoCodec = 'av1_nvenc'
+            else:
+                # Software encoding
+                VideoCodec = ProfileSettings.get('Codec', 'libsvtav1')
+            
             CommandParts.extend(['-c:v', VideoCodec])
             
             # Add parameters using CodecParameters database values
@@ -122,20 +130,31 @@ class CommandBuilder:
             for param in CodecParameters:
                 ParamLookup[param['ParameterName']] = param
             
-            # Add parameters in the correct order to match expected command
-            # 1. CRF (Quality) - should come before preset
-            if 'crf' in ParamLookup:
+            # Simple decision: NVIDIA or Software
+            UseNvidiaHardware = ProfileSettings.get('UseNvidiaHardware', 0)
+            
+            if UseNvidiaHardware == 1:
+                # NVIDIA hardware encoding parameters
                 Quality = ProfileSettings.get('Quality')
                 if Quality is not None and Quality != '' and Quality != 'None':
-                    CommandParts.extend(['-crf', str(Quality)])
-            
-            # 2. Preset
-            if 'preset' in ParamLookup:
+                    CommandParts.extend(['-qp', str(Quality)])
+                
                 Preset = ProfileSettings.get('Preset')
                 if Preset is not None and Preset != '' and Preset != 'None':
-                    CommandParts.extend(['-preset', str(Preset)])
+                    CommandParts.extend(['-preset', f'p{Preset}'])
+            else:
+                # Software encoding parameters
+                Quality = ProfileSettings.get('Quality')
+                if Quality is not None and Quality != '' and Quality != 'None':
+                    if 'crf' in ParamLookup:
+                        CommandParts.extend(['-crf', str(Quality)])
+                
+                Preset = ProfileSettings.get('Preset')
+                if Preset is not None and Preset != '' and Preset != 'None':
+                    if 'preset' in ParamLookup:
+                        CommandParts.extend(['-preset', str(Preset)])
             
-            # 3. Video bitrate (maxrate) - only if not null/blank
+            # Video bitrate (maxrate) - only if not null/blank
             VideoBitrate = ProfileSettings.get('VideoBitrateKbps')
             if VideoBitrate and VideoBitrate != '' and VideoBitrate != 'None':
                 CommandParts.extend(['-maxrate', f'{VideoBitrate}k'])
@@ -145,14 +164,21 @@ class CommandBuilder:
             pass
     
     def AddFilmGrainParameter(self, CommandParts: list, CodecParameters: list, ProfileSettings: Dict[str, Any]) -> None:
-        """Add film grain parameter for SVT-AV1."""
+        """Add film grain parameter for SVT-AV1 (skip for NVIDIA hardware acceleration)."""
         try:
+            # Simple decision: Skip for NVIDIA, add for software
+            UseNvidiaHardware = ProfileSettings.get('UseNvidiaHardware', 0)
+            
+            if UseNvidiaHardware == 1:
+                # NVIDIA doesn't support film grain - skip
+                return
+            
             # Create a lookup dictionary for codec parameters
             ParamLookup = {}
             for param in CodecParameters:
                 ParamLookup[param['ParameterName']] = param
             
-            # Add film grain (for libsvtav1)
+            # Add film grain (for software encoding only)
             if 'film-grain' in ParamLookup:
                 FilmGrain = ProfileSettings.get('FilmGrain')
                 if FilmGrain is not None and FilmGrain != '' and FilmGrain != 'None' and FilmGrain > 0:

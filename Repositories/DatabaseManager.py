@@ -25,7 +25,7 @@ class DatabaseManager:
     def GetAllProfiles(self) -> List[TranscodeProfileModel]:
         """Get all transcoding profiles."""
         query = """SELECT Id, ProfileName, Description, CreatedDate, LastModified, 
-                          Codec, Preset, FilmGrain, YadifMode, YadifParity, YadifDeint 
+                          Codec, Preset, FilmGrain, YadifMode, YadifParity, YadifDeint, UseNvidiaHardware 
                    FROM Profiles ORDER BY ProfileName"""
         rows = self.DatabaseService.ExecuteQuery(query)
         
@@ -42,7 +42,8 @@ class DatabaseManager:
                 FilmGrain=row['FilmGrain'] if row['FilmGrain'] is not None else 10,
                 YadifMode=row['YadifMode'] if row['YadifMode'] is not None else 1,
                 YadifParity=row['YadifParity'] if row['YadifParity'] is not None else 1,
-                YadifDeint=row['YadifDeint'] if row['YadifDeint'] is not None else 1
+                YadifDeint=row['YadifDeint'] if row['YadifDeint'] is not None else 1,
+                UseNvidiaHardware=row['UseNvidiaHardware'] if row['UseNvidiaHardware'] is not None else 0
             )
             profiles.append(profile)
         
@@ -51,7 +52,7 @@ class DatabaseManager:
     def GetProfileById(self, ProfileId: int) -> Optional[TranscodeProfileModel]:
         """Get a specific profile by ID."""
         query = """SELECT Id, ProfileName, Description, CreatedDate, LastModified, 
-                          Codec, Preset, FilmGrain, YadifMode, YadifParity, YadifDeint 
+                          Codec, Preset, FilmGrain, YadifMode, YadifParity, YadifDeint, UseNvidiaHardware 
                    FROM Profiles WHERE Id = ?"""
         rows = self.DatabaseService.ExecuteQuery(query, (ProfileId,))
         
@@ -70,7 +71,8 @@ class DatabaseManager:
             FilmGrain=row['FilmGrain'] if row['FilmGrain'] is not None else 10,
             YadifMode=row['YadifMode'] if row['YadifMode'] is not None else 1,
             YadifParity=row['YadifParity'] if row['YadifParity'] is not None else 1,
-            YadifDeint=row['YadifDeint'] if row['YadifDeint'] is not None else 1
+            YadifDeint=row['YadifDeint'] if row['YadifDeint'] is not None else 1,
+            UseNvidiaHardware=row['UseNvidiaHardware'] if row['UseNvidiaHardware'] is not None else 0
         )
     
     def SaveProfile(self, Profile: TranscodeProfileModel) -> int:
@@ -87,12 +89,12 @@ class DatabaseManager:
                     LoggingService.LogInfo("Inserting new profile...", "DatabaseManager", "SaveProfile")
                     query = """
                         INSERT INTO Profiles (ProfileName, Description, CreatedDate, LastModified, 
-                                             Codec, Preset, FilmGrain, YadifMode, YadifParity, YadifDeint)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                             Codec, Preset, FilmGrain, YadifMode, YadifParity, YadifDeint, UseNvidiaHardware)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """
                     parameters = (Profile.ProfileName, Profile.Description, Profile.CreatedDate, Profile.LastModified,
                                  Profile.Codec, Profile.Preset, Profile.FilmGrain, Profile.YadifMode, 
-                                 Profile.YadifParity, Profile.YadifDeint)
+                                 Profile.YadifParity, Profile.YadifDeint, Profile.UseNvidiaHardware)
                     LoggingService.LogInfo("Insert parameters: {}", "DatabaseManager", "SaveProfile", parameters)
                     cursor.execute(query, parameters)
                     connection.commit()
@@ -105,12 +107,12 @@ class DatabaseManager:
                     query = """
                         UPDATE Profiles 
                         SET ProfileName = ?, Description = ?, LastModified = ?, 
-                            Codec = ?, Preset = ?, FilmGrain = ?, YadifMode = ?, YadifParity = ?, YadifDeint = ?
+                            Codec = ?, Preset = ?, FilmGrain = ?, YadifMode = ?, YadifParity = ?, YadifDeint = ?, UseNvidiaHardware = ?
                         WHERE Id = ?
                     """
                     parameters = (Profile.ProfileName, Profile.Description, Profile.LastModified,
                                  Profile.Codec, Profile.Preset, Profile.FilmGrain, Profile.YadifMode, 
-                                 Profile.YadifParity, Profile.YadifDeint, Profile.Id)
+                                 Profile.YadifParity, Profile.YadifDeint, Profile.UseNvidiaHardware, Profile.Id)
                     LoggingService.LogInfo("Update parameters: {}", "DatabaseManager", "SaveProfile", parameters)
                     cursor.execute(query, parameters)
                     connection.commit()
@@ -1725,7 +1727,7 @@ class DatabaseManager:
                 # Get all settings from the current resolution entry (use the resolution that was found)
                 query = """
                     SELECT pt.VideoBitrateKbps, pt.AudioBitrateKbps, pt.Quality, pt.Resolution, 
-                           p.Codec, p.Preset, p.FilmGrain, p.YadifMode, p.YadifParity, p.YadifDeint, pt.ContainerType, p.Id as ProfileId
+                           p.Codec, p.Preset, p.FilmGrain, p.YadifMode, p.YadifParity, p.YadifDeint, p.UseNvidiaHardware, pt.ContainerType, p.Id as ProfileId
                     FROM ProfileThresholds pt
                     JOIN Profiles p ON pt.ProfileId = p.Id
                     WHERE p.ProfileName = ? AND pt.Resolution = ?
@@ -1736,7 +1738,7 @@ class DatabaseManager:
                 # Now get all settings for the target resolution
                 query = """
                     SELECT pt.VideoBitrateKbps, pt.AudioBitrateKbps, pt.Quality, pt.Resolution, 
-                           p.Codec, p.Preset, p.FilmGrain, p.YadifMode, p.YadifParity, p.YadifDeint, pt.ContainerType, p.Id as ProfileId
+                           p.Codec, p.Preset, p.FilmGrain, p.YadifMode, p.YadifParity, p.YadifDeint, p.UseNvidiaHardware, pt.ContainerType, p.Id as ProfileId
                     FROM ProfileThresholds pt
                     JOIN Profiles p ON pt.ProfileId = p.Id
                     WHERE p.ProfileName = ? AND pt.Resolution = ?
@@ -1759,6 +1761,7 @@ class DatabaseManager:
                     'YadifMode': row['YadifMode'],
                     'YadifParity': row['YadifParity'],
                     'YadifDeint': row['YadifDeint'],
+                    'UseNvidiaHardware': row['UseNvidiaHardware'],
                     'ContainerType': row['ContainerType'],
                     'ProfileId': row['ProfileId']
                 }
