@@ -129,6 +129,18 @@ class ProcessQualityTestQueueService:
                                  "ProcessQualityTestQueueService", "ProcessQueueLoop")
             
             while not self.StopRequested:
+                # Check if service is paused
+                try:
+                    service_status = self.DatabaseManager.GetServiceStatus("QualityTestService")
+                    if service_status and service_status.get('Status') == 'Paused':
+                        LoggingService.LogInfo("QualityTestService is paused, skipping queue processing", 
+                                             "ProcessQualityTestQueueService", "ProcessQueueLoop")
+                        time.sleep(5)
+                        continue
+                except Exception as e:
+                    LoggingService.LogException("Error checking service status", e, 
+                                              "ProcessQualityTestQueueService", "ProcessQueueLoop")
+                
                 try:
                     # Check if we can process more jobs (concurrency limit)
                     if len(self.ActiveJobs) < self.MaxConcurrentJobs:

@@ -18,20 +18,6 @@
                     <button type="button" class="btn btn-warning" id="ClearQueueBtn">
                         <i class="fas fa-trash"></i> <span class="btn-text">Clear Queue</span>
                     </button>
-                    <button type="button" class="btn btn-success" id="StartTranscodingBtn">
-                        <i class="fas fa-play"></i> <span class="btn-text">Start Transcoding</span>
-                    </button>
-                    <div class="btn-group" id="StopTranscodingGroup" style="display: none;">
-                        <button type="button" class="btn btn-warning" id="StopTranscodingBtn">
-                            <i class="fas fa-stop"></i> <span class="btn-text">Graceful Stop</span>
-                        </button>
-                        <button type="button" class="btn btn-danger" id="TerminateTranscodingBtn">
-                            <i class="fas fa-times"></i> <span class="btn-text">Terminate Now</span>
-                        </button>
-                    </div>
-                    <button type="button" class="btn btn-danger" id="ResetAllQueuesBtn">
-                        <i class="fas fa-redo"></i> <span class="btn-text">Reset Running Tasks</span>
-                    </button>
                     <button type="button" class="btn btn-secondary" id="RefreshBtn">
                         <i class="fas fa-sync-alt"></i> <span class="btn-text">Refresh</span>
                     </button>
@@ -109,12 +95,6 @@
                     <i class="fas fa-chart-line"></i> Quality Testing Queue
                 </h5>
                 <div class="btn-group" role="group">
-                    <button type="button" class="btn btn-sm btn-success" id="StartQualityTestingBtn">
-                        <i class="fas fa-play"></i> Start Quality Testing
-                    </button>
-                    <button type="button" class="btn btn-sm btn-warning" id="StopQualityTestingBtn" style="display: none;">
-                        <i class="fas fa-stop"></i> Stop Quality Testing
-                    </button>
                     <button type="button" class="btn btn-sm btn-secondary" id="RefreshQualityTestingBtn">
                         <i class="fas fa-sync-alt"></i> Refresh
                     </button>
@@ -496,24 +476,6 @@ class TranscodeQueueManager {
             this.clearQueue();
         });
 
-        // Reset All Queues
-        document.getElementById('ResetAllQueuesBtn').addEventListener('click', () => {
-            const modal = new bootstrap.Modal(document.getElementById('ResetAllQueuesModal'));
-            modal.show();
-        });
-
-        // Start/Stop Transcoding
-        document.getElementById('StartTranscodingBtn').addEventListener('click', () => {
-            this.startTranscoding();
-        });
-
-        document.getElementById('StopTranscodingBtn').addEventListener('click', () => {
-            this.stopTranscoding();
-        });
-
-        document.getElementById('TerminateTranscodingBtn').addEventListener('click', () => {
-            this.terminateTranscoding();
-        });
 
         // Refresh
         document.getElementById('RefreshBtn').addEventListener('click', () => {
@@ -537,9 +499,6 @@ class TranscodeQueueManager {
             confirmBtn.disabled = !e.target.checked;
         });
 
-        document.getElementById('ConfirmResetBtn').addEventListener('click', () => {
-            this.resetAllQueues();
-        });
 
         // Page Size Change
         document.getElementById('PageSizeSelect').addEventListener('change', (e) => {
@@ -613,14 +572,6 @@ class TranscodeQueueManager {
             this.loadMediaFiles();
         });
 
-        // Quality Testing Queue event listeners
-        document.getElementById('StartQualityTestingBtn').addEventListener('click', () => {
-            this.StartQualityTestingProcessing();
-        });
-
-        document.getElementById('StopQualityTestingBtn').addEventListener('click', () => {
-            this.StopQualityTestingProcessing();
-        });
 
         document.getElementById('RefreshQualityTestingBtn').addEventListener('click', () => {
             this.LoadQualityTestingQueueData();
@@ -644,7 +595,6 @@ class TranscodeQueueManager {
                 this.updateQueueTable(data.QueueItems);
                 this.updatePagination(data);
                 this.updateSortIndicators();
-                this.updateTranscodingStatus();
             } else {
                 this.showAlert('Error loading queue data: ' + data.ErrorMessage, 'danger');
             }
@@ -700,40 +650,6 @@ class TranscodeQueueManager {
         }
     }
 
-    async updateTranscodingStatus() {
-        try {
-            const response = await fetch('/api/Transcode/Status');
-            const data = await response.json();
-
-            if (data.Success) {
-                this.isTranscoding = data.IsTranscoding;
-                const startBtn = document.getElementById('StartTranscodingBtn');
-                const stopGroup = document.getElementById('StopTranscodingGroup');
-
-                if (this.isTranscoding) {
-                    // Show disabled/grayed out Start button and show Stop button group
-                    startBtn.style.display = 'inline-block';
-                    startBtn.disabled = true;
-                    startBtn.classList.remove('btn-success');
-                    startBtn.classList.add('btn-secondary');
-                    startBtn.innerHTML = '<i class="fas fa-play"></i> Transcoding...';
-                    
-                    stopGroup.style.display = 'inline-block';
-                } else {
-                    // Show enabled Start button and hide Stop button group
-                    startBtn.style.display = 'inline-block';
-                    startBtn.disabled = false;
-                    startBtn.classList.remove('btn-secondary');
-                    startBtn.classList.add('btn-success');
-                    startBtn.innerHTML = '<i class="fas fa-play"></i> Start Transcoding';
-                    
-                    stopGroup.style.display = 'none';
-                }
-            }
-        } catch (error) {
-            console.error('Error updating transcoding status:', error);
-        }
-    }
 
     async populateQueue() {
         const maxItems = parseInt(document.getElementById('MaxItemsInput').value);
@@ -786,134 +702,9 @@ class TranscodeQueueManager {
         }
     }
 
-    async resetAllQueues() {
-        const resetType = document.getElementById('ResetTypeSelect').value;
-        
-        try {
-            const response = await fetch('/api/QueueReset/ResetAllQueues', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    ResetType: resetType,
-                    ConfirmReset: true
-                })
-            });
 
-            const data = await response.json();
 
-            if (data.Success) {
-                const totalItemsReset = data.TotalItemsReset || 0;
-                const message = data.Message || `Successfully reset ${totalItemsReset} running tasks back to pending. They will be picked up again when the system restarts.`;
-                this.showAlert(message, 'success');
-                
-                // Close modal and reset checkbox
-                bootstrap.Modal.getInstance(document.getElementById('ResetAllQueuesModal')).hide();
-                document.getElementById('ConfirmResetCheckbox').checked = false;
-                document.getElementById('ConfirmResetBtn').disabled = true;
-                
-                // Refresh all data
-                this.loadQueueData();
-                this.LoadQualityTestingQueueData();
-            } else {
-                this.showAlert('Error resetting queues: ' + data.ErrorMessage, 'danger');
-            }
-        } catch (error) {
-            this.showAlert('Error resetting queues: ' + error.message, 'danger');
-        }
-    }
 
-    async startTranscoding() {
-        // Immediately update button state to show it's starting
-        const startBtn = document.getElementById('StartTranscodingBtn');
-        const stopBtn = document.getElementById('StopTranscodingBtn');
-        
-        startBtn.disabled = true;
-        startBtn.classList.remove('btn-success');
-        startBtn.classList.add('btn-secondary');
-        startBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Starting...';
-        
-        try {
-            const response = await fetch('/api/Transcode/Start', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ MaxConcurrentJobs: 1 })
-            });
-
-            const data = await response.json();
-
-            if (data.Success) {
-                this.showAlert('Transcoding started successfully', 'success');
-                this.updateTranscodingStatus();
-            } else {
-                this.showAlert('Error starting transcoding: ' + data.ErrorMessage, 'danger');
-                // Reset button state on error
-                startBtn.disabled = false;
-                startBtn.classList.remove('btn-secondary');
-                startBtn.classList.add('btn-success');
-                startBtn.innerHTML = '<i class="fas fa-play"></i> Start Transcoding';
-            }
-        } catch (error) {
-            this.showAlert('Error starting transcoding: ' + error.message, 'danger');
-            // Reset button state on error
-            startBtn.disabled = false;
-            startBtn.classList.remove('btn-secondary');
-            startBtn.classList.add('btn-success');
-            startBtn.innerHTML = '<i class="fas fa-play"></i> Start Transcoding';
-        }
-    }
-
-    async stopTranscoding() {
-        try {
-            const response = await fetch('/api/Transcode/Stop', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                }
-            });
-
-            const data = await response.json();
-
-            if (data.Success) {
-                this.showAlert('Graceful stop requested - transcoding will complete current job before stopping', 'success');
-                this.updateTranscodingStatus();
-            } else {
-                this.showAlert('Error requesting graceful stop: ' + data.ErrorMessage, 'danger');
-            }
-        } catch (error) {
-            this.showAlert('Error requesting graceful stop: ' + error.message, 'danger');
-        }
-    }
-
-    async terminateTranscoding() {
-        if (!confirm('Are you sure you want to terminate transcoding immediately? This will cancel any current transcoding job and reset the queue to Pending status.')) {
-            return;
-        }
-
-        try {
-            const response = await fetch('/api/Transcode/TerminateNow', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                }
-            });
-
-            const data = await response.json();
-
-            if (data.Success) {
-                this.showAlert('Transcoding terminated immediately', 'success');
-                this.updateTranscodingStatus();
-                this.loadQueueData(); // Refresh queue to show updated statuses
-            } else {
-                this.showAlert('Error terminating transcoding: ' + data.ErrorMessage, 'danger');
-            }
-        } catch (error) {
-            this.showAlert('Error terminating transcoding: ' + error.message, 'danger');
-        }
-    }
 
     async removeJob(itemId) {
         if (!confirm('Are you sure you want to remove this job from the queue?')) {
@@ -1658,7 +1449,6 @@ class TranscodeQueueManager {
             if (data.Success) {
                 console.log('Quality Testing Queue Items:', data.Jobs); // Debug logging
                 this.UpdateQualityTestingQueueTable(data.Jobs);
-                this.UpdateQualityTestingStatus();
             } else {
                 await this.LogErrorToDatabase(
                     `Quality Testing API error: ${data.Message}`,
@@ -1739,11 +1529,6 @@ class TranscodeQueueManager {
                             <button type="button" class="btn btn-outline-info" onclick="queueManager.ViewQualityTestingDetails(${item.Id})" title="View Details">
                                 <i class="fas fa-info"></i>
                             </button>
-                            ${item.Status === 'Pending' ? 
-                                `<button type="button" class="btn btn-outline-success" onclick="queueManager.StartQualityTest(${item.Id})" title="Start Quality Test">
-                                    <i class="fas fa-play"></i>
-                                </button>` : ''
-                            }
                             ${item.Status === 'Failed' && (item.RetryCount || 0) < (item.MaxRetries || 3) ? 
                                 `<button type="button" class="btn btn-outline-warning" onclick="queueManager.RetryQualityTest(${item.Id})" title="Retry Quality Test">
                                     <i class="fas fa-redo"></i>
@@ -1757,177 +1542,9 @@ class TranscodeQueueManager {
         }
     }
 
-    async UpdateQualityTestingStatus() {
-        try {
-            const response = await fetch('/api/QualityTest/Status');
-            
-            const contentType = response.headers.get('content-type');
-            if (!contentType || !contentType.includes('application/json')) {
-                await this.LogErrorToDatabase(
-                    `Quality Testing Status API returned HTML instead of JSON. Status: ${response.status}`,
-                    'UpdateQualityTestingStatus',
-                    '/api/QualityTest/Status'
-                );
-                return;
-            }
-            
-            const data = await response.json();
-            
-            // Debug logging to help identify the issue
-            console.log('Quality Testing Status API Response:', data);
 
-            if (data.Success) {
-                this.IsQualityTestingProcessing = data.IsRunning;
-                const startBtn = document.getElementById('StartQualityTestingBtn');
-                const stopBtn = document.getElementById('StopQualityTestingBtn');
 
-                if (this.IsQualityTestingProcessing) {
-                    startBtn.style.display = 'none';
-                    stopBtn.style.display = 'inline-block';
-                } else {
-                    startBtn.style.display = 'inline-block';
-                    stopBtn.style.display = 'none';
-                }
-            } else {
-                const errorMessage = data.ErrorMessage || 'Unknown error - no ErrorMessage field in response';
-                await this.LogErrorToDatabase(
-                    `Quality Testing Status API error: ${errorMessage}`,
-                    'UpdateQualityTestingStatus',
-                    '/api/QualityTest/Status'
-                );
-            }
-        } catch (error) {
-            await this.LogErrorToDatabase(
-                `Quality Testing status update error: ${error.message}`,
-                'UpdateQualityTestingStatus',
-                '/api/QualityTest/Status'
-            );
-        }
-    }
 
-    async StartQualityTestingProcessing() {
-        try {
-            const response = await fetch('/api/QualityTest/Start', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ MaxConcurrentJobs: 1 })
-            });
-
-            const contentType = response.headers.get('content-type');
-            if (!contentType || !contentType.includes('application/json')) {
-                await this.LogErrorToDatabase(
-                    `Quality Testing Start API returned HTML instead of JSON. Status: ${response.status}`,
-                    'StartQualityTestingProcessing',
-                    '/api/QualityTest/Start'
-                );
-                return;
-            }
-
-            const data = await response.json();
-
-            if (data.Success) {
-                this.showAlert('Quality testing started successfully', 'success');
-                this.UpdateQualityTestingStatus();
-            } else {
-                await this.LogErrorToDatabase(
-                    `Quality Testing Start API error: ${data.ErrorMessage}`,
-                    'StartQualityTestingProcessing',
-                    '/api/QualityTest/Start'
-                );
-            }
-        } catch (error) {
-            await this.LogErrorToDatabase(
-                `Quality testing start processing error: ${error.message}`,
-                'StartQualityTestingProcessing',
-                '/api/QualityTest/Start'
-            );
-        }
-    }
-
-    async StopQualityTestingProcessing() {
-        try {
-            const response = await fetch('/api/QualityTest/Stop', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                }
-            });
-
-            const contentType = response.headers.get('content-type');
-            if (!contentType || !contentType.includes('application/json')) {
-                await this.LogErrorToDatabase(
-                    `Quality Testing Stop API returned HTML instead of JSON. Status: ${response.status}`,
-                    'StopQualityTestingProcessing',
-                    '/api/QualityTesting/Stop'
-                );
-                return;
-            }
-
-            const data = await response.json();
-
-            if (data.Success) {
-                this.showAlert('Quality testing stopped successfully', 'success');
-                this.UpdateQualityTestingStatus();
-            } else {
-                await this.LogErrorToDatabase(
-                    `Quality Testing Stop API error: ${data.ErrorMessage}`,
-                    'StopQualityTestingProcessing',
-                    '/api/QualityTesting/Stop'
-                );
-            }
-        } catch (error) {
-            await this.LogErrorToDatabase(
-                `Quality testing stop processing error: ${error.message}`,
-                'StopQualityTestingProcessing',
-                '/api/QualityTesting/Stop'
-            );
-        }
-    }
-
-    async StartQualityTest(jobId) {
-        try {
-            const response = await fetch('/api/QualityTest/Start', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ JobId: jobId })
-            });
-
-            const contentType = response.headers.get('content-type');
-            if (!contentType || !contentType.includes('application/json')) {
-                await this.LogErrorToDatabase(
-                    `Quality Test Start API returned HTML instead of JSON. Status: ${response.status}`,
-                    'StartQualityTest',
-                    '/api/QualityTest/Start'
-                );
-                return;
-            }
-
-            const data = await response.json();
-
-            if (data.Success) {
-                this.showAlert(`Quality test started successfully for job ${jobId}`, 'success');
-                this.LoadQualityTestingQueueData();
-            } else {
-                this.showAlert(`Failed to start quality test: ${data.Message}`, 'danger');
-                await this.LogErrorToDatabase(
-                    `Quality test start error: ${data.Message}`,
-                    'StartQualityTest',
-                    '/api/QualityTest/Start'
-                );
-            }
-        } catch (error) {
-            this.showAlert(`Error starting quality test: ${error.message}`, 'danger');
-            await this.LogErrorToDatabase(
-                `Quality test start error: ${error.message}`,
-                'StartQualityTest',
-                '/api/QualityTest/Start'
-            );
-        }
-    }
 
     GetQualityTestingStatusBadgeClass(status) {
         const classes = {

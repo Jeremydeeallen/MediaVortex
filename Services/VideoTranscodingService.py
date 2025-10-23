@@ -33,11 +33,16 @@ class VideoTranscodingService:
             LoggingService.LogFunctionEntry("TranscodeVideo", "VideoTranscodingService", JobId)
             LoggingService.LogInfo(f"EXECUTING COMMAND: {TranscodeCommand}", "VideoTranscodingService", "TranscodeVideo")
             LoggingService.LogInfo(f"Command execution mode: shell=True (PID will be shell process)", "VideoTranscodingService", "TranscodeVideo")
+            LoggingService.LogInfo(f"Command type: {type(TranscodeCommand)}", "VideoTranscodingService", "TranscodeVideo")
+            LoggingService.LogInfo(f"Command length: {len(TranscodeCommand) if isinstance(TranscodeCommand, str) else 'N/A'}", "VideoTranscodingService", "TranscodeVideo")
             
             StartTime = datetime.now()
             
             # Execute transcoding command
             LoggingService.LogInfo(f"Working directory: {os.getcwd()}", "VideoTranscodingService", "TranscodeVideo")
+            
+            LoggingService.LogInfo(f"About to execute subprocess.Popen with shell=True", "VideoTranscodingService", "TranscodeVideo")
+            LoggingService.LogInfo(f"subprocess.Popen arguments: command={TranscodeCommand}, shell=True, stdout=PIPE, stderr=STDOUT", "VideoTranscodingService", "TranscodeVideo")
             
             Process = subprocess.Popen(
                 TranscodeCommand,
@@ -47,6 +52,8 @@ class VideoTranscodingService:
                 universal_newlines=True,
                 bufsize=1
             )
+            
+            LoggingService.LogInfo(f"subprocess.Popen completed successfully", "VideoTranscodingService", "TranscodeVideo")
             
             LoggingService.LogInfo(f"Process started with PID: {Process.pid}", "VideoTranscodingService", "TranscodeVideo")
             

@@ -10,7 +10,7 @@
                 <h1 class="h3 mb-0">Activity</h1>
                 <div class="btn-group" role="group">
                     <button type="button" class="btn btn-success" id="StartTranscodingBtn">
-                        <i class="fas fa-play"></i> Start Transcoding
+                        <i class="fas fa-play"></i> <span id="StartTranscodingText">Start Transcoding</span>
                     </button>
                     <button type="button" class="btn btn-warning" id="StopTranscodingBtn" style="display: none;">
                         <i class="fas fa-stop"></i> Stop Transcoding
@@ -29,7 +29,12 @@
                             <h5 class="mb-0">
                                 <i class="fas fa-cog"></i> Transcode Job
                             </h5>
-                            <span class="badge bg-info" id="TranscodeJobCount">0 running</span>
+                            <div class="d-flex align-items-center gap-3">
+                                <a href="#" id="StopTranscodeAfterCurrentLink" class="text-warning text-decoration-none small" style="display: none;" onclick="activityManager.stopTranscodeAfterCurrent(event)">
+                                    <i class="fas fa-stop-circle"></i> Stop after current job
+                                </a>
+                                <span class="badge bg-info" id="TranscodeJobCount">0 running</span>
+                            </div>
                         </div>
                         <div class="card-body">
                             <div class="table-responsive">
@@ -62,7 +67,12 @@
                             <h5 class="mb-0">
                                 <i class="fas fa-chart-line"></i> Running Quality Checks
                             </h5>
-                            <span class="badge bg-info" id="RunningQualityTestingCount">0 running</span>
+                            <div class="d-flex align-items-center gap-3">
+                                <a href="#" id="StopQualityTestAfterCurrentLink" class="text-warning text-decoration-none small" style="display: none;" onclick="activityManager.stopQualityTestAfterCurrent(event)">
+                                    <i class="fas fa-stop-circle"></i> Stop after current job
+                                </a>
+                                <span class="badge bg-info" id="RunningQualityTestingCount">0 running</span>
+                            </div>
                         </div>
                         <div class="card-body">
                             <div class="table-responsive">
@@ -364,14 +374,25 @@ class ActivityManager {
 
         const startBtn = document.getElementById('StartTranscodingBtn');
         const stopBtn = document.getElementById('StopTranscodingBtn');
+        const stopLink = document.getElementById('StopTranscodeAfterCurrentLink');
+        const startText = document.getElementById('StartTranscodingText');
 
-        // Just manage the start/stop buttons
+        // Manage the start/stop buttons and graceful stop link
         if (this.isTranscoding) {
             startBtn.style.display = 'none';
             stopBtn.style.display = 'inline-block';
+            stopLink.style.display = 'inline';
+            startText.textContent = 'Start Transcoding';
         } else {
             startBtn.style.display = 'inline-block';
             stopBtn.style.display = 'none';
+            stopLink.style.display = 'none';
+            // Check if we're in a gracefully stopped state
+            if (statusData.Status === 'GracefulStop') {
+                startText.textContent = 'Start Processing';
+            } else {
+                startText.textContent = 'Start Transcoding';
+            }
         }
     }
 
@@ -427,7 +448,7 @@ class ActivityManager {
                 </td>
                 <td>
                     ${attempt.Success ? 
-                        `<button class="btn btn-sm btn-primary" onclick="activityManager.RunQualityTest(${attempt.Id})">Run Quality Test</button>` : 
+                        `<button class="btn btn-sm btn-primary" onclick="activityManager.AddToQualityQueue(${attempt.Id})">Add to Quality Queue</button>` : 
                         '<span class="text-muted">-</span>'
                     }
                 </td>
@@ -585,6 +606,14 @@ class ActivityManager {
 
         document.getElementById('RunningQualityTestingCount').textContent = `${operations.length} running`;
 
+        // Show/hide graceful stop link based on running operations
+        const stopLink = document.getElementById('StopQualityTestAfterCurrentLink');
+        if (operations.length > 0) {
+            stopLink.style.display = 'inline';
+        } else {
+            stopLink.style.display = 'none';
+        }
+
         if (operations.length === 0) {
             const row = document.createElement('tr');
             row.innerHTML = `
@@ -676,24 +705,46 @@ class ActivityManager {
 
     async startTranscoding() {
         try {
-            const response = await fetch('/api/Transcode/Start', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ MaxConcurrentJobs: 1 })
-            });
-
-            const data = await response.json();
-
-            if (data.Success) {
-                this.showAlert('Transcoding started successfully', 'success');
-                this.loadProgressData();
+            // First check current status to determine if this is start or resume
+            const statusResponse = await fetch('/api/Transcode/Status');
+            const statusData = await statusResponse.json();
+            
+            if (statusData.Success && statusData.Status === 'Paused') {
+                // Resume from paused state
+                const response = await fetch('/api/Transcode/Resume', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                
+                const data = await response.json();
+                
+                if (data.Success) {
+                    this.showAlert('Transcoding resumed successfully', 'success');
+                    this.loadProgressData();
+                } else {
+                    this.showAlert(data.ErrorMessage || 'Failed to resume transcoding', 'danger');
+                }
             } else {
-                this.showAlert('Error starting transcoding: ' + data.ErrorMessage, 'danger');
+                // Normal start
+                const response = await fetch('/api/Transcode/Start', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ MaxConcurrentJobs: 1 })
+                });
+                
+                const data = await response.json();
+                
+                if (data.Success) {
+                    this.showAlert('Transcoding started successfully', 'success');
+                    this.loadProgressData();
+                } else {
+                    this.showAlert(data.ErrorMessage || 'Failed to start transcoding', 'danger');
+                }
             }
         } catch (error) {
-            this.showAlert('Error starting transcoding: ' + error.message, 'danger');
+            this.showAlert('Error with transcoding: ' + error.message, 'danger');
         }
     }
 
@@ -879,12 +930,12 @@ class ActivityManager {
         }, 5000);
     }
 
-    async RunQualityTest(AttemptId) {
+    async AddToQualityQueue(AttemptId) {
         try {
             // Show loading indicator
-            this.showAlert('Queuing quality test...', 'info');
+            this.showAlert('Adding to quality test queue...', 'info');
             
-            const response = await fetch('/api/QualityTest/RequeueAttempt', {
+            const response = await fetch('/api/QualityTest/AddToQueue', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
@@ -895,15 +946,15 @@ class ActivityManager {
             const data = await response.json();
 
             if (data.Success) {
-                this.showAlert('Quality test queued successfully', 'success');
+                this.showAlert('Added to quality test queue successfully', 'success');
                 // Refresh the page data
                 this.loadProgressData();
             } else {
-                this.showAlert(data.Message || 'Failed to queue quality test', 'danger');
+                this.showAlert(data.Message || 'Failed to add to quality test queue', 'danger');
             }
         } catch (error) {
-            console.error('Error running quality test:', error);
-            this.showAlert('Error running quality test: ' + error.message, 'danger');
+            console.error('Error adding to quality test queue:', error);
+            this.showAlert('Error adding to quality test queue: ' + error.message, 'danger');
         }
     }
 
@@ -1054,6 +1105,65 @@ class ActivityManager {
 
         this.qualityTestPagination.currentPage = page;
         await this.loadProgressData();
+    }
+
+    async stopTranscodeAfterCurrent(event) {
+        event.preventDefault();
+        
+        if (!confirm('Pause transcoding after the current job completes?')) {
+            return;
+        }
+
+        try {
+            const response = await fetch('/api/Transcode/Pause', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            const data = await response.json();
+
+            if (data.Success) {
+                this.showAlert('Transcoding will pause after current job completes', 'success');
+                document.getElementById('StopTranscodeAfterCurrentLink').style.display = 'none';
+                document.getElementById('StartTranscodingText').textContent = 'Resume Processing';
+                this.loadProgressData();
+            } else {
+                this.showAlert('Error pausing transcoding: ' + data.ErrorMessage, 'danger');
+            }
+        } catch (error) {
+            this.showAlert('Error pausing transcoding: ' + error.message, 'danger');
+        }
+    }
+
+    async stopQualityTestAfterCurrent(event) {
+        event.preventDefault();
+        
+        if (!confirm('Pause quality testing after the current job completes?')) {
+            return;
+        }
+
+        try {
+            const response = await fetch('/api/QualityTest/Pause', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            const data = await response.json();
+
+            if (data.Success) {
+                this.showAlert('Quality testing will pause after current job completes', 'success');
+                document.getElementById('StopQualityTestAfterCurrentLink').style.display = 'none';
+                this.loadProgressData();
+            } else {
+                this.showAlert('Error pausing quality testing: ' + data.ErrorMessage, 'danger');
+            }
+        } catch (error) {
+            this.showAlert('Error pausing quality testing: ' + error.message, 'danger');
+        }
     }
 }
 

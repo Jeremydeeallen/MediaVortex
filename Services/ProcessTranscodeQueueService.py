@@ -211,6 +211,18 @@ class ProcessTranscodeQueueService:
             LoggingService.LogInfo("Starting transcoding queue processing loop", "ProcessTranscodeQueueService", "ProcessQueueLoop")
             
             while not self.StopRequested:
+                # Check if service is paused
+                try:
+                    service_status = self.DatabaseManager.GetServiceStatus("TranscodeService")
+                    if service_status and service_status.get('Status') == 'Paused':
+                        LoggingService.LogInfo("TranscodeService is paused, skipping queue processing", 
+                                             "ProcessTranscodeQueueService", "ProcessQueueLoop")
+                        time.sleep(5)
+                        continue
+                except Exception as e:
+                    LoggingService.LogException("Error checking service status", e, 
+                                              "ProcessTranscodeQueueService", "ProcessQueueLoop")
+                
                 # Check if we can start more jobs
                 if len(self.ActiveJobs) < self.MaxConcurrentJobs:
                     # Try to get next job

@@ -21,6 +21,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from Services.LoggingService import LoggingService
 from Services.ProcessTranscodeQueueService import ProcessTranscodeQueueService
+from Services.GracefulStopService import GracefulStopService
 from Repositories.DatabaseManager import DatabaseManager
 
 class TranscodeServiceApp:
@@ -39,6 +40,14 @@ class TranscodeServiceApp:
             DatabaseManagerInstance=self.DatabaseManager
         )
         LoggingService.LogInfo(f"ProcessTranscodeQueueService created. PID: {current_pid}", "TranscodeService", "__init__")
+        
+        # Initialize graceful stop service
+        self.GracefulStopService = GracefulStopService(
+            ServiceName="TranscodeService",
+            DatabaseManagerInstance=self.DatabaseManager,
+            ProcessQueueService=self.ProcessTranscodeQueue
+        )
+        
         self.ProcessingThread = None
         self.HealthCheckThread = None
         self.StatusPollingThread = None
@@ -258,6 +267,19 @@ class TranscodeServiceApp:
                 else:
                     LoggingService.LogError(f"Failed to start transcoding: {result.get('ErrorMessage', 'Unknown error')}", 
                                           "TranscodeService", "PrivateHandleStatusChange")
+                
+            elif new_status == "GracefulStop":
+                # Graceful stop - let current jobs complete then stop
+                LoggingService.LogInfo("Graceful stop requested - will complete current transcoding jobs before stopping", 
+                                     "TranscodeService", "PrivateHandleStatusChange")
+                
+                # Start graceful stop monitoring in separate thread
+                threading.Thread(
+                    target=self.GracefulStopService.MonitorGracefulStop,
+                    args=(self.ShutdownEvent, self.UpdateServiceStatus),
+                    daemon=True,
+                    name="GracefulStopMonitor"
+                ).start()
                 
             elif new_status == "Stopped" and is_processing:
                 # Stop transcoding

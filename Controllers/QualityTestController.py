@@ -4,7 +4,6 @@ Implements MVVM pattern using MVVM architecture
 """
 
 import os
-import subprocess
 import json
 from flask import Blueprint, request, jsonify
 from Repositories.DatabaseManager import DatabaseManager
@@ -20,92 +19,22 @@ class QualityTestController:
         self.QualityTestQueueService = QualityTestQueueService(self.DatabaseManager)
     
     def StartQualityTest(self, JobId: int) -> dict:
-        """Start a quality test for the specified job"""
+        """Trigger quality test processing by updating queue status."""
         try:
-            self.LoggingService.LogInfo(f"Starting quality test for job {JobId}")
+            self.LoggingService.LogInfo(f"Triggering quality test for job {JobId}")
             
-            # Get job details from QualityTestingQueue
-            JobDetails = self.DatabaseManager.GetQualityTestJob(JobId)
-            if not JobDetails:
-                return {"Success": False, "Message": "Job not found"}
+            # Just update the queue item to Pending so service picks it up
+            success = self.DatabaseManager.UpdateQualityTestStatus(JobId, "Pending", None)
             
-            # Create active job record
-            ActiveJobId = self.DatabaseManager.CreateActiveJob(
-                ServiceName="QualityTest",
-                JobType="QualityTest", 
-                QueueId=JobId,
-                ProcessId=os.getpid(),
-                ThreadId=0
-            )
-            
-            if ActiveJobId == 0:
-                return {"Success": False, "Message": "Failed to create active job"}
-            
-            # Run FFmpeg VMAF comparison
-            Result = self.RunFFmpegVMAF(JobDetails)
-            
-            # Update job status
-            if Result["Success"]:
-                self.DatabaseManager.UpdateQualityTestStatus(JobId, "Completed", Result["VMAFScore"])
-                self.DatabaseManager.CompleteActiveJob(ActiveJobId)
-                return {"Success": True, "VMAFScore": Result["VMAFScore"]}
+            if success:
+                return {"Success": True, "Message": "Quality test queued for processing"}
             else:
-                self.DatabaseManager.UpdateQualityTestStatus(JobId, "Failed", None)
-                self.DatabaseManager.CompleteActiveJob(ActiveJobId)
-                return {"Success": False, "Message": Result["Error"]}
+                return {"Success": False, "Message": "Failed to update queue status"}
                 
         except Exception as e:
-            self.LoggingService.LogError(f"Error starting quality test: {str(e)}")
+            self.LoggingService.LogError(f"Error triggering quality test: {str(e)}")
             return {"Success": False, "Message": str(e)}
     
-    def RunFFmpegVMAF(self, JobDetails: dict) -> dict:
-        """Run FFmpeg VMAF comparison"""
-        try:
-            OriginalFile = JobDetails["LocalSourcePath"]
-            TranscodedFile = JobDetails["TranscodedFilePath"]
-            
-            # Get the full path to FFmpeg executable
-            ffmpeg_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "FFmpegMaster", "bin", "ffmpeg.exe")
-            
-            # Build FFmpeg command for VMAF comparison
-            Command = [
-                ffmpeg_path,
-                "-i", TranscodedFile,
-                "-i", OriginalFile,
-                "-lavfi", "[0:v][1:v]libvmaf=log_path=vmaf_output.xml:n_subsample=10",
-                "-f", "null",
-                "-"
-            ]
-            
-            self.LoggingService.LogInfo(f"Running FFmpeg VMAF: {' '.join(Command)}")
-            
-            # Execute FFmpeg without timeout (VMAF calculations can take a long time)
-            Result = subprocess.run(Command, capture_output=True, text=True)
-            
-            if Result.returncode == 0:
-                # Parse VMAF score from output
-                VMAFScore = self.ParseVMAFScore(Result.stderr)
-                return {"Success": True, "VMAFScore": VMAFScore}
-            else:
-                return {"Success": False, "Error": Result.stderr}
-                
-        except subprocess.TimeoutExpired:
-            return {"Success": False, "Error": "FFmpeg timeout (this should not happen as timeout was removed)"}
-        except Exception as e:
-            return {"Success": False, "Error": str(e)}
-    
-    def ParseVMAFScore(self, Output: str) -> float:
-        """Parse VMAF score from FFmpeg output"""
-        try:
-            # Look for VMAF score in output
-            Lines = Output.split('\n')
-            for Line in Lines:
-                if 'VMAF score:' in Line:
-                    Score = float(Line.split('VMAF score:')[1].strip())
-                    return Score
-            return 0.0
-        except:
-            return 0.0
     
     def GetQualityTestStatus(self, JobId: int) -> dict:
         """Get status of a quality test job"""
@@ -137,29 +66,6 @@ class QualityTestController:
         except Exception as e:
             return {"Success": False, "Message": str(e)}
     
-    def StartQualityTestService(self, MaxConcurrentJobs: int = 1) -> dict:
-        """Start the quality test service"""
-        try:
-            self.LoggingService.LogInfo(f"Starting quality test service with {MaxConcurrentJobs} concurrent jobs")
-            
-            # This would typically start a background service
-            # For now, we'll just return success
-            return {"Success": True, "Message": "Quality test service started"}
-        except Exception as e:
-            self.LoggingService.LogError(f"Error starting quality test service: {str(e)}")
-            return {"Success": False, "Message": str(e)}
-    
-    def StopQualityTestService(self) -> dict:
-        """Stop the quality test service"""
-        try:
-            self.LoggingService.LogInfo("Stopping quality test service")
-            
-            # This would typically stop the background service
-            # For now, we'll just return success
-            return {"Success": True, "Message": "Quality test service stopped"}
-        except Exception as e:
-            self.LoggingService.LogError(f"Error stopping quality test service: {str(e)}")
-            return {"Success": False, "Message": str(e)}
     
     def LogError(self, ErrorMessage: str, ErrorContext: str, RequestUrl: str) -> dict:
         """Log an error to the database"""
@@ -240,12 +146,12 @@ class QualityTestController:
             self.LoggingService.LogError(f"Error getting quality test progress: {str(e)}")
             return {"Success": False, "Message": str(e)}
     
-    def RequeueAttempt(self, TranscodeAttemptId: int) -> dict:
-        """Requeue a transcode attempt for quality testing."""
+    def AddToQueue(self, TranscodeAttemptId: int) -> dict:
+        """Add a transcode attempt to the quality test queue."""
         try:
-            self.LoggingService.LogInfo(f"Requeuing transcode attempt {TranscodeAttemptId} for quality testing", "QualityTestController", "RequeueAttempt")
+            self.LoggingService.LogInfo(f"Adding transcode attempt {TranscodeAttemptId} to quality test queue", "QualityTestController", "AddToQueue")
             
-            # Delete existing quality test records for this attempt
+            # Delete existing quality test records for this attempt (allows re-queueing)
             DeleteSuccess = self.DatabaseManager.DeleteQualityTestRecordsByAttemptId(TranscodeAttemptId)
             if not DeleteSuccess:
                 return {"Success": False, "Message": "Failed to clean up existing quality test records"}
@@ -254,15 +160,15 @@ class QualityTestController:
             JobId = self.QualityTestQueueService.AddToQualityTestQueue(TranscodeAttemptId)
             
             if JobId:
-                self.LoggingService.LogInfo(f"Successfully queued quality test job {JobId} for transcode attempt {TranscodeAttemptId}", 
-                                          "QualityTestController", "RequeueAttempt")
-                return {"Success": True, "Message": "Quality test queued successfully", "JobId": JobId}
+                self.LoggingService.LogInfo(f"Successfully added quality test job {JobId} for transcode attempt {TranscodeAttemptId}", 
+                                          "QualityTestController", "AddToQueue")
+                return {"Success": True, "Message": "Added to quality test queue successfully", "JobId": JobId}
             else:
                 return {"Success": False, "Message": "Failed to create quality test queue entry"}
                 
         except Exception as e:
-            ErrorMsg = f"Exception requeuing transcode attempt {TranscodeAttemptId}: {str(e)}"
-            self.LoggingService.LogException(ErrorMsg, e, "QualityTestController", "RequeueAttempt")
+            ErrorMsg = f"Exception adding transcode attempt {TranscodeAttemptId} to queue: {str(e)}"
+            self.LoggingService.LogException(ErrorMsg, e, "QualityTestController", "AddToQueue")
             return {"Success": False, "Message": ErrorMsg}
 
 # Flask routes
@@ -274,19 +180,13 @@ def StartQualityTest():
         Controller = QualityTestController()
         Data = request.get_json()
         
-        # Check if this is a service start request or individual job start
-        if Data and 'MaxConcurrentJobs' in Data:
-            # Service start request
-            MaxConcurrentJobs = Data.get('MaxConcurrentJobs', 1)
-            Result = Controller.StartQualityTestService(MaxConcurrentJobs)
-        else:
-            # Individual job start request
-            JobId = Data.get('JobId') if Data else None
-            
-            if not JobId:
-                return jsonify({"Success": False, "Message": "JobId required"}), 400
-            
-            Result = Controller.StartQualityTest(JobId)
+        # Individual job start request
+        JobId = Data.get('JobId') if Data else None
+        
+        if not JobId:
+            return jsonify({"Success": False, "Message": "JobId required"}), 400
+        
+        Result = Controller.StartQualityTest(JobId)
         
         LoggingService.LogInfo(f"StartQualityTest completed: {Result.get('Success', False)}", "QualityTestController", "StartQualityTest")
         return jsonify(Result)
@@ -400,8 +300,8 @@ def LogQualityTestError():
     Result = Controller.LogError(ErrorMessage, ErrorContext, RequestUrl)
     return jsonify(Result)
 
-@QualityTestBlueprint.route('/api/QualityTest/RequeueAttempt', methods=['POST'])
-def RequeueAttempt():
+@QualityTestBlueprint.route('/api/QualityTest/AddToQueue', methods=['POST'])
+def AddToQueue():
     Controller = QualityTestController()
     Data = request.get_json()
     
@@ -412,7 +312,7 @@ def RequeueAttempt():
     if not TranscodeAttemptId:
         return jsonify({"Success": False, "Message": "TranscodeAttemptId required"}), 400
     
-    Result = Controller.RequeueAttempt(TranscodeAttemptId)
+    Result = Controller.AddToQueue(TranscodeAttemptId)
     return jsonify(Result)
 
 @QualityTestBlueprint.route('/api/QualityTest/Skip', methods=['POST'])
@@ -459,3 +359,102 @@ def CancelActiveQualityTest():
             "Message": "Failed to cancel quality test",
             "Error": ErrorMsg
         }), 500
+
+@QualityTestBlueprint.route('/api/QualityTest/StopAfterCurrent', methods=['POST'])
+def StopQualityTestAfterCurrent():
+    """Graceful stop - allow current quality test to complete before stopping."""
+    try:
+        LoggingService.LogFunctionEntry("StopQualityTestAfterCurrent", "QualityTestController")
+        
+        # Update ServiceStatus to GracefulStop
+        from Repositories.DatabaseManager import DatabaseManager
+        db_manager = DatabaseManager()
+        
+        success = db_manager.UpdateServiceStatus("QualityTestService", {
+            'Status': 'GracefulStop',
+            'IsProcessing': False
+        })
+        
+        if success:
+            LoggingService.LogInfo("Graceful stop requested - quality testing will complete current job before stopping", 
+                                 "QualityTestController", "StopQualityTestAfterCurrent")
+            return jsonify({
+                "Success": True,
+                "Message": "Graceful stop requested - quality testing will complete current job before stopping",
+                "Status": "GracefulStop"
+            })
+        else:
+            LoggingService.LogError("Failed to request graceful stop", "QualityTestController", "StopQualityTestAfterCurrent")
+            return jsonify({
+                "Success": False,
+                "ErrorMessage": "Failed to request graceful stop"
+            }), 500
+            
+    except Exception as e:
+        errorMsg = f"Exception requesting graceful stop: {str(e)}"
+        LoggingService.LogException(errorMsg, e, "QualityTestController", "StopQualityTestAfterCurrent")
+        return jsonify({"Success": False, "ErrorMessage": errorMsg}), 500
+
+@QualityTestBlueprint.route('/api/QualityTest/Pause', methods=['POST'])
+def PauseQualityTest():
+    """Pause quality test queue - finish current job, don't start new ones."""
+    try:
+        LoggingService.LogFunctionEntry("PauseQualityTest", "QualityTestController")
+        
+        from Repositories.DatabaseManager import DatabaseManager
+        db_manager = DatabaseManager()
+        
+        success = db_manager.UpdateServiceStatus("QualityTestService", {
+            'Status': 'Paused',
+            'IsProcessing': False
+        })
+        
+        if success:
+            LoggingService.LogInfo("Quality testing paused successfully", 
+                                 "QualityTestController", "PauseQualityTest")
+            return jsonify({
+                "Success": True,
+                "Message": "Quality testing paused - current job will complete, no new jobs will start"
+            })
+        else:
+            return jsonify({
+                "Success": False,
+                "ErrorMessage": "Failed to pause quality testing"
+            }), 500
+            
+    except Exception as e:
+        errorMsg = f"Exception pausing quality testing: {str(e)}"
+        LoggingService.LogException(errorMsg, e, "QualityTestController", "PauseQualityTest")
+        return jsonify({"Success": False, "ErrorMessage": errorMsg}), 500
+
+@QualityTestBlueprint.route('/api/QualityTest/Resume', methods=['POST'])
+def ResumeQualityTest():
+    """Resume quality test queue processing."""
+    try:
+        LoggingService.LogFunctionEntry("ResumeQualityTest", "QualityTestController")
+        
+        from Repositories.DatabaseManager import DatabaseManager
+        db_manager = DatabaseManager()
+        
+        success = db_manager.UpdateServiceStatus("QualityTestService", {
+            'Status': 'Running',
+            'IsProcessing': True
+        })
+        
+        if success:
+            LoggingService.LogInfo("Quality testing resumed successfully", 
+                                 "QualityTestController", "ResumeQualityTest")
+            return jsonify({
+                "Success": True,
+                "Message": "Quality testing resumed - queue processing will continue"
+            })
+        else:
+            return jsonify({
+                "Success": False,
+                "ErrorMessage": "Failed to resume quality testing"
+            }), 500
+            
+    except Exception as e:
+        errorMsg = f"Exception resuming quality testing: {str(e)}"
+        LoggingService.LogException(errorMsg, e, "QualityTestController", "ResumeQualityTest")
+        return jsonify({"Success": False, "ErrorMessage": errorMsg}), 500

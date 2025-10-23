@@ -172,6 +172,19 @@ class QualityTestingBusinessService:
             if not os.path.exists(ffmpeg_path):
                 return {"Success": False, "Error": f"FFmpeg executable not found: {ffmpeg_path}"}
             
+            # Get hardware acceleration setting
+            use_hardware_acceleration = True  # Default to True
+            try:
+                hardware_setting = self.DatabaseManager.DatabaseService.ExecuteQuery(
+                    "SELECT SettingValue FROM SystemSettings WHERE SettingKey = 'UseHardwareAcceleration'"
+                )
+                if hardware_setting and hardware_setting[0]['SettingValue']:
+                    use_hardware_acceleration = hardware_setting[0]['SettingValue'].lower() == 'true'
+            except Exception as e:
+                LoggingService.LogWarning(f"Could not retrieve UseHardwareAcceleration setting, using default (True): {e}", "QualityTestingBusinessService", "RunFFmpegVMAF")
+            
+            LoggingService.LogInfo(f"Hardware acceleration mode: {'Enabled (NVIDIA CUDA)' if use_hardware_acceleration else 'Disabled (Software)'}", "QualityTestingBusinessService", "RunFFmpegVMAF")
+            
             # Get video resolutions to check if scaling is needed
             original_resolution = self.GetVideoResolution(original_file, ffmpeg_path)
             transcoded_resolution = self.GetVideoResolution(transcoded_file, ffmpeg_path)
@@ -179,12 +192,18 @@ class QualityTestingBusinessService:
             # Check if resolutions match
             if original_resolution == transcoded_resolution:
                 # Resolutions match - use direct VMAF comparison without scaling
-                vmaf_filter = "[0:v][1:v]libvmaf=log_path=vmaf_output.xml:n_subsample=10"
+                if use_hardware_acceleration:
+                    vmaf_filter = "[0:v]format=yuv420p[dist];[1:v]format=yuv420p[ref];[dist][ref]libvmaf=log_path=vmaf_output.xml:n_subsample=10"
+                else:
+                    vmaf_filter = "[0:v][1:v]libvmaf=log_path=vmaf_output.xml:n_subsample=10"
                 LoggingService.LogInfo(f"Resolutions match ({original_resolution[0]}x{original_resolution[1]}) - using direct VMAF comparison", "QualityTestingBusinessService", "RunFFmpegVMAF")
             else:
                 # Resolutions don't match - determine target resolution and scale both videos
                 target_width, target_height = self.DetermineVMAFTargetResolution(original_resolution, transcoded_resolution)
-                vmaf_filter = f"[0:v]scale={target_width}:{target_height}[dist];[1:v]scale={target_width}:{target_height}[ref];[dist][ref]libvmaf=log_path=vmaf_output.xml:n_subsample=10"
+                if use_hardware_acceleration:
+                    vmaf_filter = f"[0:v]scale={target_width}:{target_height},format=yuv420p[dist];[1:v]scale={target_width}:{target_height},format=yuv420p[ref];[dist][ref]libvmaf=log_path=vmaf_output.xml:n_subsample=10"
+                else:
+                    vmaf_filter = f"[0:v]scale={target_width}:{target_height}[dist];[1:v]scale={target_width}:{target_height}[ref];[dist][ref]libvmaf=log_path=vmaf_output.xml:n_subsample=10"
                 LoggingService.LogInfo(f"Resolutions don't match (Original: {original_resolution[0]}x{original_resolution[1]}, Transcoded: {transcoded_resolution[0]}x{transcoded_resolution[1]}) - scaling to {target_width}x{target_height}", "QualityTestingBusinessService", "RunFFmpegVMAF")
             
             # Get StartTime from TranscodeAttempts table if available
@@ -208,14 +227,28 @@ class QualityTestingBusinessService:
             # VMAF structure: ffmpeg -i original_file -i transcoded_file -lavfi [vmaf filter]
             command = [ffmpeg_path]
             
-            LoggingService.LogInfo(f"Quality Test FFmpeg command: {' '.join(command)}", "QualityTestingBusinessService", "RunFFmpegVMAF")
-            LoggingService.LogInfo(f"Command execution mode: shell=False (PID will be FFmpeg process)", "QualityTestingBusinessService", "RunFFmpegVMAF")
+            # Add hardware acceleration flags if enabled
+            if use_hardware_acceleration:
+                command.extend(["-hwaccel", "cuda"])
             
             # Add start time parameter to original file input if specified
             if StartTime and StartTime.strip():
                 command.extend(["-ss", StartTime.strip()])
             
-            command.extend(["-i", original_file, "-i", transcoded_file, "-lavfi", vmaf_filter, "-f", "null", "-"])
+            # Add input files with hardware acceleration if enabled
+            if use_hardware_acceleration:
+                command.extend(["-hwaccel", "cuda", "-i", original_file, "-hwaccel", "cuda", "-i", transcoded_file])
+            else:
+                command.extend(["-i", original_file, "-i", transcoded_file])
+            
+            # Add VMAF filter and output options
+            command.extend(["-lavfi", vmaf_filter, "-f", "null", "-"])
+            
+            LoggingService.LogInfo(f"Quality Test FFmpeg command: {' '.join(command)}", "QualityTestingBusinessService", "RunFFmpegVMAF")
+            LoggingService.LogInfo(f"Command execution mode: shell=True with CREATE_NO_WINDOW (headless execution)", "QualityTestingBusinessService", "RunFFmpegVMAF")
+            LoggingService.LogInfo(f"Command type: {type(command)}", "QualityTestingBusinessService", "RunFFmpegVMAF")
+            LoggingService.LogInfo(f"Command length: {len(command) if isinstance(command, list) else 'N/A'}", "QualityTestingBusinessService", "RunFFmpegVMAF")
+            LoggingService.LogInfo(f"Command items: {command}", "QualityTestingBusinessService", "RunFFmpegVMAF")
             
             # Convert command to string for storage
             FFmpegCommandString = ' '.join(command)
@@ -543,15 +576,53 @@ class QualityTestingBusinessService:
             import re
             import time
             
-            # Start FFmpeg process
-            process = subprocess.Popen(
-                command,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                bufsize=1,
-                universal_newlines=True
-            )
+            # Convert command list to string and use shell=True (like TranscodeService)
+            if isinstance(command, list):
+                CommandString = ' '.join(command)
+                LoggingService.LogInfo(f"Converted command list to string: {CommandString}", "QualityTestingBusinessService", "ExecuteFFmpegWithProgress")
+            else:
+                CommandString = command
+                LoggingService.LogInfo(f"Command already string: {CommandString}", "QualityTestingBusinessService", "ExecuteFFmpegWithProgress")
+            
+            LoggingService.LogInfo(f"Final command string: {CommandString}", "QualityTestingBusinessService", "ExecuteFFmpegWithProgress")
+            LoggingService.LogInfo(f"Command string type: {type(CommandString)}", "QualityTestingBusinessService", "ExecuteFFmpegWithProgress")
+            LoggingService.LogInfo(f"Command string length: {len(CommandString)}", "QualityTestingBusinessService", "ExecuteFFmpegWithProgress")
+            
+            # Use shell=True with CREATE_NO_WINDOW for headless execution (like TranscodeService)
+            import platform
+            LoggingService.LogInfo(f"Platform: {platform.system()}", "QualityTestingBusinessService", "ExecuteFFmpegWithProgress")
+            
+            if platform.system() == "Windows":
+                LoggingService.LogInfo(f"Using Windows subprocess.Popen with CREATE_NO_WINDOW", "QualityTestingBusinessService", "ExecuteFFmpegWithProgress")
+                LoggingService.LogInfo(f"subprocess.Popen arguments: command={CommandString}, shell=True, stdout=PIPE, stderr=PIPE, creationflags=CREATE_NO_WINDOW", "QualityTestingBusinessService", "ExecuteFFmpegWithProgress")
+                
+                process = subprocess.Popen(
+                    CommandString,
+                    shell=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    bufsize=1,
+                    universal_newlines=True,
+                    creationflags=subprocess.CREATE_NO_WINDOW
+                )
+            else:
+                LoggingService.LogInfo(f"Using non-Windows subprocess.Popen", "QualityTestingBusinessService", "ExecuteFFmpegWithProgress")
+                LoggingService.LogInfo(f"subprocess.Popen arguments: command={CommandString}, shell=True, stdout=PIPE, stderr=PIPE", "QualityTestingBusinessService", "ExecuteFFmpegWithProgress")
+                
+                process = subprocess.Popen(
+                    CommandString,
+                    shell=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    bufsize=1,
+                    universal_newlines=True
+                )
+            
+            LoggingService.LogInfo(f"subprocess.Popen completed successfully", "QualityTestingBusinessService", "ExecuteFFmpegWithProgress")
+            LoggingService.LogInfo(f"Process started with PID: {process.pid}", "QualityTestingBusinessService", "ExecuteFFmpegWithProgress")
+            LoggingService.LogInfo(f"Process object: {process}", "QualityTestingBusinessService", "ExecuteFFmpegWithProgress")
             
             # Set CPU affinity to cores 12-15 (4 cores for quality testing)
             try:

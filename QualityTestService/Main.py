@@ -20,6 +20,7 @@ setproctitle.setproctitle("QualityTestService")
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from Services.LoggingService import LoggingService
+from Services.GracefulStopService import GracefulStopService
 from Repositories.DatabaseManager import DatabaseManager
 from Services.ProcessQualityTestQueueService import ProcessQualityTestQueueService
 
@@ -37,6 +38,14 @@ class QualityTestServiceApp:
         self.ProcessQualityTestQueue = ProcessQualityTestQueueService(
             DatabaseManagerInstance=self.DatabaseManager
         )
+        
+        # Initialize graceful stop service
+        self.GracefulStopService = GracefulStopService(
+            ServiceName="QualityTestService",
+            DatabaseManagerInstance=self.DatabaseManager,
+            ProcessQueueService=self.ProcessQualityTestQueue
+        )
+        
         self.IsRunning = False
         self.ProcessingThread = None
         self.HealthCheckThread = None
@@ -53,6 +62,8 @@ class QualityTestServiceApp:
         try:
             from Services.ServiceStatusService import ServiceStatusService
             status_service = ServiceStatusService()
+            # RegisterServiceStartup returns True if already running (prevent duplicate), False if safe to start
+            # We want to return True if already running (prevent startup), False if safe to start
             return status_service.RegisterServiceStartup("QualityTestService", MaxConcurrentJobs=1)
         except Exception as e:
             LoggingService.LogException("Exception checking for existing QualityTestService instances", e, "QualityTestServiceApp", "PrivateIsServiceAlreadyRunning")
@@ -228,6 +239,19 @@ class QualityTestServiceApp:
                 else:
                     LoggingService.LogError(f"Failed to start quality testing: {result.get('ErrorMessage', 'Unknown error')}", 
                                           "QualityTestService", "PrivateHandleStatusChange")
+                
+            elif new_status == "GracefulStop":
+                # Graceful stop - let current jobs complete then stop
+                LoggingService.LogInfo("Graceful stop requested - will complete current quality test jobs before stopping", 
+                                     "QualityTestService", "PrivateHandleStatusChange")
+                
+                # Start graceful stop monitoring in separate thread
+                threading.Thread(
+                    target=self.GracefulStopService.MonitorGracefulStop,
+                    args=(self.ShutdownEvent, self.UpdateServiceStatus),
+                    daemon=True,
+                    name="GracefulStopMonitor"
+                ).start()
                 
             elif new_status == "Stopped" and is_processing:
                 # Stop quality testing

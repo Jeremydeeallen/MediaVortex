@@ -403,3 +403,67 @@ def CancelActiveTranscode():
         errorMsg = f"Exception cancelling active transcode job: {str(e)}"
         LoggingService.LogException(errorMsg, e, "TranscodeJobController", "CancelActiveTranscode")
         return jsonify({"Success": False, "ErrorMessage": errorMsg}), 500
+
+@TranscodeJobBlueprint.route('/Pause', methods=['POST'])
+def PauseTranscoding():
+    """Pause transcoding queue - finish current job, don't start new ones."""
+    try:
+        LoggingService.LogFunctionEntry("PauseTranscoding", "TranscodeJobController")
+        
+        from Repositories.DatabaseManager import DatabaseManager
+        db_manager = DatabaseManager()
+        
+        success = db_manager.UpdateServiceStatus("TranscodeService", {
+            'Status': 'Paused',
+            'IsProcessing': False
+        })
+        
+        if success:
+            LoggingService.LogInfo("Transcoding paused successfully", 
+                                 "TranscodeJobController", "PauseTranscoding")
+            return jsonify({
+                "Success": True,
+                "Message": "Transcoding paused - current job will complete, no new jobs will start"
+            })
+        else:
+            return jsonify({
+                "Success": False,
+                "ErrorMessage": "Failed to pause transcoding"
+            }), 500
+            
+    except Exception as e:
+        errorMsg = f"Exception pausing transcoding: {str(e)}"
+        LoggingService.LogException(errorMsg, e, "TranscodeJobController", "PauseTranscoding")
+        return jsonify({"Success": False, "ErrorMessage": errorMsg}), 500
+
+@TranscodeJobBlueprint.route('/Resume', methods=['POST'])
+def ResumeTranscoding():
+    """Resume transcoding queue processing."""
+    try:
+        LoggingService.LogFunctionEntry("ResumeTranscoding", "TranscodeJobController")
+        
+        from Repositories.DatabaseManager import DatabaseManager
+        db_manager = DatabaseManager()
+        
+        success = db_manager.UpdateServiceStatus("TranscodeService", {
+            'Status': 'Running',
+            'IsProcessing': True
+        })
+        
+        if success:
+            LoggingService.LogInfo("Transcoding resumed successfully", 
+                                 "TranscodeJobController", "ResumeTranscoding")
+            return jsonify({
+                "Success": True,
+                "Message": "Transcoding resumed - queue processing will continue"
+            })
+        else:
+            return jsonify({
+                "Success": False,
+                "ErrorMessage": "Failed to resume transcoding"
+            }), 500
+            
+    except Exception as e:
+        errorMsg = f"Exception resuming transcoding: {str(e)}"
+        LoggingService.LogException(errorMsg, e, "TranscodeJobController", "ResumeTranscoding")
+        return jsonify({"Success": False, "ErrorMessage": errorMsg}), 500
