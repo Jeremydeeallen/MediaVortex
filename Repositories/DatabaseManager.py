@@ -2588,14 +2588,16 @@ class DatabaseManager:
             min_result = self.DatabaseService.ExecuteQuery(min_threshold_query)
             max_result = self.DatabaseService.ExecuteQuery(max_threshold_query)
             
-            min_threshold = 88.0  # Default value
-            max_threshold = 94.0  # Default value
+            if not min_result or len(min_result) == 0:
+                LoggingService.LogError("VMAFAutoReplaceMinThreshold not found in SystemSettings", "DatabaseManager", "GetVMAFThresholds")
+                raise ValueError("VMAFAutoReplaceMinThreshold setting not found in database")
             
-            if min_result and len(min_result) > 0:
-                min_threshold = float(min_result[0][0])  # SettingValue is the first column
+            if not max_result or len(max_result) == 0:
+                LoggingService.LogError("VMAFAutoReplaceMaxThreshold not found in SystemSettings", "DatabaseManager", "GetVMAFThresholds")
+                raise ValueError("VMAFAutoReplaceMaxThreshold setting not found in database")
             
-            if max_result and len(max_result) > 0:
-                max_threshold = float(max_result[0][0])  # SettingValue is the first column
+            min_threshold = float(min_result[0][0])  # SettingValue is the first column
+            max_threshold = float(max_result[0][0])  # SettingValue is the first column
             
             LoggingService.LogInfo(f"Retrieved VMAF thresholds: Min={min_threshold}, Max={max_threshold}", 
                                  "DatabaseManager", "GetVMAFThresholds")
@@ -2607,7 +2609,7 @@ class DatabaseManager:
             
         except Exception as e:
             LoggingService.LogException("Error getting VMAF thresholds", e, "DatabaseManager", "GetVMAFThresholds")
-            return {'MinThreshold': 88.0, 'MaxThreshold': 94.0}  # Return defaults on error
+            raise  # Re-raise the exception instead of masking with defaults
     
     def UpdateVMAFThresholds(self, MinThreshold: float, MaxThreshold: float) -> bool:
         """Update VMAF auto-replace thresholds in SystemSettings."""

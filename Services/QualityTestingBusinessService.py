@@ -900,8 +900,12 @@ class QualityTestingBusinessService:
             
             # Get VMAF thresholds from database
             thresholds = self.DatabaseManager.GetVMAFThresholds()
-            min_threshold = thresholds.get('MinThreshold', 88.0)
-            max_threshold = thresholds.get('MaxThreshold', 94.0)
+            min_threshold = thresholds.get('MinThreshold')
+            max_threshold = thresholds.get('MaxThreshold')
+            
+            if min_threshold is None or max_threshold is None:
+                LoggingService.LogError("VMAF thresholds not properly retrieved from database", "QualityTestingBusinessService", "CheckAndTriggerAutoReplace")
+                return {"Triggered": False, "Error": "VMAF thresholds not found in database"}
             
             LoggingService.LogInfo(f"Checking VMAF score {VMAFScore} against thresholds: Min={min_threshold}, Max={max_threshold}", 
                                  "QualityTestingBusinessService", "CheckAndTriggerAutoReplace")

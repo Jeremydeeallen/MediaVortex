@@ -164,8 +164,14 @@ class FileReplacementBusinessService:
                         'ErrorMessage': 'Could not retrieve VMAF thresholds from system settings'
                     }
                 
-                min_threshold = vmaf_thresholds.get('VMAFAutoReplaceMinThreshold', 88.0)
-                max_threshold = vmaf_thresholds.get('VMAFAutoReplaceMaxThreshold', 94.0)
+                min_threshold = vmaf_thresholds.get('MinThreshold')
+                max_threshold = vmaf_thresholds.get('MaxThreshold')
+                
+                if min_threshold is None or max_threshold is None:
+                    return {
+                        'Success': False,
+                        'ErrorMessage': 'VMAF thresholds not found in database'
+                    }
                 
                 if not VMAFScore or VMAFScore < min_threshold or VMAFScore > max_threshold:
                     return {
@@ -321,8 +327,14 @@ class FileReplacementBusinessService:
                         'ErrorMessage': 'Could not retrieve VMAF thresholds from system settings'
                     }
                 
-                min_threshold = vmaf_thresholds.get('VMAFAutoReplaceMinThreshold', 88.0)
-                max_threshold = vmaf_thresholds.get('VMAFAutoReplaceMaxThreshold', 94.0)
+                min_threshold = vmaf_thresholds.get('MinThreshold')
+                max_threshold = vmaf_thresholds.get('MaxThreshold')
+                
+                if min_threshold is None or max_threshold is None:
+                    return {
+                        'Success': False,
+                        'ErrorMessage': 'VMAF thresholds not found in database'
+                    }
                 
                 if not transcode_attempt.VMAF or transcode_attempt.VMAF < min_threshold or transcode_attempt.VMAF > max_threshold:
                     return {
