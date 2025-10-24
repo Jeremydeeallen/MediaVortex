@@ -405,7 +405,7 @@ def GetMediaFileComparison():
                AudioChannels, AudioSampleRate, AudioSampleFormat, AudioChannelLayout,
                ContainerFormat, OverallBitrate, TranscodeAttemptId
         FROM MediaFilesArchive
-        WHERE FilePath = ?
+        WHERE LOWER(FilePath) = LOWER(?)
         ORDER BY ArchiveDate DESC
         LIMIT 1
         """

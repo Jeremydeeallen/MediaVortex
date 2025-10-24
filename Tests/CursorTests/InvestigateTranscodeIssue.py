@@ -79,7 +79,7 @@ def InvestigateTranscodeIssue():
         print("=== STEP 4: Check Recent Transcode Attempt ===")
         transcode_query = '''
         SELECT * FROM TranscodeAttempts 
-        WHERE FilePath LIKE ? 
+        WHERE LOWER(FilePath) LIKE LOWER(?) 
         ORDER BY AttemptDate DESC 
         LIMIT 1
         '''

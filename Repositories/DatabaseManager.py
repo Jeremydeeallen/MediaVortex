@@ -320,6 +320,9 @@ class DatabaseManager:
     def SaveRootFolder(self, RootFolder: RootFolderModel) -> int:
         """Save a root folder (insert or update) and return the root folder ID."""
         try:
+            # NORMALIZE PATH TO FILESYSTEM CASE
+            RootFolder.RootFolder = self.PrivateNormalizePathToFilesystemCase(RootFolder.RootFolder)
+            
             LoggingService.LogFunctionEntry("SaveRootFolder", 'DatabaseManager', f"RootFolder: {RootFolder.RootFolder}, Size: {RootFolder.TotalSizeGB}GB")
             
             connection = self.DatabaseService.GetConnection()
@@ -365,7 +368,7 @@ class DatabaseManager:
         """Delete a root folder and its associated media files."""
         try:
             # Delete associated media files first
-            self.DatabaseService.ExecuteNonQuery("DELETE FROM MediaFiles WHERE Id IN (SELECT Id FROM MediaFiles WHERE FilePath LIKE (SELECT RootFolder || '%' FROM RootFolders WHERE Id = ?))", (RootFolderId,))
+            self.DatabaseService.ExecuteNonQuery("DELETE FROM MediaFiles WHERE Id IN (SELECT Id FROM MediaFiles WHERE LOWER(FilePath) LIKE LOWER((SELECT RootFolder FROM RootFolders WHERE Id = ?)) || '%')", (RootFolderId,))
             
             # Delete the root folder
             affectedRows = self.DatabaseService.ExecuteNonQuery("DELETE FROM RootFolders WHERE Id = ?", (RootFolderId,))
@@ -443,6 +446,9 @@ class DatabaseManager:
     def SaveMediaFile(self, MediaFile: MediaFileModel) -> int:
         """Save a media file (insert or update) and return the media file ID."""
         try:
+            # NORMALIZE PATH TO FILESYSTEM CASE
+            MediaFile.FilePath = self.PrivateNormalizePathToFilesystemCase(MediaFile.FilePath)
+            
             LoggingService.LogFunctionEntry("SaveMediaFile", 'DatabaseManager', f"File: {MediaFile.FileName}, Path: {MediaFile.FilePath}")
             
             connection = self.DatabaseService.GetConnection()
@@ -528,7 +534,7 @@ class DatabaseManager:
                    Resolution, Codec, DurationMinutes, FrameRate, LastScannedDate,
                    CompressionPotential, AssignedProfile, FileModificationTime
             FROM MediaFiles 
-            WHERE FilePath LIKE ?
+            WHERE LOWER(FilePath) LIKE LOWER(?)
         """
         rows = self.DatabaseService.ExecuteQuery(query, (f"{RootFolderPath}%",))
         
@@ -572,7 +578,7 @@ class DatabaseManager:
                    Resolution, Codec, DurationMinutes, FrameRate, LastScannedDate,
                    CompressionPotential, AssignedProfile, FileModificationTime
             FROM MediaFiles 
-            WHERE FilePath LIKE ?
+            WHERE LOWER(FilePath) LIKE LOWER(?)
         """
         rows = self.DatabaseService.ExecuteQuery(query, (f"{rootFolderPath}%",))
         
@@ -1575,7 +1581,7 @@ class DatabaseManager:
             query = """
                 UPDATE MediaFiles 
                 SET AssignedProfile = ?
-                WHERE FilePath LIKE ? || '%'
+                WHERE LOWER(FilePath) LIKE LOWER(?) || '%'
             """
             
             connection = self.DatabaseService.GetConnection()
@@ -3314,9 +3320,10 @@ class DatabaseManager:
                 LoggingService.LogError(f"Invalid TranscodeAttemptId: {TranscodeAttemptId}", "DatabaseManager", "CreateTemporaryFilePath")
                 return None
             
-            # Normalize paths to use single backslashes
-            NormalizedOriginalPath = self.PrivateNormalizeFilePath(OriginalPath)
-            NormalizedLocalSourcePath = self.PrivateNormalizeFilePath(LocalSourcePath)
+            # NORMALIZE TO FILESYSTEM CASE THEN NORMALIZE PATH FORMAT
+            NormalizedOriginalPath = self.PrivateNormalizeFilePath(
+                self.PrivateNormalizePathToFilesystemCase(OriginalPath))
+            NormalizedLocalSourcePath = self.PrivateNormalizeFilePath(LocalSourcePath)  # Local paths don't need case norm
             NormalizedLocalOutputPath = self.PrivateNormalizeFilePath(LocalOutputPath) if LocalOutputPath else None
             
             if LocalOutputPath:
@@ -3517,6 +3524,45 @@ class DatabaseManager:
         except Exception as e:
             LoggingService.LogException("Exception normalizing file path", e, "DatabaseManager", "PrivateNormalizeFilePath")
             return FilePath
+    
+    def PrivateNormalizePathToFilesystemCase(self, Path: str) -> str:
+        """Private method to normalize path to match filesystem case."""
+        try:
+            if not Path:
+                return Path
+            
+            # For network drives, just normalize the case without resolving to UNC
+            normalized_path = os.path.normpath(Path)
+            
+            # Check if this is a network drive (Z:, Y:, etc.)
+            if len(normalized_path) >= 2 and normalized_path[1] == ':' and normalized_path[0].isalpha():
+                # This is a drive letter path - just return it normalized
+                return normalized_path
+            
+            # For other paths, check if they exist and get actual case
+            if os.path.exists(normalized_path):
+                # Use os.path.abspath but check if it converts to UNC
+                try:
+                    actual_path = os.path.abspath(normalized_path)
+                    # If it became a UNC path, just return the original normalized path
+                    if actual_path.startswith('\\\\'):
+                        return normalized_path
+                    
+                    if actual_path != Path:
+                        LoggingService.LogInfo(f"Normalized path case: '{Path}' -> '{actual_path}'",
+                                             "DatabaseManager", "PrivateNormalizePathToFilesystemCase")
+                    return actual_path
+                except:
+                    return normalized_path
+            else:
+                LoggingService.LogWarning(f"Path does not exist, cannot normalize: {Path}",
+                                         "DatabaseManager", "PrivateNormalizePathToFilesystemCase")
+                return normalized_path
+                
+        except Exception as e:
+            LoggingService.LogException("Error normalizing path to filesystem case", e,
+                                       "DatabaseManager", "PrivateNormalizePathToFilesystemCase")
+            return Path
     
     # Crash Recovery Methods
     

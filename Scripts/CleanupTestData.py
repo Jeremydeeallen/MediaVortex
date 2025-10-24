@@ -24,9 +24,9 @@ def CleanupTestData():
             "DELETE FROM ServiceCommands WHERE CommandType LIKE 'TestCommand%'",
             "DELETE FROM QualityTestProgress WHERE Status = 'Running'",
             "DELETE FROM TranscodeProgress WHERE Status = 'Running'",
-            "DELETE FROM TranscodeAttempts WHERE FilePath LIKE '/test/%'",
+            "DELETE FROM TranscodeAttempts WHERE LOWER(FilePath) LIKE LOWER('/test/%')",
             "DELETE FROM QualityTestingQueue WHERE TranscodeAttemptId IN (1, 2, 3)",
-            "DELETE FROM TranscodeQueue WHERE FilePath LIKE '/test/%'"
+            "DELETE FROM TranscodeQueue WHERE LOWER(FilePath) LIKE LOWER('/test/%')"
         ]
         
         for query in cleanupQueries:

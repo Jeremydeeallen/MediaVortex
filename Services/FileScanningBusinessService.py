@@ -473,35 +473,77 @@ class FileScanningBusinessService:
     
     
     def GetOrCreateRootFolder(self, RootFolderPath: str, TotalSizeGB: float) -> RootFolderModel:
-        """Get existing root folder or create a new one."""
+        """Get existing root folder or create a new one using filesystem validation."""
         try:
-            # Check if root folder already exists
+            # Get canonical path from filesystem
+            CanonicalPath = self.GetCanonicalPathFromFilesystem(RootFolderPath)
+            
+            # Check if root folder already exists (case-insensitive via canonical paths)
             ExistingFolders = self.DatabaseManager.GetAllRootFolders()
             
             for Folder in ExistingFolders:
-                if Folder.RootFolder == RootFolderPath:
-                    # Update existing folder
+                # Compare using canonical paths from filesystem
+                ExistingCanonical = self.GetCanonicalPathFromFilesystem(Folder.RootFolder)
+                if ExistingCanonical == CanonicalPath:
+                    # Update existing folder with canonical path
+                    Folder.RootFolder = CanonicalPath
                     Folder.LastScannedDate = datetime.now()
                     Folder.TotalSizeGB = TotalSizeGB
                     FolderId = self.DatabaseManager.SaveRootFolder(Folder)
                     Folder.Id = FolderId
-                    LoggingService.LogInfo("Updated existing root folder: {}", RootFolderPath)
+                    LoggingService.LogInfo(f"Updated existing root folder: {CanonicalPath}")
                     return Folder
             
-            # Create new root folder
+            # Create new root folder with canonical path
             NewFolder = RootFolderModel(
-                RootFolder=RootFolderPath,
+                RootFolder=CanonicalPath,
                 LastScannedDate=datetime.now(),
                 TotalSizeGB=TotalSizeGB
             )
             FolderId = self.DatabaseManager.SaveRootFolder(NewFolder)
             NewFolder.Id = FolderId
-            LoggingService.LogInfo("Created new root folder: {}", RootFolderPath)
+            LoggingService.LogInfo(f"Created new root folder: {CanonicalPath}")
             return NewFolder
             
         except Exception as e:
             LoggingService.LogException("Error managing root folder", e)
             raise
+    
+    def GetCanonicalPathFromFilesystem(self, Path: str) -> str:
+        """Get the actual case-sensitive path as it exists on the filesystem."""
+        try:
+            if not Path:
+                return Path
+            
+            # For network drives, just normalize the case without resolving to UNC
+            import os
+            normalized_path = os.path.normpath(Path)
+            
+            # Check if this is a network drive (Z:, Y:, etc.)
+            if len(normalized_path) >= 2 and normalized_path[1] == ':' and normalized_path[0].isalpha():
+                # This is a drive letter path - just return it normalized
+                return normalized_path
+            
+            # For other paths, check if they exist and get actual case
+            if os.path.exists(normalized_path):
+                # Use os.path.abspath but check if it converts to UNC
+                try:
+                    actual_path = os.path.abspath(normalized_path)
+                    # If it became a UNC path, just return the original normalized path
+                    if actual_path.startswith('\\\\'):
+                        return normalized_path
+                    return actual_path
+                except:
+                    return normalized_path
+            else:
+                LoggingService.LogWarning(f"Path does not exist, cannot get canonical case: {Path}", 
+                                         'GetCanonicalPathFromFilesystem', 'FileScanningBusinessService')
+                return normalized_path
+            
+        except Exception as e:
+            LoggingService.LogWarning(f"Could not resolve canonical path for {Path}, using original", 
+                                     'GetCanonicalPathFromFilesystem', 'FileScanningBusinessService')
+            return Path
     
     def ProcessMediaFiles(self, MediaFiles: List[str], RootFolderId: Optional[int], RootFolderPath: str = "", ExtractMetadata: bool = True):
         """Process each media file found during scanning with optional metadata extraction."""

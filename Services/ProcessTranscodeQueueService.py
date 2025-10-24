@@ -448,7 +448,7 @@ class ProcessTranscodeQueueService:
             try:
                 # Query for StartTime from the most recent TranscodeAttempt for this file
                 StartTimeResult = self.DatabaseManager.DatabaseService.ExecuteQuery(
-                    "SELECT StartTime FROM TranscodeAttempts WHERE FilePath = ? ORDER BY AttemptDate DESC LIMIT 1",
+                    "SELECT StartTime FROM TranscodeAttempts WHERE LOWER(FilePath) = LOWER(?) ORDER BY AttemptDate DESC LIMIT 1",
                     (Job.FilePath,)
                 )
                 if StartTimeResult and StartTimeResult[0]['StartTime']:

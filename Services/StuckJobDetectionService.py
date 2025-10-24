@@ -178,7 +178,7 @@ class StuckJobDetectionService:
                 attemptUpdateQuery = """
                 UPDATE TranscodeAttempts 
                 SET Success = 0, ErrorMessage = ?
-                WHERE FilePath = ? AND Success IS NULL
+                WHERE LOWER(FilePath) = LOWER(?) AND Success IS NULL
                 """
                 attemptAffected = self.DatabaseManager.DatabaseService.ExecuteNonQuery(
                     attemptUpdateQuery, 
@@ -190,7 +190,7 @@ class StuckJobDetectionService:
                 DELETE FROM TranscodeProgress 
                 WHERE TranscodeAttemptId IN (
                     SELECT Id FROM TranscodeAttempts 
-                    WHERE FilePath = ? AND Success = 0
+                    WHERE LOWER(FilePath) = LOWER(?) AND Success = 0
                 )
                 """
                 progressAffected = self.DatabaseManager.DatabaseService.ExecuteNonQuery(progressDeleteQuery, (jobDetails.FilePath,))

@@ -41,13 +41,42 @@ WHERE FilePath LIKE ?
 2. `LOWER(?)` converts the input parameter to lowercase
 3. Comparison is now case-insensitive
 4. Original FilePath values in database remain unchanged
-5. No data migration required
+5. Data migration may be required for existing databases with case-sensitive duplicates
 
 ### Performance Impact
 
 - `LOWER()` function has negligible performance impact on small-medium databases
 - Prevents duplicate records which improves overall system performance
 - Case-insensitive matching is more robust and user-friendly
+
+### LIKE Pattern Examples
+
+#### Root Folder Prefix Matching
+```python
+# CORRECT - Case-insensitive prefix matching
+WHERE LOWER(FilePath) LIKE LOWER(?) || '%'
+
+# WRONG - Case-sensitive prefix matching
+WHERE FilePath LIKE ? || '%'
+```
+
+#### Complex LIKE Patterns
+```python
+# CORRECT - Both sides use LOWER()
+WHERE LOWER(FilePath) LIKE LOWER((SELECT RootFolder FROM RootFolders WHERE Id = ?)) || '%'
+
+# WRONG - Mixed case sensitivity
+WHERE FilePath LIKE (SELECT RootFolder || '%' FROM RootFolders WHERE Id = ?)
+```
+
+### Migration Tools
+
+For existing databases with duplicate records due to case sensitivity:
+
+1. **Detection**: Run `Scripts/DetectDuplicateFilePaths.py` to identify duplicates
+2. **Review**: Examine the generated CSV report for affected records
+3. **Merge**: Run `Scripts/MergeDuplicateFilePaths.py --dry-run` to preview changes
+4. **Execute**: Run `Scripts/MergeDuplicateFilePaths.py --execute --backup` to fix duplicates
 
 ### Examples
 

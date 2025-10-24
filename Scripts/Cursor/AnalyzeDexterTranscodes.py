@@ -62,7 +62,7 @@ def AnalyzeDexterTranscodes():
         SELECT Id, Quality, VMAF, ProfileName, FfpmpegCommand, NewSizeBytes, 
                TranscodeDurationSeconds, AudioBitrateKbps
         FROM TranscodeAttempts 
-        WHERE FilePath = ? AND Success = 1
+        WHERE LOWER(FilePath) = LOWER(?) AND Success = 1
         ORDER BY AttemptDate DESC
     """
     

@@ -609,7 +609,7 @@ class SQLDataReader:
                             archive_query = """
                                 SELECT COUNT(*) as ArchiveCount
                                 FROM MediaFilesArchive
-                                WHERE FilePath = ?
+                                WHERE LOWER(FilePath) = LOWER(?)
                             """
                             archive_result = self.DatabaseManager.DatabaseService.ExecuteQuery(archive_query, (record["FilePath"],))
                             archive_count = archive_result[0]["ArchiveCount"] if archive_result else 0
@@ -678,7 +678,7 @@ class SQLDataReader:
                             archive_query = """
                                 SELECT COUNT(*) as ArchiveCount
                                 FROM MediaFilesArchive
-                                WHERE FilePath = ?
+                                WHERE LOWER(FilePath) = LOWER(?)
                             """
                             archive_result = self.DatabaseManager.DatabaseService.ExecuteQuery(archive_query, (record["FilePath"],))
                             archive_count = archive_result[0]["ArchiveCount"] if archive_result else 0
