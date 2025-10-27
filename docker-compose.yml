@@ -1,0 +1,94 @@
+services:
+  prowlarr:
+    image: linuxserver/prowlarr:latest
+    container_name: prowlarr
+    restart: always
+    ports:
+      - "9696:9696"
+    environment:
+      - PGID=0
+      - PUID=0
+      - TZ=America/Denver
+      - PROWLARR_USER=root
+      - PROWLARR_PASSWORD=calvin
+    volumes:
+      - /etc/prowlarr:/config
+      - /mnt/BrainDownloads/watch:/downloads  # transmission watch directory
+    depends_on:
+      - nzbget
+  bazarr:
+    image: linuxserver/bazarr:latest
+    container_name: bazarr
+    restart: always
+    ports:
+      - "6767:6767"
+    environment:
+      - PGID=0
+      - PUID=0
+      - TZ=America/Denver
+    volumes:
+      - /etc/bazarr:/config
+      - /mnt/BrainTv:/tv
+      - /mnt/SynologyMovies:/movies
+    depends_on:
+      - sonarr
+      - radarr
+
+  nzbget:
+    image: linuxserver/nzbget:latest
+    container_name: nzbget
+    restart: always
+    ports:
+      - "6789:6789" # Web UI port
+    environment:
+      - PGID=0
+      - PUID=0
+      - TZ=America/Denver # Your timezone
+      - NZBGET_USER=root
+      - NZBGET_PASS=calvin
+    volumes:
+      - /etc/nzbget:/config # NZBGet often uses /config
+      - /mnt/BrainDownloads:/downloads # Root download directory for NZBGet
+      - /mnt/SynologyMovies/_downloads/complete:/downloads/complete # Completed downloads
+      - /mnt/BrainDownloads/intermediate:/intermediate # Intermediate download directory
+      - /mnt/XXXVideos:/xxxvideos
+      - /mnt/XXXPictures:/xxxpictures
+  sonarr:
+    image: linuxserver/sonarr:latest
+    container_name: sonarr
+    restart: always
+    ports:
+      - "8989:8989"
+    environment:
+      - PGID=0
+      - PUID=0
+      - TZ=America/Denver
+      - SONARR_USERNAME=root
+      - SONARR_PASSWORD=calvin
+    volumes:
+      - /etc/sonarr:/config
+      - /mnt/BrainTv:/tv
+      - /mnt/SynologyMovies/_downloads/complete:/downloads/complete # Completed downloads from NZBGet
+    depends_on:
+      - nzbget
+      - prowlarr
+
+  radarr:
+    image: linuxserver/radarr:latest
+    container_name: radarr
+    restart: always
+    ports:
+      - "7878:7878"
+    environment:
+      - PGID=0
+      - PUID=0
+      - TZ=America/Denver
+      - RADARR_USERNAME=root
+      - RADARR_PASSWORD=calvin
+    volumes:
+      - /etc/radarr:/config
+      - /mnt/SynologyMovies:/movies
+      - /mnt/SynologyMovies/_downloads/complete:/downloads/complete # Completed downloads from NZBGet
+    depends_on:
+      - nzbget
+      - prowlarr

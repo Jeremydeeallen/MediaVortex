@@ -90,16 +90,17 @@ class TranscodingViewModel:
             }
     
     def GetTranscodingHistory(self, Limit: int = 50) -> Dict[str, Any]:
-        """Get transcoding history from database."""
+        """Get successful transcoding history from database."""
         try:
             LoggingService.LogFunctionEntry("GetTranscodingHistory", "TranscodingViewModel", Limit)
             
-            # Get recent transcoding attempts
+            # Get recent successful transcoding attempts only
             query = """
                 SELECT ta.Id, ta.FilePath, ta.AttemptDate, ta.TranscodeDurationSeconds, 
                        ta.Success, ta.ErrorMessage, ta.Quality, ta.ProfileName,
                        ta.OldSizeBytes, ta.NewSizeBytes, ta.SizeReductionPercent, ta.VMAF
                 FROM TranscodeAttempts ta
+                WHERE ta.Success = 1
                 ORDER BY ta.AttemptDate DESC
                 LIMIT ?
             """

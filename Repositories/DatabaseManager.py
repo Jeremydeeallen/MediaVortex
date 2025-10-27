@@ -1008,12 +1008,12 @@ class DatabaseManager:
         return queueItems
     
     def GetNextPendingTranscodeJob(self) -> Optional[TranscodeQueueModel]:
-        """Get the next pending transcoding job (highest priority, oldest first)."""
+        """Get the next pending transcoding job (largest files first)."""
         query = """
             SELECT Id, FilePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted
             FROM TranscodeQueue 
             WHERE Status = 'Pending'
-            ORDER BY Priority DESC, DateAdded ASC
+            ORDER BY SizeMB DESC, DateAdded ASC
             LIMIT 1
         """
         rows = self.DatabaseService.ExecuteQuery(query)

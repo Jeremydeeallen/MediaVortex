@@ -110,7 +110,7 @@ class QualityTestingBusinessService:
                 # Pass active_job_id and result_id so we can track the FFmpeg child process
                 job_details['active_job_id'] = active_job_id
                 job_details['result_id'] = result_id
-                result = self.RunFFmpegVMAF(job_details, progress_id)
+                result = self.BuildVMAFCommand(job_details, progress_id)
                 
                 # Update QualityTestResult with completion details
                 if result["Success"]:
@@ -152,7 +152,7 @@ class QualityTestingBusinessService:
             # Delete from queue (regardless of success/failure)
             self.DatabaseManager.DeleteQualityTestQueueItem(JobId)
     
-    def RunFFmpegVMAF(self, JobDetails: dict, ProgressId: int = None) -> dict:
+    def BuildVMAFCommand(self, JobDetails: dict, ProgressId: int = None) -> dict:
         """Run FFmpeg VMAF comparison with resolution scaling."""
         try:
             original_file = JobDetails["LocalSourcePath"]
@@ -172,19 +172,6 @@ class QualityTestingBusinessService:
             if not os.path.exists(ffmpeg_path):
                 return {"Success": False, "Error": f"FFmpeg executable not found: {ffmpeg_path}"}
             
-            # Get hardware acceleration setting
-            use_hardware_acceleration = True  # Default to True
-            try:
-                hardware_setting = self.DatabaseManager.DatabaseService.ExecuteQuery(
-                    "SELECT SettingValue FROM SystemSettings WHERE SettingKey = 'UseHardwareAcceleration'"
-                )
-                if hardware_setting and hardware_setting[0]['SettingValue']:
-                    use_hardware_acceleration = hardware_setting[0]['SettingValue'].lower() == 'true'
-            except Exception as e:
-                LoggingService.LogWarning(f"Could not retrieve UseHardwareAcceleration setting, using default (True): {e}", "QualityTestingBusinessService", "RunFFmpegVMAF")
-            
-            LoggingService.LogInfo(f"Hardware acceleration mode: {'Enabled (NVIDIA CUDA)' if use_hardware_acceleration else 'Disabled (Software)'}", "QualityTestingBusinessService", "RunFFmpegVMAF")
-            
             # Get video resolutions to check if scaling is needed
             original_resolution = self.GetVideoResolution(original_file, ffmpeg_path)
             transcoded_resolution = self.GetVideoResolution(transcoded_file, ffmpeg_path)
@@ -192,19 +179,13 @@ class QualityTestingBusinessService:
             # Check if resolutions match
             if original_resolution == transcoded_resolution:
                 # Resolutions match - use direct VMAF comparison without scaling
-                if use_hardware_acceleration:
-                    vmaf_filter = "[0:v]format=yuv420p[dist];[1:v]format=yuv420p[ref];[dist][ref]libvmaf=log_path=vmaf_output.xml:n_subsample=10"
-                else:
-                    vmaf_filter = "[0:v][1:v]libvmaf=log_path=vmaf_output.xml:n_subsample=10"
-                LoggingService.LogInfo(f"Resolutions match ({original_resolution[0]}x{original_resolution[1]}) - using direct VMAF comparison", "QualityTestingBusinessService", "RunFFmpegVMAF")
+                vmaf_filter = "[0:v]format=yuv420p[dist];[1:v]format=yuv420p[ref];[dist][ref]libvmaf=log_path=vmaf_output.xml:n_subsample=10"
+                LoggingService.LogInfo(f"Resolutions match ({original_resolution[0]}x{original_resolution[1]}) - using direct VMAF comparison", "QualityTestingBusinessService", "BuildVMAFCommand")
             else:
                 # Resolutions don't match - determine target resolution and scale both videos
                 target_width, target_height = self.DetermineVMAFTargetResolution(original_resolution, transcoded_resolution)
-                if use_hardware_acceleration:
-                    vmaf_filter = f"[0:v]scale={target_width}:{target_height},format=yuv420p[dist];[1:v]scale={target_width}:{target_height},format=yuv420p[ref];[dist][ref]libvmaf=log_path=vmaf_output.xml:n_subsample=10"
-                else:
-                    vmaf_filter = f"[0:v]scale={target_width}:{target_height}[dist];[1:v]scale={target_width}:{target_height}[ref];[dist][ref]libvmaf=log_path=vmaf_output.xml:n_subsample=10"
-                LoggingService.LogInfo(f"Resolutions don't match (Original: {original_resolution[0]}x{original_resolution[1]}, Transcoded: {transcoded_resolution[0]}x{transcoded_resolution[1]}) - scaling to {target_width}x{target_height}", "QualityTestingBusinessService", "RunFFmpegVMAF")
+                vmaf_filter = f"[0:v]scale={target_width}:{target_height},format=yuv420p[dist];[1:v]scale={target_width}:{target_height},format=yuv420p[ref];[dist][ref]libvmaf=log_path=vmaf_output.xml:n_subsample=10"
+                LoggingService.LogInfo(f"Resolutions don't match (Original: {original_resolution[0]}x{original_resolution[1]}, Transcoded: {transcoded_resolution[0]}x{transcoded_resolution[1]}) - scaling to {target_width}x{target_height}", "QualityTestingBusinessService", "BuildVMAFCommand")
             
             # Get StartTime from TranscodeAttempts table if available
             StartTime = None
@@ -218,40 +199,34 @@ class QualityTestingBusinessService:
                     if StartTimeResult and StartTimeResult[0]['StartTime']:
                         StartTime = StartTimeResult[0]['StartTime']
                         LoggingService.LogInfo(f"Retrieved StartTime {StartTime} for TranscodeAttempt {JobDetails['TranscodeAttemptId']}", 
-                                             "QualityTestingBusinessService", "RunFFmpegVMAF")
+                                             "QualityTestingBusinessService", "BuildVMAFCommand")
                 except Exception as e:
                     LoggingService.LogException("Error retrieving StartTime from TranscodeAttempts", e, 
-                                             "QualityTestingBusinessService", "RunFFmpegVMAF")
+                                             "QualityTestingBusinessService", "BuildVMAFCommand")
             
-            # Build command with optional start time on original file
+            # Build command as string (like TranscodeService)
             # VMAF structure: ffmpeg -i original_file -i transcoded_file -lavfi [vmaf filter]
-            command = [ffmpeg_path]
-            
-            # Add hardware acceleration flags if enabled
-            if use_hardware_acceleration:
-                command.extend(["-hwaccel", "cuda"])
+            command_parts = [ffmpeg_path]
             
             # Add start time parameter to original file input if specified
             if StartTime and StartTime.strip():
-                command.extend(["-ss", StartTime.strip()])
+                command_parts.extend(["-ss", StartTime.strip()])
             
-            # Add input files with hardware acceleration if enabled
-            if use_hardware_acceleration:
-                command.extend(["-hwaccel", "cuda", "-i", original_file, "-hwaccel", "cuda", "-i", transcoded_file])
-            else:
-                command.extend(["-i", original_file, "-i", transcoded_file])
+            # Add input files (no CUDA acceleration) - quote paths to handle spaces
+            command_parts.extend(["-i", f'"{original_file}"', "-i", f'"{transcoded_file}"'])
             
             # Add VMAF filter and output options
-            command.extend(["-lavfi", vmaf_filter, "-f", "null", "-"])
+            command_parts.extend(["-lavfi", vmaf_filter, "-f", "null", "-"])
             
-            LoggingService.LogInfo(f"Quality Test FFmpeg command: {' '.join(command)}", "QualityTestingBusinessService", "RunFFmpegVMAF")
-            LoggingService.LogInfo(f"Command execution mode: shell=True with CREATE_NO_WINDOW (headless execution)", "QualityTestingBusinessService", "RunFFmpegVMAF")
-            LoggingService.LogInfo(f"Command type: {type(command)}", "QualityTestingBusinessService", "RunFFmpegVMAF")
-            LoggingService.LogInfo(f"Command length: {len(command) if isinstance(command, list) else 'N/A'}", "QualityTestingBusinessService", "RunFFmpegVMAF")
-            LoggingService.LogInfo(f"Command items: {command}", "QualityTestingBusinessService", "RunFFmpegVMAF")
+            # Build final command string
+            command = " ".join(command_parts)
             
-            # Convert command to string for storage
-            FFmpegCommandString = ' '.join(command)
+            LoggingService.LogInfo(f"Quality Test FFmpeg command: {command}", "QualityTestingBusinessService", "BuildVMAFCommand")
+            LoggingService.LogInfo(f"Command type: {type(command)}", "QualityTestingBusinessService", "BuildVMAFCommand")
+            LoggingService.LogInfo(f"Command length: {len(command)}", "QualityTestingBusinessService", "BuildVMAFCommand")
+            
+            # Store command string for database
+            FFmpegCommandString = command
             
             # Update the existing QualityTestResults record with FFmpeg command
             result_id = JobDetails.get('result_id')
@@ -278,12 +253,8 @@ class QualityTestingBusinessService:
                 self.UpdateProgressRecord(ProgressId, "Processing", 95, "VMAF analysis completed, parsing results")
             
             if result.returncode == 0:
-                # Parse VMAF score from output (check both stdout and stderr)
-                vmaf_score = self.ParseVMAFScore(result.stderr)
-                
-                # If not found in stderr, try stdout
-                if vmaf_score == 0.0:
-                    vmaf_score = self.ParseVMAFScore(result.stdout)
+                # Parse VMAF score from XML file (FFmpeg creates vmaf_output.xml)
+                vmaf_score = self.ParseVMAFScore("")
                 
                 
                 # Update QualityTestResults table with VMAF score
@@ -296,7 +267,7 @@ class QualityTestingBusinessService:
                 
                 return {"Success": True, "VMAFScore": vmaf_score, "FFmpegCommand": FFmpegCommandString, "AutoReplaceTriggered": auto_replace_result.get('Triggered', False)}
             else:
-                error_msg = result.stderr if result.stderr else "FFmpeg failed with no error output"
+                error_msg = f"FFmpeg failed with return code {result.returncode}"
                 return {"Success": False, "Error": error_msg}
                 
         except subprocess.TimeoutExpired:
@@ -569,65 +540,36 @@ class QualityTestingBusinessService:
         except Exception as e:
             LoggingService.LogException(f"Error updating progress record {ProgressId}", e, "QualityTestingBusinessService", "UpdateProgressRecord")
     
-    def ExecuteFFmpegWithProgress(self, command: list, ProgressId: int = None, JobDetails: dict = None):
-        """Execute FFmpeg with real-time progress monitoring."""
+    def ExecuteFFmpegWithProgress(self, command: str, ProgressId: int = None, JobDetails: dict = None):
+        """Execute FFmpeg with real-time progress monitoring (using same pattern as TranscodeService)."""
         try:
             import subprocess
-            import re
+            import threading
             import time
+            from datetime import datetime
             
-            # Convert command list to string and use shell=True (like TranscodeService)
-            if isinstance(command, list):
-                CommandString = ' '.join(command)
-                LoggingService.LogInfo(f"Converted command list to string: {CommandString}", "QualityTestingBusinessService", "ExecuteFFmpegWithProgress")
-            else:
-                CommandString = command
-                LoggingService.LogInfo(f"Command already string: {CommandString}", "QualityTestingBusinessService", "ExecuteFFmpegWithProgress")
+            LoggingService.LogInfo(f"Final command string: {command}", "QualityTestingBusinessService", "ExecuteFFmpegWithProgress")
             
-            LoggingService.LogInfo(f"Final command string: {CommandString}", "QualityTestingBusinessService", "ExecuteFFmpegWithProgress")
-            LoggingService.LogInfo(f"Command string type: {type(CommandString)}", "QualityTestingBusinessService", "ExecuteFFmpegWithProgress")
-            LoggingService.LogInfo(f"Command string length: {len(CommandString)}", "QualityTestingBusinessService", "ExecuteFFmpegWithProgress")
+            # Start timing
+            StartTime = datetime.now()
             
-            # Use shell=True with CREATE_NO_WINDOW for headless execution (like TranscodeService)
-            import platform
-            LoggingService.LogInfo(f"Platform: {platform.system()}", "QualityTestingBusinessService", "ExecuteFFmpegWithProgress")
-            
-            if platform.system() == "Windows":
-                LoggingService.LogInfo(f"Using Windows subprocess.Popen with CREATE_NO_WINDOW", "QualityTestingBusinessService", "ExecuteFFmpegWithProgress")
-                LoggingService.LogInfo(f"subprocess.Popen arguments: command={CommandString}, shell=True, stdout=PIPE, stderr=PIPE, creationflags=CREATE_NO_WINDOW", "QualityTestingBusinessService", "ExecuteFFmpegWithProgress")
-                
-                process = subprocess.Popen(
-                    CommandString,
-                    shell=True,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                    bufsize=1,
-                    universal_newlines=True,
-                    creationflags=subprocess.CREATE_NO_WINDOW
-                )
-            else:
-                LoggingService.LogInfo(f"Using non-Windows subprocess.Popen", "QualityTestingBusinessService", "ExecuteFFmpegWithProgress")
-                LoggingService.LogInfo(f"subprocess.Popen arguments: command={CommandString}, shell=True, stdout=PIPE, stderr=PIPE", "QualityTestingBusinessService", "ExecuteFFmpegWithProgress")
-                
-                process = subprocess.Popen(
-                    CommandString,
-                    shell=True,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                    bufsize=1,
-                    universal_newlines=True
-                )
+            # Execute FFmpeg command (same pattern as TranscodeService)
+            Process = subprocess.Popen(
+                command,
+                shell=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                universal_newlines=True,
+                bufsize=1
+            )
             
             LoggingService.LogInfo(f"subprocess.Popen completed successfully", "QualityTestingBusinessService", "ExecuteFFmpegWithProgress")
-            LoggingService.LogInfo(f"Process started with PID: {process.pid}", "QualityTestingBusinessService", "ExecuteFFmpegWithProgress")
-            LoggingService.LogInfo(f"Process object: {process}", "QualityTestingBusinessService", "ExecuteFFmpegWithProgress")
+            LoggingService.LogInfo(f"Process started with PID: {Process.pid}", "QualityTestingBusinessService", "ExecuteFFmpegWithProgress")
             
             # Set CPU affinity to cores 12-15 (4 cores for quality testing)
             try:
                 import psutil
-                CurrentProcess = psutil.Process(process.pid)
+                CurrentProcess = psutil.Process(Process.pid)
                 AffinityCores = [12, 13, 14, 15]
                 CurrentProcess.cpu_affinity(AffinityCores)
                 LoggingService.LogDebug(f"Set Quality Test FFmpeg CPU affinity to cores: {AffinityCores}", 
@@ -640,43 +582,76 @@ class QualityTestingBusinessService:
             if JobDetails and 'active_job_id' in JobDetails and JobDetails['active_job_id']:
                 self.DatabaseManager.UpdateActiveJobProcessId(
                     JobDetails['active_job_id'], 
-                    process.pid
+                    Process.pid
                 )
-                LoggingService.LogInfo(f"Updated ActiveJob {JobDetails['active_job_id']} with FFmpeg PID {process.pid}", 
+                LoggingService.LogInfo(f"Updated ActiveJob {JobDetails['active_job_id']} with FFmpeg PID {Process.pid}", 
                                       "QualityTestingBusinessService", "ExecuteFFmpegWithProgress")
             
-            # Monitor progress in real-time
-            last_frame_count = 0
-            last_progress_percent = 0
-            start_time = time.time()
+            # Start progress monitoring thread (same pattern as TranscodeService)
+            if ProgressId:
+                ProgressThread = threading.Thread(
+                    target=self.MonitorVMAFProgress,
+                    args=(ProgressId, Process, JobDetails),
+                    daemon=True
+                )
+                ProgressThread.start()
             
-            # Debug: Capture raw FFmpeg output to file
-            # debug_file = open('ffmpeg_debug_output.txt', 'w')
+            # Wait for process to complete (same pattern as TranscodeService)
+            LoggingService.LogInfo(f"Waiting for process to complete...", "QualityTestingBusinessService", "ExecuteFFmpegWithProgress")
+            ReturnCode = Process.wait()
+            EndTime = datetime.now()
+            Duration = (EndTime - StartTime).total_seconds()
             
-            while True:
-                # Read a line from stderr (where FFmpeg outputs progress)
-                line = process.stderr.readline()
-                if not line:
-                    break
-                
-                # Debug: Write raw output to file
-                # debug_file.write(line)
-                # debug_file.flush()
-                
-                # Parse progress from FFmpeg output
-                if 'frame=' in line and 'fps=' in line:
-                    progress_info = self.ParseFFmpegProgressLine(line, JobDetails)
-                    if progress_info and ProgressId:
-                        progress_percent = progress_info.get('progress_percent', 0)
-                        current_time = progress_info.get('current_time', '')
-                        current_frame = progress_info.get('current_frame', 0)
-                        fps = progress_info.get('fps', 0.0)
-                        speed = progress_info.get('speed', 0.0)
-                        eta = progress_info.get('eta', '')
+            LoggingService.LogInfo(f"Process completed with return code: {ReturnCode}", "QualityTestingBusinessService", "ExecuteFFmpegWithProgress")
+            LoggingService.LogInfo(f"Duration: {Duration} seconds", "QualityTestingBusinessService", "ExecuteFFmpegWithProgress")
+            
+            # Capture any error output if the process failed (same pattern as TranscodeService)
+            if ReturnCode != 0:
+                try:
+                    # Read any remaining output
+                    Output, ErrorOutput = Process.communicate()
+                    if Output:
+                        LoggingService.LogError(f"FFmpeg stdout: {Output}", "QualityTestingBusinessService", "ExecuteFFmpegWithProgress")
+                    if ErrorOutput:
+                        LoggingService.LogError(f"FFmpeg stderr: {ErrorOutput}", "QualityTestingBusinessService", "ExecuteFFmpegWithProgress")
+                except Exception as e:
+                    LoggingService.LogException("Exception reading FFmpeg output", e, "QualityTestingBusinessService", "ExecuteFFmpegWithProgress")
+            
+            # Create a result object similar to subprocess.run
+            class FFmpegResult:
+                def __init__(self, returncode, stdout, stderr):
+                    self.returncode = returncode
+                    self.stdout = stdout
+                    self.stderr = stderr
+            
+            return FFmpegResult(ReturnCode, "", "")
+            
+        except Exception as e:
+            LoggingService.LogException("Error executing FFmpeg with progress monitoring", e, "QualityTestingBusinessService", "ExecuteFFmpegWithProgress")
+            # Let it fail - don't run a second FFmpeg process
+            raise
+    
+    def MonitorVMAFProgress(self, ProgressId: int, Process: subprocess.Popen, JobDetails: dict = None):
+        """Monitor VMAF progress and update database (using same pattern as TranscodeService)."""
+        try:
+            import time
+            
+            while Process.poll() is None:
+                # Read output line by line
+                Line = Process.stdout.readline()
+                if Line:
+                    ProgressData = self.ParseFFmpegProgressLine(Line.strip(), JobDetails)
+                    if ProgressData and ProgressId:
+                        progress_percent = ProgressData.get('progress_percent', 0)
+                        current_time = ProgressData.get('current_time', '')
+                        current_frame = ProgressData.get('current_frame', 0)
+                        fps = ProgressData.get('fps', 0.0)
+                        speed = ProgressData.get('speed', 0.0)
+                        eta = ProgressData.get('eta', '')
                         
                         # Debug logging for ETA calculation
                         if current_frame % 100 == 0:  # Log every 100 frames to avoid spam
-                            LoggingService.LogInfo(f"VMAF Progress - Frame: {current_frame}, Progress: {progress_percent:.1f}%, ETA: {eta}, Speed: {speed:.2f}x", "QualityTestingBusinessService", "ExecuteFFmpegWithProgress")
+                            LoggingService.LogInfo(f"VMAF Progress - Frame: {current_frame}, Progress: {progress_percent:.1f}%, ETA: {eta}, Speed: {speed:.2f}x", "QualityTestingBusinessService", "MonitorVMAFProgress")
                         
                         # Update progress for every frame - real-time updates
                         if current_frame > 0:
@@ -696,36 +671,46 @@ class QualityTestingBusinessService:
                                 CurrentTime=current_time,
                                 ProcessingSpeed=processing_speed
                             )
+                
+                time.sleep(0.1)  # Small delay to prevent excessive CPU usage
             
-            # Wait for process to complete
-            stdout, stderr = process.communicate()
-            
-            # Write any remaining output to debug file
-            # if stderr:
-            #     debug_file.write("=== FINAL STDERR ===\n")
-            #     debug_file.write(stderr)
-            #     debug_file.write("\n")
-            # if stdout:
-            #     debug_file.write("=== FINAL STDOUT ===\n")
-            #     debug_file.write(stdout)
-            #     debug_file.write("\n")
-            
-            # Close debug file
-            # debug_file.close()
-            
-            # Create a result object similar to subprocess.run
-            class FFmpegResult:
-                def __init__(self, returncode, stdout, stderr):
-                    self.returncode = returncode
-                    self.stdout = stdout
-                    self.stderr = stderr
-            
-            return FFmpegResult(process.returncode, stdout, stderr)
+            # Read any remaining output (only if process is still running)
+            try:
+                if Process.poll() is None:
+                    RemainingOutput = Process.stdout.read()
+                    if RemainingOutput:
+                        Lines = RemainingOutput.split('\n')
+                        for Line in Lines:
+                            if Line.strip():
+                                ProgressData = self.ParseFFmpegProgressLine(Line.strip(), JobDetails)
+                                if ProgressData and ProgressId:
+                                    progress_percent = ProgressData.get('progress_percent', 0)
+                                    current_time = ProgressData.get('current_time', '')
+                                    current_frame = ProgressData.get('current_frame', 0)
+                                    fps = ProgressData.get('fps', 0.0)
+                                    speed = ProgressData.get('speed', 0.0)
+                                    eta = ProgressData.get('eta', '')
+                                    
+                                    if current_frame > 0:
+                                        current_step = f"Processing VMAF analysis - {fps:.1f} fps"
+                                        processing_speed = f"{speed:.2f}x"
+                                        
+                                        self.UpdateProgressRecord(
+                                            ProgressId, 
+                                            "Processing", 
+                                            int(progress_percent), 
+                                            current_step, 
+                                            ETA=eta,
+                                            CurrentFrame=current_frame,
+                                            CurrentTime=current_time,
+                                            ProcessingSpeed=processing_speed
+                                        )
+            except (ValueError, OSError):
+                # Process stdout is closed, ignore
+                pass
             
         except Exception as e:
-            LoggingService.LogException("Error executing FFmpeg with progress monitoring", e, "QualityTestingBusinessService", "ExecuteFFmpegWithProgress")
-            # Let it fail - don't run a second FFmpeg process
-            raise
+            LoggingService.LogException("Exception monitoring VMAF progress", e, "QualityTestingBusinessService", "MonitorVMAFProgress")
     
     def ParseFFmpegProgressLine(self, line: str, JobDetails: dict = None) -> dict:
         """Parse progress information from FFmpeg output line."""

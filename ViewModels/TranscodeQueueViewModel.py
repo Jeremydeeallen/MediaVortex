@@ -30,13 +30,13 @@ class TranscodeQueueViewModel:
             # Get all queue items from service
             allQueueItems = self.QueueManagementService.DatabaseManager.GetAllTranscodeQueueItems()
             
-            # Sort items - Priority first, then SizeMB as tiebreaker
+            # Sort items - SizeMB first (largest files first)
             if SortBy == "SizeMB":
-                # Sort by priority first (DESC), then by size (DESC)
-                allQueueItems.sort(key=lambda x: (x.Priority or 0, x.SizeMB or 0), reverse=True)
+                # Sort by size (DESC), then by date added (ASC) as tiebreaker
+                allQueueItems.sort(key=lambda x: (x.SizeMB or 0, x.DateAdded or datetime.min), reverse=(SortOrder == "DESC"))
             elif SortBy == "Priority":
-                # Sort by priority first (DESC), then by size (DESC) as tiebreaker
-                allQueueItems.sort(key=lambda x: (x.Priority or 0, x.SizeMB or 0), reverse=True)
+                # Sort by size (DESC), then by date added (ASC) as tiebreaker
+                allQueueItems.sort(key=lambda x: (x.SizeMB or 0, x.DateAdded or datetime.min), reverse=(SortOrder == "DESC"))
             elif SortBy == "DateAdded":
                 allQueueItems.sort(key=lambda x: x.DateAdded or datetime.min, reverse=(SortOrder == "DESC"))
             elif SortBy == "FileName":

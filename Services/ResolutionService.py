@@ -298,6 +298,46 @@ class ResolutionService:
             LoggingService.LogException("Error finding matching threshold", e, "ResolutionService", "FindMatchingThreshold")
             return None
     
+    def CompareResolutions(self, SourceResolution: str, TargetResolution: str) -> int:
+        """
+        Compare two resolutions by height.
+        
+        Args:
+            SourceResolution: Source file resolution string
+            TargetResolution: Target resolution string
+            
+        Returns:
+            -1 if source < target, 0 if equal, 1 if source > target
+        """
+        try:
+            LoggingService.LogFunctionEntry("CompareResolutions", "ResolutionService", SourceResolution, TargetResolution)
+            
+            # Parse both resolutions
+            SourceWidth, SourceHeight = self.ParseResolution(SourceResolution or "")
+            TargetWidth, TargetHeight = self.ParseResolution(TargetResolution or "")
+            
+            # Handle missing or invalid resolutions
+            if SourceHeight is None or TargetHeight is None:
+                LoggingService.LogWarning(f"Could not parse resolutions: source={SourceResolution}, target={TargetResolution}", 
+                                        "ResolutionService", "CompareResolutions")
+                return 0  # Treat as equal to avoid blocking
+            
+            # Compare heights
+            if SourceHeight < TargetHeight:
+                result = -1
+            elif SourceHeight == TargetHeight:
+                result = 0
+            else:
+                result = 1
+            
+            LoggingService.LogDebug(f"Resolution comparison: {SourceResolution} ({SourceHeight}) vs {TargetResolution} ({TargetHeight}) = {result}", 
+                                    "ResolutionService", "CompareResolutions")
+            return result
+            
+        except Exception as e:
+            LoggingService.LogException("Error comparing resolutions", e, "ResolutionService", "CompareResolutions")
+            return 0  # Treat as equal to avoid blocking
+
     def ValidateResolutionMapping(self, ProfileThresholds: List) -> dict:
         """
         Validate all resolutions have proper mappings.

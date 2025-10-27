@@ -46,11 +46,19 @@ class QueueManagementBusinessService:
             
             itemsAdded = 0
             itemsSkipped = 0
+            itemsSkippedDueToResolution = 0
             
             for mediaFile in mediaFilesWithProfiles:
                 # Skip if already in queue or already successfully transcoded
                 if mediaFile.FilePath in existingFilePaths or mediaFile.FilePath in successfullyTranscodedPaths:
                     itemsSkipped += 1
+                    continue
+                
+                # Check if should skip due to resolution
+                shouldSkip, skipReason = self.ShouldSkipDueToResolution(mediaFile, mediaFile.AssignedProfile)
+                if shouldSkip:
+                    itemsSkippedDueToResolution += 1
+                    LoggingService.LogInfo(f"Skipped {mediaFile.FileName} due to resolution: {skipReason}", "QueueManagementBusinessService", "PopulateQueueFromMediaFiles")
                     continue
                 
                 # Create queue item (no need to find threshold since profile is already assigned)
@@ -75,20 +83,21 @@ class QueueManagementBusinessService:
                 if itemsSkipped == len(mediaFilesWithProfiles):
                     friendlyMessage = f"All {len(mediaFilesWithProfiles)} media files with assigned profiles are already in the queue or have been successfully transcoded. No new items were added."
                 else:
-                    friendlyMessage = f"No new items were added to the queue. {itemsSkipped} files were skipped (already in queue or transcoded)."
+                    friendlyMessage = f"No new items were added to the queue. {itemsSkipped} files were skipped (already in queue or transcoded), {itemsSkippedDueToResolution} files were skipped (resolution check)."
             else:
-                friendlyMessage = f"Successfully added {itemsAdded} items to the transcoding queue. {itemsSkipped} files were skipped (already in queue or transcoded)."
+                friendlyMessage = f"Successfully added {itemsAdded} items to the transcoding queue. {itemsSkipped} files were skipped (already in queue or transcoded), {itemsSkippedDueToResolution} files were skipped (resolution check)."
             
             result = {
                 "Success": True,
                 "ItemsEvaluated": len(mediaFilesWithProfiles),
                 "ItemsAdded": itemsAdded,
                 "ItemsSkipped": itemsSkipped,
+                "ItemsSkippedDueToResolution": itemsSkippedDueToResolution,
                 "MaxItems": MaxItems,
                 "Message": friendlyMessage
             }
             
-            LoggingService.LogInfo(f"Queue population completed: {itemsAdded} added, {itemsSkipped} skipped from {len(mediaFilesWithProfiles)} files with profiles", "QueueManagementBusinessService", "PopulateQueueFromMediaFiles")
+            LoggingService.LogInfo(f"Queue population completed: {itemsAdded} added, {itemsSkipped} skipped (duplicate/transcoded), {itemsSkippedDueToResolution} skipped (resolution check) from {len(mediaFilesWithProfiles)} files with profiles", "QueueManagementBusinessService", "PopulateQueueFromMediaFiles")
             return result
             
         except Exception as e:
@@ -224,6 +233,29 @@ class QueueManagementBusinessService:
         try:
             LoggingService.LogFunctionEntry("EvaluateThresholdCriteria", "QueueManagementBusinessService", MediaFile.FileName, DurationMinutes, Threshold.ProfileId)
             
+            # Check 1: Skip if already transcoded by MediaVortex
+            if MediaFile.TranscodedByMediaVortex:
+                LoggingService.LogDebug(f"Skipped {MediaFile.FileName}: already transcoded by MediaVortex", 
+                                       "QueueManagementBusinessService", "EvaluateThresholdCriteria")
+                return False
+            
+            # Check 2: Skip if source resolution <= target resolution
+            try:
+                # Get profile name from ProfileId
+                profile = self.DatabaseManager.GetProfileById(Threshold.ProfileId)
+                if profile and profile.ProfileName:
+                    shouldSkip, reason = self.ShouldSkipDueToResolution(MediaFile, profile.ProfileName)
+                    if shouldSkip:
+                        LoggingService.LogDebug(f"Skipped {MediaFile.FileName}: {reason}", 
+                                               "QueueManagementBusinessService", "EvaluateThresholdCriteria")
+                        return False
+                else:
+                    LoggingService.LogWarning(f"Could not get profile name for ProfileId {Threshold.ProfileId}, skipping resolution check", 
+                                            "QueueManagementBusinessService", "EvaluateThresholdCriteria")
+            except Exception as e:
+                LoggingService.LogException("Exception checking resolution skip", e, "QueueManagementBusinessService", "EvaluateThresholdCriteria")
+                # Continue with other checks if resolution check fails
+            
             # Check file size against threshold based on duration
             fileSizeMB = MediaFile.SizeMB or 0
             
@@ -295,48 +327,20 @@ class QueueManagementBusinessService:
             return None
     
     def CalculatePriority(self, MediaFile: MediaFileModel) -> int:
-        """Calculate priority for a queue item based on media file properties."""
+        """Calculate priority for a queue item based on file size (largest first)."""
         try:
             LoggingService.LogFunctionEntry("CalculatePriority", "QueueManagementBusinessService", MediaFile.FileName)
             
-            priority = 50  # Base priority
-            
-            # Adjust based on compression potential
-            compressionPotential = (MediaFile.CompressionPotential or "").lower()
-            if compressionPotential == "high":
-                priority += 30
-            elif compressionPotential == "medium":
-                priority += 15
-            elif compressionPotential == "low":
-                priority += 5
-            
-            # Adjust based on file size (larger files get higher priority)
+            # Use file size directly as priority (larger files = higher priority)
             sizeMB = MediaFile.SizeMB or 0
-            if sizeMB > 1000:  # > 1GB
-                priority += 20
-            elif sizeMB > 500:  # > 500MB
-                priority += 10
-            elif sizeMB > 100:  # > 100MB
-                priority += 5
+            priority = int(sizeMB)  # Convert to integer for priority
             
-            # Adjust based on duration (longer files get higher priority)
-            durationMinutes = MediaFile.DurationMinutes or 0
-            if durationMinutes > 120:  # > 2 hours
-                priority += 15
-            elif durationMinutes > 60:  # > 1 hour
-                priority += 10
-            elif durationMinutes > 30:  # > 30 minutes
-                priority += 5
-            
-            # Ensure priority is within reasonable bounds
-            priority = max(1, min(100, priority))
-            
-            LoggingService.LogDebug(f"Calculated priority {priority} for {MediaFile.FileName} (compression: {compressionPotential}, size: {sizeMB}MB, duration: {durationMinutes}min)", "QueueManagementBusinessService", "CalculatePriority")
+            LoggingService.LogDebug(f"Calculated priority {priority} for {MediaFile.FileName} (size: {sizeMB}MB)", "QueueManagementBusinessService", "CalculatePriority")
             return priority
             
         except Exception as e:
             LoggingService.LogException("Exception calculating priority", e, "QueueManagementBusinessService", "CalculatePriority")
-            return 50  # Default priority
+            return 0  # Default priority for files with no size
     
     def AddJobToQueue(self, MediaFileId: int, Priority: int = None, ProfileId: int = None, StartTime: str = None) -> Dict[str, Any]:
         """Add a specific media file to the transcoding queue. Simple logic: if it has a profile or user selects one, add it."""
@@ -375,6 +379,13 @@ class QueueManagementBusinessService:
             if not mediaFile.AssignedProfile or mediaFile.AssignedProfile.strip() == '':
                 errorMsg = f"File {mediaFile.FileName} has no profile assigned. Please select a profile first."
                 LoggingService.LogWarning(errorMsg, "QueueManagementBusinessService", "AddJobToQueue")
+                return {"Success": False, "ErrorMessage": errorMsg}
+            
+            # Check if should skip due to resolution
+            shouldSkip, skipReason = self.ShouldSkipDueToResolution(mediaFile, mediaFile.AssignedProfile)
+            if shouldSkip:
+                errorMsg = f"Cannot add {mediaFile.FileName} to queue: {skipReason}"
+                LoggingService.LogInfo(errorMsg, "QueueManagementBusinessService", "AddJobToQueue")
                 return {"Success": False, "ErrorMessage": errorMsg}
             
             # Create queue item directly from media file (no threshold matching needed)
@@ -518,6 +529,61 @@ class QueueManagementBusinessService:
             LoggingService.LogException("Exception getting queue statistics", e, "QueueManagementBusinessService", "GetQueueStatistics")
             return {}
     
+    def ShouldSkipDueToResolution(self, MediaFile: MediaFileModel, ProfileName: str) -> tuple[bool, str]:
+        """
+        Check if a media file should be skipped due to resolution being equal to or less than target.
+        
+        Args:
+            MediaFile: The media file to check
+            ProfileName: The assigned profile name
+            
+        Returns:
+            Tuple of (should_skip: bool, reason: str)
+        """
+        try:
+            LoggingService.LogFunctionEntry("ShouldSkipDueToResolution", "QueueManagementBusinessService", MediaFile.FileName, ProfileName)
+            
+            # Get profile thresholds for this file's resolution
+            profileThresholds = self.DatabaseManager.GetProfileThresholdsByProfileName(ProfileName)
+            if not profileThresholds:
+                LoggingService.LogWarning(f"No profile thresholds found for profile {ProfileName}", "QueueManagementBusinessService", "ShouldSkipDueToResolution")
+                return False, ""  # Allow to queue (fail-safe)
+            
+            # Find matching threshold for the file's resolution
+            from Services.ResolutionService import ResolutionService
+            resolutionService = ResolutionService()
+            matchingThreshold = resolutionService.FindMatchingThreshold(MediaFile.Resolution or "", profileThresholds)
+            
+            if not matchingThreshold:
+                LoggingService.LogWarning(f"No matching threshold found for resolution {MediaFile.Resolution} in profile {ProfileName}", "QueueManagementBusinessService", "ShouldSkipDueToResolution")
+                return False, ""  # Allow to queue (fail-safe)
+            
+            # Get the target resolution (TranscodeDownTo)
+            targetResolution = matchingThreshold.TranscodeDownTo or ""
+            
+            # Handle "No downscaling" case
+            if not targetResolution or targetResolution.strip() == "" or targetResolution.lower() == "no downscaling":
+                reason = f"Profile {ProfileName} has 'No downscaling' setting - no benefit to transcode"
+                LoggingService.LogInfo(f"Skipped {MediaFile.FileName}: {reason}", "QueueManagementBusinessService", "ShouldSkipDueToResolution")
+                return True, reason
+            
+            # Compare source vs target resolution
+            sourceResolution = MediaFile.Resolution or ""
+            comparison = resolutionService.CompareResolutions(sourceResolution, targetResolution)
+            
+            if comparison <= 0:  # Source <= target
+                reason = f"Source resolution {sourceResolution} is <= target resolution {targetResolution}"
+                LoggingService.LogInfo(f"Skipped {MediaFile.FileName}: {reason}", "QueueManagementBusinessService", "ShouldSkipDueToResolution")
+                return True, reason
+            
+            # Source > target, should transcode
+            LoggingService.LogDebug(f"File {MediaFile.FileName} will be added to queue: source {sourceResolution} > target {targetResolution}", "QueueManagementBusinessService", "ShouldSkipDueToResolution")
+            return False, ""
+            
+        except Exception as e:
+            LoggingService.LogException("Exception checking resolution skip", e, "QueueManagementBusinessService", "ShouldSkipDueToResolution")
+            return False, ""  # Allow to queue (fail-safe)
+
     def GetNextJob(self) -> Optional[TranscodeQueueModel]:
         """Get the next job to process from the queue."""
         try:
