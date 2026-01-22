@@ -298,9 +298,10 @@ class ResolutionService:
             LoggingService.LogException("Error finding matching threshold", e, "ResolutionService", "FindMatchingThreshold")
             return None
     
-    def CompareResolutions(self, SourceResolution: str, TargetResolution: str) -> int:
+    def CompareResolutions(self, SourceResolution: str, TargetResolution: str) -> Optional[int]:
         """
-        Compare two resolutions by height.
+        Compare two resolutions by normalizing to standard tiers first.
+        This handles non-standard resolutions (e.g., 1920x1040) by treating them as their nearest standard tier.
         
         Args:
             SourceResolution: Source file resolution string
@@ -308,6 +309,7 @@ class ResolutionService:
             
         Returns:
             -1 if source < target, 0 if equal, 1 if source > target
+            None if comparison cannot be determined (should result in skipping)
         """
         try:
             LoggingService.LogFunctionEntry("CompareResolutions", "ResolutionService", SourceResolution, TargetResolution)
@@ -316,27 +318,70 @@ class ResolutionService:
             SourceWidth, SourceHeight = self.ParseResolution(SourceResolution or "")
             TargetWidth, TargetHeight = self.ParseResolution(TargetResolution or "")
             
-            # Handle missing or invalid resolutions
+            # Handle missing or invalid resolutions - fail properly instead of defaulting
             if SourceHeight is None or TargetHeight is None:
-                LoggingService.LogWarning(f"Could not parse resolutions: source={SourceResolution}, target={TargetResolution}", 
-                                        "ResolutionService", "CompareResolutions")
-                return 0  # Treat as equal to avoid blocking
+                errorMsg = f"Could not parse resolutions: source={SourceResolution}, target={TargetResolution}"
+                LoggingService.LogError(errorMsg, "ResolutionService", "CompareResolutions")
+                return None  # Return None to signal failure - caller should skip
             
-            # Compare heights
-            if SourceHeight < TargetHeight:
+            # Normalize both resolutions to their standard height tiers
+            # This handles non-standard resolutions like 1920x1040 (essentially 1080p content)
+            SourceStandardHeight = self.GetStandardHeightForComparison(SourceWidth, SourceHeight)
+            TargetStandardHeight = self.GetStandardHeightForComparison(TargetWidth, TargetHeight)
+            
+            # Compare normalized standard heights
+            if SourceStandardHeight < TargetStandardHeight:
                 result = -1
-            elif SourceHeight == TargetHeight:
+            elif SourceStandardHeight == TargetStandardHeight:
                 result = 0
             else:
                 result = 1
             
-            LoggingService.LogDebug(f"Resolution comparison: {SourceResolution} ({SourceHeight}) vs {TargetResolution} ({TargetHeight}) = {result}", 
+            LoggingService.LogDebug(f"Resolution comparison: {SourceResolution} ({SourceHeight}) -> {SourceStandardHeight}p vs {TargetResolution} ({TargetHeight}) -> {TargetStandardHeight}p = {result}", 
                                     "ResolutionService", "CompareResolutions")
             return result
             
         except Exception as e:
             LoggingService.LogException("Error comparing resolutions", e, "ResolutionService", "CompareResolutions")
-            return 0  # Treat as equal to avoid blocking
+            return None  # Return None to signal failure - caller should skip
+    
+    def GetStandardHeightForComparison(self, Width: int, Height: int) -> int:
+        """
+        Get standard height tier for comparison purposes, handling non-standard resolutions.
+        For example, 1920x1040 is treated as 1080p tier since both dimensions indicate 1080p content.
+        
+        Args:
+            Width: Video width in pixels
+            Height: Video height in pixels
+            
+        Returns:
+            Standard height tier (2160, 1080, 720, or 480)
+        """
+        try:
+            # Handle 4K/UHD tier: width >= 3840 or height >= 2160
+            if Width >= 3840 or Height >= 2160:
+                return 2160
+            
+            # Handle 1080p tier: width >= 1920 and height >= 1000 (accounts for letterboxed/non-standard like 1920x1040)
+            # OR height >= 1080 (standard 1080p)
+            if (Width >= 1920 and Height >= 1000) or Height >= 1080:
+                return 1080
+            
+            # Handle 720p tier: width >= 1280 and height >= 700 OR height >= 720
+            if (Width >= 1280 and Height >= 700) or Height >= 720:
+                return 720
+            
+            # Handle 480p tier: height >= 480
+            if Height >= 480:
+                return 480
+            
+            # Default to 480p for very low resolutions
+            return 480
+            
+        except Exception as e:
+            LoggingService.LogException("Error getting standard height for comparison", e, "ResolutionService", "GetStandardHeightForComparison")
+            # Fallback: use basic height-based tier
+            return self.GetStandardHeight(Height)
 
     def ValidateResolutionMapping(self, ProfileThresholds: List) -> dict:
         """

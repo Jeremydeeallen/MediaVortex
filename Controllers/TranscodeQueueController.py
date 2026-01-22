@@ -59,20 +59,19 @@ def PopulateQueue():
         
         # Get parameters from request
         data = request.get_json() or {}
-        maxItems = data.get('MaxItems', 100)
         rootFolderPath = data.get('RootFolderPath')
+        profileId = data.get('ProfileId')
         
-        # Validate parameters
-        if not isinstance(maxItems, int) or maxItems < 1 or maxItems > 1000:
-            errorMsg = "MaxItems must be an integer between 1 and 1000"
+        if profileId is not None and (not isinstance(profileId, int) or profileId < 1):
+            errorMsg = "ProfileId must be a positive integer"
             LoggingService.LogError(errorMsg, "TranscodeQueueController", "PopulateQueue")
             return jsonify({"Success": False, "ErrorMessage": errorMsg}), 400
         
         # Create ViewModel instance
         viewModel = TranscodeQueueViewModel()
         
-        # Populate queue
-        result = viewModel.PopulateQueue(maxItems, rootFolderPath)
+        # Populate queue - no limits, all matching files are added
+        result = viewModel.PopulateQueue(rootFolderPath, profileId)
         
         if result.get("Success", False):
             itemsAdded = result.get("ItemsAdded", 0)

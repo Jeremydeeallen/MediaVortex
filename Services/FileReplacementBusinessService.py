@@ -182,6 +182,21 @@ class FileReplacementBusinessService:
                 LoggingService.LogInfo(f"Bypassing VMAF threshold check for manual replacement of attempt {TranscodeAttemptId}", 
                                      "FileReplacementBusinessService", "ProcessFileReplacementWithVMAF")
             
+            # CRITICAL: Check file size - never replace smaller file with larger file
+            # This is especially important when CRF is lowered (higher quality = larger file size)
+            if transcode_attempt.NewSizeBytes is not None and transcode_attempt.OldSizeBytes is not None:
+                if transcode_attempt.NewSizeBytes >= transcode_attempt.OldSizeBytes:
+                    errorMsg = f"Cannot replace file: transcoded file is not smaller than original (New: {transcode_attempt.NewSizeBytes:,} bytes >= Old: {transcode_attempt.OldSizeBytes:,} bytes)"
+                    
+                    # Log rejection at Warning level
+                    logMessage = f"File replacement rejected due to size: {original_path}. Original: {transcode_attempt.OldSizeBytes:,} bytes, Transcoded: {transcode_attempt.NewSizeBytes:,} bytes. VMAF: {VMAFScore:.2f}"
+                    LoggingService.LogWarning(logMessage, "FileReplacementBusinessService", "ProcessFileReplacementWithVMAF")
+                    
+                    return {
+                        'Success': False,
+                        'ErrorMessage': errorMsg
+                    }
+            
             # Get KeepSource setting from profile threshold
             keep_source = self.DatabaseManager.GetKeepSourceSetting(transcode_attempt.Id)
             if keep_source is None:
@@ -344,6 +359,22 @@ class FileReplacementBusinessService:
             else:
                 LoggingService.LogInfo(f"Bypassing VMAF threshold check for manual replacement of attempt {TranscodeAttemptId}", 
                                      "FileReplacementBusinessService", "ProcessFileReplacement")
+            
+            # CRITICAL: Check file size - never replace smaller file with larger file
+            # This is especially important when CRF is lowered (higher quality = larger file size)
+            if transcode_attempt.NewSizeBytes is not None and transcode_attempt.OldSizeBytes is not None:
+                if transcode_attempt.NewSizeBytes >= transcode_attempt.OldSizeBytes:
+                    errorMsg = f"Cannot replace file: transcoded file is not smaller than original (New: {transcode_attempt.NewSizeBytes:,} bytes >= Old: {transcode_attempt.OldSizeBytes:,} bytes)"
+                    
+                    # Log rejection at Warning level
+                    vmafScore = transcode_attempt.VMAF or 0.0
+                    logMessage = f"File replacement rejected due to size: {original_path}. Original: {transcode_attempt.OldSizeBytes:,} bytes, Transcoded: {transcode_attempt.NewSizeBytes:,} bytes. VMAF: {vmafScore:.2f}"
+                    LoggingService.LogWarning(logMessage, "FileReplacementBusinessService", "ProcessFileReplacement")
+                    
+                    return {
+                        'Success': False,
+                        'ErrorMessage': errorMsg
+                    }
             
             # Get KeepSource setting from profile threshold
             keep_source = self.DatabaseManager.GetKeepSourceSetting(transcode_attempt.Id)

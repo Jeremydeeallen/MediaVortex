@@ -64,4 +64,41 @@ Manual quality test controls: GUI for manually triggering quality tests, batch o
 
 Database transaction management: Implement proper transaction handling for cross-service data updates and rollback mechanisms for partial failures.
 
-Hard Coded FileManagerService 
+Hard Coded FileManagerService
+
+## Profile Architecture Refactoring
+
+Refactor profile system to be more semantic and easier to manage. Currently profiles are tied to specific CRF values (e.g., "720p CRF 42 12grain", "720p CRF 36 HD 8 grain"). 
+
+**Proposed Structure:**
+
+### Profile Categories:
+1. **Resolution Strategy**
+   - "Downscale to 720p" - Target resolution of 720p
+   - "Downscale to 1080p" - Target resolution of 1080p  
+   - "Compress without downscaling" - Keep same resolution, reduce file size
+   - "No downscaling" - Maintain original resolution
+
+2. **Media Type Options**
+   - "With Film Grain" - Film grain settings enabled (for grainy content)
+   - "Clean/No Grain" - No film grain settings (for clean content)
+   - "Animation" - Optimized settings for animated content
+   - "Live Action" - Default settings for live-action content
+
+3. **Quality Tier (Dynamic CRF range)**
+   - "Aggressive" - CRF 40-45 (maximum compression, lower quality)
+   - "Balanced" - CRF 30-35 (good balance of size and quality)
+   - "High Quality" - CRF 25-30 (prioritize quality)
+   - "Maximum" - CRF 20-25 (highest quality, largest files)
+
+**Benefits:**
+- More user-friendly profile selection (select resolution + grain type, not CRF numbers)
+- CRF becomes a calculated value based on quality tier and adaptive adjustment
+- Easier to understand what each profile does
+- Better separation of concerns (resolution strategy vs media characteristics vs quality)
+
+**Implementation Notes:**
+- Would require database schema changes to Profiles and ProfileThresholds tables
+- CRF would be calculated dynamically based on quality tier + adaptive adjustments
+- Migration script needed to convert existing profiles to new structure
+- UI changes required for new profile selection interface 

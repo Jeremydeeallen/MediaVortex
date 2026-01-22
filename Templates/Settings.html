@@ -155,6 +155,117 @@
                 </div>
             </div>
         </div>
+
+        <!-- CPU Affinity Settings Section -->
+        <div class="card mt-4">
+            <div class="card-header bg-light" data-bs-toggle="collapse" data-bs-target="#CpuAffinitySection" style="cursor: pointer;">
+                <div class="d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">
+                        <i class="fas fa-thermometer-half"></i> CPU Affinity Settings
+                    </h5>
+                    <i class="fas fa-chevron-up"></i>
+                </div>
+            </div>
+            <div class="collapse show" id="CpuAffinitySection">
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <div class="form-check form-switch mb-3">
+                                    <input class="form-check-input" type="checkbox" id="CpuAffinityEnabled" checked>
+                                    <label class="form-check-label" for="CpuAffinityEnabled">
+                                        <strong>Enable Dynamic CPU Affinity</strong>
+                                    </label>
+                                    <div class="form-text">
+                                        When enabled, the system automatically selects the coolest available CPU cores for transcoding and quality testing, with continuous temperature monitoring and automatic core migration if temperatures exceed critical thresholds.
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="CpuAffinityTemperatureThreshold" class="form-label">Temperature Threshold (°C)</label>
+                                <input type="number" class="form-control" id="CpuAffinityTemperatureThreshold" min="85" max="100" step="0.1" value="98.0">
+                                <div class="form-text">
+                                    Core temperature threshold for automatic migration during active transcoding. If any core exceeds this temperature, work will be migrated to cooler cores.
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="CpuAffinityMonitoringInterval" class="form-label">Monitoring Interval (seconds)</label>
+                                <input type="number" class="form-control" id="CpuAffinityMonitoringInterval" min="15" max="120" value="45">
+                                <div class="form-text">
+                                    How frequently to check core temperatures during active transcoding jobs (15-120 seconds). Lower values provide more frequent monitoring but use more system resources.
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label class="form-label">Status Information</label>
+                                <div class="alert alert-info">
+                                    <i class="fas fa-info-circle"></i>
+                                    <strong>Current Status:</strong> <span id="CpuAffinityStatus">Loading...</span>
+                                    <br><strong>Active Jobs:</strong> <span id="CpuAffinityActiveJobs">0</span>
+                                    <br><strong>Monitoring:</strong> <span id="CpuAffinityMonitoringStatus">Inactive</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-12">
+                            <hr>
+                            <h6 class="mb-3">Post-Job Cooling Wait</h6>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-4">
+                            <div class="mb-3">
+                                <div class="form-check form-switch mb-3">
+                                    <input class="form-check-input" type="checkbox" id="CpuAffinityCoolingWaitEnabled" checked>
+                                    <label class="form-check-label" for="CpuAffinityCoolingWaitEnabled">
+                                        <strong>Wait for Cooling After Job</strong>
+                                    </label>
+                                    <div class="form-text">
+                                        After a transcoding/quality test job completes, wait for CPU cores to cool below target temperature before starting the next job.
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="mb-3">
+                                <label for="CpuAffinityCoolingWaitTargetTemp" class="form-label">Cooling Target Temperature (°C)</label>
+                                <input type="number" class="form-control" id="CpuAffinityCoolingWaitTargetTemp" min="50" max="85" step="0.1" value="60.0">
+                                <div class="form-text">
+                                    Wait until all cores used by the job drop below this temperature before proceeding (50-85°C). Should be near idle temperature (typically 55-60°C).
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="mb-3">
+                                <label for="CpuAffinityCoolingWaitMaxSeconds" class="form-label">Maximum Wait Time (seconds)</label>
+                                <input type="number" class="form-control" id="CpuAffinityCoolingWaitMaxSeconds" min="30" max="300" value="300">
+                                <div class="form-text">
+                                    Maximum time to wait for cooling before proceeding anyway (30-300 seconds, default 300 = 5 minutes). Prevents indefinite blocking if cores are slow to cool.
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-12">
+                            <button class="btn btn-primary" onclick="SaveCpuAffinitySettings()">
+                                <i class="fas fa-save"></i> Save CPU Affinity Settings
+                            </button>
+                            <button class="btn btn-secondary ms-2" onclick="LoadCpuAffinitySettings()">
+                                <i class="fas fa-sync"></i> Reload Settings
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 </div>
 
@@ -1302,11 +1413,174 @@ function UpdateCpuInfo() {
 // Load CPU settings when page loads
 $(document).ready(function() {
     LoadCpuSettings();
+    LoadCpuAffinitySettings();
     
     // Update CPU info when value changes
     $('#MaxCpuThreads').on('input', function() {
         UpdateCpuInfo();
     });
 });
+
+// CPU Affinity Settings Functions
+function SaveCpuAffinitySettings() {
+    const Enabled = $('#CpuAffinityEnabled').is(':checked') ? 'true' : 'false';
+    const TemperatureThreshold = $('#CpuAffinityTemperatureThreshold').val();
+    const MonitoringInterval = $('#CpuAffinityMonitoringInterval').val();
+    const CoolingWaitEnabled = $('#CpuAffinityCoolingWaitEnabled').is(':checked') ? 'true' : 'false';
+    const CoolingWaitTargetTemp = $('#CpuAffinityCoolingWaitTargetTemp').val();
+    const CoolingWaitMaxSeconds = $('#CpuAffinityCoolingWaitMaxSeconds').val();
+    
+    // Validate inputs
+    if (!TemperatureThreshold || TemperatureThreshold < 85 || TemperatureThreshold > 100) {
+        ShowAlert('Please enter a valid temperature threshold between 85 and 100°C', 'warning');
+        return;
+    }
+    
+    if (!MonitoringInterval || MonitoringInterval < 15 || MonitoringInterval > 120) {
+        ShowAlert('Please enter a valid monitoring interval between 15 and 120 seconds', 'warning');
+        return;
+    }
+    
+    if (!CoolingWaitTargetTemp || CoolingWaitTargetTemp < 50 || CoolingWaitTargetTemp > 85) {
+        ShowAlert('Please enter a valid cooling target temperature between 50 and 85°C', 'warning');
+        return;
+    }
+    
+    if (!CoolingWaitMaxSeconds || CoolingWaitMaxSeconds < 30 || CoolingWaitMaxSeconds > 300) {
+        ShowAlert('Please enter a valid maximum wait time between 30 and 300 seconds', 'warning');
+        return;
+    }
+    
+    ShowAlert('Saving CPU affinity settings...', 'info');
+    
+    // Save each setting
+    const Settings = [
+        { Key: 'CpuAffinityEnabled', Value: Enabled, Description: 'Enable dynamic CPU affinity selection and monitoring', DataType: 'boolean' },
+        { Key: 'CpuAffinityTemperatureThreshold', Value: TemperatureThreshold, Description: 'Temperature threshold in Celsius for core migration during active transcoding', DataType: 'float' },
+        { Key: 'CpuAffinityMonitoringInterval', Value: MonitoringInterval, Description: 'Seconds between temperature checks during active transcoding', DataType: 'integer' },
+        { Key: 'CpuAffinityCoolingWaitEnabled', Value: CoolingWaitEnabled, Description: 'Wait for CPU cores to cool below target temperature after job completion before proceeding', DataType: 'boolean' },
+        { Key: 'CpuAffinityCoolingWaitTargetTemp', Value: CoolingWaitTargetTemp, Description: 'Target temperature in Celsius to wait for after job completion (50-85°C)', DataType: 'float' },
+        { Key: 'CpuAffinityCoolingWaitMaxSeconds', Value: CoolingWaitMaxSeconds, Description: 'Maximum seconds to wait for cooling after job completion (30-300 seconds)', DataType: 'integer' }
+    ];
+    
+    let SavedCount = 0;
+    let FailedCount = 0;
+    
+    Settings.forEach(function(Setting) {
+        $.ajax({
+            url: '/api/SystemSettings/' + Setting.Key,
+            method: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({
+                Value: Setting.Value,
+                Description: Setting.Description,
+                DataType: Setting.DataType
+            }),
+            success: function(Response) {
+                if (Response.Success) {
+                    SavedCount++;
+                    if (SavedCount + FailedCount === Settings.length) {
+                        if (FailedCount === 0) {
+                            ShowAlert('CPU affinity settings saved successfully', 'success');
+                            LoadCpuAffinitySettings();
+                        } else {
+                            ShowAlert(`Saved ${SavedCount} of ${Settings.length} settings. ${FailedCount} failed.`, 'warning');
+                        }
+                    }
+                } else {
+                    FailedCount++;
+                    if (SavedCount + FailedCount === Settings.length) {
+                        ShowAlert('Failed to save some CPU affinity settings', 'danger');
+                    }
+                }
+            },
+            error: function() {
+                FailedCount++;
+                if (SavedCount + FailedCount === Settings.length) {
+                    ShowAlert('Failed to save CPU affinity settings', 'danger');
+                }
+            }
+        });
+    });
+}
+
+function LoadCpuAffinitySettings() {
+    // Load CpuAffinityEnabled
+    $.get('/api/SystemSettings/CpuAffinityEnabled')
+        .done(function(Response) {
+            if (Response.Success && Response.Value) {
+                $('#CpuAffinityEnabled').prop('checked', Response.Value.toLowerCase() === 'true');
+            }
+        })
+        .fail(function() {
+            $('#CpuAffinityEnabled').prop('checked', true); // Default to enabled
+        });
+    
+    // Load TemperatureThreshold
+    $.get('/api/SystemSettings/CpuAffinityTemperatureThreshold')
+        .done(function(Response) {
+            if (Response.Success && Response.Value) {
+                $('#CpuAffinityTemperatureThreshold').val(Response.Value);
+            }
+        })
+        .fail(function() {
+            $('#CpuAffinityTemperatureThreshold').val('98.0'); // Default
+        });
+    
+    // Load MonitoringInterval
+    $.get('/api/SystemSettings/CpuAffinityMonitoringInterval')
+        .done(function(Response) {
+            if (Response.Success && Response.Value) {
+                $('#CpuAffinityMonitoringInterval').val(Response.Value);
+            }
+        })
+        .fail(function() {
+            $('#CpuAffinityMonitoringInterval').val('45'); // Default
+        });
+    
+    // Load CoolingWaitEnabled
+    $.get('/api/SystemSettings/CpuAffinityCoolingWaitEnabled')
+        .done(function(Response) {
+            if (Response.Success && Response.Value) {
+                $('#CpuAffinityCoolingWaitEnabled').prop('checked', Response.Value.toLowerCase() === 'true');
+            }
+        })
+        .fail(function() {
+            $('#CpuAffinityCoolingWaitEnabled').prop('checked', true); // Default
+        });
+    
+    // Load CoolingWaitTargetTemp
+    $.get('/api/SystemSettings/CpuAffinityCoolingWaitTargetTemp')
+        .done(function(Response) {
+            if (Response.Success && Response.Value) {
+                $('#CpuAffinityCoolingWaitTargetTemp').val(Response.Value);
+            }
+        })
+        .fail(function() {
+            $('#CpuAffinityCoolingWaitTargetTemp').val('60.0'); // Default
+        });
+    
+    // Load CoolingWaitMaxSeconds
+    $.get('/api/SystemSettings/CpuAffinityCoolingWaitMaxSeconds')
+        .done(function(Response) {
+            if (Response.Success && Response.Value) {
+                $('#CpuAffinityCoolingWaitMaxSeconds').val(Response.Value);
+            }
+        })
+        .fail(function() {
+            $('#CpuAffinityCoolingWaitMaxSeconds').val('300'); // Default (5 minutes)
+        });
+    
+    // Update status (this would need an API endpoint or periodic refresh)
+    UpdateCpuAffinityStatus();
+}
+
+function UpdateCpuAffinityStatus() {
+    // TODO: This would need an API endpoint to get current status from CpuAffinityService
+    // For now, just show placeholder
+    $('#CpuAffinityStatus').text('Enabled');
+    $('#CpuAffinityActiveJobs').text('0');
+    $('#CpuAffinityMonitoringStatus').text('Active');
+}
 </script>
 {% endblock %}

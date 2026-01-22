@@ -191,11 +191,7 @@
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body">
-                <div class="mb-3">
-                    <label for="MaxItemsInput" class="form-label">Maximum Items to Add</label>
-                    <input type="number" class="form-control" id="MaxItemsInput" value="10" min="1" max="1000">
-                    <div class="form-text">Maximum number of items to add to the queue (1-1000)</div>
-                </div>
+                <p>All matching files will be added to the queue. No limit is applied.</p>
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
@@ -652,15 +648,13 @@ class TranscodeQueueManager {
 
 
     async populateQueue() {
-        const maxItems = parseInt(document.getElementById('MaxItemsInput').value);
-        
         try {
             const response = await fetch('/api/TranscodeQueue/PopulateQueue', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
                 },
-                body: JSON.stringify({ MaxItems: maxItems })
+                body: JSON.stringify({})
             });
 
             const data = await response.json();
@@ -977,17 +971,12 @@ class TranscodeQueueManager {
                 <td>${this.formatDate(folder.LastScannedDate)}</td>
                 <td>${folder.TotalSizeGB}</td>
                 <td>
-                    <div class="d-flex gap-2">
-                        <select class="form-select form-select-sm" id="RootFolderProfileSelect_${folder.Id}" style="min-width: 150px;">
-                            <option value="">Select Profile...</option>
-                        </select>
-                        <button class="btn btn-sm btn-primary" onclick="queueManager.assignProfileToRootFolder(${folder.Id}, '${escapedPath}')" title="Apply Profile">
-                            <i class="fas fa-check"></i>
-                        </button>
-                    </div>
+                    <select class="form-select form-select-sm" id="RootFolderProfileSelect_${folder.Id}" style="min-width: 150px;">
+                        <option value="">Select Profile...</option>
+                    </select>
                 </td>
                 <td>
-                    <button class="btn btn-sm btn-outline-success" onclick="queueManager.addFolderToQueue('${escapedPath}')" title="Add to Queue">
+                    <button class="btn btn-sm btn-outline-success" onclick="queueManager.addFolderToQueue(${folder.Id}, '${escapedPath}')" title="Add to Queue">
                         <i class="fas fa-plus"></i> Add to Queue
                     </button>
                 </td>
@@ -1207,17 +1196,28 @@ class TranscodeQueueManager {
         }
     }
 
-    async addFolderToQueue(rootFolderPath) {
+    async addFolderToQueue(folderId, rootFolderPath) {
         try {
+            // Get selected profile ID from dropdown (optional - files may already have profiles assigned)
+            const profileSelect = document.getElementById(`RootFolderProfileSelect_${folderId}`);
+            const profileIdValue = profileSelect ? profileSelect.value : null;
+            
+            // Build request body - ProfileId is optional
+            const requestBody = { 
+                RootFolderPath: rootFolderPath
+            };
+            
+            // Only include ProfileId if one is selected
+            if (profileIdValue && profileIdValue !== '') {
+                requestBody.ProfileId = parseInt(profileIdValue);
+            }
+            
             const response = await fetch('/api/TranscodeQueue/PopulateQueue', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
                 },
-                body: JSON.stringify({ 
-                    MaxItems: 50,
-                    RootFolderPath: rootFolderPath 
-                })
+                body: JSON.stringify(requestBody)
             });
 
             const data = await response.json();

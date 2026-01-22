@@ -1,72 +1,107 @@
-# MediaVortex Service Architecture (MVVM + KISS), Database Driven decisions, MicroServices can read from each others tables but can only insert, update and delete from their own tables.
-## Simple Quality Testing Flow: User Click → Direct FFmpeg VMAF Test
+# MediaVortex Architecture
 
-### 1. User Clicks "Start Quality Test" Button
-- **View**: `Templates/Queue.html` → `StartQualityTest(jobId)`
-- **Action**: API call to `/api/QualityTest/Start` with JobId
+## System Overview
+MediaVortex is a comprehensive media transcoding and management system built using the MVVM (Model-View-ViewModel) pattern with Python Flask backend and modern web frontend.
 
-### 2. QualityTest Controller Processes Request
-- **Controller**: `QualityTestController.py` → `StartQualityTest()`
-- **Action**: 
-  - Gets job details from `QualityTestingQueue` table
-  - Creates active job record in `ActiveJobs` table
-  - Runs FFmpeg VMAF comparison directly
+## Core Components
 
-### 3. Direct FFmpeg VMAF Test
-- **Execution**: `RunFFmpegVMAF()` method runs FFmpeg subprocess
-- **Command**: `ffmpeg -i transcoded_file -i original_file -lavfi libvmaf=model_path=model/vmaf_v0.6.1.pkl -f null -`
-- **Result**: Parses VMAF score from FFmpeg output
+### Services Layer
+- **SystemMonitoringService**: Monitors system resources including CPU, memory, disk usage, and temperature
+- **TranscodeService**: Handles media file transcoding operations
+- **QualityTestService**: Performs quality analysis and VMAF testing
+- **WebService**: Provides REST API and web interface
 
-### 4. Database Update
-- **Action**: Updates `QualityTestingQueue` table with results
-- **Fields**: Status, VMAFScore, CompletedDate
-- **Cleanup**: Completes active job record
+### Models Layer
+- **TranscodeFileModel**: Represents media files and their transcoding status
+- **TranscodeProfileModel**: Defines transcoding parameters and settings
+- **MediaFileModel**: Handles media file metadata and analysis
+- **SystemResourceModel**: Manages system monitoring data
 
-### 5. Frontend Update
-- **View**: `Templates/Queue.html` displays updated status
-- **Refresh**: Auto-refresh shows completed quality test results
+### ViewModels Layer
+- **TranscodingViewModel**: Handles transcoding operations and progress
+- **SystemMonitoringViewModel**: Manages system resource display and alerts
+- **QualityTestingViewModel**: Controls quality analysis workflows
 
-## MVVM Architecture
+### Views Layer
+- **Templates**: HTML templates with Bootstrap styling
+- **Static Assets**: CSS, JavaScript, and media files
+- **API Endpoints**: RESTful API for frontend communication
 
-### Models (Data)
-- **QualityTestingQueue**: Files to test (simplified structure)
-- **ActiveJobs**: Concurrent job tracking
-- **ServiceStatus**: Service states
+## Technology Stack
 
-### Controllers (Business Logic)
-- **QualityTestController**: Simple quality testing logic
-  - `StartQualityTest()`: Direct FFmpeg execution
-  - `GetQualityTestStatus()`: Get job status
-  - `GetQualityTestQueue()`: Get all jobs
+### Backend
+- **Python 3.x**: Core application language
+- **Flask**: Web framework and API server
+- **SQLite**: Database for configuration and job tracking
+- **FFmpeg**: Media transcoding engine
+- **psutil**: System resource monitoring
 
-### Views (UI)
-- **Queue.html**: Quality testing interface with simple controls
+### Frontend
+- **HTML5**: Markup structure
+- **Bootstrap 5**: Responsive UI framework
+- **JavaScript (ES6+)**: Client-side functionality
+- **Chart.js**: Data visualization
 
-## KISS Principle
+### External Dependencies
+- **LibreHardwareMonitor**: Advanced hardware monitoring and temperature detection
+- **Core Temp**: CPU temperature monitoring (alternative)
+- **HWiNFO64**: System information and monitoring (alternative)
 
-**One responsibility per component:**
-- **QualityTestController**: Direct quality testing with FFmpeg
-- **TranscodeService**: Transcoding only
-- **WebService**: Web interface only
+## System Monitoring Architecture
 
-**Simple Quality Testing Architecture:**
-- **Maximum 4 method calls**: Frontend → Controller → DatabaseManager → Database → FFmpeg
-- **No complex threading**: Simple subprocess calls
-- **No service architecture**: Direct controller execution
-- **Direct database operations**: No complex data models
+### Temperature Monitoring Decision
+**Decision**: Use LibreHardwareMonitor as the primary temperature monitoring solution.
 
-## Simple Data Flow
+**Rationale**:
+- Provides detailed individual core temperature readings
+- Creates WMI namespaces for programmatic access
+- More accurate than basic WMI thermal zones
+- Active development with recent Intel Gen 14 support
+- Compatible with existing WMI-based monitoring infrastructure
 
-1. User clicks "Start Quality Test" → QualityTestController
-2. Controller gets job details → DatabaseManager
-3. Controller runs FFmpeg VMAF → Direct subprocess call
-4. Controller updates results → DatabaseManager
-5. Frontend refreshes → Shows updated status
+**Implementation**:
+- LibreHardwareMonitor runs as a background service
+- SystemMonitoringService accesses temperature data via WMI
+- Status page displays overall CPU temperature with core details on hover
+- Fallback to other methods if LibreHardwareMonitor unavailable
 
-## Benefits of Simple Architecture
+### Temperature Display Strategy
+- **Primary Display**: Show CPU Package temperature (overall CPU temp)
+- **Hover Details**: Display individual core temperatures and statistics
+- **Fallback Hierarchy**: LibreHardwareMonitor → OpenHardwareMonitor → WMI Thermal Zone → HWiNFO64
 
-- **No complex service orchestration**: Direct execution
-- **No threading complexity**: Simple subprocess calls
-- **No memory leaks**: No long-running threads
-- **Easy debugging**: Clear execution path
-- **Fast execution**: No service startup overhead
+## Database Schema
+- **TranscodeJobs**: Job queue and status tracking
+- **TranscodeProfiles**: Transcoding parameter definitions
+- **SystemSettings**: Application configuration
+- **QualityTestResults**: VMAF and quality analysis data
+
+## API Design
+- **RESTful endpoints** for all operations
+- **JSON responses** with consistent error handling
+- **Real-time updates** via polling for status changes
+- **Resource-based URLs** following REST conventions
+
+## Security Considerations
+- **Input validation** for all user inputs
+- **SQL injection prevention** using parameterized queries
+- **File system access controls** for media file operations
+- **Process isolation** for transcoding operations
+
+## Performance Optimization
+- **Asynchronous processing** for long-running operations
+- **Resource monitoring** to prevent system overload
+- **Queue management** for transcoding jobs
+- **Caching strategies** for frequently accessed data
+
+## Deployment Architecture
+- **Microservices**: Separate services for different functions
+- **Docker support**: Containerized deployment options
+- **Configuration management**: Environment-based settings
+- **Logging**: Comprehensive logging across all services
+
+## Future Enhancements
+- **GPU acceleration** support for transcoding
+- **Distributed processing** across multiple nodes
+- **Advanced quality metrics** beyond VMAF
+- **Real-time monitoring dashboard** with WebSocket updates

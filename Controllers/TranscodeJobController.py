@@ -467,3 +467,131 @@ def ResumeTranscoding():
         errorMsg = f"Exception resuming transcoding: {str(e)}"
         LoggingService.LogException(errorMsg, e, "TranscodeJobController", "ResumeTranscoding")
         return jsonify({"Success": False, "ErrorMessage": errorMsg}), 500
+
+
+@TranscodeJobBlueprint.route('/SetPreferredAttempt/<int:attempt_id>', methods=['POST'])
+def SetPreferredAttempt(attempt_id: int):
+    """Set or unset a transcode attempt as preferred to prevent further retranscoding."""
+    try:
+        LoggingService.LogFunctionEntry("SetPreferredAttempt", "TranscodeJobController", attempt_id)
+        
+        from Repositories.DatabaseManager import DatabaseManager
+        db_manager = DatabaseManager()
+        
+        # Get request data
+        data = request.get_json() or {}
+        is_preferred = data.get('IsPreferred', True)
+        
+        # Get the attempt to find its file path
+        attempt = db_manager.GetTranscodeAttemptById(attempt_id)
+        if not attempt:
+            errorMsg = f"Transcode attempt {attempt_id} not found"
+            LoggingService.LogError(errorMsg, "TranscodeJobController", "SetPreferredAttempt")
+            return jsonify({"Success": False, "ErrorMessage": errorMsg}), 404
+        
+        # Set preferred status
+        success = db_manager.SetPreferredAttempt(attempt_id, attempt.FilePath, is_preferred)
+        
+        if success:
+            action = "set as preferred" if is_preferred else "unset as preferred"
+            LoggingService.LogInfo(f"Successfully {action} for attempt {attempt_id}", 
+                                 "TranscodeJobController", "SetPreferredAttempt")
+            return jsonify({
+                "Success": True,
+                "Message": f"Attempt {attempt_id} {action} successfully",
+                "AttemptId": attempt_id,
+                "IsPreferred": is_preferred
+            })
+        else:
+            errorMsg = f"Failed to set preferred status for attempt {attempt_id}"
+            LoggingService.LogError(errorMsg, "TranscodeJobController", "SetPreferredAttempt")
+            return jsonify({"Success": False, "ErrorMessage": errorMsg}), 500
+            
+    except Exception as e:
+        errorMsg = f"Exception setting preferred attempt: {str(e)}"
+        LoggingService.LogException(errorMsg, e, "TranscodeJobController", "SetPreferredAttempt")
+        return jsonify({"Success": False, "ErrorMessage": errorMsg}), 500
+
+
+@TranscodeJobBlueprint.route('/SetCRFOverride', methods=['POST'])
+def SetCRFOverride():
+    """Set or clear a CRF override for a specific file to retry at a specific CRF value."""
+    try:
+        LoggingService.LogFunctionEntry("SetCRFOverride", "TranscodeJobController")
+        
+        from Repositories.DatabaseManager import DatabaseManager
+        db_manager = DatabaseManager()
+        
+        # Get request data
+        data = request.get_json() or {}
+        file_path = data.get('FilePath')
+        crf_value = data.get('CRF')
+        
+        # Validate inputs
+        if not file_path:
+            errorMsg = "FilePath is required"
+            LoggingService.LogError(errorMsg, "TranscodeJobController", "SetCRFOverride")
+            return jsonify({"Success": False, "ErrorMessage": errorMsg}), 400
+        
+        # If CRF is None or not provided, clear the override
+        if crf_value is None:
+            normalized_path = file_path.lower().replace('\\', '/')
+            override_key = f"CRFOverride_{normalized_path}"
+            success = db_manager.DeleteSystemSetting(override_key)
+            
+            if success:
+                LoggingService.LogInfo(f"Cleared CRF override for {file_path}", 
+                                     "TranscodeJobController", "SetCRFOverride")
+                return jsonify({
+                    "Success": True,
+                    "Message": f"CRF override cleared for {file_path}",
+                    "FilePath": file_path,
+                    "CRF": None
+                })
+            else:
+                # Setting might not exist, which is fine
+                LoggingService.LogInfo(f"CRF override not found for {file_path} (may not have been set)", 
+                                     "TranscodeJobController", "SetCRFOverride")
+                return jsonify({
+                    "Success": True,
+                    "Message": f"CRF override cleared for {file_path}",
+                    "FilePath": file_path,
+                    "CRF": None
+                })
+        
+        # Validate CRF value
+        try:
+            crf_int = int(crf_value)
+            if crf_int < 15 or crf_int > 51:
+                errorMsg = f"CRF value must be between 15 and 51, got {crf_int}"
+                LoggingService.LogError(errorMsg, "TranscodeJobController", "SetCRFOverride")
+                return jsonify({"Success": False, "ErrorMessage": errorMsg}), 400
+        except (ValueError, TypeError):
+            errorMsg = f"Invalid CRF value: {crf_value}. Must be an integer."
+            LoggingService.LogError(errorMsg, "TranscodeJobController", "SetCRFOverride")
+            return jsonify({"Success": False, "ErrorMessage": errorMsg}), 400
+        
+        # Set the override
+        normalized_path = file_path.lower().replace('\\', '/')
+        override_key = f"CRFOverride_{normalized_path}"
+        description = f"CRF override for {file_path} - will use CRF {crf_int} instead of adaptive quality calculation"
+        success = db_manager.AddOrUpdateSystemSetting(override_key, str(crf_int), description, 'integer')
+        
+        if success:
+            LoggingService.LogInfo(f"Set CRF override for {file_path} to CRF {crf_int}", 
+                                 "TranscodeJobController", "SetCRFOverride")
+            return jsonify({
+                "Success": True,
+                "Message": f"CRF override set to {crf_int} for {file_path}",
+                "FilePath": file_path,
+                "CRF": crf_int
+            })
+        else:
+            errorMsg = f"Failed to set CRF override for {file_path}"
+            LoggingService.LogError(errorMsg, "TranscodeJobController", "SetCRFOverride")
+            return jsonify({"Success": False, "ErrorMessage": errorMsg}), 500
+            
+    except Exception as e:
+        errorMsg = f"Exception setting CRF override: {str(e)}"
+        LoggingService.LogException(errorMsg, e, "TranscodeJobController", "SetCRFOverride")
+        return jsonify({"Success": False, "ErrorMessage": errorMsg}), 500

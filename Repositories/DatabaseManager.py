@@ -382,7 +382,11 @@ class DatabaseManager:
         query = """
             SELECT Id, SeasonId, FilePath, FileName, SizeMB, VideoBitrateKbps, AudioBitrateKbps,
                    Resolution, Codec, DurationMinutes, FrameRate, LastScannedDate,
-                   CompressionPotential, AssignedProfile, FileModificationTime
+                   CompressionPotential, AssignedProfile, IsInterlaced, ResolutionCategory,
+                   FileModificationTime, TotalFrames, CodecProfile, ColorRange, FieldOrder,
+                   HasBFrames, RefFrames, PixelFormat, Level, AudioChannels, AudioSampleRate,
+                   AudioSampleFormat, AudioChannelLayout, ContainerFormat, OverallBitrate,
+                   TranscodedByMediaVortex
             FROM MediaFiles
         """
         rows = self.DatabaseService.ExecuteQuery(query)
@@ -404,7 +408,24 @@ class DatabaseManager:
                 LastScannedDate=row['LastScannedDate'],
                 CompressionPotential=row['CompressionPotential'],
                 AssignedProfile=row['AssignedProfile'],
-                FileModificationTime=row['FileModificationTime']
+                IsInterlaced=row['IsInterlaced'],
+                ResolutionCategory=row['ResolutionCategory'],
+                FileModificationTime=row['FileModificationTime'],
+                TotalFrames=row['TotalFrames'],
+                CodecProfile=row['CodecProfile'],
+                ColorRange=row['ColorRange'],
+                FieldOrder=row['FieldOrder'],
+                HasBFrames=row['HasBFrames'],
+                RefFrames=row['RefFrames'],
+                PixelFormat=row['PixelFormat'],
+                Level=row['Level'],
+                AudioChannels=row['AudioChannels'],
+                AudioSampleRate=row['AudioSampleRate'],
+                AudioSampleFormat=row['AudioSampleFormat'],
+                AudioChannelLayout=row['AudioChannelLayout'],
+                ContainerFormat=row['ContainerFormat'],
+                OverallBitrate=row['OverallBitrate'],
+                TranscodedByMediaVortex=row['TranscodedByMediaVortex']
             )
             mediaFiles.append(mediaFile)
         
@@ -415,7 +436,11 @@ class DatabaseManager:
         query = """
             SELECT Id, SeasonId, FilePath, FileName, SizeMB, VideoBitrateKbps, AudioBitrateKbps,
                    Resolution, Codec, DurationMinutes, FrameRate, LastScannedDate,
-                   CompressionPotential, AssignedProfile, FileModificationTime
+                   CompressionPotential, AssignedProfile, IsInterlaced, ResolutionCategory,
+                   FileModificationTime, TotalFrames, CodecProfile, ColorRange, FieldOrder,
+                   HasBFrames, RefFrames, PixelFormat, Level, AudioChannels, AudioSampleRate,
+                   AudioSampleFormat, AudioChannelLayout, ContainerFormat, OverallBitrate,
+                   TranscodedByMediaVortex
             FROM MediaFiles 
             WHERE Id = ?
         """
@@ -440,7 +465,24 @@ class DatabaseManager:
             LastScannedDate=row['LastScannedDate'],
             CompressionPotential=row['CompressionPotential'],
             AssignedProfile=row['AssignedProfile'],
-            FileModificationTime=row['FileModificationTime']
+            IsInterlaced=row['IsInterlaced'],
+            ResolutionCategory=row['ResolutionCategory'],
+            FileModificationTime=row['FileModificationTime'],
+            TotalFrames=row['TotalFrames'],
+            CodecProfile=row['CodecProfile'],
+            ColorRange=row['ColorRange'],
+            FieldOrder=row['FieldOrder'],
+            HasBFrames=row['HasBFrames'],
+            RefFrames=row['RefFrames'],
+            PixelFormat=row['PixelFormat'],
+            Level=row['Level'],
+            AudioChannels=row['AudioChannels'],
+            AudioSampleRate=row['AudioSampleRate'],
+            AudioSampleFormat=row['AudioSampleFormat'],
+            AudioChannelLayout=row['AudioChannelLayout'],
+            ContainerFormat=row['ContainerFormat'],
+            OverallBitrate=row['OverallBitrate'],
+            TranscodedByMediaVortex=row['TranscodedByMediaVortex']
         )
     
     def SaveMediaFile(self, MediaFile: MediaFileModel) -> int:
@@ -532,7 +574,11 @@ class DatabaseManager:
         query = """
             SELECT Id, SeasonId, FilePath, FileName, SizeMB, VideoBitrateKbps, AudioBitrateKbps,
                    Resolution, Codec, DurationMinutes, FrameRate, LastScannedDate,
-                   CompressionPotential, AssignedProfile, FileModificationTime
+                   CompressionPotential, AssignedProfile, IsInterlaced, ResolutionCategory,
+                   FileModificationTime, TotalFrames, CodecProfile, ColorRange, FieldOrder,
+                   HasBFrames, RefFrames, PixelFormat, Level, AudioChannels, AudioSampleRate,
+                   AudioSampleFormat, AudioChannelLayout, ContainerFormat, OverallBitrate,
+                   TranscodedByMediaVortex
             FROM MediaFiles 
             WHERE LOWER(FilePath) LIKE LOWER(?)
         """
@@ -555,7 +601,24 @@ class DatabaseManager:
                 LastScannedDate=row['LastScannedDate'],
                 CompressionPotential=row['CompressionPotential'],
                 AssignedProfile=row['AssignedProfile'],
-                FileModificationTime=row['FileModificationTime']
+                IsInterlaced=row['IsInterlaced'],
+                ResolutionCategory=row['ResolutionCategory'],
+                FileModificationTime=row['FileModificationTime'],
+                TotalFrames=row['TotalFrames'],
+                CodecProfile=row['CodecProfile'],
+                ColorRange=row['ColorRange'],
+                FieldOrder=row['FieldOrder'],
+                HasBFrames=row['HasBFrames'],
+                RefFrames=row['RefFrames'],
+                PixelFormat=row['PixelFormat'],
+                Level=row['Level'],
+                AudioChannels=row['AudioChannels'],
+                AudioSampleRate=row['AudioSampleRate'],
+                AudioSampleFormat=row['AudioSampleFormat'],
+                AudioChannelLayout=row['AudioChannelLayout'],
+                ContainerFormat=row['ContainerFormat'],
+                OverallBitrate=row['OverallBitrate'],
+                TranscodedByMediaVortex=row['TranscodedByMediaVortex']
             )
             mediaFiles.append(mediaFile)
         
@@ -576,7 +639,11 @@ class DatabaseManager:
         query = """
             SELECT Id, SeasonId, FilePath, FileName, SizeMB, VideoBitrateKbps, AudioBitrateKbps,
                    Resolution, Codec, DurationMinutes, FrameRate, LastScannedDate,
-                   CompressionPotential, AssignedProfile, FileModificationTime
+                   CompressionPotential, AssignedProfile, IsInterlaced, ResolutionCategory,
+                   FileModificationTime, TotalFrames, CodecProfile, ColorRange, FieldOrder,
+                   HasBFrames, RefFrames, PixelFormat, Level, AudioChannels, AudioSampleRate,
+                   AudioSampleFormat, AudioChannelLayout, ContainerFormat, OverallBitrate,
+                   TranscodedByMediaVortex
             FROM MediaFiles 
             WHERE LOWER(FilePath) LIKE LOWER(?)
         """
@@ -599,7 +666,24 @@ class DatabaseManager:
                 LastScannedDate=row['LastScannedDate'],
                 CompressionPotential=row['CompressionPotential'],
                 AssignedProfile=row['AssignedProfile'],
-                FileModificationTime=row['FileModificationTime']
+                IsInterlaced=row['IsInterlaced'],
+                ResolutionCategory=row['ResolutionCategory'],
+                FileModificationTime=row['FileModificationTime'],
+                TotalFrames=row['TotalFrames'],
+                CodecProfile=row['CodecProfile'],
+                ColorRange=row['ColorRange'],
+                FieldOrder=row['FieldOrder'],
+                HasBFrames=row['HasBFrames'],
+                RefFrames=row['RefFrames'],
+                PixelFormat=row['PixelFormat'],
+                Level=row['Level'],
+                AudioChannels=row['AudioChannels'],
+                AudioSampleRate=row['AudioSampleRate'],
+                AudioSampleFormat=row['AudioSampleFormat'],
+                AudioChannelLayout=row['AudioChannelLayout'],
+                ContainerFormat=row['ContainerFormat'],
+                OverallBitrate=row['OverallBitrate'],
+                TranscodedByMediaVortex=row['TranscodedByMediaVortex']
             )
             mediaFiles.append(mediaFile)
         
@@ -732,8 +816,11 @@ class DatabaseManager:
         query = """
             SELECT Id, SeasonId, FilePath, FileName, SizeMB, VideoBitrateKbps, AudioBitrateKbps,
                    Resolution, Codec, DurationMinutes, FrameRate, LastScannedDate,
-                   CompressionPotential, AssignedProfile, IsInterlaced,
-                   ResolutionCategory, FileModificationTime
+                   CompressionPotential, AssignedProfile, IsInterlaced, ResolutionCategory,
+                   FileModificationTime, TotalFrames, CodecProfile, ColorRange, FieldOrder,
+                   HasBFrames, RefFrames, PixelFormat, Level, AudioChannels, AudioSampleRate,
+                   AudioSampleFormat, AudioChannelLayout, ContainerFormat, OverallBitrate,
+                   TranscodedByMediaVortex
             FROM MediaFiles 
             WHERE LOWER(FilePath) = LOWER(?)
         """
@@ -758,7 +845,24 @@ class DatabaseManager:
             LastScannedDate=row['LastScannedDate'],
             CompressionPotential=row['CompressionPotential'],
             AssignedProfile=row['AssignedProfile'],
-            FileModificationTime=row['FileModificationTime']
+            IsInterlaced=row['IsInterlaced'],
+            ResolutionCategory=row['ResolutionCategory'],
+            FileModificationTime=row['FileModificationTime'],
+            TotalFrames=row['TotalFrames'],
+            CodecProfile=row['CodecProfile'],
+            ColorRange=row['ColorRange'],
+            FieldOrder=row['FieldOrder'],
+            HasBFrames=row['HasBFrames'],
+            RefFrames=row['RefFrames'],
+            PixelFormat=row['PixelFormat'],
+            Level=row['Level'],
+            AudioChannels=row['AudioChannels'],
+            AudioSampleRate=row['AudioSampleRate'],
+            AudioSampleFormat=row['AudioSampleFormat'],
+            AudioChannelLayout=row['AudioChannelLayout'],
+            ContainerFormat=row['ContainerFormat'],
+            OverallBitrate=row['OverallBitrate'],
+            TranscodedByMediaVortex=row['TranscodedByMediaVortex']
         )
     
     
@@ -1066,7 +1170,8 @@ class DatabaseManager:
         query = """
             SELECT Id, FilePath, AttemptDate, Quality, OldSizeBytes, NewSizeBytes, Success,
                    SizeReductionBytes, SizeReductionPercent, ErrorMessage, TranscodeDurationSeconds,
-                   FfpmpegCommand, AudioBitrateKbps, VideoBitrateKbps, ProfileName, VMAF
+                   FfpmpegCommand, AudioBitrateKbps, VideoBitrateKbps, ProfileName, VMAF,
+                   FileReplaced, FileReplacedDate, ReplacementType, StartTime, PreferredAttempt
             FROM TranscodeAttempts 
             ORDER BY AttemptDate DESC
         """
@@ -1074,23 +1179,30 @@ class DatabaseManager:
         
         attempts = []
         for row in rows:
+            # Convert sqlite3.Row to dict to use .get() method
+            row_dict = dict(row)
             attempt = TranscodeAttemptModel(
-                Id=row['Id'],
-                FilePath=row['FilePath'],
-                AttemptDate=row['AttemptDate'],
-                Quality=row['Quality'],
-                OldSizeBytes=row['OldSizeBytes'],
-                NewSizeBytes=row['NewSizeBytes'],
-                Success=row['Success'],
-                SizeReductionBytes=row['SizeReductionBytes'],
-                SizeReductionPercent=row['SizeReductionPercent'],
-                ErrorMessage=row['ErrorMessage'],
-                TranscodeDurationSeconds=row['TranscodeDurationSeconds'],
-                FfpmpegCommand=row['FfpmpegCommand'],
-                AudioBitrateKbps=row['AudioBitrateKbps'],
-                VideoBitrateKbps=row['VideoBitrateKbps'],
-                ProfileName=row['ProfileName'],
-                VMAF=row['VMAF']
+                Id=row_dict['Id'],
+                FilePath=row_dict['FilePath'],
+                AttemptDate=row_dict['AttemptDate'],
+                Quality=row_dict['Quality'],
+                OldSizeBytes=row_dict['OldSizeBytes'],
+                NewSizeBytes=row_dict['NewSizeBytes'],
+                Success=row_dict['Success'],
+                SizeReductionBytes=row_dict['SizeReductionBytes'],
+                SizeReductionPercent=row_dict['SizeReductionPercent'],
+                ErrorMessage=row_dict['ErrorMessage'],
+                TranscodeDurationSeconds=row_dict['TranscodeDurationSeconds'],
+                FfpmpegCommand=row_dict['FfpmpegCommand'],
+                AudioBitrateKbps=row_dict['AudioBitrateKbps'],
+                VideoBitrateKbps=row_dict['VideoBitrateKbps'],
+                ProfileName=row_dict['ProfileName'],
+                VMAF=row_dict['VMAF'],
+                FileReplaced=bool(row_dict.get('FileReplaced', False)),
+                FileReplacedDate=row_dict.get('FileReplacedDate'),
+                ReplacementType=row_dict.get('ReplacementType'),
+                StartTime=row_dict.get('StartTime'),
+                PreferredAttempt=bool(row_dict.get('PreferredAttempt', False))
             )
             attempts.append(attempt)
         
@@ -1102,7 +1214,7 @@ class DatabaseManager:
             SELECT Id, FilePath, AttemptDate, Quality, OldSizeBytes, NewSizeBytes, Success,
                    SizeReductionBytes, SizeReductionPercent, ErrorMessage, TranscodeDurationSeconds,
                    FfpmpegCommand, AudioBitrateKbps, VideoBitrateKbps, ProfileName, VMAF,
-                   FileReplaced, FileReplacedDate, ReplacementType
+                   FileReplaced, FileReplacedDate, ReplacementType, StartTime, PreferredAttempt
             FROM TranscodeAttempts 
             WHERE Id = ?
         """
@@ -1110,26 +1222,30 @@ class DatabaseManager:
         row = rows[0] if rows else None
         
         if row:
+            # Convert sqlite3.Row to dict to use .get() method
+            row_dict = dict(row)
             return TranscodeAttemptModel(
-                Id=row['Id'],
-                FilePath=row['FilePath'],
-                AttemptDate=row['AttemptDate'],
-                Quality=row['Quality'],
-                OldSizeBytes=row['OldSizeBytes'],
-                NewSizeBytes=row['NewSizeBytes'],
-                Success=row['Success'],
-                SizeReductionBytes=row['SizeReductionBytes'],
-                SizeReductionPercent=row['SizeReductionPercent'],
-                ErrorMessage=row['ErrorMessage'],
-                TranscodeDurationSeconds=row['TranscodeDurationSeconds'],
-                FfpmpegCommand=row['FfpmpegCommand'],
-                AudioBitrateKbps=row['AudioBitrateKbps'],
-                VideoBitrateKbps=row['VideoBitrateKbps'],
-                ProfileName=row['ProfileName'],
-                VMAF=row['VMAF'],
-                FileReplaced=row['FileReplaced'],
-                FileReplacedDate=row['FileReplacedDate'],
-                ReplacementType=row['ReplacementType']
+                Id=row_dict['Id'],
+                FilePath=row_dict['FilePath'],
+                AttemptDate=row_dict['AttemptDate'],
+                Quality=row_dict['Quality'],
+                OldSizeBytes=row_dict['OldSizeBytes'],
+                NewSizeBytes=row_dict['NewSizeBytes'],
+                Success=row_dict['Success'],
+                SizeReductionBytes=row_dict['SizeReductionBytes'],
+                SizeReductionPercent=row_dict['SizeReductionPercent'],
+                ErrorMessage=row_dict['ErrorMessage'],
+                TranscodeDurationSeconds=row_dict['TranscodeDurationSeconds'],
+                FfpmpegCommand=row_dict['FfpmpegCommand'],
+                AudioBitrateKbps=row_dict['AudioBitrateKbps'],
+                VideoBitrateKbps=row_dict['VideoBitrateKbps'],
+                ProfileName=row_dict['ProfileName'],
+                VMAF=row_dict['VMAF'],
+                FileReplaced=bool(row_dict.get('FileReplaced', False)),
+                FileReplacedDate=row_dict.get('FileReplacedDate'),
+                ReplacementType=row_dict.get('ReplacementType'),
+                StartTime=row_dict.get('StartTime'),
+                PreferredAttempt=bool(row_dict.get('PreferredAttempt', False))
             )
         return None
     
@@ -1138,36 +1254,105 @@ class DatabaseManager:
         query = """
             SELECT Id, FilePath, AttemptDate, Quality, OldSizeBytes, NewSizeBytes, Success,
                    SizeReductionBytes, SizeReductionPercent, ErrorMessage, TranscodeDurationSeconds,
-                   FfpmpegCommand, AudioBitrateKbps, VideoBitrateKbps, ProfileName, VMAF
+                   FfpmpegCommand, AudioBitrateKbps, VideoBitrateKbps, ProfileName, VMAF,
+                   FileReplaced, FileReplacedDate, ReplacementType, StartTime, PreferredAttempt
             FROM TranscodeAttempts 
             WHERE LOWER(FilePath) = LOWER(?)
-            ORDER BY AttemptDate DESC
+            ORDER BY PreferredAttempt DESC, AttemptDate DESC
         """
         rows = self.DatabaseService.ExecuteQuery(query, (FilePath,))
         
         attempts = []
         for row in rows:
+            # Convert sqlite3.Row to dict to use .get() method
+            row_dict = dict(row)
             attempt = TranscodeAttemptModel(
-                Id=row['Id'],
-                FilePath=row['FilePath'],
-                AttemptDate=row['AttemptDate'],
-                Quality=row['Quality'],
-                OldSizeBytes=row['OldSizeBytes'],
-                NewSizeBytes=row['NewSizeBytes'],
-                Success=row['Success'],
-                SizeReductionBytes=row['SizeReductionBytes'],
-                SizeReductionPercent=row['SizeReductionPercent'],
-                ErrorMessage=row['ErrorMessage'],
-                TranscodeDurationSeconds=row['TranscodeDurationSeconds'],
-                FfpmpegCommand=row['FfpmpegCommand'],
-                AudioBitrateKbps=row['AudioBitrateKbps'],
-                VideoBitrateKbps=row['VideoBitrateKbps'],
-                ProfileName=row['ProfileName'],
-                VMAF=row['VMAF']
+                Id=row_dict['Id'],
+                FilePath=row_dict['FilePath'],
+                AttemptDate=row_dict['AttemptDate'],
+                Quality=row_dict['Quality'],
+                OldSizeBytes=row_dict['OldSizeBytes'],
+                NewSizeBytes=row_dict['NewSizeBytes'],
+                Success=row_dict['Success'],
+                SizeReductionBytes=row_dict['SizeReductionBytes'],
+                SizeReductionPercent=row_dict['SizeReductionPercent'],
+                ErrorMessage=row_dict['ErrorMessage'],
+                TranscodeDurationSeconds=row_dict['TranscodeDurationSeconds'],
+                FfpmpegCommand=row_dict['FfpmpegCommand'],
+                AudioBitrateKbps=row_dict['AudioBitrateKbps'],
+                VideoBitrateKbps=row_dict['VideoBitrateKbps'],
+                ProfileName=row_dict['ProfileName'],
+                VMAF=row_dict['VMAF'],
+                FileReplaced=bool(row_dict.get('FileReplaced', False)),
+                FileReplacedDate=row_dict.get('FileReplacedDate'),
+                ReplacementType=row_dict.get('ReplacementType'),
+                StartTime=row_dict.get('StartTime'),
+                PreferredAttempt=bool(row_dict.get('PreferredAttempt', False))
             )
             attempts.append(attempt)
         
         return attempts
+    
+    def GetLatestTranscodeAttemptWithVMAF(self, FilePath: str) -> Optional[Dict[str, Any]]:
+        """
+        Get the most recent transcode attempt with VMAF score for a file.
+        Prioritizes preferred attempts if they exist.
+        
+        Args:
+            FilePath: Path to the file to check
+            
+        Returns:
+            Dict with Quality (CRF), VMAF, ProfileName, AttemptDate, Success, PreferredAttempt, or None if no attempts
+        """
+        try:
+            LoggingService.LogFunctionEntry("GetLatestTranscodeAttemptWithVMAF", "DatabaseManager", FilePath)
+            
+            # First check for preferred attempts
+            preferred_query = """
+                SELECT Quality, VMAF, ProfileName, AttemptDate, Success, PreferredAttempt
+                FROM TranscodeAttempts 
+                WHERE LOWER(FilePath) = LOWER(?)
+                  AND VMAF IS NOT NULL
+                  AND Success = 1
+                  AND PreferredAttempt = 1
+                ORDER BY AttemptDate DESC
+                LIMIT 1
+            """
+            
+            rows = self.DatabaseService.ExecuteQuery(preferred_query, (FilePath,))
+            
+            if rows:
+                result = dict(rows[0])
+                LoggingService.LogInfo(f"Found preferred attempt for {FilePath}: CRF={result.get('Quality')}, VMAF={result.get('VMAF')}", 
+                                     "DatabaseManager", "GetLatestTranscodeAttemptWithVMAF")
+                return result
+            
+            # If no preferred attempt, get the most recent one
+            query = """
+                SELECT Quality, VMAF, ProfileName, AttemptDate, Success, PreferredAttempt
+                FROM TranscodeAttempts 
+                WHERE LOWER(FilePath) = LOWER(?)
+                  AND VMAF IS NOT NULL
+                  AND Success = 1
+                ORDER BY AttemptDate DESC
+                LIMIT 1
+            """
+            
+            rows = self.DatabaseService.ExecuteQuery(query, (FilePath,))
+            
+            if rows:
+                result = dict(rows[0])
+                LoggingService.LogInfo(f"Found latest attempt for {FilePath}: CRF={result.get('Quality')}, VMAF={result.get('VMAF')}", 
+                                     "DatabaseManager", "GetLatestTranscodeAttemptWithVMAF")
+                return result
+            else:
+                LoggingService.LogDebug(f"No previous successful attempt with VMAF found for {FilePath}", 
+                                      "DatabaseManager", "GetLatestTranscodeAttemptWithVMAF")
+                return None
+                
+        except Exception as e:
+            LoggingService.LogException("Exception getting latest transcode attempt with VMAF", e, "DatabaseManager", "GetLatestTranscodeAttemptWithVMAF")
+            return None
     
     def SaveTranscodeAttempt(self, Attempt: TranscodeAttemptModel) -> int:
         """Save a transcoding attempt (insert or update) and return the attempt ID."""
@@ -1186,8 +1371,8 @@ class DatabaseManager:
                         (FilePath, AttemptDate, Quality, OldSizeBytes, NewSizeBytes, Success,
                          SizeReductionBytes, SizeReductionPercent, ErrorMessage, TranscodeDurationSeconds,
                          FfpmpegCommand, AudioBitrateKbps, VideoBitrateKbps, ProfileName, VMAF,
-                         FileReplaced, FileReplacedDate, ReplacementType, StartTime)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                         FileReplaced, FileReplacedDate, ReplacementType, StartTime, PreferredAttempt)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """
                     parameters = (
                         Attempt.FilePath, Attempt.AttemptDate, Attempt.Quality,
@@ -1196,7 +1381,8 @@ class DatabaseManager:
                         Attempt.TranscodeDurationSeconds,
                         Attempt.FfpmpegCommand,
                         Attempt.AudioBitrateKbps, Attempt.VideoBitrateKbps, Attempt.ProfileName, Attempt.VMAF,
-                        Attempt.FileReplaced, Attempt.FileReplacedDate, Attempt.ReplacementType, Attempt.StartTime
+                        Attempt.FileReplaced, Attempt.FileReplacedDate, Attempt.ReplacementType, Attempt.StartTime,
+                        Attempt.PreferredAttempt
                     )
                     LoggingService.LogInfo(f"Insert attempt parameters: {parameters}", "DatabaseManager", "SaveTranscodeAttempt")
                     cursor.execute(query, parameters)
@@ -1213,7 +1399,7 @@ class DatabaseManager:
                             Success = ?, SizeReductionBytes = ?, SizeReductionPercent = ?, ErrorMessage = ?,
                             TranscodeDurationSeconds = ?, FfpmpegCommand = ?, AudioBitrateKbps = ?,
                             VideoBitrateKbps = ?, ProfileName = ?, VMAF = ?,
-                            FileReplaced = ?, FileReplacedDate = ?, ReplacementType = ?
+                            FileReplaced = ?, FileReplacedDate = ?, ReplacementType = ?, PreferredAttempt = ?
                         WHERE Id = ?
                     """
                     parameters = (
@@ -1223,7 +1409,7 @@ class DatabaseManager:
                         Attempt.TranscodeDurationSeconds,
                         Attempt.FfpmpegCommand,
                         Attempt.AudioBitrateKbps, Attempt.VideoBitrateKbps, Attempt.ProfileName, Attempt.VMAF,
-                        Attempt.FileReplaced, Attempt.FileReplacedDate, Attempt.ReplacementType, Attempt.Id
+                        Attempt.FileReplaced, Attempt.FileReplacedDate, Attempt.ReplacementType, Attempt.PreferredAttempt, Attempt.Id
                     )
                     LoggingService.LogInfo(f"Update attempt parameters: {parameters}", "DatabaseManager", "SaveTranscodeAttempt")
                     cursor.execute(query, parameters)
@@ -1247,7 +1433,8 @@ class DatabaseManager:
                 'FilePath', 'AttemptDate', 'Quality', 'OldSizeBytes', 'NewSizeBytes',
                 'Success', 'SizeReductionBytes', 'SizeReductionPercent', 'ErrorMessage',
                 'TranscodeDurationSeconds', 'FfpmpegCommand', 'AudioBitrateKbps',
-                'VideoBitrateKbps', 'ProfileName', 'VMAF'
+                'VideoBitrateKbps', 'ProfileName', 'VMAF', 'FileReplaced', 'FileReplacedDate',
+                'ReplacementType', 'StartTime', 'PreferredAttempt'
             ]
             
             # Build dynamic UPDATE query based on provided fields
@@ -1291,6 +1478,69 @@ class DatabaseManager:
                 
         except Exception as e:
             LoggingService.LogException("Exception in UpdateTranscodeAttempt", e, "DatabaseManager", "UpdateTranscodeAttempt")
+            return False
+    
+    def SetPreferredAttempt(self, AttemptId: int, FilePath: str, IsPreferred: bool = True) -> bool:
+        """
+        Set or unset a transcode attempt as preferred for a file.
+        When setting an attempt as preferred, all other attempts for the same file are unset.
+        
+        Args:
+            AttemptId: ID of the attempt to set as preferred
+            FilePath: Path to the file (to unset other attempts)
+            IsPreferred: True to set as preferred, False to unset
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            LoggingService.LogFunctionEntry("SetPreferredAttempt", "DatabaseManager", AttemptId, FilePath, IsPreferred)
+            
+            connection = self.DatabaseService.GetConnection()
+            try:
+                cursor = connection.cursor()
+                
+                if IsPreferred:
+                    # First, unset all other preferred attempts for this file
+                    unset_query = """
+                        UPDATE TranscodeAttempts 
+                        SET PreferredAttempt = 0
+                        WHERE LOWER(FilePath) = LOWER(?)
+                          AND Id != ?
+                    """
+                    cursor.execute(unset_query, (FilePath, AttemptId))
+                    
+                    # Then set this attempt as preferred
+                    set_query = """
+                        UPDATE TranscodeAttempts 
+                        SET PreferredAttempt = 1
+                        WHERE Id = ?
+                    """
+                    cursor.execute(set_query, (AttemptId,))
+                    connection.commit()
+                    
+                    LoggingService.LogInfo(f"Set attempt {AttemptId} as preferred for {FilePath}", 
+                                         "DatabaseManager", "SetPreferredAttempt")
+                else:
+                    # Unset this attempt
+                    unset_query = """
+                        UPDATE TranscodeAttempts 
+                        SET PreferredAttempt = 0
+                        WHERE Id = ?
+                    """
+                    cursor.execute(unset_query, (AttemptId,))
+                    connection.commit()
+                    
+                    LoggingService.LogInfo(f"Unset preferred status for attempt {AttemptId}", 
+                                         "DatabaseManager", "SetPreferredAttempt")
+                
+                return True
+                
+            finally:
+                connection.close()
+                
+        except Exception as e:
+            LoggingService.LogException("Exception in SetPreferredAttempt", e, "DatabaseManager", "SetPreferredAttempt")
             return False
     
     # TranscodeFiles Management Methods
@@ -1845,9 +2095,14 @@ class DatabaseManager:
                 parameters = (TranscodeAttemptId, 1, "Encoding", CurrentPhase, ProgressPercent, CurrentFrame, CurrentFPS,
                              CurrentBitrate, CurrentTime, CurrentSpeed, ETA, TotalFrames, AverageFPS)
                 
-                progressId = self.DatabaseService.ExecuteNonQuery(insertQuery, parameters)
-                LoggingService.LogDebug(f"Inserted new progress record for attempt {TranscodeAttemptId}: {CurrentPhase} ({ProgressPercent}%) - Frame: {CurrentFrame}, FPS: {CurrentFPS}, ETA: {ETA}", "DatabaseManager", "SaveTranscodeProgress")
-                return progressId
+                RowsAffected = self.DatabaseService.ExecuteNonQuery(insertQuery, parameters)
+                if RowsAffected > 0:
+                    progressId = self.DatabaseService.GetLastInsertId()
+                    LoggingService.LogDebug(f"Inserted new progress record for attempt {TranscodeAttemptId}: {CurrentPhase} ({ProgressPercent}%) - Frame: {CurrentFrame}, FPS: {CurrentFPS}, ETA: {ETA}", "DatabaseManager", "SaveTranscodeProgress")
+                    return progressId
+                else:
+                    LoggingService.LogError(f"Failed to insert progress record for attempt {TranscodeAttemptId}", "DatabaseManager", "SaveTranscodeProgress")
+                    return 0
                 
         except Exception as e:
             LoggingService.LogException("Exception saving transcode progress", e, "DatabaseManager", "SaveTranscodeProgress")
@@ -1945,7 +2200,7 @@ class DatabaseManager:
                        tp.TotalFrames, tp.CurrentFPS, tp.AverageFPS, tp.CurrentBitrate, 
                        tp.CurrentTime, tp.CurrentSpeed, tp.ETA, tp.PassDuration, 
                        tp.LastProgressUpdate, ta.FilePath, ta.Quality, ta.ProfileName, ta.AttemptDate,
-                       mf.TotalFrames as MediaFileTotalFrames
+                       mf.TotalFrames as MediaFileTotalFrames, ta.FfpmpegCommand
                 FROM TranscodeProgress tp
                 INNER JOIN TranscodeAttempts ta ON tp.TranscodeAttemptId = ta.Id
                 LEFT JOIN MediaFiles mf ON ta.FilePath = mf.FilePath
@@ -1995,7 +2250,8 @@ class DatabaseManager:
                     'Quality': row[14],
                     'ProfileName': row[15],
                     'MediaFileTotalFrames': MediaFileTotalFrames,  # For debugging
-                    'RecalculatedProgress': RecalculatedProgress > 0  # Flag for debugging
+                    'RecalculatedProgress': RecalculatedProgress > 0,  # Flag for debugging
+                    'Command': row[18] if len(row) > 18 else None  # FfpmpegCommand
                 }
                 
                 LoggingService.LogDebug(f"Found current progress: {progressData['CurrentPhase']} ({progressData['ProgressPercent']}%) for {progressData['FileName']}", "DatabaseManager", "GetCurrentTranscodeProgress")
@@ -3216,9 +3472,10 @@ class DatabaseManager:
                 None   # DateCompleted
             )
             
-            JobId = self.DatabaseService.ExecuteNonQuery(query, params)
+            RowsAffected = self.DatabaseService.ExecuteNonQuery(query, params)
             
-            if JobId:
+            if RowsAffected > 0:
+                JobId = self.DatabaseService.GetLastInsertId()
                 LoggingService.LogInfo(f"Created quality test queue entry with ID {JobId} for TranscodeAttempt {TranscodeAttemptId}", 
                                      "DatabaseManager", "CreateQualityTestQueueEntry")
                 return JobId
@@ -3531,33 +3788,70 @@ class DatabaseManager:
             if not Path:
                 return Path
             
-            # For network drives, just normalize the case without resolving to UNC
+            import os
             normalized_path = os.path.normpath(Path)
             
-            # Check if this is a network drive (Z:, Y:, etc.)
-            if len(normalized_path) >= 2 and normalized_path[1] == ':' and normalized_path[0].isalpha():
-                # This is a drive letter path - just return it normalized
-                return normalized_path
-            
-            # For other paths, check if they exist and get actual case
-            if os.path.exists(normalized_path):
-                # Use os.path.abspath but check if it converts to UNC
-                try:
-                    actual_path = os.path.abspath(normalized_path)
-                    # If it became a UNC path, just return the original normalized path
-                    if actual_path.startswith('\\\\'):
-                        return normalized_path
-                    
-                    if actual_path != Path:
-                        LoggingService.LogInfo(f"Normalized path case: '{Path}' -> '{actual_path}'",
-                                             "DatabaseManager", "PrivateNormalizePathToFilesystemCase")
-                    return actual_path
-                except:
-                    return normalized_path
-            else:
+            # Check if path exists
+            if not os.path.exists(normalized_path):
                 LoggingService.LogWarning(f"Path does not exist, cannot normalize: {Path}",
                                          "DatabaseManager", "PrivateNormalizePathToFilesystemCase")
                 return normalized_path
+            
+            # Build the path component by component to get actual case
+            # This works for both local and network drives
+            # Handle Windows drive letter paths properly (e.g., "Z:\Videos")
+            if len(normalized_path) >= 2 and normalized_path[1] == ':':
+                # Windows drive letter path - split at the drive letter
+                drive = normalized_path[0:2]  # e.g., "Z:"
+                remainder = normalized_path[2:].lstrip(os.sep)  # e.g., "Videos" (without leading \)
+                result_path = drive + os.sep  # e.g., "Z:\" - ensure we have the backslash
+                if remainder:
+                    parts = remainder.split(os.sep)
+                else:
+                    parts = []
+            else:
+                # Unix-style path or UNC path
+                parts = normalized_path.split(os.sep)
+                result_path = parts[0] if parts else ''
+                parts = parts[1:] if parts else []
+            
+            # Resolve each component by listing parent directory
+            current_path = result_path
+            for part in parts:
+                if not part:  # Skip empty parts
+                    continue
+                
+                try:
+                    # List directory contents to find actual case
+                    if os.path.isdir(current_path):
+                        dir_contents = os.listdir(current_path)
+                        # Find matching directory (case-insensitive comparison)
+                        actual_name = None
+                        for item in dir_contents:
+                            if item.upper() == part.upper():
+                                actual_name = item
+                                break
+                        
+                        if actual_name:
+                            current_path = os.path.join(current_path, actual_name)
+                        else:
+                            # If not found in listing, use original (might be a file)
+                            current_path = os.path.join(current_path, part)
+                    else:
+                        # Not a directory, just append
+                        current_path = os.path.join(current_path, part)
+                except Exception as e:
+                    # If we can't list directory, just use original part
+                    LoggingService.LogWarning(f"Could not list directory '{current_path}' to get actual case, using: {part}",
+                                             "DatabaseManager", "PrivateNormalizePathToFilesystemCase")
+                    current_path = os.path.join(current_path, part)
+            
+            # Log if case changed
+            if current_path != normalized_path:
+                LoggingService.LogInfo(f"Normalized path case: '{normalized_path}' -> '{current_path}'",
+                                     "DatabaseManager", "PrivateNormalizePathToFilesystemCase")
+            
+            return current_path
                 
         except Exception as e:
             LoggingService.LogException("Error normalizing path to filesystem case", e,
@@ -3988,3 +4282,54 @@ class DatabaseManager:
         except Exception as e:
             LoggingService.LogException("Exception killing active quality test process", e, "DatabaseManager", "KillActiveQualityTestProcess")
             return False
+    
+    def AddProblemFile(self, FilePath: str, ErrorType: str, ErrorMessage: str) -> Optional[int]:
+        """
+        Add a critical error to ProblemFiles table.
+        
+        Args:
+            FilePath: Path to the file with the problem
+            ErrorType: Type of error (e.g., 'CRF_Adjustment_Failed', 'Quality_Threshold_Unreachable')
+            ErrorMessage: Detailed error message
+            
+        Returns:
+            ProblemFile ID if successful, None otherwise
+        """
+        try:
+            LoggingService.LogFunctionEntry("AddProblemFile", "DatabaseManager", FilePath, ErrorType)
+            
+            # Extract file name and directory from file path
+            import os
+            FileName = os.path.basename(FilePath)
+            Directory = os.path.dirname(FilePath)
+            
+            # Get file size if file exists
+            SizeBytes = 0
+            SizeMB = 0.0
+            if os.path.exists(FilePath):
+                try:
+                    SizeBytes = os.path.getsize(FilePath)
+                    SizeMB = SizeBytes / (1024 * 1024)
+                except Exception:
+                    pass
+            
+            query = """
+                INSERT INTO ProblemFiles (FilePath, FileName, Directory, SizeBytes, SizeMB, ErrorType, ErrorMessage, DateEncountered, RetryCount)
+                VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'), 0)
+            """
+            
+            params = (FilePath, FileName, Directory, SizeBytes, SizeMB, ErrorType, ErrorMessage)
+            
+            recordId = self.DatabaseService.ExecuteNonQuery(query, params)
+            
+            if recordId:
+                LoggingService.LogInfo(f"Added problem file record with ID {recordId} for {FilePath}, ErrorType: {ErrorType}", 
+                                     "DatabaseManager", "AddProblemFile")
+                return recordId
+            else:
+                LoggingService.LogError(f"Failed to add problem file record for {FilePath}", "DatabaseManager", "AddProblemFile")
+                return None
+                
+        except Exception as e:
+            LoggingService.LogException("Exception adding problem file", e, "DatabaseManager", "AddProblemFile")
+            return None

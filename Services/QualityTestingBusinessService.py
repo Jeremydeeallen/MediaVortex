@@ -452,6 +452,28 @@ class QualityTestingBusinessService:
             LoggingService.LogException("Error checking concurrency limit", e, "QualityTestingBusinessService", "CheckConcurrencyLimit")
             return False
     
+    def GetQualityTestMaxCores(self) -> int:
+        """Get maximum CPU cores for quality testing from system settings.
+        
+        Raises:
+            ValueError: If setting is missing, invalid, or out of range (1-32)
+            Exception: If database access fails
+        """
+        # Get QualityTestMaxCores setting
+        QualityTestMaxCores = self.DatabaseManager.GetSystemSetting('QualityTestMaxCores')
+        if not QualityTestMaxCores:
+            raise ValueError("QualityTestMaxCores setting is missing from SystemSettings. Please add it to the database.")
+        
+        if not QualityTestMaxCores.isdigit():
+            raise ValueError(f"QualityTestMaxCores setting has invalid value: '{QualityTestMaxCores}'. Must be a number between 1-32.")
+        
+        CoreCount = int(QualityTestMaxCores)
+        # Validate core count (1-32 for safety)
+        if not (1 <= CoreCount <= 32):
+            raise ValueError(f"QualityTestMaxCores setting value {CoreCount} is out of valid range (1-32).")
+        
+        return CoreCount
+    
     def TerminateActiveFFmpegProcess(self):
         """Terminate any active FFmpeg process."""
         try:
@@ -566,25 +588,44 @@ class QualityTestingBusinessService:
             LoggingService.LogInfo(f"subprocess.Popen completed successfully", "QualityTestingBusinessService", "ExecuteFFmpegWithProgress")
             LoggingService.LogInfo(f"Process started with PID: {Process.pid}", "QualityTestingBusinessService", "ExecuteFFmpegWithProgress")
             
-            # Set CPU affinity to cores 12-15 (4 cores for quality testing)
+            # Set CPU affinity using reusable CpuAffinityService method (temperature-based smart core selection)
+            FFmpegPID = None
+            TranscodeAttemptId = JobDetails.get('TranscodeAttemptId') if JobDetails else None
+            JobIdForAffinity = TranscodeAttemptId if TranscodeAttemptId else Process.pid
+            
             try:
-                import psutil
-                CurrentProcess = psutil.Process(Process.pid)
-                AffinityCores = [12, 13, 14, 15]
-                CurrentProcess.cpu_affinity(AffinityCores)
-                LoggingService.LogDebug(f"Set Quality Test FFmpeg CPU affinity to cores: {AffinityCores}", 
-                                       "QualityTestingBusinessService", "ExecuteFFmpegWithProgress")
+                from Services.CpuAffinityService import GetCpuAffinityServiceInstance
+                CpuAffinityServiceInstance = GetCpuAffinityServiceInstance()
+                CoreCount = self.GetQualityTestMaxCores()
+                
+                AffinityResult = CpuAffinityServiceInstance.SetFFmpegProcessAffinity(
+                    ShellProcessPID=Process.pid,
+                    CoreCount=CoreCount,
+                    JobId=JobIdForAffinity,
+                    JobType="QualityTest",
+                    ServiceName="QualityTestingBusinessService"
+                )
+                
+                if AffinityResult["Success"]:
+                    FFmpegPID = AffinityResult["FFmpegPID"]
+                    if AffinityResult.get("ErrorMessage"):
+                        LoggingService.LogWarning(f"CPU affinity set but with warning: {AffinityResult['ErrorMessage']}", 
+                                                 "QualityTestingBusinessService", "ExecuteFFmpegWithProgress")
+                else:
+                    LoggingService.LogWarning(f"Failed to set CPU affinity: {AffinityResult.get('ErrorMessage', 'Unknown error')}", 
+                                             "QualityTestingBusinessService", "ExecuteFFmpegWithProgress")
             except Exception as AffinityError:
                 LoggingService.LogWarning(f"Failed to set CPU affinity: {AffinityError}", 
                                          "QualityTestingBusinessService", "ExecuteFFmpegWithProgress")
             
-            # Update ActiveJob with FFmpeg child process PID
+            # Update ActiveJob with FFmpeg child process PID (use FFmpeg PID if available, otherwise shell PID)
+            ProcessPIDToUse = FFmpegPID if FFmpegPID else Process.pid
             if JobDetails and 'active_job_id' in JobDetails and JobDetails['active_job_id']:
                 self.DatabaseManager.UpdateActiveJobProcessId(
                     JobDetails['active_job_id'], 
-                    Process.pid
+                    ProcessPIDToUse
                 )
-                LoggingService.LogInfo(f"Updated ActiveJob {JobDetails['active_job_id']} with FFmpeg PID {Process.pid}", 
+                LoggingService.LogInfo(f"Updated ActiveJob {JobDetails['active_job_id']} with PID {ProcessPIDToUse} (FFmpeg: {FFmpegPID is not None})", 
                                       "QualityTestingBusinessService", "ExecuteFFmpegWithProgress")
             
             # Start progress monitoring thread (same pattern as TranscodeService)
@@ -601,6 +642,17 @@ class QualityTestingBusinessService:
             ReturnCode = Process.wait()
             EndTime = datetime.now()
             Duration = (EndTime - StartTime).total_seconds()
+            
+            # Release job from CpuAffinityService (with cooling wait enabled)
+            # Use same JobId that was used for registration (JobIdForAffinity)
+            if JobIdForAffinity:
+                try:
+                    from Services.CpuAffinityService import GetCpuAffinityServiceInstance
+                    CpuAffinityServiceInstance = GetCpuAffinityServiceInstance()
+                    CpuAffinityServiceInstance.ReleaseJob(JobIdForAffinity, WaitForCooling=True)
+                except Exception as ReleaseError:
+                    LoggingService.LogWarning(f"Failed to release quality test job {JobIdForAffinity} from CpuAffinityService: {ReleaseError}", 
+                                            "QualityTestingBusinessService", "ExecuteFFmpegWithProgress")
             
             LoggingService.LogInfo(f"Process completed with return code: {ReturnCode}", "QualityTestingBusinessService", "ExecuteFFmpegWithProgress")
             LoggingService.LogInfo(f"Duration: {Duration} seconds", "QualityTestingBusinessService", "ExecuteFFmpegWithProgress")
@@ -627,6 +679,16 @@ class QualityTestingBusinessService:
             return FFmpegResult(ReturnCode, "", "")
             
         except Exception as e:
+            # Release job from CpuAffinityService on error
+            TranscodeAttemptId = JobDetails.get('TranscodeAttemptId') if JobDetails else None
+            if TranscodeAttemptId:
+                try:
+                    from Services.CpuAffinityService import GetCpuAffinityServiceInstance
+                    CpuAffinityServiceInstance = GetCpuAffinityServiceInstance()
+                    CpuAffinityServiceInstance.ReleaseJob(TranscodeAttemptId)
+                except Exception:
+                    pass  # Ignore errors during cleanup
+            
             LoggingService.LogException("Error executing FFmpeg with progress monitoring", e, "QualityTestingBusinessService", "ExecuteFFmpegWithProgress")
             # Let it fail - don't run a second FFmpeg process
             raise

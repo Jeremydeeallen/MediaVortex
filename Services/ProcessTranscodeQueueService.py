@@ -459,6 +459,81 @@ class ProcessTranscodeQueueService:
                 LoggingService.LogException("Error retrieving StartTime from TranscodeAttempts", e, 
                                          "ProcessTranscodeQueueService", "GetTranscodingSettings")
             
+            # Check for CRF override first (user-specified target CRF)
+            # Try multiple path formats to match overrides set with different path formats
+            normalizedPath = Job.FilePath.lower().replace('\\', '/')
+            fileName = os.path.basename(Job.FilePath).lower()
+            
+            # Try full path first
+            overrideKey = f"CRFOverride_{normalizedPath}"
+            crfOverride = self.DatabaseManager.GetSystemSetting(overrideKey)
+            
+            # If not found, try with just filename (for overrides set from attempt records)
+            if not crfOverride:
+                overrideKey = f"CRFOverride_{fileName}"
+                crfOverride = self.DatabaseManager.GetSystemSetting(overrideKey)
+            
+            # If still not found, try with drive letter and filename only (Z:filename.mp4 format)
+            if not crfOverride and ':' in normalizedPath:
+                driveAndFile = normalizedPath.split(':', 1)[1].lstrip('/').replace('/', '')
+                if driveAndFile:
+                    overrideKey = f"CRFOverride_{normalizedPath[0]}:{driveAndFile}"
+                    crfOverride = self.DatabaseManager.GetSystemSetting(overrideKey)
+            
+            # Track if override was successfully applied
+            overrideApplied = False
+            
+            # Debug logging to help troubleshoot override lookup
+            if crfOverride:
+                LoggingService.LogDebug(f"CRF override found: Key='{overrideKey}', FilePath='{Job.FilePath}', Value='{crfOverride}'", 
+                                      "ProcessTranscodeQueueService", "GetTranscodingSettings")
+                try:
+                    overrideCRF = int(crfOverride)
+                    ProfileSettings['Quality'] = overrideCRF
+                    overrideApplied = True
+                    LoggingService.LogInfo(f"CRF override applied for {Job.FilePath}: Using CRF={overrideCRF} (user-specified, key={overrideKey})", 
+                                         "ProcessTranscodeQueueService", "GetTranscodingSettings")
+                except (ValueError, TypeError):
+                    LoggingService.LogWarning(f"Invalid CRF override value '{crfOverride}' for {Job.FilePath}, ignoring", 
+                                            "ProcessTranscodeQueueService", "GetTranscodingSettings")
+            else:
+                LoggingService.LogDebug(f"No CRF override found. Tried keys: CRFOverride_{normalizedPath}, CRFOverride_{fileName}, CRFOverride_{normalizedPath[0] if ':' in normalizedPath else ''}:{normalizedPath.split(':', 1)[1].lstrip('/').replace('/', '') if ':' in normalizedPath else ''}", 
+                                      "ProcessTranscodeQueueService", "GetTranscodingSettings")
+            
+            # If no override was successfully applied, check for previous attempts and adjust CRF if needed
+            if not overrideApplied:
+                from Services.AdaptiveQualityService import AdaptiveQualityService
+                adaptiveService = AdaptiveQualityService(self.DatabaseManager)
+                previousAttempt = adaptiveService.GetLatestTranscodeAttemptWithVMAF(Job.FilePath)
+                
+                if previousAttempt:
+                    previousCRF = previousAttempt.get('Quality')
+                    vmafScore = previousAttempt.get('VMAF')
+                    
+                    if previousCRF and vmafScore is not None and vmafScore < 80:
+                        # Calculate adjusted CRF
+                        adjustedCRF = adaptiveService.CalculateAdjustedCRF(previousCRF, vmafScore)
+                        currentCRF = ProfileSettings.get('Quality')
+                        
+                        # Use the minimum (lowest) CRF value between adjusted and profile
+                        # Lower CRF = higher quality, so we want whichever is lower
+                        if adjustedCRF:
+                            finalCRF = min(adjustedCRF, currentCRF)
+                            ProfileSettings['Quality'] = finalCRF
+                            
+                            # Log adjustment decision at Info level
+                            logMessage = f"CRF selection for {Job.FilePath}: Previous CRF={previousCRF}, VMAF={vmafScore:.2f}, Calculated CRF={adjustedCRF}, Profile CRF={currentCRF}, Selected CRF={finalCRF} (minimum)"
+                            LoggingService.LogInfo(logMessage, "ProcessTranscodeQueueService", "GetTranscodingSettings")
+            
+            # Log final CRF value that will be used (for debugging)
+            finalCRF = ProfileSettings.get('Quality')
+            if overrideApplied:
+                LoggingService.LogInfo(f"Final CRF for {Job.FilePath}: {finalCRF} (from override)", 
+                                     "ProcessTranscodeQueueService", "GetTranscodingSettings")
+            else:
+                LoggingService.LogDebug(f"Final CRF for {Job.FilePath}: {finalCRF} (from profile/adaptive)", 
+                                     "ProcessTranscodeQueueService", "GetTranscodingSettings")
+            
             return {
                 'ProfileSettings': ProfileSettings,
                 'CodecFlags': CodecFlags,

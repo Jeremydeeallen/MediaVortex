@@ -126,6 +126,7 @@ class WebServiceApp:
         from Controllers.FileScanningController import FileScanningController
         from Controllers.ProfileController import ProfileController
         from Controllers.QualityTestController import QualityTestBlueprint
+        from Controllers.ServiceStatusController import ServiceStatusBlueprint
         
         # Register all blueprints
         self.App.register_blueprint(ServiceControlBlueprint)
@@ -137,6 +138,7 @@ class WebServiceApp:
         self.App.register_blueprint(self.ProfileController.Blueprint)
         self.App.register_blueprint(self.FileReplacementController.Blueprint)
         self.App.register_blueprint(QualityTestBlueprint)
+        self.App.register_blueprint(ServiceStatusBlueprint, url_prefix='/api')
     
     def PrivateStartServiceStatusTracking(self):
         """Start service status tracking thread."""

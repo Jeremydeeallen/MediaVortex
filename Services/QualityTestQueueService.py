@@ -69,7 +69,9 @@ class QualityTestQueueService:
                                       "QualityTestQueueService", "AddToQualityTestQueue")
                 return None
             
-            temporary_paths = dict(temporary_paths_rows[0])
+            # Convert sqlite3.Row to dictionary - use dict() constructor like other code in codebase
+            row = temporary_paths_rows[0]
+            temporary_paths = dict(row)
             OriginalFilePath = temporary_paths.get('OriginalPath')
             LocalSourcePath = temporary_paths.get('LocalSourcePath')
             TranscodedFilePath = temporary_paths.get('LocalOutputPath')

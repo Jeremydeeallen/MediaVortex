@@ -17,21 +17,34 @@ class QueueManagementBusinessService:
         self.DatabaseManager = DatabaseManagerInstance or DatabaseManager()
         self.FileManager = FileManagerService()
     
-    def PopulateQueueFromMediaFiles(self, MaxItems: int = 10, RootFolderPath: str = None) -> Dict[str, Any]:
+    def PopulateQueueFromMediaFiles(self, RootFolderPath: str = None, ProfileId: int = None) -> Dict[str, Any]:
         """Populate transcoding queue from MediaFiles that have assigned profiles, ordered by largest disk space."""
         try:
-            LoggingService.LogFunctionEntry("PopulateQueueFromMediaFiles", "QueueManagementBusinessService", MaxItems, RootFolderPath)
+            LoggingService.LogFunctionEntry("PopulateQueueFromMediaFiles", "QueueManagementBusinessService", RootFolderPath, ProfileId)
             
-            # Get media files with assigned profiles, ordered by size (largest first)
-            mediaFilesWithProfiles = self.GetMediaFilesWithProfilesOrderedBySize(RootFolderPath)
-            LoggingService.LogInfo(f"Found {len(mediaFilesWithProfiles)} media files with assigned profiles", "QueueManagementBusinessService", "PopulateQueueFromMediaFiles")
+            # If RootFolderPath is provided, always use resolution filtering
+            if RootFolderPath:
+                if ProfileId is not None:
+                    # Use selected profile for filtering
+                    mediaFilesWithProfiles = self.GetMediaFilesByFolderAndResolutionFilter(RootFolderPath, ProfileId)
+                    LoggingService.LogInfo(f"Found {len(mediaFilesWithProfiles)} media files matching resolution filter with selected profile", "QueueManagementBusinessService", "PopulateQueueFromMediaFiles")
+                else:
+                    # Use each file's assigned profile for filtering
+                    mediaFilesWithProfiles = self.GetMediaFilesByFolderWithResolutionFilterUsingAssignedProfiles(RootFolderPath)
+                    LoggingService.LogInfo(f"Found {len(mediaFilesWithProfiles)} media files matching resolution filter using assigned profiles", "QueueManagementBusinessService", "PopulateQueueFromMediaFiles")
+            else:
+                # No folder specified, use existing behavior: get media files with assigned profiles, ordered by size (largest first)
+                mediaFilesWithProfiles = self.GetMediaFilesWithProfilesOrderedBySize(RootFolderPath)
+                LoggingService.LogInfo(f"Found {len(mediaFilesWithProfiles)} media files with assigned profiles", "QueueManagementBusinessService", "PopulateQueueFromMediaFiles")
             
             if not mediaFilesWithProfiles:
-                if RootFolderPath:
+                if ProfileId is not None and RootFolderPath:
+                    friendlyMessage = f"No media files found in folder '{RootFolderPath}' with resolution greater than the target resolution for the selected profile."
+                elif RootFolderPath:
                     friendlyMessage = f"No media files found with assigned profiles in folder '{RootFolderPath}'. Please assign profiles to your media files in Settings > Profile Management before adding them to the transcoding queue."
                 else:
                     friendlyMessage = "No media files found with assigned profiles. Please assign profiles to your media files in Settings > Profile Management before adding them to the transcoding queue."
-                LoggingService.LogWarning("No media files with assigned profiles found", "QueueManagementBusinessService", "PopulateQueueFromMediaFiles")
+                LoggingService.LogWarning("No media files found matching criteria", "QueueManagementBusinessService", "PopulateQueueFromMediaFiles")
                 return {"Success": False, "ErrorMessage": friendlyMessage, "ItemsAdded": 0}
             
             # Get existing queue items to avoid duplicates
@@ -44,22 +57,77 @@ class QueueManagementBusinessService:
             successfullyTranscodedPaths = {tf.FilePath for tf in transcodeFiles if tf.SuccessfullyTranscoded}
             LoggingService.LogInfo(f"Found {len(successfullyTranscodedPaths)} already successfully transcoded files", "QueueManagementBusinessService", "PopulateQueueFromMediaFiles")
             
+            # Import adaptive quality service for VMAF-based retranscode checks
+            from Services.AdaptiveQualityService import AdaptiveQualityService
+            adaptiveService = AdaptiveQualityService(self.DatabaseManager)
+            
             itemsAdded = 0
             itemsSkipped = 0
             itemsSkippedDueToResolution = 0
+            itemsSkippedDueToQuality = 0  # Track files skipped because VMAF >= 80
             
             for mediaFile in mediaFilesWithProfiles:
-                # Skip if already in queue or already successfully transcoded
-                if mediaFile.FilePath in existingFilePaths or mediaFile.FilePath in successfullyTranscodedPaths:
+                # Skip if already in queue
+                if mediaFile.FilePath in existingFilePaths:
                     itemsSkipped += 1
                     continue
                 
-                # Check if should skip due to resolution
-                shouldSkip, skipReason = self.ShouldSkipDueToResolution(mediaFile, mediaFile.AssignedProfile)
-                if shouldSkip:
-                    itemsSkippedDueToResolution += 1
-                    LoggingService.LogInfo(f"Skipped {mediaFile.FileName} due to resolution: {skipReason}", "QueueManagementBusinessService", "PopulateQueueFromMediaFiles")
-                    continue
+                # Check if file was previously transcoded - if so, check VMAF for retranscode decision
+                if mediaFile.FilePath in successfullyTranscodedPaths:
+                    # Check if file should be retranscoded based on VMAF
+                    shouldRetranscode, previousAttempt = adaptiveService.ShouldRetranscode(mediaFile.FilePath)
+                    
+                    if not shouldRetranscode:
+                        # VMAF >= 80, quality already acceptable - skip retranscode
+                        itemsSkipped += 1
+                        itemsSkippedDueToQuality += 1
+                        LoggingService.LogInfo(f"Skipping {mediaFile.FileName}: Quality already acceptable (VMAF >= 80)", "QueueManagementBusinessService", "PopulateQueueFromMediaFiles")
+                        continue
+                    
+                    # VMAF < 80, check if CRF adjustment would fail
+                    if previousAttempt:
+                        previousCRF = previousAttempt.get('Quality')
+                        vmafScore = previousAttempt.get('VMAF')
+                        
+                        if previousCRF and vmafScore is not None and vmafScore < 80:
+                            # Calculate what the adjusted CRF would be
+                            adjustedCRF = adaptiveService.CalculateAdjustedCRF(previousCRF, vmafScore)
+                            
+                            # Validate adjustment
+                            minCRF = 15
+                            if adjustedCRF < minCRF:
+                                # Cannot adjust further - log critical error and skip
+                                errorMsg = f"Cannot adjust CRF further for {mediaFile.FileName}: Previous CRF={previousCRF}, VMAF={vmafScore:.2f}, Adjusted CRF={adjustedCRF} would be below minimum {minCRF}"
+                                
+                                # Extract directory for ProblemFiles
+                                directory = os.path.dirname(mediaFile.FilePath)
+                                
+                                # Log to ProblemFiles
+                                problemFileId = self.DatabaseManager.AddProblemFile(
+                                    mediaFile.FilePath,
+                                    "CRF_Adjustment_Failed",
+                                    f"CRF adjustment failed: Previous CRF={previousCRF}, VMAF={vmafScore:.2f}, Calculated CRF={adjustedCRF} is below minimum threshold (15). Quality threshold unreachable."
+                                )
+                                
+                                if problemFileId:
+                                    LoggingService.LogError(f"Logged CRF adjustment failure to ProblemFiles (ID: {problemFileId}): {errorMsg}", 
+                                                          "QueueManagementBusinessService", "PopulateQueueFromMediaFiles")
+                                
+                                itemsSkipped += 1
+                                continue
+                    
+                    # VMAF < 80 and CRF adjustment is valid - allow retranscode by continuing to add to queue
+                    LoggingService.LogInfo(f"File {mediaFile.FileName} will be retranscoded: Previous VMAF < 80", "QueueManagementBusinessService", "PopulateQueueFromMediaFiles")
+                # else: File not in successfullyTranscodedPaths, proceed with normal queue addition
+                
+                # Resolution filtering is already done when RootFolderPath is provided, so skip the check here
+                # Only check resolution if no folder was specified (using old behavior)
+                if not RootFolderPath:
+                    shouldSkip, skipReason = self.ShouldSkipDueToResolution(mediaFile, mediaFile.AssignedProfile)
+                    if shouldSkip:
+                        itemsSkippedDueToResolution += 1
+                        LoggingService.LogInfo(f"Skipped {mediaFile.FileName} due to resolution: {skipReason}", "QueueManagementBusinessService", "PopulateQueueFromMediaFiles")
+                        continue
                 
                 # Create queue item (no need to find threshold since profile is already assigned)
                 queueItem = self.CreateQueueItemFromMediaFileWithProfile(mediaFile)
@@ -69,23 +137,32 @@ class QueueManagementBusinessService:
                         LoggingService.LogInfo(f"Added queue item {itemId} for {mediaFile.FileName} (Size: {mediaFile.SizeMB:.1f}MB)", "QueueManagementBusinessService", "PopulateQueueFromMediaFiles")
                         itemsAdded += 1
                         existingFilePaths.add(mediaFile.FilePath)  # Prevent duplicates in this run
-                        
-                        if itemsAdded >= MaxItems:
-                            LoggingService.LogInfo(f"Reached maximum items limit ({MaxItems})", "QueueManagementBusinessService", "PopulateQueueFromMediaFiles")
-                            break
                             
                     except Exception as e:
                         LoggingService.LogException(f"Error saving queue item for {mediaFile.FileName}", e, "QueueManagementBusinessService", "PopulateQueueFromMediaFiles")
                         continue
             
             # Add friendly message based on results
+            skipDetails = []
+            if itemsSkipped > 0:
+                skipDetails.append(f"{itemsSkipped} files were skipped")
+            if itemsSkippedDueToQuality > 0:
+                skipDetails.append(f"{itemsSkippedDueToQuality} skipped (quality already acceptable - VMAF >= 80)")
+            if itemsSkippedDueToResolution > 0:
+                skipDetails.append(f"{itemsSkippedDueToResolution} skipped (resolution check)")
+            
+            skipMessage = ", ".join(skipDetails) if skipDetails else "no files were skipped"
+            
             if itemsAdded == 0:
                 if itemsSkipped == len(mediaFilesWithProfiles):
-                    friendlyMessage = f"All {len(mediaFilesWithProfiles)} media files with assigned profiles are already in the queue or have been successfully transcoded. No new items were added."
+                    if itemsSkippedDueToQuality > 0:
+                        friendlyMessage = f"All {len(mediaFilesWithProfiles)} media files with assigned profiles have acceptable quality (VMAF >= 80) or are already in the queue. No new items were added."
+                    else:
+                        friendlyMessage = f"All {len(mediaFilesWithProfiles)} media files with assigned profiles are already in the queue or have been successfully transcoded. No new items were added."
                 else:
-                    friendlyMessage = f"No new items were added to the queue. {itemsSkipped} files were skipped (already in queue or transcoded), {itemsSkippedDueToResolution} files were skipped (resolution check)."
+                    friendlyMessage = f"No new items were added to the queue. {skipMessage}."
             else:
-                friendlyMessage = f"Successfully added {itemsAdded} items to the transcoding queue. {itemsSkipped} files were skipped (already in queue or transcoded), {itemsSkippedDueToResolution} files were skipped (resolution check)."
+                friendlyMessage = f"Successfully added {itemsAdded} items to the transcoding queue. {skipMessage}."
             
             result = {
                 "Success": True,
@@ -93,11 +170,11 @@ class QueueManagementBusinessService:
                 "ItemsAdded": itemsAdded,
                 "ItemsSkipped": itemsSkipped,
                 "ItemsSkippedDueToResolution": itemsSkippedDueToResolution,
-                "MaxItems": MaxItems,
+                "ItemsSkippedDueToQuality": itemsSkippedDueToQuality,
                 "Message": friendlyMessage
             }
             
-            LoggingService.LogInfo(f"Queue population completed: {itemsAdded} added, {itemsSkipped} skipped (duplicate/transcoded), {itemsSkippedDueToResolution} skipped (resolution check) from {len(mediaFilesWithProfiles)} files with profiles", "QueueManagementBusinessService", "PopulateQueueFromMediaFiles")
+            LoggingService.LogInfo(f"Queue population completed: {itemsAdded} added, {itemsSkipped} skipped (duplicate/transcoded), {itemsSkippedDueToQuality} skipped (quality acceptable), {itemsSkippedDueToResolution} skipped (resolution check) from {len(mediaFilesWithProfiles)} files with profiles", "QueueManagementBusinessService", "PopulateQueueFromMediaFiles")
             return result
             
         except Exception as e:
@@ -132,6 +209,147 @@ class QueueManagementBusinessService:
             
         except Exception as e:
             LoggingService.LogException("Exception getting media files with profiles", e, "QueueManagementBusinessService", "GetMediaFilesWithProfilesOrderedBySize")
+            return []
+    
+    def GetMediaFilesByFolderAndResolutionFilter(self, RootFolderPath: str, ProfileId: int) -> List[MediaFileModel]:
+        """
+        Get media files in a folder that have resolution > target resolution for the specified profile.
+        Updates all files in the folder to the selected profile, then returns files where resolution > target.
+        
+        Args:
+            RootFolderPath: The root folder path to query
+            ProfileId: The profile ID to use for resolution filtering
+            
+        Returns:
+            List of MediaFileModel objects where resolution > target resolution
+        """
+        try:
+            LoggingService.LogFunctionEntry("GetMediaFilesByFolderAndResolutionFilter", "QueueManagementBusinessService", RootFolderPath, ProfileId)
+            
+            # Get the profile
+            profile = self.DatabaseManager.GetProfileById(ProfileId)
+            if not profile:
+                LoggingService.LogError(f"Profile with ID {ProfileId} not found", "QueueManagementBusinessService", "GetMediaFilesByFolderAndResolutionFilter")
+                return []
+            
+            # Get profile thresholds
+            profileThresholds = self.DatabaseManager.GetThresholdsByProfileId(ProfileId)
+            if not profileThresholds:
+                LoggingService.LogWarning(f"No profile thresholds found for profile {profile.ProfileName}", "QueueManagementBusinessService", "GetMediaFilesByFolderAndResolutionFilter")
+                return []
+            
+            # Step 1: Get target resolution once from profile thresholds
+            # Find a threshold with a valid TranscodeDownTo value (use first one found)
+            targetResolution = None
+            for threshold in profileThresholds:
+                transcodeDownTo = threshold.TranscodeDownTo or ""
+                if transcodeDownTo and transcodeDownTo.strip() != "" and transcodeDownTo.lower() != "no downscaling":
+                    targetResolution = transcodeDownTo.strip()
+                    break
+            
+            if not targetResolution:
+                LoggingService.LogWarning(f"No valid TranscodeDownTo found in profile {profile.ProfileName} thresholds", "QueueManagementBusinessService", "GetMediaFilesByFolderAndResolutionFilter")
+                return []
+            
+            LoggingService.LogInfo(f"Target resolution for profile {profile.ProfileName}: {targetResolution}", "QueueManagementBusinessService", "GetMediaFilesByFolderAndResolutionFilter")
+            
+            # Normalize the root folder path to match database format (handle Z: vs Z:\)
+            # Database paths use backslashes: Z:\Videos\Couple\...
+            normalizedRootPath = RootFolderPath.replace('/', '\\').strip()
+            # Handle drive letter without backslash (Z:Videos -> Z:\Videos)
+            if len(normalizedRootPath) >= 2 and normalizedRootPath[1] == ':' and len(normalizedRootPath) > 2 and normalizedRootPath[2] != '\\':
+                normalizedRootPath = normalizedRootPath[0:2] + '\\' + normalizedRootPath[2:]
+            # Ensure path doesn't end with backslash for LIKE matching (we'll add % in the query)
+            
+            LoggingService.LogInfo(f"Normalized root folder path: '{RootFolderPath}' -> '{normalizedRootPath}'", "QueueManagementBusinessService", "GetMediaFilesByFolderAndResolutionFilter")
+            
+            # Step 2: Update all files in folder to selected profile (bulk update)
+            filesUpdated = self.DatabaseManager.UpdateMediaFilesProfileByRootFolder(normalizedRootPath, ProfileId)
+            LoggingService.LogInfo(f"Updated {filesUpdated} files in folder {normalizedRootPath} to profile {profile.ProfileName}", "QueueManagementBusinessService", "GetMediaFilesByFolderAndResolutionFilter")
+            
+            # Step 3: Get all media files in the folder (they now all have the profile)
+            allMediaFiles = self.DatabaseManager.GetMediaFilesByRootFolder(normalizedRootPath)
+            LoggingService.LogInfo(f"Found {len(allMediaFiles)} media files in folder {RootFolderPath}", "QueueManagementBusinessService", "GetMediaFilesByFolderAndResolutionFilter")
+            
+            # Step 4: Simple loop - compare each file's resolution to target resolution
+            from Services.ResolutionService import ResolutionService
+            resolutionService = ResolutionService()
+            matchingFiles = []
+            
+            for mediaFile in allMediaFiles:
+                sourceResolution = mediaFile.Resolution or ""
+                if not sourceResolution:
+                    LoggingService.LogDebug(f"Skipping {mediaFile.FileName}: no resolution", "QueueManagementBusinessService", "GetMediaFilesByFolderAndResolutionFilter")
+                    continue
+                
+                # Compare file resolution to target resolution
+                comparison = resolutionService.CompareResolutions(sourceResolution, targetResolution)
+                
+                # If comparison cannot be determined, skip
+                if comparison is None:
+                    LoggingService.LogWarning(f"Cannot compare resolutions for {mediaFile.FileName}: source={sourceResolution}, target={targetResolution}", "QueueManagementBusinessService", "GetMediaFilesByFolderAndResolutionFilter")
+                    continue
+                
+                # Only include files where resolution > target (comparison > 0)
+                if comparison > 0:
+                    matchingFiles.append(mediaFile)
+                    LoggingService.LogDebug(f"Including {mediaFile.FileName}: {sourceResolution} > {targetResolution}", "QueueManagementBusinessService", "GetMediaFilesByFolderAndResolutionFilter")
+                else:
+                    LoggingService.LogDebug(f"Skipping {mediaFile.FileName}: {sourceResolution} <= {targetResolution}", "QueueManagementBusinessService", "GetMediaFilesByFolderAndResolutionFilter")
+            
+            # Sort by size (largest first)
+            matchingFiles.sort(key=lambda x: x.SizeMB or 0, reverse=True)
+            
+            LoggingService.LogInfo(f"Found {len(matchingFiles)} media files with resolution > {targetResolution} for profile {profile.ProfileName} in folder {RootFolderPath}", "QueueManagementBusinessService", "GetMediaFilesByFolderAndResolutionFilter")
+            return matchingFiles
+            
+        except Exception as e:
+            LoggingService.LogException("Exception getting media files by folder and resolution filter", e, "QueueManagementBusinessService", "GetMediaFilesByFolderAndResolutionFilter")
+            return []
+    
+    def GetMediaFilesByFolderWithResolutionFilterUsingAssignedProfiles(self, RootFolderPath: str) -> List[MediaFileModel]:
+        """
+        Get media files in a folder that have resolution > target resolution using each file's assigned profile.
+        Only includes files that have an assigned profile and pass the resolution check.
+        
+        Args:
+            RootFolderPath: The root folder path to query
+            
+        Returns:
+            List of MediaFileModel objects that match the criteria
+        """
+        try:
+            LoggingService.LogFunctionEntry("GetMediaFilesByFolderWithResolutionFilterUsingAssignedProfiles", "QueueManagementBusinessService", RootFolderPath)
+            
+            # Get all media files in the folder
+            allMediaFiles = self.DatabaseManager.GetMediaFilesByRootFolder(RootFolderPath)
+            LoggingService.LogInfo(f"Found {len(allMediaFiles)} media files in folder {RootFolderPath}", "QueueManagementBusinessService", "GetMediaFilesByFolderWithResolutionFilterUsingAssignedProfiles")
+            
+            matchingFiles = []
+            
+            for mediaFile in allMediaFiles:
+                # Skip files without assigned profiles
+                if not mediaFile.AssignedProfile or mediaFile.AssignedProfile.strip() == "":
+                    LoggingService.LogInfo(f"Skipping {mediaFile.FileName}: no assigned profile", "QueueManagementBusinessService", "GetMediaFilesByFolderWithResolutionFilterUsingAssignedProfiles")
+                    continue
+                
+                # Check resolution using the file's assigned profile
+                shouldSkip, skipReason = self.ShouldSkipDueToResolution(mediaFile, mediaFile.AssignedProfile)
+                if shouldSkip:
+                    LoggingService.LogDebug(f"Skipping {mediaFile.FileName}: {skipReason}", "QueueManagementBusinessService", "GetMediaFilesByFolderWithResolutionFilterUsingAssignedProfiles")
+                    continue
+                
+                # File passed resolution check, include it
+                matchingFiles.append(mediaFile)
+            
+            # Sort by size (largest first)
+            matchingFiles.sort(key=lambda x: x.SizeMB or 0, reverse=True)
+            
+            LoggingService.LogInfo(f"Found {len(matchingFiles)} media files with resolution > target in folder {RootFolderPath}", "QueueManagementBusinessService", "GetMediaFilesByFolderWithResolutionFilterUsingAssignedProfiles")
+            return matchingFiles
+            
+        except Exception as e:
+            LoggingService.LogException("Exception getting media files by folder with resolution filter using assigned profiles", e, "QueueManagementBusinessService", "GetMediaFilesByFolderWithResolutionFilterUsingAssignedProfiles")
             return []
     
     def CreateQueueItemFromMediaFileSimple(self, MediaFile: MediaFileModel) -> Optional[TranscodeQueueModel]:
@@ -381,12 +599,62 @@ class QueueManagementBusinessService:
                 LoggingService.LogWarning(errorMsg, "QueueManagementBusinessService", "AddJobToQueue")
                 return {"Success": False, "ErrorMessage": errorMsg}
             
-            # Check if should skip due to resolution
-            shouldSkip, skipReason = self.ShouldSkipDueToResolution(mediaFile, mediaFile.AssignedProfile)
+            # Check if should skip due to resolution (allow "No downscaling" for manual assignment)
+            # Only skip "No downscaling" if not manually assigned (ProfileId is None means batch processing)
+            skipNoDownscaling = ProfileId is None  # Only skip "No downscaling" if not manually assigned
+            shouldSkip, skipReason = self.ShouldSkipDueToResolution(mediaFile, mediaFile.AssignedProfile, SkipNoDownscaling=skipNoDownscaling)
             if shouldSkip:
                 errorMsg = f"Cannot add {mediaFile.FileName} to queue: {skipReason}"
                 LoggingService.LogInfo(errorMsg, "QueueManagementBusinessService", "AddJobToQueue")
                 return {"Success": False, "ErrorMessage": errorMsg}
+            
+            # Check for previous attempts and validate CRF adjustment
+            from Services.AdaptiveQualityService import AdaptiveQualityService
+            adaptiveService = AdaptiveQualityService(self.DatabaseManager)
+            shouldRetranscode, previousAttempt = adaptiveService.ShouldRetranscode(mediaFile.FilePath)
+            
+            if not shouldRetranscode:
+                # VMAF >= 80, quality already acceptable - skip retranscode
+                skipMsg = f"Quality already acceptable (VMAF >= 80), skipping retranscode for {mediaFile.FileName}"
+                LoggingService.LogInfo(skipMsg, "QueueManagementBusinessService", "AddJobToQueue")
+                return {
+                    "Success": True,
+                    "Skipped": True,
+                    "Message": "Quality already acceptable, skipping retranscode",
+                    "FileName": mediaFile.FileName
+                }
+            
+            # Check if CRF adjustment would fail
+            if previousAttempt:
+                previousCRF = previousAttempt.get('Quality')
+                vmafScore = previousAttempt.get('VMAF')
+                
+                if previousCRF and vmafScore is not None and vmafScore < 80:
+                    # Calculate what the adjusted CRF would be
+                    adjustedCRF = adaptiveService.CalculateAdjustedCRF(previousCRF, vmafScore)
+                    
+                    # Validate adjustment
+                    minCRF = 15
+                    if adjustedCRF < minCRF:
+                        # Cannot adjust further - log critical error
+                        errorMsg = f"Cannot adjust CRF further for {mediaFile.FileName}: Previous CRF={previousCRF}, VMAF={vmafScore:.2f}, Adjusted CRF={adjustedCRF} would be below minimum {minCRF}"
+                        
+                        # Extract directory for ProblemFiles
+                        import os
+                        directory = os.path.dirname(mediaFile.FilePath)
+                        
+                        # Log to ProblemFiles
+                        problemFileId = self.DatabaseManager.AddProblemFile(
+                            mediaFile.FilePath,
+                            "CRF_Adjustment_Failed",
+                            f"CRF adjustment failed: Previous CRF={previousCRF}, VMAF={vmafScore:.2f}, Calculated CRF={adjustedCRF} is below minimum threshold (15). Quality threshold unreachable."
+                        )
+                        
+                        if problemFileId:
+                            LoggingService.LogError(f"Logged CRF adjustment failure to ProblemFiles (ID: {problemFileId}): {errorMsg}", 
+                                                  "QueueManagementBusinessService", "AddJobToQueue")
+                        
+                        return {"Success": False, "ErrorMessage": errorMsg}
             
             # Create queue item directly from media file (no threshold matching needed)
             queueItem = self.CreateQueueItemFromMediaFileSimple(mediaFile)
@@ -529,13 +797,16 @@ class QueueManagementBusinessService:
             LoggingService.LogException("Exception getting queue statistics", e, "QueueManagementBusinessService", "GetQueueStatistics")
             return {}
     
-    def ShouldSkipDueToResolution(self, MediaFile: MediaFileModel, ProfileName: str) -> tuple[bool, str]:
+    def ShouldSkipDueToResolution(self, MediaFile: MediaFileModel, ProfileName: str, SkipNoDownscaling: bool = True) -> tuple[bool, str]:
         """
         Check if a media file should be skipped due to resolution being equal to or less than target.
         
         Args:
             MediaFile: The media file to check
             ProfileName: The assigned profile name
+            SkipNoDownscaling: If True, skip files when profile has "No downscaling" setting. 
+                              If False, allow transcoding even with "No downscaling" (for manual assignments).
+                              Default: True (backward compatible behavior)
             
         Returns:
             Tuple of (should_skip: bool, reason: str)
@@ -543,11 +814,21 @@ class QueueManagementBusinessService:
         try:
             LoggingService.LogFunctionEntry("ShouldSkipDueToResolution", "QueueManagementBusinessService", MediaFile.FileName, ProfileName)
             
+            # Get profile by name first, then get thresholds by ProfileId
+            allProfiles = self.DatabaseManager.GetAllProfiles()
+            matchingProfile = next((p for p in allProfiles if p.ProfileName == ProfileName), None)
+            
+            if not matchingProfile:
+                reason = f"Profile {ProfileName} not found in database"
+                LoggingService.LogError(f"Cannot determine resolution skip for {MediaFile.FileName}: {reason}", "QueueManagementBusinessService", "ShouldSkipDueToResolution")
+                return True, reason  # Skip on error - fail safe by not processing
+            
             # Get profile thresholds for this file's resolution
-            profileThresholds = self.DatabaseManager.GetProfileThresholdsByProfileName(ProfileName)
+            profileThresholds = self.DatabaseManager.GetThresholdsByProfileId(matchingProfile.Id)
             if not profileThresholds:
-                LoggingService.LogWarning(f"No profile thresholds found for profile {ProfileName}", "QueueManagementBusinessService", "ShouldSkipDueToResolution")
-                return False, ""  # Allow to queue (fail-safe)
+                reason = f"No profile thresholds found for profile {ProfileName}"
+                LoggingService.LogError(f"Cannot determine resolution skip for {MediaFile.FileName}: {reason}", "QueueManagementBusinessService", "ShouldSkipDueToResolution")
+                return True, reason  # Skip on error - fail safe by not processing
             
             # Find matching threshold for the file's resolution
             from Services.ResolutionService import ResolutionService
@@ -555,14 +836,16 @@ class QueueManagementBusinessService:
             matchingThreshold = resolutionService.FindMatchingThreshold(MediaFile.Resolution or "", profileThresholds)
             
             if not matchingThreshold:
-                LoggingService.LogWarning(f"No matching threshold found for resolution {MediaFile.Resolution} in profile {ProfileName}", "QueueManagementBusinessService", "ShouldSkipDueToResolution")
-                return False, ""  # Allow to queue (fail-safe)
+                reason = f"No matching threshold found for resolution {MediaFile.Resolution} in profile {ProfileName}"
+                LoggingService.LogError(f"Cannot determine resolution skip for {MediaFile.FileName}: {reason}", "QueueManagementBusinessService", "ShouldSkipDueToResolution")
+                return True, reason  # Skip on error - fail safe by not processing
             
             # Get the target resolution (TranscodeDownTo)
             targetResolution = matchingThreshold.TranscodeDownTo or ""
             
-            # Handle "No downscaling" case
-            if not targetResolution or targetResolution.strip() == "" or targetResolution.lower() == "no downscaling":
+            # Handle "No downscaling" case - only skip if SkipNoDownscaling is True (batch processing)
+            # When SkipNoDownscaling is False (manual assignment), allow transcoding even with "No downscaling"
+            if SkipNoDownscaling and (not targetResolution or targetResolution.strip() == "" or targetResolution.lower() == "no downscaling"):
                 reason = f"Profile {ProfileName} has 'No downscaling' setting - no benefit to transcode"
                 LoggingService.LogInfo(f"Skipped {MediaFile.FileName}: {reason}", "QueueManagementBusinessService", "ShouldSkipDueToResolution")
                 return True, reason
@@ -570,6 +853,12 @@ class QueueManagementBusinessService:
             # Compare source vs target resolution
             sourceResolution = MediaFile.Resolution or ""
             comparison = resolutionService.CompareResolutions(sourceResolution, targetResolution)
+            
+            # If comparison cannot be determined, skip to be safe
+            if comparison is None:
+                reason = f"Cannot compare resolutions: source={sourceResolution}, target={targetResolution}"
+                LoggingService.LogError(f"Cannot determine resolution skip for {MediaFile.FileName}: {reason}", "QueueManagementBusinessService", "ShouldSkipDueToResolution")
+                return True, reason  # Skip on error - fail safe by not processing
             
             if comparison <= 0:  # Source <= target
                 reason = f"Source resolution {sourceResolution} is <= target resolution {targetResolution}"
@@ -581,8 +870,9 @@ class QueueManagementBusinessService:
             return False, ""
             
         except Exception as e:
-            LoggingService.LogException("Exception checking resolution skip", e, "QueueManagementBusinessService", "ShouldSkipDueToResolution")
-            return False, ""  # Allow to queue (fail-safe)
+            reason = f"Exception checking resolution skip: {str(e)}"
+            LoggingService.LogException(f"Cannot determine resolution skip for {MediaFile.FileName}", e, "QueueManagementBusinessService", "ShouldSkipDueToResolution")
+            return True, reason  # Skip on error - fail safe by not processing
 
     def GetNextJob(self) -> Optional[TranscodeQueueModel]:
         """Get the next job to process from the queue."""

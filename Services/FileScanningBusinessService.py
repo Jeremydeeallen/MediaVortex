@@ -1,9 +1,11 @@
 import os
 import uuid
 import re
+import threading
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from Models.RootFolderModel import RootFolderModel
 from Models.MediaFileModel import MediaFileModel
 from Models.SeasonModel import SeasonModel
@@ -56,20 +58,73 @@ class FileScanningBusinessService:
                     'Error': 'MaxConcurrentScansReached'
                 }
             
-            # Validate the root folder path
-            if not RootFolderPath or not os.path.exists(RootFolderPath):
+            # Validate the root folder path with detailed debugging
+            LoggingService.LogInfo(f"Starting path validation for: '{RootFolderPath}'", 'FileScanningBusinessService', 'StartScanning')
+            
+            # Check if path is provided
+            if not RootFolderPath:
+                LoggingService.LogError("RootFolderPath is empty or None", 'FileScanningBusinessService', 'StartScanning')
                 return {
                     'Success': False,
-                    'Message': f'Root folder does not exist: {RootFolderPath}',
-                    'Error': 'InvalidPath'
+                    'Message': 'Root folder path is required',
+                    'Error': 'EmptyPath'
                 }
             
-            if not os.path.isdir(RootFolderPath):
+            # Normalize the path
+            NormalizedPath = os.path.normpath(RootFolderPath)
+            LoggingService.LogInfo(f"Normalized path: '{NormalizedPath}'", 'FileScanningBusinessService', 'StartScanning')
+            
+            # Check if path exists
+            PathExists = os.path.exists(NormalizedPath)
+            LoggingService.LogInfo(f"os.path.exists('{NormalizedPath}') = {PathExists}", 'FileScanningBusinessService', 'StartScanning')
+            
+            if not PathExists:
+                # Additional debugging for failed path
+                LoggingService.LogError(f"Path does not exist: '{NormalizedPath}'", 'FileScanningBusinessService', 'StartScanning')
+                
+                # Try alternative validation methods
+                try:
+                    ListDirResult = os.listdir(NormalizedPath)
+                    LoggingService.LogInfo(f"os.listdir succeeded, found {len(ListDirResult)} items", 'FileScanningBusinessService', 'StartScanning')
+                    PathExists = True  # Override if listdir works
+                except Exception as e:
+                    LoggingService.LogError(f"os.listdir also failed: {str(e)}", 'FileScanningBusinessService', 'StartScanning')
+                
+                if not PathExists:
+                    return {
+                        'Success': False,
+                        'Message': f'Root folder does not exist: {RootFolderPath}',
+                        'Error': 'InvalidPath'
+                    }
+            
+            # Check if it's a directory
+            IsDirectory = os.path.isdir(NormalizedPath)
+            LoggingService.LogInfo(f"os.path.isdir('{NormalizedPath}') = {IsDirectory}", 'FileScanningBusinessService', 'StartScanning')
+            
+            if not IsDirectory:
+                LoggingService.LogError(f"Path is not a directory: '{NormalizedPath}'", 'FileScanningBusinessService', 'StartScanning')
                 return {
                     'Success': False,
                     'Message': f'Path is not a directory: {RootFolderPath}',
                     'Error': 'NotDirectory'
                 }
+            
+            # Additional validation for network drives
+            if len(NormalizedPath) >= 2 and NormalizedPath[1] == ':' and NormalizedPath[0].isalpha():
+                LoggingService.LogInfo(f"Detected network drive: {NormalizedPath[0]}:", 'FileScanningBusinessService', 'StartScanning')
+                try:
+                    # Test if we can actually access the directory
+                    TestFiles = os.listdir(NormalizedPath)
+                    LoggingService.LogInfo(f"Network drive access test successful, found {len(TestFiles)} items", 'FileScanningBusinessService', 'StartScanning')
+                except Exception as e:
+                    LoggingService.LogError(f"Network drive access test failed: {str(e)}", 'FileScanningBusinessService', 'StartScanning')
+                    return {
+                        'Success': False,
+                        'Message': f'Cannot access network drive: {RootFolderPath}',
+                        'Error': 'NetworkDriveAccessFailed'
+                    }
+            
+            LoggingService.LogInfo(f"Path validation successful for: '{NormalizedPath}'", 'FileScanningBusinessService', 'StartScanning')
             
             # Generate unique job ID
             JobId = str(uuid.uuid4())
@@ -483,16 +538,22 @@ class FileScanningBusinessService:
             
             for Folder in ExistingFolders:
                 # Compare using canonical paths from filesystem
-                ExistingCanonical = self.GetCanonicalPathFromFilesystem(Folder.RootFolder)
-                if ExistingCanonical == CanonicalPath:
-                    # Update existing folder with canonical path
-                    Folder.RootFolder = CanonicalPath
-                    Folder.LastScannedDate = datetime.now()
-                    Folder.TotalSizeGB = TotalSizeGB
-                    FolderId = self.DatabaseManager.SaveRootFolder(Folder)
-                    Folder.Id = FolderId
-                    LoggingService.LogInfo(f"Updated existing root folder: {CanonicalPath}")
-                    return Folder
+                # Only check if the path exists to avoid warnings for inaccessible drives
+                try:
+                    if os.path.exists(Folder.RootFolder):
+                        ExistingCanonical = self.GetCanonicalPathFromFilesystem(Folder.RootFolder)
+                        if ExistingCanonical == CanonicalPath:
+                            # Update existing folder with canonical path
+                            Folder.RootFolder = CanonicalPath
+                            Folder.LastScannedDate = datetime.now()
+                            Folder.TotalSizeGB = TotalSizeGB
+                            FolderId = self.DatabaseManager.SaveRootFolder(Folder)
+                            Folder.Id = FolderId
+                            LoggingService.LogInfo(f"Updated existing root folder: {CanonicalPath}")
+                            return Folder
+                except Exception:
+                    # Skip folders that can't be accessed (e.g., T: drive not mapped in this session)
+                    continue
             
             # Create new root folder with canonical path
             NewFolder = RootFolderModel(
@@ -515,35 +576,75 @@ class FileScanningBusinessService:
             if not Path:
                 return Path
             
-            # For network drives, just normalize the case without resolving to UNC
             import os
             normalized_path = os.path.normpath(Path)
             
-            # Check if this is a network drive (Z:, Y:, etc.)
-            if len(normalized_path) >= 2 and normalized_path[1] == ':' and normalized_path[0].isalpha():
-                # This is a drive letter path - just return it normalized
-                return normalized_path
-            
-            # For other paths, check if they exist and get actual case
-            if os.path.exists(normalized_path):
-                # Use os.path.abspath but check if it converts to UNC
-                try:
-                    actual_path = os.path.abspath(normalized_path)
-                    # If it became a UNC path, just return the original normalized path
-                    if actual_path.startswith('\\\\'):
-                        return normalized_path
-                    return actual_path
-                except:
-                    return normalized_path
-            else:
+            # Check if path exists
+            if not os.path.exists(normalized_path):
                 LoggingService.LogWarning(f"Path does not exist, cannot get canonical case: {Path}", 
                                          'GetCanonicalPathFromFilesystem', 'FileScanningBusinessService')
                 return normalized_path
             
-        except Exception as e:
-            LoggingService.LogWarning(f"Could not resolve canonical path for {Path}, using original", 
+            # Build the path component by component to get actual case
+            # This works for both local and network drives
+            # Handle Windows drive letter paths properly (e.g., "Z:\Videos")
+            if len(normalized_path) >= 2 and normalized_path[1] == ':':
+                # Windows drive letter path - split at the drive letter
+                drive = normalized_path[0:2]  # e.g., "Z:"
+                remainder = normalized_path[2:].lstrip(os.sep)  # e.g., "Videos" (without leading \)
+                result_path = drive + os.sep  # e.g., "Z:\" - ensure we have the backslash
+                if remainder:
+                    parts = remainder.split(os.sep)
+                else:
+                    parts = []
+            else:
+                # Unix-style path or UNC path
+                parts = normalized_path.split(os.sep)
+                result_path = parts[0] if parts else ''
+                parts = parts[1:] if parts else []
+            
+            # Resolve each component by listing parent directory
+            current_path = result_path
+            for part in parts:
+                if not part:  # Skip empty parts
+                    continue
+                
+                try:
+                    # List directory contents to find actual case
+                    if os.path.isdir(current_path):
+                        dir_contents = os.listdir(current_path)
+                        # Find matching directory (case-insensitive comparison)
+                        actual_name = None
+                        for item in dir_contents:
+                            if item.upper() == part.upper():
+                                actual_name = item
+                                break
+                        
+                        if actual_name:
+                            current_path = os.path.join(current_path, actual_name)
+                        else:
+                            # If not found in listing, use original (might be a file)
+                            current_path = os.path.join(current_path, part)
+                    else:
+                        # Not a directory, just append
+                        current_path = os.path.join(current_path, part)
+                except Exception as e:
+                    # If we can't list directory, just use original part
+                    LoggingService.LogWarning(f"Could not list directory '{current_path}' to get actual case, using: {part}", 
+                                             'GetCanonicalPathFromFilesystem', 'FileScanningBusinessService')
+                    current_path = os.path.join(current_path, part)
+            
+            # Log if case changed
+            if current_path != normalized_path:
+                LoggingService.LogInfo(f"Normalized path case: '{normalized_path}' -> '{current_path}'", 
                                      'GetCanonicalPathFromFilesystem', 'FileScanningBusinessService')
-            return Path
+            
+            return current_path
+            
+        except Exception as e:
+            LoggingService.LogWarning(f"Could not resolve canonical path for {Path}, using original: {str(e)}", 
+                                     'GetCanonicalPathFromFilesystem', 'FileScanningBusinessService')
+            return Path if Path else normalized_path
     
     def ProcessMediaFiles(self, MediaFiles: List[str], RootFolderId: Optional[int], RootFolderPath: str = "", ExtractMetadata: bool = True):
         """Process each media file found during scanning with optional metadata extraction."""
@@ -683,6 +784,22 @@ class FileScanningBusinessService:
     def ProcessSingleMediaFile(self, FilePath: str, RootFolderId: Optional[int], RootFolderPath: str = "", ExtractMetadata: bool = True):
         """Process a single media file with fuzzy matching and optional metadata extraction."""
         try:
+            # First check if the file actually exists on disk
+            if not os.path.exists(FilePath):
+                LoggingService.LogWarning(f"File does not exist on disk: {FilePath}", 'ProcessSingleMediaFile', 'FileScanningBusinessService')
+                
+                # Check if there's a database entry for this file path and delete it
+                ExistingFile = self.DatabaseManager.GetMediaFileByPath(FilePath)
+                if ExistingFile:
+                    LoggingService.LogInfo(f"Deleting database entry for missing file: {FilePath} (ID: {ExistingFile.Id})", 'ProcessSingleMediaFile', 'FileScanningBusinessService')
+                    self.DatabaseManager.DeleteMediaFile(ExistingFile.Id)
+                    LoggingService.LogInfo(f"Successfully deleted database entry for missing file: {FilePath}", 'ProcessSingleMediaFile', 'FileScanningBusinessService')
+                else:
+                    LoggingService.LogDebug(f"No database entry found for missing file: {FilePath}", 'ProcessSingleMediaFile', 'FileScanningBusinessService')
+                
+                # Don't process further if file doesn't exist
+                return
+            
             # Get file information
             FileSizeMB = self.FileManager.GetFileSizeMB(FilePath)
             FileName = self.FileManager.GetFileNameFromPath(FilePath)
@@ -1059,29 +1176,105 @@ class FileScanningBusinessService:
             LoggingService.LogException("Error extracting and updating metadata", e, 'ExtractAndUpdateMetadata', 'FileScanningBusinessService')
             # Set default values on error
     
+    def CleanupMissingFiles(self, RootFolderId: Optional[int] = None):
+        """Remove database records for files that no longer exist on disk."""
+        try:
+            LoggingService.LogInfo("=== CLEANUP MISSING FILES STARTED ===", 'CleanupMissingFiles', 'FileScanningBusinessService')
+            
+            if RootFolderId:
+                # Get root folder path
+                RootFolder = self.DatabaseManager.GetRootFolderById(RootFolderId)
+                if not RootFolder:
+                    LoggingService.LogError(f"Root folder not found for ID: {RootFolderId}", 'CleanupMissingFiles', 'FileScanningBusinessService')
+                    return
+                
+                # Get all files in database for this root folder path
+                DatabaseFiles = self.DatabaseManager.GetMediaFilesByRootFolder(RootFolder.RootFolder)
+                LoggingService.LogInfo(f"Checking {len(DatabaseFiles)} database files for root folder: {RootFolder.RootFolder}", 'CleanupMissingFiles', 'FileScanningBusinessService')
+            else:
+                # Get all files in database
+                DatabaseFiles = self.DatabaseManager.GetAllMediaFiles()
+                LoggingService.LogInfo(f"Checking {len(DatabaseFiles)} total database files", 'CleanupMissingFiles', 'FileScanningBusinessService')
+            
+            # Check each database file to see if it actually exists on disk
+            DeletedCount = 0
+            for DbFile in DatabaseFiles:
+                if not os.path.exists(DbFile.FilePath):
+                    LoggingService.LogInfo(f"FILE NOT FOUND ON DISK - DELETING FROM DATABASE: {DbFile.FilePath}", 'CleanupMissingFiles', 'FileScanningBusinessService')
+                    
+                    # Delete directly using the database service
+                    DeleteQuery = "DELETE FROM MediaFiles WHERE Id = ?"
+                    AffectedRows = self.DatabaseManager.DatabaseService.ExecuteNonQuery(DeleteQuery, (DbFile.Id,))
+                    
+                    if AffectedRows > 0:
+                        LoggingService.LogInfo(f"SUCCESS: Deleted missing file from database: {DbFile.FilePath} (ID: {DbFile.Id})", 'CleanupMissingFiles', 'FileScanningBusinessService')
+                        DeletedCount += 1
+                    else:
+                        LoggingService.LogWarning(f"Failed to delete missing file from database: {DbFile.FilePath} (ID: {DbFile.Id})", 'CleanupMissingFiles', 'FileScanningBusinessService')
+            
+            LoggingService.LogInfo("=== CLEANUP MISSING FILES COMPLETED ===", 'CleanupMissingFiles', 'FileScanningBusinessService')
+            if DeletedCount > 0:
+                LoggingService.LogInfo(f"SUCCESS: Cleaned up {DeletedCount} missing files from database", 'CleanupMissingFiles', 'FileScanningBusinessService')
+            else:
+                LoggingService.LogInfo("No missing files found to clean up", 'CleanupMissingFiles', 'FileScanningBusinessService')
+                
+        except Exception as e:
+            LoggingService.LogException("CRITICAL ERROR in CleanupMissingFiles", e, 'CleanupMissingFiles', 'FileScanningBusinessService')
+    
     def ProcessMediaFilesWithMetadata(self, MediaFiles: List[str], RootFolderId: Optional[int], RootFolderPath: str = "", ExtractMetadata: bool = True):
-        """Process media files with optional metadata extraction."""
+        """Process media files with optional metadata extraction using parallel processing."""
         try:
             LoggingService.LogFunctionEntry("ProcessMediaFilesWithMetadata", 'FileScanningBusinessService', f"Processing {len(MediaFiles)} files, ExtractMetadata: {ExtractMetadata}")
             
-            # Cleanup is now handled by the subprocess before calling this method
-            # This ensures proper status updates and progress tracking
+            # Cleanup missing files before processing to remove entries for files that no longer exist
+            if RootFolderId:
+                LoggingService.LogInfo("=== CALLING CLEANUP MISSING FILES ===", 'ProcessMediaFilesWithMetadata', 'FileScanningBusinessService')
+                self.CleanupMissingFiles(RootFolderId)
+                LoggingService.LogInfo("=== CLEANUP MISSING FILES CALL COMPLETED ===", 'ProcessMediaFilesWithMetadata', 'FileScanningBusinessService')
             
             TotalFiles = len(MediaFiles)
+            ProcessedCount = 0
+            ProgressLock = threading.Lock()
             
-            for i, FilePath in enumerate(MediaFiles):
+            def ProcessSingleFile(FilePath: str):
+                """Process a single file and return result."""
+                nonlocal ProcessedCount
+                
                 try:
-                    # Update progress
-                    Progress = 30.0 + (60.0 * (i + 1) / TotalFiles)
-                    self.ScanProgress = Progress
-                    
                     # Process the file with metadata extraction
                     self.ProcessSingleMediaFile(FilePath, RootFolderId, RootFolderPath, ExtractMetadata)
                     
+                    # Update progress thread-safely
+                    with ProgressLock:
+                        ProcessedCount += 1
+                        Progress = 30.0 + (60.0 * ProcessedCount / TotalFiles)
+                        self.ScanProgress = Progress
+                    
+                    return {'Success': True, 'FilePath': FilePath}
                 except Exception as e:
-                    LoggingService.LogException("Error processing media file with metadata", e, 'ProcessMediaFilesWithMetadata', 'FileScanningBusinessService')
-                    self.ScanErrors.append(f"Error processing {FilePath}: {str(e)}")
-                    continue
+                    LoggingService.LogException(f"Error processing media file: {FilePath}", e, 'ProcessMediaFilesWithMetadata', 'FileScanningBusinessService')
+                    ErrorMessage = f"Error processing {FilePath}: {str(e)}"
+                    with ProgressLock:
+                        self.ScanErrors.append(ErrorMessage)
+                    return {'Success': False, 'FilePath': FilePath, 'Error': str(e)}
+            
+            # Process files in parallel with 5 workers
+            MaxWorkers = 5
+            with ThreadPoolExecutor(max_workers=MaxWorkers) as Executor:
+                # Submit all files for processing
+                FutureToFile = {Executor.submit(ProcessSingleFile, FilePath): FilePath for FilePath in MediaFiles}
+                
+                # Wait for all tasks to complete
+                for Future in as_completed(FutureToFile):
+                    FilePath = FutureToFile[Future]
+                    try:
+                        Result = Future.result()
+                        if not Result.get('Success', False):
+                            LoggingService.LogWarning(f"Failed to process file: {FilePath}", 'ProcessMediaFilesWithMetadata', 'FileScanningBusinessService')
+                    except Exception as e:
+                        LoggingService.LogException(f"Exception in future for file: {FilePath}", e, 'ProcessMediaFilesWithMetadata', 'FileScanningBusinessService')
+                        with ProgressLock:
+                            self.ScanErrors.append(f"Error processing {FilePath}: {str(e)}")
             
             # Note: Duplicate file detection has been moved to a separate process
             # to avoid slowing down the scanning process. Use the dedicated

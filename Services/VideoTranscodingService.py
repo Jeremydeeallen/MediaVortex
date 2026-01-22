@@ -57,38 +57,39 @@ class VideoTranscodingService:
             
             LoggingService.LogInfo(f"Process started with PID: {Process.pid}", "VideoTranscodingService", "TranscodeVideo")
             
-            # Set CPU affinity on child FFmpeg process (not shell process)
+            # Set CPU affinity using reusable CpuAffinityService method (temperature-based smart core selection)
+            FFmpegPID = None
+            MaxCpuThreads = self.GetMaxCpuThreads()
+            CoreCount = max(1, MaxCpuThreads - 2)  # Reduce by 2 as per plan
+            
             try:
-                import psutil
-                import time
+                from Services.CpuAffinityService import GetCpuAffinityServiceInstance
+                CpuAffinityServiceInstance = GetCpuAffinityServiceInstance()
                 
-                # Wait briefly for child process to spawn
-                time.sleep(0.1)
+                AffinityResult = CpuAffinityServiceInstance.SetFFmpegProcessAffinity(
+                    ShellProcessPID=Process.pid,
+                    CoreCount=CoreCount,
+                    JobId=JobId,
+                    JobType="Transcode",
+                    ServiceName="VideoTranscodingService"
+                )
                 
-                ShellProcess = psutil.Process(Process.pid)
-                MaxCpuThreads = self.GetMaxCpuThreads()
-                AffinityCores = list(range(MaxCpuThreads))
-                
-                # Find the child FFmpeg process
-                FFmpegProcess = None
-                for child in ShellProcess.children(recursive=True):
-                    if 'ffmpeg' in child.name().lower():
-                        FFmpegProcess = child
-                        break
-                
-                if FFmpegProcess:
-                    FFmpegProcess.cpu_affinity(AffinityCores)
-                    LoggingService.LogInfo(f"Set Transcode FFmpeg CPU affinity to cores: {AffinityCores} (MaxCpuThreads: {MaxCpuThreads}, Shell PID: {Process.pid}, FFmpeg PID: {FFmpegProcess.pid})", "VideoTranscodingService", "TranscodeVideo")
+                if AffinityResult["Success"]:
+                    FFmpegPID = AffinityResult["FFmpegPID"]
+                    if AffinityResult.get("ErrorMessage"):
+                        LoggingService.LogWarning(f"CPU affinity set but with warning: {AffinityResult['ErrorMessage']}", 
+                                                 "VideoTranscodingService", "TranscodeVideo")
                 else:
-                    LoggingService.LogWarning(f"Could not find child FFmpeg process for shell PID {Process.pid}. CPU affinity not set.", "VideoTranscodingService", "TranscodeVideo")
-                    
+                    LoggingService.LogWarning(f"Failed to set CPU affinity: {AffinityResult.get('ErrorMessage', 'Unknown error')}", 
+                                             "VideoTranscodingService", "TranscodeVideo")
             except Exception as AffinityError:
                 LoggingService.LogWarning(f"Failed to set CPU affinity: {AffinityError}", "VideoTranscodingService", "TranscodeVideo")
             
-            # Update ActiveJob with FFmpeg PID if provided
+            # Update ActiveJob with FFmpeg PID if provided (use FFmpeg PID if available, otherwise shell PID)
+            ProcessPIDToUse = FFmpegPID if FFmpegPID else Process.pid
             if ActiveJobId and DatabaseManager:
-                DatabaseManager.UpdateActiveJobProcessId(ActiveJobId, Process.pid)
-                LoggingService.LogInfo(f"Updated ActiveJob {ActiveJobId} with FFmpeg PID {Process.pid}", 
+                DatabaseManager.UpdateActiveJobProcessId(ActiveJobId, ProcessPIDToUse)
+                LoggingService.LogInfo(f"Updated ActiveJob {ActiveJobId} with PID {ProcessPIDToUse} (FFmpeg: {FFmpegPID is not None})", 
                                       "VideoTranscodingService", "TranscodeVideo")
             
             # Store process reference
@@ -141,6 +142,14 @@ class VideoTranscodingService:
                 del self.ActiveProcesses[JobId]
             if JobId in self.ProcessThreads:
                 del self.ProcessThreads[JobId]
+            
+            # Release job from CpuAffinityService (with cooling wait enabled)
+            try:
+                from Services.CpuAffinityService import GetCpuAffinityServiceInstance
+                CpuAffinityServiceInstance = GetCpuAffinityServiceInstance()
+                CpuAffinityServiceInstance.ReleaseJob(JobId, WaitForCooling=True)
+            except Exception as ReleaseError:
+                LoggingService.LogWarning(f"Failed to release job from CpuAffinityService: {ReleaseError}", "VideoTranscodingService", "TranscodeVideo")
             
             # Check if transcoding was successful
             if ReturnCode == 0:
@@ -198,6 +207,14 @@ class VideoTranscodingService:
         except Exception as e:
             ErrorMessage = f"Exception during transcoding: {str(e)}"
             LoggingService.LogException(ErrorMessage, e, "VideoTranscodingService", "TranscodeVideo")
+            
+            # Release job from CpuAffinityService (with cooling wait enabled)
+            try:
+                from Services.CpuAffinityService import GetCpuAffinityServiceInstance
+                CpuAffinityServiceInstance = GetCpuAffinityServiceInstance()
+                CpuAffinityServiceInstance.ReleaseJob(JobId, WaitForCooling=True)
+            except Exception as ReleaseError:
+                LoggingService.LogWarning(f"Failed to release job from CpuAffinityService: {ReleaseError}", "VideoTranscodingService", "TranscodeVideo")
             
             # Clean up process references
             if JobId in self.ActiveProcesses:
@@ -410,25 +427,29 @@ class VideoTranscodingService:
             return None
     
     def GetMaxCpuThreads(self) -> int:
-        """Get maximum CPU threads from system settings or use default."""
-        try:
-            from Repositories.DatabaseManager import DatabaseManager
-            DatabaseManagerInstance = DatabaseManager()
-            
-            # Get CPU thread limit from system settings
-            MaxCpuThreads = DatabaseManagerInstance.GetSystemSetting('MaxCpuThreads')
-            if MaxCpuThreads and MaxCpuThreads.isdigit():
-                ThreadCount = int(MaxCpuThreads)
-                # Validate thread count (1-32 for safety)
-                if 1 <= ThreadCount <= 32:
-                    return ThreadCount
-            
-            # Default to 16 threads for i9-14900KF (half of 32 cores to prevent overload)
-            return 16
-            
-        except Exception:
-            # If system settings fail, use safe default
-            return 16
+        """Get maximum CPU threads from system settings.
+        
+        Raises:
+            ValueError: If setting is missing, invalid, or out of range (1-32)
+            Exception: If database access fails
+        """
+        from Repositories.DatabaseManager import DatabaseManager
+        DatabaseManagerInstance = DatabaseManager()
+        
+        # Get CPU thread limit from system settings
+        MaxCpuThreads = DatabaseManagerInstance.GetSystemSetting('MaxCpuThreads')
+        if not MaxCpuThreads:
+            raise ValueError("MaxCpuThreads setting is missing from SystemSettings. Please add it to the database.")
+        
+        if not MaxCpuThreads.isdigit():
+            raise ValueError(f"MaxCpuThreads setting has invalid value: '{MaxCpuThreads}'. Must be a number between 1-32.")
+        
+        ThreadCount = int(MaxCpuThreads)
+        # Validate thread count (1-32 for safety)
+        if not (1 <= ThreadCount <= 32):
+            raise ValueError(f"MaxCpuThreads setting value {ThreadCount} is out of valid range (1-32).")
+        
+        return ThreadCount
     
     def FormatTime(self, Seconds: int) -> str:
         """Format seconds into HH:MM:SS format."""

@@ -22,66 +22,66 @@
         </div>
     </div>
 
-    <!-- Overall Health Summary -->
+    <!-- CPU Core Temperatures Display -->
     <div class="row mb-4">
         <div class="col-12">
             <div class="card">
                 <div class="card-header d-flex justify-content-between align-items-center">
                     <h5 class="card-title mb-0">
-                        <i class="fas fa-heartbeat me-2"></i>System Health Overview
+                        <i class="fas fa-thermometer-half me-2"></i>CPU Core Temperatures
                     </h5>
-                    <div class="btn-group btn-group-sm" role="group">
-                        <button type="button" class="btn btn-outline-primary" id="RefreshHealthBtn">
-                            <i class="fas fa-sync-alt me-1"></i>Refresh
-                        </button>
-                        <button type="button" class="btn btn-outline-success" id="AutoRefreshHealthBtn">
-                            <i class="fas fa-play me-1"></i>Auto
-                        </button>
+                    <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#CoreTemperaturesCollapse" aria-expanded="true" aria-controls="CoreTemperaturesCollapse">
+                        <i class="fas fa-chevron-up" id="CoreTemperaturesChevron"></i>
+                    </button>
+                </div>
+                <div class="collapse show" id="CoreTemperaturesCollapse">
+                    <div class="card-body">
+                        <div class="row g-2" id="CoreTemperaturesGrid">
+                            <!-- Core temperature cells will be dynamically generated here -->
+                        </div>
                     </div>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- System Resources Box -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">
+                        <i class="fas fa-tachometer-alt me-2"></i>System Resources
+                    </h5>
+                </div>
                 <div class="card-body">
-                    <div class="row" id="HealthSummary">
-                        <div class="col-md-2">
+                    <div class="row" id="SystemResources">
+                        <div class="col-md-3">
                             <div class="text-center">
-                                <h3 class="text-primary mb-1" id="TotalServices">-</h3>
-                                <small class="text-muted">Services</small>
+                                <h4 class="text-primary mb-1" id="CpuUsage">-</h4>
+                                <small class="text-muted">CPU Usage</small>
                             </div>
                         </div>
-                        <div class="col-md-2">
-                            <div class="text-center">
-                                <h3 class="text-success mb-1" id="RunningServices">-</h3>
-                                <small class="text-muted">Running</small>
+                        <div class="col-md-3">
+                            <div class="text-center" id="CpuTemperatureContainer" data-bs-toggle="tooltip" data-bs-placement="top" title="Hover for core details">
+                                <h4 class="text-info mb-1" id="CpuTemperature">-</h4>
+                                <small class="text-muted">CPU Temperature</small>
+                                <div id="CpuTemperatureDetails" class="d-none">
+                                    <small class="text-muted d-block">Max: <span id="CpuMaxTemp">-</span>°C</small>
+                                    <small class="text-muted d-block">Avg: <span id="CpuAvgTemp">-</span>°C</small>
+                                </div>
                             </div>
                         </div>
-                        <div class="col-md-2">
+                        <div class="col-md-3">
                             <div class="text-center">
-                                <h3 class="text-warning mb-1" id="WarningServices">-</h3>
-                                <small class="text-muted">Warning</small>
+                                <h4 class="text-warning mb-1" id="MemoryUsage">-</h4>
+                                <small class="text-muted">Memory Usage</small>
                             </div>
                         </div>
-                        <div class="col-md-2">
+                        <div class="col-md-3">
                             <div class="text-center">
-                                <h3 class="text-danger mb-1" id="UnhealthyServices">-</h3>
-                                <small class="text-muted">Unhealthy</small>
-                            </div>
-                        </div>
-                        <div class="col-md-2">
-                            <div class="text-center">
-                                <h3 class="text-info mb-1" id="TotalFailures">-</h3>
-                                <small class="text-muted">Failures (24h)</small>
-                            </div>
-                        </div>
-                        <div class="col-md-2">
-                            <div class="text-center">
-                                <h3 class="text-secondary mb-1" id="ActiveJobs">-</h3>
-                                <small class="text-muted">Active Jobs</small>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="row mt-3">
-                        <div class="col-12">
-                            <div class="alert" id="OverallHealthAlert" role="alert">
-                                <strong>Overall Status:</strong> <span id="OverallHealthStatus">Loading...</span>
+                                <h4 class="text-secondary mb-1" id="DiskUsage">-</h4>
+                                <small class="text-muted">Disk Usage</small>
                             </div>
                         </div>
                     </div>
@@ -91,65 +91,8 @@
     </div>
 
     <!-- Services Status Cards -->
-    <div class="row mb-4" id="ServicesContainer">
+    <div class="row" id="ServicesContainer">
         <!-- Services will be dynamically loaded here -->
-    </div>
-
-    <!-- Recent Failures -->
-    <div class="row">
-        <div class="col-12">
-            <div class="card">
-                <div class="card-header d-flex justify-content-between align-items-center">
-                    <h5 class="card-title mb-0">
-                        <i class="fas fa-exclamation-triangle me-2"></i>Recent Failures
-                    </h5>
-                    <div class="btn-group btn-group-sm" role="group">
-                        <button type="button" class="btn btn-outline-primary" id="RefreshFailuresBtn">
-                            <i class="fas fa-sync-alt me-1"></i>Refresh
-                        </button>
-                        <button type="button" class="btn btn-outline-info" id="ViewAllFailuresBtn">
-                            <i class="fas fa-list me-1"></i>View All
-                        </button>
-                    </div>
-                </div>
-                <div class="card-body">
-                    <div class="table-responsive">
-                        <table class="table table-hover table-sm" id="FailuresTable">
-                            <thead class="table-dark">
-                                <tr>
-                                    <th>Service</th>
-                                    <th>Type</th>
-                                    <th>File</th>
-                                    <th>Failure Reason</th>
-                                    <th>Time</th>
-                                    <th>Duration</th>
-                                </tr>
-                            </thead>
-                            <tbody id="FailuresTableBody">
-                                <tr>
-                                    <td colspan="6" class="text-center text-muted">
-                                        <i class="fas fa-spinner fa-spin me-2"></i>Loading failures...
-                                    </td>
-                                </tr>
-                            </tbody>
-                        </table>
-                    </div>
-                    <div class="row mt-3">
-                        <div class="col-md-6">
-                            <small class="text-muted">
-                                <i class="fas fa-info-circle me-1"></i>
-                                Showing last 20 failures across all services
-                            </small>
-                        </div>
-                        <div class="col-md-6 text-end">
-                            <small class="text-muted" id="FailureStats">
-                                <!-- Failure statistics will be loaded here -->
-                            </small>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
     </div>
 
     <!-- Loading Indicator -->
@@ -184,28 +127,205 @@ class ServiceStatusManager {
         this.RefreshInterval = 15000; // 15 seconds
         
         this.initializeEventListeners();
+        this.loadSystemResources();
         this.loadServiceStatus();
-        this.loadRecentFailures();
     }
 
     initializeEventListeners() {
-        // Health refresh buttons
-        document.getElementById('RefreshHealthBtn').addEventListener('click', () => {
+        // Refresh buttons
+        document.getElementById('RefreshBtn').addEventListener('click', () => {
+            this.loadSystemResources();
             this.loadServiceStatus();
         });
 
-        document.getElementById('AutoRefreshHealthBtn').addEventListener('click', () => {
+        document.getElementById('AutoRefreshBtn').addEventListener('click', () => {
             this.toggleAutoRefresh();
         });
+        
+        // Core temperatures collapse toggle
+        const collapseElement = document.getElementById('CoreTemperaturesCollapse');
+        if (collapseElement) {
+            collapseElement.addEventListener('show.bs.collapse', () => {
+                document.getElementById('CoreTemperaturesChevron').classList.remove('fa-chevron-down');
+                document.getElementById('CoreTemperaturesChevron').classList.add('fa-chevron-up');
+            });
+            collapseElement.addEventListener('hide.bs.collapse', () => {
+                document.getElementById('CoreTemperaturesChevron').classList.remove('fa-chevron-up');
+                document.getElementById('CoreTemperaturesChevron').classList.add('fa-chevron-down');
+            });
+        }
+    }
 
-        // Failure refresh buttons
-        document.getElementById('RefreshFailuresBtn').addEventListener('click', () => {
-            this.loadRecentFailures();
-        });
+    async loadSystemResources() {
+        try {
+            const response = await fetch('/api/SystemResources');
+            const data = await response.json();
+            
+            if (data.Success && data.Resources) {
+                this.renderSystemResources(data.Resources);
+            } else {
+                this.showResourceError('Failed to load system resources: ' + (data.ErrorMessage || 'Unknown error'));
+            }
+            
+        } catch (error) {
+            this.showResourceError('Error loading system resources: ' + error.message);
+        }
+    }
 
-        document.getElementById('ViewAllFailuresBtn').addEventListener('click', () => {
-            alert('View All Failures feature coming soon!');
+    renderSystemResources(resources) {
+        // CPU Usage
+        const cpuUsage = resources.CpuUsage || 0;
+        document.getElementById('CpuUsage').textContent = `${cpuUsage.toFixed(1)}%`;
+        
+        // CPU Temperature
+        const cpuTemp = resources.CpuTemperature;
+        if (cpuTemp !== null && cpuTemp !== undefined && cpuTemp.Celsius !== undefined) {
+            document.getElementById('CpuTemperature').textContent = `${cpuTemp.Celsius}°C / ${cpuTemp.Fahrenheit}°F`;
+            
+            // Update detailed temperature information
+            if (cpuTemp.Max !== undefined) {
+                document.getElementById('CpuMaxTemp').textContent = cpuTemp.Max;
+            }
+            if (cpuTemp.Average !== undefined) {
+                document.getElementById('CpuAvgTemp').textContent = cpuTemp.Average;
+            }
+            
+            // Create detailed tooltip with core information
+            this.updateCpuTemperatureTooltip(cpuTemp);
+            
+            // Render core temperature grid
+            this.renderCoreTemperatures(cpuTemp);
+        } else {
+            document.getElementById('CpuTemperature').textContent = 'N/A';
+            document.getElementById('CpuMaxTemp').textContent = '-';
+            document.getElementById('CpuAvgTemp').textContent = '-';
+            // Clear core temperatures grid
+            document.getElementById('CoreTemperaturesGrid').innerHTML = '<div class="col-12 text-center text-muted">Temperature data not available</div>';
+        }
+        
+        // Memory Usage
+        const memory = resources.MemoryUsage || {};
+        const memoryUsed = memory.Used || 0;
+        const memoryTotal = memory.Total || 0;
+        const memoryPercent = memory.Percent || 0;
+        document.getElementById('MemoryUsage').textContent = `${memoryUsed}GB / ${memoryTotal}GB (${memoryPercent.toFixed(1)}%)`;
+        
+        // Disk Usage
+        const disk = resources.DiskUsage || {};
+        const diskFree = disk.Free || 0;
+        const diskTotal = disk.Total || 0;
+        const diskPercent = disk.Percent || 0;
+        document.getElementById('DiskUsage').textContent = `${diskFree}GB / ${diskTotal}GB (${diskPercent.toFixed(1)}%)`;
+    }
+
+    renderCoreTemperatures(cpuTemp) {
+        const grid = document.getElementById('CoreTemperaturesGrid');
+        grid.innerHTML = '';
+        
+        if (!cpuTemp.Cores || cpuTemp.Cores.length === 0) {
+            grid.innerHTML = '<div class="col-12 text-center text-muted">No core temperature data available</div>';
+            return;
+        }
+        
+        // Sort cores by core number
+        const sortedCores = [...cpuTemp.Cores].sort((a, b) => (a.Core || 0) - (b.Core || 0));
+        
+        sortedCores.forEach(core => {
+            const coreNum = core.Core !== undefined ? core.Core : -1;
+            const temp = core.Temperature;
+            const isNA = temp === null || temp === undefined;
+            
+            // Get core status (active/cooling/available) if available
+            const coreStatus = core.Status || 'available';
+            const jobType = core.JobType || '';
+            
+            // Determine color class based on temperature
+            let tempClass = 'bg-secondary'; // Default/N/A
+            let tempText = 'N/A';
+            let borderClass = '';
+            let statusBadge = '';
+            
+            if (!isNA) {
+                // Convert Celsius to Fahrenheit
+                const tempF = (temp * 9/5) + 32;
+                tempText = `${temp}°C / ${tempF.toFixed(1)}°F`;
+                if (temp < 70) {
+                    tempClass = 'bg-success'; // Green - cool
+                } else if (temp < 85) {
+                    tempClass = 'bg-warning'; // Yellow - warm
+                } else if (temp < 95) {
+                    tempClass = 'bg-danger'; // Red - hot (85-95)
+                } else {
+                    tempClass = 'bg-danger'; // Red - critical (>95)
+                }
+            }
+            
+            // Add border/indicator for active or cooling cores
+            if (coreStatus === 'active') {
+                borderClass = 'border border-primary border-3';
+                statusBadge = `<span class="badge bg-primary position-absolute top-0 start-50 translate-middle">${jobType || 'Active'}</span>`;
+            } else if (coreStatus === 'cooling') {
+                borderClass = 'border border-info border-2';
+                statusBadge = `<span class="badge bg-info position-absolute top-0 start-50 translate-middle">Cooling</span>`;
+            }
+            
+            const coreElement = document.createElement('div');
+            coreElement.className = 'col-6 col-md-3 col-lg-2 mb-2';
+            coreElement.innerHTML = `
+                <div class="card ${tempClass} text-white ${borderClass}" style="position: relative;" data-bs-toggle="tooltip" data-bs-placement="top" title="${coreStatus === 'active' ? `${jobType ? jobType + ' job' : 'Active job'} on this core` : coreStatus === 'cooling' ? 'Core is cooling down' : 'Core is available'}"
+                     data-bs-original-title="${coreStatus === 'active' ? `${jobType ? jobType + ' job' : 'Active job'} on this core` : coreStatus === 'cooling' ? 'Core is cooling down' : 'Core is available'}">
+                    ${statusBadge}
+                    <div class="card-body text-center p-2">
+                        <div class="small fw-bold">Core ${coreNum}</div>
+                        <div class="fs-6">${tempText}</div>
+                    </div>
+                </div>
+            `;
+            grid.appendChild(coreElement);
+            
+            // Initialize tooltip for this element
+            const tooltipTrigger = coreElement.querySelector('[data-bs-toggle="tooltip"]');
+            if (tooltipTrigger) {
+                new bootstrap.Tooltip(tooltipTrigger);
+            }
         });
+    }
+
+    updateCpuTemperatureTooltip(cpuTemp) {
+        const container = document.getElementById('CpuTemperatureContainer');
+        let tooltipContent = `Package: ${cpuTemp.Celsius}°C / ${cpuTemp.Fahrenheit}°F`;
+        
+        if (cpuTemp.Max !== undefined) {
+            tooltipContent += `\nMax: ${cpuTemp.Max}°C`;
+        }
+        if (cpuTemp.Average !== undefined) {
+            tooltipContent += `\nAverage: ${cpuTemp.Average}°C`;
+        }
+        
+        if (cpuTemp.Cores && cpuTemp.Cores.length > 0) {
+            tooltipContent += '\n\nCore Temperatures:';
+            cpuTemp.Cores.forEach(core => {
+                tooltipContent += `\nCore ${core.Core}: ${core.Temperature}°C`;
+            });
+        }
+        
+        // Update tooltip content
+        container.setAttribute('data-bs-original-title', tooltipContent);
+        
+        // Reinitialize tooltip if it exists
+        const tooltip = bootstrap.Tooltip.getInstance(container);
+        if (tooltip) {
+            tooltip.dispose();
+        }
+        new bootstrap.Tooltip(container);
+    }
+
+    showResourceError(message) {
+        document.getElementById('CpuUsage').textContent = 'Error';
+        document.getElementById('CpuTemperature').textContent = 'Error';
+        document.getElementById('MemoryUsage').textContent = 'Error';
+        document.getElementById('DiskUsage').textContent = 'Error';
+        console.error(message);
     }
 
     async loadServiceStatus() {
@@ -217,7 +337,6 @@ class ServiceStatusManager {
             
             if (data.Success && data.Services) {
                 this.renderServiceStatus(data.Services);
-                this.updateHealthSummary(data.Services);
             } else {
                 this.showError('Failed to load service status: ' + (data.ErrorMessage || 'Unknown error'));
             }
@@ -230,60 +349,16 @@ class ServiceStatusManager {
         }
     }
 
-    async loadHealthSummary() {
-        try {
-            const response = await fetch('/api/ServiceStatus/Health');
-            const data = await response.json();
-
-            if (data.Success) {
-                const health = data.HealthSummary;
-                
-                document.getElementById('TotalServices').textContent = health.TotalServices || 0;
-                document.getElementById('RunningServices').textContent = health.RunningServices || 0;
-                document.getElementById('WarningServices').textContent = health.WarningServices || 0;
-                document.getElementById('UnhealthyServices').textContent = health.UnhealthyServices || 0;
-                
-                const overallStatus = health.OverallHealth || 'Unknown';
-                const alertElement = document.getElementById('OverallHealthAlert');
-                const statusElement = document.getElementById('OverallHealthStatus');
-                
-                statusElement.textContent = overallStatus;
-                
-                // Set alert class based on status
-                alertElement.className = 'alert';
-                if (overallStatus === 'Healthy') {
-                    alertElement.classList.add('alert-success');
-                } else if (overallStatus === 'Warning') {
-                    alertElement.classList.add('alert-warning');
-                } else {
-                    alertElement.classList.add('alert-danger');
-                }
-            }
-        } catch (error) {
-            console.error('Error loading health summary:', error);
-        }
-    }
-
-    async loadServices() {
-        try {
-            const response = await fetch('/api/Status');
-            const data = await response.json();
-
-            if (data.Success && data.Services && data.Services.length > 0) {
-                this.renderServices(data.Services);
-                document.getElementById('NoServicesMessage').classList.add('d-none');
-            } else {
-                document.getElementById('NoServicesMessage').classList.remove('d-none');
-            }
-        } catch (error) {
-            console.error('Error loading services:', error);
-            document.getElementById('NoServicesMessage').classList.remove('d-none');
-        }
-    }
-
-    renderServices(services) {
+    renderServiceStatus(services) {
         const container = document.getElementById('ServicesContainer');
         container.innerHTML = '';
+
+        if (!services || services.length === 0) {
+            document.getElementById('NoServicesMessage').classList.remove('d-none');
+            return;
+        }
+
+        document.getElementById('NoServicesMessage').classList.add('d-none');
 
         services.forEach(service => {
             const serviceCard = this.createServiceCard(service);
@@ -293,113 +368,24 @@ class ServiceStatusManager {
 
     createServiceCard(service) {
         const col = document.createElement('div');
-        col.className = 'col-md-6 col-lg-4 mb-4';
+        col.className = 'col-md-6 col-lg-4 mb-3';
 
-        const statusBadge = this.getStatusBadge(service.Status);
-        const healthBadge = this.getHealthBadge(service.HealthStatus);
-        const uptime = this.formatUptime(service.UptimeSeconds);
-        const lastCheck = this.formatDateTime(service.LastHealthCheck);
+        const isHealthy = service.Status === 'Running' && service.HealthStatus === 'Healthy';
+        const statusClass = isHealthy ? 'success' : 'danger';
+        const statusText = isHealthy ? 'Running' : service.Status;
+        const statusIcon = isHealthy ? 'fa-check-circle' : 'fa-times-circle';
 
         col.innerHTML = `
             <div class="card h-100">
-                <div class="card-header d-flex justify-content-between align-items-center">
-                    <h6 class="card-title mb-0">
-                        <i class="${this.getServiceIcon(service.ServiceName)} me-2"></i>${service.ServiceName}
-                    </h6>
-                    <div>
-                        ${statusBadge}
-                        ${healthBadge}
-                    </div>
-                </div>
-                <div class="card-body">
-                    <div class="row mb-2">
-                        <div class="col-6">
-                            <small class="text-muted">Service Type:</small><br>
-                            <strong>${service.ServiceType || 'Unknown'}</strong>
-                        </div>
-                        <div class="col-6">
-                            <small class="text-muted">Version:</small><br>
-                            <strong>${service.Version || 'Unknown'}</strong>
-                        </div>
-                    </div>
-                    
-                    <div class="row mb-2">
-                        <div class="col-6">
-                            <small class="text-muted">Process ID:</small><br>
-                            <strong>${service.ProcessId || 'N/A'}</strong>
-                        </div>
-                        <div class="col-6">
-                            <small class="text-muted">Active Jobs:</small><br>
-                            <strong>${service.ActiveJobsCount || 0}</strong>
-                        </div>
-                    </div>
-
-                    <div class="row mb-2">
-                        <div class="col-6">
-                            <small class="text-muted">Memory Usage:</small><br>
-                            <strong>${this.formatMemory(service.MemoryUsage)}</strong>
-                        </div>
-                        <div class="col-6">
-                            <small class="text-muted">CPU Usage:</small><br>
-                            <strong>${this.formatCPU(service.CPUUsage)}</strong>
-                        </div>
-                    </div>
-
-                    <div class="row mb-2">
-                        <div class="col-6">
-                            <small class="text-muted">Database:</small><br>
-                            <span class="badge ${service.DatabaseConnection ? 'bg-success' : 'bg-danger'}">
-                                ${service.DatabaseConnection ? 'Connected' : 'Disconnected'}
-                            </span>
-                        </div>
-                        <div class="col-6">
-                            <small class="text-muted">Processing:</small><br>
-                            <span class="badge ${service.IsProcessing ? 'bg-info' : 'bg-secondary'}">
-                                ${service.IsProcessing ? 'Active' : 'Idle'}
-                            </span>
-                        </div>
-                    </div>
-
-                    <div class="row mb-2">
-                        <div class="col-12">
-                            <small class="text-muted">Uptime:</small><br>
-                            <strong>${uptime}</strong>
-                        </div>
-                    </div>
-
-                    <div class="row mb-2">
-                        <div class="col-12">
-                            <small class="text-muted">Last Health Check:</small><br>
-                            <strong>${lastCheck}</strong>
-                        </div>
-                    </div>
-
-                    ${service.ErrorCount > 0 ? `
-                    <div class="row mb-2">
-                        <div class="col-12">
-                            <small class="text-muted">Errors:</small><br>
-                            <span class="badge bg-warning">${service.ErrorCount}/${service.MaxErrors || 'N/A'}</span>
-                        </div>
-                    </div>
-                    ` : ''}
-
-                    ${service.LastErrorMessage ? `
-                    <div class="row">
-                        <div class="col-12">
-                            <small class="text-muted">Last Error:</small><br>
-                            <small class="text-danger">${service.LastErrorMessage}</small>
-                        </div>
-                    </div>
-                    ` : ''}
-                </div>
-                <div class="card-footer">
-                    <div class="d-flex justify-content-between align-items-center">
-                        <small class="text-muted">
-                            Started: ${this.formatDateTime(service.StartTime)}
-                        </small>
-                        <div class="btn-group btn-group-sm" role="group">
-                            ${this.getServiceControlButtons(service.ServiceName, service.Status)}
-                        </div>
+                <div class="card-body text-center">
+                    <h5 class="card-title">
+                        <i class="fas fa-server me-2"></i>${service.ServiceName}
+                    </h5>
+                    <span class="badge bg-${statusClass} fs-6">
+                        <i class="fas ${statusIcon} me-1"></i>${statusText}
+                    </span>
+                    <div class="mt-2">
+                        <small class="text-muted">${service.ServiceType || 'Unknown'}</small>
                     </div>
                 </div>
             </div>
@@ -408,69 +394,8 @@ class ServiceStatusManager {
         return col;
     }
 
-    getStatusBadge(status) {
-        const badges = {
-            'Running': 'bg-success',
-            'Starting': 'bg-info',
-            'Stopped': 'bg-secondary',
-            'Error': 'bg-danger',
-            'Stopping': 'bg-warning'
-        };
-        
-        const badgeClass = badges[status] || 'bg-secondary';
-        return `<span class="badge ${badgeClass}">${status}</span>`;
-    }
-
-    getHealthBadge(health) {
-        const badges = {
-            'Healthy': 'bg-success',
-            'Warning': 'bg-warning',
-            'Unhealthy': 'bg-danger'
-        };
-        
-        const badgeClass = badges[health] || 'bg-secondary';
-        return `<span class="badge ${badgeClass}">${health}</span>`;
-    }
-
-    formatUptime(seconds) {
-        if (!seconds) return 'N/A';
-        
-        const days = Math.floor(seconds / 86400);
-        const hours = Math.floor((seconds % 86400) / 3600);
-        const minutes = Math.floor((seconds % 3600) / 60);
-        
-        if (days > 0) {
-            return `${days}d ${hours}h ${minutes}m`;
-        } else if (hours > 0) {
-            return `${hours}h ${minutes}m`;
-        } else {
-            return `${minutes}m`;
-        }
-    }
-
-    formatDateTime(dateString) {
-        if (!dateString) return 'N/A';
-        
-        try {
-            const date = new Date(dateString);
-            return date.toLocaleString();
-        } catch (error) {
-            return 'Invalid Date';
-        }
-    }
-
-    formatMemory(mb) {
-        if (!mb) return 'N/A';
-        return `${mb.toFixed(1)} MB`;
-    }
-
-    formatCPU(percent) {
-        if (!percent) return 'N/A';
-        return `${percent.toFixed(1)}%`;
-    }
-
     toggleAutoRefresh() {
-        const button = document.getElementById('AutoRefreshHealthBtn');
+        const button = document.getElementById('AutoRefreshBtn');
         
         if (this.AutoRefreshEnabled) {
             // Stop auto refresh
@@ -479,381 +404,19 @@ class ServiceStatusManager {
                 this.AutoRefreshInterval = null;
             }
             this.AutoRefreshEnabled = false;
-            button.innerHTML = '<i class="fas fa-play me-1"></i>Auto';
+            button.innerHTML = '<i class="fas fa-play me-1"></i>Auto Refresh';
             button.classList.remove('btn-success');
             button.classList.add('btn-outline-success');
         } else {
             // Start auto refresh
             this.AutoRefreshInterval = setInterval(() => {
+                this.loadSystemResources();
                 this.loadServiceStatus();
-                this.loadRecentFailures();
             }, this.RefreshInterval);
             this.AutoRefreshEnabled = true;
-            button.innerHTML = '<i class="fas fa-pause me-1"></i>Auto';
+            button.innerHTML = '<i class="fas fa-pause me-1"></i>Auto Refresh';
             button.classList.remove('btn-outline-success');
             button.classList.add('btn-success');
-        }
-    }
-
-    async loadRecentFailures() {
-        try {
-            const response = await fetch('/api/FailureTracking/RecentFailures?limit=20');
-            const data = await response.json();
-            
-            if (data.Success) {
-                this.renderRecentFailures(data.Failures);
-                this.updateFailureStats(data);
-            } else {
-                this.showFailureError('Failed to load failures: ' + data.ErrorMessage);
-            }
-            
-        } catch (error) {
-            this.showFailureError('Error loading failures: ' + error.message);
-        }
-    }
-
-    renderRecentFailures(failures) {
-        const tableBody = document.getElementById('FailuresTableBody');
-        
-        if (!failures || failures.length === 0) {
-            tableBody.innerHTML = `
-                <tr>
-                    <td colspan="6" class="text-center text-muted">
-                        <i class="fas fa-check-circle me-2"></i>No recent failures found
-                    </td>
-                </tr>
-            `;
-            return;
-        }
-
-        tableBody.innerHTML = '';
-        failures.forEach(failure => {
-            const row = document.createElement('tr');
-            
-            const serviceBadge = this.getServiceBadge(failure.ServiceType);
-            const typeBadge = this.getFailureTypeBadge(failure.FailureType);
-            const timeAgo = this.formatTimeAgo(failure.FailureDate);
-            const duration = failure.Duration ? `${failure.Duration.toFixed(1)}s` : '-';
-            
-            row.innerHTML = `
-                <td>${serviceBadge}</td>
-                <td>${typeBadge}</td>
-                <td>
-                    <small class="text-truncate d-block" style="max-width: 200px;" title="${failure.FileName}">
-                        ${failure.FileName}
-                    </small>
-                </td>
-                <td>
-                    <small class="text-danger" title="${failure.FailureReason}">
-                        ${failure.FailureReason.length > 50 ? failure.FailureReason.substring(0, 50) + '...' : failure.FailureReason}
-                    </small>
-                </td>
-                <td>
-                    <small class="text-muted">${timeAgo}</small>
-                </td>
-                <td>
-                    <small class="text-muted">${duration}</small>
-                </td>
-            `;
-            
-            tableBody.appendChild(row);
-        });
-    }
-
-    updateFailureStats(data) {
-        const statsElement = document.getElementById('FailureStats');
-        const totalFailures = data.TranscodeCount + data.QualityCount;
-        document.getElementById('TotalFailures').textContent = totalFailures;
-        
-        statsElement.innerHTML = `
-            Transcode: ${data.TranscodeCount} | Quality: ${data.QualityCount} | Total: ${totalFailures}
-        `;
-    }
-
-    getServiceBadge(serviceType) {
-        const badgeMap = {
-            'Transcode': 'primary',
-            'Quality': 'info',
-            'WebApplication': 'success'
-        };
-        const badgeClass = badgeMap[serviceType] || 'secondary';
-        return `<span class="badge bg-${badgeClass}">${serviceType}</span>`;
-    }
-
-    getServiceIcon(serviceName) {
-        const iconMap = {
-            'MediaVortex': 'fas fa-globe',
-            'TranscodeService': 'fas fa-video',
-            'QualityCompareService': 'fas fa-chart-line'
-        };
-        return iconMap[serviceName] || 'fas fa-server';
-    }
-
-    getServiceControlButtons(serviceName, status) {
-        let buttons = '';
-        
-        if (status === 'Stopped' || status === 'Error') {
-            // Show Start button for stopped services
-            buttons += `
-                <button type="button" class="btn btn-outline-success" 
-                        onclick="serviceControl('${serviceName}', 'Start')"
-                        title="Start service">
-                    <i class="fas fa-play"></i>
-                </button>
-            `;
-        } else if (status === 'Running' || status === 'Starting') {
-            // Show Stop, GracefulStop, and Restart buttons for running services
-            buttons += `
-                <button type="button" class="btn btn-outline-danger" 
-                        onclick="serviceControl('${serviceName}', 'Stop')"
-                        title="Stop service immediately">
-                    <i class="fas fa-stop"></i>
-                </button>
-                <button type="button" class="btn btn-outline-warning" 
-                        onclick="serviceControl('${serviceName}', 'GracefulStop')"
-                        title="Graceful stop - allow current process to finish">
-                    <i class="fas fa-hand-paper"></i>
-                </button>
-                <button type="button" class="btn btn-outline-primary" 
-                        onclick="serviceControl('${serviceName}', 'Restart')"
-                        title="Restart service">
-                    <i class="fas fa-redo"></i>
-                </button>
-            `;
-        } else if (status === 'GracefulStop' || status === 'Stopping') {
-            // Show only Restart button for services that are stopping
-            buttons += `
-                <button type="button" class="btn btn-outline-primary" 
-                        onclick="serviceControl('${serviceName}', 'Restart')"
-                        title="Restart service">
-                    <i class="fas fa-redo"></i>
-                </button>
-            `;
-        }
-        
-        return buttons;
-    }
-
-    getFailureTypeBadge(failureType) {
-        return `<span class="badge bg-danger">${failureType}</span>`;
-    }
-
-    formatTimeAgo(dateTimeString) {
-        if (!dateTimeString) return 'N/A';
-        
-        try {
-            const date = new Date(dateTimeString);
-            const now = new Date();
-            const diffMs = now - date;
-            const diffMins = Math.floor(diffMs / 60000);
-            const diffHours = Math.floor(diffMins / 60);
-            const diffDays = Math.floor(diffHours / 24);
-            
-            if (diffDays > 0) {
-                return `${diffDays}d ago`;
-            } else if (diffHours > 0) {
-                return `${diffHours}h ago`;
-            } else if (diffMins > 0) {
-                return `${diffMins}m ago`;
-            } else {
-                return 'Just now';
-            }
-        } catch (error) {
-            return dateTimeString;
-        }
-    }
-
-    showFailureError(message) {
-        const tableBody = document.getElementById('FailuresTableBody');
-        tableBody.innerHTML = `
-            <tr>
-                <td colspan="6" class="text-center text-danger">
-                    <i class="fas fa-exclamation-circle me-2"></i>
-                    ${message}
-                </td>
-            </tr>
-        `;
-    }
-
-    renderServiceStatus(services) {
-        const container = document.getElementById('ServicesContainer');
-        container.innerHTML = '';
-
-        if (!services || services.length === 0) {
-            container.innerHTML = `
-                <div class="col-12">
-                    <div class="alert alert-warning" role="alert">
-                        <i class="fas fa-exclamation-triangle me-2"></i>
-                        No services found. Make sure your microservices are running.
-                    </div>
-                </div>
-            `;
-            return;
-        }
-
-        services.forEach(service => {
-            const serviceCard = this.createServiceCard(service);
-            container.appendChild(serviceCard);
-        });
-    }
-
-    createServiceCard(service) {
-        const col = document.createElement('div');
-        col.className = 'col-md-6 col-lg-4 mb-4';
-
-        const statusBadge = this.getStatusBadge(service.Status);
-        const healthBadge = this.getHealthBadge(service.HealthStatus);
-        const uptime = this.formatUptime(service.UptimeSeconds);
-        const lastCheck = this.formatDateTime(service.LastHealthCheck);
-
-        col.innerHTML = `
-            <div class="card h-100">
-                <div class="card-header d-flex justify-content-between align-items-center">
-                    <h6 class="card-title mb-0">
-                        <i class="${this.getServiceIcon(service.ServiceName)} me-2"></i>${service.ServiceName}
-                    </h6>
-                    <div>
-                        ${statusBadge}
-                        ${healthBadge}
-                    </div>
-                </div>
-                <div class="card-body">
-                    <div class="row">
-                        <div class="col-6">
-                            <small class="text-muted">Uptime:</small><br>
-                            <strong>${uptime}</strong>
-                        </div>
-                        <div class="col-6">
-                            <small class="text-muted">Last Check:</small><br>
-                            <strong>${lastCheck}</strong>
-                        </div>
-                    </div>
-                    <hr>
-                    <div class="row">
-                        <div class="col-6">
-                            <small class="text-muted">Memory:</small><br>
-                            <strong>${service.MemoryUsage ? service.MemoryUsage.toFixed(1) + ' MB' : 'N/A'}</strong>
-                        </div>
-                        <div class="col-6">
-                            <small class="text-muted">CPU:</small><br>
-                            <strong>${service.CPUUsage ? service.CPUUsage.toFixed(1) + '%' : 'N/A'}</strong>
-                        </div>
-                    </div>
-                    <div class="row mt-2">
-                        <div class="col-6">
-                            <small class="text-muted">Active Jobs:</small><br>
-                            <strong>${service.ActiveJobsCount || 0}</strong>
-                        </div>
-                        <div class="col-6">
-                            <small class="text-muted">Errors:</small><br>
-                            <strong class="${service.ErrorCount > 0 ? 'text-danger' : 'text-success'}">${service.ErrorCount || 0}</strong>
-                        </div>
-                    </div>
-                    ${service.LastErrorMessage ? `
-                        <div class="mt-3">
-                            <small class="text-muted">Last Error:</small><br>
-                            <small class="text-danger">${service.LastErrorMessage}</small>
-                        </div>
-                    ` : ''}
-                </div>
-                <div class="card-footer">
-                    <div class="d-flex justify-content-between align-items-center">
-                        <small class="text-muted">
-                            <i class="fas fa-database me-1"></i>DB: ${service.DatabaseConnection ? 'Connected' : 'Disconnected'}
-                            <span class="ms-2">
-                                <i class="fas fa-hdd me-1"></i>Disk: ${service.DiskSpace ? service.DiskSpace.toFixed(1) + ' GB' : 'N/A'}
-                            </span>
-                        </small>
-                        <div class="btn-group btn-group-sm" role="group">
-                            ${this.getServiceControlButtons(service.ServiceName, service.Status)}
-                        </div>
-                    </div>
-                </div>
-            </div>
-        `;
-
-        return col;
-    }
-
-    updateHealthSummary(services) {
-        const total = services.length;
-        const running = services.filter(s => s.Status === 'Running').length;
-        const warning = services.filter(s => s.Status === 'Starting' || s.Status === 'Stopping' || s.HealthStatus === 'Warning').length;
-        const unhealthy = services.filter(s => s.Status === 'Stopped' || s.Status === 'Error' || s.HealthStatus === 'Unhealthy').length;
-        const activeJobs = services.reduce((sum, s) => sum + (s.ActiveJobsCount || 0), 0);
-
-        document.getElementById('TotalServices').textContent = total;
-        document.getElementById('RunningServices').textContent = running;
-        document.getElementById('WarningServices').textContent = warning;
-        document.getElementById('UnhealthyServices').textContent = unhealthy;
-        document.getElementById('ActiveJobs').textContent = activeJobs;
-
-        // Update overall health alert
-        const alert = document.getElementById('OverallHealthAlert');
-        const statusSpan = document.getElementById('OverallHealthStatus');
-
-        if (unhealthy > 0) {
-            alert.className = 'alert alert-danger';
-            statusSpan.textContent = 'System has unhealthy services';
-        } else if (warning > 0) {
-            alert.className = 'alert alert-warning';
-            statusSpan.textContent = 'System has services with warnings';
-        } else if (running === total && total > 0) {
-            alert.className = 'alert alert-success';
-            statusSpan.textContent = 'All services are running healthy';
-        } else {
-            alert.className = 'alert alert-info';
-            statusSpan.textContent = 'System status unknown';
-        }
-    }
-
-    getStatusBadge(status) {
-        const statusMap = {
-            'Running': 'success',
-            'Starting': 'warning',
-            'Stopping': 'warning',
-            'Stopped': 'danger',
-            'Error': 'danger'
-        };
-        const badgeClass = statusMap[status] || 'secondary';
-        return `<span class="badge bg-${badgeClass}">${status}</span>`;
-    }
-
-    getHealthBadge(healthStatus) {
-        const healthMap = {
-            'Healthy': 'success',
-            'Warning': 'warning',
-            'Unhealthy': 'danger',
-            'Unknown': 'secondary'
-        };
-        const badgeClass = healthMap[healthStatus] || 'secondary';
-        return `<span class="badge bg-${badgeClass}">${healthStatus}</span>`;
-    }
-
-    formatUptime(seconds) {
-        if (!seconds) return 'N/A';
-        
-        const hours = Math.floor(seconds / 3600);
-        const minutes = Math.floor((seconds % 3600) / 60);
-        const secs = seconds % 60;
-        
-        if (hours > 0) {
-            return `${hours}h ${minutes}m ${secs}s`;
-        } else if (minutes > 0) {
-            return `${minutes}m ${secs}s`;
-        } else {
-            return `${secs}s`;
-        }
-    }
-
-    formatDateTime(dateTimeString) {
-        if (!dateTimeString) return 'N/A';
-        
-        try {
-            const date = new Date(dateTimeString);
-            return date.toLocaleString();
-        } catch (error) {
-            return dateTimeString;
         }
     }
 
@@ -877,111 +440,6 @@ class ServiceStatusManager {
             loadingElement.classList.add('d-none');
         }
     }
-
-    showAlert(message, type = 'info') {
-        const alertContainer = document.getElementById('AlertContainer');
-        const alertId = 'alert-' + Date.now();
-        
-        const alertHtml = `
-            <div class="alert alert-${type} alert-dismissible fade show" role="alert" id="${alertId}">
-                ${message}
-                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-            </div>
-        `;
-        
-        alertContainer.insertAdjacentHTML('beforeend', alertHtml);
-        
-        // Auto-remove after 5 seconds
-        setTimeout(() => {
-            const alertElement = document.getElementById(alertId);
-            if (alertElement) {
-                alertElement.remove();
-            }
-        }, 5000);
-    }
-}
-
-// Global function for service control buttons
-async function serviceControl(serviceName, action) {
-    try {
-        // Show confirmation for destructive actions
-        if (action === 'Stop' || action === 'GracefulStop') {
-            const actionText = action === 'Stop' ? 'immediately stop' : 'gracefully stop';
-            if (!confirm(`Are you sure you want to ${actionText} ${serviceName}?`)) {
-                return;
-            }
-        }
-        
-        // Show loading state
-        const button = event.target.closest('button');
-        const originalContent = button.innerHTML;
-        button.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
-        button.disabled = true;
-        
-        // Make API call
-        const response = await fetch(`/api/ServiceControl/${serviceName}/${action}`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            }
-        });
-        
-        // Check if response is JSON
-        const contentType = response.headers.get('content-type');
-        if (!contentType || !contentType.includes('application/json')) {
-            const htmlText = await response.text();
-            console.error('API returned HTML instead of JSON:', htmlText.substring(0, 200));
-            throw new Error(`API returned HTML instead of JSON. Status: ${response.status}`);
-        }
-        
-        const data = await response.json();
-        
-        if (data.Success) {
-            // Show success message
-            showServiceAlert(`Successfully ${action.toLowerCase()}ed ${serviceName}`, 'success');
-            
-            // Refresh the service status
-            if (window.serviceStatusManager) {
-                window.serviceStatusManager.loadServiceStatus();
-            }
-        } else {
-            // Show error message
-            showServiceAlert(`Failed to ${action.toLowerCase()} ${serviceName}: ${data.ErrorMessage || 'Unknown error'}`, 'danger');
-        }
-        
-    } catch (error) {
-        console.error('Error controlling service:', error);
-        showServiceAlert(`Error controlling ${serviceName}: ${error.message}`, 'danger');
-    } finally {
-        // Restore button state
-        if (button) {
-            button.innerHTML = originalContent;
-            button.disabled = false;
-        }
-    }
-}
-
-// Global function to show service alerts
-function showServiceAlert(message, type = 'info') {
-    const alertContainer = document.getElementById('AlertContainer');
-    const alertId = 'alert-' + Date.now();
-    
-    const alertHtml = `
-        <div class="alert alert-${type} alert-dismissible fade show" role="alert" id="${alertId}">
-            ${message}
-            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-        </div>
-    `;
-    
-    alertContainer.insertAdjacentHTML('beforeend', alertHtml);
-    
-    // Auto-remove after 5 seconds
-    setTimeout(() => {
-        const alertElement = document.getElementById(alertId);
-        if (alertElement) {
-            alertElement.remove();
-        }
-    }, 5000);
 }
 
 // Initialize when page loads

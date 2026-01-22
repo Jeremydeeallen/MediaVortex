@@ -15,3 +15,6 @@ psutil>=5.9.0
 setproctitle
 
 # Note: pathlib, shutil, os, tempfile, subprocess, logging, json, configparser are built-in Python modules
+
+WinTmp
+RAMSPDToolkit-NDD

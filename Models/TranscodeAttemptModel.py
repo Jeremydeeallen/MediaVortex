@@ -29,6 +29,7 @@ class TranscodeAttemptModel:
     FileReplacedDate: Optional[datetime] = None
     ReplacementType: Optional[str] = None
     StartTime: Optional[str] = None  # Start time offset in HH:MM:SS format or seconds
+    PreferredAttempt: bool = False  # Whether this attempt is preferred and should prevent further retranscoding
     
     def __post_init__(self):
         if self.AttemptDate is None:

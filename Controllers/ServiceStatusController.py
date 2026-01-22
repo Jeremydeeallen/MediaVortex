@@ -7,6 +7,7 @@ from flask import Blueprint, jsonify
 from typing import Dict, Any, List
 from Repositories.DatabaseManager import DatabaseManager
 from Services.LoggingService import LoggingService
+from Services.SystemMonitoringService import SystemMonitoringServiceInstance
 
 # Create blueprint
 ServiceStatusBlueprint = Blueprint('ServiceStatus', __name__)
@@ -240,4 +241,25 @@ def GetTranscodeServiceStatus():
     except Exception as e:
         error_msg = f"Exception getting TranscodeService status: {str(e)}"
         LoggingService.LogException(error_msg, e, "ServiceStatusController", "GetTranscodeServiceStatus")
+        return jsonify({"Success": False, "ErrorMessage": error_msg}), 500
+
+@ServiceStatusBlueprint.route('/SystemResources', methods=['GET'])
+def GetSystemResources():
+    """Get system resource information including CPU temperature, usage, and memory."""
+    try:
+        LoggingService.LogFunctionEntry("GetSystemResources", "ServiceStatusController")
+        
+        # Get system resources from SystemMonitoringService
+        resources = SystemMonitoringServiceInstance.GetSystemResources()
+        
+        LoggingService.LogInfo("Successfully retrieved system resources", "ServiceStatusController", "GetSystemResources")
+        
+        return jsonify({
+            "Success": True,
+            "Resources": resources
+        })
+        
+    except Exception as e:
+        error_msg = f"Exception getting system resources: {str(e)}"
+        LoggingService.LogException(error_msg, e, "ServiceStatusController", "GetSystemResources")
         return jsonify({"Success": False, "ErrorMessage": error_msg}), 500
