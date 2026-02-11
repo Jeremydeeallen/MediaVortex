@@ -38,15 +38,15 @@
                         </div>
                         <div class="card-body">
                             <div class="table-responsive">
-                                <table class="table table-striped table-hover" id="TranscodeJobTable">
-                                    <thead>
+                                <table class="table table-hover" id="TranscodeJobTable">
+                                    <thead class="table-header-gradient">
                                         <tr>
-                                            <th>File Name</th>
-                                            <th>Start Time</th>
-                                            <th>Progress</th>
-                                            <th>ETA</th>
-                                            <th>Command</th>
-                                            <th>Action</th>
+                                            <th class="fw-bold">File Name</th>
+                                            <th class="fw-bold">Start Time</th>
+                                            <th class="fw-bold">Progress</th>
+                                            <th class="fw-bold">ETA</th>
+                                            <th class="fw-bold">Command</th>
+                                            <th class="fw-bold">Action</th>
                                         </tr>
                                     </thead>
                                     <tbody id="TranscodeJobTableBody">
@@ -77,14 +77,14 @@
                         </div>
                         <div class="card-body">
                             <div class="table-responsive">
-                                <table class="table table-striped table-hover" id="RunningQualityTestingTable">
-                                    <thead>
+                                <table class="table table-hover" id="RunningQualityTestingTable">
+                                    <thead class="table-header-secondary">
                                         <tr>
-                                            <th>File Name</th>
-                                            <th>Start Time</th>
-                                            <th>Progress</th>
-                                            <th>ETA</th>
-                                            <th>Action</th>
+                                            <th class="fw-bold">File Name</th>
+                                            <th class="fw-bold">Start Time</th>
+                                            <th class="fw-bold">Progress</th>
+                                            <th class="fw-bold">ETA</th>
+                                            <th class="fw-bold">Action</th>
                                         </tr>
                                     </thead>
                                     <tbody id="RunningQualityTestingTableBody">
@@ -109,20 +109,20 @@
                         </div>
                         <div class="card-body">
                             <div class="table-responsive">
-                                <table class="table table-striped table-hover" id="RecentAttemptsTable">
-                                    <thead>
+                                <table class="table table-hover" id="RecentAttemptsTable">
+                                    <thead class="table-header-dark">
                                         <tr>
-                                            <th>File Name</th>
-                                            <th>Date</th>
-                                            <th>Status</th>
-                                            <th>Quality</th>
-                                            <th>Before (MB)</th>
-                                            <th>After (MB)</th>
-                                            <th>Space Saved</th>
-                                            <th>Duration</th>
-                                            <th>Profile</th>
-                                            <th>Error</th>
-                                            <th>Actions</th>
+                                            <th class="fw-bold">File Name</th>
+                                            <th class="fw-bold">Date</th>
+                                            <th class="fw-bold">Status</th>
+                                            <th class="fw-bold">Quality</th>
+                                            <th class="fw-bold">Before (MB)</th>
+                                            <th class="fw-bold">After (MB)</th>
+                                            <th class="fw-bold">Space Saved</th>
+                                            <th class="fw-bold">Duration</th>
+                                            <th class="fw-bold">Profile</th>
+                                            <th class="fw-bold">Error</th>
+                                            <th class="fw-bold">Actions</th>
                                         </tr>
                                     </thead>
                                     <tbody id="RecentAttemptsTableBody">
@@ -147,13 +147,13 @@
                         </div>
                         <div class="card-body">
                             <div class="table-responsive">
-                                <table class="table table-striped table-hover" id="QualityTestQueueTable">
-                                    <thead>
+                                <table class="table table-hover" id="QualityTestQueueTable">
+                                    <thead class="table-header-success">
                                         <tr>
-                                            <th>File Name</th>
-                                            <th>Date Added</th>
-                                            <th>Priority</th>
-                                            <th>Action</th>
+                                            <th class="fw-bold">File Name</th>
+                                            <th class="fw-bold">Date Added</th>
+                                            <th class="fw-bold">Priority</th>
+                                            <th class="fw-bold">Action</th>
                                         </tr>
                                     </thead>
                                     <tbody id="QualityTestQueueTableBody">
@@ -178,15 +178,15 @@
                         </div>
                         <div class="card-body">
                             <div class="table-responsive">
-                                <table class="table table-striped table-hover" id="RecentQualityTestingTable">
-                                    <thead>
+                                <table class="table table-hover" id="RecentQualityTestingTable">
+                                    <thead class="table-header-dark">
                                         <tr>
-                                            <th>File Name</th>
-                                            <th>Quality Score</th>
-                                            <th>Profile</th>
-                                            <th>Size Reduction</th>
-                                            <th>Replacement Status</th>
-                                            <th>Action</th>
+                                            <th class="fw-bold">File Name</th>
+                                            <th class="fw-bold">Quality Score</th>
+                                            <th class="fw-bold">Profile</th>
+                                            <th class="fw-bold">Size Reduction</th>
+                                            <th class="fw-bold">Replacement Status</th>
+                                            <th class="fw-bold">Action</th>
                                         </tr>
                                     </thead>
                                     <tbody id="RecentQualityTestingTableBody">
@@ -1004,7 +1004,7 @@ class ActivityManager {
     async SkipQualityTest(TranscodeAttemptId) {
         try {
             // Show loading indicator
-            this.showAlert('Skipping quality test...', 'info');
+            this.showAlert('Skipping quality test and replacing file...', 'info');
             
             const response = await fetch('/api/QualityTest/Skip', {
                 method: 'POST',
@@ -1017,9 +1017,9 @@ class ActivityManager {
             const data = await response.json();
 
             if (data.Success) {
-                this.showAlert('Quality test skipped successfully', 'success');
-                // Refresh the page data
-                this.loadProgressData();
+                this.showAlert(data.Message || 'Quality test skipped and file replaced successfully', 'success');
+                // Refresh the page data to show updated status
+                setTimeout(() => this.loadProgressData(), 1000);
             } else {
                 this.showAlert(data.Message || 'Failed to skip quality test', 'danger');
             }

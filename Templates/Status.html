@@ -90,6 +90,66 @@
         </div>
     </div>
 
+    <!-- Continuous Scanning Status -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="card-title mb-0">
+                        <i class="fas fa-sync-alt me-2"></i>Continuous File Scanning
+                    </h5>
+                    <span class="badge bg-secondary" id="ContinuousScanBadge">Unknown</span>
+                </div>
+                <div class="card-body">
+                    <div class="row align-items-center">
+                        <div class="col-md-8">
+                            <div class="row">
+                                <div class="col-md-4">
+                                    <div class="mb-2">
+                                        <small class="text-muted">Status</small>
+                                        <h6 class="mb-0" id="ContinuousScanStatus">Not Running</h6>
+                                    </div>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="mb-2">
+                                        <small class="text-muted">Interval</small>
+                                        <h6 class="mb-0" id="ContinuousScanInterval">-</h6>
+                                    </div>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="mb-2">
+                                        <small class="text-muted">Last Scan</small>
+                                        <h6 class="mb-0" id="ContinuousScanLastScan">Never</h6>
+                                    </div>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="mb-2">
+                                        <small class="text-muted">Total Scans</small>
+                                        <h6 class="mb-0" id="ContinuousScanCount">0</h6>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-4 text-end">
+                            <div class="mb-2">
+                                <label for="ScanIntervalInput" class="form-label small text-muted mb-1">Interval (minutes)</label>
+                                <input type="number" class="form-control form-control-sm mb-2" id="ScanIntervalInput" value="60" min="1" max="1440" style="max-width: 150px; display: inline-block;">
+                            </div>
+                            <div class="btn-group" role="group">
+                                <button type="button" class="btn btn-success" id="EnableContinuousScanBtn">
+                                    <i class="fas fa-play me-1"></i>Enable
+                                </button>
+                                <button type="button" class="btn btn-danger" id="DisableContinuousScanBtn" disabled>
+                                    <i class="fas fa-stop me-1"></i>Disable
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Services Status Cards -->
     <div class="row" id="ServicesContainer">
         <!-- Services will be dynamically loaded here -->
@@ -129,6 +189,7 @@ class ServiceStatusManager {
         this.initializeEventListeners();
         this.loadSystemResources();
         this.loadServiceStatus();
+        this.loadContinuousScanStatus();
     }
 
     initializeEventListeners() {
@@ -136,6 +197,7 @@ class ServiceStatusManager {
         document.getElementById('RefreshBtn').addEventListener('click', () => {
             this.loadSystemResources();
             this.loadServiceStatus();
+            this.loadContinuousScanStatus();
         });
 
         document.getElementById('AutoRefreshBtn').addEventListener('click', () => {
@@ -154,6 +216,15 @@ class ServiceStatusManager {
                 document.getElementById('CoreTemperaturesChevron').classList.add('fa-chevron-down');
             });
         }
+
+        // Continuous scanning buttons
+        document.getElementById('EnableContinuousScanBtn').addEventListener('click', () => {
+            this.enableContinuousScanning();
+        });
+
+        document.getElementById('DisableContinuousScanBtn').addEventListener('click', () => {
+            this.disableContinuousScanning();
+        });
     }
 
     async loadSystemResources() {
@@ -374,8 +445,11 @@ class ServiceStatusManager {
         const statusClass = isHealthy ? 'success' : 'danger';
         const statusText = isHealthy ? 'Running' : service.Status;
         const statusIcon = isHealthy ? 'fa-check-circle' : 'fa-times-circle';
+        
+        // Check if this is the Quality Test Service
+        const isQualityTestService = service.ServiceName === 'QualityTestingService' || service.ServiceName === 'QualityTestService';
 
-        col.innerHTML = `
+        let cardContent = `
             <div class="card h-100">
                 <div class="card-body text-center">
                     <h5 class="card-title">
@@ -386,10 +460,29 @@ class ServiceStatusManager {
                     </span>
                     <div class="mt-2">
                         <small class="text-muted">${service.ServiceType || 'Unknown'}</small>
-                    </div>
+                    </div>`;
+        
+        // Add toggle control for Quality Test Service
+        if (isQualityTestService) {
+            const toggleId = 'QualityTestServiceToggle';
+            const isEnabled = service.Status === 'Running' && service.HealthStatus === 'Healthy';
+            cardContent += `
+                    <div class="mt-3 d-flex gap-2 justify-content-center">
+                        <button class="btn btn-sm ${isEnabled ? 'btn-warning' : 'btn-success'}" 
+                                onclick="window.serviceStatusManager.toggleQualityTestService(${isEnabled})"
+                                id="${toggleId}">
+                            <i class="fas ${isEnabled ? 'fa-pause' : 'fa-play'} me-1"></i>
+                            ${isEnabled ? 'Pause' : 'Resume'}
+                        </button>
+                    </div>`;
+        }
+        
+        cardContent += `
                 </div>
             </div>
         `;
+        
+        col.innerHTML = cardContent;
 
         return col;
     }
@@ -412,12 +505,187 @@ class ServiceStatusManager {
             this.AutoRefreshInterval = setInterval(() => {
                 this.loadSystemResources();
                 this.loadServiceStatus();
+                this.loadContinuousScanStatus();
             }, this.RefreshInterval);
             this.AutoRefreshEnabled = true;
             button.innerHTML = '<i class="fas fa-pause me-1"></i>Auto Refresh';
             button.classList.remove('btn-outline-success');
             button.classList.add('btn-success');
         }
+    }
+
+    async toggleQualityTestService(isCurrentlyEnabled) {
+        try {
+            const endpoint = isCurrentlyEnabled ? '/api/QualityTest/Pause' : '/api/QualityTest/Resume';
+            const actionText = isCurrentlyEnabled ? 'paused' : 'resumed';
+            
+            const response = await fetch(endpoint, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+            
+            const data = await response.json();
+            
+            if (data.Success) {
+                this.showAlert(`Quality testing ${actionText} successfully`, 'success');
+                this.loadServiceStatus();
+            } else {
+                this.showAlert(`Failed to ${isCurrentlyEnabled ? 'pause' : 'resume'} quality testing: ${data.ErrorMessage || data.Message || 'Unknown error'}`, 'danger');
+            }
+        } catch (error) {
+            console.error('Error toggling quality test service:', error);
+            this.showAlert('Error toggling quality test service: ' + error.message, 'danger');
+        }
+    }
+
+    async loadContinuousScanStatus() {
+        try {
+            const response = await fetch('/api/Scan/ContinuousStatus');
+            const data = await response.json();
+
+            if (data.Success) {
+                this.renderContinuousScanStatus(data);
+            } else {
+                console.error('Failed to load continuous scan status:', data.ErrorMessage);
+            }
+        } catch (error) {
+            console.error('Error loading continuous scan status:', error);
+        }
+    }
+
+    renderContinuousScanStatus(data) {
+        const isRunning = data.IsRunning || false;
+        const intervalMinutes = data.IntervalMinutes || 60;
+        const lastScanTime = data.LastScanTime;
+        const totalScans = data.TotalScansPerformed || 0;
+
+        // Update status badge
+        const badge = document.getElementById('ContinuousScanBadge');
+        if (isRunning) {
+            badge.textContent = 'Running';
+            badge.className = 'badge bg-success';
+        } else {
+            badge.textContent = 'Stopped';
+            badge.className = 'badge bg-secondary';
+        }
+
+        // Update status text
+        document.getElementById('ContinuousScanStatus').textContent = isRunning ? 'Running' : 'Not Running';
+
+        // Update interval
+        document.getElementById('ContinuousScanInterval').textContent = intervalMinutes + ' minutes';
+
+        // Update last scan time
+        if (lastScanTime) {
+            const scanDate = new Date(lastScanTime);
+            const now = new Date();
+            const diffMinutes = Math.floor((now - scanDate) / 60000);
+
+            if (diffMinutes < 1) {
+                document.getElementById('ContinuousScanLastScan').textContent = 'Just now';
+            } else if (diffMinutes < 60) {
+                document.getElementById('ContinuousScanLastScan').textContent = diffMinutes + ' min ago';
+            } else {
+                const diffHours = Math.floor(diffMinutes / 60);
+                document.getElementById('ContinuousScanLastScan').textContent = diffHours + ' hr ago';
+            }
+        } else {
+            document.getElementById('ContinuousScanLastScan').textContent = 'Never';
+        }
+
+        // Update scan count
+        document.getElementById('ContinuousScanCount').textContent = totalScans;
+
+        // Update button states
+        const enableBtn = document.getElementById('EnableContinuousScanBtn');
+        const disableBtn = document.getElementById('DisableContinuousScanBtn');
+        const intervalInput = document.getElementById('ScanIntervalInput');
+
+        if (isRunning) {
+            enableBtn.disabled = true;
+            disableBtn.disabled = false;
+            intervalInput.disabled = true;
+        } else {
+            enableBtn.disabled = false;
+            disableBtn.disabled = true;
+            intervalInput.disabled = false;
+        }
+
+        // Update interval input value
+        intervalInput.value = intervalMinutes;
+    }
+
+    async enableContinuousScanning() {
+        try {
+            const intervalMinutes = parseInt(document.getElementById('ScanIntervalInput').value) || 60;
+
+            const response = await fetch('/api/Scan/EnableContinuous', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ IntervalMinutes: intervalMinutes })
+            });
+
+            const data = await response.json();
+
+            if (data.Success) {
+                this.showAlert(`Continuous scanning enabled with ${intervalMinutes} minute interval`, 'success');
+                this.loadContinuousScanStatus();
+            } else {
+                this.showAlert('Failed to enable continuous scanning: ' + (data.ErrorMessage || data.Message || 'Unknown error'), 'danger');
+            }
+        } catch (error) {
+            console.error('Error enabling continuous scanning:', error);
+            this.showAlert('Error enabling continuous scanning: ' + error.message, 'danger');
+        }
+    }
+
+    async disableContinuousScanning() {
+        try {
+            const response = await fetch('/api/Scan/DisableContinuous', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            const data = await response.json();
+
+            if (data.Success) {
+                this.showAlert('Continuous scanning disabled', 'success');
+                this.loadContinuousScanStatus();
+            } else {
+                this.showAlert('Failed to disable continuous scanning: ' + (data.ErrorMessage || data.Message || 'Unknown error'), 'danger');
+            }
+        } catch (error) {
+            console.error('Error disabling continuous scanning:', error);
+            this.showAlert('Error disabling continuous scanning: ' + error.message, 'danger');
+        }
+    }
+
+    showAlert(message, type = 'info') {
+        const alertContainer = document.getElementById('AlertContainer');
+        const alertId = 'alert-' + Date.now();
+        
+        const alertHtml = `
+            <div class="alert alert-${type} alert-dismissible fade show" role="alert" id="${alertId}">
+                ${message}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+        `;
+        
+        alertContainer.insertAdjacentHTML('beforeend', alertHtml);
+        
+        // Auto-remove after 5 seconds
+        setTimeout(() => {
+            const alert = document.getElementById(alertId);
+            if (alert) {
+                alert.remove();
+            }
+        }, 5000);
     }
 
     showError(message) {

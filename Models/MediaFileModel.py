@@ -24,7 +24,9 @@ class MediaFileModel:
     IsInterlaced: Optional[bool] = None
     ResolutionCategory: Optional[str] = None
     FileModificationTime: Optional[datetime] = None
-    
+    LastModifiedDate: Optional[datetime] = None
+    FileSize: Optional[int] = None
+
     # New metadata fields
     TotalFrames: Optional[int] = None
     CodecProfile: Optional[str] = None

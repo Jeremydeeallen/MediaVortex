@@ -457,7 +457,103 @@ class FileScanningController:
                     'Message': f'Error getting statistics: {str(e)}',
                     'Error': 'StatisticsError'
                 }), 500
-        
+
+        @self.Blueprint.route('/Scan/EnableContinuous', methods=['POST'])
+        def EnableContinuousScanning():
+            """Enable continuous/periodic scanning."""
+            try:
+                LoggingService.LogInfo("EnableContinuousScanning endpoint called", "FileScanningController", "EnableContinuousScanning")
+                data = request.get_json() or {}
+                IntervalMinutes = data.get('IntervalMinutes', 60)
+
+                from Services.ContinuousScanService import ContinuousScanService
+                from Repositories.DatabaseManager import DatabaseManager
+
+                # Use shared instance or create one
+                if not hasattr(self.ViewModel, 'ContinuousScanService') or self.ViewModel.ContinuousScanService is None:
+                    self.ViewModel.ContinuousScanService = ContinuousScanService()
+
+                result = self.ViewModel.ContinuousScanService.StartContinuousScanning(IntervalMinutes)
+
+                if result['Success']:
+                    try:
+                        db_manager = DatabaseManager()
+                        db_manager.AddOrUpdateSystemSetting('ContinuousScanEnabled', '1', 'Enable/disable continuous file scanning', 'boolean')
+                        db_manager.AddOrUpdateSystemSetting('ContinuousScanIntervalMinutes', str(IntervalMinutes), 'Interval in minutes for continuous scanning', 'integer')
+                        LoggingService.LogInfo(f"Saved continuous scanning settings to database (enabled, interval: {IntervalMinutes})", "FileScanningController", "EnableContinuousScanning")
+                    except Exception as e:
+                        LoggingService.LogWarning(f"Could not save continuous scan settings to database: {e}", "FileScanningController", "EnableContinuousScanning")
+
+                    return jsonify(result), 200
+                else:
+                    return jsonify(result), 400
+
+            except Exception as e:
+                LoggingService.LogException("Error enabling continuous scanning", e, "FileScanningController", "EnableContinuousScanning")
+                return jsonify({
+                    'Success': False,
+                    'Message': f'Error enabling continuous scanning: {str(e)}',
+                    'Error': 'EnableContinuousScanError'
+                }), 500
+
+        @self.Blueprint.route('/Scan/DisableContinuous', methods=['POST'])
+        def DisableContinuousScanning():
+            """Disable continuous/periodic scanning."""
+            try:
+                LoggingService.LogInfo("DisableContinuousScanning endpoint called", "FileScanningController", "DisableContinuousScanning")
+                from Repositories.DatabaseManager import DatabaseManager
+
+                if not hasattr(self.ViewModel, 'ContinuousScanService') or self.ViewModel.ContinuousScanService is None:
+                    return jsonify({
+                        'Success': False,
+                        'Message': 'Continuous scanning is not running',
+                        'Error': 'NotRunning'
+                    }), 400
+
+                result = self.ViewModel.ContinuousScanService.StopContinuousScanning()
+
+                if result['Success']:
+                    try:
+                        db_manager = DatabaseManager()
+                        db_manager.AddOrUpdateSystemSetting('ContinuousScanEnabled', '0', 'Enable/disable continuous file scanning', 'boolean')
+                        LoggingService.LogInfo("Saved continuous scanning disabled state to database", "FileScanningController", "DisableContinuousScanning")
+                    except Exception as e:
+                        LoggingService.LogWarning(f"Could not save continuous scan settings to database: {e}", "FileScanningController", "DisableContinuousScanning")
+
+                    return jsonify(result), 200
+                else:
+                    return jsonify(result), 400
+
+            except Exception as e:
+                LoggingService.LogException("Error disabling continuous scanning", e, "FileScanningController", "DisableContinuousScanning")
+                return jsonify({
+                    'Success': False,
+                    'Message': f'Error disabling continuous scanning: {str(e)}',
+                    'Error': 'DisableContinuousScanError'
+                }), 500
+
+        @self.Blueprint.route('/Scan/ContinuousStatus', methods=['GET'])
+        def GetContinuousScanStatus():
+            """Get the status of continuous scanning."""
+            try:
+                from Services.ContinuousScanService import ContinuousScanService
+
+                # Use shared instance or create one
+                if not hasattr(self.ViewModel, 'ContinuousScanService') or self.ViewModel.ContinuousScanService is None:
+                    self.ViewModel.ContinuousScanService = ContinuousScanService()
+
+                result = self.ViewModel.ContinuousScanService.GetStatus()
+
+                return jsonify(result), 200
+
+            except Exception as e:
+                LoggingService.LogException("Error getting continuous scan status", e, "FileScanningController", "GetContinuousScanStatus")
+                return jsonify({
+                    'Success': False,
+                    'Message': f'Error getting continuous scan status: {str(e)}',
+                    'Error': 'GetContinuousStatusError'
+                }), 500
+
         @self.Blueprint.route('/Scanning', methods=['GET'])
         def FileScanningPage():
             """Serve the file scanning web page."""

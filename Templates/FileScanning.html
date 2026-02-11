@@ -3,755 +3,842 @@
 {% block title %}File Scanning - MediaVortex{% endblock %}
 
 {% block content %}
-<!-- Page-specific styles moved to common.css for better architecture -->
-
-<div class="row">
-    <div class="col-12">
-        <h1 class="mb-4">
-            <i class="fas fa-search"></i> File Scanning
-        </h1>
+<div class="container-fluid">
+    <div class="row">
+        <div class="col-12">
+            <h1 class="mb-4">
+                <i class="fas fa-search"></i> File Scanning
+            </h1>
+        </div>
     </div>
-</div>
 
-<!-- Scan Control Panel -->
-<div class="row mb-4">
-    <div class="col-12">
-        <div class="card">
-            <div class="card-header">
-                <h5><i class="fas fa-play-circle"></i> Scan Control</h5>
-            </div>
-            <div class="card-body">
-                <!-- Control Buttons at Top -->
-                <div class="row mb-4">
-                    <div class="col-12">
-                        <div class="d-flex gap-2 justify-content-end">
-                            <button class="btn btn-danger" id="StopScanBtn" disabled>
-                                <i class="fas fa-stop"></i> Stop Scan
-                            </button>
-                            <button class="btn btn-primary" id="RefreshBtn">
-                                <i class="fas fa-sync-alt"></i> Refresh Data
-                            </button>
-                            <button class="btn btn-info" id="ExtractMetadataBtn" title="Extract metadata for files that need it (happens automatically after scanning)">
-                                <i class="fas fa-cogs"></i> Extract Metadata
-                            </button>
-                        </div>
-                    </div>
+    <!-- Continuous Scanning Service -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card shadow-sm">
+                <div class="card-header bg-gradient-primary text-white d-flex justify-content-between align-items-center py-3">
+                    <h5 class="mb-0 fw-bold"><i class="fas fa-sync-alt me-2"></i> Continuous Scanning Service</h5>
+                    <span class="badge bg-light text-dark px-3 py-2" id="ContinuousScanBadge" style="font-size: 0.9rem;">Stopped</span>
                 </div>
-
-                <!-- Two Column Scan Options -->
-                <div class="row">
-                    <div class="col-md-6">
-                        <div class="card">
-                            <div class="card-header">
-                                <h6 class="mb-0"><i class="fas fa-folder"></i> Root Folder Scan</h6>
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-hover mb-0">
+                            <thead class="table-header-gradient">
+                                <tr>
+                                    <th class="fw-bold border-end" style="width: 12%;">Status</th>
+                                    <th class="fw-bold border-end" style="width: 28%;">Current Activity</th>
+                                    <th class="fw-bold border-end" style="width: 12%;">Scanned</th>
+                                    <th class="fw-bold border-end" style="width: 12%;">Changed</th>
+                                    <th class="fw-bold border-end" style="width: 12%;">Duration</th>
+                                    <th class="fw-bold" style="width: 24%;">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td class="border-end align-middle">
+                                        <span class="badge bg-secondary" id="ContinuousScanStatusBadge">Not Running</span>
+                                    </td>
+                                    <td class="border-end align-middle">
+                                        <span id="ContinuousScanActivity" class="text-muted">Service disabled</span>
+                                    </td>
+                                    <td class="border-end align-middle text-center">
+                                        <strong id="ContinuousScanScanned">0</strong>
+                                    </td>
+                                    <td class="border-end align-middle text-center">
+                                        <strong id="ContinuousScanChanged" class="text-primary">0</strong>
+                                    </td>
+                                    <td class="border-end align-middle text-center">
+                                        <span id="ContinuousScanDuration">-</span>
+                                    </td>
+                                    <td class="align-middle">
+                                        <div class="d-flex align-items-center gap-2">
+                                            <input type="number" class="form-control form-control-sm"
+                                                   id="ScanIntervalInput" value="60" min="15" max="1440"
+                                                   placeholder="Min" style="max-width: 70px;" title="Scan interval in minutes">
+                                            <span class="text-muted small">min</span>
+                                            <div class="btn-group ms-1" role="group">
+                                                <button type="button" class="btn btn-success btn-sm" id="EnableContinuousScanBtn">
+                                                    <i class="fas fa-play me-1"></i> Enable
+                                                </button>
+                                                <button type="button" class="btn btn-danger btn-sm" id="DisableContinuousScanBtn" disabled>
+                                                    <i class="fas fa-stop me-1"></i> Stop
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <!-- Expandable Stats -->
+                    <div class="collapse" id="ContinuousScanDetailsCollapse">
+                        <div class="card-body border-top bg-light">
+                            <div class="row text-center">
+                                <div class="col-md-3">
+                                    <small class="text-muted d-block">Total Scans</small>
+                                    <strong id="ContinuousScanTotalScans">0</strong>
+                                </div>
+                                <div class="col-md-3">
+                                    <small class="text-muted d-block">Last Completed</small>
+                                    <span id="ContinuousScanLastCompleted">Never</span>
+                                </div>
+                                <div class="col-md-3">
+                                    <small class="text-muted d-block">Files Added</small>
+                                    <span id="ContinuousScanAdded" class="text-success">0</span>
+                                </div>
+                                <div class="col-md-3">
+                                    <small class="text-muted d-block">Files Removed</small>
+                                    <span id="ContinuousScanRemoved" class="text-danger">0</span>
+                                </div>
                             </div>
-                            <div class="card-body">
-                                <div class="mb-3">
-                                    <label for="RootFolderSelect" class="form-label">Select Root Folder:</label>
-                                    <select class="form-select" id="RootFolderSelect">
-                                        <option value="">Select Root Folder...</option>
-                                    </select>
-                                </div>
-                                <div class="form-check mb-3">
-                                    <input class="form-check-input" type="checkbox" id="RecursiveScan1" checked>
-                                    <label class="form-check-label" for="RecursiveScan1">
-                                        Recursive Scan (include subdirectories)
-                                    </label>
-                                </div>
-                                <div class="d-grid">
-                                    <button class="btn btn-primary" id="StartRootFolderScanBtn" disabled>
-                                        <i class="fas fa-play"></i> Scan Root Folder
-                                    </button>
-                                </div>
+                            <div class="text-center mt-2">
+                                <button class="btn btn-sm btn-outline-secondary" data-bs-toggle="collapse" data-bs-target="#ContinuousScanDetailsCollapse">
+                                    <i class="fas fa-chevron-up"></i> Hide Details
+                                </button>
                             </div>
                         </div>
                     </div>
-                    <div class="col-md-6">
-                        <div class="card">
-                            <div class="card-header">
-                                <h6 class="mb-0"><i class="fas fa-folder-open"></i> Browse Folder Scan</h6>
-                            </div>
-                            <div class="card-body">
-                                <div class="mb-3">
-                                    <label for="BrowseDirectoryPath" class="form-label">Directory Path:</label>
-                                    <input type="text" class="form-control" id="BrowseDirectoryPath" placeholder="Enter directory path (e.g., z:\videos\Couple)">
-                                </div>
-                                <div class="form-check mb-3">
-                                    <input class="form-check-input" type="checkbox" id="RecursiveScan2" checked>
-                                    <label class="form-check-label" for="RecursiveScan2">
-                                        Recursive Scan (include subdirectories)
-                                    </label>
-                                </div>
-                                <div class="d-grid">
-                                    <button class="btn btn-success" id="StartBrowseScanBtn" disabled>
-                                        <i class="fas fa-play"></i> Scan Selected Folder
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Scan Status -->
-                <div class="row mt-4">
-                    <div class="col-12">
-                        <div class="mb-3">
-                            <label class="form-label">Currently Running Scan:</label>
-                            <div class="alert alert-info" id="CurrentScanStatus">
-                                <i class="fas fa-info-circle"></i> <span id="CurrentScanText">None</span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- Scan Progress -->
-                <div id="ScanProgressSection" style="display: block;">
-                    <div class="mb-2">
-                        <strong>Scan Progress:</strong>
-                        <span id="ScanStatusText">Preparing...</span>
-                    </div>
-                    <div class="scan-progress">
-                        <div class="scan-progress-bar" id="ScanProgressBar" style="width: 0%">0%</div>
-                    </div>
-                    <div class="mt-2">
-                        <small class="text-muted" id="CurrentDirectory">Ready to scan...</small>
+                    <div class="card-body border-top text-center py-2" style="display: none;" id="ShowDetailsButton">
+                        <button class="btn btn-sm btn-link text-decoration-none p-0" data-bs-toggle="collapse" data-bs-target="#ContinuousScanDetailsCollapse">
+                            <i class="fas fa-chevron-down"></i> Show Statistics
+                        </button>
                     </div>
                 </div>
             </div>
         </div>
     </div>
-</div>
 
-<!-- Unicode Test Section -->
-<div class="row mb-4">
-    <div class="col-12">
-        <div class="card">
-            <div class="card-header">
-                <h5><i class="fas fa-language"></i> Unicode Character Test</h5>
-            </div>
-            <div class="card-body">
-                <div class="unicode-test">
-                    <div class="mb-3">
-                        <label for="UnicodeTestPath" class="form-label">Test Path with Unicode Characters:</label>
-                        <input type="text" class="form-control" id="UnicodeTestPath" 
-                               placeholder="Enter a path with Unicode characters (e.g., C:\Videos\🎬 Movies\Русский фильм)">
+    <!-- Scanning Settings -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card shadow-sm">
+                <div class="card-header bg-gradient-secondary text-white">
+                    <h5 class="mb-0"><i class="fas fa-cog me-2"></i> Scanning Settings</h5>
+                </div>
+                <div class="card-body">
+                    <!-- Excluded Directories Section -->
+                    <div class="mb-4">
+                        <h6 class="fw-bold mb-3"><i class="fas fa-ban text-danger me-2"></i> Excluded Directories</h6>
+                        <p class="text-muted small mb-3">These directories will be skipped during scanning to improve performance and avoid processing unwanted files.</p>
+
+                        <!-- Excluded Directories List -->
+                        <div class="table-responsive mb-3" style="max-height: 300px; overflow-y: auto;">
+                            <table class="table table-hover table-sm mb-0">
+                                <thead class="table-header-dark">
+                                    <tr>
+                                        <th style="width: 80%;">Directory Path</th>
+                                        <th style="width: 20%;" class="text-center">Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="ExcludedDirectoriesTableBody">
+                                    <tr>
+                                        <td colspan="2" class="text-center text-muted">
+                                            <i class="fas fa-spinner fa-spin me-2"></i> Loading...
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <!-- Add New Excluded Directory -->
+                        <div class="row g-2">
+                            <div class="col-md-9">
+                                <input type="text" class="form-control" id="NewExcludedDirectoryInput"
+                                       placeholder="Enter directory path to exclude (e.g., Z:\Videos\downloads)">
+                            </div>
+                            <div class="col-md-3">
+                                <button class="btn btn-success w-100" id="AddExcludedDirectoryBtn">
+                                    <i class="fas fa-plus me-1"></i> Add Exclusion
+                                </button>
+                            </div>
+                        </div>
                     </div>
-                    <button class="btn btn-outline-primary" id="TestUnicodeBtn">
-                        <i class="fas fa-test-tube"></i> Test Unicode Support
+
+                    <!-- Manual Scan Trigger (Optional) -->
+                    <div class="collapse" id="ManualScanSection">
+                        <hr class="my-4">
+                        <h6 class="fw-bold mb-3"><i class="fas fa-play-circle text-primary me-2"></i> Manual Scan</h6>
+                        <p class="text-muted small mb-3">Trigger a one-time scan of a specific folder. For regular scanning, use Continuous Scanning above.</p>
+
+                        <div class="row g-2">
+                            <div class="col-md-7">
+                                <input type="text" class="form-control" id="ManualScanFolderInput"
+                                       placeholder="Enter folder path (e.g., Z:\Videos)">
+                            </div>
+                            <div class="col-md-3">
+                                <select class="form-select" id="ManualScanRootFolderSelect">
+                                    <option value="">-- Or Select Root Folder --</option>
+                                </select>
+                            </div>
+                            <div class="col-md-2">
+                                <button class="btn btn-primary w-100" id="ManualScanBtn">
+                                    <i class="fas fa-play me-1"></i> Scan Now
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Manual Scan Status -->
+                        <div class="mt-3" id="ManualScanStatus" style="display: none;">
+                            <div class="alert alert-info mb-0">
+                                <div class="row">
+                                    <div class="col-md-3">
+                                        <small class="text-muted d-block">Status</small>
+                                        <strong id="ManualScanStatusText">Scanning...</strong>
+                                    </div>
+                                    <div class="col-md-3">
+                                        <small class="text-muted d-block">Current Folder</small>
+                                        <span id="ManualScanCurrentFolderText" class="text-truncate d-inline-block" style="max-width: 200px;">-</span>
+                                    </div>
+                                    <div class="col-md-2">
+                                        <small class="text-muted d-block">Files Found</small>
+                                        <strong id="ManualScanFilesFoundText">0</strong>
+                                    </div>
+                                    <div class="col-md-2">
+                                        <small class="text-muted d-block">Files Processed</small>
+                                        <strong id="ManualScanFilesProcessedText">0</strong>
+                                    </div>
+                                    <div class="col-md-2">
+                                        <small class="text-muted d-block">Elapsed Time</small>
+                                        <strong id="ManualScanElapsedTimeText">0s</strong>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Toggle Manual Scan Section -->
+                    <div class="text-center mt-3">
+                        <button class="btn btn-sm btn-link text-decoration-none" data-bs-toggle="collapse" data-bs-target="#ManualScanSection">
+                            <i class="fas fa-chevron-down me-1"></i> Show Manual Scan Options
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Database Statistics -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0"><i class="fas fa-chart-bar"></i> Database Statistics</h5>
+                    <button type="button" class="btn btn-sm btn-outline-primary" id="RefreshStatisticsBtn">
+                        <i class="fas fa-sync-alt"></i> Refresh
                     </button>
-                    <div id="UnicodeTestResult" class="mt-3" style="display: none;"></div>
+                </div>
+                <div class="card-body">
+                    <div class="row" id="StatisticsContainer">
+                        <div class="col-12 text-center">
+                            <div class="spinner-border text-primary" role="status">
+                                <span class="visually-hidden">Loading...</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Advanced Section (Collapsible) -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header">
+                    <button class="btn btn-link text-decoration-none p-0 w-100 text-start"
+                            type="button" data-bs-toggle="collapse" data-bs-target="#AdvancedSection">
+                        <h5 class="mb-0">
+                            <i class="fas fa-cog"></i> Advanced Options
+                            <i class="fas fa-chevron-down float-end"></i>
+                        </h5>
+                    </button>
+                </div>
+                <div class="collapse" id="AdvancedSection">
+                    <div class="card-body">
+                        <h6><i class="fas fa-language"></i> Unicode Character Test</h6>
+                        <div class="mb-3">
+                            <input type="text" class="form-control" id="UnicodeTestPath"
+                                   placeholder="Enter a path with Unicode characters (e.g., Z:\Videos\🎬 Movies\Русский фильм)">
+                        </div>
+                        <button class="btn btn-outline-primary btn-sm" id="TestUnicodeBtn">
+                            <i class="fas fa-vial"></i> Test Unicode Support
+                        </button>
+                        <div id="UnicodeTestResult" class="mt-3" style="display: none;"></div>
+                    </div>
                 </div>
             </div>
         </div>
     </div>
 </div>
 
-<!-- Database Statistics -->
-<div class="row mb-4">
-    <div class="col-12">
-        <div class="card">
-            <div class="card-header d-flex justify-content-between align-items-center">
-                <h5><i class="fas fa-chart-bar"></i> Database Statistics</h5>
-                <button type="button" class="btn btn-sm btn-outline-primary" id="RefreshStatisticsBtn">
-                    <i class="fas fa-sync-alt"></i> Refresh
-                </button>
-            </div>
-            <div class="card-body">
-                <div class="row" id="StatisticsContainer">
-                    <!-- Statistics will be loaded here -->
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
+<!-- Toast Container -->
+<div class="toast-container position-fixed top-0 end-0 p-3" id="ToastContainer" style="z-index: 1050;"></div>
 
-<!-- Error Display -->
-<div class="row" id="ErrorDisplay" style="display: none;">
-    <div class="col-12">
-        <div class="alert alert-danger">
-            <h6><i class="fas fa-exclamation-triangle"></i> Errors</h6>
-            <div id="ErrorList"></div>
-        </div>
-    </div>
-</div>
-
-<!-- Delete Confirmation Modal -->
-<div class="modal fade" id="DeleteModal" tabindex="-1">
-    <div class="modal-dialog">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title">Confirm Delete</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-            </div>
-            <div class="modal-body">
-                <p id="DeleteMessage">Are you sure you want to delete this item?</p>
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                <button type="button" class="btn btn-danger" id="ConfirmDeleteBtn">Delete</button>
-            </div>
-        </div>
-    </div>
-</div>
 {% endblock %}
 
 {% block scripts %}
-<!-- MVVM Delete Components -->
-<script src="{{ url_for('static', filename='js/DeleteViewModel.js') }}"></script>
-<script src="{{ url_for('static', filename='js/DeleteService.js') }}"></script>
-
 <script>
-        let IsScanning = false;
-        let ScanInterval = null;
-        
-        // Initialize MVVM Delete Components (Global scope for onclick handlers)
-        window.DeleteViewModelInstance = new DeleteViewModel();
-        window.DeleteServiceInstance = new DeleteService(window.DeleteViewModelInstance);
-        
+class FileScanningManager {
+    constructor() {
+        this.isScanning = false;
+        this.scanInterval = null;
+        this.continuousScanInterval = null;
+        this.scanStartTime = null;
 
-        $(document).ready(function() {
-            LoadScanDirectories();
-            LoadStatistics();
-            SetupEventHandlers();
-            CheckForExistingScan();
+        this.initializeEventListeners();
+        this.loadRootFolders();
+        this.loadStatistics();
+        this.loadExcludedDirectories();
+        this.checkForExistingScan();
+        this.loadContinuousScanStatus();
+
+        // Auto-refresh continuous scan status every 15 seconds
+        this.continuousScanInterval = setInterval(() => {
+            this.loadContinuousScanStatus();
+        }, 15000);
+    }
+
+    initializeEventListeners() {
+        // Manual scan controls
+        const manualScanBtn = document.getElementById('ManualScanBtn');
+        if (manualScanBtn) {
+            manualScanBtn.addEventListener('click', () => this.startManualScan());
+        }
+
+        // Statistics refresh
+        document.getElementById('RefreshStatisticsBtn').addEventListener('click', () => this.loadStatistics());
+
+        // Input change handlers for manual scan
+        const manualScanInput = document.getElementById('ManualScanFolderInput');
+        const manualScanSelect = document.getElementById('ManualScanRootFolderSelect');
+        if (manualScanInput) {
+            manualScanInput.addEventListener('input', () => {
+                const folderPath = manualScanInput.value.trim();
+                if (folderPath && manualScanSelect) {
+                    manualScanSelect.value = '';
+                }
+            });
+        }
+        if (manualScanSelect) {
+            manualScanSelect.addEventListener('change', () => {
+                const selected = manualScanSelect.value;
+                if (selected && manualScanInput) {
+                    manualScanInput.value = selected;
+                }
+            });
+        }
+
+        // Unicode test
+        const unicodeTestBtn = document.getElementById('TestUnicodeBtn');
+        if (unicodeTestBtn) {
+            unicodeTestBtn.addEventListener('click', () => this.testUnicode());
+        }
+
+        // Continuous scanning
+        document.getElementById('EnableContinuousScanBtn').addEventListener('click', () => this.enableContinuousScanning());
+        document.getElementById('DisableContinuousScanBtn').addEventListener('click', () => this.disableContinuousScanning());
+
+        // Excluded directories
+        document.getElementById('AddExcludedDirectoryBtn').addEventListener('click', () => this.addExcludedDirectory());
+        document.getElementById('NewExcludedDirectoryInput').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                this.addExcludedDirectory();
+            }
         });
+    }
 
-        function CheckForExistingScan() {
-            // Check if there's already a scan running when the page loads
-            $.ajax({
-                url: '/api/Scan/Status',
-                method: 'GET',
-                success: function(response) {
-                    if (response.Success && response.IsScanning) {
-                        // There's an active scan, start polling and update UI
-                        IsScanning = true;
-                        StartProgressPolling();
-                        UpdateScanProgress(response);
-                    } else {
-                        // No active scan, just update UI without polling
-                        UpdateScanProgress(response);
-                    }
-                },
-                error: function(xhr, status, error) {
-                    // Silently handle errors
-                }
-            });
-        }
+    async loadRootFolders() {
+        try {
+            const response = await fetch('/api/RootFolders');
+            const data = await response.json();
 
-        function SetupEventHandlers() {
-            $('#StartRootFolderScanBtn').click(StartRootFolderScan);
-            $('#StartBrowseScanBtn').click(StartBrowseScan);
-            $('#StopScanBtn').click(StopScan);
-            $('#RefreshBtn').click(RefreshData);
-            $('#ExtractMetadataBtn').click(ExtractMetadata);
-            $('#TestUnicodeBtn').click(TestUnicode);
-            $('#RefreshStatisticsBtn').click(LoadStatistics);
-            
-            // Directory selection event handlers
-            $('#RootFolderSelect').change(OnRootFolderChange);
-            $('#BrowseDirectoryPath').on('input', OnBrowseDirectoryChange);
-            
-            $('#ConfirmDeleteBtn').click(() => window.DeleteServiceInstance.ExecuteDelete());
-        }
+            if (data.Success) {
+                const dropdown = document.getElementById('ManualScanRootFolderSelect');
+                if (dropdown) {
+                    dropdown.innerHTML = '<option value="">-- Or Select Root Folder --</option>';
 
-        function StartRootFolderScan() {
-            const RootFolder = $('#RootFolderSelect').val();
-            const Recursive = $('#RecursiveScan1').is(':checked');
-
-            if (!RootFolder) {
-                ShowError('Please select a root folder');
-                return;
-            }
-
-            $.ajax({
-                url: '/api/Scan/Start',
-                method: 'POST',
-                contentType: 'application/json',
-                data: JSON.stringify({
-                    RootFolderPath: RootFolder,
-                    Recursive: Recursive
-                }),
-                success: function(response) {
-                    if (response.Success) {
-                        IsScanning = true;
-                        $('#StartRootFolderScanBtn').prop('disabled', true);
-                        $('#StartBrowseScanBtn').prop('disabled', true);
-                        $('#StopScanBtn').prop('disabled', false);
-                        $('#ScanProgressSection').show();
-                        StartProgressPolling();
-                        ShowSuccess('Root folder scan started successfully');
-                    } else {
-                        ShowError('Error starting scan: ' + (response.Message || response.Error || 'Unknown error'));
-                    }
-                },
-                error: function(xhr, status, error) {
-                    ShowError('Error starting scan: ' + error);
-                }
-            });
-        }
-
-        function StartBrowseScan() {
-            const BrowseDirectoryPath = $('#BrowseDirectoryPath').val().trim();
-            const Recursive = $('#RecursiveScan2').is(':checked');
-
-            console.log('StartBrowseScan called with:', {
-                BrowseDirectoryPath: BrowseDirectoryPath,
-                Recursive: Recursive
-            });
-
-            if (!BrowseDirectoryPath) {
-                ShowError('Please select a directory to scan');
-                return;
-            }
-
-            $.ajax({
-                url: '/api/Scan/Start',
-                method: 'POST',
-                contentType: 'application/json',
-                data: JSON.stringify({
-                    RootFolderPath: BrowseDirectoryPath,
-                    Recursive: Recursive
-                }),
-                success: function(response) {
-                    if (response.Success) {
-                        IsScanning = true;
-                        $('#StartRootFolderScanBtn').prop('disabled', true);
-                        $('#StartBrowseScanBtn').prop('disabled', true);
-                        $('#StopScanBtn').prop('disabled', false);
-                        $('#ScanProgressSection').show();
-                        StartProgressPolling();
-                        ShowSuccess('Browse scan started successfully');
-                    } else {
-                        ShowError('Error starting scan: ' + (response.Message || response.Error || 'Unknown error'));
-                    }
-                },
-                error: function(xhr, status, error) {
-                    console.error('Browse Scan AJAX Error Details:', {
-                        status: xhr.status,
-                        statusText: xhr.statusText,
-                        responseText: xhr.responseText,
-                        error: error
+                    data.RootFolders.forEach(folder => {
+                        const option = document.createElement('option');
+                        option.value = folder.RootFolder;
+                        option.textContent = folder.RootFolder;
+                        dropdown.appendChild(option);
                     });
-                    ShowError('Error starting scan: ' + error + ' (Status: ' + xhr.status + ')');
                 }
-            });
+            }
+        } catch (error) {
+            console.error('Error loading root folders:', error);
+        }
+    }
+
+    async checkForExistingScan() {
+        // Scan progress is handled by the continuous scanning status display
+    }
+
+    async loadStatistics() {
+        try {
+            const response = await fetch('/api/Statistics');
+            const data = await response.json();
+
+            if (data.Success) {
+                this.displayStatistics(data.Statistics);
+            }
+        } catch (error) {
+            console.error('Error loading statistics:', error);
+        }
+    }
+
+    displayStatistics(stats) {
+        const container = document.getElementById('StatisticsContainer');
+        container.innerHTML = `
+            <div class="col-md-3 mb-3">
+                <div class="card bg-primary text-white h-100">
+                    <div class="card-body">
+                        <h3 class="mb-0">${stats.TotalMediaFiles.toLocaleString()}</h3>
+                        <small>Total Files</small>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3 mb-3">
+                <div class="card bg-success text-white h-100">
+                    <div class="card-body">
+                        <h3 class="mb-0">${stats.TotalSizeGB.toFixed(1)} GB</h3>
+                        <small>Total Size</small>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3 mb-3">
+                <div class="card bg-info text-white h-100">
+                    <div class="card-body">
+                        <h3 class="mb-0">${stats.TotalRootFolders}</h3>
+                        <small>Root Folders</small>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3 mb-3">
+                <div class="card bg-secondary text-white h-100">
+                    <div class="card-body">
+                        <h3 class="mb-0">${stats.FilesWithMetadata.toLocaleString()}</h3>
+                        <small>With Metadata</small>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    async extractMetadata() {
+        // Metadata extraction is handled as part of scanning
+    }
+
+    async testUnicode() {
+        const testPath = document.getElementById('UnicodeTestPath').value.trim();
+
+        if (!testPath) {
+            this.showToast('Please enter a test path', 'warning');
+            return;
         }
 
-        function StopScan() {
-            $.ajax({
-                url: '/api/Scan/Stop',
+        try {
+            const response = await fetch('/api/Scan/TestUnicode', {
                 method: 'POST',
-                success: function(response) {
-                    if (response.Success) {
-                        IsScanning = false;
-                        $('#StartRootFolderScanBtn').prop('disabled', false);
-                        $('#StartBrowseScanBtn').prop('disabled', false);
-                        $('#StopScanBtn').prop('disabled', true);
-                        $('#ScanProgressSection').hide();
-                        StopProgressPolling();
-                        ShowSuccess('Scan stopped successfully');
-                    } else {
-                        ShowError('Error stopping scan: ' + (response.Message || response.Error || 'Unknown error'));
-                    }
-                },
-                error: function(xhr, status, error) {
-                    ShowError('Error stopping scan: ' + error);
-                }
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ TestPath: testPath })
             });
+
+            const data = await response.json();
+
+            if (data.Success) {
+                const resultDiv = document.getElementById('UnicodeTestResult');
+                resultDiv.innerHTML = `
+                    <div class="alert alert-success">
+                        <strong>Unicode Test Result:</strong><br>
+                        <strong>Original:</strong> ${data.OriginalPath}<br>
+                        <strong>Sanitized:</strong> ${data.SanitizedPath}<br>
+                        <strong>Valid:</strong> ${data.IsValid ? 'Yes' : 'No'}
+                    </div>
+                `;
+                resultDiv.style.display = 'block';
+            } else {
+                this.showToast('Unicode test failed', 'danger');
+            }
+        } catch (error) {
+            this.showToast('Error testing unicode: ' + error.message, 'danger');
+        }
+    }
+
+    async loadContinuousScanStatus() {
+        try {
+            const response = await fetch('/api/Scan/ContinuousStatus');
+            const data = await response.json();
+
+            if (data.Success) {
+                this.renderContinuousScanStatus(data);
+            }
+        } catch (error) {
+            console.error('Error loading continuous scan status:', error);
+        }
+    }
+
+    renderContinuousScanStatus(data) {
+        const isRunning = data.IsRunning || false;
+        const intervalMinutes = data.IntervalMinutes || 60;
+        const lastScanTime = data.LastScanTime;
+        const totalScans = data.TotalScansPerformed || 0;
+        const threadAlive = data.ThreadAlive || false;
+
+        // Determine if actively scanning (use IsScanning from API or fallback to thread check)
+        const isScanning = data.IsScanning || (isRunning && threadAlive);
+
+        // Update header badge
+        const headerBadge = document.getElementById('ContinuousScanBadge');
+        if (isScanning) {
+            headerBadge.textContent = 'Scanning';
+            headerBadge.className = 'badge px-3 py-2 bg-success badge-pulse';
+        } else if (isRunning) {
+            headerBadge.textContent = 'Idle';
+            headerBadge.className = 'badge px-3 py-2 bg-warning text-dark';
+        } else {
+            headerBadge.textContent = 'Stopped';
+            headerBadge.className = 'badge px-3 py-2 bg-light text-dark';
+        }
+        headerBadge.style.fontSize = '0.9rem';
+
+        // Update status badge in table
+        const statusBadge = document.getElementById('ContinuousScanStatusBadge');
+        if (isScanning) {
+            statusBadge.textContent = 'Scanning';
+            statusBadge.className = 'badge bg-success';
+        } else if (isRunning) {
+            statusBadge.textContent = 'Idle';
+            statusBadge.className = 'badge bg-warning text-dark';
+        } else {
+            statusBadge.textContent = 'Disabled';
+            statusBadge.className = 'badge bg-secondary';
         }
 
-        function StartProgressPolling() {
-            ScanInterval = setInterval(function() {
-                $.ajax({
-                    url: '/api/Scan/Status',
-                    method: 'GET',
-                    success: function(response) {
-                        if (response.Success) {
-                            UpdateScanProgress(response);
-                        }
-                    },
-                    error: function() {
-                        // Silently handle errors to avoid spam
-                    }
-                });
-            }, 1000);
+        // Update activity text
+        const activitySpan = document.getElementById('ContinuousScanActivity');
+        if (isScanning) {
+            activitySpan.textContent = 'Scanning directories...';
+            activitySpan.className = 'text-success fw-bold';
+        } else if (isRunning) {
+            // Calculate next scan time
+            if (lastScanTime) {
+                const lastScan = new Date(lastScanTime);
+                const nextScan = new Date(lastScan.getTime() + intervalMinutes * 60000);
+                const now = new Date();
+                const minutesUntilNext = Math.max(0, Math.round((nextScan - now) / 60000));
+
+                if (minutesUntilNext === 0) {
+                    activitySpan.textContent = 'Starting next scan...';
+                } else {
+                    activitySpan.textContent = `Next scan in ${minutesUntilNext} minute${minutesUntilNext !== 1 ? 's' : ''}`;
+                }
+            } else {
+                activitySpan.textContent = 'Waiting for first scan...';
+            }
+            activitySpan.className = 'text-muted';
+        } else {
+            activitySpan.textContent = 'Service disabled';
+            activitySpan.className = 'text-muted';
         }
 
-        function StopProgressPolling() {
-            if (ScanInterval) {
-                clearInterval(ScanInterval);
-                ScanInterval = null;
-            }
+        // Update real-time scan statistics
+        const totalScanned = data.TotalFilesFound || 0;
+        const filesChanged = data.FilesChanged || 0;
+        const scanDuration = data.CurrentScanDuration || '-';
+
+        document.getElementById('ContinuousScanScanned').textContent = totalScanned.toLocaleString();
+        document.getElementById('ContinuousScanChanged').textContent = filesChanged.toLocaleString();
+        document.getElementById('ContinuousScanDuration').textContent = scanDuration;
+
+        // Update expandable details
+        document.getElementById('ContinuousScanTotalScans').textContent = totalScans.toLocaleString();
+
+        if (lastScanTime) {
+            const scanDate = new Date(lastScanTime);
+            document.getElementById('ContinuousScanLastCompleted').textContent = scanDate.toLocaleTimeString();
+        } else {
+            document.getElementById('ContinuousScanLastCompleted').textContent = 'Never';
         }
 
-        function UpdateScanProgress(response) {
-            const Progress = response.Progress || 0;
-            const CurrentDirectory = response.CurrentDirectory || '';
-            const ResponseIsScanning = response.IsScanning || false;
-            const Status = response.Status || '';
-            const RunningScans = response.RunningScans || [];
-            const TotalRunningScans = response.TotalRunningScans || 0;
-            
-            // Update the global IsScanning variable
-            IsScanning = ResponseIsScanning;
-            
-            // Update the current scan status display
-            if (ResponseIsScanning) {
-                if (TotalRunningScans > 1) {
-                    // Multiple scans running - show count and primary scan
-                    const RootFolderPath = response.RootFolderPath || CurrentDirectory.split('\\')[0] + '\\' || 'Unknown';
-                    $('#CurrentScanText').text(`${RootFolderPath} (+${TotalRunningScans - 1} more)`);
-                    $('#CurrentScanStatus').removeClass('alert-info alert-success alert-danger').addClass('alert-warning');
-                } else {
-                    // Single scan running
-                    const RootFolderPath = response.RootFolderPath || CurrentDirectory.split('\\')[0] + '\\' || 'Unknown';
-                    $('#CurrentScanText').text(RootFolderPath);
-                    $('#CurrentScanStatus').removeClass('alert-info alert-success alert-danger').addClass('alert-warning');
-                }
-            } else {
-                $('#CurrentScanText').text('None');
-                $('#CurrentScanStatus').removeClass('alert-warning alert-success alert-danger').addClass('alert-info');
-            }
-            
-            // Show/hide progress section and update button states
-            if (ResponseIsScanning) {
-                $('#ScanProgressSection').show();
-                // Only disable start button if we're at the maximum concurrent scans (2)
-                if (TotalRunningScans >= 2) {
-                    $('#StartScanBtn').prop('disabled', true);
-                } else {
-                    $('#StartScanBtn').prop('disabled', false);
-                }
-                $('#StopScanBtn').prop('disabled', false);
-            } else {
-                $('#StartScanBtn').prop('disabled', false);
-                $('#StopScanBtn').prop('disabled', true);
-            }
-            
-            // Update progress bar (show average progress if multiple scans)
-            if (TotalRunningScans > 1) {
-                const AvgProgress = RunningScans.reduce((sum, scan) => sum + (scan.Progress || 0), 0) / TotalRunningScans;
-                $('#ScanProgressBar').css('width', AvgProgress + '%').text(`${AvgProgress.toFixed(1)}% (${TotalRunningScans} scans)`);
-            } else {
-                $('#ScanProgressBar').css('width', Progress + '%').text(Progress.toFixed(1) + '%');
-            }
-            
-            // Update status text based on scan state
-            if (ResponseIsScanning) {
-                if (TotalRunningScans > 1) {
-                    $('#ScanStatusText').text(`Scanning: ${TotalRunningScans} concurrent scans`);
-                } else {
-                    $('#ScanStatusText').text(`Scanning: ${CurrentDirectory}`);
-                }
-            } else {
-                if (Status === 'Completed') {
-                    $('#ScanStatusText').text('Scan completed successfully');
-                } else if (Status === 'Failed') {
-                    $('#ScanStatusText').text('Scan failed');
-                } else if (Status === 'Stopped') {
-                    $('#ScanStatusText').text('Scan stopped');
-                } else {
-                    $('#ScanStatusText').text('Ready to scan');
-                }
-            }
-            
-            // Update current directory display
-            $('#CurrentDirectory').text(CurrentDirectory);
-            
-            // Check if scan is complete or not running
-            if (!IsScanning) {
-                IsScanning = false;
-                $('#StartScanBtn').prop('disabled', false);
-                $('#StopScanBtn').prop('disabled', true);
-                StopProgressPolling();
-                
-                if (Status === 'Completed') {
-                    ShowSuccess('Scan completed successfully');
-                    LoadStatistics();
-                } else if (Status === 'Failed') {
-                    ShowError('Scan failed: ' + (response.ErrorMessage || 'Unknown error'));
-                } else if (Status === 'Stopped') {
-                    ShowSuccess('Scan stopped by user');
-                }
-            }
+        // Show details button when service is running
+        if (isRunning && totalScans > 0) {
+            document.getElementById('ShowDetailsButton').style.display = 'block';
+        } else {
+            document.getElementById('ShowDetailsButton').style.display = 'none';
         }
 
-        function TestUnicode() {
-            const TestPath = $('#UnicodeTestPath').val().trim();
-            
-            if (!TestPath) {
-                ShowError('Please enter a test path');
-                return;
-            }
+        // Update buttons
+        document.getElementById('EnableContinuousScanBtn').disabled = isRunning;
+        document.getElementById('DisableContinuousScanBtn').disabled = !isRunning;
+        document.getElementById('ScanIntervalInput').disabled = isRunning;
+        document.getElementById('ScanIntervalInput').value = intervalMinutes;
+    }
 
-            $.ajax({
-                url: '/api/Scan/TestUnicode',
+    async enableContinuousScanning() {
+        const intervalMinutes = parseInt(document.getElementById('ScanIntervalInput').value) || 60;
+
+        try {
+            const response = await fetch('/api/Scan/EnableContinuous', {
                 method: 'POST',
-                contentType: 'application/json',
-                data: JSON.stringify({
-                    TestPath: TestPath
-                }),
-                success: function(response) {
-                    if (response.Success) {
-                        const ResultHtml = `
-                            <div class="alert alert-success">
-                                <strong>Unicode Test Result:</strong><br>
-                                <strong>Original Path:</strong> ${response.OriginalPath}<br>
-                                <strong>Sanitized Path:</strong> ${response.SanitizedPath}<br>
-                                <strong>Is Valid:</strong> ${response.IsValid ? 'Yes' : 'No'}<br>
-                                <strong>Characters Handled:</strong> ${response.CharactersHandled}
-                            </div>
-                        `;
-                        $('#UnicodeTestResult').html(ResultHtml).show();
-                    } else {
-                        ShowError('Unicode test failed: ' + response.Error);
-                    }
-                },
-                error: function(xhr, status, error) {
-                    ShowError('Error testing Unicode support: ' + error);
-                }
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ IntervalMinutes: intervalMinutes })
             });
+
+            const data = await response.json();
+
+            if (data.Success) {
+                this.showToast(`Continuous scanning enabled (${intervalMinutes} min interval)`, 'success');
+                this.loadContinuousScanStatus();
+            } else {
+                this.showToast('Error: ' + (data.ErrorMessage || 'Unknown error'), 'danger');
+            }
+        } catch (error) {
+            this.showToast('Error enabling continuous scanning: ' + error.message, 'danger');
         }
+    }
 
+    async disableContinuousScanning() {
+        const btn = document.getElementById('DisableContinuousScanBtn');
+        const originalHtml = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Stopping...';
 
-
-        function LoadScanDirectories() {
-            console.log('Loading scan directories...');
-            $.ajax({
-                url: '/api/ScanDirectories',
-                method: 'GET',
-                success: function(response) {
-                    console.log('Scan directories response:', response);
-                    if (response.Success) {
-                        PopulateScanDirectoryDropdown(response.ScanDirectories);
-                    } else {
-                        ShowError('Error loading scan directories: ' + response.Error);
-                    }
-                },
-                error: function(xhr, status, error) {
-                    console.error('Error loading scan directories:', xhr, status, error);
-                    ShowError('Error loading scan directories: ' + error);
-                }
+        try {
+            const response = await fetch('/api/Scan/DisableContinuous', {
+                method: 'POST'
             });
+
+            const data = await response.json();
+
+            if (data.Success) {
+                this.showToast('Continuous scanning stopped and disabled', 'success');
+                this.loadContinuousScanStatus();
+                // Refresh scan status to show stopped scan
+                setTimeout(() => {
+                    this.checkForExistingScan();
+                }, 500);
+            } else {
+                this.showToast('Error: ' + (data.ErrorMessage || 'Unknown error'), 'danger');
+                btn.disabled = false;
+                btn.innerHTML = originalHtml;
+            }
+        } catch (error) {
+            this.showToast('Error disabling continuous scanning: ' + error.message, 'danger');
+            btn.disabled = false;
+            btn.innerHTML = originalHtml;
         }
+    }
 
-        function PopulateScanDirectoryDropdown(scanDirectories) {
-            const dropdown = $('#RootFolderSelect');
-            dropdown.empty();
-            dropdown.append('<option value="">Select Root Folder...</option>');
-            
-            scanDirectories.forEach(function(directory) {
-                dropdown.append(`<option value="${directory.Path}">${directory.DisplayText}</option>`);
-            });
+    refreshData() {
+        this.loadStatistics();
+        this.loadContinuousScanStatus();
+        this.loadExcludedDirectories();
+        this.showToast('Data refreshed', 'info');
+    }
+
+    async loadExcludedDirectories() {
+        try {
+            const response = await fetch('/api/SystemSettings/ExcludedDirectories');
+            const data = await response.json();
+
+            if (data.Success) {
+                this.renderExcludedDirectories(data.ExcludedDirectories || []);
+            }
+        } catch (error) {
+            console.error('Error loading excluded directories:', error);
+            this.renderExcludedDirectories([]);
         }
+    }
 
-        function OnRootFolderChange() {
-            const RootFolder = $('#RootFolderSelect').val();
-            const StartRootFolderScanBtn = $('#StartRootFolderScanBtn');
-            
-            // Enable scan button if root folder is selected
-            StartRootFolderScanBtn.prop('disabled', !RootFolder);
-        }
+    renderExcludedDirectories(directories) {
+        const tbody = document.getElementById('ExcludedDirectoriesTableBody');
 
-
-        function OnBrowseDirectoryChange() {
-            const BrowseDirectoryPath = $('#BrowseDirectoryPath').val().trim();
-            const StartBrowseScanBtn = $('#StartBrowseScanBtn');
-            
-            // Enable scan button if directory path is provided
-            StartBrowseScanBtn.prop('disabled', !BrowseDirectoryPath);
-        }
-
-
-
-
-        function LoadStatistics() {
-            $.ajax({
-                url: '/api/Statistics',
-                method: 'GET',
-                success: function(response) {
-                    if (response.Success) {
-                        DisplayStatistics(response.Statistics);
-                    } else {
-                        ShowError(response.Message || 'Failed to load statistics');
-                    }
-                },
-                error: function(xhr) {
-                    const response = xhr.responseJSON;
-                    ShowError(response?.Message || 'Error loading statistics');
-                }
-            });
-        }
-
-        function DisplayStatistics(stats) {
-            const Container = $('#StatisticsContainer');
-            Container.empty();
-            
-            const StatisticsHtml = `
-                <div class="col-md-3 mb-3">
-                    <div class="card bg-primary text-white">
-                        <div class="card-body">
-                            <div class="d-flex justify-content-between">
-                                <div>
-                                    <h4 class="card-title">${stats.TotalMediaFiles}</h4>
-                                    <p class="card-text">Total Media Files</p>
-                                </div>
-                                <div class="align-self-center">
-                                    <i class="fas fa-file-video fa-2x"></i>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                <div class="col-md-3 mb-3">
-                    <div class="card bg-warning text-white">
-                        <div class="card-body">
-                            <div class="d-flex justify-content-between">
-                                <div>
-                                    <h4 class="card-title">${stats.FilesWithoutProfiles}</h4>
-                                    <p class="card-text">Files Without Profiles</p>
-                                </div>
-                                <div class="align-self-center">
-                                    <i class="fas fa-exclamation-triangle fa-2x"></i>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                <div class="col-md-3 mb-3">
-                    <div class="card bg-info text-white">
-                        <div class="card-body">
-                            <div class="d-flex justify-content-between">
-                                <div>
-                                    <h4 class="card-title">${stats.TotalRootFolders}</h4>
-                                    <p class="card-text">Root Folders</p>
-                                </div>
-                                <div class="align-self-center">
-                                    <i class="fas fa-folder-open fa-2x"></i>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                <div class="col-md-3 mb-3">
-                    <div class="card bg-success text-white">
-                        <div class="card-body">
-                            <div class="d-flex justify-content-between">
-                                <div>
-                                    <h4 class="card-title">${stats.TotalSizeGB.toFixed(1)} GB</h4>
-                                    <p class="card-text">Total Size</p>
-                                </div>
-                                <div class="align-self-center">
-                                    <i class="fas fa-hdd fa-2x"></i>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                <div class="col-md-4 mb-3">
-                    <div class="card bg-secondary text-white">
-                        <div class="card-body">
-                            <div class="d-flex justify-content-between">
-                                <div>
-                                    <h4 class="card-title">${stats.FilesWithMetadata}</h4>
-                                    <p class="card-text">Files With Metadata</p>
-                                </div>
-                                <div class="align-self-center">
-                                    <i class="fas fa-info-circle fa-2x"></i>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                <div class="col-md-4 mb-3">
-                    <div class="card bg-danger text-white">
-                        <div class="card-body">
-                            <div class="d-flex justify-content-between">
-                                <div>
-                                    <h4 class="card-title">${stats.FilesWithoutMetadata}</h4>
-                                    <p class="card-text">Files Without Metadata</p>
-                                </div>
-                                <div class="align-self-center">
-                                    <i class="fas fa-question-circle fa-2x"></i>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                <div class="col-md-4 mb-3">
-                    <div class="card bg-dark text-white">
-                        <div class="card-body">
-                            <div class="d-flex justify-content-between">
-                                <div>
-                                    <h4 class="card-title">${stats.LastScanDate}</h4>
-                                    <p class="card-text">Last Scan Date</p>
-                                </div>
-                                <div class="align-self-center">
-                                    <i class="fas fa-clock fa-2x"></i>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
+        if (!directories || directories.length === 0) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="2" class="text-center text-muted py-3">
+                        <i class="fas fa-folder-open me-2"></i> No excluded directories configured
+                    </td>
+                </tr>
             `;
-            
-            Container.html(StatisticsHtml);
+            return;
         }
 
-        function RefreshData() {
-            LoadStatistics();
-            ShowSuccess('Data refreshed');
+        tbody.innerHTML = directories.map((dir, index) => `
+            <tr>
+                <td class="align-middle">
+                    <i class="fas fa-ban text-danger me-2"></i>
+                    <code>${this.escapeHtml(dir)}</code>
+                </td>
+                <td class="text-center">
+                    <button class="btn btn-sm btn-danger" data-dir-index="${index}">
+                        <i class="fas fa-trash"></i> Remove
+                    </button>
+                </td>
+            </tr>
+        `).join('');
+
+        // Attach click handlers with proper string handling (avoids backslash escaping issues)
+        tbody.querySelectorAll('button[data-dir-index]').forEach(btn => {
+            const idx = parseInt(btn.getAttribute('data-dir-index'));
+            btn.addEventListener('click', () => this.removeExcludedDirectory(directories[idx]));
+        });
+    }
+
+    async addExcludedDirectory() {
+        const input = document.getElementById('NewExcludedDirectoryInput');
+        const directory = input.value.trim();
+
+        if (!directory) {
+            this.showToast('Please enter a directory path', 'warning');
+            return;
         }
 
-        function ExtractMetadata() {
-            // Disable button during processing
-            $('#ExtractMetadataBtn').prop('disabled', true).html('<i class="fas fa-spinner fa-spin"></i> Extracting...');
-            
-            $.ajax({
-                url: '/api/Scan/ExtractMetadata',
+        const btn = document.getElementById('AddExcludedDirectoryBtn');
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Adding...';
+
+        try {
+            const response = await fetch('/api/SystemSettings/ExcludedDirectories/Add', {
                 method: 'POST',
-                contentType: 'application/json',
-                data: JSON.stringify({
-                    RootFolderId: null  // Extract for all files, or could be specific root folder
-                }),
-                success: function(response) {
-                    if (response.Success) {
-                        const ProcessedFiles = response.ProcessedFiles || 0;
-                        ShowSuccess(`Metadata extraction completed. Processed ${ProcessedFiles} files.`);
-                        RefreshData(); // Refresh to show updated metadata
-                    } else {
-                        ShowError('Error extracting metadata: ' + (response.Message || 'Unknown error'));
-                    }
-                },
-                error: function(xhr, status, error) {
-                    ShowError('Error extracting metadata: ' + error);
-                },
-                complete: function() {
-                    // Re-enable button
-                    $('#ExtractMetadataBtn').prop('disabled', false).html('<i class="fas fa-cogs"></i> Extract Metadata');
-                }
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ Directory: directory })
             });
-        }
 
-        function ShowScanErrors(errors) {
-            if (errors && errors.length > 0) {
-                const ErrorList = errors.map(error => `<li>${error}</li>`).join('');
-                $('#ErrorList').html(`<ul>${ErrorList}</ul>`);
-                $('#ErrorDisplay').show();
+            const data = await response.json();
+
+            if (data.Success) {
+                this.showToast(`Excluded directory added: ${directory}`, 'success');
+                input.value = '';
+                this.loadExcludedDirectories();
+            } else {
+                this.showToast('Error: ' + (data.ErrorMessage || 'Unknown error'), 'danger');
             }
+        } catch (error) {
+            this.showToast('Error adding excluded directory: ' + error.message, 'danger');
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-plus me-1"></i> Add Exclusion';
+        }
+    }
+
+    async removeExcludedDirectory(directory) {
+        if (!confirm(`Remove exclusion for:\n${directory}\n\nThis directory will be scanned again.`)) {
+            return;
         }
 
-        function ShowError(message) {
-            // You can implement a toast notification system here
-            console.error('Error:', message);
-            alert('Error: ' + message);
+        try {
+            const response = await fetch('/api/SystemSettings/ExcludedDirectories/Remove', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ Directory: directory })
+            });
+
+            const data = await response.json();
+
+            if (data.Success) {
+                this.showToast(`Exclusion removed: ${directory}`, 'success');
+                this.loadExcludedDirectories();
+            } else {
+                this.showToast('Error: ' + (data.ErrorMessage || 'Unknown error'), 'danger');
+            }
+        } catch (error) {
+            this.showToast('Error removing excluded directory: ' + error.message, 'danger');
+        }
+    }
+
+    escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    async startManualScan() {
+        const folderPath = document.getElementById('ManualScanFolderInput').value.trim();
+
+        if (!folderPath) {
+            this.showToast('Please enter a folder path', 'warning');
+            return;
         }
 
+        const btn = document.getElementById('ManualScanBtn');
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Starting...';
 
+        try {
+            const response = await fetch('/api/Scan/Start', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    RootFolderPath: folderPath,
+                    Recursive: true
+                })
+            });
 
-        function ShowSuccess(message) {
-            // You can implement a toast notification system here
-            console.log('Success:', message);
+            const data = await response.json();
+
+            if (data.Success) {
+                this.showToast('Manual scan started successfully', 'success');
+                document.getElementById('ManualScanStatus').style.display = 'block';
+                // Could add polling here if needed
+            } else {
+                this.showToast('Error: ' + (data.Message || 'Unknown error'), 'danger');
+            }
+        } catch (error) {
+            this.showToast('Error starting manual scan: ' + error.message, 'danger');
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-play me-1"></i> Scan Now';
         }
+    }
+
+    showToast(message, type = 'info') {
+        const toastContainer = document.getElementById('ToastContainer');
+        const toastId = 'toast-' + Date.now();
+
+        const bgColor = {
+            'success': 'bg-success',
+            'danger': 'bg-danger',
+            'warning': 'bg-warning',
+            'info': 'bg-info'
+        }[type] || 'bg-info';
+
+        const icon = {
+            'success': 'fa-check-circle',
+            'danger': 'fa-exclamation-circle',
+            'warning': 'fa-exclamation-triangle',
+            'info': 'fa-info-circle'
+        }[type] || 'fa-info-circle';
+
+        const toastHTML = `
+            <div class="toast align-items-center text-white ${bgColor} border-0" id="${toastId}" role="alert">
+                <div class="d-flex">
+                    <div class="toast-body">
+                        <i class="fas ${icon} me-2"></i>${message}
+                    </div>
+                    <button type="button" class="btn-close btn-close-white me-2 m-auto"
+                            data-bs-dismiss="toast"></button>
+                </div>
+            </div>
+        `;
+
+        toastContainer.insertAdjacentHTML('beforeend', toastHTML);
+
+        const toastElement = document.getElementById(toastId);
+        const toast = new bootstrap.Toast(toastElement, { delay: 4000 });
+        toast.show();
+
+        // Remove from DOM after hidden
+        toastElement.addEventListener('hidden.bs.toast', () => {
+            toastElement.remove();
+        });
+    }
+}
+
+// Initialize when DOM is ready
+document.addEventListener('DOMContentLoaded', () => {
+    window.fileScanningManager = new FileScanningManager();
+});
 </script>
 {% endblock %}

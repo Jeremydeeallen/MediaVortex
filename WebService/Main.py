@@ -59,7 +59,67 @@ class WebServiceApp:
         self.FileScanningController = FileScanningController()
         self.SystemSettingsController = SystemSettingsController(self.App)
         self.FileReplacementController = FileReplacementController(self.App)
-        
+
+        # Clean up any stale scans from previous sessions
+        try:
+            from Repositories.DatabaseManager import DatabaseManager
+            db_manager = DatabaseManager()
+
+            # Mark any running/pending scans as stopped (they're from a previous session)
+            cleanup_query = """
+                UPDATE ScanJobs
+                SET Status = 'Stopped',
+                    ErrorMessage = 'Application restarted',
+                    EndTime = datetime('now', 'localtime')
+                WHERE Status IN ('Running', 'Pending')
+            """
+            db_manager.DatabaseService.ExecuteNonQuery(cleanup_query)
+            LoggingService.LogInfo("Cleaned up stale scan jobs from previous session", "WebService", "__init__")
+        except Exception as e:
+            LoggingService.LogWarning(f"Could not clean up stale scans: {e}", "WebService", "__init__")
+
+        # Initialize ContinuousScanService (single shared instance)
+        from Services.ContinuousScanService import ContinuousScanService
+        self.ContinuousScanService = ContinuousScanService()
+        LoggingService.LogInfo("ContinuousScanService initialized", "WebService", "__init__")
+
+        # Share ContinuousScanService with the FileScanningController's ViewModel
+        self.FileScanningController.ViewModel.ContinuousScanService = self.ContinuousScanService
+
+        # Auto-start continuous scanning based on SystemSettings
+        try:
+            from Repositories.DatabaseManager import DatabaseManager
+            db_manager = DatabaseManager()
+
+            # Check if continuous scanning is enabled in database
+            enabled_setting = db_manager.GetSystemSetting('ContinuousScanEnabled')
+            interval_setting = db_manager.GetSystemSetting('ContinuousScanIntervalMinutes')
+
+            # Create settings if they don't exist
+            if enabled_setting is None:
+                db_manager.AddOrUpdateSystemSetting('ContinuousScanEnabled', '0', 'Enable/disable continuous file scanning', 'boolean')
+                enabled_setting = '0'
+                LoggingService.LogInfo("Created ContinuousScanEnabled setting (default: disabled)", "WebService", "__init__")
+
+            if interval_setting is None:
+                db_manager.AddOrUpdateSystemSetting('ContinuousScanIntervalMinutes', '60', 'Interval in minutes for continuous scanning', 'integer')
+                interval_setting = '60'
+                LoggingService.LogInfo("Created ContinuousScanIntervalMinutes setting (default: 60)", "WebService", "__init__")
+
+            # Auto-start if enabled
+            if enabled_setting == '1':
+                interval = int(interval_setting) if interval_setting else 60
+                result = self.ContinuousScanService.StartContinuousScanning(interval)
+                if result.get('Success'):
+                    LoggingService.LogInfo(f"Auto-started continuous scanning with {interval} minute interval", "WebService", "__init__")
+                else:
+                    LoggingService.LogWarning(f"Could not auto-start continuous scanning: {result.get('ErrorMessage')}", "WebService", "__init__")
+            else:
+                LoggingService.LogInfo("Continuous scanning is disabled (not starting automatically)", "WebService", "__init__")
+
+        except Exception as e:
+            LoggingService.LogWarning(f"Could not check/start continuous scanning: {e}", "WebService", "__init__")
+
         self._register_routes()
         self._register_blueprints()
         

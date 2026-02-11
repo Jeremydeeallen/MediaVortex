@@ -163,3 +163,33 @@ class FilenameResolutionService:
                 'NewFileName': FileName,
                 'ErrorMessage': str(e)
             }
+
+    def ExtractBaseFilenameWithoutResolution(self, FileName: str) -> str:
+        """Extract base filename without resolution tags and file extension."""
+        try:
+            LoggingService.LogFunctionEntry("ExtractBaseFilenameWithoutResolution", 'FilenameResolutionService', FileName)
+
+            # Remove file extension
+            filePath = Path(FileName)
+            fileNameWithoutExt = filePath.stem
+
+            # Remove all resolution patterns
+            baseFileName = fileNameWithoutExt
+            for pattern in self.ResolutionPatterns:
+                baseFileName = re.sub(pattern, '', baseFileName, flags=re.IGNORECASE)
+
+            # Remove common transcoding suffixes
+            baseFileName = re.sub(r'_transcoded', '', baseFileName, flags=re.IGNORECASE)
+
+            # Clean up extra dots, dashes, and spaces
+            baseFileName = re.sub(r'[\.\-_]+$', '', baseFileName)  # Remove trailing dots, dashes, underscores
+            baseFileName = re.sub(r'^[\.\-_]+', '', baseFileName)  # Remove leading dots, dashes, underscores
+            baseFileName = re.sub(r'[\.\-_]{2,}', '.', baseFileName)  # Replace multiple separators with single dot
+
+            LoggingService.LogInfo(f"Extracted base filename '{baseFileName}' from '{FileName}'", 'ExtractBaseFilenameWithoutResolution', 'FilenameResolutionService')
+            return baseFileName
+
+        except Exception as e:
+            LoggingService.LogException("Error extracting base filename without resolution", e, 'ExtractBaseFilenameWithoutResolution', 'FilenameResolutionService')
+            # Fallback: return original filename without extension
+            return Path(FileName).stem

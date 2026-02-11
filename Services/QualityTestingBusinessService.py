@@ -1066,7 +1066,7 @@ class QualityTestingBusinessService:
             return 0.0
     
     def SkipQualityTest(self, TranscodeAttemptId: int) -> dict:
-        """Skip quality test for a transcode attempt - handles both queued and running tests"""
+        """Skip quality test for a transcode attempt and replace file immediately - handles both queued and running tests"""
         try:
             LoggingService.LogFunctionEntry("SkipQualityTest", "QualityTestingBusinessService", TranscodeAttemptId)
             
@@ -1106,10 +1106,42 @@ class QualityTestingBusinessService:
                 # Complete the active job
                 self.DatabaseManager.CompleteActiveJob(active_job['Id'], False, "Cancelled by user skip request")
             
-            LoggingService.LogInfo(f"Successfully skipped quality test for TranscodeAttempt {TranscodeAttemptId}", 
+            # Now trigger file replacement immediately since quality test is being skipped
+            LoggingService.LogInfo(f"Quality test skipped for TranscodeAttempt {TranscodeAttemptId}, triggering immediate file replacement", 
                                  "QualityTestingBusinessService", "SkipQualityTest")
+            from Services.FileReplacementBusinessService import FileReplacementBusinessService
+            file_replacement_service = FileReplacementBusinessService(self.DatabaseManager)
+            replacement_result = file_replacement_service.ProcessFileReplacement(TranscodeAttemptId, BypassVMAFCheck=True)
             
-            return {"Success": True, "Message": "Quality test skipped successfully"}
+            if replacement_result.get("Success", False):
+                # Create quality test result record showing test was skipped but file was replaced successfully
+                CurrentTime = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                Query = """
+                    INSERT INTO QualityTestResults 
+                    (TranscodeAttemptId, TestDuration, PassesThreshold, Rank, ErrorMessage, DateTested, FFmpegCommand, Status, VMAFScore)
+                    VALUES (?, ?, ?, ?, ?, datetime('now', 'localtime'), ?, ?, ?)
+                """
+                
+                params = (
+                    TranscodeAttemptId,
+                    0.0,  # TestDuration
+                    True,  # PassesThreshold (file was replaced successfully)
+                    1,  # Rank (1 = successful)
+                    "Quality test skipped by user - file replaced automatically",  # ErrorMessage field used for note
+                    "",  # FFmpegCommand
+                    "Success",  # Status
+                    95.0  # VMAFScore (use high score to indicate auto-replacement)
+                )
+                
+                result_id = self.DatabaseManager.DatabaseService.ExecuteNonQuery(Query, params)
+                
+                LoggingService.LogInfo(f"Successfully replaced file for TranscodeAttempt {TranscodeAttemptId} after skip and created quality test result record", 
+                                     "QualityTestingBusinessService", "SkipQualityTest")
+                return {"Success": True, "Message": "Quality test skipped and file replaced successfully"}
+            else:
+                LoggingService.LogWarning(f"Quality test skipped but file replacement failed for TranscodeAttempt {TranscodeAttemptId}: {replacement_result.get('ErrorMessage', 'Unknown error')}", 
+                                        "QualityTestingBusinessService", "SkipQualityTest")
+                return {"Success": False, "Message": f"Quality test skipped but file replacement failed: {replacement_result.get('ErrorMessage', 'Unknown error')}"}
             
         except Exception as e:
             LoggingService.LogException(f"Error skipping quality test for TranscodeAttempt {TranscodeAttemptId}", e, 

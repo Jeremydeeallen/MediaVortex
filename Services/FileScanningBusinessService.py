@@ -747,7 +747,35 @@ class FileScanningBusinessService:
         except Exception as e:
             LoggingService.LogException("Error in fuzzy match logic", e)
             return False
-    
+
+    def IsValidTranscodeResolutionChange(self, OriginalResolution: Optional[str], NewResolution: Optional[str]) -> bool:
+        """Check if resolution change matches valid transcoding patterns."""
+        try:
+            if not OriginalResolution or not NewResolution:
+                return False
+
+            # Import FilenameResolutionService to access resolution mapping
+            from Services.FilenameResolutionService import FilenameResolutionService
+            ResolutionService = FilenameResolutionService()
+
+            # Normalize resolution strings (case-insensitive comparison)
+            OriginalRes = OriginalResolution.lower()
+            NewRes = NewResolution.lower()
+
+            # Check if the resolution change matches the transcoding mapping
+            # For example: 2160p -> 720p, 1080p -> 720p
+            for SourceRes, TargetRes in ResolutionService.ResolutionMapping.items():
+                if OriginalRes == SourceRes.lower() and NewRes == TargetRes.lower():
+                    LoggingService.LogDebug(f"Valid transcode resolution change detected: {OriginalResolution} -> {NewResolution}", 'IsValidTranscodeResolutionChange', 'FileScanningBusinessService')
+                    return True
+
+            LoggingService.LogDebug(f"Invalid transcode resolution change: {OriginalResolution} -> {NewResolution}", 'IsValidTranscodeResolutionChange', 'FileScanningBusinessService')
+            return False
+
+        except Exception as e:
+            LoggingService.LogException("Error validating transcode resolution change", e, 'IsValidTranscodeResolutionChange', 'FileScanningBusinessService')
+            return False
+
     def FindFuzzyFileMatch(self, FilePath: str, FileName: str, FileSizeMB: float, RootFolderId: int) -> Optional[MediaFileModel]:
         """Find a fuzzy match for a file in the database."""
         try:
@@ -777,10 +805,79 @@ class FileScanningBusinessService:
         except Exception as e:
             LoggingService.LogException("Error in fuzzy file matching", e)
             return None
-    
-    
-    
-    
+
+    def FindTranscodedFileMatch(self, FilePath: str, FileName: str, FileSizeMB: float, RootFolderId: int) -> Optional[MediaFileModel]:
+        """Find a match for a transcoded file with resolution change."""
+        try:
+            LoggingService.LogDebug(f"Checking for transcoded file match: {FilePath}", 'FindTranscodedFileMatch', 'FileScanningBusinessService')
+
+            # STEP 1: Check if file is in _transcoded subdirectory
+            if "_transcoded" not in FilePath:
+                LoggingService.LogDebug(f"File not in _transcoded directory, skipping transcoded match: {FilePath}", 'FindTranscodedFileMatch', 'FileScanningBusinessService')
+                return None
+
+            # STEP 2: Extract base filename without resolution
+            from Services.FilenameResolutionService import FilenameResolutionService
+            ResolutionService = FilenameResolutionService()
+            BaseFileName = ResolutionService.ExtractBaseFilenameWithoutResolution(FileName)
+
+            if not BaseFileName:
+                LoggingService.LogWarning(f"Could not extract base filename from: {FileName}", 'FindTranscodedFileMatch', 'FileScanningBusinessService')
+                return None
+
+            # STEP 3: Get current resolution from filename
+            CurrentResolution = ResolutionService.ExtractResolutionFromFilename(FileName)
+
+            # STEP 4: Get all files for this root folder
+            DatabaseFiles = self.DatabaseManager.GetMediaFilesByRootFolder(RootFolderId)
+
+            LoggingService.LogDebug(f"Searching {len(DatabaseFiles)} database files for base name match: '{BaseFileName}'", 'FindTranscodedFileMatch', 'FileScanningBusinessService')
+
+            # STEP 5: Check each potential match
+            for DbFile in DatabaseFiles:
+                # Extract base filename from database file
+                DbBaseFileName = ResolutionService.ExtractBaseFilenameWithoutResolution(DbFile.FileName)
+
+                # Check if base filenames match (case-insensitive)
+                if DbBaseFileName.lower() != BaseFileName.lower():
+                    continue
+
+                # Get resolution from database file
+                DbResolution = ResolutionService.ExtractResolutionFromFilename(DbFile.FileName)
+
+                # Check if resolution change is valid (2160p→720p, 1080p→720p)
+                if not self.IsValidTranscodeResolutionChange(DbResolution, CurrentResolution):
+                    LoggingService.LogDebug(f"Resolution change not valid: {DbResolution} -> {CurrentResolution}", 'FindTranscodedFileMatch', 'FileScanningBusinessService')
+                    continue
+
+                # Check if original file is in parent directory (not _transcoded)
+                if "_transcoded" in DbFile.FilePath:
+                    LoggingService.LogDebug(f"Database file already in _transcoded directory: {DbFile.FilePath}", 'FindTranscodedFileMatch', 'FileScanningBusinessService')
+                    continue
+
+                # Check if original file still exists
+                if not os.path.exists(DbFile.FilePath):
+                    # Original file no longer exists, this is likely the transcoded version
+                    LoggingService.LogInfo(f"TRANSCODED FILE MATCH FOUND: Original '{DbFile.FilePath}' -> Transcoded '{FilePath}'", 'FindTranscodedFileMatch', 'FileScanningBusinessService')
+                    return DbFile
+                else:
+                    # Original still exists, check TranscodeFiles table
+                    TranscodeRecord = self.DatabaseManager.GetTranscodeFileByFilePath(DbFile.FilePath)
+                    if TranscodeRecord and TranscodeRecord.SuccessfullyTranscoded:
+                        # Original was transcoded successfully, update DB record
+                        LoggingService.LogInfo(f"TRANSCODED FILE MATCH FOUND (original exists but marked as transcoded): Original '{DbFile.FilePath}' -> Transcoded '{FilePath}'", 'FindTranscodedFileMatch', 'FileScanningBusinessService')
+                        return DbFile
+
+            LoggingService.LogDebug(f"No transcoded file match found for: {FilePath}", 'FindTranscodedFileMatch', 'FileScanningBusinessService')
+            return None
+
+        except Exception as e:
+            LoggingService.LogException("Error finding transcoded file match", e, 'FindTranscodedFileMatch', 'FileScanningBusinessService')
+            return None
+
+
+
+
     def ProcessSingleMediaFile(self, FilePath: str, RootFolderId: Optional[int], RootFolderPath: str = "", ExtractMetadata: bool = True):
         """Process a single media file with fuzzy matching and optional metadata extraction."""
         try:
@@ -800,37 +897,48 @@ class FileScanningBusinessService:
                 # Don't process further if file doesn't exist
                 return
             
-            # Get file information
+            # Get file information (FAST - no ffprobe yet)
             FileSizeMB = self.FileManager.GetFileSizeMB(FilePath)
             FileName = self.FileManager.GetFileNameFromPath(FilePath)
             FileModificationTime = self.GetFileModificationTime(FilePath)
-            
+
+            # Get file size in bytes for new FileSize column
+            try:
+                FileSize = os.path.getsize(FilePath)
+            except:
+                FileSize = int(FileSizeMB * 1024 * 1024) if FileSizeMB else 0
+
             # Check if this file already exists in database (exact match)
             ExistingFile = self.DatabaseManager.GetMediaFileByPath(FilePath)
             if ExistingFile:
-                # Check if file has actually changed
-                if self.HasFileChanged(ExistingFile, FileSizeMB, FileName, FileModificationTime):
+                # OPTIMIZATION: Quick check using LastModifiedDate and FileSize
+                # This is MUCH faster than re-extracting metadata
+                HasChanged = self.HasFileChanged(ExistingFile, FileSizeMB, FileName, FileModificationTime)
+
+                if HasChanged:
                     # File has changed - update it
+                    LoggingService.LogInfo(f"File changed, updating: {FilePath}", 'ProcessSingleMediaFile', 'FileScanningBusinessService')
                     ExistingFile.SizeMB = FileSizeMB
                     ExistingFile.FileName = FileName
                     ExistingFile.FileModificationTime = FileModificationTime
+                    ExistingFile.LastModifiedDate = FileModificationTime
+                    ExistingFile.FileSize = FileSize
                     ExistingFile.SeasonId = None  # Season functionality disabled
                     ExistingFile.LastScannedDate = datetime.now()
-                    # Note: RootFolderId is not stored in MediaFiles table - files are associated by FilePath
-                    
+
                     # Extract metadata if requested and not already present
                     if ExtractMetadata and self.ShouldExtractMetadata(ExistingFile):
                         self.ExtractAndUpdateMetadata(ExistingFile, FilePath)
-                    
+
                     self.DatabaseManager.SaveMediaFile(ExistingFile)
                     self.ScanResults.TotalFilesProcessed += 1
                 else:
-                    # File hasn't changed - just update scan date and skip database update
+                    # ⚡ FILE UNCHANGED - SKIP PROCESSING (HUGE PERFORMANCE WIN!)
+                    # Only update LastScannedDate to mark it was checked
                     ExistingFile.LastScannedDate = datetime.now()
-                    # Only update the LastScannedDate without triggering a full save
                     self.UpdateLastScannedDate(ExistingFile.Id, ExistingFile.LastScannedDate)
                     self.ScanResults.TotalFilesSkipped += 1
-                    LoggingService.LogDebug("Skipped unchanged file: {}", FilePath)
+                    LoggingService.LogDebug(f"⚡ Skipped unchanged file: {FilePath}", 'ProcessSingleMediaFile', 'FileScanningBusinessService')
                 
             else:
                 # File doesn't exist in database - check for fuzzy match (renamed file)
@@ -853,23 +961,47 @@ class FileScanningBusinessService:
                     self.DatabaseManager.SaveMediaFile(FuzzyMatch)
                     self.ScanResults.TotalFilesProcessed += 1
                 else:
-                    # Create new file record
-                    NewFile = MediaFileModel(
-                        SeasonId=None,  # Season functionality disabled
-                        FilePath=FilePath,
-                        FileName=FileName,
-                        SizeMB=FileSizeMB,
-                        FileModificationTime=FileModificationTime,
-                        LastScannedDate=datetime.now()
-                    )
-                    # Note: RootFolderId is not stored in MediaFiles table - files are associated by FilePath
-                    
-                    # Extract metadata if requested
-                    if ExtractMetadata:
-                        self.ExtractAndUpdateMetadata(NewFile, FilePath)
-                    
-                    self.DatabaseManager.SaveMediaFile(NewFile)
-                    self.ScanResults.TotalFilesProcessed += 1
+                    # No fuzzy match found - check for transcoded file match
+                    TranscodedMatch = self.FindTranscodedFileMatch(FilePath, FileName, FileSizeMB, RootFolderId)
+
+                    if TranscodedMatch:
+                        # Found a transcoded match - update existing record with new path/name
+                        LoggingService.LogInfo(f"Updating database record for transcoded file: {TranscodedMatch.FilePath} -> {FilePath}", 'ProcessSingleMediaFile', 'FileScanningBusinessService')
+                        TranscodedMatch.FilePath = FilePath  # Update to new path
+                        TranscodedMatch.FileName = FileName  # Update to new filename
+                        TranscodedMatch.SizeMB = FileSizeMB  # Update to new size
+                        TranscodedMatch.FileModificationTime = FileModificationTime
+                        TranscodedMatch.TranscodedByMediaVortex = True  # Flag as transcoded
+                        TranscodedMatch.LastScannedDate = datetime.now()
+
+                        # Extract metadata if requested (transcoded files may have different metadata)
+                        if ExtractMetadata:
+                            self.ExtractAndUpdateMetadata(TranscodedMatch, FilePath)
+
+                        self.DatabaseManager.SaveMediaFile(TranscodedMatch)
+                        self.ScanResults.TotalFilesProcessed += 1
+                        LoggingService.LogInfo(f"Successfully updated transcoded file: {FilePath}", 'ProcessSingleMediaFile', 'FileScanningBusinessService')
+                    else:
+                        # Create new file record
+                        LoggingService.LogInfo(f"New file discovered: {FilePath}", 'ProcessSingleMediaFile', 'FileScanningBusinessService')
+                        NewFile = MediaFileModel(
+                            SeasonId=None,  # Season functionality disabled
+                            FilePath=FilePath,
+                            FileName=FileName,
+                            SizeMB=FileSizeMB,
+                            FileModificationTime=FileModificationTime,
+                            LastModifiedDate=FileModificationTime,
+                            FileSize=FileSize,
+                            LastScannedDate=datetime.now()
+                        )
+                        # Note: RootFolderId is not stored in MediaFiles table - files are associated by FilePath
+
+                        # Extract metadata if requested
+                        if ExtractMetadata:
+                            self.ExtractAndUpdateMetadata(NewFile, FilePath)
+
+                        self.DatabaseManager.SaveMediaFile(NewFile)
+                        self.ScanResults.TotalFilesProcessed += 1
             
         except Exception as e:
             LoggingService.LogException("Error processing single media file", e)
@@ -1116,7 +1248,45 @@ class FileScanningBusinessService:
             LoggingService.LogException("Error checking if file has changed", e, 'HasFileChanged', 'FileScanningBusinessService')
             # If we can't check, assume it changed to be safe
             return True
-    
+
+    def IsSameFile(self, DbFile: MediaFileModel, FilePath: str) -> bool:
+        """Check if a file at a given path is the same as a database file record."""
+        try:
+            if not os.path.exists(FilePath):
+                return False
+
+            # Get current file information
+            CurrentSize = os.path.getsize(FilePath) / (1024 * 1024)  # MB
+            CurrentModTime = datetime.fromtimestamp(os.path.getmtime(FilePath))
+
+            # Allow 1MB size difference (to account for transcoding compression)
+            SizeMatch = abs(CurrentSize - DbFile.SizeMB) < 1.0
+
+            # Allow 2 second modification time difference (to account for filesystem precision)
+            TimeMatch = True
+            if DbFile.FileModificationTime and CurrentModTime:
+                # Handle case where FileModificationTime might be a string from database
+                StoredModTime = DbFile.FileModificationTime
+                if isinstance(StoredModTime, str):
+                    try:
+                        StoredModTime = datetime.fromisoformat(StoredModTime.replace('Z', '+00:00'))
+                    except (ValueError, AttributeError):
+                        # If we can't parse, just use size match
+                        TimeMatch = True
+                else:
+                    TimeDifference = abs((CurrentModTime - StoredModTime).total_seconds())
+                    TimeMatch = TimeDifference < 2.0
+
+            IsMatch = SizeMatch and TimeMatch
+            if IsMatch:
+                LoggingService.LogDebug(f"File match confirmed: DB '{DbFile.FilePath}' matches '{FilePath}' (Size: {DbFile.SizeMB}MB vs {CurrentSize}MB)", 'IsSameFile', 'FileScanningBusinessService')
+
+            return IsMatch
+
+        except Exception as e:
+            LoggingService.LogException("Error checking if files are the same", e, 'IsSameFile', 'FileScanningBusinessService')
+            return False
+
     def UpdateLastScannedDate(self, MediaFileId: int, LastScannedDate: datetime):
         """Update only the LastScannedDate for a media file without full save."""
         try:
@@ -1220,14 +1390,143 @@ class FileScanningBusinessService:
                 
         except Exception as e:
             LoggingService.LogException("CRITICAL ERROR in CleanupMissingFiles", e, 'CleanupMissingFiles', 'FileScanningBusinessService')
-    
+
+    def FindMovedFile(self, DbFile: MediaFileModel) -> Optional[Dict[str, str]]:
+        """Try to find a moved file by searching all root folders."""
+        try:
+            LoggingService.LogDebug(f"Searching for moved file: {DbFile.FileName}", 'FindMovedFile', 'FileScanningBusinessService')
+
+            # Get the filename to search for
+            SearchFileName = DbFile.FileName
+
+            # Get all root folders
+            AllRootFolders = self.DatabaseManager.GetAllRootFolders()
+
+            # Search each root folder for matching filename
+            for RootFolder in AllRootFolders:
+                if not os.path.exists(RootFolder.RootFolder):
+                    LoggingService.LogDebug(f"Root folder does not exist: {RootFolder.RootFolder}", 'FindMovedFile', 'FileScanningBusinessService')
+                    continue
+
+                try:
+                    # Use os.walk to search for file
+                    for root, dirs, files in os.walk(RootFolder.RootFolder):
+                        for file in files:
+                            if file == SearchFileName:
+                                FoundPath = os.path.join(root, file)
+
+                                # Skip if this is the original path (not moved)
+                                if FoundPath.lower() == DbFile.FilePath.lower():
+                                    continue
+
+                                # Verify it's the same file (size + modification time)
+                                if self.IsSameFile(DbFile, FoundPath):
+                                    LoggingService.LogInfo(f"MOVED FILE FOUND: '{DbFile.FilePath}' -> '{FoundPath}'", 'FindMovedFile', 'FileScanningBusinessService')
+                                    return {
+                                        'OldPath': DbFile.FilePath,
+                                        'NewPath': FoundPath
+                                    }
+
+                except Exception as e:
+                    LoggingService.LogException(f"Error searching root folder: {RootFolder.RootFolder}", e, 'FindMovedFile', 'FileScanningBusinessService')
+                    continue
+
+            LoggingService.LogDebug(f"No moved location found for: {DbFile.FileName}", 'FindMovedFile', 'FileScanningBusinessService')
+            return None
+
+        except Exception as e:
+            LoggingService.LogException("Error finding moved file", e, 'FindMovedFile', 'FileScanningBusinessService')
+            return None
+
+    def DetectMovedFiles(self, RootFolderId: Optional[int] = None) -> Dict[str, Any]:
+        """Detect files that have been moved and update their paths."""
+        try:
+            LoggingService.LogInfo("=== DETECT MOVED FILES STARTED ===", 'DetectMovedFiles', 'FileScanningBusinessService')
+
+            MovedFiles = []
+            DeletedFiles = []
+
+            # Get all files (or files for specific root folder)
+            if RootFolderId:
+                RootFolder = self.DatabaseManager.GetRootFolderById(RootFolderId)
+                if not RootFolder:
+                    LoggingService.LogError(f"Root folder not found for ID: {RootFolderId}", 'DetectMovedFiles', 'FileScanningBusinessService')
+                    return {'Success': False, 'ErrorMessage': 'Root folder not found'}
+
+                DatabaseFiles = self.DatabaseManager.GetMediaFilesByRootFolder(RootFolder.RootFolder)
+                LoggingService.LogInfo(f"Checking {len(DatabaseFiles)} files in root folder: {RootFolder.RootFolder}", 'DetectMovedFiles', 'FileScanningBusinessService')
+            else:
+                DatabaseFiles = self.DatabaseManager.GetAllMediaFiles()
+                LoggingService.LogInfo(f"Checking {len(DatabaseFiles)} total database files", 'DetectMovedFiles', 'FileScanningBusinessService')
+
+            # Performance optimization: Skip move detection for very large datasets
+            MaxFiles = 10000  # Configurable threshold
+            if len(DatabaseFiles) > MaxFiles:
+                LoggingService.LogWarning(f"Skipping move detection: Database has {len(DatabaseFiles)} files (exceeds limit of {MaxFiles})", 'DetectMovedFiles', 'FileScanningBusinessService')
+                return {
+                    'Success': True,
+                    'MovedFiles': 0,
+                    'DeletedFiles': 0,
+                    'Skipped': True,
+                    'Reason': f'File count exceeds limit ({len(DatabaseFiles)} > {MaxFiles})'
+                }
+
+            # Check each file for moves
+            for DbFile in DatabaseFiles:
+                if not os.path.exists(DbFile.FilePath):
+                    # File missing - try to find it
+                    MovedFile = self.FindMovedFile(DbFile)
+
+                    if MovedFile:
+                        # File was moved, update path
+                        LoggingService.LogInfo(f"Updating moved file: {MovedFile['OldPath']} -> {MovedFile['NewPath']}", 'DetectMovedFiles', 'FileScanningBusinessService')
+                        DbFile.FilePath = MovedFile['NewPath']
+                        DbFile.FileName = os.path.basename(MovedFile['NewPath'])
+                        DbFile.LastScannedDate = datetime.now()
+                        self.DatabaseManager.SaveMediaFile(DbFile)
+                        MovedFiles.append({
+                            'OldPath': MovedFile['OldPath'],
+                            'NewPath': MovedFile['NewPath'],
+                            'FileName': DbFile.FileName
+                        })
+                    else:
+                        # File was deleted (will be cleaned up by CleanupMissingFiles)
+                        DeletedFiles.append({
+                            'FilePath': DbFile.FilePath,
+                            'FileName': DbFile.FileName
+                        })
+
+            LoggingService.LogInfo("=== DETECT MOVED FILES COMPLETED ===", 'DetectMovedFiles', 'FileScanningBusinessService')
+            LoggingService.LogInfo(f"Results: {len(MovedFiles)} files moved, {len(DeletedFiles)} files deleted", 'DetectMovedFiles', 'FileScanningBusinessService')
+
+            return {
+                'Success': True,
+                'MovedFiles': len(MovedFiles),
+                'DeletedFiles': len(DeletedFiles),
+                'MovedFilesList': MovedFiles,
+                'DeletedFilesList': DeletedFiles
+            }
+
+        except Exception as e:
+            LoggingService.LogException("Error detecting moved files", e, 'DetectMovedFiles', 'FileScanningBusinessService')
+            return {
+                'Success': False,
+                'ErrorMessage': str(e),
+                'MovedFiles': 0,
+                'DeletedFiles': 0
+            }
+
     def ProcessMediaFilesWithMetadata(self, MediaFiles: List[str], RootFolderId: Optional[int], RootFolderPath: str = "", ExtractMetadata: bool = True):
         """Process media files with optional metadata extraction using parallel processing."""
         try:
             LoggingService.LogFunctionEntry("ProcessMediaFilesWithMetadata", 'FileScanningBusinessService', f"Processing {len(MediaFiles)} files, ExtractMetadata: {ExtractMetadata}")
-            
-            # Cleanup missing files before processing to remove entries for files that no longer exist
+
+            # Detect moved files first, then cleanup remaining missing files
             if RootFolderId:
+                LoggingService.LogInfo("=== CALLING DETECT MOVED FILES ===", 'ProcessMediaFilesWithMetadata', 'FileScanningBusinessService')
+                MoveDetectionResult = self.DetectMovedFiles(RootFolderId)
+                LoggingService.LogInfo(f"=== DETECT MOVED FILES COMPLETED === Moved: {MoveDetectionResult.get('MovedFiles', 0)}, Deleted: {MoveDetectionResult.get('DeletedFiles', 0)}", 'ProcessMediaFilesWithMetadata', 'FileScanningBusinessService')
+
                 LoggingService.LogInfo("=== CALLING CLEANUP MISSING FILES ===", 'ProcessMediaFilesWithMetadata', 'FileScanningBusinessService')
                 self.CleanupMissingFiles(RootFolderId)
                 LoggingService.LogInfo("=== CLEANUP MISSING FILES CALL COMPLETED ===", 'ProcessMediaFilesWithMetadata', 'FileScanningBusinessService')

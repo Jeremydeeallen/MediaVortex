@@ -183,3 +183,97 @@ class SystemSettingsController:
                     'Success': False,
                     'Error': str(e)
                 }), 500
+
+        @self.Blueprint.route('/ExcludedDirectories', methods=['GET'])
+        def GetExcludedDirectories():
+            """Get all excluded directories."""
+            try:
+                ExcludedDirsSetting = self.DatabaseManager.GetSystemSetting('ExcludedDirectories')
+
+                if ExcludedDirsSetting:
+                    ExcludedDirs = [d.strip() for d in ExcludedDirsSetting.split(',') if d.strip()]
+                else:
+                    ExcludedDirs = []
+
+                return jsonify({
+                    'Success': True,
+                    'ExcludedDirectories': ExcludedDirs
+                })
+
+            except Exception as e:
+                LoggingService.LogException("Error getting excluded directories", e, 'GetExcludedDirectories', 'SystemSettingsController')
+                return jsonify({
+                    'Success': False,
+                    'ErrorMessage': str(e)
+                }), 500
+
+        @self.Blueprint.route('/ExcludedDirectories/Add', methods=['POST'])
+        def AddExcludedDirectory():
+            """Add a directory to the exclusion list."""
+            try:
+                import os
+                Data = request.get_json()
+                if not Data:
+                    return jsonify({'Success': False, 'ErrorMessage': 'No JSON data provided'}), 400
+
+                Directory = Data.get('Directory', '').strip()
+                if not Directory:
+                    return jsonify({'Success': False, 'ErrorMessage': 'Directory is required'}), 400
+
+                ExcludedDirsSetting = self.DatabaseManager.GetSystemSetting('ExcludedDirectories')
+                ExcludedDirs = [d.strip() for d in ExcludedDirsSetting.split(',') if d.strip()] if ExcludedDirsSetting else []
+
+                NormalizedNewDir = os.path.normpath(Directory)
+                if any(os.path.normpath(d) == NormalizedNewDir for d in ExcludedDirs):
+                    return jsonify({'Success': False, 'ErrorMessage': 'Directory is already excluded'}), 400
+
+                ExcludedDirs.append(Directory)
+                self.DatabaseManager.AddOrUpdateSystemSetting(
+                    'ExcludedDirectories', ','.join(ExcludedDirs),
+                    'Comma-separated list of directories to exclude from scanning', 'text'
+                )
+
+                LoggingService.LogInfo(f"Added excluded directory: {Directory}", 'SystemSettingsController', 'AddExcludedDirectory')
+                return jsonify({'Success': True, 'Message': f'Directory excluded: {Directory}'})
+
+            except Exception as e:
+                LoggingService.LogException("Error adding excluded directory", e, 'AddExcludedDirectory', 'SystemSettingsController')
+                return jsonify({'Success': False, 'ErrorMessage': str(e)}), 500
+
+        @self.Blueprint.route('/ExcludedDirectories/Remove', methods=['POST'])
+        def RemoveExcludedDirectory():
+            """Remove a directory from the exclusion list."""
+            try:
+                import os
+                Data = request.get_json()
+                if not Data:
+                    return jsonify({'Success': False, 'ErrorMessage': 'No JSON data provided'}), 400
+
+                Directory = Data.get('Directory', '').strip()
+                if not Directory:
+                    return jsonify({'Success': False, 'ErrorMessage': 'Directory is required'}), 400
+
+                ExcludedDirsSetting = self.DatabaseManager.GetSystemSetting('ExcludedDirectories')
+                if not ExcludedDirsSetting:
+                    return jsonify({'Success': False, 'ErrorMessage': 'No excluded directories configured'}), 400
+
+                ExcludedDirs = [d.strip() for d in ExcludedDirsSetting.split(',') if d.strip()]
+                NormalizedDir = os.path.normpath(Directory)
+                OriginalCount = len(ExcludedDirs)
+                ExcludedDirs = [d for d in ExcludedDirs if os.path.normpath(d) != NormalizedDir]
+
+                if len(ExcludedDirs) == OriginalCount:
+                    return jsonify({'Success': False, 'ErrorMessage': 'Directory not found in exclusion list'}), 404
+
+                NewValue = ','.join(ExcludedDirs) if ExcludedDirs else ''
+                self.DatabaseManager.AddOrUpdateSystemSetting(
+                    'ExcludedDirectories', NewValue,
+                    'Comma-separated list of directories to exclude from scanning', 'text'
+                )
+
+                LoggingService.LogInfo(f"Removed excluded directory: {Directory}", 'SystemSettingsController', 'RemoveExcludedDirectory')
+                return jsonify({'Success': True, 'Message': f'Exclusion removed: {Directory}'})
+
+            except Exception as e:
+                LoggingService.LogException("Error removing excluded directory", e, 'RemoveExcludedDirectory', 'SystemSettingsController')
+                return jsonify({'Success': False, 'ErrorMessage': str(e)}), 500

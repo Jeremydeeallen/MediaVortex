@@ -20,6 +20,49 @@ class FileManagerService:
         self.ProcessedFiles = 0
         self.SkippedFiles = 0
         self.FFmpegAnalysisService = FFmpegAnalysisService()
+        self.ExcludedDirectories = self._LoadExcludedDirectories()
+
+    def _LoadExcludedDirectories(self) -> List[str]:
+        """Load excluded directories from SystemSettings."""
+        try:
+            from Repositories.DatabaseManager import DatabaseManager
+            db_manager = DatabaseManager()
+
+            # Get excluded directories setting (comma-separated list)
+            excluded_setting = db_manager.GetSystemSetting('ExcludedDirectories')
+
+            if excluded_setting:
+                # Split by comma and normalize paths
+                excluded = [os.path.normpath(d.strip()) for d in excluded_setting.split(',') if d.strip()]
+                LoggingService.LogInfo(f"Loaded {len(excluded)} excluded directories", 'FileManagerService', '_LoadExcludedDirectories')
+                return excluded
+            else:
+                # Create the setting with Z:\Videos\downloads as default
+                default_excluded = 'Z:\\Videos\\downloads'
+                db_manager.AddOrUpdateSystemSetting('ExcludedDirectories', default_excluded, 'Comma-separated list of directories to exclude from scanning', 'text')
+                LoggingService.LogInfo(f"Created ExcludedDirectories setting with default: {default_excluded}", 'FileManagerService', '_LoadExcludedDirectories')
+                return [os.path.normpath(default_excluded)]
+
+        except Exception as e:
+            LoggingService.LogException("Error loading excluded directories", e, 'FileManagerService', '_LoadExcludedDirectories')
+            return []
+
+    def ShouldExcludeDirectory(self, directory_path: str) -> bool:
+        """Check if a directory should be excluded from scanning."""
+        try:
+            normalized_path = os.path.normpath(directory_path)
+
+            for excluded in self.ExcludedDirectories:
+                # Check exact match or if directory is subdirectory of excluded path
+                if normalized_path == excluded or normalized_path.startswith(excluded + os.sep):
+                    LoggingService.LogDebug(f"Excluding directory: {directory_path}", 'ShouldExcludeDirectory', 'FileManagerService')
+                    return True
+
+            return False
+
+        except Exception as e:
+            LoggingService.LogException("Error checking if directory should be excluded", e, 'FileManagerService', 'ShouldExcludeDirectory')
+            return False
     
     def IsMediaFile(self, filePath: str) -> bool:
         """Check if a file is a media file based on its extension."""
@@ -103,6 +146,9 @@ class FileManagerService:
             # Scan the directory
             if recursive:
                 for root, dirs, files in os.walk(directoryPath):
+                    # Filter out excluded directories (modifying dirs in-place prevents os.walk from descending into them)
+                    dirs[:] = [d for d in dirs if not self.ShouldExcludeDirectory(os.path.join(root, d))]
+
                     for file in files:
                         try:
                             filePath = os.path.join(root, file)
