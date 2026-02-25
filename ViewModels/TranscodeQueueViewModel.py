@@ -79,17 +79,17 @@ class TranscodeQueueViewModel:
             LoggingService.LogException("Exception loading queue items", e, "TranscodeQueueViewModel", "LoadQueueItems")
             return {"Success": False, "ErrorMessage": self.ErrorMessage}
     
-    def PopulateQueue(self, RootFolderPath: str = None, ProfileId: int = None) -> Dict[str, Any]:
+    def PopulateQueue(self, RootFolderPath: str = None, ProfileId: int = None, CompatibilityOnly: bool = False) -> Dict[str, Any]:
         """Populate the transcoding queue from MediaFiles."""
         try:
-            LoggingService.LogFunctionEntry("PopulateQueue", "TranscodeQueueViewModel", RootFolderPath, ProfileId)
-            
+            LoggingService.LogFunctionEntry("PopulateQueue", "TranscodeQueueViewModel", RootFolderPath, ProfileId, CompatibilityOnly)
+
             self.IsLoading = True
             self.ErrorMessage = ""
             self.SuccessMessage = ""
-            
+
             # Populate queue using business service
-            result = self.QueueManagementService.PopulateQueueFromMediaFiles(RootFolderPath, ProfileId)
+            result = self.QueueManagementService.PopulateQueueFromMediaFiles(RootFolderPath, ProfileId, CompatibilityOnly)
             
             if result.get("Success", False):
                 itemsAdded = result.get("ItemsAdded", 0)
@@ -113,16 +113,16 @@ class TranscodeQueueViewModel:
             LoggingService.LogException("Exception populating queue", e, "TranscodeQueueViewModel", "PopulateQueue")
             return {"Success": False, "ErrorMessage": self.ErrorMessage}
     
-    def AddJobToQueue(self, MediaFileId: int, Priority: int = None, ProfileId: int = None, StartTime: str = None) -> Dict[str, Any]:
+    def AddJobToQueue(self, MediaFileId: int, Priority: int = None, ProfileId: int = None, StartTime: str = None, ForceAdd: bool = False) -> Dict[str, Any]:
         """Add a specific media file to the transcoding queue."""
         try:
             LoggingService.LogFunctionEntry("AddJobToQueue", "TranscodeQueueViewModel", MediaFileId, Priority)
-            
+
             self.ErrorMessage = ""
             self.SuccessMessage = ""
-            
+
             # Add job using business service
-            result = self.QueueManagementService.AddJobToQueue(MediaFileId, Priority, ProfileId, StartTime)
+            result = self.QueueManagementService.AddJobToQueue(MediaFileId, Priority, ProfileId, StartTime, ForceAdd)
             
             if result.get("Success", False):
                 fileName = result.get("FileName", "Unknown")
@@ -264,6 +264,15 @@ class TranscodeQueueViewModel:
             LoggingService.LogException("Exception getting queue statistics", e, "TranscodeQueueViewModel", "GetQueueStatistics")
             return {"Success": False, "ErrorMessage": self.ErrorMessage}
     
+    def GetMkvFileCount(self) -> Dict[str, Any]:
+        """Get count of MKV files available for remuxing."""
+        try:
+            count = self.QueueManagementService.GetMkvFileCount()
+            return {"Success": True, "MkvFileCount": count}
+        except Exception as e:
+            LoggingService.LogException("Exception getting MKV file count", e, "TranscodeQueueViewModel", "GetMkvFileCount")
+            return {"Success": False, "MkvFileCount": 0, "ErrorMessage": str(e)}
+
     def QueueItemToDict(self, QueueItem: TranscodeQueueModel) -> Dict[str, Any]:
         """Convert a queue item to dictionary for JSON serialization."""
         try:
@@ -294,7 +303,8 @@ class TranscodeQueueViewModel:
                 "IsFailed": QueueItem.IsFailed,
                 "IsRunning": QueueItem.IsRunning,
                 "IsPending": QueueItem.IsPending,
-                "IsCancelled": QueueItem.IsCancelled
+                "IsCancelled": QueueItem.IsCancelled,
+                "ProcessingMode": QueueItem.ProcessingMode
             }
         except Exception as e:
             LoggingService.LogException("Exception converting queue item to dict", e, "TranscodeQueueViewModel", "QueueItemToDict")

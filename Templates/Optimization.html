@@ -1,0 +1,1039 @@
+{% extends "Base.html" %}
+
+{% block title %}Optimization - MediaVortex{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h2><i class="fas fa-bolt"></i> Optimization</h2>
+        <div>
+            <button class="btn btn-outline-secondary btn-sm me-2" onclick="copyAllAnalysis()" title="Copy token-optimized summary for AI">
+                <i class="fas fa-copy"></i> Copy for AI
+            </button>
+            <button class="btn btn-primary btn-sm" onclick="refreshAll()">
+                <i class="fas fa-sync-alt"></i> Refresh
+            </button>
+        </div>
+    </div>
+
+    <!-- Jellyfin Connection Settings (Collapsible) -->
+    <div class="card mb-3">
+        <div class="card-header d-flex justify-content-between align-items-center" style="cursor:pointer" data-bs-toggle="collapse" data-bs-target="#connectionSettings">
+            <span><i class="fas fa-plug"></i> Jellyfin Server Connection</span>
+            <i class="fas fa-chevron-down" id="connectionChevron"></i>
+        </div>
+        <div class="collapse" id="connectionSettings">
+            <div class="card-body">
+                <div class="row g-3">
+                    <div class="col-md-3">
+                        <label class="form-label">Host</label>
+                        <input type="text" class="form-control form-control-sm" id="jellyfinHost" placeholder="10.0.0.179">
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label">SSH Port</label>
+                        <input type="number" class="form-control form-control-sm" id="jellyfinSSHPort" placeholder="22">
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label">SSH User</label>
+                        <input type="text" class="form-control form-control-sm" id="jellyfinSSHUser" placeholder="root">
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">SSH Key Path</label>
+                        <input type="text" class="form-control form-control-sm" id="jellyfinSSHKeyPath" placeholder="/path/to/key">
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label">API Port</label>
+                        <input type="number" class="form-control form-control-sm" id="jellyfinApiPort" placeholder="8096">
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">API Key</label>
+                        <input type="text" class="form-control form-control-sm" id="jellyfinApiKey" placeholder="Optional - for session info">
+                    </div>
+                    <div class="col-md-8 d-flex align-items-end gap-2">
+                        <button class="btn btn-success btn-sm" onclick="saveConnectionSettings()">
+                            <i class="fas fa-save"></i> Save
+                        </button>
+                        <button class="btn btn-info btn-sm" onclick="testConnection()">
+                            <i class="fas fa-plug"></i> Test Connection
+                        </button>
+                        <span id="connectionStatus" class="ms-2 small"></span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Server Overview -->
+    <div class="card mb-3" id="serverOverviewCard" style="display:none">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <span><i class="fas fa-server"></i> Jellyfin Server Overview</span>
+            <div class="d-flex align-items-center gap-2">
+                <small class="text-muted" id="logDateRange"></small>
+                <small class="text-muted" title="Jellyfin default: 3 days. Sync regularly to preserve history."><i class="fas fa-info-circle"></i></small>
+                <button class="btn btn-outline-primary btn-sm" onclick="syncJellyfinData()" id="syncBtn">
+                    <i class="fas fa-download"></i> Sync from Jellyfin
+                </button>
+                <span id="syncStatus" class="small"></span>
+            </div>
+        </div>
+        <div class="card-body">
+            <div class="row">
+                <div class="col-md-4" id="serverInfoCol"></div>
+                <div class="col-md-8">
+                    <div class="row text-center" id="operationCountsRow">
+                        <div class="col-md-4">
+                            <div class="card bg-success bg-opacity-10 border-success" style="cursor:pointer" onclick="toggleOperationDetails('DirectStream')">
+                                <div class="card-body py-2">
+                                    <div class="fs-3 fw-bold text-success" id="directStreamCount">-</div>
+                                    <small class="text-muted">DirectStream <span id="directStreamTotal"></span></small>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="card bg-danger bg-opacity-10 border-danger" style="cursor:pointer" onclick="toggleOperationDetails('Transcode')">
+                                <div class="card-body py-2">
+                                    <div class="fs-3 fw-bold text-danger" id="transcodeCount">-</div>
+                                    <small class="text-muted">Transcode <span id="transcodeTotal"></span></small>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="card bg-warning bg-opacity-10 border-warning" style="cursor:pointer" onclick="toggleOperationDetails('Remux')">
+                                <div class="card-body py-2">
+                                    <div class="fs-3 fw-bold text-warning" id="remuxCount">-</div>
+                                    <small class="text-muted">Remux <span id="remuxTotal"></span></small>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- Operation Details (expandable) -->
+                    <div id="operationDetails" class="mt-3" style="display:none"></div>
+                    <div id="transcodeReasonsSection" class="mt-3" style="display:none">
+                        <h6>Transcode Reasons</h6>
+                        <div id="transcodeReasonsList"></div>
+                    </div>
+                    <div id="destFormatsSection" class="mt-3" style="display:none">
+                        <h6>Transcode Destination Formats <small class="text-muted">(what Jellyfin transcodes TO)</small></h6>
+                        <div id="destFormatsList"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Device Analysis -->
+    <div class="card mb-3" id="deviceAnalysisCard" style="display:none">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <span><i class="fas fa-tv"></i> Device Analysis</span>
+            <button class="btn btn-outline-primary btn-sm" onclick="loadDeviceAnalysis()" id="deviceAnalysisBtn">
+                <i class="fas fa-search"></i> Analyze Devices
+            </button>
+        </div>
+        <div class="card-body" id="deviceAnalysisBody">
+            <p class="text-muted small mb-0">Click "Analyze Devices" to discover what devices connect to Jellyfin and what data is available for per-device compatibility analysis.</p>
+        </div>
+    </div>
+
+    <!-- No Jellyfin Data Prompt -->
+    <div class="card mb-3" id="noJellyfinDataCard" style="display:none">
+        <div class="card-body text-center py-4">
+            <i class="fas fa-server fa-2x text-muted mb-2"></i>
+            <p class="text-muted mb-2">No Jellyfin operation data imported yet.</p>
+            <button class="btn btn-primary btn-sm" onclick="syncJellyfinData()">
+                <i class="fas fa-download"></i> Sync from Jellyfin Server
+            </button>
+            <span id="syncStatusInitial" class="ms-2 small"></span>
+            <p class="text-muted small mt-3 mb-0">
+                <i class="fas fa-info-circle"></i> Jellyfin only keeps FFmpeg logs for <strong>3 days</strong> by default.
+                Data is synced automatically on app launch and stored locally so historical data is preserved.
+            </p>
+        </div>
+    </div>
+
+    <!-- Local Analysis Loading -->
+    <div id="analysisLoading" class="text-center py-4">
+        <div class="spinner-border text-primary" role="status"></div>
+        <p class="mt-2 text-muted">Analyzing media library...</p>
+    </div>
+
+    <!-- Local Analysis Summary -->
+    <div id="analysisSummary" style="display:none">
+        <div class="row mb-3">
+            <div class="col">
+                <span class="text-muted">Total files: <strong id="totalFileCount">0</strong></span>
+            </div>
+        </div>
+
+        <!-- Optimization Sections -->
+        <div id="optimizationSections"></div>
+
+        <!-- Codec Breakdown Cards -->
+        <div class="row mt-3">
+            <div class="col-md-4">
+                <div class="card">
+                    <div class="card-header"><i class="fas fa-box"></i> Containers</div>
+                    <div class="card-body p-0">
+                        <table class="table table-sm table-hover mb-0" id="containerTable">
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card">
+                    <div class="card-header"><i class="fas fa-film"></i> Video Codecs</div>
+                    <div class="card-body p-0">
+                        <table class="table table-sm table-hover mb-0" id="videoCodecTable">
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card">
+                    <div class="card-header"><i class="fas fa-volume-up"></i> Audio Codecs</div>
+                    <div class="card-body p-0">
+                        <table class="table table-sm table-hover mb-0" id="audioCodecTable">
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const API_BASE = '/api/Optimization';
+const IMPACT_COLORS = { HIGH: 'danger', MEDIUM: 'warning', LOW: 'info' };
+const SECTION_KEYS = { 'Legacy Format Files': 'legacy', 'Audio Incompatibility': 'audio', 'Subtitle Issues': 'subtitle' };
+const REASON_LABELS = {
+    legacy_codec: '<span class="badge bg-danger">Legacy Codec</span>',
+    hevc_incompatible: '<span class="badge bg-warning text-dark">HEVC Incompatible</span>',
+    container_incompatible: '<span class="badge bg-warning text-dark">MKV Container</span>',
+    subtitle_transcode: '<span class="badge bg-info">Subtitle Burn-in</span>',
+    video_transcode: '<span class="badge bg-warning text-dark">Video Transcode</span>',
+    audio_transcode: '<span class="badge bg-secondary">Audio Transcode</span>',
+    other: '<span class="badge bg-dark">Other</span>'
+};
+const MITIGATION_BADGES = {
+    mitigated: '<span class="badge bg-success">Mitigated</span>',
+    pending: '<span class="badge bg-secondary">Pending</span>',
+    not_found: '<span class="badge bg-warning text-dark">Not Found</span>',
+    ok: '<span class="badge bg-success">OK</span>',
+    unknown: '<span class="badge bg-light text-dark">?</span>'
+};
+
+let allProfiles = [];
+
+document.addEventListener('DOMContentLoaded', () => {
+    loadConnectionSettings();
+    loadProfiles();
+    loadLocalAnalysis();
+    loadJellyfinAnalysis();
+});
+
+async function loadProfiles() {
+    try {
+        const response = await fetch('/api/profiles');
+        const data = await response.json();
+        if (data.success) {
+            allProfiles = data.profiles;
+        }
+    } catch (e) {
+        console.error('Failed to load profiles', e);
+    }
+}
+
+// Sortable table columns
+function makeSortable(table) {
+    const headers = table.querySelectorAll('th');
+    headers.forEach((th, colIdx) => {
+        th.style.cursor = 'pointer';
+        th.style.userSelect = 'none';
+        th.addEventListener('click', () => sortTable(table, colIdx, th));
+    });
+}
+
+function sortTable(table, colIdx, th) {
+    const tbody = table.querySelector('tbody');
+    const rows = Array.from(tbody.querySelectorAll('tr'));
+    const headers = table.querySelectorAll('th');
+
+    // Determine current direction
+    const curDir = th.dataset.sortDir || '';
+    // Reset all headers
+    headers.forEach(h => { delete h.dataset.sortDir; h.querySelectorAll('.sort-arrow').forEach(a => a.remove()); });
+
+    const newDir = curDir === 'asc' ? 'desc' : 'asc';
+    th.dataset.sortDir = newDir;
+
+    // Add arrow indicator
+    const arrow = document.createElement('span');
+    arrow.className = 'sort-arrow ms-1';
+    arrow.textContent = newDir === 'asc' ? '\u25B2' : '\u25BC';
+    arrow.style.fontSize = '0.6em';
+    th.appendChild(arrow);
+
+    rows.sort((a, b) => {
+        const cellA = a.children[colIdx];
+        const cellB = b.children[colIdx];
+        if (!cellA || !cellB) return 0;
+
+        const sortA = cellA.dataset.sortValue;
+        const sortB = cellB.dataset.sortValue;
+
+        // Use data-sort-value if present (for dates, numbers)
+        if (sortA !== undefined && sortB !== undefined) {
+            const numA = parseFloat(sortA), numB = parseFloat(sortB);
+            if (!isNaN(numA) && !isNaN(numB)) {
+                return newDir === 'asc' ? numA - numB : numB - numA;
+            }
+            return newDir === 'asc' ? sortA.localeCompare(sortB) : sortB.localeCompare(sortA);
+        }
+
+        // Fall back to text content
+        const txtA = (cellA.textContent || '').trim();
+        const txtB = (cellB.textContent || '').trim();
+        const nA = parseFloat(txtA), nB = parseFloat(txtB);
+        if (!isNaN(nA) && !isNaN(nB)) {
+            return newDir === 'asc' ? nA - nB : nB - nA;
+        }
+        return newDir === 'asc' ? txtA.localeCompare(txtB) : txtB.localeCompare(txtA);
+    });
+
+    rows.forEach(r => tbody.appendChild(r));
+}
+
+// Connection Settings
+function loadConnectionSettings() {
+    fetch(`${API_BASE}/ConnectionSettings`)
+        .then(r => r.json())
+        .then(data => {
+            if (!data.Success) return;
+            const s = data.Settings;
+            document.getElementById('jellyfinHost').value = s.JellyfinHost || '';
+            document.getElementById('jellyfinSSHPort').value = s.JellyfinSSHPort || '22';
+            document.getElementById('jellyfinSSHUser').value = s.JellyfinSSHUser || 'root';
+            document.getElementById('jellyfinSSHKeyPath').value = s.JellyfinSSHKeyPath || '';
+            document.getElementById('jellyfinApiKey').value = s.JellyfinApiKey || '';
+            document.getElementById('jellyfinApiPort').value = s.JellyfinApiPort || '8096';
+        });
+}
+
+function saveConnectionSettings() {
+    const settings = {
+        JellyfinHost: document.getElementById('jellyfinHost').value,
+        JellyfinSSHPort: document.getElementById('jellyfinSSHPort').value,
+        JellyfinSSHUser: document.getElementById('jellyfinSSHUser').value,
+        JellyfinSSHKeyPath: document.getElementById('jellyfinSSHKeyPath').value,
+        JellyfinApiKey: document.getElementById('jellyfinApiKey').value,
+        JellyfinApiPort: document.getElementById('jellyfinApiPort').value
+    };
+    fetch(`${API_BASE}/ConnectionSettings`, {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(settings)
+    })
+    .then(r => r.json())
+    .then(data => {
+        const el = document.getElementById('connectionStatus');
+        el.innerHTML = data.Success
+            ? '<span class="text-success"><i class="fas fa-check"></i> Saved</span>'
+            : `<span class="text-danger">${data.ErrorMessage}</span>`;
+        setTimeout(() => el.innerHTML = '', 3000);
+    });
+}
+
+function testConnection() {
+    const el = document.getElementById('connectionStatus');
+    el.innerHTML = '<span class="text-info"><i class="fas fa-spinner fa-spin"></i> Testing...</span>';
+    fetch(`${API_BASE}/TestConnection`, { method: 'POST' })
+        .then(r => r.json())
+        .then(data => {
+            el.innerHTML = data.Success
+                ? `<span class="text-success"><i class="fas fa-check-circle"></i> ${data.Message}</span>`
+                : `<span class="text-danger"><i class="fas fa-times-circle"></i> ${data.ErrorMessage}</span>`;
+        })
+        .catch(() => el.innerHTML = '<span class="text-danger">Connection failed</span>');
+}
+
+// Local Analysis
+function loadLocalAnalysis() {
+    document.getElementById('analysisLoading').style.display = '';
+    document.getElementById('analysisSummary').style.display = 'none';
+
+    fetch(`${API_BASE}/LocalAnalysis`)
+        .then(r => r.json())
+        .then(data => {
+            document.getElementById('analysisLoading').style.display = 'none';
+            if (!data.Success) {
+                document.getElementById('analysisSummary').innerHTML = `<div class="alert alert-danger">${data.ErrorMessage}</div>`;
+                document.getElementById('analysisSummary').style.display = '';
+                return;
+            }
+            document.getElementById('analysisSummary').style.display = '';
+            document.getElementById('totalFileCount').textContent = data.TotalFiles.toLocaleString();
+            renderSections(data.Sections, data.TotalFiles);
+            renderBreakdownTable('containerTable', data.ContainerCounts, 'Format', data.TotalFiles);
+            renderBreakdownTable('videoCodecTable', data.VideoCodecCounts, 'Codec', data.TotalFiles);
+            renderBreakdownTable('audioCodecTable', data.AudioCodecCounts, 'Codec', data.TotalFiles);
+        })
+        .catch(err => {
+            document.getElementById('analysisLoading').style.display = 'none';
+            document.getElementById('analysisSummary').innerHTML = `<div class="alert alert-danger">Error loading analysis: ${err}</div>`;
+            document.getElementById('analysisSummary').style.display = '';
+        });
+}
+
+function renderSections(sections, totalFiles) {
+    const container = document.getElementById('optimizationSections');
+    container.innerHTML = '';
+    sections.forEach(section => {
+        const color = IMPACT_COLORS[section.Impact] || 'secondary';
+        const sectionKey = SECTION_KEYS[section.Title] || '';
+        const detailBtn = sectionKey
+            ? `<button class="btn btn-outline-${color} btn-sm" onclick="toggleDetails('${sectionKey}', this)">
+                 <i class="fas fa-list"></i> Show Files
+               </button>`
+            : '';
+
+        container.innerHTML += `
+            <div class="card mb-2 border-${color}">
+                <div class="card-body py-2">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <span class="badge bg-${color} me-2">${section.Impact}</span>
+                            <strong>${section.Title}</strong>
+                            <span class="text-muted ms-2">${section.Count.toLocaleString()} files (${section.Percentage}%)</span>
+                        </div>
+                        <div>${detailBtn}</div>
+                    </div>
+                    <div class="small text-muted mt-1">${section.Description}</div>
+                    <div class="small mt-1"><i class="fas fa-arrow-right"></i> ${section.Action}</div>
+                    <div id="details-${sectionKey}" class="mt-2" style="display:none"></div>
+                </div>
+            </div>`;
+    });
+}
+
+function toggleDetails(sectionKey, btn) {
+    const detailDiv = document.getElementById(`details-${sectionKey}`);
+    if (detailDiv.style.display !== 'none') {
+        detailDiv.style.display = 'none';
+        btn.innerHTML = '<i class="fas fa-list"></i> Show Files';
+        return;
+    }
+    detailDiv.innerHTML = '<div class="text-center"><i class="fas fa-spinner fa-spin"></i> Loading...</div>';
+    detailDiv.style.display = '';
+    btn.innerHTML = '<i class="fas fa-list"></i> Hide Files';
+
+    fetch(`${API_BASE}/LocalAnalysisDetails?section=${sectionKey}&limit=50`)
+        .then(r => r.json())
+        .then(data => {
+            if (!data.Success) {
+                detailDiv.innerHTML = `<div class="text-danger">${data.ErrorMessage}</div>`;
+                return;
+            }
+            if (data.Files.length === 0) {
+                detailDiv.innerHTML = '<div class="text-muted">No files found</div>';
+                return;
+            }
+            let html = '<table class="table table-sm table-striped"><thead><tr><th>File</th><th>Info</th><th>Resolution</th><th>Size</th><th style="width:200px">Profile</th><th style="width:80px">Queue</th></tr></thead><tbody>';
+            data.Files.forEach(f => {
+                const info = f.Codec || f.AudioCodec || f.SubtitleFormats || '';
+                const profileOptions = allProfiles.map(p => `<option value="${p.Id}">${p.ProfileName}</option>`).join('');
+                html += `<tr>
+                    <td class="text-truncate" style="max-width:350px" title="${f.FilePath}">${f.FileName}</td>
+                    <td><code>${info}</code></td>
+                    <td>${f.Resolution || '-'}</td>
+                    <td>${f.SizeMB ? (f.SizeMB / 1024).toFixed(1) + ' GB' : '-'}</td>
+                    <td><select class="form-select form-select-sm" id="optProfile_${f.Id}"><option value="">Select Profile...</option>${profileOptions}</select></td>
+                    <td><button class="btn btn-outline-primary btn-sm" onclick="addOptFileToQueue(${f.Id}, this)" title="Add to Queue"><i class="fas fa-plus"></i></button></td>
+                </tr>`;
+            });
+            html += '</tbody></table>';
+            detailDiv.innerHTML = html;
+        });
+}
+
+function renderBreakdownTable(tableId, items, keyField, total) {
+    const tbody = document.querySelector(`#${tableId} tbody`);
+    tbody.innerHTML = '';
+    (items || []).slice(0, 10).forEach(item => {
+        const name = item[keyField] || 'unknown';
+        const pct = total > 0 ? (item.Count / total * 100).toFixed(1) : 0;
+        tbody.innerHTML += `<tr><td>${name}</td><td class="text-end">${item.Count.toLocaleString()}</td>
+                            <td class="text-end text-muted" style="width:60px">${pct}%</td></tr>`;
+    });
+}
+
+// Jellyfin Analysis (reads from local DB)
+function loadJellyfinAnalysis() {
+    fetch(`${API_BASE}/JellyfinAnalysis`)
+        .then(r => r.json())
+        .then(data => {
+            if (!data.Success) {
+                // No data yet — show the import prompt
+                document.getElementById('serverOverviewCard').style.display = 'none';
+                document.getElementById('noJellyfinDataCard').style.display = '';
+                return;
+            }
+
+            document.getElementById('noJellyfinDataCard').style.display = 'none';
+            document.getElementById('serverOverviewCard').style.display = '';
+            document.getElementById('deviceAnalysisCard').style.display = '';
+
+            const opCounts = data.OperationCounts;
+            if (opCounts && opCounts.Success) {
+                const ds = opCounts.DirectStream || {};
+                const tc = opCounts.Transcode || {};
+                const rm = opCounts.Remux || {};
+                document.getElementById('directStreamCount').textContent = ds.Distinct || 0;
+                document.getElementById('directStreamTotal').textContent = `(${ds.Total || 0} total)`;
+                document.getElementById('transcodeCount').textContent = tc.Distinct || 0;
+                document.getElementById('transcodeTotal').textContent = `(${tc.Total || 0} total)`;
+                document.getElementById('remuxCount').textContent = rm.Distinct || 0;
+                document.getElementById('remuxTotal').textContent = `(${rm.Total || 0} total)`;
+
+                if (opCounts.OldestDate && opCounts.NewestDate) {
+                    document.getElementById('logDateRange').textContent =
+                        opCounts.OldestDate === opCounts.NewestDate
+                            ? `Logs from ${opCounts.OldestDate}`
+                            : `Logs from ${opCounts.OldestDate} to ${opCounts.NewestDate}`;
+                }
+            }
+
+            const serverInfo = data.ServerInfo;
+            if (serverInfo && serverInfo.Success) {
+                document.getElementById('serverInfoCol').innerHTML = `
+                    <p class="mb-1"><strong>${serverInfo.ServerName}</strong></p>
+                    <p class="mb-1 text-muted small">Version: ${serverInfo.Version}</p>
+                    <p class="mb-0 text-muted small">OS: ${serverInfo.OperatingSystem}</p>`;
+            }
+
+            const reasons = data.TranscodeReasons;
+            if (reasons && reasons.Success && Object.keys(reasons.Reasons).length > 0) {
+                document.getElementById('transcodeReasonsSection').style.display = '';
+                const list = document.getElementById('transcodeReasonsList');
+                list.innerHTML = '';
+                const labels = {
+                    legacy_codec: 'Legacy Codec', hevc_incompatible: 'HEVC Incompatible',
+                    container_incompatible: 'MKV Container', subtitle_transcode: 'Subtitle Burn-in',
+                    video_transcode: 'Video Transcode', audio_transcode: 'Audio Transcode', other: 'Other'
+                };
+                for (const [reason, count] of Object.entries(reasons.Reasons)) {
+                    if (count > 0) {
+                        list.innerHTML += `<span class="badge bg-secondary me-2">${labels[reason] || reason}: ${count}</span>`;
+                    }
+                }
+            }
+
+            // Destination format summary
+            const destFmts = data.DestinationFormats;
+            if (destFmts && destFmts.Success && destFmts.Formats && destFmts.Formats.length > 0) {
+                document.getElementById('destFormatsSection').style.display = '';
+                const destList = document.getElementById('destFormatsList');
+                const total = destFmts.TotalWithDestInfo || 1;
+                let html = '<table class="table table-sm table-striped mb-0"><thead><tr>';
+                html += '<th>Resolution</th><th>Profile</th><th>Level</th><th>Pixel Format</th><th>Container</th><th class="text-end">Count</th><th class="text-end">%</th></tr></thead><tbody>';
+                destFmts.Formats.forEach(f => {
+                    const pct = (f.Count / total * 100).toFixed(1);
+                    html += `<tr>
+                        <td>${f.DestResolution || '-'}</td>
+                        <td>${f.DestProfile || '-'}</td>
+                        <td>${f.DestLevel || '-'}</td>
+                        <td><code>${f.DestPixelFormat || '-'}</code></td>
+                        <td>${f.DestFormat || '-'}</td>
+                        <td class="text-end">${f.Count}</td>
+                        <td class="text-end text-muted">${pct}%</td>
+                    </tr>`;
+                });
+                html += '</tbody></table>';
+                destList.innerHTML = html;
+            }
+        })
+        .catch(() => {
+            // Show import prompt on error
+            document.getElementById('serverOverviewCard').style.display = 'none';
+            document.getElementById('noJellyfinDataCard').style.display = '';
+        });
+}
+
+// Sync Jellyfin Data (SSH import)
+function syncJellyfinData() {
+    const syncBtn = document.getElementById('syncBtn');
+    const statusEls = [document.getElementById('syncStatus'), document.getElementById('syncStatusInitial')];
+    const origHtml = syncBtn ? syncBtn.innerHTML : '';
+
+    if (syncBtn) syncBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Syncing...';
+    statusEls.forEach(el => { if (el) el.innerHTML = '<span class="text-info"><i class="fas fa-spinner fa-spin"></i> Importing logs...</span>'; });
+
+    fetch(`${API_BASE}/RefreshJellyfin`, { method: 'POST' })
+        .then(r => r.json())
+        .then(data => {
+            if (syncBtn) syncBtn.innerHTML = origHtml;
+            const msg = data.Success
+                ? `<span class="text-success"><i class="fas fa-check"></i> ${data.NewCount} new logs imported (${data.TotalInDB} total)</span>`
+                : `<span class="text-danger"><i class="fas fa-times"></i> ${data.ErrorMessage}</span>`;
+            statusEls.forEach(el => { if (el) el.innerHTML = msg; });
+            setTimeout(() => statusEls.forEach(el => { if (el) el.innerHTML = ''; }), 5000);
+
+            if (data.Success) {
+                loadJellyfinAnalysis();
+            }
+        })
+        .catch(err => {
+            if (syncBtn) syncBtn.innerHTML = origHtml;
+            statusEls.forEach(el => { if (el) el.innerHTML = `<span class="text-danger">Error: ${err}</span>`; });
+        });
+}
+
+// Operation Details (clickable cards)
+let currentOpType = null;
+
+function renderFileTable(files, opType, isArchived) {
+    if (files.length === 0) return '<div class="text-muted text-center py-2">No files</div>';
+
+    const showMitigation = opType !== 'DirectStream';
+    let html = '<table class="table table-sm table-striped mb-0" style="table-layout:fixed"><thead><tr>';
+    html += '<th style="width:28%">File</th><th style="width:7%">Video</th><th style="width:7%">Audio</th><th style="width:7%">Container</th>';
+    if (opType === 'Transcode') html += '<th style="width:9%">Reason</th><th style="width:13%">Actions</th>';
+    if (isArchived) {
+        html += '<th style="width:10%">Was</th>';
+    } else if (showMitigation) {
+        html += '<th style="width:10%">Status</th>';
+    }
+    html += '<th style="width:12%">Last Seen</th>';
+    html += '<th class="text-end" style="width:5%">Plays</th></tr></thead><tbody>';
+
+    files.forEach(f => {
+        const idx = f._origIdx;
+        const m = f.Mitigation || {};
+        const rowId = `op-row-${idx}`;
+        const safeFileName = (f.FileName || '').replace(/'/g, "\\'");
+        const safeFilePath = (f.FilePath || '').replace(/'/g, "\\'");
+        const safeReason = (f.Reason || '').replace(/'/g, "\\'");
+
+        const curCodec = m.CurrentCodec || f.VideoCodec || '-';
+        const curAudio = m.CurrentAudioCodec || f.AudioCodec || '-';
+        const curContainer = m.CurrentContainer || f.Container || '-';
+
+        const codecTitle = (m.CurrentCodec && m.CurrentCodec !== f.VideoCodec) ? ` title="Was: ${f.VideoCodec}"` : '';
+        const audioTitle = (m.CurrentAudioCodec && m.CurrentAudioCodec !== f.AudioCodec) ? ` title="Was: ${f.AudioCodec}"` : '';
+        const containerTitle = (m.CurrentContainer && m.CurrentContainer !== f.Container) ? ` title="Was: ${f.Container}"` : '';
+
+        const diskName = m.CurrentFileName || '';
+        const displayName = diskName && diskName !== f.FileName ? diskName : f.FileName;
+        const nameTooltip = diskName && diskName !== f.FileName ? ` title="Jellyfin: ${f.FileName}"` : (f.FilePath ? ` title="${f.FilePath}"` : '');
+
+        html += `<tr id="${rowId}">`;
+        html += `<td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap"${nameTooltip}>${displayName}</td>`;
+        html += `<td${codecTitle}><code>${curCodec}</code></td>`;
+        html += `<td${audioTitle}><code>${curAudio}</code></td>`;
+        html += `<td${containerTitle}>${curContainer}</td>`;
+        if (opType === 'Transcode') {
+            const reasonLabel = REASON_LABELS[f.Reason] || f.Reason || '-';
+            html += `<td>${reasonLabel}</td>`;
+            html += `<td><small><code>${f.TranscodeActions || '-'}</code></small></td>`;
+        }
+        if (isArchived) {
+            // Show what it was before (original Jellyfin log values) for troubleshooting
+            const origCodec = f.VideoCodec || '-';
+            const origAudio = f.AudioCodec || '-';
+            const origContainer = f.Container || '-';
+            html += `<td><small class="text-muted">${origCodec} / ${origAudio} / ${origContainer}</small></td>`;
+        } else if (showMitigation) {
+            html += `<td id="status-${idx}">`;
+            html += MITIGATION_BADGES[m.Status] || MITIGATION_BADGES.unknown;
+            html += ` <button class="btn btn-outline-primary btn-sm py-0 px-1" onclick="recheckFile('${safeFileName}', '${safeFilePath}', '${opType}', '${safeReason}', ${idx})" title="Re-analyze with ffprobe">`;
+            html += '<i class="fas fa-redo-alt" style="font-size:0.7em"></i></button>';
+            if (f.Reason === 'subtitle_transcode' && m.Status === 'pending' && m.MediaFileId) {
+                html += ` <button class="btn btn-outline-warning btn-sm py-0 px-1" onclick="queueSubtitleFix([${m.MediaFileId}], this)" title="Fix subtitle burn-in">`;
+                html += '<i class="fas fa-closed-captioning" style="font-size:0.7em"></i></button>';
+            }
+            html += '</td>';
+        }
+        const dtVal = f.LastSeen ? new Date(f.LastSeen).getTime() : 0;
+        const dtStr = f.LastSeen ? new Date(f.LastSeen).toLocaleString('en-US', {month:'2-digit', day:'2-digit', year:'numeric', hour:'numeric', minute:'2-digit', hour12:true}) : '-';
+        html += `<td data-sort-value="${dtVal}"><small>${dtStr}</small></td>`;
+        html += `<td class="text-end" data-sort-value="${f.Count}">${f.Count}</td>`;
+        html += '</tr>';
+    });
+
+    html += '</tbody></table>';
+    return html;
+}
+
+function toggleOperationDetails(opType) {
+    const detailDiv = document.getElementById('operationDetails');
+    if (currentOpType === opType && detailDiv.style.display !== 'none') {
+        detailDiv.style.display = 'none';
+        currentOpType = null;
+        return;
+    }
+    currentOpType = opType;
+    detailDiv.style.display = '';
+    detailDiv.innerHTML = '<div class="text-center py-3"><i class="fas fa-spinner fa-spin"></i> Loading details...</div>';
+
+    fetch(`${API_BASE}/OperationDetails?type=${opType}&limit=100`)
+        .then(r => r.json())
+        .then(data => {
+            if (!data.Success) {
+                detailDiv.innerHTML = `<div class="alert alert-danger">${data.ErrorMessage}</div>`;
+                return;
+            }
+            if (data.Files.length === 0) {
+                detailDiv.innerHTML = '<div class="text-muted">No log files found</div>';
+                return;
+            }
+
+            // Separate files into active (pending/not_found/unknown) vs archived (mitigated/ok)
+            const activeFiles = [];
+            const archivedFiles = [];
+            data.Files.forEach((f, idx) => {
+                f._origIdx = idx;  // preserve original index for status cell IDs
+                const status = (f.Mitigation || {}).Status || 'unknown';
+                if (status === 'mitigated' || status === 'ok') {
+                    archivedFiles.push(f);
+                } else {
+                    activeFiles.push(f);
+                }
+            });
+
+            // Summary header
+            let html = `<div class="d-flex justify-content-between align-items-center mb-2">
+                <h6 class="mb-0">${opType} Details — ${data.Count} unique files (${data.TotalLogs} total logs)</h6>
+                <button class="btn btn-sm btn-outline-secondary" onclick="document.getElementById('operationDetails').style.display='none'; currentOpType=null;">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>`;
+
+            // Reason summary for Transcode
+            if (opType === 'Transcode' && data.Reasons && Object.keys(data.Reasons).length > 0) {
+                html += '<div class="mb-2">';
+                for (const [reason, count] of Object.entries(data.Reasons)) {
+                    if (count > 0) {
+                        html += `${REASON_LABELS[reason] || `<span class="badge bg-dark">${reason}</span>`} <small class="me-3">${count}</small>`;
+                    }
+                }
+                if (data.Reasons.subtitle_transcode > 0) {
+                    html += ` <button class="btn btn-outline-warning btn-sm ms-2" onclick="queueSubtitleFixAll()" title="Queue all subtitle burn-in files for fix"><i class="fas fa-closed-captioning"></i> Fix All Subtitle Burn-in</button>`;
+                }
+                html += '</div>';
+            }
+
+            // Tabs: Active Issues | Archived/Fixed
+            const activeId = `opTab-active-${opType}`;
+            const archivedId = `opTab-archived-${opType}`;
+            html += `<ul class="nav nav-tabs nav-tabs-sm mb-0" role="tablist">
+                <li class="nav-item"><a class="nav-link active" data-bs-toggle="tab" href="#${activeId}" role="tab">
+                    <i class="fas fa-exclamation-circle"></i> Active Issues <span class="badge bg-danger">${activeFiles.length}</span></a></li>
+                <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#${archivedId}" role="tab">
+                    <i class="fas fa-check-circle"></i> Archived / Fixed <span class="badge bg-success">${archivedFiles.length}</span></a></li>
+            </ul>`;
+            html += '<div class="tab-content border border-top-0 rounded-bottom p-2">';
+
+            // Active tab
+            html += `<div class="tab-pane fade show active" id="${activeId}" role="tabpanel">`;
+            html += renderFileTable(activeFiles, opType, false);
+            html += '</div>';
+
+            // Archived tab
+            html += `<div class="tab-pane fade" id="${archivedId}" role="tabpanel">`;
+            if (archivedFiles.length === 0) {
+                html += '<div class="text-muted text-center py-3">No resolved files yet</div>';
+            } else {
+                html += renderFileTable(archivedFiles, opType, true);
+            }
+            html += '</div>';
+
+            html += '</div>'; // tab-content
+            detailDiv.innerHTML = html;
+            detailDiv.querySelectorAll('table').forEach(tbl => {
+                makeSortable(tbl);
+                // Auto-sort by Plays (last column) descending
+                const headers = tbl.querySelectorAll('th');
+                const playsHeader = headers[headers.length - 1];
+                if (playsHeader && playsHeader.textContent.trim() === 'Plays') {
+                    playsHeader.dataset.sortDir = 'asc';  // pre-set so toggle lands on desc
+                    sortTable(tbl, headers.length - 1, playsHeader);
+                }
+            });
+        })
+        .catch(err => {
+            detailDiv.innerHTML = `<div class="alert alert-danger">Error: ${err}</div>`;
+        });
+}
+
+// Recheck individual file
+function recheckFile(fileName, filePath, opType, reason, rowIdx) {
+    const statusCell = document.getElementById(`status-${rowIdx}`);
+    if (!statusCell) return;
+    statusCell.innerHTML = '<i class="fas fa-spinner fa-spin text-primary"></i>';
+
+    fetch(`${API_BASE}/RecheckFile`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ FileName: fileName, FilePath: filePath, OperationType: opType, Reason: reason })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (!data.Success) {
+            statusCell.innerHTML = `<span class="text-danger" title="${data.ErrorMessage}"><i class="fas fa-exclamation-triangle"></i></span>`;
+            return;
+        }
+        const m = data.Mitigation || {};
+        let badge = MITIGATION_BADGES[m.Status] || MITIGATION_BADGES.unknown;
+
+        // Update the row's video/audio/container cells with current values
+        const cur = data.Mitigation || data;
+        const row = document.getElementById(`op-row-${rowIdx}`);
+        if (row) {
+            const cells = row.querySelectorAll('td');
+            const codec = cur.CurrentCodec || data.CurrentCodec;
+            const audio = cur.CurrentAudioCodec || data.CurrentAudioCodec;
+            const container = cur.CurrentContainer || data.CurrentContainer;
+            if (codec) cells[1].innerHTML = `<code>${codec}</code>`;
+            if (audio) cells[2].innerHTML = `<code>${audio}</code>`;
+            if (container) cells[3].textContent = container;
+        }
+
+        const safeFileName = fileName.replace(/'/g, "\\'");
+        const safeFilePath = filePath.replace(/'/g, "\\'");
+        const safeReason = reason.replace(/'/g, "\\'");
+        statusCell.innerHTML = badge +
+            ` <button class="btn btn-outline-primary btn-sm py-0 px-1" onclick="recheckFile('${safeFileName}', '${safeFilePath}', '${opType}', '${safeReason}', ${rowIdx})" title="Re-analyze with ffprobe">` +
+            '<i class="fas fa-redo-alt" style="font-size:0.7em"></i></button>';
+    })
+    .catch(err => {
+        statusCell.innerHTML = `<span class="text-danger" title="${err}"><i class="fas fa-exclamation-triangle"></i></span>`;
+    });
+}
+
+// Actions
+function refreshAll() {
+    loadLocalAnalysis();
+    loadJellyfinAnalysis();
+    document.getElementById('operationDetails').style.display = 'none';
+    currentOpType = null;
+}
+
+function queueSubtitleFix(fileIds, btn) {
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin" style="font-size:0.7em"></i>';
+    }
+    fetch(`${API_BASE}/QueueSubtitleFix`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ FileIds: fileIds })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.Success) {
+            if (btn) {
+                btn.innerHTML = '<i class="fas fa-check" style="font-size:0.7em"></i>';
+                btn.classList.replace('btn-outline-warning', 'btn-outline-success');
+            }
+            alert(data.Message);
+        } else {
+            if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-closed-captioning" style="font-size:0.7em"></i>'; }
+            alert('Error: ' + (data.ErrorMessage || 'Unknown error'));
+        }
+    })
+    .catch(err => {
+        if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-closed-captioning" style="font-size:0.7em"></i>'; }
+        alert('Error: ' + err);
+    });
+}
+
+function queueSubtitleFixAll() {
+    if (!confirm('Queue ALL files with subtitle burn-in for automatic fix?')) return;
+    queueSubtitleFix(null, event.target.closest('button'));
+}
+
+async function addOptFileToQueue(fileId, btn, forceAdd = false) {
+    const profileSelect = document.getElementById(`optProfile_${fileId}`);
+    const profileId = profileSelect ? parseInt(profileSelect.value) : null;
+    if (!profileId) {
+        alert('Please select a profile first.');
+        return;
+    }
+
+    const origHtml = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+
+    try {
+        const body = { MediaFileId: fileId, ProfileId: profileId };
+        if (forceAdd) body.ForceAdd = true;
+
+        const response = await fetch('/api/TranscodeQueue/AddJob', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        });
+        const data = await response.json();
+
+        if (data.Success) {
+            btn.innerHTML = '<i class="fas fa-check"></i>';
+            btn.classList.replace('btn-outline-primary', 'btn-outline-success');
+        } else if (data.CanOverride) {
+            btn.disabled = false;
+            btn.innerHTML = origHtml;
+            if (confirm(`${data.ErrorMessage}\n\nWould you like to override this check and add the file anyway?`)) {
+                await addOptFileToQueue(fileId, btn, true);
+            }
+        } else {
+            btn.disabled = false;
+            btn.innerHTML = origHtml;
+            alert('Error: ' + data.ErrorMessage);
+        }
+    } catch (err) {
+        btn.disabled = false;
+        btn.innerHTML = origHtml;
+        alert('Error: ' + err.message);
+    }
+}
+
+// Device Analysis
+async function loadDeviceAnalysis() {
+    const btn = document.getElementById('deviceAnalysisBtn');
+    const body = document.getElementById('deviceAnalysisBody');
+    const origHtml = btn.innerHTML;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Analyzing...';
+    btn.disabled = true;
+
+    try {
+        const response = await fetch(`${API_BASE}/DeviceAnalysis`);
+        const data = await response.json();
+
+        if (!data.Success) {
+            body.innerHTML = `<div class="alert alert-danger">${data.ErrorMessage}</div>`;
+            btn.innerHTML = origHtml;
+            btn.disabled = false;
+            return;
+        }
+
+        let html = '';
+
+        // Registered Devices
+        const devices = data.Devices || [];
+        if (devices.length > 0) {
+            html += '<h6><i class="fas fa-mobile-alt"></i> Registered Devices</h6>';
+            html += '<table class="table table-sm table-striped mb-3"><thead><tr>';
+            html += '<th>Device</th><th>App</th><th>Version</th><th>User</th><th>Last Active</th>';
+            html += '</tr></thead><tbody>';
+            devices.forEach(d => {
+                const lastActive = d.DateLastActivity
+                    ? new Date(d.DateLastActivity).toLocaleString('en-US', {month:'2-digit', day:'2-digit', year:'numeric', hour:'numeric', minute:'2-digit', hour12:true})
+                    : '-';
+                html += `<tr>
+                    <td><strong>${d.Name || '-'}</strong></td>
+                    <td>${d.AppName || '-'}</td>
+                    <td><small>${d.AppVersion || '-'}</small></td>
+                    <td>${d.LastUserName || '-'}</td>
+                    <td><small>${lastActive}</small></td>
+                </tr>`;
+            });
+            html += '</tbody></table>';
+        } else if (data.DevicesError) {
+            html += `<div class="alert alert-warning"><i class="fas fa-exclamation-triangle"></i> Devices API: ${data.DevicesError}</div>`;
+        }
+
+        // Playback Activities from DB
+        const activities = data.PlaybackActivities || [];
+        if (activities.length > 0) {
+            html += '<h6><i class="fas fa-history"></i> Playback Activity (from Jellyfin DB)</h6>';
+            html += '<table class="table table-sm table-striped mb-3"><thead><tr>';
+            html += '<th>Activity</th><th>Details</th><th>Type</th><th class="text-end">Count</th>';
+            html += '</tr></thead><tbody>';
+            activities.slice(0, 30).forEach(a => {
+                html += `<tr>
+                    <td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${a.Name || ''}">${a.Name || '-'}</td>
+                    <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${a.ShortOverview || ''}">${a.ShortOverview || '-'}</td>
+                    <td><code>${a.Type || '-'}</code></td>
+                    <td class="text-end">${a.Count || 0}</td>
+                </tr>`;
+            });
+            html += '</tbody></table>';
+        } else if (data.PlaybackError) {
+            html += `<div class="alert alert-info"><i class="fas fa-info-circle"></i> DB query: ${data.PlaybackError}</div>`;
+        }
+
+        // Device tables found
+        const deviceTables = data.DeviceTables || [];
+        if (deviceTables.length > 0) {
+            html += `<div class="small text-muted mb-2">Device-related tables found in Jellyfin DB: <code>${deviceTables.join(', ')}</code></div>`;
+        }
+
+        // Device records from DB
+        const deviceRecords = data.DeviceRecords || [];
+        if (deviceRecords.length > 0) {
+            html += '<h6><i class="fas fa-database"></i> Device Records (from Jellyfin DB)</h6>';
+            const cols = Object.keys(deviceRecords[0]);
+            html += '<table class="table table-sm table-striped mb-3"><thead><tr>';
+            cols.forEach(c => { html += `<th>${c}</th>`; });
+            html += '</tr></thead><tbody>';
+            deviceRecords.forEach(r => {
+                html += '<tr>';
+                cols.forEach(c => {
+                    const val = r[c] || '-';
+                    const display = String(val).length > 50 ? String(val).substring(0, 50) + '...' : val;
+                    html += `<td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${val}">${display}</td>`;
+                });
+                html += '</tr>';
+            });
+            html += '</tbody></table>';
+        }
+
+        // Log JSON fields (discovery)
+        const fields = data.LogJsonFields || {};
+        const fieldKeys = Object.keys(fields);
+        if (fieldKeys.length > 0) {
+            html += '<h6><i class="fas fa-file-code"></i> FFmpeg Log JSON Fields';
+            if (data.SampleLogFile) html += ` <small class="text-muted">(from ${data.SampleLogFile})</small>`;
+            html += '</h6>';
+            html += '<div class="small" style="max-height:200px;overflow-y:auto"><table class="table table-sm mb-0"><tbody>';
+            fieldKeys.forEach(k => {
+                const val = fields[k];
+                const display = typeof val === 'string' && val.length > 80 ? val.substring(0, 80) + '...' : val;
+                html += `<tr><td><code>${k}</code></td><td>${display}</td></tr>`;
+            });
+            html += '</tbody></table></div>';
+        } else if (data.LogJsonError) {
+            html += `<div class="alert alert-info small"><i class="fas fa-info-circle"></i> Log inspection: ${data.LogJsonError}</div>`;
+        }
+
+        if (!html) {
+            html = '<div class="text-muted">No device data available. Ensure Jellyfin API key is configured.</div>';
+        }
+
+        body.innerHTML = html;
+        btn.innerHTML = '<i class="fas fa-check"></i> Done';
+        btn.disabled = false;
+    } catch (err) {
+        body.innerHTML = `<div class="alert alert-danger">Error: ${err}</div>`;
+        btn.innerHTML = origHtml;
+        btn.disabled = false;
+    }
+}
+
+function copyAllAnalysis() {
+    fetch(`${API_BASE}/CopyAnalysis`)
+        .then(r => r.json())
+        .then(data => {
+            if (data.Success) {
+                navigator.clipboard.writeText(data.Text).then(() => {
+                    const btn = event.target.closest('button');
+                    const orig = btn.innerHTML;
+                    btn.innerHTML = '<i class="fas fa-check"></i> Copied!';
+                    setTimeout(() => btn.innerHTML = orig, 2000);
+                });
+            }
+        });
+}
+</script>
+{% endblock %}

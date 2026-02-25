@@ -331,11 +331,47 @@ class TranscodeServiceApp:
             LoggingService.LogException("Error during shutdown", e, "TranscodeService", "Shutdown")
 
 def SignalHandler(signum, frame):
-    """Handle shutdown signals gracefully."""
-    LoggingService.LogInfo(f"Received signal {signum}, shutting down gracefully...", "TranscodeService", "SignalHandler")
+    """Handle shutdown signals immediately - kill FFmpeg, cleanup DB, exit."""
+    print("\nTranscodeService shutting down...")
+
     if hasattr(Main, 'app') and Main.app:
-        Main.app.Shutdown()
-    sys.exit(0)
+        app = Main.app
+
+        # Kill all active FFmpeg processes immediately
+        try:
+            activeJobIds = app.ProcessTranscodeQueue.VideoTranscoding.GetActiveJobs()
+            for jobId in activeJobIds:
+                try:
+                    proc = app.ProcessTranscodeQueue.VideoTranscoding.ActiveProcesses.get(jobId)
+                    if proc:
+                        proc.kill()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        # Database cleanup: reset running queue items and clear active jobs
+        try:
+            db = app.DatabaseManager
+            db.DatabaseService.ExecuteNonQuery(
+                "UPDATE TranscodeQueue SET Status = 'Pending', ErrorMessage = 'Service interrupted' WHERE Status IN ('Running', 'Processing')"
+            )
+            db.DatabaseService.ExecuteNonQuery(
+                "DELETE FROM ActiveJobs WHERE ServiceName = 'TranscodeService'"
+            )
+            db.DatabaseService.ExecuteNonQuery(
+                "DELETE FROM TranscodeProgress"
+            )
+            db.UpdateServiceStatus("TranscodeService", {
+                'Status': 'Stopped',
+                'ProcessId': 0,
+                'IsProcessing': False,
+                'ActiveJobsCount': 0
+            })
+        except Exception:
+            pass
+
+    os._exit(0)
 
 def Main():
     """Main entry point for TranscodeService."""

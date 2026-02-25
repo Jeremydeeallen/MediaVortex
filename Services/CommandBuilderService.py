@@ -29,7 +29,20 @@ class CommandBuilderService:
             # Calculate target resolution and scaling
             TargetResolution = self.CalculateTargetResolution(ProfileSettings, SourceResolution)
             ScaleFilter = self.CalculateScaleFilter(SourceResolution, TargetResolution, MediaFile)
-            
+
+            # Determine preferred audio stream via FFprobe analysis
+            AudioStreamIndex = 0
+            try:
+                from Services.FFmpegAnalysisService import FFmpegAnalysisService
+                AnalysisService = FFmpegAnalysisService()
+                SourcePath = f"c:\\MediaVortex\\Source\\{MediaFile.FileName}"
+                Analysis = AnalysisService.AnalyzeMediaFile(SourcePath)
+                if Analysis and Analysis.AudioStreamIndex is not None:
+                    AudioStreamIndex = Analysis.AudioStreamIndex
+                    LoggingService.LogInfo(f"Selected audio stream index {AudioStreamIndex} for transcode", "CommandBuilderService", "BuildCommand")
+            except Exception as e:
+                LoggingService.LogException("Error determining audio stream index, defaulting to 0", e, "CommandBuilderService", "BuildCommand")
+
             # Prepare command data
             CommandData = {
                 'Job': Job,
@@ -40,7 +53,8 @@ class CommandBuilderService:
                 'SourceResolution': SourceResolution,
                 'TargetResolution': TargetResolution,
                 'ScaleFilter': ScaleFilter,
-                'StartTime': TranscodingSettings.get('StartTime')
+                'StartTime': TranscodingSettings.get('StartTime'),
+                'AudioStreamIndex': AudioStreamIndex
             }
             
             # Build the command using the pure model
@@ -187,3 +201,71 @@ class CommandBuilderService:
         except Exception as e:
             LoggingService.LogException("Exception calculating width from height", e, "CommandBuilderService", "_CalculateWidthFromHeight")
             return 1280  # Default fallback to 720p width
+
+    def BuildSubtitleFixCommand(self, Job: TranscodeQueueModel, MediaFile: MediaFileModel) -> Optional[Dict[str, str]]:
+        """Build subtitle fix command: copy video+audio, convert ASS/SSA subtitle to mov_text, output MP4."""
+        try:
+            LoggingService.LogFunctionEntry("BuildSubtitleFixCommand", "CommandBuilderService", Job.Id)
+
+            # Detect source codecs and preferred streams via FFprobe
+            from Services.FFmpegAnalysisService import FFmpegAnalysisService
+            AnalysisService = FFmpegAnalysisService()
+            SourcePath = f"c:\\MediaVortex\\Source\\{MediaFile.FileName}"
+            Analysis = AnalysisService.AnalyzeMediaFile(SourcePath)
+
+            AudioCodec = Analysis.AudioCodec if Analysis and Analysis.AudioCodec else ''
+            AudioStreamIndex = Analysis.AudioStreamIndex if Analysis and Analysis.AudioStreamIndex is not None else 0
+            SubtitleStreamIndex = Analysis.SubtitleStreamIndex if Analysis and Analysis.SubtitleStreamIndex is not None else 0
+
+            LoggingService.LogInfo(
+                f"Subtitle fix: audio={AudioCodec} (stream {AudioStreamIndex}), subtitle stream {SubtitleStreamIndex} ({Analysis.SubtitleCodec if Analysis else '?'})",
+                "CommandBuilderService", "BuildSubtitleFixCommand"
+            )
+
+            CommandData = {
+                'Job': Job,
+                'MediaFile': MediaFile,
+                'AudioCodec': AudioCodec,
+                'AudioStreamIndex': AudioStreamIndex,
+                'SubtitleStreamIndex': SubtitleStreamIndex
+            }
+
+            CommandResult = self.CommandBuilder.BuildSubtitleFixCommand(CommandData)
+            if CommandResult:
+                LoggingService.LogInfo(f"Built subtitle fix command for job {Job.Id}", "CommandBuilderService", "BuildSubtitleFixCommand")
+            return CommandResult
+
+        except Exception as e:
+            LoggingService.LogException("Exception building subtitle fix command", e, "CommandBuilderService", "BuildSubtitleFixCommand")
+            return None
+
+    def BuildRemuxCommand(self, Job: TranscodeQueueModel, MediaFile: MediaFileModel) -> Optional[Dict[str, str]]:
+        """Build remux command: copy video, conditionally copy/re-encode audio, output MP4."""
+        try:
+            LoggingService.LogFunctionEntry("BuildRemuxCommand", "CommandBuilderService", Job.Id)
+
+            # Detect source audio codec via FFprobe
+            from Services.FFmpegAnalysisService import FFmpegAnalysisService
+            AnalysisService = FFmpegAnalysisService()
+            SourcePath = f"c:\\MediaVortex\\Source\\{MediaFile.FileName}"
+            Analysis = AnalysisService.AnalyzeMediaFile(SourcePath)
+            AudioCodec = Analysis.AudioCodec if Analysis and Analysis.AudioCodec else ''
+            AudioStreamIndex = Analysis.AudioStreamIndex if Analysis and Analysis.AudioStreamIndex is not None else 0
+
+            LoggingService.LogInfo(f"Source audio codec for remux: {AudioCodec}, selected audio stream index: {AudioStreamIndex}", "CommandBuilderService", "BuildRemuxCommand")
+
+            CommandData = {
+                'Job': Job,
+                'MediaFile': MediaFile,
+                'AudioCodec': AudioCodec,
+                'AudioStreamIndex': AudioStreamIndex
+            }
+
+            CommandResult = self.CommandBuilder.BuildRemuxCommand(CommandData)
+            if CommandResult:
+                LoggingService.LogInfo(f"Built remux command for job {Job.Id}", "CommandBuilderService", "BuildRemuxCommand")
+            return CommandResult
+
+        except Exception as e:
+            LoggingService.LogException("Exception building remux command", e, "CommandBuilderService", "BuildRemuxCommand")
+            return None

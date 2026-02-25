@@ -20,7 +20,68 @@ class DatabaseManager:
     
     def __init__(self, DatabaseServiceInstance: DatabaseService = None):
         self.DatabaseService = DatabaseServiceInstance or DatabaseService()
-    
+
+    def RunMigrations(self):
+        """Run database schema migrations. Safe to call multiple times."""
+        try:
+            connection = self.DatabaseService.GetConnection()
+            try:
+                cursor = connection.cursor()
+                # Check if ProcessingMode column exists in TranscodeQueue
+                cursor.execute("PRAGMA table_info(TranscodeQueue)")
+                columns = [col[1] for col in cursor.fetchall()]
+                if 'ProcessingMode' not in columns:
+                    cursor.execute("ALTER TABLE TranscodeQueue ADD COLUMN ProcessingMode TEXT DEFAULT 'Transcode'")
+                    connection.commit()
+                    LoggingService.LogInfo("Added ProcessingMode column to TranscodeQueue", "DatabaseManager", "RunMigrations")
+
+                # Add AudioCodec and SubtitleFormats columns to MediaFiles
+                cursor.execute("PRAGMA table_info(MediaFiles)")
+                mediaColumns = [col[1] for col in cursor.fetchall()]
+                if 'AudioCodec' not in mediaColumns:
+                    cursor.execute("ALTER TABLE MediaFiles ADD COLUMN AudioCodec TEXT")
+                    connection.commit()
+                    LoggingService.LogInfo("Added AudioCodec column to MediaFiles", "DatabaseManager", "RunMigrations")
+                if 'SubtitleFormats' not in mediaColumns:
+                    cursor.execute("ALTER TABLE MediaFiles ADD COLUMN SubtitleFormats TEXT")
+                    connection.commit()
+                    LoggingService.LogInfo("Added SubtitleFormats column to MediaFiles", "DatabaseManager", "RunMigrations")
+
+                # Create JellyfinOperations table for persisting FFmpeg log data
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS JellyfinOperations (
+                        LogFileName TEXT PRIMARY KEY,
+                        OperationType TEXT NOT NULL,
+                        FilePath TEXT,
+                        FileName TEXT,
+                        VideoCodec TEXT,
+                        AudioCodec TEXT,
+                        Container TEXT,
+                        Resolution TEXT,
+                        SubtitleCodecs TEXT,
+                        Reason TEXT,
+                        TranscodeActions TEXT,
+                        LogDate TEXT,
+                        ImportedAt DATETIME DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+
+                # Migration: add columns and clear stale data when schema changes
+                for col in ['SubtitleCodecs', 'TranscodeActions',
+                            'DestResolution', 'DestProfile', 'DestLevel', 'DestPixelFormat', 'DestFormat']:
+                    try:
+                        cursor.execute(f"ALTER TABLE JellyfinOperations ADD COLUMN {col} TEXT")
+                        # New column added — clear stale records for re-import with correct classification
+                        cursor.execute("DELETE FROM JellyfinOperations")
+                    except Exception:
+                        pass  # Column already exists
+
+                connection.commit()
+            finally:
+                connection.close()
+        except Exception as e:
+            LoggingService.LogWarning(f"Migration warning: {e}", "DatabaseManager", "RunMigrations")
+
     # Profile Management Methods
     def GetAllProfiles(self) -> List[TranscodeProfileModel]:
         """Get all transcoding profiles."""
@@ -385,8 +446,8 @@ class DatabaseManager:
                    CompressionPotential, AssignedProfile, IsInterlaced, ResolutionCategory,
                    FileModificationTime, TotalFrames, CodecProfile, ColorRange, FieldOrder,
                    HasBFrames, RefFrames, PixelFormat, Level, AudioChannels, AudioSampleRate,
-                   AudioSampleFormat, AudioChannelLayout, ContainerFormat, OverallBitrate,
-                   TranscodedByMediaVortex
+                   AudioSampleFormat, AudioChannelLayout, AudioCodec, SubtitleFormats,
+                   ContainerFormat, OverallBitrate, TranscodedByMediaVortex
             FROM MediaFiles
         """
         rows = self.DatabaseService.ExecuteQuery(query)
@@ -423,6 +484,8 @@ class DatabaseManager:
                 AudioSampleRate=row['AudioSampleRate'],
                 AudioSampleFormat=row['AudioSampleFormat'],
                 AudioChannelLayout=row['AudioChannelLayout'],
+                AudioCodec=row['AudioCodec'],
+                SubtitleFormats=row['SubtitleFormats'],
                 ContainerFormat=row['ContainerFormat'],
                 OverallBitrate=row['OverallBitrate'],
                 TranscodedByMediaVortex=row['TranscodedByMediaVortex']
@@ -439,8 +502,8 @@ class DatabaseManager:
                    CompressionPotential, AssignedProfile, IsInterlaced, ResolutionCategory,
                    FileModificationTime, TotalFrames, CodecProfile, ColorRange, FieldOrder,
                    HasBFrames, RefFrames, PixelFormat, Level, AudioChannels, AudioSampleRate,
-                   AudioSampleFormat, AudioChannelLayout, ContainerFormat, OverallBitrate,
-                   TranscodedByMediaVortex
+                   AudioSampleFormat, AudioChannelLayout, AudioCodec, SubtitleFormats,
+                   ContainerFormat, OverallBitrate, TranscodedByMediaVortex
             FROM MediaFiles 
             WHERE Id = ?
         """
@@ -480,6 +543,8 @@ class DatabaseManager:
             AudioSampleRate=row['AudioSampleRate'],
             AudioSampleFormat=row['AudioSampleFormat'],
             AudioChannelLayout=row['AudioChannelLayout'],
+            AudioCodec=row['AudioCodec'],
+            SubtitleFormats=row['SubtitleFormats'],
             ContainerFormat=row['ContainerFormat'],
             OverallBitrate=row['OverallBitrate'],
             TranscodedByMediaVortex=row['TranscodedByMediaVortex']
@@ -498,17 +563,56 @@ class DatabaseManager:
                 cursor = connection.cursor()
                 
                 if MediaFile.Id is None:
+                    # Safety check: verify no existing record with same path before inserting
+                    # This prevents duplicates from race conditions in parallel processing
+                    checkQuery = "SELECT Id FROM MediaFiles WHERE LOWER(FilePath) = LOWER(?)"
+                    cursor.execute(checkQuery, (MediaFile.FilePath,))
+                    existingRow = cursor.fetchone()
+
+                    if existingRow:
+                        # Record already exists - convert to update instead of creating a duplicate
+                        MediaFile.Id = existingRow['Id']
+                        LoggingService.LogInfo(f"Duplicate prevented: file already exists with ID {MediaFile.Id}, converting to update: {MediaFile.FilePath}", "DatabaseManager", "SaveMediaFile")
+                        query = """
+                            UPDATE MediaFiles
+                            SET SeasonId = ?, FilePath = ?, FileName = ?, SizeMB = ?, VideoBitrateKbps = ?,
+                                AudioBitrateKbps = ?, Resolution = ?, Codec = ?, DurationMinutes = ?,
+                                FrameRate = ?, LastScannedDate = ?, CompressionPotential = ?, AssignedProfile = ?,
+                                FileModificationTime = ?, TotalFrames = ?, CodecProfile = ?, ColorRange = ?,
+                                FieldOrder = ?, HasBFrames = ?, RefFrames = ?, PixelFormat = ?, Level = ?,
+                                AudioChannels = ?, AudioSampleRate = ?, AudioSampleFormat = ?,
+                                AudioChannelLayout = ?, AudioCodec = ?, SubtitleFormats = ?,
+                                ContainerFormat = ?, OverallBitrate = ?, TranscodedByMediaVortex = ?
+                            WHERE Id = ?
+                        """
+                        parameters = (
+                            MediaFile.SeasonId, MediaFile.FilePath, MediaFile.FileName, MediaFile.SizeMB,
+                            MediaFile.VideoBitrateKbps, MediaFile.AudioBitrateKbps, MediaFile.Resolution,
+                            MediaFile.Codec, MediaFile.DurationMinutes, MediaFile.FrameRate,
+                            MediaFile.LastScannedDate, MediaFile.CompressionPotential, MediaFile.AssignedProfile,
+                            MediaFile.FileModificationTime, MediaFile.TotalFrames, MediaFile.CodecProfile,
+                            MediaFile.ColorRange, MediaFile.FieldOrder, MediaFile.HasBFrames, MediaFile.RefFrames,
+                            MediaFile.PixelFormat, MediaFile.Level, MediaFile.AudioChannels, MediaFile.AudioSampleRate,
+                            MediaFile.AudioSampleFormat, MediaFile.AudioChannelLayout, MediaFile.AudioCodec,
+                            MediaFile.SubtitleFormats, MediaFile.ContainerFormat,
+                            MediaFile.OverallBitrate, MediaFile.TranscodedByMediaVortex, MediaFile.Id
+                        )
+                        cursor.execute(query, parameters)
+                        connection.commit()
+                        return MediaFile.Id
+
                     # Insert new media file
                     LoggingService.LogInfo("Inserting new media file...")
                     query = """
-                        INSERT INTO MediaFiles 
+                        INSERT INTO MediaFiles
                         (SeasonId, FilePath, FileName, SizeMB, VideoBitrateKbps, AudioBitrateKbps,
                          Resolution, Codec, DurationMinutes, FrameRate, LastScannedDate,
                          CompressionPotential, AssignedProfile, FileModificationTime,
                          TotalFrames, CodecProfile, ColorRange, FieldOrder, HasBFrames, RefFrames,
                          PixelFormat, Level, AudioChannels, AudioSampleRate, AudioSampleFormat,
-                         AudioChannelLayout, ContainerFormat, OverallBitrate, TranscodedByMediaVortex)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                         AudioChannelLayout, AudioCodec, SubtitleFormats,
+                         ContainerFormat, OverallBitrate, TranscodedByMediaVortex)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """
                     parameters = (
                         MediaFile.SeasonId, MediaFile.FilePath, MediaFile.FileName, MediaFile.SizeMB,
@@ -518,7 +622,8 @@ class DatabaseManager:
                         MediaFile.FileModificationTime, MediaFile.TotalFrames, MediaFile.CodecProfile,
                         MediaFile.ColorRange, MediaFile.FieldOrder, MediaFile.HasBFrames, MediaFile.RefFrames,
                         MediaFile.PixelFormat, MediaFile.Level, MediaFile.AudioChannels, MediaFile.AudioSampleRate,
-                        MediaFile.AudioSampleFormat, MediaFile.AudioChannelLayout, MediaFile.ContainerFormat,
+                        MediaFile.AudioSampleFormat, MediaFile.AudioChannelLayout, MediaFile.AudioCodec,
+                            MediaFile.SubtitleFormats, MediaFile.ContainerFormat,
                         MediaFile.OverallBitrate, MediaFile.TranscodedByMediaVortex
                     )
                     LoggingService.LogInfo(f"Insert media file parameters: {parameters}", "DatabaseManager", "SaveMediaFile")
@@ -538,7 +643,8 @@ class DatabaseManager:
                             FileModificationTime = ?, TotalFrames = ?, CodecProfile = ?, ColorRange = ?,
                             FieldOrder = ?, HasBFrames = ?, RefFrames = ?, PixelFormat = ?, Level = ?,
                             AudioChannels = ?, AudioSampleRate = ?, AudioSampleFormat = ?,
-                            AudioChannelLayout = ?, ContainerFormat = ?, OverallBitrate = ?, TranscodedByMediaVortex = ?
+                            AudioChannelLayout = ?, AudioCodec = ?, SubtitleFormats = ?,
+                            ContainerFormat = ?, OverallBitrate = ?, TranscodedByMediaVortex = ?
                         WHERE Id = ?
                     """
                     parameters = (
@@ -549,7 +655,8 @@ class DatabaseManager:
                         MediaFile.FileModificationTime, MediaFile.TotalFrames, MediaFile.CodecProfile,
                         MediaFile.ColorRange, MediaFile.FieldOrder, MediaFile.HasBFrames, MediaFile.RefFrames,
                         MediaFile.PixelFormat, MediaFile.Level, MediaFile.AudioChannels, MediaFile.AudioSampleRate,
-                        MediaFile.AudioSampleFormat, MediaFile.AudioChannelLayout, MediaFile.ContainerFormat,
+                        MediaFile.AudioSampleFormat, MediaFile.AudioChannelLayout, MediaFile.AudioCodec,
+                            MediaFile.SubtitleFormats, MediaFile.ContainerFormat,
                         MediaFile.OverallBitrate, MediaFile.TranscodedByMediaVortex, MediaFile.Id
                     )
                     LoggingService.LogInfo(f"Update media file parameters: {parameters}", "DatabaseManager", "SaveMediaFile")
@@ -568,7 +675,139 @@ class DatabaseManager:
         """Delete a media file."""
         affectedRows = self.DatabaseService.ExecuteNonQuery("DELETE FROM MediaFiles WHERE Id = ?", (MediaFileId,))
         return affectedRows > 0
-    
+
+    def CleanupDuplicateMediaFiles(self) -> Dict[str, Any]:
+        """Remove duplicate MediaFiles rows, keeping the best record for each FilePath.
+
+        Selection priority (highest to lowest):
+        1. Has a matching TranscodeAttempts record (linked to transcode history)
+        2. Most recent LastScannedDate (reflects current file state post-transcode)
+        3. Most non-NULL metadata columns (most complete probe data)
+
+        Updates MediaFilesArchive references to point to the kept record before
+        deleting duplicates.
+        """
+        try:
+            connection = self.DatabaseService.GetConnection()
+            try:
+                cursor = connection.cursor()
+
+                # Find all duplicate groups (FilePaths with more than one record)
+                cursor.execute("""
+                    SELECT LOWER(FilePath) as NormalizedPath, COUNT(*) as Cnt
+                    FROM MediaFiles
+                    GROUP BY LOWER(FilePath)
+                    HAVING Cnt > 1
+                """)
+                DuplicateGroups = cursor.fetchall()
+
+                if not DuplicateGroups:
+                    LoggingService.LogInfo("No duplicate media files found", "DatabaseManager", "CleanupDuplicateMediaFiles")
+                    return {
+                        'Success': True,
+                        'DuplicatesRemoved': 0,
+                        'Message': 'No duplicates found'
+                    }
+
+                # Build a set of FilePaths that have TranscodeAttempts records
+                cursor.execute("SELECT DISTINCT FilePath FROM TranscodeAttempts")
+                TranscodedPaths = {row['FilePath'] for row in cursor.fetchall()}
+
+                MetadataColumns = [
+                    'SeasonId', 'SizeMB', 'VideoBitrateKbps', 'AudioBitrateKbps',
+                    'Resolution', 'Codec', 'DurationMinutes', 'FrameRate',
+                    'CompressionPotential', 'AssignedProfile', 'TotalFrames',
+                    'CodecProfile', 'ColorRange', 'FieldOrder', 'HasBFrames',
+                    'RefFrames', 'PixelFormat', 'Level', 'AudioChannels',
+                    'AudioSampleRate', 'AudioSampleFormat', 'AudioChannelLayout',
+                    'ContainerFormat', 'OverallBitrate'
+                ]
+
+                TotalRemoved = 0
+
+                for group in DuplicateGroups:
+                    NormalizedPath = group['NormalizedPath']
+
+                    # Get all records for this path
+                    cursor.execute("""
+                        SELECT * FROM MediaFiles WHERE LOWER(FilePath) = ?
+                        ORDER BY Id
+                    """, (NormalizedPath,))
+                    Records = cursor.fetchall()
+
+                    if len(Records) < 2:
+                        continue
+
+                    # Score each record with a tuple for natural ordering:
+                    # (has_transcode_link, scan_date, metadata_completeness)
+                    BestRecord = None
+                    BestKey = None
+
+                    for record in Records:
+                        HasTranscodeLink = 1 if record['FilePath'] in TranscodedPaths else 0
+                        ScanDate = record['LastScannedDate'] or ''
+                        MetadataScore = sum(1 for col in MetadataColumns if record[col] is not None)
+
+                        Key = (HasTranscodeLink, ScanDate, MetadataScore)
+
+                        if BestKey is None or Key > BestKey:
+                            BestKey = Key
+                            BestRecord = record
+
+                    KeptId = BestRecord['Id']
+                    DeleteIds = [r['Id'] for r in Records if r['Id'] != KeptId]
+
+                    if not DeleteIds:
+                        continue
+
+                    # Update MediaFilesArchive: reassign any references from deleted IDs to kept ID
+                    Placeholders = ','.join('?' * len(DeleteIds))
+                    cursor.execute(f"""
+                        UPDATE MediaFilesArchive
+                        SET Id = ?
+                        WHERE Id IN ({Placeholders})
+                    """, [KeptId] + DeleteIds)
+
+                    # Delete the duplicate records
+                    cursor.execute(f"""
+                        DELETE FROM MediaFiles WHERE Id IN ({Placeholders})
+                    """, DeleteIds)
+
+                    TotalRemoved += len(DeleteIds)
+
+                connection.commit()
+                LoggingService.LogInfo(
+                    f"Cleaned up {TotalRemoved} duplicate media file records across {len(DuplicateGroups)} groups",
+                    "DatabaseManager", "CleanupDuplicateMediaFiles"
+                )
+
+                # Create unique index to prevent future duplicates
+                try:
+                    cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_mediafiles_filepath_unique ON MediaFiles (FilePath COLLATE NOCASE)")
+                    connection.commit()
+                    LoggingService.LogInfo("Created unique index on MediaFiles.FilePath", "DatabaseManager", "CleanupDuplicateMediaFiles")
+                except Exception as IndexError:
+                    LoggingService.LogWarning(
+                        f"Could not create unique index (may already exist or duplicates remain): {str(IndexError)}",
+                        "DatabaseManager", "CleanupDuplicateMediaFiles"
+                    )
+
+                return {
+                    'Success': True,
+                    'DuplicatesRemoved': TotalRemoved,
+                    'DuplicateGroups': len(DuplicateGroups),
+                    'Message': f'Removed {TotalRemoved} duplicate records from {len(DuplicateGroups)} groups'
+                }
+            finally:
+                connection.close()
+        except Exception as e:
+            LoggingService.LogException("Error cleaning up duplicate media files", e, "DatabaseManager", "CleanupDuplicateMediaFiles")
+            return {
+                'Success': False,
+                'DuplicatesRemoved': 0,
+                'Message': f'Error: {str(e)}'
+            }
+
     def GetMediaFilesByRootFolder(self, RootFolderPath: str) -> List[MediaFileModel]:
         """Get all media files for a specific root folder."""
         query = """
@@ -577,8 +816,8 @@ class DatabaseManager:
                    CompressionPotential, AssignedProfile, IsInterlaced, ResolutionCategory,
                    FileModificationTime, TotalFrames, CodecProfile, ColorRange, FieldOrder,
                    HasBFrames, RefFrames, PixelFormat, Level, AudioChannels, AudioSampleRate,
-                   AudioSampleFormat, AudioChannelLayout, ContainerFormat, OverallBitrate,
-                   TranscodedByMediaVortex
+                   AudioSampleFormat, AudioChannelLayout, AudioCodec, SubtitleFormats,
+                   ContainerFormat, OverallBitrate, TranscodedByMediaVortex
             FROM MediaFiles 
             WHERE LOWER(FilePath) LIKE LOWER(?)
         """
@@ -616,6 +855,8 @@ class DatabaseManager:
                 AudioSampleRate=row['AudioSampleRate'],
                 AudioSampleFormat=row['AudioSampleFormat'],
                 AudioChannelLayout=row['AudioChannelLayout'],
+                AudioCodec=row['AudioCodec'],
+                SubtitleFormats=row['SubtitleFormats'],
                 ContainerFormat=row['ContainerFormat'],
                 OverallBitrate=row['OverallBitrate'],
                 TranscodedByMediaVortex=row['TranscodedByMediaVortex']
@@ -642,8 +883,8 @@ class DatabaseManager:
                    CompressionPotential, AssignedProfile, IsInterlaced, ResolutionCategory,
                    FileModificationTime, TotalFrames, CodecProfile, ColorRange, FieldOrder,
                    HasBFrames, RefFrames, PixelFormat, Level, AudioChannels, AudioSampleRate,
-                   AudioSampleFormat, AudioChannelLayout, ContainerFormat, OverallBitrate,
-                   TranscodedByMediaVortex
+                   AudioSampleFormat, AudioChannelLayout, AudioCodec, SubtitleFormats,
+                   ContainerFormat, OverallBitrate, TranscodedByMediaVortex
             FROM MediaFiles 
             WHERE LOWER(FilePath) LIKE LOWER(?)
         """
@@ -681,6 +922,8 @@ class DatabaseManager:
                 AudioSampleRate=row['AudioSampleRate'],
                 AudioSampleFormat=row['AudioSampleFormat'],
                 AudioChannelLayout=row['AudioChannelLayout'],
+                AudioCodec=row['AudioCodec'],
+                SubtitleFormats=row['SubtitleFormats'],
                 ContainerFormat=row['ContainerFormat'],
                 OverallBitrate=row['OverallBitrate'],
                 TranscodedByMediaVortex=row['TranscodedByMediaVortex']
@@ -819,8 +1062,8 @@ class DatabaseManager:
                    CompressionPotential, AssignedProfile, IsInterlaced, ResolutionCategory,
                    FileModificationTime, TotalFrames, CodecProfile, ColorRange, FieldOrder,
                    HasBFrames, RefFrames, PixelFormat, Level, AudioChannels, AudioSampleRate,
-                   AudioSampleFormat, AudioChannelLayout, ContainerFormat, OverallBitrate,
-                   TranscodedByMediaVortex
+                   AudioSampleFormat, AudioChannelLayout, AudioCodec, SubtitleFormats,
+                   ContainerFormat, OverallBitrate, TranscodedByMediaVortex
             FROM MediaFiles 
             WHERE LOWER(FilePath) = LOWER(?)
         """
@@ -860,6 +1103,8 @@ class DatabaseManager:
             AudioSampleRate=row['AudioSampleRate'],
             AudioSampleFormat=row['AudioSampleFormat'],
             AudioChannelLayout=row['AudioChannelLayout'],
+            AudioCodec=row['AudioCodec'],
+            SubtitleFormats=row['SubtitleFormats'],
             ContainerFormat=row['ContainerFormat'],
             OverallBitrate=row['OverallBitrate'],
             TranscodedByMediaVortex=row['TranscodedByMediaVortex']
@@ -870,7 +1115,131 @@ class DatabaseManager:
         """Delete a media file by path (case-insensitive)."""
         affectedRows = self.DatabaseService.ExecuteNonQuery("DELETE FROM MediaFiles WHERE LOWER(FilePath) = LOWER(?)", (FilePath,))
         return affectedRows > 0
-    
+
+    # Optimization Analysis Methods
+    def GetContainerFormatCounts(self) -> List[Dict[str, Any]]:
+        """Get file counts grouped by container format."""
+        query = """
+            SELECT COALESCE(ContainerFormat, 'unknown') as Format, COUNT(*) as Count
+            FROM MediaFiles GROUP BY ContainerFormat ORDER BY Count DESC
+        """
+        rows = self.DatabaseService.ExecuteQuery(query)
+        return [{'Format': row['Format'], 'Count': row['Count']} for row in rows]
+
+    def GetAudioCodecCounts(self) -> List[Dict[str, Any]]:
+        """Get file counts grouped by audio codec."""
+        query = """
+            SELECT COALESCE(AudioCodec, 'unknown') as Codec, COUNT(*) as Count
+            FROM MediaFiles GROUP BY AudioCodec ORDER BY Count DESC
+        """
+        rows = self.DatabaseService.ExecuteQuery(query)
+        return [{'Codec': row['Codec'], 'Count': row['Count']} for row in rows]
+
+    def GetSubtitleFormatCounts(self) -> List[Dict[str, Any]]:
+        """Get file counts grouped by subtitle formats."""
+        query = """
+            SELECT COALESCE(SubtitleFormats, 'none') as Formats, COUNT(*) as Count
+            FROM MediaFiles GROUP BY SubtitleFormats ORDER BY Count DESC
+        """
+        rows = self.DatabaseService.ExecuteQuery(query)
+        return [{'Formats': row['Formats'], 'Count': row['Count']} for row in rows]
+
+    def GetMkvFileCount(self) -> int:
+        """Get count of MKV files (remux candidates)."""
+        query = "SELECT COUNT(*) as Count FROM MediaFiles WHERE LOWER(ContainerFormat) LIKE '%matroska%'"
+        rows = self.DatabaseService.ExecuteQuery(query)
+        return rows[0]['Count'] if rows else 0
+
+    def GetTotalMediaFileCount(self) -> int:
+        """Get total count of all media files."""
+        query = "SELECT COUNT(*) as Count FROM MediaFiles"
+        rows = self.DatabaseService.ExecuteQuery(query)
+        return rows[0]['Count'] if rows else 0
+
+    def GetLegacyCodecFiles(self, Limit: int = 100) -> List[Dict[str, Any]]:
+        """Get files with legacy codecs that need full transcode."""
+        query = """
+            SELECT Id, FilePath, FileName, Codec, ContainerFormat, SizeMB, Resolution
+            FROM MediaFiles
+            WHERE LOWER(Codec) IN ('mpeg4', 'msmpeg4v3', 'msmpeg4v2', 'mpeg2video', 'wmv3', 'wmv2', 'wmv1', 'rv40', 'rv30', 'vp6f')
+            ORDER BY SizeMB DESC
+            LIMIT ?
+        """
+        rows = self.DatabaseService.ExecuteQuery(query, (Limit,))
+        return [{'Id': r['Id'], 'FilePath': r['FilePath'], 'FileName': r['FileName'],
+                 'Codec': r['Codec'], 'ContainerFormat': r['ContainerFormat'],
+                 'SizeMB': r['SizeMB'], 'Resolution': r['Resolution']} for r in rows]
+
+    def GetLegacyCodecCount(self) -> int:
+        """Get count of files with legacy codecs."""
+        query = """
+            SELECT COUNT(*) as Count FROM MediaFiles
+            WHERE LOWER(Codec) IN ('mpeg4', 'msmpeg4v3', 'msmpeg4v2', 'mpeg2video', 'wmv3', 'wmv2', 'wmv1', 'rv40', 'rv30', 'vp6f')
+        """
+        rows = self.DatabaseService.ExecuteQuery(query)
+        return rows[0]['Count'] if rows else 0
+
+    def GetIncompatibleAudioFiles(self, Limit: int = 100) -> List[Dict[str, Any]]:
+        """Get files with audio codecs that may cause transcoding on playback."""
+        query = """
+            SELECT Id, FilePath, FileName, AudioCodec, ContainerFormat, SizeMB, Resolution
+            FROM MediaFiles
+            WHERE LOWER(AudioCodec) IN ('dts', 'truehd', 'flac', 'pcm_s16le', 'pcm_s24le', 'pcm_s32le', 'pcm_f32le')
+            ORDER BY SizeMB DESC
+            LIMIT ?
+        """
+        rows = self.DatabaseService.ExecuteQuery(query, (Limit,))
+        return [{'Id': r['Id'], 'FilePath': r['FilePath'], 'FileName': r['FileName'],
+                 'AudioCodec': r['AudioCodec'], 'ContainerFormat': r['ContainerFormat'],
+                 'SizeMB': r['SizeMB'], 'Resolution': r['Resolution']} for r in rows]
+
+    def GetIncompatibleAudioCount(self) -> int:
+        """Get count of files with incompatible audio codecs."""
+        query = """
+            SELECT COUNT(*) as Count FROM MediaFiles
+            WHERE LOWER(AudioCodec) IN ('dts', 'truehd', 'flac', 'pcm_s16le', 'pcm_s24le', 'pcm_s32le', 'pcm_f32le')
+        """
+        rows = self.DatabaseService.ExecuteQuery(query)
+        return rows[0]['Count'] if rows else 0
+
+    def GetProblematicSubtitleFiles(self, Limit: int = 100) -> List[Dict[str, Any]]:
+        """Get files with subtitle formats that force burn-in transcoding."""
+        query = """
+            SELECT Id, FilePath, FileName, SubtitleFormats, ContainerFormat, SizeMB, Resolution
+            FROM MediaFiles
+            WHERE SubtitleFormats IS NOT NULL AND SubtitleFormats != ''
+              AND (LOWER(SubtitleFormats) LIKE '%ass%' OR LOWER(SubtitleFormats) LIKE '%ssa%'
+                   OR LOWER(SubtitleFormats) LIKE '%hdmv_pgs%' OR LOWER(SubtitleFormats) LIKE '%pgssub%'
+                   OR LOWER(SubtitleFormats) LIKE '%dvd_subtitle%' OR LOWER(SubtitleFormats) LIKE '%dvdsub%')
+            ORDER BY SizeMB DESC
+            LIMIT ?
+        """
+        rows = self.DatabaseService.ExecuteQuery(query, (Limit,))
+        return [{'Id': r['Id'], 'FilePath': r['FilePath'], 'FileName': r['FileName'],
+                 'SubtitleFormats': r['SubtitleFormats'], 'ContainerFormat': r['ContainerFormat'],
+                 'SizeMB': r['SizeMB'], 'Resolution': r['Resolution']} for r in rows]
+
+    def GetProblematicSubtitleCount(self) -> int:
+        """Get count of files with problematic subtitle formats."""
+        query = """
+            SELECT COUNT(*) as Count FROM MediaFiles
+            WHERE SubtitleFormats IS NOT NULL AND SubtitleFormats != ''
+              AND (LOWER(SubtitleFormats) LIKE '%ass%' OR LOWER(SubtitleFormats) LIKE '%ssa%'
+                   OR LOWER(SubtitleFormats) LIKE '%hdmv_pgs%' OR LOWER(SubtitleFormats) LIKE '%pgssub%'
+                   OR LOWER(SubtitleFormats) LIKE '%dvd_subtitle%' OR LOWER(SubtitleFormats) LIKE '%dvdsub%')
+        """
+        rows = self.DatabaseService.ExecuteQuery(query)
+        return rows[0]['Count'] if rows else 0
+
+    def GetVideoCodecCounts(self) -> List[Dict[str, Any]]:
+        """Get file counts grouped by video codec."""
+        query = """
+            SELECT COALESCE(Codec, 'unknown') as Codec, COUNT(*) as Count
+            FROM MediaFiles GROUP BY Codec ORDER BY Count DESC
+        """
+        rows = self.DatabaseService.ExecuteQuery(query)
+        return [{'Codec': row['Codec'], 'Count': row['Count']} for row in rows]
+
     # System Settings Management Methods
     def GetSystemSetting(self, SettingKey: str) -> Optional[str]:
         """Get a system setting value by key."""
@@ -959,12 +1328,12 @@ class DatabaseManager:
     def GetAllTranscodeQueueItems(self) -> List[TranscodeQueueModel]:
         """Get all transcoding queue items."""
         query = """
-            SELECT Id, FilePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted
-            FROM TranscodeQueue 
+            SELECT Id, FilePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted, ProcessingMode
+            FROM TranscodeQueue
             ORDER BY Priority DESC, DateAdded ASC
         """
         rows = self.DatabaseService.ExecuteQuery(query)
-        
+
         queueItems = []
         for row in rows:
             queueItem = TranscodeQueueModel(
@@ -977,24 +1346,25 @@ class DatabaseManager:
                 Priority=row['Priority'],
                 Status=row['Status'],
                 DateAdded=self.ConvertStringToDateTime(row['DateAdded']) if row['DateAdded'] else None,
-                DateStarted=self.ConvertStringToDateTime(row['DateStarted']) if row['DateStarted'] else None
+                DateStarted=self.ConvertStringToDateTime(row['DateStarted']) if row['DateStarted'] else None,
+                ProcessingMode=row['ProcessingMode'] or 'Transcode'
             )
             queueItems.append(queueItem)
-        
+
         return queueItems
     
     def GetTranscodeQueueItemById(self, ItemId: int) -> Optional[TranscodeQueueModel]:
         """Get a specific transcoding queue item by ID."""
         query = """
-            SELECT Id, FilePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted
-            FROM TranscodeQueue 
+            SELECT Id, FilePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted, ProcessingMode
+            FROM TranscodeQueue
             WHERE Id = ?
         """
         rows = self.DatabaseService.ExecuteQuery(query, (ItemId,))
-        
+
         if not rows:
             return None
-        
+
         row = rows[0]
         return TranscodeQueueModel(
             Id=row['Id'],
@@ -1006,7 +1376,8 @@ class DatabaseManager:
             Priority=row['Priority'],
             Status=row['Status'],
             DateAdded=self.ConvertStringToDateTime(row['DateAdded']) if row['DateAdded'] else None,
-            DateStarted=self.ConvertStringToDateTime(row['DateStarted']) if row['DateStarted'] else None
+            DateStarted=self.ConvertStringToDateTime(row['DateStarted']) if row['DateStarted'] else None,
+            ProcessingMode=row['ProcessingMode'] or 'Transcode'
         )
     
     def SaveTranscodeQueueItem(self, QueueItem: TranscodeQueueModel) -> int:
@@ -1022,14 +1393,15 @@ class DatabaseManager:
                     # Insert new queue item
                     LoggingService.LogInfo("Inserting new transcoding queue item...", "DatabaseManager", "SaveTranscodeQueueItem")
                     query = """
-                        INSERT INTO TranscodeQueue 
-                        (FilePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        INSERT INTO TranscodeQueue
+                        (FilePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted, ProcessingMode)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """
                     parameters = (
                         QueueItem.FilePath, QueueItem.FileName, QueueItem.Directory,
                         QueueItem.SizeBytes, QueueItem.SizeMB, QueueItem.Priority,
-                        QueueItem.Status, QueueItem.DateAdded, QueueItem.DateStarted
+                        QueueItem.Status, QueueItem.DateAdded, QueueItem.DateStarted,
+                        QueueItem.ProcessingMode
                     )
                     LoggingService.LogInfo(f"Insert queue item parameters: {parameters}", "DatabaseManager", "SaveTranscodeQueueItem")
                     cursor.execute(query, parameters)
@@ -1041,15 +1413,16 @@ class DatabaseManager:
                     # Update existing queue item
                     LoggingService.LogInfo(f"Updating existing queue item with ID: {QueueItem.Id}", "DatabaseManager", "SaveTranscodeQueueItem")
                     query = """
-                        UPDATE TranscodeQueue 
+                        UPDATE TranscodeQueue
                         SET FilePath = ?, FileName = ?, Directory = ?, SizeBytes = ?, SizeMB = ?,
-                            Priority = ?, Status = ?, DateAdded = ?, DateStarted = ?
+                            Priority = ?, Status = ?, DateAdded = ?, DateStarted = ?, ProcessingMode = ?
                         WHERE Id = ?
                     """
                     parameters = (
                         QueueItem.FilePath, QueueItem.FileName, QueueItem.Directory,
                         QueueItem.SizeBytes, QueueItem.SizeMB, QueueItem.Priority,
-                        QueueItem.Status, QueueItem.DateAdded, QueueItem.DateStarted, QueueItem.Id
+                        QueueItem.Status, QueueItem.DateAdded, QueueItem.DateStarted,
+                        QueueItem.ProcessingMode, QueueItem.Id
                     )
                     LoggingService.LogInfo(f"Update queue item parameters: {parameters}", "DatabaseManager", "SaveTranscodeQueueItem")
                     cursor.execute(query, parameters)
@@ -1086,13 +1459,13 @@ class DatabaseManager:
     def GetTranscodeQueueItemsByStatus(self, Status: str) -> List[TranscodeQueueModel]:
         """Get all transcoding queue items with a specific status."""
         query = """
-            SELECT Id, FilePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted
-            FROM TranscodeQueue 
+            SELECT Id, FilePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted, ProcessingMode
+            FROM TranscodeQueue
             WHERE Status = ?
             ORDER BY Priority DESC, DateAdded ASC
         """
         rows = self.DatabaseService.ExecuteQuery(query, (Status,))
-        
+
         queueItems = []
         for row in rows:
             queueItem = TranscodeQueueModel(
@@ -1105,23 +1478,24 @@ class DatabaseManager:
                 Priority=row['Priority'],
                 Status=row['Status'],
                 DateAdded=row['DateAdded'],
-                DateStarted=row['DateStarted']
+                DateStarted=row['DateStarted'],
+                ProcessingMode=row['ProcessingMode'] or 'Transcode'
             )
             queueItems.append(queueItem)
-        
+
         return queueItems
     
     def GetNextPendingTranscodeJob(self) -> Optional[TranscodeQueueModel]:
         """Get the next pending transcoding job (largest files first)."""
         query = """
-            SELECT Id, FilePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted
-            FROM TranscodeQueue 
+            SELECT Id, FilePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted, ProcessingMode
+            FROM TranscodeQueue
             WHERE Status = 'Pending'
             ORDER BY SizeMB DESC, DateAdded ASC
             LIMIT 1
         """
         rows = self.DatabaseService.ExecuteQuery(query)
-        
+
         if rows:
             row = rows[0]
             return TranscodeQueueModel(
@@ -1134,9 +1508,10 @@ class DatabaseManager:
                 Priority=row['Priority'],
                 Status=row['Status'],
                 DateAdded=row['DateAdded'],
-                DateStarted=row['DateStarted']
+                DateStarted=row['DateStarted'],
+                ProcessingMode=row['ProcessingMode'] or 'Transcode'
             )
-        
+
         return None
     
     def ClearAllTranscodeQueueItems(self) -> int:
@@ -2194,17 +2569,19 @@ class DatabaseManager:
         try:
             LoggingService.LogFunctionEntry("GetCurrentTranscodeProgress", "DatabaseManager")
             
-            # Get the most recent progress from any transcoding attempt with MediaFiles TotalFrames
+            # Get progress only from currently active (in-progress) transcoding attempts
             query = """
-                SELECT tp.TranscodeAttemptId, tp.CurrentPhase, tp.ProgressPercent, tp.CurrentFrame, 
-                       tp.TotalFrames, tp.CurrentFPS, tp.AverageFPS, tp.CurrentBitrate, 
-                       tp.CurrentTime, tp.CurrentSpeed, tp.ETA, tp.PassDuration, 
+                SELECT tp.TranscodeAttemptId, tp.CurrentPhase, tp.ProgressPercent, tp.CurrentFrame,
+                       tp.TotalFrames, tp.CurrentFPS, tp.AverageFPS, tp.CurrentBitrate,
+                       tp.CurrentTime, tp.CurrentSpeed, tp.ETA, tp.PassDuration,
                        tp.LastProgressUpdate, ta.FilePath, ta.Quality, ta.ProfileName, ta.AttemptDate,
                        mf.TotalFrames as MediaFileTotalFrames, ta.FfpmpegCommand
                 FROM TranscodeProgress tp
                 INNER JOIN TranscodeAttempts ta ON tp.TranscodeAttemptId = ta.Id
+                INNER JOIN TranscodeQueue tq ON LOWER(ta.FilePath) = LOWER(tq.FilePath) AND tq.Status = 'Running'
                 LEFT JOIN MediaFiles mf ON ta.FilePath = mf.FilePath
-                ORDER BY tp.LastProgressUpdate DESC 
+                WHERE ta.Success IS NULL
+                ORDER BY tp.LastProgressUpdate DESC
                 LIMIT 1
             """
             
@@ -4332,4 +4709,330 @@ class DatabaseManager:
                 
         except Exception as e:
             LoggingService.LogException("Exception adding problem file", e, "DatabaseManager", "AddProblemFile")
+            return None
+
+    # Jellyfin Operations Methods
+
+    def InsertJellyfinOperation(self, LogFileName: str, OperationType: str, FilePath: str,
+                                 FileName: str, VideoCodec: str, AudioCodec: str,
+                                 Container: str, Resolution: str, SubtitleCodecs: str,
+                                 Reason: str, TranscodeActions: str, LogDate: str) -> bool:
+        """Insert a Jellyfin FFmpeg operation log entry. Skips if LogFileName already exists."""
+        try:
+            query = """
+                INSERT OR IGNORE INTO JellyfinOperations
+                (LogFileName, OperationType, FilePath, FileName, VideoCodec, AudioCodec, Container, Resolution,
+                 SubtitleCodecs, Reason, TranscodeActions, LogDate,
+                 DestResolution, DestProfile, DestLevel, DestPixelFormat, DestFormat)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """
+            self.DatabaseService.ExecuteNonQuery(query, (
+                LogFileName, OperationType, FilePath, FileName,
+                VideoCodec, AudioCodec, Container, Resolution, SubtitleCodecs, Reason, TranscodeActions, LogDate,
+                "", "", "", "", ""
+            ))
+            return True
+        except Exception as e:
+            LoggingService.LogException("Error inserting Jellyfin operation", e, "DatabaseManager", "InsertJellyfinOperation")
+            return False
+
+    def InsertJellyfinOperationsBatch(self, Entries: list) -> int:
+        """Batch insert Jellyfin operations. Returns count of new rows inserted."""
+        try:
+            query = """
+                INSERT OR IGNORE INTO JellyfinOperations
+                (LogFileName, OperationType, FilePath, FileName, VideoCodec, AudioCodec, Container, Resolution,
+                 SubtitleCodecs, Reason, TranscodeActions, LogDate,
+                 DestResolution, DestProfile, DestLevel, DestPixelFormat, DestFormat)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """
+            connection = self.DatabaseService.GetConnection()
+            try:
+                cursor = connection.cursor()
+                beforeCount = cursor.execute("SELECT COUNT(*) FROM JellyfinOperations").fetchone()[0]
+                cursor.executemany(query, [
+                    (e["LogFileName"], e["OperationType"], e["FilePath"], e["FileName"],
+                     e["VideoCodec"], e["AudioCodec"], e["Container"], e["Resolution"],
+                     e.get("SubtitleCodecs", ""), e["Reason"], e.get("TranscodeActions", ""), e["LogDate"],
+                     e.get("DestResolution", ""), e.get("DestProfile", ""), e.get("DestLevel", ""),
+                     e.get("DestPixelFormat", ""), e.get("DestFormat", ""))
+                    for e in Entries
+                ])
+                connection.commit()
+                afterCount = cursor.execute("SELECT COUNT(*) FROM JellyfinOperations").fetchone()[0]
+                return afterCount - beforeCount
+            finally:
+                connection.close()
+        except Exception as e:
+            LoggingService.LogException("Error batch inserting Jellyfin operations", e, "DatabaseManager", "InsertJellyfinOperationsBatch")
+            return 0
+
+    def GetExistingLogFileNames(self) -> set:
+        """Get set of all LogFileName values already in the database."""
+        try:
+            rows = self.DatabaseService.ExecuteQuery("SELECT LogFileName FROM JellyfinOperations")
+            return {row[0] for row in rows}
+        except Exception as e:
+            LoggingService.LogException("Error getting existing log filenames", e, "DatabaseManager", "GetExistingLogFileNames")
+            return set()
+
+    def GetStaleJellyfinRecordCount(self) -> int:
+        """Count transcode records missing destination format data (need re-import)."""
+        try:
+            rows = self.DatabaseService.ExecuteQuery("""
+                SELECT COUNT(*) FROM JellyfinOperations
+                WHERE OperationType = 'Transcode'
+                  AND (DestResolution IS NULL OR DestResolution = '')
+                  AND (DestProfile IS NULL OR DestProfile = '')
+                  AND (DestLevel IS NULL OR DestLevel = '')
+            """)
+            return rows[0][0] if rows else 0
+        except Exception as e:
+            LoggingService.LogException("Error checking stale records", e, "DatabaseManager", "GetStaleJellyfinRecordCount")
+            return 0
+
+    def ClearJellyfinOperations(self):
+        """Delete all JellyfinOperations records to force full re-import."""
+        try:
+            self.DatabaseService.ExecuteNonQuery("DELETE FROM JellyfinOperations")
+        except Exception as e:
+            LoggingService.LogException("Error clearing Jellyfin operations", e, "DatabaseManager", "ClearJellyfinOperations")
+
+    def GetJellyfinOperationCounts(self) -> Dict[str, Any]:
+        """Get distinct file count and total log count per operation type, with date range."""
+        try:
+            query = """
+                SELECT OperationType,
+                       COUNT(*) as TotalLogs,
+                       COUNT(DISTINCT FileName) as DistinctFiles,
+                       MIN(LogDate) as OldestDate,
+                       MAX(LogDate) as NewestDate
+                FROM JellyfinOperations
+                GROUP BY OperationType
+            """
+            rows = self.DatabaseService.ExecuteQuery(query)
+            result = {}
+            allOldest = []
+            allNewest = []
+            for row in rows:
+                result[row[0]] = {"Distinct": row[2], "Total": row[1]}
+                if row[3]:
+                    allOldest.append(row[3])
+                if row[4]:
+                    allNewest.append(row[4])
+            return {
+                "Success": True,
+                "Counts": result,
+                "OldestDate": min(allOldest) if allOldest else None,
+                "NewestDate": max(allNewest) if allNewest else None,
+                "TotalRecords": sum(r["Total"] for r in result.values())
+            }
+        except Exception as e:
+            LoggingService.LogException("Error getting Jellyfin operation counts", e, "DatabaseManager", "GetJellyfinOperationCounts")
+            return {"Success": False, "ErrorMessage": str(e)}
+
+    def GetJellyfinOperationsByType(self, OperationType: str, Limit: int = 100) -> Dict[str, Any]:
+        """Get operation details from local DB, grouped by file with play counts."""
+        try:
+            query = """
+                SELECT FileName, FilePath, VideoCodec, AudioCodec, Container, Resolution, Reason,
+                       COUNT(*) as PlayCount,
+                       MIN(LogDate) as FirstSeen,
+                       MAX(LogDate) as LastSeen,
+                       SubtitleCodecs,
+                       TranscodeActions
+                FROM JellyfinOperations
+                WHERE OperationType = ?
+                GROUP BY FileName, Reason
+                ORDER BY LastSeen DESC
+                LIMIT ?
+            """
+            rows = self.DatabaseService.ExecuteQuery(query, (OperationType, Limit))
+            files = []
+            reasons = {}
+            for row in rows:
+                reason = row[6] or "other"
+                files.append({
+                    "FileName": row[0],
+                    "FilePath": row[1],
+                    "VideoCodec": row[2],
+                    "AudioCodec": row[3],
+                    "Container": row[4],
+                    "Resolution": row[5],
+                    "Reason": reason,
+                    "Count": row[7],
+                    "FirstSeen": row[8],
+                    "LastSeen": row[9],
+                    "SubtitleCodecs": row[10] or "",
+                    "TranscodeActions": row[11] or ""
+                })
+                if OperationType == "Transcode":
+                    reasons[reason] = reasons.get(reason, 0) + row[7]
+
+            totalQuery = "SELECT COUNT(*) FROM JellyfinOperations WHERE OperationType = ?"
+            totalRow = self.DatabaseService.ExecuteQuery(totalQuery, (OperationType,))
+            totalLogs = totalRow[0][0] if totalRow else 0
+
+            dateQuery = "SELECT MIN(LogDate), MAX(LogDate) FROM JellyfinOperations WHERE OperationType = ?"
+            dateRow = self.DatabaseService.ExecuteQuery(dateQuery, (OperationType,))
+
+            return {
+                "Success": True,
+                "Files": files,
+                "Count": len(files),
+                "TotalLogs": totalLogs,
+                "OperationType": OperationType,
+                "Reasons": reasons,
+                "OldestDate": dateRow[0][0] if dateRow else None,
+                "NewestDate": dateRow[0][1] if dateRow else None
+            }
+        except Exception as e:
+            LoggingService.LogException("Error getting Jellyfin operations by type", e, "DatabaseManager", "GetJellyfinOperationsByType")
+            return {"Success": False, "ErrorMessage": str(e)}
+
+    def GetTranscodeDestinationSummary(self) -> Dict[str, Any]:
+        """Aggregate destination formats from transcode logs to show what Jellyfin transcodes TO."""
+        try:
+            query = """
+                SELECT DestResolution, DestProfile, DestLevel, DestPixelFormat, DestFormat,
+                       COUNT(*) as Count
+                FROM JellyfinOperations
+                WHERE OperationType = 'Transcode'
+                  AND (DestResolution != '' OR DestProfile != '' OR DestLevel != '')
+                GROUP BY DestResolution, DestProfile, DestLevel, DestPixelFormat, DestFormat
+                ORDER BY Count DESC
+            """
+            rows = self.DatabaseService.ExecuteQuery(query)
+            formats = []
+            for row in rows:
+                formats.append({
+                    "DestResolution": row[0] or "",
+                    "DestProfile": row[1] or "",
+                    "DestLevel": row[2] or "",
+                    "DestPixelFormat": row[3] or "",
+                    "DestFormat": row[4] or "",
+                    "Count": row[5]
+                })
+            totalWithDest = sum(f["Count"] for f in formats)
+            return {"Success": True, "Formats": formats, "TotalWithDestInfo": totalWithDest}
+        except Exception as e:
+            LoggingService.LogException("Error getting transcode destination summary", e, "DatabaseManager", "GetTranscodeDestinationSummary")
+            return {"Success": False, "ErrorMessage": str(e)}
+
+    def GetMediaFileByFileName(self, FileName: str) -> Optional[Dict[str, Any]]:
+        """Look up a MediaFile by filename (case-insensitive) for mitigation checking.
+        Tries exact match first, then fuzzy match by episode prefix if not found.
+        Returns dict with MatchType: 'exact', 'no_ext', or 'fuzzy'."""
+        try:
+            selectCols = "Id, FileName, FilePath, ContainerFormat, Codec, AudioCodec, TranscodedByMediaVortex, SubtitleFormats"
+
+            # 1. Exact match
+            query = f"SELECT {selectCols} FROM MediaFiles WHERE LOWER(FileName) = LOWER(?) LIMIT 1"
+            rows = self.DatabaseService.ExecuteQuery(query, (FileName,))
+            if rows:
+                return self._MapMediaFileSummaryRow(rows[0], "exact")
+
+            # 2. Match without extension (handles container change: .mkv -> .mp4)
+            import os
+            nameNoExt = os.path.splitext(FileName)[0]
+            query = f"SELECT {selectCols} FROM MediaFiles WHERE LOWER(FileName) LIKE LOWER(?) LIMIT 1"
+            rows = self.DatabaseService.ExecuteQuery(query, (nameNoExt + '%',))
+            if rows:
+                return self._MapMediaFileSummaryRow(rows[0], "no_ext")
+
+            # 3. Fuzzy match by episode prefix (handles resolution/quality change)
+            episodePrefix = self._ExtractEpisodePrefix(FileName)
+            if episodePrefix and episodePrefix != nameNoExt:
+                rows = self.DatabaseService.ExecuteQuery(query, (episodePrefix + '%',))
+                if rows:
+                    return self._MapMediaFileSummaryRow(rows[0], "fuzzy")
+
+            return None
+        except Exception as e:
+            LoggingService.LogException("Error getting media file by filename", e, "DatabaseManager", "GetMediaFileByFileName")
+            return None
+
+    def _MapMediaFileSummaryRow(self, row, matchType: str = "exact") -> Dict[str, Any]:
+        """Map a summary row to a dict for mitigation checking."""
+        return {
+            "Id": row[0],
+            "FileName": row[1],
+            "FilePath": row[2],
+            "ContainerFormat": row[3],
+            "Codec": row[4],
+            "AudioCodec": row[5],
+            "TranscodedByMediaVortex": row[6],
+            "SubtitleFormats": row[7],
+            "MatchType": matchType
+        }
+
+    def _ExtractEpisodePrefix(self, FileName: str) -> Optional[str]:
+        """Extract the show name + episode identifier from a filename for fuzzy matching.
+        E.g. 'Psych - S06E01 - Shawn Rescues Darth Vader WEBRip-480p.mkv'
+          -> 'Psych - S06E01'
+        """
+        import re
+        # Match patterns like S01E05, S1E5, s01e05
+        match = re.search(r'(.*?S\d{1,2}E\d{1,2})', FileName, re.IGNORECASE)
+        if match:
+            return match.group(1).strip(' -_.')
+        # Match patterns like "1x05", "01x05"
+        match = re.search(r'(.*?\d{1,2}x\d{2})', FileName, re.IGNORECASE)
+        if match:
+            return match.group(1).strip(' -_.')
+        return None
+
+    def GetFullMediaFileByFileName(self, FileName: str) -> Optional[MediaFileModel]:
+        """Get full MediaFile model by filename (case-insensitive) for re-analysis.
+        Uses same 3-tier fuzzy matching as GetMediaFileByFileName."""
+        try:
+            import os
+            selectCols = """Id, SeasonId, FilePath, FileName, SizeMB, VideoBitrateKbps, AudioBitrateKbps,
+                       Resolution, Codec, DurationMinutes, FrameRate, LastScannedDate,
+                       CompressionPotential, AssignedProfile, IsInterlaced, ResolutionCategory,
+                       FileModificationTime, TotalFrames, CodecProfile, ColorRange, FieldOrder,
+                       HasBFrames, RefFrames, PixelFormat, Level, AudioChannels, AudioSampleRate,
+                       AudioSampleFormat, AudioChannelLayout, AudioCodec, SubtitleFormats,
+                       ContainerFormat, OverallBitrate, TranscodedByMediaVortex"""
+
+            # 1. Exact match
+            query = f"SELECT {selectCols} FROM MediaFiles WHERE LOWER(FileName) = LOWER(?) LIMIT 1"
+            rows = self.DatabaseService.ExecuteQuery(query, (FileName,))
+
+            # 2. Match without extension (handles container change: .mkv -> .mp4)
+            if not rows:
+                nameNoExt = os.path.splitext(FileName)[0]
+                likeQuery = f"SELECT {selectCols} FROM MediaFiles WHERE LOWER(FileName) LIKE LOWER(?) LIMIT 1"
+                rows = self.DatabaseService.ExecuteQuery(likeQuery, (nameNoExt + '%',))
+
+                # 3. Fuzzy match by episode prefix (handles resolution/quality change)
+                if not rows:
+                    episodePrefix = self._ExtractEpisodePrefix(FileName)
+                    if episodePrefix and episodePrefix != nameNoExt:
+                        rows = self.DatabaseService.ExecuteQuery(likeQuery, (episodePrefix + '%',))
+
+            if not rows:
+                return None
+            row = rows[0]
+            return MediaFileModel(
+                Id=row['Id'], SeasonId=row['SeasonId'], FilePath=row['FilePath'],
+                FileName=row['FileName'], SizeMB=row['SizeMB'],
+                VideoBitrateKbps=row['VideoBitrateKbps'], AudioBitrateKbps=row['AudioBitrateKbps'],
+                Resolution=row['Resolution'], Codec=row['Codec'],
+                DurationMinutes=row['DurationMinutes'], FrameRate=row['FrameRate'],
+                LastScannedDate=row['LastScannedDate'], CompressionPotential=row['CompressionPotential'],
+                AssignedProfile=row['AssignedProfile'], IsInterlaced=row['IsInterlaced'],
+                ResolutionCategory=row['ResolutionCategory'], FileModificationTime=row['FileModificationTime'],
+                TotalFrames=row['TotalFrames'], CodecProfile=row['CodecProfile'],
+                ColorRange=row['ColorRange'], FieldOrder=row['FieldOrder'],
+                HasBFrames=row['HasBFrames'], RefFrames=row['RefFrames'],
+                PixelFormat=row['PixelFormat'], Level=row['Level'],
+                AudioChannels=row['AudioChannels'], AudioSampleRate=row['AudioSampleRate'],
+                AudioSampleFormat=row['AudioSampleFormat'], AudioChannelLayout=row['AudioChannelLayout'],
+                AudioCodec=row['AudioCodec'], SubtitleFormats=row['SubtitleFormats'],
+                ContainerFormat=row['ContainerFormat'], OverallBitrate=row['OverallBitrate'],
+                TranscodedByMediaVortex=row['TranscodedByMediaVortex']
+            )
+        except Exception as e:
+            LoggingService.LogException("Error getting full media file by filename", e, "DatabaseManager", "GetFullMediaFileByFileName")
             return None

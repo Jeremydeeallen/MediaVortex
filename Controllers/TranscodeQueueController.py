@@ -61,17 +61,18 @@ def PopulateQueue():
         data = request.get_json() or {}
         rootFolderPath = data.get('RootFolderPath')
         profileId = data.get('ProfileId')
-        
+        compatibilityOnly = data.get('CompatibilityOnly', False)
+
         if profileId is not None and (not isinstance(profileId, int) or profileId < 1):
             errorMsg = "ProfileId must be a positive integer"
             LoggingService.LogError(errorMsg, "TranscodeQueueController", "PopulateQueue")
             return jsonify({"Success": False, "ErrorMessage": errorMsg}), 400
-        
+
         # Create ViewModel instance
         viewModel = TranscodeQueueViewModel()
-        
+
         # Populate queue - no limits, all matching files are added
-        result = viewModel.PopulateQueue(rootFolderPath, profileId)
+        result = viewModel.PopulateQueue(rootFolderPath, profileId, compatibilityOnly)
         
         if result.get("Success", False):
             itemsAdded = result.get("ItemsAdded", 0)
@@ -115,6 +116,19 @@ def ClearQueue():
         return jsonify({"Success": False, "ErrorMessage": errorMsg}), 500
 
 
+@TranscodeQueueBlueprint.route('/GetMkvCount', methods=['GET'])
+def GetMkvCount():
+    """Get count of MKV files available for remuxing."""
+    try:
+        viewModel = TranscodeQueueViewModel()
+        result = viewModel.GetMkvFileCount()
+        return jsonify(result)
+    except Exception as e:
+        errorMsg = f"Exception getting MKV count: {str(e)}"
+        LoggingService.LogException(errorMsg, e, "TranscodeQueueController", "GetMkvCount")
+        return jsonify({"Success": False, "MkvFileCount": 0, "ErrorMessage": errorMsg}), 500
+
+
 @TranscodeQueueBlueprint.route('/AddJob', methods=['POST'])
 def AddJob():
     """Manually add a job to the transcoding queue."""
@@ -127,6 +141,7 @@ def AddJob():
         priority = data.get('Priority')
         profileId = data.get('ProfileId')
         startTime = data.get('StartTime')
+        forceAdd = data.get('ForceAdd', False)
         
         # Validate parameters
         if not mediaFileId:
@@ -148,7 +163,7 @@ def AddJob():
         viewModel = TranscodeQueueViewModel()
         
         # Add job to queue
-        result = viewModel.AddJobToQueue(mediaFileId, priority, profileId, startTime)
+        result = viewModel.AddJobToQueue(mediaFileId, priority, profileId, startTime, forceAdd)
         
         if result.get("Success", False):
             itemId = result.get("ItemId")

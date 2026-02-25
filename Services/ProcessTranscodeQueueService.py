@@ -268,6 +268,14 @@ class ProcessTranscodeQueueService:
     
     def ProcessJob(self, Job: TranscodeQueueModel):
         """Process a single transcoding job through the complete workflow."""
+        # Branch on processing mode
+        if Job.IsRemux:
+            self.ProcessRemuxJob(Job)
+            return
+        if Job.IsSubtitleFix:
+            self.ProcessSubtitleFixJob(Job)
+            return
+
         ActiveJobId = None  # Initialize for error handling
         try:
             LoggingService.LogInfo(f"Starting job processing for job ID: {Job.Id}", "ProcessTranscodeQueueService", "ProcessJob")
@@ -392,6 +400,228 @@ class ProcessTranscodeQueueService:
             LoggingService.LogException(f"Exception processing job {Job.Id}", e, "ProcessTranscodeQueueService", "ProcessJob")
             self.HandleJobFailure(Job, f"Exception during processing: {str(e)}")
     
+    def ProcessRemuxJob(self, Job: TranscodeQueueModel):
+        """Process a remux (compatibility-only) job: copy video, handle audio, change container to MP4."""
+        ActiveJobId = None
+        TranscodeAttemptId = None
+        try:
+            LoggingService.LogInfo(f"Starting remux job processing for job ID: {Job.Id}", "ProcessTranscodeQueueService", "ProcessRemuxJob")
+
+            # Create active job record
+            ActiveJobId = self.DatabaseManager.CreateActiveJob(
+                ServiceName="TranscodeService",
+                JobType="Remux",
+                QueueId=Job.Id,
+                ProcessId=os.getpid(),
+                ThreadId=threading.get_ident()
+            )
+            if ActiveJobId == 0:
+                self.HandleJobFailure(Job, "Failed to create active job record for remux", None, ActiveJobId)
+                return
+
+            # Update queue status to Running
+            self.DatabaseManager.UpdateTranscodeQueueStatus(Job.Id, "Running")
+
+            # Create transcode attempt record
+            TranscodeAttemptId = self.CreateTranscodeAttempt(Job, None, None, None)
+            if not TranscodeAttemptId:
+                self.HandleJobFailure(Job, "Failed to create transcode attempt record for remux", None, ActiveJobId)
+                return
+
+            self.UpdateTranscodeProgress(TranscodeAttemptId, "Initializing", 0.0, "Starting remux (container change)...")
+
+            # Get MediaFile data
+            MediaFile = self.GetMediaFileData(Job)
+            if not MediaFile:
+                self.HandleJobFailure(Job, "Failed to get media file data for remux", TranscodeAttemptId, ActiveJobId)
+                return
+
+            self.ArchiveOriginalFileDetails(MediaFile, TranscodeAttemptId)
+
+            # Build remux command (no profile settings needed)
+            self.UpdateTranscodeProgress(TranscodeAttemptId, "Building Command", 0.0, "Building remux command...")
+            CommandResult = self.CommandBuilder.BuildRemuxCommand(Job, MediaFile)
+            if not CommandResult:
+                self.HandleJobFailure(Job, "Failed to build remux command", TranscodeAttemptId, ActiveJobId)
+                return
+
+            RemuxCommand = CommandResult['Command']
+            OutputPath = CommandResult['OutputPath']
+
+            # Setup file preparation (copy source to local)
+            self.UpdateTranscodeProgress(TranscodeAttemptId, "Preparing Files", 0.0, "Copying source file...")
+            if not self.SetupFilePreparation(Job, MediaFile, TranscodeAttemptId):
+                self.HandleJobFailure(Job, "Failed to setup file preparation for remux", TranscodeAttemptId, ActiveJobId)
+                return
+
+            # Create TemporaryFilePaths record
+            LocalSourcePath = f"C:\\MediaVortex\\Source\\{MediaFile.FileName}"
+            TemporaryFilePathId = self.PrivateCreateTemporaryFilePathRecord(TranscodeAttemptId, Job.FilePath, LocalSourcePath, OutputPath)
+
+            # Update attempt record
+            self.DatabaseManager.UpdateTranscodeAttempt(TranscodeAttemptId, {
+                'FilePath': Job.FilePath,
+                'AttemptDate': datetime.now(),
+                'Quality': 0,
+                'OldSizeBytes': Job.SizeBytes,
+                'NewSizeBytes': 0,
+                'Success': False,
+                'FfpmpegCommand': RemuxCommand,
+                'ProfileName': 'Remux',
+                'VMAF': None
+            })
+
+            # Execute remux
+            self.UpdateTranscodeProgress(TranscodeAttemptId, "Remuxing", 0.0, "Remuxing to MP4...")
+            TranscodeResult = self.ExecuteTranscoding(Job, RemuxCommand, TranscodeAttemptId, MediaFile, ActiveJobId)
+            if not TranscodeResult.get("Success", False):
+                self.HandleJobFailure(Job, f"Remux failed: {TranscodeResult.get('ErrorMessage', 'Unknown error')}", TranscodeAttemptId, ActiveJobId)
+                return
+
+            # Handle result - skip quality testing for remux
+            self.UpdateTranscodeProgress(TranscodeAttemptId, "Finalizing", 0.0, "Finalizing remux...")
+            self.HandleRemuxResult(Job, TranscodeResult, TranscodeAttemptId, ActiveJobId, OutputPath)
+            self.CleanupOrContinue(Job)
+
+            LoggingService.LogInfo(f"Completed remux job processing for job ID: {Job.Id}", "ProcessTranscodeQueueService", "ProcessRemuxJob")
+
+        except Exception as e:
+            LoggingService.LogException(f"Exception processing remux job {Job.Id}", e, "ProcessTranscodeQueueService", "ProcessRemuxJob")
+            self.HandleJobFailure(Job, f"Exception during remux: {str(e)}", TranscodeAttemptId, ActiveJobId)
+
+    def ProcessSubtitleFixJob(self, Job: TranscodeQueueModel):
+        """Process a subtitle fix job: copy video+audio, convert ASS/SSA subtitle to mov_text, output MP4."""
+        ActiveJobId = None
+        TranscodeAttemptId = None
+        try:
+            LoggingService.LogInfo(f"Starting subtitle fix job processing for job ID: {Job.Id}", "ProcessTranscodeQueueService", "ProcessSubtitleFixJob")
+
+            # Create active job record
+            ActiveJobId = self.DatabaseManager.CreateActiveJob(
+                ServiceName="TranscodeService",
+                JobType="SubtitleFix",
+                QueueId=Job.Id,
+                ProcessId=os.getpid(),
+                ThreadId=threading.get_ident()
+            )
+            if ActiveJobId == 0:
+                self.HandleJobFailure(Job, "Failed to create active job record for subtitle fix", None, ActiveJobId)
+                return
+
+            # Update queue status to Running
+            self.DatabaseManager.UpdateTranscodeQueueStatus(Job.Id, "Running")
+
+            # Create transcode attempt record
+            TranscodeAttemptId = self.CreateTranscodeAttempt(Job, None, None, None)
+            if not TranscodeAttemptId:
+                self.HandleJobFailure(Job, "Failed to create transcode attempt record for subtitle fix", None, ActiveJobId)
+                return
+
+            self.UpdateTranscodeProgress(TranscodeAttemptId, "Initializing", 0.0, "Starting subtitle fix (ASS/SSA → mov_text)...")
+
+            # Get MediaFile data
+            MediaFile = self.GetMediaFileData(Job)
+            if not MediaFile:
+                self.HandleJobFailure(Job, "Failed to get media file data for subtitle fix", TranscodeAttemptId, ActiveJobId)
+                return
+
+            self.ArchiveOriginalFileDetails(MediaFile, TranscodeAttemptId)
+
+            # Build subtitle fix command
+            self.UpdateTranscodeProgress(TranscodeAttemptId, "Building Command", 0.0, "Building subtitle fix command...")
+            CommandResult = self.CommandBuilder.BuildSubtitleFixCommand(Job, MediaFile)
+            if not CommandResult:
+                self.HandleJobFailure(Job, "Failed to build subtitle fix command", TranscodeAttemptId, ActiveJobId)
+                return
+
+            SubFixCommand = CommandResult['Command']
+            OutputPath = CommandResult['OutputPath']
+
+            # Setup file preparation (copy source to local)
+            self.UpdateTranscodeProgress(TranscodeAttemptId, "Preparing Files", 0.0, "Copying source file...")
+            if not self.SetupFilePreparation(Job, MediaFile, TranscodeAttemptId):
+                self.HandleJobFailure(Job, "Failed to setup file preparation for subtitle fix", TranscodeAttemptId, ActiveJobId)
+                return
+
+            # Create TemporaryFilePaths record
+            LocalSourcePath = f"C:\\MediaVortex\\Source\\{MediaFile.FileName}"
+            TemporaryFilePathId = self.PrivateCreateTemporaryFilePathRecord(TranscodeAttemptId, Job.FilePath, LocalSourcePath, OutputPath)
+
+            # Update attempt record
+            self.DatabaseManager.UpdateTranscodeAttempt(TranscodeAttemptId, {
+                'FilePath': Job.FilePath,
+                'AttemptDate': datetime.now(),
+                'Quality': 0,
+                'OldSizeBytes': Job.SizeBytes,
+                'NewSizeBytes': 0,
+                'Success': False,
+                'FfpmpegCommand': SubFixCommand,
+                'ProfileName': 'SubtitleFix',
+                'VMAF': None
+            })
+
+            # Execute subtitle fix
+            self.UpdateTranscodeProgress(TranscodeAttemptId, "Fixing Subtitles", 0.0, "Converting subtitles to mov_text...")
+            TranscodeResult = self.ExecuteTranscoding(Job, SubFixCommand, TranscodeAttemptId, MediaFile, ActiveJobId)
+            if not TranscodeResult.get("Success", False):
+                self.HandleJobFailure(Job, f"Subtitle fix failed: {TranscodeResult.get('ErrorMessage', 'Unknown error')}", TranscodeAttemptId, ActiveJobId)
+                return
+
+            # Handle result - skip quality testing (same as remux)
+            self.UpdateTranscodeProgress(TranscodeAttemptId, "Finalizing", 0.0, "Finalizing subtitle fix...")
+            self.HandleRemuxResult(Job, TranscodeResult, TranscodeAttemptId, ActiveJobId, OutputPath)
+            self.CleanupOrContinue(Job)
+
+            LoggingService.LogInfo(f"Completed subtitle fix job processing for job ID: {Job.Id}", "ProcessTranscodeQueueService", "ProcessSubtitleFixJob")
+
+        except Exception as e:
+            LoggingService.LogException(f"Exception processing subtitle fix job {Job.Id}", e, "ProcessTranscodeQueueService", "ProcessSubtitleFixJob")
+            self.HandleJobFailure(Job, f"Exception during subtitle fix: {str(e)}", TranscodeAttemptId, ActiveJobId)
+
+    def HandleRemuxResult(self, Job: TranscodeQueueModel, TranscodeResult: Dict[str, Any], TranscodeAttemptId: int, ActiveJobId: int, OutputPath: str):
+        """Handle remux results - skip quality testing, go directly to file replacement."""
+        try:
+            NewSizeBytes = TranscodeResult.get("NewSizeBytes", 0)
+            OutputFilePath = TranscodeResult.get("OutputFilePath", OutputPath)
+            OldSizeBytes = Job.SizeBytes
+
+            SizeReductionBytes = OldSizeBytes - NewSizeBytes if NewSizeBytes > 0 and OldSizeBytes > 0 else 0
+            SizeReductionPercent = (SizeReductionBytes / OldSizeBytes) * 100 if OldSizeBytes > 0 else 0.0
+
+            # Update attempt as successful, no quality test needed
+            self.DatabaseManager.UpdateTranscodeAttempt(TranscodeAttemptId, {
+                'Success': True,
+                'TranscodeDurationSeconds': TranscodeResult.get('Duration', 0.0),
+                'NewSizeBytes': NewSizeBytes,
+                'SizeReductionBytes': SizeReductionBytes,
+                'SizeReductionPercent': SizeReductionPercent,
+                'QualityTestRequired': False
+            })
+
+            # Update TranscodeFiles record
+            self.UpdateTranscodeFileRecord(Job.FilePath, TranscodeAttemptId, True, OutputFilePath, NewSizeBytes)
+
+            # Skip quality testing - go directly to file replacement
+            # Use ShouldQualityTest with bypass since video is bit-identical
+            QualityTestResult = self.ShouldQualityTest.ProcessTranscodedFile(TranscodeAttemptId, Job.FilePath, OutputFilePath)
+
+            if QualityTestResult.get("Success"):
+                LoggingService.LogInfo(f"Remux file replacement processed for TranscodeAttempt {TranscodeAttemptId}", "ProcessTranscodeQueueService", "HandleRemuxResult")
+            else:
+                LoggingService.LogWarning(f"Remux file replacement issue for TranscodeAttempt {TranscodeAttemptId}: {QualityTestResult.get('Message')}", "ProcessTranscodeQueueService", "HandleRemuxResult")
+
+            # Delete job from queue
+            self.DatabaseManager.DeleteTranscodeQueueItem(Job.Id)
+            self.DatabaseManager.DeleteTranscodeProgress(TranscodeAttemptId)
+
+            if ActiveJobId:
+                self.DatabaseManager.CompleteActiveJob(ActiveJobId, Success=True)
+
+            LoggingService.LogInfo(f"Remux job {Job.Id} completed successfully", "ProcessTranscodeQueueService", "HandleRemuxResult")
+
+        except Exception as e:
+            LoggingService.LogException("Exception handling remux result", e, "ProcessTranscodeQueueService", "HandleRemuxResult")
+
     def GetMediaFileData(self, Job: TranscodeQueueModel) -> Optional[MediaFileModel]:
         """Get MediaFile data by FilePath to retrieve source resolution."""
         try:
@@ -1182,135 +1412,67 @@ class ProcessTranscodeQueueService:
                                       "ProcessTranscodeQueueService", "PrivateHandleFilePreparationFailure")
     
     def CancelActiveTranscodeJob(self) -> Dict[str, Any]:
-        """Cancel the currently running transcode job and reset queue status to pending."""
+        """Cancel the currently running transcode job — kill FFmpeg by PID, clean up DB, remove from queue."""
         try:
             LoggingService.LogFunctionEntry("CancelActiveTranscodeJob", "ProcessTranscodeQueueService")
-            
+
             # Get active transcode job from TranscodeQueue (Status='Running')
-            active_jobs = self.DatabaseManager.GetTranscodeQueueItemsByStatus("Running")
-            if not active_jobs:
-                return {"Success": False, "Message": "No active transcode job found"}
-            
-            active_job = active_jobs[0]  # Get the first running job
-            job_id = active_job.Id
-            
-            LoggingService.LogInfo(f"Cancelling active transcode job {job_id} for file: {active_job.FileName}", 
+            running_jobs = self.DatabaseManager.GetTranscodeQueueItemsByStatus("Running")
+            if not running_jobs:
+                return {"Success": False, "ErrorMessage": "No active transcode job found"}
+
+            job = running_jobs[0]
+            job_id = job.Id
+
+            LoggingService.LogInfo(f"Cancelling active transcode job {job_id} for file: {job.FileName}",
                                  "ProcessTranscodeQueueService", "CancelActiveTranscodeJob")
-            
-            # Get the TranscodeAttemptId from the active job context
-            # We need to find the TranscodeAttemptId associated with this queue job
-            transcode_attempt_id = self.PrivateGetTranscodeAttemptIdForJob(job_id)
-            if not transcode_attempt_id:
-                LoggingService.LogWarning(f"Could not find TranscodeAttemptId for job {job_id}", 
-                                        "ProcessTranscodeQueueService", "CancelActiveTranscodeJob")
-            
-            # Kill FFmpeg process using VideoTranscodingService.StopTranscoding()
-            try:
-                from Services.VideoTranscodingService import VideoTranscodingService
-                video_service = VideoTranscodingService()
-                
-                # Get list of active jobs and stop them
-                active_job_ids = video_service.GetActiveJobs()
-                for active_job_id in active_job_ids:
-                    LoggingService.LogInfo(f"Stopping FFmpeg process for job {active_job_id}", 
-                                         "ProcessTranscodeQueueService", "CancelActiveTranscodeJob")
-                    stop_result = video_service.StopTranscoding(active_job_id)
-                    if stop_result.get("Success", False):
-                        LoggingService.LogInfo(f"Successfully stopped FFmpeg process for job {active_job_id}", 
-                                             "ProcessTranscodeQueueService", "CancelActiveTranscodeJob")
-                    else:
-                        LoggingService.LogWarning(f"Failed to stop FFmpeg process for job {active_job_id}: {stop_result.get('ErrorMessage', 'Unknown error')}", 
-                                                "ProcessTranscodeQueueService", "CancelActiveTranscodeJob")
-                        
-            except Exception as e:
-                LoggingService.LogException("Error stopping FFmpeg processes", e, 
-                                          "ProcessTranscodeQueueService", "CancelActiveTranscodeJob")
-            
-            # Update TranscodeAttempts: Set Success=False, ErrorMessage='Cancelled by user'
-            if transcode_attempt_id:
-                try:
-                    update_success = self.DatabaseManager.UpdateTranscodeAttempt(transcode_attempt_id, {
-                        'Success': False,
-                        'ErrorMessage': 'Cancelled by user'
-                    })
-                    
-                    if update_success:
-                        LoggingService.LogInfo(f"Updated TranscodeAttempt {transcode_attempt_id} as cancelled", 
-                                             "ProcessTranscodeQueueService", "CancelActiveTranscodeJob")
-                    else:
-                        LoggingService.LogWarning(f"Failed to update TranscodeAttempt {transcode_attempt_id}", 
-                                                "ProcessTranscodeQueueService", "CancelActiveTranscodeJob")
-                        
-                except Exception as e:
-                    LoggingService.LogException(f"Error updating TranscodeAttempt {transcode_attempt_id}", e, 
-                                              "ProcessTranscodeQueueService", "CancelActiveTranscodeJob")
-            
-            # Update TranscodeQueue: Set Status='Pending' (NOT deleted, so it can be retried)
-            try:
-                queue_update_success = self.DatabaseManager.UpdateTranscodeQueueStatus(job_id, "Pending")
-                if queue_update_success:
-                    # Also reset DateStarted to NULL
-                    self.DatabaseManager.DatabaseService.ExecuteNonQuery(
-                        "UPDATE TranscodeQueue SET DateStarted = NULL WHERE Id = ?", 
-                        (job_id,)
-                    )
-                    LoggingService.LogInfo(f"Reset TranscodeQueue job {job_id} status to Pending", 
-                                         "ProcessTranscodeQueueService", "CancelActiveTranscodeJob")
-                else:
-                    LoggingService.LogWarning(f"Failed to update TranscodeQueue job {job_id} status", 
-                                            "ProcessTranscodeQueueService", "CancelActiveTranscodeJob")
-                    
-            except Exception as e:
-                LoggingService.LogException(f"Error updating TranscodeQueue job {job_id}", e, 
-                                          "ProcessTranscodeQueueService", "CancelActiveTranscodeJob")
-            
-            # Delete from TranscodeProgress table using TranscodeAttemptId
-            if transcode_attempt_id:
-                try:
-                    progress_deleted = self.DatabaseManager.DatabaseService.ExecuteNonQuery(
-                        "DELETE FROM TranscodeProgress WHERE TranscodeAttemptId = ?", 
-                        (transcode_attempt_id,)
-                    )
-                    
-                    if progress_deleted:
-                        LoggingService.LogInfo(f"Deleted TranscodeProgress records for TranscodeAttempt {transcode_attempt_id}", 
-                                             "ProcessTranscodeQueueService", "CancelActiveTranscodeJob")
-                    else:
-                        LoggingService.LogInfo(f"No TranscodeProgress records found for TranscodeAttempt {transcode_attempt_id}", 
-                                             "ProcessTranscodeQueueService", "CancelActiveTranscodeJob")
-                        
-                except Exception as e:
-                    LoggingService.LogException(f"Error deleting TranscodeProgress for TranscodeAttempt {transcode_attempt_id}", e, 
-                                              "ProcessTranscodeQueueService", "CancelActiveTranscodeJob")
-            
-            # Complete any ActiveJobs records via DatabaseManager.CompleteActiveJob()
-            try:
-                # Get active jobs for TranscodeService
-                active_jobs = self.DatabaseManager.GetActiveJobsByService("TranscodeService")
-                for active_job in active_jobs:
+
+            # 1. Kill FFmpeg process via ActiveJobs PID
+            from Services.ProcessManagementService import ProcessManagementService
+            process_mgmt = ProcessManagementService()
+            active_jobs = self.DatabaseManager.GetActiveJobsByService("TranscodeService")
+            for active_job in active_jobs:
+                if active_job.get('QueueId') == job_id:
+                    pid = active_job.get('ProcessId')
+                    if pid:
+                        try:
+                            process_mgmt.KillProcess(pid, Graceful=True)
+                            LoggingService.LogInfo(f"Killed FFmpeg process PID {pid} for job {job_id}",
+                                                 "ProcessTranscodeQueueService", "CancelActiveTranscodeJob")
+                        except Exception as e:
+                            LoggingService.LogException(f"Error killing FFmpeg process PID {pid}", e,
+                                                      "ProcessTranscodeQueueService", "CancelActiveTranscodeJob")
                     self.DatabaseManager.CompleteActiveJob(active_job['Id'], False, "Cancelled by user")
-                    LoggingService.LogInfo(f"Completed active job {active_job['Id']} as cancelled", 
-                                         "ProcessTranscodeQueueService", "CancelActiveTranscodeJob")
-                    
-            except Exception as e:
-                LoggingService.LogException("Error completing active jobs", e, 
-                                          "ProcessTranscodeQueueService", "CancelActiveTranscodeJob")
-            
-            LoggingService.LogInfo(f"Successfully cancelled transcode job {job_id} for file: {active_job.FileName}", 
+                    break
+
+            # 2. Mark TranscodeAttempts as cancelled
+            self.DatabaseManager.DatabaseService.ExecuteNonQuery(
+                "UPDATE TranscodeAttempts SET Success = 0, ErrorMessage = 'Cancelled by user' "
+                "WHERE LOWER(FilePath) = LOWER(?) AND Success IS NULL", (job.FilePath,))
+
+            # 3. Clean up TranscodeProgress records
+            self.DatabaseManager.DatabaseService.ExecuteNonQuery(
+                "DELETE FROM TranscodeProgress WHERE TranscodeAttemptId IN ("
+                "SELECT Id FROM TranscodeAttempts WHERE LOWER(FilePath) = LOWER(?) AND Success = 0)",
+                (job.FilePath,))
+
+            # 4. Delete the queue item (same as queue page cancel)
+            self.DatabaseManager.DeleteTranscodeQueueItem(job_id)
+
+            LoggingService.LogInfo(f"Successfully cancelled and removed transcode job {job_id} for file: {job.FileName}",
                                  "ProcessTranscodeQueueService", "CancelActiveTranscodeJob")
-            
+
             return {
-                "Success": True, 
-                "Message": f"Active transcode job cancelled successfully. File: {active_job.FileName}",
-                "JobId": job_id,
-                "TranscodeAttemptId": transcode_attempt_id
+                "Success": True,
+                "Message": f"Transcode job cancelled and removed. File: {job.FileName}",
+                "JobId": job_id
             }
-            
+
         except Exception as e:
-            LoggingService.LogException("Error cancelling active transcode job", e, 
+            LoggingService.LogException("Error cancelling active transcode job", e,
                                       "ProcessTranscodeQueueService", "CancelActiveTranscodeJob")
-            return {"Success": False, "Message": str(e)}
-    
+            return {"Success": False, "ErrorMessage": str(e)}
+
     def PrivateGetTranscodeAttemptIdForJob(self, JobId: int) -> Optional[int]:
         """Private method to get TranscodeAttemptId for a given TranscodeQueue job."""
         try:

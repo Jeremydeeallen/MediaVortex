@@ -99,53 +99,113 @@ class StuckJobDetectionService:
                 "JobsCleaned": 0
             }
     
+    # If no progress update for this many minutes, consider the job frozen (even if FFmpeg process is alive)
+    FROZEN_PROGRESS_THRESHOLD_MINUTES = 5
+
     def IsJobStuck(self, Job) -> tuple[bool, str]:
-        """Check if a specific job is stuck by verifying if the FFmpeg process is still alive."""
+        """Check if a specific job is stuck by verifying if the FFmpeg process is still alive and making progress."""
         try:
             # Get active job record for this transcode job
             activeJobs = self.DatabaseManager.GetActiveJobsByService("TranscodeService")
-            
+
             # Find the active job for this queue item
             relevantActiveJob = None
             for activeJob in activeJobs:
                 if activeJob.get('QueueId') == Job.Id:
                     relevantActiveJob = activeJob
                     break
-            
+
             if not relevantActiveJob:
                 # No active job record found - this could be stuck
                 return True, "No ActiveJob record found for running transcode job"
-            
+
             processId = relevantActiveJob.get('ProcessId')
             if not processId:
                 # No process ID recorded yet - might be stuck
                 return True, "No ProcessId recorded in ActiveJob"
-            
-            # Check if the process is still alive
+
+            # Check if the tracked process is still alive and is actually FFmpeg
             isAlive = self.IsProcessAlive(processId)
-            
+
             if not isAlive:
-                return True, f"FFmpeg process {processId} not found (process died)"
-            else:
-                return False, "Process is alive and running"
-                
+                return True, f"FFmpeg process {processId} not found or is no longer FFmpeg (process died or PID reused)"
+
+            # Secondary check: verify there are actually FFmpeg processes on the system
+            ffmpegProcesses = self.ProcessManagementService.FindFFmpegProcesses()
+            if not ffmpegProcesses:
+                return True, f"No FFmpeg processes running on system but job status is Running (PID {processId} may have been reused)"
+
+            # Progress stagnation check: process is alive but may be frozen
+            isFrozen, frozenReason = self._IsJobFrozen(Job)
+            if isFrozen:
+                return True, frozenReason
+
+            return False, "Process is alive and making progress"
+
         except Exception as e:
-            LoggingService.LogException(f"Error checking if job {Job.Id} is stuck", e, 
+            LoggingService.LogException(f"Error checking if job {Job.Id} is stuck", e,
                                      "StuckJobDetectionService", "IsJobStuck")
             # If we can't determine, assume it's not stuck to be safe
             return False, f"Error checking process status: {str(e)}"
+
+    def _IsJobFrozen(self, Job) -> tuple[bool, str]:
+        """Check if a job's FFmpeg process is alive but not making progress (frozen/hung)."""
+        try:
+            # Get the latest TranscodeProgress record for this job's file
+            query = """
+                SELECT tp.LastProgressUpdate, tp.ProgressPercent, tp.CurrentFPS
+                FROM TranscodeProgress tp
+                INNER JOIN TranscodeAttempts ta ON tp.TranscodeAttemptId = ta.Id
+                WHERE LOWER(ta.FilePath) = LOWER(?) AND ta.Success IS NULL
+                ORDER BY tp.LastProgressUpdate DESC
+                LIMIT 1
+            """
+            rows = self.DatabaseManager.DatabaseService.ExecuteQuery(query, (Job.FilePath,))
+
+            if not rows:
+                # No progress records yet - job may still be starting up, not frozen
+                return False, "No progress records found (job may be starting)"
+
+            row = rows[0]
+            lastUpdateStr = row[0]  # LastProgressUpdate
+            progressPercent = row[1]
+            currentFPS = row[2]
+
+            if not lastUpdateStr:
+                return False, "No LastProgressUpdate timestamp available"
+
+            # Parse the timestamp and check staleness
+            lastUpdate = datetime.strptime(lastUpdateStr, "%Y-%m-%d %H:%M:%S")
+            minutesSinceUpdate = (datetime.now() - lastUpdate).total_seconds() / 60.0
+
+            if minutesSinceUpdate >= self.FROZEN_PROGRESS_THRESHOLD_MINUTES:
+                return True, (
+                    f"FFmpeg process is alive but frozen - no progress update for {minutesSinceUpdate:.1f} minutes "
+                    f"(threshold: {self.FROZEN_PROGRESS_THRESHOLD_MINUTES}min). "
+                    f"Last progress: {progressPercent:.1f}%, FPS: {currentFPS}"
+                )
+
+            return False, f"Progress updated {minutesSinceUpdate:.1f} minutes ago"
+
+        except Exception as e:
+            LoggingService.LogException(f"Error checking if job {Job.Id} is frozen", e,
+                                     "StuckJobDetectionService", "_IsJobFrozen")
+            return False, f"Error checking progress stagnation: {str(e)}"
     
     def IsProcessAlive(self, ProcessId: int) -> bool:
-        """Check if a process with the given ID is still alive using psutil."""
+        """Check if a process with the given ID is still alive and is actually an FFmpeg process."""
         try:
             if not ProcessId or ProcessId <= 0:
                 return False
-            
-            # Use psutil to check if process exists
-            return psutil.pid_exists(ProcessId)
-            
+
+            # Verify the process exists AND is actually FFmpeg (PIDs get reused by the OS)
+            process = psutil.Process(ProcessId)
+            return process.is_running() and 'ffmpeg' in process.name().lower()
+
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+            return False
         except Exception as e:
-            LoggingService.LogException(f"Error checking if process {ProcessId} is alive", e, 
+            LoggingService.LogException(f"Error checking if process {ProcessId} is alive", e,
                                       "StuckJobDetectionService", "IsProcessAlive")
             return False
     

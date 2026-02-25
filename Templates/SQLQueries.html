@@ -6,43 +6,16 @@
 <div class="container-fluid">
     <div class="row">
         <div class="col-12">
-            <h1 class="mb-4">
-                <i class="fas fa-database"></i> SQL Queries & Troubleshooting
-            </h1>
-            <p class="text-muted">Execute custom SQL queries and access common troubleshooting data for MediaVortex services.</p>
-        </div>
-    </div>
-
-    <!-- Media File Comparison Section -->
-    <div class="row mb-4">
-        <div class="col-12">
-            <div class="card">
-                <div class="card-header">
-                    <h5 class="mb-0">
-                        <i class="fas fa-exchange-alt"></i> Media File Comparison
-                    </h5>
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <div>
+                    <h1 class="h3 mb-0">
+                        <i class="fas fa-database"></i> SQL Queries & Troubleshooting
+                    </h1>
+                    <p class="text-muted mb-0 mt-1">Execute custom SQL queries and access common troubleshooting data for MediaVortex services.</p>
                 </div>
-                <div class="card-body">
-                    <div class="row g-3">
-                        <div class="col-md-4">
-                            <label for="FileIdInput" class="form-label">File ID:</label>
-                            <input type="number" class="form-control" id="FileIdInput" placeholder="Enter MediaFile ID">
-                        </div>
-                        <div class="col-md-4">
-                            <label for="FilePathInput" class="form-label">File Path:</label>
-                            <input type="text" class="form-control" id="FilePathInput" placeholder="Enter file path or filename">
-                        </div>
-                        <div class="col-md-4">
-                            <label class="form-label">&nbsp;</label>
-                            <button class="btn btn-primary w-100" onclick="LoadMediaFileComparison()">
-                                <i class="fas fa-search"></i> Load Comparison
-                            </button>
-                        </div>
-                    </div>
-                    <div id="ComparisonResults" class="mt-3" style="display: none;">
-                        <!-- Comparison results will be displayed here -->
-                    </div>
-                </div>
+                <button type="button" class="btn btn-secondary" onclick="sqlQueriesManager.RefreshPage()">
+                    <i class="fas fa-sync-alt"></i> Refresh
+                </button>
             </div>
         </div>
     </div>
@@ -50,8 +23,8 @@
     <!-- Quick Actions Row -->
     <div class="row mb-4">
         <div class="col-12">
-            <div class="card">
-                <div class="card-header">
+            <div class="card shadow-sm">
+                <div class="card-header bg-gradient-primary text-white d-flex justify-content-between align-items-center">
                     <h5 class="mb-0">
                         <i class="fas fa-bolt"></i> Quick Actions
                     </h5>
@@ -59,22 +32,22 @@
                 <div class="card-body">
                     <div class="row g-3">
                         <div class="col-md-3">
-                            <button class="btn btn-info w-100" onclick="LoadActiveJobs()">
+                            <button class="btn btn-info w-100" onclick="sqlQueriesManager.LoadActiveJobs()">
                                 <i class="fas fa-tasks"></i> Active Jobs
                             </button>
                         </div>
                         <div class="col-md-3">
-                            <button class="btn btn-warning w-100" onclick="LoadErrorSummary()">
+                            <button class="btn btn-warning w-100" onclick="sqlQueriesManager.LoadErrorSummary()">
                                 <i class="fas fa-exclamation-triangle"></i> Error Summary
                             </button>
                         </div>
                         <div class="col-md-3">
-                            <button class="btn btn-danger w-100" onclick="LoadStuckJobs()">
+                            <button class="btn btn-danger w-100" onclick="sqlQueriesManager.LoadStuckJobs()">
                                 <i class="fas fa-clock"></i> Stuck Jobs
                             </button>
                         </div>
                         <div class="col-md-3">
-                            <button class="btn btn-success w-100" onclick="LoadDatabaseInfo()">
+                            <button class="btn btn-success w-100" onclick="sqlQueriesManager.LoadDatabaseInfo()">
                                 <i class="fas fa-table"></i> Database Info
                             </button>
                         </div>
@@ -87,13 +60,13 @@
     <!-- Recent Transcode Failures Section -->
     <div class="row mb-4">
         <div class="col-12">
-            <div class="card">
-                <div class="card-header d-flex justify-content-between align-items-center">
+            <div class="card shadow-sm">
+                <div class="card-header bg-gradient-dark text-white d-flex justify-content-between align-items-center">
                     <h5 class="mb-0">
                         <i class="fas fa-exclamation-circle"></i> Recent Transcode Failures
                     </h5>
-                    <button class="btn btn-sm btn-outline-primary" onclick="LoadRecentFailures()">
-                        <i class="fas fa-refresh"></i> Refresh
+                    <button class="btn btn-sm btn-outline-light" onclick="sqlQueriesManager.LoadRecentFailures()">
+                        <i class="fas fa-sync-alt"></i> Refresh
                     </button>
                 </div>
                 <div class="card-body">
@@ -113,13 +86,13 @@
     <!-- Stuck Jobs Section -->
     <div class="row mb-4">
         <div class="col-12">
-            <div class="card">
-                <div class="card-header d-flex justify-content-between align-items-center">
+            <div class="card shadow-sm">
+                <div class="card-header bg-gradient-dark text-white d-flex justify-content-between align-items-center">
                     <h5 class="mb-0">
                         <i class="fas fa-clock"></i> Stuck Jobs
                     </h5>
-                    <button class="btn btn-sm btn-outline-danger" onclick="LoadStuckJobs()">
-                        <i class="fas fa-refresh"></i> Check Stuck Jobs
+                    <button class="btn btn-sm btn-outline-light" onclick="sqlQueriesManager.LoadStuckJobs()">
+                        <i class="fas fa-sync-alt"></i> Check Stuck Jobs
                     </button>
                 </div>
                 <div class="card-body">
@@ -137,15 +110,15 @@
     <!-- Quality Test Results Section -->
     <div class="row mb-4">
         <div class="col-12">
-            <div class="card">
-                <div class="card-header d-flex justify-content-between align-items-center">
+            <div class="card shadow-sm">
+                <div class="card-header bg-gradient-success text-white d-flex justify-content-between align-items-center">
                     <h5 class="mb-0">
                         <i class="fas fa-chart-line"></i> Quality Test Results
                     </h5>
                     <div class="btn-group" role="group">
-                        <button class="btn btn-sm btn-outline-primary" onclick="LoadQualityTestResults('All')">All</button>
-                        <button class="btn btn-sm btn-outline-success" onclick="LoadQualityTestResults('Passed')">Passed</button>
-                        <button class="btn btn-sm btn-outline-danger" onclick="LoadQualityTestResults('Failed')">Failed</button>
+                        <button class="btn btn-sm btn-outline-light" onclick="sqlQueriesManager.LoadQualityTestResults('All')">All</button>
+                        <button class="btn btn-sm btn-outline-light" onclick="sqlQueriesManager.LoadQualityTestResults('Passed')">Passed</button>
+                        <button class="btn btn-sm btn-outline-light" onclick="sqlQueriesManager.LoadQualityTestResults('Failed')">Failed</button>
                     </div>
                 </div>
                 <div class="card-body">
@@ -160,17 +133,51 @@
         </div>
     </div>
 
+    <!-- Media File Comparison Section -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card shadow-sm">
+                <div class="card-header bg-gradient-secondary text-white d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">
+                        <i class="fas fa-exchange-alt"></i> Media File Comparison
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="row g-3">
+                        <div class="col-md-4">
+                            <label for="FileIdInput" class="form-label">File ID:</label>
+                            <input type="number" class="form-control" id="FileIdInput" placeholder="Enter MediaFile ID">
+                        </div>
+                        <div class="col-md-4">
+                            <label for="FilePathInput" class="form-label">File Path:</label>
+                            <input type="text" class="form-control" id="FilePathInput" placeholder="Enter file path or filename">
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">&nbsp;</label>
+                            <button class="btn btn-primary w-100" onclick="sqlQueriesManager.LoadMediaFileComparison()">
+                                <i class="fas fa-search"></i> Load Comparison
+                            </button>
+                        </div>
+                    </div>
+                    <div id="ComparisonResults" class="mt-3" style="display: none;">
+                        <!-- Comparison results will be displayed here -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Service Logs Section (Collapsed) -->
     <div class="row mb-4">
         <div class="col-12">
-            <div class="card">
-                <div class="card-header">
+            <div class="card shadow-sm">
+                <div class="card-header bg-gradient-dark text-white d-flex justify-content-between align-items-center"
+                     data-bs-toggle="collapse" data-bs-target="#ServiceLogsCollapse"
+                     style="cursor: pointer;">
                     <h5 class="mb-0">
                         <i class="fas fa-file-alt"></i> Service Logs
-                        <button class="btn btn-sm btn-outline-secondary float-end" type="button" data-bs-toggle="collapse" data-bs-target="#ServiceLogsCollapse">
-                            <i class="fas fa-chevron-down"></i>
-                        </button>
                     </h5>
+                    <i class="fas fa-chevron-down"></i>
                 </div>
                 <div class="collapse" id="ServiceLogsCollapse">
                     <div class="card-body">
@@ -205,7 +212,7 @@
                                 <input type="number" class="form-control" id="LogLimit" placeholder="Limit" value="50" min="1" max="500">
                             </div>
                             <div class="col-md-3">
-                                <button class="btn btn-secondary w-100" onclick="LoadServiceLogs()">
+                                <button class="btn btn-secondary w-100" onclick="sqlQueriesManager.LoadServiceLogs()">
                                     <i class="fas fa-search"></i> Load Logs
                                 </button>
                             </div>
@@ -216,16 +223,28 @@
         </div>
     </div>
 
-    <!-- Custom Query Section -->
+    <!-- Custom SQL Query Section (merged with Common Queries) -->
     <div class="row mb-4">
         <div class="col-12">
-            <div class="card">
-                <div class="card-header">
+            <div class="card shadow-sm">
+                <div class="card-header bg-gradient-primary text-white d-flex justify-content-between align-items-center">
                     <h5 class="mb-0">
                         <i class="fas fa-code"></i> Custom SQL Query
                     </h5>
                 </div>
                 <div class="card-body">
+                    <div class="mb-3">
+                        <label class="form-label">Quick Queries:</label>
+                        <div class="d-flex gap-2">
+                            <button class="btn btn-sm btn-outline-secondary" onclick="sqlQueriesManager.LoadCommonQuery('recent_errors')">
+                                <i class="fas fa-exclamation-circle"></i> Recent Errors (24h)
+                            </button>
+                            <button class="btn btn-sm btn-outline-secondary" onclick="sqlQueriesManager.LoadCommonQuery('service_health')">
+                                <i class="fas fa-heartbeat"></i> Service Health
+                            </button>
+                        </div>
+                    </div>
+                    <hr>
                     <div class="mb-3">
                         <label for="CustomQuery" class="form-label">SQL Query (SELECT only for security):</label>
                         <textarea class="form-control" id="CustomQuery" rows="4" placeholder="SELECT * FROM Logs WHERE LogLevel = 'ERROR' ORDER BY Timestamp DESC LIMIT 10"></textarea>
@@ -235,55 +254,8 @@
                             <input type="text" class="form-control" id="QueryParameters" placeholder="Parameters (comma-separated, optional)">
                         </div>
                         <div class="col-md-4">
-                            <button class="btn btn-primary w-100" onclick="ExecuteCustomQuery()">
+                            <button class="btn btn-primary w-100" onclick="sqlQueriesManager.ExecuteCustomQuery()">
                                 <i class="fas fa-play"></i> Execute Query
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Common Queries Section -->
-    <div class="row mb-4">
-        <div class="col-12">
-            <div class="card">
-                <div class="card-header">
-                    <h5 class="mb-0">
-                        <i class="fas fa-bookmark"></i> Common Troubleshooting Queries
-                    </h5>
-                </div>
-                <div class="card-body">
-                    <div class="row g-2">
-                        <div class="col-md-4">
-                            <button class="btn btn-outline-secondary w-100" onclick="LoadCommonQuery('recent_errors')">
-                                Recent Errors (24h)
-                            </button>
-                        </div>
-                        <div class="col-md-4">
-                            <button class="btn btn-outline-secondary w-100" onclick="LoadCommonQuery('stuck_jobs')">
-                                Stuck Jobs
-                            </button>
-                        </div>
-                        <div class="col-md-4">
-                            <button class="btn btn-outline-secondary w-100" onclick="LoadCommonQuery('service_health')">
-                                Service Health
-                            </button>
-                        </div>
-                        <div class="col-md-4">
-                            <button class="btn btn-outline-secondary w-100" onclick="LoadCommonQuery('transcode_failures')">
-                                Transcode Failures
-                            </button>
-                        </div>
-                        <div class="col-md-4">
-                            <button class="btn btn-outline-secondary w-100" onclick="LoadCommonQuery('quality_test_results')">
-                                Quality Test Results
-                            </button>
-                        </div>
-                        <div class="col-md-4">
-                            <button class="btn btn-outline-secondary w-100" onclick="LoadCommonQuery('database_size')">
-                                Database Size
                             </button>
                         </div>
                     </div>
@@ -295,14 +267,14 @@
     <!-- Results Section -->
     <div class="row">
         <div class="col-12">
-            <div class="card">
-                <div class="card-header d-flex justify-content-between align-items-center">
+            <div class="card shadow-sm">
+                <div class="card-header bg-gradient-dark text-white d-flex justify-content-between align-items-center">
                     <h5 class="mb-0">
                         <i class="fas fa-table"></i> Query Results
                     </h5>
                     <div>
-                        <span class="badge bg-secondary" id="ResultCount">0 rows</span>
-                        <button class="btn btn-sm btn-outline-secondary ms-2" onclick="ClearResults()">
+                        <span class="badge bg-light text-dark" id="ResultCount">0 rows</span>
+                        <button class="btn btn-sm btn-outline-light ms-2" onclick="sqlQueriesManager.ClearResults()">
                             <i class="fas fa-trash"></i> Clear
                         </button>
                     </div>
@@ -325,708 +297,664 @@
         </div>
     </div>
 </div>
+
+<!-- Alert Container -->
+<div id="AlertContainer" class="position-fixed top-0 end-0 p-3" style="z-index: 1050;"></div>
 {% endblock %}
 
 {% block scripts %}
 <script>
-// Common query templates
-const CommonQueries = {
-    'recent_errors': "SELECT LogLevel, Message, Timestamp, Component, FunctionName FROM Logs WHERE LogLevel IN ('ERROR', 'CRITICAL') AND Timestamp >= datetime('now', '-24 hours') ORDER BY Timestamp DESC LIMIT 50",
-    'stuck_jobs': "SELECT Id, ServiceName, JobType, Status, StartedAt, CreatedAt, UpdatedAt FROM ActiveJobs WHERE Status = 'Running' AND StartedAt < datetime('now', '-1 hour') ORDER BY StartedAt ASC",
-    'service_health': "SELECT ServiceName, Status, HealthStatus, ErrorCount, LastErrorMessage, LastHealthCheck FROM ServiceStatus ORDER BY ServiceName",
-    'transcode_failures': "SELECT Id, FilePath, FileName, Status, ErrorMessage, DateAdded, DateStarted FROM TranscodeQueue WHERE Status = 'Failed' ORDER BY DateAdded DESC LIMIT 20",
-    'quality_test_results': "SELECT Id, OriginalFilePath, TranscodedFilePath, Status, VMAFScore, DateAdded, DateCompleted FROM QualityTestingQueue WHERE Status = 'Completed' ORDER BY DateCompleted DESC LIMIT 20",
-    'database_size': "SELECT name, (SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=t.name) as row_count FROM sqlite_master t WHERE type='table' ORDER BY name"
-};
+class SQLQueriesManager {
+    constructor() {
+        this.CommonQueries = {
+            'recent_errors': "SELECT LogLevel, Message, Timestamp, Component, FunctionName FROM Logs WHERE LogLevel IN ('ERROR', 'CRITICAL') AND Timestamp >= datetime('now', '-24 hours') ORDER BY Timestamp DESC LIMIT 50",
+            'service_health': "SELECT ServiceName, Status, HealthStatus, ErrorCount, LastErrorMessage, LastHealthCheck FROM ServiceStatus ORDER BY ServiceName"
+        };
+        this.LoadRecentFailures();
+    }
 
-function ShowLoading() {
-    document.getElementById('LoadingSpinner').style.display = 'block';
-    document.getElementById('ResultsContainer').style.display = 'none';
-}
+    // ---- Utility Methods ----
 
-function HideLoading() {
-    document.getElementById('LoadingSpinner').style.display = 'none';
-    document.getElementById('ResultsContainer').style.display = 'block';
-}
-
-function DisplayResults(data, title = 'Query Results') {
-    HideLoading();
-    
-    const container = document.getElementById('ResultsContainer');
-    const countElement = document.getElementById('ResultCount');
-    
-    if (!data || data.length === 0) {
-        container.innerHTML = `
-            <div class="text-muted text-center py-4">
-                <i class="fas fa-info-circle fa-2x mb-3"></i>
-                <p>No results found.</p>
+    showAlert(message, type) {
+        const alertContainer = document.getElementById('AlertContainer');
+        const alertId = 'alert-' + Date.now();
+        const alertHtml = `
+            <div class="alert alert-${type} alert-dismissible fade show" role="alert" id="${alertId}">
+                ${message}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
             </div>
         `;
-        countElement.textContent = '0 rows';
-        return;
+        alertContainer.insertAdjacentHTML('beforeend', alertHtml);
+        setTimeout(() => {
+            const alert = document.getElementById(alertId);
+            if (alert) alert.remove();
+        }, 5000);
     }
-    
-    // Create table
-    const table = document.createElement('table');
-    table.className = 'table table-striped table-hover';
-    
-    // Create header
-    const thead = document.createElement('thead');
-    const headerRow = document.createElement('tr');
-    const columns = Object.keys(data[0]);
-    
-    columns.forEach(column => {
-        const th = document.createElement('th');
-        th.textContent = column;
-        th.style.cursor = 'pointer';
-        th.onclick = () => SortTable(table, Array.from(thead.children[0].children).indexOf(th));
-        headerRow.appendChild(th);
-    });
-    
-    thead.appendChild(headerRow);
-    table.appendChild(thead);
-    
-    // Create body
-    const tbody = document.createElement('tbody');
-    data.forEach(row => {
-        const tr = document.createElement('tr');
-        columns.forEach(column => {
-            const td = document.createElement('td');
-            const value = row[column];
-            if (value === null || value === undefined) {
-                td.textContent = '';
-                td.className = 'text-muted';
-            } else if (typeof value === 'boolean') {
-                td.innerHTML = value ? '<span class="badge bg-success">True</span>' : '<span class="badge bg-secondary">False</span>';
-            } else if (typeof value === 'string' && value.length > 100) {
-                td.innerHTML = `<span title="${value}">${value.substring(0, 100)}...</span>`;
-            } else {
-                td.textContent = value;
-            }
-            tr.appendChild(td);
-        });
-        tbody.appendChild(tr);
-    });
-    
-    table.appendChild(tbody);
-    
-    // Clear container and add table
-    container.innerHTML = '';
-    container.appendChild(table);
-    
-    countElement.textContent = `${data.length} rows`;
-}
 
-function SortTable(table, columnIndex) {
-    const tbody = table.querySelector('tbody');
-    const rows = Array.from(tbody.querySelectorAll('tr'));
-    
-    rows.sort((a, b) => {
-        const aVal = a.children[columnIndex].textContent.trim();
-        const bVal = b.children[columnIndex].textContent.trim();
-        
-        // Try to parse as numbers
-        const aNum = parseFloat(aVal);
-        const bNum = parseFloat(bVal);
-        
-        if (!isNaN(aNum) && !isNaN(bNum)) {
-            return aNum - bNum;
-        }
-        
-        return aVal.localeCompare(bVal);
-    });
-    
-    rows.forEach(row => tbody.appendChild(row));
-}
-
-function ClearResults() {
-    document.getElementById('ResultsContainer').innerHTML = `
-        <div class="text-muted text-center py-4">
-            <i class="fas fa-database fa-3x mb-3"></i>
-            <p>No results to display. Use the buttons above or enter a custom query.</p>
-        </div>
-    `;
-    document.getElementById('ResultCount').textContent = '0 rows';
-}
-
-// API Functions
-async function ExecuteCustomQuery() {
-    const query = document.getElementById('CustomQuery').value.trim();
-    const parametersText = document.getElementById('QueryParameters').value.trim();
-    
-    if (!query) {
-        alert('Please enter a SQL query');
-        return;
+    ShowLoading() {
+        document.getElementById('LoadingSpinner').style.display = 'block';
+        document.getElementById('ResultsContainer').style.display = 'none';
     }
-    
-    ShowLoading();
-    
-    try {
-        const parameters = parametersText ? parametersText.split(',').map(p => p.trim()) : [];
-        
-        const response = await fetch('/api/SQLQueries/ExecuteQuery', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                Query: query,
-                Parameters: parameters
-            })
-        });
-        
-        const data = await response.json();
-        
-        if (data.Success) {
-            DisplayResults(data.Results);
-        } else {
-            alert('Error: ' + data.ErrorMessage);
-            HideLoading();
-        }
-    } catch (error) {
-        alert('Error executing query: ' + error.message);
-        HideLoading();
-    }
-}
 
-async function LoadServiceLogs() {
-    const serviceName = document.getElementById('ServiceNameSelect').value;
-    const logLevel = document.getElementById('LogLevelSelect').value;
-    const hours = document.getElementById('HoursSelect').value;
-    const limit = document.getElementById('LogLimit').value;
-    
-    ShowLoading();
-    
-    try {
-        const params = new URLSearchParams({
-            Hours: hours,
-            Limit: limit
-        });
-        
-        if (serviceName) params.append('ServiceName', serviceName);
-        if (logLevel) params.append('LogLevel', logLevel);
-        
-        const response = await fetch(`/api/SQLQueries/GetServiceLogs?${params}`);
-        const data = await response.json();
-        
-        if (data.Success) {
-            DisplayResults(data.Logs);
-        } else {
-            alert('Error: ' + data.ErrorMessage);
-            HideLoading();
-        }
-    } catch (error) {
-        alert('Error loading logs: ' + error.message);
-        HideLoading();
+    HideLoading() {
+        document.getElementById('LoadingSpinner').style.display = 'none';
+        document.getElementById('ResultsContainer').style.display = 'block';
     }
-}
 
-async function LoadServiceStatus() {
-    ShowLoading();
-    
-    try {
-        const response = await fetch('/api/SQLQueries/GetServiceStatus');
-        const data = await response.json();
-        
-        if (data.Success) {
-            DisplayResults(data.Services);
-        } else {
-            alert('Error: ' + data.ErrorMessage);
-            HideLoading();
-        }
-    } catch (error) {
-        alert('Error loading service status: ' + error.message);
-        HideLoading();
+    RefreshPage() {
+        this.LoadRecentFailures();
+        this.showAlert('Page refreshed', 'info');
     }
-}
 
-async function LoadActiveJobs() {
-    ShowLoading();
-    
-    try {
-        const response = await fetch('/api/SQLQueries/GetActiveJobs');
-        const data = await response.json();
-        
-        if (data.Success) {
-            DisplayResults(data.ActiveJobs);
-        } else {
-            alert('Error: ' + data.ErrorMessage);
-            HideLoading();
-        }
-    } catch (error) {
-        alert('Error loading active jobs: ' + error.message);
-        HideLoading();
-    }
-}
+    // ---- Display Methods ----
 
-async function LoadErrorSummary() {
-    ShowLoading();
-    
-    try {
-        const response = await fetch('/api/SQLQueries/GetErrorSummary?Hours=24');
-        const data = await response.json();
-        
-        if (data.Success) {
-            // Combine error summary and recent errors
-            const combinedData = [
-                ...data.ErrorSummary.map(item => ({
-                    ...item,
-                    Type: 'Summary'
-                })),
-                ...data.RecentErrors.map(item => ({
-                    ...item,
-                    Type: 'Recent Error'
-                }))
-            ];
-            DisplayResults(combinedData);
-        } else {
-            alert('Error: ' + data.ErrorMessage);
-            HideLoading();
-        }
-    } catch (error) {
-        alert('Error loading error summary: ' + error.message);
-        HideLoading();
-    }
-}
+    DisplayResults(data, title = 'Query Results') {
+        this.HideLoading();
 
-async function LoadDatabaseInfo() {
-    ShowLoading();
-    
-    try {
-        const response = await fetch('/api/SQLQueries/GetDatabaseInfo');
-        const data = await response.json();
-        
-        if (data.Success) {
-            DisplayResults(data.Tables);
-        } else {
-            alert('Error: ' + data.ErrorMessage);
-            HideLoading();
-        }
-    } catch (error) {
-        alert('Error loading database info: ' + error.message);
-        HideLoading();
-    }
-}
+        const container = document.getElementById('ResultsContainer');
+        const countElement = document.getElementById('ResultCount');
 
-async function LoadTranscodeQueue() {
-    ShowLoading();
-    
-    try {
-        const response = await fetch('/api/SQLQueries/GetTranscodeQueue');
-        const data = await response.json();
-        
-        if (data.Success) {
-            DisplayResults(data.QueueItems);
-        } else {
-            alert('Error: ' + data.ErrorMessage);
-            HideLoading();
-        }
-    } catch (error) {
-        alert('Error loading transcode queue: ' + error.message);
-        HideLoading();
-    }
-}
-
-async function LoadQualityTestQueue() {
-    ShowLoading();
-    
-    try {
-        const response = await fetch('/api/SQLQueries/GetQualityTestQueue');
-        const data = await response.json();
-        
-        if (data.Success) {
-            DisplayResults(data.QueueItems);
-        } else {
-            alert('Error: ' + data.ErrorMessage);
-            HideLoading();
-        }
-    } catch (error) {
-        alert('Error loading quality test queue: ' + error.message);
-        HideLoading();
-    }
-}
-
-function LoadCommonQuery(queryType) {
-    const query = CommonQueries[queryType];
-    if (query) {
-        document.getElementById('CustomQuery').value = query;
-        ExecuteCustomQuery();
-    }
-}
-
-// New troubleshooting functions
-async function LoadMediaFileComparison() {
-    const FileId = document.getElementById('FileIdInput').value.trim();
-    const FilePath = document.getElementById('FilePathInput').value.trim();
-    
-    if (!FileId && !FilePath) {
-        alert('Please enter either a File ID or File Path');
-        return;
-    }
-    
-    const ComparisonContainer = document.getElementById('ComparisonResults');
-    ComparisonContainer.innerHTML = `
-        <div class="text-center py-4">
-            <div class="spinner-border text-primary" role="status">
-                <span class="visually-hidden">Loading...</span>
-            </div>
-            <p class="mt-2">Loading comparison...</p>
-        </div>
-    `;
-    ComparisonContainer.style.display = 'block';
-    
-    try {
-        const params = new URLSearchParams();
-        if (FileId) params.append('FileId', FileId);
-        if (FilePath) params.append('FilePath', FilePath);
-        
-        const response = await fetch(`/api/SQLQueries/GetMediaFileComparison?${params}`);
-        const data = await response.json();
-        
-        if (data.Success) {
-            DisplayComparisonTable(data);
-        } else {
-            ComparisonContainer.innerHTML = `
-                <div class="alert alert-danger">
-                    <i class="fas fa-exclamation-triangle"></i> Error: ${data.ErrorMessage}
+        if (!data || data.length === 0) {
+            container.innerHTML = `
+                <div class="text-muted text-center py-4">
+                    <i class="fas fa-info-circle fa-2x mb-3"></i>
+                    <p>No results found.</p>
                 </div>
             `;
+            countElement.textContent = '0 rows';
+            return;
         }
-    } catch (error) {
-        ComparisonContainer.innerHTML = `
-            <div class="alert alert-danger">
-                <i class="fas fa-exclamation-triangle"></i> Error loading comparison: ${error.message}
-            </div>
-        `;
-    }
-}
 
-function DisplayComparisonTable(data) {
-    const ComparisonContainer = document.getElementById('ComparisonResults');
-    
-    if (!data.OriginalFile) {
-        ComparisonContainer.innerHTML = `
-            <div class="alert alert-warning">
-                <i class="fas fa-exclamation-triangle"></i> No original file found.
-            </div>
-        `;
-        return;
+        const table = document.createElement('table');
+        table.className = 'table table-striped table-hover';
+
+        const thead = document.createElement('thead');
+        thead.className = 'table-header-dark';
+        const headerRow = document.createElement('tr');
+        const columns = Object.keys(data[0]);
+
+        columns.forEach(column => {
+            const th = document.createElement('th');
+            th.className = 'fw-bold';
+            th.textContent = column;
+            th.style.cursor = 'pointer';
+            th.onclick = () => this.SortTable(table, Array.from(thead.children[0].children).indexOf(th));
+            headerRow.appendChild(th);
+        });
+
+        thead.appendChild(headerRow);
+        table.appendChild(thead);
+
+        const tbody = document.createElement('tbody');
+        data.forEach(row => {
+            const tr = document.createElement('tr');
+            columns.forEach(column => {
+                const td = document.createElement('td');
+                const value = row[column];
+                if (value === null || value === undefined) {
+                    td.textContent = '';
+                    td.className = 'text-muted';
+                } else if (typeof value === 'boolean') {
+                    td.innerHTML = value ? '<span class="badge bg-success">True</span>' : '<span class="badge bg-secondary">False</span>';
+                } else if (typeof value === 'string' && value.length > 100) {
+                    td.innerHTML = `<span title="${value}">${value.substring(0, 100)}...</span>`;
+                } else {
+                    td.textContent = value;
+                }
+                tr.appendChild(td);
+            });
+            tbody.appendChild(tr);
+        });
+
+        table.appendChild(tbody);
+
+        container.innerHTML = '';
+        const tableWrapper = document.createElement('div');
+        tableWrapper.className = 'table-responsive';
+        tableWrapper.appendChild(table);
+        container.appendChild(tableWrapper);
+
+        countElement.textContent = `${data.length} rows`;
     }
-    
-    const OriginalFile = data.OriginalFile;
-    const TranscodedFile = data.TranscodedFile;
-    const ArchivedFile = data.ArchivedFile;
-    
-    let html = `
-        <div class="row">
-            <div class="col-12">
-                <h6><i class="fas fa-file-video"></i> ${OriginalFile.FileName}</h6>
-                <p class="text-muted">${OriginalFile.FilePath}</p>
+
+    SortTable(table, columnIndex) {
+        const tbody = table.querySelector('tbody');
+        const rows = Array.from(tbody.querySelectorAll('tr'));
+
+        rows.sort((a, b) => {
+            const aVal = a.children[columnIndex].textContent.trim();
+            const bVal = b.children[columnIndex].textContent.trim();
+
+            const aNum = parseFloat(aVal);
+            const bNum = parseFloat(bVal);
+
+            if (!isNaN(aNum) && !isNaN(bNum)) {
+                return aNum - bNum;
+            }
+
+            return aVal.localeCompare(bVal);
+        });
+
+        rows.forEach(row => tbody.appendChild(row));
+    }
+
+    ClearResults() {
+        document.getElementById('ResultsContainer').innerHTML = `
+            <div class="text-muted text-center py-4">
+                <i class="fas fa-database fa-3x mb-3"></i>
+                <p>No results to display. Use the buttons above or enter a custom query.</p>
             </div>
-        </div>
-        <div class="row">
-            <div class="col-md-6">
-                <h6 class="text-primary"><i class="fas fa-file"></i> Original File</h6>
-                <table class="table table-sm">
-                    <tr><td><strong>Size:</strong></td><td>${OriginalFile.SizeMB?.toFixed(2) || 'N/A'} MB</td></tr>
-                    <tr><td><strong>Resolution:</strong></td><td>${OriginalFile.Resolution || 'N/A'}</td></tr>
-                    <tr><td><strong>Codec:</strong></td><td>${OriginalFile.Codec || 'N/A'}</td></tr>
-                    <tr><td><strong>Video Bitrate:</strong></td><td>${OriginalFile.VideoBitrateKbps || 'N/A'} kbps</td></tr>
-                    <tr><td><strong>Audio Bitrate:</strong></td><td>${OriginalFile.AudioBitrateKbps || 'N/A'} kbps</td></tr>
-                    <tr><td><strong>Duration:</strong></td><td>${OriginalFile.DurationMinutes?.toFixed(1) || 'N/A'} min</td></tr>
-                    <tr><td><strong>Frame Rate:</strong></td><td>${OriginalFile.FrameRate || 'N/A'} fps</td></tr>
-                    <tr><td><strong>Profile:</strong></td><td>${OriginalFile.AssignedProfile || 'N/A'}</td></tr>
-                </table>
-            </div>
-            <div class="col-md-6">
-    `;
-    
-    if (TranscodedFile) {
-        const VMAFScore = TranscodedFile.VMAFScore || TranscodedFile.VMAF;
-        const VMAFColor = VMAFScore > 95 ? 'success' : VMAFScore > 90 ? 'warning' : 'danger';
-        const VMAFBadge = VMAFScore ? `<span class="badge bg-${VMAFColor}">${VMAFScore.toFixed(1)}</span>` : '<span class="badge bg-secondary">N/A</span>';
-        
-        html += `
-                <h6 class="text-success"><i class="fas fa-compress"></i> Transcoded File</h6>
-                <table class="table table-sm">
-                    <tr><td><strong>Size:</strong></td><td>${(TranscodedFile.NewSizeBytes / (1024*1024)).toFixed(2)} MB</td></tr>
-                    <tr><td><strong>Compression:</strong></td><td>${TranscodedFile.SizeReductionPercent?.toFixed(1) || 'N/A'}%</td></tr>
-                    <tr><td><strong>Video Bitrate:</strong></td><td>${TranscodedFile.VideoBitrateKbps || 'N/A'} kbps</td></tr>
-                    <tr><td><strong>Audio Bitrate:</strong></td><td>${TranscodedFile.AudioBitrateKbps || 'N/A'} kbps</td></tr>
-                    <tr><td><strong>Profile:</strong></td><td>${TranscodedFile.ProfileName || 'N/A'}</td></tr>
-                    <tr><td><strong>Quality:</strong></td><td>${TranscodedFile.Quality || 'N/A'}</td></tr>
-                    <tr><td><strong>VMAF Score:</strong></td><td>${VMAFBadge}</td></tr>
-                    <tr><td><strong>Status:</strong></td><td>${TranscodedFile.Success ? '<span class="badge bg-success">Success</span>' : '<span class="badge bg-danger">Failed</span>'}</td></tr>
-                </table>
         `;
-        
-        if (TranscodedFile.FfpmpegCommand) {
+        document.getElementById('ResultCount').textContent = '0 rows';
+    }
+
+    DisplayComparisonTable(data) {
+        const ComparisonContainer = document.getElementById('ComparisonResults');
+
+        if (!data.OriginalFile) {
+            ComparisonContainer.innerHTML = `
+                <div class="alert alert-warning">
+                    <i class="fas fa-exclamation-triangle"></i> No original file found.
+                </div>
+            `;
+            return;
+        }
+
+        const OriginalFile = data.OriginalFile;
+        const TranscodedFile = data.TranscodedFile;
+
+        let html = `
+            <div class="row">
+                <div class="col-12">
+                    <h6><i class="fas fa-file-video"></i> ${OriginalFile.FileName}</h6>
+                    <p class="text-muted">${OriginalFile.FilePath}</p>
+                </div>
+            </div>
+            <div class="row">
+                <div class="col-md-6">
+                    <h6 class="text-primary"><i class="fas fa-file"></i> Original File</h6>
+                    <table class="table table-sm">
+                        <tr><td><strong>Size:</strong></td><td>${OriginalFile.SizeMB?.toFixed(2) || 'N/A'} MB</td></tr>
+                        <tr><td><strong>Resolution:</strong></td><td>${OriginalFile.Resolution || 'N/A'}</td></tr>
+                        <tr><td><strong>Codec:</strong></td><td>${OriginalFile.Codec || 'N/A'}</td></tr>
+                        <tr><td><strong>Video Bitrate:</strong></td><td>${OriginalFile.VideoBitrateKbps || 'N/A'} kbps</td></tr>
+                        <tr><td><strong>Audio Bitrate:</strong></td><td>${OriginalFile.AudioBitrateKbps || 'N/A'} kbps</td></tr>
+                        <tr><td><strong>Duration:</strong></td><td>${OriginalFile.DurationMinutes?.toFixed(1) || 'N/A'} min</td></tr>
+                        <tr><td><strong>Frame Rate:</strong></td><td>${OriginalFile.FrameRate || 'N/A'} fps</td></tr>
+                        <tr><td><strong>Profile:</strong></td><td>${OriginalFile.AssignedProfile || 'N/A'}</td></tr>
+                    </table>
+                </div>
+                <div class="col-md-6">
+        `;
+
+        if (TranscodedFile) {
+            const VMAFScore = TranscodedFile.VMAFScore || TranscodedFile.VMAF;
+            const VMAFColor = VMAFScore > 95 ? 'success' : VMAFScore > 90 ? 'warning' : 'danger';
+            const VMAFBadge = VMAFScore ? `<span class="badge bg-${VMAFColor}">${VMAFScore.toFixed(1)}</span>` : '<span class="badge bg-secondary">N/A</span>';
+
             html += `
-                <div class="mt-3">
-                    <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#FFmpegCommand">
-                        <i class="fas fa-code"></i> View FFmpeg Command
-                    </button>
-                    <div class="collapse mt-2" id="FFmpegCommand">
-                        <div class="card card-body">
-                            <code style="font-size: 0.8em; word-break: break-all;">${TranscodedFile.FfpmpegCommand}</code>
+                    <h6 class="text-success"><i class="fas fa-compress"></i> Transcoded File</h6>
+                    <table class="table table-sm">
+                        <tr><td><strong>Size:</strong></td><td>${(TranscodedFile.NewSizeBytes / (1024*1024)).toFixed(2)} MB</td></tr>
+                        <tr><td><strong>Compression:</strong></td><td>${TranscodedFile.SizeReductionPercent?.toFixed(1) || 'N/A'}%</td></tr>
+                        <tr><td><strong>Video Bitrate:</strong></td><td>${TranscodedFile.VideoBitrateKbps || 'N/A'} kbps</td></tr>
+                        <tr><td><strong>Audio Bitrate:</strong></td><td>${TranscodedFile.AudioBitrateKbps || 'N/A'} kbps</td></tr>
+                        <tr><td><strong>Profile:</strong></td><td>${TranscodedFile.ProfileName || 'N/A'}</td></tr>
+                        <tr><td><strong>Quality:</strong></td><td>${TranscodedFile.Quality || 'N/A'}</td></tr>
+                        <tr><td><strong>VMAF Score:</strong></td><td>${VMAFBadge}</td></tr>
+                        <tr><td><strong>Status:</strong></td><td>${TranscodedFile.Success ? '<span class="badge bg-success">Success</span>' : '<span class="badge bg-danger">Failed</span>'}</td></tr>
+                    </table>
+            `;
+
+            if (TranscodedFile.FfpmpegCommand) {
+                html += `
+                    <div class="mt-3">
+                        <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#FFmpegCommand">
+                            <i class="fas fa-code"></i> View FFmpeg Command
+                        </button>
+                        <div class="collapse mt-2" id="FFmpegCommand">
+                            <div class="card card-body">
+                                <code style="font-size: 0.8em; word-break: break-all;">${TranscodedFile.FfpmpegCommand}</code>
+                            </div>
                         </div>
                     </div>
-                </div>
+                `;
+            }
+        } else {
+            html += `
+                    <h6 class="text-muted"><i class="fas fa-question-circle"></i> No Transcode Data</h6>
+                    <p class="text-muted">This file has not been transcoded yet.</p>
             `;
         }
-    } else {
+
         html += `
-                <h6 class="text-muted"><i class="fas fa-question-circle"></i> No Transcode Data</h6>
-                <p class="text-muted">This file has not been transcoded yet.</p>
-        `;
-    }
-    
-    html += `
+                </div>
             </div>
-        </div>
-    `;
-    
-    ComparisonContainer.innerHTML = html;
-}
+        `;
 
-async function LoadRecentFailures() {
-    const Container = document.getElementById('RecentFailuresContainer');
-    
-    try {
-        const response = await fetch('/api/FailureTracking/RecentFailures?limit=20');
-        const data = await response.json();
-        
-        if (data.Success) {
-            if (data.Failures && data.Failures.length > 0) {
-                let html = `
-                    <div class="table-responsive">
-                        <table class="table table-striped table-hover">
-                            <thead>
-                                <tr>
-                                    <th>Service</th>
-                                    <th>File</th>
-                                    <th>Error</th>
-                                    <th>Date</th>
-                                    <th>Duration</th>
-                                    <th>Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                `;
-                
-                data.Failures.forEach(failure => {
-                    const FileName = failure.FileName ? failure.FileName.split('/').pop() : 'Unknown';
-                    const ErrorMessage = failure.FailureReason ? failure.FailureReason.substring(0, 100) + (failure.FailureReason.length > 100 ? '...' : '') : 'No error message';
-                    const Duration = failure.Duration ? `${failure.Duration}s` : 'N/A';
-                    
-                    html += `
-                        <tr>
-                            <td><span class="badge bg-${failure.ServiceType === 'Transcode' ? 'primary' : 'info'}">${failure.ServiceType}</span></td>
-                            <td title="${failure.FileName}">${FileName}</td>
-                            <td title="${failure.FailureReason}">${ErrorMessage}</td>
-                            <td>${new Date(failure.FailureDate).toLocaleString()}</td>
-                            <td>${Duration}</td>
-                            <td>
-                                <button class="btn btn-sm btn-outline-primary" onclick="LoadMediaFileComparisonForPath('${failure.FileName}')">
-                                    <i class="fas fa-search"></i> Compare
-                                </button>
-                            </td>
-                        </tr>
-                    `;
-                });
-                
-                html += `
-                            </tbody>
-                        </table>
-                    </div>
-                `;
-                
-                Container.innerHTML = html;
+        ComparisonContainer.innerHTML = html;
+    }
+
+    // ---- API Methods ----
+
+    async ExecuteCustomQuery() {
+        const query = document.getElementById('CustomQuery').value.trim();
+        const parametersText = document.getElementById('QueryParameters').value.trim();
+
+        if (!query) {
+            this.showAlert('Please enter a SQL query', 'warning');
+            return;
+        }
+
+        this.ShowLoading();
+
+        try {
+            const parameters = parametersText ? parametersText.split(',').map(p => p.trim()) : [];
+
+            const response = await fetch('/api/SQLQueries/ExecuteQuery', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ Query: query, Parameters: parameters })
+            });
+
+            const data = await response.json();
+
+            if (data.Success) {
+                this.DisplayResults(data.Results);
             } else {
-                Container.innerHTML = `
-                    <div class="text-center py-4">
-                        <i class="fas fa-check-circle fa-3x text-success mb-3"></i>
-                        <p class="text-muted">No recent failures found. Great job!</p>
+                this.showAlert('Error: ' + data.ErrorMessage, 'danger');
+                this.HideLoading();
+            }
+        } catch (error) {
+            this.showAlert('Error executing query: ' + error.message, 'danger');
+            this.HideLoading();
+        }
+    }
+
+    async LoadServiceLogs() {
+        const serviceName = document.getElementById('ServiceNameSelect').value;
+        const logLevel = document.getElementById('LogLevelSelect').value;
+        const hours = document.getElementById('HoursSelect').value;
+        const limit = document.getElementById('LogLimit').value;
+
+        this.ShowLoading();
+
+        try {
+            const params = new URLSearchParams({ Hours: hours, Limit: limit });
+            if (serviceName) params.append('ServiceName', serviceName);
+            if (logLevel) params.append('LogLevel', logLevel);
+
+            const response = await fetch(`/api/SQLQueries/GetServiceLogs?${params}`);
+            const data = await response.json();
+
+            if (data.Success) {
+                this.DisplayResults(data.Logs);
+            } else {
+                this.showAlert('Error: ' + data.ErrorMessage, 'danger');
+                this.HideLoading();
+            }
+        } catch (error) {
+            this.showAlert('Error loading logs: ' + error.message, 'danger');
+            this.HideLoading();
+        }
+    }
+
+    async LoadActiveJobs() {
+        this.ShowLoading();
+
+        try {
+            const response = await fetch('/api/SQLQueries/GetActiveJobs');
+            const data = await response.json();
+
+            if (data.Success) {
+                this.DisplayResults(data.ActiveJobs);
+            } else {
+                this.showAlert('Error: ' + data.ErrorMessage, 'danger');
+                this.HideLoading();
+            }
+        } catch (error) {
+            this.showAlert('Error loading active jobs: ' + error.message, 'danger');
+            this.HideLoading();
+        }
+    }
+
+    async LoadErrorSummary() {
+        this.ShowLoading();
+
+        try {
+            const response = await fetch('/api/SQLQueries/GetErrorSummary?Hours=24');
+            const data = await response.json();
+
+            if (data.Success) {
+                const combinedData = [
+                    ...data.ErrorSummary.map(item => ({ ...item, Type: 'Summary' })),
+                    ...data.RecentErrors.map(item => ({ ...item, Type: 'Recent Error' }))
+                ];
+                this.DisplayResults(combinedData);
+            } else {
+                this.showAlert('Error: ' + data.ErrorMessage, 'danger');
+                this.HideLoading();
+            }
+        } catch (error) {
+            this.showAlert('Error loading error summary: ' + error.message, 'danger');
+            this.HideLoading();
+        }
+    }
+
+    async LoadDatabaseInfo() {
+        this.ShowLoading();
+
+        try {
+            const response = await fetch('/api/SQLQueries/GetDatabaseInfo');
+            const data = await response.json();
+
+            if (data.Success) {
+                this.DisplayResults(data.Tables);
+            } else {
+                this.showAlert('Error: ' + data.ErrorMessage, 'danger');
+                this.HideLoading();
+            }
+        } catch (error) {
+            this.showAlert('Error loading database info: ' + error.message, 'danger');
+            this.HideLoading();
+        }
+    }
+
+    LoadCommonQuery(queryType) {
+        const query = this.CommonQueries[queryType];
+        if (query) {
+            document.getElementById('CustomQuery').value = query;
+            this.ExecuteCustomQuery();
+        }
+    }
+
+    async LoadMediaFileComparison() {
+        const FileId = document.getElementById('FileIdInput').value.trim();
+        const FilePath = document.getElementById('FilePathInput').value.trim();
+
+        if (!FileId && !FilePath) {
+            this.showAlert('Please enter either a File ID or File Path', 'warning');
+            return;
+        }
+
+        const ComparisonContainer = document.getElementById('ComparisonResults');
+        ComparisonContainer.innerHTML = `
+            <div class="text-center py-4">
+                <div class="spinner-border text-primary" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+                <p class="mt-2">Loading comparison...</p>
+            </div>
+        `;
+        ComparisonContainer.style.display = 'block';
+
+        try {
+            const params = new URLSearchParams();
+            if (FileId) params.append('FileId', FileId);
+            if (FilePath) params.append('FilePath', FilePath);
+
+            const response = await fetch(`/api/SQLQueries/GetMediaFileComparison?${params}`);
+            const data = await response.json();
+
+            if (data.Success) {
+                this.DisplayComparisonTable(data);
+            } else {
+                ComparisonContainer.innerHTML = `
+                    <div class="alert alert-danger">
+                        <i class="fas fa-exclamation-triangle"></i> Error: ${data.ErrorMessage}
                     </div>
                 `;
             }
-        } else {
-            Container.innerHTML = `
+        } catch (error) {
+            ComparisonContainer.innerHTML = `
                 <div class="alert alert-danger">
-                    <i class="fas fa-exclamation-triangle"></i> Error: ${data.ErrorMessage}
+                    <i class="fas fa-exclamation-triangle"></i> Error loading comparison: ${error.message}
                 </div>
             `;
         }
-    } catch (error) {
-        Container.innerHTML = `
-            <div class="alert alert-danger">
-                <i class="fas fa-exclamation-triangle"></i> Error loading failures: ${error.message}
-            </div>
-        `;
     }
-}
 
-async function LoadStuckJobs() {
-    const Container = document.getElementById('StuckJobsContainer');
-    
-    try {
-        const response = await fetch('/api/SQLQueries/GetStuckJobs');
-        const data = await response.json();
-        
-        if (data.Success) {
-            if (data.StuckJobs && data.StuckJobs.length > 0) {
-                let html = `
-                    <div class="alert alert-warning">
-                        <i class="fas fa-exclamation-triangle"></i> Found ${data.Count} stuck jobs that may need attention.
-                    </div>
-                    <div class="table-responsive">
-                        <table class="table table-striped table-hover">
-                            <thead>
-                                <tr>
-                                    <th>Job Type</th>
-                                    <th>File/Service</th>
-                                    <th>Status</th>
-                                    <th>Started</th>
-                                    <th>Duration</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                `;
-                
-                data.StuckJobs.forEach(job => {
-                    const FileName = job.FilePath ? job.FilePath.split('/').pop() : job.FileName;
-                    
-                    html += `
-                        <tr>
-                            <td><span class="badge bg-warning">${job.JobType}</span></td>
-                            <td title="${job.FilePath}">${FileName}</td>
-                            <td><span class="badge bg-danger">${job.Status}</span></td>
-                            <td>${new Date(job.StartedAt).toLocaleString()}</td>
-                            <td>${job.Duration}</td>
-                        </tr>
+    async LoadRecentFailures() {
+        const Container = document.getElementById('RecentFailuresContainer');
+
+        try {
+            const response = await fetch('/api/FailureTracking/RecentFailures?limit=20');
+            const data = await response.json();
+
+            if (data.Success) {
+                if (data.Failures && data.Failures.length > 0) {
+                    let html = `
+                        <div class="table-responsive">
+                            <table class="table table-striped table-hover">
+                                <thead class="table-header-dark">
+                                    <tr>
+                                        <th class="fw-bold">Service</th>
+                                        <th class="fw-bold">File</th>
+                                        <th class="fw-bold">Error</th>
+                                        <th class="fw-bold">Date</th>
+                                        <th class="fw-bold">Duration</th>
+                                        <th class="fw-bold">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
                     `;
-                });
-                
-                html += `
-                            </tbody>
-                        </table>
-                    </div>
-                `;
-                
-                Container.innerHTML = html;
+
+                    data.Failures.forEach(failure => {
+                        const FileName = failure.FileName ? failure.FileName.split('/').pop() : 'Unknown';
+                        const ErrorMessage = failure.FailureReason ? failure.FailureReason.substring(0, 100) + (failure.FailureReason.length > 100 ? '...' : '') : 'No error message';
+                        const Duration = failure.Duration ? `${failure.Duration}s` : 'N/A';
+
+                        html += `
+                            <tr>
+                                <td><span class="badge bg-${failure.ServiceType === 'Transcode' ? 'primary' : 'info'}">${failure.ServiceType}</span></td>
+                                <td title="${failure.FileName}">${FileName}</td>
+                                <td title="${failure.FailureReason}">${ErrorMessage}</td>
+                                <td>${new Date(failure.FailureDate).toLocaleString()}</td>
+                                <td>${Duration}</td>
+                                <td>
+                                    <button class="btn btn-sm btn-outline-primary" onclick="sqlQueriesManager.LoadMediaFileComparisonForPath('${failure.FileName}')">
+                                        <i class="fas fa-search"></i> Compare
+                                    </button>
+                                </td>
+                            </tr>
+                        `;
+                    });
+
+                    html += `
+                                </tbody>
+                            </table>
+                        </div>
+                    `;
+
+                    Container.innerHTML = html;
+                } else {
+                    Container.innerHTML = `
+                        <div class="text-center py-4">
+                            <i class="fas fa-check-circle fa-3x text-success mb-3"></i>
+                            <p class="text-muted">No recent failures found. Great job!</p>
+                        </div>
+                    `;
+                }
             } else {
                 Container.innerHTML = `
-                    <div class="text-center py-4">
-                        <i class="fas fa-check-circle fa-3x text-success mb-3"></i>
-                        <p class="text-muted">No stuck jobs found. All systems running smoothly!</p>
+                    <div class="alert alert-danger">
+                        <i class="fas fa-exclamation-triangle"></i> Error: ${data.ErrorMessage}
                     </div>
                 `;
             }
-        } else {
+        } catch (error) {
             Container.innerHTML = `
                 <div class="alert alert-danger">
-                    <i class="fas fa-exclamation-triangle"></i> Error: ${data.ErrorMessage}
+                    <i class="fas fa-exclamation-triangle"></i> Error loading failures: ${error.message}
                 </div>
             `;
         }
-    } catch (error) {
-        Container.innerHTML = `
-            <div class="alert alert-danger">
-                <i class="fas fa-exclamation-triangle"></i> Error loading stuck jobs: ${error.message}
-            </div>
-        `;
     }
-}
 
-async function LoadQualityTestResults(PassFailFilter) {
-    const Container = document.getElementById('QualityTestResultsContainer');
-    
-    try {
-        const response = await fetch(`/api/SQLQueries/GetQualityTestResultsFiltered?PassFailFilter=${PassFailFilter}&Limit=30`);
-        const data = await response.json();
-        
-        if (data.Success) {
-            if (data.QualityTestResults && data.QualityTestResults.length > 0) {
-                let html = `
-                    <div class="table-responsive">
-                        <table class="table table-striped table-hover">
-                            <thead>
-                                <tr>
-                                    <th>File</th>
-                                    <th>VMAF Score</th>
-                                    <th>Status</th>
-                                    <th>Profile</th>
-                                    <th>Date Tested</th>
-                                    <th>Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                `;
-                
-                data.QualityTestResults.forEach(result => {
-                    const FileName = result.FilePath ? result.FilePath.split('/').pop() : 'Unknown';
-                    const VMAFScore = result.VMAFScore;
-                    const VMAFColor = VMAFScore > 95 ? 'success' : VMAFScore > 90 ? 'warning' : 'danger';
-                    const VMAFBadge = VMAFScore ? `<span class="badge bg-${VMAFColor}">${VMAFScore.toFixed(1)}</span>` : '<span class="badge bg-secondary">N/A</span>';
-                    const StatusBadge = result.PassesThreshold ? '<span class="badge bg-success">Passed</span>' : '<span class="badge bg-danger">Failed</span>';
-                    
-                    html += `
-                        <tr>
-                            <td title="${result.FilePath}">${FileName}</td>
-                            <td>${VMAFBadge}</td>
-                            <td>${StatusBadge}</td>
-                            <td>${result.ProfileName || 'N/A'}</td>
-                            <td>${new Date(result.DateTested).toLocaleString()}</td>
-                            <td>
-                                <button class="btn btn-sm btn-outline-primary" onclick="LoadMediaFileComparisonForPath('${result.FilePath}')">
-                                    <i class="fas fa-search"></i> Compare
-                                </button>
-                            </td>
-                        </tr>
+    async LoadStuckJobs() {
+        const Container = document.getElementById('StuckJobsContainer');
+
+        try {
+            const response = await fetch('/api/SQLQueries/GetStuckJobs');
+            const data = await response.json();
+
+            if (data.Success) {
+                if (data.StuckJobs && data.StuckJobs.length > 0) {
+                    let html = `
+                        <div class="alert alert-warning">
+                            <i class="fas fa-exclamation-triangle"></i> Found ${data.Count} stuck jobs that may need attention.
+                        </div>
+                        <div class="table-responsive">
+                            <table class="table table-striped table-hover">
+                                <thead class="table-header-dark">
+                                    <tr>
+                                        <th class="fw-bold">Job Type</th>
+                                        <th class="fw-bold">File/Service</th>
+                                        <th class="fw-bold">Status</th>
+                                        <th class="fw-bold">Started</th>
+                                        <th class="fw-bold">Duration</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
                     `;
-                });
-                
-                html += `
-                            </tbody>
-                        </table>
-                    </div>
-                `;
-                
-                Container.innerHTML = html;
+
+                    data.StuckJobs.forEach(job => {
+                        const FileName = job.FilePath ? job.FilePath.split('/').pop() : job.FileName;
+
+                        html += `
+                            <tr>
+                                <td><span class="badge bg-warning">${job.JobType}</span></td>
+                                <td title="${job.FilePath}">${FileName}</td>
+                                <td><span class="badge bg-danger">${job.Status}</span></td>
+                                <td>${new Date(job.StartedAt).toLocaleString()}</td>
+                                <td>${job.Duration}</td>
+                            </tr>
+                        `;
+                    });
+
+                    html += `
+                                </tbody>
+                            </table>
+                        </div>
+                    `;
+
+                    Container.innerHTML = html;
+                } else {
+                    Container.innerHTML = `
+                        <div class="text-center py-4">
+                            <i class="fas fa-check-circle fa-3x text-success mb-3"></i>
+                            <p class="text-muted">No stuck jobs found. All systems running smoothly!</p>
+                        </div>
+                    `;
+                }
             } else {
                 Container.innerHTML = `
-                    <div class="text-center py-4">
-                        <i class="fas fa-info-circle fa-3x text-info mb-3"></i>
-                        <p class="text-muted">No quality test results found for filter: ${PassFailFilter}</p>
+                    <div class="alert alert-danger">
+                        <i class="fas fa-exclamation-triangle"></i> Error: ${data.ErrorMessage}
                     </div>
                 `;
             }
-        } else {
+        } catch (error) {
             Container.innerHTML = `
                 <div class="alert alert-danger">
-                    <i class="fas fa-exclamation-triangle"></i> Error: ${data.ErrorMessage}
+                    <i class="fas fa-exclamation-triangle"></i> Error loading stuck jobs: ${error.message}
                 </div>
             `;
         }
-    } catch (error) {
-        Container.innerHTML = `
-            <div class="alert alert-danger">
-                <i class="fas fa-exclamation-triangle"></i> Error loading quality test results: ${error.message}
-            </div>
-        `;
+    }
+
+    async LoadQualityTestResults(PassFailFilter) {
+        const Container = document.getElementById('QualityTestResultsContainer');
+
+        try {
+            const response = await fetch(`/api/SQLQueries/GetQualityTestResultsFiltered?PassFailFilter=${PassFailFilter}&Limit=30`);
+            const data = await response.json();
+
+            if (data.Success) {
+                if (data.QualityTestResults && data.QualityTestResults.length > 0) {
+                    let html = `
+                        <div class="table-responsive">
+                            <table class="table table-striped table-hover">
+                                <thead class="table-header-success">
+                                    <tr>
+                                        <th class="fw-bold">File</th>
+                                        <th class="fw-bold">VMAF Score</th>
+                                        <th class="fw-bold">Status</th>
+                                        <th class="fw-bold">Profile</th>
+                                        <th class="fw-bold">Date Tested</th>
+                                        <th class="fw-bold">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                    `;
+
+                    data.QualityTestResults.forEach(result => {
+                        const FileName = result.FilePath ? result.FilePath.split('/').pop() : 'Unknown';
+                        const VMAFScore = result.VMAFScore;
+                        const VMAFColor = VMAFScore > 95 ? 'success' : VMAFScore > 90 ? 'warning' : 'danger';
+                        const VMAFBadge = VMAFScore ? `<span class="badge bg-${VMAFColor}">${VMAFScore.toFixed(1)}</span>` : '<span class="badge bg-secondary">N/A</span>';
+                        const StatusBadge = result.PassesThreshold ? '<span class="badge bg-success">Passed</span>' : '<span class="badge bg-danger">Failed</span>';
+
+                        html += `
+                            <tr>
+                                <td title="${result.FilePath}">${FileName}</td>
+                                <td>${VMAFBadge}</td>
+                                <td>${StatusBadge}</td>
+                                <td>${result.ProfileName || 'N/A'}</td>
+                                <td>${new Date(result.DateTested).toLocaleString()}</td>
+                                <td>
+                                    <button class="btn btn-sm btn-outline-primary" onclick="sqlQueriesManager.LoadMediaFileComparisonForPath('${result.FilePath}')">
+                                        <i class="fas fa-search"></i> Compare
+                                    </button>
+                                </td>
+                            </tr>
+                        `;
+                    });
+
+                    html += `
+                                </tbody>
+                            </table>
+                        </div>
+                    `;
+
+                    Container.innerHTML = html;
+                } else {
+                    Container.innerHTML = `
+                        <div class="text-center py-4">
+                            <i class="fas fa-info-circle fa-3x text-info mb-3"></i>
+                            <p class="text-muted">No quality test results found for filter: ${PassFailFilter}</p>
+                        </div>
+                    `;
+                }
+            } else {
+                Container.innerHTML = `
+                    <div class="alert alert-danger">
+                        <i class="fas fa-exclamation-triangle"></i> Error: ${data.ErrorMessage}
+                    </div>
+                `;
+            }
+        } catch (error) {
+            Container.innerHTML = `
+                <div class="alert alert-danger">
+                    <i class="fas fa-exclamation-triangle"></i> Error loading quality test results: ${error.message}
+                </div>
+            `;
+        }
+    }
+
+    LoadMediaFileComparisonForPath(FilePath) {
+        document.getElementById('FilePathInput').value = FilePath;
+        document.getElementById('FileIdInput').value = '';
+        this.LoadMediaFileComparison();
+        // Scroll to comparison section
+        document.getElementById('ComparisonResults').scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
 }
 
-function LoadMediaFileComparisonForPath(FilePath) {
-    document.getElementById('FilePathInput').value = FilePath;
-    document.getElementById('FileIdInput').value = '';
-    LoadMediaFileComparison();
-}
-
-// Initialize page
+// Initialize
+let sqlQueriesManager;
 document.addEventListener('DOMContentLoaded', function() {
-    // Load recent failures by default instead of service status
-    LoadRecentFailures();
+    sqlQueriesManager = new SQLQueriesManager();
 });
 </script>
 {% endblock %}

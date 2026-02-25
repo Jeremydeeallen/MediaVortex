@@ -455,7 +455,12 @@ class FileScanningBusinessService:
         """Perform the actual scanning process."""
         try:
             LoggingService.LogInfo("Starting scan of directory: {}", RootFolderPath)
-            
+
+            # Step 0: Clean up any existing duplicate records before scanning
+            CleanupResult = self.DatabaseManager.CleanupDuplicateMediaFiles()
+            if CleanupResult.get('DuplicatesRemoved', 0) > 0:
+                LoggingService.LogInfo(f"Pre-scan cleanup removed {CleanupResult['DuplicatesRemoved']} duplicate records", 'PerformScan', 'FileScanningBusinessService')
+
             # Step 1: Calculate directory size
             self.ScanProgress = 10.0
             TotalSizeGB = self.FileManager.CalculateDirectorySize(RootFolderPath)
@@ -881,10 +886,15 @@ class FileScanningBusinessService:
     def ProcessSingleMediaFile(self, FilePath: str, RootFolderId: Optional[int], RootFolderPath: str = "", ExtractMetadata: bool = True):
         """Process a single media file with fuzzy matching and optional metadata extraction."""
         try:
+            # Normalize the path upfront so all lookups and inserts use the same canonical path
+            # This prevents duplicates caused by path normalization differences between
+            # GetMediaFileByPath (raw path) and SaveMediaFile (normalized path)
+            FilePath = os.path.normpath(FilePath)
+
             # First check if the file actually exists on disk
             if not os.path.exists(FilePath):
                 LoggingService.LogWarning(f"File does not exist on disk: {FilePath}", 'ProcessSingleMediaFile', 'FileScanningBusinessService')
-                
+
                 # Check if there's a database entry for this file path and delete it
                 ExistingFile = self.DatabaseManager.GetMediaFileByPath(FilePath)
                 if ExistingFile:
@@ -893,10 +903,10 @@ class FileScanningBusinessService:
                     LoggingService.LogInfo(f"Successfully deleted database entry for missing file: {FilePath}", 'ProcessSingleMediaFile', 'FileScanningBusinessService')
                 else:
                     LoggingService.LogDebug(f"No database entry found for missing file: {FilePath}", 'ProcessSingleMediaFile', 'FileScanningBusinessService')
-                
+
                 # Don't process further if file doesn't exist
                 return
-            
+
             # Get file information (FAST - no ffprobe yet)
             FileSizeMB = self.FileManager.GetFileSizeMB(FilePath)
             FileName = self.FileManager.GetFileNameFromPath(FilePath)
@@ -1332,6 +1342,8 @@ class FileScanningBusinessService:
                 MediaFile.AudioSampleRate = MetadataResult.get('AudioSampleRate')
                 MediaFile.AudioSampleFormat = MetadataResult.get('AudioSampleFormat')
                 MediaFile.AudioChannelLayout = MetadataResult.get('AudioChannelLayout')
+                MediaFile.AudioCodec = MetadataResult.get('AudioCodec')
+                MediaFile.SubtitleFormats = MetadataResult.get('SubtitleFormats')
                 MediaFile.ContainerFormat = MetadataResult.get('ContainerFormat')
                 MediaFile.OverallBitrate = MetadataResult.get('OverallBitrate')
                 

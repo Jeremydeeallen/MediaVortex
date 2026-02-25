@@ -458,6 +458,21 @@ class FileScanningController:
                     'Error': 'StatisticsError'
                 }), 500
 
+        @self.Blueprint.route('/Scan/CleanupDuplicates', methods=['POST'])
+        def CleanupDuplicates():
+            """Remove duplicate media file records from the database."""
+            try:
+                LoggingService.LogInfo("CleanupDuplicates endpoint called", "FileScanningController", "CleanupDuplicates")
+                result = self.ViewModel.BusinessService.DatabaseManager.CleanupDuplicateMediaFiles()
+                return jsonify(result), 200 if result.get('Success') else 500
+            except Exception as e:
+                LoggingService.LogException("Error cleaning up duplicates", e, "FileScanningController", "CleanupDuplicates")
+                return jsonify({
+                    'Success': False,
+                    'Message': f'Error cleaning up duplicates: {str(e)}',
+                    'Error': 'CleanupError'
+                }), 500
+
         @self.Blueprint.route('/Scan/EnableContinuous', methods=['POST'])
         def EnableContinuousScanning():
             """Enable continuous/periodic scanning."""

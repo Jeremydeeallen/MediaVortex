@@ -42,8 +42,14 @@ class FFmpegAnalysisModel:
     AudioChannelLayout: Optional[str] = None
     OverallBitrate: Optional[int] = None
     
+    # Stream Selection
+    AudioStreamIndex: Optional[int] = None  # 0-based audio stream index for -map 0:a:{index}
+    SubtitleStreamIndex: Optional[int] = None  # 0-based subtitle stream index for -map 0:s:{index}
+    SubtitleCodec: Optional[str] = None  # Codec of selected subtitle stream (ass, srt, etc.)
+
     # Subtitle Information
     Subtitles: Optional[str] = None
+    SubtitleFormats: Optional[str] = None
     
     # Metadata Information
     Title: Optional[str] = None
@@ -90,6 +96,7 @@ class FFmpegAnalysisModel:
             'AudioChannels': self.AudioChannels,
             'Language': self.Language,
             'Subtitles': self.Subtitles,
+            'SubtitleFormats': self.SubtitleFormats,
             'Title': self.Title,
             'ShowTitle': self.ShowTitle,
             'Season': self.Season,
@@ -117,7 +124,10 @@ class FFmpegAnalysisModel:
             'AudioSampleRate': self.AudioSampleRate,
             'AudioSampleFormat': self.AudioSampleFormat,
             'AudioChannelLayout': self.AudioChannelLayout,
-            'OverallBitrate': self.OverallBitrate
+            'OverallBitrate': self.OverallBitrate,
+            'AudioStreamIndex': self.AudioStreamIndex,
+            'SubtitleStreamIndex': self.SubtitleStreamIndex,
+            'SubtitleCodec': self.SubtitleCodec
         }
     
     @classmethod

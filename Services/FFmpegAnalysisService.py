@@ -171,17 +171,21 @@ class FFmpegAnalysisService:
             # Extract stream information
             Streams = MediaInfo.get('streams', [])
             VideoStream = None
-            AudioStream = None
+            AudioStreams = []
             SubtitleStreams = []
-            
+
             for Stream in Streams:
                 CodecType = Stream.get('codec_type', '')
                 if CodecType == 'video' and VideoStream is None:
                     VideoStream = Stream
-                elif CodecType == 'audio' and AudioStream is None:
-                    AudioStream = Stream
+                elif CodecType == 'audio':
+                    AudioStreams.append(Stream)
                 elif CodecType == 'subtitle':
                     SubtitleStreams.append(Stream)
+
+            # Select preferred audio stream (English preferred, most channels as tiebreaker)
+            AudioStream, AudioStreamIndex = self.SelectPreferredAudioStream(AudioStreams)
+            AnalysisModel.AudioStreamIndex = AudioStreamIndex
             
             # Process video stream
             if VideoStream:
@@ -254,12 +258,24 @@ class FFmpegAnalysisService:
             # Process subtitle streams
             if SubtitleStreams:
                 SubtitleLanguages = []
+                SubtitleCodecs = []
                 for SubStream in SubtitleStreams:
                     Language = SubStream.get('tags', {}).get('language')
                     if Language:
                         SubtitleLanguages.append(Language)
+                    CodecName = SubStream.get('codec_name', '')
+                    if CodecName and CodecName not in SubtitleCodecs:
+                        SubtitleCodecs.append(CodecName)
                 if SubtitleLanguages:
                     AnalysisModel.Subtitles = ', '.join(SubtitleLanguages)
+                if SubtitleCodecs:
+                    AnalysisModel.SubtitleFormats = ','.join(SubtitleCodecs)
+
+                # Select preferred subtitle stream for potential SubtitleFix
+                SelectedSubStream, SubStreamIndex, _ = self.SelectPreferredSubtitleStream(SubtitleStreams)
+                if SelectedSubStream:
+                    AnalysisModel.SubtitleStreamIndex = SubStreamIndex
+                    AnalysisModel.SubtitleCodec = SelectedSubStream.get('codec_name', '')
             
             # Calculate bitrate from file size and duration if still missing
             if not AnalysisModel.VideoBitrateKbps and AnalysisModel.DurationMinutes and AnalysisModel.FileSizeMB:
@@ -292,6 +308,94 @@ class FFmpegAnalysisService:
         except Exception as e:
             LoggingService.LogException("Error parsing FFprobe output", e, 'ParseFFprobeOutput', 'FFmpegAnalysisService')
     
+    def SelectPreferredAudioStream(self, AudioStreams: list) -> tuple:
+        """Select the preferred audio stream, preferring English with most channels.
+
+        Returns:
+            Tuple of (SelectedStream dict or None, 0-based audio stream index)
+        """
+        if not AudioStreams:
+            return None, 0
+
+        # Find English streams
+        EnglishStreams = []
+        for Index, Stream in enumerate(AudioStreams):
+            Language = Stream.get('tags', {}).get('language', '')
+            if Language.lower() in ('eng', 'en'):
+                EnglishStreams.append((Index, Stream))
+
+        if EnglishStreams:
+            # Pick English stream with most channels (surround > stereo)
+            BestIndex, BestStream = max(EnglishStreams, key=lambda x: x[1].get('channels', 0))
+            LoggingService.LogInfo(
+                f"Selected English audio stream index {BestIndex} ({BestStream.get('channels', '?')}ch) "
+                f"from {len(AudioStreams)} audio stream(s)",
+                'SelectPreferredAudioStream', 'FFmpegAnalysisService'
+            )
+            return BestStream, BestIndex
+
+        # No English streams found — fall back to first stream
+        LoggingService.LogInfo(
+            f"No English audio stream found among {len(AudioStreams)} stream(s), using first stream",
+            'SelectPreferredAudioStream', 'FFmpegAnalysisService'
+        )
+        return AudioStreams[0], 0
+
+    # Subtitle codecs that are text-based and can be converted to SRT/mov_text
+    TEXT_SUBTITLE_CODECS = {'ass', 'ssa', 'srt', 'subrip', 'webvtt', 'mov_text'}
+    # Subtitle codecs that are image-based and require OCR (skipped for now)
+    IMAGE_SUBTITLE_CODECS = {'hdmv_pgs_subtitle', 'pgssub', 'dvdsub', 'dvd_subtitle', 'dvbsub', 'dvb_subtitle'}
+
+    def SelectPreferredSubtitleStream(self, SubtitleStreams: list) -> tuple:
+        """Select the preferred subtitle stream for subtitle fix.
+        Prefers English text-based subtitles. Skips image-based (PGS/VOBSUB).
+
+        Returns:
+            Tuple of (SelectedStream dict or None, 0-based subtitle stream index, skip_reason or None)
+        """
+        if not SubtitleStreams:
+            return None, 0, "no_subtitles"
+
+        # Filter to text-based subtitle streams only
+        TextStreams = []
+        for Index, Stream in enumerate(SubtitleStreams):
+            CodecName = Stream.get('codec_name', '').lower()
+            if CodecName in self.TEXT_SUBTITLE_CODECS:
+                TextStreams.append((Index, Stream))
+
+        if not TextStreams:
+            return None, 0, "pgs_only"
+
+        # Find English text streams
+        EnglishTextStreams = []
+        for Index, Stream in TextStreams:
+            Language = Stream.get('tags', {}).get('language', '').lower()
+            if Language in ('eng', 'en', 'english'):
+                EnglishTextStreams.append((Index, Stream))
+
+        if EnglishTextStreams:
+            # Prefer ASS/SSA (the ones causing burn-in) so we convert them
+            for Index, Stream in EnglishTextStreams:
+                if Stream.get('codec_name', '').lower() in ('ass', 'ssa'):
+                    LoggingService.LogInfo(
+                        f"Selected English ASS subtitle stream index {Index} from {len(SubtitleStreams)} subtitle stream(s)",
+                        'SelectPreferredSubtitleStream', 'FFmpegAnalysisService'
+                    )
+                    return Stream, Index, None
+            # Fall back to first English text stream
+            LoggingService.LogInfo(
+                f"Selected English subtitle stream index {EnglishTextStreams[0][0]} from {len(SubtitleStreams)} subtitle stream(s)",
+                'SelectPreferredSubtitleStream', 'FFmpegAnalysisService'
+            )
+            return EnglishTextStreams[0][1], EnglishTextStreams[0][0], None
+
+        # No English subtitles — use first text stream
+        LoggingService.LogInfo(
+            f"No English subtitle found among {len(SubtitleStreams)} stream(s), using first text stream (index {TextStreams[0][0]})",
+            'SelectPreferredSubtitleStream', 'FFmpegAnalysisService'
+        )
+        return TextStreams[0][1], TextStreams[0][0], None
+
     def ExtractMetadataFromFilename(self, FileName: str) -> Dict[str, Any]:
         """Extract metadata from filename using pattern matching."""
         try:

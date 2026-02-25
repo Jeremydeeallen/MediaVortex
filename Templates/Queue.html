@@ -15,6 +15,9 @@
                     <button type="button" class="btn btn-primary" id="PopulateQueueBtn">
                         <i class="fas fa-plus"></i> <span class="btn-text">Populate Queue</span>
                     </button>
+                    <button type="button" class="btn btn-outline-danger" id="CleanupDuplicatesBtn">
+                        <i class="fas fa-broom"></i> <span class="btn-text">Cleanup Duplicates</span>
+                    </button>
                     <button type="button" class="btn btn-warning" id="ClearQueueBtn">
                         <i class="fas fa-trash"></i> <span class="btn-text">Clear Queue</span>
                     </button>
@@ -57,6 +60,7 @@
                                     </th>
                                     <th class="sortable" data-sort="Priority">Priority</th>
                                     <th>Status</th>
+                                    <th>Mode</th>
                                     <th>Start Time</th>
                                     <th class="sortable" data-sort="DateAdded">Date Added</th>
                                     <th>Date Started</th>
@@ -378,6 +382,8 @@
                                     Total Size <i class="fas fa-sort-down"></i>
                                 </th>
                                 <th>Profile</th>
+                                <th class="text-center">MKVs</th>
+                                <th class="text-center">Compat. Only</th>
                                 <th>Actions</th>
                             </tr>
                         </thead>
@@ -398,6 +404,22 @@
 
 <!-- Alert Container -->
 <div id="AlertContainer" class="position-fixed top-0 end-0 p-3" style="z-index: 1050;"></div>
+
+<!-- Persistent Error Display -->
+<div id="ErrorDisplay" class="d-none mb-3 mx-3">
+    <div class="alert alert-danger d-flex align-items-start mb-0">
+        <div class="flex-grow-1 me-2" style="min-width: 0;">
+            <strong>Error:</strong>
+            <div id="ErrorDisplayMessage" class="mt-1" style="word-break: break-word; user-select: text;"></div>
+        </div>
+        <div class="d-flex flex-shrink-0 gap-1">
+            <button type="button" class="btn btn-outline-danger btn-sm" onclick="copyErrorMessage()" title="Copy error message">
+                <i class="bi bi-clipboard"></i> Copy
+            </button>
+            <button type="button" class="btn-close" onclick="dismissError()"></button>
+        </div>
+    </div>
+</div>
 
 <script>
 class TranscodeQueueManager {
@@ -465,6 +487,11 @@ class TranscodeQueueManager {
 
         document.getElementById('ConfirmPopulateBtn').addEventListener('click', () => {
             this.populateQueue();
+        });
+
+        // Cleanup Duplicates
+        document.getElementById('CleanupDuplicatesBtn').addEventListener('click', () => {
+            this.cleanupDuplicates();
         });
 
         // Clear Queue
@@ -601,13 +628,14 @@ class TranscodeQueueManager {
 
 
     updateQueueTable(queueItems) {
+        this.queueItems = queueItems;
         const tbody = document.getElementById('QueueTableBody');
         tbody.innerHTML = '';
 
         if (queueItems.length === 0) {
             const row = document.createElement('tr');
             row.innerHTML = `
-                <td colspan="10" class="text-center text-muted py-4">
+                <td colspan="11" class="text-center text-muted py-4">
                     <i class="fas fa-inbox fa-2x mb-2"></i><br>
                     No queue items found
                 </td>
@@ -615,6 +643,8 @@ class TranscodeQueueManager {
             tbody.appendChild(row);
         } else {
             queueItems.forEach(item => {
+                const mode = item.ProcessingMode || 'Transcode';
+                const modeBadgeClass = mode === 'Remux' ? 'bg-info' : 'bg-primary';
                 const row = document.createElement('tr');
                 row.innerHTML = `
                     <td>${item.Id}</td>
@@ -627,6 +657,9 @@ class TranscodeQueueManager {
                     <td>
                         <span class="badge ${this.getStatusBadgeClass(item.Status)}">${item.Status}</span>
                     </td>
+                    <td>
+                        <span class="badge ${modeBadgeClass}">${mode}</span>
+                    </td>
                     <td>${item.StartTime || '-'}</td>
                     <td>${this.formatDate(item.DateAdded)}</td>
                     <td>${this.formatDate(item.DateStarted)}</td>
@@ -635,7 +668,7 @@ class TranscodeQueueManager {
                             <button type="button" class="btn btn-outline-primary" onclick="queueManager.updatePriorityModal(${item.Id}, ${item.Priority})" title="Update Priority">
                                 <i class="fas fa-edit"></i>
                             </button>
-                            <button type="button" class="btn btn-outline-danger" onclick="queueManager.removeJob(${item.Id})" title="Remove Job" ${item.Status === 'Running' ? 'disabled' : ''}>
+                            <button type="button" class="btn btn-outline-danger" onclick="queueManager.removeJob(${item.Id})" title="${item.Status === 'Running' ? 'Cancel & Remove Job' : 'Remove Job'}">
                                 <i class="fas fa-trash"></i>
                             </button>
                         </div>
@@ -696,12 +729,42 @@ class TranscodeQueueManager {
         }
     }
 
+    async cleanupDuplicates() {
+        if (!confirm('This will remove duplicate MediaFile entries from the database (keeping the oldest record for each file path). Continue?')) {
+            return;
+        }
+        try {
+            const response = await fetch('/api/Scan/CleanupDuplicates', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+            });
+            const data = await response.json();
+            if (data.Success) {
+                const removed = data.DuplicatesRemoved || 0;
+                this.showAlert(`Cleanup complete: ${removed} duplicate records removed`, 'success');
+                this.loadRootFolders();
+                this.loadMediaFiles();
+            } else {
+                this.showAlert('Error cleaning up duplicates: ' + (data.Message || 'Unknown error'), 'danger');
+            }
+        } catch (error) {
+            this.showAlert('Error cleaning up duplicates: ' + error.message, 'danger');
+        }
+    }
+
 
 
 
 
     async removeJob(itemId) {
-        if (!confirm('Are you sure you want to remove this job from the queue?')) {
+        // Find the item to check if it's running
+        const item = this.queueItems ? this.queueItems.find(i => i.Id === itemId) : null;
+        const isRunning = item && item.Status === 'Running';
+        const confirmMsg = isRunning
+            ? 'This job is currently running. This will stop FFmpeg and remove the job. Continue?'
+            : 'Are you sure you want to remove this job from the queue?';
+
+        if (!confirm(confirmMsg)) {
             return;
         }
 
@@ -717,7 +780,7 @@ class TranscodeQueueManager {
             const data = await response.json();
 
             if (data.Success) {
-                this.showAlert('Job removed from queue successfully', 'success');
+                this.showAlert(isRunning ? 'Running job cancelled and removed' : 'Job removed from queue successfully', 'success');
                 this.loadQueueData();
             } else {
                 this.showAlert('Error removing job: ' + data.ErrorMessage, 'danger');
@@ -958,12 +1021,14 @@ class TranscodeQueueManager {
         tbody.innerHTML = '';
 
         if (rootFolders.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">No root folders found</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted">No root folders found</td></tr>';
             return;
         }
 
         rootFolders.forEach(folder => {
             const escapedPath = folder.RootFolder.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '\\"');
+            const mkvCount = folder.MkvFileCount || 0;
+            const mkvBadgeClass = mkvCount > 0 ? 'bg-info' : 'bg-secondary';
             const row = document.createElement('tr');
             row.innerHTML = `
                 <td>${folder.Id}</td>
@@ -974,6 +1039,14 @@ class TranscodeQueueManager {
                     <select class="form-select form-select-sm" id="RootFolderProfileSelect_${folder.Id}" style="min-width: 150px;">
                         <option value="">Select Profile...</option>
                     </select>
+                </td>
+                <td class="text-center">
+                    <span class="badge ${mkvBadgeClass}">${mkvCount}</span>
+                </td>
+                <td class="text-center">
+                    <input class="form-check-input" type="checkbox" id="CompatibilityOnly_${folder.Id}"
+                           onchange="queueManager.toggleCompatibilityMode(${folder.Id})"
+                           title="Remux MKV files to MP4 (no re-encoding)">
                 </td>
                 <td>
                     <button class="btn btn-sm btn-outline-success" onclick="queueManager.addFolderToQueue(${folder.Id}, '${escapedPath}')" title="Add to Queue">
@@ -1196,19 +1269,33 @@ class TranscodeQueueManager {
         }
     }
 
+    toggleCompatibilityMode(folderId) {
+        const checkbox = document.getElementById(`CompatibilityOnly_${folderId}`);
+        const profileSelect = document.getElementById(`RootFolderProfileSelect_${folderId}`);
+        if (profileSelect) {
+            profileSelect.disabled = checkbox.checked;
+            profileSelect.style.opacity = checkbox.checked ? '0.5' : '1';
+        }
+    }
+
     async addFolderToQueue(folderId, rootFolderPath) {
         try {
+            // Check compatibility-only mode
+            const compatCheckbox = document.getElementById(`CompatibilityOnly_${folderId}`);
+            const compatibilityOnly = compatCheckbox ? compatCheckbox.checked : false;
+
             // Get selected profile ID from dropdown (optional - files may already have profiles assigned)
             const profileSelect = document.getElementById(`RootFolderProfileSelect_${folderId}`);
             const profileIdValue = profileSelect ? profileSelect.value : null;
-            
-            // Build request body - ProfileId is optional
-            const requestBody = { 
-                RootFolderPath: rootFolderPath
+
+            // Build request body
+            const requestBody = {
+                RootFolderPath: rootFolderPath,
+                CompatibilityOnly: compatibilityOnly
             };
-            
-            // Only include ProfileId if one is selected
-            if (profileIdValue && profileIdValue !== '') {
+
+            // Only include ProfileId if one is selected and not in compatibility mode
+            if (!compatibilityOnly && profileIdValue && profileIdValue !== '') {
                 requestBody.ProfileId = parseInt(profileIdValue);
             }
             
@@ -1279,7 +1366,7 @@ class TranscodeQueueManager {
         await this.addFileToQueueDirectly(fileId, parseInt(profileId));
     }
     
-    async addFileToQueueDirectly(fileId, profileId = null, startTime = null, priority = null) {
+    async addFileToQueueDirectly(fileId, profileId = null, startTime = null, priority = null, forceAdd = false) {
         try {
             const requestBody = { MediaFileId: fileId };
             if (profileId) {
@@ -1291,7 +1378,10 @@ class TranscodeQueueManager {
             if (priority) {
                 requestBody.Priority = priority;
             }
-            
+            if (forceAdd) {
+                requestBody.ForceAdd = true;
+            }
+
             const response = await fetch('/api/TranscodeQueue/AddJob', {
                 method: 'POST',
                 headers: {
@@ -1310,6 +1400,11 @@ class TranscodeQueueManager {
                 }
                 this.loadQueueData(); // Refresh queue
                 this.loadMediaFiles(); // Refresh media files to show updated profile
+            } else if (data.CanOverride) {
+                // Show override confirmation for resolution check failures
+                if (confirm(`${data.ErrorMessage}\n\nWould you like to override this check and add the file anyway?`)) {
+                    await this.addFileToQueueDirectly(fileId, profileId, startTime, priority, true);
+                }
             } else {
                 this.showAlert('Error adding file to queue: ' + data.ErrorMessage, 'danger');
             }
@@ -1631,18 +1726,29 @@ class TranscodeQueueManager {
 
 
     showAlert(message, type) {
+        if (type === 'danger') {
+            // Show errors in persistent error display with copy button
+            const errorDisplay = document.getElementById('ErrorDisplay');
+            const errorMessage = document.getElementById('ErrorDisplayMessage');
+            errorMessage.textContent = message;
+            errorDisplay.classList.remove('d-none');
+            errorDisplay.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            return;
+        }
+
+        // Non-error alerts use toast notifications
         const alertContainer = document.getElementById('AlertContainer');
         const alertId = 'alert-' + Date.now();
-        
+
         const alertHtml = `
             <div class="alert alert-${type} alert-dismissible fade show" role="alert" id="${alertId}">
                 ${message}
                 <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
             </div>
         `;
-        
+
         alertContainer.insertAdjacentHTML('beforeend', alertHtml);
-        
+
         // Auto-remove after 5 seconds
         setTimeout(() => {
             const alert = document.getElementById(alertId);
@@ -1651,6 +1757,42 @@ class TranscodeQueueManager {
             }
         }, 5000);
     }
+}
+
+function copyErrorMessage() {
+    const errorMessage = document.getElementById('ErrorDisplayMessage').textContent;
+    const copyBtn = document.querySelector('#ErrorDisplay .btn-outline-danger');
+    const originalHtml = copyBtn.innerHTML;
+
+    function showCopied() {
+        copyBtn.innerHTML = '<i class="bi bi-check"></i> Copied';
+        setTimeout(() => { copyBtn.innerHTML = originalHtml; }, 2000);
+    }
+
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(errorMessage).then(showCopied).catch(() => {
+            fallbackCopy(errorMessage);
+            showCopied();
+        });
+    } else {
+        fallbackCopy(errorMessage);
+        showCopied();
+    }
+}
+
+function fallbackCopy(text) {
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.style.position = 'fixed';
+    textarea.style.opacity = '0';
+    document.body.appendChild(textarea);
+    textarea.select();
+    document.execCommand('copy');
+    document.body.removeChild(textarea);
+}
+
+function dismissError() {
+    document.getElementById('ErrorDisplay').classList.add('d-none');
 }
 
 // Initialize the queue manager when the page loads

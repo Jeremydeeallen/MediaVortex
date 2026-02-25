@@ -16,6 +16,7 @@ class TranscodeQueueModel:
     Priority: int = 0
     Status: str = "Pending"  # Pending, Running, Completed, Failed, Cancelled
     AssignedProfile: str = ""  # Profile assigned for transcoding
+    ProcessingMode: str = "Transcode"  # "Transcode" or "Remux"
     DateAdded: Optional[datetime] = None
     DateStarted: Optional[datetime] = None
     
@@ -56,6 +57,16 @@ class TranscodeQueueModel:
             return duration.total_seconds() / 60.0
         return None
     
+    @property
+    def IsRemux(self) -> bool:
+        """Check if this is a remux (compatibility-only) job."""
+        return self.ProcessingMode == "Remux"
+
+    @property
+    def IsSubtitleFix(self) -> bool:
+        """Check if this is a subtitle fix job (ASS/SSA -> SRT conversion)."""
+        return self.ProcessingMode == "SubtitleFix"
+
     @property
     def SizeGB(self) -> float:
         """Get file size in GB."""

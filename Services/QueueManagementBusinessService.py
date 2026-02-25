@@ -17,11 +17,15 @@ class QueueManagementBusinessService:
         self.DatabaseManager = DatabaseManagerInstance or DatabaseManager()
         self.FileManager = FileManagerService()
     
-    def PopulateQueueFromMediaFiles(self, RootFolderPath: str = None, ProfileId: int = None) -> Dict[str, Any]:
+    def PopulateQueueFromMediaFiles(self, RootFolderPath: str = None, ProfileId: int = None, CompatibilityOnly: bool = False) -> Dict[str, Any]:
         """Populate transcoding queue from MediaFiles that have assigned profiles, ordered by largest disk space."""
         try:
-            LoggingService.LogFunctionEntry("PopulateQueueFromMediaFiles", "QueueManagementBusinessService", RootFolderPath, ProfileId)
-            
+            LoggingService.LogFunctionEntry("PopulateQueueFromMediaFiles", "QueueManagementBusinessService", RootFolderPath, ProfileId, CompatibilityOnly)
+
+            # Remux path: only MKV files, no profile/resolution requirements
+            if CompatibilityOnly:
+                return self.PopulateQueueForRemux(RootFolderPath)
+
             # If RootFolderPath is provided, always use resolution filtering
             if RootFolderPath:
                 if ProfileId is not None:
@@ -413,6 +417,121 @@ class QueueManagementBusinessService:
             LoggingService.LogException("Exception creating queue item from media file with profile", e, "QueueManagementBusinessService", "CreateQueueItemFromMediaFileWithProfile")
             return None
     
+    def PopulateQueueForRemux(self, RootFolderPath: str = None) -> Dict[str, Any]:
+        """Populate queue with MKV files for remuxing (container change to MP4 only)."""
+        try:
+            LoggingService.LogFunctionEntry("PopulateQueueForRemux", "QueueManagementBusinessService", RootFolderPath)
+
+            mkvFiles = self.GetMkvFilesForRemux(RootFolderPath)
+            if not mkvFiles:
+                friendlyMessage = f"No MKV files found{' in folder ' + RootFolderPath if RootFolderPath else ''} for remuxing."
+                return {"Success": False, "ErrorMessage": friendlyMessage, "ItemsAdded": 0}
+
+            # Get existing queue items - build lookup by FilePath
+            existingQueueItems = self.DatabaseManager.GetAllTranscodeQueueItems()
+            existingQueueByPath = {item.FilePath: item for item in existingQueueItems}
+
+            itemsAdded = 0
+            itemsUpdated = 0
+
+            for mediaFile in mkvFiles:
+                existingItem = existingQueueByPath.get(mediaFile.FilePath)
+
+                if existingItem:
+                    # File already in queue - switch to Remux if it's currently Transcode and still Pending
+                    if existingItem.ProcessingMode != "Remux" and existingItem.Status == "Pending":
+                        existingItem.ProcessingMode = "Remux"
+                        self.DatabaseManager.SaveTranscodeQueueItem(existingItem)
+                        itemsUpdated += 1
+                        LoggingService.LogInfo(f"Switched queue item {existingItem.Id} ({mediaFile.FileName}) from Transcode to Remux", "QueueManagementBusinessService", "PopulateQueueForRemux")
+                    continue
+
+                queueItem = self.CreateRemuxQueueItem(mediaFile)
+                if queueItem:
+                    try:
+                        itemId = self.DatabaseManager.SaveTranscodeQueueItem(queueItem)
+                        LoggingService.LogInfo(f"Added remux queue item {itemId} for {mediaFile.FileName}", "QueueManagementBusinessService", "PopulateQueueForRemux")
+                        itemsAdded += 1
+                        existingQueueByPath[mediaFile.FilePath] = queueItem
+                    except Exception as e:
+                        LoggingService.LogException(f"Error saving remux queue item for {mediaFile.FileName}", e, "QueueManagementBusinessService", "PopulateQueueForRemux")
+
+            details = []
+            if itemsAdded > 0:
+                details.append(f"{itemsAdded} added")
+            if itemsUpdated > 0:
+                details.append(f"{itemsUpdated} switched from Transcode to Remux")
+            friendlyMessage = f"Remux queue: {', '.join(details)}." if details else "No changes needed - all MKV files already queued for remux."
+
+            return {
+                "Success": True,
+                "ItemsAdded": itemsAdded,
+                "ItemsUpdated": itemsUpdated,
+                "Message": friendlyMessage
+            }
+
+        except Exception as e:
+            errorMsg = f"Exception populating remux queue: {str(e)}"
+            LoggingService.LogException(errorMsg, e, "QueueManagementBusinessService", "PopulateQueueForRemux")
+            return {"Success": False, "ErrorMessage": errorMsg, "ItemsAdded": 0}
+
+    def GetMkvFilesForRemux(self, RootFolderPath: str = None) -> List[MediaFileModel]:
+        """Get MKV media files eligible for remuxing, ordered by size (largest first)."""
+        try:
+            allMediaFiles = self.DatabaseManager.GetAllMediaFiles()
+
+            # Filter to MKV files only
+            mkvFiles = [mf for mf in allMediaFiles
+                        if mf.FileName and mf.FileName.lower().endswith('.mkv')]
+
+            # Filter by root folder if specified
+            if RootFolderPath:
+                normalizedRootPath = RootFolderPath.replace('\\', '/').rstrip('/')
+                mkvFiles = [mf for mf in mkvFiles
+                            if mf.FilePath.replace('\\', '/').startswith(normalizedRootPath)]
+
+            # Sort by size (largest first)
+            mkvFiles.sort(key=lambda x: x.SizeMB or 0, reverse=True)
+
+            LoggingService.LogInfo(f"Found {len(mkvFiles)} MKV files for remux", "QueueManagementBusinessService", "GetMkvFilesForRemux")
+            return mkvFiles
+
+        except Exception as e:
+            LoggingService.LogException("Exception getting MKV files for remux", e, "QueueManagementBusinessService", "GetMkvFilesForRemux")
+            return []
+
+    def CreateRemuxQueueItem(self, MediaFile: MediaFileModel) -> Optional[TranscodeQueueModel]:
+        """Create a queue item for remuxing (container change only)."""
+        try:
+            filePath = MediaFile.FilePath or ""
+            directory = ""
+            fileName = MediaFile.FileName or ""
+
+            if filePath:
+                pathParts = filePath.replace("\\", "/").split("/")
+                if len(pathParts) > 1:
+                    directory = "/".join(pathParts[:-1])
+                fileName = pathParts[-1] if pathParts else ""
+
+            queueItem = TranscodeQueueModel(
+                FilePath=filePath,
+                FileName=fileName,
+                Directory=directory,
+                SizeBytes=int((MediaFile.SizeMB or 0) * 1024 * 1024),
+                SizeMB=MediaFile.SizeMB or 0.0,
+                Priority=self.CalculatePriority(MediaFile),
+                Status="Pending",
+                ProcessingMode="Remux",
+                DateAdded=datetime.now()
+            )
+
+            LoggingService.LogInfo(f"Created remux queue item for {fileName}", "QueueManagementBusinessService", "CreateRemuxQueueItem")
+            return queueItem
+
+        except Exception as e:
+            LoggingService.LogException("Exception creating remux queue item", e, "QueueManagementBusinessService", "CreateRemuxQueueItem")
+            return None
+
     def FindMatchingProfileThreshold(self, MediaFile: MediaFileModel, ProfileThresholds: List[ProfileThresholdModel], AllowAssignedProfile: bool = False) -> Optional[ProfileThresholdModel]:
         """Find the best matching profile threshold for a media file."""
         try:
@@ -560,7 +679,7 @@ class QueueManagementBusinessService:
             LoggingService.LogException("Exception calculating priority", e, "QueueManagementBusinessService", "CalculatePriority")
             return 0  # Default priority for files with no size
     
-    def AddJobToQueue(self, MediaFileId: int, Priority: int = None, ProfileId: int = None, StartTime: str = None) -> Dict[str, Any]:
+    def AddJobToQueue(self, MediaFileId: int, Priority: int = None, ProfileId: int = None, StartTime: str = None, ForceAdd: bool = False) -> Dict[str, Any]:
         """Add a specific media file to the transcoding queue. Simple logic: if it has a profile or user selects one, add it."""
         try:
             LoggingService.LogFunctionEntry("AddJobToQueue", "QueueManagementBusinessService", MediaFileId, Priority)
@@ -601,12 +720,15 @@ class QueueManagementBusinessService:
             
             # Check if should skip due to resolution (allow "No downscaling" for manual assignment)
             # Only skip "No downscaling" if not manually assigned (ProfileId is None means batch processing)
-            skipNoDownscaling = ProfileId is None  # Only skip "No downscaling" if not manually assigned
-            shouldSkip, skipReason = self.ShouldSkipDueToResolution(mediaFile, mediaFile.AssignedProfile, SkipNoDownscaling=skipNoDownscaling)
-            if shouldSkip:
-                errorMsg = f"Cannot add {mediaFile.FileName} to queue: {skipReason}"
-                LoggingService.LogInfo(errorMsg, "QueueManagementBusinessService", "AddJobToQueue")
-                return {"Success": False, "ErrorMessage": errorMsg}
+            if not ForceAdd:
+                skipNoDownscaling = ProfileId is None  # Only skip "No downscaling" if not manually assigned
+                shouldSkip, skipReason = self.ShouldSkipDueToResolution(mediaFile, mediaFile.AssignedProfile, SkipNoDownscaling=skipNoDownscaling)
+                if shouldSkip:
+                    errorMsg = f"Cannot add {mediaFile.FileName} to queue: {skipReason}"
+                    LoggingService.LogInfo(errorMsg, "QueueManagementBusinessService", "AddJobToQueue")
+                    return {"Success": False, "ErrorMessage": errorMsg, "CanOverride": True}
+            else:
+                LoggingService.LogWarning(f"Force adding {mediaFile.FileName} to queue (resolution check overridden)", "QueueManagementBusinessService", "AddJobToQueue")
             
             # Check for previous attempts and validate CRF adjustment
             from Services.AdaptiveQualityService import AdaptiveQualityService
@@ -690,26 +812,26 @@ class QueueManagementBusinessService:
             return {"Success": False, "ErrorMessage": errorMsg}
     
     def RemoveJobFromQueue(self, ItemId: int) -> Dict[str, Any]:
-        """Remove a job from the transcoding queue."""
+        """Remove a job from the transcoding queue. If the job is running, kill FFmpeg and clean up first."""
         try:
             LoggingService.LogFunctionEntry("RemoveJobFromQueue", "QueueManagementBusinessService", ItemId)
-            
+
             # Get queue item to verify it exists
             queueItem = self.DatabaseManager.GetTranscodeQueueItemById(ItemId)
             if not queueItem:
                 errorMsg = f"Queue item with ID {ItemId} not found"
                 LoggingService.LogError(errorMsg, "QueueManagementBusinessService", "RemoveJobFromQueue")
                 return {"Success": False, "ErrorMessage": errorMsg}
-            
-            # Check if job is running
+
+            # If job is running, kill FFmpeg and clean up associated records first
             if queueItem.Status == "Running":
-                errorMsg = f"Cannot remove running job {ItemId}"
-                LoggingService.LogWarning(errorMsg, "QueueManagementBusinessService", "RemoveJobFromQueue")
-                return {"Success": False, "ErrorMessage": errorMsg}
-            
+                LoggingService.LogInfo(f"Cancelling running job {ItemId} ({queueItem.FileName}) before removal",
+                                     "QueueManagementBusinessService", "RemoveJobFromQueue")
+                self._CancelRunningJob(ItemId, queueItem)
+
             # Delete from database
             success = self.DatabaseManager.DeleteTranscodeQueueItem(ItemId)
-            
+
             if success:
                 result = {
                     "Success": True,
@@ -722,11 +844,62 @@ class QueueManagementBusinessService:
                 errorMsg = f"Failed to delete queue item {ItemId}"
                 LoggingService.LogError(errorMsg, "QueueManagementBusinessService", "RemoveJobFromQueue")
                 return {"Success": False, "ErrorMessage": errorMsg}
-                
+
         except Exception as e:
             errorMsg = f"Exception removing job from queue: {str(e)}"
             LoggingService.LogException(errorMsg, e, "QueueManagementBusinessService", "RemoveJobFromQueue")
             return {"Success": False, "ErrorMessage": errorMsg}
+
+    def _CancelRunningJob(self, JobId: int, QueueItem) -> None:
+        """Kill the FFmpeg process and clean up database records for a running job."""
+        try:
+            # 1. Kill FFmpeg process via ActiveJobs PID
+            activeJobs = self.DatabaseManager.GetActiveJobsByService("TranscodeService")
+            for activeJob in activeJobs:
+                if activeJob.get('QueueId') == JobId:
+                    processId = activeJob.get('ProcessId')
+                    if processId:
+                        try:
+                            from Services.ProcessManagementService import ProcessManagementService
+                            ProcessManagementService().KillProcess(processId, Graceful=True)
+                            LoggingService.LogInfo(f"Killed FFmpeg process {processId} for job {JobId}",
+                                                 "QueueManagementBusinessService", "_CancelRunningJob")
+                        except Exception as e:
+                            LoggingService.LogException(f"Error killing FFmpeg process {processId}", e,
+                                                      "QueueManagementBusinessService", "_CancelRunningJob")
+
+                    # Mark ActiveJob as failed/cancelled
+                    self.DatabaseManager.CompleteActiveJob(activeJob['Id'], False, "Cancelled by user - job removed from queue")
+                    break
+
+            # 2. Mark TranscodeAttempts as cancelled
+            try:
+                self.DatabaseManager.DatabaseService.ExecuteNonQuery(
+                    "UPDATE TranscodeAttempts SET Success = 0, ErrorMessage = 'Cancelled by user' WHERE LOWER(FilePath) = LOWER(?) AND Success IS NULL",
+                    (QueueItem.FilePath,)
+                )
+            except Exception as e:
+                LoggingService.LogException(f"Error updating TranscodeAttempts for job {JobId}", e,
+                                          "QueueManagementBusinessService", "_CancelRunningJob")
+
+            # 3. Clean up TranscodeProgress records
+            try:
+                self.DatabaseManager.DatabaseService.ExecuteNonQuery(
+                    """DELETE FROM TranscodeProgress WHERE TranscodeAttemptId IN (
+                        SELECT Id FROM TranscodeAttempts WHERE LOWER(FilePath) = LOWER(?) AND Success = 0
+                    )""",
+                    (QueueItem.FilePath,)
+                )
+            except Exception as e:
+                LoggingService.LogException(f"Error cleaning TranscodeProgress for job {JobId}", e,
+                                          "QueueManagementBusinessService", "_CancelRunningJob")
+
+            LoggingService.LogInfo(f"Cleaned up running job {JobId} ({QueueItem.FileName})",
+                                 "QueueManagementBusinessService", "_CancelRunningJob")
+
+        except Exception as e:
+            LoggingService.LogException(f"Error cancelling running job {JobId}", e,
+                                      "QueueManagementBusinessService", "_CancelRunningJob")
     
     def PrioritizeJob(self, ItemId: int, NewPriority: int) -> Dict[str, Any]:
         """Update the priority of a queue item."""
@@ -873,6 +1046,98 @@ class QueueManagementBusinessService:
             reason = f"Exception checking resolution skip: {str(e)}"
             LoggingService.LogException(f"Cannot determine resolution skip for {MediaFile.FileName}", e, "QueueManagementBusinessService", "ShouldSkipDueToResolution")
             return True, reason  # Skip on error - fail safe by not processing
+
+    def GetMkvFileCount(self) -> int:
+        """Get count of MKV files in the database."""
+        try:
+            mkvFiles = self.GetMkvFilesForRemux()
+            return len(mkvFiles)
+        except Exception as e:
+            LoggingService.LogException("Exception getting MKV file count", e, "QueueManagementBusinessService", "GetMkvFileCount")
+            return 0
+
+    def PopulateQueueForSubtitleFix(self, FileIds: list = None) -> Dict[str, Any]:
+        """Queue specific files (by MediaFile ID) or all eligible files for subtitle fix processing.
+        Eligible = has ASS/SSA subtitle formats and is not already in queue."""
+        try:
+            LoggingService.LogFunctionEntry("PopulateQueueForSubtitleFix", "QueueManagementBusinessService", FileIds)
+
+            if FileIds:
+                # Queue specific files by ID
+                mediaFiles = []
+                for fileId in FileIds:
+                    mf = self.DatabaseManager.GetMediaFileById(fileId)
+                    if mf:
+                        mediaFiles.append(mf)
+            else:
+                # Find all eligible files: SubtitleFormats contains ass or ssa
+                mediaFiles = self._GetSubtitleFixEligibleFiles()
+
+            if not mediaFiles:
+                return {"Success": False, "ErrorMessage": "No eligible files found for subtitle fix.", "ItemsAdded": 0}
+
+            # Get existing queue items to avoid duplicates
+            existingQueueItems = self.DatabaseManager.GetAllTranscodeQueueItems()
+            existingFilePaths = {item.FilePath for item in existingQueueItems}
+
+            itemsAdded = 0
+            itemsSkipped = 0
+
+            for mediaFile in mediaFiles:
+                if mediaFile.FilePath in existingFilePaths:
+                    itemsSkipped += 1
+                    continue
+
+                queueItem = TranscodeQueueModel(
+                    FilePath=mediaFile.FilePath,
+                    FileName=mediaFile.FileName,
+                    Directory=os.path.dirname(mediaFile.FilePath) if mediaFile.FilePath else '',
+                    SizeBytes=int((mediaFile.SizeMB or 0) * 1024 * 1024),
+                    SizeMB=mediaFile.SizeMB or 0.0,
+                    Priority=self.CalculatePriority(mediaFile),
+                    Status="Pending",
+                    ProcessingMode="SubtitleFix",
+                    DateAdded=datetime.now()
+                )
+
+                try:
+                    itemId = self.DatabaseManager.SaveTranscodeQueueItem(queueItem)
+                    LoggingService.LogInfo(f"Added subtitle fix queue item {itemId} for {mediaFile.FileName}", "QueueManagementBusinessService", "PopulateQueueForSubtitleFix")
+                    itemsAdded += 1
+                    existingFilePaths.add(mediaFile.FilePath)
+                except Exception as e:
+                    LoggingService.LogException(f"Error saving subtitle fix queue item for {mediaFile.FileName}", e, "QueueManagementBusinessService", "PopulateQueueForSubtitleFix")
+
+            if itemsAdded > 0:
+                friendlyMessage = f"Added {itemsAdded} files to queue for subtitle fix."
+            else:
+                friendlyMessage = "No new files added — all eligible files are already in the queue."
+            if itemsSkipped > 0:
+                friendlyMessage += f" {itemsSkipped} skipped (already queued)."
+
+            return {"Success": True, "ItemsAdded": itemsAdded, "ItemsSkipped": itemsSkipped, "Message": friendlyMessage}
+
+        except Exception as e:
+            errorMsg = f"Exception populating subtitle fix queue: {str(e)}"
+            LoggingService.LogException(errorMsg, e, "QueueManagementBusinessService", "PopulateQueueForSubtitleFix")
+            return {"Success": False, "ErrorMessage": errorMsg, "ItemsAdded": 0}
+
+    def _GetSubtitleFixEligibleFiles(self) -> List[MediaFileModel]:
+        """Find MediaFiles where SubtitleFormats contains ASS or SSA (burn-in candidates)."""
+        try:
+            allMediaFiles = self.DatabaseManager.GetAllMediaFiles()
+            burnInCodecs = {'ass', 'ssa'}
+            eligible = []
+            for mf in allMediaFiles:
+                subFormats = (mf.SubtitleFormats or "").lower()
+                if any(codec in subFormats for codec in burnInCodecs):
+                    eligible.append(mf)
+            eligible.sort(key=lambda x: x.SizeMB or 0, reverse=True)
+            LoggingService.LogInfo(f"Found {len(eligible)} files eligible for subtitle fix", "QueueManagementBusinessService", "_GetSubtitleFixEligibleFiles")
+            return eligible
+        except Exception as e:
+            LoggingService.LogException("Exception getting subtitle fix eligible files", e, "QueueManagementBusinessService", "_GetSubtitleFixEligibleFiles")
+            return []
 
     def GetNextJob(self) -> Optional[TranscodeQueueModel]:
         """Get the next job to process from the queue."""

@@ -276,14 +276,21 @@ class FileScanningViewModel:
             EndIndex = StartIndex + PageSize
             PageFolders = FilteredFolders[StartIndex:EndIndex]
             
+            # Get MKV file counts per folder
+            MkvCounts = self._GetMkvCountsByFolder()
+
             # Format for display
             DisplayFolders = []
             for folder in PageFolders:
+                # Match folder path to MKV counts (normalize for comparison)
+                normalizedPath = folder.RootFolder.replace('/', '\\').rstrip('\\').lower()
+                mkvCount = MkvCounts.get(normalizedPath, 0)
                 DisplayFolders.append({
                     'Id': folder.Id,
                     'RootFolder': folder.RootFolder,
                     'LastScannedDate': folder.LastScannedDate.strftime('%Y-%m-%d %H:%M:%S') if folder.LastScannedDate and hasattr(folder.LastScannedDate, 'strftime') else str(folder.LastScannedDate) if folder.LastScannedDate else 'Never',
-                    'TotalSizeGB': f"{folder.TotalSizeGB:.2f} GB"
+                    'TotalSizeGB': f"{folder.TotalSizeGB:.2f} GB",
+                    'MkvFileCount': mkvCount
                 })
             
             # Get all folders for filter dropdown
@@ -305,6 +312,25 @@ class FileScanningViewModel:
                 'AllRootFolders': []
             }
     
+    def _GetMkvCountsByFolder(self) -> Dict[str, int]:
+        """Get MKV file counts grouped by root folder path."""
+        try:
+            allMediaFiles = self.BusinessService.DatabaseManager.GetAllMediaFiles()
+            counts = {}
+            for mf in allMediaFiles:
+                if mf.FileName and mf.FileName.lower().endswith('.mkv') and mf.FilePath:
+                    # Find which root folder this file belongs to
+                    filePath = mf.FilePath.replace('/', '\\').lower()
+                    for folder in self.RootFolders:
+                        folderPath = folder.RootFolder.replace('/', '\\').rstrip('\\').lower()
+                        if filePath.startswith(folderPath):
+                            counts[folderPath] = counts.get(folderPath, 0) + 1
+                            break
+            return counts
+        except Exception as e:
+            LoggingService.LogException("Error getting MKV counts by folder", e, "FileScanningViewModel", "_GetMkvCountsByFolder")
+            return {}
+
     def GetMediaFilesForDisplay(self) -> List[Dict[str, Any]]:
         """Get media files formatted for display."""
         DisplayFiles = []

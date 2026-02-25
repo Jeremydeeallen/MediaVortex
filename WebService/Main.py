@@ -75,6 +75,9 @@ class WebServiceApp:
             """
             db_manager.DatabaseService.ExecuteNonQuery(cleanup_query)
             LoggingService.LogInfo("Cleaned up stale scan jobs from previous session", "WebService", "__init__")
+
+            # Run database migrations
+            db_manager.RunMigrations()
         except Exception as e:
             LoggingService.LogWarning(f"Could not clean up stale scans: {e}", "WebService", "__init__")
 
@@ -120,6 +123,9 @@ class WebServiceApp:
         except Exception as e:
             LoggingService.LogWarning(f"Could not check/start continuous scanning: {e}", "WebService", "__init__")
 
+        # Auto-sync Jellyfin FFmpeg logs on startup (background thread)
+        self._start_jellyfin_sync()
+
         self._register_routes()
         self._register_blueprints()
         
@@ -132,6 +138,28 @@ class WebServiceApp:
         # Update service status to Running immediately after startup
         self.PrivateUpdateServiceStatus()
     
+    def _start_jellyfin_sync(self):
+        """Auto-sync Jellyfin FFmpeg logs on startup in a background thread."""
+        def sync_worker():
+            try:
+                from ViewModels.OptimizationViewModel import OptimizationViewModel
+                vm = OptimizationViewModel()
+                service = vm._GetJellyfinService()
+                if not service:
+                    LoggingService.LogInfo("Jellyfin not configured, skipping auto-sync", "WebService", "_start_jellyfin_sync")
+                    return
+                result = vm.RefreshJellyfinData()
+                if result.get("Success"):
+                    LoggingService.LogInfo(f"Jellyfin auto-sync complete: {result.get('NewCount', 0)} new logs imported ({result.get('TotalInDB', 0)} total)", "WebService", "_start_jellyfin_sync")
+                else:
+                    LoggingService.LogWarning(f"Jellyfin auto-sync failed: {result.get('ErrorMessage')}", "WebService", "_start_jellyfin_sync")
+            except Exception as e:
+                LoggingService.LogWarning(f"Jellyfin auto-sync error: {e}", "WebService", "_start_jellyfin_sync")
+
+        thread = threading.Thread(target=sync_worker, daemon=True, name="JellyfinSync")
+        thread.start()
+        LoggingService.LogInfo("Started Jellyfin auto-sync background thread", "WebService", "_start_jellyfin_sync")
+
     def PrivateIsServiceAlreadyRunning(self) -> bool:
         """Check if another WebService instance is already running using ServiceStatusService."""
         try:
@@ -175,6 +203,10 @@ class WebServiceApp:
         @self.App.route('/TranscodeProgress')
         def transcode_progress():
             return render_template('TranscodeProgress.html')
+
+        @self.App.route('/Optimization')
+        def optimization():
+            return render_template('Optimization.html')
     
     def _register_blueprints(self):
         """Register Flask blueprints."""
@@ -187,6 +219,7 @@ class WebServiceApp:
         from Controllers.ProfileController import ProfileController
         from Controllers.QualityTestController import QualityTestBlueprint
         from Controllers.ServiceStatusController import ServiceStatusBlueprint
+        from Controllers.OptimizationController import OptimizationBlueprint
         
         # Register all blueprints
         self.App.register_blueprint(ServiceControlBlueprint)
@@ -199,6 +232,7 @@ class WebServiceApp:
         self.App.register_blueprint(self.FileReplacementController.Blueprint)
         self.App.register_blueprint(QualityTestBlueprint)
         self.App.register_blueprint(ServiceStatusBlueprint, url_prefix='/api')
+        self.App.register_blueprint(OptimizationBlueprint)
     
     def PrivateStartServiceStatusTracking(self):
         """Start service status tracking thread."""
@@ -342,11 +376,9 @@ class WebServiceApp:
             print(f"Error during shutdown: {e}")
 
 def SignalHandler(signum, frame):
-    """Handle shutdown signals gracefully."""
-    LoggingService.LogInfo(f"Received signal {signum}, shutting down gracefully...", "WebService", "SignalHandler")
-    if hasattr(Main, 'app') and Main.app:
-        Main.app.Shutdown()
-    sys.exit(0)
+    """Handle shutdown signals immediately."""
+    print("\nWebService shutting down...")
+    os._exit(0)
 
 def Main():
     """Main entry point for WebService."""

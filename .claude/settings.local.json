@@ -3,7 +3,21 @@
     "allow": [
       "Bash(find:*)",
       "Bash(sqlite3:*)",
-      "Bash(python:*)"
+      "Bash(python:*)",
+      "Bash(cmd.exe /c \"npm config get prefix\")",
+      "Bash(grep:*)",
+      "Bash(\"c:/Code/Automation/MediaVortex/WebService/venv/Scripts/pip.exe\" install \"paramiko>=3.0.0\")",
+      "Bash(\"c:/Code/Automation/MediaVortex/WebService/venv/Scripts/python.exe\":*)",
+      "Bash(\"c:/Code/Automation/MediaVortex/WebService/venv/Scripts/python.exe\" -m pip install \"paramiko>=3.0.0\")",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:deepwiki.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:jellyfin.org)",
+      "WebFetch(domain:swiftpackageindex.com)",
+      "WebFetch(domain:medium.com)",
+      "WebFetch(domain:typescript-sdk.jellyfin.org)",
+      "WebFetch(domain:gist.github.com)",
+      "WebFetch(domain:jmshrv.com)"
     ]
   }
 }

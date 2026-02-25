@@ -50,7 +50,11 @@ class CommandBuilder:
             
             # Add input file
             CommandParts.extend(['-i', f'"{InputPath}"'])
-            
+
+            # Explicit stream mapping: select preferred audio stream (English when available)
+            AudioStreamIndex = CommandData.get('AudioStreamIndex', 0)
+            CommandParts.extend(['-map', '0:v:0', '-map', f'0:a:{AudioStreamIndex}'])
+
             # Simple decision: NVIDIA or Software
             UseNvidiaHardware = ProfileSettings.get('UseNvidiaHardware', 0)
             
@@ -364,6 +368,105 @@ class CommandBuilder:
         # Return combined filters or None if no filters
         return ','.join(Filters) if Filters else None
     
+    # MP4-compatible audio codecs that can be copied without re-encoding
+    MP4_COMPATIBLE_AUDIO = ['aac', 'ac3', 'eac3', 'mp3']
+
+    def BuildRemuxCommand(self, CommandData: Dict[str, Any]) -> Optional[Dict[str, str]]:
+        """Build FFmpeg remux command: copy video, handle audio conditionally, output MP4."""
+        try:
+            Job = CommandData.get('Job')
+            MediaFile = CommandData.get('MediaFile')
+            AudioCodec = CommandData.get('AudioCodec', '')
+
+            if not Job or not MediaFile:
+                return None
+
+            InputPath = f"c:\\MediaVortex\\Source\\{MediaFile.FileName}"
+            OutputFileName = os.path.splitext(MediaFile.FileName)[0] + ".mp4"
+            OutputPath = f"c:\\MediaVortex\\{OutputFileName}"
+
+            CommandParts = ['C:\\Code\\Automation\\MediaVortex\\FFmpegMaster\\bin\\ffmpeg.exe']
+            CommandParts.extend(['-i', f'"{InputPath}"'])
+
+            # Explicit stream mapping: select preferred audio stream (English when available)
+            AudioStreamIndex = CommandData.get('AudioStreamIndex', 0)
+            CommandParts.extend(['-map', '0:v:0', '-map', f'0:a:{AudioStreamIndex}'])
+
+            # Video: always copy (no re-encode)
+            CommandParts.extend(['-c:v', 'copy'])
+
+            # Tag HEVC as hvc1 for broad device compatibility (Android TV, Apple, etc.)
+            CommandParts.extend(['-tag:v', 'hvc1'])
+
+            # Audio: copy if MP4-compatible, otherwise re-encode to AAC
+            if AudioCodec.lower() in self.MP4_COMPATIBLE_AUDIO:
+                CommandParts.extend(['-c:a', 'copy'])
+            else:
+                CommandParts.extend(['-c:a', 'aac', '-b:a', '128k'])
+
+            # MP4 container flags
+            CommandParts.extend(['-movflags', '+faststart'])
+            CommandParts.append('-y')
+            CommandParts.append(f'"{OutputPath}"')
+
+            return {
+                'Command': ' '.join(CommandParts),
+                'OutputPath': OutputPath
+            }
+
+        except Exception:
+            return None
+
+    def BuildSubtitleFixCommand(self, CommandData: Dict[str, Any]) -> Optional[Dict[str, str]]:
+        """Build FFmpeg subtitle fix command: copy video+audio, convert ASS/SSA subtitle to mov_text, output MP4."""
+        try:
+            Job = CommandData.get('Job')
+            MediaFile = CommandData.get('MediaFile')
+            AudioCodec = CommandData.get('AudioCodec', '')
+            AudioStreamIndex = CommandData.get('AudioStreamIndex', 0)
+            SubtitleStreamIndex = CommandData.get('SubtitleStreamIndex', 0)
+
+            if not Job or not MediaFile:
+                return None
+
+            InputPath = f"c:\\MediaVortex\\Source\\{MediaFile.FileName}"
+            OutputFileName = os.path.splitext(MediaFile.FileName)[0] + ".mp4"
+            OutputPath = f"c:\\MediaVortex\\{OutputFileName}"
+
+            CommandParts = ['C:\\Code\\Automation\\MediaVortex\\FFmpegMaster\\bin\\ffmpeg.exe']
+            CommandParts.extend(['-i', f'"{InputPath}"'])
+
+            # Map video, preferred audio, and preferred subtitle streams
+            CommandParts.extend(['-map', '0:v:0', '-map', f'0:a:{AudioStreamIndex}', '-map', f'0:s:{SubtitleStreamIndex}'])
+
+            # Video: copy (no re-encode)
+            CommandParts.extend(['-c:v', 'copy'])
+
+            # Tag HEVC as hvc1 for broad device compatibility
+            CommandParts.extend(['-tag:v', 'hvc1'])
+
+            # Audio: copy if MP4-compatible, otherwise re-encode to AAC
+            if AudioCodec.lower() in self.MP4_COMPATIBLE_AUDIO:
+                CommandParts.extend(['-c:a', 'copy'])
+            else:
+                CommandParts.extend(['-c:a', 'aac', '-b:a', '128k'])
+
+            # Subtitle: convert to mov_text (MP4-native text format)
+            CommandParts.extend(['-c:s', 'mov_text'])
+
+            # MP4 container flags
+            CommandParts.extend(['-movflags', '+faststart'])
+            CommandParts.append('-y')
+            CommandParts.append(f'"{OutputPath}"')
+
+            return {
+                'Command': ' '.join(CommandParts),
+                'OutputPath': OutputPath
+            }
+
+        except Exception:
+            return None
+
     def GetMaxCpuThreads(self) -> int:
         """Get maximum CPU threads from system settings or use default."""
         try:

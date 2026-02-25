@@ -40,6 +40,8 @@ class MediaFileModel:
     AudioSampleRate: Optional[int] = None
     AudioSampleFormat: Optional[str] = None
     AudioChannelLayout: Optional[str] = None
+    AudioCodec: Optional[str] = None
+    SubtitleFormats: Optional[str] = None
     ContainerFormat: Optional[str] = None
     OverallBitrate: Optional[int] = None
     TranscodedByMediaVortex: Optional[bool] = None
