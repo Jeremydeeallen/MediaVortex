@@ -526,7 +526,7 @@ class FFmpegAnalysisService:
             
             Query = """
             INSERT INTO ScanJobs (JobId, RootFolderPath, Recursive, Status, StartTime, LastUpdated, ScanType)
-            VALUES (?, ?, ?, 'Pending', ?, ?, 'FFprobe')
+            VALUES (%s, %s, %s, 'Pending', %s, %s, 'FFprobe')
             """
             Now = datetime.now()
             LoggingService.LogInfo(f"Executing FFprobe query with params: JobId={JobId}, RootFolderPath={RootFolderPath}, Recursive={Recursive}, Now={Now}")
@@ -555,7 +555,7 @@ class FFmpegAnalysisService:
             self.CreateFFprobeScanJob(JobId, RootFolderPath, Recursive)
             
             # Update job status to running
-            Query = "UPDATE ScanJobs SET Status = 'Running', ProcessId = ?, LastUpdated = ? WHERE JobId = ?"
+            Query = "UPDATE ScanJobs SET Status = 'Running', ProcessId = %s, LastUpdated = %s WHERE JobId = %s"
             Now = datetime.now()
             
             if self.DatabaseService:

@@ -61,7 +61,7 @@ class CrashRecoveryService:
                     # Process is orphaned - kill it
                     if self.ProcessManager.KillProcess(process_id, Graceful=True):
                         recovery_action = "OrphanedProcessKilled"
-                        orphaned_processes_killed += 1
+                        OrphanedProcessesKilled += 1
                         LoggingService.LogWarning(f"Killed orphaned process {process_id} for job {job_id}", "CrashRecoveryService", "RecoverServiceJobs")
                     else:
                         recovery_action = "FailedToKillProcess"
@@ -97,7 +97,7 @@ class CrashRecoveryService:
                 # Only delete jobs that were in ActiveJobs (actually crashed)
                 CrashedQueueIds = [detail['QueueId'] for detail in RecoveryDetails]
                 if CrashedQueueIds:
-                    Placeholders = ','.join('?' * len(CrashedQueueIds))
+                    Placeholders = ','.join(['%s'] * len(CrashedQueueIds))
                     DeleteQuery = f"DELETE FROM QualityTestingQueue WHERE Id IN ({Placeholders})"
                     DeletedCount = self.DatabaseManager.DatabaseService.ExecuteNonQuery(
                         DeleteQuery, CrashedQueueIds
@@ -165,13 +165,13 @@ class CrashRecoveryService:
             
             # Reset status to Pending and clear DateStarted
             query = """
-                UPDATE TranscodeQueue 
-                SET Status = 'Pending', DateStarted = NULL 
+                UPDATE TranscodeQueue
+                SET Status = 'Pending', DateStarted = NULL
                 WHERE Id IN ({})
-            """.format(','.join('?' * len(QueueIds)))
-            
+            """.format(','.join(['%s'] * len(QueueIds)))
+
             affected_rows = self.DatabaseManager.DatabaseService.ExecuteNonQuery(query, QueueIds)
-            
+
             LoggingService.LogInfo(f"Reset {affected_rows} transcode queue jobs to Pending", "CrashRecoveryService", "ResetTranscodeQueue")
             return affected_rows > 0
             
@@ -187,12 +187,12 @@ class CrashRecoveryService:
             
             # Delete running jobs from queue (they'll be recreated by RecoverMissedQualityTests if needed)
             query = """
-                DELETE FROM QualityTestingQueue 
+                DELETE FROM QualityTestingQueue
                 WHERE Id IN ({})
-            """.format(','.join('?' * len(QueueIds)))
-            
+            """.format(','.join(['%s'] * len(QueueIds)))
+
             affected_rows = self.DatabaseManager.DatabaseService.ExecuteNonQuery(query, QueueIds)
-            
+
             LoggingService.LogInfo(f"Deleted {affected_rows} running quality test queue jobs", "CrashRecoveryService", "ResetQualityTestQueue")
             return affected_rows > 0
             
@@ -206,11 +206,11 @@ class CrashRecoveryService:
             if JobType == "Transcode":
                 # Clean up TranscodeProgress records
                 query = """
-                    DELETE FROM TranscodeProgress 
+                    DELETE FROM TranscodeProgress
                     WHERE TranscodeAttemptId IN (
-                        SELECT Id FROM TranscodeAttempts 
+                        SELECT Id FROM TranscodeAttempts
                         WHERE FilePath IN (
-                            SELECT FilePath FROM TranscodeQueue WHERE Id = ?
+                            SELECT FilePath FROM TranscodeQueue WHERE Id = %s
                         )
                     )
                 """
@@ -218,7 +218,7 @@ class CrashRecoveryService:
                 
             elif JobType == "QualityTest":
                 # Clean up QualityTestProgress records
-                query = "DELETE FROM QualityTestProgress WHERE TranscodeAttemptId IN (SELECT TranscodeAttemptId FROM QualityTestingQueue WHERE Id = ?)"
+                query = "DELETE FROM QualityTestProgress WHERE TranscodeAttemptId IN (SELECT TranscodeAttemptId FROM QualityTestingQueue WHERE Id = %s)"
                 affected_rows = self.DatabaseManager.DatabaseService.ExecuteNonQuery(query, (QueueId,))
                 
             else:
@@ -237,7 +237,7 @@ class CrashRecoveryService:
     def CleanupActiveJobs(self, ServiceName: str) -> int:
         """Clean up ActiveJobs records for a service."""
         try:
-            query = "DELETE FROM ActiveJobs WHERE ServiceName = ?"
+            query = "DELETE FROM ActiveJobs WHERE ServiceName = %s"
             affected_rows = self.DatabaseManager.DatabaseService.ExecuteNonQuery(query, (ServiceName,))
             
             LoggingService.LogInfo(f"Cleaned up {affected_rows} ActiveJobs records for service {ServiceName}", "CrashRecoveryService", "CleanupActiveJobs")

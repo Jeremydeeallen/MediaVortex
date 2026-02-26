@@ -875,7 +875,7 @@ class QueueManagementBusinessService:
             # 2. Mark TranscodeAttempts as cancelled
             try:
                 self.DatabaseManager.DatabaseService.ExecuteNonQuery(
-                    "UPDATE TranscodeAttempts SET Success = 0, ErrorMessage = 'Cancelled by user' WHERE LOWER(FilePath) = LOWER(?) AND Success IS NULL",
+                    "UPDATE TranscodeAttempts SET Success = FALSE, ErrorMessage = 'Cancelled by user' WHERE LOWER(FilePath) = LOWER(%s) AND Success IS NULL",
                     (QueueItem.FilePath,)
                 )
             except Exception as e:
@@ -886,7 +886,7 @@ class QueueManagementBusinessService:
             try:
                 self.DatabaseManager.DatabaseService.ExecuteNonQuery(
                     """DELETE FROM TranscodeProgress WHERE TranscodeAttemptId IN (
-                        SELECT Id FROM TranscodeAttempts WHERE LOWER(FilePath) = LOWER(?) AND Success = 0
+                        SELECT Id FROM TranscodeAttempts WHERE LOWER(FilePath) = LOWER(%s) AND Success = FALSE
                     )""",
                     (QueueItem.FilePath,)
                 )

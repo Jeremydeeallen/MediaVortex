@@ -70,7 +70,7 @@ class WebServiceApp:
                 UPDATE ScanJobs
                 SET Status = 'Stopped',
                     ErrorMessage = 'Application restarted',
-                    EndTime = datetime('now', 'localtime')
+                    EndTime = NOW()
                 WHERE Status IN ('Running', 'Pending')
             """
             db_manager.DatabaseService.ExecuteNonQuery(cleanup_query)

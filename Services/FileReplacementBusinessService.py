@@ -102,34 +102,34 @@ class FileReplacementBusinessService:
             
             # Get the file paths from TemporaryFilePaths
             file_paths_query = '''
-            SELECT OriginalPath, LocalSourcePath, LocalOutputPath FROM TemporaryFilePaths 
-            WHERE TranscodeAttemptId = ?
+            SELECT OriginalPath, LocalSourcePath, LocalOutputPath FROM TemporaryFilePaths
+            WHERE TranscodeAttemptId = %s
             '''
             file_paths_result = self.DatabaseManager.DatabaseService.ExecuteQuery(file_paths_query, (TranscodeAttemptId,))
-            
+
             if not file_paths_result:
                 return {
                     'Success': False,
                     'ErrorMessage': f'No temporary file path found for transcode attempt {TranscodeAttemptId}'
                 }
-            
+
             original_path = file_paths_result[0]['OriginalPath']
             local_source_path = file_paths_result[0]['LocalSourcePath']
             transcoded_path = file_paths_result[0]['LocalOutputPath']
-            
+
             # Validate files exist - use LocalSourcePath instead of network path
             local_source_exists = self.FileManager.ValidateFileExists(local_source_path)
             transcoded_exists = self.FileManager.ValidateFileExists(transcoded_path)
             network_transcoded_path = os.path.join(os.path.dirname(original_path), os.path.basename(transcoded_path))
             network_transcoded_exists = self.FileManager.ValidateFileExists(network_transcoded_path)
-            
+
             # Check if transcoded file exists either locally or at network location
             if not transcoded_exists and not network_transcoded_exists:
                 return {
                     'Success': False,
                     'ErrorMessage': 'Transcoded file not found at local or network location'
                 }
-            
+
             # If transcoded file is already at network location, just update the database
             if network_transcoded_exists:
                 # File was already moved, just update the database
@@ -137,7 +137,7 @@ class FileReplacementBusinessService:
                 transcode_attempt.FileReplacedDate = datetime.now()
                 transcode_attempt.ReplacementType = "Auto"
                 self.DatabaseManager.SaveTranscodeAttempt(transcode_attempt)
-                
+
                 return {
                     'Success': True,
                     'Message': 'File was already replaced and moved to network location',
@@ -280,34 +280,34 @@ class FileReplacementBusinessService:
             
             # Get the file paths from TemporaryFilePaths
             file_paths_query = '''
-            SELECT OriginalPath, LocalSourcePath, LocalOutputPath FROM TemporaryFilePaths 
-            WHERE TranscodeAttemptId = ?
+            SELECT OriginalPath, LocalSourcePath, LocalOutputPath FROM TemporaryFilePaths
+            WHERE TranscodeAttemptId = %s
             '''
             file_paths_result = self.DatabaseManager.DatabaseService.ExecuteQuery(file_paths_query, (TranscodeAttemptId,))
-            
+
             if not file_paths_result:
                 return {
                     'Success': False,
                     'ErrorMessage': f'No temporary file path found for transcode attempt {TranscodeAttemptId}'
                 }
-            
+
             original_path = file_paths_result[0]['OriginalPath']
             local_source_path = file_paths_result[0]['LocalSourcePath']
             transcoded_path = file_paths_result[0]['LocalOutputPath']
-            
+
             # Validate files exist - use LocalSourcePath instead of network path
             local_source_exists = self.FileManager.ValidateFileExists(local_source_path)
             transcoded_exists = self.FileManager.ValidateFileExists(transcoded_path)
             network_transcoded_path = os.path.join(os.path.dirname(original_path), os.path.basename(transcoded_path))
             network_transcoded_exists = self.FileManager.ValidateFileExists(network_transcoded_path)
-            
+
             # Check if transcoded file exists either locally or at network location
             if not transcoded_exists and not network_transcoded_exists:
                 return {
                     'Success': False,
                     'ErrorMessage': 'Transcoded file not found at local or network location'
                 }
-            
+
             # If transcoded file is already at network location, just update the database
             if network_transcoded_exists:
                 # File was already moved, just update the database
@@ -315,7 +315,7 @@ class FileReplacementBusinessService:
                 transcode_attempt.FileReplacedDate = datetime.now()
                 transcode_attempt.ReplacementType = "Auto"
                 self.DatabaseManager.SaveTranscodeAttempt(transcode_attempt)
-                
+
                 return {
                     'Success': True,
                     'Message': 'File was already replaced and moved to network location',
@@ -445,8 +445,8 @@ class FileReplacementBusinessService:
             
             # Get the actual transcoded file path from QualityTestingQueue
             vmaf_query = '''
-            SELECT TranscodedFilePath FROM QualityTestingQueue 
-            WHERE TranscodeAttemptId = ?
+            SELECT TranscodedFilePath FROM QualityTestingQueue
+            WHERE TranscodeAttemptId = %s
             '''
             vmaf_result = self.DatabaseManager.DatabaseService.ExecuteQuery(vmaf_query, (TranscodeAttemptId,))
             

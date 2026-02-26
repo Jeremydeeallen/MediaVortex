@@ -4,6 +4,9 @@ psutil>=5.9.0
 setproctitle
 pythonnet>=3.0.0
 
+# Database
+psycopg2-binary>=2.9.0
+
 # Configuration and logging
 configparser
 

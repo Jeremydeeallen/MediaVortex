@@ -354,7 +354,7 @@ def SignalHandler(signum, frame):
         try:
             db = app.DatabaseManager
             db.DatabaseService.ExecuteNonQuery(
-                "UPDATE TranscodeQueue SET Status = 'Pending', ErrorMessage = 'Service interrupted' WHERE Status IN ('Running', 'Processing')"
+                "UPDATE TranscodeQueue SET Status = 'Pending' WHERE Status IN ('Running', 'Processing')"
             )
             db.DatabaseService.ExecuteNonQuery(
                 "DELETE FROM ActiveJobs WHERE ServiceName = 'TranscodeService'"

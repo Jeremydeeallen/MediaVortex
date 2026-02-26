@@ -127,22 +127,19 @@ def TerminateTranscodingNow():
             from Repositories.DatabaseManager import DatabaseManager
             dbManager = DatabaseManager()
             
-            # Update any running transcode attempts to cancelled
+            # Update any running transcode attempts to cancelled (Success=NULL means in-progress)
             updateQuery = """
-                UPDATE TranscodeAttempts 
-                SET Status = 'Cancelled', 
-                    EndTime = datetime('now', 'localtime'),
+                UPDATE TranscodeAttempts
+                SET Success = FALSE,
                     ErrorMessage = 'Transcoding terminated by user - immediate stop request'
-                WHERE Status = 'Running'
+                WHERE Success IS NULL
             """
             dbManager.DatabaseService.ExecuteNonQuery(updateQuery)
-            
+
             # Update any running progress records to cancelled
             progressQuery = """
-                UPDATE TranscodeProgress 
-                SET Status = 'Cancelled',
-                    EndTime = datetime('now', 'localtime'),
-                    ErrorMessage = 'Transcoding terminated by user - immediate stop request'
+                UPDATE TranscodeProgress
+                SET Status = 'Cancelled'
                 WHERE Status = 'Running'
             """
             dbManager.DatabaseService.ExecuteNonQuery(progressQuery)

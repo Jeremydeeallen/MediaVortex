@@ -16,5 +16,8 @@ setproctitle
 
 # Note: pathlib, shutil, os, tempfile, subprocess, logging, json, configparser are built-in Python modules
 
+# Database
+psycopg2-binary>=2.9.0
+
 WinTmp
 RAMSPDToolkit-NDD

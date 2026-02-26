@@ -220,7 +220,7 @@ class JellyfinService:
                 cmd = (
                     f"sqlite3 -json {self.JELLYFIN_DB_PATH} "
                     f"\"SELECT Name, Type, COUNT(*) as Count FROM ActivityLogs "
-                    f"WHERE DateCreated >= datetime('now', '-{Days} days') "
+                    f"WHERE DateCreated >= NOW() - INTERVAL '{Days} days' "
                     f"GROUP BY Name, Type ORDER BY Count DESC LIMIT 50\""
                 )
                 stdin, stdout, stderr = client.exec_command(cmd)

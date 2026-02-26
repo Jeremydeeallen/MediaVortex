@@ -88,7 +88,7 @@ class QualityTestingViewModel:
         try:
             # Check if MicroServiceStatus is enabled (assuming it's in ServiceStatus table)
             microservice_status = self.DatabaseManager.DatabaseService.ExecuteQuery(
-                "SELECT MicroServiceStatus FROM ServiceStatus WHERE ServiceName = ?", 
+                "SELECT MicroServiceStatus FROM ServiceStatus WHERE ServiceName = %s",
                 ('QualityTestingService',)
             )
             

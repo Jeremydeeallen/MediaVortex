@@ -45,8 +45,8 @@ class QualityTestQueueService:
             
             # Check for duplicate queue entries
             existing_query = """
-                SELECT Id FROM QualityTestingQueue 
-                WHERE TranscodeAttemptId = ?
+                SELECT Id FROM QualityTestingQueue
+                WHERE TranscodeAttemptId = %s
             """
             existing_entries = self.DatabaseManager.DatabaseService.ExecuteQuery(existing_query, (TranscodeAttemptId,))
             
@@ -59,8 +59,8 @@ class QualityTestQueueService:
             # Query TemporaryFilePaths table for file paths
             temporary_paths_query = """
                 SELECT OriginalPath, LocalSourcePath, LocalOutputPath
-                FROM TemporaryFilePaths 
-                WHERE TranscodeAttemptId = ?
+                FROM TemporaryFilePaths
+                WHERE TranscodeAttemptId = %s
             """
             temporary_paths_rows = self.DatabaseManager.DatabaseService.ExecuteQuery(temporary_paths_query, (TranscodeAttemptId,))
             
@@ -69,9 +69,8 @@ class QualityTestQueueService:
                                       "QualityTestQueueService", "AddToQualityTestQueue")
                 return None
             
-            # Convert sqlite3.Row to dictionary - use dict() constructor like other code in codebase
-            row = temporary_paths_rows[0]
-            temporary_paths = dict(row)
+            # Use CaseInsensitiveDict directly (returned by ExecuteQuery)
+            temporary_paths = temporary_paths_rows[0]
             OriginalFilePath = temporary_paths.get('OriginalPath')
             LocalSourcePath = temporary_paths.get('LocalSourcePath')
             TranscodedFilePath = temporary_paths.get('LocalOutputPath')

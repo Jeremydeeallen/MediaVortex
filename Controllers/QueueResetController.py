@@ -137,9 +137,9 @@ def ResetTranscodeAttempts(databaseManager: DatabaseManager) -> Dict[str, Any]:
         
         # Mark running attempts as terminated (set Success to False and add error message)
         updateQuery = """UPDATE TranscodeAttempts 
-                        SET Success = 0, 
+                        SET Success = FALSE,
                             ErrorMessage = 'Terminated due to system reset',
-                            AttemptDate = datetime('now')
+                            AttemptDate = NOW()
                         WHERE Success IS NULL"""
         updateResult = databaseManager.DatabaseService.ExecuteNonQuery(updateQuery)
         
@@ -217,7 +217,7 @@ def ResetServiceCommands(databaseManager: DatabaseManager) -> Dict[str, Any]:
         updateQuery = """UPDATE ServiceCommands 
                         SET Status = 'Cancelled',
                             Result = 'Cancelled due to system reset',
-                            ProcessedAt = datetime('now')
+                            ProcessedAt = NOW()
                         WHERE Status = 'Pending'"""
         updateResult = databaseManager.DatabaseService.ExecuteNonQuery(updateQuery)
         
@@ -268,7 +268,7 @@ def GetQueueStatus():
             queueStatus['ServiceCommands'] = {'Error': 'Failed to get status'}
         
         # TranscodeAttempts status
-        attemptsQuery = "SELECT CASE WHEN Success IS NULL THEN 'Running' WHEN Success = 1 THEN 'Completed' ELSE 'Failed' END as Status, COUNT(*) as Count FROM TranscodeAttempts GROUP BY Status"
+        attemptsQuery = "SELECT CASE WHEN Success IS NULL THEN 'Running' WHEN Success = TRUE THEN 'Completed' ELSE 'Failed' END as Status, COUNT(*) as Count FROM TranscodeAttempts GROUP BY Status"
         attemptsResult = databaseManager.DatabaseService.ExecuteQuery(attemptsQuery)
         if attemptsResult:
             queueStatus['TranscodeAttempts'] = {item['Status']: item['Count'] for item in attemptsResult}

@@ -19,31 +19,48 @@ class QualityTestController:
         self.QualityTestQueueService = QualityTestQueueService(self.DatabaseManager)
     
     def StartQualityTest(self, JobId: int) -> dict:
-        """Trigger quality test processing by updating queue status."""
+        """Trigger quality test processing - the job is already in the queue, just verify it exists."""
         try:
             self.LoggingService.LogInfo(f"Triggering quality test for job {JobId}")
-            
-            # Just update the queue item to Pending so service picks it up
-            success = self.DatabaseManager.UpdateQualityTestStatus(JobId, "Pending", None)
-            
-            if success:
-                return {"Success": True, "Message": "Quality test queued for processing"}
+
+            # Verify the job exists in the queue
+            JobDetails = self.DatabaseManager.GetQualityTestJob(JobId)
+
+            if JobDetails:
+                return {"Success": True, "Message": "Quality test job exists in queue and will be processed"}
             else:
-                return {"Success": False, "Message": "Failed to update queue status"}
-                
+                return {"Success": False, "Message": "Quality test job not found in queue"}
+
         except Exception as e:
             self.LoggingService.LogError(f"Error triggering quality test: {str(e)}")
             return {"Success": False, "Message": str(e)}
     
     
     def GetQualityTestStatus(self, JobId: int) -> dict:
-        """Get status of a quality test job"""
+        """Get status of a quality test job by checking both queue and results tables."""
         try:
             JobDetails = self.DatabaseManager.GetQualityTestJob(JobId)
-            if JobDetails:
-                return {"Success": True, "Status": JobDetails["Status"], "VMAFScore": JobDetails.get("VMAFScore")}
-            else:
+            if not JobDetails:
                 return {"Success": False, "Message": "Job not found"}
+
+            # Determine status from queue dates
+            if JobDetails.get("DateCompleted"):
+                Status = "Completed"
+            elif JobDetails.get("DateStarted"):
+                Status = "Running"
+            else:
+                Status = "Pending"
+
+            # Get VMAF score from QualityTestResults if available
+            TranscodeAttemptId = JobDetails.get("TranscodeAttemptId")
+            VMAFScore = None
+            if TranscodeAttemptId:
+                query = "SELECT VMAFScore FROM QualityTestResults WHERE TranscodeAttemptId = %s ORDER BY DateTested DESC LIMIT 1"
+                results = self.DatabaseManager.DatabaseService.ExecuteQuery(query, (TranscodeAttemptId,))
+                if results:
+                    VMAFScore = results[0].get("VMAFScore")
+
+            return {"Success": True, "Status": Status, "VMAFScore": VMAFScore, "JobDetails": JobDetails}
         except Exception as e:
             return {"Success": False, "Message": str(e)}
     
@@ -76,22 +93,31 @@ class QualityTestController:
             return {"Success": False, "Message": str(e)}
     
     def RetryQualityTest(self, JobId: int) -> dict:
-        """Retry a failed quality test job"""
+        """Retry a failed quality test job by deleting old results and re-queuing."""
         try:
             self.LoggingService.LogInfo(f"Retrying quality test for job {JobId}")
-            
-            # Get job details
+
+            # Get job details from queue
             JobDetails = self.DatabaseManager.GetQualityTestJob(JobId)
             if not JobDetails:
                 return {"Success": False, "Message": "Job not found"}
-            
-            # Reset job status to Pending and increment retry count
-            Success = self.DatabaseManager.ResetQualityTestJobForRetry(JobId)
-            if Success:
-                return {"Success": True, "Message": "Job reset for retry"}
+
+            TranscodeAttemptId = JobDetails.get("TranscodeAttemptId")
+            if not TranscodeAttemptId:
+                return {"Success": False, "Message": "Job has no TranscodeAttemptId"}
+
+            # Delete existing quality test records and re-queue
+            DeleteSuccess = self.DatabaseManager.DeleteQualityTestRecordsByAttemptId(TranscodeAttemptId)
+            if not DeleteSuccess:
+                return {"Success": False, "Message": "Failed to clean up existing quality test records"}
+
+            # Re-add to queue
+            NewJobId = self.QualityTestQueueService.AddToQualityTestQueue(TranscodeAttemptId)
+            if NewJobId:
+                return {"Success": True, "Message": "Job re-queued for retry", "NewJobId": NewJobId}
             else:
-                return {"Success": False, "Message": "Failed to reset job for retry"}
-                
+                return {"Success": False, "Message": "Failed to re-queue job for retry"}
+
         except Exception as e:
             self.LoggingService.LogError(f"Error retrying quality test: {str(e)}")
             return {"Success": False, "Message": str(e)}

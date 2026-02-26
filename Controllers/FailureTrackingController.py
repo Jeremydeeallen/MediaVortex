@@ -19,19 +19,19 @@ def GetRecentFailures():
     """Get recent failures from all services."""
     try:
         LoggingService.LogFunctionEntry("GetRecentFailures", "FailureTrackingController")
-        
+
         # Get query parameters
         Limit = int(request.args.get('limit', 50))
         ServiceType = request.args.get('serviceType', '')  # 'Transcode' or 'Quality' or empty for all
-        
+
         if Limit < 1 or Limit > 200:
             Limit = 50
-        
+
         # Get transcode failures
         TranscodeFailures = []
         if not ServiceType or ServiceType == 'Transcode':
             TranscodeQuery = """
-            SELECT 
+            SELECT
                 'Transcode' as ServiceType,
                 Id as FailureId,
                 FilePath as FileName,
@@ -40,66 +40,67 @@ def GetRecentFailures():
                 ProfileName as ServiceName,
                 'Transcode Job Failed' as FailureType,
                 TranscodeDurationSeconds as Duration
-            FROM TranscodeAttempts 
-            WHERE Success = 0 AND ErrorMessage IS NOT NULL AND ErrorMessage != ''
+            FROM TranscodeAttempts
+            WHERE Success = FALSE AND ErrorMessage IS NOT NULL AND ErrorMessage != ''
             ORDER BY AttemptDate DESC
-            LIMIT ?
+            LIMIT %s
             """
             TranscodeResults = SharedDatabaseManager.DatabaseService.ExecuteQuery(TranscodeQuery, (Limit,))
-            
+
             for row in TranscodeResults:
                 TranscodeFailures.append({
-                    "ServiceType": row[0],
-                    "FailureId": row[1],
-                    "FileName": row[2],
-                    "FailureDate": row[3],
-                    "FailureReason": row[4],
-                    "ServiceName": row[5],
-                    "FailureType": row[6],
-                    "Duration": row[7]
+                    "ServiceType": row['ServiceType'],
+                    "FailureId": row['FailureId'],
+                    "FileName": row['FileName'],
+                    "FailureDate": str(row['FailureDate']) if row['FailureDate'] else None,
+                    "FailureReason": row['FailureReason'],
+                    "ServiceName": row['ServiceName'],
+                    "FailureType": row['FailureType'],
+                    "Duration": row['Duration']
                 })
-        
-        # Get quality testing failures
+
+        # Get quality testing failures from QualityTestResults table
         QualityFailures = []
         if not ServiceType or ServiceType == 'Quality':
             QualityQuery = """
-            SELECT 
+            SELECT
                 'Quality' as ServiceType,
-                Id as FailureId,
-                FileName,
-                DateCompleted as FailureDate,
-                ErrorMessage as FailureReason,
-                StrategyType as ServiceName,
+                qtr.Id as FailureId,
+                ta.FilePath as FileName,
+                qtr.DateTested as FailureDate,
+                qtr.ErrorMessage as FailureReason,
+                ta.ProfileName as ServiceName,
                 'Quality Test Failed' as FailureType,
-                NULL as Duration
-            FROM QualityTestingQueue 
-            WHERE Status = 'Failed' AND ErrorMessage IS NOT NULL AND ErrorMessage != ''
-            ORDER BY DateCompleted DESC
-            LIMIT ?
+                qtr.TestDuration as Duration
+            FROM QualityTestResults qtr
+            LEFT JOIN TranscodeAttempts ta ON qtr.TranscodeAttemptId = ta.Id
+            WHERE qtr.Status = 'Failed' AND qtr.ErrorMessage IS NOT NULL AND qtr.ErrorMessage != ''
+            ORDER BY qtr.DateTested DESC
+            LIMIT %s
             """
             QualityResults = SharedDatabaseManager.DatabaseService.ExecuteQuery(QualityQuery, (Limit,))
-            
+
             for row in QualityResults:
                 QualityFailures.append({
-                    "ServiceType": row[0],
-                    "FailureId": row[1],
-                    "FileName": row[2],
-                    "FailureDate": row[3],
-                    "FailureReason": row[4],
-                    "ServiceName": row[5],
-                    "FailureType": row[6],
-                    "Duration": row[7]
+                    "ServiceType": row['ServiceType'],
+                    "FailureId": row['FailureId'],
+                    "FileName": row['FileName'],
+                    "FailureDate": str(row['FailureDate']) if row['FailureDate'] else None,
+                    "FailureReason": row['FailureReason'],
+                    "ServiceName": row['ServiceName'],
+                    "FailureType": row['FailureType'],
+                    "Duration": row['Duration']
                 })
-        
+
         # Combine and sort all failures
         AllFailures = TranscodeFailures + QualityFailures
         AllFailures.sort(key=lambda x: x['FailureDate'] or '', reverse=True)
-        
+
         # Limit combined results
         AllFailures = AllFailures[:Limit]
-        
+
         LoggingService.LogInfo(f"Retrieved {len(AllFailures)} recent failures", "FailureTrackingController", "GetRecentFailures")
-        
+
         return jsonify({
             "Success": True,
             "Failures": AllFailures,
@@ -107,7 +108,7 @@ def GetRecentFailures():
             "TranscodeCount": len(TranscodeFailures),
             "QualityCount": len(QualityFailures)
         })
-        
+
     except Exception as e:
         error_msg = f"Exception getting recent failures: {str(e)}"
         LoggingService.LogException(error_msg, e, "FailureTrackingController", "GetRecentFailures")
@@ -118,70 +119,70 @@ def GetFailureStats():
     """Get failure statistics by service."""
     try:
         LoggingService.LogFunctionEntry("GetFailureStats", "FailureTrackingController")
-        
+
         # Get transcode failure stats
         TranscodeStatsQuery = """
-        SELECT 
+        SELECT
             COUNT(*) as TotalFailures,
-            COUNT(CASE WHEN AttemptDate >= datetime('now', '-24 hours') THEN 1 END) as Last24Hours,
-            COUNT(CASE WHEN AttemptDate >= datetime('now', '-7 days') THEN 1 END) as Last7Days,
-            COUNT(CASE WHEN AttemptDate >= datetime('now', '-30 days') THEN 1 END) as Last30Days
-        FROM TranscodeAttempts 
-        WHERE Success = 0 AND ErrorMessage IS NOT NULL AND ErrorMessage != ''
+            COUNT(CASE WHEN AttemptDate >= NOW() - INTERVAL '24 hours' THEN 1 END) as Last24Hours,
+            COUNT(CASE WHEN AttemptDate >= NOW() - INTERVAL '7 days' THEN 1 END) as Last7Days,
+            COUNT(CASE WHEN AttemptDate >= NOW() - INTERVAL '30 days' THEN 1 END) as Last30Days
+        FROM TranscodeAttempts
+        WHERE Success = FALSE AND ErrorMessage IS NOT NULL AND ErrorMessage != ''
         """
         TranscodeStats = SharedDatabaseManager.DatabaseService.ExecuteQuery(TranscodeStatsQuery)[0]
-        
-        # Get quality testing failure stats
+
+        # Get quality testing failure stats from QualityTestResults
         QualityStatsQuery = """
-        SELECT 
+        SELECT
             COUNT(*) as TotalFailures,
-            COUNT(CASE WHEN DateCompleted >= datetime('now', '-24 hours') THEN 1 END) as Last24Hours,
-            COUNT(CASE WHEN DateCompleted >= datetime('now', '-7 days') THEN 1 END) as Last7Days,
-            COUNT(CASE WHEN DateCompleted >= datetime('now', '-30 days') THEN 1 END) as Last30Days
-        FROM QualityTestingQueue 
+            COUNT(CASE WHEN DateTested >= NOW() - INTERVAL '24 hours' THEN 1 END) as Last24Hours,
+            COUNT(CASE WHEN DateTested >= NOW() - INTERVAL '7 days' THEN 1 END) as Last7Days,
+            COUNT(CASE WHEN DateTested >= NOW() - INTERVAL '30 days' THEN 1 END) as Last30Days
+        FROM QualityTestResults
         WHERE Status = 'Failed' AND ErrorMessage IS NOT NULL AND ErrorMessage != ''
         """
         QualityStats = SharedDatabaseManager.DatabaseService.ExecuteQuery(QualityStatsQuery)[0]
-        
+
         # Get most common failure reasons
         CommonReasonsQuery = """
         SELECT ErrorMessage, COUNT(*) as Count
         FROM (
-            SELECT ErrorMessage FROM TranscodeAttempts WHERE Success = 0 AND ErrorMessage IS NOT NULL AND ErrorMessage != ''
+            SELECT ErrorMessage FROM TranscodeAttempts WHERE Success = FALSE AND ErrorMessage IS NOT NULL AND ErrorMessage != ''
             UNION ALL
-            SELECT ErrorMessage FROM QualityTestingQueue WHERE Status = 'Failed' AND ErrorMessage IS NOT NULL AND ErrorMessage != ''
-        )
+            SELECT ErrorMessage FROM QualityTestResults WHERE Status = 'Failed' AND ErrorMessage IS NOT NULL AND ErrorMessage != ''
+        ) AS error_source
         GROUP BY ErrorMessage
         ORDER BY Count DESC
         LIMIT 10
         """
         CommonReasons = SharedDatabaseManager.DatabaseService.ExecuteQuery(CommonReasonsQuery)
-        
+
         Stats = {
             "TranscodeService": {
-                "TotalFailures": TranscodeStats[0],
-                "Last24Hours": TranscodeStats[1],
-                "Last7Days": TranscodeStats[2],
-                "Last30Days": TranscodeStats[3]
+                "TotalFailures": TranscodeStats['TotalFailures'],
+                "Last24Hours": TranscodeStats['Last24Hours'],
+                "Last7Days": TranscodeStats['Last7Days'],
+                "Last30Days": TranscodeStats['Last30Days']
             },
             "QualityCompareService": {
-                "TotalFailures": QualityStats[0],
-                "Last24Hours": QualityStats[1],
-                "Last7Days": QualityStats[2],
-                "Last30Days": QualityStats[3]
+                "TotalFailures": QualityStats['TotalFailures'],
+                "Last24Hours": QualityStats['Last24Hours'],
+                "Last7Days": QualityStats['Last7Days'],
+                "Last30Days": QualityStats['Last30Days']
             },
             "CommonFailureReasons": [
-                {"Reason": row[0], "Count": row[1]} for row in CommonReasons
+                {"Reason": row['ErrorMessage'], "Count": row['Count']} for row in CommonReasons
             ]
         }
-        
+
         LoggingService.LogInfo("Retrieved failure statistics", "FailureTrackingController", "GetFailureStats")
-        
+
         return jsonify({
             "Success": True,
             "Stats": Stats
         })
-        
+
     except Exception as e:
         error_msg = f"Exception getting failure stats: {str(e)}"
         LoggingService.LogException(error_msg, e, "FailureTrackingController", "GetFailureStats")
@@ -192,80 +193,81 @@ def GetServiceFailures(service_name: str):
     """Get failures for a specific service."""
     try:
         LoggingService.LogFunctionEntry(f"GetServiceFailures({service_name})", "FailureTrackingController")
-        
+
         # Get query parameters
         Limit = int(request.args.get('limit', 25))
         if Limit < 1 or Limit > 100:
             Limit = 25
-        
+
         Failures = []
-        
+
         if service_name.lower() == 'transcode':
             Query = """
-            SELECT 
+            SELECT
                 Id as FailureId,
                 FilePath as FileName,
                 AttemptDate as FailureDate,
                 ErrorMessage as FailureReason,
                 ProfileName as ServiceName,
                 TranscodeDurationSeconds as Duration
-            FROM TranscodeAttempts 
-            WHERE Success = 0 AND ErrorMessage IS NOT NULL AND ErrorMessage != ''
+            FROM TranscodeAttempts
+            WHERE Success = FALSE AND ErrorMessage IS NOT NULL AND ErrorMessage != ''
             ORDER BY AttemptDate DESC
-            LIMIT ?
+            LIMIT %s
             """
             Results = SharedDatabaseManager.DatabaseService.ExecuteQuery(Query, (Limit,))
-            
+
             for row in Results:
                 Failures.append({
-                    "FailureId": row[0],
-                    "FileName": row[1],
-                    "FailureDate": row[2],
-                    "FailureReason": row[3],
-                    "ServiceName": row[4],
-                    "Duration": row[5]
+                    "FailureId": row['FailureId'],
+                    "FileName": row['FileName'],
+                    "FailureDate": str(row['FailureDate']) if row['FailureDate'] else None,
+                    "FailureReason": row['FailureReason'],
+                    "ServiceName": row['ServiceName'],
+                    "Duration": row['Duration']
                 })
-                
+
         elif service_name.lower() == 'quality':
             Query = """
-            SELECT 
-                Id as FailureId,
-                FileName,
-                DateCompleted as FailureDate,
-                ErrorMessage as FailureReason,
-                StrategyType as ServiceName,
-                NULL as Duration
-            FROM QualityTestingQueue 
-            WHERE Status = 'Failed' AND ErrorMessage IS NOT NULL AND ErrorMessage != ''
-            ORDER BY DateCompleted DESC
-            LIMIT ?
+            SELECT
+                qtr.Id as FailureId,
+                ta.FilePath as FileName,
+                qtr.DateTested as FailureDate,
+                qtr.ErrorMessage as FailureReason,
+                ta.ProfileName as ServiceName,
+                qtr.TestDuration as Duration
+            FROM QualityTestResults qtr
+            LEFT JOIN TranscodeAttempts ta ON qtr.TranscodeAttemptId = ta.Id
+            WHERE qtr.Status = 'Failed' AND qtr.ErrorMessage IS NOT NULL AND qtr.ErrorMessage != ''
+            ORDER BY qtr.DateTested DESC
+            LIMIT %s
             """
             Results = SharedDatabaseManager.DatabaseService.ExecuteQuery(Query, (Limit,))
-            
+
             for row in Results:
                 Failures.append({
-                    "FailureId": row[0],
-                    "FileName": row[1],
-                    "FailureDate": row[2],
-                    "FailureReason": row[3],
-                    "ServiceName": row[4],
-                    "Duration": row[5]
+                    "FailureId": row['FailureId'],
+                    "FileName": row['FileName'],
+                    "FailureDate": str(row['FailureDate']) if row['FailureDate'] else None,
+                    "FailureReason": row['FailureReason'],
+                    "ServiceName": row['ServiceName'],
+                    "Duration": row['Duration']
                 })
         else:
             return jsonify({
                 "Success": False,
                 "ErrorMessage": f"Unknown service: {service_name}. Use 'transcode' or 'quality'."
             }), 400
-        
+
         LoggingService.LogInfo(f"Retrieved {len(Failures)} failures for {service_name}", "FailureTrackingController", "GetServiceFailures")
-        
+
         return jsonify({
             "Success": True,
             "ServiceName": service_name,
             "Failures": Failures,
             "Count": len(Failures)
         })
-        
+
     except Exception as e:
         error_msg = f"Exception getting failures for {service_name}: {str(e)}"
         LoggingService.LogException(error_msg, e, "FailureTrackingController", "GetServiceFailures")

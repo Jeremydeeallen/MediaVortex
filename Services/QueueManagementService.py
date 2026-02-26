@@ -58,8 +58,8 @@ class QueueManagementService:
                 
                 # Cancel associated transcode attempts
                 transcodeAttemptsQuery = """
-                UPDATE TranscodeAttempts 
-                SET Success = 0, ErrorMessage = ?
+                UPDATE TranscodeAttempts
+                SET Success = FALSE, ErrorMessage = %s
                 WHERE FilePath IN (
                     SELECT FilePath FROM TranscodeQueue 
                     WHERE Status = 'Pending' AND DateStarted IS NULL
@@ -108,13 +108,13 @@ class QueueManagementService:
             if QueueType == "TranscodeQueue":
                 query = "SELECT COUNT(*) FROM TranscodeQueue WHERE Status = 'Running'"
             elif QueueType == "QualityTestingQueue":
-                query = "SELECT COUNT(*) FROM QualityTestingQueue WHERE Status = 'Running'"
+                query = "SELECT COUNT(*) FROM QualityTestingQueue WHERE DateStarted IS NOT NULL AND DateCompleted IS NULL"
             else:
                 return 0
-            
+
             result = self.DatabaseManager.DatabaseService.ExecuteQuery(query)
-            return result[0][0] if result and len(result) > 0 else 0
-            
+            return result[0]['count'] if result and len(result) > 0 else 0
+
         except Exception as e:
             LoggingService.LogException("Error getting running jobs count", e, "QueueManagementService", "GetRunningJobsCount")
             return 0
@@ -130,8 +130,14 @@ class QueueManagementService:
                 """
             elif QueueType == "QualityTestingQueue":
                 query = """
-                SELECT Status, COUNT(*) as Count 
-                FROM QualityTestingQueue 
+                SELECT
+                    CASE
+                        WHEN DateCompleted IS NOT NULL THEN 'Completed'
+                        WHEN DateStarted IS NOT NULL THEN 'Running'
+                        ELSE 'Pending'
+                    END as Status,
+                    COUNT(*) as Count
+                FROM QualityTestingQueue
                 GROUP BY Status
                 """
             else:
@@ -141,7 +147,7 @@ class QueueManagementService:
             
             statusSummary = {}
             for row in results:
-                statusSummary[row[0]] = row[1]
+                statusSummary[row['Status']] = row['Count']
             
             return {
                 "Success": True,

@@ -402,24 +402,6 @@
     </div>
 </div>
 
-<!-- Alert Container -->
-<div id="AlertContainer" class="position-fixed top-0 end-0 p-3" style="z-index: 1050;"></div>
-
-<!-- Persistent Error Display -->
-<div id="ErrorDisplay" class="d-none mb-3 mx-3">
-    <div class="alert alert-danger d-flex align-items-start mb-0">
-        <div class="flex-grow-1 me-2" style="min-width: 0;">
-            <strong>Error:</strong>
-            <div id="ErrorDisplayMessage" class="mt-1" style="word-break: break-word; user-select: text;"></div>
-        </div>
-        <div class="d-flex flex-shrink-0 gap-1">
-            <button type="button" class="btn btn-outline-danger btn-sm" onclick="copyErrorMessage()" title="Copy error message">
-                <i class="bi bi-clipboard"></i> Copy
-            </button>
-            <button type="button" class="btn-close" onclick="dismissError()"></button>
-        </div>
-    </div>
-</div>
 
 <script>
 class TranscodeQueueManager {
@@ -1726,73 +1708,8 @@ class TranscodeQueueManager {
 
 
     showAlert(message, type) {
-        if (type === 'danger') {
-            // Show errors in persistent error display with copy button
-            const errorDisplay = document.getElementById('ErrorDisplay');
-            const errorMessage = document.getElementById('ErrorDisplayMessage');
-            errorMessage.textContent = message;
-            errorDisplay.classList.remove('d-none');
-            errorDisplay.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-            return;
-        }
-
-        // Non-error alerts use toast notifications
-        const alertContainer = document.getElementById('AlertContainer');
-        const alertId = 'alert-' + Date.now();
-
-        const alertHtml = `
-            <div class="alert alert-${type} alert-dismissible fade show" role="alert" id="${alertId}">
-                ${message}
-                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-            </div>
-        `;
-
-        alertContainer.insertAdjacentHTML('beforeend', alertHtml);
-
-        // Auto-remove after 5 seconds
-        setTimeout(() => {
-            const alert = document.getElementById(alertId);
-            if (alert) {
-                alert.remove();
-            }
-        }, 5000);
+        showToastAlert(message, type);
     }
-}
-
-function copyErrorMessage() {
-    const errorMessage = document.getElementById('ErrorDisplayMessage').textContent;
-    const copyBtn = document.querySelector('#ErrorDisplay .btn-outline-danger');
-    const originalHtml = copyBtn.innerHTML;
-
-    function showCopied() {
-        copyBtn.innerHTML = '<i class="bi bi-check"></i> Copied';
-        setTimeout(() => { copyBtn.innerHTML = originalHtml; }, 2000);
-    }
-
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(errorMessage).then(showCopied).catch(() => {
-            fallbackCopy(errorMessage);
-            showCopied();
-        });
-    } else {
-        fallbackCopy(errorMessage);
-        showCopied();
-    }
-}
-
-function fallbackCopy(text) {
-    const textarea = document.createElement('textarea');
-    textarea.value = text;
-    textarea.style.position = 'fixed';
-    textarea.style.opacity = '0';
-    document.body.appendChild(textarea);
-    textarea.select();
-    document.execCommand('copy');
-    document.body.removeChild(textarea);
-}
-
-function dismissError() {
-    document.getElementById('ErrorDisplay').classList.add('d-none');
 }
 
 // Initialize the queue manager when the page loads

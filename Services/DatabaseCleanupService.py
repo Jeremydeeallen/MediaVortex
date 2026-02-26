@@ -88,7 +88,7 @@ class DatabaseCleanupService:
     def RemoveActiveJobs(self, ServiceName: str) -> int:
         """Remove all active jobs for a specific service."""
         try:
-            query = "DELETE FROM ActiveJobs WHERE ServiceName = ?"
+            query = "DELETE FROM ActiveJobs WHERE ServiceName = %s"
             rows_affected = self.DatabaseManager.DatabaseService.ExecuteNonQuery(query, (ServiceName,))
             return rows_affected
         except Exception as e:
@@ -152,29 +152,29 @@ class DatabaseCleanupService:
             }
             
             # Count running quality test jobs
-            query = "SELECT COUNT(*) FROM QualityTestingQueue WHERE DateStarted IS NOT NULL"
+            query = "SELECT COUNT(*) as count FROM QualityTestingQueue WHERE DateStarted IS NOT NULL"
             result = self.DatabaseManager.DatabaseService.ExecuteQuery(query)
             if result:
-                summary["RunningQualityTestJobs"] = result[0][0]
-            
+                summary["RunningQualityTestJobs"] = result[0]['count']
+
             # Count active jobs by service
-            query = "SELECT ServiceName, COUNT(*) FROM ActiveJobs GROUP BY ServiceName"
+            query = "SELECT ServiceName, COUNT(*) as count FROM ActiveJobs GROUP BY ServiceName"
             result = self.DatabaseManager.DatabaseService.ExecuteQuery(query)
             if result:
                 for row in result:
-                    summary["ActiveJobs"][row[0]] = row[1]
-            
+                    summary["ActiveJobs"][row['ServiceName']] = row['count']
+
             # Count orphaned progress records
             query = """
-                SELECT COUNT(*) FROM QualityTestProgress 
-                WHERE Status IN ('Running', 'Processing') 
+                SELECT COUNT(*) as count FROM QualityTestProgress
+                WHERE Status IN ('Running', 'Processing')
                 AND TranscodeAttemptId NOT IN (
                     SELECT Id FROM TranscodeAttempts WHERE Success IS NULL
                 )
             """
             result = self.DatabaseManager.DatabaseService.ExecuteQuery(query)
             if result:
-                summary["OrphanedProgressRecords"] = result[0][0]
+                summary["OrphanedProgressRecords"] = result[0]['count']
             
             return summary
             

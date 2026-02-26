@@ -345,26 +345,26 @@ def GetAllServiceStatus():
         services = []
         for row in results:
             services.append({
-                "ServiceName": row[0],
-                "Status": row[1],
-                "HealthStatus": row[2],
-                "StartTime": row[3],
-                "LastHealthCheck": row[4],
-                "UptimeSeconds": row[5],
-                "MemoryUsage": row[6],
-                "CPUUsage": row[7],
-                "DatabaseConnection": bool(row[8]),
-                "DiskSpace": row[9],
-                "ErrorCount": row[10],
-                "MaxErrors": row[11],
-                "ActiveJobsCount": row[12],
-                "IsProcessing": bool(row[13]),
-                "LastErrorMessage": row[14],
-                "ProcessId": row[15],
-                "Version": row[16],
-                "ServiceType": row[17],
-                "CreatedAt": row[18],
-                "UpdatedAt": row[19]
+                "ServiceName": row['ServiceName'],
+                "Status": row['Status'],
+                "HealthStatus": row['HealthStatus'],
+                "StartTime": str(row['StartTime']) if row['StartTime'] else None,
+                "LastHealthCheck": str(row['LastHealthCheck']) if row['LastHealthCheck'] else None,
+                "UptimeSeconds": row['UptimeSeconds'],
+                "MemoryUsage": row['MemoryUsage'],
+                "CPUUsage": row['CPUUsage'],
+                "DatabaseConnection": bool(row['DatabaseConnection']),
+                "DiskSpace": row['DiskSpace'],
+                "ErrorCount": row['ErrorCount'],
+                "MaxErrors": row['MaxErrors'],
+                "ActiveJobsCount": row['ActiveJobsCount'],
+                "IsProcessing": bool(row['IsProcessing']),
+                "LastErrorMessage": row['LastErrorMessage'],
+                "ProcessId": row['ProcessId'],
+                "Version": row['Version'],
+                "ServiceType": row['ServiceType'],
+                "CreatedAt": str(row['CreatedAt']) if row['CreatedAt'] else None,
+                "UpdatedAt": str(row['UpdatedAt']) if row['UpdatedAt'] else None
             })
         
         LoggingService.LogInfo(f"Retrieved status for {len(services)} services", "ServiceControlController", "GetAllServiceStatus")

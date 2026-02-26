@@ -27,22 +27,27 @@ class DatabaseManager:
             connection = self.DatabaseService.GetConnection()
             try:
                 cursor = connection.cursor()
+
+                # Helper to check if a column exists in a table
+                def column_exists(table_name, column_name):
+                    cursor.execute("""
+                        SELECT column_name FROM information_schema.columns
+                        WHERE table_name = %s AND column_name = %s
+                    """, (table_name.lower(), column_name.lower()))
+                    return cursor.fetchone() is not None
+
                 # Check if ProcessingMode column exists in TranscodeQueue
-                cursor.execute("PRAGMA table_info(TranscodeQueue)")
-                columns = [col[1] for col in cursor.fetchall()]
-                if 'ProcessingMode' not in columns:
+                if not column_exists('TranscodeQueue', 'ProcessingMode'):
                     cursor.execute("ALTER TABLE TranscodeQueue ADD COLUMN ProcessingMode TEXT DEFAULT 'Transcode'")
                     connection.commit()
                     LoggingService.LogInfo("Added ProcessingMode column to TranscodeQueue", "DatabaseManager", "RunMigrations")
 
                 # Add AudioCodec and SubtitleFormats columns to MediaFiles
-                cursor.execute("PRAGMA table_info(MediaFiles)")
-                mediaColumns = [col[1] for col in cursor.fetchall()]
-                if 'AudioCodec' not in mediaColumns:
+                if not column_exists('MediaFiles', 'AudioCodec'):
                     cursor.execute("ALTER TABLE MediaFiles ADD COLUMN AudioCodec TEXT")
                     connection.commit()
                     LoggingService.LogInfo("Added AudioCodec column to MediaFiles", "DatabaseManager", "RunMigrations")
-                if 'SubtitleFormats' not in mediaColumns:
+                if not column_exists('MediaFiles', 'SubtitleFormats'):
                     cursor.execute("ALTER TABLE MediaFiles ADD COLUMN SubtitleFormats TEXT")
                     connection.commit()
                     LoggingService.LogInfo("Added SubtitleFormats column to MediaFiles", "DatabaseManager", "RunMigrations")
@@ -62,23 +67,24 @@ class DatabaseManager:
                         Reason TEXT,
                         TranscodeActions TEXT,
                         LogDate TEXT,
-                        ImportedAt DATETIME DEFAULT CURRENT_TIMESTAMP
+                        ImportedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )
                 """)
 
                 # Migration: add columns and clear stale data when schema changes
                 for col in ['SubtitleCodecs', 'TranscodeActions',
                             'DestResolution', 'DestProfile', 'DestLevel', 'DestPixelFormat', 'DestFormat']:
-                    try:
-                        cursor.execute(f"ALTER TABLE JellyfinOperations ADD COLUMN {col} TEXT")
-                        # New column added — clear stale records for re-import with correct classification
-                        cursor.execute("DELETE FROM JellyfinOperations")
-                    except Exception:
-                        pass  # Column already exists
+                    if not column_exists('JellyfinOperations', col):
+                        try:
+                            cursor.execute(f"ALTER TABLE JellyfinOperations ADD COLUMN {col} TEXT")
+                            # New column added — clear stale records for re-import with correct classification
+                            cursor.execute("DELETE FROM JellyfinOperations")
+                        except Exception:
+                            pass  # Column already exists
 
                 connection.commit()
             finally:
-                connection.close()
+                self.DatabaseService.CloseConnection(connection)
         except Exception as e:
             LoggingService.LogWarning(f"Migration warning: {e}", "DatabaseManager", "RunMigrations")
 
@@ -114,7 +120,7 @@ class DatabaseManager:
         """Get a specific profile by ID."""
         query = """SELECT Id, ProfileName, Description, CreatedDate, LastModified, 
                           Codec, Preset, FilmGrain, YadifMode, YadifParity, YadifDeint, UseNvidiaHardware 
-                   FROM Profiles WHERE Id = ?"""
+                   FROM Profiles WHERE Id = %s"""
         rows = self.DatabaseService.ExecuteQuery(query, (ProfileId,))
         
         if not rows:
@@ -151,15 +157,16 @@ class DatabaseManager:
                     query = """
                         INSERT INTO Profiles (ProfileName, Description, CreatedDate, LastModified, 
                                              Codec, Preset, FilmGrain, YadifMode, YadifParity, YadifDeint, UseNvidiaHardware)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        RETURNING Id
                     """
                     parameters = (Profile.ProfileName, Profile.Description, Profile.CreatedDate, Profile.LastModified,
-                                 Profile.Codec, Profile.Preset, Profile.FilmGrain, Profile.YadifMode, 
+                                 Profile.Codec, Profile.Preset, Profile.FilmGrain, Profile.YadifMode,
                                  Profile.YadifParity, Profile.YadifDeint, Profile.UseNvidiaHardware)
                     LoggingService.LogInfo("Insert parameters: {}", "DatabaseManager", "SaveProfile", parameters)
                     cursor.execute(query, parameters)
+                    profile_id = cursor.fetchone()[0]
                     connection.commit()
-                    profile_id = cursor.lastrowid
                     LoggingService.LogInfo("Profile inserted with ID: {}", "DatabaseManager", "SaveProfile", profile_id)
                     return profile_id
                 else:
@@ -167,9 +174,9 @@ class DatabaseManager:
                     LoggingService.LogInfo("Updating existing profile with ID: {}", "DatabaseManager", "SaveProfile", Profile.Id)
                     query = """
                         UPDATE Profiles 
-                        SET ProfileName = ?, Description = ?, LastModified = ?, 
-                            Codec = ?, Preset = ?, FilmGrain = ?, YadifMode = ?, YadifParity = ?, YadifDeint = ?, UseNvidiaHardware = ?
-                        WHERE Id = ?
+                        SET ProfileName = %s, Description = %s, LastModified = %s, 
+                            Codec = %s, Preset = %s, FilmGrain = %s, YadifMode = %s, YadifParity = %s, YadifDeint = %s, UseNvidiaHardware = %s
+                        WHERE Id = %s
                     """
                     parameters = (Profile.ProfileName, Profile.Description, Profile.LastModified,
                                  Profile.Codec, Profile.Preset, Profile.FilmGrain, Profile.YadifMode, 
@@ -181,7 +188,7 @@ class DatabaseManager:
                     LoggingService.LogInfo("Profile update affected {} rows", "DatabaseManager", "SaveProfile", affected_rows)
                     return Profile.Id
             finally:
-                connection.close()
+                self.DatabaseService.CloseConnection(connection)
         except Exception as e:
             LoggingService.LogException("Exception in SaveProfile", e, "DatabaseManager", "SaveProfile")
             raise
@@ -190,10 +197,10 @@ class DatabaseManager:
         """Delete a profile and its associated thresholds."""
         try:
             # Delete associated thresholds first
-            self.DatabaseService.ExecuteNonQuery("DELETE FROM ProfileThresholds WHERE ProfileId = ?", (ProfileId,))
+            self.DatabaseService.ExecuteNonQuery("DELETE FROM ProfileThresholds WHERE ProfileId = %s", (ProfileId,))
             
             # Delete the profile
-            affected_rows = self.DatabaseService.ExecuteNonQuery("DELETE FROM Profiles WHERE Id = ?", (ProfileId,))
+            affected_rows = self.DatabaseService.ExecuteNonQuery("DELETE FROM Profiles WHERE Id = %s", (ProfileId,))
             return affected_rows > 0
         except Exception:
             return False
@@ -206,7 +213,7 @@ class DatabaseManager:
                    VideoBitrateKbps, AudioBitrateKbps, FallbackVideoBitrateKbps,
                    FallbackAudioBitrateKbps, TranscodeDownTo, Quality, KeepSource, ContainerType
             FROM ProfileThresholds 
-            WHERE ProfileId = ?
+            WHERE ProfileId = %s
             ORDER BY Resolution
         """
         rows = self.DatabaseService.ExecuteQuery(query, (ProfileId,))
@@ -226,13 +233,13 @@ class DatabaseManager:
                 FallbackAudioBitrateKbps=row['FallbackAudioBitrateKbps'],
                 TranscodeDownTo=row['TranscodeDownTo'],
                 Quality=row['Quality'],
-                KeepSource=bool(row['KeepSource'] if 'KeepSource' in row.keys() else 0),
-                ContainerType=row['ContainerType'] if 'ContainerType' in row.keys() else 'mp4'
+                KeepSource=bool(row['keepsource'] if 'keepsource' in row else 0),
+                ContainerType=row['containertype'] if 'containertype' in row else 'mp4'
             )
             thresholds.append(threshold)
-        
+
         return thresholds
-    
+
     def GetAllProfileThresholds(self) -> List[ProfileThresholdModel]:
         """Get all thresholds from all profiles."""
         query = """
@@ -259,11 +266,11 @@ class DatabaseManager:
                 FallbackAudioBitrateKbps=row['FallbackAudioBitrateKbps'],
                 TranscodeDownTo=row['TranscodeDownTo'],
                 Quality=row['Quality'],
-                KeepSource=bool(row['KeepSource'] if 'KeepSource' in row.keys() else 0),
-                ContainerType=row['ContainerType'] if 'ContainerType' in row.keys() else 'mp4'
+                KeepSource=bool(row['keepsource'] if 'keepsource' in row else 0),
+                ContainerType=row['containertype'] if 'containertype' in row else 'mp4'
             )
             thresholds.append(threshold)
-        
+
         return thresholds
     
     def SaveThreshold(self, Threshold: ProfileThresholdModel) -> int:
@@ -283,20 +290,21 @@ class DatabaseManager:
                         (ProfileId, Resolution, Under30MinMB, Under65MinMB, Over65MinMB,
                          VideoBitrateKbps, AudioBitrateKbps, FallbackVideoBitrateKbps,
                          FallbackAudioBitrateKbps, TranscodeDownTo, Quality, KeepSource, ContainerType)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        RETURNING Id
                     """
                     parameters = (
                         Threshold.ProfileId, Threshold.Resolution, Threshold.Under30MinMB,
                         Threshold.Under65MinMB, Threshold.Over65MinMB, Threshold.VideoBitrateKbps,
                         Threshold.AudioBitrateKbps, Threshold.FallbackVideoBitrateKbps,
-                        Threshold.FallbackAudioBitrateKbps, 
-                        Threshold.TranscodeDownTo if Threshold.TranscodeDownTo is not None else '', 
+                        Threshold.FallbackAudioBitrateKbps,
+                        Threshold.TranscodeDownTo if Threshold.TranscodeDownTo is not None else '',
                         Threshold.Quality, Threshold.KeepSource, 'mp4'
                     )
                     LoggingService.LogInfo(f"Insert threshold parameters: {parameters}", "SaveThreshold", "DatabaseManager")
                     cursor.execute(query, parameters)
+                    threshold_id = cursor.fetchone()[0]
                     connection.commit()
-                    threshold_id = cursor.lastrowid
                     LoggingService.LogInfo(f"Threshold inserted with ID: {threshold_id}", "SaveThreshold", "DatabaseManager")
                     return threshold_id
                 else:
@@ -304,11 +312,11 @@ class DatabaseManager:
                     LoggingService.LogInfo(f"Updating existing threshold with ID: {Threshold.Id}", "SaveThreshold", "DatabaseManager")
                     query = """
                         UPDATE ProfileThresholds 
-                        SET ProfileId = ?, Resolution = ?, Under30MinMB = ?, Under65MinMB = ?,
-                            Over65MinMB = ?, VideoBitrateKbps = ?, AudioBitrateKbps = ?,
-                            FallbackVideoBitrateKbps = ?, FallbackAudioBitrateKbps = ?,
-                            TranscodeDownTo = ?, Quality = ?, KeepSource = ?
-                        WHERE Id = ?
+                        SET ProfileId = %s, Resolution = %s, Under30MinMB = %s, Under65MinMB = %s,
+                            Over65MinMB = %s, VideoBitrateKbps = %s, AudioBitrateKbps = %s,
+                            FallbackVideoBitrateKbps = %s, FallbackAudioBitrateKbps = %s,
+                            TranscodeDownTo = %s, Quality = %s, KeepSource = %s
+                        WHERE Id = %s
                     """
                     parameters = (
                         Threshold.ProfileId, Threshold.Resolution, Threshold.Under30MinMB,
@@ -325,14 +333,14 @@ class DatabaseManager:
                     LoggingService.LogInfo(f"Threshold update affected {affected_rows} rows", "SaveThreshold", "DatabaseManager")
                     return Threshold.Id
             finally:
-                connection.close()
+                self.DatabaseService.CloseConnection(connection)
         except Exception as e:
             LoggingService.LogException("Exception in SaveThreshold", e, "DatabaseManager", "SaveThreshold")
             raise
     
     def DeleteThreshold(self, ThresholdId: int) -> bool:
         """Delete a threshold."""
-        affected_rows = self.DatabaseService.ExecuteNonQuery("DELETE FROM ProfileThresholds WHERE Id = ?", (ThresholdId,))
+        affected_rows = self.DatabaseService.ExecuteNonQuery("DELETE FROM ProfileThresholds WHERE Id = %s", (ThresholdId,))
         return affected_rows > 0
     
     # Root Folder Management Methods
@@ -364,7 +372,7 @@ class DatabaseManager:
     
     def GetRootFolderById(self, RootFolderId: int) -> Optional[RootFolderModel]:
         """Get a specific root folder by ID."""
-        query = "SELECT Id, RootFolder, LastScannedDate, TotalSizeGB FROM RootFolders WHERE Id = ?"
+        query = "SELECT Id, RootFolder, LastScannedDate, TotalSizeGB FROM RootFolders WHERE Id = %s"
         rows = self.DatabaseService.ExecuteQuery(query, (RootFolderId,))
         
         if not rows:
@@ -395,13 +403,14 @@ class DatabaseManager:
                     LoggingService.LogInfo("Inserting new root folder...")
                     query = """
                         INSERT INTO RootFolders (RootFolder, LastScannedDate, TotalSizeGB)
-                        VALUES (?, ?, ?)
+                        VALUES (%s, %s, %s)
+                        RETURNING Id
                     """
                     parameters = (RootFolder.RootFolder, RootFolder.LastScannedDate, RootFolder.TotalSizeGB)
                     LoggingService.LogInfo("Insert root folder parameters: {}", "DatabaseManager", "SaveRootFolder", parameters)
                     cursor.execute(query, parameters)
+                    rootFolderId = cursor.fetchone()[0]
                     connection.commit()
-                    rootFolderId = cursor.lastrowid
                     LoggingService.LogInfo("Root folder inserted with ID: {}", "DatabaseManager", "SaveRootFolder", rootFolderId)
                     return rootFolderId
                 else:
@@ -409,8 +418,8 @@ class DatabaseManager:
                     LoggingService.LogInfo("Updating existing root folder with ID: {}", "DatabaseManager", "SaveRootFolder", RootFolder.Id)
                     query = """
                         UPDATE RootFolders 
-                        SET RootFolder = ?, LastScannedDate = ?, TotalSizeGB = ?
-                        WHERE Id = ?
+                        SET RootFolder = %s, LastScannedDate = %s, TotalSizeGB = %s
+                        WHERE Id = %s
                     """
                     parameters = (RootFolder.RootFolder, RootFolder.LastScannedDate, RootFolder.TotalSizeGB, RootFolder.Id)
                     LoggingService.LogInfo(f"Update root folder parameters: {parameters}", "DatabaseManager", "SaveRootFolder")
@@ -420,7 +429,7 @@ class DatabaseManager:
                     LoggingService.LogInfo("Root folder update affected {} rows", "DatabaseManager", "SaveRootFolder", affectedRows)
                     return RootFolder.Id
             finally:
-                connection.close()
+                self.DatabaseService.CloseConnection(connection)
         except Exception as e:
             LoggingService.LogException("Exception in SaveRootFolder", e, "DatabaseManager", "SaveRootFolder")
             raise
@@ -429,10 +438,10 @@ class DatabaseManager:
         """Delete a root folder and its associated media files."""
         try:
             # Delete associated media files first
-            self.DatabaseService.ExecuteNonQuery("DELETE FROM MediaFiles WHERE Id IN (SELECT Id FROM MediaFiles WHERE LOWER(FilePath) LIKE LOWER((SELECT RootFolder FROM RootFolders WHERE Id = ?)) || '%')", (RootFolderId,))
+            self.DatabaseService.ExecuteNonQuery("DELETE FROM MediaFiles WHERE Id IN (SELECT Id FROM MediaFiles WHERE LOWER(FilePath) LIKE LOWER((SELECT RootFolder FROM RootFolders WHERE Id = %s)) || '%%' ESCAPE '!')", (RootFolderId,))
             
             # Delete the root folder
-            affectedRows = self.DatabaseService.ExecuteNonQuery("DELETE FROM RootFolders WHERE Id = ?", (RootFolderId,))
+            affectedRows = self.DatabaseService.ExecuteNonQuery("DELETE FROM RootFolders WHERE Id = %s", (RootFolderId,))
             return affectedRows > 0
         except Exception:
             return False
@@ -505,7 +514,7 @@ class DatabaseManager:
                    AudioSampleFormat, AudioChannelLayout, AudioCodec, SubtitleFormats,
                    ContainerFormat, OverallBitrate, TranscodedByMediaVortex
             FROM MediaFiles 
-            WHERE Id = ?
+            WHERE Id = %s
         """
         rows = self.DatabaseService.ExecuteQuery(query, (MediaFileId,))
         
@@ -565,7 +574,7 @@ class DatabaseManager:
                 if MediaFile.Id is None:
                     # Safety check: verify no existing record with same path before inserting
                     # This prevents duplicates from race conditions in parallel processing
-                    checkQuery = "SELECT Id FROM MediaFiles WHERE LOWER(FilePath) = LOWER(?)"
+                    checkQuery = "SELECT Id FROM MediaFiles WHERE LOWER(FilePath) = LOWER(%s)"
                     cursor.execute(checkQuery, (MediaFile.FilePath,))
                     existingRow = cursor.fetchone()
 
@@ -575,15 +584,15 @@ class DatabaseManager:
                         LoggingService.LogInfo(f"Duplicate prevented: file already exists with ID {MediaFile.Id}, converting to update: {MediaFile.FilePath}", "DatabaseManager", "SaveMediaFile")
                         query = """
                             UPDATE MediaFiles
-                            SET SeasonId = ?, FilePath = ?, FileName = ?, SizeMB = ?, VideoBitrateKbps = ?,
-                                AudioBitrateKbps = ?, Resolution = ?, Codec = ?, DurationMinutes = ?,
-                                FrameRate = ?, LastScannedDate = ?, CompressionPotential = ?, AssignedProfile = ?,
-                                FileModificationTime = ?, TotalFrames = ?, CodecProfile = ?, ColorRange = ?,
-                                FieldOrder = ?, HasBFrames = ?, RefFrames = ?, PixelFormat = ?, Level = ?,
-                                AudioChannels = ?, AudioSampleRate = ?, AudioSampleFormat = ?,
-                                AudioChannelLayout = ?, AudioCodec = ?, SubtitleFormats = ?,
-                                ContainerFormat = ?, OverallBitrate = ?, TranscodedByMediaVortex = ?
-                            WHERE Id = ?
+                            SET SeasonId = %s, FilePath = %s, FileName = %s, SizeMB = %s, VideoBitrateKbps = %s,
+                                AudioBitrateKbps = %s, Resolution = %s, Codec = %s, DurationMinutes = %s,
+                                FrameRate = %s, LastScannedDate = %s, CompressionPotential = %s, AssignedProfile = %s,
+                                FileModificationTime = %s, TotalFrames = %s, CodecProfile = %s, ColorRange = %s,
+                                FieldOrder = %s, HasBFrames = %s, RefFrames = %s, PixelFormat = %s, Level = %s,
+                                AudioChannels = %s, AudioSampleRate = %s, AudioSampleFormat = %s,
+                                AudioChannelLayout = %s, AudioCodec = %s, SubtitleFormats = %s,
+                                ContainerFormat = %s, OverallBitrate = %s, TranscodedByMediaVortex = %s
+                            WHERE Id = %s
                         """
                         parameters = (
                             MediaFile.SeasonId, MediaFile.FilePath, MediaFile.FileName, MediaFile.SizeMB,
@@ -612,7 +621,8 @@ class DatabaseManager:
                          PixelFormat, Level, AudioChannels, AudioSampleRate, AudioSampleFormat,
                          AudioChannelLayout, AudioCodec, SubtitleFormats,
                          ContainerFormat, OverallBitrate, TranscodedByMediaVortex)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        RETURNING Id
                     """
                     parameters = (
                         MediaFile.SeasonId, MediaFile.FilePath, MediaFile.FileName, MediaFile.SizeMB,
@@ -628,8 +638,8 @@ class DatabaseManager:
                     )
                     LoggingService.LogInfo(f"Insert media file parameters: {parameters}", "DatabaseManager", "SaveMediaFile")
                     cursor.execute(query, parameters)
+                    mediaFileId = cursor.fetchone()[0]
                     connection.commit()
-                    mediaFileId = cursor.lastrowid
                     LoggingService.LogInfo(f"Media file inserted with ID: {mediaFileId}", "DatabaseManager", "SaveMediaFile")
                     return mediaFileId
                 else:
@@ -637,15 +647,15 @@ class DatabaseManager:
                     LoggingService.LogInfo(f"Updating existing media file with ID: {MediaFile.Id}", "DatabaseManager", "SaveMediaFile")
                     query = """
                         UPDATE MediaFiles 
-                        SET SeasonId = ?, FilePath = ?, FileName = ?, SizeMB = ?, VideoBitrateKbps = ?,
-                            AudioBitrateKbps = ?, Resolution = ?, Codec = ?, DurationMinutes = ?,
-                            FrameRate = ?, LastScannedDate = ?, CompressionPotential = ?, AssignedProfile = ?,
-                            FileModificationTime = ?, TotalFrames = ?, CodecProfile = ?, ColorRange = ?,
-                            FieldOrder = ?, HasBFrames = ?, RefFrames = ?, PixelFormat = ?, Level = ?,
-                            AudioChannels = ?, AudioSampleRate = ?, AudioSampleFormat = ?,
-                            AudioChannelLayout = ?, AudioCodec = ?, SubtitleFormats = ?,
-                            ContainerFormat = ?, OverallBitrate = ?, TranscodedByMediaVortex = ?
-                        WHERE Id = ?
+                        SET SeasonId = %s, FilePath = %s, FileName = %s, SizeMB = %s, VideoBitrateKbps = %s,
+                            AudioBitrateKbps = %s, Resolution = %s, Codec = %s, DurationMinutes = %s,
+                            FrameRate = %s, LastScannedDate = %s, CompressionPotential = %s, AssignedProfile = %s,
+                            FileModificationTime = %s, TotalFrames = %s, CodecProfile = %s, ColorRange = %s,
+                            FieldOrder = %s, HasBFrames = %s, RefFrames = %s, PixelFormat = %s, Level = %s,
+                            AudioChannels = %s, AudioSampleRate = %s, AudioSampleFormat = %s,
+                            AudioChannelLayout = %s, AudioCodec = %s, SubtitleFormats = %s,
+                            ContainerFormat = %s, OverallBitrate = %s, TranscodedByMediaVortex = %s
+                        WHERE Id = %s
                     """
                     parameters = (
                         MediaFile.SeasonId, MediaFile.FilePath, MediaFile.FileName, MediaFile.SizeMB,
@@ -666,14 +676,14 @@ class DatabaseManager:
                     LoggingService.LogInfo(f"Media file update affected {affectedRows} rows", "DatabaseManager", "SaveMediaFile")
                     return MediaFile.Id
             finally:
-                connection.close()
+                self.DatabaseService.CloseConnection(connection)
         except Exception as e:
             LoggingService.LogException("Exception in SaveMediaFile", e, "DatabaseManager", "SaveMediaFile")
             raise
     
     def DeleteMediaFile(self, MediaFileId: int) -> bool:
         """Delete a media file."""
-        affectedRows = self.DatabaseService.ExecuteNonQuery("DELETE FROM MediaFiles WHERE Id = ?", (MediaFileId,))
+        affectedRows = self.DatabaseService.ExecuteNonQuery("DELETE FROM MediaFiles WHERE Id = %s", (MediaFileId,))
         return affectedRows > 0
 
     def CleanupDuplicateMediaFiles(self) -> Dict[str, Any]:
@@ -690,14 +700,15 @@ class DatabaseManager:
         try:
             connection = self.DatabaseService.GetConnection()
             try:
-                cursor = connection.cursor()
+                import psycopg2.extras
+                cursor = connection.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
                 # Find all duplicate groups (FilePaths with more than one record)
                 cursor.execute("""
-                    SELECT LOWER(FilePath) as NormalizedPath, COUNT(*) as Cnt
+                    SELECT LOWER(FilePath) as normalizedpath, COUNT(*) as cnt
                     FROM MediaFiles
                     GROUP BY LOWER(FilePath)
-                    HAVING Cnt > 1
+                    HAVING COUNT(*) > 1
                 """)
                 DuplicateGroups = cursor.fetchall()
 
@@ -711,7 +722,7 @@ class DatabaseManager:
 
                 # Build a set of FilePaths that have TranscodeAttempts records
                 cursor.execute("SELECT DISTINCT FilePath FROM TranscodeAttempts")
-                TranscodedPaths = {row['FilePath'] for row in cursor.fetchall()}
+                TranscodedPaths = {row['filepath'] for row in cursor.fetchall()}
 
                 MetadataColumns = [
                     'SeasonId', 'SizeMB', 'VideoBitrateKbps', 'AudioBitrateKbps',
@@ -726,11 +737,11 @@ class DatabaseManager:
                 TotalRemoved = 0
 
                 for group in DuplicateGroups:
-                    NormalizedPath = group['NormalizedPath']
+                    NormalizedPath = group['normalizedpath']
 
                     # Get all records for this path
                     cursor.execute("""
-                        SELECT * FROM MediaFiles WHERE LOWER(FilePath) = ?
+                        SELECT * FROM MediaFiles WHERE LOWER(FilePath) = %s
                         ORDER BY Id
                     """, (NormalizedPath,))
                     Records = cursor.fetchall()
@@ -744,9 +755,9 @@ class DatabaseManager:
                     BestKey = None
 
                     for record in Records:
-                        HasTranscodeLink = 1 if record['FilePath'] in TranscodedPaths else 0
-                        ScanDate = record['LastScannedDate'] or ''
-                        MetadataScore = sum(1 for col in MetadataColumns if record[col] is not None)
+                        HasTranscodeLink = 1 if record['filepath'] in TranscodedPaths else 0
+                        ScanDate = record['lastscanneddate'] or ''
+                        MetadataScore = sum(1 for col in MetadataColumns if record.get(col.lower()) is not None)
 
                         Key = (HasTranscodeLink, ScanDate, MetadataScore)
 
@@ -754,17 +765,17 @@ class DatabaseManager:
                             BestKey = Key
                             BestRecord = record
 
-                    KeptId = BestRecord['Id']
-                    DeleteIds = [r['Id'] for r in Records if r['Id'] != KeptId]
+                    KeptId = BestRecord['id']
+                    DeleteIds = [r['id'] for r in Records if r['id'] != KeptId]
 
                     if not DeleteIds:
                         continue
 
                     # Update MediaFilesArchive: reassign any references from deleted IDs to kept ID
-                    Placeholders = ','.join('?' * len(DeleteIds))
+                    Placeholders = ','.join(['%s'] * len(DeleteIds))
                     cursor.execute(f"""
                         UPDATE MediaFilesArchive
-                        SET Id = ?
+                        SET Id = %s
                         WHERE Id IN ({Placeholders})
                     """, [KeptId] + DeleteIds)
 
@@ -783,7 +794,7 @@ class DatabaseManager:
 
                 # Create unique index to prevent future duplicates
                 try:
-                    cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_mediafiles_filepath_unique ON MediaFiles (FilePath COLLATE NOCASE)")
+                    cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_mediafiles_filepath_unique ON MediaFiles (LOWER(FilePath))")
                     connection.commit()
                     LoggingService.LogInfo("Created unique index on MediaFiles.FilePath", "DatabaseManager", "CleanupDuplicateMediaFiles")
                 except Exception as IndexError:
@@ -799,7 +810,7 @@ class DatabaseManager:
                     'Message': f'Removed {TotalRemoved} duplicate records from {len(DuplicateGroups)} groups'
                 }
             finally:
-                connection.close()
+                self.DatabaseService.CloseConnection(connection)
         except Exception as e:
             LoggingService.LogException("Error cleaning up duplicate media files", e, "DatabaseManager", "CleanupDuplicateMediaFiles")
             return {
@@ -819,7 +830,7 @@ class DatabaseManager:
                    AudioSampleFormat, AudioChannelLayout, AudioCodec, SubtitleFormats,
                    ContainerFormat, OverallBitrate, TranscodedByMediaVortex
             FROM MediaFiles 
-            WHERE LOWER(FilePath) LIKE LOWER(?)
+            WHERE LOWER(FilePath) LIKE LOWER(%s) ESCAPE '!'
         """
         rows = self.DatabaseService.ExecuteQuery(query, (f"{RootFolderPath}%",))
         
@@ -868,7 +879,7 @@ class DatabaseManager:
     def GetMediaFilesByRootFolderId(self, RootFolderId: int) -> List[MediaFileModel]:
         """Get all media files for a specific root folder by ID."""
         # First get the root folder path from the ID
-        rootFolderQuery = "SELECT RootFolder FROM RootFolders WHERE Id = ?"
+        rootFolderQuery = "SELECT RootFolder FROM RootFolders WHERE Id = %s"
         rootFolderRows = self.DatabaseService.ExecuteQuery(rootFolderQuery, (RootFolderId,))
         
         if not rootFolderRows:
@@ -886,7 +897,7 @@ class DatabaseManager:
                    AudioSampleFormat, AudioChannelLayout, AudioCodec, SubtitleFormats,
                    ContainerFormat, OverallBitrate, TranscodedByMediaVortex
             FROM MediaFiles 
-            WHERE LOWER(FilePath) LIKE LOWER(?)
+            WHERE LOWER(FilePath) LIKE LOWER(%s) ESCAPE '!'
         """
         rows = self.DatabaseService.ExecuteQuery(query, (f"{rootFolderPath}%",))
         
@@ -936,52 +947,40 @@ class DatabaseManager:
     def GetAllSeasons(self) -> List[SeasonModel]:
         """Get all seasons."""
         query = """
-            SELECT Id, RootFolderId, SeasonName, SeasonNumber, EpisodeCount, 
-                   TotalSizeGB, CreatedDate, LastUpdatedDate
-            FROM Seasons 
-            ORDER BY RootFolderId, SeasonNumber
+            SELECT Id, RootFolderId, SeasonName
+            FROM Seasons
+            ORDER BY RootFolderId, SeasonName
         """
         rows = self.DatabaseService.ExecuteQuery(query)
-        
+
         seasons = []
         for row in rows:
             season = SeasonModel(
                 Id=row['Id'],
                 RootFolderId=row['RootFolderId'],
-                SeasonName=row['SeasonName'],
-                SeasonNumber=row['SeasonNumber'],
-                EpisodeCount=row['EpisodeCount'],
-                TotalSizeGB=row['TotalSizeGB'],
-                CreatedDate=row['CreatedDate'],
-                LastUpdatedDate=row['LastUpdatedDate']
+                SeasonName=row['SeasonName']
             )
             seasons.append(season)
-        
+
         return seasons
     
     def GetSeasonById(self, SeasonId: int) -> Optional[SeasonModel]:
         """Get a specific season by ID."""
         query = """
-            SELECT Id, RootFolderId, SeasonName, SeasonNumber, EpisodeCount, 
-                   TotalSizeGB, CreatedDate, LastUpdatedDate
-            FROM Seasons 
-            WHERE Id = ?
+            SELECT Id, RootFolderId, SeasonName
+            FROM Seasons
+            WHERE Id = %s
         """
         rows = self.DatabaseService.ExecuteQuery(query, (SeasonId,))
-        
+
         if not rows:
             return None
-        
+
         row = rows[0]
         return SeasonModel(
             Id=row['Id'],
             RootFolderId=row['RootFolderId'],
-            SeasonName=row['SeasonName'],
-            SeasonNumber=row['SeasonNumber'],
-            EpisodeCount=row['EpisodeCount'],
-            TotalSizeGB=row['TotalSizeGB'],
-            CreatedDate=row['CreatedDate'],
-            LastUpdatedDate=row['LastUpdatedDate']
+            SeasonName=row['SeasonName']
         )
     
     def SaveSeason(self, Season: SeasonModel) -> int:
@@ -990,64 +989,52 @@ class DatabaseManager:
             if Season.Id is None:
                 # Insert new season
                 query = """
-                    INSERT INTO Seasons 
-                    (RootFolderId, SeasonName, SeasonNumber, EpisodeCount, TotalSizeGB, CreatedDate, LastUpdatedDate)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO Seasons (RootFolderId, SeasonName)
+                    VALUES (%s, %s)
+                    RETURNING Id
                 """
-                parameters = (
-                    Season.RootFolderId, Season.SeasonName, Season.SeasonNumber, 
-                    Season.EpisodeCount, Season.TotalSizeGB, Season.CreatedDate, Season.LastUpdatedDate
-                )
-                Season.Id = self.DatabaseService.ExecuteNonQuery(query, parameters)
+                parameters = (Season.RootFolderId, Season.SeasonName)
+                result = self.DatabaseService.ExecuteQuery(query, parameters)
+                Season.Id = result[0]['Id'] if result else None
                 LoggingService.LogInfo("Created new season: {} with ID: {}", Season.SeasonName, Season.Id)
             else:
                 # Update existing season
                 query = """
-                    UPDATE Seasons 
-                    SET RootFolderId = ?, SeasonName = ?, SeasonNumber = ?, EpisodeCount = ?,
-                        TotalSizeGB = ?, LastUpdatedDate = ?
-                    WHERE Id = ?
+                    UPDATE Seasons
+                    SET RootFolderId = %s, SeasonName = %s
+                    WHERE Id = %s
                 """
-                parameters = (
-                    Season.RootFolderId, Season.SeasonName, Season.SeasonNumber, 
-                    Season.EpisodeCount, Season.TotalSizeGB, Season.LastUpdatedDate, Season.Id
-                )
+                parameters = (Season.RootFolderId, Season.SeasonName, Season.Id)
                 self.DatabaseService.ExecuteNonQuery(query, parameters)
                 LoggingService.LogInfo("Updated season: {} with ID: {}", Season.SeasonName, Season.Id)
-            
+
             return Season.Id
-            
+
         except Exception as e:
             LoggingService.LogException("Error saving season", e)
             raise
     
     def DeleteSeason(self, SeasonId: int) -> bool:
         """Delete a season."""
-        affectedRows = self.DatabaseService.ExecuteNonQuery("DELETE FROM Seasons WHERE Id = ?", (SeasonId,))
+        affectedRows = self.DatabaseService.ExecuteNonQuery("DELETE FROM Seasons WHERE Id = %s", (SeasonId,))
         return affectedRows > 0
     
     def GetSeasonsByRootFolder(self, RootFolderId: int) -> List[SeasonModel]:
         """Get all seasons for a specific root folder."""
         query = """
-            SELECT Id, RootFolderId, SeasonName, SeasonNumber, EpisodeCount, 
-                   TotalSizeGB, CreatedDate, LastUpdatedDate
-            FROM Seasons 
-            WHERE RootFolderId = ?
-            ORDER BY SeasonNumber
+            SELECT Id, RootFolderId, SeasonName
+            FROM Seasons
+            WHERE RootFolderId = %s
+            ORDER BY SeasonName
         """
         rows = self.DatabaseService.ExecuteQuery(query, (RootFolderId,))
-        
+
         seasons = []
         for row in rows:
             season = SeasonModel(
                 Id=row['Id'],
                 RootFolderId=row['RootFolderId'],
-                SeasonName=row['SeasonName'],
-                SeasonNumber=row['SeasonNumber'],
-                EpisodeCount=row['EpisodeCount'],
-                TotalSizeGB=row['TotalSizeGB'],
-                CreatedDate=row['CreatedDate'],
-                LastUpdatedDate=row['LastUpdatedDate']
+                SeasonName=row['SeasonName']
             )
             seasons.append(season)
         
@@ -1065,7 +1052,7 @@ class DatabaseManager:
                    AudioSampleFormat, AudioChannelLayout, AudioCodec, SubtitleFormats,
                    ContainerFormat, OverallBitrate, TranscodedByMediaVortex
             FROM MediaFiles 
-            WHERE LOWER(FilePath) = LOWER(?)
+            WHERE LOWER(FilePath) = LOWER(%s)
         """
         rows = self.DatabaseService.ExecuteQuery(query, (FilePath,))
         
@@ -1113,7 +1100,7 @@ class DatabaseManager:
     
     def DeleteMediaFileByPath(self, FilePath: str) -> bool:
         """Delete a media file by path (case-insensitive)."""
-        affectedRows = self.DatabaseService.ExecuteNonQuery("DELETE FROM MediaFiles WHERE LOWER(FilePath) = LOWER(?)", (FilePath,))
+        affectedRows = self.DatabaseService.ExecuteNonQuery("DELETE FROM MediaFiles WHERE LOWER(FilePath) = LOWER(%s)", (FilePath,))
         return affectedRows > 0
 
     # Optimization Analysis Methods
@@ -1146,7 +1133,7 @@ class DatabaseManager:
 
     def GetMkvFileCount(self) -> int:
         """Get count of MKV files (remux candidates)."""
-        query = "SELECT COUNT(*) as Count FROM MediaFiles WHERE LOWER(ContainerFormat) LIKE '%matroska%'"
+        query = "SELECT COUNT(*) as Count FROM MediaFiles WHERE LOWER(ContainerFormat) LIKE '%%matroska%%'"
         rows = self.DatabaseService.ExecuteQuery(query)
         return rows[0]['Count'] if rows else 0
 
@@ -1163,7 +1150,7 @@ class DatabaseManager:
             FROM MediaFiles
             WHERE LOWER(Codec) IN ('mpeg4', 'msmpeg4v3', 'msmpeg4v2', 'mpeg2video', 'wmv3', 'wmv2', 'wmv1', 'rv40', 'rv30', 'vp6f')
             ORDER BY SizeMB DESC
-            LIMIT ?
+            LIMIT %s
         """
         rows = self.DatabaseService.ExecuteQuery(query, (Limit,))
         return [{'Id': r['Id'], 'FilePath': r['FilePath'], 'FileName': r['FileName'],
@@ -1186,7 +1173,7 @@ class DatabaseManager:
             FROM MediaFiles
             WHERE LOWER(AudioCodec) IN ('dts', 'truehd', 'flac', 'pcm_s16le', 'pcm_s24le', 'pcm_s32le', 'pcm_f32le')
             ORDER BY SizeMB DESC
-            LIMIT ?
+            LIMIT %s
         """
         rows = self.DatabaseService.ExecuteQuery(query, (Limit,))
         return [{'Id': r['Id'], 'FilePath': r['FilePath'], 'FileName': r['FileName'],
@@ -1208,11 +1195,11 @@ class DatabaseManager:
             SELECT Id, FilePath, FileName, SubtitleFormats, ContainerFormat, SizeMB, Resolution
             FROM MediaFiles
             WHERE SubtitleFormats IS NOT NULL AND SubtitleFormats != ''
-              AND (LOWER(SubtitleFormats) LIKE '%ass%' OR LOWER(SubtitleFormats) LIKE '%ssa%'
-                   OR LOWER(SubtitleFormats) LIKE '%hdmv_pgs%' OR LOWER(SubtitleFormats) LIKE '%pgssub%'
-                   OR LOWER(SubtitleFormats) LIKE '%dvd_subtitle%' OR LOWER(SubtitleFormats) LIKE '%dvdsub%')
+              AND (LOWER(SubtitleFormats) LIKE '%%ass%%' OR LOWER(SubtitleFormats) LIKE '%%ssa%%'
+                   OR LOWER(SubtitleFormats) LIKE '%%hdmv_pgs%%' OR LOWER(SubtitleFormats) LIKE '%%pgssub%%'
+                   OR LOWER(SubtitleFormats) LIKE '%%dvd_subtitle%%' OR LOWER(SubtitleFormats) LIKE '%%dvdsub%%')
             ORDER BY SizeMB DESC
-            LIMIT ?
+            LIMIT %s
         """
         rows = self.DatabaseService.ExecuteQuery(query, (Limit,))
         return [{'Id': r['Id'], 'FilePath': r['FilePath'], 'FileName': r['FileName'],
@@ -1224,9 +1211,9 @@ class DatabaseManager:
         query = """
             SELECT COUNT(*) as Count FROM MediaFiles
             WHERE SubtitleFormats IS NOT NULL AND SubtitleFormats != ''
-              AND (LOWER(SubtitleFormats) LIKE '%ass%' OR LOWER(SubtitleFormats) LIKE '%ssa%'
-                   OR LOWER(SubtitleFormats) LIKE '%hdmv_pgs%' OR LOWER(SubtitleFormats) LIKE '%pgssub%'
-                   OR LOWER(SubtitleFormats) LIKE '%dvd_subtitle%' OR LOWER(SubtitleFormats) LIKE '%dvdsub%')
+              AND (LOWER(SubtitleFormats) LIKE '%%ass%%' OR LOWER(SubtitleFormats) LIKE '%%ssa%%'
+                   OR LOWER(SubtitleFormats) LIKE '%%hdmv_pgs%%' OR LOWER(SubtitleFormats) LIKE '%%pgssub%%'
+                   OR LOWER(SubtitleFormats) LIKE '%%dvd_subtitle%%' OR LOWER(SubtitleFormats) LIKE '%%dvdsub%%')
         """
         rows = self.DatabaseService.ExecuteQuery(query)
         return rows[0]['Count'] if rows else 0
@@ -1243,7 +1230,7 @@ class DatabaseManager:
     # System Settings Management Methods
     def GetSystemSetting(self, SettingKey: str) -> Optional[str]:
         """Get a system setting value by key."""
-        query = "SELECT SettingValue FROM SystemSettings WHERE SettingKey = ?"
+        query = "SELECT SettingValue FROM SystemSettings WHERE SettingKey = %s"
         rows = self.DatabaseService.ExecuteQuery(query, (SettingKey,))
         
         if not rows:
@@ -1271,7 +1258,7 @@ class DatabaseManager:
     
     def GetScanDirectories(self) -> List[Dict[str, str]]:
         """Get all scan directory settings (ScanDir1, ScanDir2, etc.)."""
-        query = "SELECT SettingKey, SettingValue, Description FROM SystemSettings WHERE SettingKey LIKE 'ScanDir%' ORDER BY SettingKey"
+        query = "SELECT SettingKey, SettingValue, Description FROM SystemSettings WHERE SettingKey LIKE 'ScanDir%%' ORDER BY SettingKey"
         rows = self.DatabaseService.ExecuteQuery(query)
         
         scanDirs = []
@@ -1295,15 +1282,15 @@ class DatabaseManager:
                 # Update existing setting
                 query = """
                     UPDATE SystemSettings 
-                    SET SettingValue = ?, Description = ?, DataType = ?, LastModified = datetime('now', 'localtime')
-                    WHERE SettingKey = ?
+                    SET SettingValue = %s, Description = %s, DataType = %s, LastModified = NOW()
+                    WHERE SettingKey = %s
                 """
                 self.DatabaseService.ExecuteNonQuery(query, (SettingValue, Description, DataType, SettingKey))
             else:
                 # Insert new setting
                 query = """
                     INSERT INTO SystemSettings (SettingKey, SettingValue, Description, DataType, LastModified)
-                    VALUES (?, ?, ?, ?, datetime('now', 'localtime'))
+                    VALUES (%s, %s, %s, %s, NOW())
                 """
                 self.DatabaseService.ExecuteNonQuery(query, (SettingKey, SettingValue, Description, DataType))
             
@@ -1316,7 +1303,7 @@ class DatabaseManager:
     def DeleteSystemSetting(self, SettingKey: str) -> bool:
         """Delete a system setting."""
         try:
-            query = "DELETE FROM SystemSettings WHERE SettingKey = ?"
+            query = "DELETE FROM SystemSettings WHERE SettingKey = %s"
             affectedRows = self.DatabaseService.ExecuteNonQuery(query, (SettingKey,))
             return affectedRows > 0
             
@@ -1358,7 +1345,7 @@ class DatabaseManager:
         query = """
             SELECT Id, FilePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted, ProcessingMode
             FROM TranscodeQueue
-            WHERE Id = ?
+            WHERE Id = %s
         """
         rows = self.DatabaseService.ExecuteQuery(query, (ItemId,))
 
@@ -1395,7 +1382,8 @@ class DatabaseManager:
                     query = """
                         INSERT INTO TranscodeQueue
                         (FilePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted, ProcessingMode)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        RETURNING Id
                     """
                     parameters = (
                         QueueItem.FilePath, QueueItem.FileName, QueueItem.Directory,
@@ -1405,8 +1393,8 @@ class DatabaseManager:
                     )
                     LoggingService.LogInfo(f"Insert queue item parameters: {parameters}", "DatabaseManager", "SaveTranscodeQueueItem")
                     cursor.execute(query, parameters)
+                    itemId = cursor.fetchone()[0]
                     connection.commit()
-                    itemId = cursor.lastrowid
                     LoggingService.LogInfo(f"Queue item inserted with ID: {itemId}", "DatabaseManager", "SaveTranscodeQueueItem")
                     return itemId
                 else:
@@ -1414,9 +1402,9 @@ class DatabaseManager:
                     LoggingService.LogInfo(f"Updating existing queue item with ID: {QueueItem.Id}", "DatabaseManager", "SaveTranscodeQueueItem")
                     query = """
                         UPDATE TranscodeQueue
-                        SET FilePath = ?, FileName = ?, Directory = ?, SizeBytes = ?, SizeMB = ?,
-                            Priority = ?, Status = ?, DateAdded = ?, DateStarted = ?, ProcessingMode = ?
-                        WHERE Id = ?
+                        SET FilePath = %s, FileName = %s, Directory = %s, SizeBytes = %s, SizeMB = %s,
+                            Priority = %s, Status = %s, DateAdded = %s, DateStarted = %s, ProcessingMode = %s
+                        WHERE Id = %s
                     """
                     parameters = (
                         QueueItem.FilePath, QueueItem.FileName, QueueItem.Directory,
@@ -1431,14 +1419,14 @@ class DatabaseManager:
                     LoggingService.LogInfo(f"Queue item update affected {affectedRows} rows", "DatabaseManager", "SaveTranscodeQueueItem")
                     return QueueItem.Id
             finally:
-                connection.close()
+                self.DatabaseService.CloseConnection(connection)
         except Exception as e:
             LoggingService.LogException("Exception in SaveTranscodeQueueItem", e, "DatabaseManager", "SaveTranscodeQueueItem")
             raise
     
     def DeleteTranscodeQueueItem(self, ItemId: int) -> bool:
         """Delete a transcoding queue item."""
-        affectedRows = self.DatabaseService.ExecuteNonQuery("DELETE FROM TranscodeQueue WHERE Id = ?", (ItemId,))
+        affectedRows = self.DatabaseService.ExecuteNonQuery("DELETE FROM TranscodeQueue WHERE Id = %s", (ItemId,))
         return affectedRows > 0
     
     def UpdateTranscodeQueueStatus(self, JobId: int, Status: str) -> bool:
@@ -1446,7 +1434,7 @@ class DatabaseManager:
         try:
             LoggingService.LogFunctionEntry("UpdateTranscodeQueueStatus", "DatabaseManager", JobId, Status)
             
-            query = "UPDATE TranscodeQueue SET Status = ? WHERE Id = ?"
+            query = "UPDATE TranscodeQueue SET Status = %s WHERE Id = %s"
             affectedRows = self.DatabaseService.ExecuteNonQuery(query, (Status, JobId))
             
             LoggingService.LogInfo(f"Updated transcoding queue item {JobId} status to {Status}", "DatabaseManager", "UpdateTranscodeQueueStatus")
@@ -1461,7 +1449,7 @@ class DatabaseManager:
         query = """
             SELECT Id, FilePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted, ProcessingMode
             FROM TranscodeQueue
-            WHERE Status = ?
+            WHERE Status = %s
             ORDER BY Priority DESC, DateAdded ASC
         """
         rows = self.DatabaseService.ExecuteQuery(query, (Status,))
@@ -1554,8 +1542,8 @@ class DatabaseManager:
         
         attempts = []
         for row in rows:
-            # Convert sqlite3.Row to dict to use .get() method
-            row_dict = dict(row)
+            # RealDictRow from PostgreSQL supports dict-style access
+            row_dict = row
             attempt = TranscodeAttemptModel(
                 Id=row_dict['Id'],
                 FilePath=row_dict['FilePath'],
@@ -1591,14 +1579,14 @@ class DatabaseManager:
                    FfpmpegCommand, AudioBitrateKbps, VideoBitrateKbps, ProfileName, VMAF,
                    FileReplaced, FileReplacedDate, ReplacementType, StartTime, PreferredAttempt
             FROM TranscodeAttempts 
-            WHERE Id = ?
+            WHERE Id = %s
         """
         rows = self.DatabaseService.ExecuteQuery(query, (AttemptId,))
         row = rows[0] if rows else None
         
         if row:
-            # Convert sqlite3.Row to dict to use .get() method
-            row_dict = dict(row)
+            # RealDictRow from PostgreSQL supports dict-style access
+            row_dict = row
             return TranscodeAttemptModel(
                 Id=row_dict['Id'],
                 FilePath=row_dict['FilePath'],
@@ -1632,15 +1620,15 @@ class DatabaseManager:
                    FfpmpegCommand, AudioBitrateKbps, VideoBitrateKbps, ProfileName, VMAF,
                    FileReplaced, FileReplacedDate, ReplacementType, StartTime, PreferredAttempt
             FROM TranscodeAttempts 
-            WHERE LOWER(FilePath) = LOWER(?)
+            WHERE LOWER(FilePath) = LOWER(%s)
             ORDER BY PreferredAttempt DESC, AttemptDate DESC
         """
         rows = self.DatabaseService.ExecuteQuery(query, (FilePath,))
         
         attempts = []
         for row in rows:
-            # Convert sqlite3.Row to dict to use .get() method
-            row_dict = dict(row)
+            # RealDictRow from PostgreSQL supports dict-style access
+            row_dict = row
             attempt = TranscodeAttemptModel(
                 Id=row_dict['Id'],
                 FilePath=row_dict['FilePath'],
@@ -1686,10 +1674,10 @@ class DatabaseManager:
             preferred_query = """
                 SELECT Quality, VMAF, ProfileName, AttemptDate, Success, PreferredAttempt
                 FROM TranscodeAttempts 
-                WHERE LOWER(FilePath) = LOWER(?)
+                WHERE LOWER(FilePath) = LOWER(%s)
                   AND VMAF IS NOT NULL
-                  AND Success = 1
-                  AND PreferredAttempt = 1
+                  AND Success = TRUE
+                  AND PreferredAttempt = TRUE
                 ORDER BY AttemptDate DESC
                 LIMIT 1
             """
@@ -1697,7 +1685,7 @@ class DatabaseManager:
             rows = self.DatabaseService.ExecuteQuery(preferred_query, (FilePath,))
             
             if rows:
-                result = dict(rows[0])
+                result = rows[0]
                 LoggingService.LogInfo(f"Found preferred attempt for {FilePath}: CRF={result.get('Quality')}, VMAF={result.get('VMAF')}", 
                                      "DatabaseManager", "GetLatestTranscodeAttemptWithVMAF")
                 return result
@@ -1706,17 +1694,17 @@ class DatabaseManager:
             query = """
                 SELECT Quality, VMAF, ProfileName, AttemptDate, Success, PreferredAttempt
                 FROM TranscodeAttempts 
-                WHERE LOWER(FilePath) = LOWER(?)
+                WHERE LOWER(FilePath) = LOWER(%s)
                   AND VMAF IS NOT NULL
-                  AND Success = 1
+                  AND Success = TRUE
                 ORDER BY AttemptDate DESC
                 LIMIT 1
             """
-            
+
             rows = self.DatabaseService.ExecuteQuery(query, (FilePath,))
             
             if rows:
-                result = dict(rows[0])
+                result = rows[0]
                 LoggingService.LogInfo(f"Found latest attempt for {FilePath}: CRF={result.get('Quality')}, VMAF={result.get('VMAF')}", 
                                      "DatabaseManager", "GetLatestTranscodeAttemptWithVMAF")
                 return result
@@ -1747,7 +1735,8 @@ class DatabaseManager:
                          SizeReductionBytes, SizeReductionPercent, ErrorMessage, TranscodeDurationSeconds,
                          FfpmpegCommand, AudioBitrateKbps, VideoBitrateKbps, ProfileName, VMAF,
                          FileReplaced, FileReplacedDate, ReplacementType, StartTime, PreferredAttempt)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        RETURNING Id
                     """
                     parameters = (
                         Attempt.FilePath, Attempt.AttemptDate, Attempt.Quality,
@@ -1761,8 +1750,8 @@ class DatabaseManager:
                     )
                     LoggingService.LogInfo(f"Insert attempt parameters: {parameters}", "DatabaseManager", "SaveTranscodeAttempt")
                     cursor.execute(query, parameters)
+                    attemptId = cursor.fetchone()[0]
                     connection.commit()
-                    attemptId = cursor.lastrowid
                     LoggingService.LogInfo(f"Attempt inserted with ID: {attemptId}", "DatabaseManager", "SaveTranscodeAttempt")
                     return attemptId
                 else:
@@ -1770,12 +1759,12 @@ class DatabaseManager:
                     LoggingService.LogInfo(f"Updating existing attempt with ID: {Attempt.Id}", "DatabaseManager", "SaveTranscodeAttempt")
                     query = """
                         UPDATE TranscodeAttempts 
-                        SET FilePath = ?, AttemptDate = ?, Quality = ?, OldSizeBytes = ?, NewSizeBytes = ?,
-                            Success = ?, SizeReductionBytes = ?, SizeReductionPercent = ?, ErrorMessage = ?,
-                            TranscodeDurationSeconds = ?, FfpmpegCommand = ?, AudioBitrateKbps = ?,
-                            VideoBitrateKbps = ?, ProfileName = ?, VMAF = ?,
-                            FileReplaced = ?, FileReplacedDate = ?, ReplacementType = ?, PreferredAttempt = ?
-                        WHERE Id = ?
+                        SET FilePath = %s, AttemptDate = %s, Quality = %s, OldSizeBytes = %s, NewSizeBytes = %s,
+                            Success = %s, SizeReductionBytes = %s, SizeReductionPercent = %s, ErrorMessage = %s,
+                            TranscodeDurationSeconds = %s, FfpmpegCommand = %s, AudioBitrateKbps = %s,
+                            VideoBitrateKbps = %s, ProfileName = %s, VMAF = %s,
+                            FileReplaced = %s, FileReplacedDate = %s, ReplacementType = %s, PreferredAttempt = %s
+                        WHERE Id = %s
                     """
                     parameters = (
                         Attempt.FilePath, Attempt.AttemptDate, Attempt.Quality,
@@ -1793,7 +1782,7 @@ class DatabaseManager:
                     LoggingService.LogInfo(f"Attempt update affected {affectedRows} rows", "DatabaseManager", "SaveTranscodeAttempt")
                     return Attempt.Id
             finally:
-                connection.close()
+                self.DatabaseService.CloseConnection(connection)
         except Exception as e:
             LoggingService.LogException("Exception in SaveTranscodeAttempt", e, "DatabaseManager", "SaveTranscodeAttempt")
             raise
@@ -1818,15 +1807,15 @@ class DatabaseManager:
             
             for field, value in Updates.items():
                 if field in valid_fields:
-                    set_clauses.append(f"{field} = ?")
+                    set_clauses.append(f"{field} = %s")
                     parameters.append(value)
                 elif field == 'FFmpegOutput':
                     # Map FFmpegOutput to FfpmpegCommand (correct column name) - legacy support
-                    set_clauses.append("FfpmpegCommand = ?")
+                    set_clauses.append("FfpmpegCommand = %s")
                     parameters.append(value)
                 elif field == 'FFmpegError':
                     # Map FFmpegError to ErrorMessage (closest equivalent) - legacy support
-                    set_clauses.append("ErrorMessage = ?")
+                    set_clauses.append("ErrorMessage = %s")
                     parameters.append(value)
                 else:
                     LoggingService.LogWarning(f"Unknown field '{field}' ignored in UpdateTranscodeAttempt", 
@@ -1836,7 +1825,7 @@ class DatabaseManager:
                 LoggingService.LogWarning("No valid fields to update", "DatabaseManager", "UpdateTranscodeAttempt")
                 return False
             
-            query = f"UPDATE TranscodeAttempts SET {', '.join(set_clauses)} WHERE Id = ?"
+            query = f"UPDATE TranscodeAttempts SET {', '.join(set_clauses)} WHERE Id = %s"
             parameters.append(AttemptId)
             
             connection = self.DatabaseService.GetConnection()
@@ -1849,7 +1838,7 @@ class DatabaseManager:
                                      "DatabaseManager", "UpdateTranscodeAttempt")
                 return affected_rows > 0
             finally:
-                connection.close()
+                self.DatabaseService.CloseConnection(connection)
                 
         except Exception as e:
             LoggingService.LogException("Exception in UpdateTranscodeAttempt", e, "DatabaseManager", "UpdateTranscodeAttempt")
@@ -1879,17 +1868,17 @@ class DatabaseManager:
                     # First, unset all other preferred attempts for this file
                     unset_query = """
                         UPDATE TranscodeAttempts 
-                        SET PreferredAttempt = 0
-                        WHERE LOWER(FilePath) = LOWER(?)
-                          AND Id != ?
+                        SET PreferredAttempt = FALSE
+                        WHERE LOWER(FilePath) = LOWER(%s)
+                          AND Id != %s
                     """
                     cursor.execute(unset_query, (FilePath, AttemptId))
                     
                     # Then set this attempt as preferred
                     set_query = """
                         UPDATE TranscodeAttempts 
-                        SET PreferredAttempt = 1
-                        WHERE Id = ?
+                        SET PreferredAttempt = TRUE
+                        WHERE Id = %s
                     """
                     cursor.execute(set_query, (AttemptId,))
                     connection.commit()
@@ -1900,8 +1889,8 @@ class DatabaseManager:
                     # Unset this attempt
                     unset_query = """
                         UPDATE TranscodeAttempts 
-                        SET PreferredAttempt = 0
-                        WHERE Id = ?
+                        SET PreferredAttempt = FALSE
+                        WHERE Id = %s
                     """
                     cursor.execute(unset_query, (AttemptId,))
                     connection.commit()
@@ -1912,7 +1901,7 @@ class DatabaseManager:
                 return True
                 
             finally:
-                connection.close()
+                self.DatabaseService.CloseConnection(connection)
                 
         except Exception as e:
             LoggingService.LogException("Exception in SetPreferredAttempt", e, "DatabaseManager", "SetPreferredAttempt")
@@ -1957,7 +1946,7 @@ class DatabaseManager:
                    LastAttemptDate, SuccessDate, FinalQuality, FinalSizeBytes, TotalAttempts,
                    OriginalFilePath, FinalFilePath
             FROM TranscodeFiles 
-            WHERE LOWER(FilePath) = LOWER(?)
+            WHERE LOWER(FilePath) = LOWER(%s)
         """
         rows = self.DatabaseService.ExecuteQuery(query, (FilePath,))
         
@@ -1997,7 +1986,8 @@ class DatabaseManager:
                         (FilePath, AllQualitiesFailed, SuccessfullyTranscoded, FirstAttemptDate,
                          LastAttemptDate, SuccessDate, FinalQuality, FinalSizeBytes, TotalAttempts,
                          OriginalFilePath, FinalFilePath)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        RETURNING Id
                     """
                     parameters = (
                         TranscodeFile.FilePath, TranscodeFile.AllQualitiesFailed, TranscodeFile.SuccessfullyTranscoded,
@@ -2007,8 +1997,8 @@ class DatabaseManager:
                     )
                     LoggingService.LogInfo(f"Insert transcode file parameters: {parameters}", "DatabaseManager", "SaveTranscodeFile")
                     cursor.execute(query, parameters)
+                    fileId = cursor.fetchone()[0]
                     connection.commit()
-                    fileId = cursor.lastrowid
                     LoggingService.LogInfo(f"Transcode file inserted with ID: {fileId}", "DatabaseManager", "SaveTranscodeFile")
                     return fileId
                 else:
@@ -2016,10 +2006,10 @@ class DatabaseManager:
                     LoggingService.LogInfo(f"Updating existing transcode file with ID: {TranscodeFile.Id}", "DatabaseManager", "SaveTranscodeFile")
                     query = """
                         UPDATE TranscodeFiles 
-                        SET FilePath = ?, AllQualitiesFailed = ?, SuccessfullyTranscoded = ?, FirstAttemptDate = ?,
-                            LastAttemptDate = ?, SuccessDate = ?, FinalQuality = ?, FinalSizeBytes = ?,
-                            TotalAttempts = ?, OriginalFilePath = ?, FinalFilePath = ?
-                        WHERE Id = ?
+                        SET FilePath = %s, AllQualitiesFailed = %s, SuccessfullyTranscoded = %s, FirstAttemptDate = %s,
+                            LastAttemptDate = %s, SuccessDate = %s, FinalQuality = %s, FinalSizeBytes = %s,
+                            TotalAttempts = %s, OriginalFilePath = %s, FinalFilePath = %s
+                        WHERE Id = %s
                     """
                     parameters = (
                         TranscodeFile.FilePath, TranscodeFile.AllQualitiesFailed, TranscodeFile.SuccessfullyTranscoded,
@@ -2034,7 +2024,7 @@ class DatabaseManager:
                     LoggingService.LogInfo(f"Transcode file update affected {affectedRows} rows", "DatabaseManager", "SaveTranscodeFile")
                     return TranscodeFile.Id
             finally:
-                connection.close()
+                self.DatabaseService.CloseConnection(connection)
         except Exception as e:
             LoggingService.LogException("Exception in SaveTranscodeFile", e, "DatabaseManager", "SaveTranscodeFile")
             raise
@@ -2051,23 +2041,23 @@ class DatabaseManager:
             parameters = []
             
             if SuccessfullyTranscoded is not None:
-                updateFields.append("SuccessfullyTranscoded = ?")
+                updateFields.append("SuccessfullyTranscoded = %s")
                 parameters.append(SuccessfullyTranscoded)
             
             if AllQualitiesFailed is not None:
-                updateFields.append("AllQualitiesFailed = ?")
+                updateFields.append("AllQualitiesFailed = %s")
                 parameters.append(AllQualitiesFailed)
             
             if FinalQuality is not None:
-                updateFields.append("FinalQuality = ?")
+                updateFields.append("FinalQuality = %s")
                 parameters.append(FinalQuality)
             
             if FinalSizeBytes is not None:
-                updateFields.append("FinalSizeBytes = ?")
+                updateFields.append("FinalSizeBytes = %s")
                 parameters.append(FinalSizeBytes)
             
             if FinalFilePath is not None:
-                updateFields.append("FinalFilePath = ?")
+                updateFields.append("FinalFilePath = %s")
                 parameters.append(FinalFilePath)
             
             if not updateFields:
@@ -2075,12 +2065,12 @@ class DatabaseManager:
                 return False
             
             # Add LastAttemptDate update
-            updateFields.append("LastAttemptDate = datetime('now', 'localtime')")
+            updateFields.append("LastAttemptDate = NOW()")
             
             # Add FilePath to parameters for WHERE clause
             parameters.append(FilePath)
             
-            query = f"UPDATE TranscodeFiles SET {', '.join(updateFields)} WHERE LOWER(FilePath) = LOWER(?)"
+            query = f"UPDATE TranscodeFiles SET {', '.join(updateFields)} WHERE LOWER(FilePath) = LOWER(%s)"
             
             affectedRows = self.DatabaseService.ExecuteNonQuery(query, parameters)
             LoggingService.LogInfo(f"Updated transcode file status for {FilePath}, affected {affectedRows} rows", "DatabaseManager", "UpdateTranscodeFileStatus")
@@ -2204,19 +2194,14 @@ class DatabaseManager:
             
             # Update all media files where FilePath starts with RootFolderPath
             query = """
-                UPDATE MediaFiles 
-                SET AssignedProfile = ?
-                WHERE LOWER(FilePath) LIKE LOWER(?) || '%'
+                UPDATE MediaFiles
+                SET AssignedProfile = %s
+                WHERE LOWER(FilePath) LIKE LOWER(%s) || '%%' ESCAPE '!'
             """
-            
-            connection = self.DatabaseService.GetConnection()
-            cursor = connection.cursor()
-            cursor.execute(query, (profileName, RootFolderPath))
-            connection.commit()
-            
-            filesUpdated = cursor.rowcount
+
+            filesUpdated = self.DatabaseService.ExecuteNonQuery(query, (profileName, RootFolderPath))
             LoggingService.LogInfo(f"Updated {filesUpdated} media files in root folder '{RootFolderPath}' to use profile '{profileName}'", "DatabaseManager", "UpdateMediaFilesProfileByRootFolder")
-            
+
             return filesUpdated
             
         except Exception as e:
@@ -2232,7 +2217,7 @@ class DatabaseManager:
                 SELECT pt.Quality 
                 FROM ProfileThresholds pt
                 JOIN Profiles p ON pt.ProfileId = p.Id
-                WHERE p.ProfileName = ?
+                WHERE p.ProfileName = %s
                 LIMIT 1
             """
             rows = self.DatabaseService.ExecuteQuery(query, (ProfileName,))
@@ -2263,7 +2248,7 @@ class DatabaseManager:
                 SELECT pt.TranscodeDownTo 
                 FROM ProfileThresholds pt
                 JOIN Profiles p ON pt.ProfileId = p.Id
-                WHERE p.ProfileName = ? AND pt.Resolution = ?
+                WHERE p.ProfileName = %s AND pt.Resolution = %s
                 LIMIT 1
             """
             rows = self.DatabaseService.ExecuteQuery(query, (ProfileName, resolutionCategory))
@@ -2284,7 +2269,7 @@ class DatabaseManager:
                     SELECT pt.Quality 
                     FROM ProfileThresholds pt
                     JOIN Profiles p ON pt.ProfileId = p.Id
-                    WHERE p.ProfileName = ? AND pt.Resolution = ?
+                    WHERE p.ProfileName = %s AND pt.Resolution = %s
                     LIMIT 1
                 """
                 rows = self.DatabaseService.ExecuteQuery(query, (ProfileName, resolutionCategory))
@@ -2302,7 +2287,7 @@ class DatabaseManager:
                     SELECT pt.Quality 
                     FROM ProfileThresholds pt
                     JOIN Profiles p ON pt.ProfileId = p.Id
-                    WHERE p.ProfileName = ? AND pt.Resolution = ?
+                    WHERE p.ProfileName = %s AND pt.Resolution = %s
                     LIMIT 1
                 """
                 rows = self.DatabaseService.ExecuteQuery(query, (ProfileName, targetResolution))
@@ -2329,7 +2314,7 @@ class DatabaseManager:
                 SELECT pt.TranscodeDownTo 
                 FROM ProfileThresholds pt
                 JOIN Profiles p ON pt.ProfileId = p.Id
-                WHERE p.ProfileName = ? AND pt.Resolution = ?
+                WHERE p.ProfileName = %s AND pt.Resolution = %s
                 LIMIT 1
             """
             rows = self.DatabaseService.ExecuteQuery(query, (ProfileName, SourceResolution))
@@ -2361,7 +2346,7 @@ class DatabaseManager:
                            p.Codec, p.Preset, p.FilmGrain, p.YadifMode, p.YadifParity, p.YadifDeint, p.UseNvidiaHardware, pt.ContainerType, p.Id as ProfileId
                     FROM ProfileThresholds pt
                     JOIN Profiles p ON pt.ProfileId = p.Id
-                    WHERE p.ProfileName = ? AND pt.Resolution = ?
+                    WHERE p.ProfileName = %s AND pt.Resolution = %s
                     LIMIT 1
                 """
                 rows = self.DatabaseService.ExecuteQuery(query, (ProfileName, foundResolution))
@@ -2372,7 +2357,7 @@ class DatabaseManager:
                            p.Codec, p.Preset, p.FilmGrain, p.YadifMode, p.YadifParity, p.YadifDeint, p.UseNvidiaHardware, pt.ContainerType, p.Id as ProfileId
                     FROM ProfileThresholds pt
                     JOIN Profiles p ON pt.ProfileId = p.Id
-                    WHERE p.ProfileName = ? AND pt.Resolution = ?
+                    WHERE p.ProfileName = %s AND pt.Resolution = %s
                     LIMIT 1
                 """
                 rows = self.DatabaseService.ExecuteQuery(query, (ProfileName, targetResolution))
@@ -2440,17 +2425,17 @@ class DatabaseManager:
             # Function entry logging removed for frequent progress updates
             
             # Check if progress record already exists
-            existingQuery = "SELECT Id FROM TranscodeProgress WHERE TranscodeAttemptId = ?"
+            existingQuery = "SELECT Id FROM TranscodeProgress WHERE TranscodeAttemptId = %s"
             existingRows = self.DatabaseService.ExecuteQuery(existingQuery, (TranscodeAttemptId,))
             
             if existingRows:
                 # Update existing record
                 updateQuery = """
                     UPDATE TranscodeProgress SET
-                        CurrentPhase = ?, ProgressPercent = ?, CurrentFrame = ?, CurrentFPS = ?,
-                        CurrentBitrate = ?, CurrentTime = ?, CurrentSpeed = ?, ETA = ?,
-                        TotalFrames = ?, AverageFPS = ?, LastProgressUpdate = datetime('now', 'localtime')
-                    WHERE TranscodeAttemptId = ?
+                        CurrentPhase = %s, ProgressPercent = %s, CurrentFrame = %s, CurrentFPS = %s,
+                        CurrentBitrate = %s, CurrentTime = %s, CurrentSpeed = %s, ETA = %s,
+                        TotalFrames = %s, AverageFPS = %s, LastProgressUpdate = NOW()
+                    WHERE TranscodeAttemptId = %s
                 """
                 parameters = (CurrentPhase, ProgressPercent, CurrentFrame, CurrentFPS,
                              CurrentBitrate, CurrentTime, CurrentSpeed, ETA,
@@ -2462,10 +2447,11 @@ class DatabaseManager:
             else:
                 # Insert new record
                 insertQuery = """
-                    INSERT INTO TranscodeProgress 
-                    (TranscodeAttemptId, PassNumber, PassType, CurrentPhase, ProgressPercent, CurrentFrame, CurrentFPS, 
+                    INSERT INTO TranscodeProgress
+                    (TranscodeAttemptId, PassNumber, PassType, CurrentPhase, ProgressPercent, CurrentFrame, CurrentFPS,
                      CurrentBitrate, CurrentTime, CurrentSpeed, ETA, TotalFrames, AverageFPS, LastProgressUpdate)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'))
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+                    RETURNING Id
                 """
                 parameters = (TranscodeAttemptId, 1, "Encoding", CurrentPhase, ProgressPercent, CurrentFrame, CurrentFPS,
                              CurrentBitrate, CurrentTime, CurrentSpeed, ETA, TotalFrames, AverageFPS)
@@ -2493,7 +2479,7 @@ class DatabaseManager:
                        AverageFPS, CurrentBitrate, CurrentTime, CurrentSpeed, ETA, 
                        PassDuration, LastProgressUpdate
                 FROM TranscodeProgress 
-                WHERE TranscodeAttemptId = ? 
+                WHERE TranscodeAttemptId = %s 
                 ORDER BY LastProgressUpdate DESC 
                 LIMIT 1
             """
@@ -2535,7 +2521,7 @@ class DatabaseManager:
                 SELECT CurrentPhase, ProgressPercent, CurrentFrame, CurrentFPS, 
                        CurrentBitrate, CurrentTime, CurrentSpeed, LastProgressUpdate
                 FROM TranscodeProgress 
-                WHERE TranscodeAttemptId = ? AND CurrentPhase = ?
+                WHERE TranscodeAttemptId = %s AND CurrentPhase = %s
                 ORDER BY LastProgressUpdate DESC 
                 LIMIT 1
             """
@@ -2590,45 +2576,45 @@ class DatabaseManager:
             if result and len(result) > 0:
                 row = result[0]
                 # Extract filename from filepath
-                FilePath = row[13]
+                FilePath = row['filepath']
                 FileName = FilePath.split('\\')[-1] if FilePath else "Unknown"
-                
+
                 # Use MediaFiles TotalFrames if available, fallback to TranscodeProgress TotalFrames
-                MediaFileTotalFrames = row[17]  # mf.TotalFrames
-                ProgressTotalFrames = row[4]    # tp.TotalFrames
+                MediaFileTotalFrames = row.get('mediafiletotalframes')
+                ProgressTotalFrames = row['totalframes']
                 ActualTotalFrames = MediaFileTotalFrames if MediaFileTotalFrames else ProgressTotalFrames
-                
+
                 # Recalculate progress percentage if we have better TotalFrames data
-                CurrentFrame = row[3]
+                CurrentFrame = row['currentframe']
                 RecalculatedProgress = 0.0
                 if ActualTotalFrames and ActualTotalFrames > 0 and CurrentFrame > 0:
                     RecalculatedProgress = min((CurrentFrame / ActualTotalFrames) * 100, 95.0)
-                
+
                 progressData = {
                     'Success': True,
-                    'AttemptId': row[0],  # Frontend expects AttemptId
-                    'TranscodeAttemptId': row[0],
-                    'CurrentPhase': row[1],
-                    'ProgressPercent': RecalculatedProgress if RecalculatedProgress > 0 else row[2],
-                    'CurrentFrame': row[3],
+                    'AttemptId': row['transcodeattemptid'],
+                    'TranscodeAttemptId': row['transcodeattemptid'],
+                    'CurrentPhase': row['currentphase'],
+                    'ProgressPercent': RecalculatedProgress if RecalculatedProgress > 0 else row['progresspercent'],
+                    'CurrentFrame': CurrentFrame,
                     'TotalFrames': ActualTotalFrames,
-                    'CurrentFPS': row[5],
-                    'AverageFPS': row[6],
-                    'CurrentBitrate': row[7],
-                    'CurrentTime': row[8],
-                    'CurrentSpeed': row[9],
-                    'ETA': row[10],
-                    'PassDuration': row[11],
-                    'LastUpdate': row[12],  # Frontend expects LastUpdate
-                    'LastProgressUpdate': row[12],
+                    'CurrentFPS': row['currentfps'],
+                    'AverageFPS': row['averagefps'],
+                    'CurrentBitrate': row['currentbitrate'],
+                    'CurrentTime': row['currenttime'],
+                    'CurrentSpeed': row['currentspeed'],
+                    'ETA': row['eta'],
+                    'PassDuration': row['passduration'],
+                    'LastUpdate': row['lastprogressupdate'],
+                    'LastProgressUpdate': row['lastprogressupdate'],
                     'FilePath': FilePath,
-                    'FileName': FileName,  # Frontend expects FileName
-                    'StartTime': row[16],  # Frontend expects StartTime
-                    'Quality': row[14],
-                    'ProfileName': row[15],
-                    'MediaFileTotalFrames': MediaFileTotalFrames,  # For debugging
-                    'RecalculatedProgress': RecalculatedProgress > 0,  # Flag for debugging
-                    'Command': row[18] if len(row) > 18 else None  # FfpmpegCommand
+                    'FileName': FileName,
+                    'StartTime': row['attemptdate'],
+                    'Quality': row['quality'],
+                    'ProfileName': row['profilename'],
+                    'MediaFileTotalFrames': MediaFileTotalFrames,
+                    'RecalculatedProgress': RecalculatedProgress > 0,
+                    'Command': row.get('ffpmpegcommand')
                 }
                 
                 LoggingService.LogDebug(f"Found current progress: {progressData['CurrentPhase']} ({progressData['ProgressPercent']}%) for {progressData['FileName']}", "DatabaseManager", "GetCurrentTranscodeProgress")
@@ -2646,7 +2632,7 @@ class DatabaseManager:
         try:
             LoggingService.LogFunctionEntry("DeleteTranscodeProgress", "DatabaseManager", TranscodeAttemptId)
             
-            query = "DELETE FROM TranscodeProgress WHERE TranscodeAttemptId = ?"
+            query = "DELETE FROM TranscodeProgress WHERE TranscodeAttemptId = %s"
             rowsAffected = self.DatabaseService.ExecuteNonQuery(query, (TranscodeAttemptId,))
             
             LoggingService.LogInfo(f"Deleted {rowsAffected} progress records for attempt {TranscodeAttemptId}", "DatabaseManager", "DeleteTranscodeProgress")
@@ -2663,7 +2649,7 @@ class DatabaseManager:
             
             query = """
                 DELETE FROM TranscodeProgress 
-                WHERE LastProgressUpdate < datetime('now', '-{} days')
+                WHERE LastProgressUpdate < NOW() - INTERVAL '{} days'
             """.format(DaysToKeep)
             
             rowsAffected = self.DatabaseService.ExecuteNonQuery(query)
@@ -2675,10 +2661,29 @@ class DatabaseManager:
             LoggingService.LogException("Exception cleaning up old progress data", e, "DatabaseManager", "CleanupOldProgressData")
             return 0
     
-    def ConvertStringToDateTime(self, DateString: str) -> Optional[datetime]:
-        """Convert date string from database to datetime object."""
+    def CleanupOldLogs(self, DaysToKeep: int = 30) -> int:
+        """Clean up old log entries to prevent database bloat."""
+        try:
+            query = """
+                DELETE FROM Logs
+                WHERE Timestamp < NOW() - INTERVAL '{} days'
+            """.format(DaysToKeep)
+
+            rowsAffected = self.DatabaseService.ExecuteNonQuery(query)
+
+            LoggingService.LogInfo(f"Cleaned up {rowsAffected} old log records (older than {DaysToKeep} days)", "DatabaseManager", "CleanupOldLogs")
+            return rowsAffected
+
+        except Exception as e:
+            LoggingService.LogException("Exception cleaning up old logs", e, "DatabaseManager", "CleanupOldLogs")
+            return 0
+
+    def ConvertStringToDateTime(self, DateString) -> Optional[datetime]:
+        """Convert date string from database to datetime object. Pass through if already datetime."""
         if not DateString:
             return None
+        if isinstance(DateString, datetime):
+            return DateString
         try:
             if 'T' in DateString:
                 return datetime.fromisoformat(DateString.replace('Z', '+00:00'))
@@ -2705,12 +2710,12 @@ class DatabaseManager:
                 # Update existing status
                 query = """
                 UPDATE ServiceStatus SET 
-                    Status = ?, HealthStatus = ?, StartTime = ?, LastHealthCheck = ?,
-                    UptimeSeconds = ?, MemoryUsage = ?, CPUUsage = ?, DatabaseConnection = ?,
-                    DiskSpace = ?, ErrorCount = ?, MaxErrors = ?, ActiveJobsCount = ?,
-                    IsProcessing = ?, ProcessId = ?, Version = ?, ServiceType = ?,
-                    MaxConcurrentJobs = ?, UpdatedAt = datetime('now', 'localtime')
-                WHERE ServiceName = ?
+                    Status = %s, HealthStatus = %s, StartTime = %s, LastHealthCheck = %s,
+                    UptimeSeconds = %s, MemoryUsage = %s, CPUUsage = %s, DatabaseConnection = %s,
+                    DiskSpace = %s, ErrorCount = %s, MaxErrors = %s, ActiveJobsCount = %s,
+                    IsProcessing = %s, ProcessId = %s, Version = %s, ServiceType = %s,
+                    MaxConcurrentJobs = %s, UpdatedAt = NOW()
+                WHERE ServiceName = %s
                 """
                 parameters = (
                     ServiceStatus.get('Status'),
@@ -2740,7 +2745,7 @@ class DatabaseManager:
                     UptimeSeconds, MemoryUsage, CPUUsage, DatabaseConnection, DiskSpace,
                     ErrorCount, MaxErrors, ActiveJobsCount, IsProcessing, ProcessId,
                     Version, ServiceType, MaxConcurrentJobs, CreatedAt, UpdatedAt
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'), datetime('now', 'localtime'))
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
                 """
                 parameters = (
                     ServiceStatus.get('ServiceName'),
@@ -2781,7 +2786,7 @@ class DatabaseManager:
             Parameters = []
             
             for key, value in StatusData.items():
-                UpdateFields.append(f"{key} = ?")
+                UpdateFields.append(f"{key} = %s")
                 Parameters.append(value)
             
             if not UpdateFields:
@@ -2789,7 +2794,7 @@ class DatabaseManager:
                 return False
             
             Parameters.append(ServiceName)
-            query = f"UPDATE ServiceStatus SET {', '.join(UpdateFields)}, UpdatedAt = datetime('now', 'localtime') WHERE ServiceName = ?"
+            query = f"UPDATE ServiceStatus SET {', '.join(UpdateFields)}, UpdatedAt = NOW() WHERE ServiceName = %s"
             
             self.DatabaseService.ExecuteNonQuery(query, Parameters)
             LoggingService.LogDebug(f"Service status updated for {ServiceName}", "DatabaseManager", "UpdateServiceStatus")
@@ -2804,14 +2809,13 @@ class DatabaseManager:
         try:
             LoggingService.LogFunctionEntry("GetServiceStatus", "DatabaseManager", ServiceName)
             
-            query = "SELECT * FROM ServiceStatus WHERE ServiceName = ?"
+            query = "SELECT * FROM ServiceStatus WHERE ServiceName = %s"
             rows = self.DatabaseService.ExecuteQuery(query, (ServiceName,))
             
             if rows:
                 LoggingService.LogDebug(f"Retrieved service status for {ServiceName}", "DatabaseManager", "GetServiceStatus")
-                # Convert sqlite3.Row to dictionary
-                row = rows[0]
-                return dict(row)
+                # Return the CaseInsensitiveDict directly to preserve case-insensitive key access
+                return rows[0]
             else:
                 LoggingService.LogDebug(f"No service status found for {ServiceName}", "DatabaseManager", "GetServiceStatus")
                 return None
@@ -2835,9 +2839,10 @@ class DatabaseManager:
             
             query = """
                 INSERT INTO ServiceCommands (
-                CommandType, SourceService, TargetService, Parameters, Status, 
+                CommandType, SourceService, TargetService, Parameters, Status,
                 Priority, CreatedBy, CreatedAt, UpdatedAt
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'), datetime('now', 'localtime'))
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
+                RETURNING Id
             """
             
             import json
@@ -2873,8 +2878,8 @@ class DatabaseManager:
             
             query = """
             UPDATE ServiceCommands 
-            SET Status = ?, Result = ?, UpdatedAt = datetime('now', 'localtime')
-            WHERE Id = ?
+            SET Status = %s, Result = %s, UpdatedAt = NOW()
+            WHERE Id = %s
             """
             
             result = self.DatabaseService.ExecuteNonQuery(query, (Status, Result, CommandId))
@@ -2897,7 +2902,7 @@ class DatabaseManager:
             
             query = """
             SELECT * FROM ServiceCommands 
-            WHERE TargetService = ? AND Status = 'Pending'
+            WHERE TargetService = %s AND Status = 'Pending'
             ORDER BY Priority DESC, CreatedAt ASC
             """
             rows = self.DatabaseService.ExecuteQuery(query, (ServiceName,))
@@ -2919,7 +2924,7 @@ class DatabaseManager:
                    PresetOptions, FilmGrainType, FilmGrainMin, FilmGrainMax, FilmGrainDefault, 
                    TuneOptions, CreatedDate, LastModified
             FROM CodecFlags 
-            WHERE CodecName = ?
+            WHERE CodecName = %s
             """
             rows = self.DatabaseService.ExecuteQuery(query, (CodecName,))
             
@@ -2929,7 +2934,7 @@ class DatabaseManager:
             
             row = rows[0]
             LoggingService.LogInfo(f"Retrieved codec flags for {CodecName}", "DatabaseManager", "GetCodecFlagsByCodecName")
-            return dict(row)
+            return row
             
         except Exception as e:
             LoggingService.LogException("Exception getting codec flags by codec name", e, "DatabaseManager", "GetCodecFlagsByCodecName")
@@ -2944,13 +2949,13 @@ class DatabaseManager:
             SELECT Id, CodecFlagsId, ParameterName, ParameterType, MinValue, MaxValue, 
                    DefaultValue, Description, FFmpegFlag, CreatedDate
             FROM CodecParameters 
-            WHERE CodecFlagsId = ?
+            WHERE CodecFlagsId = %s
             ORDER BY ParameterName
             """
             rows = self.DatabaseService.ExecuteQuery(query, (CodecFlagsId,))
             
             LoggingService.LogInfo(f"Retrieved {len(rows)} codec parameters for CodecFlagsId {CodecFlagsId}", "DatabaseManager", "GetCodecParametersByCodecFlagsId")
-            return [dict(row) for row in rows]
+            return list(rows)
             
         except Exception as e:
             LoggingService.LogException("Exception getting codec parameters by codec flags ID", e, "DatabaseManager", "GetCodecParametersByCodecFlagsId")
@@ -2992,12 +2997,12 @@ class DatabaseManager:
             SELECT mf.KeepSource 
             FROM MediaFiles mf
             JOIN TranscodeAttempts ta ON mf.FilePath = ta.FilePath
-            WHERE ta.Id = ?
+            WHERE ta.Id = %s
             '''
             result = self.DatabaseService.ExecuteQuery(query, (TranscodeAttemptId,))
             
             if result:
-                return bool(result[0][0])  # KeepSource is the first column
+                return bool(result[0]['keepsource'])
             return None
             
         except Exception as e:
@@ -3011,10 +3016,23 @@ class DatabaseManager:
             LoggingService.LogFunctionEntry("SaveMediaFileArchive", "DatabaseManager", MediaFileId, TranscodeAttemptId)
             
             query = """
-                INSERT INTO MediaFilesArchive 
-                SELECT *, datetime('now', 'localtime'), ? 
-                FROM MediaFiles 
-                WHERE Id = ?
+                INSERT INTO MediaFilesArchive
+                (Id, SeasonId, FilePath, FileName, SizeMB, VideoBitrateKbps, AudioBitrateKbps,
+                 Resolution, Codec, DurationMinutes, FrameRate, LastScannedDate,
+                 CompressionPotential, AssignedProfile, IsInterlaced, ResolutionCategory,
+                 FileModificationTime, KeepSource, TotalFrames, CodecProfile, ColorRange,
+                 FieldOrder, HasBFrames, RefFrames, PixelFormat, Level, AudioChannels,
+                 AudioSampleRate, AudioSampleFormat, AudioChannelLayout, ContainerFormat,
+                 OverallBitrate, TranscodedByMediaVortex, ArchiveDate, TranscodeAttemptId)
+                SELECT Id, SeasonId, FilePath, FileName, SizeMB, VideoBitrateKbps, AudioBitrateKbps,
+                       Resolution, Codec, DurationMinutes, FrameRate, LastScannedDate,
+                       CompressionPotential, AssignedProfile, IsInterlaced, ResolutionCategory,
+                       FileModificationTime, KeepSource, TotalFrames, CodecProfile, ColorRange,
+                       FieldOrder, HasBFrames, RefFrames, PixelFormat, Level, AudioChannels,
+                       AudioSampleRate, AudioSampleFormat, AudioChannelLayout, ContainerFormat,
+                       OverallBitrate, TranscodedByMediaVortex, NOW(), %s
+                FROM MediaFiles
+                WHERE Id = %s
             """
             
             parameters = (TranscodeAttemptId, MediaFileId)
@@ -3047,13 +3065,13 @@ class DatabaseManager:
             
             query = """
                 INSERT INTO ActiveJobs (ServiceName, JobType, QueueId, ProcessId, ThreadId, Status, StartedAt)
-                VALUES (?, ?, ?, ?, ?, 'Running', datetime('now', 'localtime'))
+                VALUES (%s, %s, %s, %s, %s, 'Running', NOW())
+                RETURNING Id
             """
-            
+
             result = self.DatabaseService.ExecuteNonQuery(query, (ServiceName, JobType, QueueId, ProcessId, ThreadId))
-            
+
             if result > 0:
-                # Get the inserted ID from DatabaseService
                 job_id = self.DatabaseService.LastInsertId
                 
                 LoggingService.LogInfo(f"Created active job {job_id} for {ServiceName} - JobType: {JobType}, QueueId: {QueueId}", "DatabaseManager", "CreateActiveJob")
@@ -3076,8 +3094,8 @@ class DatabaseManager:
             # Update the job status first
             update_query = """
                 UPDATE ActiveJobs 
-                SET Status = ?, UpdatedAt = datetime('now', 'localtime')
-                WHERE Id = ?
+                SET Status = %s, UpdatedAt = NOW()
+                WHERE Id = %s
             """
             
             self.DatabaseService.ExecuteNonQuery(update_query, (status, JobId))
@@ -3089,7 +3107,7 @@ class DatabaseManager:
                 LoggingService.LogError(f"Active job {JobId} failed: {ErrorMessage}", "DatabaseManager", "CompleteActiveJob")
             
             # Remove from ActiveJobs table
-            delete_query = "DELETE FROM ActiveJobs WHERE Id = ?"
+            delete_query = "DELETE FROM ActiveJobs WHERE Id = %s"
             result = self.DatabaseService.ExecuteNonQuery(delete_query, (JobId,))
             
             return result > 0
@@ -3105,13 +3123,13 @@ class DatabaseManager:
                 SELECT Id, ServiceName, JobType, QueueId, ProcessId, ThreadId, 
                        StartedAt, Status, CreatedAt, UpdatedAt
                 FROM ActiveJobs 
-                WHERE ServiceName = ? AND QueueId = ? AND Status = 'Running'
+                WHERE ServiceName = %s AND QueueId = %s AND Status = 'Running'
             """
             
             rows = self.DatabaseService.ExecuteQuery(query, (ServiceName, QueueId))
-            
+
             if rows:
-                return dict(rows[0])
+                return rows[0]
             return None
             
         except Exception as e:
@@ -3125,12 +3143,12 @@ class DatabaseManager:
                 SELECT Id, ServiceName, JobType, QueueId, ProcessId, ThreadId, 
                        StartedAt, Status, CreatedAt, UpdatedAt
                 FROM ActiveJobs 
-                WHERE ServiceName = ? AND Status = 'Running'
+                WHERE ServiceName = %s AND Status = 'Running'
                 ORDER BY StartedAt ASC
             """
             
             rows = self.DatabaseService.ExecuteQuery(query, (ServiceName,))
-            return [dict(row) for row in rows]
+            return list(rows)
             
         except Exception as e:
             LoggingService.LogException("Exception getting active jobs by service", e, "DatabaseManager", "GetActiveJobsByService")
@@ -3148,7 +3166,7 @@ class DatabaseManager:
             """
             
             rows = self.DatabaseService.ExecuteQuery(query)
-            return [dict(row) for row in rows]
+            return list(rows)
             
         except Exception as e:
             LoggingService.LogException("Exception getting all active jobs", e, "DatabaseManager", "GetAllActiveJobs")
@@ -3164,7 +3182,7 @@ class DatabaseManager:
             """
             
             rows = self.DatabaseService.ExecuteQuery(query)
-            return [row[0] for row in rows if row[0] is not None]
+            return [row['processid'] for row in rows if row['processid'] is not None]
             
         except Exception as e:
             LoggingService.LogException("Exception getting active job process IDs", e, "DatabaseManager", "GetAllActiveJobProcessIds")
@@ -3178,8 +3196,8 @@ class DatabaseManager:
             # Update job status to cancelled
             update_query = """
                 UPDATE ActiveJobs 
-                SET Status = 'Cancelled', UpdatedAt = datetime('now', 'localtime')
-                WHERE Id = ?
+                SET Status = 'Cancelled', UpdatedAt = NOW()
+                WHERE Id = %s
             """
             
             result = self.DatabaseService.ExecuteNonQuery(update_query, (JobId,))
@@ -3202,7 +3220,7 @@ class DatabaseManager:
         try:
             LoggingService.LogFunctionEntry("UpdateTranscodeAttemptVMAF", "DatabaseManager", TranscodeAttemptId, VMAFScore)
             
-            query = "UPDATE TranscodeAttempts SET VMAF = ? WHERE Id = ?"
+            query = "UPDATE TranscodeAttempts SET VMAF = %s WHERE Id = %s"
             result = self.DatabaseService.ExecuteNonQuery(query, (VMAFScore, TranscodeAttemptId))
             
             if result > 0:
@@ -3235,8 +3253,8 @@ class DatabaseManager:
                 LoggingService.LogError("VMAFAutoReplaceMaxThreshold not found in SystemSettings", "DatabaseManager", "GetVMAFThresholds")
                 raise ValueError("VMAFAutoReplaceMaxThreshold setting not found in database")
             
-            min_threshold = float(min_result[0][0])  # SettingValue is the first column
-            max_threshold = float(max_result[0][0])  # SettingValue is the first column
+            min_threshold = float(min_result[0]['settingvalue'])
+            max_threshold = float(max_result[0]['settingvalue'])
             
             LoggingService.LogInfo(f"Retrieved VMAF thresholds: Min={min_threshold}, Max={max_threshold}", 
                                  "DatabaseManager", "GetVMAFThresholds")
@@ -3260,7 +3278,7 @@ class DatabaseManager:
             # Update min threshold
             min_query = """
                 UPDATE SystemSettings 
-                SET SettingValue = ?, LastModified = ?
+                SET SettingValue = %s, LastModified = %s
                 WHERE SettingKey = 'VMAFAutoReplaceMinThreshold'
             """
             min_result = self.DatabaseService.ExecuteNonQuery(min_query, (str(MinThreshold), current_time))
@@ -3268,7 +3286,7 @@ class DatabaseManager:
             # Update max threshold
             max_query = """
                 UPDATE SystemSettings 
-                SET SettingValue = ?, LastModified = ?
+                SET SettingValue = %s, LastModified = %s
                 WHERE SettingKey = 'VMAFAutoReplaceMaxThreshold'
             """
             max_result = self.DatabaseService.ExecuteNonQuery(max_query, (str(MaxThreshold), current_time))
@@ -3290,7 +3308,7 @@ class DatabaseManager:
         try:
             LoggingService.LogFunctionEntry("MarkQualityTestCompleted", "DatabaseManager", TranscodeAttemptId)
             
-            query = "UPDATE TranscodeAttempts SET QualityTestCompleted = 1 WHERE Id = ?"
+            query = "UPDATE TranscodeAttempts SET QualityTestCompleted = TRUE WHERE Id = %s"
             result = self.DatabaseService.ExecuteNonQuery(query, (TranscodeAttemptId,))
             
             if result > 0:
@@ -3313,14 +3331,14 @@ class DatabaseManager:
                 SELECT Id, TranscodeAttemptId, OriginalFilePath, TranscodedFilePath, LocalSourcePath,
                        DateAdded, DateStarted, DateCompleted
                 FROM QualityTestingQueue 
-                WHERE Id = ?
+                WHERE Id = %s
             """
             
             rows = self.DatabaseService.ExecuteQuery(query, (job_id,))
             
             if rows:
                 LoggingService.LogInfo(f"Successfully retrieved quality testing job {job_id}", "DatabaseManager", "GetQualityTestingJob")
-                return dict(rows[0])
+                return rows[0]
             else:
                 LoggingService.LogWarning(f"Quality testing job {job_id} not found", "DatabaseManager", "GetQualityTestingJob")
                 return None
@@ -3337,17 +3355,17 @@ class DatabaseManager:
         """Save quality test progress - updates existing record or creates new one"""
         try:
             # First, check if a record exists for this transcode attempt
-            check_query = "SELECT Id FROM QualityTestProgress WHERE TranscodeAttemptId = ?"
+            check_query = "SELECT Id FROM QualityTestProgress WHERE TranscodeAttemptId = %s"
             existing_records = self.DatabaseService.ExecuteQuery(check_query, (transcode_attempt_id,))
             
             if existing_records:
                 # Update existing record
                 query = """
                     UPDATE QualityTestProgress SET
-                        Status = ?, ProgressPercentage = ?, CurrentStep = ?, 
-                        UpdatedAt = datetime('now', 'localtime'), CurrentTime = ?, CurrentFrame = ?, 
-                        ProcessingSpeed = ?, ETA = ?
-                    WHERE TranscodeAttemptId = ?
+                        Status = %s, ProgressPercentage = %s, CurrentStep = %s, 
+                        UpdatedAt = NOW(), CurrentTime = %s, CurrentFrame = %s, 
+                        ProcessingSpeed = %s, ETA = %s
+                    WHERE TranscodeAttemptId = %s
                 """
                 
                 parameters = (
@@ -3367,8 +3385,8 @@ class DatabaseManager:
                     (TranscodeAttemptId, Status, ProgressPercentage, CurrentStep, 
                      StartTime, UpdatedAt, CreatedAt, CurrentTime, CurrentFrame, 
                      ProcessingSpeed, ETA)
-                    VALUES (?, ?, ?, ?, ?, datetime('now', 'localtime'), datetime('now', 'localtime'),
-                            ?, ?, ?, ?)
+                    VALUES (%s, %s, %s, %s, %s, NOW(), NOW(),
+                            %s, %s, %s, %s)
                 """
                 
                 parameters = (
@@ -3393,7 +3411,7 @@ class DatabaseManager:
     def RemoveFromQualityTestQueue(self, JobId: int) -> bool:
         """Remove completed job from QualityTestingQueue (revolving door)."""
         try:
-            query = "DELETE FROM QualityTestingQueue WHERE Id = ?"
+            query = "DELETE FROM QualityTestingQueue WHERE Id = %s"
             rows_affected = self.DatabaseService.ExecuteNonQuery(query, (JobId,))
             if rows_affected > 0:
                 LoggingService.LogInfo(f"Successfully removed job {JobId} from quality test queue", "DatabaseManager", "RemoveFromQualityTestQueue")
@@ -3411,8 +3429,8 @@ class DatabaseManager:
         try:
             query = """
                 UPDATE TranscodeAttempts 
-                SET VMAF = ?
-                WHERE Id = ?
+                SET VMAF = %s
+                WHERE Id = %s
             """
             
             rows_affected = self.DatabaseService.ExecuteNonQuery(query, (vmaf_score, transcode_attempt_id))
@@ -3427,8 +3445,8 @@ class DatabaseManager:
         try:
             query = """
                 UPDATE TranscodeAttempts 
-                SET QualityTestCompleted = 1
-                WHERE Id = ?
+                SET QualityTestCompleted = TRUE
+                WHERE Id = %s
             """
             
             rows_affected = self.DatabaseService.ExecuteNonQuery(query, (transcode_attempt_id,))
@@ -3443,8 +3461,8 @@ class DatabaseManager:
         try:
             query = """
                 UPDATE TranscodeAttempts 
-                SET QualityTestRequired = 0, QualityTestCompleted = 1
-                WHERE Id = ?
+                SET QualityTestRequired = FALSE, QualityTestCompleted = TRUE
+                WHERE Id = %s
             """
             
             rows_affected = self.DatabaseService.ExecuteNonQuery(query, (transcode_attempt_id,))
@@ -3460,8 +3478,8 @@ class DatabaseManager:
         try:
             query = """
                 UPDATE ActiveJobs 
-                SET ThreadId = ?, UpdatedAt = datetime('now', 'localtime')
-                WHERE Id = ?
+                SET ThreadId = %s, UpdatedAt = NOW()
+                WHERE Id = %s
             """
             
             rows_affected = self.DatabaseService.ExecuteNonQuery(query, (thread_id, job_id))
@@ -3479,13 +3497,13 @@ class DatabaseManager:
                 SELECT Id, ServiceName, JobType, QueueId, ProcessId, ThreadId, 
                        StartedAt, Status, CreatedAt, UpdatedAt
                 FROM ActiveJobs 
-                WHERE ServiceName = ? AND QueueId = ?
+                WHERE ServiceName = %s AND QueueId = %s
             """
             
             rows = self.DatabaseService.ExecuteQuery(query, (service_name, queue_id))
-            
+
             if rows:
-                return dict(rows[0])
+                return rows[0]
             
             return None
             
@@ -3500,11 +3518,11 @@ class DatabaseManager:
                 SELECT Id, ServiceName, JobType, QueueId, ProcessId, ThreadId, 
                        StartedAt, Status, CreatedAt, UpdatedAt
                 FROM ActiveJobs 
-                WHERE ServiceName = ?
+                WHERE ServiceName = %s
             """
             
             rows = self.DatabaseService.ExecuteQuery(query, (service_name,))
-            return [dict(row) for row in rows]
+            return list(rows)
             
         except Exception as e:
             LoggingService.LogException("Exception getting active jobs by service", e, "DatabaseManager", "GetActiveJobsByService")
@@ -3520,7 +3538,7 @@ class DatabaseManager:
             """
             
             rows = self.DatabaseService.ExecuteQuery(query)
-            return [dict(row) for row in rows]
+            return list(rows)
             
         except Exception as e:
             LoggingService.LogException("Exception getting all active jobs", e, "DatabaseManager", "GetAllActiveJobs")
@@ -3530,7 +3548,7 @@ class DatabaseManager:
         """Cancel a specific active job"""
         try:
             # Get job details
-            get_job_query = "SELECT ServiceName, JobType, QueueId FROM ActiveJobs WHERE Id = ?"
+            get_job_query = "SELECT ServiceName, JobType, QueueId FROM ActiveJobs WHERE Id = %s"
             job_rows = self.DatabaseService.ExecuteNonQuery(get_job_query, (job_id,))
             
             if not job_rows:
@@ -3541,7 +3559,7 @@ class DatabaseManager:
                          "DatabaseManager", "CancelActiveJob")
             
             # Delete from ActiveJobs
-            delete_query = "DELETE FROM ActiveJobs WHERE Id = ?"
+            delete_query = "DELETE FROM ActiveJobs WHERE Id = %s"
             rows_affected = self.DatabaseService.ExecuteNonQuery(delete_query, (job_id,))
             
             return rows_affected > 0
@@ -3557,7 +3575,7 @@ class DatabaseManager:
             result = self.DatabaseService.ExecuteQuery(query)
             
             if result and len(result) > 0:
-                return result[0][0] or 1  # Default to 1 if not set
+                return result[0]['maxconcurrentjobs'] or 1  # Default to 1 if not set
             
             return 1  # Default value
             
@@ -3569,7 +3587,7 @@ class DatabaseManager:
         """Cancel all active jobs for a specific service."""
         try:
             # Get all active jobs for the service
-            get_jobs_query = "SELECT Id, JobType, QueueId FROM ActiveJobs WHERE ServiceName = ? AND Status = 'Running'"
+            get_jobs_query = "SELECT Id, JobType, QueueId FROM ActiveJobs WHERE ServiceName = %s AND Status = 'Running'"
             jobs = self.DatabaseService.ExecuteQuery(get_jobs_query, (service_name,))
             
             if not jobs:
@@ -3581,7 +3599,7 @@ class DatabaseManager:
                              "DatabaseManager", "CancelActiveJobs")
             
             # Delete all active jobs for the service
-            delete_query = "DELETE FROM ActiveJobs WHERE ServiceName = ? AND Status = 'Running'"
+            delete_query = "DELETE FROM ActiveJobs WHERE ServiceName = %s AND Status = 'Running'"
             rows_affected = self.DatabaseService.ExecuteNonQuery(delete_query, (service_name,))
             
             return rows_affected >= 0  # Return True even if no rows affected
@@ -3595,7 +3613,7 @@ class DatabaseManager:
         """Get a quality test job by ID"""
         try:
             query = """SELECT Id, TranscodeAttemptId, OriginalFilePath, LocalSourcePath, TranscodedFilePath, DateAdded, DateStarted, DateCompleted 
-                       FROM QualityTestingQueue WHERE Id = ?"""
+                       FROM QualityTestingQueue WHERE Id = %s"""
             rows = self.DatabaseService.ExecuteQuery(query, (JobId,))
             
             if rows:
@@ -3627,10 +3645,7 @@ class DatabaseManager:
             """
             rows = self.DatabaseService.ExecuteQuery(query)
             
-            jobs = []
-            for row in rows:
-                jobs.append(dict(row))
-            return jobs
+            return list(rows)
             
         except Exception as e:
             LoggingService.LogException("Exception getting quality test queue", e, "DatabaseManager", "GetQualityTestQueue")
@@ -3658,7 +3673,7 @@ class DatabaseManager:
                 LEFT JOIN TranscodeAttempts ta ON qtr.TranscodeAttemptId = ta.Id
                 LEFT JOIN TemporaryFilePaths tfp ON qtr.TranscodeAttemptId = tfp.TranscodeAttemptId
                 ORDER BY qtr.DateTested DESC 
-                LIMIT ? OFFSET ?
+                LIMIT %s OFFSET %s
             """
             rows = self.DatabaseService.ExecuteQuery(query, (Limit, Offset))
             
@@ -3714,7 +3729,7 @@ class DatabaseManager:
             result = self.DatabaseService.ExecuteQuery(query)
             
             if result:
-                return result[0][0]  # TotalCount is the first column
+                return result[0]['totalcount']
             return 0
             
         except Exception as e:
@@ -3798,8 +3813,8 @@ class DatabaseManager:
             # Now atomically claim the job
             update_query = """
                 UPDATE QualityTestingQueue 
-                SET DateStarted = datetime('now', 'localtime')
-                WHERE Id = ? AND DateStarted IS NULL
+                SET DateStarted = NOW()
+                WHERE Id = %s AND DateStarted IS NULL
             """
             
             rows_affected = self.DatabaseService.ExecuteNonQuery(update_query, (job_id,))
@@ -3837,7 +3852,8 @@ class DatabaseManager:
                 INSERT INTO QualityTestingQueue (
                     TranscodeAttemptId, OriginalFilePath, TranscodedFilePath, LocalSourcePath,
                     DateAdded, DateStarted, DateCompleted
-                ) VALUES (?, ?, ?, ?, datetime('now', 'localtime'), ?, ?)
+                ) VALUES (%s, %s, %s, %s, NOW(), %s, %s)
+                RETURNING Id
             """
             
             params = (
@@ -3920,11 +3936,11 @@ class DatabaseManager:
             LoggingService.LogFunctionEntry("DeleteQualityTestRecordsByAttemptId", "DatabaseManager", TranscodeAttemptId)
             
             # Delete from QualityTestingQueue
-            QueueQuery = "DELETE FROM QualityTestingQueue WHERE TranscodeAttemptId = ?"
+            QueueQuery = "DELETE FROM QualityTestingQueue WHERE TranscodeAttemptId = %s"
             QueueRowsAffected = self.DatabaseService.ExecuteNonQuery(QueueQuery, (TranscodeAttemptId,))
             
             # Delete from QualityTestProgress
-            ProgressQuery = "DELETE FROM QualityTestProgress WHERE TranscodeAttemptId = ?"
+            ProgressQuery = "DELETE FROM QualityTestProgress WHERE TranscodeAttemptId = %s"
             ProgressRowsAffected = self.DatabaseService.ExecuteNonQuery(ProgressQuery, (TranscodeAttemptId,))
             
             TotalRowsAffected = QueueRowsAffected + ProgressRowsAffected
@@ -3964,14 +3980,14 @@ class DatabaseManager:
                 query = """
                     INSERT INTO TemporaryFilePaths (
                         TranscodeAttemptId, OriginalPath, LocalSourcePath, LocalOutputPath, CreatedDate
-                    ) VALUES (?, ?, ?, ?, datetime('now', 'localtime'))
+                    ) VALUES (%s, %s, %s, %s, NOW())
                 """
                 params = (TranscodeAttemptId, NormalizedOriginalPath, NormalizedLocalSourcePath, NormalizedLocalOutputPath)
             else:
                 query = """
                     INSERT INTO TemporaryFilePaths (
                         TranscodeAttemptId, OriginalPath, LocalSourcePath, CreatedDate
-                    ) VALUES (?, ?, ?, datetime('now', 'localtime'))
+                    ) VALUES (%s, %s, %s, NOW())
                 """
                 params = (TranscodeAttemptId, NormalizedOriginalPath, NormalizedLocalSourcePath)
             
@@ -4009,8 +4025,8 @@ class DatabaseManager:
             
             query = """
                 UPDATE TemporaryFilePaths 
-                SET LocalOutputPath = ?
-                WHERE TranscodeAttemptId = ?
+                SET LocalOutputPath = %s
+                WHERE TranscodeAttemptId = %s
             """
             
             params = (NormalizedLocalOutputPath, TranscodeAttemptId)
@@ -4041,7 +4057,7 @@ class DatabaseManager:
             query = """
                 SELECT Id, TranscodeAttemptId, OriginalPath, LocalSourcePath, LocalOutputPath, CreatedDate
                 FROM TemporaryFilePaths 
-                WHERE TranscodeAttemptId = ?
+                WHERE TranscodeAttemptId = %s
             """
             
             results = self.DatabaseService.ExecuteQuery(query, (TranscodeAttemptId,))
@@ -4070,7 +4086,7 @@ class DatabaseManager:
             
             query = """
                 DELETE FROM TemporaryFilePaths 
-                WHERE TranscodeAttemptId = ?
+                WHERE TranscodeAttemptId = %s
             """
             
             RowsAffected = self.DatabaseService.ExecuteNonQuery(query, (TranscodeAttemptId,))
@@ -4094,7 +4110,7 @@ class DatabaseManager:
     def PrivateValidateTranscodeAttemptId(self, TranscodeAttemptId: int) -> bool:
         """Private method to validate TranscodeAttemptId exists."""
         try:
-            query = "SELECT COUNT(*) as Count FROM TranscodeAttempts WHERE Id = ?"
+            query = "SELECT COUNT(*) as Count FROM TranscodeAttempts WHERE Id = %s"
             results = self.DatabaseService.ExecuteQuery(query, (TranscodeAttemptId,))
             return results[0]['Count'] > 0 if results else False
         except Exception as e:
@@ -4121,7 +4137,7 @@ class DatabaseManager:
         try:
             LoggingService.LogFunctionEntry("GetSystemSetting", "DatabaseManager", SettingKey)
             
-            query = "SELECT SettingValue FROM SystemSettings WHERE SettingKey = ?"
+            query = "SELECT SettingValue FROM SystemSettings WHERE SettingKey = %s"
             results = self.DatabaseService.ExecuteQuery(query, (SettingKey,))
             
             if results:
@@ -4246,15 +4262,14 @@ class DatabaseManager:
                 SELECT Id, ServiceName, JobType, QueueId, ProcessId, ThreadId, 
                        StartedAt, Status, CreatedAt, UpdatedAt
                 FROM ActiveJobs 
-                WHERE Id = ?
+                WHERE Id = %s
             """
             
             rows = self.DatabaseService.ExecuteQuery(query, (JobId,))
             
             if rows:
-                job_details = dict(rows[0])
                 LoggingService.LogInfo(f"Retrieved active job details for ID {JobId}", "DatabaseManager", "GetActiveJobDetails")
-                return job_details
+                return rows[0]
             else:
                 LoggingService.LogWarning(f"Active job not found: {JobId}", "DatabaseManager", "GetActiveJobDetails")
                 return None
@@ -4268,7 +4283,7 @@ class DatabaseManager:
         try:
             LoggingService.LogFunctionEntry("DeleteActiveJob", "DatabaseManager", JobId)
             
-            query = "DELETE FROM ActiveJobs WHERE Id = ?"
+            query = "DELETE FROM ActiveJobs WHERE Id = %s"
             affected_rows = self.DatabaseService.ExecuteNonQuery(query, (JobId,))
             
             if affected_rows > 0:
@@ -4287,7 +4302,7 @@ class DatabaseManager:
         try:
             LoggingService.LogFunctionEntry("DeleteActiveJobsByService", "DatabaseManager", ServiceName)
             
-            query = "DELETE FROM ActiveJobs WHERE ServiceName = ?"
+            query = "DELETE FROM ActiveJobs WHERE ServiceName = %s"
             affected_rows = self.DatabaseService.ExecuteNonQuery(query, (ServiceName,))
             
             LoggingService.LogInfo(f"Deleted {affected_rows} active jobs for service {ServiceName}", "DatabaseManager", "DeleteActiveJobsByService")
@@ -4301,28 +4316,38 @@ class DatabaseManager:
         """Reset multiple queue jobs to Pending status. Returns count of reset jobs."""
         try:
             LoggingService.LogFunctionEntry("ResetQueueJobsToPending", "DatabaseManager", QueueIds, QueueTable)
-            
+
             if not QueueIds:
                 return 0
-            
+
             # Validate queue table name to prevent SQL injection
             valid_tables = ['TranscodeQueue', 'QualityTestingQueue']
             if QueueTable not in valid_tables:
                 LoggingService.LogError(f"Invalid queue table name: {QueueTable}", "DatabaseManager", "ResetQueueJobsToPending")
                 return 0
-            
-            # Reset status to Pending and clear DateStarted
-            query = f"""
-                UPDATE {QueueTable} 
-                SET Status = 'Pending', DateStarted = NULL 
-                WHERE Id IN ({','.join('?' * len(QueueIds))})
-            """
-            
+
+            placeholders = ','.join(['%s'] * len(QueueIds))
+
+            if QueueTable == 'TranscodeQueue':
+                # TranscodeQueue has a Status column
+                query = f"""
+                    UPDATE {QueueTable}
+                    SET Status = 'Pending', DateStarted = NULL
+                    WHERE Id IN ({placeholders})
+                """
+            else:
+                # QualityTestingQueue has no Status column - reset by clearing dates
+                query = f"""
+                    UPDATE {QueueTable}
+                    SET DateStarted = NULL, DateCompleted = NULL
+                    WHERE Id IN ({placeholders})
+                """
+
             affected_rows = self.DatabaseService.ExecuteNonQuery(query, QueueIds)
-            
+
             LoggingService.LogInfo(f"Reset {affected_rows} jobs to Pending in {QueueTable}", "DatabaseManager", "ResetQueueJobsToPending")
             return affected_rows
-            
+
         except Exception as e:
             LoggingService.LogException("Exception resetting queue jobs to pending", e, "DatabaseManager", "ResetQueueJobsToPending")
             return 0
@@ -4332,7 +4357,7 @@ class DatabaseManager:
         try:
             LoggingService.LogFunctionEntry("UpdateActiveJobProcessId", "DatabaseManager", ActiveJobId, ProcessId)
             
-            query = "UPDATE ActiveJobs SET ProcessId = ?, UpdatedAt = datetime('now', 'localtime') WHERE Id = ?"
+            query = "UPDATE ActiveJobs SET ProcessId = %s, UpdatedAt = NOW() WHERE Id = %s"
             affected_rows = self.DatabaseService.ExecuteNonQuery(query, (ProcessId, ActiveJobId))
             
             if affected_rows > 0:
@@ -4365,7 +4390,7 @@ class DatabaseManager:
             )
             
             # Verify TranscodeAttemptId exists
-            check_query = "SELECT Id FROM TranscodeAttempts WHERE Id = ?"
+            check_query = "SELECT Id FROM TranscodeAttempts WHERE Id = %s"
             check_result = self.DatabaseService.ExecuteQuery(check_query, (TranscodeAttemptId,))
             
             if not check_result:
@@ -4377,9 +4402,10 @@ class DatabaseManager:
             
             # Insert into database with all required fields
             query = """
-                INSERT INTO QualityTestResults 
+                INSERT INTO QualityTestResults
                 (TranscodeAttemptId, TestDuration, PassesThreshold, Rank, ErrorMessage, DateTested, FFmpegCommand, Status, VMAFScore)
-                VALUES (?, ?, ?, ?, ?, datetime('now', 'localtime'), ?, ?, ?)
+                VALUES (%s, %s, %s, %s, %s, NOW(), %s, %s, %s)
+                RETURNING Id
             """
             
             params = (
@@ -4429,7 +4455,7 @@ class DatabaseManager:
         try:
             LoggingService.LogFunctionEntry("UpdateQualityTestResultFailure", "DatabaseManager", ResultId, ErrorMessage)
             
-            query = "UPDATE QualityTestResults SET Status = 'Failed', ErrorMessage = ? WHERE Id = ?"
+            query = "UPDATE QualityTestResults SET Status = 'Failed', ErrorMessage = %s WHERE Id = %s"
             affected_rows = self.DatabaseService.ExecuteNonQuery(query, (ErrorMessage, ResultId))
             
             if affected_rows > 0:
@@ -4450,7 +4476,7 @@ class DatabaseManager:
         try:
             LoggingService.LogFunctionEntry("DeleteQualityTestQueueItem", "DatabaseManager", JobId)
             
-            query = "DELETE FROM QualityTestingQueue WHERE Id = ?"
+            query = "DELETE FROM QualityTestingQueue WHERE Id = %s"
             affected_rows = self.DatabaseService.ExecuteNonQuery(query, (JobId,))
             
             if affected_rows > 0:
@@ -4476,18 +4502,18 @@ class DatabaseManager:
                        tfp.LocalSourcePath, tfp.LocalOutputPath
                 FROM TranscodeAttempts ta
                 INNER JOIN TemporaryFilePaths tfp ON ta.Id = tfp.TranscodeAttemptId
-                WHERE ta.Success = 1
-                  AND ta.QualityTestRequired = 1
-                  AND ta.QualityTestCompleted = 0
+                WHERE ta.Success = TRUE
+                  AND ta.QualityTestRequired = TRUE
+                  AND ta.QualityTestCompleted = FALSE
                   AND tfp.LocalOutputPath IS NOT NULL
                   AND ta.Id NOT IN (
-                      SELECT TranscodeAttemptId 
-                      FROM QualityTestResults 
+                      SELECT TranscodeAttemptId
+                      FROM QualityTestResults
                       WHERE TranscodeAttemptId IS NOT NULL
                         AND Status = 'Success'
                   )
                 ORDER BY ta.AttemptDate DESC
-                LIMIT ?
+                LIMIT %s
             """
             
             Rows = self.DatabaseService.ExecuteQuery(query, (Limit,))
@@ -4521,9 +4547,9 @@ class DatabaseManager:
                     SELECT ta.Id 
                     FROM TranscodeAttempts ta
                     INNER JOIN TemporaryFilePaths tfp ON ta.Id = tfp.TranscodeAttemptId
-                    WHERE ta.Success = 1
-                      AND ta.QualityTestRequired = 1
-                      AND ta.QualityTestCompleted = 0
+                    WHERE ta.Success = TRUE
+                      AND ta.QualityTestRequired = TRUE
+                      AND ta.QualityTestCompleted = FALSE
                       AND tfp.LocalOutputPath IS NOT NULL
                       AND ta.Id NOT IN (
                           SELECT TranscodeAttemptId 
@@ -4562,13 +4588,13 @@ class DatabaseManager:
                 INNER JOIN QualityTestResults qtr ON ta.Id = qtr.TranscodeAttemptId
                 WHERE ta.VMAF IS NOT NULL 
                 AND ta.VMAF >= 90
-                AND ta.Success = 1
+                AND ta.Success = TRUE
                 AND tfp.LocalOutputPath IS NOT NULL
                 AND qtr.Status = 'Success'
-                AND ta.QualityTestRequired = 1
+                AND ta.QualityTestRequired = TRUE
                 AND qtr.DateTested IS NOT NULL
                 ORDER BY ta.AttemptDate DESC
-                LIMIT ?
+                LIMIT %s
             """
             
             Rows = self.DatabaseService.ExecuteQuery(query, (Limit,))
@@ -4621,14 +4647,14 @@ class DatabaseManager:
             import psutil
             
             # Get the process ID from ActiveJobs
-            query = "SELECT ProcessId FROM ActiveJobs WHERE Id = ?"
+            query = "SELECT ProcessId FROM ActiveJobs WHERE Id = %s"
             result = self.DatabaseService.ExecuteQuery(query, (ActiveJobId,))
             
             if not result:
                 LoggingService.LogWarning(f"No active job found with ID {ActiveJobId}", "DatabaseManager", "KillActiveQualityTestProcess")
                 return False
             
-            process_id = result[0][0]  # ProcessId is the first (and only) column
+            process_id = result[0]['processid']
             if not process_id:
                 LoggingService.LogWarning(f"No process ID found for active job {ActiveJobId}", "DatabaseManager", "KillActiveQualityTestProcess")
                 return False
@@ -4692,7 +4718,7 @@ class DatabaseManager:
             
             query = """
                 INSERT INTO ProblemFiles (FilePath, FileName, Directory, SizeBytes, SizeMB, ErrorType, ErrorMessage, DateEncountered, RetryCount)
-                VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'), 0)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, NOW(), 0)
             """
             
             params = (FilePath, FileName, Directory, SizeBytes, SizeMB, ErrorType, ErrorMessage)
@@ -4720,11 +4746,12 @@ class DatabaseManager:
         """Insert a Jellyfin FFmpeg operation log entry. Skips if LogFileName already exists."""
         try:
             query = """
-                INSERT OR IGNORE INTO JellyfinOperations
+                INSERT INTO JellyfinOperations
                 (LogFileName, OperationType, FilePath, FileName, VideoCodec, AudioCodec, Container, Resolution,
                  SubtitleCodecs, Reason, TranscodeActions, LogDate,
                  DestResolution, DestProfile, DestLevel, DestPixelFormat, DestFormat)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (LogFileName) DO NOTHING
             """
             self.DatabaseService.ExecuteNonQuery(query, (
                 LogFileName, OperationType, FilePath, FileName,
@@ -4740,16 +4767,18 @@ class DatabaseManager:
         """Batch insert Jellyfin operations. Returns count of new rows inserted."""
         try:
             query = """
-                INSERT OR IGNORE INTO JellyfinOperations
+                INSERT INTO JellyfinOperations
                 (LogFileName, OperationType, FilePath, FileName, VideoCodec, AudioCodec, Container, Resolution,
                  SubtitleCodecs, Reason, TranscodeActions, LogDate,
                  DestResolution, DestProfile, DestLevel, DestPixelFormat, DestFormat)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (LogFileName) DO NOTHING
             """
             connection = self.DatabaseService.GetConnection()
             try:
                 cursor = connection.cursor()
-                beforeCount = cursor.execute("SELECT COUNT(*) FROM JellyfinOperations").fetchone()[0]
+                cursor.execute("SELECT COUNT(*) FROM JellyfinOperations")
+                beforeCount = cursor.fetchone()[0]
                 cursor.executemany(query, [
                     (e["LogFileName"], e["OperationType"], e["FilePath"], e["FileName"],
                      e["VideoCodec"], e["AudioCodec"], e["Container"], e["Resolution"],
@@ -4759,10 +4788,11 @@ class DatabaseManager:
                     for e in Entries
                 ])
                 connection.commit()
-                afterCount = cursor.execute("SELECT COUNT(*) FROM JellyfinOperations").fetchone()[0]
+                cursor.execute("SELECT COUNT(*) FROM JellyfinOperations")
+                afterCount = cursor.fetchone()[0]
                 return afterCount - beforeCount
             finally:
-                connection.close()
+                self.DatabaseService.CloseConnection(connection)
         except Exception as e:
             LoggingService.LogException("Error batch inserting Jellyfin operations", e, "DatabaseManager", "InsertJellyfinOperationsBatch")
             return 0
@@ -4771,7 +4801,7 @@ class DatabaseManager:
         """Get set of all LogFileName values already in the database."""
         try:
             rows = self.DatabaseService.ExecuteQuery("SELECT LogFileName FROM JellyfinOperations")
-            return {row[0] for row in rows}
+            return {row['logfilename'] for row in rows}
         except Exception as e:
             LoggingService.LogException("Error getting existing log filenames", e, "DatabaseManager", "GetExistingLogFileNames")
             return set()
@@ -4786,7 +4816,7 @@ class DatabaseManager:
                   AND (DestProfile IS NULL OR DestProfile = '')
                   AND (DestLevel IS NULL OR DestLevel = '')
             """)
-            return rows[0][0] if rows else 0
+            return rows[0]['count'] if rows else 0
         except Exception as e:
             LoggingService.LogException("Error checking stale records", e, "DatabaseManager", "GetStaleJellyfinRecordCount")
             return 0
@@ -4815,11 +4845,11 @@ class DatabaseManager:
             allOldest = []
             allNewest = []
             for row in rows:
-                result[row[0]] = {"Distinct": row[2], "Total": row[1]}
-                if row[3]:
-                    allOldest.append(row[3])
-                if row[4]:
-                    allNewest.append(row[4])
+                result[row['operationtype']] = {"Distinct": row['distinctfiles'], "Total": row['totallogs']}
+                if row['oldestdate']:
+                    allOldest.append(row['oldestdate'])
+                if row['newestdate']:
+                    allNewest.append(row['newestdate'])
             return {
                 "Success": True,
                 "Counts": result,
@@ -4842,38 +4872,38 @@ class DatabaseManager:
                        SubtitleCodecs,
                        TranscodeActions
                 FROM JellyfinOperations
-                WHERE OperationType = ?
+                WHERE OperationType = %s
                 GROUP BY FileName, Reason
                 ORDER BY LastSeen DESC
-                LIMIT ?
+                LIMIT %s
             """
             rows = self.DatabaseService.ExecuteQuery(query, (OperationType, Limit))
             files = []
             reasons = {}
             for row in rows:
-                reason = row[6] or "other"
+                reason = row['reason'] or "other"
                 files.append({
-                    "FileName": row[0],
-                    "FilePath": row[1],
-                    "VideoCodec": row[2],
-                    "AudioCodec": row[3],
-                    "Container": row[4],
-                    "Resolution": row[5],
+                    "FileName": row['filename'],
+                    "FilePath": row['filepath'],
+                    "VideoCodec": row['videocodec'],
+                    "AudioCodec": row['audiocodec'],
+                    "Container": row['container'],
+                    "Resolution": row['resolution'],
                     "Reason": reason,
-                    "Count": row[7],
-                    "FirstSeen": row[8],
-                    "LastSeen": row[9],
-                    "SubtitleCodecs": row[10] or "",
-                    "TranscodeActions": row[11] or ""
+                    "Count": row['playcount'],
+                    "FirstSeen": row['firstseen'],
+                    "LastSeen": row['lastseen'],
+                    "SubtitleCodecs": row['subtitlecodecs'] or "",
+                    "TranscodeActions": row['transcodeactions'] or ""
                 })
                 if OperationType == "Transcode":
-                    reasons[reason] = reasons.get(reason, 0) + row[7]
+                    reasons[reason] = reasons.get(reason, 0) + row['playcount']
 
-            totalQuery = "SELECT COUNT(*) FROM JellyfinOperations WHERE OperationType = ?"
+            totalQuery = "SELECT COUNT(*) FROM JellyfinOperations WHERE OperationType = %s"
             totalRow = self.DatabaseService.ExecuteQuery(totalQuery, (OperationType,))
-            totalLogs = totalRow[0][0] if totalRow else 0
+            totalLogs = totalRow[0]['count'] if totalRow else 0
 
-            dateQuery = "SELECT MIN(LogDate), MAX(LogDate) FROM JellyfinOperations WHERE OperationType = ?"
+            dateQuery = "SELECT MIN(LogDate), MAX(LogDate) FROM JellyfinOperations WHERE OperationType = %s"
             dateRow = self.DatabaseService.ExecuteQuery(dateQuery, (OperationType,))
 
             return {
@@ -4883,8 +4913,8 @@ class DatabaseManager:
                 "TotalLogs": totalLogs,
                 "OperationType": OperationType,
                 "Reasons": reasons,
-                "OldestDate": dateRow[0][0] if dateRow else None,
-                "NewestDate": dateRow[0][1] if dateRow else None
+                "OldestDate": dateRow[0]['min'] if dateRow else None,
+                "NewestDate": dateRow[0]['max'] if dateRow else None
             }
         except Exception as e:
             LoggingService.LogException("Error getting Jellyfin operations by type", e, "DatabaseManager", "GetJellyfinOperationsByType")
@@ -4906,12 +4936,12 @@ class DatabaseManager:
             formats = []
             for row in rows:
                 formats.append({
-                    "DestResolution": row[0] or "",
-                    "DestProfile": row[1] or "",
-                    "DestLevel": row[2] or "",
-                    "DestPixelFormat": row[3] or "",
-                    "DestFormat": row[4] or "",
-                    "Count": row[5]
+                    "DestResolution": row['destresolution'] or "",
+                    "DestProfile": row['destprofile'] or "",
+                    "DestLevel": row['destlevel'] or "",
+                    "DestPixelFormat": row['destpixelformat'] or "",
+                    "DestFormat": row['destformat'] or "",
+                    "Count": row['count']
                 })
             totalWithDest = sum(f["Count"] for f in formats)
             return {"Success": True, "Formats": formats, "TotalWithDestInfo": totalWithDest}
@@ -4927,7 +4957,7 @@ class DatabaseManager:
             selectCols = "Id, FileName, FilePath, ContainerFormat, Codec, AudioCodec, TranscodedByMediaVortex, SubtitleFormats"
 
             # 1. Exact match
-            query = f"SELECT {selectCols} FROM MediaFiles WHERE LOWER(FileName) = LOWER(?) LIMIT 1"
+            query = f"SELECT {selectCols} FROM MediaFiles WHERE LOWER(FileName) = LOWER(%s) LIMIT 1"
             rows = self.DatabaseService.ExecuteQuery(query, (FileName,))
             if rows:
                 return self._MapMediaFileSummaryRow(rows[0], "exact")
@@ -4935,7 +4965,7 @@ class DatabaseManager:
             # 2. Match without extension (handles container change: .mkv -> .mp4)
             import os
             nameNoExt = os.path.splitext(FileName)[0]
-            query = f"SELECT {selectCols} FROM MediaFiles WHERE LOWER(FileName) LIKE LOWER(?) LIMIT 1"
+            query = f"SELECT {selectCols} FROM MediaFiles WHERE LOWER(FileName) LIKE LOWER(%s) ESCAPE '!' LIMIT 1"
             rows = self.DatabaseService.ExecuteQuery(query, (nameNoExt + '%',))
             if rows:
                 return self._MapMediaFileSummaryRow(rows[0], "no_ext")
@@ -4955,14 +4985,14 @@ class DatabaseManager:
     def _MapMediaFileSummaryRow(self, row, matchType: str = "exact") -> Dict[str, Any]:
         """Map a summary row to a dict for mitigation checking."""
         return {
-            "Id": row[0],
-            "FileName": row[1],
-            "FilePath": row[2],
-            "ContainerFormat": row[3],
-            "Codec": row[4],
-            "AudioCodec": row[5],
-            "TranscodedByMediaVortex": row[6],
-            "SubtitleFormats": row[7],
+            "Id": row['id'],
+            "FileName": row['filename'],
+            "FilePath": row['filepath'],
+            "ContainerFormat": row['containerformat'],
+            "Codec": row['codec'],
+            "AudioCodec": row['audiocodec'],
+            "TranscodedByMediaVortex": row['transcodedbymediavortex'],
+            "SubtitleFormats": row['subtitleformats'],
             "MatchType": matchType
         }
 
@@ -4973,11 +5003,11 @@ class DatabaseManager:
         """
         import re
         # Match patterns like S01E05, S1E5, s01e05
-        match = re.search(r'(.*?S\d{1,2}E\d{1,2})', FileName, re.IGNORECASE)
+        match = re.search(r'(.*%sS\d{1,2}E\d{1,2})', FileName, re.IGNORECASE)
         if match:
             return match.group(1).strip(' -_.')
         # Match patterns like "1x05", "01x05"
-        match = re.search(r'(.*?\d{1,2}x\d{2})', FileName, re.IGNORECASE)
+        match = re.search(r'(.*%s\d{1,2}x\d{2})', FileName, re.IGNORECASE)
         if match:
             return match.group(1).strip(' -_.')
         return None
@@ -4996,13 +5026,13 @@ class DatabaseManager:
                        ContainerFormat, OverallBitrate, TranscodedByMediaVortex"""
 
             # 1. Exact match
-            query = f"SELECT {selectCols} FROM MediaFiles WHERE LOWER(FileName) = LOWER(?) LIMIT 1"
+            query = f"SELECT {selectCols} FROM MediaFiles WHERE LOWER(FileName) = LOWER(%s) LIMIT 1"
             rows = self.DatabaseService.ExecuteQuery(query, (FileName,))
 
             # 2. Match without extension (handles container change: .mkv -> .mp4)
             if not rows:
                 nameNoExt = os.path.splitext(FileName)[0]
-                likeQuery = f"SELECT {selectCols} FROM MediaFiles WHERE LOWER(FileName) LIKE LOWER(?) LIMIT 1"
+                likeQuery = f"SELECT {selectCols} FROM MediaFiles WHERE LOWER(FileName) LIKE LOWER(%s) ESCAPE '!' LIMIT 1"
                 rows = self.DatabaseService.ExecuteQuery(likeQuery, (nameNoExt + '%',))
 
                 # 3. Fuzzy match by episode prefix (handles resolution/quality change)

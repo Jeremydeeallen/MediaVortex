@@ -22,15 +22,15 @@ class ServiceStatusHelperService:
             LoggingService.LogFunctionEntry("UpdateTranscodingStatus", "ServiceStatusHelperService")
             
             # Build update query dynamically based on provided parameters
-            updateFields = ["Status = ?", "UpdatedAt = datetime('now', 'localtime')"]
+            updateFields = ["Status = %s", "UpdatedAt = NOW()"]
             params = [Status]
             
             if IsProcessing is not None:
-                updateFields.append("IsProcessing = ?")
+                updateFields.append("IsProcessing = %s")
                 params.append(IsProcessing)
             
             if ActiveJobsCount is not None:
-                updateFields.append("ActiveJobsCount = ?")
+                updateFields.append("ActiveJobsCount = %s")
                 params.append(ActiveJobsCount)
             
             params.append("TranscodeService")  # For WHERE clause
@@ -38,7 +38,7 @@ class ServiceStatusHelperService:
             query = f"""
             UPDATE ServiceStatus 
             SET {', '.join(updateFields)}
-            WHERE ServiceName = ?
+            WHERE ServiceName = %s
             """
             
             result = self.DatabaseManager.DatabaseService.ExecuteNonQuery(query, params)
@@ -69,11 +69,11 @@ class ServiceStatusHelperService:
                 row = results[0]
                 return {
                     "Success": True,
-                    "Status": row[0],
-                    "IsProcessing": bool(row[1]) if row[1] is not None else False,
-                    "ActiveJobsCount": row[2] or 0,
-                    "LastHealthCheck": row[3],
-                    "IsTranscoding": bool(row[1]) if row[1] is not None else False
+                    "Status": row['Status'],
+                    "IsProcessing": bool(row['IsProcessing']) if row['IsProcessing'] is not None else False,
+                    "ActiveJobsCount": row['ActiveJobsCount'] or 0,
+                    "LastHealthCheck": str(row['LastHealthCheck']) if row['LastHealthCheck'] else None,
+                    "IsTranscoding": bool(row['IsProcessing']) if row['IsProcessing'] is not None else False
                 }
             else:
                 return {

@@ -164,7 +164,7 @@ class FileScanningBusinessService:
         try:
             Query = """
             INSERT INTO ScanJobs (JobId, RootFolderPath, Recursive, Status, StartTime, LastUpdated, ScanType)
-            VALUES (?, ?, ?, 'Running', ?, ?, 'File')
+            VALUES (%s, %s, %s, 'Running', %s, %s, 'File')
             """
             Now = datetime.now()
             self.DatabaseManager.DatabaseService.ExecuteNonQuery(Query, (JobId, RootFolderPath, Recursive, Now, Now))
@@ -182,39 +182,39 @@ class FileScanningBusinessService:
             UpdateValues = []
             
             if Status:
-                UpdateFields.append("Status = ?")
+                UpdateFields.append("Status = %s")
                 UpdateValues.append(Status)
             
             if Progress is not None:
-                UpdateFields.append("Progress = ?")
+                UpdateFields.append("Progress = %s")
                 UpdateValues.append(Progress)
             
             if CurrentDirectory is not None:
-                UpdateFields.append("CurrentDirectory = ?")
+                UpdateFields.append("CurrentDirectory = %s")
                 UpdateValues.append(CurrentDirectory)
             
             if ProcessId is not None:
-                UpdateFields.append("ProcessId = ?")
+                UpdateFields.append("ProcessId = %s")
                 UpdateValues.append(ProcessId)
             
             if StartTime is not None:
-                UpdateFields.append("StartTime = ?")
+                UpdateFields.append("StartTime = %s")
                 UpdateValues.append(StartTime)
             
             if EndTime is not None:
-                UpdateFields.append("EndTime = ?")
+                UpdateFields.append("EndTime = %s")
                 UpdateValues.append(EndTime)
             
             if ErrorMessage is not None:
-                UpdateFields.append("ErrorMessage = ?")
+                UpdateFields.append("ErrorMessage = %s")
                 UpdateValues.append(ErrorMessage)
             
             if ScanResults is not None:
                 UpdateFields.extend([
-                    "TotalFiles = ?",
-                    "ProcessedFiles = ?", 
-                    "SkippedFiles = ?",
-                    "EncodingErrors = ?"
+                    "TotalFiles = %s",
+                    "ProcessedFiles = %s",
+                    "SkippedFiles = %s",
+                    "EncodingErrors = %s"
                 ])
                 UpdateValues.extend([
                     ScanResults.TotalFilesFound,
@@ -224,13 +224,13 @@ class FileScanningBusinessService:
                 ])
             
             # Always update LastUpdated
-            UpdateFields.append("LastUpdated = ?")
+            UpdateFields.append("LastUpdated = %s")
             UpdateValues.append(datetime.now())
-            
+
             # Add JobId for WHERE clause
             UpdateValues.append(JobId)
-            
-            Query = f"UPDATE ScanJobs SET {', '.join(UpdateFields)} WHERE JobId = ?"
+
+            Query = f"UPDATE ScanJobs SET {', '.join(UpdateFields)} WHERE JobId = %s"
             self.DatabaseManager.DatabaseService.ExecuteNonQuery(Query, UpdateValues)
             
         except Exception as e:
@@ -275,7 +275,7 @@ class FileScanningBusinessService:
             SELECT JobId, RootFolderPath, Recursive, Status, ProcessId, StartTime, EndTime,
                    Progress, CurrentDirectory, TotalFiles, ProcessedFiles, SkippedFiles,
                    EncodingErrors, NewFiles, UpdatedFiles, DeletedFiles, ErrorMessage, LastUpdated
-            FROM ScanJobs WHERE JobId = ?
+            FROM ScanJobs WHERE JobId = %s
             """
             Result = self.DatabaseManager.DatabaseService.ExecuteQuery(Query, (JobId,))
             
@@ -444,7 +444,7 @@ class FileScanningBusinessService:
             Query = """
             DELETE FROM ScanJobs 
             WHERE Status IN ('Completed', 'Failed', 'Stopped') 
-            AND LastUpdated < datetime('now', '-7 days')
+            AND LastUpdated < NOW() - INTERVAL '7 days'
             """
             self.DatabaseManager.DatabaseService.ExecuteNonQuery(Query)
             LoggingService.LogInfo("Cleaned up old scan jobs")
@@ -1300,7 +1300,7 @@ class FileScanningBusinessService:
     def UpdateLastScannedDate(self, MediaFileId: int, LastScannedDate: datetime):
         """Update only the LastScannedDate for a media file without full save."""
         try:
-            Query = "UPDATE MediaFiles SET LastScannedDate = ? WHERE Id = ?"
+            Query = "UPDATE MediaFiles SET LastScannedDate = %s WHERE Id = %s"
             self.DatabaseManager.DatabaseService.ExecuteNonQuery(Query, (LastScannedDate, MediaFileId))
         except Exception as e:
             LoggingService.LogException(f"Error updating LastScannedDate for file ID {MediaFileId}", e, 'UpdateLastScannedDate', 'FileScanningBusinessService')
@@ -1385,7 +1385,7 @@ class FileScanningBusinessService:
                     LoggingService.LogInfo(f"FILE NOT FOUND ON DISK - DELETING FROM DATABASE: {DbFile.FilePath}", 'CleanupMissingFiles', 'FileScanningBusinessService')
                     
                     # Delete directly using the database service
-                    DeleteQuery = "DELETE FROM MediaFiles WHERE Id = ?"
+                    DeleteQuery = "DELETE FROM MediaFiles WHERE Id = %s"
                     AffectedRows = self.DatabaseManager.DatabaseService.ExecuteNonQuery(DeleteQuery, (DbFile.Id,))
                     
                     if AffectedRows > 0:

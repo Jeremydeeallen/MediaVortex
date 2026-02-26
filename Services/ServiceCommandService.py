@@ -26,7 +26,7 @@ class ServiceCommandService:
             INSERT INTO ServiceCommands (
                 CommandType, SourceService, TargetService, Parameters, 
                 Status, Priority, CreatedBy, CreatedAt, UpdatedAt
-            ) VALUES (?, ?, ?, ?, 'Pending', ?, ?, datetime('now', 'localtime'), datetime('now', 'localtime'))
+            ) VALUES (%s, %s, %s, %s, 'Pending', %s, %s, NOW(), NOW())
             """
             
             params = (CommandType, SourceService, TargetService, ParametersJson, 
@@ -55,7 +55,7 @@ class ServiceCommandService:
             query = """
             SELECT Id, CommandType, SourceService, Parameters, Priority, CreatedAt
             FROM ServiceCommands 
-            WHERE TargetService = ? AND Status = 'Pending'
+            WHERE TargetService = %s AND Status = 'Pending'
             ORDER BY Priority DESC, CreatedAt ASC
             """
             
@@ -64,12 +64,12 @@ class ServiceCommandService:
             commands = []
             for row in results:
                 commands.append({
-                    "Id": row[0],
-                    "CommandType": row[1],
-                    "SourceService": row[2],
-                    "Parameters": json.loads(row[3]) if row[3] else {},
-                    "Priority": row[4],
-                    "CreatedAt": row[5]
+                    "Id": row['Id'],
+                    "CommandType": row['CommandType'],
+                    "SourceService": row['SourceService'],
+                    "Parameters": json.loads(row['Parameters']) if row['Parameters'] else {},
+                    "Priority": row['Priority'],
+                    "CreatedAt": str(row['CreatedAt']) if row['CreatedAt'] else None
                 })
             
             return commands
@@ -86,9 +86,9 @@ class ServiceCommandService:
             
             query = """
             UPDATE ServiceCommands 
-            SET Status = ?, ProcessedAt = datetime('now', 'localtime'), Result = ?, 
-                ErrorMessage = ?, UpdatedAt = datetime('now', 'localtime')
-            WHERE Id = ?
+            SET Status = %s, ProcessedAt = NOW(), Result = %s,
+                ErrorMessage = %s, UpdatedAt = NOW()
+            WHERE Id = %s
             """
             
             params = (Status, ResultJson, ErrorMessage, CommandId)
@@ -108,9 +108,9 @@ class ServiceCommandService:
             query = """
             SELECT Status, Result, ErrorMessage, ProcessedAt
             FROM ServiceCommands 
-            WHERE Id = ?
+            WHERE Id = %s
             """
-            
+
             results = self.DatabaseManager.DatabaseService.ExecuteQuery(query, (CommandId,))
             
             if not results:
@@ -119,10 +119,10 @@ class ServiceCommandService:
             row = results[0]
             result = {
                 "Success": True,
-                "Status": row[0],
-                "Result": json.loads(row[1]) if row[1] else {},
-                "ErrorMessage": row[2],
-                "ProcessedAt": row[3]
+                "Status": row['Status'],
+                "Result": json.loads(row['Result']) if row['Result'] else {},
+                "ErrorMessage": row['ErrorMessage'],
+                "ProcessedAt": str(row['ProcessedAt']) if row['ProcessedAt'] else None
             }
             
             return result
@@ -137,7 +137,7 @@ class ServiceCommandService:
             query = """
             DELETE FROM ServiceCommands 
             WHERE Status IN ('Completed', 'Failed') 
-            AND CreatedAt < datetime('now', '-{} days')
+            AND CreatedAt < NOW() - INTERVAL '{} days'
             """.format(DaysOld)
             
             DeletedCount = self.DatabaseManager.DatabaseService.ExecuteNonQuery(query)

@@ -64,7 +64,7 @@ class TranscodingViewModel:
                 row = result[0]
                 return {
                     "Success": True,
-                    "IsTranscoding": row['IsProcessing'] == 1,
+                    "IsTranscoding": bool(row['IsProcessing']),
                     "Status": row['Status'],
                     "HealthStatus": row['HealthStatus'],
                     "ActiveJobsCount": row['ActiveJobsCount'],
@@ -100,9 +100,9 @@ class TranscodingViewModel:
                        ta.Success, ta.ErrorMessage, ta.Quality, ta.ProfileName,
                        ta.OldSizeBytes, ta.NewSizeBytes, ta.SizeReductionPercent, ta.VMAF
                 FROM TranscodeAttempts ta
-                WHERE ta.Success = 1
+                WHERE ta.Success = TRUE
                 ORDER BY ta.AttemptDate DESC
-                LIMIT ?
+                LIMIT %s
             """
             
             rows = self.DatabaseManager.DatabaseService.ExecuteQuery(query, (Limit,))

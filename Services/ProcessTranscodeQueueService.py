@@ -678,7 +678,7 @@ class ProcessTranscodeQueueService:
             try:
                 # Query for StartTime from the most recent TranscodeAttempt for this file
                 StartTimeResult = self.DatabaseManager.DatabaseService.ExecuteQuery(
-                    "SELECT StartTime FROM TranscodeAttempts WHERE LOWER(FilePath) = LOWER(?) ORDER BY AttemptDate DESC LIMIT 1",
+                    "SELECT StartTime FROM TranscodeAttempts WHERE LOWER(FilePath) = LOWER(%s) ORDER BY AttemptDate DESC LIMIT 1",
                     (Job.FilePath,)
                 )
                 if StartTimeResult and StartTimeResult[0]['StartTime']:
@@ -815,8 +815,8 @@ class ProcessTranscodeQueueService:
                 VideoBitrateKbps=ProfileSettings.get('VideoBitrateKbps'),
                 ProfileName=MediaFile.AssignedProfile if hasattr(MediaFile, 'AssignedProfile') else None,
                 VMAF=None,  # Will be set after VMAF analysis
-                QualityTestRequired=1,  # Default to 1 (required)
-                QualityTestCompleted=0,  # Default to 0 (not completed)
+                QualityTestRequired=True,
+                QualityTestCompleted=False,
                 StartTime=TranscodingSettings.get('StartTime') if TranscodingSettings else None
             )
             
@@ -1447,13 +1447,13 @@ class ProcessTranscodeQueueService:
 
             # 2. Mark TranscodeAttempts as cancelled
             self.DatabaseManager.DatabaseService.ExecuteNonQuery(
-                "UPDATE TranscodeAttempts SET Success = 0, ErrorMessage = 'Cancelled by user' "
-                "WHERE LOWER(FilePath) = LOWER(?) AND Success IS NULL", (job.FilePath,))
+                "UPDATE TranscodeAttempts SET Success = FALSE, ErrorMessage = 'Cancelled by user' "
+                "WHERE LOWER(FilePath) = LOWER(%s) AND Success IS NULL", (job.FilePath,))
 
             # 3. Clean up TranscodeProgress records
             self.DatabaseManager.DatabaseService.ExecuteNonQuery(
                 "DELETE FROM TranscodeProgress WHERE TranscodeAttemptId IN ("
-                "SELECT Id FROM TranscodeAttempts WHERE LOWER(FilePath) = LOWER(?) AND Success = 0)",
+                "SELECT Id FROM TranscodeAttempts WHERE LOWER(FilePath) = LOWER(%s) AND Success = FALSE)",
                 (job.FilePath,))
 
             # 4. Delete the queue item (same as queue page cancel)
@@ -1481,7 +1481,7 @@ class ProcessTranscodeQueueService:
                 SELECT ta.Id 
                 FROM TranscodeAttempts ta
                 JOIN TranscodeQueue tq ON ta.FilePath = tq.FilePath
-                WHERE tq.Id = ? 
+                WHERE tq.Id = %s 
                 ORDER BY ta.AttemptDate DESC
                 LIMIT 1
             """

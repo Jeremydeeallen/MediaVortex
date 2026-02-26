@@ -193,7 +193,7 @@ class QualityTestingBusinessService:
                 try:
                     # Query TranscodeAttempts table for StartTime
                     StartTimeResult = self.DatabaseManager.DatabaseService.ExecuteQuery(
-                        "SELECT StartTime FROM TranscodeAttempts WHERE Id = ?",
+                        "SELECT StartTime FROM TranscodeAttempts WHERE Id = %s",
                         (JobDetails['TranscodeAttemptId'],)
                     )
                     if StartTimeResult and StartTimeResult[0]['StartTime']:
@@ -232,7 +232,7 @@ class QualityTestingBusinessService:
             result_id = JobDetails.get('result_id')
             if result_id:
                 self.DatabaseManager.DatabaseService.ExecuteNonQuery(
-                    "UPDATE QualityTestResults SET FFmpegCommand = ? WHERE Id = ?",
+                    "UPDATE QualityTestResults SET FFmpegCommand = %s WHERE Id = %s",
                     (FFmpegCommandString, result_id)
                 )
             
@@ -514,7 +514,7 @@ class QualityTestingBusinessService:
                 INSERT INTO QualityTestProgress (
                     TranscodeAttemptId, Status, ProgressPercentage, CurrentStep,
                     StartTime, UpdatedAt, CreatedAt
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s)
             """
             
             current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -553,9 +553,9 @@ class QualityTestingBusinessService:
             # Update progress record (VMAF scores go to QualityTestResults, not here)
             query = """
                 UPDATE QualityTestProgress 
-                SET Status = ?, ProgressPercentage = ?, CurrentStep = ?, UpdatedAt = ?, 
-                    ETA = ?, CurrentFrame = ?, CurrentTime = ?, ProcessingSpeed = ?
-                WHERE Id = ?
+                SET Status = %s, ProgressPercentage = %s, CurrentStep = %s, UpdatedAt = %s,
+                    ETA = %s, CurrentFrame = %s, CurrentTime = %s, ProcessingSpeed = %s
+                WHERE Id = %s
             """
             result = self.DatabaseManager.DatabaseService.ExecuteNonQuery(query, (Status, ProgressPercentage, CurrentStep, current_time, ETA, CurrentFrame, CurrentTime, ProcessingSpeed, ProgressId))
             
@@ -911,13 +911,13 @@ class QualityTestingBusinessService:
             
             Query = """
                 UPDATE QualityTestResults 
-                SET VMAFScore = ?, 
-                    TestDuration = ?, 
-                    PassesThreshold = ?, 
-                    Rank = ?,
-                    DateTested = ?,
+                SET VMAFScore = %s,
+                    TestDuration = %s,
+                    PassesThreshold = %s,
+                    Rank = %s,
+                    DateTested = %s,
                     Status = 'Success'
-                WHERE Id = ?
+                WHERE Id = %s
             """
             
             Result = self.DatabaseManager.DatabaseService.ExecuteNonQuery(Query, (
@@ -1005,8 +1005,8 @@ class QualityTestingBusinessService:
             
             query = """
                 UPDATE TranscodeAttempts 
-                SET FileReplaced = ?, FileReplacedDate = ?, ReplacementType = ?
-                WHERE Id = ?
+                SET FileReplaced = %s, FileReplacedDate = %s, ReplacementType = %s
+                WHERE Id = %s
             """
             
             result = self.DatabaseManager.DatabaseService.ExecuteNonQuery(query, (
@@ -1099,10 +1099,10 @@ class QualityTestingBusinessService:
             if is_running:
                 # Clean up QualityTestProgress
                 self.DatabaseManager.DatabaseService.ExecuteNonQuery(
-                    "DELETE FROM QualityTestProgress WHERE TranscodeAttemptId = ?", 
+                    "DELETE FROM QualityTestProgress WHERE TranscodeAttemptId = %s",
                     (TranscodeAttemptId,)
                 )
-                
+
                 # Complete the active job
                 self.DatabaseManager.CompleteActiveJob(active_job['Id'], False, "Cancelled by user skip request")
             
@@ -1119,7 +1119,7 @@ class QualityTestingBusinessService:
                 Query = """
                     INSERT INTO QualityTestResults 
                     (TranscodeAttemptId, TestDuration, PassesThreshold, Rank, ErrorMessage, DateTested, FFmpegCommand, Status, VMAFScore)
-                    VALUES (?, ?, ?, ?, ?, datetime('now', 'localtime'), ?, ?, ?)
+                    VALUES (%s, %s, %s, %s, %s, NOW(), %s, %s, %s)
                 """
                 
                 params = (
@@ -1181,16 +1181,16 @@ class QualityTestingBusinessService:
             
             # Update QualityTestResults to mark as cancelled
             self.DatabaseManager.DatabaseService.ExecuteNonQuery(
-                "UPDATE QualityTestResults SET Status = 'Cancelled', ErrorMessage = 'Cancelled by user' WHERE TranscodeAttemptId = ? AND Status = 'Running'",
+                "UPDATE QualityTestResults SET Status = 'Cancelled', ErrorMessage = 'Cancelled by user' WHERE TranscodeAttemptId = %s AND Status = 'Running'",
                 (transcode_attempt_id,)
             )
             
             # Clean up progress and active job records
             self.DatabaseManager.DatabaseService.ExecuteNonQuery(
-                "DELETE FROM QualityTestProgress WHERE TranscodeAttemptId = ?", 
+                "DELETE FROM QualityTestProgress WHERE TranscodeAttemptId = %s",
                 (transcode_attempt_id,)
             )
-            
+
             # Complete the active job
             self.DatabaseManager.CompleteActiveJob(active_job['Id'], False, "Cancelled by user")
             

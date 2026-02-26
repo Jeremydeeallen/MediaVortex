@@ -7,6 +7,9 @@ psutil>=5.9.0
 # Process naming
 setproctitle
 
+# Database
+psycopg2-binary>=2.9.0
+
 # Note: All other functionality uses built-in Python modules
 # The main dependencies (ProcessTranscodeQueueService, DatabaseManager, etc.)
 # are imported from the parent MediaVortex project

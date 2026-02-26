@@ -245,8 +245,6 @@
     </div>
 </div>
 
-<!-- Alert Container -->
-<div id="AlertContainer" class="position-fixed top-0 end-0 p-3" style="z-index: 1050;"></div>
 
 <script>
 class ActivityManager {
@@ -832,25 +830,7 @@ class ActivityManager {
     }
 
     showAlert(message, type) {
-        const alertContainer = document.getElementById('AlertContainer');
-        const alertId = 'alert-' + Date.now();
-        
-        const alertHtml = `
-            <div class="alert alert-${type} alert-dismissible fade show" role="alert" id="${alertId}">
-                ${message}
-                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-            </div>
-        `;
-        
-        alertContainer.insertAdjacentHTML('beforeend', alertHtml);
-        
-        // Auto-remove after 5 seconds
-        setTimeout(() => {
-            const alert = document.getElementById(alertId);
-            if (alert) {
-                alert.remove();
-            }
-        }, 5000);
+        showToastAlert(message, type);
     }
 }
 

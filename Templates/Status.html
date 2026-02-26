@@ -176,8 +176,6 @@
     </div>
 </div>
 
-<!-- Alert Container -->
-<div id="AlertContainer" class="position-fixed top-0 end-0 p-3" style="z-index: 1050;"></div>
 
 <script>
 class ServiceStatusManager {
@@ -549,9 +547,11 @@ class ServiceStatusManager {
                 this.renderContinuousScanStatus(data);
             } else {
                 console.error('Failed to load continuous scan status:', data.ErrorMessage);
+                showPersistentError('Failed to load continuous scan status: ' + data.ErrorMessage);
             }
         } catch (error) {
             console.error('Error loading continuous scan status:', error);
+            showPersistentError('Error loading continuous scan status: ' + error.message);
         }
     }
 
@@ -667,37 +667,11 @@ class ServiceStatusManager {
     }
 
     showAlert(message, type = 'info') {
-        const alertContainer = document.getElementById('AlertContainer');
-        const alertId = 'alert-' + Date.now();
-        
-        const alertHtml = `
-            <div class="alert alert-${type} alert-dismissible fade show" role="alert" id="${alertId}">
-                ${message}
-                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-            </div>
-        `;
-        
-        alertContainer.insertAdjacentHTML('beforeend', alertHtml);
-        
-        // Auto-remove after 5 seconds
-        setTimeout(() => {
-            const alert = document.getElementById(alertId);
-            if (alert) {
-                alert.remove();
-            }
-        }, 5000);
+        showToastAlert(message, type);
     }
 
     showError(message) {
-        const container = document.getElementById('ServicesContainer');
-        container.innerHTML = `
-            <div class="col-12">
-                <div class="alert alert-danger" role="alert">
-                    <i class="fas fa-exclamation-circle me-2"></i>
-                    ${message}
-                </div>
-            </div>
-        `;
+        showPersistentError(message);
     }
 
     showLoading(show) {

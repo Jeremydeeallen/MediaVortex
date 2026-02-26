@@ -156,7 +156,7 @@ class StuckJobDetectionService:
                 SELECT tp.LastProgressUpdate, tp.ProgressPercent, tp.CurrentFPS
                 FROM TranscodeProgress tp
                 INNER JOIN TranscodeAttempts ta ON tp.TranscodeAttemptId = ta.Id
-                WHERE LOWER(ta.FilePath) = LOWER(?) AND ta.Success IS NULL
+                WHERE LOWER(ta.FilePath) = LOWER(%s) AND ta.Success IS NULL
                 ORDER BY tp.LastProgressUpdate DESC
                 LIMIT 1
             """
@@ -167,15 +167,19 @@ class StuckJobDetectionService:
                 return False, "No progress records found (job may be starting)"
 
             row = rows[0]
-            lastUpdateStr = row[0]  # LastProgressUpdate
-            progressPercent = row[1]
-            currentFPS = row[2]
+            lastUpdateValue = row['LastProgressUpdate']
+            progressPercent = row['ProgressPercent']
+            currentFPS = row['CurrentFPS']
 
-            if not lastUpdateStr:
+            if not lastUpdateValue:
                 return False, "No LastProgressUpdate timestamp available"
 
             # Parse the timestamp and check staleness
-            lastUpdate = datetime.strptime(lastUpdateStr, "%Y-%m-%d %H:%M:%S")
+            # PostgreSQL returns datetime objects directly, but handle string format as fallback
+            if isinstance(lastUpdateValue, str):
+                lastUpdate = datetime.strptime(lastUpdateValue, "%Y-%m-%d %H:%M:%S")
+            else:
+                lastUpdate = lastUpdateValue
             minutesSinceUpdate = (datetime.now() - lastUpdate).total_seconds() / 60.0
 
             if minutesSinceUpdate >= self.FROZEN_PROGRESS_THRESHOLD_MINUTES:
@@ -230,15 +234,15 @@ class StuckJobDetectionService:
                 queueUpdateQuery = """
                 UPDATE TranscodeQueue 
                 SET Status = 'Pending', DateStarted = NULL 
-                WHERE Id = ?
+                WHERE Id = %s
                 """
                 queueAffected = self.DatabaseManager.DatabaseService.ExecuteNonQuery(queueUpdateQuery, (QueueId,))
-                
+
                 # 2. Update TranscodeAttempts to mark as failed
                 attemptUpdateQuery = """
-                UPDATE TranscodeAttempts 
-                SET Success = 0, ErrorMessage = ?
-                WHERE LOWER(FilePath) = LOWER(?) AND Success IS NULL
+                UPDATE TranscodeAttempts
+                SET Success = FALSE, ErrorMessage = %s
+                WHERE LOWER(FilePath) = LOWER(%s) AND Success IS NULL
                 """
                 attemptAffected = self.DatabaseManager.DatabaseService.ExecuteNonQuery(
                     attemptUpdateQuery, 
@@ -250,21 +254,20 @@ class StuckJobDetectionService:
                 DELETE FROM TranscodeProgress 
                 WHERE TranscodeAttemptId IN (
                     SELECT Id FROM TranscodeAttempts 
-                    WHERE LOWER(FilePath) = LOWER(?) AND Success = 0
+                    WHERE LOWER(FilePath) = LOWER(%s) AND Success = FALSE
                 )
                 """
                 progressAffected = self.DatabaseManager.DatabaseService.ExecuteNonQuery(progressDeleteQuery, (jobDetails.FilePath,))
                 
                 # 4. Complete ActiveJobs records for this service
                 activeJobUpdateQuery = """
-                UPDATE ActiveJobs 
-                SET Status = 'Failed', CompletedAt = datetime('now', 'localtime'), 
-                    ErrorMessage = ?
-                WHERE ServiceName = 'TranscodeService' AND QueueId = ?
+                UPDATE ActiveJobs
+                SET Status = 'Failed', UpdatedAt = NOW()
+                WHERE ServiceName = 'TranscodeService' AND QueueId = %s
                 """
                 activeJobAffected = self.DatabaseManager.DatabaseService.ExecuteNonQuery(
-                    activeJobUpdateQuery, 
-                    (f"Stuck job cleaned by StuckJobDetectionService: {Reason}", QueueId)
+                    activeJobUpdateQuery,
+                    (QueueId,)
                 )
                 
                 # Commit transaction
@@ -482,13 +485,13 @@ class StuckJobDetectionService:
                 # 1. Delete the stuck job from QualityTestingQueue (no Status column exists)
                 queueDeleteQuery = """
                 DELETE FROM QualityTestingQueue 
-                WHERE Id = ?
+                WHERE Id = %s
                 """
                 queueAffected = self.DatabaseManager.DatabaseService.ExecuteNonQuery(queueDeleteQuery, (QueueId,))
-                
+
                 # 2. Update QualityTestResults to mark as failed (using TranscodeAttemptId from QualityTestingQueue)
                 # First get the TranscodeAttemptId for this queue item
-                attemptIdQuery = "SELECT TranscodeAttemptId FROM QualityTestingQueue WHERE Id = ?"
+                attemptIdQuery = "SELECT TranscodeAttemptId FROM QualityTestingQueue WHERE Id = %s"
                 attemptResult = self.DatabaseManager.DatabaseService.ExecuteQuery(attemptIdQuery, (QueueId,))
                 resultsAffected = 0
                 
@@ -496,8 +499,8 @@ class StuckJobDetectionService:
                     transcodeAttemptId = attemptResult[0][0]
                     resultsUpdateQuery = """
                     UPDATE QualityTestResults 
-                    SET VMAFScore = 0.0, PassesThreshold = 0, ErrorMessage = ?, Status = 'Failed'
-                    WHERE TranscodeAttemptId = ? AND Status = 'Running'
+                    SET VMAFScore = 0.0, PassesThreshold = FALSE, ErrorMessage = %s, Status = 'Failed'
+                    WHERE TranscodeAttemptId = %s AND Status = 'Running'
                     """
                     resultsAffected = self.DatabaseManager.DatabaseService.ExecuteNonQuery(
                         resultsUpdateQuery, 
@@ -510,20 +513,19 @@ class StuckJobDetectionService:
                     transcodeAttemptId = attemptResult[0][0]
                     progressDeleteQuery = """
                     DELETE FROM QualityTestProgress 
-                    WHERE TranscodeAttemptId = ?
+                    WHERE TranscodeAttemptId = %s
                     """
                     progressAffected = self.DatabaseManager.DatabaseService.ExecuteNonQuery(progressDeleteQuery, (transcodeAttemptId,))
-                
+
                 # 4. Complete ActiveJobs records for this service
                 activeJobUpdateQuery = """
-                UPDATE ActiveJobs 
-                SET Status = 'Failed', CompletedAt = datetime('now', 'localtime'), 
-                    ErrorMessage = ?
-                WHERE ServiceName = 'QualityTest' AND QueueId = ?
+                UPDATE ActiveJobs
+                SET Status = 'Failed', UpdatedAt = NOW()
+                WHERE ServiceName = 'QualityTest' AND QueueId = %s
                 """
                 activeJobAffected = self.DatabaseManager.DatabaseService.ExecuteNonQuery(
-                    activeJobUpdateQuery, 
-                    (f"Stuck quality test job cleaned by StuckJobDetectionService: {Reason}", QueueId)
+                    activeJobUpdateQuery,
+                    (QueueId,)
                 )
                 
                 # Commit transaction

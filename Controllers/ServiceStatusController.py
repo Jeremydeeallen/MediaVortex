@@ -36,29 +36,29 @@ def GetServiceStatus():
         services = []
         for row in results:
             service = {
-                "ServiceName": row[0],
-                "Status": row[1],
-                "HealthStatus": row[2],
-                "StartTime": row[3],
-                "LastHealthCheck": row[4],
-                "UptimeSeconds": row[5],
-                "MemoryUsage": row[6],
-                "CPUUsage": row[7],
-                "DatabaseConnection": row[8],
-                "DiskSpace": row[9],
-                "ErrorCount": row[10],
-                "MaxErrors": row[11],
-                "ActiveJobsCount": row[12],
-                "IsProcessing": row[13],
-                "LastErrorMessage": row[14],
-                "ProcessId": row[15],
-                "Version": row[16],
-                "ServiceType": row[17],
-                "CreatedAt": row[18],
-                "UpdatedAt": row[19]
+                "ServiceName": row['ServiceName'],
+                "Status": row['Status'],
+                "HealthStatus": row['HealthStatus'],
+                "StartTime": str(row['StartTime']) if row['StartTime'] else None,
+                "LastHealthCheck": str(row['LastHealthCheck']) if row['LastHealthCheck'] else None,
+                "UptimeSeconds": row['UptimeSeconds'],
+                "MemoryUsage": row['MemoryUsage'],
+                "CPUUsage": row['CPUUsage'],
+                "DatabaseConnection": row['DatabaseConnection'],
+                "DiskSpace": row['DiskSpace'],
+                "ErrorCount": row['ErrorCount'],
+                "MaxErrors": row['MaxErrors'],
+                "ActiveJobsCount": row['ActiveJobsCount'],
+                "IsProcessing": row['IsProcessing'],
+                "LastErrorMessage": row['LastErrorMessage'],
+                "ProcessId": row['ProcessId'],
+                "Version": row['Version'],
+                "ServiceType": row['ServiceType'],
+                "CreatedAt": str(row['CreatedAt']) if row['CreatedAt'] else None,
+                "UpdatedAt": str(row['UpdatedAt']) if row['UpdatedAt'] else None
             }
             services.append(service)
-        
+
         LoggingService.LogInfo(f"Retrieved status for {len(services)} services", "ServiceStatusController", "GetServiceStatus")
         
         return jsonify({
@@ -85,7 +85,7 @@ def GetServiceStatusByName(service_name: str):
                ErrorCount, MaxErrors, ActiveJobsCount, IsProcessing, LastErrorMessage,
                ProcessId, Version, ServiceType, CreatedAt, UpdatedAt
         FROM ServiceStatus
-        WHERE ServiceName = ?
+        WHERE ServiceName = %s
         """
         
         results = SharedDatabaseManager.DatabaseService.ExecuteQuery(query, (service_name,))
@@ -98,28 +98,28 @@ def GetServiceStatusByName(service_name: str):
         
         row = results[0]
         service = {
-            "ServiceName": row[0],
-            "Status": row[1],
-            "HealthStatus": row[2],
-            "StartTime": row[3],
-            "LastHealthCheck": row[4],
-            "UptimeSeconds": row[5],
-            "MemoryUsage": row[6],
-            "CPUUsage": row[7],
-            "DatabaseConnection": row[8],
-            "DiskSpace": row[9],
-            "ErrorCount": row[10],
-            "MaxErrors": row[11],
-            "ActiveJobsCount": row[12],
-            "IsProcessing": row[13],
-            "LastErrorMessage": row[14],
-            "ProcessId": row[15],
-            "Version": row[16],
-            "ServiceType": row[17],
-            "CreatedAt": row[18],
-            "UpdatedAt": row[19]
+            "ServiceName": row['ServiceName'],
+            "Status": row['Status'],
+            "HealthStatus": row['HealthStatus'],
+            "StartTime": str(row['StartTime']) if row['StartTime'] else None,
+            "LastHealthCheck": str(row['LastHealthCheck']) if row['LastHealthCheck'] else None,
+            "UptimeSeconds": row['UptimeSeconds'],
+            "MemoryUsage": row['MemoryUsage'],
+            "CPUUsage": row['CPUUsage'],
+            "DatabaseConnection": row['DatabaseConnection'],
+            "DiskSpace": row['DiskSpace'],
+            "ErrorCount": row['ErrorCount'],
+            "MaxErrors": row['MaxErrors'],
+            "ActiveJobsCount": row['ActiveJobsCount'],
+            "IsProcessing": row['IsProcessing'],
+            "LastErrorMessage": row['LastErrorMessage'],
+            "ProcessId": row['ProcessId'],
+            "Version": row['Version'],
+            "ServiceType": row['ServiceType'],
+            "CreatedAt": str(row['CreatedAt']) if row['CreatedAt'] else None,
+            "UpdatedAt": str(row['UpdatedAt']) if row['UpdatedAt'] else None
         }
-        
+
         LoggingService.LogInfo(f"Retrieved status for service: {service_name}", "ServiceStatusController", "GetServiceStatusByName")
         
         return jsonify({
@@ -155,14 +155,14 @@ def GetServiceHealth():
         row = results[0]
         
         health_summary = {
-            "TotalServices": row[0],
-            "RunningServices": row[1],
-            "HealthyServices": row[2],
-            "WarningServices": row[3],
-            "UnhealthyServices": row[4],
-            "StoppedServices": row[5],
-            "ErrorServices": row[6],
-            "OverallHealth": "Healthy" if row[4] == 0 and row[6] == 0 else "Warning" if row[3] > 0 else "Unhealthy"
+            "TotalServices": row['TotalServices'],
+            "RunningServices": row['RunningServices'],
+            "HealthyServices": row['HealthyServices'],
+            "WarningServices": row['WarningServices'],
+            "UnhealthyServices": row['UnhealthyServices'],
+            "StoppedServices": row['StoppedServices'],
+            "ErrorServices": row['ErrorServices'],
+            "OverallHealth": "Healthy" if row['UnhealthyServices'] == 0 and row['ErrorServices'] == 0 else "Warning" if row['WarningServices'] > 0 else "Unhealthy"
         }
         
         LoggingService.LogInfo(f"Retrieved health summary: {health_summary['OverallHealth']}", "ServiceStatusController", "GetServiceHealth")
@@ -203,28 +203,28 @@ def GetTranscodeServiceStatus():
         
         row = results[0]
         service = {
-            "ServiceName": row[0],
-            "Status": row[1],
-            "HealthStatus": row[2],
-            "StartTime": row[3],
-            "LastHealthCheck": row[4],
-            "UptimeSeconds": row[5],
-            "MemoryUsage": row[6],
-            "CPUUsage": row[7],
-            "DatabaseConnection": row[8],
-            "DiskSpace": row[9],
-            "ErrorCount": row[10],
-            "MaxErrors": row[11],
-            "ActiveJobsCount": row[12],
-            "IsProcessing": row[13],
-            "LastErrorMessage": row[14],
-            "ProcessId": row[15],
-            "Version": row[16],
-            "ServiceType": row[17],
-            "CreatedAt": row[18],
-            "UpdatedAt": row[19]
+            "ServiceName": row['ServiceName'],
+            "Status": row['Status'],
+            "HealthStatus": row['HealthStatus'],
+            "StartTime": str(row['StartTime']) if row['StartTime'] else None,
+            "LastHealthCheck": str(row['LastHealthCheck']) if row['LastHealthCheck'] else None,
+            "UptimeSeconds": row['UptimeSeconds'],
+            "MemoryUsage": row['MemoryUsage'],
+            "CPUUsage": row['CPUUsage'],
+            "DatabaseConnection": row['DatabaseConnection'],
+            "DiskSpace": row['DiskSpace'],
+            "ErrorCount": row['ErrorCount'],
+            "MaxErrors": row['MaxErrors'],
+            "ActiveJobsCount": row['ActiveJobsCount'],
+            "IsProcessing": row['IsProcessing'],
+            "LastErrorMessage": row['LastErrorMessage'],
+            "ProcessId": row['ProcessId'],
+            "Version": row['Version'],
+            "ServiceType": row['ServiceType'],
+            "CreatedAt": str(row['CreatedAt']) if row['CreatedAt'] else None,
+            "UpdatedAt": str(row['UpdatedAt']) if row['UpdatedAt'] else None
         }
-        
+
         # Check if service is running
         is_running = service["Status"] == "Running"
         is_healthy = service["HealthStatus"] == "Healthy"

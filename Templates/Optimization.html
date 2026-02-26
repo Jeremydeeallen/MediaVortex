@@ -244,6 +244,7 @@ async function loadProfiles() {
         }
     } catch (e) {
         console.error('Failed to load profiles', e);
+        showPersistentError('Failed to load profiles: ' + e.message);
     }
 }
 
@@ -837,15 +838,15 @@ function queueSubtitleFix(fileIds, btn) {
                 btn.innerHTML = '<i class="fas fa-check" style="font-size:0.7em"></i>';
                 btn.classList.replace('btn-outline-warning', 'btn-outline-success');
             }
-            alert(data.Message);
+            showToastAlert(data.Message, 'success');
         } else {
             if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-closed-captioning" style="font-size:0.7em"></i>'; }
-            alert('Error: ' + (data.ErrorMessage || 'Unknown error'));
+            showPersistentError('Error: ' + (data.ErrorMessage || 'Unknown error'));
         }
     })
     .catch(err => {
         if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-closed-captioning" style="font-size:0.7em"></i>'; }
-        alert('Error: ' + err);
+        showPersistentError('Error: ' + err);
     });
 }
 
@@ -858,7 +859,7 @@ async function addOptFileToQueue(fileId, btn, forceAdd = false) {
     const profileSelect = document.getElementById(`optProfile_${fileId}`);
     const profileId = profileSelect ? parseInt(profileSelect.value) : null;
     if (!profileId) {
-        alert('Please select a profile first.');
+        showPersistentError('Please select a profile first.');
         return;
     }
 
@@ -889,12 +890,12 @@ async function addOptFileToQueue(fileId, btn, forceAdd = false) {
         } else {
             btn.disabled = false;
             btn.innerHTML = origHtml;
-            alert('Error: ' + data.ErrorMessage);
+            showPersistentError('Error: ' + data.ErrorMessage);
         }
     } catch (err) {
         btn.disabled = false;
         btn.innerHTML = origHtml;
-        alert('Error: ' + err.message);
+        showPersistentError('Error: ' + err.message);
     }
 }
 

@@ -1,4 +1,17 @@
 services:
+  postgres:
+    image: postgres:16
+    container_name: mediavortex-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: mediavortex
+      POSTGRES_USER: mediavortex
+      POSTGRES_PASSWORD: mediavortex
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
   prowlarr:
     image: linuxserver/prowlarr:latest
     container_name: prowlarr
@@ -92,3 +105,5 @@ services:
     depends_on:
       - nzbget
       - prowlarr
+volumes:
+  pgdata:

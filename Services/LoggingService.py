@@ -54,7 +54,7 @@ class LoggingService:
             INSERT INTO Logs (Timestamp, LogLevel, FunctionName, Message, SourceFile, 
                             SourceLine, SourceFunction, ExceptionType, ExceptionMessage, 
                             StackTrace, Component, Operation, CreatedAt)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """
             
             Now = datetime.now()

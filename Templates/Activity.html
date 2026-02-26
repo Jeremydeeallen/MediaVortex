@@ -213,8 +213,6 @@
     </div>
 </div>
 
-<!-- Alert Container -->
-<div id="AlertContainer" class="position-fixed top-0 end-0 p-3" style="z-index: 1050;"></div>
 
 <script>
 class ActivityManager {
@@ -925,25 +923,7 @@ class ActivityManager {
     }
 
     showAlert(message, type) {
-        const alertContainer = document.getElementById('AlertContainer');
-        const alertId = 'alert-' + Date.now();
-        
-        const alertHtml = `
-            <div class="alert alert-${type} alert-dismissible fade show" role="alert" id="${alertId}">
-                ${message}
-                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-            </div>
-        `;
-        
-        alertContainer.insertAdjacentHTML('beforeend', alertHtml);
-        
-        // Auto-remove after 5 seconds
-        setTimeout(() => {
-            const alert = document.getElementById(alertId);
-            if (alert) {
-                alert.remove();
-            }
-        }, 5000);
+        showToastAlert(message, type);
     }
 
     async AddToQualityQueue(AttemptId) {
@@ -1342,15 +1322,15 @@ async function cancelTranscodeJob() {
         const result = await response.json();
         
         if (result.Success) {
-            alert('Transcode job cancelled successfully');
+            showToastAlert('Transcode job cancelled successfully', 'success');
             // Refresh the page to update the display
             location.reload();
         } else {
-            alert('Failed to cancel transcode job: ' + (result.ErrorMessage || 'Unknown error'));
+            showPersistentError('Failed to cancel transcode job: ' + (result.ErrorMessage || 'Unknown error'));
         }
     } catch (error) {
         console.error('Error cancelling transcode job:', error);
-        alert('Error cancelling transcode job: ' + error.message);
+        showPersistentError('Error cancelling transcode job: ' + error.message);
     }
 }
 

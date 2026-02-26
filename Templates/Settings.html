@@ -7,8 +7,6 @@
     <div class="col-12">
         <h2><i class="fas fa-cog"></i> Settings</h2>
 
-        <!-- Alert Messages -->
-        <div id="AlertContainer"></div>
 
         <!-- Profile Management Section -->
         <div class="card mt-4">
@@ -771,13 +769,7 @@ $(document).ready(function() {
 });
 
 function ShowAlert(Message, Type = 'info') {
-    const AlertHtml = `
-        <div class="alert alert-${Type} alert-dismissible fade show" role="alert">
-            ${Message}
-            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-        </div>
-    `;
-    $('#AlertContainer').html(AlertHtml);
+    showToastAlert(Message, Type);
 }
 
 function LoadProfiles() {

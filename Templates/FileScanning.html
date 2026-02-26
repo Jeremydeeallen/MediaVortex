@@ -367,6 +367,7 @@ class FileScanningManager {
             }
         } catch (error) {
             console.error('Error loading root folders:', error);
+            showPersistentError('Error loading root folders: ' + error.message);
         }
     }
 
@@ -384,6 +385,7 @@ class FileScanningManager {
             }
         } catch (error) {
             console.error('Error loading statistics:', error);
+            showPersistentError('Error loading statistics: ' + error.message);
         }
     }
 
@@ -475,6 +477,7 @@ class FileScanningManager {
             }
         } catch (error) {
             console.error('Error loading continuous scan status:', error);
+            showPersistentError('Error loading continuous scan status: ' + error.message);
         }
     }
 
@@ -647,6 +650,7 @@ class FileScanningManager {
             }
         } catch (error) {
             console.error('Error loading excluded directories:', error);
+            showPersistentError('Error loading excluded directories: ' + error.message);
             this.renderExcludedDirectories([]);
         }
     }
@@ -794,19 +798,22 @@ class FileScanningManager {
     }
 
     showToast(message, type = 'info') {
+        if (type === 'danger') {
+            showPersistentError(message);
+            return;
+        }
+
         const toastContainer = document.getElementById('ToastContainer');
         const toastId = 'toast-' + Date.now();
 
         const bgColor = {
             'success': 'bg-success',
-            'danger': 'bg-danger',
             'warning': 'bg-warning',
             'info': 'bg-info'
         }[type] || 'bg-info';
 
         const icon = {
             'success': 'fa-check-circle',
-            'danger': 'fa-exclamation-circle',
             'warning': 'fa-exclamation-triangle',
             'info': 'fa-info-circle'
         }[type] || 'fa-info-circle';
