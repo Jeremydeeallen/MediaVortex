@@ -18,6 +18,13 @@
                     <button type="button" class="btn btn-outline-danger" id="CleanupDuplicatesBtn">
                         <i class="fas fa-broom"></i> <span class="btn-text">Cleanup Duplicates</span>
                     </button>
+                    <div class="input-group" style="width: auto;">
+                        <input type="number" class="form-control form-control-sm" id="RemoveBySizeInput"
+                               placeholder="MB" style="width: 80px;" min="1" step="1">
+                        <button type="button" class="btn btn-outline-warning btn-sm" id="RemoveBySizeBtn">
+                            <i class="fas fa-filter"></i> Remove &lt; Size
+                        </button>
+                    </div>
                     <button type="button" class="btn btn-warning" id="ClearQueueBtn">
                         <i class="fas fa-trash"></i> <span class="btn-text">Clear Queue</span>
                     </button>
@@ -481,6 +488,13 @@ class TranscodeQueueManager {
             this.clearQueue();
         });
 
+        // Remove by Size
+        document.getElementById('RemoveBySizeBtn').addEventListener('click', () => {
+            this.removeBySize();
+        });
+        document.getElementById('RemoveBySizeInput').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') this.removeBySize();
+        });
 
         // Refresh
         document.getElementById('RefreshBtn').addEventListener('click', () => {
@@ -708,6 +722,42 @@ class TranscodeQueueManager {
             }
         } catch (error) {
             this.showAlert('Error clearing queue: ' + error.message, 'danger');
+        }
+    }
+
+    async removeBySize() {
+        const input = document.getElementById('RemoveBySizeInput');
+        const maxSizeMB = parseFloat(input.value);
+
+        if (!maxSizeMB || maxSizeMB <= 0) {
+            this.showAlert('Enter a valid size in MB', 'warning');
+            input.focus();
+            return;
+        }
+
+        if (!confirm(`Remove all pending queue items smaller than ${maxSizeMB} MB?`)) {
+            return;
+        }
+
+        try {
+            const response = await fetch('/api/TranscodeQueue/RemoveBySize', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ MaxSizeMB: maxSizeMB })
+            });
+
+            const data = await response.json();
+
+            if (data.Success) {
+                const removed = data.ItemsRemoved || 0;
+                this.showAlert(`Removed ${removed} items smaller than ${maxSizeMB} MB`, 'success');
+                input.value = '';
+                this.loadQueueData();
+            } else {
+                this.showAlert('Error: ' + (data.ErrorMessage || 'Unknown error'), 'danger');
+            }
+        } catch (error) {
+            this.showAlert('Error removing items: ' + error.message, 'danger');
         }
     }
 

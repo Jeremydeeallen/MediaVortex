@@ -50,10 +50,10 @@ class WebServiceApp:
         self.CurrentStatus = "Stopped"  # Track current service status
         
         # Initialize controllers
-        from Controllers.ProfileController import ProfileController
-        from Controllers.FileScanningController import FileScanningController
-        from Controllers.SystemSettingsController import SystemSettingsController
-        from Controllers.FileReplacementController import FileReplacementController
+        from Features.Profiles.ProfileController import ProfileController
+        from Features.FileScanning.FileScanningController import FileScanningController
+        from Features.SystemSettings.SystemSettingsController import SystemSettingsController
+        from Features.FileReplacement.FileReplacementController import FileReplacementController
         
         self.ProfileController = ProfileController()
         self.FileScanningController = FileScanningController()
@@ -210,16 +210,16 @@ class WebServiceApp:
     
     def _register_blueprints(self):
         """Register Flask blueprints."""
-        from Controllers.ServiceControlController import ServiceControlBlueprint
-        from Controllers.QueueResetController import QueueResetBlueprint
-        from Controllers.SQLQueriesController import SQLQueriesBlueprint
-        from Controllers.TranscodeQueueController import TranscodeQueueBlueprint
-        from Controllers.TranscodeJobController import TranscodeJobBlueprint
-        from Controllers.FileScanningController import FileScanningController
-        from Controllers.ProfileController import ProfileController
-        from Controllers.QualityTestController import QualityTestBlueprint
-        from Controllers.ServiceStatusController import ServiceStatusBlueprint
-        from Controllers.OptimizationController import OptimizationBlueprint
+        from Features.ServiceControl.ServiceControlController import ServiceControlBlueprint
+        from Features.TranscodeQueue.QueueResetController import QueueResetBlueprint
+        from Features.SQLQueries.SQLQueriesController import SQLQueriesBlueprint
+        from Features.TranscodeQueue.TranscodeQueueController import TranscodeQueueBlueprint
+        from Features.TranscodeJob.TranscodeJobController import TranscodeJobBlueprint
+        from Features.FileScanning.FileScanningController import FileScanningController
+        from Features.Profiles.ProfileController import ProfileController
+        from Features.QualityTesting.QualityTestController import QualityTestBlueprint
+        from Features.ServiceControl.ServiceStatusController import ServiceStatusBlueprint
+        from Features.Optimization.OptimizationController import OptimizationBlueprint
         
         # Register all blueprints
         self.App.register_blueprint(ServiceControlBlueprint)

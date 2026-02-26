@@ -1,11 +1,3 @@
-from dataclasses import dataclass
-from typing import Optional
-
-
-@dataclass
-class SeasonModel:
-    """Represents season/folder organization for media files."""
-
-    Id: Optional[int] = None
-    RootFolderId: Optional[int] = None
-    SeasonName: str = ""
+# Re-export shim: SeasonModel has moved to Features/FileScanning/Models/SeasonModel.py
+# This file exists for backwards compatibility during migration.
+from Features.FileScanning.Models.SeasonModel import SeasonModel
