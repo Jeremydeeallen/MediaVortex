@@ -96,12 +96,12 @@ class TranscodingViewModel:
 
             # Get recent successful transcoding attempts only
             query = """
-                SELECT ta.Id, ta.FilePath, ta.AttemptDate, ta.TranscodeDurationSeconds,
+                SELECT ta.Id, ta.FilePath, ta.AttemptDate, ta.CompletedDate, ta.TranscodeDurationSeconds,
                        ta.Success, ta.ErrorMessage, ta.Quality, ta.ProfileName,
                        ta.OldSizeBytes, ta.NewSizeBytes, ta.SizeReductionPercent, ta.VMAF
                 FROM TranscodeAttempts ta
                 WHERE ta.Success = TRUE
-                ORDER BY ta.AttemptDate DESC
+                ORDER BY COALESCE(ta.CompletedDate, ta.AttemptDate) DESC
                 LIMIT %s
             """
 
@@ -113,6 +113,7 @@ class TranscodingViewModel:
                     'Id': row['Id'],
                     'FilePath': row['FilePath'],
                     'AttemptDate': row['AttemptDate'],
+                    'CompletedDate': row['CompletedDate'],
                     'Duration': row['TranscodeDurationSeconds'],
                     'Success': bool(row['Success']),
                     'ErrorMessage': row['ErrorMessage'],

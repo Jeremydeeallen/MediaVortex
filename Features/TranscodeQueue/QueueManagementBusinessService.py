@@ -59,7 +59,7 @@ class QueueManagementBusinessService:
             LoggingService.LogInfo(f"Found {len(existingFilePaths)} existing queue items", "QueueManagementBusinessService", "PopulateQueueFromMediaFiles")
 
             # Get files already successfully transcoded
-            transcodeFiles = self.Repository.GetAllTranscodeFiles()
+            transcodeFiles = self.DatabaseManager.GetAllTranscodeFiles()
             successfullyTranscodedPaths = {tf.FilePath for tf in transcodeFiles if tf.SuccessfullyTranscoded}
             LoggingService.LogInfo(f"Found {len(successfullyTranscodedPaths)} already successfully transcoded files", "QueueManagementBusinessService", "PopulateQueueFromMediaFiles")
 

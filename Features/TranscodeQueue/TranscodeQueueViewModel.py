@@ -20,47 +20,26 @@ class TranscodeQueueViewModel:
         self.SuccessMessage = ""
 
     def LoadQueueItems(self, Page: int = 1, PageSize: int = 25, SortBy: str = "SizeMB", SortOrder: str = "DESC") -> Dict[str, Any]:
-        """Load transcoding queue items with pagination and sorting."""
+        """Load transcoding queue items with database-level pagination and sorting."""
         try:
             LoggingService.LogFunctionEntry("LoadQueueItems", "TranscodeQueueViewModel", Page, PageSize, SortBy, SortOrder)
 
             self.IsLoading = True
             self.ErrorMessage = ""
 
-            # Get all queue items from service
-            allQueueItems = self.QueueManagementService.Repository.GetAllTranscodeQueueItems()
-
-            # Sort items - SizeMB first (largest files first)
-            if SortBy == "SizeMB":
-                # Sort by size (DESC), then by date added (ASC) as tiebreaker
-                allQueueItems.sort(key=lambda x: (x.SizeMB or 0, x.DateAdded or datetime.min), reverse=(SortOrder == "DESC"))
-            elif SortBy == "Priority":
-                # Sort by size (DESC), then by date added (ASC) as tiebreaker
-                allQueueItems.sort(key=lambda x: (x.SizeMB or 0, x.DateAdded or datetime.min), reverse=(SortOrder == "DESC"))
-            elif SortBy == "DateAdded":
-                allQueueItems.sort(key=lambda x: x.DateAdded or datetime.min, reverse=(SortOrder == "DESC"))
-            elif SortBy == "FileName":
-                allQueueItems.sort(key=lambda x: x.FileName or "", reverse=(SortOrder == "DESC"))
-
-            # Calculate pagination
-            totalItems = len(allQueueItems)
-            totalPages = (totalItems + PageSize - 1) // PageSize
-            startIndex = (Page - 1) * PageSize
-            endIndex = min(startIndex + PageSize, totalItems)
-
-            # Get page items
-            pageItems = allQueueItems[startIndex:endIndex]
+            # Use database-level pagination
+            from Repositories.DatabaseManager import DatabaseManager
+            db = DatabaseManager()
+            pageItems, totalItems = db.GetTranscodeQueueItemsPaginated(Page, PageSize, SortBy, SortOrder)
             self.QueueItems = pageItems
 
-            # Get queue statistics
-            self.QueueStatistics = self.QueueManagementService.GetQueueStatistics()
+            totalPages = (totalItems + PageSize - 1) // PageSize
 
             self.IsLoading = False
 
             result = {
                 "Success": True,
                 "QueueItems": [self.QueueItemToDict(item) for item in pageItems],
-                "Statistics": self.QueueStatistics,
                 "Count": len(pageItems),
                 "TotalItems": totalItems,
                 "TotalPages": totalPages,
@@ -70,7 +49,6 @@ class TranscodeQueueViewModel:
                 "SortOrder": SortOrder
             }
 
-            # Reduced logging verbosity for routine queue loading
             return result
 
         except Exception as e:

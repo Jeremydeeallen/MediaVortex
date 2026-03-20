@@ -158,6 +158,81 @@ class FileScanningController:
                     'Error': 'GetRootFoldersError'
                 }), 500
 
+        @self.Blueprint.route('/RootFolders/<int:RootFolderId>/Subfolders', methods=['GET'])
+        def GetRootFolderSubfolders(RootFolderId):
+            """Get subfolders for a root folder with pagination and filtering."""
+            try:
+                rootFolder = self.ViewModel.BusinessService.Repository.GetRootFolderById(RootFolderId)
+                if not rootFolder:
+                    return jsonify({
+                        'Success': False,
+                        'Message': 'Root folder not found',
+                        'Error': 'RootFolderNotFound'
+                    }), 404
+
+                page = int(request.args.get('Page', 1))
+                pageSize = int(request.args.get('PageSize', 25))
+                search = request.args.get('Search', '')
+                sortColumn = request.args.get('SortColumn', 'TotalSizeMB')
+                sortOrder = request.args.get('SortOrder', 'DESC')
+
+                result = self.ViewModel.GetSubfoldersPaginated(
+                    rootFolder.RootFolder, page, pageSize, search, sortColumn, sortOrder
+                )
+                return jsonify({
+                    'Success': True,
+                    'Subfolders': result['Subfolders'],
+                    'TotalCount': result['TotalCount'],
+                    'TotalPages': result['TotalPages'],
+                    'RootFolderPath': rootFolder.RootFolder
+                }), 200
+
+            except Exception as e:
+                LoggingService.LogException("Error in GetRootFolderSubfolders endpoint", e, "FileScanningController", "GetRootFolderSubfolders")
+                return jsonify({
+                    'Success': False,
+                    'Message': f'Error getting subfolders: {str(e)}',
+                    'Error': 'GetSubfoldersError'
+                }), 500
+
+        @self.Blueprint.route('/RootFolders/SubfoldersByPath', methods=['GET'])
+        def GetSubfoldersByPath():
+            """Get subfolders for a root folder path with pagination and filtering."""
+            try:
+                rootFolderPath = request.args.get('RootFolderPath', '')
+                LoggingService.LogInfo(f"GetSubfoldersByPath called with RootFolderPath={repr(rootFolderPath)}", "FileScanningController", "GetSubfoldersByPath")
+                if not rootFolderPath:
+                    return jsonify({
+                        'Success': False,
+                        'Message': 'RootFolderPath is required',
+                        'Error': 'MissingParameter'
+                    }), 400
+
+                page = int(request.args.get('Page', 1))
+                pageSize = int(request.args.get('PageSize', 25))
+                search = request.args.get('Search', '')
+                sortColumn = request.args.get('SortColumn', 'TotalSizeMB')
+                sortOrder = request.args.get('SortOrder', 'DESC')
+
+                result = self.ViewModel.GetSubfoldersPaginated(
+                    rootFolderPath, page, pageSize, search, sortColumn, sortOrder
+                )
+                return jsonify({
+                    'Success': True,
+                    'Subfolders': result['Subfolders'],
+                    'TotalCount': result['TotalCount'],
+                    'TotalPages': result['TotalPages'],
+                    'RootFolderPath': rootFolderPath
+                }), 200
+
+            except Exception as e:
+                LoggingService.LogException("Error in GetSubfoldersByPath endpoint", e, "FileScanningController", "GetSubfoldersByPath")
+                return jsonify({
+                    'Success': False,
+                    'Message': f'Error getting subfolders: {str(e)}',
+                    'Error': 'GetSubfoldersError'
+                }), 500
+
         @self.Blueprint.route('/RootFolders/<int:RootFolderId>', methods=['DELETE'])
         def DeleteRootFolder(RootFolderId):
             """Delete a root folder."""
@@ -438,6 +513,75 @@ class FileScanningController:
                 return jsonify({
                     'Success': False,
                     'Error': f'Error deleting scan directory: {str(e)}'
+                }), 500
+
+        @self.Blueprint.route('/TranscodeCandidates', methods=['GET'])
+        def GetTranscodeCandidates():
+            """Get transcode candidate subfolders ranked by estimated savings."""
+            try:
+                rootFolderPath = request.args.get('RootFolderPath', '')
+                if not rootFolderPath:
+                    return jsonify({
+                        'Success': False,
+                        'Message': 'RootFolderPath is required',
+                        'Error': 'MissingParameter'
+                    }), 400
+
+                page = int(request.args.get('Page', 1))
+                pageSize = int(request.args.get('PageSize', 25))
+                search = request.args.get('Search', '')
+                sortColumn = request.args.get('SortColumn', 'EstimatedSavingsMB')
+                sortOrder = request.args.get('SortOrder', 'DESC')
+
+                result = self.ViewModel.GetTranscodeCandidatesPaginated(
+                    rootFolderPath, page, pageSize, search, sortColumn, sortOrder
+                )
+                return jsonify({
+                    'Success': True,
+                    'Subfolders': result['Subfolders'],
+                    'TotalCount': result['TotalCount'],
+                    'TotalPages': result['TotalPages'],
+                    'RootFolderPath': rootFolderPath
+                }), 200
+
+            except Exception as e:
+                LoggingService.LogException("Error in GetTranscodeCandidates endpoint", e, "FileScanningController", "GetTranscodeCandidates")
+                return jsonify({
+                    'Success': False,
+                    'Message': f'Error getting transcode candidates: {str(e)}',
+                    'Error': 'GetTranscodeCandidatesError'
+                }), 500
+
+        @self.Blueprint.route('/TranscodeCandidates/Files', methods=['GET'])
+        def GetTranscodeCandidateFiles():
+            """Get individual untranscoded files in a subfolder for drill-down."""
+            try:
+                subfolderPath = request.args.get('SubfolderPath', '')
+                if not subfolderPath:
+                    return jsonify({
+                        'Success': False,
+                        'Message': 'SubfolderPath is required',
+                        'Error': 'MissingParameter'
+                    }), 400
+
+                page = int(request.args.get('Page', 1))
+                pageSize = int(request.args.get('PageSize', 25))
+
+                result = self.ViewModel.GetTranscodeCandidateFiles(subfolderPath, page, pageSize)
+                return jsonify({
+                    'Success': True,
+                    'Files': result['Files'],
+                    'TotalCount': result['TotalCount'],
+                    'TotalPages': result['TotalPages'],
+                    'SubfolderPath': subfolderPath
+                }), 200
+
+            except Exception as e:
+                LoggingService.LogException("Error in GetTranscodeCandidateFiles endpoint", e, "FileScanningController", "GetTranscodeCandidateFiles")
+                return jsonify({
+                    'Success': False,
+                    'Message': f'Error getting candidate files: {str(e)}',
+                    'Error': 'GetCandidateFilesError'
                 }), 500
 
         @self.Blueprint.route('/Statistics', methods=['GET'])

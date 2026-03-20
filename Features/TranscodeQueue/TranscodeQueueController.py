@@ -116,6 +116,19 @@ def ClearQueue():
         return jsonify({"Success": False, "ErrorMessage": errorMsg}), 500
 
 
+@TranscodeQueueBlueprint.route('/Count', methods=['GET'])
+def GetQueueCount():
+    """Lightweight endpoint that returns only the queue count."""
+    try:
+        from Repositories.DatabaseManager import DatabaseManager
+        db = DatabaseManager()
+        rows = db.DatabaseService.ExecuteQuery("SELECT COUNT(*) as Count FROM TranscodeQueue")
+        count = rows[0]['Count'] if rows else 0
+        return jsonify({"Success": True, "Count": count})
+    except Exception as e:
+        return jsonify({"Success": False, "Count": 0}), 500
+
+
 @TranscodeQueueBlueprint.route('/GetMkvCount', methods=['GET'])
 def GetMkvCount():
     """Get count of MKV files available for remuxing."""

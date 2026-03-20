@@ -188,6 +188,9 @@ class ServiceStatusManager {
         this.loadSystemResources();
         this.loadServiceStatus();
         this.loadContinuousScanStatus();
+
+        // Auto-refresh on by default
+        this.toggleAutoRefresh();
     }
 
     initializeEventListeners() {
@@ -308,24 +311,28 @@ class ServiceStatusManager {
             const coreStatus = core.Status || 'available';
             const jobType = core.JobType || '';
             
-            // Determine color class based on temperature
-            let tempClass = 'bg-secondary'; // Default/N/A
+            // Determine color based on temperature
+            let tempColor = '#6c757d'; // Grey - N/A
             let tempText = 'N/A';
             let borderClass = '';
             let statusBadge = '';
-            
+
             if (!isNA) {
                 // Convert Celsius to Fahrenheit
                 const tempF = (temp * 9/5) + 32;
                 tempText = `${temp}°C / ${tempF.toFixed(1)}°F`;
-                if (temp < 70) {
-                    tempClass = 'bg-success'; // Green - cool
+                if (temp < 30) {
+                    tempColor = '#0d6efd'; // Blue - cold/idle
+                } else if (temp < 50) {
+                    tempColor = '#0f9b8e'; // Teal - cool
+                } else if (temp < 70) {
+                    tempColor = '#198754'; // Green - normal
                 } else if (temp < 85) {
-                    tempClass = 'bg-warning'; // Yellow - warm
+                    tempColor = '#ffc107'; // Yellow - warm
                 } else if (temp < 95) {
-                    tempClass = 'bg-danger'; // Red - hot (85-95)
+                    tempColor = '#e8590c'; // Orange - hot
                 } else {
-                    tempClass = 'bg-danger'; // Red - critical (>95)
+                    tempColor = '#dc3545'; // Red - critical (>95)
                 }
             }
             
@@ -341,7 +348,7 @@ class ServiceStatusManager {
             const coreElement = document.createElement('div');
             coreElement.className = 'col-6 col-md-3 col-lg-2 mb-2';
             coreElement.innerHTML = `
-                <div class="card ${tempClass} text-white ${borderClass}" style="position: relative;" data-bs-toggle="tooltip" data-bs-placement="top" title="${coreStatus === 'active' ? `${jobType ? jobType + ' job' : 'Active job'} on this core` : coreStatus === 'cooling' ? 'Core is cooling down' : 'Core is available'}"
+                <div class="card text-white ${borderClass}" style="position: relative; background-color: ${tempColor};" data-bs-toggle="tooltip" data-bs-placement="top" title="${coreStatus === 'active' ? `${jobType ? jobType + ' job' : 'Active job'} on this core` : coreStatus === 'cooling' ? 'Core is cooling down' : 'Core is available'}"
                      data-bs-original-title="${coreStatus === 'active' ? `${jobType ? jobType + ' job' : 'Active job'} on this core` : coreStatus === 'cooling' ? 'Core is cooling down' : 'Core is available'}">
                     ${statusBadge}
                     <div class="card-body text-center p-2">

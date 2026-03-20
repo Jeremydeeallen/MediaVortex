@@ -207,6 +207,10 @@ class WebServiceApp:
         @self.App.route('/Optimization')
         def optimization():
             return render_template('Optimization.html')
+
+        @self.App.route('/ClipBuilder')
+        def clip_builder():
+            return render_template('ClipBuilder.html')
     
     def _register_blueprints(self):
         """Register Flask blueprints."""
@@ -220,7 +224,8 @@ class WebServiceApp:
         from Features.QualityTesting.QualityTestController import QualityTestBlueprint
         from Features.ServiceControl.ServiceStatusController import ServiceStatusBlueprint
         from Features.Optimization.OptimizationController import OptimizationBlueprint
-        
+        from Features.ClipBuilder.ClipBuilderController import ClipBuilderBlueprint
+
         # Register all blueprints
         self.App.register_blueprint(ServiceControlBlueprint)
         self.App.register_blueprint(QueueResetBlueprint)
@@ -233,6 +238,7 @@ class WebServiceApp:
         self.App.register_blueprint(QualityTestBlueprint)
         self.App.register_blueprint(ServiceStatusBlueprint, url_prefix='/api')
         self.App.register_blueprint(OptimizationBlueprint)
+        self.App.register_blueprint(ClipBuilderBlueprint)
     
     def PrivateStartServiceStatusTracking(self):
         """Start service status tracking thread."""

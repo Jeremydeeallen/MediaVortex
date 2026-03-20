@@ -313,96 +313,64 @@
     </div>
 </div>
 
-<!-- Media Files Section -->
+<!-- Transcode Candidates Section -->
 <div class="row mb-4">
     <div class="col-12">
         <div class="card">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <h5 class="mb-0">
-                    <i class="fas fa-file-video"></i> Media Files
+                    <i class="fas fa-compress-arrows-alt"></i> Transcode Candidates
                 </h5>
-                <div class="d-flex gap-2">
-                    <input type="text" class="form-control form-control-sm" id="MediaFileSearch" placeholder="Search files... (use !VR to exclude VR files)" style="width: 250px;" title="Search files by name. Use ! prefix to exclude files (e.g., !VR, !360, !HDR)">
-                    <select class="form-select form-select-sm" id="MediaFileFilter" style="width: 150px;">
-                        <option value="">All Folders</option>
+                <div class="d-flex gap-2 align-items-center">
+                    <select class="form-select form-select-sm" id="CandidateRootFolderDropdown" style="min-width: 200px;">
+                        <option value="T:\" selected>T:\</option>
+                        <option value="M:\">M:\</option>
+                        <option value="Z:\">Z:\</option>
                     </select>
-                    <button type="button" class="btn btn-sm btn-outline-primary" id="RefreshMediaFilesBtn">
+                    <input type="text" class="form-control form-control-sm" id="CandidateSearch" placeholder="Search subfolders..." style="width: 200px;">
+                    <button type="button" class="btn btn-sm btn-outline-primary" id="RefreshCandidatesBtn">
                         <i class="fas fa-sync-alt"></i> Refresh
                     </button>
                 </div>
             </div>
             <div class="card-body">
                 <div class="table-responsive">
-                    <table class="table table-striped" id="MediaFilesTable">
+                    <table class="table table-striped table-hover" id="CandidatesTable">
                         <thead>
                             <tr>
-                                <th>ID</th>
-                                <th>File Name</th>
-                                <th>Directory</th>
-                                <th class="sortable" data-sort="SizeMB">
-                                    Size <i class="fas fa-sort-down"></i>
+                                <th></th>
+                                <th class="sortable candidate-sortable" data-sort="SubfolderName">
+                                    Folder <i class="fas fa-sort"></i>
                                 </th>
-                                <th>Resolution</th>
+                                <th class="sortable candidate-sortable" data-sort="FileCount">
+                                    Files <i class="fas fa-sort"></i>
+                                </th>
+                                <th class="sortable candidate-sortable" data-sort="TotalSizeMB">
+                                    Size <i class="fas fa-sort"></i>
+                                </th>
+                                <th>Codecs</th>
+                                <th>Resolutions</th>
+                                <th class="sortable candidate-sortable" data-sort="AvgBitrateKbps">
+                                    Avg Bitrate <i class="fas fa-sort"></i>
+                                </th>
+                                <th class="sortable candidate-sortable" data-sort="EstimatedSavingsMB">
+                                    Est. Savings <i class="fas fa-sort-down"></i>
+                                </th>
                                 <th>Profile</th>
                                 <th>Actions</th>
                             </tr>
                         </thead>
-                        <tbody>
-                            <!-- Media files will be loaded here -->
+                        <tbody id="CandidatesTableBody">
+                            <!-- Candidate rows will be populated here -->
                         </tbody>
                     </table>
                 </div>
-                <nav aria-label="Media files pagination">
-                    <ul class="pagination pagination-sm justify-content-center" id="MediaFilePagination">
-                        <!-- Pagination will be populated here -->
-                    </ul>
-                </nav>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- Root Folders Section -->
-<div class="row mb-4">
-    <div class="col-12">
-        <div class="card">
-            <div class="card-header d-flex justify-content-between align-items-center">
-                <h5 class="mb-0">
-                    <i class="fas fa-folder-open"></i> Root Folders
-                </h5>
-                <div class="d-flex gap-2">
-                    <input type="text" class="form-control form-control-sm" id="RootFolderSearch" placeholder="Search folders..." style="width: 200px;">
-                    <button type="button" class="btn btn-sm btn-outline-primary" id="RefreshRootFoldersBtn">
-                        <i class="fas fa-sync-alt"></i> Refresh
-                    </button>
-                </div>
-            </div>
-            <div class="card-body">
-                <div class="table-responsive">
-                    <table class="table table-striped" id="RootFoldersTable">
-                        <thead>
-                            <tr>
-                                <th>ID</th>
-                                <th>Path</th>
-                                <th>Last Scanned</th>
-                                <th class="sortable" data-sort="TotalSizeGB">
-                                    Total Size <i class="fas fa-sort-down"></i>
-                                </th>
-                                <th>Profile</th>
-                                <th class="text-center">MKVs</th>
-                                <th class="text-center">Compat. Only</th>
-                                <th>Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <!-- Root folders will be loaded here -->
-                        </tbody>
-                    </table>
-                </div>
-                <nav aria-label="Root folders pagination">
-                    <ul class="pagination pagination-sm justify-content-center" id="RootFolderPagination">
-                        <!-- Pagination will be populated here -->
-                    </ul>
+                <nav aria-label="Candidates pagination" class="mt-3">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <span id="CandidatesPaginationInfo" class="text-muted"></span>
+                        <ul class="pagination pagination-sm mb-0" id="CandidatesPagination">
+                        </ul>
+                    </div>
                 </nav>
             </div>
         </div>
@@ -422,22 +390,16 @@ class TranscodeQueueManager {
         this.totalPages = 1;
         this.totalItems = 0;
         
-        // Root Folders pagination and state
-        this.rootFolderCurrentPage = 1;
-        this.rootFolderPageSize = 10;
-        this.rootFolderTotalPages = 1;
-        this.rootFolderSearchTerm = '';
-        this.rootFolderSortBy = 'TotalSizeGB';
-        this.rootFolderSortOrder = 'DESC';
-        
-        // Media Files pagination and state
-        this.mediaFileCurrentPage = 1;
-        this.mediaFilePageSize = 20;
-        this.mediaFileTotalPages = 1;
-        this.mediaFileSearchTerm = '';
-        this.mediaFileFilterPath = '';
-        this.mediaFileSortBy = 'SizeMB';
-        this.mediaFileSortOrder = 'DESC';
+        // Transcode Candidates state
+        this.candidateRootFolderPath = 'T:\\';
+        this.candidateCurrentPage = 1;
+        this.candidatePageSize = 25;
+        this.candidateTotalPages = 1;
+        this.candidateTotalCount = 0;
+        this.candidateSearchTerm = '';
+        this.candidateSortBy = 'EstimatedSavingsMB';
+        this.candidateSortOrder = 'DESC';
+        this.expandedCandidates = {};  // subfolderPath -> {files, page, totalPages}
         
         // Quality Testing Queue pagination and state
         this.QualityTestingCurrentPage = 1;
@@ -448,8 +410,7 @@ class TranscodeQueueManager {
         
         this.initializeEventListeners();
         this.loadQueueData();
-        this.loadRootFolders();
-        this.loadMediaFiles();
+        this.loadTranscodeCandidates();
         this.LoadQualityTestingQueueData();
         this.loadProfilesForDropdowns();
         this.startAutoRefresh();
@@ -526,69 +487,55 @@ class TranscodeQueueManager {
             this.loadQueueData();
         });
 
-        // Sortable Column Clicks
-        document.querySelectorAll('.sortable').forEach(th => {
+        // Sortable Column Clicks for Queue table
+        document.querySelectorAll('#QueueTable .sortable').forEach(th => {
             th.addEventListener('click', () => {
                 const sortField = th.dataset.sort;
-                const tableId = th.closest('table').id;
-                
-                if (tableId === 'QueueTable') {
-                    if (this.sortBy === sortField) {
-                        this.sortOrder = this.sortOrder === 'ASC' ? 'DESC' : 'ASC';
-                    } else {
-                        this.sortBy = sortField;
-                        this.sortOrder = 'DESC';
-                    }
-                    this.currentPage = 1;
-                    this.loadQueueData();
-                } else if (tableId === 'RootFoldersTable') {
-                    if (this.rootFolderSortBy === sortField) {
-                        this.rootFolderSortOrder = this.rootFolderSortOrder === 'ASC' ? 'DESC' : 'ASC';
-                    } else {
-                        this.rootFolderSortBy = sortField;
-                        this.rootFolderSortOrder = 'DESC';
-                    }
-                    this.rootFolderCurrentPage = 1;
-                    this.loadRootFolders();
-                } else if (tableId === 'MediaFilesTable') {
-                    if (this.mediaFileSortBy === sortField) {
-                        this.mediaFileSortOrder = this.mediaFileSortOrder === 'ASC' ? 'DESC' : 'ASC';
-                    } else {
-                        this.mediaFileSortBy = sortField;
-                        this.mediaFileSortOrder = 'DESC';
-                    }
-                    this.mediaFileCurrentPage = 1;
-                    this.loadMediaFiles();
+                if (this.sortBy === sortField) {
+                    this.sortOrder = this.sortOrder === 'ASC' ? 'DESC' : 'ASC';
+                } else {
+                    this.sortBy = sortField;
+                    this.sortOrder = 'DESC';
                 }
+                this.currentPage = 1;
+                this.loadQueueData();
             });
         });
 
-        // Root Folders event listeners
-        document.getElementById('RefreshRootFoldersBtn').addEventListener('click', () => {
-            this.loadRootFolders();
+        // Sortable Column Clicks for Candidates table
+        document.querySelectorAll('.candidate-sortable').forEach(th => {
+            th.addEventListener('click', () => {
+                const sortField = th.dataset.sort;
+                if (this.candidateSortBy === sortField) {
+                    this.candidateSortOrder = this.candidateSortOrder === 'ASC' ? 'DESC' : 'ASC';
+                } else {
+                    this.candidateSortBy = sortField;
+                    this.candidateSortOrder = 'DESC';
+                }
+                this.candidateCurrentPage = 1;
+                this.loadTranscodeCandidates();
+            });
         });
 
-        document.getElementById('RootFolderSearch').addEventListener('input', (e) => {
-            this.rootFolderSearchTerm = e.target.value;
-            this.rootFolderCurrentPage = 1;
-            this.loadRootFolders();
+        // Transcode Candidates event listeners
+        document.getElementById('CandidateRootFolderDropdown').addEventListener('change', (e) => {
+            this.candidateRootFolderPath = e.target.value;
+            this.candidateCurrentPage = 1;
+            this.candidateSearchTerm = '';
+            this.expandedCandidates = {};
+            document.getElementById('CandidateSearch').value = '';
+            this.loadTranscodeCandidates();
         });
 
-        // Media Files event listeners
-        document.getElementById('RefreshMediaFilesBtn').addEventListener('click', () => {
-            this.loadMediaFiles();
+        document.getElementById('CandidateSearch').addEventListener('input', (e) => {
+            this.candidateSearchTerm = e.target.value;
+            this.candidateCurrentPage = 1;
+            this.loadTranscodeCandidates();
         });
 
-        document.getElementById('MediaFileSearch').addEventListener('input', (e) => {
-            this.mediaFileSearchTerm = e.target.value;
-            this.mediaFileCurrentPage = 1;
-            this.loadMediaFiles();
-        });
-
-        document.getElementById('MediaFileFilter').addEventListener('change', (e) => {
-            this.mediaFileFilterPath = e.target.value;
-            this.mediaFileCurrentPage = 1;
-            this.loadMediaFiles();
+        document.getElementById('RefreshCandidatesBtn').addEventListener('click', () => {
+            this.expandedCandidates = {};
+            this.loadTranscodeCandidates();
         });
 
 
@@ -774,8 +721,7 @@ class TranscodeQueueManager {
             if (data.Success) {
                 const removed = data.DuplicatesRemoved || 0;
                 this.showAlert(`Cleanup complete: ${removed} duplicate records removed`, 'success');
-                this.loadRootFolders();
-                this.loadMediaFiles();
+                this.loadTranscodeCandidates();
             } else {
                 this.showAlert('Error cleaning up duplicates: ' + (data.Message || 'Unknown error'), 'danger');
             }
@@ -860,11 +806,11 @@ class TranscodeQueueManager {
 
 
     startAutoRefresh() {
-        // Refresh every 5 seconds for real-time updates
+        // Refresh every 30 seconds
         setInterval(() => {
             this.loadQueueData();
             this.LoadQualityTestingQueueData();
-        }, 5000);
+        }, 30000);
     }
 
     // Utility functions
@@ -879,7 +825,7 @@ class TranscodeQueueManager {
     formatDate(dateString) {
         if (!dateString) return '-';
         const date = new Date(dateString);
-        return date.toLocaleString();
+        return date.toLocaleString(undefined, { timeZoneName: 'short' });
     }
 
     getStatusBadgeClass(status) {
@@ -991,10 +937,13 @@ class TranscodeQueueManager {
     
     updateSortIndicators() {
         // Clear all sort indicators
-        document.querySelectorAll('.sortable i').forEach(icon => {
+        document.querySelectorAll('#QueueTable .sortable i').forEach(icon => {
             icon.className = 'fas fa-sort';
         });
-        
+        document.querySelectorAll('.candidate-sortable i').forEach(icon => {
+            icon.className = 'fas fa-sort';
+        });
+
         // Update current sort indicator for queue table
         const currentSortTh = document.querySelector(`#QueueTable [data-sort="${this.sortBy}"]`);
         if (currentSortTh) {
@@ -1003,339 +952,279 @@ class TranscodeQueueManager {
                 icon.className = this.sortOrder === 'ASC' ? 'fas fa-sort-up' : 'fas fa-sort-down';
             }
         }
-        
-        // Update sort indicators for root folders table
-        const rootFolderSortTh = document.querySelector(`#RootFoldersTable [data-sort="${this.rootFolderSortBy}"]`);
-        if (rootFolderSortTh) {
-            const icon = rootFolderSortTh.querySelector('i');
+
+        // Update sort indicators for candidates table
+        const candidateSortTh = document.querySelector(`.candidate-sortable[data-sort="${this.candidateSortBy}"]`);
+        if (candidateSortTh) {
+            const icon = candidateSortTh.querySelector('i');
             if (icon) {
-                icon.className = this.rootFolderSortOrder === 'ASC' ? 'fas fa-sort-up' : 'fas fa-sort-down';
-            }
-        }
-        
-        // Update sort indicators for media files table
-        const mediaFileSortTh = document.querySelector(`#MediaFilesTable [data-sort="${this.mediaFileSortBy}"]`);
-        if (mediaFileSortTh) {
-            const icon = mediaFileSortTh.querySelector('i');
-            if (icon) {
-                icon.className = this.mediaFileSortOrder === 'ASC' ? 'fas fa-sort-up' : 'fas fa-sort-down';
+                icon.className = this.candidateSortOrder === 'ASC' ? 'fas fa-sort-up' : 'fas fa-sort-down';
             }
         }
     }
 
-    async loadRootFolders() {
+    // ─── Transcode Candidates Methods ─────────────────────────────────
+
+    async loadTranscodeCandidates() {
+        if (!this.candidateRootFolderPath) return;
         try {
             const params = new URLSearchParams({
-                Page: this.rootFolderCurrentPage,
-                PageSize: this.rootFolderPageSize,
-                Search: this.rootFolderSearchTerm,
-                SortColumn: this.rootFolderSortBy,
-                SortOrder: this.rootFolderSortOrder
+                RootFolderPath: this.candidateRootFolderPath,
+                Page: this.candidateCurrentPage,
+                PageSize: this.candidatePageSize,
+                Search: this.candidateSearchTerm,
+                SortColumn: this.candidateSortBy,
+                SortOrder: this.candidateSortOrder
             });
-            
-            const response = await fetch(`/api/RootFolders?${params}`);
+
+            const response = await fetch(`/api/TranscodeCandidates?${params}`);
             const data = await response.json();
 
             if (data.Success) {
-                this.displayRootFolders(data.RootFolders);
-                this.updateRootFolderPagination(data.TotalCount, data.TotalPages);
+                this.displayTranscodeCandidates(data.Subfolders);
+                this.candidateTotalCount = data.TotalCount;
+                this.candidateTotalPages = data.TotalPages;
+                this.updateCandidatesPagination();
                 this.updateSortIndicators();
             } else {
-                this.showAlert('Error loading root folders: ' + data.Message, 'danger');
+                this.showAlert('Error loading transcode candidates: ' + data.Message, 'danger');
             }
         } catch (error) {
-            this.showAlert('Error loading root folders: ' + error.message, 'danger');
+            this.showAlert('Error loading transcode candidates: ' + error.message, 'danger');
         }
     }
 
-    displayRootFolders(rootFolders) {
-        const tbody = document.getElementById('RootFoldersTable').querySelector('tbody');
+    displayTranscodeCandidates(subfolders) {
+        const tbody = document.getElementById('CandidatesTableBody');
         tbody.innerHTML = '';
 
-        if (rootFolders.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted">No root folders found</td></tr>';
+        if (subfolders.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="10" class="text-center text-muted py-4">
+                <i class="fas fa-check-circle fa-2x mb-2 d-block"></i>
+                No transcode candidates found (all files already transcoded or efficient codecs)
+            </td></tr>`;
             return;
         }
 
-        rootFolders.forEach(folder => {
-            const escapedPath = folder.RootFolder.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '\\"');
-            const mkvCount = folder.MkvFileCount || 0;
-            const mkvBadgeClass = mkvCount > 0 ? 'bg-info' : 'bg-secondary';
+        subfolders.forEach((subfolder, index) => {
+            const escapedPath = subfolder.SubfolderPath.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '\\"');
+            const isExpanded = !!this.expandedCandidates[subfolder.SubfolderPath];
+
+            // Build codec badges
+            const codecBadges = Object.entries(subfolder.CodecBreakdown || {})
+                .sort((a, b) => b[1] - a[1])
+                .map(([codec, count]) => `<span class="badge bg-secondary me-1">${codec}: ${count}</span>`)
+                .join('');
+
+            // Build resolution badges
+            const resBadges = Object.entries(subfolder.ResolutionBreakdown || {})
+                .sort((a, b) => b[1] - a[1])
+                .map(([res, count]) => `<span class="badge bg-info me-1">${res}: ${count}</span>`)
+                .join('');
+
+            // Color-code savings and bitrate
+            const savingsMB = subfolder.EstimatedSavingsMB || 0;
+            const savingsClass = savingsMB >= 50000 ? 'text-success fw-bold' : savingsMB >= 10000 ? 'text-success' : 'text-muted';
+            const bitrateKbps = subfolder.AvgBitrateKbps || 0;
+            const bitrateClass = bitrateKbps >= 5000 ? 'text-danger fw-bold' : bitrateKbps >= 2000 ? 'text-warning' : 'text-muted';
+
             const row = document.createElement('tr');
+            row.className = 'candidate-row';
+            row.style.cursor = 'pointer';
             row.innerHTML = `
-                <td>${folder.Id}</td>
-                <td>${this.escapeHtml(folder.RootFolder)}</td>
-                <td>${this.formatDate(folder.LastScannedDate)}</td>
-                <td>${folder.TotalSizeGB}</td>
+                <td onclick="queueManager.toggleCandidateExpand('${escapedPath}', ${index})">
+                    <i class="fas fa-chevron-${isExpanded ? 'down' : 'right'}"></i>
+                </td>
+                <td onclick="queueManager.toggleCandidateExpand('${escapedPath}', ${index})">${this.escapeHtml(subfolder.SubfolderName)}</td>
+                <td onclick="queueManager.toggleCandidateExpand('${escapedPath}', ${index})">${subfolder.FileCount}</td>
+                <td onclick="queueManager.toggleCandidateExpand('${escapedPath}', ${index})">${subfolder.TotalSizeDisplay}</td>
+                <td>${codecBadges || '<span class="text-muted">-</span>'}</td>
+                <td>${resBadges || '<span class="text-muted">-</span>'}</td>
+                <td class="${bitrateClass}">${subfolder.AvgBitrateDisplay || '-'}</td>
+                <td class="${savingsClass}">${subfolder.EstimatedSavingsDisplay}</td>
                 <td>
-                    <select class="form-select form-select-sm" id="RootFolderProfileSelect_${folder.Id}" style="min-width: 150px;">
+                    <select class="form-select form-select-sm" id="CandidateProfileSelect_${index}" style="min-width: 130px;" onclick="event.stopPropagation()">
                         <option value="">Select Profile...</option>
                     </select>
                 </td>
-                <td class="text-center">
-                    <span class="badge ${mkvBadgeClass}">${mkvCount}</span>
-                </td>
-                <td class="text-center">
-                    <input class="form-check-input" type="checkbox" id="CompatibilityOnly_${folder.Id}"
-                           onchange="queueManager.toggleCompatibilityMode(${folder.Id})"
-                           title="Remux MKV files to MP4 (no re-encoding)">
-                </td>
                 <td>
-                    <button class="btn btn-sm btn-outline-success" onclick="queueManager.addFolderToQueue(${folder.Id}, '${escapedPath}')" title="Add to Queue">
-                        <i class="fas fa-plus"></i> Add to Queue
+                    <button class="btn btn-sm btn-outline-success" onclick="event.stopPropagation(); queueManager.addCandidateToQueue(${index}, '${escapedPath}')" title="Add to Queue">
+                        <i class="fas fa-plus"></i> Add
                     </button>
                 </td>
             `;
             tbody.appendChild(row);
+
+            // If expanded, show detail rows
+            if (isExpanded) {
+                const detailData = this.expandedCandidates[subfolder.SubfolderPath];
+                if (detailData && detailData.files) {
+                    this.renderCandidateFileRows(tbody, detailData, subfolder.SubfolderPath, index);
+                }
+            }
         });
-        
+
         // Populate profile dropdowns
         this.loadProfilesForDropdowns();
     }
 
-    async loadMediaFiles() {
+    renderCandidateFileRows(tbody, detailData, subfolderPath, parentIndex) {
+        const escapedPath = subfolderPath.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '\\"');
+
+        if (detailData.files.length === 0) {
+            const emptyRow = document.createElement('tr');
+            emptyRow.className = 'candidate-detail-row table-light';
+            emptyRow.innerHTML = `<td></td><td colspan="9" class="text-muted ps-4">No candidate files in this folder</td>`;
+            tbody.appendChild(emptyRow);
+            return;
+        }
+
+        detailData.files.forEach(file => {
+            const fileRow = document.createElement('tr');
+            fileRow.className = 'candidate-detail-row table-light';
+            fileRow.innerHTML = `
+                <td></td>
+                <td class="ps-4">
+                    <small><i class="fas fa-file-video text-muted me-1"></i>${this.escapeHtml(file.FileName)}</small>
+                </td>
+                <td></td>
+                <td><small>${file.SizeDisplay}</small></td>
+                <td><span class="badge bg-secondary">${file.Codec}</span></td>
+                <td><span class="badge bg-info">${file.ResolutionCategory}</span></td>
+                <td></td>
+                <td></td>
+                <td><small class="text-muted">${file.AssignedProfile || 'None'}</small></td>
+                <td>
+                    <button class="btn btn-sm btn-outline-primary" onclick="queueManager.addFileToQueueDirectly(${file.Id})" title="Add single file">
+                        <i class="fas fa-plus"></i>
+                    </button>
+                </td>
+            `;
+            tbody.appendChild(fileRow);
+        });
+
+        // Add pagination for detail files if needed
+        if (detailData.totalPages > 1) {
+            const pagRow = document.createElement('tr');
+            pagRow.className = 'candidate-detail-row table-light';
+            const pagCell = document.createElement('td');
+            pagCell.colSpan = 10;
+            pagCell.className = 'text-center';
+            pagCell.innerHTML = `
+                <small class="text-muted">Page ${detailData.page} of ${detailData.totalPages}</small>
+                ${detailData.page > 1 ? `<button class="btn btn-sm btn-link" onclick="queueManager.changeCandidateFilePage('${escapedPath}', ${detailData.page - 1})">Prev</button>` : ''}
+                ${detailData.page < detailData.totalPages ? `<button class="btn btn-sm btn-link" onclick="queueManager.changeCandidateFilePage('${escapedPath}', ${detailData.page + 1})">Next</button>` : ''}
+            `;
+            pagRow.appendChild(pagCell);
+            tbody.appendChild(pagRow);
+        }
+    }
+
+    async toggleCandidateExpand(subfolderPath, index) {
+        if (this.expandedCandidates[subfolderPath]) {
+            // Collapse
+            delete this.expandedCandidates[subfolderPath];
+            this.loadTranscodeCandidates();
+        } else {
+            // Expand - load files
+            await this.loadCandidateFiles(subfolderPath, 1);
+        }
+    }
+
+    async loadCandidateFiles(subfolderPath, page) {
         try {
             const params = new URLSearchParams({
-                Page: this.mediaFileCurrentPage,
-                PageSize: this.mediaFilePageSize,
-                Search: this.mediaFileSearchTerm,
-                RootFolderPath: this.mediaFileFilterPath,
-                SortBy: this.mediaFileSortBy,
-                SortOrder: this.mediaFileSortOrder
+                SubfolderPath: subfolderPath,
+                Page: page,
+                PageSize: 10
             });
-            
-            const response = await fetch(`/api/MediaFiles?${params}`);
+
+            const response = await fetch(`/api/TranscodeCandidates/Files?${params}`);
             const data = await response.json();
 
             if (data.Success) {
-                this.displayMediaFiles(data.MediaFiles);
-                this.updateMediaFilePagination(data.TotalCount, data.TotalPages);
-                this.updateSortIndicators();
+                this.expandedCandidates[subfolderPath] = {
+                    files: data.Files,
+                    page: page,
+                    totalPages: data.TotalPages
+                };
+                this.loadTranscodeCandidates(); // Re-render with expanded data
             } else {
-                this.showAlert('Error loading media files: ' + data.Message, 'danger');
+                this.showAlert('Error loading candidate files: ' + data.Message, 'danger');
             }
         } catch (error) {
-            this.showAlert('Error loading media files: ' + error.message, 'danger');
+            this.showAlert('Error loading candidate files: ' + error.message, 'danger');
         }
     }
 
-    displayMediaFiles(mediaFiles) {
-        const tbody = document.getElementById('MediaFilesTable').querySelector('tbody');
-        tbody.innerHTML = '';
-
-        if (mediaFiles.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">No media files found</td></tr>';
-            return;
-        }
-
-        mediaFiles.forEach(file => {
-            const escapedPath = file.FilePath.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '\\"');
-            const row = document.createElement('tr');
-            row.innerHTML = `
-                <td>${file.Id}</td>
-                <td>${this.escapeHtml(file.FileName)}</td>
-                <td>${this.escapeHtml(file.Directory || '')}</td>
-                <td>${this.formatFileSize(parseFloat(file.SizeMB) || 0)}</td>
-                <td>${file.Resolution || 'Unknown'}</td>
-                <td>
-                    <div class="d-flex gap-2 align-items-center">
-                        <span class="badge ${file.AssignedProfile ? 'bg-success' : 'bg-warning'}">
-                            ${file.AssignedProfile || 'No Profile'}
-                        </span>
-                        <select class="form-select form-select-sm" id="MediaFileProfileSelect_${file.Id}" style="min-width: 120px;">
-                            <option value="">Select Profile...</option>
-                        </select>
-                    </div>
-                </td>
-                <td>
-                    <div class="btn-group btn-group-sm" role="group">
-                        <button class="btn btn-outline-primary" onclick="queueManager.addFileToQueueWithProfile(${file.Id})" title="Add to Queue">
-                            <i class="fas fa-plus"></i>
-                        </button>
-                        <button class="btn btn-outline-secondary" onclick="queueManager.showAddJobOptions(${file.Id})" title="Advanced Options">
-                            <i class="fas fa-cog"></i>
-                        </button>
-                        <button class="btn btn-outline-info" onclick="queueManager.viewFileDetails(${file.Id})" title="View Details">
-                            <i class="fas fa-info"></i>
-                        </button>
-                        <button class="btn btn-outline-success" onclick="queueManager.refreshMediaFile(${file.Id})" title="Refresh File">
-                            <i class="fas fa-sync-alt"></i>
-                        </button>
-                    </div>
-                </td>
-            `;
-            tbody.appendChild(row);
-        });
-        
-        // Populate profile dropdowns after creating the media files table
-        this.loadProfilesForDropdowns();
+    async changeCandidateFilePage(subfolderPath, page) {
+        await this.loadCandidateFiles(subfolderPath, page);
     }
 
-    // Pagination methods for Root Folders
-    updateRootFolderPagination(totalCount, totalPages) {
-        this.rootFolderTotalPages = totalPages || 1;
-        const pagination = document.getElementById('RootFolderPagination');
+    updateCandidatesPagination() {
+        const pagination = document.getElementById('CandidatesPagination');
+        const info = document.getElementById('CandidatesPaginationInfo');
         pagination.innerHTML = '';
-        
-        if (this.rootFolderTotalPages <= 1) return;
-        
-        // Previous button
-        const prevDisabled = this.rootFolderCurrentPage <= 1 ? 'disabled' : '';
-        pagination.innerHTML += `<li class="page-item ${prevDisabled}"><a class="page-link" href="#" onclick="queueManager.changeRootFolderPage(${this.rootFolderCurrentPage - 1})">Previous</a></li>`;
-        
-        // Page numbers with ellipsis
-        const startPage = Math.max(1, this.rootFolderCurrentPage - 2);
-        const endPage = Math.min(this.rootFolderTotalPages, this.rootFolderCurrentPage + 2);
-        
+
+        const startItem = this.candidateTotalCount > 0 ? (this.candidateCurrentPage - 1) * this.candidatePageSize + 1 : 0;
+        const endItem = Math.min(this.candidateCurrentPage * this.candidatePageSize, this.candidateTotalCount);
+        info.textContent = `Showing ${startItem} to ${endItem} of ${this.candidateTotalCount} folders`;
+
+        if (this.candidateTotalPages <= 1) return;
+
+        const prevDisabled = this.candidateCurrentPage <= 1 ? 'disabled' : '';
+        pagination.innerHTML += `<li class="page-item ${prevDisabled}"><a class="page-link" href="#" onclick="queueManager.changeCandidatePage(${this.candidateCurrentPage - 1})">Previous</a></li>`;
+
+        const startPage = Math.max(1, this.candidateCurrentPage - 2);
+        const endPage = Math.min(this.candidateTotalPages, this.candidateCurrentPage + 2);
+
         if (startPage > 1) {
-            pagination.innerHTML += `<li class="page-item"><a class="page-link" href="#" onclick="queueManager.changeRootFolderPage(1)">1</a></li>`;
+            pagination.innerHTML += `<li class="page-item"><a class="page-link" href="#" onclick="queueManager.changeCandidatePage(1)">1</a></li>`;
             if (startPage > 2) {
                 pagination.innerHTML += `<li class="page-item disabled"><span class="page-link">...</span></li>`;
             }
         }
-        
+
         for (let i = startPage; i <= endPage; i++) {
-            const active = i === this.rootFolderCurrentPage ? 'active' : '';
-            pagination.innerHTML += `<li class="page-item ${active}"><a class="page-link" href="#" onclick="queueManager.changeRootFolderPage(${i})">${i}</a></li>`;
+            const active = i === this.candidateCurrentPage ? 'active' : '';
+            pagination.innerHTML += `<li class="page-item ${active}"><a class="page-link" href="#" onclick="queueManager.changeCandidatePage(${i})">${i}</a></li>`;
         }
-        
-        if (endPage < this.rootFolderTotalPages) {
-            if (endPage < this.rootFolderTotalPages - 1) {
+
+        if (endPage < this.candidateTotalPages) {
+            if (endPage < this.candidateTotalPages - 1) {
                 pagination.innerHTML += `<li class="page-item disabled"><span class="page-link">...</span></li>`;
             }
-            pagination.innerHTML += `<li class="page-item"><a class="page-link" href="#" onclick="queueManager.changeRootFolderPage(${this.rootFolderTotalPages})">${this.rootFolderTotalPages}</a></li>`;
+            pagination.innerHTML += `<li class="page-item"><a class="page-link" href="#" onclick="queueManager.changeCandidatePage(${this.candidateTotalPages})">${this.candidateTotalPages}</a></li>`;
         }
-        
-        // Next button
-        const nextDisabled = this.rootFolderCurrentPage >= this.rootFolderTotalPages ? 'disabled' : '';
-        pagination.innerHTML += `<li class="page-item ${nextDisabled}"><a class="page-link" href="#" onclick="queueManager.changeRootFolderPage(${this.rootFolderCurrentPage + 1})">Next</a></li>`;
+
+        const nextDisabled = this.candidateCurrentPage >= this.candidateTotalPages ? 'disabled' : '';
+        pagination.innerHTML += `<li class="page-item ${nextDisabled}"><a class="page-link" href="#" onclick="queueManager.changeCandidatePage(${this.candidateCurrentPage + 1})">Next</a></li>`;
     }
 
-    changeRootFolderPage(page) {
-        if (page >= 1 && page <= this.rootFolderTotalPages && page !== this.rootFolderCurrentPage) {
-            this.rootFolderCurrentPage = page;
-            this.loadRootFolders();
-        }
-    }
-
-    // Pagination methods for Media Files
-    updateMediaFilePagination(totalCount, totalPages) {
-        this.mediaFileTotalPages = totalPages || 1;
-        const pagination = document.getElementById('MediaFilePagination');
-        pagination.innerHTML = '';
-        
-        if (this.mediaFileTotalPages <= 1) return;
-        
-        // Previous button
-        const prevDisabled = this.mediaFileCurrentPage <= 1 ? 'disabled' : '';
-        pagination.innerHTML += `<li class="page-item ${prevDisabled}"><a class="page-link" href="#" onclick="queueManager.changeMediaFilePage(${this.mediaFileCurrentPage - 1})">Previous</a></li>`;
-        
-        // Page numbers with ellipsis
-        const startPage = Math.max(1, this.mediaFileCurrentPage - 2);
-        const endPage = Math.min(this.mediaFileTotalPages, this.mediaFileCurrentPage + 2);
-        
-        if (startPage > 1) {
-            pagination.innerHTML += `<li class="page-item"><a class="page-link" href="#" onclick="queueManager.changeMediaFilePage(1)">1</a></li>`;
-            if (startPage > 2) {
-                pagination.innerHTML += `<li class="page-item disabled"><span class="page-link">...</span></li>`;
-            }
-        }
-        
-        for (let i = startPage; i <= endPage; i++) {
-            const active = i === this.mediaFileCurrentPage ? 'active' : '';
-            pagination.innerHTML += `<li class="page-item ${active}"><a class="page-link" href="#" onclick="queueManager.changeMediaFilePage(${i})">${i}</a></li>`;
-        }
-        
-        if (endPage < this.mediaFileTotalPages) {
-            if (endPage < this.mediaFileTotalPages - 1) {
-                pagination.innerHTML += `<li class="page-item disabled"><span class="page-link">...</span></li>`;
-            }
-            pagination.innerHTML += `<li class="page-item"><a class="page-link" href="#" onclick="queueManager.changeMediaFilePage(${this.mediaFileTotalPages})">${this.mediaFileTotalPages}</a></li>`;
-        }
-        
-        // Next button
-        const nextDisabled = this.mediaFileCurrentPage >= this.mediaFileTotalPages ? 'disabled' : '';
-        pagination.innerHTML += `<li class="page-item ${nextDisabled}"><a class="page-link" href="#" onclick="queueManager.changeMediaFilePage(${this.mediaFileCurrentPage + 1})">Next</a></li>`;
-    }
-
-    changeMediaFilePage(page) {
-        if (page >= 1 && page <= this.mediaFileTotalPages && page !== this.mediaFileCurrentPage) {
-            this.mediaFileCurrentPage = page;
-            this.loadMediaFiles();
+    changeCandidatePage(page) {
+        if (page >= 1 && page <= this.candidateTotalPages && page !== this.candidateCurrentPage) {
+            this.candidateCurrentPage = page;
+            this.expandedCandidates = {};
+            this.loadTranscodeCandidates();
         }
     }
 
-    // Profile assignment methods
-    async assignProfileToRootFolder(folderId, rootFolderPath) {
-        const profileSelect = document.getElementById(`RootFolderProfileSelect_${folderId}`);
-        const profileId = profileSelect.value;
-        
-        if (!profileId) {
-            this.showAlert('Please select a profile first', 'warning');
-            return;
-        }
-        
+    async addCandidateToQueue(index, subfolderPath) {
         try {
-            const response = await fetch('/api/profiles/assign-to-root-folder', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    RootFolderPath: rootFolderPath,
-                    ProfileId: parseInt(profileId)
-                })
-            });
-
-            const data = await response.json();
-
-            if (data.success) {
-                this.showAlert(data.message, 'success');
-                profileSelect.value = ''; // Clear selection
-                this.loadMediaFiles(); // Refresh media files to show updated profiles
-            } else {
-                this.showAlert('Error assigning profile: ' + data.error, 'danger');
-            }
-        } catch (error) {
-            this.showAlert('Error assigning profile: ' + error.message, 'danger');
-        }
-    }
-
-    toggleCompatibilityMode(folderId) {
-        const checkbox = document.getElementById(`CompatibilityOnly_${folderId}`);
-        const profileSelect = document.getElementById(`RootFolderProfileSelect_${folderId}`);
-        if (profileSelect) {
-            profileSelect.disabled = checkbox.checked;
-            profileSelect.style.opacity = checkbox.checked ? '0.5' : '1';
-        }
-    }
-
-    async addFolderToQueue(folderId, rootFolderPath) {
-        try {
-            // Check compatibility-only mode
-            const compatCheckbox = document.getElementById(`CompatibilityOnly_${folderId}`);
-            const compatibilityOnly = compatCheckbox ? compatCheckbox.checked : false;
-
-            // Get selected profile ID from dropdown (optional - files may already have profiles assigned)
-            const profileSelect = document.getElementById(`RootFolderProfileSelect_${folderId}`);
+            const profileSelect = document.getElementById(`CandidateProfileSelect_${index}`);
             const profileIdValue = profileSelect ? profileSelect.value : null;
 
-            // Build request body
             const requestBody = {
-                RootFolderPath: rootFolderPath,
-                CompatibilityOnly: compatibilityOnly
+                RootFolderPath: subfolderPath
             };
 
-            // Only include ProfileId if one is selected and not in compatibility mode
-            if (!compatibilityOnly && profileIdValue && profileIdValue !== '') {
+            if (profileIdValue && profileIdValue !== '') {
                 requestBody.ProfileId = parseInt(profileIdValue);
             }
-            
+
             const response = await fetch('/api/TranscodeQueue/PopulateQueue', {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(requestBody)
             });
 
@@ -1343,7 +1232,7 @@ class TranscodeQueueManager {
 
             if (data.Success) {
                 this.showAlert(`Added ${data.ItemsAdded || 0} files from folder to queue`, 'success');
-                this.loadQueueData(); // Refresh queue
+                this.loadQueueData();
             } else {
                 this.showAlert('Error adding folder to queue: ' + data.ErrorMessage, 'danger');
             }
@@ -1828,7 +1717,7 @@ function displayFailedReplacements(failedReplacements) {
             <td>
                 <span class="badge bg-success">${replacement.VMAFScore.toFixed(2)}</span>
             </td>
-            <td>${new Date(replacement.AttemptDate).toLocaleString()}</td>
+            <td>${this.formatDate(replacement.AttemptDate)}</td>
             <td>
                 <small class="text-muted">
                     ${replacement.OriginalFileSize.toFixed(1)} MB → ${replacement.TranscodedFileSize.toFixed(1)} MB

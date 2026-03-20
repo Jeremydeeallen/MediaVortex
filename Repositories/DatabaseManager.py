@@ -82,6 +82,12 @@ class DatabaseManager:
                         except Exception:
                             pass  # Column already exists
 
+                # Add CompletedDate column to TranscodeAttempts
+                if not column_exists('TranscodeAttempts', 'CompletedDate'):
+                    cursor.execute("ALTER TABLE TranscodeAttempts ADD COLUMN CompletedDate TIMESTAMP")
+                    connection.commit()
+                    LoggingService.LogInfo("Added CompletedDate column to TranscodeAttempts", "DatabaseManager", "RunMigrations")
+
                 connection.commit()
             finally:
                 self.DatabaseService.CloseConnection(connection)
@@ -1340,6 +1346,50 @@ class DatabaseManager:
 
         return queueItems
     
+    def GetTranscodeQueueItemsPaginated(self, Page: int = 1, PageSize: int = 25, SortBy: str = "SizeMB", SortOrder: str = "DESC"):
+        """Get paginated transcoding queue items with SQL-level sorting and pagination."""
+        # Whitelist sort columns to prevent SQL injection
+        sort_columns = {
+            'SizeMB': 'SizeMB',
+            'Priority': 'SizeMB',  # Priority sorts by size as per existing behavior
+            'DateAdded': 'DateAdded',
+            'FileName': 'FileName'
+        }
+        sort_col = sort_columns.get(SortBy, 'SizeMB')
+        order = 'DESC' if SortOrder == 'DESC' else 'ASC'
+
+        # Get total count
+        count_rows = self.DatabaseService.ExecuteQuery("SELECT COUNT(*) as Count FROM TranscodeQueue")
+        total_items = count_rows[0]['Count'] if count_rows else 0
+
+        # Get paginated items
+        offset = (Page - 1) * PageSize
+        query = f"""
+            SELECT Id, FilePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted, ProcessingMode
+            FROM TranscodeQueue
+            ORDER BY {sort_col} {order}, DateAdded ASC
+            LIMIT %s OFFSET %s
+        """
+        rows = self.DatabaseService.ExecuteQuery(query, (PageSize, offset))
+
+        queue_items = []
+        for row in rows:
+            queue_items.append(TranscodeQueueModel(
+                Id=row['Id'],
+                FilePath=row['FilePath'],
+                FileName=row['FileName'],
+                Directory=row['Directory'],
+                SizeBytes=row['SizeBytes'],
+                SizeMB=row['SizeMB'],
+                Priority=row['Priority'],
+                Status=row['Status'],
+                DateAdded=self.ConvertStringToDateTime(row['DateAdded']) if row['DateAdded'] else None,
+                DateStarted=self.ConvertStringToDateTime(row['DateStarted']) if row['DateStarted'] else None,
+                ProcessingMode=row['ProcessingMode'] or 'Transcode'
+            ))
+
+        return queue_items, total_items
+
     def GetTranscodeQueueItemById(self, ItemId: int) -> Optional[TranscodeQueueModel]:
         """Get a specific transcoding queue item by ID."""
         query = """
@@ -1503,26 +1553,25 @@ class DatabaseManager:
         return None
     
     def ClearAllTranscodeQueueItems(self) -> int:
-        """Clear all items from the transcoding queue and return the count of deleted items."""
+        """Clear pending items from the transcoding queue, preserving in-progress jobs."""
         try:
             LoggingService.LogFunctionEntry("ClearAllTranscodeQueueItems", "DatabaseManager")
-            
-            # First get the count of items to be deleted for logging
-            countQuery = "SELECT COUNT(*) as Count FROM TranscodeQueue"
+
+            # Count items to be deleted (exclude running jobs)
+            countQuery = "SELECT COUNT(*) as Count FROM TranscodeQueue WHERE Status != 'Running'"
             countResult = self.DatabaseService.ExecuteQuery(countQuery)
             itemsToDelete = countResult[0]['Count'] if countResult else 0
-            
+
             if itemsToDelete > 0:
-                # Delete all items from the queue
-                deleteQuery = "DELETE FROM TranscodeQueue"
+                deleteQuery = "DELETE FROM TranscodeQueue WHERE Status != 'Running'"
                 affectedRows = self.DatabaseService.ExecuteNonQuery(deleteQuery)
-                
-                LoggingService.LogInfo(f"Cleared {affectedRows} items from TranscodeQueue", "DatabaseManager", "ClearAllTranscodeQueueItems")
+
+                LoggingService.LogInfo(f"Cleared {affectedRows} items from TranscodeQueue (preserved running jobs)", "DatabaseManager", "ClearAllTranscodeQueueItems")
                 return affectedRows
             else:
                 LoggingService.LogInfo("No items found in TranscodeQueue to clear", "DatabaseManager", "ClearAllTranscodeQueueItems")
                 return 0
-                
+
         except Exception as e:
             LoggingService.LogException("Exception clearing all transcoding queue items", e, "DatabaseManager", "ClearAllTranscodeQueueItems")
             return 0
@@ -1798,7 +1847,7 @@ class DatabaseManager:
                 'Success', 'SizeReductionBytes', 'SizeReductionPercent', 'ErrorMessage',
                 'TranscodeDurationSeconds', 'FfpmpegCommand', 'AudioBitrateKbps',
                 'VideoBitrateKbps', 'ProfileName', 'VMAF', 'FileReplaced', 'FileReplacedDate',
-                'ReplacementType', 'StartTime', 'PreferredAttempt'
+                'ReplacementType', 'StartTime', 'PreferredAttempt', 'CompletedDate'
             ]
             
             # Build dynamic UPDATE query based on provided fields

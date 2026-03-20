@@ -803,7 +803,7 @@ class ActivityManager {
     formatDate(dateString) {
         if (!dateString) return '-';
         const date = new Date(dateString);
-        return date.toLocaleString();
+        return date.toLocaleString(undefined, { timeZoneName: 'short' });
     }
 
     formatDuration(seconds) {

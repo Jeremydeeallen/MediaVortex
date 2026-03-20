@@ -142,15 +142,15 @@ class TranscodeQueueRepository(BaseRepository):
         return None
 
     def ClearAllTranscodeQueueItems(self) -> int:
-        """Clear all items from the transcoding queue."""
+        """Clear pending items from the transcoding queue, preserving in-progress jobs."""
         try:
             LoggingService.LogFunctionEntry("ClearAllTranscodeQueueItems", "TranscodeQueueRepository")
-            countQuery = "SELECT COUNT(*) as Count FROM TranscodeQueue"
+            countQuery = "SELECT COUNT(*) as Count FROM TranscodeQueue WHERE Status != 'Running'"
             countResult = self.ExecuteQuery(countQuery)
             itemsToDelete = countResult[0]['Count'] if countResult else 0
             if itemsToDelete > 0:
-                affectedRows = self.ExecuteNonQuery("DELETE FROM TranscodeQueue")
-                LoggingService.LogInfo(f"Cleared {affectedRows} items from TranscodeQueue", "TranscodeQueueRepository", "ClearAllTranscodeQueueItems")
+                affectedRows = self.ExecuteNonQuery("DELETE FROM TranscodeQueue WHERE Status != 'Running'")
+                LoggingService.LogInfo(f"Cleared {affectedRows} items from TranscodeQueue (preserved running jobs)", "TranscodeQueueRepository", "ClearAllTranscodeQueueItems")
                 return affectedRows
             else:
                 LoggingService.LogInfo("No items found in TranscodeQueue to clear", "TranscodeQueueRepository", "ClearAllTranscodeQueueItems")

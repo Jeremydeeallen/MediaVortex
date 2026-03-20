@@ -657,7 +657,7 @@ function renderFileTable(files, opType, isArchived) {
             html += '</td>';
         }
         const dtVal = f.LastSeen ? new Date(f.LastSeen).getTime() : 0;
-        const dtStr = f.LastSeen ? new Date(f.LastSeen).toLocaleString('en-US', {month:'2-digit', day:'2-digit', year:'numeric', hour:'numeric', minute:'2-digit', hour12:true}) : '-';
+        const dtStr = f.LastSeen ? new Date(f.LastSeen).toLocaleString('en-US', {month:'2-digit', day:'2-digit', year:'numeric', hour:'numeric', minute:'2-digit', hour12:true, timeZoneName:'short'}) : '-';
         html += `<td data-sort-value="${dtVal}"><small>${dtStr}</small></td>`;
         html += `<td class="text-end" data-sort-value="${f.Count}">${f.Count}</td>`;
         html += '</tr>';
@@ -929,7 +929,7 @@ async function loadDeviceAnalysis() {
             html += '</tr></thead><tbody>';
             devices.forEach(d => {
                 const lastActive = d.DateLastActivity
-                    ? new Date(d.DateLastActivity).toLocaleString('en-US', {month:'2-digit', day:'2-digit', year:'numeric', hour:'numeric', minute:'2-digit', hour12:true})
+                    ? new Date(d.DateLastActivity).toLocaleString('en-US', {month:'2-digit', day:'2-digit', year:'numeric', hour:'numeric', minute:'2-digit', hour12:true, timeZoneName:'short'})
                     : '-';
                 html += `<tr>
                     <td><strong>${d.Name || '-'}</strong></td>

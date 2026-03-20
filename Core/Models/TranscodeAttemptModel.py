@@ -28,6 +28,7 @@ class TranscodeAttemptModel:
     FileReplaced: bool = False
     FileReplacedDate: Optional[datetime] = None
     ReplacementType: Optional[str] = None
+    CompletedDate: Optional[datetime] = None  # Timestamp when the transcode job finished (success or failure)
     StartTime: Optional[str] = None  # Start time offset in HH:MM:SS format or seconds
     PreferredAttempt: bool = False  # Whether this attempt is preferred and should prevent further retranscoding
     

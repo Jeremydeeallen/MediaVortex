@@ -357,14 +357,14 @@ class ProcessTranscodeQueueService:
                                         "ProcessTranscodeQueueService", "ProcessJob")
                 # Don't fail the entire operation if TemporaryFilePath creation fails
 
-            # Update attempt record with complete information
+            # Update attempt record with complete information (keep Success=None to indicate in-progress)
             self.DatabaseManager.UpdateTranscodeAttempt(TranscodeAttemptId, {
                 'FilePath': Job.FilePath,
                 'AttemptDate': datetime.now(),
                 'Quality': TranscodingSettings.get('ProfileSettings', {}).get('Quality', 0),
                 'OldSizeBytes': Job.SizeBytes,
                 'NewSizeBytes': 0,
-                'Success': False,
+                'Success': None,
                 'SizeReductionBytes': 0,
                 'SizeReductionPercent': 0.0,
                 'ErrorMessage': None,
@@ -458,14 +458,14 @@ class ProcessTranscodeQueueService:
             LocalSourcePath = f"C:\\MediaVortex\\Source\\{MediaFile.FileName}"
             TemporaryFilePathId = self.PrivateCreateTemporaryFilePathRecord(TranscodeAttemptId, Job.FilePath, LocalSourcePath, OutputPath)
 
-            # Update attempt record
+            # Update attempt record (keep Success=None to indicate in-progress)
             self.DatabaseManager.UpdateTranscodeAttempt(TranscodeAttemptId, {
                 'FilePath': Job.FilePath,
                 'AttemptDate': datetime.now(),
                 'Quality': 0,
                 'OldSizeBytes': Job.SizeBytes,
                 'NewSizeBytes': 0,
-                'Success': False,
+                'Success': None,
                 'FfpmpegCommand': RemuxCommand,
                 'ProfileName': 'Remux',
                 'VMAF': None
@@ -547,14 +547,14 @@ class ProcessTranscodeQueueService:
             LocalSourcePath = f"C:\\MediaVortex\\Source\\{MediaFile.FileName}"
             TemporaryFilePathId = self.PrivateCreateTemporaryFilePathRecord(TranscodeAttemptId, Job.FilePath, LocalSourcePath, OutputPath)
 
-            # Update attempt record
+            # Update attempt record (keep Success=None to indicate in-progress)
             self.DatabaseManager.UpdateTranscodeAttempt(TranscodeAttemptId, {
                 'FilePath': Job.FilePath,
                 'AttemptDate': datetime.now(),
                 'Quality': 0,
                 'OldSizeBytes': Job.SizeBytes,
                 'NewSizeBytes': 0,
-                'Success': False,
+                'Success': None,
                 'FfpmpegCommand': SubFixCommand,
                 'ProfileName': 'SubtitleFix',
                 'VMAF': None
@@ -591,6 +591,7 @@ class ProcessTranscodeQueueService:
             # Update attempt as successful, no quality test needed
             self.DatabaseManager.UpdateTranscodeAttempt(TranscodeAttemptId, {
                 'Success': True,
+                'CompletedDate': datetime.now(),
                 'TranscodeDurationSeconds': TranscodeResult.get('Duration', 0.0),
                 'NewSizeBytes': NewSizeBytes,
                 'SizeReductionBytes': SizeReductionBytes,
@@ -944,6 +945,7 @@ class ProcessTranscodeQueueService:
                 # Update attempt record with success details
                 self.DatabaseManager.UpdateTranscodeAttempt(TranscodeAttemptId, {
                     'Success': True,
+                    'CompletedDate': datetime.now(),
                     'TranscodeDurationSeconds': TranscodeResult.get('Duration', 0.0),
                     'NewSizeBytes': NewSizeBytes,
                     'SizeReductionBytes': SizeReductionBytes,
@@ -1002,7 +1004,8 @@ class ProcessTranscodeQueueService:
                 # Update existing attempt record with failure details
                 self.DatabaseManager.UpdateTranscodeAttempt(TranscodeAttemptId, {
                     'Success': False,
-                    'ErrorMessage': ErrorMessage
+                    'ErrorMessage': ErrorMessage,
+                    'CompletedDate': datetime.now()
                 })
 
                 # Update TranscodeFiles record for overall file status (failure)
@@ -1024,7 +1027,8 @@ class ProcessTranscodeQueueService:
                     AudioBitrateKbps=None,
                     VideoBitrateKbps=None,
                     ProfileName=None,  # Will be set when we have profile info
-                    VMAF=None
+                    VMAF=None,
+                    CompletedDate=datetime.now()
                 )
                 AttemptId = self.DatabaseManager.SaveTranscodeAttempt(Attempt)
 

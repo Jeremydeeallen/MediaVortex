@@ -10,6 +10,7 @@ import psutil
 import platform
 import subprocess
 import re
+import json
 from typing import Dict, Any, Optional
 from Services.LoggingService import LoggingService
 
@@ -142,76 +143,69 @@ class SystemMonitoringService:
 
         This is the ONLY method that works reliably for per-core temperatures on Windows.
         Requires LibreHardwareMonitor software to be running.
+
+        Uses ConvertTo-Json for structured output to avoid PowerShell Format-Table
+        truncating long sensor names (which caused Distance to TjMax values to be
+        misidentified as actual core temperatures).
         """
         try:
-            # Get all temperature sensors from LibreHardwareMonitor
-            ps_command = "Get-WmiObject -Namespace 'root\\LibreHardwareMonitor' -Class Sensor | Where-Object {$_.SensorType -eq 'Temperature'} | Select-Object Name, Value | Sort-Object Name"
+            # Use ConvertTo-Json for reliable structured output (no truncation)
+            ps_command = "Get-WmiObject -Namespace 'root\\LibreHardwareMonitor' -Class Sensor | Where-Object {$_.SensorType -eq 'Temperature'} | Select-Object Name, Value | ConvertTo-Json"
             result = subprocess.run([
                 'powershell', '-Command', ps_command
             ], capture_output=True, text=True, timeout=10, creationflags=subprocess.CREATE_NO_WINDOW)
 
             if result.returncode == 0 and result.stdout.strip():
-                lines = result.stdout.strip().split('\n')
+                try:
+                    sensor_data = json.loads(result.stdout)
+                except json.JSONDecodeError as e:
+                    LoggingService.LogInfo(f"Failed to parse JSON from LibreHardwareMonitor: {e}", "SystemMonitoringService", "_GetLibreHardwareMonitorTemperature")
+                    return None
+
+                # Handle single sensor (returns dict) vs multiple (returns list)
+                if isinstance(sensor_data, dict):
+                    sensor_data = [sensor_data]
+
                 sensors = {}
                 core_temps = {}  # Dictionary: core_number -> temperature
 
-                for line in lines:
-                    line = line.strip()
-                    if not line or 'Name' in line and 'Value' in line:
-                        continue  # Skip header or empty lines
+                for sensor in sensor_data:
+                    name = sensor.get('Name', '')
+                    value = sensor.get('Value')
 
-                    # PowerShell output format: "Name Value" or "Name    Value"
-                    # Try to split on whitespace, but the name might contain spaces
-                    # The value should be the last token (a number)
-                    try:
-                        # Split line and find where the numeric value starts
-                        parts = line.split()
-                        if len(parts) < 2:
-                            continue
-
-                        # The last part should be the temperature value
-                        temp_str = parts[-1]
-
-                        # Try to parse the temperature
-                        try:
-                            temp_celsius = float(temp_str)
-                        except ValueError:
-                            # If last part isn't a number, skip this line
-                            continue
-
-                        # Validate temperature is reasonable (0-150°C)
-                        if not (0 < temp_celsius < 150):
-                            continue
-
-                        # The name is everything except the last part
-                        name = ' '.join(parts[:-1])
-
-                        # Store the sensor
-                        sensors[name] = round(temp_celsius, 1)
-
-                        # Extract core number if this is a core temperature
-                        # LibreHardwareMonitor uses "CPU Core #1", "CPU Core #2", etc.
-                        core_match = re.match(r'CPU Core #(\d+)', name, re.IGNORECASE)
-                        if core_match:
-                            # LibreHardwareMonitor uses 1-indexed core numbers (1-24)
-                            # Convert to 0-indexed (0-23) for consistency
-                            core_number = int(core_match.group(1))
-                            core_number_0_based = core_number - 1
-
-                            # Only add if it's a reasonable core number (0-63)
-                            if 0 <= core_number_0_based < 64:
-                                core_temps[core_number_0_based] = round(temp_celsius, 1)
-                                LoggingService.LogDebug(f"Found core {core_number_0_based} temperature: {temp_celsius}°C", "SystemMonitoringService", "_GetLibreHardwareMonitorTemperature")
-
-                    except (ValueError, AttributeError) as e:
-                        LoggingService.LogDebug(f"Error parsing sensor data: {line}, error: {e}", "SystemMonitoringService", "_GetLibreHardwareMonitorTemperature")
+                    if not name or value is None:
                         continue
+
+                    try:
+                        temp_celsius = float(value)
+                    except (ValueError, TypeError):
+                        continue
+
+                    # Validate temperature is reasonable (0-150°C)
+                    if not (0 < temp_celsius < 150):
+                        continue
+
+                    # Store the sensor
+                    sensors[name] = round(temp_celsius, 1)
+
+                    # Skip Distance to TjMax sensors (full name available, no truncation)
+                    if 'distance' in name.lower() or 'tjmax' in name.lower():
+                        continue
+
+                    # Extract core number: "CPU Core #1", "CPU Core #2", etc.
+                    core_match = re.match(r'CPU Core #(\d+)$', name, re.IGNORECASE)
+                    if core_match:
+                        # LHM uses 1-indexed, convert to 0-indexed
+                        core_number = int(core_match.group(1))
+                        core_number_0_based = core_number - 1
+
+                        if 0 <= core_number_0_based < 64:
+                            core_temps[core_number_0_based] = round(temp_celsius, 1)
 
                 if sensors:
                     # Find package temperature (prefer CPU Package, fallback to highest temp)
                     package_temp = sensors.get('CPU Package')
                     if package_temp is None:
-                        # Try to find package in sensors dict with variations
                         for sensor_name, sensor_temp in sensors.items():
                             if 'Package' in sensor_name and 'CPU' in sensor_name:
                                 package_temp = sensor_temp
@@ -223,14 +217,12 @@ class SystemMonitoringService:
                     cores = []
                     if core_temps:
                         LoggingService.LogInfo(f"Found {len(core_temps)} core temperatures", "SystemMonitoringService", "_GetLibreHardwareMonitorTemperature")
-                        # Sort by core number to ensure consistent ordering
                         for core_number in sorted(core_temps.keys()):
                             cores.append({
-                                "Core": core_number,  # Use 0-based core number (0-23)
+                                "Core": core_number,
                                 "Temperature": core_temps[core_number]
                             })
 
-                        # Find max and average core temperatures
                         max_temp = max(core_temps.values())
                         avg_temp = sum(core_temps.values()) / len(core_temps)
                     else:

@@ -68,7 +68,13 @@
       "Bash(where psql)",
       "Bash(docker exec mediavortex-postgres psql -U mediavortex -d mediavortex -c \"SELECT table_name, column_name, data_type FROM information_schema.columns WHERE table_schema = ''public'' AND table_name IN \\(''transcodeattempts'', ''transcodeprogress'', ''transcodequeue'', ''activejobs'', ''temporaryfilepaths'', ''qualitytestingqueue'', ''qualitytestresults''\\) ORDER BY table_name, ordinal_position;\")",
       "Bash(PGPASSWORD=mediavortex psql -h localhost -U mediavortex -d mediavortex -c \"SELECT table_name, column_name, data_type FROM information_schema.columns WHERE table_schema = ''public'' AND table_name IN \\(''transcodeattempts'', ''transcodeprogress'', ''transcodequeue'', ''activejobs'', ''temporaryfilepaths'', ''qualitytestingqueue'', ''qualitytestresults''\\) ORDER BY table_name, ordinal_position;\")",
-      "Bash(ls -la /c/Code/Automation/MediaVortex/*.py)"
+      "Bash(ls -la /c/Code/Automation/MediaVortex/*.py)",
+      "Bash(python3:*)",
+      "Bash(cd:*)",
+      "Bash(ls:*)",
+      "Bash(/c/Code/Automation/MediaVortex/venv/Scripts/python.exe:*)",
+      "Bash(C:/Code/Automation/MediaVortex/venv/Scripts/python.exe:*)",
+      "Bash(where py:*)"
     ]
   }
 }

@@ -255,34 +255,18 @@ class FileScanningViewModel:
         return DisplayFolders
 
     def GetRootFoldersPaginated(self, Page: int, PageSize: int, Search: str = '', SortColumn: str = 'RootFolder', SortOrder: str = 'ASC') -> Dict[str, Any]:
-        """Get root folders with pagination, filtering, and sorting."""
+        """Get root folders with SQL-level pagination, filtering, and sorting."""
         try:
-            # Load all root folders first with sorting
-            self.LoadRootFolders(SortColumn, SortOrder)
+            # SQL-level pagination and filtering
+            result = self.BusinessService.Repository.GetRootFoldersPaginated(Page, PageSize, Search, SortColumn, SortOrder)
+            PageFolders = result['RootFolders']
 
-            # Apply search filter
-            FilteredFolders = self.RootFolders
-            if Search:
-                SearchLower = Search.lower()
-                FilteredFolders = [folder for folder in self.RootFolders
-                                 if SearchLower in folder.RootFolder.lower()]
-
-            # Calculate pagination
-            TotalCount = len(FilteredFolders)
-            TotalPages = (TotalCount + PageSize - 1) // PageSize
-
-            # Get page slice
-            StartIndex = (Page - 1) * PageSize
-            EndIndex = StartIndex + PageSize
-            PageFolders = FilteredFolders[StartIndex:EndIndex]
-
-            # Get MKV file counts per folder
-            MkvCounts = self._GetMkvCountsByFolder()
+            # Get MKV file counts via SQL aggregation (not loading all media files)
+            MkvCounts = self.BusinessService.Repository.GetMkvCountsByRootFolder()
 
             # Format for display
             DisplayFolders = []
             for folder in PageFolders:
-                # Match folder path to MKV counts (normalize for comparison)
                 normalizedPath = folder.RootFolder.replace('/', '\\').rstrip('\\').lower()
                 mkvCount = MkvCounts.get(normalizedPath, 0)
                 DisplayFolders.append({
@@ -293,13 +277,21 @@ class FileScanningViewModel:
                     'MkvFileCount': mkvCount
                 })
 
-            # Get all folders for filter dropdown
-            AllDisplayFolders = self.GetRootFoldersForDisplay()
+            # Get all folders for filter dropdown (lightweight query)
+            AllDisplayFolders = []
+            allFolders = self.BusinessService.Repository.GetAllRootFolders()
+            for folder in allFolders:
+                AllDisplayFolders.append({
+                    'Id': folder.Id,
+                    'RootFolder': folder.RootFolder,
+                    'LastScannedDate': folder.LastScannedDate.strftime('%Y-%m-%d %H:%M:%S') if folder.LastScannedDate and hasattr(folder.LastScannedDate, 'strftime') else str(folder.LastScannedDate) if folder.LastScannedDate else 'Never',
+                    'TotalSizeGB': f"{folder.TotalSizeGB:.2f} GB"
+                })
 
             return {
                 'RootFolders': DisplayFolders,
-                'TotalCount': TotalCount,
-                'TotalPages': TotalPages,
+                'TotalCount': result['TotalCount'],
+                'TotalPages': result['TotalPages'],
                 'AllRootFolders': AllDisplayFolders
             }
 
@@ -312,24 +304,44 @@ class FileScanningViewModel:
                 'AllRootFolders': []
             }
 
-    def _GetMkvCountsByFolder(self) -> Dict[str, int]:
-        """Get MKV file counts grouped by root folder path."""
+    def GetSubfoldersPaginated(self, RootFolderPath: str, Page: int = 1, PageSize: int = 25,
+                               Search: str = '', SortColumn: str = 'TotalSizeMB',
+                               SortOrder: str = 'DESC') -> Dict[str, Any]:
+        """Get subfolders under a root folder with aggregated stats, respecting ExcludedDirectories."""
         try:
-            allMediaFiles = self.BusinessService.Repository.GetAllMediaFiles()
-            counts = {}
-            for mf in allMediaFiles:
-                if mf.FileName and mf.FileName.lower().endswith('.mkv') and mf.FilePath:
-                    # Find which root folder this file belongs to
-                    filePath = mf.FilePath.replace('/', '\\').lower()
-                    for folder in self.RootFolders:
-                        folderPath = folder.RootFolder.replace('/', '\\').rstrip('\\').lower()
-                        if filePath.startswith(folderPath):
-                            counts[folderPath] = counts.get(folderPath, 0) + 1
-                            break
-            return counts
+            # Load excluded directories from SystemSettings
+            excluded_dirs = []
+            try:
+                excluded_setting = self.BusinessService.Repository.ExecuteQuery(
+                    "SELECT SettingValue FROM SystemSettings WHERE SettingKey = %s",
+                    ('ExcludedDirectories',)
+                )
+                if excluded_setting and excluded_setting[0]['SettingValue']:
+                    excluded_dirs = [d.strip() for d in excluded_setting[0]['SettingValue'].split(',') if d.strip()]
+            except Exception:
+                pass  # If we can't load exclusions, proceed without them
+
+            result = self.BusinessService.Repository.GetSubfoldersByRootFolder(
+                RootFolderPath, Page, PageSize, Search, SortColumn, SortOrder, excluded_dirs
+            )
+
+            # Format sizes for display
+            for subfolder in result['Subfolders']:
+                size_mb = subfolder['TotalSizeMB']
+                if size_mb >= 1024:
+                    subfolder['TotalSizeDisplay'] = f"{size_mb / 1024:.2f} GB"
+                else:
+                    subfolder['TotalSizeDisplay'] = f"{size_mb:.2f} MB"
+
+            return result
+
         except Exception as e:
-            LoggingService.LogException("Error getting MKV counts by folder", e, "FileScanningViewModel", "_GetMkvCountsByFolder")
-            return {}
+            LoggingService.LogException("Error getting subfolders", e, "GetSubfoldersPaginated", "FileScanningViewModel")
+            return {
+                'Subfolders': [],
+                'TotalCount': 0,
+                'TotalPages': 0
+            }
 
     def GetMediaFilesForDisplay(self) -> List[Dict[str, Any]]:
         """Get media files formatted for display."""
@@ -348,60 +360,39 @@ class FileScanningViewModel:
         return DisplayFiles
 
     def GetMediaFilesPaginated(self, Page: int, PageSize: int, Search: str = '', RootFolderPath: str = '', SortBy: str = 'SizeMB', SortOrder: str = 'DESC') -> Dict[str, Any]:
-        """Get media files with pagination and filtering."""
+        """Get media files with SQL-level pagination, filtering, and sorting."""
         try:
-            # Get media files directly from business service
-            MediaFiles = self.BusinessService.GetMediaFiles(RootFolderPath)
+            # SQL-level pagination, filtering, and sorting
+            result = self.BusinessService.Repository.GetMediaFilesPaginated(
+                Page, PageSize, Search, RootFolderPath, SortBy, SortOrder
+            )
 
-            # Apply search filter if provided
-            if Search:
-                SearchLower = Search.lower()
-
-                # Check if it's a negative filter (starts with !)
-                if SearchLower.startswith('!'):
-                    # Negative filter - exclude files containing the term
-                    ExcludeTerm = SearchLower[1:]  # Remove the ! prefix
-                    MediaFiles = [file for file in MediaFiles if ExcludeTerm not in (file.FileName or '').lower()]
-                else:
-                    # Positive filter - include only files containing the term
-                    MediaFiles = [file for file in MediaFiles if SearchLower in (file.FileName or '').lower()]
-
-            # Sort by size descending (simple)
-            MediaFiles.sort(key=lambda x: x.SizeMB or 0, reverse=True)
-
-            # Calculate pagination
-            TotalCount = len(MediaFiles)
-            TotalPages = (TotalCount + PageSize - 1) // PageSize
-
-            # Get page slice
-            StartIndex = (Page - 1) * PageSize
-            EndIndex = StartIndex + PageSize
-            PageFiles = MediaFiles[StartIndex:EndIndex]
-
-            # Format for display
+            # Format rows for display
             DisplayFiles = []
-            for file in PageFiles:
-                # Extract directory from file path
-                import os
-                Directory = os.path.dirname(file.FilePath) if file.FilePath else ''
+            for row in result['Rows']:
+                FilePath = row['FilePath'] or ''
+                Directory = os.path.dirname(FilePath) if FilePath else ''
+                SizeMB = row['SizeMB']
+                DurationMinutes = row['DurationMinutes']
+                LastScannedDate = row['LastScannedDate']
 
                 DisplayFiles.append({
-                    'Id': file.Id,
-                    'FileName': file.FileName,
-                    'FilePath': file.FilePath,
+                    'Id': row['Id'],
+                    'FileName': row['FileName'],
+                    'FilePath': FilePath,
                     'Directory': Directory,
-                    'SizeMB': f"{file.SizeMB:.2f} MB" if file.SizeMB else 'Unknown',
-                    'LastScannedDate': file.LastScannedDate.strftime('%Y-%m-%d %H:%M:%S') if file.LastScannedDate and hasattr(file.LastScannedDate, 'strftime') else str(file.LastScannedDate) if file.LastScannedDate else 'Unknown',
-                    'Codec': file.Codec or 'Unknown',
-                    'Resolution': file.Resolution or 'Unknown',
-                    'DurationMinutes': f"{file.DurationMinutes:.1f} min" if file.DurationMinutes else 'Unknown',
-                    'AssignedProfile': file.AssignedProfile or None
+                    'SizeMB': f"{SizeMB:.2f} MB" if SizeMB else 'Unknown',
+                    'LastScannedDate': LastScannedDate.strftime('%Y-%m-%d %H:%M:%S') if LastScannedDate and hasattr(LastScannedDate, 'strftime') else str(LastScannedDate) if LastScannedDate else 'Unknown',
+                    'Codec': row['Codec'] or 'Unknown',
+                    'Resolution': row['Resolution'] or 'Unknown',
+                    'DurationMinutes': f"{DurationMinutes:.1f} min" if DurationMinutes else 'Unknown',
+                    'AssignedProfile': row['AssignedProfile'] or None
                 })
 
             return {
                 'MediaFiles': DisplayFiles,
-                'TotalCount': TotalCount,
-                'TotalPages': TotalPages
+                'TotalCount': result['TotalCount'],
+                'TotalPages': result['TotalPages']
             }
 
         except Exception as e:
@@ -493,6 +484,68 @@ class FileScanningViewModel:
             })
         return DisplayDirectories
 
+
+    def GetTranscodeCandidatesPaginated(self, RootFolderPath: str, Page: int = 1, PageSize: int = 25,
+                                         Search: str = '', SortColumn: str = 'EstimatedSavingsMB',
+                                         SortOrder: str = 'DESC') -> Dict[str, Any]:
+        """Get transcode candidate subfolders ranked by estimated savings."""
+        try:
+            result = self.BusinessService.Repository.GetTranscodeCandidatesByRootFolder(
+                RootFolderPath, Page, PageSize, Search, SortColumn, SortOrder
+            )
+
+            # Format sizes for display
+            for subfolder in result['Subfolders']:
+                size_mb = subfolder['TotalSizeMB']
+                if size_mb >= 1024:
+                    subfolder['TotalSizeDisplay'] = f"{size_mb / 1024:.2f} GB"
+                else:
+                    subfolder['TotalSizeDisplay'] = f"{size_mb:.2f} MB"
+
+                savings_mb = subfolder['EstimatedSavingsMB']
+                if savings_mb >= 1024:
+                    subfolder['EstimatedSavingsDisplay'] = f"~{savings_mb / 1024:.1f} GB"
+                else:
+                    subfolder['EstimatedSavingsDisplay'] = f"~{savings_mb:.0f} MB"
+
+                bitrate = subfolder.get('AvgBitrateKbps', 0)
+                if bitrate >= 1000:
+                    subfolder['AvgBitrateDisplay'] = f"{bitrate / 1000:.1f} Mbps"
+                else:
+                    subfolder['AvgBitrateDisplay'] = f"{bitrate} Kbps" if bitrate else '-'
+
+            return result
+
+        except Exception as e:
+            LoggingService.LogException("Error getting transcode candidates", e, "GetTranscodeCandidatesPaginated", "FileScanningViewModel")
+            return {
+                'Subfolders': [],
+                'TotalCount': 0,
+                'TotalPages': 0
+            }
+
+    def GetTranscodeCandidateFiles(self, SubfolderPath: str, Page: int = 1, PageSize: int = 25) -> Dict[str, Any]:
+        """Get individual untranscoded files in a subfolder for drill-down."""
+        try:
+            result = self.BusinessService.Repository.GetTranscodeCandidateFiles(SubfolderPath, Page, PageSize)
+
+            # Format sizes for display
+            for file in result['Files']:
+                size_mb = file['SizeMB']
+                if size_mb >= 1024:
+                    file['SizeDisplay'] = f"{size_mb / 1024:.2f} GB"
+                else:
+                    file['SizeDisplay'] = f"{size_mb:.2f} MB"
+
+            return result
+
+        except Exception as e:
+            LoggingService.LogException("Error getting transcode candidate files", e, "GetTranscodeCandidateFiles", "FileScanningViewModel")
+            return {
+                'Files': [],
+                'TotalCount': 0,
+                'TotalPages': 0
+            }
 
     def ExtractMetadataForExistingFiles(self, RootFolderId: Optional[int] = None) -> Dict[str, Any]:
         """Extract metadata for existing files that need it."""

@@ -71,12 +71,13 @@ class CommandBuilder:
             self.AddCodecParameters(CommandParts, CodecParameters, ProfileSettings)
             
             # Add audio codec and bitrate - always use AAC for normalization compatibility
+            # Downmix to stereo to avoid unsupported channel layouts (e.g. 5.1 surround)
             AudioBitrate = ProfileSettings.get('AudioBitrateKbps')
             if AudioBitrate and AudioBitrate != '' and AudioBitrate != 'None':
-                CommandParts.extend(['-c:a', 'aac', '-b:a', f'{AudioBitrate}k'])
+                CommandParts.extend(['-c:a', 'aac', '-ac', '2', '-b:a', f'{AudioBitrate}k'])
             else:
                 # Use default AAC bitrate when none specified (never use copy for audio normalization)
-                CommandParts.extend(['-c:a', 'aac', '-b:a', '128k'])
+                CommandParts.extend(['-c:a', 'aac', '-ac', '2', '-b:a', '128k'])
             
             # Add audio filters (normalization)
             AudioFilter = self.BuildAudioFilters(ProfileSettings)

@@ -76,6 +76,194 @@ class FileScanningRepository(BaseRepository):
         except Exception:
             return False
 
+    def GetSubfoldersByRootFolder(self, RootFolderPath: str, Page: int = 1, PageSize: int = 25,
+                                  Search: str = '', SortColumn: str = 'TotalSizeMB',
+                                  SortOrder: str = 'DESC', ExcludedDirectories: List[str] = None) -> Dict[str, Any]:
+        """Get subfolders under a root folder with aggregated stats from MediaFiles, with SQL-level pagination."""
+        valid_sort = {'SubfolderName': 'SubfolderName', 'TotalSizeMB': 'TotalSizeMB',
+                      'FileCount': 'FileCount', 'MkvCount': 'MkvCount'}
+        sort_col = valid_sort.get(SortColumn, 'TotalSizeMB')
+        order = 'DESC' if SortOrder.upper() == 'DESC' else 'ASC'
+
+        # Ensure trailing backslash for prefix matching
+        root = RootFolderPath.rstrip('\\') + '\\'
+        root_len = len(root)
+
+        # Search filter on subfolder name
+        search_condition = ""
+        search_params = []
+        if Search:
+            search_condition = "AND LOWER(SubfolderName) LIKE LOWER(%s)"
+            search_params = [f"%{Search}%"]
+
+        # CTE uses LEFT() for prefix matching instead of LIKE (avoids backslash escape issues)
+        # SPLIT_PART extracts the first path component after the root prefix
+        cte = """
+            WITH subfolders AS (
+                SELECT
+                    SPLIT_PART(SUBSTRING(mf.FilePath FROM %s + 1), chr(92), 1) AS SubfolderName,
+                    COUNT(*) AS FileCount,
+                    ROUND(SUM(mf.SizeMB)::numeric, 2) AS TotalSizeMB,
+                    SUM(CASE WHEN LOWER(mf.FileName) LIKE '%%.mkv' THEN 1 ELSE 0 END) AS MkvCount
+                FROM MediaFiles mf
+                WHERE LEFT(mf.FilePath, %s) = %s
+                  AND LENGTH(mf.FilePath) > %s
+                GROUP BY SPLIT_PART(SUBSTRING(mf.FilePath FROM %s + 1), chr(92), 1)
+            )
+        """
+        cte_params = [root_len, root_len, root, root_len, root_len]
+
+        # Count query
+        count_query = cte + f"SELECT COUNT(*) AS Count FROM subfolders WHERE SubfolderName != '' {search_condition}"
+        count_rows = self.ExecuteQuery(count_query, tuple(cte_params + search_params))
+        total_count = count_rows[0]['Count'] if count_rows else 0
+
+        # Data query
+        offset = (Page - 1) * PageSize
+        data_query = cte + f"""
+            SELECT SubfolderName, FileCount, TotalSizeMB, MkvCount
+            FROM subfolders
+            WHERE SubfolderName != ''
+            {search_condition}
+            ORDER BY {sort_col} {order}
+            LIMIT %s OFFSET %s
+        """
+        rows = self.ExecuteQuery(data_query, tuple(cte_params + search_params + [PageSize, offset]))
+
+        subfolders = []
+        for row in rows:
+            subfolders.append({
+                'SubfolderName': row['SubfolderName'],
+                'SubfolderPath': root + row['SubfolderName'],
+                'FileCount': row['FileCount'],
+                'TotalSizeMB': float(row['TotalSizeMB']),
+                'MkvCount': row['MkvCount']
+            })
+
+        return {
+            'Subfolders': subfolders,
+            'TotalCount': total_count,
+            'TotalPages': (total_count + PageSize - 1) // PageSize
+        }
+
+    def GetRootFoldersPaginated(self, Page: int, PageSize: int, Search: str = '',
+                                SortColumn: str = 'RootFolder', SortOrder: str = 'ASC') -> Dict[str, Any]:
+        """Get root folders with SQL-level pagination, filtering, and sorting."""
+        ValidColumns = ['Id', 'RootFolder', 'LastScannedDate', 'TotalSizeGB']
+        if SortColumn not in ValidColumns:
+            SortColumn = 'RootFolder'
+        if SortOrder.upper() not in ['ASC', 'DESC']:
+            SortOrder = 'ASC'
+
+        params = []
+        where_clause = ""
+        if Search:
+            where_clause = "WHERE LOWER(RootFolder) LIKE LOWER(%s)"
+            params.append(f"%{Search}%")
+
+        # Get total count
+        count_query = f"SELECT COUNT(*) as Count FROM RootFolders {where_clause}"
+        count_rows = self.ExecuteQuery(count_query, tuple(params) if params else None)
+        total_count = count_rows[0]['Count'] if count_rows else 0
+
+        # Get paginated results
+        offset = (Page - 1) * PageSize
+        data_query = f"""SELECT Id, RootFolder, LastScannedDate, TotalSizeGB
+                         FROM RootFolders {where_clause}
+                         ORDER BY {SortColumn} {SortOrder.upper()}
+                         LIMIT %s OFFSET %s"""
+        data_params = params + [PageSize, offset]
+        rows = self.ExecuteQuery(data_query, tuple(data_params))
+
+        root_folders = []
+        for row in rows:
+            root_folders.append(RootFolderModel(
+                Id=row['Id'], RootFolder=row['RootFolder'],
+                LastScannedDate=row['LastScannedDate'], TotalSizeGB=row['TotalSizeGB']
+            ))
+
+        return {
+            'RootFolders': root_folders,
+            'TotalCount': total_count,
+            'TotalPages': (total_count + PageSize - 1) // PageSize
+        }
+
+    def GetMkvCountsByRootFolder(self) -> Dict[str, int]:
+        """Get MKV file counts per root folder using SQL aggregation."""
+        try:
+            query = """
+                SELECT rf.RootFolder, COUNT(mf.Id) as MkvCount
+                FROM RootFolders rf
+                LEFT JOIN MediaFiles mf ON LOWER(mf.FilePath) LIKE LOWER(rf.RootFolder || '%%')
+                    AND LOWER(mf.FileName) LIKE '%%.mkv'
+                GROUP BY rf.RootFolder
+            """
+            rows = self.ExecuteQuery(query)
+            counts = {}
+            for row in rows:
+                folder = row['RootFolder'].replace('/', '\\').rstrip('\\').lower()
+                counts[folder] = row['MkvCount']
+            return counts
+        except Exception as e:
+            LoggingService.LogException("Error getting MKV counts", e, "FileScanningRepository", "GetMkvCountsByRootFolder")
+            return {}
+
+    def GetMediaFilesPaginated(self, Page: int, PageSize: int, Search: str = '',
+                               RootFolderPath: str = '', SortBy: str = 'SizeMB',
+                               SortOrder: str = 'DESC') -> Dict[str, Any]:
+        """Get media files with SQL-level pagination, filtering, and sorting."""
+        valid_sort_columns = {
+            'SizeMB': 'SizeMB', 'FileName': 'FileName',
+            'LastScannedDate': 'LastScannedDate', 'Codec': 'Codec',
+            'Resolution': 'Resolution', 'DurationMinutes': 'DurationMinutes'
+        }
+        sort_col = valid_sort_columns.get(SortBy, 'SizeMB')
+        order = 'DESC' if SortOrder.upper() == 'DESC' else 'ASC'
+
+        conditions = []
+        params = []
+
+        # Root folder filter
+        if RootFolderPath:
+            conditions.append("LOWER(FilePath) LIKE LOWER(%s)")
+            params.append(f"{RootFolderPath}%")
+
+        # Search filter (supports negative filter with ! prefix)
+        if Search:
+            if Search.startswith('!'):
+                exclude_term = Search[1:]
+                if exclude_term:
+                    conditions.append("LOWER(FileName) NOT LIKE LOWER(%s)")
+                    params.append(f"%{exclude_term}%")
+            else:
+                conditions.append("LOWER(FileName) LIKE LOWER(%s)")
+                params.append(f"%{Search}%")
+
+        where_clause = ""
+        if conditions:
+            where_clause = "WHERE " + " AND ".join(conditions)
+
+        # Get total count
+        count_query = f"SELECT COUNT(*) as Count FROM MediaFiles {where_clause}"
+        count_rows = self.ExecuteQuery(count_query, tuple(params) if params else None)
+        total_count = count_rows[0]['Count'] if count_rows else 0
+
+        # Get paginated results - only select columns needed for display
+        offset = (Page - 1) * PageSize
+        display_cols = "Id, FileName, FilePath, SizeMB, LastScannedDate, Codec, Resolution, DurationMinutes, AssignedProfile"
+        data_query = f"""SELECT {display_cols}
+                         FROM MediaFiles {where_clause}
+                         ORDER BY {sort_col} {order} NULLS LAST
+                         LIMIT %s OFFSET %s"""
+        data_params = params + [PageSize, offset]
+        rows = self.ExecuteQuery(data_query, tuple(data_params))
+
+        return {
+            'Rows': rows,
+            'TotalCount': total_count,
+            'TotalPages': (total_count + PageSize - 1) // PageSize
+        }
+
     # ─── Media File Methods ────────────────────────────────────────────
 
     def _MapRowToMediaFile(self, row) -> MediaFileModel:
@@ -319,6 +507,200 @@ class FileScanningRepository(BaseRepository):
                 'DuplicatesRemoved': 0,
                 'Message': f'Error: {str(e)}'
             }
+
+    # ─── Transcode Candidates Methods ─────────────────────────────────
+
+    def GetHistoricalReductionRates(self) -> Dict[str, float]:
+        """Get average size reduction percentages grouped by source codec + resolution category.
+        Returns dict like {("h264", "1080p"): 93.5, ...}"""
+        try:
+            query = """
+                SELECT LOWER(m.Codec) AS Codec, LOWER(COALESCE(m.ResolutionCategory, 'unknown')) AS ResolutionCategory,
+                       AVG(t.SizeReductionPercent) AS AvgReduction
+                FROM TranscodeAttempts t
+                JOIN MediaFiles m ON LOWER(m.FilePath) = LOWER(t.FilePath)
+                WHERE t.Success = true AND t.SizeReductionPercent > 0
+                GROUP BY LOWER(m.Codec), LOWER(COALESCE(m.ResolutionCategory, 'unknown'))
+            """
+            rows = self.ExecuteQuery(query)
+            rates = {}
+            for row in rows:
+                rates[(row['codec'], row['resolutioncategory'])] = float(row['avgreduction'])
+            return rates
+        except Exception as e:
+            LoggingService.LogException("Error getting historical reduction rates", e, "FileScanningRepository", "GetHistoricalReductionRates")
+            return {}
+
+    def GetTranscodeCandidatesByRootFolder(self, RootFolderPath: str, Page: int = 1, PageSize: int = 25,
+                                            Search: str = '', SortColumn: str = 'EstimatedSavingsMB',
+                                            SortOrder: str = 'DESC') -> Dict[str, Any]:
+        """Get subfolders with untranscoded files, aggregated with codec/resolution breakdowns and estimated savings."""
+        valid_sort = {'SubfolderName': 'SubfolderName', 'TotalSizeMB': 'TotalSizeMB',
+                      'FileCount': 'FileCount', 'EstimatedSavingsMB': 'EstimatedSavingsMB',
+                      'AvgBitrateKbps': 'AvgBitrateKbps'}
+        sort_col = valid_sort.get(SortColumn, 'EstimatedSavingsMB')
+        order = 'DESC' if SortOrder.upper() == 'DESC' else 'ASC'
+
+        root = RootFolderPath.rstrip('\\') + '\\'
+        root_len = len(root)
+
+        search_condition = ""
+        search_params = []
+        if Search:
+            search_condition = "AND LOWER(SubfolderName) LIKE LOWER(%s)"
+            search_params = [f"%{Search}%"]
+
+        # Get historical reduction rates for estimation
+        reduction_rates = self.GetHistoricalReductionRates()
+        # Calculate global average fallback
+        if reduction_rates:
+            global_avg = sum(reduction_rates.values()) / len(reduction_rates)
+        else:
+            global_avg = 85.0
+
+        cte = """
+            WITH candidates AS (
+                SELECT
+                    SPLIT_PART(SUBSTRING(mf.FilePath FROM %s + 1), chr(92), 1) AS SubfolderName,
+                    mf.SizeMB,
+                    COALESCE(mf.VideoBitrateKbps, 0) AS VideoBitrateKbps,
+                    LOWER(COALESCE(mf.Codec, 'unknown')) AS Codec,
+                    LOWER(COALESCE(mf.ResolutionCategory, 'unknown')) AS ResolutionCategory
+                FROM MediaFiles mf
+                WHERE LEFT(mf.FilePath, %s) = %s
+                  AND LENGTH(mf.FilePath) > %s
+                  AND (mf.TranscodedByMediaVortex IS DISTINCT FROM true)
+                  AND LOWER(COALESCE(mf.Codec, '')) NOT IN ('hevc', 'av1', 'h265')
+            ),
+            subfolder_stats AS (
+                SELECT
+                    SubfolderName,
+                    COUNT(*) AS FileCount,
+                    ROUND(SUM(SizeMB)::numeric, 2) AS TotalSizeMB,
+                    ROUND(AVG(NULLIF(VideoBitrateKbps, 0))::numeric, 0) AS AvgBitrateKbps,
+                    STRING_AGG(Codec || ':' || SizeMB::text || ':' || ResolutionCategory, '|') AS FileDetails
+                FROM candidates
+                WHERE SubfolderName != ''
+                GROUP BY SubfolderName
+            )
+        """
+        cte_params = [root_len, root_len, root, root_len]
+
+        # Count query
+        count_query = cte + f"SELECT COUNT(*) AS Count FROM subfolder_stats WHERE 1=1 {search_condition}"
+        count_rows = self.ExecuteQuery(count_query, tuple(cte_params + search_params))
+        total_count = count_rows[0]['Count'] if count_rows else 0
+
+        # SQL-sortable columns can paginate at DB level; Python-computed columns need all rows
+        sql_sortable = ('SubfolderName', 'FileCount', 'TotalSizeMB', 'AvgBitrateKbps')
+        data_query = cte + f"""
+            SELECT SubfolderName, FileCount, TotalSizeMB, AvgBitrateKbps, FileDetails
+            FROM subfolder_stats
+            WHERE 1=1
+            {search_condition}
+            ORDER BY {sort_col if sort_col in sql_sortable else 'TotalSizeMB'} {order if sort_col in sql_sortable else 'DESC'}
+        """
+
+        if sort_col in sql_sortable:
+            paginated_query = data_query + " LIMIT %s OFFSET %s"
+            offset = (Page - 1) * PageSize
+            all_rows = self.ExecuteQuery(paginated_query, tuple(cte_params + search_params + [PageSize, offset]))
+        else:
+            # EstimatedSavingsMB is computed in Python, so fetch all and sort/paginate below
+            all_rows = self.ExecuteQuery(data_query, tuple(cte_params + search_params))
+
+        subfolders = []
+        for row in all_rows:
+            file_details_str = row['filedetails'] or ''
+            codec_breakdown = {}
+            resolution_breakdown = {}
+            estimated_savings_mb = 0.0
+
+            if file_details_str:
+                for entry in file_details_str.split('|'):
+                    parts = entry.split(':')
+                    if len(parts) >= 3:
+                        codec = parts[0]
+                        size_mb = float(parts[1]) if parts[1] else 0
+                        res_cat = parts[2]
+
+                        codec_breakdown[codec] = codec_breakdown.get(codec, 0) + 1
+                        resolution_breakdown[res_cat] = resolution_breakdown.get(res_cat, 0) + 1
+
+                        # Calculate estimated savings for this file
+                        rate = reduction_rates.get((codec, res_cat))
+                        if rate is None:
+                            rate = reduction_rates.get((codec, 'unknown'), global_avg)
+                        estimated_savings_mb += size_mb * (rate / 100.0)
+
+            subfolders.append({
+                'SubfolderName': row['subfoldername'],
+                'SubfolderPath': root + row['subfoldername'],
+                'FileCount': row['filecount'],
+                'TotalSizeMB': float(row['totalsizemb']),
+                'AvgBitrateKbps': int(row['avgbitratekbps']) if row['avgbitratekbps'] else 0,
+                'CodecBreakdown': codec_breakdown,
+                'ResolutionBreakdown': resolution_breakdown,
+                'EstimatedSavingsMB': round(estimated_savings_mb, 2)
+            })
+
+        # If sorting by EstimatedSavingsMB, sort and paginate in Python
+        if sort_col == 'EstimatedSavingsMB':
+            reverse = (order == 'DESC')
+            subfolders.sort(key=lambda x: x['EstimatedSavingsMB'], reverse=reverse)
+            offset = (Page - 1) * PageSize
+            subfolders = subfolders[offset:offset + PageSize]
+
+        return {
+            'Subfolders': subfolders,
+            'TotalCount': total_count,
+            'TotalPages': (total_count + PageSize - 1) // PageSize
+        }
+
+    def GetTranscodeCandidateFiles(self, SubfolderPath: str, Page: int = 1, PageSize: int = 25) -> Dict[str, Any]:
+        """Get individual untranscoded files in a subfolder for drill-down view."""
+        conditions = [
+            "LEFT(mf.FilePath, %s) = %s",
+            "(mf.TranscodedByMediaVortex IS DISTINCT FROM true)",
+            "LOWER(COALESCE(mf.Codec, '')) NOT IN ('hevc', 'av1', 'h265')"
+        ]
+        prefix = SubfolderPath.rstrip('\\') + '\\'
+        params = [len(prefix), prefix]
+
+        where_clause = "WHERE " + " AND ".join(conditions)
+
+        # Count
+        count_query = f"SELECT COUNT(*) AS Count FROM MediaFiles mf {where_clause}"
+        count_rows = self.ExecuteQuery(count_query, tuple(params))
+        total_count = count_rows[0]['Count'] if count_rows else 0
+
+        # Data
+        offset = (Page - 1) * PageSize
+        data_query = f"""
+            SELECT mf.Id, mf.FileName, mf.SizeMB, mf.Codec, mf.ResolutionCategory, mf.AssignedProfile
+            FROM MediaFiles mf
+            {where_clause}
+            ORDER BY mf.SizeMB DESC NULLS LAST
+            LIMIT %s OFFSET %s
+        """
+        rows = self.ExecuteQuery(data_query, tuple(params + [PageSize, offset]))
+
+        files = []
+        for row in rows:
+            files.append({
+                'Id': row['id'],
+                'FileName': row['filename'],
+                'SizeMB': float(row['sizemb']) if row['sizemb'] else 0,
+                'Codec': row['codec'] or 'Unknown',
+                'ResolutionCategory': row['resolutioncategory'] or 'Unknown',
+                'AssignedProfile': row['assignedprofile']
+            })
+
+        return {
+            'Files': files,
+            'TotalCount': total_count,
+            'TotalPages': (total_count + PageSize - 1) // PageSize
+        }
 
     # ─── Season Methods ────────────────────────────────────────────────
 

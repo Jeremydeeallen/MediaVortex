@@ -421,7 +421,7 @@ class ActivityManager {
             const row = document.createElement('tr');
             row.innerHTML = `
                 <td>${this.escapeHtml(fileName)}</td>
-                <td>${this.formatDate(attempt.AttemptDate)}</td>
+                <td>${this.formatDate(attempt.CompletedDate || attempt.AttemptDate)}</td>
                 <td>
                     <span class="badge ${statusClass}">
                         ${statusText}
@@ -896,7 +896,7 @@ class ActivityManager {
     formatDate(dateString) {
         if (!dateString) return '-';
         const date = new Date(dateString);
-        return date.toLocaleString();
+        return date.toLocaleString(undefined, { timeZoneName: 'short' });
     }
 
     formatDuration(seconds) {

@@ -36,10 +36,12 @@
                             <i class="fas fa-search"></i> File Scanning
                         </a>
                     </li>
-                    <li class="nav-item">
+                    <li class="nav-item" style="position: relative;">
                         <a class="nav-link {% if request.endpoint == 'transcode_queue' %}active{% endif %}" href="/TranscodeQueue">
                             <i class="fas fa-list"></i> Queue
                         </a>
+                        <span class="badge rounded-pill bg-primary d-none" id="NavQueueCount"
+                              style="position: absolute; top: 2px; right: -6px; font-size: 0.65em; padding: 3px 6px; pointer-events: none;"></span>
                     </li>
                     <li class="nav-item">
                         <a class="nav-link {% if request.endpoint == 'activity' %}active{% endif %}" href="/Activity">
@@ -59,6 +61,11 @@
                     <li class="nav-item">
                         <a class="nav-link {% if request.endpoint == 'optimization' %}active{% endif %}" href="/Optimization">
                             <i class="fas fa-bolt"></i> Optimization
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.endpoint == 'clip_builder' %}active{% endif %}" href="/ClipBuilder">
+                            <i class="fas fa-cut"></i> Clip Builder
                         </a>
                     </li>
                 </ul>
@@ -158,6 +165,24 @@
             if (alert) alert.remove();
         }, 5000);
     }
+    // Fetch queue count for nav badge
+    function updateNavQueueCount() {
+        fetch('/api/TranscodeQueue/Count')
+            .then(r => r.json())
+            .then(data => {
+                const badge = document.getElementById('NavQueueCount');
+                const count = data.Count || 0;
+                if (count > 0) {
+                    badge.textContent = count;
+                    badge.classList.remove('d-none');
+                } else {
+                    badge.classList.add('d-none');
+                }
+            })
+            .catch(() => {});
+    }
+    updateNavQueueCount();
+    setInterval(updateNavQueueCount, 30000);
     </script>
     {% block scripts %}{% endblock %}
 </body>
