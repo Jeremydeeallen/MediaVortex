@@ -203,6 +203,35 @@ class ContinuousScanService:
             LoggingService.LogException("Critical error in scan loop", e, 'ContinuousScanService', '_ScanLoop')
             self.IsRunning = False
 
+    def _GetTopLevelFolders(self, RootFolders) -> list:
+        """Filter root folders to only top-level paths, removing children covered by a parent's recursive scan.
+
+        If both T:\\ and T:\\Ted Lasso are root folders, scanning T:\\ recursively
+        already covers T:\\Ted Lasso, so we skip the child to avoid redundant work.
+        """
+        # Normalize all paths for comparison
+        NormalizedFolders = []
+        for Folder in RootFolders:
+            NormPath = os.path.normpath(Folder.RootFolder).lower()
+            if not NormPath.endswith(os.sep):
+                NormPath += os.sep
+            NormalizedFolders.append((NormPath, Folder))
+
+        # Sort by path length so parents come before children
+        NormalizedFolders.sort(key=lambda x: len(x[0]))
+
+        TopLevel = []
+        CoveredPrefixes = []
+
+        for NormPath, Folder in NormalizedFolders:
+            # Check if this path is already covered by a previously accepted parent
+            IsCovered = any(NormPath.startswith(Prefix) for Prefix in CoveredPrefixes)
+            if not IsCovered:
+                TopLevel.append(Folder)
+                CoveredPrefixes.append(NormPath)
+
+        return TopLevel
+
     def _ExecuteScan(self):
         """Execute a single scan iteration."""
         try:
@@ -220,10 +249,28 @@ class ContinuousScanService:
                 LoggingService.LogWarning("No root folders found in database, skipping scan", 'ContinuousScanService', '_ExecuteScan')
                 return
 
-            LoggingService.LogInfo(f"Found {len(RootFolders)} root folders to scan", 'ContinuousScanService', '_ExecuteScan')
+            # Deduplicate: if a parent folder is in the list, skip children it covers
+            TopLevelFolders = self._GetTopLevelFolders(RootFolders)
+            SkippedCount = len(RootFolders) - len(TopLevelFolders)
 
-            # Scan each root folder
-            for RootFolder in RootFolders:
+            LoggingService.LogInfo(
+                f"Found {len(RootFolders)} root folders, scanning {len(TopLevelFolders)} top-level paths (skipping {SkippedCount} already covered by parent folders)",
+                'ContinuousScanService', '_ExecuteScan'
+            )
+
+            # Run duplicate cleanup once before the loop instead of per-folder
+            try:
+                if not self.FileScanningService:
+                    from Features.FileScanning.FileScanningBusinessService import FileScanningBusinessService
+                    self.FileScanningService = FileScanningBusinessService()
+                CleanupResult = self.FileScanningService.Repository.CleanupDuplicateMediaFiles()
+                if CleanupResult.get('DuplicatesRemoved', 0) > 0:
+                    LoggingService.LogInfo(f"Pre-scan cleanup removed {CleanupResult['DuplicatesRemoved']} duplicate records", 'ContinuousScanService', '_ExecuteScan')
+            except Exception as e:
+                LoggingService.LogException("Error during pre-scan duplicate cleanup", e, 'ContinuousScanService', '_ExecuteScan')
+
+            # Scan each top-level root folder
+            for RootFolder in TopLevelFolders:
                 if self.StopEvent.is_set():
                     LoggingService.LogInfo("Stop event received during scan, aborting", 'ContinuousScanService', '_ExecuteScan')
                     break
@@ -246,8 +293,8 @@ class ContinuousScanService:
 
                     LoggingService.LogInfo(f"Starting scan for root folder: {RootFolder.RootFolder}", 'ContinuousScanService', '_ExecuteScan')
 
-                    # Trigger scan for this root folder
-                    ScanResult = self.FileScanningService.StartScanning(RootFolder.RootFolder, Recursive=True)
+                    # Trigger scan for this root folder (skip duplicate cleanup - already ran once above)
+                    ScanResult = self.FileScanningService.StartScanning(RootFolder.RootFolder, Recursive=True, SkipDuplicateCleanup=True)
 
                     if ScanResult.get('Success'):
                         LoggingService.LogInfo(f"Scan completed successfully for: {RootFolder.RootFolder}", 'ContinuousScanService', '_ExecuteScan')

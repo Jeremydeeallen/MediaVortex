@@ -46,7 +46,7 @@ class FileScanningBusinessService:
         except Exception as e:
             LoggingService.LogException("Error checking for existing running scans", e, 'FileScanningBusinessService', 'CheckForExistingRunningScan')
 
-    def StartScanning(self, RootFolderPath: str, Recursive: bool = True) -> Dict[str, Any]:
+    def StartScanning(self, RootFolderPath: str, Recursive: bool = True, SkipDuplicateCleanup: bool = False) -> Dict[str, Any]:
         """Start scanning a root folder for media files directly in the main process."""
         try:
             LoggingService.LogFunctionEntry("StartScanning", 'FileScanningBusinessService', RootFolderPath, Recursive=Recursive)
@@ -143,7 +143,7 @@ class FileScanningBusinessService:
             LoggingService.LogInfo(f"Starting direct scan for {RootFolderPath}", 'FileScanningBusinessService', 'StartScanning')
 
             # Perform the scan directly
-            result = self.PerformScan(RootFolderPath, Recursive)
+            result = self.PerformScan(RootFolderPath, Recursive, SkipDuplicateCleanup=SkipDuplicateCleanup)
 
             # Update job status based on result
             if result.get('Success', False):
@@ -453,15 +453,17 @@ class FileScanningBusinessService:
         except Exception as e:
             LoggingService.LogException("Error cleaning up scan jobs", e)
 
-    def PerformScan(self, RootFolderPath: str, Recursive: bool) -> Dict[str, Any]:
+    def PerformScan(self, RootFolderPath: str, Recursive: bool, SkipDuplicateCleanup: bool = False) -> Dict[str, Any]:
         """Perform the actual scanning process."""
         try:
             LoggingService.LogInfo("Starting scan of directory: {}", RootFolderPath)
 
             # Step 0: Clean up any existing duplicate records before scanning
-            CleanupResult = self.Repository.CleanupDuplicateMediaFiles()
-            if CleanupResult.get('DuplicatesRemoved', 0) > 0:
-                LoggingService.LogInfo(f"Pre-scan cleanup removed {CleanupResult['DuplicatesRemoved']} duplicate records", 'PerformScan', 'FileScanningBusinessService')
+            # Skipped during continuous scans where cleanup runs once before the loop
+            if not SkipDuplicateCleanup:
+                CleanupResult = self.Repository.CleanupDuplicateMediaFiles()
+                if CleanupResult.get('DuplicatesRemoved', 0) > 0:
+                    LoggingService.LogInfo(f"Pre-scan cleanup removed {CleanupResult['DuplicatesRemoved']} duplicate records", 'PerformScan', 'FileScanningBusinessService')
 
             # Step 1: Calculate directory size
             self.ScanProgress = 10.0
