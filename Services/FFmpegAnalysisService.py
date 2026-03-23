@@ -184,8 +184,10 @@ class FFmpegAnalysisService:
                     SubtitleStreams.append(Stream)
 
             # Select preferred audio stream (English preferred, most channels as tiebreaker)
-            AudioStream, AudioStreamIndex = self.SelectPreferredAudioStream(AudioStreams)
+            AudioStream, AudioStreamIndex, AllAudioLanguages, HasExplicitEnglish = self.SelectPreferredAudioStream(AudioStreams)
             AnalysisModel.AudioStreamIndex = AudioStreamIndex
+            AnalysisModel.AudioLanguages = ','.join(AllAudioLanguages) if AllAudioLanguages else None
+            AnalysisModel.HasExplicitEnglishAudio = HasExplicitEnglish
             
             # Process video stream
             if VideoStream:
@@ -312,10 +314,20 @@ class FFmpegAnalysisService:
         """Select the preferred audio stream, preferring English with most channels.
 
         Returns:
-            Tuple of (SelectedStream dict or None, 0-based audio stream index)
+            Tuple of (SelectedStream dict or None, 0-based audio stream index,
+                      AllLanguages list, HasExplicitEnglish bool)
         """
         if not AudioStreams:
-            return None, 0
+            return None, 0, [], False
+
+        # Collect all audio stream languages
+        AllLanguages = []
+        for Stream in AudioStreams:
+            Language = Stream.get('tags', {}).get('language', '')
+            if Language:
+                AllLanguages.append(Language.lower())
+            else:
+                AllLanguages.append('und')  # undetermined
 
         # Find English streams
         EnglishStreams = []
@@ -323,6 +335,8 @@ class FFmpegAnalysisService:
             Language = Stream.get('tags', {}).get('language', '')
             if Language.lower() in ('eng', 'en'):
                 EnglishStreams.append((Index, Stream))
+
+        HasExplicitEnglish = len(EnglishStreams) > 0
 
         if EnglishStreams:
             # Pick English stream with most channels (surround > stereo)
@@ -332,14 +346,14 @@ class FFmpegAnalysisService:
                 f"from {len(AudioStreams)} audio stream(s)",
                 'SelectPreferredAudioStream', 'FFmpegAnalysisService'
             )
-            return BestStream, BestIndex
+            return BestStream, BestIndex, AllLanguages, HasExplicitEnglish
 
         # No English streams found — fall back to first stream
-        LoggingService.LogInfo(
-            f"No English audio stream found among {len(AudioStreams)} stream(s), using first stream",
+        LoggingService.LogWarning(
+            f"No English audio stream found among {len(AudioStreams)} stream(s) (languages: {AllLanguages}), using first stream",
             'SelectPreferredAudioStream', 'FFmpegAnalysisService'
         )
-        return AudioStreams[0], 0
+        return AudioStreams[0], 0, AllLanguages, HasExplicitEnglish
 
     # Subtitle codecs that are text-based and can be converted to SRT/mov_text
     TEXT_SUBTITLE_CODECS = {'ass', 'ssa', 'srt', 'subrip', 'webvtt', 'mov_text'}

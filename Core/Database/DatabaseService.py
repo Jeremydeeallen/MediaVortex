@@ -138,6 +138,15 @@ def _parse_select_columns(query: str) -> list:
     return result
 
 
+def EscapeLikePattern(Value: str) -> str:
+    """Escape special LIKE characters (!, %, _) in a value for use with ESCAPE '!'.
+
+    Must be applied to any user-supplied string used in a LIKE pattern
+    so that characters like ! % _ are treated as literals.
+    """
+    return Value.replace('!', '!!').replace('%', '!%').replace('_', '!_')
+
+
 class DatabaseService:
     """Low-level database connection service using PostgreSQL with connection pooling."""
 

@@ -275,6 +275,39 @@ class WebServiceApp:
                 LoggingService.LogException("Error rendering ClipBuilder page", e, "WebService", "clip_builder")
                 return render_template('Error.html', ErrorCode=500, ErrorMessage="Failed to load page"), 500
 
+        @self.App.route('/api/ClientLog', methods=['POST'])
+        def ClientLog():
+            """Receive client-side JavaScript errors and log them to the database."""
+            try:
+                Data = request.get_json()
+                if not Data:
+                    return jsonify({'Success': False, 'Message': 'No data provided'}), 400
+
+                Message = Data.get('Message', 'Unknown client error')
+                Source = Data.get('Source', '')
+                LineNo = Data.get('LineNo', '')
+                ColNo = Data.get('ColNo', '')
+                Stack = Data.get('Stack', '')
+                Page = Data.get('Page', '')
+                ErrorType = Data.get('ErrorType', 'JavaScriptError')
+
+                LogMessage = f"[{Page}] {Message}"
+                if Source:
+                    LogMessage += f" (at {Source}:{LineNo}:{ColNo})"
+
+                LoggingService.LogToDatabase(
+                    'ERROR',
+                    LogMessage,
+                    FunctionName='ClientLog',
+                    Component='WebUI',
+                    ExceptionType=ErrorType,
+                    ExceptionMessage=Message,
+                    StackTrace=Stack
+                )
+                return jsonify({'Success': True}), 200
+            except Exception as e:
+                return jsonify({'Success': False, 'Message': str(e)}), 500
+
     def _register_blueprints(self):
         """Register Flask blueprints."""
         from Features.ServiceControl.ServiceControlController import ServiceControlBlueprint
@@ -289,6 +322,8 @@ class WebServiceApp:
         from Features.Optimization.OptimizationController import OptimizationBlueprint
         from Features.ClipBuilder.ClipBuilderController import ClipBuilderBlueprint
         from Features.TeamStatus.TeamStatusController import TeamStatusBlueprint
+        from Features.MediaProbe.MediaProbeController import MediaProbeBlueprint
+        from Features.FailureTracking.FailureTrackingController import FailureTrackingBlueprint
 
         # Register all blueprints
         self.App.register_blueprint(ServiceControlBlueprint)
@@ -304,6 +339,8 @@ class WebServiceApp:
         self.App.register_blueprint(OptimizationBlueprint)
         self.App.register_blueprint(ClipBuilderBlueprint)
         self.App.register_blueprint(TeamStatusBlueprint)
+        self.App.register_blueprint(MediaProbeBlueprint)
+        self.App.register_blueprint(FailureTrackingBlueprint, url_prefix='/api/FailureTracking')
     
     def PrivateStartServiceStatusTracking(self):
         """Start service status tracking thread."""

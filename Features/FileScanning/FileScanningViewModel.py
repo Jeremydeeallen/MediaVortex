@@ -547,6 +547,38 @@ class FileScanningViewModel:
                 'TotalPages': 0
             }
 
+    def GetAllTranscodeCandidateFilesPaginated(self, RootFolderPath: str, Page: int = 1, PageSize: int = 25,
+                                                Search: str = '', SortColumn: str = 'VideoBitrateKbps',
+                                                SortOrder: str = 'DESC') -> Dict[str, Any]:
+        """Get individual transcode candidate files across a root folder, with display formatting."""
+        try:
+            Result = self.BusinessService.Repository.GetAllTranscodeCandidateFiles(
+                RootFolderPath, Page, PageSize, Search, SortColumn, SortOrder
+            )
+
+            for File in Result['Files']:
+                SizeMB = File['SizeMB']
+                if SizeMB >= 1024:
+                    File['SizeDisplay'] = f"{SizeMB / 1024:.2f} GB"
+                else:
+                    File['SizeDisplay'] = f"{SizeMB:.2f} MB"
+
+                Bitrate = File.get('VideoBitrateKbps', 0)
+                if Bitrate >= 1000:
+                    File['BitrateDisplay'] = f"{Bitrate / 1000:.1f} Mbps"
+                else:
+                    File['BitrateDisplay'] = f"{Bitrate} Kbps" if Bitrate else '-'
+
+            return Result
+
+        except Exception as e:
+            LoggingService.LogException("Error getting all transcode candidate files", e, "GetAllTranscodeCandidateFilesPaginated", "FileScanningViewModel")
+            return {
+                'Files': [],
+                'TotalCount': 0,
+                'TotalPages': 0
+            }
+
     def ExtractMetadataForExistingFiles(self, RootFolderId: Optional[int] = None) -> Dict[str, Any]:
         """Extract metadata for existing files that need it."""
         try:

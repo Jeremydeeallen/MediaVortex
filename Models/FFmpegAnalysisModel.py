@@ -42,6 +42,10 @@ class FFmpegAnalysisModel:
     AudioChannelLayout: Optional[str] = None
     OverallBitrate: Optional[int] = None
     
+    # Audio language tracking
+    AudioLanguages: Optional[str] = None  # Comma-separated list of all audio stream languages (e.g. 'eng,jpn')
+    HasExplicitEnglishAudio: Optional[bool] = None  # True if at least one stream is tagged eng/en
+
     # Stream Selection
     AudioStreamIndex: Optional[int] = None  # 0-based audio stream index for -map 0:a:{index}
     SubtitleStreamIndex: Optional[int] = None  # 0-based subtitle stream index for -map 0:s:{index}
@@ -125,6 +129,8 @@ class FFmpegAnalysisModel:
             'AudioSampleFormat': self.AudioSampleFormat,
             'AudioChannelLayout': self.AudioChannelLayout,
             'OverallBitrate': self.OverallBitrate,
+            'AudioLanguages': self.AudioLanguages,
+            'HasExplicitEnglishAudio': self.HasExplicitEnglishAudio,
             'AudioStreamIndex': self.AudioStreamIndex,
             'SubtitleStreamIndex': self.SubtitleStreamIndex,
             'SubtitleCodec': self.SubtitleCodec

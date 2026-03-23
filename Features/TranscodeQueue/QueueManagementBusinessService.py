@@ -71,6 +71,7 @@ class QueueManagementBusinessService:
             itemsSkipped = 0
             itemsSkippedDueToResolution = 0
             itemsSkippedDueToQuality = 0  # Track files skipped because VMAF >= 80
+            itemsSkippedDueToAudio = 0  # Track files skipped because no English audio found
 
             for mediaFile in mediaFilesWithProfiles:
                 # Skip if already in queue
@@ -135,6 +136,12 @@ class QueueManagementBusinessService:
                         LoggingService.LogInfo(f"Skipped {mediaFile.FileName} due to resolution: {skipReason}", "QueueManagementBusinessService", "PopulateQueueFromMediaFiles")
                         continue
 
+                # Skip files without confirmed English audio to prevent destructive transcoding
+                if mediaFile.HasExplicitEnglishAudio is False:
+                    itemsSkippedDueToAudio += 1
+                    LoggingService.LogWarning(f"Skipped {mediaFile.FileName}: No English audio track found (languages: {mediaFile.AudioLanguages or 'unknown'})", "QueueManagementBusinessService", "PopulateQueueFromMediaFiles")
+                    continue
+
                 # Create queue item (no need to find threshold since profile is already assigned)
                 queueItem = self.CreateQueueItemFromMediaFileWithProfile(mediaFile)
                 if queueItem:
@@ -156,6 +163,8 @@ class QueueManagementBusinessService:
                 skipDetails.append(f"{itemsSkippedDueToQuality} skipped (quality already acceptable - VMAF >= 80)")
             if itemsSkippedDueToResolution > 0:
                 skipDetails.append(f"{itemsSkippedDueToResolution} skipped (resolution check)")
+            if itemsSkippedDueToAudio > 0:
+                skipDetails.append(f"{itemsSkippedDueToAudio} skipped (no confirmed English audio - needs manual review)")
 
             skipMessage = ", ".join(skipDetails) if skipDetails else "no files were skipped"
 
@@ -177,10 +186,11 @@ class QueueManagementBusinessService:
                 "ItemsSkipped": itemsSkipped,
                 "ItemsSkippedDueToResolution": itemsSkippedDueToResolution,
                 "ItemsSkippedDueToQuality": itemsSkippedDueToQuality,
+                "ItemsSkippedDueToAudio": itemsSkippedDueToAudio,
                 "Message": friendlyMessage
             }
 
-            LoggingService.LogInfo(f"Queue population completed: {itemsAdded} added, {itemsSkipped} skipped (duplicate/transcoded), {itemsSkippedDueToQuality} skipped (quality acceptable), {itemsSkippedDueToResolution} skipped (resolution check) from {len(mediaFilesWithProfiles)} files with profiles", "QueueManagementBusinessService", "PopulateQueueFromMediaFiles")
+            LoggingService.LogInfo(f"Queue population completed: {itemsAdded} added, {itemsSkipped} skipped (duplicate/transcoded), {itemsSkippedDueToQuality} skipped (quality acceptable), {itemsSkippedDueToResolution} skipped (resolution check), {itemsSkippedDueToAudio} skipped (no English audio) from {len(mediaFilesWithProfiles)} files with profiles", "QueueManagementBusinessService", "PopulateQueueFromMediaFiles")
             return result
 
         except Exception as e:

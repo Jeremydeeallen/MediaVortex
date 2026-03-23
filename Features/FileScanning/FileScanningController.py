@@ -584,6 +584,43 @@ class FileScanningController:
                     'Error': 'GetCandidateFilesError'
                 }), 500
 
+        @self.Blueprint.route('/TranscodeCandidates/AllFiles', methods=['GET'])
+        def GetAllTranscodeCandidateFiles():
+            """Get individual transcode candidate files across a root folder, sortable by bitrate."""
+            try:
+                RootFolderPath = request.args.get('RootFolderPath', '')
+                if not RootFolderPath:
+                    return jsonify({
+                        'Success': False,
+                        'Message': 'RootFolderPath is required',
+                        'Error': 'MissingParameter'
+                    }), 400
+
+                Page = int(request.args.get('Page', 1))
+                PageSize = int(request.args.get('PageSize', 25))
+                Search = request.args.get('Search', '')
+                SortColumn = request.args.get('SortColumn', 'VideoBitrateKbps')
+                SortOrder = request.args.get('SortOrder', 'DESC')
+
+                Result = self.ViewModel.GetAllTranscodeCandidateFilesPaginated(
+                    RootFolderPath, Page, PageSize, Search, SortColumn, SortOrder
+                )
+                return jsonify({
+                    'Success': True,
+                    'Files': Result['Files'],
+                    'TotalCount': Result['TotalCount'],
+                    'TotalPages': Result['TotalPages'],
+                    'RootFolderPath': RootFolderPath
+                }), 200
+
+            except Exception as e:
+                LoggingService.LogException("Error in GetAllTranscodeCandidateFiles endpoint", e, "FileScanningController", "GetAllTranscodeCandidateFiles")
+                return jsonify({
+                    'Success': False,
+                    'Message': f'Error getting candidate files: {str(e)}',
+                    'Error': 'GetAllCandidateFilesError'
+                }), 500
+
         @self.Blueprint.route('/Statistics', methods=['GET'])
         def GetStatistics():
             """Get database statistics for the file scanning page."""

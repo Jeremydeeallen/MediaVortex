@@ -13,6 +13,7 @@ from Models.TranscodeFileModel import TranscodeFileModel
 # Quality testing models removed - using simple QualityTest methods instead
 from Services.DatabaseService import DatabaseService
 from Services.LoggingService import LoggingService
+from Core.Database.DatabaseService import EscapeLikePattern
 
 
 class DatabaseManager:
@@ -87,6 +88,30 @@ class DatabaseManager:
                     cursor.execute("ALTER TABLE TranscodeAttempts ADD COLUMN CompletedDate TIMESTAMP")
                     connection.commit()
                     LoggingService.LogInfo("Added CompletedDate column to TranscodeAttempts", "DatabaseManager", "RunMigrations")
+
+                # Add FFprobe failure tracking columns to MediaFiles
+                if not column_exists('MediaFiles', 'FFprobeFailureCount'):
+                    cursor.execute("ALTER TABLE MediaFiles ADD COLUMN FFprobeFailureCount INTEGER DEFAULT 0")
+                    connection.commit()
+                    LoggingService.LogInfo("Added FFprobeFailureCount column to MediaFiles", "DatabaseManager", "RunMigrations")
+                if not column_exists('MediaFiles', 'LastFFprobeError'):
+                    cursor.execute("ALTER TABLE MediaFiles ADD COLUMN LastFFprobeError TEXT")
+                    connection.commit()
+                    LoggingService.LogInfo("Added LastFFprobeError column to MediaFiles", "DatabaseManager", "RunMigrations")
+                if not column_exists('MediaFiles', 'LastFFprobeAttemptDate'):
+                    cursor.execute("ALTER TABLE MediaFiles ADD COLUMN LastFFprobeAttemptDate TIMESTAMP")
+                    connection.commit()
+                    LoggingService.LogInfo("Added LastFFprobeAttemptDate column to MediaFiles", "DatabaseManager", "RunMigrations")
+
+                # Add audio language tracking columns to MediaFiles
+                if not column_exists('MediaFiles', 'AudioLanguages'):
+                    cursor.execute("ALTER TABLE MediaFiles ADD COLUMN AudioLanguages TEXT")
+                    connection.commit()
+                    LoggingService.LogInfo("Added AudioLanguages column to MediaFiles", "DatabaseManager", "RunMigrations")
+                if not column_exists('MediaFiles', 'HasExplicitEnglishAudio'):
+                    cursor.execute("ALTER TABLE MediaFiles ADD COLUMN HasExplicitEnglishAudio BOOLEAN")
+                    connection.commit()
+                    LoggingService.LogInfo("Added HasExplicitEnglishAudio column to MediaFiles", "DatabaseManager", "RunMigrations")
 
                 connection.commit()
             finally:
@@ -444,7 +469,11 @@ class DatabaseManager:
         """Delete a root folder and its associated media files."""
         try:
             # Delete associated media files first
-            self.DatabaseService.ExecuteNonQuery("DELETE FROM MediaFiles WHERE Id IN (SELECT Id FROM MediaFiles WHERE LOWER(FilePath) LIKE LOWER((SELECT RootFolder FROM RootFolders WHERE Id = %s)) || '%%' ESCAPE '!')", (RootFolderId,))
+            # Get root folder path to escape LIKE special chars before deletion
+            rfRows = self.DatabaseService.ExecuteQuery("SELECT RootFolder FROM RootFolders WHERE Id = %s", (RootFolderId,))
+            if rfRows:
+                escapedPath = EscapeLikePattern(rfRows[0]['RootFolder'])
+                self.DatabaseService.ExecuteNonQuery("DELETE FROM MediaFiles WHERE LOWER(FilePath) LIKE LOWER(%s) || '%%' ESCAPE '!'", (escapedPath,))
             
             # Delete the root folder
             affectedRows = self.DatabaseService.ExecuteNonQuery("DELETE FROM RootFolders WHERE Id = %s", (RootFolderId,))
@@ -838,7 +867,8 @@ class DatabaseManager:
             FROM MediaFiles 
             WHERE LOWER(FilePath) LIKE LOWER(%s) ESCAPE '!'
         """
-        rows = self.DatabaseService.ExecuteQuery(query, (f"{RootFolderPath}%",))
+        escapedPath = EscapeLikePattern(RootFolderPath)
+        rows = self.DatabaseService.ExecuteQuery(query, (f"{escapedPath}%",))
         
         mediaFiles = []
         for row in rows:
@@ -2247,8 +2277,8 @@ class DatabaseManager:
                 SET AssignedProfile = %s
                 WHERE LOWER(FilePath) LIKE LOWER(%s) || '%%' ESCAPE '!'
             """
-
-            filesUpdated = self.DatabaseService.ExecuteNonQuery(query, (profileName, RootFolderPath))
+            escapedPath = EscapeLikePattern(RootFolderPath)
+            filesUpdated = self.DatabaseService.ExecuteNonQuery(query, (profileName, escapedPath))
             LoggingService.LogInfo(f"Updated {filesUpdated} media files in root folder '{RootFolderPath}' to use profile '{profileName}'", "DatabaseManager", "UpdateMediaFilesProfileByRootFolder")
 
             return filesUpdated
@@ -4923,7 +4953,8 @@ class DatabaseManager:
                        TranscodeActions
                 FROM JellyfinOperations
                 WHERE OperationType = %s
-                GROUP BY FileName, Reason
+                GROUP BY FileName, FilePath, VideoCodec, AudioCodec, Container, Resolution, Reason,
+                         SubtitleCodecs, TranscodeActions
                 ORDER BY LastSeen DESC
                 LIMIT %s
             """
@@ -5016,14 +5047,14 @@ class DatabaseManager:
             import os
             nameNoExt = os.path.splitext(FileName)[0]
             query = f"SELECT {selectCols} FROM MediaFiles WHERE LOWER(FileName) LIKE LOWER(%s) ESCAPE '!' LIMIT 1"
-            rows = self.DatabaseService.ExecuteQuery(query, (nameNoExt + '%',))
+            rows = self.DatabaseService.ExecuteQuery(query, (EscapeLikePattern(nameNoExt) + '%',))
             if rows:
                 return self._MapMediaFileSummaryRow(rows[0], "no_ext")
 
             # 3. Fuzzy match by episode prefix (handles resolution/quality change)
             episodePrefix = self._ExtractEpisodePrefix(FileName)
             if episodePrefix and episodePrefix != nameNoExt:
-                rows = self.DatabaseService.ExecuteQuery(query, (episodePrefix + '%',))
+                rows = self.DatabaseService.ExecuteQuery(query, (EscapeLikePattern(episodePrefix) + '%',))
                 if rows:
                     return self._MapMediaFileSummaryRow(rows[0], "fuzzy")
 
@@ -5083,13 +5114,13 @@ class DatabaseManager:
             if not rows:
                 nameNoExt = os.path.splitext(FileName)[0]
                 likeQuery = f"SELECT {selectCols} FROM MediaFiles WHERE LOWER(FileName) LIKE LOWER(%s) ESCAPE '!' LIMIT 1"
-                rows = self.DatabaseService.ExecuteQuery(likeQuery, (nameNoExt + '%',))
+                rows = self.DatabaseService.ExecuteQuery(likeQuery, (EscapeLikePattern(nameNoExt) + '%',))
 
                 # 3. Fuzzy match by episode prefix (handles resolution/quality change)
                 if not rows:
                     episodePrefix = self._ExtractEpisodePrefix(FileName)
                     if episodePrefix and episodePrefix != nameNoExt:
-                        rows = self.DatabaseService.ExecuteQuery(likeQuery, (episodePrefix + '%',))
+                        rows = self.DatabaseService.ExecuteQuery(likeQuery, (EscapeLikePattern(episodePrefix) + '%',))
 
             if not rows:
                 return None

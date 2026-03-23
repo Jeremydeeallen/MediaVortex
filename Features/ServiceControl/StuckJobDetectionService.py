@@ -249,70 +249,59 @@ class StuckJobDetectionService:
                 LoggingService.LogException(f"Error killing FFmpeg process for stuck job {QueueId} (continuing with DB cleanup)", killEx,
                                           "StuckJobDetectionService", "CleanupStuckJob")
 
-            # Start database transaction for atomic cleanup
-            self.DatabaseManager.DatabaseService.BeginTransaction()
+            # Each ExecuteNonQuery auto-commits on its own connection
+            # 1. Reset TranscodeQueue status to Pending
+            queueUpdateQuery = """
+            UPDATE TranscodeQueue
+            SET Status = 'Pending', DateStarted = NULL
+            WHERE Id = %s
+            """
+            queueAffected = self.DatabaseManager.DatabaseService.ExecuteNonQuery(queueUpdateQuery, (QueueId,))
 
-            try:
-                # 1. Reset TranscodeQueue status to Pending
-                queueUpdateQuery = """
-                UPDATE TranscodeQueue
-                SET Status = 'Pending', DateStarted = NULL
-                WHERE Id = %s
-                """
-                queueAffected = self.DatabaseManager.DatabaseService.ExecuteNonQuery(queueUpdateQuery, (QueueId,))
+            # 2. Update TranscodeAttempts to mark as failed
+            attemptUpdateQuery = """
+            UPDATE TranscodeAttempts
+            SET Success = FALSE, ErrorMessage = %s
+            WHERE LOWER(FilePath) = LOWER(%s) AND Success IS NULL
+            """
+            attemptAffected = self.DatabaseManager.DatabaseService.ExecuteNonQuery(
+                attemptUpdateQuery,
+                (f"FFmpeg process died unexpectedly - cleaned by StuckJobDetectionService: {Reason}", jobDetails.FilePath)
+            )
 
-                # 2. Update TranscodeAttempts to mark as failed
-                attemptUpdateQuery = """
-                UPDATE TranscodeAttempts
-                SET Success = FALSE, ErrorMessage = %s
-                WHERE LOWER(FilePath) = LOWER(%s) AND Success IS NULL
-                """
-                attemptAffected = self.DatabaseManager.DatabaseService.ExecuteNonQuery(
-                    attemptUpdateQuery,
-                    (f"FFmpeg process died unexpectedly - cleaned by StuckJobDetectionService: {Reason}", jobDetails.FilePath)
-                )
+            # 3. Delete TranscodeProgress records
+            progressDeleteQuery = """
+            DELETE FROM TranscodeProgress
+            WHERE TranscodeAttemptId IN (
+                SELECT Id FROM TranscodeAttempts
+                WHERE LOWER(FilePath) = LOWER(%s) AND Success = FALSE
+            )
+            """
+            progressAffected = self.DatabaseManager.DatabaseService.ExecuteNonQuery(progressDeleteQuery, (jobDetails.FilePath,))
 
-                # 3. Delete TranscodeProgress records
-                progressDeleteQuery = """
-                DELETE FROM TranscodeProgress
-                WHERE TranscodeAttemptId IN (
-                    SELECT Id FROM TranscodeAttempts
-                    WHERE LOWER(FilePath) = LOWER(%s) AND Success = FALSE
-                )
-                """
-                progressAffected = self.DatabaseManager.DatabaseService.ExecuteNonQuery(progressDeleteQuery, (jobDetails.FilePath,))
+            # 4. Complete ActiveJobs records for this service
+            activeJobUpdateQuery = """
+            UPDATE ActiveJobs
+            SET Status = 'Failed', UpdatedAt = NOW()
+            WHERE ServiceName = 'TranscodeService' AND QueueId = %s
+            """
+            activeJobAffected = self.DatabaseManager.DatabaseService.ExecuteNonQuery(
+                activeJobUpdateQuery,
+                (QueueId,)
+            )
 
-                # 4. Complete ActiveJobs records for this service
-                activeJobUpdateQuery = """
-                UPDATE ActiveJobs
-                SET Status = 'Failed', UpdatedAt = NOW()
-                WHERE ServiceName = 'TranscodeService' AND QueueId = %s
-                """
-                activeJobAffected = self.DatabaseManager.DatabaseService.ExecuteNonQuery(
-                    activeJobUpdateQuery,
-                    (QueueId,)
-                )
+            # Log cleanup details
+            LoggingService.LogInfo(f"Cleaned up stuck job {QueueId}: Queue={queueAffected}, Attempts={attemptAffected}, Progress={progressAffected}, ActiveJobs={activeJobAffected}",
+                                 "StuckJobDetectionService", "CleanupStuckJob")
 
-                # Commit transaction
-                self.DatabaseManager.DatabaseService.CommitTransaction()
-
-                # Log cleanup details
-                LoggingService.LogInfo(f"Cleaned up stuck job {QueueId}: Queue={queueAffected}, Attempts={attemptAffected}, Progress={progressAffected}, ActiveJobs={activeJobAffected}",
-                                     "StuckJobDetectionService", "CleanupStuckJob")
-
-                return {
-                    "Success": True,
-                    "Message": f"Successfully cleaned up stuck job {QueueId}",
-                    "QueueAffected": queueAffected,
-                    "AttemptsAffected": attemptAffected,
-                    "ProgressAffected": progressAffected,
-                    "ActiveJobsAffected": activeJobAffected
-                }
-
-            except Exception as e:
-                # Rollback transaction on error
-                self.DatabaseManager.DatabaseService.RollbackTransaction()
-                raise e
+            return {
+                "Success": True,
+                "Message": f"Successfully cleaned up stuck job {QueueId}",
+                "QueueAffected": queueAffected,
+                "AttemptsAffected": attemptAffected,
+                "ProgressAffected": progressAffected,
+                "ActiveJobsAffected": activeJobAffected
+            }
 
         except Exception as e:
             errorMsg = f"Exception cleaning up stuck job {QueueId}: {str(e)}"

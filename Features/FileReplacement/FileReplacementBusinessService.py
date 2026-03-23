@@ -651,8 +651,28 @@ class FileReplacementBusinessService:
             media_file.AudioSampleRate = metadata.get('AudioSampleRate')
             media_file.AudioSampleFormat = metadata.get('AudioSampleFormat')
             media_file.AudioChannelLayout = metadata.get('AudioChannelLayout')
+            media_file.AudioCodec = metadata.get('AudioCodec')
+            media_file.SubtitleFormats = metadata.get('SubtitleFormats')
             media_file.ContainerFormat = metadata.get('ContainerFormat')
             media_file.OverallBitrate = metadata.get('OverallBitrate')
+            media_file.AudioLanguages = metadata.get('AudioLanguages')
+            media_file.HasExplicitEnglishAudio = metadata.get('HasExplicitEnglishAudio')
+
+            # Derive ResolutionCategory from new Resolution
+            NewResolution = media_file.Resolution or ''
+            if NewResolution and 'x' in NewResolution:
+                try:
+                    Height = int(NewResolution.split('x')[1])
+                    if Height >= 2160:
+                        media_file.ResolutionCategory = "2160p"
+                    elif Height >= 1080:
+                        media_file.ResolutionCategory = "1080p"
+                    elif Height >= 720:
+                        media_file.ResolutionCategory = "720p"
+                    else:
+                        media_file.ResolutionCategory = "480p"
+                except (ValueError, IndexError):
+                    pass
 
             # Set TranscodedByMediaVortex to True
             media_file.TranscodedByMediaVortex = True

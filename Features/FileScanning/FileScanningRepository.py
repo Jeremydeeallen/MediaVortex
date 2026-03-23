@@ -2,6 +2,7 @@ import os
 import re
 from typing import Optional, List, Dict, Any
 from Core.Database.BaseRepository import BaseRepository
+from Core.Database.DatabaseService import EscapeLikePattern
 from Core.Logging.LoggingService import LoggingService
 from Core.Models.MediaFileModel import MediaFileModel
 from Features.FileScanning.Models.RootFolderModel import RootFolderModel
@@ -70,7 +71,10 @@ class FileScanningRepository(BaseRepository):
 
     def DeleteRootFolder(self, RootFolderId: int) -> bool:
         try:
-            self.ExecuteNonQuery("DELETE FROM MediaFiles WHERE Id IN (SELECT Id FROM MediaFiles WHERE LOWER(FilePath) LIKE LOWER((SELECT RootFolder FROM RootFolders WHERE Id = %s)) || '%%' ESCAPE '!')", (RootFolderId,))
+            rfRows = self.ExecuteQuery("SELECT RootFolder FROM RootFolders WHERE Id = %s", (RootFolderId,))
+            if rfRows:
+                escapedPath = EscapeLikePattern(rfRows[0]['RootFolder'])
+                self.ExecuteNonQuery("DELETE FROM MediaFiles WHERE LOWER(FilePath) LIKE LOWER(%s) || '%%' ESCAPE '!'", (escapedPath,))
             affectedRows = self.ExecuteNonQuery("DELETE FROM RootFolders WHERE Id = %s", (RootFolderId,))
             return affectedRows > 0
         except Exception:
@@ -285,7 +289,10 @@ class FileScanningRepository(BaseRepository):
             AudioSampleFormat=row['AudioSampleFormat'], AudioChannelLayout=row['AudioChannelLayout'],
             AudioCodec=row['AudioCodec'], SubtitleFormats=row['SubtitleFormats'],
             ContainerFormat=row['ContainerFormat'], OverallBitrate=row['OverallBitrate'],
-            TranscodedByMediaVortex=row['TranscodedByMediaVortex']
+            TranscodedByMediaVortex=row['TranscodedByMediaVortex'],
+            FFprobeFailureCount=row.get('FFprobeFailureCount', 0),
+            LastFFprobeError=row.get('LastFFprobeError'),
+            LastFFprobeAttemptDate=row.get('LastFFprobeAttemptDate')
         )
 
     _MEDIA_FILE_SELECT_COLS = """Id, SeasonId, FilePath, FileName, SizeMB, VideoBitrateKbps, AudioBitrateKbps,
@@ -294,7 +301,8 @@ class FileScanningRepository(BaseRepository):
                    FileModificationTime, TotalFrames, CodecProfile, ColorRange, FieldOrder,
                    HasBFrames, RefFrames, PixelFormat, Level, AudioChannels, AudioSampleRate,
                    AudioSampleFormat, AudioChannelLayout, AudioCodec, SubtitleFormats,
-                   ContainerFormat, OverallBitrate, TranscodedByMediaVortex"""
+                   ContainerFormat, OverallBitrate, TranscodedByMediaVortex,
+                   FFprobeFailureCount, LastFFprobeError, LastFFprobeAttemptDate"""
 
     def GetAllMediaFiles(self) -> List[MediaFileModel]:
         query = f"SELECT {self._MEDIA_FILE_SELECT_COLS} FROM MediaFiles"
@@ -317,7 +325,7 @@ class FileScanningRepository(BaseRepository):
 
     def GetMediaFilesByRootFolder(self, RootFolderPath: str) -> List[MediaFileModel]:
         query = f"SELECT {self._MEDIA_FILE_SELECT_COLS} FROM MediaFiles WHERE LOWER(FilePath) LIKE LOWER(%s) ESCAPE '!'"
-        rows = self.ExecuteQuery(query, (f"{RootFolderPath}%",))
+        rows = self.ExecuteQuery(query, (f"{EscapeLikePattern(RootFolderPath)}%",))
         return [self._MapRowToMediaFile(row) for row in rows]
 
     def GetMediaFilesByRootFolderId(self, RootFolderId: int) -> List[MediaFileModel]:
@@ -343,16 +351,16 @@ class FileScanningRepository(BaseRepository):
                         # Fall through to update branch
                     else:
                         # Insert
-                        query = """INSERT INTO MediaFiles (SeasonId, FilePath, FileName, SizeMB, VideoBitrateKbps, AudioBitrateKbps, Resolution, Codec, DurationMinutes, FrameRate, LastScannedDate, CompressionPotential, AssignedProfile, FileModificationTime, TotalFrames, CodecProfile, ColorRange, FieldOrder, HasBFrames, RefFrames, PixelFormat, Level, AudioChannels, AudioSampleRate, AudioSampleFormat, AudioChannelLayout, AudioCodec, SubtitleFormats, ContainerFormat, OverallBitrate, TranscodedByMediaVortex) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING Id"""
-                        parameters = (MediaFile.SeasonId, MediaFile.FilePath, MediaFile.FileName, MediaFile.SizeMB, MediaFile.VideoBitrateKbps, MediaFile.AudioBitrateKbps, MediaFile.Resolution, MediaFile.Codec, MediaFile.DurationMinutes, MediaFile.FrameRate, MediaFile.LastScannedDate, MediaFile.CompressionPotential, MediaFile.AssignedProfile, MediaFile.FileModificationTime, MediaFile.TotalFrames, MediaFile.CodecProfile, MediaFile.ColorRange, MediaFile.FieldOrder, MediaFile.HasBFrames, MediaFile.RefFrames, MediaFile.PixelFormat, MediaFile.Level, MediaFile.AudioChannels, MediaFile.AudioSampleRate, MediaFile.AudioSampleFormat, MediaFile.AudioChannelLayout, MediaFile.AudioCodec, MediaFile.SubtitleFormats, MediaFile.ContainerFormat, MediaFile.OverallBitrate, MediaFile.TranscodedByMediaVortex)
+                        query = """INSERT INTO MediaFiles (SeasonId, FilePath, FileName, SizeMB, VideoBitrateKbps, AudioBitrateKbps, Resolution, Codec, DurationMinutes, FrameRate, LastScannedDate, CompressionPotential, AssignedProfile, FileModificationTime, TotalFrames, CodecProfile, ColorRange, FieldOrder, HasBFrames, RefFrames, PixelFormat, Level, AudioChannels, AudioSampleRate, AudioSampleFormat, AudioChannelLayout, AudioCodec, SubtitleFormats, ContainerFormat, OverallBitrate, TranscodedByMediaVortex, FFprobeFailureCount, LastFFprobeError, LastFFprobeAttemptDate) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING Id"""
+                        parameters = (MediaFile.SeasonId, MediaFile.FilePath, MediaFile.FileName, MediaFile.SizeMB, MediaFile.VideoBitrateKbps, MediaFile.AudioBitrateKbps, MediaFile.Resolution, MediaFile.Codec, MediaFile.DurationMinutes, MediaFile.FrameRate, MediaFile.LastScannedDate, MediaFile.CompressionPotential, MediaFile.AssignedProfile, MediaFile.FileModificationTime, MediaFile.TotalFrames, MediaFile.CodecProfile, MediaFile.ColorRange, MediaFile.FieldOrder, MediaFile.HasBFrames, MediaFile.RefFrames, MediaFile.PixelFormat, MediaFile.Level, MediaFile.AudioChannels, MediaFile.AudioSampleRate, MediaFile.AudioSampleFormat, MediaFile.AudioChannelLayout, MediaFile.AudioCodec, MediaFile.SubtitleFormats, MediaFile.ContainerFormat, MediaFile.OverallBitrate, MediaFile.TranscodedByMediaVortex, MediaFile.FFprobeFailureCount, MediaFile.LastFFprobeError, MediaFile.LastFFprobeAttemptDate)
                         cursor.execute(query, parameters)
                         mediaFileId = cursor.fetchone()[0]
                         connection.commit()
                         return mediaFileId
                 # Update (either explicit update or duplicate converted to update)
                 if MediaFile.Id is not None:
-                    query = """UPDATE MediaFiles SET SeasonId = %s, FilePath = %s, FileName = %s, SizeMB = %s, VideoBitrateKbps = %s, AudioBitrateKbps = %s, Resolution = %s, Codec = %s, DurationMinutes = %s, FrameRate = %s, LastScannedDate = %s, CompressionPotential = %s, AssignedProfile = %s, FileModificationTime = %s, TotalFrames = %s, CodecProfile = %s, ColorRange = %s, FieldOrder = %s, HasBFrames = %s, RefFrames = %s, PixelFormat = %s, Level = %s, AudioChannels = %s, AudioSampleRate = %s, AudioSampleFormat = %s, AudioChannelLayout = %s, AudioCodec = %s, SubtitleFormats = %s, ContainerFormat = %s, OverallBitrate = %s, TranscodedByMediaVortex = %s WHERE Id = %s"""
-                    parameters = (MediaFile.SeasonId, MediaFile.FilePath, MediaFile.FileName, MediaFile.SizeMB, MediaFile.VideoBitrateKbps, MediaFile.AudioBitrateKbps, MediaFile.Resolution, MediaFile.Codec, MediaFile.DurationMinutes, MediaFile.FrameRate, MediaFile.LastScannedDate, MediaFile.CompressionPotential, MediaFile.AssignedProfile, MediaFile.FileModificationTime, MediaFile.TotalFrames, MediaFile.CodecProfile, MediaFile.ColorRange, MediaFile.FieldOrder, MediaFile.HasBFrames, MediaFile.RefFrames, MediaFile.PixelFormat, MediaFile.Level, MediaFile.AudioChannels, MediaFile.AudioSampleRate, MediaFile.AudioSampleFormat, MediaFile.AudioChannelLayout, MediaFile.AudioCodec, MediaFile.SubtitleFormats, MediaFile.ContainerFormat, MediaFile.OverallBitrate, MediaFile.TranscodedByMediaVortex, MediaFile.Id)
+                    query = """UPDATE MediaFiles SET SeasonId = %s, FilePath = %s, FileName = %s, SizeMB = %s, VideoBitrateKbps = %s, AudioBitrateKbps = %s, Resolution = %s, Codec = %s, DurationMinutes = %s, FrameRate = %s, LastScannedDate = %s, CompressionPotential = %s, AssignedProfile = %s, FileModificationTime = %s, TotalFrames = %s, CodecProfile = %s, ColorRange = %s, FieldOrder = %s, HasBFrames = %s, RefFrames = %s, PixelFormat = %s, Level = %s, AudioChannels = %s, AudioSampleRate = %s, AudioSampleFormat = %s, AudioChannelLayout = %s, AudioCodec = %s, SubtitleFormats = %s, ContainerFormat = %s, OverallBitrate = %s, TranscodedByMediaVortex = %s, FFprobeFailureCount = %s, LastFFprobeError = %s, LastFFprobeAttemptDate = %s WHERE Id = %s"""
+                    parameters = (MediaFile.SeasonId, MediaFile.FilePath, MediaFile.FileName, MediaFile.SizeMB, MediaFile.VideoBitrateKbps, MediaFile.AudioBitrateKbps, MediaFile.Resolution, MediaFile.Codec, MediaFile.DurationMinutes, MediaFile.FrameRate, MediaFile.LastScannedDate, MediaFile.CompressionPotential, MediaFile.AssignedProfile, MediaFile.FileModificationTime, MediaFile.TotalFrames, MediaFile.CodecProfile, MediaFile.ColorRange, MediaFile.FieldOrder, MediaFile.HasBFrames, MediaFile.RefFrames, MediaFile.PixelFormat, MediaFile.Level, MediaFile.AudioChannels, MediaFile.AudioSampleRate, MediaFile.AudioSampleFormat, MediaFile.AudioChannelLayout, MediaFile.AudioCodec, MediaFile.SubtitleFormats, MediaFile.ContainerFormat, MediaFile.OverallBitrate, MediaFile.TranscodedByMediaVortex, MediaFile.FFprobeFailureCount, MediaFile.LastFFprobeError, MediaFile.LastFFprobeAttemptDate, MediaFile.Id)
                     cursor.execute(query, parameters)
                     connection.commit()
                     return MediaFile.Id
@@ -702,6 +710,77 @@ class FileScanningRepository(BaseRepository):
             'TotalPages': (total_count + PageSize - 1) // PageSize
         }
 
+    def GetAllTranscodeCandidateFiles(self, RootFolderPath: str, Page: int = 1, PageSize: int = 25,
+                                       Search: str = '', SortColumn: str = 'VideoBitrateKbps',
+                                       SortOrder: str = 'DESC') -> Dict[str, Any]:
+        """Get individual untranscoded files across the entire root folder, sortable by bitrate."""
+        ValidSortColumns = {
+            'FileName': 'mf.FileName',
+            'SizeMB': 'mf.SizeMB',
+            'VideoBitrateKbps': 'mf.VideoBitrateKbps',
+            'ResolutionCategory': 'mf.ResolutionCategory',
+            'Codec': 'mf.Codec'
+        }
+        SortCol = ValidSortColumns.get(SortColumn, 'mf.VideoBitrateKbps')
+        Order = 'DESC' if SortOrder.upper() == 'DESC' else 'ASC'
+
+        Prefix = RootFolderPath.rstrip('\\') + '\\'
+        Conditions = [
+            "LEFT(mf.FilePath, %s) = %s",
+            "(mf.TranscodedByMediaVortex IS DISTINCT FROM true)",
+            "LOWER(COALESCE(mf.Codec, '')) NOT IN ('hevc', 'av1', 'h265')"
+        ]
+        Params = [len(Prefix), Prefix]
+
+        if Search:
+            Conditions.append("LOWER(mf.FileName) LIKE LOWER(%s) ESCAPE '!'")
+            Params.append(f"%{EscapeLikePattern(Search)}%")
+
+        WhereClause = "WHERE " + " AND ".join(Conditions)
+
+        CountQuery = f"SELECT COUNT(*) AS Count FROM MediaFiles mf {WhereClause}"
+        CountRows = self.ExecuteQuery(CountQuery, tuple(Params))
+        TotalCount = CountRows[0]['Count'] if CountRows else 0
+
+        Offset = (Page - 1) * PageSize
+        DataQuery = f"""
+            SELECT mf.Id, mf.FileName, mf.FilePath, mf.SizeMB, mf.Codec,
+                   mf.ResolutionCategory, mf.VideoBitrateKbps, mf.AssignedProfile,
+                   mf.AudioLanguages, mf.HasExplicitEnglishAudio
+            FROM MediaFiles mf
+            {WhereClause}
+            ORDER BY {SortCol} {Order} NULLS LAST
+            LIMIT %s OFFSET %s
+        """
+        Rows = self.ExecuteQuery(DataQuery, tuple(Params + [PageSize, Offset]))
+
+        Files = []
+        for Row in Rows:
+            # Extract subfolder name from path
+            FilePath = Row['filepath'] or ''
+            RelativePath = FilePath[len(Prefix):] if FilePath.startswith(Prefix) else FilePath
+            FolderParts = RelativePath.rsplit('\\', 1)
+            FolderName = FolderParts[0] if len(FolderParts) > 1 else ''
+
+            Files.append({
+                'Id': Row['id'],
+                'FileName': Row['filename'],
+                'FolderName': FolderName,
+                'SizeMB': float(Row['sizemb']) if Row['sizemb'] else 0,
+                'Codec': Row['codec'] or 'Unknown',
+                'ResolutionCategory': Row['resolutioncategory'] or 'Unknown',
+                'VideoBitrateKbps': int(Row['videobitratekbps']) if Row['videobitratekbps'] else 0,
+                'AssignedProfile': Row['assignedprofile'],
+                'AudioLanguages': Row['audiolanguages'],
+                'HasExplicitEnglishAudio': Row['hasexplicitenglishaudio']
+            })
+
+        return {
+            'Files': Files,
+            'TotalCount': TotalCount,
+            'TotalPages': (TotalCount + PageSize - 1) // PageSize
+        }
+
     # ─── Season Methods ────────────────────────────────────────────────
 
     def GetAllSeasons(self) -> List[SeasonModel]:
@@ -893,13 +972,13 @@ class FileScanningRepository(BaseRepository):
             if not rows:
                 nameNoExt = os.path.splitext(FileName)[0]
                 likeQuery = f"SELECT {self._MEDIA_FILE_SELECT_COLS} FROM MediaFiles WHERE LOWER(FileName) LIKE LOWER(%s) ESCAPE '!' LIMIT 1"
-                rows = self.ExecuteQuery(likeQuery, (nameNoExt + '%',))
+                rows = self.ExecuteQuery(likeQuery, (EscapeLikePattern(nameNoExt) + '%',))
 
                 # 3. Fuzzy match by episode prefix (handles resolution/quality change)
                 if not rows:
                     episodePrefix = self._ExtractEpisodePrefix(FileName)
                     if episodePrefix and episodePrefix != nameNoExt:
-                        rows = self.ExecuteQuery(likeQuery, (episodePrefix + '%',))
+                        rows = self.ExecuteQuery(likeQuery, (EscapeLikePattern(episodePrefix) + '%',))
 
             if not rows:
                 return None

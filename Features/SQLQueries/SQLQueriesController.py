@@ -6,6 +6,7 @@ Handles database query execution and common troubleshooting queries
 from flask import Blueprint, jsonify, request
 from typing import Dict, Any, List
 from Repositories.DatabaseManager import DatabaseManager
+from Core.Database.DatabaseService import EscapeLikePattern
 from Core.Logging.LoggingService import LoggingService
 
 # Create blueprint
@@ -351,7 +352,7 @@ def GetMediaFileComparison():
             OriginalParams = (FileId,)
         else:
             OriginalQuery += "FilePath LIKE %s ESCAPE '!'"
-            OriginalParams = (f"%{FilePath}%",)
+            OriginalParams = (f"%{EscapeLikePattern(FilePath)}%",)
 
         OriginalResults = SharedDatabaseManager.DatabaseService.ExecuteQuery(OriginalQuery, OriginalParams)
 

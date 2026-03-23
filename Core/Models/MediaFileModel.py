@@ -45,6 +45,15 @@ class MediaFileModel:
     ContainerFormat: Optional[str] = None
     OverallBitrate: Optional[int] = None
     TranscodedByMediaVortex: Optional[bool] = None
+
+    # Audio language tracking
+    AudioLanguages: Optional[str] = None
+    HasExplicitEnglishAudio: Optional[bool] = None
+
+    # FFprobe failure tracking
+    FFprobeFailureCount: Optional[int] = 0
+    LastFFprobeError: Optional[str] = None
+    LastFFprobeAttemptDate: Optional[datetime] = None
     
     def __post_init__(self):
         if self.LastScannedDate is None:

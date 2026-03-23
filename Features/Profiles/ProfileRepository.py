@@ -1,5 +1,6 @@
 from typing import List, Optional, Dict, Any
 from Core.Database.BaseRepository import BaseRepository
+from Core.Database.DatabaseService import EscapeLikePattern
 from Features.Profiles.Models.TranscodeProfileModel import TranscodeProfileModel
 from Features.Profiles.Models.ProfileThresholdModel import ProfileThresholdModel
 from Core.Logging.LoggingService import LoggingService
@@ -267,8 +268,8 @@ class ProfileRepository(BaseRepository):
                 SET AssignedProfile = %s
                 WHERE LOWER(FilePath) LIKE LOWER(%s) || '%%' ESCAPE '!'
             """
-
-            filesUpdated = self.ExecuteNonQuery(query, (profileName, RootFolderPath))
+            escapedPath = EscapeLikePattern(RootFolderPath)
+            filesUpdated = self.ExecuteNonQuery(query, (profileName, escapedPath))
             LoggingService.LogInfo(f"Updated {filesUpdated} media files in root folder '{RootFolderPath}' to use profile '{profileName}'", "ProfileRepository", "UpdateMediaFilesProfileByRootFolder")
 
             return filesUpdated

@@ -12,6 +12,7 @@ from Features.FileScanning.Models.SeasonModel import SeasonModel
 from Features.FileScanning.Models.FileScanResultModel import FileScanResultModel
 from Services.FileManagerService import FileManagerService
 from Features.FileScanning.FileScanningRepository import FileScanningRepository
+from Features.MediaProbe.MediaProbeBusinessService import MediaProbeBusinessService
 from Core.Logging.LoggingService import LoggingService
 
 
@@ -21,6 +22,7 @@ class FileScanningBusinessService:
     def __init__(self, RepositoryInstance=None, FileManagerInstance=None):
         self.Repository = RepositoryInstance or FileScanningRepository()
         self.FileManager = FileManagerInstance or FileManagerService()
+        self.MediaProbeService = MediaProbeBusinessService()
         self.CurrentJobId = None
         self.ScanProgress = 0.0
         self.ScanResults = FileScanResultModel()
@@ -500,12 +502,12 @@ class FileScanningBusinessService:
             try:
                 if RootFolder and RootFolder.Id:
                     LoggingService.LogInfo(f"Starting automatic metadata extraction for RootFolderId: {RootFolder.Id}", 'PerformScan', 'FileScanningBusinessService')
-                    metadataResult = self.ExtractMetadataForExistingFiles(RootFolder.Id)
+                    metadataResult = self.MediaProbeService.ProbeFilesNeedingMetadata(RootFolder.Id)
                 else:
                     LoggingService.LogWarning("No RootFolderId available - skipping automatic metadata extraction", 'PerformScan', 'FileScanningBusinessService')
-                    metadataResult = {'Success': True, 'Message': 'No RootFolderId - metadata extraction skipped', 'ProcessedFiles': 0}
+                    metadataResult = {'Success': True, 'Message': 'No RootFolderId - metadata extraction skipped', 'Processed': 0}
                 if metadataResult.get('Success', False):
-                    processedFiles = metadataResult.get('ProcessedFiles', 0)
+                    processedFiles = metadataResult.get('Processed', 0)
                     LoggingService.LogInfo(f"Metadata extraction completed: {processedFiles} files processed")
                 else:
                     LoggingService.LogWarning(f"Metadata extraction failed: {metadataResult.get('Message', 'Unknown error')}")
@@ -1169,6 +1171,11 @@ class FileScanningBusinessService:
 
             LoggingService.LogDebug(f"Media analysis is available for file: {MediaFile.FilePath}", 'ShouldExtractMetadata', 'FileScanningBusinessService')
 
+            # Skip files that have exceeded the FFprobe failure limit
+            if (MediaFile.FFprobeFailureCount or 0) >= MediaProbeBusinessService.MaxFFprobeFailures:
+                LoggingService.LogDebug(f"Skipping file with {MediaFile.FFprobeFailureCount} probe failures (max {MediaProbeBusinessService.MaxFFprobeFailures}): {MediaFile.FilePath}", 'ShouldExtractMetadata', 'FileScanningBusinessService')
+                return False
+
             # Always extract for new files (no metadata at all)
             if (MediaFile.VideoBitrateKbps is None and
                 MediaFile.AudioBitrateKbps is None and
@@ -1219,6 +1226,9 @@ class FileScanningBusinessService:
         """Get the file modification time."""
         try:
             ModificationTime = os.path.getmtime(FilePath)
+            # Windows datetime.fromtimestamp() cannot handle negative timestamps (pre-1970 dates)
+            if ModificationTime < 0:
+                ModificationTime = 0
             return datetime.fromtimestamp(ModificationTime)
         except Exception as e:
             LoggingService.LogException(f"Error getting file modification time for {FilePath}", e, 'GetFileModificationTime', 'FileScanningBusinessService')
@@ -1346,16 +1356,39 @@ class FileScanningBusinessService:
                 MediaFile.ContainerFormat = MetadataResult.get('ContainerFormat')
                 MediaFile.OverallBitrate = MetadataResult.get('OverallBitrate')
 
+                # Derive ResolutionCategory from Resolution
+                if MediaFile.Resolution and 'x' in MediaFile.Resolution:
+                    try:
+                        Height = int(MediaFile.Resolution.split('x')[1])
+                        if Height >= 2160:
+                            MediaFile.ResolutionCategory = "2160p"
+                        elif Height >= 1080:
+                            MediaFile.ResolutionCategory = "1080p"
+                        elif Height >= 720:
+                            MediaFile.ResolutionCategory = "720p"
+                        else:
+                            MediaFile.ResolutionCategory = "480p"
+                    except (ValueError, IndexError):
+                        pass
 
                 LoggingService.LogDebug(f"Successfully extracted metadata for: {FilePath}", 'ExtractAndUpdateMetadata', 'FileScanningBusinessService')
+                # Clear failure tracking on success
+                MediaFile.FFprobeFailureCount = 0
+                MediaFile.LastFFprobeError = None
+                MediaFile.LastFFprobeAttemptDate = datetime.now()
             else:
-                # Set default values for failed extraction
+                # Record failure
                 ErrorMessage = MetadataResult.get('ErrorMessage', 'Unknown error')
                 LoggingService.LogWarning(f"Failed to extract metadata for {FilePath}: {ErrorMessage}", 'ExtractAndUpdateMetadata', 'FileScanningBusinessService')
+                MediaFile.FFprobeFailureCount = (MediaFile.FFprobeFailureCount or 0) + 1
+                MediaFile.LastFFprobeError = ErrorMessage
+                MediaFile.LastFFprobeAttemptDate = datetime.now()
 
         except Exception as e:
             LoggingService.LogException("Error extracting and updating metadata", e, 'ExtractAndUpdateMetadata', 'FileScanningBusinessService')
-            # Set default values on error
+            MediaFile.FFprobeFailureCount = (MediaFile.FFprobeFailureCount or 0) + 1
+            MediaFile.LastFFprobeError = str(e)
+            MediaFile.LastFFprobeAttemptDate = datetime.now()
 
     def CleanupMissingFiles(self, RootFolderId: Optional[int] = None):
         """Remove database records for files that no longer exist on disk."""

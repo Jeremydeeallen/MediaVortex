@@ -183,6 +183,55 @@
     }
     updateNavQueueCount();
     setInterval(updateNavQueueCount, 30000);
+    // Global client-side error reporting
+    (function() {
+        var ErrorQueue = [];
+        var Sending = false;
+
+        function SendErrorToServer(ErrorData) {
+            ErrorQueue.push(ErrorData);
+            if (Sending) return;
+            Sending = true;
+            ProcessQueue();
+        }
+
+        function ProcessQueue() {
+            if (ErrorQueue.length === 0) { Sending = false; return; }
+            var Data = ErrorQueue.shift();
+            fetch('/api/ClientLog', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(Data)
+            }).catch(function() {}).finally(function() {
+                setTimeout(ProcessQueue, 100);
+            });
+        }
+
+        window.addEventListener('error', function(Event) {
+            SendErrorToServer({
+                Message: Event.message || 'Unknown error',
+                Source: Event.filename || '',
+                LineNo: Event.lineno || 0,
+                ColNo: Event.colno || 0,
+                Stack: Event.error && Event.error.stack ? Event.error.stack : '',
+                Page: window.location.pathname,
+                ErrorType: 'JavaScriptError'
+            });
+        });
+
+        window.addEventListener('unhandledrejection', function(Event) {
+            var Reason = Event.reason || {};
+            SendErrorToServer({
+                Message: Reason.message || String(Event.reason) || 'Unhandled promise rejection',
+                Source: '',
+                LineNo: 0,
+                ColNo: 0,
+                Stack: Reason.stack || '',
+                Page: window.location.pathname,
+                ErrorType: 'UnhandledPromiseRejection'
+            });
+        });
+    })();
     </script>
     {% block scripts %}{% endblock %}
 </body>
