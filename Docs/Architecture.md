@@ -32,7 +32,7 @@ MediaVortex is a comprehensive media transcoding and management system built usi
 ### Backend
 - **Python 3.x**: Core application language
 - **Flask**: Web framework and API server
-- **SQLite**: Database for configuration and job tracking
+- **PostgreSQL 16**: Database for configuration and job tracking (localhost:5432, psycopg2)
 - **FFmpeg**: Media transcoding engine
 - **psutil**: System resource monitoring
 
@@ -95,10 +95,10 @@ MediaVortex is a comprehensive media transcoding and management system built usi
 - **Caching strategies** for frequently accessed data
 
 ## Deployment Architecture
-- **Microservices**: Separate services for different functions
-- **Docker support**: Containerized deployment options
+- **Microservices**: Three services (WebService, TranscodeService, QualityTestService)
+- **Local PostgreSQL**: Database runs locally (not Docker)
 - **Configuration management**: Environment-based settings
-- **Logging**: Comprehensive logging across all services
+- **Logging**: Comprehensive logging across all services via centralized LoggingService
 
 ## Future Enhancements
 - **GPU acceleration** support for transcoding

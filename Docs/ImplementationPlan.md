@@ -4,82 +4,55 @@
 Implement real-time FFmpeg progress monitoring and VMAF quality comparison in the MediaVortex transcoding application.
 
 ## Current Status
-✅ **FFmpeg Execution**: Confirmed working with proper progress output
-✅ **VMAF Comparison**: Confirmed working with quality scoring
-✅ **Two-Pass Encoding**: Confirmed working with proper pass detection
-✅ **Progress Data Format**: Confirmed FFmpeg outputs frame, fps, bitrate, time data
+✅ **FFmpeg Execution**: Working with proper progress output
+✅ **VMAF Comparison**: Working — full QualityTestService microservice implemented
+✅ **Two-Pass Encoding**: Working with proper pass detection
+✅ **Progress Data Format**: Working — frame, fps, bitrate, time captured in TranscodeProgress table
 
 ## Implementation Tasks
 
-### Phase 0: Critical Fix - Two-Pass Transcoding
+### Phase 0: Critical Fix - Two-Pass Transcoding ✅ COMPLETE
 **Priority: Critical**
 
 #### 0.1 Replace Single-Pass with Two-Pass
-- [ ] **Issue**: System builds single-pass FFmpeg commands instead of two-pass
-- [ ] **Root Cause**: `FFmpegTranscodingService.BuildFFmpegCommand` method
-- [ ] **Solution**: Use exact two-pass approach from `TestFfmpeg.py`
-- [ ] **Implementation**:
-  - Replace single-pass command building with two-pass
-  - Pass 1: Analysis pass with `-preset ultrafast -x265-params "pass=1" -an -f null -`
-  - Pass 2: Encoding pass with `-preset fast -crf 22 -pass 2`
-  - Use same progress reading approach as `TestFfmpeg.py`
-- [ ] **Files**: `Services/FFmpegTranscodingService.py`
-- [ ] **Expected**: Two-pass transcoding works like `TestFfmpeg.py`
+- [x] Two-pass transcoding implemented and confirmed working
+- [x] Pass 1: Analysis pass, Pass 2: Encoding pass
+- [x] Progress reading works across both passes
 
-### Phase 1: FFmpeg Progress Capture
+### Phase 1: FFmpeg Progress Capture ✅ COMPLETE
 **Priority: High**
 
 #### 1.1 Replace Progress Callback System
-- [x] **Issue**: Complex threading/callback system not working
-- [x] **Root Cause**: Overly complex progress reading with threads and callbacks
-- [x] **Solution**: Replace with simple direct stdout reading from `TestFfmpeg.py`
-- [x] **Implementation**: 
-  - Remove threading and callback complexity
-  - Use direct `Process.stdout.readline()` loop
-  - Parse progress lines with simple `Line.startswith("frame=")`
-  - Call progress callback immediately for each progress line
-- [x] **Files**: `Services/FFmpegService.py` - `_ExecuteFFmpegWithProgress` method
-- [x] **Expected**: Every FFmpeg progress update creates new `TranscodeProgress` record
+- [x] Replaced complex threading/callback with direct stdout reading
+- [x] Progress lines parsed with simple `Line.startswith("frame=")`
+- [x] Every FFmpeg progress update creates new `TranscodeProgress` record
 
 #### 1.2 Enhance Progress Data Capture
-- [ ] **Add Fields**: `CurrentFrame`, `CurrentFPS`, `CurrentBitrate`, `CurrentTime`
-- [ ] **Parse FFmpeg Output**: Extract frame=, fps=, bitrate=, time= values using simple parsing
-- [ ] **Update Database**: Store all progress data in `TranscodeProgress` table
-- [ ] **Implementation**: Use the proven parsing logic from `TestFfmpeg.py`
-- [ ] **Files**: `Services/FFmpegService.py`, `Models/TranscodeProgressModel.py`
+- [x] TranscodeProgress table stores frame, FPS, bitrate, ETA
+- [x] FFmpeg output parsed for all progress fields
+- [x] Real-time progress tracking operational
 
-#### 1.3 Fix Two-Pass Transcoding
-- [ ] **Issue**: System is doing single-pass instead of two-pass transcoding
-- [ ] **Root Cause**: `FFmpegTranscodingService.BuildFFmpegCommand` builds single-pass commands
-- [ ] **Solution**: Replace with proven two-pass approach from `TestFfmpeg.py`
-- [ ] **Implementation**: 
-  - Pass 1: `-c:v libx265 -preset ultrafast -x265-params "pass=1" -an -f null -`
-  - Pass 2: `-c:v libx265 -c:a aac -b:a 70k -preset fast -crf 22 -pass 2`
-  - Use exact same command structure as `TestFfmpeg.py`
-- [ ] **Files**: `Services/FFmpegTranscodingService.py` - `BuildFFmpegCommand` method
-- [ ] **Expected**: Two-pass transcoding with proper progress capture
+#### 1.3 Two-Pass Transcoding
+- [x] Merged with Phase 0 — two-pass working
 
-### Phase 2: VMAF Quality Integration
+### Phase 2: VMAF Quality Integration ✅ COMPLETE
 **Priority: Medium**
 
 #### 2.1 VMAF Service Creation
-- [ ] **Create Service**: `Services/FFmpegVMAFService.py`
-- [ ] **VMAF Execution**: Run VMAF comparison after transcoding
-- [ ] **Score Extraction**: Parse VMAF JSON output for quality score
-- [ ] **Database Storage**: Store VMAF score in `TranscodeAttempts` table
-- [ ] **Implementation**: Use the proven VMAF approach from `TestFfmpegVMAFComparison.py`
+- [x] Full QualityTestService microservice implemented (`QualityTestService/Main.py`)
+- [x] VMAF comparison runs via dedicated queue (`QualityTestQueue` table)
+- [x] VMAF scores parsed and stored in `QualityTestResults` table
+- [x] Results linked to `TranscodeAttempts` with preferred attempt marking
 
 #### 2.2 VMAF UI Integration
-- [ ] **Quality Display**: Show VMAF score in transcoding results
-- [ ] **Quality Assessment**: Display "Excellent", "Very Good", etc.
-- [ ] **Comparison View**: Show before/after quality metrics
-- [ ] **Files**: `Templates/TranscodeProgress.html`, `ViewModels/ActivityViewModel.py`
+- [x] Quality test history viewable with pagination
+- [x] Quality test progress tracking in Activity page
+- [x] Service control (start/stop/pause/resume) from UI
 
 #### 2.3 VMAF Configuration
-- [ ] **Settings UI**: Add VMAF enable/disable option
-- [ ] **Quality Thresholds**: Configure minimum acceptable VMAF scores
-- [ ] **Auto-Retry**: Re-transcode if VMAF score below threshold
-- [ ] **Files**: `Templates/Settings.html`, `Services/ProfileService.py`
+- [x] Quality thresholds configurable per profile
+- [x] `ShouldQualityTestService` determines when testing is needed
+- [x] Pause/resume/graceful stop controls implemented
 
 ### Phase 3: Enhanced Progress Monitoring
 **Priority: Medium**

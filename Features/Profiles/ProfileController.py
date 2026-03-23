@@ -34,6 +34,7 @@ class ProfileController:
                         'error': self.ViewModel.ErrorMessage
                     }), 500
             except Exception as e:
+                LoggingService.LogException("Failed to load profiles", e, "ProfileController", "get_all_profiles")
                 return jsonify({
                     'success': False,
                     'error': f'Failed to load profiles: {str(e)}'
@@ -56,6 +57,7 @@ class ProfileController:
                         'error': self.ViewModel.ErrorMessage
                     }), 404
             except Exception as e:
+                LoggingService.LogException("Failed to load profile", e, "ProfileController", "get_profile")
                 return jsonify({
                     'success': False,
                     'error': f'Failed to load profile: {str(e)}'
@@ -181,6 +183,7 @@ class ProfileController:
                         'error': self.ViewModel.ErrorMessage
                     }), 400
             except Exception as e:
+                LoggingService.LogException("Failed to delete profile", e, "ProfileController", "delete_profile")
                 return jsonify({
                     'success': False,
                     'error': f'Failed to delete profile: {str(e)}'
@@ -233,6 +236,7 @@ class ProfileController:
                         'error': self.ViewModel.ErrorMessage
                     }), 400
             except Exception as e:
+                LoggingService.LogException("Failed to add threshold", e, "ProfileController", "add_threshold")
                 return jsonify({
                     'success': False,
                     'error': f'Failed to add threshold: {str(e)}'
@@ -276,6 +280,7 @@ class ProfileController:
                         'error': self.ViewModel.ErrorMessage
                     }), 400
             except Exception as e:
+                LoggingService.LogException("Failed to update threshold", e, "ProfileController", "update_threshold")
                 return jsonify({
                     'success': False,
                     'error': f'Failed to update threshold: {str(e)}'
@@ -297,6 +302,7 @@ class ProfileController:
                         'error': self.ViewModel.ErrorMessage
                     }), 400
             except Exception as e:
+                LoggingService.LogException("Failed to delete threshold", e, "ProfileController", "delete_threshold")
                 return jsonify({
                     'success': False,
                     'error': f'Failed to delete threshold: {str(e)}'

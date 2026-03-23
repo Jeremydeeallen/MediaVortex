@@ -102,6 +102,9 @@ class StuckJobDetectionService:
     # If no progress update for this many minutes, consider the job frozen (even if FFmpeg process is alive)
     FROZEN_PROGRESS_THRESHOLD_MINUTES = 5
 
+    # Quality test queue jobs sitting with DateStarted=NULL longer than this are stale (never picked up)
+    STALE_QUALITY_TEST_THRESHOLD_MINUTES = 60
+
     def IsJobStuck(self, Job) -> tuple[bool, str]:
         """Check if a specific job is stuck by verifying if the FFmpeg process is still alive and making progress."""
         try:
@@ -149,11 +152,13 @@ class StuckJobDetectionService:
             return False, f"Error checking process status: {str(e)}"
 
     def _IsJobFrozen(self, Job) -> tuple[bool, str]:
-        """Check if a job's FFmpeg process is alive but not making progress (frozen/hung)."""
+        """Check if a job's FFmpeg process is alive but not making progress (frozen/hung).
+        Uses LastFrameAdvance (only updates when CurrentFrame changes) instead of LastProgressUpdate
+        to detect hung FFmpeg processes that keep emitting identical status lines."""
         try:
             # Get the latest TranscodeProgress record for this job's file
             query = """
-                SELECT tp.LastProgressUpdate, tp.ProgressPercent, tp.CurrentFPS
+                SELECT tp.LastFrameAdvance, tp.LastProgressUpdate, tp.ProgressPercent, tp.CurrentFPS
                 FROM TranscodeProgress tp
                 INNER JOIN TranscodeAttempts ta ON tp.TranscodeAttemptId = ta.Id
                 WHERE LOWER(ta.FilePath) = LOWER(%s) AND ta.Success IS NULL
@@ -167,12 +172,13 @@ class StuckJobDetectionService:
                 return False, "No progress records found (job may be starting)"
 
             row = rows[0]
-            lastUpdateValue = row['LastProgressUpdate']
+            # Prefer LastFrameAdvance; fall back to LastProgressUpdate for backward compat
+            lastUpdateValue = row.get('LastFrameAdvance') or row.get('LastProgressUpdate')
             progressPercent = row['ProgressPercent']
             currentFPS = row['CurrentFPS']
 
             if not lastUpdateValue:
-                return False, "No LastProgressUpdate timestamp available"
+                return False, "No LastFrameAdvance/LastProgressUpdate timestamp available"
 
             # Parse the timestamp and check staleness
             # PostgreSQL returns datetime objects directly, but handle string format as fallback
@@ -184,12 +190,12 @@ class StuckJobDetectionService:
 
             if minutesSinceUpdate >= self.FROZEN_PROGRESS_THRESHOLD_MINUTES:
                 return True, (
-                    f"FFmpeg process is alive but frozen - no progress update for {minutesSinceUpdate:.1f} minutes "
+                    f"FFmpeg process is alive but frozen - no frame advance for {minutesSinceUpdate:.1f} minutes "
                     f"(threshold: {self.FROZEN_PROGRESS_THRESHOLD_MINUTES}min). "
                     f"Last progress: {progressPercent:.1f}%, FPS: {currentFPS}"
                 )
 
-            return False, f"Progress updated {minutesSinceUpdate:.1f} minutes ago"
+            return False, f"Frame advanced {minutesSinceUpdate:.1f} minutes ago"
 
         except Exception as e:
             LoggingService.LogException(f"Error checking if job {Job.Id} is frozen", e,
@@ -214,7 +220,7 @@ class StuckJobDetectionService:
             return False
 
     def CleanupStuckJob(self, QueueId: int, Reason: str) -> Dict[str, Any]:
-        """Clean up a stuck job by resetting its status and cleaning up related records."""
+        """Clean up a stuck job by killing the hung FFmpeg process and resetting its status."""
         try:
             LoggingService.LogFunctionEntry("CleanupStuckJob", "StuckJobDetectionService", QueueId, Reason)
 
@@ -225,6 +231,23 @@ class StuckJobDetectionService:
                     "Success": False,
                     "ErrorMessage": f"TranscodeQueue job {QueueId} not found"
                 }
+
+            # Kill the hung FFmpeg process before resetting DB records
+            try:
+                activeJobs = self.DatabaseManager.GetActiveJobsByService("TranscodeService")
+                for activeJob in activeJobs:
+                    if activeJob.get('QueueId') == QueueId:
+                        processId = activeJob.get('ProcessId')
+                        if processId and self.IsProcessAlive(processId):
+                            LoggingService.LogInfo(f"Killing hung FFmpeg process {processId} for stuck job {QueueId}",
+                                                 "StuckJobDetectionService", "CleanupStuckJob")
+                            self.ProcessManagementService.KillProcess(processId, Graceful=True)
+                            LoggingService.LogInfo(f"Killed FFmpeg process {processId} for stuck job {QueueId}",
+                                                 "StuckJobDetectionService", "CleanupStuckJob")
+                        break
+            except Exception as killEx:
+                LoggingService.LogException(f"Error killing FFmpeg process for stuck job {QueueId} (continuing with DB cleanup)", killEx,
+                                          "StuckJobDetectionService", "CleanupStuckJob")
 
             # Start database transaction for atomic cleanup
             self.DatabaseManager.DatabaseService.BeginTransaction()
@@ -337,10 +360,94 @@ class StuckJobDetectionService:
                 "ErrorMessage": str(e)
             }
 
+    def DetectAndCleanStaleQualityTestJobs(self) -> Dict[str, Any]:
+        """Detect and delete quality test queue jobs that were never started (DateStarted=NULL) and are older than the threshold."""
+        try:
+            LoggingService.LogFunctionEntry("DetectAndCleanStaleQualityTestJobs", "StuckJobDetectionService")
+
+            # Find never-started jobs older than the threshold
+            query = """
+                SELECT Id, OriginalFilePath, DateAdded
+                FROM QualityTestingQueue
+                WHERE DateStarted IS NULL
+                  AND DateAdded < NOW() - INTERVAL '%s minutes'
+            """ % self.STALE_QUALITY_TEST_THRESHOLD_MINUTES
+            staleRows = self.DatabaseManager.DatabaseService.ExecuteQuery(query)
+
+            if not staleRows:
+                LoggingService.LogInfo("Stale quality test detection: No stale pending jobs found",
+                                     "StuckJobDetectionService", "DetectAndCleanStaleQualityTestJobs")
+                return {
+                    "Success": True,
+                    "Message": "No stale pending quality test jobs found",
+                    "StaleJobsFound": 0,
+                    "StaleJobsCleaned": 0,
+                    "StaleJobs": []
+                }
+
+            LoggingService.LogInfo(f"Stale quality test detection: Found {len(staleRows)} stale pending jobs",
+                                 "StuckJobDetectionService", "DetectAndCleanStaleQualityTestJobs")
+
+            staleJobs = []
+            cleanedCount = 0
+
+            for row in staleRows:
+                jobId = row['id']
+                filePath = row.get('originalfilepath', 'Unknown')
+                dateAdded = row.get('dateadded')
+                ageHours = 0
+                if dateAdded:
+                    ageHours = (datetime.now() - dateAdded).total_seconds() / 3600.0
+
+                LoggingService.LogWarning(
+                    f"Stale quality test job detected: Id={jobId}, File={filePath}, DateAdded={dateAdded}, Age={ageHours:.1f} hours",
+                    "StuckJobDetectionService", "DetectAndCleanStaleQualityTestJobs")
+
+                # Delete the stale row
+                deleteQuery = "DELETE FROM QualityTestingQueue WHERE Id = %s"
+                affected = self.DatabaseManager.DatabaseService.ExecuteNonQuery(deleteQuery, (jobId,))
+
+                if affected > 0:
+                    cleanedCount += 1
+                    LoggingService.LogInfo(f"Deleted stale quality test job {jobId} (age: {ageHours:.1f} hours)",
+                                         "StuckJobDetectionService", "DetectAndCleanStaleQualityTestJobs")
+
+                staleJobs.append({
+                    "JobId": jobId,
+                    "OriginalFilePath": filePath,
+                    "DateAdded": str(dateAdded) if dateAdded else None,
+                    "AgeHours": round(ageHours, 1)
+                })
+
+            LoggingService.LogInfo(f"Stale quality test detection completed - found {len(staleJobs)}, cleaned {cleanedCount}",
+                                 "StuckJobDetectionService", "DetectAndCleanStaleQualityTestJobs")
+
+            return {
+                "Success": True,
+                "Message": f"Stale detection completed - found {len(staleJobs)} stale jobs, cleaned {cleanedCount}",
+                "StaleJobsFound": len(staleJobs),
+                "StaleJobsCleaned": cleanedCount,
+                "StaleJobs": staleJobs
+            }
+
+        except Exception as e:
+            errorMsg = f"Exception during stale quality test job detection: {str(e)}"
+            LoggingService.LogException(errorMsg, e, "StuckJobDetectionService", "DetectAndCleanStaleQualityTestJobs")
+            return {
+                "Success": False,
+                "ErrorMessage": errorMsg,
+                "StaleJobsFound": 0,
+                "StaleJobsCleaned": 0,
+                "StaleJobs": []
+            }
+
     def DetectAndCleanStuckQualityTestJobs(self) -> Dict[str, Any]:
         """Detect and clean up stuck quality test jobs where FFmpeg VMAF processes have died."""
         try:
             LoggingService.LogFunctionEntry("DetectAndCleanStuckQualityTestJobs", "StuckJobDetectionService")
+
+            # First, detect and clean stale pending jobs (never started)
+            staleResult = self.DetectAndCleanStaleQualityTestJobs()
 
             # Get all running quality test jobs
             # For quality test jobs, we need to get them differently since there's no status filter method
@@ -410,13 +517,19 @@ class StuckJobDetectionService:
             LoggingService.LogInfo(f"Stuck quality test job detection completed - found {len(stuckJobs)} stuck jobs, cleaned {len(cleanedJobs)} jobs",
                                  "StuckJobDetectionService", "DetectAndCleanStuckQualityTestJobs")
 
+            staleJobsFound = staleResult.get("StaleJobsFound", 0)
+            staleJobsCleaned = staleResult.get("StaleJobsCleaned", 0)
+
             return {
                 "Success": True,
-                "Message": f"Quality test detection completed - found {len(stuckJobs)} stuck jobs, cleaned {len(cleanedJobs)} jobs",
+                "Message": f"Quality test detection completed - found {len(stuckJobs)} stuck jobs, cleaned {len(cleanedJobs)} jobs, found {staleJobsFound} stale pending jobs, cleaned {staleJobsCleaned}",
                 "StuckJobsFound": len(stuckJobs),
                 "JobsCleaned": len(cleanedJobs),
                 "StuckJobs": stuckJobs,
-                "CleanedJobs": cleanedJobs
+                "CleanedJobs": cleanedJobs,
+                "StaleJobsFound": staleJobsFound,
+                "StaleJobsCleaned": staleJobsCleaned,
+                "StaleJobs": staleResult.get("StaleJobs", [])
             }
 
         except Exception as e:
@@ -426,7 +539,9 @@ class StuckJobDetectionService:
                 "Success": False,
                 "ErrorMessage": errorMsg,
                 "StuckJobsFound": 0,
-                "JobsCleaned": 0
+                "JobsCleaned": 0,
+                "StaleJobsFound": 0,
+                "StaleJobsCleaned": 0
             }
 
     def IsQualityTestJobStuck(self, Job) -> tuple[bool, str]:

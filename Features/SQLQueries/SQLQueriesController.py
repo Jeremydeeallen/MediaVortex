@@ -30,11 +30,31 @@ def ExecuteQuery():
         query = data['Query']
         parameters = data.get('Parameters', [])
 
-        # Security check - only allow SELECT queries for safety
-        if not query.strip().upper().startswith('SELECT'):
+        # Security check - only allow safe read-only queries
+        NormalizedQuery = ' '.join(query.strip().upper().split())
+        if not NormalizedQuery.startswith('SELECT'):
             return jsonify({
                 "Success": False,
                 "ErrorMessage": "Only SELECT queries are allowed for security reasons"
+            }), 400
+
+        # Block dangerous patterns even within SELECT statements
+        DangerousPatterns = ['INSERT ', 'UPDATE ', 'DELETE ', 'DROP ', 'ALTER ', 'CREATE ',
+                             'TRUNCATE ', 'GRANT ', 'REVOKE ', 'EXEC ', 'EXECUTE ',
+                             'INTO ', 'COPY ', 'LO_EXPORT', 'LO_IMPORT', 'PG_READ_FILE',
+                             'PG_WRITE_FILE', 'PG_EXECUTE_SERVER_PROGRAM']
+        for Pattern in DangerousPatterns:
+            if Pattern in NormalizedQuery:
+                return jsonify({
+                    "Success": False,
+                    "ErrorMessage": f"Query contains disallowed keyword: {Pattern.strip()}"
+                }), 400
+
+        # Block multiple statements (semicolons outside of string literals)
+        if ';' in query:
+            return jsonify({
+                "Success": False,
+                "ErrorMessage": "Multiple statements are not allowed"
             }), 400
 
         # Execute query
@@ -60,63 +80,6 @@ def ExecuteQuery():
     except Exception as e:
         error_msg = f"Exception executing query: {str(e)}"
         LoggingService.LogException(error_msg, e, "SQLQueriesController", "ExecuteQuery")
-        return jsonify({"Success": False, "ErrorMessage": error_msg}), 500
-
-@SQLQueriesBlueprint.route('/GetServiceLogs', methods=['GET'])
-def GetServiceLogs():
-    """Get recent logs for a specific service."""
-    try:
-        LoggingService.LogFunctionEntry("GetServiceLogs", "SQLQueriesController")
-
-        service_name = request.args.get('ServiceName', '')
-        hours = int(request.args.get('Hours', 2))
-        log_level = request.args.get('LogLevel', '')
-        limit = int(request.args.get('Limit', 50))
-
-        # Build query
-        query = f"""
-        SELECT LogLevel, Message, Timestamp, Component, FunctionName
-        FROM Logs
-        WHERE Timestamp >= NOW() - INTERVAL '{hours} hours'
-        """
-
-        parameters = []
-
-        if service_name:
-            query += " AND Component LIKE %s"
-            # Use more specific wildcard patterns for better matching
-            if service_name == "TranscodeService":
-                parameters.append("%Transcode%")
-            elif service_name == "QualityTestService" or service_name == "QualityCompareService":
-                parameters.append("%Quality%")
-            else:
-                parameters.append(f"%{service_name}%")
-
-        if log_level:
-            query += " AND LogLevel = %s"
-            parameters.append(log_level)
-
-        query += " ORDER BY Timestamp DESC LIMIT %s"
-        parameters.append(limit)
-
-        results = SharedDatabaseManager.DatabaseService.ExecuteQuery(query, parameters)
-
-        if results:
-            rows = [dict(row) for row in results]
-        else:
-            rows = []
-
-        LoggingService.LogInfo(f"Retrieved {len(rows)} log entries for service: {service_name}", "SQLQueriesController", "GetServiceLogs")
-
-        return jsonify({
-            "Success": True,
-            "Logs": rows,
-            "Count": len(rows)
-        })
-
-    except Exception as e:
-        error_msg = f"Exception getting service logs: {str(e)}"
-        LoggingService.LogException(error_msg, e, "SQLQueriesController", "GetServiceLogs")
         return jsonify({"Success": False, "ErrorMessage": error_msg}), 500
 
 @SQLQueriesBlueprint.route('/GetServiceStatus', methods=['GET'])
@@ -232,16 +195,16 @@ def GetErrorSummary():
         hours = int(request.args.get('Hours', 24))
 
         # Get error count by service
-        error_query = f"""
+        error_query = """
         SELECT Component, LogLevel, COUNT(*) as Count
         FROM Logs
-        WHERE Timestamp >= NOW() - INTERVAL '{hours} hours'
+        WHERE Timestamp >= NOW() - INTERVAL '%s hours'
         AND LogLevel IN ('ERROR', 'CRITICAL', 'WARNING')
         GROUP BY Component, LogLevel
         ORDER BY Count DESC
         """
 
-        error_results = SharedDatabaseManager.DatabaseService.ExecuteQuery(error_query)
+        error_results = SharedDatabaseManager.DatabaseService.ExecuteQuery(error_query, [hours])
 
         if error_results:
             error_rows = [dict(row) for row in error_results]
@@ -249,16 +212,16 @@ def GetErrorSummary():
             error_rows = []
 
         # Get recent errors
-        recent_errors_query = f"""
+        recent_errors_query = """
         SELECT LogLevel, Message, Timestamp, Component, FunctionName
         FROM Logs
-        WHERE Timestamp >= NOW() - INTERVAL '{hours} hours'
+        WHERE Timestamp >= NOW() - INTERVAL '%s hours'
         AND LogLevel IN ('ERROR', 'CRITICAL')
         ORDER BY Timestamp DESC
         LIMIT 20
         """
 
-        recent_results = SharedDatabaseManager.DatabaseService.ExecuteQuery(recent_errors_query)
+        recent_results = SharedDatabaseManager.DatabaseService.ExecuteQuery(recent_errors_query, [hours])
 
         if recent_results:
             recent_rows = [dict(row) for row in recent_results]
@@ -541,72 +504,4 @@ def GetStuckJobs():
     except Exception as e:
         error_msg = f"Exception getting stuck jobs: {str(e)}"
         LoggingService.LogException(error_msg, e, "SQLQueriesController", "GetStuckJobs")
-        return jsonify({"Success": False, "ErrorMessage": error_msg}), 500
-
-@SQLQueriesBlueprint.route('/GetQualityTestResultsFiltered', methods=['GET'])
-def GetQualityTestResultsFiltered():
-    """Get quality test results filtered by pass/fail status."""
-    try:
-        LoggingService.LogFunctionEntry("GetQualityTestResultsFiltered", "SQLQueriesController")
-
-        PassFailFilter = request.args.get('PassFailFilter', 'All')  # All, Passed, Failed
-        Limit = int(request.args.get('Limit', 50))
-
-        if Limit < 1 or Limit > 200:
-            Limit = 50
-
-        # Build query with optional filter
-        Query = """
-        SELECT qtr.Id, qtr.TranscodeAttemptId, qtr.VMAFScore, qtr.PassesThreshold,
-               qtr.TestDuration, qtr.DateTested, qtr.Status, qtr.ErrorMessage,
-               ta.FilePath, ta.ProfileName, ta.Quality, ta.AttemptDate,
-               ta.OldSizeBytes, ta.NewSizeBytes, ta.SizeReductionPercent
-        FROM QualityTestResults qtr
-        LEFT JOIN TranscodeAttempts ta ON qtr.TranscodeAttemptId = ta.Id
-        """
-
-        Parameters = []
-
-        if PassFailFilter == 'Passed':
-            Query += " WHERE qtr.PassesThreshold = TRUE"
-        elif PassFailFilter == 'Failed':
-            Query += " WHERE qtr.PassesThreshold = FALSE"
-
-        Query += " ORDER BY qtr.DateTested DESC LIMIT %s"
-        Parameters.append(Limit)
-
-        Results = SharedDatabaseManager.DatabaseService.ExecuteQuery(Query, Parameters)
-
-        QualityTestResultsList = []
-        for row in Results:
-            QualityTestResultsList.append({
-                "Id": row['id'],
-                "TranscodeAttemptId": row['transcodeattemptid'],
-                "VMAFScore": row['vmafscore'],
-                "PassesThreshold": bool(row['passesthreshold']),
-                "TestDuration": row['testduration'],
-                "DateTested": str(row['datetested']) if row['datetested'] else None,
-                "Status": row['status'],
-                "ErrorMessage": row['errormessage'],
-                "FilePath": row['filepath'],
-                "ProfileName": row['profilename'],
-                "Quality": row['quality'],
-                "AttemptDate": str(row['attemptdate']) if row['attemptdate'] else None,
-                "OldSizeBytes": row['oldsizebytes'],
-                "NewSizeBytes": row['newsizebytes'],
-                "SizeReductionPercent": row['sizereductionpercent']
-            })
-
-        LoggingService.LogInfo(f"Retrieved {len(QualityTestResultsList)} quality test results with filter: {PassFailFilter}", "SQLQueriesController", "GetQualityTestResultsFiltered")
-
-        return jsonify({
-            "Success": True,
-            "QualityTestResults": QualityTestResultsList,
-            "Count": len(QualityTestResultsList),
-            "Filter": PassFailFilter
-        })
-
-    except Exception as e:
-        error_msg = f"Exception getting quality test results: {str(e)}"
-        LoggingService.LogException(error_msg, e, "SQLQueriesController", "GetQualityTestResultsFiltered")
         return jsonify({"Success": False, "ErrorMessage": error_msg}), 500

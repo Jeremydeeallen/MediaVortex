@@ -11,7 +11,7 @@ import setproctitle
 import time
 import threading
 from datetime import datetime
-from flask import Flask, render_template
+from flask import Flask, render_template, request, jsonify
 from flask_cors import CORS
 
 # Set process title for better visibility in Task Manager
@@ -128,6 +128,7 @@ class WebServiceApp:
 
         self._register_routes()
         self._register_blueprints()
+        self._register_error_handlers()
         
         # Start service status tracking
         self.PrivateStartServiceStatusTracking()
@@ -170,48 +171,110 @@ class WebServiceApp:
             print(f"ERROR: Exception checking for existing WebService instances: {e}")
             return True  # Prevent startup on error
     
+    def _register_error_handlers(self):
+        """Register global error handlers for the Flask app."""
+        @self.App.errorhandler(404)
+        def HandleNotFound(e):
+            if request.path.startswith('/api/'):
+                return jsonify({"Success": False, "Message": "Resource not found", "Error": str(e)}), 404
+            return render_template('Error.html', ErrorCode=404, ErrorMessage="Page not found"), 404
+
+        @self.App.errorhandler(500)
+        def HandleInternalError(e):
+            LoggingService.LogError(f"Internal server error: {e}", "WebService", "HandleInternalError")
+            if request.path.startswith('/api/'):
+                return jsonify({"Success": False, "Message": "Internal server error", "Error": str(e)}), 500
+            return render_template('Error.html', ErrorCode=500, ErrorMessage="Internal server error"), 500
+
+        @self.App.errorhandler(Exception)
+        def HandleException(e):
+            LoggingService.LogException(f"Unhandled exception on {request.path}", e, "WebService", "HandleException")
+            if request.path.startswith('/api/'):
+                return jsonify({"Success": False, "Message": "An unexpected error occurred", "Error": str(e)}), 500
+            return render_template('Error.html', ErrorCode=500, ErrorMessage="An unexpected error occurred"), 500
+
     def _register_routes(self):
         """Register main website routes."""
         @self.App.route('/')
         def home():
-            return render_template('Home.html')
-        
+            try:
+                return render_template('Home.html')
+            except Exception as e:
+                LoggingService.LogException("Error rendering Home page", e, "WebService", "home")
+                return render_template('Error.html', ErrorCode=500, ErrorMessage="Failed to load page"), 500
+
         @self.App.route('/settings')
         def settings():
-            return render_template('Settings.html')
-        
+            try:
+                return render_template('Settings.html')
+            except Exception as e:
+                LoggingService.LogException("Error rendering Settings page", e, "WebService", "settings")
+                return render_template('Error.html', ErrorCode=500, ErrorMessage="Failed to load page"), 500
+
         @self.App.route('/Scanning')
         def scanning():
-            return render_template('FileScanning.html')
-        
+            try:
+                return render_template('FileScanning.html')
+            except Exception as e:
+                LoggingService.LogException("Error rendering FileScanning page", e, "WebService", "scanning")
+                return render_template('Error.html', ErrorCode=500, ErrorMessage="Failed to load page"), 500
+
         @self.App.route('/TranscodeQueue')
         def transcode_queue():
-            return render_template('Queue.html')
-        
+            try:
+                return render_template('Queue.html')
+            except Exception as e:
+                LoggingService.LogException("Error rendering Queue page", e, "WebService", "transcode_queue")
+                return render_template('Error.html', ErrorCode=500, ErrorMessage="Failed to load page"), 500
+
         @self.App.route('/Activity')
         def activity():
-            return render_template('Activity.html')
-        
+            try:
+                return render_template('Activity.html')
+            except Exception as e:
+                LoggingService.LogException("Error rendering Activity page", e, "WebService", "activity")
+                return render_template('Error.html', ErrorCode=500, ErrorMessage="Failed to load page"), 500
+
         @self.App.route('/Status')
         def status():
-            return render_template('Status.html')
-        
+            try:
+                return render_template('Status.html')
+            except Exception as e:
+                LoggingService.LogException("Error rendering Status page", e, "WebService", "status")
+                return render_template('Error.html', ErrorCode=500, ErrorMessage="Failed to load page"), 500
+
         @self.App.route('/SQLQueries')
         def sql_queries():
-            return render_template('SQLQueries.html')
-        
+            try:
+                return render_template('SQLQueries.html')
+            except Exception as e:
+                LoggingService.LogException("Error rendering SQLQueries page", e, "WebService", "sql_queries")
+                return render_template('Error.html', ErrorCode=500, ErrorMessage="Failed to load page"), 500
+
         @self.App.route('/TranscodeProgress')
         def transcode_progress():
-            return render_template('TranscodeProgress.html')
+            try:
+                return render_template('TranscodeProgress.html')
+            except Exception as e:
+                LoggingService.LogException("Error rendering TranscodeProgress page", e, "WebService", "transcode_progress")
+                return render_template('Error.html', ErrorCode=500, ErrorMessage="Failed to load page"), 500
 
         @self.App.route('/Optimization')
         def optimization():
-            return render_template('Optimization.html')
+            try:
+                return render_template('Optimization.html')
+            except Exception as e:
+                LoggingService.LogException("Error rendering Optimization page", e, "WebService", "optimization")
+                return render_template('Error.html', ErrorCode=500, ErrorMessage="Failed to load page"), 500
 
         @self.App.route('/ClipBuilder')
         def clip_builder():
-            return render_template('ClipBuilder.html')
-    
+            try:
+                return render_template('ClipBuilder.html')
+            except Exception as e:
+                LoggingService.LogException("Error rendering ClipBuilder page", e, "WebService", "clip_builder")
+                return render_template('Error.html', ErrorCode=500, ErrorMessage="Failed to load page"), 500
+
     def _register_blueprints(self):
         """Register Flask blueprints."""
         from Features.ServiceControl.ServiceControlController import ServiceControlBlueprint
@@ -225,11 +288,12 @@ class WebServiceApp:
         from Features.ServiceControl.ServiceStatusController import ServiceStatusBlueprint
         from Features.Optimization.OptimizationController import OptimizationBlueprint
         from Features.ClipBuilder.ClipBuilderController import ClipBuilderBlueprint
+        from Features.TeamStatus.TeamStatusController import TeamStatusBlueprint
 
         # Register all blueprints
         self.App.register_blueprint(ServiceControlBlueprint)
         self.App.register_blueprint(QueueResetBlueprint)
-        self.App.register_blueprint(SQLQueriesBlueprint)
+        self.App.register_blueprint(SQLQueriesBlueprint, url_prefix='/api/SQLQueries')
         self.App.register_blueprint(TranscodeQueueBlueprint)
         self.App.register_blueprint(TranscodeJobBlueprint)
         self.App.register_blueprint(self.FileScanningController.Blueprint)
@@ -239,6 +303,7 @@ class WebServiceApp:
         self.App.register_blueprint(ServiceStatusBlueprint, url_prefix='/api')
         self.App.register_blueprint(OptimizationBlueprint)
         self.App.register_blueprint(ClipBuilderBlueprint)
+        self.App.register_blueprint(TeamStatusBlueprint)
     
     def PrivateStartServiceStatusTracking(self):
         """Start service status tracking thread."""

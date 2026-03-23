@@ -47,11 +47,11 @@ class TranscodingViewModel:
             }
 
     def GetTranscodingStatus(self) -> Dict[str, Any]:
-        """Get current transcoding status and progress from ServiceStatus table."""
+        """Get current transcoding status and progress from ServiceStatus and ActiveJobs tables."""
         try:
             LoggingService.LogFunctionEntry("GetTranscodingStatus", "TranscodingViewModel")
 
-            # Get status from ServiceStatus table instead of ProcessTranscodeQueueService
+            # Get status from ServiceStatus table
             query = """
                 SELECT Status, HealthStatus, IsProcessing, ActiveJobsCount, LastHealthCheck
                 FROM ServiceStatus
@@ -62,12 +62,28 @@ class TranscodingViewModel:
 
             if result and len(result) > 0:
                 row = result[0]
+                IsTranscoding = bool(row['IsProcessing'])
+                ActiveJobsCount = row['ActiveJobsCount'] or 0
+
+                # If ServiceStatus says not processing, cross-check ActiveJobs table
+                # ServiceStatus.IsProcessing can be stale if not updated by TranscodeService
+                if not IsTranscoding:
+                    ActiveJobQuery = """
+                        SELECT COUNT(*) as Count
+                        FROM ActiveJobs
+                        WHERE ServiceName = 'TranscodeService' AND Status = 'Running'
+                    """
+                    ActiveJobResult = self.DatabaseManager.DatabaseService.ExecuteQuery(ActiveJobQuery)
+                    if ActiveJobResult and ActiveJobResult[0]['count'] > 0:
+                        IsTranscoding = True
+                        ActiveJobsCount = ActiveJobResult[0]['count']
+
                 return {
                     "Success": True,
-                    "IsTranscoding": bool(row['IsProcessing']),
+                    "IsTranscoding": IsTranscoding,
                     "Status": row['Status'],
                     "HealthStatus": row['HealthStatus'],
-                    "ActiveJobsCount": row['ActiveJobsCount'],
+                    "ActiveJobsCount": ActiveJobsCount,
                     "LastHealthCheck": row['LastHealthCheck']
                 }
             else:

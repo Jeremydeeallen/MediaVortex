@@ -116,7 +116,7 @@ The simple orchestrator provides:
 ### Logging
 
 All services use the centralized LoggingService:
-- **Database Storage** - All logs stored in MediaVortex.db
+- **Database Storage** - All logs stored in PostgreSQL (Logs table)
 - **Component Tracking** - Each log tagged with service name
 - **Function Tracking** - Each log includes function name
 - **Exception Handling** - Full stack traces for errors

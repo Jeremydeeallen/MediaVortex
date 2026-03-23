@@ -126,6 +126,7 @@ def GetQueueCount():
         count = rows[0]['Count'] if rows else 0
         return jsonify({"Success": True, "Count": count})
     except Exception as e:
+        LoggingService.LogException("Failed to get queue count", e, "TranscodeQueueController", "GetQueueCount")
         return jsonify({"Success": False, "Count": 0}), 500
 
 

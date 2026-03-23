@@ -74,7 +74,9 @@
       "Bash(ls:*)",
       "Bash(/c/Code/Automation/MediaVortex/venv/Scripts/python.exe:*)",
       "Bash(C:/Code/Automation/MediaVortex/venv/Scripts/python.exe:*)",
-      "Bash(where py:*)"
+      "Bash(where py:*)",
+      "WebSearch",
+      "WebFetch(domain:www.ebay.com)"
     ]
   }
 }

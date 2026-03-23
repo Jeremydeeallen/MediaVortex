@@ -20,38 +20,36 @@
         </div>
     </div>
 
-    <!-- Quick Actions Row -->
+    <!-- Quick Queries Bar -->
     <div class="row mb-4">
         <div class="col-12">
-            <div class="card shadow-sm">
-                <div class="card-header bg-gradient-primary text-white d-flex justify-content-between align-items-center">
-                    <h5 class="mb-0">
-                        <i class="fas fa-bolt"></i> Quick Actions
-                    </h5>
+            <div class="btn-toolbar" role="toolbar">
+                <div class="btn-group me-2 mb-2" role="group">
+                    <button class="btn btn-outline-primary" onclick="sqlQueriesManager.LoadCommonQuery('queue_status')">
+                        <i class="fas fa-list-ol"></i> Queue Status
+                    </button>
+                    <button class="btn btn-outline-info" onclick="sqlQueriesManager.LoadActiveJobs()">
+                        <i class="fas fa-tasks"></i> Active Jobs
+                    </button>
+                    <button class="btn btn-outline-danger" onclick="sqlQueriesManager.LoadStuckJobs()">
+                        <i class="fas fa-clock"></i> Stuck Jobs
+                    </button>
                 </div>
-                <div class="card-body">
-                    <div class="row g-3">
-                        <div class="col-md-3">
-                            <button class="btn btn-info w-100" onclick="sqlQueriesManager.LoadActiveJobs()">
-                                <i class="fas fa-tasks"></i> Active Jobs
-                            </button>
-                        </div>
-                        <div class="col-md-3">
-                            <button class="btn btn-warning w-100" onclick="sqlQueriesManager.LoadErrorSummary()">
-                                <i class="fas fa-exclamation-triangle"></i> Error Summary
-                            </button>
-                        </div>
-                        <div class="col-md-3">
-                            <button class="btn btn-danger w-100" onclick="sqlQueriesManager.LoadStuckJobs()">
-                                <i class="fas fa-clock"></i> Stuck Jobs
-                            </button>
-                        </div>
-                        <div class="col-md-3">
-                            <button class="btn btn-success w-100" onclick="sqlQueriesManager.LoadDatabaseInfo()">
-                                <i class="fas fa-table"></i> Database Info
-                            </button>
-                        </div>
-                    </div>
+                <div class="btn-group me-2 mb-2" role="group">
+                    <button class="btn btn-outline-warning" onclick="sqlQueriesManager.LoadCommonQuery('recent_errors')">
+                        <i class="fas fa-exclamation-circle"></i> Recent Errors
+                    </button>
+                    <button class="btn btn-outline-warning" onclick="sqlQueriesManager.LoadErrorSummary()">
+                        <i class="fas fa-exclamation-triangle"></i> Error Summary
+                    </button>
+                </div>
+                <div class="btn-group mb-2" role="group">
+                    <button class="btn btn-outline-success" onclick="sqlQueriesManager.LoadCommonQuery('service_health')">
+                        <i class="fas fa-heartbeat"></i> Service Health
+                    </button>
+                    <button class="btn btn-outline-secondary" onclick="sqlQueriesManager.LoadDatabaseInfo()">
+                        <i class="fas fa-table"></i> Database Info
+                    </button>
                 </div>
             </div>
         </div>
@@ -92,40 +90,16 @@
                         <i class="fas fa-clock"></i> Stuck Jobs
                     </h5>
                     <button class="btn btn-sm btn-outline-light" onclick="sqlQueriesManager.LoadStuckJobs()">
-                        <i class="fas fa-sync-alt"></i> Check Stuck Jobs
+                        <i class="fas fa-sync-alt"></i> Refresh
                     </button>
                 </div>
                 <div class="card-body">
                     <div id="StuckJobsContainer">
-                        <div class="text-muted text-center py-4">
-                            <i class="fas fa-clock fa-3x mb-3"></i>
-                            <p>Click "Check Stuck Jobs" to scan for jobs that have been running too long.</p>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Quality Test Results Section -->
-    <div class="row mb-4">
-        <div class="col-12">
-            <div class="card shadow-sm">
-                <div class="card-header bg-gradient-success text-white d-flex justify-content-between align-items-center">
-                    <h5 class="mb-0">
-                        <i class="fas fa-chart-line"></i> Quality Test Results
-                    </h5>
-                    <div class="btn-group" role="group">
-                        <button class="btn btn-sm btn-outline-light" onclick="sqlQueriesManager.LoadQualityTestResults('All')">All</button>
-                        <button class="btn btn-sm btn-outline-light" onclick="sqlQueriesManager.LoadQualityTestResults('Passed')">Passed</button>
-                        <button class="btn btn-sm btn-outline-light" onclick="sqlQueriesManager.LoadQualityTestResults('Failed')">Failed</button>
-                    </div>
-                </div>
-                <div class="card-body">
-                    <div id="QualityTestResultsContainer">
-                        <div class="text-muted text-center py-4">
-                            <i class="fas fa-chart-line fa-3x mb-3"></i>
-                            <p>Click a filter button above to view quality test results.</p>
+                        <div class="text-center py-4">
+                            <div class="spinner-border text-primary" role="status">
+                                <span class="visually-hidden">Loading...</span>
+                            </div>
+                            <p class="mt-2">Loading stuck jobs...</p>
                         </div>
                     </div>
                 </div>
@@ -167,63 +141,7 @@
         </div>
     </div>
 
-    <!-- Service Logs Section (Collapsed) -->
-    <div class="row mb-4">
-        <div class="col-12">
-            <div class="card shadow-sm">
-                <div class="card-header bg-gradient-dark text-white d-flex justify-content-between align-items-center"
-                     data-bs-toggle="collapse" data-bs-target="#ServiceLogsCollapse"
-                     style="cursor: pointer;">
-                    <h5 class="mb-0">
-                        <i class="fas fa-file-alt"></i> Service Logs
-                    </h5>
-                    <i class="fas fa-chevron-down"></i>
-                </div>
-                <div class="collapse" id="ServiceLogsCollapse">
-                    <div class="card-body">
-                        <div class="row g-3">
-                            <div class="col-md-3">
-                                <select class="form-select" id="ServiceNameSelect">
-                                    <option value="">All Services</option>
-                                    <option value="MediaVortex">MediaVortex (Web App)</option>
-                                    <option value="TranscodeService">TranscodeService</option>
-                                    <option value="QualityTestingService">QualityTestingService</option>
-                                    <option value="QualityCompareService">QualityCompareService</option>
-                                </select>
-                            </div>
-                            <div class="col-md-2">
-                                <select class="form-select" id="LogLevelSelect">
-                                    <option value="">All Levels</option>
-                                    <option value="ERROR">ERROR</option>
-                                    <option value="WARNING">WARNING</option>
-                                    <option value="INFO">INFO</option>
-                                    <option value="DEBUG">DEBUG</option>
-                                </select>
-                            </div>
-                            <div class="col-md-2">
-                                <select class="form-select" id="HoursSelect">
-                                    <option value="1">Last 1 Hour</option>
-                                    <option value="2" selected>Last 2 Hours</option>
-                                    <option value="6">Last 6 Hours</option>
-                                    <option value="24">Last 24 Hours</option>
-                                </select>
-                            </div>
-                            <div class="col-md-2">
-                                <input type="number" class="form-control" id="LogLimit" placeholder="Limit" value="50" min="1" max="500">
-                            </div>
-                            <div class="col-md-3">
-                                <button class="btn btn-secondary w-100" onclick="sqlQueriesManager.LoadServiceLogs()">
-                                    <i class="fas fa-search"></i> Load Logs
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Custom SQL Query Section (merged with Common Queries) -->
+    <!-- Custom SQL Query Section -->
     <div class="row mb-4">
         <div class="col-12">
             <div class="card shadow-sm">
@@ -234,13 +152,22 @@
                 </div>
                 <div class="card-body">
                     <div class="mb-3">
-                        <label class="form-label">Quick Queries:</label>
-                        <div class="d-flex gap-2">
+                        <label class="form-label">Preset Queries:</label>
+                        <div class="d-flex flex-wrap gap-2">
                             <button class="btn btn-sm btn-outline-secondary" onclick="sqlQueriesManager.LoadCommonQuery('recent_errors')">
                                 <i class="fas fa-exclamation-circle"></i> Recent Errors (24h)
                             </button>
                             <button class="btn btn-sm btn-outline-secondary" onclick="sqlQueriesManager.LoadCommonQuery('service_health')">
                                 <i class="fas fa-heartbeat"></i> Service Health
+                            </button>
+                            <button class="btn btn-sm btn-outline-secondary" onclick="sqlQueriesManager.LoadCommonQuery('queue_status')">
+                                <i class="fas fa-list-ol"></i> Queue Status
+                            </button>
+                            <button class="btn btn-sm btn-outline-secondary" onclick="sqlQueriesManager.LoadCommonQuery('recent_transcodes')">
+                                <i class="fas fa-film"></i> Recent Transcodes
+                            </button>
+                            <button class="btn btn-sm btn-outline-secondary" onclick="sqlQueriesManager.LoadCommonQuery('large_queue_items')">
+                                <i class="fas fa-weight-hanging"></i> Large Queue Items
                             </button>
                         </div>
                     </div>
@@ -305,10 +232,14 @@
 class SQLQueriesManager {
     constructor() {
         this.CommonQueries = {
-            'recent_errors': "SELECT LogLevel, Message, Timestamp, Component, FunctionName FROM Logs WHERE LogLevel IN ('ERROR', 'CRITICAL') AND Timestamp >= datetime('now', '-24 hours') ORDER BY Timestamp DESC LIMIT 50",
-            'service_health': "SELECT ServiceName, Status, HealthStatus, ErrorCount, LastErrorMessage, LastHealthCheck FROM ServiceStatus ORDER BY ServiceName"
+            'recent_errors': "SELECT LogLevel, Message, Timestamp, Component, FunctionName FROM Logs WHERE LogLevel IN ('ERROR', 'CRITICAL') AND Timestamp >= NOW() - INTERVAL '24 hours' ORDER BY Timestamp DESC LIMIT 50",
+            'service_health': "SELECT ServiceName, Status, HealthStatus, ErrorCount, LastErrorMessage, LastHealthCheck FROM ServiceStatus ORDER BY ServiceName",
+            'queue_status': "SELECT Status, COUNT(*) as Count FROM TranscodeQueue GROUP BY Status",
+            'recent_transcodes': "SELECT FilePath, Success, AttemptDate, ProfileName, SizeReductionPercent FROM TranscodeAttempts ORDER BY AttemptDate DESC LIMIT 20",
+            'large_queue_items': "SELECT FileName, SizeMB, Status, Priority, DateAdded FROM TranscodeQueue ORDER BY SizeMB DESC LIMIT 20"
         };
         this.LoadRecentFailures();
+        this.LoadStuckJobs();
     }
 
     // ---- Utility Methods ----
@@ -329,6 +260,7 @@ class SQLQueriesManager {
 
     RefreshPage() {
         this.LoadRecentFailures();
+        this.LoadStuckJobs();
         this.showAlert('Page refreshed', 'info');
     }
 
@@ -553,34 +485,6 @@ class SQLQueriesManager {
             }
         } catch (error) {
             this.showAlert('Error executing query: ' + error.message, 'danger');
-            this.HideLoading();
-        }
-    }
-
-    async LoadServiceLogs() {
-        const serviceName = document.getElementById('ServiceNameSelect').value;
-        const logLevel = document.getElementById('LogLevelSelect').value;
-        const hours = document.getElementById('HoursSelect').value;
-        const limit = document.getElementById('LogLimit').value;
-
-        this.ShowLoading();
-
-        try {
-            const params = new URLSearchParams({ Hours: hours, Limit: limit });
-            if (serviceName) params.append('ServiceName', serviceName);
-            if (logLevel) params.append('LogLevel', logLevel);
-
-            const response = await fetch(`/api/SQLQueries/GetServiceLogs?${params}`);
-            const data = await response.json();
-
-            if (data.Success) {
-                this.DisplayResults(data.Logs);
-            } else {
-                this.showAlert('Error: ' + data.ErrorMessage, 'danger');
-                this.HideLoading();
-            }
-        } catch (error) {
-            this.showAlert('Error loading logs: ' + error.message, 'danger');
             this.HideLoading();
         }
     }
@@ -844,85 +748,6 @@ class SQLQueriesManager {
             Container.innerHTML = `
                 <div class="alert alert-danger">
                     <i class="fas fa-exclamation-triangle"></i> Error loading stuck jobs: ${error.message}
-                </div>
-            `;
-        }
-    }
-
-    async LoadQualityTestResults(PassFailFilter) {
-        const Container = document.getElementById('QualityTestResultsContainer');
-
-        try {
-            const response = await fetch(`/api/SQLQueries/GetQualityTestResultsFiltered?PassFailFilter=${PassFailFilter}&Limit=30`);
-            const data = await response.json();
-
-            if (data.Success) {
-                if (data.QualityTestResults && data.QualityTestResults.length > 0) {
-                    let html = `
-                        <div class="table-responsive">
-                            <table class="table table-striped table-hover">
-                                <thead class="table-header-success">
-                                    <tr>
-                                        <th class="fw-bold">File</th>
-                                        <th class="fw-bold">VMAF Score</th>
-                                        <th class="fw-bold">Status</th>
-                                        <th class="fw-bold">Profile</th>
-                                        <th class="fw-bold">Date Tested</th>
-                                        <th class="fw-bold">Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                    `;
-
-                    data.QualityTestResults.forEach(result => {
-                        const FileName = result.FilePath ? result.FilePath.split('/').pop() : 'Unknown';
-                        const VMAFScore = result.VMAFScore;
-                        const VMAFColor = VMAFScore > 95 ? 'success' : VMAFScore > 90 ? 'warning' : 'danger';
-                        const VMAFBadge = VMAFScore ? `<span class="badge bg-${VMAFColor}">${VMAFScore.toFixed(1)}</span>` : '<span class="badge bg-secondary">N/A</span>';
-                        const StatusBadge = result.PassesThreshold ? '<span class="badge bg-success">Passed</span>' : '<span class="badge bg-danger">Failed</span>';
-
-                        html += `
-                            <tr>
-                                <td title="${result.FilePath}">${FileName}</td>
-                                <td>${VMAFBadge}</td>
-                                <td>${StatusBadge}</td>
-                                <td>${result.ProfileName || 'N/A'}</td>
-                                <td>${new Date(result.DateTested).toLocaleString(undefined, { timeZoneName: 'short' })}</td>
-                                <td>
-                                    <button class="btn btn-sm btn-outline-primary" onclick="sqlQueriesManager.LoadMediaFileComparisonForPath('${result.FilePath}')">
-                                        <i class="fas fa-search"></i> Compare
-                                    </button>
-                                </td>
-                            </tr>
-                        `;
-                    });
-
-                    html += `
-                                </tbody>
-                            </table>
-                        </div>
-                    `;
-
-                    Container.innerHTML = html;
-                } else {
-                    Container.innerHTML = `
-                        <div class="text-center py-4">
-                            <i class="fas fa-info-circle fa-3x text-info mb-3"></i>
-                            <p class="text-muted">No quality test results found for filter: ${PassFailFilter}</p>
-                        </div>
-                    `;
-                }
-            } else {
-                Container.innerHTML = `
-                    <div class="alert alert-danger">
-                        <i class="fas fa-exclamation-triangle"></i> Error: ${data.ErrorMessage}
-                    </div>
-                `;
-            }
-        } catch (error) {
-            Container.innerHTML = `
-                <div class="alert alert-danger">
-                    <i class="fas fa-exclamation-triangle"></i> Error loading quality test results: ${error.message}
                 </div>
             `;
         }

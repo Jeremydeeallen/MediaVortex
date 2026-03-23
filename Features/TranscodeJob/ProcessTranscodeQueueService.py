@@ -223,6 +223,15 @@ class ProcessTranscodeQueueService:
                     LoggingService.LogException("Error checking service status", e,
                                               "ProcessTranscodeQueueService", "ProcessQueueLoop")
 
+                # Check thermal clearance before starting new job
+                from Services.CpuAffinityService import GetCpuAffinityServiceInstance
+                CpuAffinityServiceInstance = GetCpuAffinityServiceInstance()
+                if CpuAffinityServiceInstance.CpuAffinityEnabled and CpuAffinityServiceInstance.ThermalGateEnabled:
+                    ThermalReady = CpuAffinityServiceInstance.WaitForThermalClearance(CoreCount=0)
+                    if not ThermalReady:
+                        LoggingService.LogWarning("Thermal clearance timeout — starting job anyway",
+                                                 "ProcessTranscodeQueueService", "ProcessQueueLoop")
+
                 # Check if we can start more jobs
                 if len(self.ActiveJobs) < self.MaxConcurrentJobs:
                     # Try to get next job

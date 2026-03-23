@@ -285,8 +285,11 @@ class QueueManagementBusinessService:
             for mediaFile in allMediaFiles:
                 sourceResolution = mediaFile.Resolution or ""
                 if not sourceResolution:
-                    LoggingService.LogDebug(f"Skipping {mediaFile.FileName}: no resolution", "QueueManagementBusinessService", "GetMediaFilesByFolderAndResolutionFilter")
-                    continue
+                    if not self.ProbeAndUpdateMissingMetadata(mediaFile):
+                        continue
+                    sourceResolution = mediaFile.Resolution or ""
+                    if not sourceResolution:
+                        continue
 
                 # Compare file resolution to target resolution
                 comparison = resolutionService.CompareResolutions(sourceResolution, targetResolution)
@@ -338,6 +341,10 @@ class QueueManagementBusinessService:
                 if not mediaFile.AssignedProfile or mediaFile.AssignedProfile.strip() == "":
                     LoggingService.LogInfo(f"Skipping {mediaFile.FileName}: no assigned profile", "QueueManagementBusinessService", "GetMediaFilesByFolderWithResolutionFilterUsingAssignedProfiles")
                     continue
+
+                # Probe missing resolution before checking
+                if not mediaFile.Resolution:
+                    self.ProbeAndUpdateMissingMetadata(mediaFile)
 
                 # Check resolution using the file's assigned profile
                 shouldSkip, skipReason = self.ShouldSkipDueToResolution(mediaFile, mediaFile.AssignedProfile)
@@ -971,6 +978,61 @@ class QueueManagementBusinessService:
         except Exception as e:
             LoggingService.LogException("Exception getting queue statistics", e, "QueueManagementBusinessService", "GetQueueStatistics")
             return {}
+
+    def ProbeAndUpdateMissingMetadata(self, MediaFile: MediaFileModel) -> bool:
+        """FFprobe a media file that has no resolution, update the DB, and set fields on the model.
+        Returns True if resolution was successfully obtained, False otherwise."""
+        try:
+            FilePath = MediaFile.FilePath or ""
+            if not FilePath or not os.path.exists(FilePath):
+                LoggingService.LogWarning(f"Cannot probe {MediaFile.FileName}: file not found at {FilePath}", "QueueManagementBusinessService", "ProbeAndUpdateMissingMetadata")
+                return False
+
+            LoggingService.LogInfo(f"Probing missing metadata for {MediaFile.FileName}", "QueueManagementBusinessService", "ProbeAndUpdateMissingMetadata")
+            MetadataResult = self.FileManager.ExtractMediaMetadata(FilePath)
+
+            if not MetadataResult.get('Success', False):
+                ErrorMessage = MetadataResult.get('ErrorMessage', 'Unknown error')
+                LoggingService.LogWarning(f"FFprobe failed for {MediaFile.FileName}: {ErrorMessage}", "QueueManagementBusinessService", "ProbeAndUpdateMissingMetadata")
+                return False
+
+            # Map metadata fields onto the model (mirrors FileScanningBusinessService.ExtractAndUpdateMetadata)
+            MediaFile.VideoBitrateKbps = MetadataResult.get('VideoBitrateKbps')
+            MediaFile.AudioBitrateKbps = MetadataResult.get('AudioBitrateKbps')
+            MediaFile.Resolution = MetadataResult.get('Resolution')
+            MediaFile.Codec = MetadataResult.get('VideoCodec')
+            MediaFile.DurationMinutes = MetadataResult.get('DurationMinutes')
+            MediaFile.FrameRate = MetadataResult.get('FrameRate')
+            MediaFile.TotalFrames = MetadataResult.get('TotalFrames')
+            MediaFile.CodecProfile = MetadataResult.get('CodecProfile')
+            MediaFile.ColorRange = MetadataResult.get('ColorRange')
+            MediaFile.FieldOrder = MetadataResult.get('FieldOrder')
+            MediaFile.HasBFrames = MetadataResult.get('HasBFrames')
+            MediaFile.RefFrames = MetadataResult.get('RefFrames')
+            MediaFile.PixelFormat = MetadataResult.get('PixelFormat')
+            MediaFile.Level = MetadataResult.get('Level')
+            MediaFile.AudioChannels = MetadataResult.get('AudioChannels')
+            MediaFile.AudioSampleRate = MetadataResult.get('AudioSampleRate')
+            MediaFile.AudioSampleFormat = MetadataResult.get('AudioSampleFormat')
+            MediaFile.AudioChannelLayout = MetadataResult.get('AudioChannelLayout')
+            MediaFile.AudioCodec = MetadataResult.get('AudioCodec')
+            MediaFile.SubtitleFormats = MetadataResult.get('SubtitleFormats')
+            MediaFile.ContainerFormat = MetadataResult.get('ContainerFormat')
+            MediaFile.OverallBitrate = MetadataResult.get('OverallBitrate')
+
+            # Persist to DB
+            self.DatabaseManager.SaveMediaFile(MediaFile)
+
+            if MediaFile.Resolution:
+                LoggingService.LogInfo(f"Probed and updated {MediaFile.FileName}: Resolution={MediaFile.Resolution}", "QueueManagementBusinessService", "ProbeAndUpdateMissingMetadata")
+                return True
+            else:
+                LoggingService.LogWarning(f"Probed {MediaFile.FileName} but resolution still empty", "QueueManagementBusinessService", "ProbeAndUpdateMissingMetadata")
+                return False
+
+        except Exception as e:
+            LoggingService.LogException(f"Exception probing metadata for {MediaFile.FileName}", e, "QueueManagementBusinessService", "ProbeAndUpdateMissingMetadata")
+            return False
 
     def ShouldSkipDueToResolution(self, MediaFile: MediaFileModel, ProfileName: str, SkipNoDownscaling: bool = True) -> tuple[bool, str]:
         """

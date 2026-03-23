@@ -228,21 +228,36 @@ def StartQualityTest():
 
 @QualityTestBlueprint.route('/QualityTest/Status/<int:JobId>', methods=['GET'])
 def GetQualityTestStatus(JobId):
-    Controller = QualityTestController()
-    Result = Controller.GetQualityTestStatus(JobId)
-    return jsonify(Result)
+    try:
+        Controller = QualityTestController()
+        Result = Controller.GetQualityTestStatus(JobId)
+        return jsonify(Result)
+    except Exception as e:
+        ErrorMsg = f"Exception in GetQualityTestStatus endpoint: {str(e)}"
+        LoggingService.LogException(ErrorMsg, e, "QualityTestController", "GetQualityTestStatus")
+        return jsonify({"Success": False, "Message": "Failed to get quality test status", "Error": ErrorMsg}), 500
 
 @QualityTestBlueprint.route('/api/QualityTest/Status', methods=['GET'])
 def GetQualityTestServiceStatus():
-    Controller = QualityTestController()
-    Result = Controller.GetQualityTestServiceStatus()
-    return jsonify(Result)
+    try:
+        Controller = QualityTestController()
+        Result = Controller.GetQualityTestServiceStatus()
+        return jsonify(Result)
+    except Exception as e:
+        ErrorMsg = f"Exception in GetQualityTestServiceStatus endpoint: {str(e)}"
+        LoggingService.LogException(ErrorMsg, e, "QualityTestController", "GetQualityTestServiceStatus")
+        return jsonify({"Success": False, "Message": "Failed to get service status", "Error": ErrorMsg}), 500
 
 @QualityTestBlueprint.route('/api/QualityTest/Queue', methods=['GET'])
 def GetQualityTestQueue():
-    Controller = QualityTestController()
-    Result = Controller.GetQualityTestQueue()
-    return jsonify(Result)
+    try:
+        Controller = QualityTestController()
+        Result = Controller.GetQualityTestQueue()
+        return jsonify(Result)
+    except Exception as e:
+        ErrorMsg = f"Exception in GetQualityTestQueue endpoint: {str(e)}"
+        LoggingService.LogException(ErrorMsg, e, "QualityTestController", "GetQualityTestQueue")
+        return jsonify({"Success": False, "Message": "Failed to get quality test queue", "Error": ErrorMsg}), 500
 
 @QualityTestBlueprint.route('/QualityTest/Stop', methods=['POST'])
 def StopQualityTestService():
@@ -292,74 +307,97 @@ def RetryQualityTest():
 
 @QualityTestBlueprint.route('/api/QualityTesting/History', methods=['GET'])
 def GetQualityTestHistory():
-    Controller = QualityTestController()
-    Page = request.args.get('Page', 1, type=int)
-    Limit = request.args.get('Limit', 10, type=int)
+    try:
+        Controller = QualityTestController()
+        Page = request.args.get('Page', 1, type=int)
+        Limit = request.args.get('Limit', 10, type=int)
 
-    # Validate parameters
-    if Page < 1:
-        Page = 1
-    if Limit < 1 or Limit > 50:  # Max 50 per page
-        Limit = 10
+        if Page < 1:
+            Page = 1
+        if Limit < 1 or Limit > 50:
+            Limit = 10
 
-    Result = Controller.GetQualityTestHistory(Page, Limit)
-    return jsonify(Result)
+        Result = Controller.GetQualityTestHistory(Page, Limit)
+        return jsonify(Result)
+    except Exception as e:
+        ErrorMsg = f"Exception in GetQualityTestHistory endpoint: {str(e)}"
+        LoggingService.LogException(ErrorMsg, e, "QualityTestController", "GetQualityTestHistory")
+        return jsonify({"Success": False, "Message": "Failed to get quality test history", "Error": ErrorMsg}), 500
 
 @QualityTestBlueprint.route('/api/QualityTesting/Progress', methods=['GET'])
 def GetQualityTestProgress():
-    Controller = QualityTestController()
-    Result = Controller.GetQualityTestProgress()
-    return jsonify(Result)
+    try:
+        Controller = QualityTestController()
+        Result = Controller.GetQualityTestProgress()
+        return jsonify(Result)
+    except Exception as e:
+        ErrorMsg = f"Exception in GetQualityTestProgress endpoint: {str(e)}"
+        LoggingService.LogException(ErrorMsg, e, "QualityTestController", "GetQualityTestProgress")
+        return jsonify({"Success": False, "Message": "Failed to get quality test progress", "Error": ErrorMsg}), 500
 
 @QualityTestBlueprint.route('/api/QualityTesting/LogError', methods=['POST'])
 def LogQualityTestError():
-    Controller = QualityTestController()
-    Data = request.get_json()
+    try:
+        Controller = QualityTestController()
+        Data = request.get_json()
 
-    if not Data:
-        return jsonify({"Success": False, "Message": "No data provided"}), 400
+        if not Data:
+            return jsonify({"Success": False, "Message": "No data provided"}), 400
 
-    ErrorMessage = Data.get('ErrorMessage', '')
-    ErrorContext = Data.get('ErrorContext', '')
-    RequestUrl = Data.get('RequestUrl', '')
+        ErrorMessage = Data.get('ErrorMessage', '')
+        ErrorContext = Data.get('ErrorContext', '')
+        RequestUrl = Data.get('RequestUrl', '')
 
-    Result = Controller.LogError(ErrorMessage, ErrorContext, RequestUrl)
-    return jsonify(Result)
+        Result = Controller.LogError(ErrorMessage, ErrorContext, RequestUrl)
+        return jsonify(Result)
+    except Exception as e:
+        ErrorMsg = f"Exception in LogQualityTestError endpoint: {str(e)}"
+        LoggingService.LogException(ErrorMsg, e, "QualityTestController", "LogQualityTestError")
+        return jsonify({"Success": False, "Message": "Failed to log error", "Error": ErrorMsg}), 500
 
 @QualityTestBlueprint.route('/api/QualityTest/AddToQueue', methods=['POST'])
 def AddToQueue():
-    Controller = QualityTestController()
-    Data = request.get_json()
+    try:
+        Controller = QualityTestController()
+        Data = request.get_json()
 
-    if not Data:
-        return jsonify({"Success": False, "Message": "No data provided"}), 400
+        if not Data:
+            return jsonify({"Success": False, "Message": "No data provided"}), 400
 
-    TranscodeAttemptId = Data.get('TranscodeAttemptId')
-    if not TranscodeAttemptId:
-        return jsonify({"Success": False, "Message": "TranscodeAttemptId required"}), 400
+        TranscodeAttemptId = Data.get('TranscodeAttemptId')
+        if not TranscodeAttemptId:
+            return jsonify({"Success": False, "Message": "TranscodeAttemptId required"}), 400
 
-    Result = Controller.AddToQueue(TranscodeAttemptId)
-    return jsonify(Result)
+        Result = Controller.AddToQueue(TranscodeAttemptId)
+        return jsonify(Result)
+    except Exception as e:
+        ErrorMsg = f"Exception in AddToQueue endpoint: {str(e)}"
+        LoggingService.LogException(ErrorMsg, e, "QualityTestController", "AddToQueue")
+        return jsonify({"Success": False, "Message": "Failed to add to queue", "Error": ErrorMsg}), 500
 
 @QualityTestBlueprint.route('/api/QualityTest/Skip', methods=['POST'])
 def SkipQualityTest():
     """Skip quality test for a transcode attempt"""
-    Controller = QualityTestController()
-    Data = request.get_json()
+    try:
+        Controller = QualityTestController()
+        Data = request.get_json()
 
-    if not Data:
-        return jsonify({"Success": False, "Message": "No data provided"}), 400
+        if not Data:
+            return jsonify({"Success": False, "Message": "No data provided"}), 400
 
-    TranscodeAttemptId = Data.get('TranscodeAttemptId')
-    if not TranscodeAttemptId:
-        return jsonify({"Success": False, "Message": "TranscodeAttemptId required"}), 400
+        TranscodeAttemptId = Data.get('TranscodeAttemptId')
+        if not TranscodeAttemptId:
+            return jsonify({"Success": False, "Message": "TranscodeAttemptId required"}), 400
 
-    # Use the business service to handle the skip logic
-    from Features.QualityTesting.QualityTestingBusinessService import QualityTestingBusinessService
-    business_service = QualityTestingBusinessService(Controller.DatabaseManager)
-    Result = business_service.SkipQualityTest(TranscodeAttemptId)
+        from Features.QualityTesting.QualityTestingBusinessService import QualityTestingBusinessService
+        business_service = QualityTestingBusinessService(Controller.DatabaseManager)
+        Result = business_service.SkipQualityTest(TranscodeAttemptId)
 
-    return jsonify(Result)
+        return jsonify(Result)
+    except Exception as e:
+        ErrorMsg = f"Exception in SkipQualityTest endpoint: {str(e)}"
+        LoggingService.LogException(ErrorMsg, e, "QualityTestController", "SkipQualityTest")
+        return jsonify({"Success": False, "Message": "Failed to skip quality test", "Error": ErrorMsg}), 500
 
 @QualityTestBlueprint.route('/api/QualityTest/CancelActive', methods=['POST'])
 def CancelActiveQualityTest():

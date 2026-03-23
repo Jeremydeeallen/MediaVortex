@@ -47,6 +47,14 @@ class CpuAffinityService:
         self.CoolingWaitTargetTemp = 60.0  # Wait for cores to drop below this temp (idle range is 55-60°C)
         self.CoolingWaitMaxSeconds = 300  # Maximum wait time (5 minutes)
         self.CoolingWaitCheckInterval = 5  # Check temperature every N seconds
+
+        # Thermal gate configuration (pre-start temperature gate)
+        self.ThermalGateEnabled = True
+        self.ThermalGateMaxTemp = 80.0  # Per-core temp threshold for "cool enough"
+        self.ThermalGateMinCoolCores = 8  # Min cool cores before starting new job
+        self.ThermalPauseCriticalTemp = 90.0  # Average temp that pauses all new starts
+        self.ThermalGateMaxWaitSeconds = 600  # Max wait for thermal clearance (10 min)
+        self.ThermalGateCheckInterval = 10  # Seconds between temp checks while waiting
         
         # Temperature cache
         self.TemperatureCache = None
@@ -130,7 +138,54 @@ class CpuAffinityService:
                 except ValueError:
                     pass
             
-            LoggingService.LogInfo(f"Loaded configuration: Enabled={self.CpuAffinityEnabled}, Threshold={self.TemperatureThreshold}°C, Interval={self.MonitoringInterval}s, CoolingWait={self.CoolingWaitEnabled}, CoolingWaitTarget={self.CoolingWaitTargetTemp}°C", 
+            # Load ThermalGateEnabled
+            ThermalGateEnabledStr = self.DatabaseManager.GetSystemSetting('ThermalGateEnabled')
+            if ThermalGateEnabledStr:
+                self.ThermalGateEnabled = ThermalGateEnabledStr.lower() in ('true', '1', 'yes')
+
+            # Load ThermalGateMaxTemp
+            ThermalGateMaxTempStr = self.DatabaseManager.GetSystemSetting('ThermalGateMaxTemp')
+            if ThermalGateMaxTempStr:
+                try:
+                    self.ThermalGateMaxTemp = float(ThermalGateMaxTempStr)
+                except ValueError:
+                    pass
+
+            # Load ThermalGateMinCoolCores
+            ThermalGateMinCoolCoresStr = self.DatabaseManager.GetSystemSetting('ThermalGateMinCoolCores')
+            if ThermalGateMinCoolCoresStr:
+                try:
+                    self.ThermalGateMinCoolCores = int(ThermalGateMinCoolCoresStr)
+                except ValueError:
+                    pass
+
+            # Load ThermalPauseCriticalTemp
+            ThermalPauseCriticalTempStr = self.DatabaseManager.GetSystemSetting('ThermalPauseCriticalTemp')
+            if ThermalPauseCriticalTempStr:
+                try:
+                    self.ThermalPauseCriticalTemp = float(ThermalPauseCriticalTempStr)
+                except ValueError:
+                    pass
+
+            # Load ThermalGateMaxWaitSeconds
+            ThermalGateMaxWaitSecondsStr = self.DatabaseManager.GetSystemSetting('ThermalGateMaxWaitSeconds')
+            if ThermalGateMaxWaitSecondsStr:
+                try:
+                    self.ThermalGateMaxWaitSeconds = int(ThermalGateMaxWaitSecondsStr)
+                except ValueError:
+                    pass
+
+            # Load ThermalGateCheckInterval
+            ThermalGateCheckIntervalStr = self.DatabaseManager.GetSystemSetting('ThermalGateCheckInterval')
+            if ThermalGateCheckIntervalStr:
+                try:
+                    self.ThermalGateCheckInterval = int(ThermalGateCheckIntervalStr)
+                    if self.ThermalGateCheckInterval < 5:
+                        self.ThermalGateCheckInterval = 5
+                except ValueError:
+                    pass
+
+            LoggingService.LogInfo(f"Loaded configuration: Enabled={self.CpuAffinityEnabled}, Threshold={self.TemperatureThreshold}°C, Interval={self.MonitoringInterval}s, CoolingWait={self.CoolingWaitEnabled}, CoolingWaitTarget={self.CoolingWaitTargetTemp}°C, ThermalGate={self.ThermalGateEnabled}, ThermalGateMaxTemp={self.ThermalGateMaxTemp}°C, ThermalPauseCriticalTemp={self.ThermalPauseCriticalTemp}°C",
                                  "CpuAffinityService", "_LoadConfiguration")
         except Exception as e:
             LoggingService.LogException("Error loading configuration", e, "CpuAffinityService", "_LoadConfiguration")
@@ -377,6 +432,123 @@ class CpuAffinityService:
         except Exception as e:
             LoggingService.LogException(f"Error registering job {JobId}", e, "CpuAffinityService", "RegisterJob")
     
+    def IsSystemTooHotForNewJob(self, CoreCount: int) -> Dict[str, Any]:
+        """Check if the system is too hot to start a new job.
+
+        Args:
+            CoreCount: Number of cores the job would use (0 = general check)
+
+        Returns:
+            Dictionary with Ready (bool), Reason (str), and diagnostic info
+        """
+        try:
+            if not self.ThermalGateEnabled:
+                return {"Ready": True}
+
+            TempData = self._GetCurrentTemperatures()
+            if not TempData:
+                # Can't read temps — don't block
+                return {"Ready": True, "Reason": "no_temp_data"}
+
+            Cores = TempData.get('Cores', [])
+            if not Cores:
+                return {"Ready": True, "Reason": "no_core_data"}
+
+            # Calculate average temperature across all cores
+            CoreTemps = [c.get('Temperature') for c in Cores if c.get('Temperature') is not None]
+            if not CoreTemps:
+                return {"Ready": True, "Reason": "no_temp_readings"}
+
+            AverageTemp = sum(CoreTemps) / len(CoreTemps)
+
+            # Check critical temperature (queue-level pause)
+            if AverageTemp >= self.ThermalPauseCriticalTemp:
+                return {
+                    "Ready": False,
+                    "Reason": "critical_temp",
+                    "AverageTemp": round(AverageTemp, 1),
+                    "CriticalThreshold": self.ThermalPauseCriticalTemp
+                }
+
+            # Count cores below ThermalGateMaxTemp
+            CoolCoreCount = sum(1 for Temp in CoreTemps if Temp < self.ThermalGateMaxTemp)
+
+            if CoolCoreCount < self.ThermalGateMinCoolCores:
+                return {
+                    "Ready": False,
+                    "Reason": "insufficient_cool_cores",
+                    "CoolCores": CoolCoreCount,
+                    "RequiredCoolCores": self.ThermalGateMinCoolCores,
+                    "ThermalGateMaxTemp": self.ThermalGateMaxTemp,
+                    "AverageTemp": round(AverageTemp, 1)
+                }
+
+            return {"Ready": True, "AverageTemp": round(AverageTemp, 1), "CoolCores": CoolCoreCount}
+
+        except Exception as e:
+            LoggingService.LogException("Error checking thermal readiness", e, "CpuAffinityService", "IsSystemTooHotForNewJob")
+            return {"Ready": True, "Reason": "error"}
+
+    def WaitForThermalClearance(self, CoreCount: int) -> bool:
+        """Wait for the system to cool enough before starting a new job.
+
+        Loops calling IsSystemTooHotForNewJob, sleeping ThermalGateCheckInterval between checks.
+
+        Args:
+            CoreCount: Number of cores the job would use (0 = general check)
+
+        Returns:
+            True when clearance granted, False if ThermalGateMaxWaitSeconds exceeded
+        """
+        if not self.ThermalGateEnabled:
+            return True
+
+        try:
+            # Initial check — fast path if already cool
+            Result = self.IsSystemTooHotForNewJob(CoreCount)
+            if Result.get("Ready", True):
+                return True
+
+            Reason = Result.get("Reason", "unknown")
+            LoggingService.LogInfo(
+                f"Waiting for thermal clearance (reason: {Reason}, avg temp: {Result.get('AverageTemp', 'N/A')}°C, "
+                f"cool cores: {Result.get('CoolCores', 'N/A')}/{self.ThermalGateMinCoolCores})",
+                "CpuAffinityService", "WaitForThermalClearance")
+
+            StartTime = datetime.now()
+            LastLogTime = StartTime
+
+            while True:
+                time.sleep(self.ThermalGateCheckInterval)
+
+                ElapsedSeconds = (datetime.now() - StartTime).total_seconds()
+                if ElapsedSeconds >= self.ThermalGateMaxWaitSeconds:
+                    LoggingService.LogWarning(
+                        f"Thermal clearance timeout after {ElapsedSeconds:.0f}s — allowing job to proceed anyway",
+                        "CpuAffinityService", "WaitForThermalClearance")
+                    return False
+
+                Result = self.IsSystemTooHotForNewJob(CoreCount)
+                if Result.get("Ready", True):
+                    LoggingService.LogInfo(
+                        f"Thermal clearance granted after {ElapsedSeconds:.0f}s (avg temp: {Result.get('AverageTemp', 'N/A')}°C, "
+                        f"cool cores: {Result.get('CoolCores', 'N/A')})",
+                        "CpuAffinityService", "WaitForThermalClearance")
+                    return True
+
+                # Log status every 30 seconds
+                SecondsSinceLastLog = (datetime.now() - LastLogTime).total_seconds()
+                if SecondsSinceLastLog >= 30:
+                    LastLogTime = datetime.now()
+                    LoggingService.LogInfo(
+                        f"Still waiting for thermal clearance ({ElapsedSeconds:.0f}s elapsed, reason: {Result.get('Reason', 'unknown')}, "
+                        f"avg temp: {Result.get('AverageTemp', 'N/A')}°C, cool cores: {Result.get('CoolCores', 'N/A')}/{self.ThermalGateMinCoolCores})",
+                        "CpuAffinityService", "WaitForThermalClearance")
+
+        except Exception as e:
+            LoggingService.LogException("Error waiting for thermal clearance", e, "CpuAffinityService", "WaitForThermalClearance")
+            return True  # On error, don't block — allow job to proceed
+
     def WaitForCoresToCool(self, CoreList: List[int]) -> bool:
         """Wait for cores to cool down below target temperature before proceeding.
         

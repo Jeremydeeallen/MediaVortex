@@ -2483,12 +2483,13 @@ class DatabaseManager:
                     UPDATE TranscodeProgress SET
                         CurrentPhase = %s, ProgressPercent = %s, CurrentFrame = %s, CurrentFPS = %s,
                         CurrentBitrate = %s, CurrentTime = %s, CurrentSpeed = %s, ETA = %s,
-                        TotalFrames = %s, AverageFPS = %s, LastProgressUpdate = NOW()
+                        TotalFrames = %s, AverageFPS = %s, LastProgressUpdate = NOW(),
+                        LastFrameAdvance = CASE WHEN CurrentFrame != %s THEN NOW() ELSE LastFrameAdvance END
                     WHERE TranscodeAttemptId = %s
                 """
                 parameters = (CurrentPhase, ProgressPercent, CurrentFrame, CurrentFPS,
                              CurrentBitrate, CurrentTime, CurrentSpeed, ETA,
-                             TotalFrames, AverageFPS, TranscodeAttemptId)
+                             TotalFrames, AverageFPS, CurrentFrame, TranscodeAttemptId)
                 
                 result = self.DatabaseService.ExecuteNonQuery(updateQuery, parameters)
                 LoggingService.LogDebug(f"Updated progress record for attempt {TranscodeAttemptId}: {CurrentPhase} ({ProgressPercent}%) - Frame: {CurrentFrame}, FPS: {CurrentFPS}, ETA: {ETA}", "DatabaseManager", "SaveTranscodeProgress")
@@ -2498,8 +2499,8 @@ class DatabaseManager:
                 insertQuery = """
                     INSERT INTO TranscodeProgress
                     (TranscodeAttemptId, PassNumber, PassType, CurrentPhase, ProgressPercent, CurrentFrame, CurrentFPS,
-                     CurrentBitrate, CurrentTime, CurrentSpeed, ETA, TotalFrames, AverageFPS, LastProgressUpdate)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+                     CurrentBitrate, CurrentTime, CurrentSpeed, ETA, TotalFrames, AverageFPS, LastProgressUpdate, LastFrameAdvance)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
                     RETURNING Id
                 """
                 parameters = (TranscodeAttemptId, 1, "Encoding", CurrentPhase, ProgressPercent, CurrentFrame, CurrentFPS,

@@ -30,7 +30,7 @@ class MenuStandards {
         // Add visual feedback to all buttons (exclude menu navigation)
         document.addEventListener('click', (e) => {
             if (e.target.matches('.btn:not(.nav-link)')) {
-                this.addClickFeedback(e.target);
+                this.addClickFeedback(e.target, e);
             }
         });
     }
@@ -59,7 +59,7 @@ class MenuStandards {
         }
     }
 
-    addClickFeedback(button) {
+    addClickFeedback(button, e) {
         // Add ripple effect
         const ripple = document.createElement('span');
         ripple.classList.add('btn-ripple');
@@ -71,12 +71,12 @@ class MenuStandards {
             animation: ripple 0.6s linear;
             pointer-events: none;
         `;
-        
+
         const rect = button.getBoundingClientRect();
         const size = Math.max(rect.width, rect.height);
         ripple.style.width = ripple.style.height = size + 'px';
-        ripple.style.left = (event.clientX - rect.left - size / 2) + 'px';
-        ripple.style.top = (event.clientY - rect.top - size / 2) + 'px';
+        ripple.style.left = (e.clientX - rect.left - size / 2) + 'px';
+        ripple.style.top = (e.clientY - rect.top - size / 2) + 'px';
         
         button.style.position = 'relative';
         button.style.overflow = 'hidden';

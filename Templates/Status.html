@@ -1,697 +1,718 @@
 {% extends "Base.html" %}
 
-{% block title %}Service Status - MediaVortex{% endblock %}
+{% block title %}Status - MediaVortex{% endblock %}
 
 {% block content %}
 <div class="container-fluid">
-    <div class="row">
-        <div class="col-12">
-            <div class="d-flex justify-content-between align-items-center mb-4">
-                <h1 class="h3 mb-0">
-                    <i class="fas fa-server me-2"></i>Service Status
-                </h1>
-                <div class="btn-group" role="group">
-                    <button type="button" class="btn btn-outline-primary" id="RefreshBtn">
-                        <i class="fas fa-sync-alt me-1"></i>Refresh
+    <!-- Header -->
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h1 class="h3 mb-0"><i class="fas fa-server me-2"></i>Status</h1>
+        <div class="btn-group" role="group">
+            <button type="button" class="btn btn-outline-primary btn-sm" id="RefreshBtn">
+                <i class="fas fa-sync-alt me-1"></i>Refresh
+            </button>
+            <button type="button" class="btn btn-outline-success btn-sm" id="AutoRefreshBtn">
+                <i class="fas fa-play me-1"></i>Auto
+            </button>
+        </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════ -->
+    <!-- SYSTEM RESOURCES                                    -->
+    <!-- ═══════════════════════════════════════════════════ -->
+    <div class="row g-3 mb-4">
+        <div class="col-6 col-lg-3">
+            <div class="card h-100 text-center">
+                <div class="card-body py-3">
+                    <small class="text-muted d-block mb-1">CPU Usage</small>
+                    <h4 class="mb-0 text-primary" id="CpuUsage">--</h4>
+                </div>
+            </div>
+        </div>
+        <div class="col-6 col-lg-3">
+            <div class="card h-100 text-center" id="CpuTemperatureContainer">
+                <div class="card-body py-3">
+                    <small class="text-muted d-block mb-1">CPU Temperature</small>
+                    <h4 class="mb-0 text-info" id="CpuTemperature">--</h4>
+                </div>
+            </div>
+        </div>
+        <div class="col-6 col-lg-3">
+            <div class="card h-100 text-center">
+                <div class="card-body py-3">
+                    <small class="text-muted d-block mb-1">Memory</small>
+                    <h4 class="mb-0 text-warning" id="MemoryUsage">--</h4>
+                </div>
+            </div>
+        </div>
+        <div class="col-6 col-lg-3">
+            <div class="card h-100 text-center">
+                <div class="card-body py-3">
+                    <small class="text-muted d-block mb-1">Disk</small>
+                    <h4 class="mb-0 text-secondary" id="DiskUsage">--</h4>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- CPU Core Temperatures (collapsible) -->
+    <div class="card mb-4">
+        <div class="card-header py-2 d-flex justify-content-between align-items-center" role="button" data-bs-toggle="collapse" data-bs-target="#CoreTemperaturesCollapse">
+            <h6 class="mb-0"><i class="fas fa-thermometer-half me-2"></i>CPU Core Temperatures</h6>
+            <i class="fas fa-chevron-up" id="CoreTemperaturesChevron"></i>
+        </div>
+        <div class="collapse show" id="CoreTemperaturesCollapse">
+            <div class="card-body py-2">
+                <div class="row g-2" id="CoreTemperaturesGrid">
+                    <div class="col-12 text-center text-muted">Loading...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════ -->
+    <!-- TRANSCODE CONTROLS + CURRENT JOB                    -->
+    <!-- ═══════════════════════════════════════════════════ -->
+    <div class="card mb-4">
+        <div class="card-header py-2 d-flex justify-content-between align-items-center">
+            <h6 class="mb-0"><i class="fas fa-film me-2"></i>Transcoding</h6>
+            <span id="TranscodeStatusBadge" class="badge bg-secondary">Loading...</span>
+        </div>
+        <div class="card-body py-3">
+            <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
+                <div id="CurrentJobInfo" class="d-none">
+                    <i class="fas fa-spinner fa-spin me-1 text-primary"></i>
+                    <strong id="CurrentJobName"></strong>
+                    <span id="CurrentJobPercent" class="ms-2 badge bg-info"></span>
+                    <small id="CurrentJobDetails" class="ms-2 text-muted"></small>
+                </div>
+                <div id="NoJobInfo" class="text-muted"><em>No active transcode job</em></div>
+                <div class="d-flex gap-2 ms-auto">
+                    <button id="BtnStopAfterJob" class="btn btn-warning btn-sm" onclick="StopAfterJob()" disabled>
+                        <i class="fas fa-stop-circle me-1"></i>Stop After This Job
                     </button>
-                    <button type="button" class="btn btn-outline-success" id="AutoRefreshBtn">
-                        <i class="fas fa-play me-1"></i>Auto Refresh
+                    <button id="BtnResume" class="btn btn-success btn-sm d-none" onclick="ResumeTranscoding()">
+                        <i class="fas fa-play-circle me-1"></i>Resume
                     </button>
                 </div>
             </div>
         </div>
     </div>
 
-    <!-- CPU Core Temperatures Display -->
-    <div class="row mb-4">
-        <div class="col-12">
-            <div class="card">
-                <div class="card-header d-flex justify-content-between align-items-center">
-                    <h5 class="card-title mb-0">
-                        <i class="fas fa-thermometer-half me-2"></i>CPU Core Temperatures
-                    </h5>
-                    <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#CoreTemperaturesCollapse" aria-expanded="true" aria-controls="CoreTemperaturesCollapse">
-                        <i class="fas fa-chevron-up" id="CoreTemperaturesChevron"></i>
-                    </button>
+    <!-- ═══════════════════════════════════════════════════ -->
+    <!-- TRANSCODE SAVINGS SUMMARY                           -->
+    <!-- ═══════════════════════════════════════════════════ -->
+    <div class="row g-3 mb-4">
+        <div class="col-md-4">
+            <div class="card text-center h-100">
+                <div class="card-body py-3">
+                    <small class="text-muted d-block mb-1">Total Space Saved</small>
+                    <h4 class="mb-0 text-success" id="TotalSaved">--</h4>
                 </div>
-                <div class="collapse show" id="CoreTemperaturesCollapse">
-                    <div class="card-body">
-                        <div class="row g-2" id="CoreTemperaturesGrid">
-                            <!-- Core temperature cells will be dynamically generated here -->
-                        </div>
-                    </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card text-center h-100">
+                <div class="card-body py-3">
+                    <small class="text-muted d-block mb-1">Successful Jobs</small>
+                    <h4 class="mb-0 text-primary" id="TotalJobs">--</h4>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card text-center h-100">
+                <div class="card-body py-3">
+                    <small class="text-muted d-block mb-1">Average Savings</small>
+                    <h4 class="mb-0 text-info" id="AvgSavings">--</h4>
                 </div>
             </div>
         </div>
     </div>
 
-    <!-- System Resources Box -->
-    <div class="row mb-4">
-        <div class="col-12">
-            <div class="card">
-                <div class="card-header">
-                    <h5 class="card-title mb-0">
-                        <i class="fas fa-tachometer-alt me-2"></i>System Resources
-                    </h5>
+    <!-- Savings by Volume -->
+    <div class="card mb-4">
+        <div class="card-header py-2">
+            <h6 class="mb-0"><i class="fas fa-hdd me-2"></i>Savings by Volume</h6>
+        </div>
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-striped table-hover table-sm mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th class="ps-3">Volume</th>
+                            <th class="text-end">Jobs</th>
+                            <th class="text-end">Original</th>
+                            <th class="text-end">Transcoded</th>
+                            <th class="text-end">Saved</th>
+                            <th class="text-end pe-3">%</th>
+                        </tr>
+                    </thead>
+                    <tbody id="VolumeTableBody">
+                        <tr><td colspan="6" class="text-center text-muted py-3">Loading...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Savings by Day — Chart + Table -->
+    <div class="card mb-4">
+        <div class="card-header py-2 d-flex justify-content-between align-items-center">
+            <h6 class="mb-0"><i class="fas fa-calendar-alt me-2"></i>Savings by Day</h6>
+            <select id="DayFilter" class="form-select form-select-sm" style="width: auto;" onchange="LoadSavingsByDay()">
+                <option value="7">7 days</option>
+                <option value="14">14 days</option>
+                <option value="30" selected>30 days</option>
+                <option value="90">90 days</option>
+            </select>
+        </div>
+        <div class="card-body">
+            <canvas id="SavingsByDayChart" height="200"></canvas>
+        </div>
+        <div class="card-body p-0 border-top">
+            <div class="table-responsive">
+                <table class="table table-striped table-hover table-sm mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th class="ps-3">Date</th>
+                            <th class="text-end">Jobs</th>
+                            <th class="text-end">Saved</th>
+                            <th class="text-end pe-3">Running Total</th>
+                        </tr>
+                    </thead>
+                    <tbody id="DayTableBody">
+                        <tr><td colspan="4" class="text-center text-muted py-3">Loading...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════ -->
+    <!-- CONTINUOUS SCANNING (summary — full controls on File Scanning page) -->
+    <!-- ═══════════════════════════════════════════════════ -->
+    <div class="card mb-4">
+        <div class="card-header py-2 d-flex justify-content-between align-items-center">
+            <h6 class="mb-0"><i class="fas fa-sync-alt me-2"></i>Continuous File Scanning</h6>
+            <div class="d-flex align-items-center gap-2">
+                <span class="badge bg-secondary" id="ContinuousScanBadge">Unknown</span>
+                <a href="/Scanning" class="btn btn-outline-primary btn-sm"><i class="fas fa-external-link-alt me-1"></i>Manage</a>
+            </div>
+        </div>
+        <div class="card-body py-2">
+            <div class="row g-2">
+                <div class="col-6 col-md-3">
+                    <small class="text-muted d-block">Status</small>
+                    <strong id="ContinuousScanStatus">Not Running</strong>
                 </div>
-                <div class="card-body">
-                    <div class="row" id="SystemResources">
-                        <div class="col-md-3">
-                            <div class="text-center">
-                                <h4 class="text-primary mb-1" id="CpuUsage">-</h4>
-                                <small class="text-muted">CPU Usage</small>
-                            </div>
-                        </div>
-                        <div class="col-md-3">
-                            <div class="text-center" id="CpuTemperatureContainer" data-bs-toggle="tooltip" data-bs-placement="top" title="Hover for core details">
-                                <h4 class="text-info mb-1" id="CpuTemperature">-</h4>
-                                <small class="text-muted">CPU Temperature</small>
-                                <div id="CpuTemperatureDetails" class="d-none">
-                                    <small class="text-muted d-block">Max: <span id="CpuMaxTemp">-</span>°C</small>
-                                    <small class="text-muted d-block">Avg: <span id="CpuAvgTemp">-</span>°C</small>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="col-md-3">
-                            <div class="text-center">
-                                <h4 class="text-warning mb-1" id="MemoryUsage">-</h4>
-                                <small class="text-muted">Memory Usage</small>
-                            </div>
-                        </div>
-                        <div class="col-md-3">
-                            <div class="text-center">
-                                <h4 class="text-secondary mb-1" id="DiskUsage">-</h4>
-                                <small class="text-muted">Disk Usage</small>
-                            </div>
-                        </div>
-                    </div>
+                <div class="col-6 col-md-3">
+                    <small class="text-muted d-block">Interval</small>
+                    <strong id="ContinuousScanInterval">-</strong>
+                </div>
+                <div class="col-6 col-md-3">
+                    <small class="text-muted d-block">Last Scan</small>
+                    <strong id="ContinuousScanLastScan">Never</strong>
+                </div>
+                <div class="col-6 col-md-3">
+                    <small class="text-muted d-block">Total Scans</small>
+                    <strong id="ContinuousScanCount">0</strong>
                 </div>
             </div>
         </div>
     </div>
 
-    <!-- Continuous Scanning Status -->
-    <div class="row mb-4">
-        <div class="col-12">
-            <div class="card">
-                <div class="card-header d-flex justify-content-between align-items-center">
-                    <h5 class="card-title mb-0">
-                        <i class="fas fa-sync-alt me-2"></i>Continuous File Scanning
-                    </h5>
-                    <span class="badge bg-secondary" id="ContinuousScanBadge">Unknown</span>
-                </div>
-                <div class="card-body">
-                    <div class="row align-items-center">
-                        <div class="col-md-8">
-                            <div class="row">
-                                <div class="col-md-4">
-                                    <div class="mb-2">
-                                        <small class="text-muted">Status</small>
-                                        <h6 class="mb-0" id="ContinuousScanStatus">Not Running</h6>
-                                    </div>
-                                </div>
-                                <div class="col-md-4">
-                                    <div class="mb-2">
-                                        <small class="text-muted">Interval</small>
-                                        <h6 class="mb-0" id="ContinuousScanInterval">-</h6>
-                                    </div>
-                                </div>
-                                <div class="col-md-4">
-                                    <div class="mb-2">
-                                        <small class="text-muted">Last Scan</small>
-                                        <h6 class="mb-0" id="ContinuousScanLastScan">Never</h6>
-                                    </div>
-                                </div>
-                                <div class="col-md-4">
-                                    <div class="mb-2">
-                                        <small class="text-muted">Total Scans</small>
-                                        <h6 class="mb-0" id="ContinuousScanCount">0</h6>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="col-md-4 text-end">
-                            <div class="mb-2">
-                                <label for="ScanIntervalInput" class="form-label small text-muted mb-1">Interval (minutes)</label>
-                                <input type="number" class="form-control form-control-sm mb-2" id="ScanIntervalInput" value="60" min="1" max="1440" style="max-width: 150px; display: inline-block;">
-                            </div>
-                            <div class="btn-group" role="group">
-                                <button type="button" class="btn btn-success" id="EnableContinuousScanBtn">
-                                    <i class="fas fa-play me-1"></i>Enable
-                                </button>
-                                <button type="button" class="btn btn-danger" id="DisableContinuousScanBtn" disabled>
-                                    <i class="fas fa-stop me-1"></i>Disable
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Services Status Cards -->
-    <div class="row" id="ServicesContainer">
-        <!-- Services will be dynamically loaded here -->
-    </div>
+    <!-- ═══════════════════════════════════════════════════ -->
+    <!-- SERVICES                                            -->
+    <!-- ═══════════════════════════════════════════════════ -->
+    <h6 class="text-muted mb-3"><i class="fas fa-cubes me-2"></i>Services</h6>
+    <div class="row g-3 mb-4" id="ServicesContainer"></div>
 
     <!-- Loading Indicator -->
-    <div class="row" id="LoadingIndicator">
-        <div class="col-12 text-center">
-            <div class="spinner-border text-primary" role="status">
-                <span class="visually-hidden">Loading...</span>
-            </div>
-            <p class="mt-2 text-muted">Loading service status...</p>
+    <div class="row d-none" id="LoadingIndicator">
+        <div class="col-12 text-center py-4">
+            <div class="spinner-border text-primary" role="status"></div>
+            <p class="mt-2 text-muted">Loading...</p>
         </div>
     </div>
 
     <!-- No Services Message -->
     <div class="row d-none" id="NoServicesMessage">
         <div class="col-12">
-            <div class="alert alert-info" role="alert">
-                <i class="fas fa-info-circle me-2"></i>
-                No services found. Make sure your microservices are running and registered.
+            <div class="alert alert-info">
+                <i class="fas fa-info-circle me-2"></i>No services found.
             </div>
         </div>
     </div>
 </div>
+{% endblock %}
 
-
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script>
+// ─── Utilities ───────────────────────────────────────────
+function FormatBytes(Bytes) {
+    if (!Bytes || Bytes === 0) return '0 B';
+    const Units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    const K = 1024;
+    const I = Math.floor(Math.log(Math.abs(Bytes)) / Math.log(K));
+    return parseFloat((Bytes / Math.pow(K, I)).toFixed(2)) + ' ' + Units[I];
+}
+
+function BytesToGB(Bytes) {
+    return (Bytes / (1024 * 1024 * 1024)).toFixed(2);
+}
+
+// ─── Chart ───────────────────────────────────────────────
+let SavingsChart = null;
+
+function RenderSavingsChart(Data) {
+    const Ctx = document.getElementById('SavingsByDayChart').getContext('2d');
+
+    if (SavingsChart) {
+        SavingsChart.destroy();
+    }
+
+    const Labels = Data.map(R => R.Day);
+    const SavedGB = Data.map(R => parseFloat(BytesToGB(R.TotalSavedBytes)));
+
+    SavingsChart = new Chart(Ctx, {
+        type: 'bar',
+        data: {
+            labels: Labels,
+            datasets: [{
+                label: 'Space Saved (GB)',
+                data: SavedGB,
+                backgroundColor: 'rgba(25, 135, 84, 0.7)',
+                borderColor: 'rgba(25, 135, 84, 1)',
+                borderWidth: 1,
+                borderRadius: 3
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    callbacks: {
+                        label: function(Ctx) {
+                            return Ctx.parsed.y.toFixed(2) + ' GB saved';
+                        }
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    grid: { display: false },
+                    ticks: { maxRotation: 45, font: { size: 11 } }
+                },
+                y: {
+                    beginAtZero: true,
+                    title: { display: true, text: 'GB Saved' },
+                    ticks: {
+                        callback: function(V) { return V + ' GB'; }
+                    }
+                }
+            }
+        }
+    });
+}
+
+// ─── Transcode Controls ─────────────────────────────────
+function UpdateTranscodeStatus(Data) {
+    const Status = Data.ServiceStatus;
+    const IsProcessing = Data.IsProcessing;
+    const CurrentJob = Data.CurrentJob;
+
+    const Badge = document.getElementById('TranscodeStatusBadge');
+    const BtnStop = document.getElementById('BtnStopAfterJob');
+    const BtnResume = document.getElementById('BtnResume');
+    const JobInfo = document.getElementById('CurrentJobInfo');
+    const NoJob = document.getElementById('NoJobInfo');
+
+    Badge.className = 'badge';
+
+    if (IsProcessing) {
+        Badge.textContent = 'Running';
+        Badge.classList.add('bg-success');
+        BtnStop.disabled = false;
+        BtnResume.classList.add('d-none');
+    } else if (Status === 'GracefulStop' || Status === 'Paused') {
+        Badge.textContent = 'Stopping After Current Job';
+        Badge.classList.add('bg-warning', 'text-dark');
+        BtnStop.disabled = true;
+        BtnResume.classList.remove('d-none');
+    } else if (Status === 'Stopped' || Status === 'Unknown') {
+        Badge.textContent = 'Stopped';
+        Badge.classList.add('bg-danger');
+        BtnStop.disabled = true;
+        BtnResume.classList.remove('d-none');
+    } else if (Status === 'Running') {
+        Badge.textContent = 'Idle';
+        Badge.classList.add('bg-info');
+        BtnStop.disabled = true;
+        BtnResume.classList.add('d-none');
+    } else {
+        Badge.textContent = Status;
+        Badge.classList.add('bg-secondary');
+        BtnStop.disabled = true;
+        BtnResume.classList.add('d-none');
+    }
+
+    if (CurrentJob) {
+        const FileName = CurrentJob.FilePath.split(/[/\\]/).pop();
+        document.getElementById('CurrentJobName').textContent = FileName;
+        document.getElementById('CurrentJobPercent').textContent = (CurrentJob.ProgressPercent || 0) + '%';
+        const Details = [];
+        if (CurrentJob.CurrentPhase) Details.push(CurrentJob.CurrentPhase);
+        if (CurrentJob.CurrentFPS) Details.push(CurrentJob.CurrentFPS + ' fps');
+        if (CurrentJob.CurrentSpeed) Details.push(CurrentJob.CurrentSpeed);
+        document.getElementById('CurrentJobDetails').textContent = Details.join(' | ');
+        JobInfo.classList.remove('d-none');
+        NoJob.classList.add('d-none');
+    } else {
+        JobInfo.classList.add('d-none');
+        NoJob.classList.remove('d-none');
+    }
+}
+
+function StopAfterJob() {
+    if (!confirm('Stop transcoding after the current job finishes?')) return;
+    fetch('/api/Transcode/Stop', { method: 'POST' })
+        .then(R => R.json())
+        .then(Result => {
+            if (Result.Success) {
+                showToastAlert('Transcode will stop after the current job.', 'success');
+                LoadTranscodeOverview();
+            } else {
+                showToastAlert(Result.ErrorMessage || 'Failed to stop.', 'danger');
+            }
+        })
+        .catch(() => showToastAlert('Failed to contact server.', 'danger'));
+}
+
+function ResumeTranscoding() {
+    fetch('/api/Transcode/Start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ MaxConcurrentJobs: 1 })
+    })
+        .then(R => R.json())
+        .then(Result => {
+            if (Result.Success) {
+                showToastAlert('Transcoding resumed.', 'success');
+                LoadTranscodeOverview();
+            } else {
+                showToastAlert(Result.ErrorMessage || 'Failed to resume.', 'danger');
+            }
+        })
+        .catch(() => showToastAlert('Failed to contact server.', 'danger'));
+}
+
+// ─── Data Loading ────────────────────────────────────────
+function LoadTranscodeOverview() {
+    fetch('/api/TeamStatus/Overview')
+        .then(R => R.json())
+        .then(Result => {
+            if (!Result.Success) return;
+            const D = Result.Data;
+            document.getElementById('TotalSaved').textContent = FormatBytes(D.TotalSavedBytes);
+            document.getElementById('TotalJobs').textContent = D.JobCount.toLocaleString();
+            document.getElementById('AvgSavings').textContent = D.AvgSavingsPercent + '%';
+            UpdateTranscodeStatus(D);
+        })
+        .catch(() => {});
+}
+
+function LoadSavingsByVolume() {
+    fetch('/api/TeamStatus/SavingsByVolume')
+        .then(R => R.json())
+        .then(Result => {
+            const Tbody = document.getElementById('VolumeTableBody');
+            if (!Result.Success || !Result.Data || !Result.Data.length) {
+                Tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-3">No data</td></tr>';
+                return;
+            }
+            Tbody.innerHTML = Result.Data.map(Row => {
+                const Pct = Row.TotalOriginalBytes > 0 ? ((Row.TotalSavedBytes / Row.TotalOriginalBytes) * 100).toFixed(1) : '0.0';
+                return `<tr>
+                    <td class="ps-3"><strong>${Row.Volume}</strong></td>
+                    <td class="text-end">${Row.JobCount.toLocaleString()}</td>
+                    <td class="text-end">${FormatBytes(Row.TotalOriginalBytes)}</td>
+                    <td class="text-end">${FormatBytes(Row.TotalNewBytes)}</td>
+                    <td class="text-end text-success fw-bold">${FormatBytes(Row.TotalSavedBytes)}</td>
+                    <td class="text-end pe-3">${Pct}%</td>
+                </tr>`;
+            }).join('');
+        })
+        .catch(() => {
+            document.getElementById('VolumeTableBody').innerHTML = '<tr><td colspan="6" class="text-center text-danger py-3">Failed to load</td></tr>';
+        });
+}
+
+function LoadSavingsByDay() {
+    const Days = document.getElementById('DayFilter').value;
+    fetch('/api/TeamStatus/SavingsByDay?Days=' + Days)
+        .then(R => R.json())
+        .then(Result => {
+            const Tbody = document.getElementById('DayTableBody');
+            if (!Result.Success || !Result.Data || !Result.Data.length) {
+                Tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted py-3">No data</td></tr>';
+                if (SavingsChart) { SavingsChart.destroy(); SavingsChart = null; }
+                return;
+            }
+
+            // Data comes back ASC — chart needs ASC, table shows DESC
+            RenderSavingsChart(Result.Data);
+
+            // Running total (accumulate ASC)
+            let RunningTotal = 0;
+            const Totals = [];
+            Result.Data.forEach(Row => {
+                RunningTotal += Row.TotalSavedBytes;
+                Totals.push(RunningTotal);
+            });
+
+            // Table in DESC order (most recent first)
+            const Reversed = Result.Data.slice().reverse();
+            const ReversedTotals = Totals.slice().reverse();
+
+            Tbody.innerHTML = Reversed.map((Row, Idx) =>
+                `<tr>
+                    <td class="ps-3">${Row.Day}</td>
+                    <td class="text-end">${Row.JobCount.toLocaleString()}</td>
+                    <td class="text-end text-success fw-bold">${FormatBytes(Row.TotalSavedBytes)}</td>
+                    <td class="text-end pe-3">${FormatBytes(ReversedTotals[Idx])}</td>
+                </tr>`
+            ).join('');
+        })
+        .catch(() => {
+            document.getElementById('DayTableBody').innerHTML = '<tr><td colspan="4" class="text-center text-danger py-3">Failed to load</td></tr>';
+        });
+}
+
+// ─── ServiceStatusManager ────────────────────────────────
 class ServiceStatusManager {
     constructor() {
         this.AutoRefreshInterval = null;
         this.AutoRefreshEnabled = false;
-        this.RefreshInterval = 15000; // 15 seconds
-        
-        this.initializeEventListeners();
-        this.loadSystemResources();
-        this.loadServiceStatus();
-        this.loadContinuousScanStatus();
-
-        // Auto-refresh on by default
-        this.toggleAutoRefresh();
+        this.RefreshInterval = 10000;
+        this.InitializeEventListeners();
+        this.RefreshAll();
+        this.ToggleAutoRefresh(); // auto-on by default
     }
 
-    initializeEventListeners() {
-        // Refresh buttons
-        document.getElementById('RefreshBtn').addEventListener('click', () => {
-            this.loadSystemResources();
-            this.loadServiceStatus();
-            this.loadContinuousScanStatus();
-        });
+    InitializeEventListeners() {
+        document.getElementById('RefreshBtn').addEventListener('click', () => this.RefreshAll());
+        document.getElementById('AutoRefreshBtn').addEventListener('click', () => this.ToggleAutoRefresh());
 
-        document.getElementById('AutoRefreshBtn').addEventListener('click', () => {
-            this.toggleAutoRefresh();
-        });
-        
-        // Core temperatures collapse toggle
-        const collapseElement = document.getElementById('CoreTemperaturesCollapse');
-        if (collapseElement) {
-            collapseElement.addEventListener('show.bs.collapse', () => {
-                document.getElementById('CoreTemperaturesChevron').classList.remove('fa-chevron-down');
-                document.getElementById('CoreTemperaturesChevron').classList.add('fa-chevron-up');
+        const Collapse = document.getElementById('CoreTemperaturesCollapse');
+        if (Collapse) {
+            Collapse.addEventListener('show.bs.collapse', () => {
+                document.getElementById('CoreTemperaturesChevron').className = 'fas fa-chevron-up';
             });
-            collapseElement.addEventListener('hide.bs.collapse', () => {
-                document.getElementById('CoreTemperaturesChevron').classList.remove('fa-chevron-up');
-                document.getElementById('CoreTemperaturesChevron').classList.add('fa-chevron-down');
+            Collapse.addEventListener('hide.bs.collapse', () => {
+                document.getElementById('CoreTemperaturesChevron').className = 'fas fa-chevron-down';
             });
         }
 
-        // Continuous scanning buttons
-        document.getElementById('EnableContinuousScanBtn').addEventListener('click', () => {
-            this.enableContinuousScanning();
-        });
-
-        document.getElementById('DisableContinuousScanBtn').addEventListener('click', () => {
-            this.disableContinuousScanning();
-        });
+        // Continuous scan controls moved to FileScanning page — Status page is read-only summary
     }
 
-    async loadSystemResources() {
+    RefreshAll() {
+        this.LoadSystemResources();
+        this.LoadServiceStatus();
+        this.LoadContinuousScanStatus();
+        LoadTranscodeOverview();
+        LoadSavingsByVolume();
+        LoadSavingsByDay();
+    }
+
+    ToggleAutoRefresh() {
+        const Btn = document.getElementById('AutoRefreshBtn');
+        if (this.AutoRefreshEnabled) {
+            clearInterval(this.AutoRefreshInterval);
+            this.AutoRefreshInterval = null;
+            this.AutoRefreshEnabled = false;
+            Btn.innerHTML = '<i class="fas fa-play me-1"></i>Auto';
+            Btn.classList.remove('btn-success');
+            Btn.classList.add('btn-outline-success');
+        } else {
+            this.AutoRefreshInterval = setInterval(() => this.RefreshAll(), this.RefreshInterval);
+            this.AutoRefreshEnabled = true;
+            Btn.innerHTML = '<i class="fas fa-pause me-1"></i>Auto';
+            Btn.classList.remove('btn-outline-success');
+            Btn.classList.add('btn-success');
+        }
+    }
+
+    async LoadSystemResources() {
         try {
-            const response = await fetch('/api/SystemResources');
-            const data = await response.json();
-            
-            if (data.Success && data.Resources) {
-                this.renderSystemResources(data.Resources);
-            } else {
-                this.showResourceError('Failed to load system resources: ' + (data.ErrorMessage || 'Unknown error'));
+            const Resp = await fetch('/api/SystemResources');
+            const Data = await Resp.json();
+            if (Data.Success && Data.Resources) {
+                this.RenderSystemResources(Data.Resources);
             }
-            
-        } catch (error) {
-            this.showResourceError('Error loading system resources: ' + error.message);
+        } catch (e) {
+            console.error('System resources error:', e);
         }
     }
 
-    renderSystemResources(resources) {
-        // CPU Usage
-        const cpuUsage = resources.CpuUsage || 0;
-        document.getElementById('CpuUsage').textContent = `${cpuUsage.toFixed(1)}%`;
-        
-        // CPU Temperature
-        const cpuTemp = resources.CpuTemperature;
-        if (cpuTemp !== null && cpuTemp !== undefined && cpuTemp.Celsius !== undefined) {
-            document.getElementById('CpuTemperature').textContent = `${cpuTemp.Celsius}°C / ${cpuTemp.Fahrenheit}°F`;
-            
-            // Update detailed temperature information
-            if (cpuTemp.Max !== undefined) {
-                document.getElementById('CpuMaxTemp').textContent = cpuTemp.Max;
-            }
-            if (cpuTemp.Average !== undefined) {
-                document.getElementById('CpuAvgTemp').textContent = cpuTemp.Average;
-            }
-            
-            // Create detailed tooltip with core information
-            this.updateCpuTemperatureTooltip(cpuTemp);
-            
-            // Render core temperature grid
-            this.renderCoreTemperatures(cpuTemp);
+    RenderSystemResources(R) {
+        document.getElementById('CpuUsage').textContent = (R.CpuUsage || 0).toFixed(1) + '%';
+
+        const T = R.CpuTemperature;
+        if (T && T.Celsius !== undefined) {
+            document.getElementById('CpuTemperature').textContent = T.Celsius + '\u00B0C / ' + T.Fahrenheit + '\u00B0F';
+            this.RenderCoreTemperatures(T);
         } else {
             document.getElementById('CpuTemperature').textContent = 'N/A';
-            document.getElementById('CpuMaxTemp').textContent = '-';
-            document.getElementById('CpuAvgTemp').textContent = '-';
-            // Clear core temperatures grid
             document.getElementById('CoreTemperaturesGrid').innerHTML = '<div class="col-12 text-center text-muted">Temperature data not available</div>';
         }
-        
-        // Memory Usage
-        const memory = resources.MemoryUsage || {};
-        const memoryUsed = memory.Used || 0;
-        const memoryTotal = memory.Total || 0;
-        const memoryPercent = memory.Percent || 0;
-        document.getElementById('MemoryUsage').textContent = `${memoryUsed}GB / ${memoryTotal}GB (${memoryPercent.toFixed(1)}%)`;
-        
-        // Disk Usage
-        const disk = resources.DiskUsage || {};
-        const diskFree = disk.Free || 0;
-        const diskTotal = disk.Total || 0;
-        const diskPercent = disk.Percent || 0;
-        document.getElementById('DiskUsage').textContent = `${diskFree}GB / ${diskTotal}GB (${diskPercent.toFixed(1)}%)`;
+
+        const M = R.MemoryUsage || {};
+        document.getElementById('MemoryUsage').textContent = (M.Used || 0) + ' / ' + (M.Total || 0) + ' GB';
+
+        const D = R.DiskUsage || {};
+        document.getElementById('DiskUsage').textContent = (D.Free || 0) + ' / ' + (D.Total || 0) + ' GB';
     }
 
-    renderCoreTemperatures(cpuTemp) {
-        const grid = document.getElementById('CoreTemperaturesGrid');
-        grid.innerHTML = '';
-        
-        if (!cpuTemp.Cores || cpuTemp.Cores.length === 0) {
-            grid.innerHTML = '<div class="col-12 text-center text-muted">No core temperature data available</div>';
+    RenderCoreTemperatures(CpuTemp) {
+        const Grid = document.getElementById('CoreTemperaturesGrid');
+        Grid.innerHTML = '';
+        if (!CpuTemp.Cores || CpuTemp.Cores.length === 0) {
+            Grid.innerHTML = '<div class="col-12 text-center text-muted">No core data</div>';
             return;
         }
-        
-        // Sort cores by core number
-        const sortedCores = [...cpuTemp.Cores].sort((a, b) => (a.Core || 0) - (b.Core || 0));
-        
-        sortedCores.forEach(core => {
-            const coreNum = core.Core !== undefined ? core.Core : -1;
-            const temp = core.Temperature;
-            const isNA = temp === null || temp === undefined;
-            
-            // Get core status (active/cooling/available) if available
-            const coreStatus = core.Status || 'available';
-            const jobType = core.JobType || '';
-            
-            // Determine color based on temperature
-            let tempColor = '#6c757d'; // Grey - N/A
-            let tempText = 'N/A';
-            let borderClass = '';
-            let statusBadge = '';
+        const Sorted = [...CpuTemp.Cores].sort((A, B) => (A.Core || 0) - (B.Core || 0));
+        Sorted.forEach(Core => {
+            const Num = Core.Core !== undefined ? Core.Core : -1;
+            const Temp = Core.Temperature;
+            const IsNA = Temp === null || Temp === undefined;
+            const Status = Core.Status || 'available';
+            const JobType = Core.JobType || '';
 
-            if (!isNA) {
-                // Convert Celsius to Fahrenheit
-                const tempF = (temp * 9/5) + 32;
-                tempText = `${temp}°C / ${tempF.toFixed(1)}°F`;
-                if (temp < 30) {
-                    tempColor = '#0d6efd'; // Blue - cold/idle
-                } else if (temp < 50) {
-                    tempColor = '#0f9b8e'; // Teal - cool
-                } else if (temp < 70) {
-                    tempColor = '#198754'; // Green - normal
-                } else if (temp < 85) {
-                    tempColor = '#ffc107'; // Yellow - warm
-                } else if (temp < 95) {
-                    tempColor = '#e8590c'; // Orange - hot
-                } else {
-                    tempColor = '#dc3545'; // Red - critical (>95)
-                }
+            let Color = '#6c757d', Text = 'N/A', Border = '', StatusBadge = '';
+            if (!IsNA) {
+                const F = (Temp * 9/5 + 32).toFixed(1);
+                Text = Temp + '\u00B0C / ' + F + '\u00B0F';
+                if (Temp < 30) Color = '#0d6efd';
+                else if (Temp < 50) Color = '#0f9b8e';
+                else if (Temp < 70) Color = '#198754';
+                else if (Temp < 85) Color = '#ffc107';
+                else if (Temp < 95) Color = '#e8590c';
+                else Color = '#dc3545';
             }
-            
-            // Add border/indicator for active or cooling cores
-            if (coreStatus === 'active') {
-                borderClass = 'border border-primary border-3';
-                statusBadge = `<span class="badge bg-primary position-absolute top-0 start-50 translate-middle">${jobType || 'Active'}</span>`;
-            } else if (coreStatus === 'cooling') {
-                borderClass = 'border border-info border-2';
-                statusBadge = `<span class="badge bg-info position-absolute top-0 start-50 translate-middle">Cooling</span>`;
+            if (Status === 'active') {
+                Border = 'border border-primary border-3';
+                StatusBadge = '<span class="badge bg-primary position-absolute top-0 start-50 translate-middle" style="font-size:.65em">' + (JobType || 'Active') + '</span>';
+            } else if (Status === 'cooling') {
+                Border = 'border border-info border-2';
+                StatusBadge = '<span class="badge bg-info position-absolute top-0 start-50 translate-middle" style="font-size:.65em">Cooling</span>';
             }
-            
-            const coreElement = document.createElement('div');
-            coreElement.className = 'col-6 col-md-3 col-lg-2 mb-2';
-            coreElement.innerHTML = `
-                <div class="card text-white ${borderClass}" style="position: relative; background-color: ${tempColor};" data-bs-toggle="tooltip" data-bs-placement="top" title="${coreStatus === 'active' ? `${jobType ? jobType + ' job' : 'Active job'} on this core` : coreStatus === 'cooling' ? 'Core is cooling down' : 'Core is available'}"
-                     data-bs-original-title="${coreStatus === 'active' ? `${jobType ? jobType + ' job' : 'Active job'} on this core` : coreStatus === 'cooling' ? 'Core is cooling down' : 'Core is available'}">
-                    ${statusBadge}
-                    <div class="card-body text-center p-2">
-                        <div class="small fw-bold">Core ${coreNum}</div>
-                        <div class="fs-6">${tempText}</div>
-                    </div>
-                </div>
-            `;
-            grid.appendChild(coreElement);
-            
-            // Initialize tooltip for this element
-            const tooltipTrigger = coreElement.querySelector('[data-bs-toggle="tooltip"]');
-            if (tooltipTrigger) {
-                new bootstrap.Tooltip(tooltipTrigger);
-            }
+
+            const El = document.createElement('div');
+            El.className = 'col-4 col-md-2 col-lg-1 mb-1';
+            El.innerHTML = '<div class="card text-white ' + Border + '" style="position:relative;background-color:' + Color + '">' + StatusBadge +
+                '<div class="card-body text-center p-1"><div class="small fw-bold" style="font-size:.7em">Core ' + Num + '</div><div style="font-size:.75em">' + Text + '</div></div></div>';
+            Grid.appendChild(El);
         });
     }
 
-    updateCpuTemperatureTooltip(cpuTemp) {
-        const container = document.getElementById('CpuTemperatureContainer');
-        let tooltipContent = `Package: ${cpuTemp.Celsius}°C / ${cpuTemp.Fahrenheit}°F`;
-        
-        if (cpuTemp.Max !== undefined) {
-            tooltipContent += `\nMax: ${cpuTemp.Max}°C`;
-        }
-        if (cpuTemp.Average !== undefined) {
-            tooltipContent += `\nAverage: ${cpuTemp.Average}°C`;
-        }
-        
-        if (cpuTemp.Cores && cpuTemp.Cores.length > 0) {
-            tooltipContent += '\n\nCore Temperatures:';
-            cpuTemp.Cores.forEach(core => {
-                tooltipContent += `\nCore ${core.Core}: ${core.Temperature}°C`;
-            });
-        }
-        
-        // Update tooltip content
-        container.setAttribute('data-bs-original-title', tooltipContent);
-        
-        // Reinitialize tooltip if it exists
-        const tooltip = bootstrap.Tooltip.getInstance(container);
-        if (tooltip) {
-            tooltip.dispose();
-        }
-        new bootstrap.Tooltip(container);
-    }
-
-    showResourceError(message) {
-        document.getElementById('CpuUsage').textContent = 'Error';
-        document.getElementById('CpuTemperature').textContent = 'Error';
-        document.getElementById('MemoryUsage').textContent = 'Error';
-        document.getElementById('DiskUsage').textContent = 'Error';
-        console.error(message);
-    }
-
-    async loadServiceStatus() {
+    async LoadServiceStatus() {
         try {
-            this.showLoading(true);
-            
-            const response = await fetch('/api/Status');
-            const data = await response.json();
-            
-            if (data.Success && data.Services) {
-                this.renderServiceStatus(data.Services);
-            } else {
-                this.showError('Failed to load service status: ' + (data.ErrorMessage || 'Unknown error'));
+            document.getElementById('LoadingIndicator').classList.remove('d-none');
+            const Resp = await fetch('/api/Status');
+            const Data = await Resp.json();
+            if (Data.Success && Data.Services) {
+                this.RenderServices(Data.Services);
             }
-            
-        } catch (error) {
-            console.error('Error loading service status:', error);
-            this.showError('Error loading service status: ' + error.message);
+        } catch (e) {
+            console.error('Service status error:', e);
         } finally {
-            this.showLoading(false);
+            document.getElementById('LoadingIndicator').classList.add('d-none');
         }
     }
 
-    renderServiceStatus(services) {
-        const container = document.getElementById('ServicesContainer');
-        container.innerHTML = '';
-
-        if (!services || services.length === 0) {
+    RenderServices(Services) {
+        const Container = document.getElementById('ServicesContainer');
+        Container.innerHTML = '';
+        if (!Services || Services.length === 0) {
             document.getElementById('NoServicesMessage').classList.remove('d-none');
             return;
         }
-
         document.getElementById('NoServicesMessage').classList.add('d-none');
+        Services.forEach(S => {
+            const IsHealthy = S.Status === 'Running' && S.HealthStatus === 'Healthy';
+            const Cls = IsHealthy ? 'success' : 'danger';
+            const Icon = IsHealthy ? 'fa-check-circle' : 'fa-times-circle';
+            const IsQT = S.ServiceName === 'QualityTestingService' || S.ServiceName === 'QualityTestService';
 
-        services.forEach(service => {
-            const serviceCard = this.createServiceCard(service);
-            container.appendChild(serviceCard);
+            let Html = '<div class="card h-100"><div class="card-body text-center py-3">' +
+                '<h6 class="card-title mb-1"><i class="fas fa-server me-1"></i>' + S.ServiceName + '</h6>' +
+                '<span class="badge bg-' + Cls + '"><i class="fas ' + Icon + ' me-1"></i>' + (IsHealthy ? 'Running' : S.Status) + '</span>';
+            if (IsQT) {
+                const Enabled = IsHealthy;
+                Html += '<div class="mt-2"><button class="btn btn-sm ' + (Enabled ? 'btn-warning' : 'btn-success') + '" onclick="window.serviceStatusManager.ToggleQualityTest(' + Enabled + ')">' +
+                    '<i class="fas ' + (Enabled ? 'fa-pause' : 'fa-play') + ' me-1"></i>' + (Enabled ? 'Pause' : 'Resume') + '</button></div>';
+            }
+            Html += '</div></div>';
+
+            const Col = document.createElement('div');
+            Col.className = 'col-6 col-lg-4 col-xl-3';
+            Col.innerHTML = Html;
+            Container.appendChild(Col);
         });
     }
 
-    createServiceCard(service) {
-        const col = document.createElement('div');
-        col.className = 'col-md-6 col-lg-4 mb-3';
-
-        const isHealthy = service.Status === 'Running' && service.HealthStatus === 'Healthy';
-        const statusClass = isHealthy ? 'success' : 'danger';
-        const statusText = isHealthy ? 'Running' : service.Status;
-        const statusIcon = isHealthy ? 'fa-check-circle' : 'fa-times-circle';
-        
-        // Check if this is the Quality Test Service
-        const isQualityTestService = service.ServiceName === 'QualityTestingService' || service.ServiceName === 'QualityTestService';
-
-        let cardContent = `
-            <div class="card h-100">
-                <div class="card-body text-center">
-                    <h5 class="card-title">
-                        <i class="fas fa-server me-2"></i>${service.ServiceName}
-                    </h5>
-                    <span class="badge bg-${statusClass} fs-6">
-                        <i class="fas ${statusIcon} me-1"></i>${statusText}
-                    </span>
-                    <div class="mt-2">
-                        <small class="text-muted">${service.ServiceType || 'Unknown'}</small>
-                    </div>`;
-        
-        // Add toggle control for Quality Test Service
-        if (isQualityTestService) {
-            const toggleId = 'QualityTestServiceToggle';
-            const isEnabled = service.Status === 'Running' && service.HealthStatus === 'Healthy';
-            cardContent += `
-                    <div class="mt-3 d-flex gap-2 justify-content-center">
-                        <button class="btn btn-sm ${isEnabled ? 'btn-warning' : 'btn-success'}" 
-                                onclick="window.serviceStatusManager.toggleQualityTestService(${isEnabled})"
-                                id="${toggleId}">
-                            <i class="fas ${isEnabled ? 'fa-pause' : 'fa-play'} me-1"></i>
-                            ${isEnabled ? 'Pause' : 'Resume'}
-                        </button>
-                    </div>`;
-        }
-        
-        cardContent += `
-                </div>
-            </div>
-        `;
-        
-        col.innerHTML = cardContent;
-
-        return col;
-    }
-
-    toggleAutoRefresh() {
-        const button = document.getElementById('AutoRefreshBtn');
-        
-        if (this.AutoRefreshEnabled) {
-            // Stop auto refresh
-            if (this.AutoRefreshInterval) {
-                clearInterval(this.AutoRefreshInterval);
-                this.AutoRefreshInterval = null;
-            }
-            this.AutoRefreshEnabled = false;
-            button.innerHTML = '<i class="fas fa-play me-1"></i>Auto Refresh';
-            button.classList.remove('btn-success');
-            button.classList.add('btn-outline-success');
-        } else {
-            // Start auto refresh
-            this.AutoRefreshInterval = setInterval(() => {
-                this.loadSystemResources();
-                this.loadServiceStatus();
-                this.loadContinuousScanStatus();
-            }, this.RefreshInterval);
-            this.AutoRefreshEnabled = true;
-            button.innerHTML = '<i class="fas fa-pause me-1"></i>Auto Refresh';
-            button.classList.remove('btn-outline-success');
-            button.classList.add('btn-success');
-        }
-    }
-
-    async toggleQualityTestService(isCurrentlyEnabled) {
+    async ToggleQualityTest(IsEnabled) {
         try {
-            const endpoint = isCurrentlyEnabled ? '/api/QualityTest/Pause' : '/api/QualityTest/Resume';
-            const actionText = isCurrentlyEnabled ? 'paused' : 'resumed';
-            
-            const response = await fetch(endpoint, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                }
-            });
-            
-            const data = await response.json();
-            
-            if (data.Success) {
-                this.showAlert(`Quality testing ${actionText} successfully`, 'success');
-                this.loadServiceStatus();
+            const Endpoint = IsEnabled ? '/api/QualityTest/Pause' : '/api/QualityTest/Resume';
+            const Resp = await fetch(Endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+            const Data = await Resp.json();
+            if (Data.Success) {
+                showToastAlert('Quality testing ' + (IsEnabled ? 'paused' : 'resumed'), 'success');
+                this.LoadServiceStatus();
             } else {
-                this.showAlert(`Failed to ${isCurrentlyEnabled ? 'pause' : 'resume'} quality testing: ${data.ErrorMessage || data.Message || 'Unknown error'}`, 'danger');
+                showToastAlert('Failed: ' + (Data.ErrorMessage || 'Unknown error'), 'danger');
             }
-        } catch (error) {
-            console.error('Error toggling quality test service:', error);
-            this.showAlert('Error toggling quality test service: ' + error.message, 'danger');
+        } catch (e) {
+            showToastAlert('Error: ' + e.message, 'danger');
         }
     }
 
-    async loadContinuousScanStatus() {
+    async LoadContinuousScanStatus() {
         try {
-            const response = await fetch('/api/Scan/ContinuousStatus');
-            const data = await response.json();
-
-            if (data.Success) {
-                this.renderContinuousScanStatus(data);
-            } else {
-                console.error('Failed to load continuous scan status:', data.ErrorMessage);
-                showPersistentError('Failed to load continuous scan status: ' + data.ErrorMessage);
-            }
-        } catch (error) {
-            console.error('Error loading continuous scan status:', error);
-            showPersistentError('Error loading continuous scan status: ' + error.message);
+            const Resp = await fetch('/api/Scan/ContinuousStatus');
+            const Data = await Resp.json();
+            if (Data.Success) this.RenderContinuousScan(Data);
+        } catch (e) {
+            console.error('Continuous scan error:', e);
         }
     }
 
-    renderContinuousScanStatus(data) {
-        const isRunning = data.IsRunning || false;
-        const intervalMinutes = data.IntervalMinutes || 60;
-        const lastScanTime = data.LastScanTime;
-        const totalScans = data.TotalScansPerformed || 0;
+    RenderContinuousScan(Data) {
+        const IsRunning = Data.IsRunning || false;
+        const Interval = Data.IntervalMinutes || 60;
 
-        // Update status badge
-        const badge = document.getElementById('ContinuousScanBadge');
-        if (isRunning) {
-            badge.textContent = 'Running';
-            badge.className = 'badge bg-success';
-        } else {
-            badge.textContent = 'Stopped';
-            badge.className = 'badge bg-secondary';
-        }
+        const Badge = document.getElementById('ContinuousScanBadge');
+        Badge.textContent = IsRunning ? 'Running' : 'Stopped';
+        Badge.className = 'badge ' + (IsRunning ? 'bg-success' : 'bg-secondary');
 
-        // Update status text
-        document.getElementById('ContinuousScanStatus').textContent = isRunning ? 'Running' : 'Not Running';
+        document.getElementById('ContinuousScanStatus').textContent = IsRunning ? 'Running' : 'Not Running';
+        document.getElementById('ContinuousScanInterval').textContent = Interval + ' min';
+        document.getElementById('ContinuousScanCount').textContent = Data.TotalScansPerformed || 0;
 
-        // Update interval
-        document.getElementById('ContinuousScanInterval').textContent = intervalMinutes + ' minutes';
-
-        // Update last scan time
-        if (lastScanTime) {
-            const scanDate = new Date(lastScanTime);
-            const now = new Date();
-            const diffMinutes = Math.floor((now - scanDate) / 60000);
-
-            if (diffMinutes < 1) {
-                document.getElementById('ContinuousScanLastScan').textContent = 'Just now';
-            } else if (diffMinutes < 60) {
-                document.getElementById('ContinuousScanLastScan').textContent = diffMinutes + ' min ago';
-            } else {
-                const diffHours = Math.floor(diffMinutes / 60);
-                document.getElementById('ContinuousScanLastScan').textContent = diffHours + ' hr ago';
-            }
+        if (Data.LastScanTime) {
+            const Diff = Math.floor((new Date() - new Date(Data.LastScanTime)) / 60000);
+            document.getElementById('ContinuousScanLastScan').textContent = Diff < 1 ? 'Just now' : Diff < 60 ? Diff + ' min ago' : Math.floor(Diff / 60) + ' hr ago';
         } else {
             document.getElementById('ContinuousScanLastScan').textContent = 'Never';
         }
 
-        // Update scan count
-        document.getElementById('ContinuousScanCount').textContent = totalScans;
-
-        // Update button states
-        const enableBtn = document.getElementById('EnableContinuousScanBtn');
-        const disableBtn = document.getElementById('DisableContinuousScanBtn');
-        const intervalInput = document.getElementById('ScanIntervalInput');
-
-        if (isRunning) {
-            enableBtn.disabled = true;
-            disableBtn.disabled = false;
-            intervalInput.disabled = true;
-        } else {
-            enableBtn.disabled = false;
-            disableBtn.disabled = true;
-            intervalInput.disabled = false;
-        }
-
-        // Update interval input value
-        intervalInput.value = intervalMinutes;
-    }
-
-    async enableContinuousScanning() {
-        try {
-            const intervalMinutes = parseInt(document.getElementById('ScanIntervalInput').value) || 60;
-
-            const response = await fetch('/api/Scan/EnableContinuous', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ IntervalMinutes: intervalMinutes })
-            });
-
-            const data = await response.json();
-
-            if (data.Success) {
-                this.showAlert(`Continuous scanning enabled with ${intervalMinutes} minute interval`, 'success');
-                this.loadContinuousScanStatus();
-            } else {
-                this.showAlert('Failed to enable continuous scanning: ' + (data.ErrorMessage || data.Message || 'Unknown error'), 'danger');
-            }
-        } catch (error) {
-            console.error('Error enabling continuous scanning:', error);
-            this.showAlert('Error enabling continuous scanning: ' + error.message, 'danger');
-        }
-    }
-
-    async disableContinuousScanning() {
-        try {
-            const response = await fetch('/api/Scan/DisableContinuous', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                }
-            });
-
-            const data = await response.json();
-
-            if (data.Success) {
-                this.showAlert('Continuous scanning disabled', 'success');
-                this.loadContinuousScanStatus();
-            } else {
-                this.showAlert('Failed to disable continuous scanning: ' + (data.ErrorMessage || data.Message || 'Unknown error'), 'danger');
-            }
-        } catch (error) {
-            console.error('Error disabling continuous scanning:', error);
-            this.showAlert('Error disabling continuous scanning: ' + error.message, 'danger');
-        }
-    }
-
-    showAlert(message, type = 'info') {
-        showToastAlert(message, type);
-    }
-
-    showError(message) {
-        showPersistentError(message);
-    }
-
-    showLoading(show) {
-        const loadingElement = document.getElementById('LoadingIndicator');
-        if (show) {
-            loadingElement.classList.remove('d-none');
-        } else {
-            loadingElement.classList.add('d-none');
-        }
     }
 }
 
-// Initialize when page loads
 document.addEventListener('DOMContentLoaded', function() {
     window.serviceStatusManager = new ServiceStatusManager();
 });

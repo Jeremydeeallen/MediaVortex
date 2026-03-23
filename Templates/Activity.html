@@ -115,7 +115,7 @@
                                             <th class="fw-bold">File Name</th>
                                             <th class="fw-bold">Date</th>
                                             <th class="fw-bold">Status</th>
-                                            <th class="fw-bold">Quality</th>
+                                            <th class="fw-bold">CRF</th>
                                             <th class="fw-bold">Before (MB)</th>
                                             <th class="fw-bold">After (MB)</th>
                                             <th class="fw-bold">Space Saved</th>
@@ -444,8 +444,8 @@ class ActivityManager {
                 <td>${this.formatDuration(attempt.Duration || attempt.TranscodeDurationSeconds)}</td>
                 <td>${this.escapeHtml(attempt.ProfileName || '-')}</td>
                 <td>
-                    ${attempt.ErrorMessage ? 
-                        `<span class="text-danger" title="${this.escapeHtml(attempt.ErrorMessage)}">Error</span>` : 
+                    ${attempt.ErrorMessage ?
+                        `<span class="text-danger" style="cursor:pointer;" onclick="activityManager.ShowErrorModal('${this.escapeHtml(attempt.ErrorMessage).replace(/'/g, "\\'")}')"><i class="fas fa-exclamation-circle me-1"></i>View Error</span>` :
                         '<span class="text-muted">-</span>'
                     }
                 </td>
@@ -1265,14 +1265,14 @@ class ActivityManager {
             this.showAlert('No file path specified', 'danger');
             return;
         }
-        
+
         if (!confirm('Clear CRF override for this file? The system will return to adaptive quality calculation.')) {
             return;
         }
-        
+
         try {
             this.showAlert('Clearing CRF override...', 'info');
-            
+
             const response = await fetch('/api/Transcode/SetCRFOverride', {
                 method: 'POST',
                 headers: {
@@ -1283,9 +1283,9 @@ class ActivityManager {
                     CRF: null
                 })
             });
-            
+
             const data = await response.json();
-            
+
             if (data.Success) {
                 this.showAlert('CRF override cleared successfully', 'success');
                 // Close modal
@@ -1303,6 +1303,36 @@ class ActivityManager {
             this.showAlert('Error clearing CRF override: ' + error.message, 'danger');
         }
     }
+
+    ShowErrorModal(errorMessage) {
+        let modal = document.getElementById('ErrorDetailModal');
+        if (!modal) {
+            document.body.insertAdjacentHTML('beforeend', `
+                <div class="modal fade" id="ErrorDetailModal" tabindex="-1">
+                    <div class="modal-dialog modal-lg">
+                        <div class="modal-content">
+                            <div class="modal-header bg-danger text-white">
+                                <h5 class="modal-title"><i class="fas fa-exclamation-circle me-2"></i>Error Details</h5>
+                                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                            </div>
+                            <div class="modal-body">
+                                <pre id="ErrorDetailContent" class="mb-0" style="white-space: pre-wrap; word-break: break-word; font-size: 0.8rem; max-height: 400px; overflow-y: auto;"></pre>
+                            </div>
+                            <div class="modal-footer">
+                                <button type="button" class="btn btn-sm btn-outline-secondary" onclick="navigator.clipboard.writeText(document.getElementById('ErrorDetailContent').textContent)">
+                                    <i class="fas fa-copy me-1"></i>Copy
+                                </button>
+                                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `);
+            modal = document.getElementById('ErrorDetailModal');
+        }
+        document.getElementById('ErrorDetailContent').textContent = errorMessage;
+        new bootstrap.Modal(modal).show();
+    }
 }
 
 // Global function for cancel button
@@ -1311,16 +1341,16 @@ async function cancelTranscodeJob() {
         if (!confirm('Are you sure you want to cancel the current transcode job?')) {
             return;
         }
-        
+
         const response = await fetch('/api/Transcode/CancelActive', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
             }
         });
-        
+
         const result = await response.json();
-        
+
         if (result.Success) {
             showToastAlert('Transcode job cancelled successfully', 'success');
             // Refresh the page to update the display

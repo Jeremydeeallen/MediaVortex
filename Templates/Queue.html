@@ -1387,11 +1387,6 @@ class TranscodeQueueManager {
         );
     }
 
-    viewFileDetails(fileId) {
-        // Placeholder for file details modal
-        this.showAlert('File details feature coming soon', 'info');
-    }
-
     async refreshMediaFile(fileId) {
         try {
             const response = await fetch(`/api/MediaFiles/${fileId}/Refresh`, {
@@ -1541,16 +1536,11 @@ class TranscodeQueueManager {
                         }
                     </td>
                     <td>
-                        <div class="btn-group btn-group-sm" role="group">
-                            <button type="button" class="btn btn-outline-info" onclick="queueManager.ViewQualityTestingDetails(${item.Id})" title="View Details">
-                                <i class="fas fa-info"></i>
-                            </button>
-                            ${item.Status === 'Failed' && (item.RetryCount || 0) < (item.MaxRetries || 3) ? 
-                                `<button type="button" class="btn btn-outline-warning" onclick="queueManager.RetryQualityTest(${item.Id})" title="Retry Quality Test">
-                                    <i class="fas fa-redo"></i>
-                                </button>` : ''
-                            }
-                        </div>
+                        ${item.Status === 'Failed' && (item.RetryCount || 0) < (item.MaxRetries || 3) ?
+                            `<button type="button" class="btn btn-sm btn-outline-warning" onclick="queueManager.RetryQualityTest(${item.Id})" title="Retry Quality Test">
+                                <i class="fas fa-redo"></i>
+                            </button>` : '-'
+                        }
                     </td>
                 `;
                 tbody.appendChild(row);
@@ -1570,10 +1560,6 @@ class TranscodeQueueManager {
             'Failed': 'bg-danger'
         };
         return classes[status] || 'bg-secondary';
-    }
-
-    ViewQualityTestingDetails(qualityTestId) {
-        this.showAlert('Quality testing details feature coming soon', 'info');
     }
 
     async RetryQualityTest(qualityTestId) {
