@@ -12,9 +12,6 @@
         <div class="d-flex justify-content-between align-items-center mb-4">
             <h1 class="h3 mb-0">Queue</h1>
             <div class="page-action-buttons">
-                    <button type="button" class="btn btn-primary" id="PopulateQueueBtn">
-                        <i class="fas fa-plus"></i> <span class="btn-text">Populate Queue</span>
-                    </button>
                     <button type="button" class="btn btn-outline-danger" id="CleanupDuplicatesBtn">
                         <i class="fas fa-broom"></i> <span class="btn-text">Cleanup Duplicates</span>
                     </button>
@@ -40,7 +37,16 @@
             <!-- Queue Table -->
             <div class="card">
                 <div class="card-header d-flex justify-content-between align-items-center">
-                    <h5 class="mb-0">Transcode Queue</h5>
+                    <div class="d-flex align-items-center gap-2">
+                        <h5 class="mb-0">Transcode Queue</h5>
+                        <span class="badge bg-secondary" id="TranscodeServiceBadge">—</span>
+                        <button class="btn btn-success btn-sm d-none" id="BtnStartTranscoding" onclick="queueManager.startTranscoding()">
+                            <i class="fas fa-play"></i> Start Transcoding
+                        </button>
+                        <button class="btn btn-warning btn-sm d-none" id="BtnStopTranscoding" onclick="queueManager.stopAfterJob()">
+                            <i class="fas fa-stop-circle"></i> Stop After Job
+                        </button>
+                    </div>
                     <div class="d-flex align-items-center gap-3">
                         <div class="d-flex align-items-center gap-2">
                             <label for="PageSizeSelect" class="form-label mb-0">Show:</label>
@@ -68,9 +74,8 @@
                                     <th class="sortable" data-sort="Priority">Priority</th>
                                     <th>Status</th>
                                     <th>Mode</th>
-                                    <th>Start Time</th>
+                                    <th>Progress</th>
                                     <th class="sortable" data-sort="DateAdded">Date Added</th>
-                                    <th>Date Started</th>
                                     <th>Actions</th>
                                 </tr>
                             </thead>
@@ -123,12 +128,8 @@
                                 <th>Status</th>
                                 <th>Priority</th>
                                 <th>VMAF Score</th>
-                                <th>Strategy</th>
-                                <th>Retry</th>
+                                <th>Progress</th>
                                 <th>Date Added</th>
-                                <th>Date Started</th>
-                                <th>Date Completed</th>
-                                <th>Error</th>
                                 <th>Actions</th>
                             </tr>
                         </thead>
@@ -149,64 +150,6 @@
                         </ul>
                     </div>
                 </nav>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- File Replacement Section -->
-<div class="row mb-4">
-    <div class="col-12">
-        <div class="card">
-            <div class="card-header d-flex justify-content-between align-items-center">
-                <h5 class="mb-0">
-                    <i class="fas fa-exchange-alt"></i> File Replacement
-                </h5>
-                <button type="button" class="btn btn-sm btn-primary" id="RefreshFailedReplacementsBtn">
-                    <i class="fas fa-sync-alt"></i> Refresh
-                </button>
-            </div>
-            <div class="card-body">
-                <div class="table-responsive">
-                    <table class="table table-striped table-hover" id="FailedReplacementsTable">
-                        <thead>
-                            <tr>
-                                <th>Attempt ID</th>
-                                <th>Original File</th>
-                                <th>Transcoded File</th>
-                                <th>Quality Score</th>
-                                <th>Date</th>
-                                <th>File Sizes</th>
-                                <th>Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody id="FailedReplacementsTableBody">
-                            <!-- Failed replacements will be populated here -->
-                        </tbody>
-                    </table>
-                </div>
-                <div class="text-center" id="NoFailedReplacementsMessage" style="display: none;">
-                    <p class="text-muted">No failed file replacements found.</p>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- Populate Queue Modal -->
-<div class="modal fade" id="PopulateQueueModal" tabindex="-1">
-    <div class="modal-dialog">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title">Populate Queue</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-            </div>
-            <div class="modal-body">
-                <p>All matching files will be added to the queue. No limit is applied.</p>
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                <button type="button" class="btn btn-primary" id="ConfirmPopulateBtn">Populate Queue</button>
             </div>
         </div>
     </div>
@@ -313,129 +256,6 @@
     </div>
 </div>
 
-<!-- Transcode Candidates Section -->
-<div class="row mb-4">
-    <div class="col-12">
-        <div class="card">
-            <div class="card-header d-flex justify-content-between align-items-center">
-                <h5 class="mb-0">
-                    <i class="fas fa-compress-arrows-alt"></i> Transcode Candidates
-                </h5>
-                <div class="d-flex gap-2 align-items-center">
-                    <select class="form-select form-select-sm" id="CandidateRootFolderDropdown" style="min-width: 200px;">
-                        <option value="T:\" selected>T:\</option>
-                        <option value="M:\">M:\</option>
-                        <option value="Z:\">Z:\</option>
-                    </select>
-                    <input type="text" class="form-control form-control-sm" id="CandidateSearch" placeholder="Search..." style="width: 200px;">
-                    <button type="button" class="btn btn-sm btn-outline-primary" id="RefreshCandidatesBtn">
-                        <i class="fas fa-sync-alt"></i> Refresh
-                    </button>
-                </div>
-            </div>
-            <div class="card-body">
-                <!-- Tab Navigation -->
-                <ul class="nav nav-tabs mb-3" id="CandidatesTabs" role="tablist">
-                    <li class="nav-item" role="presentation">
-                        <button class="nav-link active" id="CandidateFoldersTab" data-bs-toggle="tab" data-bs-target="#CandidateFoldersPane" type="button" role="tab">
-                            <i class="fas fa-folder"></i> Folders
-                        </button>
-                    </li>
-                    <li class="nav-item" role="presentation">
-                        <button class="nav-link" id="CandidateFilesTab" data-bs-toggle="tab" data-bs-target="#CandidateFilesPane" type="button" role="tab">
-                            <i class="fas fa-file-video"></i> Files
-                        </button>
-                    </li>
-                </ul>
-
-                <div class="tab-content">
-                    <!-- Folders Tab (existing) -->
-                    <div class="tab-pane fade show active" id="CandidateFoldersPane" role="tabpanel">
-                        <div class="table-responsive">
-                            <table class="table table-striped table-hover" id="CandidatesTable">
-                                <thead>
-                                    <tr>
-                                        <th></th>
-                                        <th class="sortable candidate-sortable" data-sort="SubfolderName">
-                                            Folder <i class="fas fa-sort"></i>
-                                        </th>
-                                        <th class="sortable candidate-sortable" data-sort="FileCount">
-                                            Files <i class="fas fa-sort"></i>
-                                        </th>
-                                        <th class="sortable candidate-sortable" data-sort="TotalSizeMB">
-                                            Size <i class="fas fa-sort"></i>
-                                        </th>
-                                        <th>Codecs</th>
-                                        <th>Resolutions</th>
-                                        <th class="sortable candidate-sortable" data-sort="AvgBitrateKbps">
-                                            Avg Bitrate <i class="fas fa-sort"></i>
-                                        </th>
-                                        <th class="sortable candidate-sortable" data-sort="EstimatedSavingsMB">
-                                            Est. Savings <i class="fas fa-sort-down"></i>
-                                        </th>
-                                        <th>Profile</th>
-                                        <th>Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="CandidatesTableBody">
-                                </tbody>
-                            </table>
-                        </div>
-                        <nav aria-label="Candidates pagination" class="mt-3">
-                            <div class="d-flex justify-content-between align-items-center">
-                                <span id="CandidatesPaginationInfo" class="text-muted"></span>
-                                <ul class="pagination pagination-sm mb-0" id="CandidatesPagination">
-                                </ul>
-                            </div>
-                        </nav>
-                    </div>
-
-                    <!-- Files Tab (new) -->
-                    <div class="tab-pane fade" id="CandidateFilesPane" role="tabpanel">
-                        <div class="table-responsive">
-                            <table class="table table-striped table-hover" id="CandidateFilesTable">
-                                <thead>
-                                    <tr>
-                                        <th class="sortable candidate-file-sortable" data-sort="FileName">
-                                            File <i class="fas fa-sort"></i>
-                                        </th>
-                                        <th>Folder</th>
-                                        <th class="sortable candidate-file-sortable" data-sort="SizeMB">
-                                            Size <i class="fas fa-sort"></i>
-                                        </th>
-                                        <th class="sortable candidate-file-sortable" data-sort="ResolutionCategory">
-                                            Resolution <i class="fas fa-sort"></i>
-                                        </th>
-                                        <th class="sortable candidate-file-sortable" data-sort="Codec">
-                                            Codec <i class="fas fa-sort"></i>
-                                        </th>
-                                        <th class="sortable candidate-file-sortable" data-sort="VideoBitrateKbps">
-                                            Bitrate <i class="fas fa-sort-down"></i>
-                                        </th>
-                                        <th>Audio</th>
-                                        <th>Profile</th>
-                                        <th>Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="CandidateFilesTableBody">
-                                </tbody>
-                            </table>
-                        </div>
-                        <nav aria-label="Candidate files pagination" class="mt-3">
-                            <div class="d-flex justify-content-between align-items-center">
-                                <span id="CandidateFilesPaginationInfo" class="text-muted"></span>
-                                <ul class="pagination pagination-sm mb-0" id="CandidateFilesPagination">
-                                </ul>
-                            </div>
-                        </nav>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
-
-
 <script>
 class TranscodeQueueManager {
     constructor() {
@@ -448,26 +268,6 @@ class TranscodeQueueManager {
         this.totalPages = 1;
         this.totalItems = 0;
         
-        // Transcode Candidates state
-        this.candidateRootFolderPath = 'T:\\';
-        this.candidateCurrentPage = 1;
-        this.candidatePageSize = 25;
-        this.candidateTotalPages = 1;
-        this.candidateTotalCount = 0;
-        this.candidateSearchTerm = '';
-        this.candidateSortBy = 'EstimatedSavingsMB';
-        this.candidateSortOrder = 'DESC';
-        this.expandedCandidates = {};  // subfolderPath -> {files, page, totalPages}
-
-        // Candidate Files tab state
-        this.candidateFileCurrentPage = 1;
-        this.candidateFilePageSize = 25;
-        this.candidateFileTotalPages = 1;
-        this.candidateFileTotalCount = 0;
-        this.candidateFileSortBy = 'VideoBitrateKbps';
-        this.candidateFileSortOrder = 'DESC';
-        this.candidateFilesLoaded = false;
-        
         // Quality Testing Queue pagination and state
         this.QualityTestingCurrentPage = 1;
         this.QualityTestingPageSize = 25;
@@ -475,37 +275,22 @@ class TranscodeQueueManager {
         this.QualityTestingTotalItems = 0;
         this.IsQualityTestingProcessing = false;
         
+        // Progress tracking
+        this.currentProgress = null;
+        this.currentQTProgress = null;
+        this.serviceStatus = 'Unknown';
+        
         this.initializeEventListeners();
         this.loadQueueData();
-        this.loadTranscodeCandidates();
         this.LoadQualityTestingQueueData();
-        this.loadProfilesForDropdowns();
         this.startAutoRefresh();
+        this.startProgressPolling();
+        this.startQualityTestProgressPolling();
+        this.pollServiceStatus();
+        setInterval(() => this.pollServiceStatus(), 5000);
     }
 
     initializeEventListeners() {
-        console.log('Initializing event listeners...');
-        
-        // Check if elements exist
-        const populateBtn = document.getElementById('PopulateQueueBtn');
-        console.log('PopulateQueueBtn element:', populateBtn);
-        
-        if (!populateBtn) {
-            console.error('PopulateQueueBtn not found!');
-            return;
-        }
-        
-        // Populate Queue button
-        document.getElementById('PopulateQueueBtn').addEventListener('click', (e) => {
-            console.log('PopulateQueueBtn clicked', e);
-            const modal = new bootstrap.Modal(document.getElementById('PopulateQueueModal'));
-            modal.show();
-        });
-
-        document.getElementById('ConfirmPopulateBtn').addEventListener('click', () => {
-            this.populateQueue();
-        });
-
         // Cleanup Duplicates
         document.getElementById('CleanupDuplicatesBtn').addEventListener('click', () => {
             this.cleanupDuplicates();
@@ -550,7 +335,7 @@ class TranscodeQueueManager {
         // Page Size Change
         document.getElementById('PageSizeSelect').addEventListener('change', (e) => {
             this.pageSize = parseInt(e.target.value);
-            this.currentPage = 1; // Reset to first page
+            this.currentPage = 1;
             this.loadQueueData();
         });
 
@@ -568,78 +353,6 @@ class TranscodeQueueManager {
                 this.loadQueueData();
             });
         });
-
-        // Sortable Column Clicks for Candidates table
-        document.querySelectorAll('.candidate-sortable').forEach(th => {
-            th.addEventListener('click', () => {
-                const sortField = th.dataset.sort;
-                if (this.candidateSortBy === sortField) {
-                    this.candidateSortOrder = this.candidateSortOrder === 'ASC' ? 'DESC' : 'ASC';
-                } else {
-                    this.candidateSortBy = sortField;
-                    this.candidateSortOrder = 'DESC';
-                }
-                this.candidateCurrentPage = 1;
-                this.loadTranscodeCandidates();
-            });
-        });
-
-        // Sortable Column Clicks for Candidate Files table
-        document.querySelectorAll('.candidate-file-sortable').forEach(th => {
-            th.addEventListener('click', () => {
-                const sortField = th.dataset.sort;
-                if (this.candidateFileSortBy === sortField) {
-                    this.candidateFileSortOrder = this.candidateFileSortOrder === 'ASC' ? 'DESC' : 'ASC';
-                } else {
-                    this.candidateFileSortBy = sortField;
-                    this.candidateFileSortOrder = 'DESC';
-                }
-                this.candidateFileCurrentPage = 1;
-                this.loadCandidateAllFiles();
-            });
-        });
-
-        // Load Files tab on first switch
-        document.getElementById('CandidateFilesTab').addEventListener('shown.bs.tab', () => {
-            if (!this.candidateFilesLoaded) {
-                this.loadCandidateAllFiles();
-            }
-        });
-
-        // Transcode Candidates event listeners
-        document.getElementById('CandidateRootFolderDropdown').addEventListener('change', (e) => {
-            this.candidateRootFolderPath = e.target.value;
-            this.candidateCurrentPage = 1;
-            this.candidateFileCurrentPage = 1;
-            this.candidateSearchTerm = '';
-            this.expandedCandidates = {};
-            this.candidateFilesLoaded = false;
-            document.getElementById('CandidateSearch').value = '';
-            this.loadTranscodeCandidates();
-            if (document.getElementById('CandidateFilesPane').classList.contains('active')) {
-                this.loadCandidateAllFiles();
-            }
-        });
-
-        document.getElementById('CandidateSearch').addEventListener('input', (e) => {
-            this.candidateSearchTerm = e.target.value;
-            this.candidateCurrentPage = 1;
-            this.candidateFileCurrentPage = 1;
-            this.loadTranscodeCandidates();
-            if (document.getElementById('CandidateFilesPane').classList.contains('active')) {
-                this.loadCandidateAllFiles();
-            }
-        });
-
-        document.getElementById('RefreshCandidatesBtn').addEventListener('click', () => {
-            this.expandedCandidates = {};
-            this.loadTranscodeCandidates();
-            if (document.getElementById('CandidateFilesPane').classList.contains('active')) {
-                this.candidateFilesLoaded = false;
-                this.loadCandidateAllFiles();
-            }
-        });
-
 
         document.getElementById('RefreshQualityTestingBtn').addEventListener('click', () => {
             this.LoadQualityTestingQueueData();
@@ -680,7 +393,7 @@ class TranscodeQueueManager {
         if (queueItems.length === 0) {
             const row = document.createElement('tr');
             row.innerHTML = `
-                <td colspan="11" class="text-center text-muted py-4">
+                <td colspan="10" class="text-center text-muted py-4">
                     <i class="fas fa-inbox fa-2x mb-2"></i><br>
                     No queue items found
                 </td>
@@ -691,6 +404,8 @@ class TranscodeQueueManager {
                 const mode = item.ProcessingMode || 'Transcode';
                 const modeBadgeClass = mode === 'Remux' ? 'bg-info' : 'bg-primary';
                 const row = document.createElement('tr');
+                row.dataset.itemId = item.Id;
+                row.dataset.status = item.Status;
                 row.innerHTML = `
                     <td>${item.Id}</td>
                     <td>${this.escapeHtml(item.FileName)}</td>
@@ -705,9 +420,8 @@ class TranscodeQueueManager {
                     <td>
                         <span class="badge ${modeBadgeClass}">${mode}</span>
                     </td>
-                    <td>${item.StartTime || '-'}</td>
+                    <td class="progress-cell">${this.renderProgressCell(item)}</td>
                     <td>${this.formatDate(item.DateAdded)}</td>
-                    <td>${this.formatDate(item.DateStarted)}</td>
                     <td>
                         <div class="btn-group btn-group-sm" role="group">
                             <button type="button" class="btn btn-outline-primary" onclick="queueManager.updatePriorityModal(${item.Id}, ${item.Priority})" title="Update Priority">
@@ -724,31 +438,6 @@ class TranscodeQueueManager {
         }
     }
 
-
-    async populateQueue() {
-        try {
-            const response = await fetch('/api/TranscodeQueue/PopulateQueue', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({})
-            });
-
-            const data = await response.json();
-
-            if (data.Success) {
-                const itemsAdded = data.ItemsAdded || 0;
-                this.showAlert(`Successfully added ${itemsAdded} items to the queue`, 'success');
-                bootstrap.Modal.getInstance(document.getElementById('PopulateQueueModal')).hide();
-                this.loadQueueData();
-            } else {
-                this.showAlert('Error populating queue: ' + data.ErrorMessage, 'danger');
-            }
-        } catch (error) {
-            this.showAlert('Error populating queue: ' + error.message, 'danger');
-        }
-    }
 
     async clearQueue() {
         try {
@@ -823,7 +512,7 @@ class TranscodeQueueManager {
             if (data.Success) {
                 const removed = data.DuplicatesRemoved || 0;
                 this.showAlert(`Cleanup complete: ${removed} duplicate records removed`, 'success');
-                this.loadTranscodeCandidates();
+                this.loadQueueData();
             } else {
                 this.showAlert('Error cleaning up duplicates: ' + (data.Message || 'Unknown error'), 'danger');
             }
@@ -913,6 +602,72 @@ class TranscodeQueueManager {
             this.loadQueueData();
             this.LoadQualityTestingQueueData();
         }, 30000);
+    }
+
+    startProgressPolling() {
+        setInterval(() => {
+            this.updateProgress();
+        }, 2000);
+    }
+
+    async updateProgress() {
+        try {
+            const response = await fetch('/api/Transcode/Progress');
+            const data = await response.json();
+            this.currentProgress = data;
+            this.updateProgressCells();
+        } catch (error) {
+            // Silently ignore progress polling errors
+        }
+    }
+
+    updateProgressCells() {
+        const runningRows = document.querySelectorAll('#QueueTableBody tr[data-status="Running"]');
+        runningRows.forEach(row => {
+            const cell = row.querySelector('.progress-cell');
+            if (cell && this.currentProgress && this.currentProgress.Success) {
+                const p = this.currentProgress;
+                cell.innerHTML = `
+                    <div class="d-flex align-items-center">
+                        <div class="progress me-2" style="width: 80px; height: 18px;">
+                            <div class="progress-bar progress-bar-striped progress-bar-animated bg-primary" 
+                                 role="progressbar" 
+                                 style="width: ${p.ProgressPercent || 0}%"
+                                 aria-valuenow="${p.ProgressPercent || 0}" 
+                                 aria-valuemin="0" 
+                                 aria-valuemax="100">
+                            </div>
+                        </div>
+                        <small>${(p.ProgressPercent || 0).toFixed(1)}%</small>
+                        <button class="btn btn-warning btn-sm ms-2 py-0 px-1" onclick="queueManager.stopAfterJob()" title="Stop After This Job">
+                            <i class="fas fa-stop-circle"></i>
+                        </button>
+                    </div>
+                    <small class="text-muted">${p.ETA ? 'ETA: ' + p.ETA : (p.CurrentPhase || '')}</small>
+                `;
+            }
+        });
+    }
+
+    renderProgressCell(item) {
+        if (item.Status === 'Running') {
+            return `
+                <div class="d-flex align-items-center">
+                    <div class="spinner-border spinner-border-sm text-primary me-2" role="status"></div>
+                    <small class="text-muted">Loading...</small>
+                </div>
+            `;
+        }
+        if (item.Status === 'Completed') {
+            return '<span class="badge bg-success"><i class="fas fa-check"></i> Done</span>';
+        }
+        if (item.Status === 'Failed') {
+            return '<span class="badge bg-danger"><i class="fas fa-times"></i> Failed</span>';
+        }
+        if (item.DateStarted) {
+            return this.formatDate(item.DateStarted);
+        }
+        return '-';
     }
 
     // Utility functions
@@ -1038,15 +793,10 @@ class TranscodeQueueManager {
     }
     
     updateSortIndicators() {
-        // Clear all sort indicators
         document.querySelectorAll('#QueueTable .sortable i').forEach(icon => {
             icon.className = 'fas fa-sort';
         });
-        document.querySelectorAll('.candidate-sortable i').forEach(icon => {
-            icon.className = 'fas fa-sort';
-        });
 
-        // Update current sort indicator for queue table
         const currentSortTh = document.querySelector(`#QueueTable [data-sort="${this.sortBy}"]`);
         if (currentSortTh) {
             const icon = currentSortTh.querySelector('i');
@@ -1054,642 +804,6 @@ class TranscodeQueueManager {
                 icon.className = this.sortOrder === 'ASC' ? 'fas fa-sort-up' : 'fas fa-sort-down';
             }
         }
-
-        // Update sort indicators for candidates table
-        const candidateSortTh = document.querySelector(`.candidate-sortable[data-sort="${this.candidateSortBy}"]`);
-        if (candidateSortTh) {
-            const icon = candidateSortTh.querySelector('i');
-            if (icon) {
-                icon.className = this.candidateSortOrder === 'ASC' ? 'fas fa-sort-up' : 'fas fa-sort-down';
-            }
-        }
-    }
-
-    // ─── Transcode Candidates Methods ─────────────────────────────────
-
-    async loadTranscodeCandidates() {
-        if (!this.candidateRootFolderPath) return;
-        try {
-            const params = new URLSearchParams({
-                RootFolderPath: this.candidateRootFolderPath,
-                Page: this.candidateCurrentPage,
-                PageSize: this.candidatePageSize,
-                Search: this.candidateSearchTerm,
-                SortColumn: this.candidateSortBy,
-                SortOrder: this.candidateSortOrder
-            });
-
-            const response = await fetch(`/api/TranscodeCandidates?${params}`);
-            const data = await response.json();
-
-            if (data.Success) {
-                this.displayTranscodeCandidates(data.Subfolders);
-                this.candidateTotalCount = data.TotalCount;
-                this.candidateTotalPages = data.TotalPages;
-                this.updateCandidatesPagination();
-                this.updateSortIndicators();
-            } else {
-                this.showAlert('Error loading transcode candidates: ' + data.Message, 'danger');
-            }
-        } catch (error) {
-            this.showAlert('Error loading transcode candidates: ' + error.message, 'danger');
-        }
-    }
-
-    displayTranscodeCandidates(subfolders) {
-        const tbody = document.getElementById('CandidatesTableBody');
-        tbody.innerHTML = '';
-
-        if (subfolders.length === 0) {
-            tbody.innerHTML = `<tr><td colspan="10" class="text-center text-muted py-4">
-                <i class="fas fa-check-circle fa-2x mb-2 d-block"></i>
-                No transcode candidates found (all files already transcoded or efficient codecs)
-            </td></tr>`;
-            return;
-        }
-
-        subfolders.forEach((subfolder, index) => {
-            const escapedPath = subfolder.SubfolderPath.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '\\"');
-            const isExpanded = !!this.expandedCandidates[subfolder.SubfolderPath];
-
-            // Build codec badges
-            const codecBadges = Object.entries(subfolder.CodecBreakdown || {})
-                .sort((a, b) => b[1] - a[1])
-                .map(([codec, count]) => `<span class="badge bg-secondary me-1">${codec}: ${count}</span>`)
-                .join('');
-
-            // Build resolution badges
-            const resBadges = Object.entries(subfolder.ResolutionBreakdown || {})
-                .sort((a, b) => b[1] - a[1])
-                .map(([res, count]) => `<span class="badge bg-info me-1">${res}: ${count}</span>`)
-                .join('');
-
-            // Color-code savings and bitrate
-            const savingsMB = subfolder.EstimatedSavingsMB || 0;
-            const savingsClass = savingsMB >= 50000 ? 'text-success fw-bold' : savingsMB >= 10000 ? 'text-success' : 'text-muted';
-            const bitrateKbps = subfolder.AvgBitrateKbps || 0;
-            const bitrateClass = bitrateKbps >= 5000 ? 'text-danger fw-bold' : bitrateKbps >= 2000 ? 'text-warning' : 'text-muted';
-
-            const row = document.createElement('tr');
-            row.className = 'candidate-row';
-            row.style.cursor = 'pointer';
-            row.innerHTML = `
-                <td onclick="queueManager.toggleCandidateExpand('${escapedPath}', ${index})">
-                    <i class="fas fa-chevron-${isExpanded ? 'down' : 'right'}"></i>
-                </td>
-                <td onclick="queueManager.toggleCandidateExpand('${escapedPath}', ${index})">${this.escapeHtml(subfolder.SubfolderName)}</td>
-                <td onclick="queueManager.toggleCandidateExpand('${escapedPath}', ${index})">${subfolder.FileCount}</td>
-                <td onclick="queueManager.toggleCandidateExpand('${escapedPath}', ${index})">${subfolder.TotalSizeDisplay}</td>
-                <td>${codecBadges || '<span class="text-muted">-</span>'}</td>
-                <td>${resBadges || '<span class="text-muted">-</span>'}</td>
-                <td class="${bitrateClass}">${subfolder.AvgBitrateDisplay || '-'}</td>
-                <td class="${savingsClass}">${subfolder.EstimatedSavingsDisplay}</td>
-                <td>
-                    <select class="form-select form-select-sm" id="CandidateProfileSelect_${index}" style="min-width: 130px;" onclick="event.stopPropagation()">
-                        <option value="">Select Profile...</option>
-                    </select>
-                </td>
-                <td>
-                    <button class="btn btn-sm btn-outline-success" onclick="event.stopPropagation(); queueManager.addCandidateToQueue(${index}, '${escapedPath}')" title="Add to Queue">
-                        <i class="fas fa-plus"></i> Add
-                    </button>
-                </td>
-            `;
-            tbody.appendChild(row);
-
-            // If expanded, show detail rows
-            if (isExpanded) {
-                const detailData = this.expandedCandidates[subfolder.SubfolderPath];
-                if (detailData && detailData.files) {
-                    this.renderCandidateFileRows(tbody, detailData, subfolder.SubfolderPath, index);
-                }
-            }
-        });
-
-        // Populate profile dropdowns
-        this.loadProfilesForDropdowns();
-    }
-
-    renderCandidateFileRows(tbody, detailData, subfolderPath, parentIndex) {
-        const escapedPath = subfolderPath.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '\\"');
-
-        if (detailData.files.length === 0) {
-            const emptyRow = document.createElement('tr');
-            emptyRow.className = 'candidate-detail-row table-light';
-            emptyRow.innerHTML = `<td></td><td colspan="9" class="text-muted ps-4">No candidate files in this folder</td>`;
-            tbody.appendChild(emptyRow);
-            return;
-        }
-
-        detailData.files.forEach(file => {
-            const fileRow = document.createElement('tr');
-            fileRow.className = 'candidate-detail-row table-light';
-            fileRow.innerHTML = `
-                <td></td>
-                <td class="ps-4">
-                    <small><i class="fas fa-file-video text-muted me-1"></i>${this.escapeHtml(file.FileName)}</small>
-                </td>
-                <td></td>
-                <td><small>${file.SizeDisplay}</small></td>
-                <td><span class="badge bg-secondary">${file.Codec}</span></td>
-                <td><span class="badge bg-info">${file.ResolutionCategory}</span></td>
-                <td></td>
-                <td></td>
-                <td><small class="text-muted">${file.AssignedProfile || 'None'}</small></td>
-                <td>
-                    <button class="btn btn-sm btn-outline-primary" onclick="queueManager.addFileToQueueDirectly(${file.Id})" title="Add single file">
-                        <i class="fas fa-plus"></i>
-                    </button>
-                </td>
-            `;
-            tbody.appendChild(fileRow);
-        });
-
-        // Add pagination for detail files if needed
-        if (detailData.totalPages > 1) {
-            const pagRow = document.createElement('tr');
-            pagRow.className = 'candidate-detail-row table-light';
-            const pagCell = document.createElement('td');
-            pagCell.colSpan = 10;
-            pagCell.className = 'text-center';
-            pagCell.innerHTML = `
-                <small class="text-muted">Page ${detailData.page} of ${detailData.totalPages}</small>
-                ${detailData.page > 1 ? `<button class="btn btn-sm btn-link" onclick="queueManager.changeCandidateFilePage('${escapedPath}', ${detailData.page - 1})">Prev</button>` : ''}
-                ${detailData.page < detailData.totalPages ? `<button class="btn btn-sm btn-link" onclick="queueManager.changeCandidateFilePage('${escapedPath}', ${detailData.page + 1})">Next</button>` : ''}
-            `;
-            pagRow.appendChild(pagCell);
-            tbody.appendChild(pagRow);
-        }
-    }
-
-    async toggleCandidateExpand(subfolderPath, index) {
-        if (this.expandedCandidates[subfolderPath]) {
-            // Collapse
-            delete this.expandedCandidates[subfolderPath];
-            this.loadTranscodeCandidates();
-        } else {
-            // Expand - load files
-            await this.loadCandidateFiles(subfolderPath, 1);
-        }
-    }
-
-    async loadCandidateFiles(subfolderPath, page) {
-        try {
-            const params = new URLSearchParams({
-                SubfolderPath: subfolderPath,
-                Page: page,
-                PageSize: 10
-            });
-
-            const response = await fetch(`/api/TranscodeCandidates/Files?${params}`);
-            const data = await response.json();
-
-            if (data.Success) {
-                this.expandedCandidates[subfolderPath] = {
-                    files: data.Files,
-                    page: page,
-                    totalPages: data.TotalPages
-                };
-                this.loadTranscodeCandidates(); // Re-render with expanded data
-            } else {
-                this.showAlert('Error loading candidate files: ' + data.Message, 'danger');
-            }
-        } catch (error) {
-            this.showAlert('Error loading candidate files: ' + error.message, 'danger');
-        }
-    }
-
-    async changeCandidateFilePage(subfolderPath, page) {
-        await this.loadCandidateFiles(subfolderPath, page);
-    }
-
-    updateCandidatesPagination() {
-        const pagination = document.getElementById('CandidatesPagination');
-        const info = document.getElementById('CandidatesPaginationInfo');
-        pagination.innerHTML = '';
-
-        const startItem = this.candidateTotalCount > 0 ? (this.candidateCurrentPage - 1) * this.candidatePageSize + 1 : 0;
-        const endItem = Math.min(this.candidateCurrentPage * this.candidatePageSize, this.candidateTotalCount);
-        info.textContent = `Showing ${startItem} to ${endItem} of ${this.candidateTotalCount} folders`;
-
-        if (this.candidateTotalPages <= 1) return;
-
-        const prevDisabled = this.candidateCurrentPage <= 1 ? 'disabled' : '';
-        pagination.innerHTML += `<li class="page-item ${prevDisabled}"><a class="page-link" href="#" onclick="queueManager.changeCandidatePage(${this.candidateCurrentPage - 1})">Previous</a></li>`;
-
-        const startPage = Math.max(1, this.candidateCurrentPage - 2);
-        const endPage = Math.min(this.candidateTotalPages, this.candidateCurrentPage + 2);
-
-        if (startPage > 1) {
-            pagination.innerHTML += `<li class="page-item"><a class="page-link" href="#" onclick="queueManager.changeCandidatePage(1)">1</a></li>`;
-            if (startPage > 2) {
-                pagination.innerHTML += `<li class="page-item disabled"><span class="page-link">...</span></li>`;
-            }
-        }
-
-        for (let i = startPage; i <= endPage; i++) {
-            const active = i === this.candidateCurrentPage ? 'active' : '';
-            pagination.innerHTML += `<li class="page-item ${active}"><a class="page-link" href="#" onclick="queueManager.changeCandidatePage(${i})">${i}</a></li>`;
-        }
-
-        if (endPage < this.candidateTotalPages) {
-            if (endPage < this.candidateTotalPages - 1) {
-                pagination.innerHTML += `<li class="page-item disabled"><span class="page-link">...</span></li>`;
-            }
-            pagination.innerHTML += `<li class="page-item"><a class="page-link" href="#" onclick="queueManager.changeCandidatePage(${this.candidateTotalPages})">${this.candidateTotalPages}</a></li>`;
-        }
-
-        const nextDisabled = this.candidateCurrentPage >= this.candidateTotalPages ? 'disabled' : '';
-        pagination.innerHTML += `<li class="page-item ${nextDisabled}"><a class="page-link" href="#" onclick="queueManager.changeCandidatePage(${this.candidateCurrentPage + 1})">Next</a></li>`;
-    }
-
-    changeCandidatePage(page) {
-        if (page >= 1 && page <= this.candidateTotalPages && page !== this.candidateCurrentPage) {
-            this.candidateCurrentPage = page;
-            this.expandedCandidates = {};
-            this.loadTranscodeCandidates();
-        }
-    }
-
-    // ─── Candidate Files Tab Methods ──────────────────────────────────
-
-    async loadCandidateAllFiles() {
-        if (!this.candidateRootFolderPath) return;
-        try {
-            const params = new URLSearchParams({
-                RootFolderPath: this.candidateRootFolderPath,
-                Page: this.candidateFileCurrentPage,
-                PageSize: this.candidateFilePageSize,
-                Search: this.candidateSearchTerm,
-                SortColumn: this.candidateFileSortBy,
-                SortOrder: this.candidateFileSortOrder
-            });
-
-            const response = await fetch(`/api/TranscodeCandidates/AllFiles?${params}`);
-            const data = await response.json();
-
-            if (data.Success) {
-                this.displayCandidateAllFiles(data.Files);
-                this.candidateFileTotalCount = data.TotalCount;
-                this.candidateFileTotalPages = data.TotalPages;
-                this.updateCandidateFilesPagination();
-                this.updateCandidateFileSortIndicators();
-                this.candidateFilesLoaded = true;
-            } else {
-                this.showAlert('Error loading candidate files: ' + data.Message, 'danger');
-            }
-        } catch (error) {
-            this.showAlert('Error loading candidate files: ' + error.message, 'danger');
-        }
-    }
-
-    displayCandidateAllFiles(files) {
-        const tbody = document.getElementById('CandidateFilesTableBody');
-        tbody.innerHTML = '';
-
-        if (files.length === 0) {
-            tbody.innerHTML = `<tr><td colspan="9" class="text-center text-muted py-4">
-                <i class="fas fa-check-circle fa-2x mb-2 d-block"></i>
-                No transcode candidate files found
-            </td></tr>`;
-            return;
-        }
-
-        files.forEach(file => {
-            const bitrateKbps = file.VideoBitrateKbps || 0;
-            const bitrateClass = bitrateKbps >= 5000 ? 'text-danger fw-bold' : bitrateKbps >= 2000 ? 'text-warning' : 'text-muted';
-
-            const audioWarning = file.HasExplicitEnglishAudio === false
-                ? '<i class="fas fa-exclamation-triangle text-warning ms-1" title="No confirmed English audio"></i>'
-                : '';
-
-            const row = document.createElement('tr');
-            row.innerHTML = `
-                <td><small>${this.escapeHtml(file.FileName)}</small></td>
-                <td><small class="text-muted">${this.escapeHtml(file.FolderName)}</small></td>
-                <td>${file.SizeDisplay}</td>
-                <td><span class="badge bg-info">${file.ResolutionCategory}</span></td>
-                <td><span class="badge bg-secondary">${file.Codec}</span></td>
-                <td class="${bitrateClass}">${file.BitrateDisplay}</td>
-                <td>
-                    <small>${file.AudioLanguages || '-'}</small>${audioWarning}
-                </td>
-                <td>
-                    <div class="d-flex align-items-center gap-1">
-                        <small class="text-muted">${file.AssignedProfile || ''}</small>
-                        <select class="form-select form-select-sm" id="CandidateFileProfileSelect_${file.Id}" style="min-width: 120px;" onclick="event.stopPropagation()">
-                            <option value="">${file.AssignedProfile ? 'Change...' : 'Select Profile...'}</option>
-                        </select>
-                    </div>
-                </td>
-                <td>
-                    <button class="btn btn-sm btn-outline-success" onclick="queueManager.addCandidateFileToQueue(${file.Id})" title="Add to Queue">
-                        <i class="fas fa-plus"></i> Add
-                    </button>
-                </td>
-            `;
-            tbody.appendChild(row);
-        });
-
-        this.loadProfilesForDropdowns();
-    }
-
-    async addCandidateFileToQueue(fileId) {
-        const profileSelect = document.getElementById(`CandidateFileProfileSelect_${fileId}`);
-        const profileId = profileSelect ? profileSelect.value : null;
-
-        await this.addFileToQueueDirectly(fileId, profileId ? parseInt(profileId) : null);
-        this.loadCandidateAllFiles();
-    }
-
-    updateCandidateFilesPagination() {
-        const pagination = document.getElementById('CandidateFilesPagination');
-        const info = document.getElementById('CandidateFilesPaginationInfo');
-        pagination.innerHTML = '';
-
-        const startItem = this.candidateFileTotalCount > 0 ? (this.candidateFileCurrentPage - 1) * this.candidateFilePageSize + 1 : 0;
-        const endItem = Math.min(this.candidateFileCurrentPage * this.candidateFilePageSize, this.candidateFileTotalCount);
-        info.textContent = `Showing ${startItem} to ${endItem} of ${this.candidateFileTotalCount} files`;
-
-        if (this.candidateFileTotalPages <= 1) return;
-
-        const prevDisabled = this.candidateFileCurrentPage <= 1 ? 'disabled' : '';
-        pagination.innerHTML += `<li class="page-item ${prevDisabled}"><a class="page-link" href="#" onclick="queueManager.changeCandidateFilePage2(${this.candidateFileCurrentPage - 1})">Previous</a></li>`;
-
-        const startPage = Math.max(1, this.candidateFileCurrentPage - 2);
-        const endPage = Math.min(this.candidateFileTotalPages, this.candidateFileCurrentPage + 2);
-
-        if (startPage > 1) {
-            pagination.innerHTML += `<li class="page-item"><a class="page-link" href="#" onclick="queueManager.changeCandidateFilePage2(1)">1</a></li>`;
-            if (startPage > 2) {
-                pagination.innerHTML += `<li class="page-item disabled"><span class="page-link">...</span></li>`;
-            }
-        }
-
-        for (let i = startPage; i <= endPage; i++) {
-            const active = i === this.candidateFileCurrentPage ? 'active' : '';
-            pagination.innerHTML += `<li class="page-item ${active}"><a class="page-link" href="#" onclick="queueManager.changeCandidateFilePage2(${i})">${i}</a></li>`;
-        }
-
-        if (endPage < this.candidateFileTotalPages) {
-            if (endPage < this.candidateFileTotalPages - 1) {
-                pagination.innerHTML += `<li class="page-item disabled"><span class="page-link">...</span></li>`;
-            }
-            pagination.innerHTML += `<li class="page-item"><a class="page-link" href="#" onclick="queueManager.changeCandidateFilePage2(${this.candidateFileTotalPages})">${this.candidateFileTotalPages}</a></li>`;
-        }
-
-        const nextDisabled = this.candidateFileCurrentPage >= this.candidateFileTotalPages ? 'disabled' : '';
-        pagination.innerHTML += `<li class="page-item ${nextDisabled}"><a class="page-link" href="#" onclick="queueManager.changeCandidateFilePage2(${this.candidateFileCurrentPage + 1})">Next</a></li>`;
-    }
-
-    changeCandidateFilePage2(page) {
-        if (page >= 1 && page <= this.candidateFileTotalPages && page !== this.candidateFileCurrentPage) {
-            this.candidateFileCurrentPage = page;
-            this.loadCandidateAllFiles();
-        }
-    }
-
-    updateCandidateFileSortIndicators() {
-        document.querySelectorAll('.candidate-file-sortable i').forEach(icon => {
-            icon.className = 'fas fa-sort';
-        });
-        const currentSortTh = document.querySelector(`.candidate-file-sortable[data-sort="${this.candidateFileSortBy}"]`);
-        if (currentSortTh) {
-            const icon = currentSortTh.querySelector('i');
-            if (icon) {
-                icon.className = this.candidateFileSortOrder === 'ASC' ? 'fas fa-sort-up' : 'fas fa-sort-down';
-            }
-        }
-    }
-
-    async addCandidateToQueue(index, subfolderPath) {
-        try {
-            const profileSelect = document.getElementById(`CandidateProfileSelect_${index}`);
-            const profileIdValue = profileSelect ? profileSelect.value : null;
-
-            const requestBody = {
-                RootFolderPath: subfolderPath
-            };
-
-            if (profileIdValue && profileIdValue !== '') {
-                requestBody.ProfileId = parseInt(profileIdValue);
-            }
-
-            const response = await fetch('/api/TranscodeQueue/PopulateQueue', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(requestBody)
-            });
-
-            const data = await response.json();
-
-            if (data.Success) {
-                this.showAlert(`Added ${data.ItemsAdded || 0} files from folder to queue`, 'success');
-                this.loadQueueData();
-            } else {
-                this.showAlert('Error adding folder to queue: ' + data.ErrorMessage, 'danger');
-            }
-        } catch (error) {
-            this.showAlert('Error adding folder to queue: ' + error.message, 'danger');
-        }
-    }
-
-    async addFileToQueue(fileId) {
-        try {
-            const response = await fetch('/api/TranscodeQueue/AddJob', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ MediaFileId: fileId })
-            });
-
-            const data = await response.json();
-
-            if (data.Success) {
-                this.showAlert('File added to queue successfully', 'success');
-                this.loadQueueData(); // Refresh queue
-            } else {
-                this.showAlert('Error adding file to queue: ' + data.ErrorMessage, 'danger');
-            }
-        } catch (error) {
-            this.showAlert('Error adding file to queue: ' + error.message, 'danger');
-        }
-    }
-
-    async addFileToQueueWithProfile(fileId) {
-        const profileSelect = document.getElementById(`MediaFileProfileSelect_${fileId}`);
-        const profileId = profileSelect.value;
-        
-        // If no profile selected, try to add without profile (file might already have one)
-        if (!profileId) {
-            // Check if file already has a profile by looking at the badge
-            const badge = document.querySelector(`#MediaFileProfileSelect_${fileId}`).closest('td').querySelector('.badge');
-            if (badge && badge.textContent.trim() !== 'No Profile') {
-                // File has a profile, add it directly
-                await this.addFileToQueueDirectly(fileId);
-                return;
-            } else {
-                // File has no profile, user must select one
-                this.showAlert('Please select a profile first', 'warning');
-                return;
-            }
-        }
-        
-        // User selected a profile, add with profile
-        await this.addFileToQueueDirectly(fileId, parseInt(profileId));
-    }
-    
-    async addFileToQueueDirectly(fileId, profileId = null, startTime = null, priority = null, forceAdd = false) {
-        try {
-            const requestBody = { MediaFileId: fileId };
-            if (profileId) {
-                requestBody.ProfileId = profileId;
-            }
-            if (startTime) {
-                requestBody.StartTime = startTime;
-            }
-            if (priority) {
-                requestBody.Priority = priority;
-            }
-            if (forceAdd) {
-                requestBody.ForceAdd = true;
-            }
-
-            const response = await fetch('/api/TranscodeQueue/AddJob', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(requestBody)
-            });
-
-            const data = await response.json();
-
-            if (data.Success) {
-                this.showAlert('File added to queue successfully', 'success');
-                if (profileId) {
-                    const profileSelect = document.getElementById(`MediaFileProfileSelect_${fileId}`);
-                    if (profileSelect) {
-                        profileSelect.value = '';
-                    }
-                }
-                this.loadQueueData(); // Refresh queue
-                this.loadMediaFiles(); // Refresh media files to show updated profile
-            } else if (data.CanOverride) {
-                // Show override confirmation for resolution check failures
-                if (confirm(`${data.ErrorMessage}\n\nWould you like to override this check and add the file anyway?`)) {
-                    await this.addFileToQueueDirectly(fileId, profileId, startTime, priority, true);
-                }
-            } else {
-                this.showAlert('Error adding file to queue: ' + data.ErrorMessage, 'danger');
-            }
-        } catch (error) {
-            this.showAlert('Error adding file to queue: ' + error.message, 'danger');
-        }
-    }
-
-    showAddJobOptions(fileId) {
-        // Store the current file ID for the modal
-        this.currentFileId = fileId;
-        
-        // Clear the form
-        document.getElementById('StartTimeInput').value = '';
-        document.getElementById('JobPriorityInput').value = '';
-        
-        // Show the modal
-        const modal = new bootstrap.Modal(document.getElementById('AddJobOptionsModal'));
-        modal.show();
-    }
-
-    async addJobWithOptions() {
-        if (!this.currentFileId) {
-            this.showAlert('No file selected', 'danger');
-            return;
-        }
-
-        const startTime = document.getElementById('StartTimeInput').value.trim();
-        const priority = document.getElementById('JobPriorityInput').value.trim();
-
-        // Validate start time format if provided
-        if (startTime) {
-            const timeRegex = /^(\d{2}:\d{2}:\d{2}|\d+)$/;
-            if (!timeRegex.test(startTime)) {
-                this.showAlert('Start time must be in HH:MM:SS format or seconds (e.g., 00:02:30 or 150)', 'danger');
-                return;
-            }
-        }
-
-        // Validate priority if provided
-        if (priority) {
-            const priorityNum = parseInt(priority);
-            if (isNaN(priorityNum) || priorityNum < 1 || priorityNum > 100) {
-                this.showAlert('Priority must be a number between 1 and 100', 'danger');
-                return;
-            }
-        }
-
-        // Close the modal
-        const modal = bootstrap.Modal.getInstance(document.getElementById('AddJobOptionsModal'));
-        modal.hide();
-
-        // Add the job with options
-        await this.addFileToQueueDirectly(
-            this.currentFileId, 
-            null, // profileId - will use existing profile
-            startTime || null, 
-            priority ? parseInt(priority) : null
-        );
-    }
-
-    async refreshMediaFile(fileId) {
-        try {
-            const response = await fetch(`/api/MediaFiles/${fileId}/Refresh`, {
-                method: 'POST'
-            });
-            const data = await response.json();
-            
-            if (data.Success) {
-                this.showAlert('File refreshed successfully', 'success');
-                this.loadMediaFiles();
-            } else {
-                this.showAlert('Error refreshing file: ' + data.Message, 'danger');
-            }
-        } catch (error) {
-            this.showAlert('Error refreshing file: ' + error.message, 'danger');
-        }
-    }
-
-    async loadProfilesForDropdowns() {
-        try {
-            const response = await fetch('/api/profiles');
-            const data = await response.json();
-
-            if (data.success) {
-                this.populateProfileDropdowns(data.profiles);
-            } else {
-                this.showAlert('Failed to load profiles: ' + data.error, 'danger');
-            }
-        } catch (error) {
-            this.showAlert('Failed to load profiles', 'danger');
-        }
-    }
-
-    populateProfileDropdowns(profiles) {
-        // Populate all profile dropdowns (both root folder and regular ones)
-        document.querySelectorAll('select[id*="ProfileSelect"]').forEach(select => {
-            const currentValue = select.value;
-            select.innerHTML = '<option value="">Select Profile...</option>';
-            
-            profiles.forEach(profile => {
-                select.innerHTML += `<option value="${profile.Id}">${profile.ProfileName}</option>`;
-            });
-            
-            // Restore previous selection if it exists
-            if (currentValue) {
-                select.value = currentValue;
-            }
-        });
     }
 
     // Quality Testing Queue Methods
@@ -1713,7 +827,6 @@ class TranscodeQueueManager {
             console.log('Quality Testing API Response:', data); // Debug logging
 
             if (data.Success) {
-                console.log('Quality Testing Queue Items:', data.Jobs); // Debug logging
                 this.UpdateQualityTestingQueueTable(data.Jobs);
             } else {
                 await this.LogErrorToDatabase(
@@ -1733,28 +846,27 @@ class TranscodeQueueManager {
 
 
     UpdateQualityTestingQueueTable(queueItems) {
-        console.log('UpdateQualityTestingQueueTable called with:', queueItems); // Debug logging
         const tbody = document.getElementById('QualityTestingQueueTableBody');
         tbody.innerHTML = '';
 
         if (!queueItems || queueItems.length === 0) {
-            console.log('No quality testing queue items to display'); // Debug logging
             const row = document.createElement('tr');
             row.innerHTML = `
-                <td colspan="12" class="text-center text-muted py-4">
+                <td colspan="8" class="text-center text-muted py-4">
                     <i class="fas fa-inbox fa-2x mb-2"></i><br>
                     No quality testing queue items found
                 </td>
             `;
             tbody.appendChild(row);
         } else {
-            console.log(`Displaying ${queueItems.length} quality testing queue items`); // Debug logging
             queueItems.forEach(item => {
                 const row = document.createElement('tr');
+                row.dataset.qtItemId = item.Id;
+                row.dataset.qtStatus = item.Status;
                 row.innerHTML = `
                     <td>${item.Id}</td>
                     <td>
-                        <div class="text-truncate" style="max-width: 200px;" title="${this.escapeHtml(item.OriginalFilePath || '')}">
+                        <div class="text-truncate" style="max-width: 250px;" title="${this.escapeHtml(item.OriginalFilePath || '')}">
                             ${this.escapeHtml(item.FileName || (item.OriginalFilePath ? item.OriginalFilePath.split('\\').pop() : 'Unknown'))}
                         </div>
                     </td>
@@ -1770,31 +882,15 @@ class TranscodeQueueManager {
                             '-'
                         }
                     </td>
-                    <td>
-                        <small class="text-muted">${item.StrategyType || '-'}</small>
-                    </td>
-                    <td>
-                        ${item.RetryCount > 0 ? 
-                            `<span class="badge bg-warning">${item.RetryCount}/${item.MaxRetries || 3}</span>` : 
-                            '<span class="badge bg-secondary">0</span>'
-                        }
-                    </td>
+                    <td class="qt-progress-cell">${this.renderQTProgressCell(item)}</td>
                     <td>${this.formatDate(item.DateAdded || item.CreatedDate)}</td>
-                    <td>${this.formatDate(item.DateStarted)}</td>
-                    <td>${this.formatDate(item.DateCompleted || item.CompletedDate)}</td>
-                    <td>
-                        ${item.ErrorMessage ? 
-                            `<span class="text-danger" title="${this.escapeHtml(item.ErrorMessage)}">
-                                <i class="fas fa-exclamation-triangle"></i>
-                            </span>` : 
-                            '-'
-                        }
-                    </td>
                     <td>
                         ${item.Status === 'Failed' && (item.RetryCount || 0) < (item.MaxRetries || 3) ?
                             `<button type="button" class="btn btn-sm btn-outline-warning" onclick="queueManager.RetryQualityTest(${item.Id})" title="Retry Quality Test">
                                 <i class="fas fa-redo"></i>
-                            </button>` : '-'
+                            </button>` : 
+                            (item.ErrorMessage ? 
+                                `<span class="text-danger" title="${this.escapeHtml(item.ErrorMessage)}"><i class="fas fa-exclamation-triangle"></i></span>` : '-')
                         }
                     </td>
                 `;
@@ -1806,6 +902,67 @@ class TranscodeQueueManager {
 
 
 
+
+    startQualityTestProgressPolling() {
+        setInterval(() => {
+            this.updateQualityTestProgress();
+        }, 3000);
+    }
+
+    async updateQualityTestProgress() {
+        try {
+            const response = await fetch('/api/QualityTesting/Progress');
+            const data = await response.json();
+            this.currentQTProgress = data;
+            this.updateQTProgressCells();
+        } catch (error) {
+            // Silently ignore progress polling errors
+        }
+    }
+
+    updateQTProgressCells() {
+        const runningRows = document.querySelectorAll('#QualityTestingQueueTableBody tr[data-qt-status="Running"]');
+        runningRows.forEach(row => {
+            const cell = row.querySelector('.qt-progress-cell');
+            if (cell && this.currentQTProgress && this.currentQTProgress.Success && this.currentQTProgress.IsRunning) {
+                const p = this.currentQTProgress.Progress || {};
+                const pct = p.ProgressPercentage || 0;
+                cell.innerHTML = `
+                    <div class="d-flex align-items-center">
+                        <div class="progress me-2" style="width: 80px; height: 18px;">
+                            <div class="progress-bar progress-bar-striped progress-bar-animated bg-info" 
+                                 role="progressbar" 
+                                 style="width: ${pct}%"
+                                 aria-valuenow="${pct}" 
+                                 aria-valuemin="0" 
+                                 aria-valuemax="100">
+                            </div>
+                        </div>
+                        <small>${pct.toFixed ? pct.toFixed(1) : pct}%</small>
+                    </div>
+                    <small class="text-muted">${p.ETA ? 'ETA: ' + p.ETA : (p.CurrentStep || '')}</small>
+                `;
+            }
+        });
+    }
+
+    renderQTProgressCell(item) {
+        if (item.Status === 'Running') {
+            return `
+                <div class="d-flex align-items-center">
+                    <div class="spinner-border spinner-border-sm text-info me-2" role="status"></div>
+                    <small class="text-muted">Loading...</small>
+                </div>
+            `;
+        }
+        if (item.Status === 'Completed') {
+            return '<span class="badge bg-success"><i class="fas fa-check"></i> Done</span>';
+        }
+        if (item.Status === 'Failed') {
+            return '<span class="badge bg-danger"><i class="fas fa-times"></i> Failed</span>';
+        }
+        return '-';
+    }
 
     GetQualityTestingStatusBadgeClass(status) {
         const classes = {
@@ -1890,116 +1047,88 @@ class TranscodeQueueManager {
     showAlert(message, type) {
         showToastAlert(message, type);
     }
+
+    async stopAfterJob() {
+        if (!confirm('Stop transcoding after the current job finishes?')) return;
+        try {
+            const response = await fetch('/api/Transcode/Stop', { method: 'POST' });
+            const data = await response.json();
+            if (data.Success) {
+                this.showAlert('Transcode will stop after the current job.', 'success');
+                this.pollServiceStatus();
+            } else {
+                this.showAlert(data.ErrorMessage || 'Failed to stop.', 'danger');
+            }
+        } catch (error) {
+            this.showAlert('Failed to contact server.', 'danger');
+        }
+    }
+
+    async startTranscoding() {
+        try {
+            const response = await fetch('/api/Transcode/Start', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ MaxConcurrentJobs: 1 })
+            });
+            const data = await response.json();
+            if (data.Success) {
+                this.showAlert('Transcoding started.', 'success');
+                this.pollServiceStatus();
+            } else {
+                this.showAlert(data.ErrorMessage || 'Failed to start.', 'danger');
+            }
+        } catch (error) {
+            this.showAlert('Failed to contact server.', 'danger');
+        }
+    }
+
+    async pollServiceStatus() {
+        try {
+            const response = await fetch('/api/TeamStatus/Overview');
+            const result = await response.json();
+            if (!result.Success) return;
+            const D = result.Data;
+            const Status = D.ServiceStatus;
+            const IsProcessing = D.IsProcessing;
+            this.serviceStatus = Status;
+
+            const Badge = document.getElementById('TranscodeServiceBadge');
+            const BtnStart = document.getElementById('BtnStartTranscoding');
+            const BtnStop = document.getElementById('BtnStopTranscoding');
+
+            Badge.className = 'badge';
+            if (IsProcessing) {
+                Badge.textContent = 'Running';
+                Badge.classList.add('bg-success');
+                BtnStart.classList.add('d-none');
+                BtnStop.classList.remove('d-none');
+            } else if (Status === 'Stopped' || Status === 'Unknown') {
+                Badge.textContent = 'Stopped';
+                Badge.classList.add('bg-danger');
+                BtnStart.classList.remove('d-none');
+                BtnStop.classList.add('d-none');
+            } else if (Status === 'Running') {
+                Badge.textContent = 'Idle';
+                Badge.classList.add('bg-info');
+                BtnStart.classList.add('d-none');
+                BtnStop.classList.add('d-none');
+            } else {
+                Badge.textContent = Status;
+                Badge.classList.add('bg-secondary');
+                BtnStart.classList.add('d-none');
+                BtnStop.classList.add('d-none');
+            }
+        } catch (error) {
+            // Silently ignore status polling errors
+        }
+    }
 }
 
 // Initialize the queue manager when the page loads
 let queueManager;
 document.addEventListener('DOMContentLoaded', function() {
-    console.log('DOM Content Loaded - Initializing Queue Manager');
     queueManager = new TranscodeQueueManager();
-    
-    // Initialize file replacement functionality
-    initializeFileReplacement();
 });
-
-// File Replacement functionality
-function initializeFileReplacement() {
-    // Load failed replacements on page load
-    loadFailedReplacements();
-    
-    // Set up refresh button
-    document.getElementById('RefreshFailedReplacementsBtn').addEventListener('click', function() {
-        loadFailedReplacements();
-    });
-}
-
-async function loadFailedReplacements() {
-    try {
-        const response = await fetch('/api/FileReplacement/FailedReplacements');
-        const data = await response.json();
-        
-        if (data.Success) {
-            displayFailedReplacements(data.FailedReplacements);
-        } else {
-            showAlert('Error loading failed replacements: ' + data.ErrorMessage, 'danger');
-        }
-    } catch (error) {
-        showAlert('Error loading failed replacements: ' + error.message, 'danger');
-    }
-}
-
-function displayFailedReplacements(failedReplacements) {
-    const tableBody = document.getElementById('FailedReplacementsTableBody');
-    const noDataMessage = document.getElementById('NoFailedReplacementsMessage');
-    
-    if (failedReplacements.length === 0) {
-        tableBody.innerHTML = '';
-        noDataMessage.style.display = 'block';
-        return;
-    }
-    
-    noDataMessage.style.display = 'none';
-    tableBody.innerHTML = '';
-    
-    failedReplacements.forEach(replacement => {
-        const row = document.createElement('tr');
-        row.innerHTML = `
-            <td>${replacement.TranscodeAttemptId}</td>
-            <td>
-                <div class="text-truncate" style="max-width: 200px;" title="${replacement.OriginalFilePath}">
-                    ${replacement.OriginalFileName}
-                </div>
-            </td>
-            <td>
-                <div class="text-truncate" style="max-width: 200px;" title="${replacement.TranscodedFilePath}">
-                    ${replacement.TranscodedFileName}
-                </div>
-            </td>
-            <td>
-                <span class="badge bg-success">${replacement.VMAFScore.toFixed(2)}</span>
-            </td>
-            <td>${this.formatDate(replacement.AttemptDate)}</td>
-            <td>
-                <small class="text-muted">
-                    ${replacement.OriginalFileSize.toFixed(1)} MB → ${replacement.TranscodedFileSize.toFixed(1)} MB
-                </small>
-            </td>
-            <td>
-                <button type="button" class="btn btn-sm btn-success" 
-                        onclick="processFileReplacement(${replacement.TranscodeAttemptId})"
-                        title="Replace original file with transcoded file">
-                    <i class="fas fa-exchange-alt"></i> Replace
-                </button>
-            </td>
-        `;
-        tableBody.appendChild(row);
-    });
-}
-
-async function processFileReplacement(transcodeAttemptId) {
-    if (!confirm('Are you sure you want to replace the original file with the transcoded file? This action cannot be undone.')) {
-        return;
-    }
-    
-    try {
-        const response = await fetch(`/api/FileReplacement/Process/${transcodeAttemptId}`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            }
-        });
-        
-        const data = await response.json();
-        
-        if (data.Success) {
-            showAlert('File replacement completed successfully!', 'success');
-            loadFailedReplacements(); // Refresh the list
-        } else {
-            showAlert('File replacement failed: ' + data.ErrorMessage, 'danger');
-        }
-    } catch (error) {
-        showAlert('Error processing file replacement: ' + error.message, 'danger');
-    }
-}
 </script>
 {% endblock %}

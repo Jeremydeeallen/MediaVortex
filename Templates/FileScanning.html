@@ -3,7 +3,8 @@
 {% block title %}File Scanning - MediaVortex{% endblock %}
 
 {% block content %}
-<div class="container-fluid">
+<div class="container-fluid px-4">
+    {% include '_admin_subnav.html' %}
     <div class="row">
         <div class="col-12">
             <h1 class="mb-4">
@@ -116,44 +117,6 @@
                     <h5 class="mb-0"><i class="fas fa-cog me-2"></i> Scanning Settings</h5>
                 </div>
                 <div class="card-body">
-                    <!-- Excluded Directories Section -->
-                    <div class="mb-4">
-                        <h6 class="fw-bold mb-3"><i class="fas fa-ban text-danger me-2"></i> Excluded Directories</h6>
-                        <p class="text-muted small mb-3">These directories will be skipped during scanning to improve performance and avoid processing unwanted files.</p>
-
-                        <!-- Excluded Directories List -->
-                        <div class="table-responsive mb-3" style="max-height: 300px; overflow-y: auto;">
-                            <table class="table table-hover table-sm mb-0">
-                                <thead class="table-header-dark">
-                                    <tr>
-                                        <th style="width: 80%;">Directory Path</th>
-                                        <th style="width: 20%;" class="text-center">Action</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="ExcludedDirectoriesTableBody">
-                                    <tr>
-                                        <td colspan="2" class="text-center text-muted">
-                                            <i class="fas fa-spinner fa-spin me-2"></i> Loading...
-                                        </td>
-                                    </tr>
-                                </tbody>
-                            </table>
-                        </div>
-
-                        <!-- Add New Excluded Directory -->
-                        <div class="row g-2">
-                            <div class="col-md-9">
-                                <input type="text" class="form-control" id="NewExcludedDirectoryInput"
-                                       placeholder="Enter directory path to exclude (e.g., Z:\Videos\downloads)">
-                            </div>
-                            <div class="col-md-3">
-                                <button class="btn btn-success w-100" id="AddExcludedDirectoryBtn">
-                                    <i class="fas fa-plus me-1"></i> Add Exclusion
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-
                     <!-- Manual Scan Trigger (Optional) -->
                     <div class="collapse" id="ManualScanSection">
                         <hr class="my-4">
@@ -223,9 +186,14 @@
             <div class="card">
                 <div class="card-header d-flex justify-content-between align-items-center">
                     <h5 class="mb-0"><i class="fas fa-chart-bar"></i> Database Statistics</h5>
-                    <button type="button" class="btn btn-sm btn-outline-primary" id="RefreshStatisticsBtn">
-                        <i class="fas fa-sync-alt"></i> Refresh
-                    </button>
+                    <div class="d-flex gap-2">
+                        <button type="button" class="btn btn-sm btn-outline-danger" id="CorruptFilesBtn">
+                            <i class="fas fa-exclamation-triangle"></i> Corrupt Files
+                        </button>
+                        <button type="button" class="btn btn-sm btn-outline-primary" id="RefreshStatisticsBtn">
+                            <i class="fas fa-sync-alt"></i> Refresh
+                        </button>
+                    </div>
                 </div>
                 <div class="card-body">
                     <div class="row" id="StatisticsContainer">
@@ -271,6 +239,49 @@
     </div>
 </div>
 
+<!-- Corrupt Files Modal -->
+<div class="modal fade" id="CorruptFilesModal" tabindex="-1" aria-labelledby="CorruptFilesModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header bg-danger text-white">
+                <h5 class="modal-title" id="CorruptFilesModalLabel">
+                    <i class="fas fa-exclamation-triangle me-2"></i> Possibly Corrupt Files
+                    <span class="badge bg-light text-danger ms-2" id="CorruptFileCount">0</span>
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body p-0">
+                <div class="text-center py-4" id="CorruptFilesLoading">
+                    <div class="spinner-border text-danger" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                </div>
+                <div id="CorruptFilesEmpty" class="text-center py-4" style="display: none;">
+                    <i class="fas fa-check-circle text-success fa-3x mb-3"></i>
+                    <p class="text-muted mb-0">No corrupt files found.</p>
+                </div>
+                <div class="table-responsive" id="CorruptFilesTableWrapper" style="display: none;">
+                    <table class="table table-hover table-sm mb-0">
+                        <thead class="table-light sticky-top">
+                            <tr>
+                                <th style="width: 45%;">Directory</th>
+                                <th style="width: 25%;">File Name</th>
+                                <th class="text-end" style="width: 8%;">Size</th>
+                                <th class="text-center" style="width: 7%;">Fails</th>
+                                <th style="width: 15%;">Error</th>
+                            </tr>
+                        </thead>
+                        <tbody id="CorruptFilesTableBody"></tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 {% endblock %}
 
 {% block scripts %}
@@ -285,7 +296,6 @@ class FileScanningManager {
         this.initializeEventListeners();
         this.loadRootFolders();
         this.loadStatistics();
-        this.loadExcludedDirectories();
         this.checkForExistingScan();
         this.loadContinuousScanStatus();
 
@@ -304,6 +314,9 @@ class FileScanningManager {
 
         // Statistics refresh
         document.getElementById('RefreshStatisticsBtn').addEventListener('click', () => this.loadStatistics());
+
+        // Corrupt files modal
+        document.getElementById('CorruptFilesBtn').addEventListener('click', () => this.showCorruptFiles());
 
         // Input change handlers for manual scan
         const manualScanInput = document.getElementById('ManualScanFolderInput');
@@ -334,14 +347,6 @@ class FileScanningManager {
         // Continuous scanning
         document.getElementById('EnableContinuousScanBtn').addEventListener('click', () => this.enableContinuousScanning());
         document.getElementById('DisableContinuousScanBtn').addEventListener('click', () => this.disableContinuousScanning());
-
-        // Excluded directories
-        document.getElementById('AddExcludedDirectoryBtn').addEventListener('click', () => this.addExcludedDirectory());
-        document.getElementById('NewExcludedDirectoryInput').addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') {
-                this.addExcludedDirectory();
-            }
-        });
     }
 
     async loadRootFolders() {
@@ -633,126 +638,7 @@ class FileScanningManager {
     refreshData() {
         this.loadStatistics();
         this.loadContinuousScanStatus();
-        this.loadExcludedDirectories();
         this.showToast('Data refreshed', 'info');
-    }
-
-    async loadExcludedDirectories() {
-        try {
-            const response = await fetch('/api/SystemSettings/ExcludedDirectories');
-            const data = await response.json();
-
-            if (data.Success) {
-                this.renderExcludedDirectories(data.ExcludedDirectories || []);
-            }
-        } catch (error) {
-            console.error('Error loading excluded directories:', error);
-            showPersistentError('Error loading excluded directories: ' + error.message);
-            this.renderExcludedDirectories([]);
-        }
-    }
-
-    renderExcludedDirectories(directories) {
-        const tbody = document.getElementById('ExcludedDirectoriesTableBody');
-
-        if (!directories || directories.length === 0) {
-            tbody.innerHTML = `
-                <tr>
-                    <td colspan="2" class="text-center text-muted py-3">
-                        <i class="fas fa-folder-open me-2"></i> No excluded directories configured
-                    </td>
-                </tr>
-            `;
-            return;
-        }
-
-        tbody.innerHTML = directories.map((dir, index) => `
-            <tr>
-                <td class="align-middle">
-                    <i class="fas fa-ban text-danger me-2"></i>
-                    <code>${this.escapeHtml(dir)}</code>
-                </td>
-                <td class="text-center">
-                    <button class="btn btn-sm btn-danger" data-dir-index="${index}">
-                        <i class="fas fa-trash"></i> Remove
-                    </button>
-                </td>
-            </tr>
-        `).join('');
-
-        // Attach click handlers with proper string handling (avoids backslash escaping issues)
-        tbody.querySelectorAll('button[data-dir-index]').forEach(btn => {
-            const idx = parseInt(btn.getAttribute('data-dir-index'));
-            btn.addEventListener('click', () => this.removeExcludedDirectory(directories[idx]));
-        });
-    }
-
-    async addExcludedDirectory() {
-        const input = document.getElementById('NewExcludedDirectoryInput');
-        const directory = input.value.trim();
-
-        if (!directory) {
-            this.showToast('Please enter a directory path', 'warning');
-            return;
-        }
-
-        const btn = document.getElementById('AddExcludedDirectoryBtn');
-        btn.disabled = true;
-        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Adding...';
-
-        try {
-            const response = await fetch('/api/SystemSettings/ExcludedDirectories/Add', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ Directory: directory })
-            });
-
-            const data = await response.json();
-
-            if (data.Success) {
-                this.showToast(`Excluded directory added: ${directory}`, 'success');
-                input.value = '';
-                this.loadExcludedDirectories();
-            } else {
-                this.showToast('Error: ' + (data.ErrorMessage || 'Unknown error'), 'danger');
-            }
-        } catch (error) {
-            this.showToast('Error adding excluded directory: ' + error.message, 'danger');
-        } finally {
-            btn.disabled = false;
-            btn.innerHTML = '<i class="fas fa-plus me-1"></i> Add Exclusion';
-        }
-    }
-
-    async removeExcludedDirectory(directory) {
-        if (!confirm(`Remove exclusion for:\n${directory}\n\nThis directory will be scanned again.`)) {
-            return;
-        }
-
-        try {
-            const response = await fetch('/api/SystemSettings/ExcludedDirectories/Remove', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ Directory: directory })
-            });
-
-            const data = await response.json();
-
-            if (data.Success) {
-                this.showToast(`Exclusion removed: ${directory}`, 'success');
-                this.loadExcludedDirectories();
-            } else {
-                this.showToast('Error: ' + (data.ErrorMessage || 'Unknown error'), 'danger');
-            }
-        } catch (error) {
-            this.showToast('Error removing excluded directory: ' + error.message, 'danger');
-        }
-    }
-
-    escapeHtml(text) {
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
     }
 
     async startManualScan() {
@@ -791,6 +677,55 @@ class FileScanningManager {
         } finally {
             btn.disabled = false;
             btn.innerHTML = '<i class="fas fa-play me-1"></i> Scan Now';
+        }
+    }
+
+    async showCorruptFiles() {
+        const modal = new bootstrap.Modal(document.getElementById('CorruptFilesModal'));
+        document.getElementById('CorruptFilesLoading').style.display = 'block';
+        document.getElementById('CorruptFilesEmpty').style.display = 'none';
+        document.getElementById('CorruptFilesTableWrapper').style.display = 'none';
+        modal.show();
+
+        try {
+            const response = await fetch('/api/Scanning/MediaFiles/Corrupt');
+            const data = await response.json();
+            document.getElementById('CorruptFilesLoading').style.display = 'none';
+
+            if (!data.Success || !data.Files || data.Files.length === 0) {
+                document.getElementById('CorruptFilesEmpty').style.display = 'block';
+                document.getElementById('CorruptFileCount').textContent = '0';
+                return;
+            }
+
+            document.getElementById('CorruptFileCount').textContent = data.Count;
+            document.getElementById('CorruptFilesTableWrapper').style.display = 'block';
+
+            const tbody = document.getElementById('CorruptFilesTableBody');
+            tbody.innerHTML = data.Files.map(f => {
+                const dir = f.FilePath.substring(0, f.FilePath.length - f.FileName.length).replace(/[\\/]+$/, '');
+                const escapedDir = dir.replace(/'/g, "\\'");
+                const sizeMB = f.SizeMB >= 1024 ? (f.SizeMB / 1024).toFixed(1) + ' GB' : f.SizeMB.toFixed(0) + ' MB';
+                const errorTrunc = (f.Error || '').length > 40 ? f.Error.substring(0, 40) + '...' : (f.Error || '-');
+                return `<tr>
+                    <td>
+                        <div class="d-flex align-items-center gap-2">
+                            <button class="btn btn-outline-secondary btn-sm py-0 px-1 flex-shrink-0" onclick="navigator.clipboard.writeText('${escapedDir}').then(() => { this.innerHTML='<i class=\\'fas fa-check text-success\\'></i>'; setTimeout(() => this.innerHTML='<i class=\\'fas fa-copy\\'></i>', 1500); })" title="Copy directory path">
+                                <i class="fas fa-copy"></i>
+                            </button>
+                            <span class="text-truncate small" title="${dir}" style="max-width: 500px;">${dir}</span>
+                        </div>
+                    </td>
+                    <td class="text-truncate small" title="${f.FileName}" style="max-width: 250px;">${f.FileName}</td>
+                    <td class="text-end small">${sizeMB}</td>
+                    <td class="text-center"><span class="badge bg-danger">${f.FailCount}</span></td>
+                    <td class="small text-muted" title="${f.Error || ''}">${errorTrunc}</td>
+                </tr>`;
+            }).join('');
+        } catch (error) {
+            document.getElementById('CorruptFilesLoading').style.display = 'none';
+            document.getElementById('CorruptFilesEmpty').style.display = 'block';
+            document.getElementById('CorruptFilesEmpty').innerHTML = `<i class="fas fa-times-circle text-danger fa-3x mb-3"></i><p class="text-muted mb-0">Error loading corrupt files: ${error.message}</p>`;
         }
     }
 

@@ -1,12 +1,13 @@
 {% extends "Base.html" %}
 
-{% block title %}Status - MediaVortex{% endblock %}
+{% block title %}Stats - MediaVortex{% endblock %}
 
 {% block content %}
 <div class="container-fluid">
+    {% include '_admin_subnav.html' %}
     <!-- Header -->
     <div class="d-flex justify-content-between align-items-center mb-4">
-        <h1 class="h3 mb-0"><i class="fas fa-server me-2"></i>Status</h1>
+        <h1 class="h3 mb-0"><i class="fas fa-chart-bar me-2"></i>Stats</h1>
         <div class="btn-group" role="group">
             <button type="button" class="btn btn-outline-primary btn-sm" id="RefreshBtn">
                 <i class="fas fa-sync-alt me-1"></i>Refresh
@@ -14,6 +15,70 @@
             <button type="button" class="btn btn-outline-success btn-sm" id="AutoRefreshBtn">
                 <i class="fas fa-play me-1"></i>Auto
             </button>
+        </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════ -->
+    <!-- LIBRARY STATISTICS                                  -->
+    <!-- ═══════════════════════════════════════════════════ -->
+    <div class="row g-3 mb-4">
+        <div class="col-6 col-lg">
+            <div class="card h-100 text-center">
+                <div class="card-body py-3">
+                    <small class="text-muted d-block mb-1">Total Files</small>
+                    <h4 class="mb-0" id="LibTotalFiles">--</h4>
+                </div>
+            </div>
+        </div>
+        <div class="col-6 col-lg">
+            <div class="card h-100 text-center">
+                <div class="card-body py-3">
+                    <small class="text-muted d-block mb-1">Library Size</small>
+                    <h4 class="mb-0" id="LibTotalSize">--</h4>
+                </div>
+            </div>
+        </div>
+        <div class="col-6 col-lg">
+            <div class="card h-100 text-center">
+                <div class="card-body py-3">
+                    <small class="text-muted d-block mb-1">Encoded by MV</small>
+                    <h4 class="mb-0 text-primary" id="LibEncoded">--</h4>
+                </div>
+            </div>
+        </div>
+        <div class="col-6 col-lg">
+            <div class="card h-100 text-center">
+                <div class="card-body py-3">
+                    <small class="text-muted d-block mb-1">Space Saved</small>
+                    <h4 class="mb-0 text-success" id="LibSpaceSaved">--</h4>
+                </div>
+            </div>
+        </div>
+        <div class="col-6 col-lg">
+            <div class="card h-100 text-center">
+                <div class="card-body py-3">
+                    <small class="text-muted d-block mb-1">Possibly Corrupt</small>
+                    <h4 class="mb-0" id="LibCorrupt">--</h4>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════ -->
+    <!-- SAVINGS BY DAY — Chart + Table                      -->
+    <!-- ═══════════════════════════════════════════════════ -->
+    <div class="card mb-4">
+        <div class="card-header py-2 d-flex justify-content-between align-items-center">
+            <h6 class="mb-0"><i class="fas fa-calendar-alt me-2"></i>Savings by Day</h6>
+            <select id="DayFilter" class="form-select form-select-sm" style="width: auto;" onchange="LoadSavingsByDay()">
+                <option value="7">7 days</option>
+                <option value="14">14 days</option>
+                <option value="30" selected>30 days</option>
+                <option value="90">90 days</option>
+            </select>
+        </div>
+        <div class="card-body">
+            <canvas id="SavingsByDayChart" height="200"></canvas>
         </div>
     </div>
 
@@ -155,39 +220,6 @@
         </div>
     </div>
 
-    <!-- Savings by Day — Chart + Table -->
-    <div class="card mb-4">
-        <div class="card-header py-2 d-flex justify-content-between align-items-center">
-            <h6 class="mb-0"><i class="fas fa-calendar-alt me-2"></i>Savings by Day</h6>
-            <select id="DayFilter" class="form-select form-select-sm" style="width: auto;" onchange="LoadSavingsByDay()">
-                <option value="7">7 days</option>
-                <option value="14">14 days</option>
-                <option value="30" selected>30 days</option>
-                <option value="90">90 days</option>
-            </select>
-        </div>
-        <div class="card-body">
-            <canvas id="SavingsByDayChart" height="200"></canvas>
-        </div>
-        <div class="card-body p-0 border-top">
-            <div class="table-responsive">
-                <table class="table table-striped table-hover table-sm mb-0">
-                    <thead class="table-light">
-                        <tr>
-                            <th class="ps-3">Date</th>
-                            <th class="text-end">Jobs</th>
-                            <th class="text-end">Saved</th>
-                            <th class="text-end pe-3">Running Total</th>
-                        </tr>
-                    </thead>
-                    <tbody id="DayTableBody">
-                        <tr><td colspan="4" class="text-center text-muted py-3">Loading...</td></tr>
-                    </tbody>
-                </table>
-            </div>
-        </div>
-    </div>
-
     <!-- ═══════════════════════════════════════════════════ -->
     <!-- CONTINUOUS SCANNING (summary — full controls on File Scanning page) -->
     <!-- ═══════════════════════════════════════════════════ -->
@@ -275,28 +307,57 @@ function RenderSavingsChart(Data) {
     const Labels = Data.map(R => R.Day);
     const SavedGB = Data.map(R => parseFloat(BytesToGB(R.TotalSavedBytes)));
 
+    // Build cumulative running total
+    let RunningTotal = 0;
+    const CumulativeGB = Data.map(R => {
+        RunningTotal += Number(R.TotalSavedBytes) || 0;
+        return parseFloat(BytesToGB(RunningTotal));
+    });
+
     SavingsChart = new Chart(Ctx, {
         type: 'bar',
         data: {
             labels: Labels,
-            datasets: [{
-                label: 'Space Saved (GB)',
-                data: SavedGB,
-                backgroundColor: 'rgba(25, 135, 84, 0.7)',
-                borderColor: 'rgba(25, 135, 84, 1)',
-                borderWidth: 1,
-                borderRadius: 3
-            }]
+            datasets: [
+                {
+                    label: 'Daily Saved (GB)',
+                    data: SavedGB,
+                    backgroundColor: 'rgba(25, 135, 84, 0.7)',
+                    borderColor: 'rgba(25, 135, 84, 1)',
+                    borderWidth: 1,
+                    borderRadius: 3,
+                    yAxisID: 'y',
+                    order: 2
+                },
+                {
+                    label: 'Running Total (GB)',
+                    data: CumulativeGB,
+                    type: 'line',
+                    borderColor: 'rgba(13, 110, 253, 0.9)',
+                    backgroundColor: 'rgba(13, 110, 253, 0.1)',
+                    borderWidth: 2,
+                    pointRadius: 2,
+                    pointHoverRadius: 4,
+                    fill: true,
+                    tension: 0.3,
+                    yAxisID: 'y1',
+                    order: 1
+                }
+            ]
         },
         options: {
             responsive: true,
             maintainAspectRatio: false,
+            interaction: {
+                mode: 'index',
+                intersect: false
+            },
             plugins: {
-                legend: { display: false },
+                legend: { display: true, position: 'top', labels: { boxWidth: 12, font: { size: 11 } } },
                 tooltip: {
                     callbacks: {
                         label: function(Ctx) {
-                            return Ctx.parsed.y.toFixed(2) + ' GB saved';
+                            return Ctx.dataset.label + ': ' + Ctx.parsed.y.toFixed(2) + ' GB';
                         }
                     }
                 }
@@ -308,7 +369,17 @@ function RenderSavingsChart(Data) {
                 },
                 y: {
                     beginAtZero: true,
-                    title: { display: true, text: 'GB Saved' },
+                    position: 'left',
+                    title: { display: true, text: 'Daily (GB)' },
+                    ticks: {
+                        callback: function(V) { return V + ' GB'; }
+                    }
+                },
+                y1: {
+                    beginAtZero: true,
+                    position: 'right',
+                    title: { display: true, text: 'Cumulative (GB)' },
+                    grid: { drawOnChartArea: false },
                     ticks: {
                         callback: function(V) { return V + ' GB'; }
                     }
@@ -455,40 +526,37 @@ function LoadSavingsByDay() {
     fetch('/api/TeamStatus/SavingsByDay?Days=' + Days)
         .then(R => R.json())
         .then(Result => {
-            const Tbody = document.getElementById('DayTableBody');
             if (!Result.Success || !Result.Data || !Result.Data.length) {
-                Tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted py-3">No data</td></tr>';
                 if (SavingsChart) { SavingsChart.destroy(); SavingsChart = null; }
                 return;
             }
-
-            // Data comes back ASC — chart needs ASC, table shows DESC
             RenderSavingsChart(Result.Data);
-
-            // Running total (accumulate ASC)
-            let RunningTotal = 0;
-            const Totals = [];
-            Result.Data.forEach(Row => {
-                RunningTotal += Row.TotalSavedBytes;
-                Totals.push(RunningTotal);
-            });
-
-            // Table in DESC order (most recent first)
-            const Reversed = Result.Data.slice().reverse();
-            const ReversedTotals = Totals.slice().reverse();
-
-            Tbody.innerHTML = Reversed.map((Row, Idx) =>
-                `<tr>
-                    <td class="ps-3">${Row.Day}</td>
-                    <td class="text-end">${Row.JobCount.toLocaleString()}</td>
-                    <td class="text-end text-success fw-bold">${FormatBytes(Row.TotalSavedBytes)}</td>
-                    <td class="text-end pe-3">${FormatBytes(ReversedTotals[Idx])}</td>
-                </tr>`
-            ).join('');
         })
-        .catch(() => {
-            document.getElementById('DayTableBody').innerHTML = '<tr><td colspan="4" class="text-center text-danger py-3">Failed to load</td></tr>';
-        });
+        .catch(() => {});
+}
+
+// ─── Library Statistics ──────────────────────────────────
+function LoadLibraryStats() {
+    fetch('/api/Statistics')
+        .then(R => R.json())
+        .then(Result => {
+            if (!Result.Success || !Result.Statistics) return;
+            const S = Result.Statistics;
+            const SizeGB = S.TotalSizeGB || 0;
+            const SizeDisplay = SizeGB >= 1024 ? (SizeGB / 1024).toFixed(1) + ' TB' : SizeGB.toFixed(1) + ' GB';
+            const SavedGB = S.SpaceSavedGB || 0;
+            const SavedDisplay = SavedGB >= 1024 ? (SavedGB / 1024).toFixed(1) + ' TB' : SavedGB.toFixed(1) + ' GB';
+            const Corrupt = S.PossiblyCorrupt || 0;
+
+            document.getElementById('LibTotalFiles').textContent = (S.TotalMediaFiles || 0).toLocaleString();
+            document.getElementById('LibTotalSize').textContent = SizeDisplay;
+            document.getElementById('LibEncoded').textContent = (S.EncodedByMediaVortex || 0).toLocaleString();
+            document.getElementById('LibSpaceSaved').textContent = SavedDisplay;
+            const CorruptEl = document.getElementById('LibCorrupt');
+            CorruptEl.textContent = Corrupt;
+            CorruptEl.className = 'mb-0' + (Corrupt > 0 ? ' text-danger' : ' text-success');
+        })
+        .catch(() => {});
 }
 
 // ─── ServiceStatusManager ────────────────────────────────
@@ -526,6 +594,7 @@ class ServiceStatusManager {
         LoadTranscodeOverview();
         LoadSavingsByVolume();
         LoadSavingsByDay();
+        LoadLibraryStats();
     }
 
     ToggleAutoRefresh() {

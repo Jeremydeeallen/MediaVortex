@@ -21,6 +21,7 @@ class TranscodeProfileModel:
     YadifParity: int = 1  # Deinterlacing parity (0=auto, 1=top, -1=bottom)
     YadifDeint: int = 1  # Deinterlacing type (0=all, 1=interlaced)
     UseNvidiaHardware: int = 0  # 0=software, 1=NVIDIA hardware
+    SortOrder: int = 0  # Display order (lower = first)
     
     def __post_init__(self):
         if self.CreatedDate is None:

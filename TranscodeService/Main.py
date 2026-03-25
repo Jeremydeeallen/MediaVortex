@@ -198,11 +198,13 @@ class TranscodeServiceApp:
             LoggingService.LogException("Error starting health monitoring", e, "TranscodeService", "StartHealthMonitoring")
     
     def HealthCheckLoop(self):
-        """Health monitoring loop."""
+        """Health monitoring loop - updates heartbeat without overwriting operational status."""
         while not self.ShutdownEvent.is_set():
             try:
-                # Update health status
-                self.UpdateServiceStatus("Running", "Healthy", 0, False)
+                # Only update health heartbeat, never overwrite the operational Status
+                self.DatabaseManager.UpdateServiceStatus("TranscodeService", {
+                    'HealthStatus': 'Healthy'
+                })
                 self.ShutdownEvent.wait(30)  # Check every 30 seconds
             except Exception as e:
                 LoggingService.LogException("Error in health check", e, "TranscodeService", "HealthCheckLoop")
@@ -258,42 +260,53 @@ class TranscodeServiceApp:
                 LoggingService.LogInfo("Service starting up, updating status to Running", "TranscodeService", "PrivateHandleStatusChange")
                 self.UpdateServiceStatus("Running", "Healthy", 0, False)
                 
-            elif new_status == "Running" and not is_processing:
-                # Start transcoding
-                LoggingService.LogInfo("Starting transcoding based on status change", "TranscodeService", "PrivateHandleStatusChange")
-                result = self.ProcessTranscodeQueue.Run(MaxConcurrentJobs=1)
-                if result.get("Success", False):
-                    LoggingService.LogInfo("Transcoding started successfully", "TranscodeService", "PrivateHandleStatusChange")
-                else:
-                    LoggingService.LogError(f"Failed to start transcoding: {result.get('ErrorMessage', 'Unknown error')}", 
-                                          "TranscodeService", "PrivateHandleStatusChange")
+            elif new_status == "Running":
+                # Start transcoding if not already processing
+                if not self.ProcessTranscodeQueue.IsProcessing:
+                    LoggingService.LogInfo("Starting transcoding based on status change", "TranscodeService", "PrivateHandleStatusChange")
+                    self.ManuallyStopped = False
+                    result = self.ProcessTranscodeQueue.Run(MaxConcurrentJobs=1)
+                    if result.get("Success", False):
+                        LoggingService.LogInfo("Transcoding started successfully", "TranscodeService", "PrivateHandleStatusChange")
+                    else:
+                        LoggingService.LogError(f"Failed to start transcoding: {result.get('ErrorMessage', 'Unknown error')}", 
+                                              "TranscodeService", "PrivateHandleStatusChange")
                 
-            elif new_status == "GracefulStop":
-                # Graceful stop - let current jobs complete then stop
-                LoggingService.LogInfo("Graceful stop requested - will complete current transcoding jobs before stopping", 
+            elif new_status in ("Stopped", "GracefulStop"):
+                # Stop transcoding - let current job finish, then go idle
+                LoggingService.LogInfo(f"Stop requested (status={new_status}), finishing current job then stopping",
                                      "TranscodeService", "PrivateHandleStatusChange")
+                self.ProcessTranscodeQueue.StopRequested = True
+                self.ManuallyStopped = True
                 
-                # Start graceful stop monitoring in separate thread
+                # Wait for current job in a background thread so polling loop stays responsive
                 threading.Thread(
-                    target=self.GracefulStopService.MonitorGracefulStop,
-                    args=(self.ShutdownEvent, self.UpdateServiceStatus),
+                    target=self._WaitForStopAndUpdate,
                     daemon=True,
-                    name="GracefulStopMonitor"
+                    name="StopWaiter"
                 ).start()
-                
-            elif new_status == "Stopped" and is_processing:
-                # Stop transcoding
-                LoggingService.LogInfo("Stopping transcoding based on status change", "TranscodeService", "PrivateHandleStatusChange")
-                result = self.ProcessTranscodeQueue.Stop()
-                if result.get("Success", False):
-                    LoggingService.LogInfo("Transcoding stopped successfully", "TranscodeService", "PrivateHandleStatusChange")
-                else:
-                    LoggingService.LogError(f"Failed to stop transcoding: {result.get('ErrorMessage', 'Unknown error')}", 
-                                          "TranscodeService", "PrivateHandleStatusChange")
                     
         except Exception as e:
             LoggingService.LogException("Error handling status change", e, "TranscodeService", "PrivateHandleStatusChange")
     
+    def _WaitForStopAndUpdate(self):
+        """Wait for current transcoding job to finish, then update status to Stopped."""
+        try:
+            # Wait for the processing thread to finish (current job completes)
+            if self.ProcessTranscodeQueue.ProcessingThread and self.ProcessTranscodeQueue.ProcessingThread.is_alive():
+                self.ProcessTranscodeQueue.ProcessingThread.join(timeout=7200)  # 2 hour max
+
+            # Clean up
+            self.ProcessTranscodeQueue.IsProcessing = False
+            self.ProcessTranscodeQueue.ActiveJobs.clear()
+
+            # Update DB to Stopped
+            self.UpdateServiceStatus("Stopped", "Healthy", 0, False)
+            LoggingService.LogInfo("Transcoding stopped after current job completed",
+                                 "TranscodeService", "_WaitForStopAndUpdate")
+        except Exception as e:
+            LoggingService.LogException("Error in stop waiter", e, "TranscodeService", "_WaitForStopAndUpdate")
+
     def StartTranscodingProcessing(self):
         """Start transcoding processing."""
         try:

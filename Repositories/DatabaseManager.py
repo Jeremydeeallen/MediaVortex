@@ -113,6 +113,18 @@ class DatabaseManager:
                     connection.commit()
                     LoggingService.LogInfo("Added HasExplicitEnglishAudio column to MediaFiles", "DatabaseManager", "RunMigrations")
 
+                # Create ShowSettings table for per-show target resolution overrides
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS ShowSettings (
+                        Id SERIAL PRIMARY KEY,
+                        ShowFolder TEXT NOT NULL UNIQUE,
+                        TargetResolution TEXT NOT NULL DEFAULT '',
+                        CreatedDate TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        LastModifiedDate TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                connection.commit()
+
                 connection.commit()
             finally:
                 self.DatabaseService.CloseConnection(connection)
@@ -1877,7 +1889,8 @@ class DatabaseManager:
                 'Success', 'SizeReductionBytes', 'SizeReductionPercent', 'ErrorMessage',
                 'TranscodeDurationSeconds', 'FfpmpegCommand', 'AudioBitrateKbps',
                 'VideoBitrateKbps', 'ProfileName', 'VMAF', 'FileReplaced', 'FileReplacedDate',
-                'ReplacementType', 'StartTime', 'PreferredAttempt', 'CompletedDate'
+                'ReplacementType', 'StartTime', 'PreferredAttempt', 'CompletedDate',
+                'QualityTestRequired', 'QualityTestCompleted'
             ]
             
             # Build dynamic UPDATE query based on provided fields

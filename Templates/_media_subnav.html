@@ -1,0 +1,12 @@
+<ul class="nav nav-pills mb-3">
+    <li class="nav-item">
+        <a class="nav-link {% if request.endpoint == 'show_settings' %}active{% endif %}" href="/ShowSettings">
+            <i class="fas fa-film"></i> Transcode
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link {% if request.endpoint == 'clip_builder' %}active{% endif %}" href="/ClipBuilder">
+            <i class="fas fa-cut"></i> Clip Builder
+        </a>
+    </li>
+</ul>

@@ -131,7 +131,7 @@ class FFmpegService:
                 }
             
             if Arguments is None:
-                Arguments = ['-v', 'quiet', '-print_format', 'json', '-show_format', '-show_streams']
+                Arguments = ['-v', 'error', '-print_format', 'json', '-show_format', '-show_streams']
             
             # Use the project-bundled FFprobe path with proper quoting for special characters
             CommandString = f'"{self.FFprobePath}"'

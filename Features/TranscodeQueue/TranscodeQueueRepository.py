@@ -119,7 +119,10 @@ class TranscodeQueueRepository(BaseRepository):
         """Update the status of a transcoding queue item."""
         try:
             LoggingService.LogFunctionEntry("UpdateTranscodeQueueStatus", "TranscodeQueueRepository", JobId, Status)
-            query = "UPDATE TranscodeQueue SET Status = %s WHERE Id = %s"
+            if Status == "Running":
+                query = "UPDATE TranscodeQueue SET Status = %s, DateStarted = CURRENT_TIMESTAMP WHERE Id = %s"
+            else:
+                query = "UPDATE TranscodeQueue SET Status = %s WHERE Id = %s"
             affectedRows = self.ExecuteNonQuery(query, (Status, JobId))
             LoggingService.LogInfo(f"Updated transcoding queue item {JobId} status to {Status}", "TranscodeQueueRepository", "UpdateTranscodeQueueStatus")
             return affectedRows > 0

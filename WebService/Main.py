@@ -11,7 +11,7 @@ import setproctitle
 import time
 import threading
 from datetime import datetime
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, render_template, request, jsonify, redirect
 from flask_cors import CORS
 
 # Set process title for better visibility in Task Manager
@@ -197,11 +197,7 @@ class WebServiceApp:
         """Register main website routes."""
         @self.App.route('/')
         def home():
-            try:
-                return render_template('Home.html')
-            except Exception as e:
-                LoggingService.LogException("Error rendering Home page", e, "WebService", "home")
-                return render_template('Error.html', ErrorCode=500, ErrorMessage="Failed to load page"), 500
+            return redirect('/ShowSettings')
 
         @self.App.route('/settings')
         def settings():
@@ -209,14 +205,6 @@ class WebServiceApp:
                 return render_template('Settings.html')
             except Exception as e:
                 LoggingService.LogException("Error rendering Settings page", e, "WebService", "settings")
-                return render_template('Error.html', ErrorCode=500, ErrorMessage="Failed to load page"), 500
-
-        @self.App.route('/Scanning')
-        def scanning():
-            try:
-                return render_template('FileScanning.html')
-            except Exception as e:
-                LoggingService.LogException("Error rendering FileScanning page", e, "WebService", "scanning")
                 return render_template('Error.html', ErrorCode=500, ErrorMessage="Failed to load page"), 500
 
         @self.App.route('/TranscodeQueue')
@@ -227,15 +215,7 @@ class WebServiceApp:
                 LoggingService.LogException("Error rendering Queue page", e, "WebService", "transcode_queue")
                 return render_template('Error.html', ErrorCode=500, ErrorMessage="Failed to load page"), 500
 
-        @self.App.route('/Activity')
-        def activity():
-            try:
-                return render_template('Activity.html')
-            except Exception as e:
-                LoggingService.LogException("Error rendering Activity page", e, "WebService", "activity")
-                return render_template('Error.html', ErrorCode=500, ErrorMessage="Failed to load page"), 500
-
-        @self.App.route('/Status')
+        @self.App.route('/Stats')
         def status():
             try:
                 return render_template('Status.html')
@@ -273,6 +253,14 @@ class WebServiceApp:
                 return render_template('ClipBuilder.html')
             except Exception as e:
                 LoggingService.LogException("Error rendering ClipBuilder page", e, "WebService", "clip_builder")
+                return render_template('Error.html', ErrorCode=500, ErrorMessage="Failed to load page"), 500
+
+        @self.App.route('/ShowSettings')
+        def show_settings():
+            try:
+                return render_template('ShowSettings.html')
+            except Exception as e:
+                LoggingService.LogException("Error rendering ShowSettings page", e, "WebService", "show_settings")
                 return render_template('Error.html', ErrorCode=500, ErrorMessage="Failed to load page"), 500
 
         @self.App.route('/api/ClientLog', methods=['POST'])
@@ -324,8 +312,10 @@ class WebServiceApp:
         from Features.TeamStatus.TeamStatusController import TeamStatusBlueprint
         from Features.MediaProbe.MediaProbeController import MediaProbeBlueprint
         from Features.FailureTracking.FailureTrackingController import FailureTrackingBlueprint
+        from Features.ShowSettings.ShowSettingsController import ShowSettingsBlueprint
 
         # Register all blueprints
+        self.App.register_blueprint(ShowSettingsBlueprint)
         self.App.register_blueprint(ServiceControlBlueprint)
         self.App.register_blueprint(QueueResetBlueprint)
         self.App.register_blueprint(SQLQueriesBlueprint, url_prefix='/api/SQLQueries')
@@ -450,19 +440,14 @@ class WebServiceApp:
             self.ShutdownEvent = True
     
     def PrivateUpdateServiceStatus(self):
-        """Update WebService service status in database."""
+        """Update WebService health heartbeat without overwriting operational status."""
         try:
             from Repositories.DatabaseManager import DatabaseManager
-            from Services.LoggingService import LoggingService
             
             db_manager = DatabaseManager()
             db_manager.UpdateServiceStatus("WebService", {
-                'Status': 'Running',
-                'HealthStatus': 'Healthy',
-                'IsProcessing': False,
-                'ActiveJobsCount': 0
+                'HealthStatus': 'Healthy'
             })
-            LoggingService.LogInfo("WebService status updated", "WebService", "PrivateUpdateServiceStatus")
         except Exception as e:
             print(f"Error updating service status: {e}")
     

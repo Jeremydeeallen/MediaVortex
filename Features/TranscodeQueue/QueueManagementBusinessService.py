@@ -198,6 +198,165 @@ class QueueManagementBusinessService:
             LoggingService.LogException(errorMsg, e, "QueueManagementBusinessService", "PopulateQueueFromMediaFiles")
             return {"Success": False, "ErrorMessage": errorMsg, "ItemsAdded": 0}
 
+    def SmartPopulateQueue(self, Limit: int = 100, Offset: int = 0, Drive: str = '') -> Dict[str, Any]:
+        """Get the biggest untranscoded files sorted by size then bitrate.
+        
+        Simple DB query — no target resolution analysis. User picks target and profile in the UI.
+        Excludes files already in queue and already successfully transcoded by MediaVortex.
+        Optionally filters by drive letter (e.g. 'T:').
+        Uses server-side pagination (Limit/Offset) to avoid returning all candidates at once.
+        """
+        try:
+            LoggingService.LogFunctionEntry("SmartPopulateQueue", "QueueManagementBusinessService", Limit, Offset)
+
+            from Core.Database.DatabaseService import DatabaseService
+
+            # Build WHERE clause once for both COUNT and SELECT
+            Params = []
+            WhereSql = """
+                WHERE (m.TranscodedByMediaVortex IS NULL OR m.TranscodedByMediaVortex = false)
+                  AND m.FilePath NOT IN (SELECT FilePath FROM TranscodeQueue)
+                  AND m.SizeMB > 0
+            """
+            if Drive:
+                # Filter by drive letter prefix (e.g. 'T:')
+                DrivePrefix = Drive.rstrip(':\\/') + ':'
+                WhereSql += " AND m.FilePath LIKE %s ESCAPE '!'"
+                from Core.Database.DatabaseService import EscapeLikePattern
+                Params.append(EscapeLikePattern(DrivePrefix) + '%')
+
+            ParamsTuple = tuple(Params)
+
+            # Cheap COUNT query for total candidates
+            CountSql = f"SELECT COUNT(*) as TotalCount FROM MediaFiles m {WhereSql}"
+            CountRows = DatabaseService().ExecuteQuery(CountSql, ParamsTuple)
+            TotalCandidates = int(CountRows[0].get('TotalCount', 0)) if CountRows else 0
+
+            # Paginated data query
+            Sql = f"""
+                SELECT m.Id, m.FilePath, m.FileName, m.SizeMB, m.VideoBitrateKbps,
+                       m.Codec, m.Resolution, m.ResolutionCategory, m.ContainerFormat
+                FROM MediaFiles m
+                {WhereSql}
+                ORDER BY m.SizeMB DESC, m.VideoBitrateKbps DESC
+                LIMIT {int(Limit)} OFFSET {int(Offset)}
+            """
+
+            Rows = DatabaseService().ExecuteQuery(Sql, ParamsTuple)
+            LoggingService.LogInfo(f"SmartPopulate: fetched {len(Rows)} of {TotalCandidates} candidates (offset={Offset})", "QueueManagementBusinessService", "SmartPopulateQueue")
+
+            Suggestions = []
+            for Row in Rows:
+                FilePath = Row.get('FilePath', '')
+                FileName = Row.get('FileName', '')
+                # Extract show name from path: "T:\ShowName\Season\file" -> "ShowName"
+                Parts = FilePath.replace('\\', '/').split('/')
+                ShowName = Parts[1] if len(Parts) >= 2 else 'Unknown'
+
+                Suggestions.append({
+                    'MediaFileId': Row.get('Id'),
+                    'FilePath': FilePath,
+                    'FileName': FileName,
+                    'ShowName': ShowName,
+                    'SizeMB': round(float(Row.get('SizeMB', 0) or 0), 1),
+                    'Codec': Row.get('Codec', 'Unknown') or 'Unknown',
+                    'Resolution': Row.get('Resolution', 'Unknown') or 'Unknown',
+                    'ResolutionCategory': Row.get('ResolutionCategory', '') or '',
+                    'BitrateKbps': int(Row.get('VideoBitrateKbps', 0) or 0),
+                    'ContainerFormat': Row.get('ContainerFormat', '') or '',
+                    'Mode': 'Transcode',
+                    'Priority': int(float(Row.get('SizeMB', 0) or 0)),
+                })
+
+            Result = {
+                "Success": True,
+                "Suggestions": Suggestions,
+                "TotalCandidates": TotalCandidates,
+                "Offset": Offset,
+                "Limit": Limit,
+                "HasMore": (Offset + len(Suggestions)) < TotalCandidates,
+            }
+            LoggingService.LogInfo(f"SmartPopulate complete: {len(Suggestions)} fetched, {TotalCandidates} total (offset={Offset})", "QueueManagementBusinessService", "SmartPopulateQueue")
+            return Result
+
+        except Exception as Ex:
+            ErrorMsg = f"Exception in SmartPopulateQueue: {str(Ex)}"
+            LoggingService.LogException(ErrorMsg, Ex, "QueueManagementBusinessService", "SmartPopulateQueue")
+            return {"Success": False, "ErrorMessage": ErrorMsg, "Suggestions": []}
+
+    def AddSuggestionsToQueue(self, Items: List[Dict[str, Any]], ProfileId: int = None) -> Dict[str, Any]:
+        """Add approved suggestions to the transcode queue.
+        
+        Each item should have FilePath, TargetResolution, Mode, SizeMB, Priority.
+        If ProfileId is provided, assigns that profile to each media file before queuing.
+        """
+        try:
+            LoggingService.LogFunctionEntry("AddSuggestionsToQueue", "QueueManagementBusinessService", len(Items), ProfileId)
+
+            ExistingQueueItems = self.Repository.GetAllTranscodeQueueItems()
+            ExistingFilePaths = {Item.FilePath for Item in ExistingQueueItems}
+
+            # Resolve profile name if ProfileId provided
+            ProfileName = None
+            if ProfileId is not None:
+                Profile = self.DatabaseManager.GetProfileById(ProfileId)
+                if Profile:
+                    ProfileName = Profile.ProfileName
+                else:
+                    return {"Success": False, "ErrorMessage": f"Profile with ID {ProfileId} not found", "ItemsAdded": 0}
+
+            ItemsAdded = 0
+            ItemsSkipped = 0
+
+            for Item in Items:
+                FilePath = Item.get('FilePath', '')
+                if not FilePath or FilePath in ExistingFilePaths:
+                    ItemsSkipped += 1
+                    continue
+
+                # Assign profile to the media file if specified
+                if ProfileName:
+                    MediaFileId = Item.get('MediaFileId')
+                    if MediaFileId:
+                        MediaFile = self.DatabaseManager.GetMediaFileById(MediaFileId)
+                        if MediaFile:
+                            MediaFile.AssignedProfile = ProfileName
+                            self.DatabaseManager.SaveMediaFile(MediaFile)
+
+                PathParts = FilePath.replace("\\", "/").split("/")
+                Directory = "/".join(PathParts[:-1]) if len(PathParts) > 1 else ""
+                FileName = PathParts[-1] if PathParts else ""
+                SizeMB = float(Item.get('SizeMB', 0))
+                Mode = Item.get('Mode', 'Transcode')
+                Priority = int(Item.get('Priority', 0))
+
+                QueueItem = TranscodeQueueModel(
+                    FilePath=FilePath,
+                    FileName=FileName,
+                    Directory=Directory,
+                    SizeBytes=int(SizeMB * 1024 * 1024),
+                    SizeMB=SizeMB,
+                    Priority=Priority,
+                    Status="Pending",
+                    ProcessingMode=Mode,
+                    DateAdded=datetime.now()
+                )
+
+                try:
+                    self.Repository.SaveTranscodeQueueItem(QueueItem)
+                    ExistingFilePaths.add(FilePath)
+                    ItemsAdded += 1
+                except Exception as Ex:
+                    LoggingService.LogException(f"Error saving queue item for {FileName}", Ex, "QueueManagementBusinessService", "AddSuggestionsToQueue")
+
+            LoggingService.LogInfo(f"AddSuggestionsToQueue: {ItemsAdded} added, {ItemsSkipped} skipped, profile={ProfileName}", "QueueManagementBusinessService", "AddSuggestionsToQueue")
+            return {"Success": True, "ItemsAdded": ItemsAdded, "ItemsSkipped": ItemsSkipped}
+
+        except Exception as Ex:
+            ErrorMsg = f"Exception in AddSuggestionsToQueue: {str(Ex)}"
+            LoggingService.LogException(ErrorMsg, Ex, "QueueManagementBusinessService", "AddSuggestionsToQueue")
+            return {"Success": False, "ErrorMessage": ErrorMsg, "ItemsAdded": 0}
+
     def GetMediaFilesWithProfilesOrderedBySize(self, RootFolderPath: str = None) -> List[MediaFileModel]:
         """Get media files that have assigned profiles, ordered by size (largest first)."""
         try:
@@ -292,6 +451,14 @@ class QueueManagementBusinessService:
             resolutionService = ResolutionService()
             matchingFiles = []
 
+            # Load ShowSettings for per-show target resolution overrides
+            ShowSettingsRepo = None
+            try:
+                from Features.ShowSettings.ShowSettingsRepository import ShowSettingsRepository
+                ShowSettingsRepo = ShowSettingsRepository()
+            except Exception:
+                pass  # ShowSettings table may not exist yet
+
             for mediaFile in allMediaFiles:
                 sourceResolution = mediaFile.Resolution or ""
                 if not sourceResolution:
@@ -301,8 +468,18 @@ class QueueManagementBusinessService:
                     if not sourceResolution:
                         continue
 
+                # Check for per-show target resolution override
+                FileTargetResolution = targetResolution
+                if ShowSettingsRepo:
+                    try:
+                        ShowOverride = ShowSettingsRepo.GetTargetResolutionForFile(mediaFile.FilePath)
+                        if ShowOverride:
+                            FileTargetResolution = ShowOverride
+                    except Exception:
+                        pass
+
                 # Compare file resolution to target resolution
-                comparison = resolutionService.CompareResolutions(sourceResolution, targetResolution)
+                comparison = resolutionService.CompareResolutions(sourceResolution, FileTargetResolution)
 
                 # If comparison cannot be determined, skip
                 if comparison is None:
@@ -741,7 +918,8 @@ class QueueManagementBusinessService:
             # Only skip "No downscaling" if not manually assigned (ProfileId is None means batch processing)
             if not ForceAdd:
                 skipNoDownscaling = ProfileId is None  # Only skip "No downscaling" if not manually assigned
-                shouldSkip, skipReason = self.ShouldSkipDueToResolution(mediaFile, mediaFile.AssignedProfile, SkipNoDownscaling=skipNoDownscaling)
+                useShowSettings = ProfileId is None  # Don't override with ShowSettings when user explicitly picked a profile
+                shouldSkip, skipReason = self.ShouldSkipDueToResolution(mediaFile, mediaFile.AssignedProfile, SkipNoDownscaling=skipNoDownscaling, UseShowSettings=useShowSettings)
                 if shouldSkip:
                     errorMsg = f"Cannot add {mediaFile.FileName} to queue: {skipReason}"
                     LoggingService.LogInfo(errorMsg, "QueueManagementBusinessService", "AddJobToQueue")
@@ -1044,7 +1222,7 @@ class QueueManagementBusinessService:
             LoggingService.LogException(f"Exception probing metadata for {MediaFile.FileName}", e, "QueueManagementBusinessService", "ProbeAndUpdateMissingMetadata")
             return False
 
-    def ShouldSkipDueToResolution(self, MediaFile: MediaFileModel, ProfileName: str, SkipNoDownscaling: bool = True) -> tuple[bool, str]:
+    def ShouldSkipDueToResolution(self, MediaFile: MediaFileModel, ProfileName: str, SkipNoDownscaling: bool = True, UseShowSettings: bool = True) -> tuple[bool, str]:
         """
         Check if a media file should be skipped due to resolution being equal to or less than target.
 
@@ -1054,6 +1232,9 @@ class QueueManagementBusinessService:
             SkipNoDownscaling: If True, skip files when profile has "No downscaling" setting.
                               If False, allow transcoding even with "No downscaling" (for manual assignments).
                               Default: True (backward compatible behavior)
+            UseShowSettings: If True, allow ShowSettings to override the profile's target resolution.
+                            If False, use only the profile's target resolution (for manual profile selection).
+                            Default: True
 
         Returns:
             Tuple of (should_skip: bool, reason: str)
@@ -1089,6 +1270,18 @@ class QueueManagementBusinessService:
 
             # Get the target resolution (TranscodeDownTo)
             targetResolution = matchingThreshold.TranscodeDownTo or ""
+
+            # Check ShowSettings for per-show target resolution override (only for batch/auto processing)
+            if UseShowSettings:
+                try:
+                    from Features.ShowSettings.ShowSettingsRepository import ShowSettingsRepository
+                    ShowSettingsRepo = ShowSettingsRepository()
+                    ShowTargetResolution = ShowSettingsRepo.GetTargetResolutionForFile(MediaFile.FilePath)
+                    if ShowTargetResolution:
+                        LoggingService.LogInfo(f"ShowSettings override for {MediaFile.FileName}: target resolution '{targetResolution}' -> '{ShowTargetResolution}'", "QueueManagementBusinessService", "ShouldSkipDueToResolution")
+                        targetResolution = ShowTargetResolution
+                except Exception:
+                    pass  # ShowSettings table may not exist yet; fall through to profile default
 
             # Handle "No downscaling" case - only skip if SkipNoDownscaling is True (batch processing)
             # When SkipNoDownscaling is False (manual assignment), allow transcoding even with "No downscaling"

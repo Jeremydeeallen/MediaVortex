@@ -189,6 +189,26 @@ class ProfileController:
                     'error': f'Failed to delete profile: {str(e)}'
                 }), 500
 
+        @self.Blueprint.route('/profiles/reorder', methods=['POST'])
+        def reorder_profiles():
+            """Update the display order of profiles."""
+            try:
+                Data = request.get_json()
+                OrderedIds = Data.get('OrderedIds', [])
+                if not OrderedIds:
+                    return jsonify({'success': False, 'error': 'OrderedIds is required'}), 400
+
+                from Features.Profiles.ProfileRepository import ProfileRepository
+                Repo = ProfileRepository()
+                Success = Repo.UpdateProfileOrder(OrderedIds)
+                if Success:
+                    return jsonify({'success': True, 'message': 'Profile order updated'})
+                else:
+                    return jsonify({'success': False, 'error': 'Failed to update order'}), 500
+            except Exception as e:
+                LoggingService.LogException("Failed to reorder profiles", e, "ProfileController", "reorder_profiles")
+                return jsonify({'success': False, 'error': str(e)}), 500
+
         @self.Blueprint.route('/profiles/<int:profile_id>/thresholds', methods=['POST'])
         def add_threshold(profile_id):
             """Add a threshold to a profile."""

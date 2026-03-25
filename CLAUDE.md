@@ -86,8 +86,10 @@ Separate processes coordinated via database records:
 
 ## Database
 
-- **PostgreSQL 16** running locally (not Docker)
-- Connection: `localhost:5432`, database/user/password: `mediavortex`
+- **PostgreSQL 16** on dedicated LXC container (CT 203 on Proxmox, `10.0.0.15`)
+- Connection: `10.0.0.15:5432`, database/user/password: `mediavortex`
+- Host configured via `MEDIAVORTEX_DB_HOST` env var (User-level, defaults to localhost)
+- **Database encoding must be UTF-8** — media file paths contain non-ASCII characters. Always create with: `ENCODING 'UTF8' LC_COLLATE='en_US.UTF-8' LC_CTYPE='en_US.UTF-8' TEMPLATE=template0`
 - Config in `Core/Database/DatabaseService.py` (env vars: `MEDIAVORTEX_DB_HOST`, `MEDIAVORTEX_DB_PORT`, `MEDIAVORTEX_DB_NAME`, `MEDIAVORTEX_DB_USER`, `MEDIAVORTEX_DB_PASSWORD`)
 - Uses `psycopg2` with `RealDictCursor` returning lowercase keys
 - `CaseInsensitiveDict` maps lowercase PostgreSQL keys to PascalCase for JSON responses

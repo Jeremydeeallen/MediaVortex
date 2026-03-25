@@ -654,6 +654,47 @@ class FileScanningController:
                     'Error': 'CleanupError'
                 }), 500
 
+        @self.Blueprint.route('/MediaFiles/Corrupt', methods=['GET'])
+        def GetCorruptFiles():
+            """Get media files that failed FFprobe 3+ times (possibly corrupt)."""
+            try:
+                from Core.Database.DatabaseService import DatabaseService
+                Query = """
+                    SELECT Id, FilePath, FileName, SizeMB, FFProbeFailureCount, LastFFprobeError
+                    FROM MediaFiles
+                    WHERE FFProbeFailureCount >= 3
+                    ORDER BY SizeMB DESC
+                """
+                Rows = DatabaseService().ExecuteQuery(Query)
+                Files = [{'Id': r['Id'], 'FilePath': r['FilePath'], 'FileName': r['FileName'],
+                          'SizeMB': float(r['SizeMB']) if r['SizeMB'] else 0,
+                          'FailCount': r['FFProbeFailureCount'],
+                          'Error': r.get('LastFFprobeError', '')} for r in Rows]
+                return jsonify({'Success': True, 'Files': Files, 'Count': len(Files)}), 200
+            except Exception as e:
+                LoggingService.LogException("Error getting corrupt files", e, "FileScanningController", "GetCorruptFiles")
+                return jsonify({'Success': False, 'Message': str(e)}), 500
+
+        @self.Blueprint.route('/MediaFiles/CleanCorrupt', methods=['POST'])
+        def CleanCorruptFiles():
+            """Delete all media files that failed FFprobe 3+ times."""
+            try:
+                from Core.Database.DatabaseService import DatabaseService
+                CountQuery = "SELECT COUNT(*) as Count FROM MediaFiles WHERE FFProbeFailureCount >= 3"
+                CountResult = DatabaseService().ExecuteQuery(CountQuery)
+                Count = CountResult[0]['Count'] if CountResult else 0
+
+                if Count == 0:
+                    return jsonify({'Success': True, 'Message': 'No corrupt files to clean', 'Cleaned': 0}), 200
+
+                DeleteQuery = "DELETE FROM MediaFiles WHERE FFProbeFailureCount >= 3"
+                DatabaseService().ExecuteNonQuery(DeleteQuery)
+                LoggingService.LogInfo(f"Cleaned {Count} corrupt media files from database", "FileScanningController", "CleanCorruptFiles")
+                return jsonify({'Success': True, 'Message': f'Removed {Count} corrupt files from database', 'Cleaned': Count}), 200
+            except Exception as e:
+                LoggingService.LogException("Error cleaning corrupt files", e, "FileScanningController", "CleanCorruptFiles")
+                return jsonify({'Success': False, 'Message': str(e)}), 500
+
         @self.Blueprint.route('/Scan/EnableContinuous', methods=['POST'])
         def EnableContinuousScanning():
             """Enable continuous/periodic scanning."""

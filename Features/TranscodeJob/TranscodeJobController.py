@@ -61,29 +61,24 @@ def StopTranscoding():
     try:
         LoggingService.LogFunctionEntry("StopTranscoding", "TranscodeJobController")
 
-        # Step 1: Immediately set status to Stopped to prevent restart
-        SharedStatusHelper.SetTranscodingStopped()
-
-        # Step 2: Update ServiceStatus to GracefulStop to signal TranscodeService
-        success = SharedStatusHelper.UpdateTranscodingStatus("GracefulStop", IsProcessing=False, ActiveJobsCount=0)
+        # Set status to Stopped — TranscodeService will finish current job then go idle
+        success = SharedStatusHelper.SetTranscodingStopped()
 
         if success:
-            LoggingService.LogInfo("Graceful stop requested - transcoding will complete current job before stopping",
-                                 "TranscodeJobController", "StopTranscoding")
             return jsonify({
                 "Success": True,
-                "Message": "Graceful stop requested - transcoding will complete current job before stopping",
-                "Status": "GracefulStop"
+                "Message": "Stop requested — transcoding will finish the current job then stop",
+                "Status": "Stopped"
             })
         else:
-            LoggingService.LogError("Failed to request graceful stop", "TranscodeJobController", "StopTranscoding")
+            LoggingService.LogError("Failed to request stop", "TranscodeJobController", "StopTranscoding")
             return jsonify({
                 "Success": False,
-                "ErrorMessage": "Failed to request graceful stop"
+                "ErrorMessage": "Failed to request stop"
             }), 500
 
     except Exception as e:
-        errorMsg = f"Exception requesting graceful stop: {str(e)}"
+        errorMsg = f"Exception requesting stop: {str(e)}"
         LoggingService.LogException(errorMsg, e, "TranscodeJobController", "StopTranscoding")
         return jsonify({"Success": False, "ErrorMessage": errorMsg}), 500
 

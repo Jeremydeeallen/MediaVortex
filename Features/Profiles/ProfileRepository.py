@@ -12,8 +12,8 @@ class ProfileRepository(BaseRepository):
     def GetAllProfiles(self) -> List[TranscodeProfileModel]:
         """Get all transcoding profiles."""
         query = """SELECT Id, ProfileName, Description, CreatedDate, LastModified,
-                          Codec, Preset, FilmGrain, YadifMode, YadifParity, YadifDeint, UseNvidiaHardware
-                   FROM Profiles ORDER BY ProfileName"""
+                          Codec, Preset, FilmGrain, YadifMode, YadifParity, YadifDeint, UseNvidiaHardware, SortOrder
+                   FROM Profiles ORDER BY SortOrder, ProfileName"""
         rows = self.ExecuteQuery(query)
 
         profiles = []
@@ -30,7 +30,8 @@ class ProfileRepository(BaseRepository):
                 YadifMode=row['YadifMode'] if row['YadifMode'] is not None else 1,
                 YadifParity=row['YadifParity'] if row['YadifParity'] is not None else 1,
                 YadifDeint=row['YadifDeint'] if row['YadifDeint'] is not None else 1,
-                UseNvidiaHardware=row['UseNvidiaHardware'] if row['UseNvidiaHardware'] is not None else 0
+                UseNvidiaHardware=row['UseNvidiaHardware'] if row['UseNvidiaHardware'] is not None else 0,
+                SortOrder=row['SortOrder'] if row['SortOrder'] is not None else 0
             )
             profiles.append(profile)
 
@@ -75,8 +76,8 @@ class ProfileRepository(BaseRepository):
                     LoggingService.LogInfo("Inserting new profile...", "ProfileRepository", "SaveProfile")
                     query = """
                         INSERT INTO Profiles (ProfileName, Description, CreatedDate, LastModified,
-                                             Codec, Preset, FilmGrain, YadifMode, YadifParity, YadifDeint, UseNvidiaHardware)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                             Codec, Preset, FilmGrain, YadifMode, YadifParity, YadifDeint, UseNvidiaHardware, SortOrder)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, (SELECT COALESCE(MAX(SortOrder), 0) + 1 FROM Profiles))
                         RETURNING Id
                     """
                     parameters = (Profile.ProfileName, Profile.Description, Profile.CreatedDate, Profile.LastModified,
@@ -118,6 +119,22 @@ class ProfileRepository(BaseRepository):
             affected_rows = self.ExecuteNonQuery("DELETE FROM Profiles WHERE Id = %s", (ProfileId,))
             return affected_rows > 0
         except Exception:
+            return False
+
+    def UpdateProfileOrder(self, OrderedIds: list) -> bool:
+        """Update SortOrder for all profiles based on the provided ID order."""
+        try:
+            connection = self.DatabaseService.GetConnection()
+            try:
+                cursor = connection.cursor()
+                for Index, ProfileId in enumerate(OrderedIds):
+                    cursor.execute("UPDATE Profiles SET SortOrder = %s WHERE Id = %s", (Index + 1, int(ProfileId)))
+                connection.commit()
+                return True
+            finally:
+                self.DatabaseService.CloseConnection(connection)
+        except Exception as e:
+            LoggingService.LogException("Exception in UpdateProfileOrder", e, "ProfileRepository", "UpdateProfileOrder")
             return False
 
     def GetThresholdsByProfileId(self, ProfileId: int) -> List[ProfileThresholdModel]:

@@ -1,0 +1,674 @@
+{% extends "Base.html" %}
+
+{% block title %}Home - MediaVortex{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4">
+    {% include '_media_subnav.html' %}
+    <div class="d-flex justify-content-between align-items-center mb-1">
+        <h2><i class="fas fa-film"></i> Media</h2>
+        <div class="d-flex align-items-center gap-3">
+            <button class="btn btn-success" onclick="SmartPopulate()" id="SmartPopulateBtn">
+                <i class="fas fa-magic"></i> Analyze Files
+            </button>
+            <div class="d-flex align-items-center gap-2">
+                <label class="mb-0 text-nowrap"><strong>Default:</strong></label>
+                <select id="DefaultResolution" class="form-select form-select-sm" style="width: 140px;" onchange="SaveDefaultResolution()">
+                    <option value="">Profile Default</option>
+                    <option value="480p">480p</option>
+                    <option value="720p">720p</option>
+                    <option value="1080p">1080p</option>
+                    <option value="2160p">2160p</option>
+                </select>
+            </div>
+            <div class="d-flex align-items-center gap-2">
+                <label class="mb-0 text-nowrap">Drive:</label>
+                <select id="DriveFilter" class="form-select form-select-sm" style="width: 100px;" onchange="LoadShows()">
+                    <option value="">All</option>
+                    <option value="T:" selected>T:</option>
+                    <option value="M:">M:</option>
+                    <option value="Z:">Z:</option>
+                </select>
+            </div>
+            <input type="text" id="SearchBox" class="form-control form-control-sm" style="width: 220px;" placeholder="Search shows..." oninput="FilterShows()">
+        </div>
+    </div>
+    <p class="text-muted mb-3" style="font-size: 0.85rem;"><i class="fas fa-info-circle"></i> Click <strong>Analyze Files</strong> to find the largest files that haven't been transcoded yet. Filter by drive to narrow results.</p>
+
+    <!-- Next Batch Card -->
+    <div id="SuggestionsSection" class="mb-4">
+        <div class="card mb-3 border-primary">
+            <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="fas fa-trophy"></i> Next Batch <span id="BatchCount" class="badge bg-light text-primary ms-2">10</span>
+                    <small class="fw-normal ms-2 opacity-75" style="font-size: 0.75rem;">Top 10 largest files &mdash; select a profile, then add to queue. Next batch loads automatically.</small>
+                </h5>
+                <div class="d-flex align-items-center gap-3">
+                    <div class="d-flex align-items-center gap-2">
+                        <label class="mb-0 text-white text-nowrap">Profile:</label>
+                        <select id="BatchProfileSelect" class="form-select form-select-sm" style="width: 220px;">
+                            <option value="">-- Select a Profile --</option>
+                        </select>
+                    </div>
+                    <button class="btn btn-light btn-sm" onclick="AddBatchToQueue()" id="AddBatchBtn">
+                        <i class="fas fa-plus-circle"></i> Add Batch to Queue
+                    </button>
+                </div>
+            </div>
+            <div class="card-body p-0">
+                <div id="BatchInfo" class="px-3 py-2 border-bottom bg-light">
+                    <small class="text-muted">Loading candidates...</small>
+                </div>
+                <div class="table-responsive">
+                    <table class="table table-hover table-sm mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th style="width: 30px;"></th>
+                                <th>Show</th>
+                                <th>File</th>
+                                <th style="width: 90px;">Size</th>
+                                <th style="width: 80px;">Codec</th>
+                                <th style="width: 100px;">Bitrate</th>
+                                <th style="width: 100px;">Resolution</th>
+                            </tr>
+                        </thead>
+                        <tbody id="BatchTableBody">
+                            <tr><td colspan="7" class="text-center py-3 text-muted"><i class="fas fa-spinner fa-spin"></i> Analyzing...</td></tr>
+                        </tbody>
+                        <tfoot class="table-light">
+                            <tr class="fw-bold">
+                                <td></td>
+                                <td colspan="2">Batch Total</td>
+                                <td id="BatchTotalSize" class="text-end"></td>
+                                <td colspan="3"></td>
+                            </tr>
+                        </tfoot>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Bulk Actions -->
+    <div class="card mb-3">
+        <div class="card-body py-2">
+            <div class="d-flex align-items-center gap-3">
+                <button class="btn btn-sm btn-outline-secondary" onclick="SelectAll()">Select All Visible</button>
+                <button class="btn btn-sm btn-outline-secondary" onclick="SelectNone()">Deselect All</button>
+                <span class="text-muted">|</span>
+                <span id="SelectedCount" class="text-muted">0 selected</span>
+                <span class="text-muted">|</span>
+                <label class="mb-0">Set selected to:</label>
+                <select id="BulkResolution" class="form-select form-select-sm" style="width: 140px;">
+                    <option value="480p">480p</option>
+                    <option value="720p">720p</option>
+                    <option value="1080p">1080p</option>
+                    <option value="2160p">2160p</option>
+                    <option value="">Profile Default</option>
+                </select>
+                <button class="btn btn-sm btn-primary" onclick="BulkUpdate()">
+                    <i class="fas fa-save"></i> Apply
+                </button>
+                <span class="text-muted">|</span>
+                <button class="btn btn-sm btn-outline-danger" onclick="ClearSelected()">
+                    <i class="fas fa-times"></i> Clear Settings
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Summary Stats -->
+    <div class="row mb-3" id="StatsRow">
+        <div class="col-md-2">
+            <div class="card bg-light">
+                <div class="card-body py-2 text-center">
+                    <div class="fw-bold" id="StatTotalShows">-</div>
+                    <small class="text-muted">Total Shows</small>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-2">
+            <div class="card bg-light">
+                <div class="card-body py-2 text-center">
+                    <div class="fw-bold" id="StatTotalGB">-</div>
+                    <small class="text-muted">Total Size</small>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-2">
+            <div class="card bg-light">
+                <div class="card-body py-2 text-center">
+                    <div class="fw-bold text-success" id="StatConfigured">-</div>
+                    <small class="text-muted">Configured</small>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-2">
+            <div class="card bg-light">
+                <div class="card-body py-2 text-center">
+                    <div class="fw-bold text-warning" id="StatUnconfigured">-</div>
+                    <small class="text-muted">Using Default</small>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-2">
+            <div class="card bg-light">
+                <div class="card-body py-2 text-center">
+                    <div class="fw-bold text-info" id="Stat480p">-</div>
+                    <small class="text-muted">→ 480p</small>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-2">
+            <div class="card bg-light">
+                <div class="card-body py-2 text-center">
+                    <div class="fw-bold text-primary" id="Stat720p">-</div>
+                    <small class="text-muted">→ 720p</small>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Shows Table -->
+    <div class="card">
+        <div class="card-body p-0">
+            <div class="table-responsive" style="max-height: 70vh; overflow-y: auto;">
+                <table class="table table-hover table-sm mb-0" id="ShowsTable">
+                    <thead class="table-light sticky-top">
+                        <tr>
+                            <th style="width: 30px;"><input type="checkbox" id="SelectAllCheckbox" onchange="ToggleSelectAll(this)"></th>
+                            <th style="cursor:pointer;" onclick="SortTable('ShowName')">Show <i class="fas fa-sort" id="SortShowName"></i></th>
+                            <th style="width: 80px; cursor:pointer;" onclick="SortTable('FileCount')">Files <i class="fas fa-sort" id="SortFileCount"></i></th>
+                            <th style="width: 90px; cursor:pointer;" onclick="SortTable('TotalGB')">Size (GB) <i class="fas fa-sort" id="SortTotalGB"></i></th>
+                            <th style="width: 100px;">Source Res</th>
+                            <th style="width: 90px;">Codec</th>
+                            <th style="width: 80px;">Done</th>
+                            <th style="width: 150px;">Target Resolution</th>
+                        </tr>
+                    </thead>
+                    <tbody id="ShowsTableBody">
+                        <tr><td colspan="8" class="text-center py-4"><i class="fas fa-spinner fa-spin"></i> Loading...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let AllShows = [];
+let FilteredShows = [];
+let SelectedShows = new Set();
+let CurrentSort = { Column: 'TotalGB', Direction: 'desc' };
+
+// Suggestion data
+let AllSuggestions = [];
+let BatchItems = [];       // Top 10 batch (mutable — user can remove items)
+let AllProfiles = [];
+const BATCH_SIZE = 10;
+const PAGE_SIZE = 100;     // Server-side page size
+let CurrentOffset = 0;     // Current offset for server pagination
+let TotalCandidates = 0;   // Total candidates reported by server
+let HasMore = false;       // Whether server has more pages
+
+$(document).ready(function() {
+    LoadShows();
+    LoadProfiles();
+    SmartPopulate();
+});
+
+// ─── Show Settings ───
+
+function LoadShows() {
+    const Drive = $('#DriveFilter').val();
+    const Params = Drive ? `?Drive=${encodeURIComponent(Drive)}` : '';
+
+    $.get(`/api/ShowSettings/Shows${Params}`, function(Response) {
+        if (Response.Success) {
+            AllShows = Response.Data;
+            if (Response.DefaultTargetResolution) {
+                $('#DefaultResolution').val(Response.DefaultTargetResolution);
+            }
+            FilterShows();
+            UpdateStats();
+        }
+    }).fail(function() {
+        $('#ShowsTableBody').html('<tr><td colspan="8" class="text-center text-danger">Failed to load shows</td></tr>');
+    });
+}
+
+function LoadProfiles() {
+    $.get('/api/profiles', function(Response) {
+        if (Response.success && Response.profiles) {
+            AllProfiles = Response.profiles;
+            let Html = '<option value="">-- Select a Profile --</option>';
+            AllProfiles.forEach(function(P) {
+                Html += `<option value="${P.Id}">${EscapeHtml(P.ProfileName)}</option>`;
+            });
+            $('#BatchProfileSelect').html(Html);
+        }
+    });
+}
+
+function FilterShows() {
+    const SearchTerm = $('#SearchBox').val().toLowerCase();
+    FilteredShows = AllShows.filter(function(Show) {
+        return !SearchTerm || (Show.ShowName || '').toLowerCase().includes(SearchTerm);
+    });
+    ApplySort();
+    RenderTable();
+}
+
+function ApplySort() {
+    FilteredShows.sort(function(A, B) {
+        let ValA = A[CurrentSort.Column];
+        let ValB = B[CurrentSort.Column];
+        if (ValA === null || ValA === undefined) ValA = '';
+        if (ValB === null || ValB === undefined) ValB = '';
+        if (typeof ValA === 'string') ValA = ValA.toLowerCase();
+        if (typeof ValB === 'string') ValB = ValB.toLowerCase();
+        let Result = ValA < ValB ? -1 : (ValA > ValB ? 1 : 0);
+        return CurrentSort.Direction === 'desc' ? -Result : Result;
+    });
+}
+
+function SortTable(Column) {
+    if (CurrentSort.Column === Column) {
+        CurrentSort.Direction = CurrentSort.Direction === 'asc' ? 'desc' : 'asc';
+    } else {
+        CurrentSort.Column = Column;
+        CurrentSort.Direction = Column === 'ShowName' ? 'asc' : 'desc';
+    }
+    FilterShows();
+}
+
+function RenderTable() {
+    const Tbody = $('#ShowsTableBody');
+    if (FilteredShows.length === 0) {
+        Tbody.html('<tr><td colspan="8" class="text-center py-4 text-muted">No shows found</td></tr>');
+        return;
+    }
+
+    let Html = '';
+    const DefaultRes = $('#DefaultResolution').val();
+
+    FilteredShows.forEach(function(Show) {
+        const Folder = Show.ShowFolder || '';
+        const IsSelected = SelectedShows.has(Folder);
+        const TargetRes = Show.TargetResolution || '';
+        const HasSetting = TargetRes !== '' && TargetRes !== null;
+
+        const ResClass = HasSetting ? 'fw-bold' : 'text-muted';
+        const DoneRatio = Show.TranscodedCount + '/' + Show.FileCount;
+        const DonePercent = Show.FileCount > 0 ? Math.round((Show.TranscodedCount / Show.FileCount) * 100) : 0;
+        const DoneClass = DonePercent === 100 ? 'text-success' : (DonePercent > 0 ? 'text-info' : '');
+
+        Html += `<tr data-folder="${EscapeHtml(Folder)}">
+            <td><input type="checkbox" class="ShowCheckbox" data-folder="${EscapeHtml(Folder)}" ${IsSelected ? 'checked' : ''} onchange="ToggleShow(this)"></td>
+            <td>${EscapeHtml(Show.ShowName || 'Unknown')}</td>
+            <td class="text-end">${Show.FileCount || 0}</td>
+            <td class="text-end">${Show.TotalGB || 0}</td>
+            <td><span class="badge bg-secondary">${EscapeHtml(Show.CommonResolution || 'N/A')}</span></td>
+            <td><span class="badge ${GetCodecBadgeClass(Show.CommonCodec)}">${EscapeHtml(Show.CommonCodec || 'N/A')}</span></td>
+            <td class="${DoneClass}">${DoneRatio}</td>
+            <td>
+                <select class="form-select form-select-sm TargetResSelect ${ResClass}" data-folder="${EscapeHtml(Folder)}" onchange="SaveSingleSetting(this)">
+                    <option value="" ${!HasSetting ? 'selected' : ''}>Default (${DefaultRes || 'Profile'})</option>
+                    <option value="480p" ${TargetRes === '480p' ? 'selected' : ''}>480p</option>
+                    <option value="720p" ${TargetRes === '720p' ? 'selected' : ''}>720p</option>
+                    <option value="1080p" ${TargetRes === '1080p' ? 'selected' : ''}>1080p</option>
+                    <option value="2160p" ${TargetRes === '2160p' ? 'selected' : ''}>2160p</option>
+                </select>
+            </td>
+        </tr>`;
+    });
+
+    Tbody.html(Html);
+}
+
+function GetCodecBadgeClass(Codec) {
+    if (!Codec) return 'bg-secondary';
+    Codec = Codec.toLowerCase();
+    if (Codec === 'av1') return 'bg-success';
+    if (Codec === 'hevc') return 'bg-info';
+    if (Codec === 'h264') return 'bg-warning text-dark';
+    if (Codec === 'mpeg4') return 'bg-danger';
+    return 'bg-secondary';
+}
+
+function SaveSingleSetting(SelectEl) {
+    const Folder = $(SelectEl).data('folder');
+    const Resolution = $(SelectEl).val();
+
+    if (Resolution === '') {
+        $.ajax({
+            url: '/api/ShowSettings/Delete',
+            method: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({ ShowFolder: Folder }),
+            success: function() { FlashRow(SelectEl, true); },
+            error: function() { FlashRow(SelectEl, false); }
+        });
+    } else {
+        $.ajax({
+            url: '/api/ShowSettings/Save',
+            method: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({ ShowFolder: Folder, TargetResolution: Resolution }),
+            success: function() { FlashRow(SelectEl, true); },
+            error: function() { FlashRow(SelectEl, false); }
+        });
+    }
+
+    const ShowIndex = AllShows.findIndex(S => S.ShowFolder === Folder);
+    if (ShowIndex >= 0) {
+        AllShows[ShowIndex].TargetResolution = Resolution || null;
+    }
+    UpdateStats();
+}
+
+function SaveDefaultResolution() {
+    const Resolution = $('#DefaultResolution').val();
+    $.ajax({
+        url: '/api/ShowSettings/Default',
+        method: 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify({ TargetResolution: Resolution }),
+        success: function() { RenderTable(); }
+    });
+}
+
+function BulkUpdate() {
+    if (SelectedShows.size === 0) return;
+    const Resolution = $('#BulkResolution').val();
+    const Folders = Array.from(SelectedShows);
+
+    $.ajax({
+        url: '/api/ShowSettings/BulkUpdate',
+        method: 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify({ ShowFolders: Folders, TargetResolution: Resolution }),
+        success: function(Response) {
+            if (Response.Success) {
+                Folders.forEach(function(Folder) {
+                    const Idx = AllShows.findIndex(S => S.ShowFolder === Folder);
+                    if (Idx >= 0) AllShows[Idx].TargetResolution = Resolution || null;
+                });
+                SelectedShows.clear();
+                FilterShows();
+                UpdateStats();
+            }
+        }
+    });
+}
+
+function ClearSelected() {
+    if (SelectedShows.size === 0) return;
+    const Folders = Array.from(SelectedShows);
+    $.ajax({
+        url: '/api/ShowSettings/BulkUpdate',
+        method: 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify({ ShowFolders: Folders, TargetResolution: '' }),
+        success: function(Response) {
+            if (Response.Success) {
+                Folders.forEach(function(Folder) {
+                    const Idx = AllShows.findIndex(S => S.ShowFolder === Folder);
+                    if (Idx >= 0) AllShows[Idx].TargetResolution = null;
+                });
+                SelectedShows.clear();
+                FilterShows();
+                UpdateStats();
+            }
+        }
+    });
+}
+
+function ToggleShow(Checkbox) {
+    const Folder = $(Checkbox).data('folder');
+    if (Checkbox.checked) SelectedShows.add(Folder);
+    else SelectedShows.delete(Folder);
+    UpdateSelectedCount();
+}
+
+function SelectAll() {
+    FilteredShows.forEach(S => SelectedShows.add(S.ShowFolder));
+    $('.ShowCheckbox').prop('checked', true);
+    UpdateSelectedCount();
+}
+
+function SelectNone() {
+    SelectedShows.clear();
+    $('.ShowCheckbox').prop('checked', false);
+    UpdateSelectedCount();
+}
+
+function ToggleSelectAll(Checkbox) {
+    if (Checkbox.checked) SelectAll();
+    else SelectNone();
+}
+
+function UpdateSelectedCount() {
+    $('#SelectedCount').text(SelectedShows.size + ' selected');
+}
+
+function UpdateStats() {
+    const DefaultRes = $('#DefaultResolution').val();
+    let Configured = 0, Unconfigured = 0, Count480 = 0, Count720 = 0;
+    let TotalGB = 0;
+
+    AllShows.forEach(function(Show) {
+        TotalGB += parseFloat(Show.TotalGB || 0);
+        const Res = Show.TargetResolution || '';
+        if (Res) {
+            Configured++;
+            if (Res === '480p') Count480++;
+            if (Res === '720p') Count720++;
+        } else {
+            Unconfigured++;
+            if (DefaultRes === '480p') Count480++;
+            if (DefaultRes === '720p') Count720++;
+        }
+    });
+
+    $('#StatTotalShows').text(AllShows.length);
+    $('#StatTotalGB').text(TotalGB.toFixed(1) + ' GB');
+    $('#StatConfigured').text(Configured);
+    $('#StatUnconfigured').text(Unconfigured);
+    $('#Stat480p').text(Count480);
+    $('#Stat720p').text(Count720);
+}
+
+function FlashRow(Element, Success) {
+    const Row = $(Element).closest('tr');
+    Row.addClass(Success ? 'table-success' : 'table-danger');
+    setTimeout(() => Row.removeClass('table-success table-danger'), 800);
+}
+
+// ─── Analyze Files / Batch ───
+
+function SmartPopulate(IsNextPage) {
+    const Btn = $('#SmartPopulateBtn');
+    const OrigText = Btn.html();
+
+    if (!IsNextPage) {
+        // Fresh analysis: reset pagination
+        CurrentOffset = 0;
+        AllSuggestions = [];
+        BatchItems = [];
+        Btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin"></i> Analyzing...');
+    }
+
+    const Drive = $('#DriveFilter').val();
+    $.ajax({
+        url: '/api/ShowSettings/SmartPopulate',
+        method: 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify({ Drive: Drive, Limit: PAGE_SIZE, Offset: CurrentOffset }),
+        timeout: 30000,
+        success: function(Response) {
+            Btn.prop('disabled', false).html(OrigText);
+            if (Response.Success) {
+                const NewItems = Response.Suggestions || [];
+                TotalCandidates = Response.TotalCandidates || 0;
+                HasMore = Response.HasMore || false;
+                CurrentOffset += NewItems.length;
+
+                // Append new items to the buffer
+                AllSuggestions = AllSuggestions.concat(NewItems);
+
+                // Fill batch from buffer if needed
+                if (BatchItems.length === 0) {
+                    BatchItems = AllSuggestions.splice(0, BATCH_SIZE);
+                }
+
+                $('#BatchInfo').html('<small><strong>' + TotalCandidates.toLocaleString() + '</strong> candidates found. Showing top ' + BATCH_SIZE + ' at a time.</small>');
+
+                RenderBatch();
+            } else {
+                alert('Error: ' + (Response.Message || Response.ErrorMessage || 'Unknown error'));
+            }
+        },
+        error: function() {
+            Btn.prop('disabled', false).html(OrigText);
+            alert('Failed to run analysis');
+        }
+    });
+}
+
+function FormatSize(MB) {
+    if (MB >= 1024) return (MB / 1024).toFixed(1) + ' GB';
+    return Math.round(MB) + ' MB';
+}
+
+function FormatBitrate(Kbps) {
+    if (!Kbps) return 'N/A';
+    if (Kbps >= 1000) return (Kbps / 1000).toFixed(1) + ' Mbps';
+    return Math.round(Kbps) + ' kbps';
+}
+
+function RenderBatch() {
+    const Tbody = $('#BatchTableBody');
+    $('#BatchCount').text(BatchItems.length);
+
+    if (BatchItems.length === 0) {
+        Tbody.html('<tr><td colspan="7" class="text-center py-3 text-muted">Batch is empty</td></tr>');
+        $('#BatchTotalSize').text('');
+        return;
+    }
+
+    let Html = '';
+    let TotalSize = 0;
+
+    BatchItems.forEach(function(S, Idx) {
+        TotalSize += S.SizeMB;
+        Html += `<tr>
+            <td><button class="btn btn-sm btn-outline-danger py-0 px-1" onclick="RemoveFromBatch(${Idx})" title="Remove"><i class="fas fa-times"></i></button></td>
+            <td>${EscapeHtml(S.ShowName)}</td>
+            <td title="${EscapeAttr(S.FilePath)}">${EscapeHtml(S.FileName)}</td>
+            <td class="text-end">${FormatSize(S.SizeMB)}</td>
+            <td><span class="badge ${GetCodecBadgeClass(S.Codec)}">${EscapeHtml(S.Codec)}</span></td>
+            <td class="text-end">${FormatBitrate(S.BitrateKbps)}</td>
+            <td>${EscapeHtml(S.Resolution)}</td>
+        </tr>`;
+    });
+
+    Tbody.html(Html);
+    $('#BatchTotalSize').text(FormatSize(TotalSize));
+}
+
+function RemoveFromBatch(Idx) {
+    BatchItems.splice(Idx, 1);
+    RenderBatch();
+}
+
+function AddBatchToQueue() {
+    if (BatchItems.length === 0) {
+        alert('Batch is empty');
+        return;
+    }
+
+    const ProfileId = $('#BatchProfileSelect').val();
+    if (!ProfileId) {
+        alert('Please select a profile before adding to queue');
+        $('#BatchProfileSelect').focus();
+        return;
+    }
+
+    const Items = BatchItems.map(function(S) {
+        return {
+            FilePath: S.FilePath,
+            MediaFileId: S.MediaFileId,
+            SizeMB: S.SizeMB,
+            Mode: 'Transcode',
+            Priority: S.Priority,
+        };
+    });
+
+    const Btn = $('#AddBatchBtn');
+    const OrigText = Btn.html();
+    Btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin"></i> Adding...');
+
+    $.ajax({
+        url: '/api/ShowSettings/AddToQueue',
+        method: 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify({ Items: Items, ProfileId: parseInt(ProfileId) }),
+        success: function(Response) {
+            Btn.prop('disabled', false).html(OrigText);
+            if (Response.Success) {
+                const Added = Response.ItemsAdded || 0;
+                const Skipped = Response.ItemsSkipped || 0;
+                let Msg = Added + ' items added to the transcode queue.';
+                if (Skipped > 0) Msg += ' ' + Skipped + ' were already in queue.';
+
+                // Refill batch from buffer
+                BatchItems = AllSuggestions.splice(0, BATCH_SIZE);
+
+                // If buffer is empty and server has more, fetch next page
+                if (BatchItems.length === 0 && HasMore) {
+                    ShowNotification(Msg + ' Loading next batch...', 'success');
+                    SmartPopulate(true);
+                } else {
+                    RenderBatch();
+                    ShowNotification(Msg, 'success');
+                }
+            } else {
+                alert('Error: ' + (Response.Message || Response.ErrorMessage || 'Unknown error'));
+            }
+        },
+        error: function() {
+            Btn.prop('disabled', false).html(OrigText);
+            alert('Failed to add batch to queue');
+        }
+    });
+}
+
+// ─── Utilities ───
+
+function ShowNotification(Message, Type) {
+    const AlertClass = Type === 'success' ? 'alert-success' : 'alert-danger';
+    const Alert = $(`<div class="alert ${AlertClass} alert-dismissible fade show position-fixed" style="top: 70px; right: 20px; z-index: 9999; min-width: 300px;">
+        ${EscapeHtml(Message)}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>`);
+    $('body').append(Alert);
+    setTimeout(() => Alert.alert('close'), 5000);
+}
+
+function EscapeHtml(Text) {
+    if (!Text) return '';
+    const Div = document.createElement('div');
+    Div.appendChild(document.createTextNode(Text));
+    return Div.innerHTML;
+}
+
+function EscapeAttr(Text) {
+    if (!Text) return '';
+    return Text.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+</script>
+{% endblock %}

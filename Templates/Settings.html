@@ -3,10 +3,107 @@
 {% block title %}Settings - MediaVortex{% endblock %}
 
 {% block content %}
+<div class="container-fluid px-4">
+    {% include '_admin_subnav.html' %}
+</div>
 <div class="row">
     <div class="col-12">
         <h2><i class="fas fa-cog"></i> Settings</h2>
 
+
+        <!-- Scan Directory Management Section -->
+        <div class="card mt-4">
+            <div class="card-header bg-light" data-bs-toggle="collapse" data-bs-target="#ScanDirectorySection" style="cursor: pointer;">
+                <div class="d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">
+                        <i class="fas fa-folder-open"></i> Scan Directory Management
+                    </h5>
+                    <i class="fas fa-chevron-down"></i>
+                </div>
+            </div>
+            <div class="collapse" id="ScanDirectorySection">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <h6 class="mb-0">Scan Directories</h6>
+                        <button class="btn btn-primary" onclick="ShowAddScanDirectoryModal()">
+                            <i class="fas fa-plus"></i> Add Scan Directory
+                        </button>
+                    </div>
+
+                    <!-- Scan Directories List -->
+                    <div id="ScanDirectoriesList">
+                        <!-- Scan directories will be loaded here -->
+                    </div>
+
+                    <hr class="my-4">
+
+                    <!-- Excluded Directories -->
+                    <h6 class="fw-bold mb-3"><i class="fas fa-ban text-danger me-2"></i> Excluded Directories</h6>
+                    <p class="text-muted small mb-3">These directories will be skipped during scanning.</p>
+                    <div class="table-responsive mb-3" style="max-height: 300px; overflow-y: auto;">
+                        <table class="table table-hover table-sm mb-0">
+                            <thead class="table-light">
+                                <tr>
+                                    <th style="width: 80%;">Directory Path</th>
+                                    <th style="width: 20%;" class="text-center">Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="ExcludedDirectoriesTableBody">
+                                <tr><td colspan="2" class="text-center text-muted"><i class="fas fa-spinner fa-spin me-2"></i> Loading...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="row g-2">
+                        <div class="col-md-9">
+                            <input type="text" class="form-control" id="NewExcludedDirectoryInput"
+                                   placeholder="Enter directory path to exclude (e.g., Z:\Videos\downloads)">
+                        </div>
+                        <div class="col-md-3">
+                            <button class="btn btn-success w-100" onclick="AddExcludedDirectory()">
+                                <i class="fas fa-plus me-1"></i> Add Exclusion
+                            </button>
+                        </div>
+                    </div>
+
+                    <hr class="my-4">
+
+                    <!-- Continuous Scanning Service -->
+                    <h6 class="fw-bold mb-3"><i class="fas fa-sync-alt text-primary me-2"></i> Continuous Scanning</h6>
+                    <div class="d-flex align-items-center gap-3 mb-2">
+                        <span class="badge bg-secondary" id="ContinuousScanStatusBadge" style="font-size: 0.8rem;">Not Running</span>
+                        <small class="text-muted" id="ContinuousScanActivity">Service disabled</small>
+                        <div class="ms-auto d-flex align-items-center gap-2">
+                            <input type="number" class="form-control form-control-sm" id="ScanIntervalInput" 
+                                   value="60" min="15" max="1440" style="width: 70px;" title="Scan interval in minutes">
+                            <small class="text-muted">min</small>
+                            <div class="btn-group" role="group">
+                                <button type="button" class="btn btn-success btn-sm" id="EnableContinuousScanBtn">
+                                    <i class="fas fa-play me-1"></i> Enable
+                                </button>
+                                <button type="button" class="btn btn-danger btn-sm" id="DisableContinuousScanBtn" disabled>
+                                    <i class="fas fa-stop me-1"></i> Stop
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- Scan Stats (compact) -->
+                    <div class="row text-center g-2 mb-2" id="ScanStatsRow" style="display: none;">
+                        <div class="col">
+                            <small class="text-muted d-block">Scanned</small>
+                            <strong id="ContinuousScanScanned" class="small">0</strong>
+                        </div>
+                        <div class="col">
+                            <small class="text-muted d-block">Changed</small>
+                            <strong id="ContinuousScanChanged" class="small text-primary">0</strong>
+                        </div>
+                        <div class="col">
+                            <small class="text-muted d-block">Last Scan</small>
+                            <span id="ContinuousScanLastCompleted" class="small">Never</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
 
         <!-- Profile Management Section -->
         <div class="card mt-4">
@@ -15,10 +112,10 @@
                     <h5 class="mb-0">
                         <i class="fas fa-sliders-h"></i> Profile Management
                     </h5>
-                    <i class="fas fa-chevron-up"></i>
+                    <i class="fas fa-chevron-down"></i>
                 </div>
             </div>
-            <div class="collapse show" id="ProfileManagementSection">
+            <div class="collapse" id="ProfileManagementSection">
                 <div class="card-body">
                     <div class="d-flex justify-content-between align-items-center mb-3">
                         <h6 class="mb-0">Transcoding Profiles</h6>
@@ -35,33 +132,6 @@
             </div>
         </div>
 
-        <!-- Scan Directory Management Section -->
-        <div class="card mt-4">
-            <div class="card-header bg-light" data-bs-toggle="collapse" data-bs-target="#ScanDirectorySection" style="cursor: pointer;">
-                <div class="d-flex justify-content-between align-items-center">
-                    <h5 class="mb-0">
-                        <i class="fas fa-folder-open"></i> Scan Directory Management
-                    </h5>
-                    <i class="fas fa-chevron-up"></i>
-                </div>
-            </div>
-            <div class="collapse show" id="ScanDirectorySection">
-                <div class="card-body">
-                    <div class="d-flex justify-content-between align-items-center mb-3">
-                        <h6 class="mb-0">Scan Directories</h6>
-                        <button class="btn btn-primary" onclick="ShowAddScanDirectoryModal()">
-                            <i class="fas fa-plus"></i> Add Scan Directory
-                        </button>
-                    </div>
-
-                    <!-- Scan Directories List -->
-                    <div id="ScanDirectoriesList">
-                        <!-- Scan directories will be loaded here -->
-                    </div>
-                </div>
-            </div>
-        </div>
-
         <!-- FFmpeg/FFprobe Path Management Section -->
         <div class="card mt-4">
             <div class="card-header bg-light" data-bs-toggle="collapse" data-bs-target="#FFmpegPathSection" style="cursor: pointer;">
@@ -69,10 +139,10 @@
                     <h5 class="mb-0">
                         <i class="fas fa-video"></i> FFmpeg/FFprobe Path Management
                     </h5>
-                    <i class="fas fa-chevron-up"></i>
+                    <i class="fas fa-chevron-down"></i>
                 </div>
             </div>
-            <div class="collapse show" id="FFmpegPathSection">
+            <div class="collapse" id="FFmpegPathSection">
                 <div class="card-body">
                     <div class="row">
                         <div class="col-md-6">
@@ -111,10 +181,10 @@
                     <h5 class="mb-0">
                         <i class="fas fa-microchip"></i> CPU/Performance Settings
                     </h5>
-                    <i class="fas fa-chevron-up"></i>
+                    <i class="fas fa-chevron-down"></i>
                 </div>
             </div>
-            <div class="collapse show" id="CpuPerformanceSection">
+            <div class="collapse" id="CpuPerformanceSection">
                 <div class="card-body">
                     <div class="row">
                         <div class="col-md-6">
@@ -161,10 +231,10 @@
                     <h5 class="mb-0">
                         <i class="fas fa-thermometer-half"></i> CPU Affinity Settings
                     </h5>
-                    <i class="fas fa-chevron-up"></i>
+                    <i class="fas fa-chevron-down"></i>
                 </div>
             </div>
-            <div class="collapse show" id="CpuAffinitySection">
+            <div class="collapse" id="CpuAffinitySection">
                 <div class="card-body">
                     <div class="row">
                         <div class="col-md-6">
@@ -285,7 +355,7 @@
                             <div class="mb-3">
                                 <label for="ProfileName" class="form-label">Profile Name</label>
                                 <input type="text" class="form-control" id="ProfileName" required>
-                                <div class="form-text">Unique name for the profile</div>
+                                <div class="form-text" id="ProfileNote"></div>
                             </div>
                         </div>
                         <div class="col-md-6">
@@ -381,7 +451,17 @@
                                 </div>
                             </div>
                             <div class="row g-3 mt-2">
-                                <div class="col-md-12">
+                                <div class="col-md-3">
+                                    <label for="ProfileTranscodeDownTo" class="form-label">Transcode Down To</label>
+                                    <select class="form-select" id="ProfileTranscodeDownTo" onchange="ApplyTranscodeDownTo()">
+                                        <option value="No downscaling">No downscaling</option>
+                                        <option value="720p">720p</option>
+                                        <option value="480p">480p</option>
+                                        <option value="360p">360p</option>
+                                    </select>
+                                    <div class="form-text">Sets all resolution thresholds to this target</div>
+                                </div>
+                                <div class="col-md-9 d-flex align-items-end">
                                     <small class="text-muted">
                                         <i class="fas fa-info-circle"></i> These settings apply to all resolution thresholds below.
                                     </small>
@@ -709,6 +789,8 @@
 <script>
 let CurrentProfile = null;
 let IsEditMode = false;
+let SuppressAutoName = false;
+let AllLoadedProfiles = [];
 
 // Load profiles and scan directories on page load
 // Function to update bitrate fields state based on Quality field
@@ -746,6 +828,26 @@ $(document).ready(function() {
     LoadProfiles();
     LoadScanDirectories();
     LoadFFmpegPaths();
+    LoadExcludedDirectories();
+    LoadContinuousScanStatus();
+
+    // Auto-refresh scan status every 15 seconds
+    setInterval(LoadContinuousScanStatus, 15000);
+
+    // Continuous scanning controls
+    $('#EnableContinuousScanBtn').on('click', EnableContinuousScanning);
+    $('#DisableContinuousScanBtn').on('click', DisableContinuousScanning);
+
+    // Auto-generate profile name when key settings change
+    $('#ProfileCodec, #ProfilePreset, #ProfileFilmGrain').on('change input', GenerateProfileName);
+    $('#ProfileUseNvidiaHardware, #ProfileTranscodeDownTo').on('change', GenerateProfileName);
+
+    // Toggle chevron icons on collapse
+    $('.collapse').on('show.bs.collapse', function() {
+        $(this).prev('.card-header').find('.fa-chevron-down').removeClass('fa-chevron-down').addClass('fa-chevron-up');
+    }).on('hide.bs.collapse', function() {
+        $(this).prev('.card-header').find('.fa-chevron-up').removeClass('fa-chevron-up').addClass('fa-chevron-down');
+    });
     
     // Add event listeners for Quality field changes
     $('#Quality480p, #Quality720p, #Quality1080p').on('input', function() {
@@ -772,11 +874,60 @@ function ShowAlert(Message, Type = 'info') {
     showToastAlert(Message, Type);
 }
 
+function GenerateProfileName() {
+    if (SuppressAutoName) return;
+    const CodecMap = { 'libsvtav1': 'SVT-AV1', 'libx265': 'x265', 'libx264': 'x264', 'libvpx-vp9': 'VP9' };
+    const Codec = CodecMap[$('#ProfileCodec').val()] || $('#ProfileCodec').val();
+    const Preset = parseInt($('#ProfilePreset').val());
+    const FilmGrain = parseInt($('#ProfileFilmGrain').val());
+    const Nvidia = $('#ProfileUseNvidiaHardware').is(':checked');
+    const DownTo = $('#ProfileTranscodeDownTo').val();
+
+    let Name = Codec + ' P' + Preset + ' FG' + FilmGrain;
+    if (DownTo && DownTo !== 'No downscaling') Name += ' >' + DownTo;
+    if (Nvidia) Name += ' NVENC';
+    $('#ProfileName').val(Name);
+
+    // Build usage note
+    let Notes = [];
+    if (Preset <= 4) Notes.push('slow but high quality');
+    else if (Preset <= 6) Notes.push('balanced speed/quality');
+    else if (Preset <= 8) Notes.push('fast encoding');
+    else Notes.push('very fast, lower quality');
+
+    if (FilmGrain === 0) Notes.push('CGI, clean digital content (CRF ~20)');
+    else if (FilmGrain <= 3) Notes.push('cartoons, animation (CRF ~25)');
+    else if (FilmGrain <= 10) Notes.push('general live-action');
+    else if (FilmGrain <= 20) Notes.push('older/film content with natural grain');
+    else Notes.push('very grainy sources');
+
+    if (DownTo && DownTo !== 'No downscaling') Notes.push('downscales to ' + DownTo);
+    if (Nvidia) Notes.push('GPU-accelerated');
+
+    $('#ProfileNote').html('<i class="fas fa-lightbulb text-warning"></i> <strong>Good for:</strong> ' + Notes.join(', '));
+}
+
+function ApplyTranscodeDownTo() {
+    const Target = $('#ProfileTranscodeDownTo').val();
+    const Map = {
+        'No downscaling': { '480p': 'No downscaling', '720p': 'No downscaling', '1080p': 'No downscaling', '2160p': 'No downscaling' },
+        '720p': { '480p': 'No downscaling', '720p': 'No downscaling', '1080p': '720p', '2160p': '720p' },
+        '480p': { '480p': 'No downscaling', '720p': '480p', '1080p': '480p', '2160p': '480p' },
+        '360p': { '480p': '360p', '720p': '360p', '1080p': '360p', '2160p': '360p' }
+    };
+    const Settings = Map[Target] || Map['No downscaling'];
+    ['480p', '720p', '1080p', '2160p'].forEach(function(Res) {
+        $('#TranscodeDownTo' + Res).val(Settings[Res]);
+    });
+    GenerateProfileName();
+}
+
 function LoadProfiles() {
     $.get('/api/profiles')
         .done(function(Response) {
             if (Response.success) {
-                DisplayProfiles(Response.profiles);
+                AllLoadedProfiles = Response.profiles || [];
+                DisplayProfiles(AllLoadedProfiles);
             } else {
                 ShowAlert('Failed to load profiles: ' + Response.error, 'danger');
             }
@@ -796,24 +947,27 @@ function DisplayProfiles(Profiles) {
     }
     
     Profiles.forEach(function(Profile) {
+        const SafeName = Profile.ProfileName.replace(/'/g, "\\'");
         const ProfileCard = `
-            <div class="card mb-3">
-                <div class="card-body">
-                    <div class="row align-items-center">
-                        <div class="col-md-8">
-                            <h5 class="card-title mb-1">${Profile.ProfileName}</h5>
-                            <p class="card-text text-muted mb-1">${Profile.Description || 'No description provided'}</p>
-                            <small class="text-muted">Last modified: ${new Date(Profile.LastModified).toLocaleDateString()}</small>
+            <div class="card mb-2 profile-sortable" data-profile-id="${Profile.Id}" draggable="true">
+                <div class="card-body py-2">
+                    <div class="d-flex align-items-center">
+                        <div class="drag-handle me-3" style="cursor: grab; color: #aaa; font-size: 1.2rem;" title="Drag to reorder">
+                            <i class="fas fa-grip-vertical"></i>
                         </div>
-                        <div class="col-md-4 text-end">
-                            <button class="btn btn-outline-primary btn-sm me-2" onclick="EditProfile(${Profile.Id})">
-                                <i class="fas fa-edit"></i> Edit
+                        <div class="flex-grow-1">
+                            <h6 class="card-title mb-0">${Profile.ProfileName}</h6>
+                            <small class="text-muted">${Profile.Description || 'No description'}</small>
+                        </div>
+                        <div class="text-end text-nowrap">
+                            <button class="btn btn-outline-primary btn-sm me-1" onclick="EditProfile(${Profile.Id})">
+                                <i class="fas fa-edit"></i>
                             </button>
-                            <button class="btn btn-outline-secondary btn-sm me-2" onclick="CopyProfile(${Profile.Id})">
-                                <i class="fas fa-copy"></i> Copy
+                            <button class="btn btn-outline-secondary btn-sm me-1" onclick="CopyProfile(${Profile.Id})">
+                                <i class="fas fa-copy"></i>
                             </button>
-                            <button class="btn btn-outline-danger btn-sm" onclick="DeleteProfile(${Profile.Id}, '${Profile.ProfileName}')">
-                                <i class="fas fa-trash"></i> Delete
+                            <button class="btn btn-outline-danger btn-sm" onclick="DeleteProfile(${Profile.Id}, '${SafeName}')">
+                                <i class="fas fa-trash"></i>
                             </button>
                         </div>
                     </div>
@@ -821,6 +975,72 @@ function DisplayProfiles(Profiles) {
             </div>
         `;
         ProfilesList.append(ProfileCard);
+    });
+
+    // Setup drag-and-drop
+    InitProfileDragDrop();
+}
+
+function InitProfileDragDrop() {
+    let DragItem = null;
+
+    document.querySelectorAll('.profile-sortable').forEach(function(Card) {
+        Card.addEventListener('dragstart', function(E) {
+            DragItem = this;
+            this.style.opacity = '0.4';
+            E.dataTransfer.effectAllowed = 'move';
+        });
+        Card.addEventListener('dragend', function() {
+            this.style.opacity = '1';
+            document.querySelectorAll('.profile-sortable').forEach(C => C.classList.remove('border-primary'));
+            DragItem = null;
+        });
+        Card.addEventListener('dragover', function(E) {
+            E.preventDefault();
+            E.dataTransfer.dropEffect = 'move';
+            this.classList.add('border-primary');
+        });
+        Card.addEventListener('dragleave', function() {
+            this.classList.remove('border-primary');
+        });
+        Card.addEventListener('drop', function(E) {
+            E.preventDefault();
+            this.classList.remove('border-primary');
+            if (DragItem && DragItem !== this) {
+                const List = document.getElementById('ProfilesList');
+                const Items = Array.from(List.querySelectorAll('.profile-sortable'));
+                const FromIdx = Items.indexOf(DragItem);
+                const ToIdx = Items.indexOf(this);
+                if (FromIdx < ToIdx) {
+                    this.parentNode.insertBefore(DragItem, this.nextSibling);
+                } else {
+                    this.parentNode.insertBefore(DragItem, this);
+                }
+                SaveProfileOrder();
+            }
+        });
+    });
+}
+
+function SaveProfileOrder() {
+    const OrderedIds = [];
+    document.querySelectorAll('.profile-sortable').forEach(function(Card) {
+        OrderedIds.push(parseInt(Card.dataset.profileId));
+    });
+
+    $.ajax({
+        url: '/api/profiles/reorder',
+        method: 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify({ OrderedIds: OrderedIds }),
+        success: function(Response) {
+            if (!Response.success) {
+                ShowAlert('Failed to save order: ' + Response.error, 'danger');
+            }
+        },
+        error: function() {
+            ShowAlert('Failed to save profile order', 'danger');
+        }
     });
 }
 
@@ -868,6 +1088,7 @@ function CopyProfile(ProfileId) {
 }
 
 function PopulateProfileForm(Profile) {
+    SuppressAutoName = true;
     // Only set the ID if we're in edit mode, otherwise clear it for new profiles
     if (IsEditMode) {
         $('#ProfileId').val(Profile.Id || '');
@@ -885,9 +1106,14 @@ function PopulateProfileForm(Profile) {
     $('#ProfileYadifParity').val(Profile.YadifParity || 1);
     $('#ProfileYadifDeint').val(Profile.YadifDeint || 1);
     $('#ProfileUseNvidiaHardware').prop('checked', Profile.UseNvidiaHardware === 1);
-    
-    // Populate thresholds for each resolution
+
+    // Derive profile-level TranscodeDownTo from thresholds (use 1080p as reference)
     const Thresholds = Profile.Thresholds || [];
+    const Ref1080 = Thresholds.find(t => t.Resolution === '1080p');
+    const DownTo = Ref1080 ? Ref1080.TranscodeDownTo : 'No downscaling';
+    $('#ProfileTranscodeDownTo').val(DownTo || 'No downscaling');
+
+    SuppressAutoName = false;
     
     // 480p settings
     const Threshold480p = Thresholds.find(t => t.Resolution === '480p');
@@ -952,7 +1178,6 @@ function PopulateProfileForm(Profile) {
 
 function ClearProfileForm() {
     $('#ProfileId').val('');
-    $('#ProfileName').val('');
     $('#ProfileDescription').val('');
     
     // Clear profile-level FFmpeg settings
@@ -963,6 +1188,9 @@ function ClearProfileForm() {
     $('#ProfileYadifParity').val('1');
     $('#ProfileYadifDeint').val('1');
     $('#ProfileUseNvidiaHardware').prop('checked', false);
+    $('#ProfileTranscodeDownTo').val('No downscaling');
+
+    GenerateProfileName();
     
     // Clear all threshold fields
     const Resolutions = ['480p', '720p', '1080p', '2160p'];
@@ -986,6 +1214,27 @@ function SaveProfile() {
     
     if (!ProfileName) {
         ShowAlert('Profile name is required', 'warning');
+        return;
+    }
+
+    // Check for duplicate settings
+    const Codec = $('#ProfileCodec').val();
+    const Preset = parseInt($('#ProfilePreset').val());
+    const FilmGrain = parseInt($('#ProfileFilmGrain').val());
+    const Nvidia = $('#ProfileUseNvidiaHardware').is(':checked') ? 1 : 0;
+    const DownTo = $('#ProfileTranscodeDownTo').val();
+    const EditingId = IsEditMode && CurrentProfile ? CurrentProfile.Id : null;
+
+    const Duplicate = AllLoadedProfiles.find(function(P) {
+        if (EditingId && P.Id === EditingId) return false;
+        // Derive the stored profile's DownTo from its thresholds (1080p as reference)
+        const PThresholds = P.Thresholds || [];
+        const PRef = PThresholds.find(t => t.Resolution === '1080p');
+        const PDownTo = PRef ? PRef.TranscodeDownTo : 'No downscaling';
+        return P.Codec === Codec && P.Preset === Preset && P.FilmGrain === FilmGrain && (P.UseNvidiaHardware || 0) === Nvidia && PDownTo === DownTo;
+    });
+
+    if (Duplicate && !confirm('A profile with identical settings already exists: "' + Duplicate.ProfileName + '"\n\nDo you still want to save this profile?')) {
         return;
     }
     
@@ -1247,6 +1496,83 @@ function DeleteScanDirectory(Key, Path) {
     .fail(function() {
         ShowAlert('Failed to delete scan directory', 'danger');
     });
+}
+
+// ─── Excluded Directories ───
+
+function LoadExcludedDirectories() {
+    $.get('/api/SystemSettings/ExcludedDirectories')
+        .done(function(Response) {
+            if (Response.Success) {
+                RenderExcludedDirectories(Response.ExcludedDirectories || []);
+            }
+        })
+        .fail(function() {
+            RenderExcludedDirectories([]);
+        });
+}
+
+function RenderExcludedDirectories(Directories) {
+    const Tbody = $('#ExcludedDirectoriesTableBody');
+    if (!Directories || Directories.length === 0) {
+        Tbody.html('<tr><td colspan="2" class="text-center text-muted py-3"><i class="fas fa-folder-open me-2"></i> No excluded directories configured</td></tr>');
+        return;
+    }
+    let Html = '';
+    Directories.forEach(function(Dir, Idx) {
+        Html += `<tr>
+            <td class="align-middle"><i class="fas fa-ban text-danger me-2"></i><code>${EscapeHtml(Dir)}</code></td>
+            <td class="text-center"><button class="btn btn-sm btn-danger RemoveExcludedBtn" data-idx="${Idx}"><i class="fas fa-trash"></i></button></td>
+        </tr>`;
+    });
+    Tbody.html(Html);
+    Tbody.find('.RemoveExcludedBtn').each(function() {
+        const Idx = $(this).data('idx');
+        $(this).on('click', function() { RemoveExcludedDirectory(Directories[Idx]); });
+    });
+}
+
+function AddExcludedDirectory() {
+    const Input = $('#NewExcludedDirectoryInput');
+    const Directory = Input.val().trim();
+    if (!Directory) { ShowAlert('Please enter a directory path', 'warning'); return; }
+
+    $.ajax({
+        url: '/api/SystemSettings/ExcludedDirectories/Add',
+        type: 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify({ Directory: Directory })
+    })
+    .done(function(Response) {
+        if (Response.Success) {
+            ShowAlert('Excluded directory added', 'success');
+            Input.val('');
+            LoadExcludedDirectories();
+        } else {
+            ShowAlert(Response.ErrorMessage || 'Error adding exclusion', 'danger');
+        }
+    })
+    .fail(function() { ShowAlert('Failed to add excluded directory', 'danger'); });
+}
+
+function RemoveExcludedDirectory(Directory) {
+    if (!confirm('Remove exclusion for:\\n' + Directory + '\\n\\nThis directory will be scanned again.')) return;
+
+    $.ajax({
+        url: '/api/SystemSettings/ExcludedDirectories/Remove',
+        type: 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify({ Directory: Directory })
+    })
+    .done(function(Response) {
+        if (Response.Success) {
+            ShowAlert('Exclusion removed', 'success');
+            LoadExcludedDirectories();
+        } else {
+            ShowAlert(Response.ErrorMessage || 'Error removing exclusion', 'danger');
+        }
+    })
+    .fail(function() { ShowAlert('Failed to remove excluded directory', 'danger'); });
 }
 
 // FFmpeg Path Management Functions
@@ -1574,5 +1900,117 @@ function UpdateCpuAffinityStatus() {
     $('#CpuAffinityActiveJobs').text('0');
     $('#CpuAffinityMonitoringStatus').text('Active');
 }
+function EscapeHtml(Text) {
+    if (!Text) return '';
+    const Div = document.createElement('div');
+    Div.appendChild(document.createTextNode(Text));
+    return Div.innerHTML;
+}
+
+// ─── Continuous Scanning Functions ───
+
+function LoadContinuousScanStatus() {
+    $.get('/api/Scan/ContinuousStatus')
+        .done(function(Data) {
+            if (Data.Success) {
+                RenderContinuousScanStatus(Data);
+            }
+        })
+        .fail(function() {
+            // Silently ignore
+        });
+}
+
+function RenderContinuousScanStatus(Data) {
+    const IsRunning = Data.IsRunning || false;
+    const IntervalMinutes = Data.IntervalMinutes || 60;
+    const LastScanTime = Data.LastScanTime;
+    const TotalScans = Data.TotalScansPerformed || 0;
+    const IsScanning = Data.IsScanning || false;
+
+    // Status badge
+    const Badge = $('#ContinuousScanStatusBadge');
+    if (IsScanning) {
+        Badge.text('Scanning').attr('class', 'badge bg-success');
+    } else if (IsRunning) {
+        Badge.text('Idle').attr('class', 'badge bg-warning text-dark');
+    } else {
+        Badge.text('Disabled').attr('class', 'badge bg-secondary');
+    }
+    Badge.css('font-size', '0.8rem');
+
+    // Activity text
+    const Activity = $('#ContinuousScanActivity');
+    if (IsScanning) {
+        Activity.text('Scanning directories...').attr('class', 'text-success fw-bold small');
+    } else if (IsRunning && LastScanTime) {
+        const LastScan = new Date(LastScanTime);
+        const NextScan = new Date(LastScan.getTime() + IntervalMinutes * 60000);
+        const MinutesUntil = Math.max(0, Math.round((NextScan - new Date()) / 60000));
+        Activity.text(MinutesUntil === 0 ? 'Starting next scan...' : `Next scan in ${MinutesUntil}m`).attr('class', 'text-muted small');
+    } else if (IsRunning) {
+        Activity.text('Waiting for first scan...').attr('class', 'text-muted small');
+    } else {
+        Activity.text('Service disabled').attr('class', 'text-muted small');
+    }
+
+    // Show/hide stats row
+    if (IsRunning || TotalScans > 0) {
+        $('#ScanStatsRow').show();
+        $('#ContinuousScanScanned').text((Data.TotalFilesFound || 0).toLocaleString());
+        $('#ContinuousScanChanged').text((Data.FilesChanged || 0).toLocaleString());
+        if (LastScanTime) {
+            $('#ContinuousScanLastCompleted').text(new Date(LastScanTime).toLocaleTimeString());
+        }
+    } else {
+        $('#ScanStatsRow').hide();
+    }
+
+    // Button states
+    $('#EnableContinuousScanBtn').prop('disabled', IsRunning);
+    $('#DisableContinuousScanBtn').prop('disabled', !IsRunning);
+    $('#ScanIntervalInput').prop('disabled', IsRunning).val(IntervalMinutes);
+}
+
+function EnableContinuousScanning() {
+    const IntervalMinutes = parseInt($('#ScanIntervalInput').val()) || 60;
+    $.ajax({
+        url: '/api/Scan/EnableContinuous',
+        type: 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify({ IntervalMinutes: IntervalMinutes })
+    }).done(function(Data) {
+        if (Data.Success) {
+            ShowAlert(`Continuous scanning enabled (${IntervalMinutes} min interval)`, 'success');
+            LoadContinuousScanStatus();
+        } else {
+            ShowAlert('Error: ' + (Data.ErrorMessage || 'Unknown error'), 'danger');
+        }
+    }).fail(function() {
+        ShowAlert('Failed to enable continuous scanning', 'danger');
+    });
+}
+
+function DisableContinuousScanning() {
+    const Btn = $('#DisableContinuousScanBtn');
+    const OrigHtml = Btn.html();
+    Btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin"></i> Stopping...');
+    $.ajax({
+        url: '/api/Scan/DisableContinuous',
+        type: 'POST'
+    }).done(function(Data) {
+        if (Data.Success) {
+            ShowAlert('Continuous scanning stopped', 'success');
+            LoadContinuousScanStatus();
+        } else {
+            ShowAlert('Error: ' + (Data.ErrorMessage || 'Unknown error'), 'danger');
+            Btn.prop('disabled', false).html(OrigHtml);
+        }
+    }).fail(function() {
+        ShowAlert('Failed to disable continuous scanning', 'danger');
+        Btn.prop('disabled', false).html(OrigHtml);
+    });
+}
+
 </script>
 {% endblock %}

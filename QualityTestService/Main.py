@@ -170,11 +170,13 @@ class QualityTestServiceApp:
             LoggingService.LogException("Error starting health monitoring", e, "QualityTestService", "StartHealthMonitoring")
     
     def HealthCheckLoop(self):
-        """Health monitoring loop."""
+        """Health monitoring loop - updates heartbeat without overwriting operational status."""
         while not self.ShutdownEvent.is_set():
             try:
-                # Update health status
-                self.UpdateServiceStatus("Running", "Healthy", 0, False)
+                # Only update health heartbeat, never overwrite the operational Status
+                self.DatabaseManager.UpdateServiceStatus("QualityTestService", {
+                    'HealthStatus': 'Healthy'
+                })
                 self.ShutdownEvent.wait(30)  # Check every 30 seconds
             except Exception as e:
                 LoggingService.LogException("Error in health check", e, "QualityTestService", "HealthCheckLoop")

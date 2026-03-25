@@ -100,7 +100,7 @@ class StuckJobDetectionService:
             }
 
     # If no progress update for this many minutes, consider the job frozen (even if FFmpeg process is alive)
-    FROZEN_PROGRESS_THRESHOLD_MINUTES = 5
+    FROZEN_PROGRESS_THRESHOLD_MINUTES = 15
 
     # Quality test queue jobs sitting with DateStarted=NULL longer than this are stale (never picked up)
     STALE_QUALITY_TEST_THRESHOLD_MINUTES = 60

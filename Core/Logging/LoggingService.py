@@ -10,6 +10,7 @@ class LoggingService:
 
     _Instance = None
     _DebugEnabled = False
+    _InfoEnabled = False
     DatabaseService = None
 
     def __new__(cls):
@@ -18,6 +19,8 @@ class LoggingService:
             cls.DatabaseService = DatabaseService()
             # Check environment variable for debug mode
             cls._DebugEnabled = os.getenv('MEDIAVORTEX_DEBUG', 'false').lower() in ('true', '1', 'yes', 'on')
+            # Check environment variable for info logging (off by default to reduce noise)
+            cls._InfoEnabled = os.getenv('MEDIAVORTEX_LOG_INFO', 'false').lower() in ('true', '1', 'yes', 'on')
         return cls._Instance
 
     @classmethod
@@ -83,7 +86,9 @@ class LoggingService:
 
     @classmethod
     def LogInfo(cls, Message: str, FunctionName: str = '', Component: str = 'System', Operation: str = ''):
-        """Log an info message."""
+        """Log an info message if info logging is enabled."""
+        if not cls._InfoEnabled:
+            return
         try:
             print(f"INFO: {Message}")
         except OSError:

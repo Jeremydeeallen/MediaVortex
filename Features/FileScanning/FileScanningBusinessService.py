@@ -1093,67 +1093,43 @@ class FileScanningBusinessService:
             return []
 
     def GetStatistics(self) -> Dict[str, Any]:
-        """Get database statistics for display."""
+        """Get library statistics for display."""
         try:
-            # Get total media files count
-            TotalMediaFilesQuery = "SELECT COUNT(*) as Count FROM MediaFiles"
-            TotalMediaFilesResult = self.Repository.DatabaseService.ExecuteQuery(TotalMediaFilesQuery)
-            TotalMediaFiles = TotalMediaFilesResult[0]['Count'] if TotalMediaFilesResult else 0
-
-            # Get files without profiles count
-            FilesWithoutProfilesQuery = "SELECT COUNT(*) as Count FROM MediaFiles WHERE AssignedProfile IS NULL OR AssignedProfile = ''"
-            FilesWithoutProfilesResult = self.Repository.DatabaseService.ExecuteQuery(FilesWithoutProfilesQuery)
-            FilesWithoutProfiles = FilesWithoutProfilesResult[0]['Count'] if FilesWithoutProfilesResult else 0
-
-            # Get total root folders count
-            TotalRootFoldersQuery = "SELECT COUNT(*) as Count FROM RootFolders"
-            TotalRootFoldersResult = self.Repository.DatabaseService.ExecuteQuery(TotalRootFoldersQuery)
-            TotalRootFolders = TotalRootFoldersResult[0]['Count'] if TotalRootFoldersResult else 0
-
-            # Get total size in GB
-            TotalSizeQuery = "SELECT SUM(TotalSizeGB) as TotalSize FROM RootFolders"
-            TotalSizeResult = self.Repository.DatabaseService.ExecuteQuery(TotalSizeQuery)
-            TotalSizeGB = TotalSizeResult[0]['TotalSize'] if TotalSizeResult and TotalSizeResult[0]['TotalSize'] else 0.0
-
-            # Get last scan date
-            LastScanQuery = "SELECT MAX(LastScannedDate) as LastScanDate FROM RootFolders"
-            LastScanResult = self.Repository.DatabaseService.ExecuteQuery(LastScanQuery)
-            LastScanDate = LastScanResult[0]['LastScanDate'] if LastScanResult and LastScanResult[0]['LastScanDate'] else 'Never'
-
-            # Get files with metadata count
-            FilesWithMetadataQuery = """
-                SELECT COUNT(*) as Count FROM MediaFiles
-                WHERE VideoBitrateKbps IS NOT NULL
-                AND AudioBitrateKbps IS NOT NULL
-                AND Resolution IS NOT NULL
-                AND Codec IS NOT NULL
+            Query = """
+                SELECT
+                    COUNT(*) AS TotalMediaFiles,
+                    COUNT(CASE WHEN TranscodedByMediaVortex = true THEN 1 END) AS EncodedByMediaVortex,
+                    COUNT(CASE WHEN FFProbeFailureCount >= 3 THEN 1 END) AS PossiblyCorrupt,
+                    ROUND(SUM(SizeMB)::numeric / 1024, 1) AS TotalSizeGB
+                FROM MediaFiles
             """
-            FilesWithMetadataResult = self.Repository.DatabaseService.ExecuteQuery(FilesWithMetadataQuery)
-            FilesWithMetadata = FilesWithMetadataResult[0]['Count'] if FilesWithMetadataResult else 0
+            Result = self.Repository.DatabaseService.ExecuteQuery(Query)
+            Row = Result[0] if Result else {}
 
-            # Get files without metadata count
-            FilesWithoutMetadata = TotalMediaFiles - FilesWithMetadata
+            SpaceSavedQuery = """
+                SELECT ROUND(COALESCE(SUM(OldSizeBytes - NewSizeBytes), 0)::numeric / 1024 / 1024 / 1024, 1) AS SpaceSavedGB
+                FROM TranscodeAttempts
+                WHERE Success = true AND FileReplaced = true
+            """
+            SpaceSavedResult = self.Repository.DatabaseService.ExecuteQuery(SpaceSavedQuery)
+            SpaceSavedGB = float(SpaceSavedResult[0]['SpaceSavedGB']) if SpaceSavedResult and SpaceSavedResult[0]['SpaceSavedGB'] else 0.0
 
             return {
-                'TotalMediaFiles': TotalMediaFiles,
-                'FilesWithoutProfiles': FilesWithoutProfiles,
-                'TotalRootFolders': TotalRootFolders,
-                'TotalSizeGB': TotalSizeGB,
-                'LastScanDate': LastScanDate,
-                'FilesWithMetadata': FilesWithMetadata,
-                'FilesWithoutMetadata': FilesWithoutMetadata
+                'TotalMediaFiles': Row.get('TotalMediaFiles', 0),
+                'EncodedByMediaVortex': Row.get('EncodedByMediaVortex', 0),
+                'SpaceSavedGB': SpaceSavedGB,
+                'TotalSizeGB': float(Row.get('TotalSizeGB', 0) or 0),
+                'PossiblyCorrupt': Row.get('PossiblyCorrupt', 0)
             }
 
         except Exception as e:
             LoggingService.LogException("Error getting statistics", e, "FileScanningBusinessService", "GetStatistics")
             return {
                 'TotalMediaFiles': 0,
-                'FilesWithoutProfiles': 0,
-                'TotalRootFolders': 0,
+                'EncodedByMediaVortex': 0,
+                'SpaceSavedGB': 0.0,
                 'TotalSizeGB': 0.0,
-                'LastScanDate': 'Error',
-                'FilesWithMetadata': 0,
-                'FilesWithoutMetadata': 0
+                'PossiblyCorrupt': 0
             }
 
     def ResetScanState(self):

@@ -369,7 +369,8 @@ class ProfileManagementViewModel:
                 'YadifMode': profile.YadifMode,
                 'YadifParity': profile.YadifParity,
                 'YadifDeint': profile.YadifDeint,
-                'UseNvidiaHardware': profile.UseNvidiaHardware
+                'UseNvidiaHardware': profile.UseNvidiaHardware,
+                'SortOrder': profile.SortOrder
             }
             for profile in self.Profiles
         ]

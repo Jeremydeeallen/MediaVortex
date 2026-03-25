@@ -605,31 +605,26 @@ class FileScanningViewModel:
             }
 
     def GetStatistics(self) -> Dict[str, Any]:
-        """Get database statistics for display."""
+        """Get library statistics for display."""
         try:
-            # Get statistics from business service
             stats = self.BusinessService.GetStatistics()
 
             return {
                 'TotalMediaFiles': stats.get('TotalMediaFiles', 0),
-                'FilesWithoutProfiles': stats.get('FilesWithoutProfiles', 0),
-                'TotalRootFolders': stats.get('TotalRootFolders', 0),
+                'EncodedByMediaVortex': stats.get('EncodedByMediaVortex', 0),
+                'SpaceSavedGB': stats.get('SpaceSavedGB', 0.0),
                 'TotalSizeGB': stats.get('TotalSizeGB', 0.0),
-                'LastScanDate': stats.get('LastScanDate', 'Never'),
-                'FilesWithMetadata': stats.get('FilesWithMetadata', 0),
-                'FilesWithoutMetadata': stats.get('FilesWithoutMetadata', 0)
+                'PossiblyCorrupt': stats.get('PossiblyCorrupt', 0)
             }
 
         except Exception as e:
             LoggingService.LogException("Error getting statistics", e, "FileScanningViewModel", "GetStatistics")
             return {
                 'TotalMediaFiles': 0,
-                'FilesWithoutProfiles': 0,
-                'TotalRootFolders': 0,
+                'EncodedByMediaVortex': 0,
+                'SpaceSavedGB': 0.0,
                 'TotalSizeGB': 0.0,
-                'LastScanDate': 'Error',
-                'FilesWithMetadata': 0,
-                'FilesWithoutMetadata': 0
+                'PossiblyCorrupt': 0
             }
 
     def AddOrUpdateScanDirectory(self, Key: Optional[str], Path: str, Description: str) -> Dict[str, Any]:
