@@ -27,37 +27,49 @@ def AddCpuAffinitySettings():
             {
                 'SettingKey': 'CpuAffinityEnabled',
                 'SettingValue': 'true',
-                'Description': 'Enable dynamic CPU affinity selection and monitoring',
+                'Description': 'Enable topology-aware CPU affinity for FFmpeg processes',
                 'DataType': 'boolean'
             },
             {
-                'SettingKey': 'CpuAffinityTemperatureThreshold',
-                'SettingValue': '98.0',
-                'Description': 'Temperature threshold in Celsius for core migration during active transcoding',
+                'SettingKey': 'TranscodeCoreTier',
+                'SettingValue': 'performance',
+                'Description': 'Core tier for transcode jobs: performance (P-cores), efficiency (E-cores), or all',
+                'DataType': 'string'
+            },
+            {
+                'SettingKey': 'QualityTestCoreTier',
+                'SettingValue': 'efficiency',
+                'Description': 'Core tier for quality test jobs: performance (P-cores), efficiency (E-cores), or all',
+                'DataType': 'string'
+            },
+            {
+                'SettingKey': 'ThermalGateEnabled',
+                'SettingValue': 'true',
+                'Description': 'Block new jobs when system temperature is too high',
+                'DataType': 'boolean'
+            },
+            {
+                'SettingKey': 'ThermalGateMaxTemp',
+                'SettingValue': '80.0',
+                'Description': 'Per-core temperature threshold for "cool enough" to start new jobs',
                 'DataType': 'float'
             },
             {
-                'SettingKey': 'CpuAffinityMonitoringInterval',
-                'SettingValue': '45',
-                'Description': 'Seconds between temperature checks during active transcoding',
+                'SettingKey': 'ThermalGateMinCoolCores',
+                'SettingValue': '8',
+                'Description': 'Minimum number of cool cores required before starting new jobs',
                 'DataType': 'integer'
             },
             {
-                'SettingKey': 'CpuAffinityCoolingWaitEnabled',
-                'SettingValue': 'true',
-                'Description': 'Wait for CPU cores to cool below target temperature after job completion before proceeding',
-                'DataType': 'boolean'
-            },
-            {
-                'SettingKey': 'CpuAffinityCoolingWaitTargetTemp',
-                'SettingValue': '60.0',
-                'Description': 'Target temperature in Celsius to wait for after job completion (50-85°C)',
+                'SettingKey': 'ThermalPauseCriticalTemp',
+                'SettingValue': '90.0',
+                'Description': 'Average CPU temperature that pauses all new job starts',
                 'DataType': 'float'
             },
             {
-                'SettingKey': 'CpuAffinityCoolingWaitMaxSeconds',
-                'SettingValue': '300',
-                'Description': 'Maximum seconds to wait for cooling after job completion (30-300 seconds)',
+                'SettingKey': 'ThermalGateMaxWaitSeconds',
+                'SettingValue': '600',
+                'Description': 'Maximum seconds to wait for thermal clearance before allowing job anyway',
                 'DataType': 'integer'
             }
         ]

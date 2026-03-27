@@ -337,7 +337,15 @@ class ProcessTranscodeQueueService:
                 self.HandleJobFailure(Job, "Failed to get transcoding settings", TranscodeAttemptId, ActiveJobId)
                 return
 
-            # Phase 4: Building Command
+            # Phase 4: Preparing Files (must happen before command building — FFprobe needs the staged file)
+            self.UpdateTranscodeProgress(TranscodeAttemptId, "Preparing Files", 0.0, "Preparing files for transcoding...")
+
+            # Step b: Setup directories and copy file
+            if not self.SetupFilePreparation(Job, MediaFile, TranscodeAttemptId):
+                self.HandleJobFailure(Job, "Failed to setup file preparation", TranscodeAttemptId, ActiveJobId)
+                return
+
+            # Phase 5: Building Command
             self.UpdateTranscodeProgress(TranscodeAttemptId, "Building Command", 0.0, "Building FFmpeg command...")
 
             # Step d: Build transcoding command
@@ -349,14 +357,6 @@ class ProcessTranscodeQueueService:
             # Extract command and output path from result
             TranscodeCommand = CommandResult['Command']
             OutputPath = CommandResult['OutputPath']
-
-            # Phase 5: Preparing Files
-            self.UpdateTranscodeProgress(TranscodeAttemptId, "Preparing Files", 0.0, "Preparing files for transcoding...")
-
-            # Step b: Setup directories and copy file
-            if not self.SetupFilePreparation(Job, MediaFile, TranscodeAttemptId):
-                self.HandleJobFailure(Job, "Failed to setup file preparation", TranscodeAttemptId, ActiveJobId)
-                return
 
             # Create TemporaryFilePaths record with all three paths (single source of truth)
             LocalSourcePath = f"C:\\MediaVortex\\Source\\{MediaFile.FileName}"

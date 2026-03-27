@@ -461,7 +461,7 @@ def StopQualityTestAfterCurrent():
 
 @QualityTestBlueprint.route('/api/QualityTest/Pause', methods=['POST'])
 def PauseQualityTest():
-    """Pause quality test queue - finish current job, don't start new ones."""
+    """Pause quality test queue and migrate running jobs to E-cores (Game Mode)."""
     try:
         LoggingService.LogFunctionEntry("PauseQualityTest", "QualityTestController")
 
@@ -473,12 +473,22 @@ def PauseQualityTest():
             'IsProcessing': False
         })
 
+        # Migrate active FFmpeg jobs to E-cores
+        try:
+            from Services.CpuAffinityService import GetCpuAffinityServiceInstance
+            AffinityService = GetCpuAffinityServiceInstance()
+            if AffinityService.CpuAffinityEnabled:
+                AffinityService.MigrateActiveJobsToTier("efficiency")
+        except Exception as MigrationError:
+            LoggingService.LogWarning(f"Failed to migrate jobs to E-cores on pause: {MigrationError}",
+                                     "QualityTestController", "PauseQualityTest")
+
         if success:
             LoggingService.LogInfo("Quality testing paused successfully",
                                  "QualityTestController", "PauseQualityTest")
             return jsonify({
                 "Success": True,
-                "Message": "Quality testing paused - current job will complete, no new jobs will start"
+                "Message": "Quality testing paused - running jobs moved to E-cores"
             })
         else:
             return jsonify({
@@ -493,12 +503,22 @@ def PauseQualityTest():
 
 @QualityTestBlueprint.route('/api/QualityTest/Resume', methods=['POST'])
 def ResumeQualityTest():
-    """Resume quality test queue processing."""
+    """Resume quality test queue and restore jobs to original cores."""
     try:
         LoggingService.LogFunctionEntry("ResumeQualityTest", "QualityTestController")
 
         from Repositories.DatabaseManager import DatabaseManager
         db_manager = DatabaseManager()
+
+        # Restore active jobs to their original core tier
+        try:
+            from Services.CpuAffinityService import GetCpuAffinityServiceInstance
+            AffinityService = GetCpuAffinityServiceInstance()
+            if AffinityService.CpuAffinityEnabled:
+                AffinityService.MigrateActiveJobsToTier("restore")
+        except Exception as MigrationError:
+            LoggingService.LogWarning(f"Failed to restore jobs on resume: {MigrationError}",
+                                     "QualityTestController", "ResumeQualityTest")
 
         success = db_manager.UpdateServiceStatus("QualityTestService", {
             'Status': 'Running',

@@ -99,6 +99,9 @@ class CommandBuilder:
             if ContainerType.lower() == 'mp4':
                 CommandParts.extend(['-movflags', '+faststart'])
             
+            # Tag file so we can verify it was transcoded by MediaVortex
+            CommandParts.extend(['-metadata', '"comment=Transcoded by MediaVortex"'])
+            
             # Add overwrite flag (before output path)
             CommandParts.append('-y')
             

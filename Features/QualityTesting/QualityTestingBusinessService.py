@@ -588,7 +588,7 @@ class QualityTestingBusinessService:
             LoggingService.LogInfo(f"subprocess.Popen completed successfully", "QualityTestingBusinessService", "ExecuteFFmpegWithProgress")
             LoggingService.LogInfo(f"Process started with PID: {Process.pid}", "QualityTestingBusinessService", "ExecuteFFmpegWithProgress")
 
-            # Set CPU affinity using reusable CpuAffinityService method (temperature-based smart core selection)
+            # Set CPU affinity using topology-based core selection (E-cores for quality test)
             FFmpegPID = None
             TranscodeAttemptId = JobDetails.get('TranscodeAttemptId') if JobDetails else None
             JobIdForAffinity = TranscodeAttemptId if TranscodeAttemptId else Process.pid

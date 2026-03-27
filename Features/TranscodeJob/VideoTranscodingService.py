@@ -57,7 +57,7 @@ class VideoTranscodingService:
 
             LoggingService.LogInfo(f"Process started with PID: {Process.pid}", "VideoTranscodingService", "TranscodeVideo")
 
-            # Set CPU affinity using reusable CpuAffinityService method (temperature-based smart core selection)
+            # Set CPU affinity using topology-based core selection (P-cores for transcode)
             FFmpegPID = None
             MaxCpuThreads = self.GetMaxCpuThreads()
             CoreCount = max(1, MaxCpuThreads - 2)  # Reduce by 2 as per plan

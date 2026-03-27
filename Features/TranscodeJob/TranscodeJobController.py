@@ -398,7 +398,7 @@ def CancelActiveTranscode():
 
 @TranscodeJobBlueprint.route('/Pause', methods=['POST'])
 def PauseTranscoding():
-    """Pause transcoding queue - finish current job, don't start new ones."""
+    """Pause transcoding queue and migrate running jobs to E-cores (Game Mode)."""
     try:
         LoggingService.LogFunctionEntry("PauseTranscoding", "TranscodeJobController")
 
@@ -410,12 +410,26 @@ def PauseTranscoding():
             'IsProcessing': False
         })
 
+        # Migrate active FFmpeg jobs to E-cores so P-cores are free
+        MigrationResult = None
+        try:
+            from Services.CpuAffinityService import GetCpuAffinityServiceInstance
+            AffinityService = GetCpuAffinityServiceInstance()
+            if AffinityService.CpuAffinityEnabled:
+                MigrationResult = AffinityService.MigrateActiveJobsToTier("efficiency")
+        except Exception as MigrationError:
+            LoggingService.LogWarning(f"Failed to migrate jobs to E-cores on pause: {MigrationError}",
+                                     "TranscodeJobController", "PauseTranscoding")
+
         if success:
+            Message = "Transcoding paused - no new jobs will start"
+            if MigrationResult and MigrationResult.get("MigratedCount", 0) > 0:
+                Message += f", {MigrationResult['MigratedCount']} running job(s) moved to E-cores"
             LoggingService.LogInfo("Transcoding paused successfully",
                                  "TranscodeJobController", "PauseTranscoding")
             return jsonify({
                 "Success": True,
-                "Message": "Transcoding paused - current job will complete, no new jobs will start"
+                "Message": Message
             })
         else:
             return jsonify({
@@ -430,12 +444,22 @@ def PauseTranscoding():
 
 @TranscodeJobBlueprint.route('/Resume', methods=['POST'])
 def ResumeTranscoding():
-    """Resume transcoding queue processing."""
+    """Resume transcoding queue and restore jobs to P-cores."""
     try:
         LoggingService.LogFunctionEntry("ResumeTranscoding", "TranscodeJobController")
 
         from Repositories.DatabaseManager import DatabaseManager
         db_manager = DatabaseManager()
+
+        # Restore active jobs to their original core tier before resuming queue
+        try:
+            from Services.CpuAffinityService import GetCpuAffinityServiceInstance
+            AffinityService = GetCpuAffinityServiceInstance()
+            if AffinityService.CpuAffinityEnabled:
+                AffinityService.MigrateActiveJobsToTier("restore")
+        except Exception as MigrationError:
+            LoggingService.LogWarning(f"Failed to restore jobs to P-cores on resume: {MigrationError}",
+                                     "TranscodeJobController", "ResumeTranscoding")
 
         success = db_manager.UpdateServiceStatus("TranscodeService", {
             'Status': 'Running',
