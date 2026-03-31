@@ -140,26 +140,33 @@
     <!-- ═══════════════════════════════════════════════════ -->
     <div class="card mb-4">
         <div class="card-header py-2 d-flex justify-content-between align-items-center">
-            <h6 class="mb-0"><i class="fas fa-film me-2"></i>Transcoding</h6>
-            <span id="TranscodeStatusBadge" class="badge bg-secondary">Loading...</span>
+            <h6 class="mb-0"><i class="fas fa-film me-2"></i>Active Transcode Jobs</h6>
+            <div class="d-flex align-items-center gap-2">
+                <span id="TranscodeStatusBadge" class="badge bg-secondary">Loading...</span>
+                <button id="BtnStopAfterJob" class="btn btn-warning btn-sm" onclick="StopAfterJob()" disabled>
+                    <i class="fas fa-stop-circle me-1"></i>Stop After This Job
+                </button>
+                <button id="BtnResume" class="btn btn-success btn-sm d-none" onclick="ResumeTranscoding()">
+                    <i class="fas fa-play-circle me-1"></i>Resume
+                </button>
+            </div>
         </div>
-        <div class="card-body py-3">
-            <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
-                <div id="CurrentJobInfo" class="d-none">
-                    <i class="fas fa-spinner fa-spin me-1 text-primary"></i>
-                    <strong id="CurrentJobName"></strong>
-                    <span id="CurrentJobPercent" class="ms-2 badge bg-info"></span>
-                    <small id="CurrentJobDetails" class="ms-2 text-muted"></small>
-                </div>
-                <div id="NoJobInfo" class="text-muted"><em>No active transcode job</em></div>
-                <div class="d-flex gap-2 ms-auto">
-                    <button id="BtnStopAfterJob" class="btn btn-warning btn-sm" onclick="StopAfterJob()" disabled>
-                        <i class="fas fa-stop-circle me-1"></i>Stop After This Job
-                    </button>
-                    <button id="BtnResume" class="btn btn-success btn-sm d-none" onclick="ResumeTranscoding()">
-                        <i class="fas fa-play-circle me-1"></i>Resume
-                    </button>
-                </div>
+        <div class="card-body p-0">
+            <div id="NoJobInfo" class="text-muted py-3 px-3"><em>No active transcode jobs</em></div>
+            <div id="ActiveJobsTable" class="d-none">
+                <table class="table table-sm table-hover mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th class="ps-3">File</th>
+                            <th style="width: 90px;">Size</th>
+                            <th style="width: 200px;">Progress</th>
+                            <th style="width: 80px;">FPS</th>
+                            <th style="width: 80px;">Speed</th>
+                            <th style="width: 100px;">ETA</th>
+                        </tr>
+                    </thead>
+                    <tbody id="ActiveJobsBody"></tbody>
+                </table>
             </div>
         </div>
     </div>
@@ -393,57 +400,48 @@ function RenderSavingsChart(Data) {
 function UpdateTranscodeStatus(Data) {
     const Status = Data.ServiceStatus;
     const IsProcessing = Data.IsProcessing;
-    const CurrentJob = Data.CurrentJob;
+    const ActiveJobs = Data.ActiveJobs || [];
 
     const Badge = document.getElementById('TranscodeStatusBadge');
     const BtnStop = document.getElementById('BtnStopAfterJob');
     const BtnResume = document.getElementById('BtnResume');
-    const JobInfo = document.getElementById('CurrentJobInfo');
     const NoJob = document.getElementById('NoJobInfo');
+    const JobsTable = document.getElementById('ActiveJobsTable');
+    const JobsBody = document.getElementById('ActiveJobsBody');
 
-    Badge.className = 'badge';
+    const R = RenderTranscodeStatusBadge(Badge, Status, IsProcessing);
+    BtnStop.disabled = R.StopDisabled;
+    BtnResume.classList.toggle('d-none', !R.ShowResume);
 
-    if (IsProcessing) {
-        Badge.textContent = 'Running';
-        Badge.classList.add('bg-success');
-        BtnStop.disabled = false;
-        BtnResume.classList.add('d-none');
-    } else if (Status === 'GracefulStop' || Status === 'Paused') {
-        Badge.textContent = 'Stopping After Current Job';
-        Badge.classList.add('bg-warning', 'text-dark');
-        BtnStop.disabled = true;
-        BtnResume.classList.remove('d-none');
-    } else if (Status === 'Stopped' || Status === 'Unknown') {
-        Badge.textContent = 'Stopped';
-        Badge.classList.add('bg-danger');
-        BtnStop.disabled = true;
-        BtnResume.classList.remove('d-none');
-    } else if (Status === 'Running') {
-        Badge.textContent = 'Idle';
-        Badge.classList.add('bg-info');
-        BtnStop.disabled = true;
-        BtnResume.classList.add('d-none');
-    } else {
-        Badge.textContent = Status;
-        Badge.classList.add('bg-secondary');
-        BtnStop.disabled = true;
-        BtnResume.classList.add('d-none');
-    }
-
-    if (CurrentJob) {
-        const FileName = CurrentJob.FilePath.split(/[/\\]/).pop();
-        document.getElementById('CurrentJobName').textContent = FileName;
-        document.getElementById('CurrentJobPercent').textContent = (CurrentJob.ProgressPercent || 0) + '%';
-        const Details = [];
-        if (CurrentJob.CurrentPhase) Details.push(CurrentJob.CurrentPhase);
-        if (CurrentJob.CurrentFPS) Details.push(CurrentJob.CurrentFPS + ' fps');
-        if (CurrentJob.CurrentSpeed) Details.push(CurrentJob.CurrentSpeed);
-        document.getElementById('CurrentJobDetails').textContent = Details.join(' | ');
-        JobInfo.classList.remove('d-none');
+    if (ActiveJobs.length > 0) {
         NoJob.classList.add('d-none');
+        JobsTable.classList.remove('d-none');
+        JobsBody.innerHTML = ActiveJobs.map(function(Job) {
+            const FileName = Job.FileName || Job.FilePath.split(/[/\\]/).pop();
+            const Pct = (Job.ProgressPercent || 0).toFixed(1);
+            const Details = [];
+            if (Job.CurrentPhase) Details.push(Job.CurrentPhase);
+            return '<tr>' +
+                '<td class="ps-3"><i class="fas fa-spinner fa-spin me-1 text-primary"></i>' +
+                    '<span title="' + (Job.FilePath || '').replace(/"/g, '&quot;') + '">' + FileName + '</span></td>' +
+                '<td>' + (Job.SizeMB ? (Job.SizeMB >= 1024 ? (Job.SizeMB / 1024).toFixed(2) + ' GB' : Math.round(Job.SizeMB) + ' MB') : '-') + '</td>' +
+                '<td><div class="d-flex align-items-center gap-2">' +
+                    '<div class="progress flex-grow-1" style="height: 18px;">' +
+                        '<div class="progress-bar progress-bar-striped progress-bar-animated bg-primary" ' +
+                            'role="progressbar" style="width: ' + Pct + '%" ' +
+                            'aria-valuenow="' + Pct + '" aria-valuemin="0" aria-valuemax="100"></div>' +
+                    '</div>' +
+                    '<small class="text-nowrap">' + Pct + '%</small>' +
+                '</div></td>' +
+                '<td>' + (Job.CurrentFPS ? parseFloat(Job.CurrentFPS).toFixed(1) : '-') + '</td>' +
+                '<td>' + (Job.CurrentSpeed || '-') + '</td>' +
+                '<td>' + (Job.ETA || '-') + '</td>' +
+            '</tr>';
+        }).join('');
     } else {
-        JobInfo.classList.add('d-none');
         NoJob.classList.remove('d-none');
+        JobsTable.classList.add('d-none');
+        JobsBody.innerHTML = '';
     }
 }
 

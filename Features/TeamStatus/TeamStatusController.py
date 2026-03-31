@@ -46,27 +46,49 @@ def GetOverview():
         IsProcessing = bool(StatusRow.get('IsProcessing', False)) if StatusRow else False
         ActiveJobsCount = StatusRow.get('ActiveJobsCount', 0) if StatusRow else 0
 
-        # Current job info — fetch from Progress endpoint data
-        CurrentJob = None
-        if IsProcessing:
-            JobQuery = """
-                SELECT ta.FilePath, tp.ProgressPercent, tp.CurrentPhase,
-                       tp.CurrentFPS, tp.CurrentSpeed
-                FROM TranscodeProgress tp
-                JOIN TranscodeAttempts ta ON tp.TranscodeAttemptId = ta.Id
-                WHERE tp.Status = 'Running'
-                ORDER BY tp.LastProgressUpdate DESC
-                LIMIT 1
+        # Current job info — query ALL active jobs from progress + queue
+        # This supports multiple concurrent transcode workers across machines
+        ActiveJobs = []
+        JobQuery = """
+            SELECT tq.Id AS QueueId, ta.FilePath, tq.FileName, tq.SizeMB,
+                   tp.ProgressPercent, tp.CurrentPhase,
+                   tp.CurrentFPS, tp.CurrentSpeed, tp.ETA,
+                   tq.DateStarted
+            FROM TranscodeProgress tp
+            JOIN TranscodeAttempts ta ON tp.TranscodeAttemptId = ta.Id
+            JOIN TranscodeQueue tq ON tq.FilePath = ta.FilePath AND tq.Status = 'Running'
+            WHERE tp.Status = 'Running'
+            ORDER BY tq.DateStarted ASC
+        """
+        JobRows = DbManager.DatabaseService.ExecuteQuery(JobQuery)
+        for Row in (JobRows or []):
+            ActiveJobs.append({
+                "QueueId": Row.get('QueueId', 0),
+                "FilePath": Row.get('FilePath', ''),
+                "FileName": Row.get('FileName', ''),
+                "SizeMB": Row.get('SizeMB', 0),
+                "ProgressPercent": Row.get('ProgressPercent', 0),
+                "CurrentPhase": Row.get('CurrentPhase', ''),
+                "CurrentFPS": Row.get('CurrentFPS', 0),
+                "CurrentSpeed": Row.get('CurrentSpeed', ''),
+                "ETA": Row.get('ETA', ''),
+                "DateStarted": str(Row.get('DateStarted', '')) if Row.get('DateStarted') else ''
+            })
+
+        # Also check for running queue items as a fallback
+        if not IsProcessing:
+            RunningQueueQuery = """
+                SELECT COUNT(*) AS RunningCount
+                FROM TranscodeQueue
+                WHERE Status = 'Running'
             """
-            JobRows = DbManager.DatabaseService.ExecuteQuery(JobQuery)
-            if JobRows:
-                CurrentJob = {
-                    "FilePath": JobRows[0].get('FilePath', ''),
-                    "ProgressPercent": JobRows[0].get('ProgressPercent', 0),
-                    "CurrentPhase": JobRows[0].get('CurrentPhase', ''),
-                    "CurrentFPS": JobRows[0].get('CurrentFPS', 0),
-                    "CurrentSpeed": JobRows[0].get('CurrentSpeed', '')
-                }
+            RunningRows = DbManager.DatabaseService.ExecuteQuery(RunningQueueQuery)
+            if RunningRows and (RunningRows[0].get('RunningCount', 0) or 0) > 0:
+                IsProcessing = True
+                ActiveJobsCount = RunningRows[0].get('RunningCount', 0)
+
+        # Backward compat: CurrentJob is first active job (or null)
+        CurrentJob = ActiveJobs[0] if ActiveJobs else None
 
         return jsonify({
             "Success": True,
@@ -79,7 +101,8 @@ def GetOverview():
                 "ServiceStatus": CurrentStatus,
                 "IsProcessing": IsProcessing,
                 "ActiveJobsCount": ActiveJobsCount,
-                "CurrentJob": CurrentJob
+                "CurrentJob": CurrentJob,
+                "ActiveJobs": ActiveJobs
             }
         })
 

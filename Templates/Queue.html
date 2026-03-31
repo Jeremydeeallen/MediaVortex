@@ -1097,28 +1097,9 @@ class TranscodeQueueManager {
             const BtnStart = document.getElementById('BtnStartTranscoding');
             const BtnStop = document.getElementById('BtnStopTranscoding');
 
-            Badge.className = 'badge';
-            if (IsProcessing) {
-                Badge.textContent = 'Running';
-                Badge.classList.add('bg-success');
-                BtnStart.classList.add('d-none');
-                BtnStop.classList.remove('d-none');
-            } else if (Status === 'Stopped' || Status === 'Unknown') {
-                Badge.textContent = 'Stopped';
-                Badge.classList.add('bg-danger');
-                BtnStart.classList.remove('d-none');
-                BtnStop.classList.add('d-none');
-            } else if (Status === 'Running') {
-                Badge.textContent = 'Idle';
-                Badge.classList.add('bg-info');
-                BtnStart.classList.add('d-none');
-                BtnStop.classList.add('d-none');
-            } else {
-                Badge.textContent = Status;
-                Badge.classList.add('bg-secondary');
-                BtnStart.classList.add('d-none');
-                BtnStop.classList.add('d-none');
-            }
+            const R = RenderTranscodeStatusBadge(Badge, Status, IsProcessing);
+            BtnStart.classList.toggle('d-none', !R.ShowStart);
+            BtnStop.classList.toggle('d-none', !R.ShowStop);
         } catch (error) {
             // Silently ignore status polling errors
         }

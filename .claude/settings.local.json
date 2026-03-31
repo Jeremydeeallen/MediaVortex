@@ -77,7 +77,12 @@
       "Bash(where py:*)",
       "WebSearch",
       "WebFetch(domain:www.ebay.com)",
-      "WebFetch(domain:adroitdba.com)"
+      "WebFetch(domain:adroitdba.com)",
+      "WebFetch(domain:unsplash.com)",
+      "WebFetch(domain:dev.to)",
+      "WebFetch(domain:help.unsplash.com)",
+      "WebFetch(domain:images.unsplash.com)",
+      "WebFetch(domain:www.pexels.com)"
     ]
   }
 }
