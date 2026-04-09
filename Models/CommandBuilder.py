@@ -209,41 +209,35 @@ class CommandBuilder:
             pass
 
     def GenerateOutputFileName(self, OriginalFileName: str, SourceResolution: str, TargetResolution: str, ContainerType: str = 'mp4', CrfValue: int = None) -> str:
-        """Generate output filename with target resolution and container type."""
+        """Generate output filename with target resolution and container type.
+        CrfValue parameter is accepted for backwards compatibility but no longer embedded in filenames.
+        CRF is tracked in the TranscodeAttempts table."""
         try:
             # Get the base filename without extension
             BaseName = os.path.splitext(OriginalFileName)[0]
-            
+
             # If resolutions are the same, just change extension
             if SourceResolution == TargetResolution:
-                if CrfValue:
-                    return f"{BaseName}.{CrfValue}.{ContainerType}"
                 return f"{BaseName}.{ContainerType}"
-            
+
             # Extract resolution from filename (e.g., "1080p", "720p")
             SourceResolutionStr = self.ExtractResolutionFromFilename(OriginalFileName)
             if not SourceResolutionStr:
                 # If no resolution found in filename, add target resolution
                 TargetResolutionStr = self.FormatResolutionForFilename(TargetResolution)
-                if CrfValue:
-                    return f"{BaseName}{TargetResolutionStr}.{CrfValue}.{ContainerType}"
                 return f"{BaseName}{TargetResolutionStr}.{ContainerType}"
-            
+
             # Replace source resolution with target resolution
             TargetResolutionStr = self.FormatResolutionForFilename(TargetResolution)
             NewBaseName = OriginalFileName.replace(SourceResolutionStr, TargetResolutionStr)
             NewBaseName = os.path.splitext(NewBaseName)[0]  # Remove old extension
-            
+
             # Add container type extension
-            if CrfValue:
-                return f"{NewBaseName}.{CrfValue}.{ContainerType}"
             return f"{NewBaseName}.{ContainerType}"
-            
+
         except Exception:
             # If anything goes wrong, return original filename with container extension
             BaseName = os.path.splitext(OriginalFileName)[0]
-            if CrfValue:
-                return f"{BaseName}.{CrfValue}.{ContainerType}"
             return f"{BaseName}.{ContainerType}"
     
     def ExtractResolutionFromFilename(self, Filename: str) -> Optional[str]:

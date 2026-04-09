@@ -4239,8 +4239,8 @@ class DatabaseManager:
                                      "DatabaseManager", "GetSystemSetting")
                 return SettingValue
             else:
-                LoggingService.LogWarning(f"System setting not found: {SettingKey}", 
-                                        "DatabaseManager", "GetSystemSetting")
+                LoggingService.LogDebug(f"System setting not found: {SettingKey}",
+                                      "DatabaseManager", "GetSystemSetting")
                 return None
                 
         except Exception as e:
