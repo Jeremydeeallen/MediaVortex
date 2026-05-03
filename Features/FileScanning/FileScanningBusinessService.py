@@ -789,7 +789,7 @@ class FileScanningBusinessService:
         """Find a fuzzy match for a file in the database."""
         try:
             # Get all files for this root folder
-            DatabaseFiles = self.Repository.GetMediaFilesByRootFolder(RootFolderId)
+            DatabaseFiles = self.Repository.GetMediaFilesByRootFolderId(RootFolderId)
 
             # Extract show/season/episode info from filename
             FileShowInfo = self.ExtractShowInfo(FileName)
@@ -838,7 +838,7 @@ class FileScanningBusinessService:
             CurrentResolution = ResolutionService.ExtractResolutionFromFilename(FileName)
 
             # STEP 4: Get all files for this root folder
-            DatabaseFiles = self.Repository.GetMediaFilesByRootFolder(RootFolderId)
+            DatabaseFiles = self.Repository.GetMediaFilesByRootFolderId(RootFolderId)
 
             LoggingService.LogDebug(f"Searching {len(DatabaseFiles)} database files for base name match: '{BaseFileName}'", 'FindTranscodedFileMatch', 'FileScanningBusinessService')
 

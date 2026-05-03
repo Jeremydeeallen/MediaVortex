@@ -163,6 +163,78 @@ def SmartPopulateQueue():
         return jsonify({'Success': False, 'Message': str(Ex)}), 500
 
 
+@ShowSettingsBlueprint.route('/QueueByFolder', methods=['POST'])
+def QueueByFolder():
+    """Queue all untranscoded files for specified show/media folders.
+    Applies the same safety guards as PopulateQueueFromMediaFiles:
+    - Skips files with HasExplicitEnglishAudio = false
+    - Skips files already successfully transcoded with VMAF >= 80
+    - Skips files already in the transcode queue
+    """
+    try:
+        Data = request.get_json()
+        if not Data:
+            return jsonify({'Success': False, 'Message': 'No data provided'}), 400
+
+        ShowFolders = Data.get('ShowFolders', [])
+        ProfileId = Data.get('ProfileId')
+
+        if not ShowFolders:
+            return jsonify({'Success': False, 'Message': 'ShowFolders list is required'}), 400
+        if not ProfileId:
+            return jsonify({'Success': False, 'Message': 'ProfileId is required'}), 400
+
+        ProfileId = int(ProfileId)
+
+        from Core.Database.DatabaseService import DatabaseService, EscapeLikePattern
+
+        FolderConditions = []
+        Params = []
+        for Folder in ShowFolders:
+            FolderConditions.append("m.FilePath LIKE %s ESCAPE '!'")
+            Params.append(EscapeLikePattern(Folder) + '%')
+
+        FolderWhere = ' OR '.join(FolderConditions)
+
+        Sql = f"""
+            SELECT m.Id, m.FilePath, m.FileName, m.SizeMB, m.VideoBitrateKbps,
+                   m.Codec, m.Resolution, m.ResolutionCategory,
+                   m.HasExplicitEnglishAudio, m.AudioLanguages
+            FROM MediaFiles m
+            WHERE (m.TranscodedByMediaVortex IS NULL OR m.TranscodedByMediaVortex = false)
+              AND m.FilePath NOT IN (SELECT FilePath FROM TranscodeQueue)
+              AND m.SizeMB > 0
+              AND (m.HasExplicitEnglishAudio IS NULL OR m.HasExplicitEnglishAudio = true)
+              AND m.Resolution IS NOT NULL
+              AND ({FolderWhere})
+            ORDER BY m.SizeMB DESC
+        """
+
+        Rows = DatabaseService().ExecuteQuery(Sql, tuple(Params))
+
+        if not Rows:
+            return jsonify({'Success': True, 'Message': 'No eligible files found in the selected folders', 'ItemsAdded': 0, 'ItemsSkipped': 0})
+
+        Items = []
+        for Row in Rows:
+            Items.append({
+                'MediaFileId': Row.get('Id'),
+                'FilePath': Row.get('FilePath', ''),
+                'SizeMB': float(Row.get('SizeMB', 0) or 0),
+                'Mode': 'Transcode',
+                'Priority': int(float(Row.get('SizeMB', 0) or 0)),
+            })
+
+        from Features.TranscodeQueue.QueueManagementBusinessService import QueueManagementBusinessService
+        Service = QueueManagementBusinessService()
+        Result = Service.AddSuggestionsToQueue(Items, ProfileId=ProfileId)
+
+        return jsonify(Result)
+    except Exception as Ex:
+        LoggingService.LogException("Exception queuing by folder", Ex, "ShowSettingsController", "QueueByFolder")
+        return jsonify({'Success': False, 'Message': str(Ex)}), 500
+
+
 @ShowSettingsBlueprint.route('/AddToQueue', methods=['POST'])
 def AddSuggestionsToQueue():
     """Add user-approved suggestions to the transcode queue."""

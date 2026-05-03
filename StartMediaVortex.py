@@ -1,17 +1,22 @@
 """
 StartMediaVortex - Service orchestrator
 Opens each service in its own Windows Terminal tab using their own venv Python.
+
+Network drives use SMB (net use). Brain shares (F:, T:) use Samba with user auth.
+Allen/Synology shares (Z:) use native Synology SMB. All are mapped with
+/persistent:yes so they survive reboots via Windows Credential Manager.
 """
 
 import os
 import sys
 import subprocess
-import time
 
 RootDirectory = os.path.dirname(os.path.abspath(__file__))
 
 NetworkDrives = [
-    {"Letter": "T", "UncPath": r"\\10.0.0.40\mnt\pve\Media\_tv"},
+    {"Letter": "F", "UncPath": r"\\10.0.0.40\Media", "User": "media", "Password": "media", "Required": True},
+    {"Letter": "T", "UncPath": r"\\10.0.0.40\Media_tv", "User": "media", "Password": "media", "Required": True},
+    {"Letter": "Z", "UncPath": r"\\10.0.0.61\xxx", "Required": False},
 ]
 
 Services = [
@@ -32,27 +37,49 @@ def GetPythonExe(ServiceDirectory):
     return os.path.join(ServiceDirectory, "venv", "Scripts", "python.exe")
 
 
+def _MountSmbDrives(Drives):
+    """Mount SMB drives via net use with /persistent:yes."""
+    for Drive in Drives:
+        Letter = Drive["Letter"]
+        UncPath = Drive["UncPath"]
+        Cmd = ["net", "use", f"{Letter}:", UncPath, "/persistent:yes"]
+        if "User" in Drive:
+            Cmd.extend([f"/user:{Drive['User']}", Drive["Password"]])
+        Result = subprocess.run(Cmd, capture_output=True, text=True)
+        if Result.returncode == 0:
+            print(f"  [OK]   {Letter}:\\ mounted")
+        else:
+            Tag = "[FAIL]" if Drive.get("Required", True) else "[WARN]"
+            ErrorMsg = (Result.stdout + Result.stderr).strip().split("\n")[0]
+            print(f"  {Tag} {Letter}:\\: {ErrorMsg}")
+
+
 def main():
     print("================================")
     print("Starting MediaVortex services...")
     print("================================")
 
-    # Ensure required network drives are mounted
+    # Check which drives need mounting
+    DrivesNeeded = []
     for Drive in NetworkDrives:
         DrivePath = f"{Drive['Letter']}:\\"
         if os.path.exists(DrivePath):
             print(f"  [OK]   {DrivePath} already mounted")
         else:
-            print(f"  [MAP]  Mounting {DrivePath} -> {Drive['UncPath']}")
-            result = subprocess.run(
-                ["powershell", "-Command",
-                 f"New-PSDrive -Name {Drive['Letter']} -PSProvider FileSystem -Root \"{Drive['UncPath']}\" -Persist"],
-                capture_output=True, text=True
-            )
-            if result.returncode == 0:
-                print(f"  [OK]   {DrivePath} mounted successfully")
-            else:
-                print(f"  [WARN] Failed to mount {DrivePath}: {result.stderr.strip()}")
+            DrivesNeeded.append(Drive)
+
+    if DrivesNeeded:
+        _MountSmbDrives(DrivesNeeded)
+        time.sleep(2)
+
+    # Verify required drives are accessible
+    for Drive in NetworkDrives:
+        DrivePath = f"{Drive['Letter']}:\\"
+        if Drive.get("Required", True) and not os.path.exists(DrivePath):
+            print(f"  [FAIL] Required drive {DrivePath} is not accessible")
+            sys.exit(1)
+        elif not os.path.exists(DrivePath):
+            print(f"  [WARN] Optional drive {DrivePath} is not accessible")
 
     # Validate all services before launching
     for Service in Services:
@@ -65,15 +92,22 @@ def main():
             print(f"  [FAIL] {Service['Name']}: Main.py not found at {MainFile}")
             sys.exit(1)
 
-    # Launch each service as a separate wt tab with a delay between them
-    for i, Service in enumerate(Services):
+    # Launch all services as tabs in a single Windows Terminal window.
+    # Each tab runs RunService.cmd which loops on Ctrl+C so you can restart.
+    RunServiceScript = os.path.join(RootDirectory, "RunService.cmd")
+    TabCommands = []
+    for Service in Services:
         PythonExe = GetPythonExe(Service["Directory"])
-        MainFile = os.path.join(Service["Directory"], Service["MainFile"])
-        TabCmd = ["wt.exe", "--title", Service["Name"], "-d", Service["Directory"], PythonExe, MainFile]
-        subprocess.Popen(TabCmd)
+        Tab = f'--title "{Service["Name"]}" -d "{Service["Directory"]}" "{RunServiceScript}" "{Service["Name"]}" "{PythonExe}" "{Service["MainFile"]}"'
+        TabCommands.append(Tab)
+
+    WtCmd = "wt.exe " + TabCommands[0]
+    for Tab in TabCommands[1:]:
+        WtCmd += f" ; new-tab {Tab}"
+
+    subprocess.Popen(WtCmd)
+    for Service in Services:
         print(f"  Launched {Service['Name']}")
-        if i < len(Services) - 1:
-            time.sleep(3)
 
     print("================================")
     print("All services launched.")
