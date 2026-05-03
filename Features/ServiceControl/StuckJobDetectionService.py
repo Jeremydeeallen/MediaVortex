@@ -105,9 +105,17 @@ class StuckJobDetectionService:
     # Quality test queue jobs sitting with DateStarted=NULL longer than this are stale (never picked up)
     STALE_QUALITY_TEST_THRESHOLD_MINUTES = 60
 
+    # If worker heartbeat is older than this many minutes, consider the worker offline
+    WORKER_HEARTBEAT_STALE_MINUTES = 5
+
     def IsJobStuck(self, Job) -> tuple[bool, str]:
-        """Check if a specific job is stuck by verifying if the FFmpeg process is still alive and making progress."""
+        """Check if a specific job is stuck using three-tier detection:
+        1. Worker heartbeat (distributed) - if the owning worker is offline
+        2. Progress stagnation - if no frame advance for 15 minutes
+        3. Local PID check - if the job is owned by this machine"""
         try:
+            import socket
+
             # Get active job record for this transcode job
             activeJobs = self.DatabaseManager.GetActiveJobsByService("TranscodeService")
 
@@ -122,26 +130,38 @@ class StuckJobDetectionService:
                 # No active job record found - this could be stuck
                 return True, "No ActiveJob record found for running transcode job"
 
+            # Tier 1: Worker heartbeat check (for distributed workers)
+            JobWorkerName = relevantActiveJob.get('WorkerName')
+            if JobWorkerName:
+                isWorkerOffline, workerReason = self._IsWorkerOffline(JobWorkerName)
+                if isWorkerOffline:
+                    return True, f"Worker '{JobWorkerName}' is offline: {workerReason}"
+
             processId = relevantActiveJob.get('ProcessId')
             if not processId:
                 # No process ID recorded yet - might be stuck
                 return True, "No ProcessId recorded in ActiveJob"
 
-            # Check if the tracked process is still alive and is actually FFmpeg
-            isAlive = self.IsProcessAlive(processId)
-
-            if not isAlive:
-                return True, f"FFmpeg process {processId} not found or is no longer FFmpeg (process died or PID reused)"
-
-            # Secondary check: verify there are actually FFmpeg processes on the system
-            ffmpegProcesses = self.ProcessManagementService.FindFFmpegProcesses()
-            if not ffmpegProcesses:
-                return True, f"No FFmpeg processes running on system but job status is Running (PID {processId} may have been reused)"
-
-            # Progress stagnation check: process is alive but may be frozen
+            # Tier 2: Progress stagnation check (works across all machines)
             isFrozen, frozenReason = self._IsJobFrozen(Job)
             if isFrozen:
                 return True, frozenReason
+
+            # Tier 3: Local PID check (only for jobs on this machine)
+            LocalHostname = socket.gethostname()
+            IsLocalJob = (not JobWorkerName) or (JobWorkerName == LocalHostname)
+
+            if IsLocalJob:
+                # Check if the tracked process is still alive and is actually FFmpeg
+                isAlive = self.IsProcessAlive(processId)
+
+                if not isAlive:
+                    return True, f"FFmpeg process {processId} not found or is no longer FFmpeg (process died or PID reused)"
+
+                # Secondary check: verify there are actually FFmpeg processes on the system
+                ffmpegProcesses = self.ProcessManagementService.FindFFmpegProcesses()
+                if not ffmpegProcesses:
+                    return True, f"No FFmpeg processes running on system but job status is Running (PID {processId} may have been reused)"
 
             return False, "Process is alive and making progress"
 
@@ -150,6 +170,40 @@ class StuckJobDetectionService:
                                      "StuckJobDetectionService", "IsJobStuck")
             # If we can't determine, assume it's not stuck to be safe
             return False, f"Error checking process status: {str(e)}"
+
+    def _IsWorkerOffline(self, WorkerName: str) -> tuple[bool, str]:
+        """Check if a worker's heartbeat is stale (indicating it's offline/crashed)."""
+        try:
+            WorkerConfig = self.DatabaseManager.GetWorkerConfig(WorkerName)
+            if not WorkerConfig:
+                # No worker record found - might be a legacy job from before distributed mode
+                return False, "No worker record (legacy job)"
+
+            LastHeartbeat = WorkerConfig.get('LastHeartbeat') or WorkerConfig.get('lastheartbeat')
+            WorkerStatus = WorkerConfig.get('Status') or WorkerConfig.get('status')
+
+            # If worker explicitly marked Offline, it's offline
+            if WorkerStatus and WorkerStatus.lower() == 'offline':
+                return True, "Worker status is Offline"
+
+            if not LastHeartbeat:
+                return False, "No heartbeat recorded yet"
+
+            # Parse heartbeat timestamp
+            if isinstance(LastHeartbeat, str):
+                LastHeartbeat = datetime.strptime(LastHeartbeat, "%Y-%m-%d %H:%M:%S")
+
+            MinutesSinceHeartbeat = (datetime.now() - LastHeartbeat).total_seconds() / 60.0
+
+            if MinutesSinceHeartbeat >= self.WORKER_HEARTBEAT_STALE_MINUTES:
+                return True, f"Last heartbeat was {MinutesSinceHeartbeat:.1f} minutes ago (threshold: {self.WORKER_HEARTBEAT_STALE_MINUTES}min)"
+
+            return False, f"Heartbeat {MinutesSinceHeartbeat:.1f} minutes ago (healthy)"
+
+        except Exception as e:
+            LoggingService.LogException(f"Error checking worker heartbeat for {WorkerName}", e,
+                                     "StuckJobDetectionService", "_IsWorkerOffline")
+            return False, f"Error checking heartbeat: {str(e)}"
 
     def _IsJobFrozen(self, Job) -> tuple[bool, str]:
         """Check if a job's FFmpeg process is alive but not making progress (frozen/hung).

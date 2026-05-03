@@ -144,6 +144,39 @@ class TranscodeQueueRepository(BaseRepository):
             return self._MapRowToQueueItem(rows[0])
         return None
 
+    def ClaimNextPendingTranscodeJob(self, WorkerName: str) -> Optional[TranscodeQueueModel]:
+        """Atomically claim the next pending job using SELECT FOR UPDATE SKIP LOCKED.
+        This prevents race conditions when multiple workers compete for jobs."""
+        try:
+            import psycopg2.extras
+            connection = self.DatabaseService.GetConnection()
+            try:
+                cursor = connection.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                query = f"""
+                    UPDATE TranscodeQueue
+                    SET Status = 'Running', ClaimedBy = %s, ClaimedAt = NOW(), DateStarted = NOW()
+                    WHERE Id = (
+                        SELECT Id FROM TranscodeQueue
+                        WHERE Status = 'Pending'
+                        ORDER BY SizeMB DESC, DateAdded ASC
+                        LIMIT 1
+                        FOR UPDATE SKIP LOCKED
+                    )
+                    RETURNING {self._QUEUE_SELECT_COLS}
+                """
+                cursor.execute(query, (WorkerName,))
+                row = cursor.fetchone()
+                connection.commit()
+
+                if row:
+                    return self._MapRowToQueueItem(row)
+                return None
+            finally:
+                self.DatabaseService.CloseConnection(connection)
+        except Exception as e:
+            LoggingService.LogException("Exception in ClaimNextPendingTranscodeJob", e, "TranscodeQueueRepository", "ClaimNextPendingTranscodeJob")
+            return None
+
     def ClearAllTranscodeQueueItems(self) -> int:
         """Clear pending items from the transcoding queue, preserving in-progress jobs."""
         try:

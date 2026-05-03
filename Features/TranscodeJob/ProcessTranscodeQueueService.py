@@ -25,13 +25,32 @@ class ProcessTranscodeQueueService:
                  CommandBuilderInstance: CommandBuilderService = None,
                  VideoTranscodingInstance: VideoTranscodingService = None,
                  QueueManagementInstance: QueueManagementService = None,
-                 ShouldQualityTestInstance: ShouldQualityTestService = None):
+                 ShouldQualityTestInstance: ShouldQualityTestService = None,
+                 WorkerName: str = None,
+                 WorkerConfig: dict = None):
         self.DatabaseManager = DatabaseManagerInstance or DatabaseManager()
         self.FileManager = FileManagerInstance or TranscodingFileManagerService()
         self.CommandBuilder = CommandBuilderInstance or CommandBuilderService()
         self.VideoTranscoding = VideoTranscodingInstance or VideoTranscodingService()
         self.QueueManagement = QueueManagementInstance or QueueManagementService(DatabaseManagerInstance=self.DatabaseManager)
         self.ShouldQualityTest = ShouldQualityTestInstance or ShouldQualityTestService()
+
+        # Worker identity for distributed transcoding
+        import socket
+        self.WorkerName = WorkerName or socket.gethostname()
+        self.WorkerConfig = WorkerConfig or {}
+
+        # Worker-specific paths (from Workers table, with fallback defaults)
+        self.FFmpegPath = self.WorkerConfig.get('FFmpegPath') or self.WorkerConfig.get('ffmpegpath')
+        self.OutputDirectory = self.WorkerConfig.get('StagingDirectory') or self.WorkerConfig.get('stagingdirectory')
+        self.ShareMountPrefix = self.WorkerConfig.get('ShareMountPrefix') or self.WorkerConfig.get('sharemountprefix')
+        self.ShareCanonicalPrefix = self.WorkerConfig.get('ShareCanonicalPrefix') or self.WorkerConfig.get('sharecanonicalprefix') or 'T:\\'
+
+        # Path translation service for cross-platform support
+        self.PathTranslation = None
+        if self.ShareMountPrefix:
+            from Core.Services.PathTranslationService import PathTranslationService
+            self.PathTranslation = PathTranslationService(self.ShareMountPrefix, self.ShareCanonicalPrefix)
 
         # Processing state
         self.IsProcessing = False
@@ -268,9 +287,10 @@ class ProcessTranscodeQueueService:
             self.IsProcessing = False
 
     def GetNextJob(self) -> Optional[TranscodeQueueModel]:
-        """Get the next pending job from the queue."""
+        """Get and atomically claim the next pending job from the queue.
+        Uses SELECT FOR UPDATE SKIP LOCKED for safe distributed operation."""
         try:
-            return self.DatabaseManager.GetNextPendingTranscodeJob()
+            return self.DatabaseManager.ClaimNextPendingTranscodeJob(self.WorkerName)
         except Exception as e:
             LoggingService.LogException("Exception getting next job", e, "ProcessTranscodeQueueService", "GetNextJob")
             return None
@@ -295,7 +315,8 @@ class ProcessTranscodeQueueService:
                 JobType="Transcode",
                 QueueId=Job.Id,
                 ProcessId=os.getpid(),
-                ThreadId=threading.get_ident()
+                ThreadId=threading.get_ident(),
+                WorkerName=self.WorkerName
             )
 
             if ActiveJobId == 0:
@@ -340,15 +361,17 @@ class ProcessTranscodeQueueService:
             # Phase 4: Preparing Files (must happen before command building — FFprobe needs the staged file)
             self.UpdateTranscodeProgress(TranscodeAttemptId, "Preparing Files", 0.0, "Preparing files for transcoding...")
 
-            # Step b: Setup directories and copy file
-            if not self.SetupFilePreparation(Job, MediaFile, TranscodeAttemptId):
+            # Step b: Setup directories and optionally copy file
+            EffectiveInputPath = self.SetupFilePreparation(Job, MediaFile, TranscodeAttemptId)
+            if not EffectiveInputPath:
                 self.HandleJobFailure(Job, "Failed to setup file preparation", TranscodeAttemptId, ActiveJobId)
                 return
 
             # Phase 5: Building Command
             self.UpdateTranscodeProgress(TranscodeAttemptId, "Building Command", 0.0, "Building FFmpeg command...")
 
-            # Step d: Build transcoding command
+            # Step d: Build transcoding command (pass effective input path)
+            TranscodingSettings['InputPath'] = EffectiveInputPath
             CommandResult = self.BuildTranscodeCommand(Job, MediaFile, TranscodingSettings)
             if not CommandResult:
                 self.HandleJobFailure(Job, "Failed to build transcoding command", TranscodeAttemptId, ActiveJobId)
@@ -358,9 +381,14 @@ class ProcessTranscodeQueueService:
             TranscodeCommand = CommandResult['Command']
             OutputPath = CommandResult['OutputPath']
 
-            # Create TemporaryFilePaths record with all three paths (single source of truth)
-            LocalSourcePath = f"C:\\MediaVortex\\Source\\{MediaFile.FileName}"
-            TemporaryFilePathId = self.PrivateCreateTemporaryFilePathRecord(TranscodeAttemptId, Job.FilePath, LocalSourcePath, OutputPath)
+            # Create TemporaryFilePaths record with CANONICAL paths (so VMAF/FileReplacement on any machine can find files)
+            # OriginalPath is already canonical (from Job.FilePath in DB)
+            # LocalSourcePath and OutputPath must be converted back to canonical if this is a remote worker
+            CanonicalSourcePath = Job.FilePath  # Already canonical
+            CanonicalOutputPath = OutputPath
+            if self.PathTranslation:
+                CanonicalOutputPath = self.PathTranslation.ToCanonicalPath(OutputPath)
+            TemporaryFilePathId = self.PrivateCreateTemporaryFilePathRecord(TranscodeAttemptId, Job.FilePath, CanonicalSourcePath, CanonicalOutputPath)
             if not TemporaryFilePathId:
                 LoggingService.LogWarning(f"Failed to create TemporaryFilePath record for TranscodeAttempt {TranscodeAttemptId}, but file preparation succeeded",
                                         "ProcessTranscodeQueueService", "ProcessJob")
@@ -422,7 +450,8 @@ class ProcessTranscodeQueueService:
                 JobType="Remux",
                 QueueId=Job.Id,
                 ProcessId=os.getpid(),
-                ThreadId=threading.get_ident()
+                ThreadId=threading.get_ident(),
+                WorkerName=self.WorkerName
             )
             if ActiveJobId == 0:
                 self.HandleJobFailure(Job, "Failed to create active job record for remux", None, ActiveJobId)
@@ -447,9 +476,16 @@ class ProcessTranscodeQueueService:
 
             self.ArchiveOriginalFileDetails(MediaFile, TranscodeAttemptId)
 
-            # Build remux command (no profile settings needed)
+            # Setup file preparation first (copy or in-place based on setting)
+            self.UpdateTranscodeProgress(TranscodeAttemptId, "Preparing Files", 0.0, "Preparing source file...")
+            EffectiveInputPath = self.SetupFilePreparation(Job, MediaFile, TranscodeAttemptId)
+            if not EffectiveInputPath:
+                self.HandleJobFailure(Job, "Failed to setup file preparation for remux", TranscodeAttemptId, ActiveJobId)
+                return
+
+            # Build remux command (pass effective input path)
             self.UpdateTranscodeProgress(TranscodeAttemptId, "Building Command", 0.0, "Building remux command...")
-            CommandResult = self.CommandBuilder.BuildRemuxCommand(Job, MediaFile)
+            CommandResult = self.CommandBuilder.BuildRemuxCommand(Job, MediaFile, InputPath=EffectiveInputPath, TranscodingSettings={'FFmpegPath': self.FFmpegPath, 'OutputDirectory': self.OutputDirectory})
             if not CommandResult:
                 self.HandleJobFailure(Job, "Failed to build remux command", TranscodeAttemptId, ActiveJobId)
                 return
@@ -457,15 +493,11 @@ class ProcessTranscodeQueueService:
             RemuxCommand = CommandResult['Command']
             OutputPath = CommandResult['OutputPath']
 
-            # Setup file preparation (copy source to local)
-            self.UpdateTranscodeProgress(TranscodeAttemptId, "Preparing Files", 0.0, "Copying source file...")
-            if not self.SetupFilePreparation(Job, MediaFile, TranscodeAttemptId):
-                self.HandleJobFailure(Job, "Failed to setup file preparation for remux", TranscodeAttemptId, ActiveJobId)
-                return
-
-            # Create TemporaryFilePaths record
-            LocalSourcePath = f"C:\\MediaVortex\\Source\\{MediaFile.FileName}"
-            TemporaryFilePathId = self.PrivateCreateTemporaryFilePathRecord(TranscodeAttemptId, Job.FilePath, LocalSourcePath, OutputPath)
+            # Create TemporaryFilePaths record with canonical paths
+            CanonicalOutputPath = OutputPath
+            if self.PathTranslation:
+                CanonicalOutputPath = self.PathTranslation.ToCanonicalPath(OutputPath)
+            TemporaryFilePathId = self.PrivateCreateTemporaryFilePathRecord(TranscodeAttemptId, Job.FilePath, Job.FilePath, CanonicalOutputPath)
 
             # Update attempt record (keep Success=None to indicate in-progress)
             self.DatabaseManager.UpdateTranscodeAttempt(TranscodeAttemptId, {
@@ -511,7 +543,8 @@ class ProcessTranscodeQueueService:
                 JobType="SubtitleFix",
                 QueueId=Job.Id,
                 ProcessId=os.getpid(),
-                ThreadId=threading.get_ident()
+                ThreadId=threading.get_ident(),
+                WorkerName=self.WorkerName
             )
             if ActiveJobId == 0:
                 self.HandleJobFailure(Job, "Failed to create active job record for subtitle fix", None, ActiveJobId)
@@ -536,9 +569,16 @@ class ProcessTranscodeQueueService:
 
             self.ArchiveOriginalFileDetails(MediaFile, TranscodeAttemptId)
 
-            # Build subtitle fix command
+            # Setup file preparation first (copy or in-place based on setting)
+            self.UpdateTranscodeProgress(TranscodeAttemptId, "Preparing Files", 0.0, "Preparing source file...")
+            EffectiveInputPath = self.SetupFilePreparation(Job, MediaFile, TranscodeAttemptId)
+            if not EffectiveInputPath:
+                self.HandleJobFailure(Job, "Failed to setup file preparation for subtitle fix", TranscodeAttemptId, ActiveJobId)
+                return
+
+            # Build subtitle fix command (pass effective input path)
             self.UpdateTranscodeProgress(TranscodeAttemptId, "Building Command", 0.0, "Building subtitle fix command...")
-            CommandResult = self.CommandBuilder.BuildSubtitleFixCommand(Job, MediaFile)
+            CommandResult = self.CommandBuilder.BuildSubtitleFixCommand(Job, MediaFile, InputPath=EffectiveInputPath, TranscodingSettings={'FFmpegPath': self.FFmpegPath, 'OutputDirectory': self.OutputDirectory})
             if not CommandResult:
                 self.HandleJobFailure(Job, "Failed to build subtitle fix command", TranscodeAttemptId, ActiveJobId)
                 return
@@ -546,15 +586,11 @@ class ProcessTranscodeQueueService:
             SubFixCommand = CommandResult['Command']
             OutputPath = CommandResult['OutputPath']
 
-            # Setup file preparation (copy source to local)
-            self.UpdateTranscodeProgress(TranscodeAttemptId, "Preparing Files", 0.0, "Copying source file...")
-            if not self.SetupFilePreparation(Job, MediaFile, TranscodeAttemptId):
-                self.HandleJobFailure(Job, "Failed to setup file preparation for subtitle fix", TranscodeAttemptId, ActiveJobId)
-                return
-
-            # Create TemporaryFilePaths record
-            LocalSourcePath = f"C:\\MediaVortex\\Source\\{MediaFile.FileName}"
-            TemporaryFilePathId = self.PrivateCreateTemporaryFilePathRecord(TranscodeAttemptId, Job.FilePath, LocalSourcePath, OutputPath)
+            # Create TemporaryFilePaths record with canonical paths
+            CanonicalOutputPath = OutputPath
+            if self.PathTranslation:
+                CanonicalOutputPath = self.PathTranslation.ToCanonicalPath(OutputPath)
+            TemporaryFilePathId = self.PrivateCreateTemporaryFilePathRecord(TranscodeAttemptId, Job.FilePath, Job.FilePath, CanonicalOutputPath)
 
             # Update attempt record (keep Success=None to indicate in-progress)
             self.DatabaseManager.UpdateTranscodeAttempt(TranscodeAttemptId, {
@@ -640,28 +676,54 @@ class ProcessTranscodeQueueService:
             LoggingService.LogException("Exception getting media file data", e, "ProcessTranscodeQueueService", "GetMediaFileData")
             return None
 
-    def SetupFilePreparation(self, Job: TranscodeQueueModel, MediaFile: MediaFileModel, TranscodeAttemptId: int) -> bool:
-        """Setup transcoding directories and copy source file."""
+    def GetTranscodeFileMode(self) -> str:
+        """Get the transcode file mode from SystemSettings. Returns 'InPlace' (default) or 'CopyLocal'."""
         try:
-            # Setup directories
-            if not self.FileManager.SetupTranscodingDirectories():
-                return False
+            from Features.SystemSettings.SystemSettingsRepository import SystemSettingsRepository
+            Repo = SystemSettingsRepository()
+            Mode = Repo.GetSystemSetting('TranscodeFileMode')
+            if Mode and Mode.strip().lower() == 'copylocal':
+                return 'CopyLocal'
+            return 'InPlace'
+        except Exception as Ex:
+            LoggingService.LogException("Exception reading TranscodeFileMode, defaulting to InPlace", Ex, "ProcessTranscodeQueueService", "GetTranscodeFileMode")
+            return 'InPlace'
 
-            # Copy file to source directory
-            SourcePath = Job.FilePath
-            DestinationPath = f"C:\\MediaVortex\\Source\\{MediaFile.FileName}"
+    def SetupFilePreparation(self, Job: TranscodeQueueModel, MediaFile: MediaFileModel, TranscodeAttemptId: int) -> Optional[str]:
+        """Setup transcoding directories and optionally copy source file.
+        Returns the effective input path for FFmpeg, or None on failure.
+        When TranscodeFileMode is 'InPlace', skips the copy and returns the network path (translated for this worker's platform).
+        When 'CopyLocal', copies to C:\\MediaVortex\\Source\\ and returns the local path."""
+        try:
+            # Setup output directory (always needed, uses worker's configured staging dir if set)
+            if not self.FileManager.SetupTranscodingDirectories(OutputDirectory=self.OutputDirectory):
+                return None
 
-            # Copy the file
-            CopyResult = self.FileManager.CopyFile(SourcePath, DestinationPath)
-            if not CopyResult:
-                return False
+            FileMode = self.GetTranscodeFileMode()
 
-            return True
+            if FileMode == 'CopyLocal':
+                # Copy file to local source directory
+                SourcePath = Job.FilePath
+                if self.PathTranslation:
+                    SourcePath = self.PathTranslation.ToLocalPath(SourcePath)
+                DestinationPath = f"C:\\MediaVortex\\Source\\{MediaFile.FileName}"
+                CopyResult = self.FileManager.CopyFile(SourcePath, DestinationPath)
+                if not CopyResult:
+                    return None
+                LoggingService.LogInfo(f"CopyLocal mode: copied {SourcePath} to {DestinationPath}", "ProcessTranscodeQueueService", "SetupFilePreparation")
+                return DestinationPath
+            else:
+                # InPlace mode: translate canonical DB path to local worker path
+                LocalPath = Job.FilePath
+                if self.PathTranslation:
+                    LocalPath = self.PathTranslation.ToLocalPath(Job.FilePath)
+                LoggingService.LogInfo(f"InPlace mode: using path: {LocalPath}", "ProcessTranscodeQueueService", "SetupFilePreparation")
+                return LocalPath
 
         except Exception as e:
             LoggingService.LogException("Exception in file preparation", e, "ProcessTranscodeQueueService", "SetupFilePreparation")
             self.PrivateHandleFilePreparationFailure(TranscodeAttemptId, str(e))
-            return False
+            return None
 
     def GetTranscodingSettings(self, Job: TranscodeQueueModel, MediaFile: MediaFileModel) -> Optional[Dict[str, Any]]:
         """Get transcoding settings including profile, codec flags, and parameters."""
@@ -797,7 +859,9 @@ class ProcessTranscodeQueueService:
                 'CodecFlags': CodecFlags,
                 'CodecParameters': CodecParameters,
                 'SourceResolution': MediaFile.Resolution,
-                'StartTime': StartTime
+                'StartTime': StartTime,
+                'FFmpegPath': self.FFmpegPath,
+                'OutputDirectory': self.OutputDirectory
             }
 
         except Exception as e:

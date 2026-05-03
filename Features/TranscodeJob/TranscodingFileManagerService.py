@@ -11,19 +11,20 @@ class TranscodingFileManagerService:
         self.ProcessedFiles = 0
         self.SkippedFiles = 0
 
-    def SetupTranscodingDirectories(self) -> bool:
-        """Create transcoding directories if they don't exist."""
+    def SetupTranscodingDirectories(self, OutputDirectory: str = None) -> bool:
+        """Create transcoding directories if they don't exist.
+        OutputDirectory can be overridden for distributed workers (e.g. a staging dir on the network share)."""
         try:
             LoggingService.LogFunctionEntry("SetupTranscodingDirectories", "TranscodingFileManagerService")
 
-            # Create source directory
+            # Create source directory (for CopyLocal mode)
             SourceDir = "C:\\MediaVortex\\Source"
             if not os.path.exists(SourceDir):
                 os.makedirs(SourceDir, exist_ok=True)
                 LoggingService.LogInfo(f"Created source directory: {SourceDir}", "TranscodingFileManagerService", "SetupTranscodingDirectories")
 
-            # Create output directory
-            OutputDir = "C:\\MediaVortex"
+            # Create output directory (configurable per worker)
+            OutputDir = OutputDirectory or "C:\\MediaVortex"
             if not os.path.exists(OutputDir):
                 os.makedirs(OutputDir, exist_ok=True)
                 LoggingService.LogInfo(f"Created output directory: {OutputDir}", "TranscodingFileManagerService", "SetupTranscodingDirectories")

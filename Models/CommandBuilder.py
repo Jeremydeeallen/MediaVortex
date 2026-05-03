@@ -33,16 +33,18 @@ class CommandBuilder:
                 return None
             
             # Build command components
-            InputPath = f"c:\\MediaVortex\\Source\\{MediaFile.FileName}"
-            
+            InputPath = CommandData.get('InputPath', f"c:\\MediaVortex\\Source\\{MediaFile.FileName}")
+
             # Generate output filename with target resolution and container type
             CrfValue = ProfileSettings.get('Quality')
             OutputFileName = self.GenerateOutputFileName(MediaFile.FileName, SourceResolution, TargetResolution, ContainerType, CrfValue)
-            OutputPath = f"c:\\MediaVortex\\{OutputFileName}"
-            
+            OutputDirectory = CommandData.get('OutputDirectory') or 'c:\\MediaVortex'
+            OutputPath = os.path.join(OutputDirectory, OutputFileName)
+
             # Start building command - FFmpeg command structure: ffmpeg -i input [options] output -y
-            # Use full path to FFmpeg executable
-            CommandParts = ['C:\\Code\\Automation\\MediaVortex\\FFmpegMaster\\bin\\ffmpeg.exe']
+            # Use full path to FFmpeg executable (configurable per worker for distributed transcoding)
+            FFmpegPath = CommandData.get('FFmpegPath') or 'C:\\Code\\Automation\\MediaVortex\\FFmpegMaster\\bin\\ffmpeg.exe'
+            CommandParts = [FFmpegPath]
             
             # Add start time parameter if specified (must come before -i input)
             if StartTime and StartTime.strip():
@@ -379,11 +381,13 @@ class CommandBuilder:
             if not Job or not MediaFile:
                 return None
 
-            InputPath = f"c:\\MediaVortex\\Source\\{MediaFile.FileName}"
+            InputPath = CommandData.get('InputPath', f"c:\\MediaVortex\\Source\\{MediaFile.FileName}")
             OutputFileName = os.path.splitext(MediaFile.FileName)[0] + ".mp4"
-            OutputPath = f"c:\\MediaVortex\\{OutputFileName}"
+            OutputDirectory = CommandData.get('OutputDirectory') or 'c:\\MediaVortex'
+            OutputPath = os.path.join(OutputDirectory, OutputFileName)
 
-            CommandParts = ['C:\\Code\\Automation\\MediaVortex\\FFmpegMaster\\bin\\ffmpeg.exe']
+            FFmpegPath = CommandData.get('FFmpegPath') or 'C:\\Code\\Automation\\MediaVortex\\FFmpegMaster\\bin\\ffmpeg.exe'
+            CommandParts = [FFmpegPath]
             CommandParts.extend(['-i', f'"{InputPath}"'])
 
             # Explicit stream mapping: select preferred audio stream (English when available)
@@ -427,11 +431,13 @@ class CommandBuilder:
             if not Job or not MediaFile:
                 return None
 
-            InputPath = f"c:\\MediaVortex\\Source\\{MediaFile.FileName}"
+            InputPath = CommandData.get('InputPath', f"c:\\MediaVortex\\Source\\{MediaFile.FileName}")
             OutputFileName = os.path.splitext(MediaFile.FileName)[0] + ".mp4"
-            OutputPath = f"c:\\MediaVortex\\{OutputFileName}"
+            OutputDirectory = CommandData.get('OutputDirectory') or 'c:\\MediaVortex'
+            OutputPath = os.path.join(OutputDirectory, OutputFileName)
 
-            CommandParts = ['C:\\Code\\Automation\\MediaVortex\\FFmpegMaster\\bin\\ffmpeg.exe']
+            FFmpegPath = CommandData.get('FFmpegPath') or 'C:\\Code\\Automation\\MediaVortex\\FFmpegMaster\\bin\\ffmpeg.exe'
+            CommandParts = [FFmpegPath]
             CommandParts.extend(['-i', f'"{InputPath}"'])
 
             # Map video, preferred audio, and preferred subtitle streams

@@ -8,24 +8,25 @@ from Services.LoggingService import LoggingService
 
 class CommandBuilderService:
     """Orchestrates command building by coordinating data retrieval and command construction."""
-    
+
     def __init__(self, CommandBuilderInstance: CommandBuilder = None,
                  ResolutionServiceInstance: ResolutionService = None):
         self.CommandBuilder = CommandBuilderInstance or CommandBuilder()
         self.ResolutionService = ResolutionServiceInstance or ResolutionService()
-    
-    def BuildCommand(self, Job: TranscodeQueueModel, MediaFile: MediaFileModel, 
+
+    def BuildCommand(self, Job: TranscodeQueueModel, MediaFile: MediaFileModel,
                     TranscodingSettings: Dict[str, Any]) -> Optional[Dict[str, str]]:
         """Build complete transcoding command by orchestrating data preparation and command construction."""
         try:
             LoggingService.LogFunctionEntry("BuildCommand", "CommandBuilderService", Job.Id)
-            
+
             # Extract settings from the provided data
             ProfileSettings = TranscodingSettings.get('ProfileSettings', {})
             CodecFlags = TranscodingSettings.get('CodecFlags', {})
             CodecParameters = TranscodingSettings.get('CodecParameters', {})
             SourceResolution = TranscodingSettings.get('SourceResolution', '')
-            
+            InputPath = TranscodingSettings.get('InputPath', f"c:\\MediaVortex\\Source\\{MediaFile.FileName}")
+
             # Calculate target resolution and scaling
             TargetResolution = self.CalculateTargetResolution(ProfileSettings, SourceResolution)
             ScaleFilter = self.CalculateScaleFilter(SourceResolution, TargetResolution, MediaFile)
@@ -35,8 +36,7 @@ class CommandBuilderService:
             try:
                 from Services.FFmpegAnalysisService import FFmpegAnalysisService
                 AnalysisService = FFmpegAnalysisService()
-                SourcePath = f"c:\\MediaVortex\\Source\\{MediaFile.FileName}"
-                Analysis = AnalysisService.AnalyzeMediaFile(SourcePath)
+                Analysis = AnalysisService.AnalyzeMediaFile(InputPath)
                 if Analysis and Analysis.AudioStreamIndex is not None:
                     AudioStreamIndex = Analysis.AudioStreamIndex
                     LoggingService.LogInfo(f"Selected audio stream index {AudioStreamIndex} for transcode", "CommandBuilderService", "BuildCommand")
@@ -54,23 +54,26 @@ class CommandBuilderService:
                 'TargetResolution': TargetResolution,
                 'ScaleFilter': ScaleFilter,
                 'StartTime': TranscodingSettings.get('StartTime'),
-                'AudioStreamIndex': AudioStreamIndex
+                'AudioStreamIndex': AudioStreamIndex,
+                'InputPath': InputPath,
+                'FFmpegPath': TranscodingSettings.get('FFmpegPath'),
+                'OutputDirectory': TranscodingSettings.get('OutputDirectory')
             }
-            
+
             # Build the command using the pure model
             CommandResult = self.CommandBuilder.BuildCommand(CommandData)
-            
+
             if CommandResult:
                 LoggingService.LogInfo(f"Successfully built command for job {Job.Id}", "CommandBuilderService", "BuildCommand")
                 return CommandResult
             else:
                 LoggingService.LogError(f"Failed to build command for job {Job.Id}", "CommandBuilderService", "BuildCommand")
                 return None
-                
+
         except Exception as e:
             LoggingService.LogException("Exception building command", e, "CommandBuilderService", "BuildCommand")
             return None
-    
+
     def CalculateTargetResolution(self, ProfileSettings: Dict[str, Any], SourceResolution: str) -> str:
         """Calculate target resolution based on profile settings and TranscodeDownTo logic."""
         try:
@@ -78,57 +81,57 @@ class CommandBuilderService:
             # based on TranscodeDownTo logic, so we just use that
             TargetResolution = ProfileSettings.get('TargetResolution')
             if TargetResolution:
-                LoggingService.LogInfo(f"Using target resolution from profile settings: {TargetResolution}", 
+                LoggingService.LogInfo(f"Using target resolution from profile settings: {TargetResolution}",
                                      "CommandBuilderService", "CalculateTargetResolution")
                 return TargetResolution
-            
+
             # Fallback to source resolution if no target resolution found
-            LoggingService.LogWarning(f"No target resolution found in profile settings, using source: {SourceResolution}", 
+            LoggingService.LogWarning(f"No target resolution found in profile settings, using source: {SourceResolution}",
                                     "CommandBuilderService", "CalculateTargetResolution")
             return SourceResolution
-            
+
         except Exception as e:
             LoggingService.LogException("Exception calculating target resolution", e, "CommandBuilderService", "CalculateTargetResolution")
             return SourceResolution
-    
+
     def CalculateScaleFilter(self, SourceResolution: str, TargetResolution: str, MediaFile) -> Optional[str]:
         """Calculate FFmpeg scale filter if resolution scaling is needed, maintaining source aspect ratio."""
         try:
             # If resolutions are the same, no scaling needed
             if SourceResolution == TargetResolution:
                 return None
-            
+
             # Standardize both resolutions
             StandardizedSource = self.ResolutionService.StandardizeResolution(SourceResolution)
             StandardizedTarget = self.ResolutionService.StandardizeResolution(TargetResolution)
-            
+
             # Extract height from standardized resolutions
             SourceHeight = self._ExtractHeightFromResolution(StandardizedSource)
             TargetHeight = self._ExtractHeightFromResolution(StandardizedTarget)
-            
+
             # Get standard dimensions
             StandardSourceHeight = self.ResolutionService.GetStandardHeight(SourceHeight)
             StandardTargetHeight = self.ResolutionService.GetStandardHeight(TargetHeight)
-            
+
             # Get source dimensions to calculate aspect ratio
             SourceWidth, SourceHeight = self._GetSourceDimensions(MediaFile)
             SourceAspectRatio = SourceWidth / SourceHeight
-            
+
             # Calculate target width maintaining source aspect ratio
             TargetWidth = self._CalculateWidthFromHeight(StandardTargetHeight, SourceAspectRatio)
-            
+
             # Build scale filter with target dimensions
             ScaleFilter = f"scale={TargetWidth}:{StandardTargetHeight}"
-            
-            LoggingService.LogInfo(f"Calculated scale filter: {ScaleFilter} (from {StandardizedSource} to {StandardizedTarget}, maintaining {SourceWidth}x{SourceHeight} aspect ratio)", 
+
+            LoggingService.LogInfo(f"Calculated scale filter: {ScaleFilter} (from {StandardizedSource} to {StandardizedTarget}, maintaining {SourceWidth}x{SourceHeight} aspect ratio)",
                                  "CommandBuilderService", "CalculateScaleFilter")
-            
+
             return ScaleFilter
-            
+
         except Exception as e:
             LoggingService.LogException("Exception calculating scale filter", e, "CommandBuilderService", "CalculateScaleFilter")
             return None
-    
+
     def _ExtractHeightFromResolution(self, Resolution: str) -> int:
         """Extract height integer from resolution string (e.g., '1080p' -> 1080)."""
         try:
@@ -141,15 +144,15 @@ class CommandBuilderService:
         except (ValueError, IndexError):
             LoggingService.LogWarning(f"Could not extract height from resolution: {Resolution}", "CommandBuilderService", "_ExtractHeightFromResolution")
             return 720  # Default fallback
-    
+
     def _GetSourceDimensions(self, MediaFile) -> tuple:
         """Get source video width and height from MediaFile.Resolution."""
         try:
             if not MediaFile or not MediaFile.Resolution:
                 return (1920, 1080)  # Default fallback
-            
+
             Resolution = MediaFile.Resolution
-            
+
             # Check if it's already in pixel format (e.g., "1920x1080")
             if 'x' in Resolution:
                 try:
@@ -157,7 +160,7 @@ class CommandBuilderService:
                     return (int(Width), int(Height))
                 except (ValueError, IndexError):
                     pass
-            
+
             # If it's in standard format (e.g., "1080p"), use standard dimensions
             if Resolution == '2160p' or Resolution == '4K':
                 return (3840, 2160)
@@ -172,11 +175,11 @@ class CommandBuilderService:
                 Height = self._ExtractHeightFromResolution(Resolution)
                 Width = self._CalculateWidthFromHeight(Height)
                 return (Width, Height)
-                
+
         except Exception as e:
             LoggingService.LogException("Exception getting source dimensions", e, "CommandBuilderService", "_GetSourceDimensions")
             return (1920, 1080)  # Default fallback
-    
+
     def _CalculateWidthFromHeight(self, Height: int, AspectRatio: float = None) -> int:
         """Calculate width from height, optionally using custom aspect ratio."""
         try:
@@ -185,7 +188,7 @@ class CommandBuilderService:
                 Width = int(Height * AspectRatio)
                 # Ensure even number (required by codecs)
                 return Width - (Width % 2)
-            
+
             # Standard 16:9 aspect ratio widths for common resolutions
             if Height == 2160:  # 4K
                 return 3840
@@ -202,15 +205,16 @@ class CommandBuilderService:
             LoggingService.LogException("Exception calculating width from height", e, "CommandBuilderService", "_CalculateWidthFromHeight")
             return 1280  # Default fallback to 720p width
 
-    def BuildSubtitleFixCommand(self, Job: TranscodeQueueModel, MediaFile: MediaFileModel) -> Optional[Dict[str, str]]:
+    def BuildSubtitleFixCommand(self, Job: TranscodeQueueModel, MediaFile: MediaFileModel, InputPath: str = None, TranscodingSettings: Dict[str, Any] = None) -> Optional[Dict[str, str]]:
         """Build subtitle fix command: copy video+audio, convert ASS/SSA subtitle to mov_text, output MP4."""
         try:
             LoggingService.LogFunctionEntry("BuildSubtitleFixCommand", "CommandBuilderService", Job.Id)
 
+            SourcePath = InputPath or f"c:\\MediaVortex\\Source\\{MediaFile.FileName}"
+
             # Detect source codecs and preferred streams via FFprobe
             from Services.FFmpegAnalysisService import FFmpegAnalysisService
             AnalysisService = FFmpegAnalysisService()
-            SourcePath = f"c:\\MediaVortex\\Source\\{MediaFile.FileName}"
             Analysis = AnalysisService.AnalyzeMediaFile(SourcePath)
 
             AudioCodec = Analysis.AudioCodec if Analysis and Analysis.AudioCodec else ''
@@ -227,7 +231,10 @@ class CommandBuilderService:
                 'MediaFile': MediaFile,
                 'AudioCodec': AudioCodec,
                 'AudioStreamIndex': AudioStreamIndex,
-                'SubtitleStreamIndex': SubtitleStreamIndex
+                'SubtitleStreamIndex': SubtitleStreamIndex,
+                'InputPath': SourcePath,
+                'FFmpegPath': TranscodingSettings.get('FFmpegPath') if TranscodingSettings else None,
+                'OutputDirectory': TranscodingSettings.get('OutputDirectory') if TranscodingSettings else None
             }
 
             CommandResult = self.CommandBuilder.BuildSubtitleFixCommand(CommandData)
@@ -239,15 +246,16 @@ class CommandBuilderService:
             LoggingService.LogException("Exception building subtitle fix command", e, "CommandBuilderService", "BuildSubtitleFixCommand")
             return None
 
-    def BuildRemuxCommand(self, Job: TranscodeQueueModel, MediaFile: MediaFileModel) -> Optional[Dict[str, str]]:
+    def BuildRemuxCommand(self, Job: TranscodeQueueModel, MediaFile: MediaFileModel, InputPath: str = None, TranscodingSettings: Dict[str, Any] = None) -> Optional[Dict[str, str]]:
         """Build remux command: copy video, conditionally copy/re-encode audio, output MP4."""
         try:
             LoggingService.LogFunctionEntry("BuildRemuxCommand", "CommandBuilderService", Job.Id)
 
+            SourcePath = InputPath or f"c:\\MediaVortex\\Source\\{MediaFile.FileName}"
+
             # Detect source audio codec via FFprobe
             from Services.FFmpegAnalysisService import FFmpegAnalysisService
             AnalysisService = FFmpegAnalysisService()
-            SourcePath = f"c:\\MediaVortex\\Source\\{MediaFile.FileName}"
             Analysis = AnalysisService.AnalyzeMediaFile(SourcePath)
             AudioCodec = Analysis.AudioCodec if Analysis and Analysis.AudioCodec else ''
             AudioStreamIndex = Analysis.AudioStreamIndex if Analysis and Analysis.AudioStreamIndex is not None else 0
@@ -258,7 +266,10 @@ class CommandBuilderService:
                 'Job': Job,
                 'MediaFile': MediaFile,
                 'AudioCodec': AudioCodec,
-                'AudioStreamIndex': AudioStreamIndex
+                'AudioStreamIndex': AudioStreamIndex,
+                'InputPath': SourcePath,
+                'FFmpegPath': TranscodingSettings.get('FFmpegPath') if TranscodingSettings else None,
+                'OutputDirectory': TranscodingSettings.get('OutputDirectory') if TranscodingSettings else None
             }
 
             CommandResult = self.CommandBuilder.BuildRemuxCommand(CommandData)

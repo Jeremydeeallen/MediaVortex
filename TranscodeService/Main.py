@@ -26,18 +26,31 @@ from Repositories.DatabaseManager import DatabaseManager
 
 class TranscodeServiceApp:
     """Main application class for TranscodeService."""
-    
+
     def __init__(self):
         """Initialize the TranscodeService application."""
+        import socket
+        import platform
+
         current_pid = os.getpid()
         LoggingService.LogInfo(f"TranscodeServiceApp __init__ started. PID: {current_pid}", "TranscodeService", "__init__")
         self.DatabaseManager = DatabaseManager()
         LoggingService.LogInfo(f"DatabaseManager created. PID: {current_pid}", "TranscodeService", "__init__")
-        
+
+        # Worker identity for distributed transcoding
+        self.WorkerName = socket.gethostname()
+        self.WorkerPlatform = platform.system().lower()
+        LoggingService.LogInfo(f"Worker identity: {self.WorkerName} ({self.WorkerPlatform})", "TranscodeService", "__init__")
+
+        # Register worker and load config from Workers table
+        self.WorkerConfig = self._RegisterAndLoadWorkerConfig()
+
         # Duplicate prevention is now handled in Main() function
         LoggingService.LogInfo(f"Creating ProcessTranscodeQueueService. PID: {current_pid}", "TranscodeService", "__init__")
         self.ProcessTranscodeQueue = ProcessTranscodeQueueService(
-            DatabaseManagerInstance=self.DatabaseManager
+            DatabaseManagerInstance=self.DatabaseManager,
+            WorkerName=self.WorkerName,
+            WorkerConfig=self.WorkerConfig
         )
         LoggingService.LogInfo(f"ProcessTranscodeQueueService created. PID: {current_pid}", "TranscodeService", "__init__")
         
@@ -59,8 +72,32 @@ class TranscodeServiceApp:
         self.ManuallyStopped = False  # Track if transcoding was manually stopped
         
         LoggingService.LogInfo("TranscodeServiceApp initialized", "TranscodeService", "__init__")
-    
-    
+
+    def _RegisterAndLoadWorkerConfig(self) -> dict:
+        """Register this worker in the Workers table and load its configuration."""
+        try:
+            # Register worker (UPSERT - creates or updates)
+            self.DatabaseManager.RegisterWorker(
+                WorkerName=self.WorkerName,
+                Platform=self.WorkerPlatform
+            )
+            LoggingService.LogInfo(f"Worker '{self.WorkerName}' registered in Workers table", "TranscodeService", "_RegisterAndLoadWorkerConfig")
+
+            # Load worker config from DB
+            Config = self.DatabaseManager.GetWorkerConfig(self.WorkerName)
+            if Config:
+                LoggingService.LogInfo(
+                    f"Worker config loaded: FFmpegPath={Config.get('FFmpegPath') or Config.get('ffmpegpath') or '(default)'}, "
+                    f"StagingDirectory={Config.get('StagingDirectory') or Config.get('stagingdirectory') or '(default)'}, "
+                    f"MaxConcurrentJobs={Config.get('MaxConcurrentJobs') or Config.get('maxconcurrentjobs') or 1}",
+                    "TranscodeService", "_RegisterAndLoadWorkerConfig"
+                )
+                return Config
+            return {}
+        except Exception as e:
+            LoggingService.LogException("Error registering worker, using defaults", e, "TranscodeService", "_RegisterAndLoadWorkerConfig")
+            return {}
+
     def Run(self):
         """Start the transcoding service."""
         try:
@@ -205,6 +242,8 @@ class TranscodeServiceApp:
                 self.DatabaseManager.UpdateServiceStatus("TranscodeService", {
                     'HealthStatus': 'Healthy'
                 })
+                # Update worker heartbeat for distributed stuck-job detection
+                self.DatabaseManager.UpdateWorkerHeartbeat(self.WorkerName)
                 self.ShutdownEvent.wait(30)  # Check every 30 seconds
             except Exception as e:
                 LoggingService.LogException("Error in health check", e, "TranscodeService", "HealthCheckLoop")
@@ -328,7 +367,10 @@ class TranscodeServiceApp:
         """Gracefully shutdown the service."""
         try:
             LoggingService.LogInfo("Shutting down TranscodeService...", "TranscodeService", "Shutdown")
-            
+
+            # Mark worker as Offline
+            self.DatabaseManager.UpdateWorkerStatus(self.WorkerName, "Offline")
+
             # Update service status to Stopped and clear ProcessId
             self.UpdateServiceStatus("Stopped", "Stopped", 0, False)
             self.DatabaseManager.UpdateServiceStatus("TranscodeService", {
@@ -337,7 +379,7 @@ class TranscodeServiceApp:
                 'IsProcessing': False,
                 'ActiveJobsCount': 0
             })
-            
+
             self.ShutdownEvent.set()
             LoggingService.LogInfo("TranscodeService shutdown complete", "TranscodeService", "Shutdown")
         except Exception as e:

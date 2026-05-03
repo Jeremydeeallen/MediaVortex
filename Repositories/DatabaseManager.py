@@ -1593,6 +1593,115 @@ class DatabaseManager:
             )
 
         return None
+
+    def ClaimNextPendingTranscodeJob(self, WorkerName: str) -> Optional[TranscodeQueueModel]:
+        """Atomically claim the next pending job using SELECT FOR UPDATE SKIP LOCKED.
+        Prevents race conditions when multiple workers compete for jobs."""
+        try:
+            import psycopg2.extras
+            connection = self.DatabaseService.GetConnection()
+            try:
+                cursor = connection.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                query = """
+                    UPDATE TranscodeQueue
+                    SET Status = 'Running', ClaimedBy = %s, ClaimedAt = NOW(), DateStarted = NOW()
+                    WHERE Id = (
+                        SELECT Id FROM TranscodeQueue
+                        WHERE Status = 'Pending'
+                        ORDER BY SizeMB DESC, DateAdded ASC
+                        LIMIT 1
+                        FOR UPDATE SKIP LOCKED
+                    )
+                    RETURNING Id, FilePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted, ProcessingMode
+                """
+                cursor.execute(query, (WorkerName,))
+                row = cursor.fetchone()
+                connection.commit()
+
+                if row:
+                    return TranscodeQueueModel(
+                        Id=row['id'],
+                        FilePath=row['filepath'],
+                        FileName=row['filename'],
+                        Directory=row['directory'],
+                        SizeBytes=row['sizebytes'],
+                        SizeMB=row['sizemb'],
+                        Priority=row['priority'],
+                        Status=row['status'],
+                        DateAdded=row['dateadded'],
+                        DateStarted=row['datestarted'],
+                        ProcessingMode=row.get('processingmode') or 'Transcode'
+                    )
+                return None
+            finally:
+                self.DatabaseService.CloseConnection(connection)
+        except Exception as e:
+            LoggingService.LogException("Exception in ClaimNextPendingTranscodeJob", e, "DatabaseManager", "ClaimNextPendingTranscodeJob")
+            return None
+
+    def RegisterWorker(self, WorkerName: str, Platform: str = 'windows', FFmpegPath: str = None,
+                       FFprobePath: str = None, StagingDirectory: str = None,
+                       ShareMountPrefix: str = None, MaxConcurrentJobs: int = 1) -> bool:
+        """Register or update a worker in the Workers table (UPSERT)."""
+        try:
+            query = """
+                INSERT INTO Workers (WorkerName, Platform, FFmpegPath, FFprobePath, StagingDirectory,
+                                     ShareMountPrefix, MaxConcurrentJobs, Status, LastHeartbeat, RegisteredAt)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, 'Online', NOW(), NOW())
+                ON CONFLICT (WorkerName) DO UPDATE SET
+                    Platform = EXCLUDED.Platform,
+                    FFmpegPath = COALESCE(EXCLUDED.FFmpegPath, Workers.FFmpegPath),
+                    FFprobePath = COALESCE(EXCLUDED.FFprobePath, Workers.FFprobePath),
+                    StagingDirectory = COALESCE(EXCLUDED.StagingDirectory, Workers.StagingDirectory),
+                    ShareMountPrefix = COALESCE(EXCLUDED.ShareMountPrefix, Workers.ShareMountPrefix),
+                    MaxConcurrentJobs = EXCLUDED.MaxConcurrentJobs,
+                    Status = 'Online',
+                    LastHeartbeat = NOW()
+            """
+            self.DatabaseService.ExecuteNonQuery(query, (
+                WorkerName, Platform, FFmpegPath, FFprobePath,
+                StagingDirectory, ShareMountPrefix, MaxConcurrentJobs
+            ))
+            return True
+        except Exception as e:
+            LoggingService.LogException("Exception in RegisterWorker", e, "DatabaseManager", "RegisterWorker")
+            return False
+
+    def UpdateWorkerHeartbeat(self, WorkerName: str) -> bool:
+        """Update the LastHeartbeat timestamp for a worker."""
+        try:
+            query = "UPDATE Workers SET LastHeartbeat = NOW() WHERE WorkerName = %s"
+            self.DatabaseService.ExecuteNonQuery(query, (WorkerName,))
+            return True
+        except Exception as e:
+            LoggingService.LogException("Exception in UpdateWorkerHeartbeat", e, "DatabaseManager", "UpdateWorkerHeartbeat")
+            return False
+
+    def GetWorkerConfig(self, WorkerName: str) -> Optional[Dict[str, Any]]:
+        """Get worker configuration from the Workers table."""
+        try:
+            query = """
+                SELECT WorkerName, Platform, FFmpegPath, FFprobePath, StagingDirectory,
+                       ShareMountPrefix, ShareCanonicalPrefix, MaxConcurrentJobs, Status
+                FROM Workers WHERE WorkerName = %s
+            """
+            rows = self.DatabaseService.ExecuteQuery(query, (WorkerName,))
+            if rows:
+                return rows[0]
+            return None
+        except Exception as e:
+            LoggingService.LogException("Exception in GetWorkerConfig", e, "DatabaseManager", "GetWorkerConfig")
+            return None
+
+    def UpdateWorkerStatus(self, WorkerName: str, Status: str) -> bool:
+        """Update worker status (Online, Offline, Draining)."""
+        try:
+            query = "UPDATE Workers SET Status = %s, LastHeartbeat = NOW() WHERE WorkerName = %s"
+            self.DatabaseService.ExecuteNonQuery(query, (Status, WorkerName))
+            return True
+        except Exception as e:
+            LoggingService.LogException("Exception in UpdateWorkerStatus", e, "DatabaseManager", "UpdateWorkerStatus")
+            return False
     
     def ClearAllTranscodeQueueItems(self) -> int:
         """Clear pending items from the transcoding queue, preserving in-progress jobs."""
@@ -3151,18 +3260,18 @@ class DatabaseManager:
     
     # ActiveJobs Management Methods
     
-    def CreateActiveJob(self, ServiceName: str, JobType: str, QueueId: int, ProcessId: int = None, ThreadId: int = None) -> int:
+    def CreateActiveJob(self, ServiceName: str, JobType: str, QueueId: int, ProcessId: int = None, ThreadId: int = None, WorkerName: str = None) -> int:
         """Create an active job record for tracking."""
         try:
             LoggingService.LogFunctionEntry("CreateActiveJob", "DatabaseManager", ServiceName, JobType, QueueId, ProcessId, ThreadId)
-            
+
             query = """
-                INSERT INTO ActiveJobs (ServiceName, JobType, QueueId, ProcessId, ThreadId, Status, StartedAt)
-                VALUES (%s, %s, %s, %s, %s, 'Running', NOW())
+                INSERT INTO ActiveJobs (ServiceName, JobType, QueueId, ProcessId, ThreadId, WorkerName, Status, StartedAt)
+                VALUES (%s, %s, %s, %s, %s, %s, 'Running', NOW())
                 RETURNING Id
             """
 
-            result = self.DatabaseService.ExecuteNonQuery(query, (ServiceName, JobType, QueueId, ProcessId, ThreadId))
+            result = self.DatabaseService.ExecuteNonQuery(query, (ServiceName, JobType, QueueId, ProcessId, ThreadId, WorkerName))
 
             if result > 0:
                 job_id = self.DatabaseService.LastInsertId
