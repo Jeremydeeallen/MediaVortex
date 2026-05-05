@@ -4,11 +4,11 @@ import platform
 class PathTranslationService:
     """Translates file paths between canonical (DB) format and local worker format.
 
-    DB paths use Windows drive letters (e.g. T:\Shows\file.mkv). Linux workers
+    DB paths use Windows drive letters (e.g. T:\\Shows\\file.mkv). Linux workers
     need those mapped to mount points (e.g. /mnt/media_tv/Shows/file.mkv).
 
     MountMap stores {DriveLetter: LocalMountPrefix} -- no backslashes in the map.
-    The service owns the ':\' separator knowledge.
+    The service owns the ':\\' separator knowledge.
 
     Windows workers with no mappings pass paths through unchanged.
     """
@@ -37,7 +37,7 @@ class PathTranslationService:
 
         DriveLetter = CanonicalPath[0].upper()
         if DriveLetter in self.MountMap:
-            # Strip drive letter + ':\'  (3 chars), prepend mount path
+            # Strip drive letter + colon + backslash (3 chars), prepend mount path
             LocalPath = self.MountMap[DriveLetter] + CanonicalPath[3:]
         else:
             LocalPath = CanonicalPath
@@ -50,7 +50,7 @@ class PathTranslationService:
     def ToCanonicalPath(self, LocalPath: str) -> str:
         """Convert a local worker path back to canonical (DB) format.
 
-        Finds the mount prefix that matches, replaces with drive letter + ':\'
+        Finds the mount prefix that matches, replaces with drive letter + colon + backslash.
 
         Example (Linux worker):
             '/mnt/media_tv/Shows/Breaking Bad/S01E01.mkv' -> 'T:\\Shows\\Breaking Bad\\S01E01.mkv'
