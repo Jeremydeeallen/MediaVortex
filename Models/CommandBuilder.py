@@ -94,7 +94,8 @@ class CommandBuilder:
                 CommandParts.extend(['-af', f'"{AudioFilter}"'])
             
             # Add video filters (deinterlacing only for interlaced sources, plus scaling)
-            IsInterlaced = getattr(MediaFile, 'IsInterlaced', 0) == 1 if MediaFile else False
+            RawInterlaced = getattr(MediaFile, 'IsInterlaced', None) if MediaFile else None
+            IsInterlaced = str(RawInterlaced) == '1' if RawInterlaced is not None else False
             VideoFilter = self.BuildVideoFilters(ProfileSettings, ScaleFilter, IsInterlaced)
             if VideoFilter:
                 CommandParts.extend(['-vf', f'"{VideoFilter}"'])

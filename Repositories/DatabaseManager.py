@@ -1621,7 +1621,7 @@ class DatabaseManager:
                     """
                     cursor.execute(query, (WorkerName,))
                 else:
-                    # Skip interlaced files (join MediaFiles to check)
+                    # Skip interlaced files (join MediaFiles to check IsInterlaced TEXT column)
                     query = """
                         UPDATE TranscodeQueue
                         SET Status = 'Running', ClaimedBy = %s, ClaimedAt = NOW(), DateStarted = NOW()
@@ -1629,7 +1629,7 @@ class DatabaseManager:
                             SELECT tq.Id FROM TranscodeQueue tq
                             JOIN MediaFiles mf ON mf.FilePath = tq.FilePath
                             WHERE tq.Status = 'Pending'
-                              AND (mf.IsInterlaced = 0 OR mf.IsInterlaced IS NULL)
+                              AND (mf.IsInterlaced IS NULL OR mf.IsInterlaced = '0')
                             ORDER BY tq.SizeMB DESC, tq.DateAdded ASC
                             LIMIT 1
                             FOR UPDATE SKIP LOCKED
