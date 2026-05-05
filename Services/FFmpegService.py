@@ -16,18 +16,22 @@ class FFmpegService:
     _cached_ffprobe_path = None
     _logged_initialization = False
     
-    def __init__(self):
+    def __init__(self, FFprobePath: str = None):
         # Initialize DatabaseManager
         self.DatabaseManager = DatabaseManager()
-        
-        # Use cached paths if available, otherwise find them
+
+        # If caller provides an explicit FFprobe path, use it directly (worker override)
+        if FFprobePath:
+            self.FFprobePath = FFprobePath
+        else:
+            # Use cached paths if available, otherwise find them
+            if FFmpegService._cached_ffprobe_path is None:
+                FFmpegService._cached_ffprobe_path = self.GetFFprobePathFromSettings()
+            self.FFprobePath = FFmpegService._cached_ffprobe_path
+
         if FFmpegService._cached_ffmpeg_path is None:
             FFmpegService._cached_ffmpeg_path = self.GetFFmpegPathFromSettings()
-        if FFmpegService._cached_ffprobe_path is None:
-            FFmpegService._cached_ffprobe_path = self.GetFFprobePathFromSettings()
-            
         self.FFmpegPath = FFmpegService._cached_ffmpeg_path
-        self.FFprobePath = FFmpegService._cached_ffprobe_path
         
         # Only log once when first instance is created
         if not FFmpegService._logged_initialization:

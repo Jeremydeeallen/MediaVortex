@@ -42,6 +42,7 @@ class ProcessTranscodeQueueService:
 
         # Worker-specific paths (from Workers table, with fallback defaults)
         self.FFmpegPath = self.WorkerConfig.get('FFmpegPath') or self.WorkerConfig.get('ffmpegpath')
+        self.FFprobePath = self.WorkerConfig.get('FFprobePath') or self.WorkerConfig.get('ffprobepath')
         self.OutputDirectory = self.WorkerConfig.get('StagingDirectory') or self.WorkerConfig.get('stagingdirectory')
 
         # Per-worker CPU thread limit (NULL = use global SystemSettings.MaxCpuThreads)
@@ -904,6 +905,7 @@ class ProcessTranscodeQueueService:
                 'SourceResolution': MediaFile.Resolution,
                 'StartTime': StartTime,
                 'FFmpegPath': self.FFmpegPath,
+                'FFprobePath': self.FFprobePath,
                 'OutputDirectory': self.OutputDirectory,
                 'TranscodeOutputMode': self.GetTranscodeOutputMode(),
                 'MaxCpuThreads': self.MaxCpuThreads

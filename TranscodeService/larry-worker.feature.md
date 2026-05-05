@@ -24,22 +24,23 @@ Both (infrastructure deployment + code change)
    - T:\ (Brain 10.0.0.40 Media_tv) -> /mnt/media_tv/
    - M:\ (Synology "allen" _video/Adults/Movies) -> /mnt/movies/
    - Z:\ (Synology "allen" xxx) -> /mnt/xxx/
-8. Worker registered in Workers table with correct multi-prefix mappings, MaxConcurrentJobs=1.
-9. Worker claims a queued job, transcodes it, and the output file is accessible from the WebService for VMAF/replacement.
-10. Systemd service starts the worker on boot and restarts on failure.
+8. Worker registered in Workers table with correct multi-prefix mappings, MaxConcurrentJobs=1. Workers.FFmpegPath AND Workers.FFprobePath both set to the worker's local paths (e.g. /usr/local/bin/ffmpeg, /usr/local/bin/ffprobe).
+9. FFprobe runs on the worker using the worker's FFprobePath to analyze audio streams before transcoding. Audio language selection (English preferred) works identically on all workers regardless of platform.
+10. Worker claims a queued job, transcodes it, and the output file is written in-place next to the source file.
+11. Systemd service starts the worker on boot and restarts on failure.
 
 ### Documentation
-11. WorkerSetup.md updated with multi-share configuration instructions (generic, not Larry-specific).
+12. WorkerSetup.md updated with multi-share configuration instructions (generic, not Larry-specific).
 
 ### End-to-End Worker Lifecycle (pass/fail)
-12. setup.sh runs unattended and completes: worker row exists in Workers table, 3 rows in WorkerShareMappings, systemd service enabled.
-13. Service starts, registers heartbeat, and enters Running state within 60 seconds of `systemctl start`.
-14. Worker claims a Pending queue item: TranscodeQueue.Status = 'Running', ClaimedBy = worker hostname, ClaimedAt set. No other worker can claim the same item.
-15. FFmpeg runs to completion on the worker. TranscodeAttempts.Success = TRUE, ErrorMessage IS NULL, NewSizeBytes > 0.
-16. After success: queue item deleted from TranscodeQueue, ActiveJob marked Completed, quality test queued.
-17. Worker immediately claims the next Pending item and repeats the cycle.
-18. Stopping the worker (systemctl stop or SIGTERM) resets only THIS worker's running jobs to Pending, marks worker Offline, does not touch other workers' jobs.
-19. Worker isolation: StuckJobDetector, CrashRecoveryService, and SignalHandler never interfere with another worker's jobs.
+13. setup.sh runs unattended and completes: worker row exists in Workers table, 3 rows in WorkerShareMappings, systemd service enabled.
+14. Service starts, registers heartbeat, and enters Running state within 60 seconds of `systemctl start`.
+15. Worker claims a Pending queue item: TranscodeQueue.Status = 'Running', ClaimedBy = worker hostname, ClaimedAt set. No other worker can claim the same item.
+16. FFmpeg runs to completion on the worker. TranscodeAttempts.Success = TRUE, ErrorMessage IS NULL, NewSizeBytes > 0.
+17. After success: queue item deleted from TranscodeQueue, ActiveJob marked Completed.
+18. Worker immediately claims the next Pending item and repeats the cycle.
+19. Stopping the worker (systemctl stop or SIGTERM) resets only THIS worker's running jobs to Pending, marks worker Offline, does not touch other workers' jobs.
+20. Worker isolation: StuckJobDetector, CrashRecoveryService, and SignalHandler never interfere with another worker's jobs.
 
 ## Status
 
@@ -69,8 +70,10 @@ IN PROGRESS
 - [x] Interlaced routing: AcceptsInterlaced=FALSE on Larry, claim query skips interlaced files
 - [x] Conditional yadif: CommandBuilder checks MediaFile.IsInterlaced, applies yadif only when true
 - [x] VERIFY: worker claims job (75609), transcodes (Success=TRUE, 151MB, 784s), claims next (75610)
-- [ ] True in-place output: output file next to source, not in staging directory
-- [ ] VMAF toggle: global OFF so worker does not wait for quality test
+- [x] True in-place output: output file next to source, not in staging directory
+- [x] VMAF toggle: global OFF so worker does not wait for quality test
+- [ ] FFprobe per-worker: set Workers.FFprobePath, wire through to FFmpegAnalysisService for audio stream selection
+- [ ] VERIFY: worker selects correct English audio stream (not defaulting to stream 0)
 
 ## Scope
 

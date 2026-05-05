@@ -22,6 +22,7 @@ Executes FFmpeg transcode jobs from the queue, tracks progress, and handles resu
 - True in-place output: transcoded file is written to the same directory as the source file (not a staging directory). Output filename includes target resolution (e.g. 480p) so it coexists with the original until replacement.
 - Output location mode: SystemSettings.TranscodeOutputMode controls output placement. "InPlace" = same directory as source (default). "Staging" = worker's StagingDirectory or SystemSettings.StagingDirectory.
 - VMAF quality test toggle: SystemSettings.QualityTestEnabled (global on/off, default OFF). Workers.QualityTestEnabled (per-worker override, NULL = use global). TranscodeAttempts.QualityTestRequired is set from these at job creation time, not hardcoded.
+- Per-worker FFprobe: Workers.FFprobePath flows through ProcessTranscodeQueueService -> CommandBuilderService -> FFmpegAnalysisService -> FFmpegService. Audio stream selection (English preferred) uses the worker's local FFprobe, not the global SystemSettings path.
 
 ## Progress
 
@@ -30,7 +31,8 @@ Executes FFmpeg transcode jobs from the queue, tracks progress, and handles resu
 - [x] Fix: worker isolation -- SignalHandler, CrashRecovery, StuckJobDetector, QueueManagement scoped by WorkerName
 - [x] Interlaced routing: AcceptsInterlaced flag on Workers, claim query filters by IsInterlaced
 - [x] Conditional deinterlacing: CommandBuilder applies yadif based on MediaFile.IsInterlaced, not profile
-- [ ] True in-place output: CommandBuilder uses source file directory instead of OutputDirectory
-- [ ] Output location mode: add TranscodeOutputMode setting, respect InPlace vs Staging
-- [ ] VMAF toggle: add QualityTestEnabled global setting (default OFF) and per-worker column
+- [x] True in-place output: CommandBuilder uses source file directory instead of OutputDirectory
+- [x] Output location mode: add TranscodeOutputMode setting, respect InPlace vs Staging
+- [x] VMAF toggle: add QualityTestEnabled global setting (default OFF) and per-worker column
+- [ ] Per-worker FFprobe: wire Workers.FFprobePath through to audio stream analysis
 - [ ] Fix: concurrent job progress isolation (see KNOWN-ISSUES.md)

@@ -35,7 +35,8 @@ class CommandBuilderService:
             AudioStreamIndex = 0
             try:
                 from Services.FFmpegAnalysisService import FFmpegAnalysisService
-                AnalysisService = FFmpegAnalysisService()
+                FFprobePath = TranscodingSettings.get('FFprobePath')
+                AnalysisService = FFmpegAnalysisService(FFprobePath=FFprobePath)
                 Analysis = AnalysisService.AnalyzeMediaFile(InputPath)
                 if Analysis and Analysis.AudioStreamIndex is not None:
                     AudioStreamIndex = Analysis.AudioStreamIndex

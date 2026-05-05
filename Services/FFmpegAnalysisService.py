@@ -13,8 +13,8 @@ from Services.LoggingService import LoggingService
 class FFmpegAnalysisService:
     """Business service for FFmpeg media analysis operations."""
     
-    def __init__(self, FFmpegServiceInstance: FFmpegService = None, DatabaseService = None):
-        self.FFmpegService = FFmpegServiceInstance or FFmpegService()
+    def __init__(self, FFmpegServiceInstance: FFmpegService = None, DatabaseService = None, FFprobePath: str = None):
+        self.FFmpegService = FFmpegServiceInstance or FFmpegService(FFprobePath=FFprobePath)
         self.DatabaseService = DatabaseService
     
     def AnalyzeMediaFile(self, FilePath: str) -> FFmpegAnalysisModel:
