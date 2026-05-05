@@ -44,6 +44,10 @@ class ProcessTranscodeQueueService:
         self.FFmpegPath = self.WorkerConfig.get('FFmpegPath') or self.WorkerConfig.get('ffmpegpath')
         self.OutputDirectory = self.WorkerConfig.get('StagingDirectory') or self.WorkerConfig.get('stagingdirectory')
 
+        # Per-worker CPU thread limit (NULL = use global SystemSettings.MaxCpuThreads)
+        RawMaxCpu = self.WorkerConfig.get('MaxCpuThreads') or self.WorkerConfig.get('maxcputhreads')
+        self.MaxCpuThreads = int(RawMaxCpu) if RawMaxCpu else None
+
         # Path translation service for cross-platform support
         # MountMap is a {DriveLetter: LocalMountPrefix} dict from WorkerShareMappings table
         self.PathTranslation = None
@@ -861,7 +865,8 @@ class ProcessTranscodeQueueService:
                 'SourceResolution': MediaFile.Resolution,
                 'StartTime': StartTime,
                 'FFmpegPath': self.FFmpegPath,
-                'OutputDirectory': self.OutputDirectory
+                'OutputDirectory': self.OutputDirectory,
+                'MaxCpuThreads': self.MaxCpuThreads
             }
 
         except Exception as e:
@@ -999,7 +1004,7 @@ class ProcessTranscodeQueueService:
                 except Exception as e:
                     LoggingService.LogException("Exception in progress callback", e, "ProcessTranscodeQueueService", "ExecuteTranscoding")
 
-            TranscodeResult = self.VideoTranscoding.TranscodeVideo(TranscodeAttemptId, TranscodeCommand, ProgressCallback, TotalFramesFromMediaFile, ActiveJobId, self.DatabaseManager)
+            TranscodeResult = self.VideoTranscoding.TranscodeVideo(TranscodeAttemptId, TranscodeCommand, ProgressCallback, TotalFramesFromMediaFile, ActiveJobId, self.DatabaseManager, MaxCpuThreads=self.MaxCpuThreads)
 
             # File size calculation is now handled in VideoTranscodingService.TranscodeVideo()
             return TranscodeResult

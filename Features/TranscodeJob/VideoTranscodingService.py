@@ -17,7 +17,8 @@ class VideoTranscodingService:
 
     def TranscodeVideo(self, JobId: int, TranscodeCommand: str,
                       ProgressCallback: Optional[Callable] = None, TotalFramesFromMediaFile: int = 0,
-                      ActiveJobId: int = None, DatabaseManager = None) -> Dict[str, Any]:
+                      ActiveJobId: int = None, DatabaseManager = None,
+                      MaxCpuThreads: int = None) -> Dict[str, Any]:
         """Execute transcoding command with real-time progress tracking.
 
         Args:
@@ -59,8 +60,12 @@ class VideoTranscodingService:
 
             # Set CPU affinity using topology-based core selection (P-cores for transcode)
             FFmpegPID = None
-            MaxCpuThreads = self.GetMaxCpuThreads()
-            CoreCount = max(1, MaxCpuThreads - 2)  # Reduce by 2 as per plan
+            if MaxCpuThreads:
+                # Per-worker config: use directly (admin already accounted for reserves)
+                CoreCount = MaxCpuThreads
+            else:
+                # Global fallback: read from SystemSettings, subtract 2 for system headroom
+                CoreCount = max(1, self.GetMaxCpuThreads() - 2)
 
             try:
                 from Services.CpuAffinityService import GetCpuAffinityServiceInstance

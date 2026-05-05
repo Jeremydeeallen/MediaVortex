@@ -68,7 +68,14 @@ class CommandBuilder:
                 VideoCodec = ProfileSettings.get('Codec', 'libsvtav1')
             
             CommandParts.extend(['-c:v', VideoCodec])
-            
+
+            # Per-worker thread limit -- tells FFmpeg/SVT-AV1 how many threads to use.
+            # Critical for LXC containers where /proc/cpuinfo shows all host CPUs
+            # but cgroup limits actual available cores.
+            MaxCpuThreads = CommandData.get('MaxCpuThreads')
+            if MaxCpuThreads:
+                CommandParts.extend(['-threads', str(MaxCpuThreads)])
+
             # Add parameters using CodecParameters database values
             self.AddCodecParameters(CommandParts, CodecParameters, ProfileSettings)
             

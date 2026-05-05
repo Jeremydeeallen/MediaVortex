@@ -1683,7 +1683,8 @@ class DatabaseManager:
         try:
             query = """
                 SELECT WorkerName, Platform, FFmpegPath, FFprobePath, StagingDirectory,
-                       ShareMountPrefix, ShareCanonicalPrefix, MaxConcurrentJobs, Status
+                       ShareMountPrefix, ShareCanonicalPrefix, MaxConcurrentJobs, Status,
+                       MaxCpuThreads
                 FROM Workers WHERE WorkerName = %s
             """
             rows = self.DatabaseService.ExecuteQuery(query, (WorkerName,))

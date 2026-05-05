@@ -57,7 +57,8 @@ class CommandBuilderService:
                 'AudioStreamIndex': AudioStreamIndex,
                 'InputPath': InputPath,
                 'FFmpegPath': TranscodingSettings.get('FFmpegPath'),
-                'OutputDirectory': TranscodingSettings.get('OutputDirectory')
+                'OutputDirectory': TranscodingSettings.get('OutputDirectory'),
+                'MaxCpuThreads': TranscodingSettings.get('MaxCpuThreads')
             }
 
             # Build the command using the pure model
