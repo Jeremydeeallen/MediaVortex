@@ -44,18 +44,13 @@ class ProcessTranscodeQueueService:
         self.FFmpegPath = self.WorkerConfig.get('FFmpegPath') or self.WorkerConfig.get('ffmpegpath')
         self.OutputDirectory = self.WorkerConfig.get('StagingDirectory') or self.WorkerConfig.get('stagingdirectory')
 
-        # Path translation service for cross-platform support (multi-prefix)
+        # Path translation service for cross-platform support
+        # MountMap is a {DriveLetter: LocalMountPrefix} dict from WorkerShareMappings table
         self.PathTranslation = None
-        ShareMappings = self.WorkerConfig.get('ShareMappings') or []
-        ShareMountPrefix = self.WorkerConfig.get('ShareMountPrefix') or self.WorkerConfig.get('sharemountprefix')
-        ShareCanonicalPrefix = self.WorkerConfig.get('ShareCanonicalPrefix') or self.WorkerConfig.get('sharecanonicalprefix') or 'T:\\'
-        if ShareMappings or ShareMountPrefix:
+        MountMap = self.WorkerConfig.get('ShareMappings') or {}
+        if MountMap:
             from Core.Services.PathTranslationService import PathTranslationService
-            self.PathTranslation = PathTranslationService(
-                ShareMountPrefix=ShareMountPrefix,
-                ShareCanonicalPrefix=ShareCanonicalPrefix,
-                Mappings=ShareMappings if ShareMappings else None
-            )
+            self.PathTranslation = PathTranslationService(MountMap=MountMap)
 
         # Processing state
         self.IsProcessing = False

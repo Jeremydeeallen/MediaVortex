@@ -11,11 +11,12 @@ Both (infrastructure deployment + code change)
 ## Success Criteria
 
 ### Code (multi-prefix path translation)
-1. PathTranslationService accepts a list of (CanonicalPrefix, LocalPrefix) pairs and translates any DB path to the correct local mount point, regardless of which drive letter the path starts with.
-2. Workers table schema stores multiple share mappings per worker (replaces the single ShareMountPrefix/ShareCanonicalPrefix columns).
-3. ProcessTranscodeQueueService loads multi-prefix config from the DB and passes it to PathTranslationService.
-4. Existing Windows worker (I9-2024) continues to function with no path translation (backwards compatible -- null/empty mappings = no translation).
+1. WorkerShareMappings table stores (DriveLetter CHAR(1), LocalMountPrefix TEXT) per worker. No backslashes in the DB -- the service layer owns the `:\` separator.
+2. PathTranslationService uses a dict lookup by drive letter (path[0]) instead of string prefix matching. Eliminates backslash escaping across Python/bash/SQL/SSH layers.
+3. ProcessTranscodeQueueService loads mappings from the DB as a {DriveLetter: MountPath} dict and passes to PathTranslationService.
+4. Existing Windows worker (I9-2024) continues to function with no path translation (backwards compatible -- empty mappings = no translation).
 5. DB migration script is idempotent (safe to run on a DB that already has the Workers table).
+6. Schema is forward-compatible with full path normalization: DriveLetter maps to a future ShareId FK.
 
 ### Infrastructure (LXC container on Larry)
 6. LXC container created on Larry with: Debian 12 or Ubuntu 24.04, Python 3.11+, FFmpeg with libsvtav1, psycopg2. System-wide install (no venv -- single-purpose container).
@@ -39,6 +40,7 @@ IN PROGRESS
 - [x] Read and understand current PathTranslationService, ProcessTranscodeQueueService worker config loading, and Workers table schema
 - [x] Design multi-prefix schema change -- new WorkerShareMappings table (normalized, easy to query ad-hoc)
 - [x] Write idempotent DB migration for multi-prefix support (WorkerShareMappings table)
+- [x] Redesign: DriveLetter CHAR(1) instead of CanonicalPrefix -- no backslashes in DB, service owns separator
 - [x] Update PathTranslationService to accept list of prefix pairs
 - [x] Update ProcessTranscodeQueueService to load and pass multi-prefix config
 - [x] Verify existing Windows worker still works (no regression -- empty mappings = no translation)

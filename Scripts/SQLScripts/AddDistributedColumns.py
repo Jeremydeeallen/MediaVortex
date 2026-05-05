@@ -89,21 +89,39 @@ def RunMigration():
         else:
             print("[SKIP] ActiveJobs.WorkerName already exists")
 
-        # 5. Create WorkerShareMappings table (multi-prefix path translation)
+        # 5. WorkerShareMappings table (multi-prefix path translation)
+        # DriveLetter stores just the letter (e.g. 'T'), not 'T:\'.
+        # The service layer owns the ':\ ' separator -- no backslashes in the DB.
         if not TableExists(cursor, 'workersharemappings'):
             cursor.execute("""
                 CREATE TABLE WorkerShareMappings (
                     Id BIGSERIAL PRIMARY KEY,
                     WorkerName TEXT NOT NULL,
-                    CanonicalPrefix TEXT NOT NULL,
+                    DriveLetter CHAR(1) NOT NULL,
                     LocalMountPrefix TEXT NOT NULL,
-                    UNIQUE(WorkerName, CanonicalPrefix)
+                    UNIQUE(WorkerName, DriveLetter)
                 )
             """)
             connection.commit()
             print("[OK] Created WorkerShareMappings table")
+        elif ColumnExists(cursor, 'workersharemappings', 'canonicalprefix'):
+            # Migrate from old CanonicalPrefix schema to DriveLetter schema
+            cursor.execute("DELETE FROM WorkerShareMappings")
+            cursor.execute("ALTER TABLE WorkerShareMappings DROP COLUMN CanonicalPrefix")
+            cursor.execute("ALTER TABLE WorkerShareMappings ADD COLUMN DriveLetter CHAR(1) NOT NULL DEFAULT 'T'")
+            cursor.execute("ALTER TABLE WorkerShareMappings ALTER COLUMN DriveLetter DROP DEFAULT")
+            cursor.execute("""
+                ALTER TABLE WorkerShareMappings
+                DROP CONSTRAINT IF EXISTS workersharemappings_workername_canonicalprefix_key
+            """)
+            cursor.execute("""
+                ALTER TABLE WorkerShareMappings
+                ADD CONSTRAINT workersharemappings_workername_driveletter_key UNIQUE(WorkerName, DriveLetter)
+            """)
+            connection.commit()
+            print("[OK] Migrated WorkerShareMappings: CanonicalPrefix -> DriveLetter")
         else:
-            print("[SKIP] WorkerShareMappings table already exists")
+            print("[SKIP] WorkerShareMappings table already has DriveLetter column")
 
         print("\nMigration completed successfully.")
 

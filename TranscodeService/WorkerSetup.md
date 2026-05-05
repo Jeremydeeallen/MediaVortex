@@ -170,25 +170,25 @@ python3 Scripts/SQLScripts/QueryDatabase.py sql "INSERT INTO Workers (WorkerName
 
 ### 8. Configure share mappings (multi-share workers)
 
-If the DB has files on multiple drive letters (e.g. T:\, M:\, Z:\), each backed by a different network share, you need a mapping row per share in `WorkerShareMappings`:
+If the DB has files on multiple drive letters (e.g. T:\, M:\, Z:\), each backed by a different network share, you need a mapping row per drive letter in `WorkerShareMappings`:
 
 ```bash
-python3 Scripts/SQLScripts/QueryDatabase.py sql "INSERT INTO WorkerShareMappings (WorkerName, CanonicalPrefix, LocalMountPrefix) VALUES
-    ('$(hostname)', 'T:\', '/mnt/media_tv/'),
-    ('$(hostname)', 'M:\', '/mnt/movies/'),
-    ('$(hostname)', 'Z:\', '/mnt/xxx/')
-ON CONFLICT (WorkerName, CanonicalPrefix) DO UPDATE SET LocalMountPrefix = EXCLUDED.LocalMountPrefix"
+python3 Scripts/SQLScripts/QueryDatabase.py sql "INSERT INTO WorkerShareMappings (WorkerName, DriveLetter, LocalMountPrefix) VALUES
+    ('$(hostname)', 'T', '/mnt/media_tv/'),
+    ('$(hostname)', 'M', '/mnt/movies/'),
+    ('$(hostname)', 'Z', '/mnt/xxx/')
+ON CONFLICT (WorkerName, DriveLetter) DO UPDATE SET LocalMountPrefix = EXCLUDED.LocalMountPrefix"
 ```
 
-Adjust the LocalMountPrefix values to match your actual mount points. Each CanonicalPrefix is the Windows drive letter as stored in the DB. The PathTranslationService uses these mappings to convert DB paths to local paths and back.
+Adjust the LocalMountPrefix values to match your actual mount points. DriveLetter is just the letter (e.g. `T`, not `T:\`) -- the PathTranslationService handles the `:\` separator at runtime.
 
 To check which drive letters are in use:
 
 ```bash
-python3 Scripts/SQLScripts/QueryDatabase.py sql "SELECT DISTINCT LEFT(filepath, 3) AS drive, COUNT(*) AS cnt FROM mediafiles GROUP BY LEFT(filepath, 3)"
+python3 Scripts/SQLScripts/QueryDatabase.py sql "SELECT DISTINCT LEFT(filepath, 1) AS drive, COUNT(*) AS cnt FROM mediafiles GROUP BY LEFT(filepath, 1)"
 ```
 
-**Single-share workers:** If you only need one share (all DB files are on T:\), you can either use WorkerShareMappings with one row, or set ShareMountPrefix/ShareCanonicalPrefix on the Workers row directly (legacy approach).
+**Single-share workers:** If you only need one share (all DB files are on T:\), add one WorkerShareMappings row with that drive letter.
 
 ### 9. Create the staging directory
 
@@ -271,7 +271,7 @@ The `ClaimedBy` column should show your worker's hostname.
 | Output file not found after transcode | StagingDirectory doesn't exist or wrong path | Create the directory, verify write permissions |
 | "connection refused" on startup | DB not reachable from this machine | Check firewall, verify `pg_hba.conf` allows connections from worker IP |
 | Files not accessible | Share not mounted or wrong mount prefix | Verify mount with `ls /mnt/media/` (Linux) or `dir T:\` (Windows) |
-| "file not found" but worker claims job | Missing share mapping for that drive letter | Check `WorkerShareMappings` has a row for each drive letter in the DB. Run the drive letter query in step 8 to find all in use. |
+| "file not found" but worker claims job | Missing share mapping for that drive letter | Check `WorkerShareMappings` has a DriveLetter row for each drive in the DB. Run the drive letter query in step 8 to find all in use. |
 | Worker shows as Offline in stuck detection | Heartbeat not updating | Check if service crashed, look at logs |
 
 ---
@@ -281,5 +281,5 @@ The `ClaimedBy` column should show your worker's hostname.
 - Workers talk directly to PostgreSQL -- no REST intermediary needed
 - Job claiming uses `SELECT FOR UPDATE SKIP LOCKED` -- multiple workers never claim the same job
 - Heartbeat (30-second interval) enables remote stuck-job detection
-- Path translation is automatic based on WorkerShareMappings (multi-share) or ShareMountPrefix/ShareCanonicalPrefix (single-share)
+- Path translation is automatic based on WorkerShareMappings (DriveLetter -> LocalMountPrefix)
 - StagingDirectory should be ON the network share so VMAF and file replacement can access output files from any machine

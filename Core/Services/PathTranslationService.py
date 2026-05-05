@@ -4,51 +4,43 @@ import platform
 class PathTranslationService:
     """Translates file paths between canonical (DB) format and local worker format.
 
-    Supports multiple share mappings so a single worker can access files across
-    different drive letters / network shares (e.g. T:\, M:\, Z:\ each mounted
-    at different Linux paths).
+    DB paths use Windows drive letters (e.g. T:\Shows\file.mkv). Linux workers
+    need those mapped to mount points (e.g. /mnt/media_tv/Shows/file.mkv).
 
-    Accepts either:
-      - A list of (CanonicalPrefix, LocalMountPrefix) tuples  (multi-prefix)
-      - A single ShareMountPrefix + ShareCanonicalPrefix       (legacy single-prefix)
+    MountMap stores {DriveLetter: LocalMountPrefix} -- no backslashes in the map.
+    The service owns the ':\' separator knowledge.
+
+    Windows workers with no mappings pass paths through unchanged.
     """
 
-    def __init__(self, ShareMountPrefix: str = None, ShareCanonicalPrefix: str = "T:\\",
-                 Mappings: list = None):
-        """Initialize with share mappings.
+    def __init__(self, MountMap: dict = None, **_):
+        """Initialize with drive letter to mount path mappings.
 
         Args:
-            Mappings: List of (CanonicalPrefix, LocalMountPrefix) tuples.
-                      Takes priority over the single-prefix arguments.
-            ShareMountPrefix: Single local mount prefix (legacy, used if Mappings is empty).
-            ShareCanonicalPrefix: Single canonical prefix (legacy, used if Mappings is empty).
+            MountMap: Dict of {DriveLetter: LocalMountPrefix}.
+                      e.g. {'T': '/mnt/media_tv/', 'M': '/mnt/movies/'}
         """
         self.IsLinux = platform.system().lower() != 'windows'
-
-        if Mappings:
-            self.Mappings = [(c, l) for c, l in Mappings]
-        elif ShareMountPrefix:
-            self.Mappings = [(ShareCanonicalPrefix, ShareMountPrefix)]
-        else:
-            self.Mappings = []
+        self.MountMap = {k.upper(): v for k, v in (MountMap or {}).items()}
 
     def ToLocalPath(self, CanonicalPath: str) -> str:
         """Convert a canonical (DB) path to the local worker path.
 
-        Tries each mapping in order; first matching canonical prefix wins.
+        Parses the drive letter from position 0 and looks up the mount point.
 
-        Example (Linux worker with multiple mappings):
+        Example (Linux worker):
             'T:\\Shows\\Breaking Bad\\S01E01.mkv' -> '/mnt/media_tv/Shows/Breaking Bad/S01E01.mkv'
             'M:\\Movie Name\\movie.mkv'           -> '/mnt/movies/Movie Name/movie.mkv'
         """
-        if not CanonicalPath:
+        if not CanonicalPath or not self.MountMap:
             return CanonicalPath
 
-        LocalPath = CanonicalPath
-        for CanonicalPrefix, LocalMountPrefix in self.Mappings:
-            if CanonicalPath.upper().startswith(CanonicalPrefix.upper()):
-                LocalPath = LocalMountPrefix + CanonicalPath[len(CanonicalPrefix):]
-                break
+        DriveLetter = CanonicalPath[0].upper()
+        if DriveLetter in self.MountMap:
+            # Strip drive letter + ':\'  (3 chars), prepend mount path
+            LocalPath = self.MountMap[DriveLetter] + CanonicalPath[3:]
+        else:
+            LocalPath = CanonicalPath
 
         if self.IsLinux:
             LocalPath = LocalPath.replace('\\', '/')
@@ -58,20 +50,17 @@ class PathTranslationService:
     def ToCanonicalPath(self, LocalPath: str) -> str:
         """Convert a local worker path back to canonical (DB) format.
 
-        Tries each mapping in order; first matching local prefix wins.
+        Finds the mount prefix that matches, replaces with drive letter + ':\'
 
         Example (Linux worker):
             '/mnt/media_tv/Shows/Breaking Bad/S01E01.mkv' -> 'T:\\Shows\\Breaking Bad\\S01E01.mkv'
         """
-        if not LocalPath:
+        if not LocalPath or not self.MountMap:
             return LocalPath
 
-        CanonicalPath = LocalPath
-        for CanonicalPrefix, LocalMountPrefix in self.Mappings:
-            if LocalPath.startswith(LocalMountPrefix):
-                CanonicalPath = CanonicalPrefix + LocalPath[len(LocalMountPrefix):]
-                break
+        for DriveLetter, MountPrefix in self.MountMap.items():
+            if LocalPath.startswith(MountPrefix):
+                CanonicalPath = DriveLetter + ':\\' + LocalPath[len(MountPrefix):]
+                return CanonicalPath.replace('/', '\\')
 
-        CanonicalPath = CanonicalPath.replace('/', '\\')
-
-        return CanonicalPath
+        return LocalPath.replace('/', '\\')

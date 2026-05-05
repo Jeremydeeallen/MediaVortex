@@ -1695,27 +1695,28 @@ class DatabaseManager:
             LoggingService.LogException("Exception in GetWorkerConfig", e, "DatabaseManager", "GetWorkerConfig")
             return None
 
-    def GetWorkerShareMappings(self, WorkerName: str) -> list:
-        """Get share prefix mappings for a worker from WorkerShareMappings table.
+    def GetWorkerShareMappings(self, WorkerName: str) -> dict:
+        """Get drive letter to mount path mappings for a worker.
 
-        Returns list of (CanonicalPrefix, LocalMountPrefix) tuples.
-        Falls back to empty list if table doesn't exist yet (pre-migration).
+        Returns dict of {DriveLetter: LocalMountPrefix}.
+        e.g. {'T': '/mnt/media_tv/', 'M': '/mnt/movies/', 'Z': '/mnt/xxx/'}
+        Falls back to empty dict if table doesn't exist yet (pre-migration).
         """
         try:
             query = """
-                SELECT CanonicalPrefix, LocalMountPrefix
+                SELECT DriveLetter, LocalMountPrefix
                 FROM WorkerShareMappings WHERE WorkerName = %s
-                ORDER BY CanonicalPrefix
+                ORDER BY DriveLetter
             """
             rows = self.DatabaseService.ExecuteQuery(query, (WorkerName,))
-            return [
-                (row.get('canonicalprefix') or row.get('CanonicalPrefix'),
-                 row.get('localmountprefix') or row.get('LocalMountPrefix'))
+            return {
+                (row.get('driveletter') or row.get('DriveLetter')).strip():
+                (row.get('localmountprefix') or row.get('LocalMountPrefix'))
                 for row in rows
-            ]
+            }
         except Exception as e:
             LoggingService.LogException("Exception in GetWorkerShareMappings", e, "DatabaseManager", "GetWorkerShareMappings")
-            return []
+            return {}
 
     def UpdateWorkerStatus(self, WorkerName: str, Status: str) -> bool:
         """Update worker status (Online, Offline, Draining)."""
