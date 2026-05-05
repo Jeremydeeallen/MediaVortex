@@ -13,6 +13,18 @@ When MaxConcurrentJobs > 1 and a second job starts while the first is still runn
 
 **Fix with:** `/t`
 
+### [FIXED] Yadif deinterlacing applied to progressive files
+**Date:** 2026-05-05
+**Fixed:** 2026-05-05
+**Affects:** All profiles, CommandBuilder video filter chain
+
+All 12 profiles had YadifMode=1/YadifParity=1/YadifDeint=1 hardcoded. CommandBuilder.BuildVideoFilters applied yadif unconditionally based on profile settings without checking MediaFiles.IsInterlaced. This caused:
+1. Unnecessary deinterlacing on progressive content (majority of queue)
+2. yadif is single-threaded per-frame -- bottlenecked SVT-AV1 to ~2 cores regardless of -threads setting
+3. Encode speed ~8.4 FPS on progressive files vs ~10+ FPS without yadif
+
+**Fix:** Set YadifMode=NULL, YadifParity=NULL on all profiles. CommandBuilder already skips yadif when these values are NULL/blank. Future: CommandBuilder should check IsInterlaced from MediaFile and only apply yadif when the source is actually interlaced.
+
 ### [BUG] FilePath used as denormalized natural key across 6+ tables
 **Date:** 2026-05-05
 **Affects:** Schema-wide -- MediaFiles, TranscodeAttempts, TranscodeFiles, TranscodeQueue, CompliantFiles, ProblemFiles

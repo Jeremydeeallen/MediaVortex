@@ -63,7 +63,9 @@ IN PROGRESS
 - [x] Update WorkerSetup.md with multi-share setup instructions
 - [x] Fix worker isolation: SignalHandler, CrashRecovery, StuckJobDetector, QueueManagement scoped by WorkerName
 - [x] Fix QueryDatabase.py --commit flag so setup.sh writes persist
-- [ ] DEPLOY: push code, git pull on worker, restart service
+- [x] Per-worker MaxCpuThreads: Workers table column, -threads N in FFmpeg command, affinity uses per-worker value
+- [x] Fix yadif applied to progressive files: nulled YadifMode on profiles (CommandBuilder skips when NULL)
+- [x] Upgrade FFmpeg: replace Ubuntu repo FFmpeg 6.1.1/SVT-AV1 1.7.0 with static build (SVT-AV1 2.x, 30-50% faster)
 - [ ] VERIFY: worker claims job, transcodes, completes, claims next (criteria 12-19)
 
 ## Scope
