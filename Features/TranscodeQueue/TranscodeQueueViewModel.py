@@ -306,7 +306,8 @@ class TranscodeQueueViewModel:
                 "IsRunning": QueueItem.IsRunning,
                 "IsPending": QueueItem.IsPending,
                 "IsCancelled": QueueItem.IsCancelled,
-                "ProcessingMode": QueueItem.ProcessingMode
+                "ProcessingMode": QueueItem.ProcessingMode,
+                "ClaimedBy": QueueItem.ClaimedBy
             }
         except Exception as e:
             LoggingService.LogException("Exception converting queue item to dict", e, "TranscodeQueueViewModel", "QueueItemToDict")

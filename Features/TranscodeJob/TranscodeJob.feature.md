@@ -16,9 +16,11 @@ Executes FFmpeg transcode jobs from the queue, tracks progress, and handles resu
 - Completed jobs update TranscodeAttempts with final size, duration, and FFmpeg command
 - ActiveJobs table tracks running processes for stuck-job detection
 - Distributed workers claim jobs atomically via SELECT FOR UPDATE SKIP LOCKED
+- Worker isolation: all destructive operations (shutdown cleanup, crash recovery, stuck detection, stop) are scoped to the calling worker via ClaimedBy/WorkerName. No worker may reset, kill, or interfere with another worker's jobs.
 
 ## Progress
 
 - [x] Single-job transcoding pipeline
 - [x] Distributed worker support (Phase 1)
+- [x] Fix: worker isolation -- SignalHandler, CrashRecovery, StuckJobDetector, QueueManagement scoped by WorkerName
 - [ ] Fix: concurrent job progress isolation (see KNOWN-ISSUES.md)

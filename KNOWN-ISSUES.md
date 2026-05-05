@@ -30,15 +30,28 @@ Full Windows paths (e.g., `T:\Shows\file.mkv`) are stored as natural keys in at 
 
 **Fix with:** `/n` (this is a schema redesign, not a quick fix)
 
-### [BUG] QueryDatabase.py sql command silently rolls back writes
+### [FIXED] StuckJobDetector breaks distributed transcoding -- orphaned FFmpeg, corrupted results
 **Date:** 2026-05-05
-**Affects:** Scripts/SQLScripts/QueryDatabase.py -- `run_raw_sql()` function, line 192
-**Criterion violated:** setup.sh uses QueryDatabase.py for INSERT/UPDATE during worker registration, but writes are silently rolled back.
+**Fixed:** 2026-05-05
+**Affects:** Features/ServiceControl/StuckJobDetectionService.py, TranscodeService worker flow
 
-`run_raw_sql()` explicitly calls `conn.rollback()` for non-SELECT statements (comment: "Don't commit modifications from troubleshooting script"). This is intentional for a read-only troubleshooting tool, but setup.sh depends on it for writes. The function reports "Rows affected: N" before rolling back, making it appear successful.
+**Root cause (5 compounding failures):**
+1. `GetActiveJobsByService` did not SELECT WorkerName, so Tier 1 heartbeat check never ran and all jobs were treated as local
+2. `IsProcessAlive` checked `'ffmpeg' in process.name()` on the Python worker PID -- always false
+3. `SignalHandler` reset ALL workers' queue items and active jobs, not just its own
+4. `CrashRecoveryService` operated on ALL workers' active jobs, incorrectly resetting remote jobs
+5. `QueueManagementService.Stop()` reset ALL running jobs globally
 
-**Impact:** Worker registration and share mapping inserts via setup.sh silently fail on every deploy. Must use direct psycopg2 with autocommit instead.
+**Fix:** All destructive operations scoped by WorkerName/ClaimedBy:
+- `GetActiveJobsByService` now includes WorkerName in SELECT + optional filter
+- `IsProcessAlive` checks `process.is_running()` only (PID reuse guarded by Tier 1 heartbeat)
+- `SignalHandler` uses `AND ClaimedBy = %s` and `AND WorkerName = %s`
+- `CrashRecoveryService` accepts WorkerName, scopes all queries and cleanup
+- `QueueManagementService.ResetTranscodeQueueRunningJobs` accepts WorkerName filter
+- All cleanup also clears ClaimedBy/ClaimedAt when resetting to Pending
 
-**Look first:** `Scripts/SQLScripts/QueryDatabase.py:184-192` (`run_raw_sql`), `terraform/mediavortex-transcode/setup.sh` (worker registration section)
+### [FIXED] QueryDatabase.py sql command silently rolls back writes
+**Date:** 2026-05-05
+**Fixed:** 2026-05-05
 
-**Fix with:** `/t` -- add a `--commit` flag to QueryDatabase.py so `sql` writes commit when explicitly opted in, or have setup.sh use inline Python instead.
+Added `--commit` flag to `QueryDatabase.py sql`. Default behavior unchanged (rollback for safety). setup.sh updated to use `--commit` for worker registration and share mapping writes. Output now explicitly says "(rolled back -- use --commit to persist)" when writes are not committed.

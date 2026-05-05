@@ -295,24 +295,28 @@ Race condition: Steps 3 and 4 are non-atomic. Two workers could SELECT the same 
 ### ActiveJobs Tracking
 
 Table: `ActiveJobs`
-- Created per job via `DatabaseManager.CreateActiveJob(ServiceName, JobType, QueueId, ProcessId, ThreadId)`
-- Columns: Id, ServiceName, JobType, QueueId, ProcessId, ThreadId, Status, CreatedAt, UpdatedAt
-- Used by StuckJobDetectionService to correlate running jobs with OS processes
+- Created per job via `DatabaseManager.CreateActiveJob(ServiceName, JobType, QueueId, ProcessId, ThreadId, WorkerName)`
+- Columns: Id, ServiceName, JobType, QueueId, ProcessId, ThreadId, WorkerName, Status, CreatedAt, UpdatedAt
+- ProcessId stores `os.getpid()` (Python worker PID, NOT FFmpeg PID)
+- WorkerName identifies which worker owns the job -- all queries/cleanup are scoped by this
+- Used by StuckJobDetectionService to correlate running jobs with worker heartbeats
 
 ### Stuck Job Detection
 
-Two checks combined:
-1. **PID-based**: `IsProcessAlive(ProcessId)` verifies the tracked process exists and its name contains "ffmpeg" (catches PID reuse)
-2. **Progress stagnation**: `_IsJobFrozen()` checks `TranscodeProgress.LastFrameAdvance` -- if no frame advance for 15 minutes, job is frozen
+Three-tier detection (all scoped by WorkerName):
+1. **Worker heartbeat** (Tier 1): `_IsWorkerOffline(WorkerName)` -- if LastHeartbeat > 5 min stale, worker is offline and all its jobs are stuck. Works across machines.
+2. **Progress stagnation** (Tier 2): `_IsJobFrozen()` checks `TranscodeProgress.LastFrameAdvance` -- if no frame advance for 15 minutes, job is frozen. Works across machines.
+3. **Local PID check** (Tier 3): `IsProcessAlive(ProcessId)` -- only runs for local jobs (WorkerName == hostname). Checks if the Python worker process is still alive. PID reuse is guarded by Tier 1 (heartbeat staleness).
 
-Cleanup: resets TranscodeQueue to Pending, marks TranscodeAttempt as failed, deletes TranscodeProgress, updates ActiveJobs to Failed.
+Cleanup: resets TranscodeQueue to Pending (clears ClaimedBy/ClaimedAt), marks TranscodeAttempt as failed, deletes TranscodeProgress, updates ActiveJobs to Failed.
 
 ### Crash Recovery
 
-`CrashRecoveryService.RecoverServiceJobs("TranscodeService")` runs at startup:
-- Finds ActiveJobs for this service that are not in a terminal state
-- Verifies if their processes are still running
-- Resets orphaned jobs (dead process) back to Pending
+`CrashRecoveryService.RecoverServiceJobs("TranscodeService")` runs at startup, scoped to this worker:
+- Finds ActiveJobs for this service AND this worker (WorkerName filter)
+- Verifies if their processes are still running locally
+- Resets orphaned jobs (dead process) back to Pending, clears ClaimedBy
+- Never touches other workers' jobs
 
 ### MaxConcurrentJobs
 
@@ -432,14 +436,14 @@ End-to-end trace from worker installation through finished product. Every functi
 | 7.4 | Re-probe new file | FFprobe on replaced file | `UPDATE MediaFiles SET Resolution=..., Codec=..., SizeMB=..., TranscodedByMediaVortex=True` | MediaFiles updated with new metadata |
 | 7.5 | Mark complete | | `UPDATE TranscodeFiles SET ... Status='Completed'` | Done |
 
-### Phase 8: Shutdown
+### Phase 8: Shutdown (scoped to this worker only)
 
 | Step | Action | Function | DB Call | Status Change |
 |------|--------|----------|---------|---------------|
 | 8.1 | SIGINT/SIGTERM received | `SignalHandler()` or `Shutdown()` | -- | -- |
-| 8.2 | Kill FFmpeg processes | `proc.kill()` for active jobs | -- | -- |
-| 8.3 | Reset running jobs | | `UPDATE TranscodeQueue SET Status='Pending' WHERE Status IN ('Running', 'Processing')` | Uncompleted jobs back to Pending |
-| 8.4 | Clear active jobs | | `DELETE FROM ActiveJobs WHERE ServiceName='TranscodeService'` | -- |
+| 8.2 | Kill local FFmpeg processes | `proc.kill()` for active jobs | -- | Only kills local processes |
+| 8.3 | Reset this worker's jobs | | `UPDATE TranscodeQueue SET Status='Pending', ClaimedBy=NULL, ClaimedAt=NULL WHERE Status IN ('Running', 'Processing') AND ClaimedBy = %s` | This worker's jobs back to Pending |
+| 8.4 | Clear this worker's active jobs | | `DELETE FROM ActiveJobs WHERE ServiceName='TranscodeService' AND WorkerName = %s` | -- |
 | 8.5 | Mark worker offline | `DatabaseManager.UpdateWorkerStatus(WorkerName, "Offline")` | `UPDATE Workers SET Status='Offline' WHERE WorkerName = %s` | Workers.Status = `Offline` |
 | 8.6 | Update ServiceStatus | | `UPDATE ServiceStatus SET Status='Stopped', ProcessId=0, IsProcessing=False` | ServiceStatus.Status = `Stopped` |
 

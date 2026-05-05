@@ -31,6 +31,16 @@ Both (infrastructure deployment + code change)
 ### Documentation
 11. WorkerSetup.md updated with multi-share configuration instructions (generic, not Larry-specific).
 
+### End-to-End Worker Lifecycle (pass/fail)
+12. setup.sh runs unattended and completes: worker row exists in Workers table, 3 rows in WorkerShareMappings, systemd service enabled.
+13. Service starts, registers heartbeat, and enters Running state within 60 seconds of `systemctl start`.
+14. Worker claims a Pending queue item: TranscodeQueue.Status = 'Running', ClaimedBy = worker hostname, ClaimedAt set. No other worker can claim the same item.
+15. FFmpeg runs to completion on the worker. TranscodeAttempts.Success = TRUE, ErrorMessage IS NULL, NewSizeBytes > 0.
+16. After success: queue item deleted from TranscodeQueue, ActiveJob marked Completed, quality test queued.
+17. Worker immediately claims the next Pending item and repeats the cycle.
+18. Stopping the worker (systemctl stop or SIGTERM) resets only THIS worker's running jobs to Pending, marks worker Offline, does not touch other workers' jobs.
+19. Worker isolation: StuckJobDetector, CrashRecoveryService, and SignalHandler never interfere with another worker's jobs.
+
 ## Status
 
 IN PROGRESS
@@ -49,9 +59,12 @@ IN PROGRESS
 - [x] Configure three media shares via Proxmox bind mounts (same host mounts as mediamanager CT 206)
 - [x] Clone repo, install TranscodeService requirements system-wide (no venv -- in setup.sh)
 - [x] Register worker in DB with multi-prefix share mappings (in setup.sh)
-- [ ] DEPLOY: Run terraform apply, clone repo into container, start service, verify end-to-end
 - [x] Set up systemd service for auto-start (in setup.sh)
 - [x] Update WorkerSetup.md with multi-share setup instructions
+- [x] Fix worker isolation: SignalHandler, CrashRecovery, StuckJobDetector, QueueManagement scoped by WorkerName
+- [x] Fix QueryDatabase.py --commit flag so setup.sh writes persist
+- [ ] DEPLOY: push code, git pull on worker, restart service
+- [ ] VERIFY: worker claims job, transcodes, completes, claims next (criteria 12-19)
 
 ## Scope
 

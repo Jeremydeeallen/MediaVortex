@@ -257,14 +257,15 @@ class StuckJobDetectionService:
             return False, f"Error checking progress stagnation: {str(e)}"
 
     def IsProcessAlive(self, ProcessId: int) -> bool:
-        """Check if a process with the given ID is still alive and is actually an FFmpeg process."""
+        """Check if the worker process that owns a job is still alive.
+        ActiveJob stores the Python worker PID (os.getpid()), not the FFmpeg PID.
+        PID reuse is guarded by Tier 1 (heartbeat staleness within 5 minutes)."""
         try:
             if not ProcessId or ProcessId <= 0:
                 return False
 
-            # Verify the process exists AND is actually FFmpeg (PIDs get reused by the OS)
             process = psutil.Process(ProcessId)
-            return process.is_running() and 'ffmpeg' in process.name().lower()
+            return process.is_running()
 
         except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
             return False
@@ -304,10 +305,10 @@ class StuckJobDetectionService:
                                           "StuckJobDetectionService", "CleanupStuckJob")
 
             # Each ExecuteNonQuery auto-commits on its own connection
-            # 1. Reset TranscodeQueue status to Pending
+            # 1. Reset TranscodeQueue status to Pending and clear ownership
             queueUpdateQuery = """
             UPDATE TranscodeQueue
-            SET Status = 'Pending', DateStarted = NULL
+            SET Status = 'Pending', DateStarted = NULL, ClaimedBy = NULL, ClaimedAt = NULL
             WHERE Id = %s
             """
             queueAffected = self.DatabaseManager.DatabaseService.ExecuteNonQuery(queueUpdateQuery, (QueueId,))

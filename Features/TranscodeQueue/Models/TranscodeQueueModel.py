@@ -17,6 +17,7 @@ class TranscodeQueueModel:
     Status: str = "Pending"  # Pending, Running, Completed, Failed, Cancelled
     AssignedProfile: str = ""  # Profile assigned for transcoding
     ProcessingMode: str = "Transcode"  # "Transcode" or "Remux"
+    ClaimedBy: Optional[str] = None  # Worker hostname that claimed this job
     DateAdded: Optional[datetime] = None
     DateStarted: Optional[datetime] = None
 

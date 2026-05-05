@@ -178,9 +178,9 @@ class TranscodeServiceApp:
         try:
             LoggingService.LogInfo("Starting crash recovery for TranscodeService...", "TranscodeService", "RecoverFromCrash")
             
-            # Import and use the new CrashRecoveryService
+            # Import and use the new CrashRecoveryService (scoped to this worker)
             from Services.CrashRecoveryService import CrashRecoveryService
-            recovery_service = CrashRecoveryService(self.DatabaseManager)
+            recovery_service = CrashRecoveryService(self.DatabaseManager, WorkerName=self.WorkerName)
             
             # Perform crash recovery
             result = recovery_service.RecoverServiceJobs("TranscodeService")
@@ -386,13 +386,15 @@ class TranscodeServiceApp:
             LoggingService.LogException("Error during shutdown", e, "TranscodeService", "Shutdown")
 
 def SignalHandler(signum, frame):
-    """Handle shutdown signals immediately - kill FFmpeg, cleanup DB, exit."""
+    """Handle shutdown signals immediately - kill FFmpeg, cleanup DB, exit.
+    Scoped to this worker only -- never touches other workers' jobs."""
     print("\nTranscodeService shutting down...")
 
     if hasattr(Main, 'app') and Main.app:
         app = Main.app
+        WorkerName = app.WorkerName
 
-        # Kill all active FFmpeg processes immediately
+        # Kill all active FFmpeg processes immediately (local only)
         try:
             activeJobIds = app.ProcessTranscodeQueue.VideoTranscoding.GetActiveJobs()
             for jobId in activeJobIds:
@@ -405,17 +407,26 @@ def SignalHandler(signum, frame):
         except Exception:
             pass
 
-        # Database cleanup: reset running queue items and clear active jobs
+        # Database cleanup: reset only THIS worker's running queue items and active jobs
         try:
             db = app.DatabaseManager
             db.DatabaseService.ExecuteNonQuery(
-                "UPDATE TranscodeQueue SET Status = 'Pending' WHERE Status IN ('Running', 'Processing')"
+                "UPDATE TranscodeQueue SET Status = 'Pending', ClaimedBy = NULL, ClaimedAt = NULL WHERE Status IN ('Running', 'Processing') AND ClaimedBy = %s",
+                (WorkerName,)
             )
             db.DatabaseService.ExecuteNonQuery(
-                "DELETE FROM ActiveJobs WHERE ServiceName = 'TranscodeService'"
+                "DELETE FROM ActiveJobs WHERE ServiceName = 'TranscodeService' AND WorkerName = %s",
+                (WorkerName,)
             )
             db.DatabaseService.ExecuteNonQuery(
-                "DELETE FROM TranscodeProgress"
+                """DELETE FROM TranscodeProgress WHERE TranscodeAttemptId IN (
+                    SELECT ta.Id FROM TranscodeAttempts ta
+                    INNER JOIN ActiveJobs aj ON aj.QueueId IN (
+                        SELECT tq.Id FROM TranscodeQueue tq WHERE tq.ClaimedBy = %s
+                    )
+                    WHERE ta.Success IS NULL
+                )""",
+                (WorkerName,)
             )
             db.UpdateServiceStatus("TranscodeService", {
                 'Status': 'Stopped',
@@ -423,6 +434,7 @@ def SignalHandler(signum, frame):
                 'IsProcessing': False,
                 'ActiveJobsCount': 0
             })
+            db.UpdateWorkerStatus(WorkerName, "Offline")
         except Exception:
             pass
 

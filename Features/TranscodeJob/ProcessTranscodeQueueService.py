@@ -133,8 +133,8 @@ class ProcessTranscodeQueueService:
             # Stop any active video transcoding processes
             self.StopAllActiveTranscodingProcesses()
 
-            # Reset running jobs to pending status using shared service
-            resetResult = self.QueueManagement.ResetRunningJobsToPending("TranscodeQueue", "Transcoding cancelled by user stop request")
+            # Reset this worker's running jobs to pending status
+            resetResult = self.QueueManagement.ResetRunningJobsToPending("TranscodeQueue", "Transcoding cancelled by user stop request", WorkerName=self.WorkerName)
             if resetResult.get("Success", False):
                 LoggingService.LogInfo(f"Queue reset completed: {resetResult.get('Message', '')}",
                                      "ProcessTranscodeQueueService", "Stop")

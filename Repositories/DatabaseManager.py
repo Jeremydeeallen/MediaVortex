@@ -1407,7 +1407,7 @@ class DatabaseManager:
         # Get paginated items
         offset = (Page - 1) * PageSize
         query = f"""
-            SELECT Id, FilePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted, ProcessingMode
+            SELECT Id, FilePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted, ProcessingMode, ClaimedBy
             FROM TranscodeQueue
             ORDER BY {sort_col} {order}, DateAdded ASC
             LIMIT %s OFFSET %s
@@ -1427,7 +1427,8 @@ class DatabaseManager:
                 Status=row['Status'],
                 DateAdded=self.ConvertStringToDateTime(row['DateAdded']) if row['DateAdded'] else None,
                 DateStarted=self.ConvertStringToDateTime(row['DateStarted']) if row['DateStarted'] else None,
-                ProcessingMode=row['ProcessingMode'] or 'Transcode'
+                ProcessingMode=row['ProcessingMode'] or 'Transcode',
+                ClaimedBy=row.get('ClaimedBy')
             ))
 
         return queue_items, total_items
@@ -3443,20 +3444,31 @@ class DatabaseManager:
             LoggingService.LogException("Exception getting active job by queue ID", e, "DatabaseManager", "GetActiveJobByQueueId")
             return None
     
-    def GetActiveJobsByService(self, ServiceName: str) -> List[Dict[str, Any]]:
-        """Get all active jobs for a specific service."""
+    def GetActiveJobsByService(self, ServiceName: str, WorkerName: str = None, RunningOnly: bool = True) -> List[Dict[str, Any]]:
+        """Get active jobs for a service, optionally filtered by worker.
+        RunningOnly=True (default) returns only Status='Running'. Set False for crash recovery."""
         try:
+            conditions = ["ServiceName = %s"]
+            params = [ServiceName]
+
+            if RunningOnly:
+                conditions.append("Status = 'Running'")
+
+            if WorkerName:
+                conditions.append("WorkerName = %s")
+                params.append(WorkerName)
+
             query = """
-                SELECT Id, ServiceName, JobType, QueueId, ProcessId, ThreadId, 
-                       StartedAt, Status, CreatedAt, UpdatedAt
-                FROM ActiveJobs 
-                WHERE ServiceName = %s AND Status = 'Running'
+                SELECT Id, ServiceName, JobType, QueueId, ProcessId, ThreadId,
+                       StartedAt, Status, CreatedAt, UpdatedAt, WorkerName
+                FROM ActiveJobs
+                WHERE {}
                 ORDER BY StartedAt ASC
-            """
-            
-            rows = self.DatabaseService.ExecuteQuery(query, (ServiceName,))
+            """.format(" AND ".join(conditions))
+
+            rows = self.DatabaseService.ExecuteQuery(query, params)
             return list(rows)
-            
+
         except Exception as e:
             LoggingService.LogException("Exception getting active jobs by service", e, "DatabaseManager", "GetActiveJobsByService")
             return []
@@ -3818,22 +3830,7 @@ class DatabaseManager:
             LoggingService.LogException("Exception getting active job by queue ID", e, "DatabaseManager", "GetActiveJobByQueueId")
             return None
     
-    def GetActiveJobsByService(self, service_name: str) -> List[Dict[str, Any]]:
-        """Get all active jobs for a service"""
-        try:
-            query = """
-                SELECT Id, ServiceName, JobType, QueueId, ProcessId, ThreadId, 
-                       StartedAt, Status, CreatedAt, UpdatedAt
-                FROM ActiveJobs 
-                WHERE ServiceName = %s
-            """
-            
-            rows = self.DatabaseService.ExecuteQuery(query, (service_name,))
-            return list(rows)
-            
-        except Exception as e:
-            LoggingService.LogException("Exception getting active jobs by service", e, "DatabaseManager", "GetActiveJobsByService")
-            return []
+    # Duplicate GetActiveJobsByService removed -- use the canonical version above (supports WorkerName + RunningOnly filters)
     
     def GetAllActiveJobs(self) -> List[Dict[str, Any]]:
         """Get all active jobs"""

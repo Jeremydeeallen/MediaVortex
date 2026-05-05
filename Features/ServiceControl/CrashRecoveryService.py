@@ -15,19 +15,20 @@ from Services.ProcessManagementService import ProcessManagementService
 class CrashRecoveryService:
     """Service for automated crash recovery of stuck jobs."""
 
-    def __init__(self, DatabaseManagerInstance):
+    def __init__(self, DatabaseManagerInstance, WorkerName: str = None):
         """Initialize the crash recovery service."""
         self.DatabaseManager = DatabaseManagerInstance
         self.ProcessManager = ProcessManagementService()
-        LoggingService.LogInfo("CrashRecoveryService initialized", "CrashRecoveryService", "__init__")
+        self.WorkerName = WorkerName
+        LoggingService.LogInfo(f"CrashRecoveryService initialized (worker={WorkerName or 'all'})", "CrashRecoveryService", "__init__")
 
     def RecoverServiceJobs(self, ServiceName: str) -> Dict:
-        """Recover all stuck jobs for a specific service."""
+        """Recover stuck jobs for a specific service, scoped to this worker's jobs only."""
         try:
-            LoggingService.LogInfo(f"Starting crash recovery for service: {ServiceName}", "CrashRecoveryService", "RecoverServiceJobs")
+            LoggingService.LogInfo(f"Starting crash recovery for service: {ServiceName}, worker: {self.WorkerName or 'all'}", "CrashRecoveryService", "RecoverServiceJobs")
 
-            # Get all active jobs for this service
-            active_jobs = self.DatabaseManager.GetActiveJobsByService(ServiceName)
+            # Get active jobs scoped to this worker (all statuses for recovery)
+            active_jobs = self.DatabaseManager.GetActiveJobsByService(ServiceName, WorkerName=self.WorkerName, RunningOnly=False)
 
             if not active_jobs:
                 LoggingService.LogInfo(f"No active jobs found for service {ServiceName}", "CrashRecoveryService", "RecoverServiceJobs")
@@ -163,10 +164,10 @@ class CrashRecoveryService:
             if not QueueIds:
                 return True
 
-            # Reset status to Pending and clear DateStarted
+            # Reset status to Pending and clear ownership
             query = """
                 UPDATE TranscodeQueue
-                SET Status = 'Pending', DateStarted = NULL
+                SET Status = 'Pending', DateStarted = NULL, ClaimedBy = NULL, ClaimedAt = NULL
                 WHERE Id IN ({})
             """.format(','.join(['%s'] * len(QueueIds)))
 
@@ -235,12 +236,16 @@ class CrashRecoveryService:
             return 0
 
     def CleanupActiveJobs(self, ServiceName: str) -> int:
-        """Clean up ActiveJobs records for a service."""
+        """Clean up ActiveJobs records for a service, scoped to this worker."""
         try:
-            query = "DELETE FROM ActiveJobs WHERE ServiceName = %s"
-            affected_rows = self.DatabaseManager.DatabaseService.ExecuteNonQuery(query, (ServiceName,))
+            if self.WorkerName:
+                query = "DELETE FROM ActiveJobs WHERE ServiceName = %s AND WorkerName = %s"
+                affected_rows = self.DatabaseManager.DatabaseService.ExecuteNonQuery(query, (ServiceName, self.WorkerName))
+            else:
+                query = "DELETE FROM ActiveJobs WHERE ServiceName = %s"
+                affected_rows = self.DatabaseManager.DatabaseService.ExecuteNonQuery(query, (ServiceName,))
 
-            LoggingService.LogInfo(f"Cleaned up {affected_rows} ActiveJobs records for service {ServiceName}", "CrashRecoveryService", "CleanupActiveJobs")
+            LoggingService.LogInfo(f"Cleaned up {affected_rows} ActiveJobs records for service {ServiceName} (worker={self.WorkerName or 'all'})", "CrashRecoveryService", "CleanupActiveJobs")
             return affected_rows
 
         except Exception as e:

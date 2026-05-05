@@ -14,13 +14,14 @@ class QueueManagementService:
     def __init__(self, DatabaseManagerInstance: DatabaseManager = None):
         self.DatabaseManager = DatabaseManagerInstance or DatabaseManager()
     
-    def ResetRunningJobsToPending(self, QueueType: str, CancelReason: str = "Cancelled by user stop request") -> Dict[str, Any]:
-        """Reset all running jobs to pending status for specified queue type."""
+    def ResetRunningJobsToPending(self, QueueType: str, CancelReason: str = "Cancelled by user stop request", WorkerName: str = None) -> Dict[str, Any]:
+        """Reset running jobs to pending status for specified queue type.
+        WorkerName scopes to a single worker. None = all workers (admin action)."""
         try:
             LoggingService.LogFunctionEntry("ResetRunningJobsToPending", "QueueManagementService", QueueType)
-            
+
             if QueueType == "TranscodeQueue":
-                return self.ResetTranscodeQueueRunningJobs(CancelReason)
+                return self.ResetTranscodeQueueRunningJobs(CancelReason, WorkerName)
             elif QueueType == "QualityTestingQueue":
                 return self.ResetQualityTestingQueueRunningJobs(CancelReason)
             else:
@@ -28,7 +29,7 @@ class QueueManagementService:
                     "Success": False,
                     "ErrorMessage": f"Unknown queue type: {QueueType}"
                 }
-                
+
         except Exception as e:
             LoggingService.LogException("Error resetting running jobs", e, "QueueManagementService", "ResetRunningJobsToPending")
             return {
@@ -36,32 +37,43 @@ class QueueManagementService:
                 "ErrorMessage": str(e)
             }
     
-    def ResetTranscodeQueueRunningJobs(self, CancelReason: str) -> Dict[str, Any]:
-        """Reset running transcoding jobs to pending and cancel associated attempts."""
+    def ResetTranscodeQueueRunningJobs(self, CancelReason: str, WorkerName: str = None) -> Dict[str, Any]:
+        """Reset running transcoding jobs to pending and cancel associated attempts.
+        WorkerName scopes to a single worker. None = all workers (admin action)."""
         try:
             LoggingService.LogFunctionEntry("ResetTranscodeQueueRunningJobs", "QueueManagementService")
-            
-            # Get all running transcoding jobs
+
+            # Get running transcoding jobs (filtered by worker if specified)
             runningJobs = self.DatabaseManager.GetTranscodeQueueItemsByStatus("Running")
-            
+            if WorkerName and runningJobs:
+                runningJobs = [j for j in runningJobs if j.ClaimedBy == WorkerName]
+
             if runningJobs and len(runningJobs) > 0:
-                LoggingService.LogInfo(f"Resetting {len(runningJobs)} running transcoding jobs to pending status", 
+                LoggingService.LogInfo(f"Resetting {len(runningJobs)} running transcoding jobs to pending status (worker={WorkerName or 'all'})",
                                      "QueueManagementService", "ResetTranscodeQueueRunningJobs")
-                
-                # Reset queue items to pending
-                queueResetQuery = """
-                UPDATE TranscodeQueue 
-                SET Status = 'Pending', DateStarted = NULL 
-                WHERE Status = 'Running'
-                """
-                queueAffectedRows = self.DatabaseManager.DatabaseService.ExecuteNonQuery(queueResetQuery)
-                
+
+                # Reset queue items to pending and clear ownership
+                if WorkerName:
+                    queueResetQuery = """
+                    UPDATE TranscodeQueue
+                    SET Status = 'Pending', DateStarted = NULL, ClaimedBy = NULL, ClaimedAt = NULL
+                    WHERE Status = 'Running' AND ClaimedBy = %s
+                    """
+                    queueAffectedRows = self.DatabaseManager.DatabaseService.ExecuteNonQuery(queueResetQuery, (WorkerName,))
+                else:
+                    queueResetQuery = """
+                    UPDATE TranscodeQueue
+                    SET Status = 'Pending', DateStarted = NULL, ClaimedBy = NULL, ClaimedAt = NULL
+                    WHERE Status = 'Running'
+                    """
+                    queueAffectedRows = self.DatabaseManager.DatabaseService.ExecuteNonQuery(queueResetQuery)
+
                 # Cancel associated transcode attempts
                 transcodeAttemptsQuery = """
                 UPDATE TranscodeAttempts
                 SET Success = FALSE, ErrorMessage = %s
                 WHERE FilePath IN (
-                    SELECT FilePath FROM TranscodeQueue 
+                    SELECT FilePath FROM TranscodeQueue
                     WHERE Status = 'Pending' AND DateStarted IS NULL
                 ) AND Success IS NULL
                 """

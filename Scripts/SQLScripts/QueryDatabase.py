@@ -181,15 +181,21 @@ def query_table(conn, table_name, columns=None, where=None, order=None, limit=50
         print(f"Query was: {query}")
 
 
-def run_raw_sql(conn, sql):
-    """Execute a raw SQL query and display results."""
+def run_raw_sql(conn, sql, commit=False):
+    """Execute a raw SQL query and display results.
+    By default, non-SELECT statements are rolled back (safe for troubleshooting).
+    Pass commit=True for writes that must persist (e.g., worker registration)."""
     try:
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cur.execute(sql)
 
         if cur.description is None:
-            print(f"Query executed. Rows affected: {cur.rowcount}")
-            conn.rollback()  # Don't commit modifications from troubleshooting script
+            if commit:
+                conn.commit()
+                print(f"Query executed and committed. Rows affected: {cur.rowcount}")
+            else:
+                conn.rollback()
+                print(f"Query executed (rolled back -- use --commit to persist). Rows affected: {cur.rowcount}")
             return
 
         rows = cur.fetchall()
@@ -233,6 +239,7 @@ Examples:
     parser.add_argument("--limit", "-l", type=int, default=50, help="Max rows to return (default: 50, 0 for unlimited)")
     parser.add_argument("--columns", "-c", help="Comma-separated column names to select")
     parser.add_argument("--count", action="store_true", help="Return row count instead of data")
+    parser.add_argument("--commit", action="store_true", help="Commit writes (INSERT/UPDATE/DELETE) instead of rolling back")
 
     args = parser.parse_args()
 
@@ -250,7 +257,7 @@ Examples:
             if not args.argument:
                 print("Usage: python QueryDatabase.py sql \"SELECT ...\"")
                 sys.exit(1)
-            run_raw_sql(conn, args.argument)
+            run_raw_sql(conn, args.argument, commit=args.commit)
         else:
             limit = args.limit if args.limit != 0 else None
             query_table(conn, args.command, columns=args.columns, where=args.where,
