@@ -303,6 +303,27 @@ def GetCurrentProgress():
         return jsonify({"Success": False, "ErrorMessage": errorMsg}), 500
 
 
+@TranscodeJobBlueprint.route('/AllProgress', methods=['GET'])
+def GetAllProgress():
+    """Get progress for all active transcode jobs (supports concurrent transcoding)."""
+    try:
+        from Repositories.DatabaseManager import DatabaseManager
+        DbManager = DatabaseManager()
+
+        ProgressList = DbManager.GetAllCurrentTranscodeProgress()
+
+        return jsonify({
+            'Success': True,
+            'Jobs': ProgressList,
+            'Count': len(ProgressList)
+        })
+
+    except Exception as e:
+        errorMsg = f"Exception getting all progress: {str(e)}"
+        LoggingService.LogException(errorMsg, e, "TranscodeJobController", "GetAllProgress")
+        return jsonify({"Success": False, "ErrorMessage": errorMsg}), 500
+
+
 @TranscodeJobBlueprint.route('/Refresh', methods=['POST'])
 def RefreshStatus():
     """Refresh transcoding status and progress."""

@@ -166,22 +166,48 @@ python3 Scripts/SQLScripts/AddDistributedColumns.py
 python3 Scripts/SQLScripts/QueryDatabase.py sql "INSERT INTO Workers (WorkerName, Platform, FFmpegPath, StagingDirectory, ShareMountPrefix, ShareCanonicalPrefix, MaxConcurrentJobs) VALUES ('$(hostname)', 'linux', '/usr/bin/ffmpeg', '/mnt/media/MediaVortex/Staging/', '/mnt/media/', 'T:\', 1) ON CONFLICT (WorkerName) DO UPDATE SET FFmpegPath = EXCLUDED.FFmpegPath, StagingDirectory = EXCLUDED.StagingDirectory, ShareMountPrefix = EXCLUDED.ShareMountPrefix, MaxConcurrentJobs = EXCLUDED.MaxConcurrentJobs"
 ```
 
-**Key difference from Windows:** `ShareMountPrefix` is the Linux mount path (`/mnt/media/`) while `ShareCanonicalPrefix` is how paths are stored in the DB (`T:\`). The PathTranslationService converts between them automatically.
+**Key difference from Windows:** Linux workers need path translation because the DB stores Windows drive letters (T:\, M:\, Z:\) but Linux mounts the same shares at different paths.
 
-### 8. Create the staging directory
+### 8. Configure share mappings (multi-share workers)
+
+If the DB has files on multiple drive letters (e.g. T:\, M:\, Z:\), each backed by a different network share, you need a mapping row per share in `WorkerShareMappings`:
 
 ```bash
-sudo mkdir -p /mnt/media/MediaVortex/Staging
-sudo chown $(whoami) /mnt/media/MediaVortex/Staging
+python3 Scripts/SQLScripts/QueryDatabase.py sql "INSERT INTO WorkerShareMappings (WorkerName, CanonicalPrefix, LocalMountPrefix) VALUES
+    ('$(hostname)', 'T:\', '/mnt/media_tv/'),
+    ('$(hostname)', 'M:\', '/mnt/movies/'),
+    ('$(hostname)', 'Z:\', '/mnt/xxx/')
+ON CONFLICT (WorkerName, CanonicalPrefix) DO UPDATE SET LocalMountPrefix = EXCLUDED.LocalMountPrefix"
 ```
 
-### 9. Start the service
+Adjust the LocalMountPrefix values to match your actual mount points. Each CanonicalPrefix is the Windows drive letter as stored in the DB. The PathTranslationService uses these mappings to convert DB paths to local paths and back.
+
+To check which drive letters are in use:
+
+```bash
+python3 Scripts/SQLScripts/QueryDatabase.py sql "SELECT DISTINCT LEFT(filepath, 3) AS drive, COUNT(*) AS cnt FROM mediafiles GROUP BY LEFT(filepath, 3)"
+```
+
+**Single-share workers:** If you only need one share (all DB files are on T:\), you can either use WorkerShareMappings with one row, or set ShareMountPrefix/ShareCanonicalPrefix on the Workers row directly (legacy approach).
+
+### 9. Create the staging directory
+
+The staging directory should be on a network share so the WebService can access output files for VMAF and file replacement.
+
+```bash
+sudo mkdir -p /mnt/media_tv/MediaVortex/Staging
+sudo chown $(whoami) /mnt/media_tv/MediaVortex/Staging
+```
+
+### 10. Start the service
 
 ```bash
 python3 TranscodeService/Main.py
 ```
 
-### 10. (Optional) Create a systemd service
+### 11. (Optional) Create a systemd service
+
+For a dedicated container (no venv), point ExecStart at the system python3:
 
 ```ini
 # /etc/systemd/system/mediavortex-transcode.service
@@ -192,20 +218,21 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=mediavortex
 WorkingDirectory=/opt/mediavortex
 Environment=MEDIAVORTEX_DB_HOST=10.0.0.15
 Environment=MEDIAVORTEX_DB_PORT=5432
 Environment=MEDIAVORTEX_DB_NAME=mediavortex
 Environment=MEDIAVORTEX_DB_USER=mediavortex
 Environment=MEDIAVORTEX_DB_PASSWORD=mediavortex
-ExecStart=/opt/mediavortex/venv/bin/python TranscodeService/Main.py
+ExecStart=/usr/bin/python3 TranscodeService/Main.py
 Restart=on-failure
 RestartSec=10
 
 [Install]
 WantedBy=multi-user.target
 ```
+
+If using a venv, change ExecStart to `/opt/mediavortex/venv/bin/python TranscodeService/Main.py`.
 
 ```bash
 sudo systemctl daemon-reload
@@ -244,6 +271,7 @@ The `ClaimedBy` column should show your worker's hostname.
 | Output file not found after transcode | StagingDirectory doesn't exist or wrong path | Create the directory, verify write permissions |
 | "connection refused" on startup | DB not reachable from this machine | Check firewall, verify `pg_hba.conf` allows connections from worker IP |
 | Files not accessible | Share not mounted or wrong mount prefix | Verify mount with `ls /mnt/media/` (Linux) or `dir T:\` (Windows) |
+| "file not found" but worker claims job | Missing share mapping for that drive letter | Check `WorkerShareMappings` has a row for each drive letter in the DB. Run the drive letter query in step 8 to find all in use. |
 | Worker shows as Offline in stuck detection | Heartbeat not updating | Check if service crashed, look at logs |
 
 ---
@@ -253,5 +281,5 @@ The `ClaimedBy` column should show your worker's hostname.
 - Workers talk directly to PostgreSQL -- no REST intermediary needed
 - Job claiming uses `SELECT FOR UPDATE SKIP LOCKED` -- multiple workers never claim the same job
 - Heartbeat (30-second interval) enables remote stuck-job detection
-- Path translation is automatic based on ShareMountPrefix/ShareCanonicalPrefix config
+- Path translation is automatic based on WorkerShareMappings (multi-share) or ShareMountPrefix/ShareCanonicalPrefix (single-share)
 - StagingDirectory should be ON the network share so VMAF and file replacement can access output files from any machine

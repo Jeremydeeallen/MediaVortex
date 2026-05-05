@@ -57,7 +57,7 @@ def GetOverview():
             FROM TranscodeProgress tp
             JOIN TranscodeAttempts ta ON tp.TranscodeAttemptId = ta.Id
             JOIN TranscodeQueue tq ON tq.FilePath = ta.FilePath AND tq.Status = 'Running'
-            WHERE tp.Status = 'Running'
+            WHERE ta.Success IS NULL
             ORDER BY tq.DateStarted ASC
         """
         JobRows = DbManager.DatabaseService.ExecuteQuery(JobQuery)

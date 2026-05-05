@@ -406,6 +406,7 @@ class TranscodeQueueManager {
                 const row = document.createElement('tr');
                 row.dataset.itemId = item.Id;
                 row.dataset.status = item.Status;
+                row.dataset.filepath = item.FilePath;
                 row.innerHTML = `
                     <td>${item.Id}</td>
                     <td>${this.escapeHtml(item.FileName)}</td>
@@ -612,9 +613,19 @@ class TranscodeQueueManager {
 
     async updateProgress() {
         try {
-            const response = await fetch('/api/Transcode/Progress');
+            const response = await fetch('/api/Transcode/AllProgress');
             const data = await response.json();
-            this.currentProgress = data;
+            if (data.Success && data.Jobs) {
+                // Build lookup by FilePath (case-insensitive)
+                this.progressByFile = {};
+                data.Jobs.forEach(job => {
+                    if (job.FilePath) {
+                        this.progressByFile[job.FilePath.toLowerCase()] = job;
+                    }
+                });
+                // Keep currentProgress for backward compat (first job)
+                this.currentProgress = data.Jobs.length > 0 ? data.Jobs[0] : null;
+            }
             this.updateProgressCells();
         } catch (error) {
             // Silently ignore progress polling errors
@@ -625,16 +636,22 @@ class TranscodeQueueManager {
         const runningRows = document.querySelectorAll('#QueueTableBody tr[data-status="Running"]');
         runningRows.forEach(row => {
             const cell = row.querySelector('.progress-cell');
-            if (cell && this.currentProgress && this.currentProgress.Success) {
-                const p = this.currentProgress;
+            if (!cell) return;
+
+            const filePath = row.dataset.filepath;
+            const p = filePath && this.progressByFile
+                ? this.progressByFile[filePath.toLowerCase()]
+                : null;
+
+            if (p && p.Success) {
                 cell.innerHTML = `
                     <div class="d-flex align-items-center">
                         <div class="progress me-2" style="width: 80px; height: 18px;">
-                            <div class="progress-bar progress-bar-striped progress-bar-animated bg-primary" 
-                                 role="progressbar" 
+                            <div class="progress-bar progress-bar-striped progress-bar-animated bg-primary"
+                                 role="progressbar"
                                  style="width: ${p.ProgressPercent || 0}%"
-                                 aria-valuenow="${p.ProgressPercent || 0}" 
-                                 aria-valuemin="0" 
+                                 aria-valuenow="${p.ProgressPercent || 0}"
+                                 aria-valuemin="0"
                                  aria-valuemax="100">
                             </div>
                         </div>

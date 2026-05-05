@@ -43,14 +43,19 @@ class ProcessTranscodeQueueService:
         # Worker-specific paths (from Workers table, with fallback defaults)
         self.FFmpegPath = self.WorkerConfig.get('FFmpegPath') or self.WorkerConfig.get('ffmpegpath')
         self.OutputDirectory = self.WorkerConfig.get('StagingDirectory') or self.WorkerConfig.get('stagingdirectory')
-        self.ShareMountPrefix = self.WorkerConfig.get('ShareMountPrefix') or self.WorkerConfig.get('sharemountprefix')
-        self.ShareCanonicalPrefix = self.WorkerConfig.get('ShareCanonicalPrefix') or self.WorkerConfig.get('sharecanonicalprefix') or 'T:\\'
 
-        # Path translation service for cross-platform support
+        # Path translation service for cross-platform support (multi-prefix)
         self.PathTranslation = None
-        if self.ShareMountPrefix:
+        ShareMappings = self.WorkerConfig.get('ShareMappings') or []
+        ShareMountPrefix = self.WorkerConfig.get('ShareMountPrefix') or self.WorkerConfig.get('sharemountprefix')
+        ShareCanonicalPrefix = self.WorkerConfig.get('ShareCanonicalPrefix') or self.WorkerConfig.get('sharecanonicalprefix') or 'T:\\'
+        if ShareMappings or ShareMountPrefix:
             from Core.Services.PathTranslationService import PathTranslationService
-            self.PathTranslation = PathTranslationService(self.ShareMountPrefix, self.ShareCanonicalPrefix)
+            self.PathTranslation = PathTranslationService(
+                ShareMountPrefix=ShareMountPrefix,
+                ShareCanonicalPrefix=ShareCanonicalPrefix,
+                Mappings=ShareMappings if ShareMappings else None
+            )
 
         # Processing state
         self.IsProcessing = False

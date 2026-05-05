@@ -1678,7 +1678,7 @@ class DatabaseManager:
             return False
 
     def GetWorkerConfig(self, WorkerName: str) -> Optional[Dict[str, Any]]:
-        """Get worker configuration from the Workers table."""
+        """Get worker configuration from the Workers table, including share mappings."""
         try:
             query = """
                 SELECT WorkerName, Platform, FFmpegPath, FFprobePath, StagingDirectory,
@@ -1687,11 +1687,35 @@ class DatabaseManager:
             """
             rows = self.DatabaseService.ExecuteQuery(query, (WorkerName,))
             if rows:
-                return rows[0]
+                Config = rows[0]
+                Config['ShareMappings'] = self.GetWorkerShareMappings(WorkerName)
+                return Config
             return None
         except Exception as e:
             LoggingService.LogException("Exception in GetWorkerConfig", e, "DatabaseManager", "GetWorkerConfig")
             return None
+
+    def GetWorkerShareMappings(self, WorkerName: str) -> list:
+        """Get share prefix mappings for a worker from WorkerShareMappings table.
+
+        Returns list of (CanonicalPrefix, LocalMountPrefix) tuples.
+        Falls back to empty list if table doesn't exist yet (pre-migration).
+        """
+        try:
+            query = """
+                SELECT CanonicalPrefix, LocalMountPrefix
+                FROM WorkerShareMappings WHERE WorkerName = %s
+                ORDER BY CanonicalPrefix
+            """
+            rows = self.DatabaseService.ExecuteQuery(query, (WorkerName,))
+            return [
+                (row.get('canonicalprefix') or row.get('CanonicalPrefix'),
+                 row.get('localmountprefix') or row.get('LocalMountPrefix'))
+                for row in rows
+            ]
+        except Exception as e:
+            LoggingService.LogException("Exception in GetWorkerShareMappings", e, "DatabaseManager", "GetWorkerShareMappings")
+            return []
 
     def UpdateWorkerStatus(self, WorkerName: str, Status: str) -> bool:
         """Update worker status (Online, Offline, Draining)."""
@@ -2829,6 +2853,86 @@ class DatabaseManager:
             LoggingService.LogException("Exception getting current transcode progress", e, "DatabaseManager", "GetCurrentTranscodeProgress")
             return None
     
+    def GetAllCurrentTranscodeProgress(self) -> list:
+        """Get progress for ALL active transcoding jobs (supports concurrent transcoding)."""
+        try:
+            LoggingService.LogFunctionEntry("GetAllCurrentTranscodeProgress", "DatabaseManager")
+
+            query = """
+                SELECT tp.TranscodeAttemptId, tp.CurrentPhase, tp.ProgressPercent, tp.CurrentFrame,
+                       tp.TotalFrames, tp.CurrentFPS, tp.AverageFPS, tp.CurrentBitrate,
+                       tp.CurrentTime, tp.CurrentSpeed, tp.ETA, tp.PassDuration,
+                       tp.LastProgressUpdate, ta.FilePath, ta.Quality, ta.ProfileName, ta.AttemptDate,
+                       mf.TotalFrames as MediaFileTotalFrames, ta.FfpmpegCommand
+                FROM TranscodeProgress tp
+                INNER JOIN TranscodeAttempts ta ON tp.TranscodeAttemptId = ta.Id
+                INNER JOIN TranscodeQueue tq ON LOWER(ta.FilePath) = LOWER(tq.FilePath) AND tq.Status = 'Running'
+                LEFT JOIN MediaFiles mf ON ta.FilePath = mf.FilePath
+                WHERE ta.Success IS NULL
+                ORDER BY tp.LastProgressUpdate DESC
+            """
+
+            results = self.DatabaseService.ExecuteQuery(query)
+
+            if not results:
+                LoggingService.LogDebug("No active transcoding progress found", "DatabaseManager", "GetAllCurrentTranscodeProgress")
+                return []
+
+            ProgressList = []
+            SeenAttempts = set()
+            for row in results:
+                AttemptId = row['transcodeattemptid']
+                # The query may return multiple phases per attempt; take the most recent (already ordered by LastProgressUpdate DESC)
+                if AttemptId in SeenAttempts:
+                    continue
+                SeenAttempts.add(AttemptId)
+
+                FilePath = row['filepath']
+                FileName = FilePath.split('\\')[-1] if FilePath else "Unknown"
+
+                MediaFileTotalFrames = row.get('mediafiletotalframes')
+                ProgressTotalFrames = row['totalframes']
+                ActualTotalFrames = MediaFileTotalFrames if MediaFileTotalFrames else ProgressTotalFrames
+
+                CurrentFrame = row['currentframe']
+                RecalculatedProgress = 0.0
+                if ActualTotalFrames and ActualTotalFrames > 0 and CurrentFrame > 0:
+                    RecalculatedProgress = min((CurrentFrame / ActualTotalFrames) * 100, 95.0)
+
+                ProgressList.append({
+                    'Success': True,
+                    'AttemptId': AttemptId,
+                    'TranscodeAttemptId': AttemptId,
+                    'CurrentPhase': row['currentphase'],
+                    'ProgressPercent': RecalculatedProgress if RecalculatedProgress > 0 else row['progresspercent'],
+                    'CurrentFrame': CurrentFrame,
+                    'TotalFrames': ActualTotalFrames,
+                    'CurrentFPS': row['currentfps'],
+                    'AverageFPS': row['averagefps'],
+                    'CurrentBitrate': row['currentbitrate'],
+                    'CurrentTime': row['currenttime'],
+                    'CurrentSpeed': row['currentspeed'],
+                    'ETA': row['eta'],
+                    'PassDuration': row['passduration'],
+                    'LastUpdate': row['lastprogressupdate'],
+                    'LastProgressUpdate': row['lastprogressupdate'],
+                    'FilePath': FilePath,
+                    'FileName': FileName,
+                    'StartTime': row['attemptdate'],
+                    'Quality': row['quality'],
+                    'ProfileName': row['profilename'],
+                    'MediaFileTotalFrames': MediaFileTotalFrames,
+                    'RecalculatedProgress': RecalculatedProgress > 0,
+                    'Command': row.get('ffpmpegcommand')
+                })
+
+            LoggingService.LogDebug(f"Found progress for {len(ProgressList)} active jobs", "DatabaseManager", "GetAllCurrentTranscodeProgress")
+            return ProgressList
+
+        except Exception as e:
+            LoggingService.LogException("Exception getting all current transcode progress", e, "DatabaseManager", "GetAllCurrentTranscodeProgress")
+            return []
+
     def DeleteTranscodeProgress(self, TranscodeAttemptId: int) -> bool:
         """Delete all progress records for a specific transcoding attempt."""
         try:

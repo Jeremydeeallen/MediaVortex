@@ -89,6 +89,22 @@ def RunMigration():
         else:
             print("[SKIP] ActiveJobs.WorkerName already exists")
 
+        # 5. Create WorkerShareMappings table (multi-prefix path translation)
+        if not TableExists(cursor, 'workersharemappings'):
+            cursor.execute("""
+                CREATE TABLE WorkerShareMappings (
+                    Id BIGSERIAL PRIMARY KEY,
+                    WorkerName TEXT NOT NULL,
+                    CanonicalPrefix TEXT NOT NULL,
+                    LocalMountPrefix TEXT NOT NULL,
+                    UNIQUE(WorkerName, CanonicalPrefix)
+                )
+            """)
+            connection.commit()
+            print("[OK] Created WorkerShareMappings table")
+        else:
+            print("[SKIP] WorkerShareMappings table already exists")
+
         print("\nMigration completed successfully.")
 
     except Exception as e:
