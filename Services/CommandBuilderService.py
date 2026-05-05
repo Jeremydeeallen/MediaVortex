@@ -58,6 +58,7 @@ class CommandBuilderService:
                 'InputPath': InputPath,
                 'FFmpegPath': TranscodingSettings.get('FFmpegPath'),
                 'OutputDirectory': TranscodingSettings.get('OutputDirectory'),
+                'TranscodeOutputMode': TranscodingSettings.get('TranscodeOutputMode', 'InPlace'),
                 'MaxCpuThreads': TranscodingSettings.get('MaxCpuThreads')
             }
 
@@ -235,7 +236,8 @@ class CommandBuilderService:
                 'SubtitleStreamIndex': SubtitleStreamIndex,
                 'InputPath': SourcePath,
                 'FFmpegPath': TranscodingSettings.get('FFmpegPath') if TranscodingSettings else None,
-                'OutputDirectory': TranscodingSettings.get('OutputDirectory') if TranscodingSettings else None
+                'OutputDirectory': TranscodingSettings.get('OutputDirectory') if TranscodingSettings else None,
+                'TranscodeOutputMode': TranscodingSettings.get('TranscodeOutputMode', 'InPlace') if TranscodingSettings else 'InPlace'
             }
 
             CommandResult = self.CommandBuilder.BuildSubtitleFixCommand(CommandData)
@@ -270,7 +272,8 @@ class CommandBuilderService:
                 'AudioStreamIndex': AudioStreamIndex,
                 'InputPath': SourcePath,
                 'FFmpegPath': TranscodingSettings.get('FFmpegPath') if TranscodingSettings else None,
-                'OutputDirectory': TranscodingSettings.get('OutputDirectory') if TranscodingSettings else None
+                'OutputDirectory': TranscodingSettings.get('OutputDirectory') if TranscodingSettings else None,
+                'TranscodeOutputMode': TranscodingSettings.get('TranscodeOutputMode', 'InPlace') if TranscodingSettings else 'InPlace'
             }
 
             CommandResult = self.CommandBuilder.BuildRemuxCommand(CommandData)

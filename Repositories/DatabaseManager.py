@@ -1706,7 +1706,7 @@ class DatabaseManager:
             query = """
                 SELECT WorkerName, Platform, FFmpegPath, FFprobePath, StagingDirectory,
                        ShareMountPrefix, ShareCanonicalPrefix, MaxConcurrentJobs, Status,
-                       MaxCpuThreads, AcceptsInterlaced
+                       MaxCpuThreads, AcceptsInterlaced, QualityTestEnabled
                 FROM Workers WHERE WorkerName = %s
             """
             rows = self.DatabaseService.ExecuteQuery(query, (WorkerName,))

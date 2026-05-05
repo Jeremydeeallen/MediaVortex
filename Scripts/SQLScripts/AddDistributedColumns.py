@@ -139,6 +139,38 @@ def RunMigration():
         else:
             print("[SKIP] WorkerShareMappings table already has DriveLetter column")
 
+        # 8. Add QualityTestEnabled column to Workers (per-worker VMAF toggle)
+        if not ColumnExists(cursor, 'workers', 'qualitytestenabled'):
+            cursor.execute("ALTER TABLE Workers ADD COLUMN QualityTestEnabled BOOLEAN")
+            connection.commit()
+            print("[OK] Added QualityTestEnabled column to Workers (NULL = use global setting)")
+        else:
+            print("[SKIP] Workers.QualityTestEnabled already exists")
+
+        # 9. Add QualityTestEnabled global setting (default OFF)
+        cursor.execute("SELECT 1 FROM SystemSettings WHERE SettingKey = 'QualityTestEnabled' LIMIT 1")
+        if not cursor.fetchone():
+            cursor.execute("""
+                INSERT INTO SystemSettings (SettingKey, SettingValue, Description, DataType)
+                VALUES ('QualityTestEnabled', 'false', 'Global toggle for VMAF quality testing after transcode', 'boolean')
+            """)
+            connection.commit()
+            print("[OK] Added QualityTestEnabled system setting (default: false)")
+        else:
+            print("[SKIP] QualityTestEnabled system setting already exists")
+
+        # 10. Add TranscodeOutputMode global setting (default InPlace)
+        cursor.execute("SELECT 1 FROM SystemSettings WHERE SettingKey = 'TranscodeOutputMode' LIMIT 1")
+        if not cursor.fetchone():
+            cursor.execute("""
+                INSERT INTO SystemSettings (SettingKey, SettingValue, Description, DataType)
+                VALUES ('TranscodeOutputMode', 'InPlace', 'Output placement: InPlace (next to source) or Staging (worker staging dir)', 'string')
+            """)
+            connection.commit()
+            print("[OK] Added TranscodeOutputMode system setting (default: InPlace)")
+        else:
+            print("[SKIP] TranscodeOutputMode system setting already exists")
+
         print("\nMigration completed successfully.")
 
     except Exception as e:

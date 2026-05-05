@@ -38,7 +38,14 @@ class CommandBuilder:
             # Generate output filename with target resolution and container type
             CrfValue = ProfileSettings.get('Quality')
             OutputFileName = self.GenerateOutputFileName(MediaFile.FileName, SourceResolution, TargetResolution, ContainerType, CrfValue)
-            OutputDirectory = CommandData.get('OutputDirectory') or 'c:\\MediaVortex'
+
+            # Output location: use source file's directory (true in-place) unless Staging mode
+            OutputMode = CommandData.get('TranscodeOutputMode', 'InPlace')
+            if OutputMode == 'Staging':
+                OutputDirectory = CommandData.get('OutputDirectory') or 'c:\\MediaVortex'
+            else:
+                # InPlace: put output next to the source file
+                OutputDirectory = os.path.dirname(InputPath.strip('"'))
             OutputPath = os.path.join(OutputDirectory, OutputFileName)
 
             # Start building command - FFmpeg command structure: ffmpeg -i input [options] output -y
@@ -386,7 +393,12 @@ class CommandBuilder:
 
             InputPath = CommandData.get('InputPath', f"c:\\MediaVortex\\Source\\{MediaFile.FileName}")
             OutputFileName = os.path.splitext(MediaFile.FileName)[0] + ".mp4"
-            OutputDirectory = CommandData.get('OutputDirectory') or 'c:\\MediaVortex'
+
+            OutputMode = CommandData.get('TranscodeOutputMode', 'InPlace')
+            if OutputMode == 'Staging':
+                OutputDirectory = CommandData.get('OutputDirectory') or 'c:\\MediaVortex'
+            else:
+                OutputDirectory = os.path.dirname(InputPath.strip('"'))
             OutputPath = os.path.join(OutputDirectory, OutputFileName)
 
             FFmpegPath = CommandData.get('FFmpegPath') or 'C:\\Code\\Automation\\MediaVortex\\FFmpegMaster\\bin\\ffmpeg.exe'
@@ -436,7 +448,12 @@ class CommandBuilder:
 
             InputPath = CommandData.get('InputPath', f"c:\\MediaVortex\\Source\\{MediaFile.FileName}")
             OutputFileName = os.path.splitext(MediaFile.FileName)[0] + ".mp4"
-            OutputDirectory = CommandData.get('OutputDirectory') or 'c:\\MediaVortex'
+
+            OutputMode = CommandData.get('TranscodeOutputMode', 'InPlace')
+            if OutputMode == 'Staging':
+                OutputDirectory = CommandData.get('OutputDirectory') or 'c:\\MediaVortex'
+            else:
+                OutputDirectory = os.path.dirname(InputPath.strip('"'))
             OutputPath = os.path.join(OutputDirectory, OutputFileName)
 
             FFmpegPath = CommandData.get('FFmpegPath') or 'C:\\Code\\Automation\\MediaVortex\\FFmpegMaster\\bin\\ffmpeg.exe'

@@ -19,6 +19,9 @@ Executes FFmpeg transcode jobs from the queue, tracks progress, and handles resu
 - Worker isolation: all destructive operations (shutdown cleanup, crash recovery, stuck detection, stop) are scoped to the calling worker via ClaimedBy/WorkerName. No worker may reset, kill, or interfere with another worker's jobs.
 - Interlaced routing: workers with AcceptsInterlaced=FALSE skip interlaced files in the claim query. Interlaced files remain Pending until a capable worker claims them.
 - Conditional deinterlacing: yadif is applied by CommandBuilder only when MediaFile.IsInterlaced=TRUE, not based on profile settings. Progressive files never get yadif regardless of profile.
+- True in-place output: transcoded file is written to the same directory as the source file (not a staging directory). Output filename includes target resolution (e.g. 480p) so it coexists with the original until replacement.
+- Output location mode: SystemSettings.TranscodeOutputMode controls output placement. "InPlace" = same directory as source (default). "Staging" = worker's StagingDirectory or SystemSettings.StagingDirectory.
+- VMAF quality test toggle: SystemSettings.QualityTestEnabled (global on/off, default OFF). Workers.QualityTestEnabled (per-worker override, NULL = use global). TranscodeAttempts.QualityTestRequired is set from these at job creation time, not hardcoded.
 
 ## Progress
 
@@ -27,4 +30,7 @@ Executes FFmpeg transcode jobs from the queue, tracks progress, and handles resu
 - [x] Fix: worker isolation -- SignalHandler, CrashRecovery, StuckJobDetector, QueueManagement scoped by WorkerName
 - [x] Interlaced routing: AcceptsInterlaced flag on Workers, claim query filters by IsInterlaced
 - [x] Conditional deinterlacing: CommandBuilder applies yadif based on MediaFile.IsInterlaced, not profile
+- [ ] True in-place output: CommandBuilder uses source file directory instead of OutputDirectory
+- [ ] Output location mode: add TranscodeOutputMode setting, respect InPlace vs Staging
+- [ ] VMAF toggle: add QualityTestEnabled global setting (default OFF) and per-worker column
 - [ ] Fix: concurrent job progress isolation (see KNOWN-ISSUES.md)

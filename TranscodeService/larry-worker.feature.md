@@ -68,7 +68,9 @@ IN PROGRESS
 - [x] Upgrade FFmpeg: replace Ubuntu repo FFmpeg 6.1.1/SVT-AV1 1.7.0 with static build (SVT-AV1 2.x, 30-50% faster)
 - [x] Interlaced routing: AcceptsInterlaced=FALSE on Larry, claim query skips interlaced files
 - [x] Conditional yadif: CommandBuilder checks MediaFile.IsInterlaced, applies yadif only when true
-- [ ] VERIFY: worker claims job, transcodes, completes, claims next (criteria 12-19)
+- [x] VERIFY: worker claims job (75609), transcodes (Success=TRUE, 151MB, 784s), claims next (75610)
+- [ ] True in-place output: output file next to source, not in staging directory
+- [ ] VMAF toggle: global OFF so worker does not wait for quality test
 
 ## Scope
 

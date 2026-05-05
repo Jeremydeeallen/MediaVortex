@@ -52,6 +52,10 @@ class ProcessTranscodeQueueService:
         RawAccepts = self.WorkerConfig.get('AcceptsInterlaced') or self.WorkerConfig.get('acceptsinterlaced')
         self.AcceptsInterlaced = RawAccepts if RawAccepts is not None else True
 
+        # VMAF quality test: per-worker override (NULL = use global setting)
+        RawWorkerQT = self.WorkerConfig.get('QualityTestEnabled') or self.WorkerConfig.get('qualitytestenabled')
+        self.WorkerQualityTestEnabled = RawWorkerQT  # None means "use global"
+
         # Path translation service for cross-platform support
         # MountMap is a {DriveLetter: LocalMountPrefix} dict from WorkerShareMappings table
         self.PathTranslation = None
@@ -698,6 +702,36 @@ class ProcessTranscodeQueueService:
             LoggingService.LogException("Exception reading TranscodeFileMode, defaulting to InPlace", Ex, "ProcessTranscodeQueueService", "GetTranscodeFileMode")
             return 'InPlace'
 
+    def GetTranscodeOutputMode(self) -> str:
+        """Get output placement mode. Returns 'InPlace' (default) or 'Staging'."""
+        try:
+            from Features.SystemSettings.SystemSettingsRepository import SystemSettingsRepository
+            Repo = SystemSettingsRepository()
+            Mode = Repo.GetSystemSetting('TranscodeOutputMode')
+            if Mode and Mode.strip().lower() == 'staging':
+                return 'Staging'
+            return 'InPlace'
+        except Exception as Ex:
+            LoggingService.LogException("Exception reading TranscodeOutputMode, defaulting to InPlace", Ex, "ProcessTranscodeQueueService", "GetTranscodeOutputMode")
+            return 'InPlace'
+
+    def IsQualityTestEnabled(self) -> bool:
+        """Resolve whether quality test is enabled. Per-worker override > global setting."""
+        # Per-worker override takes priority
+        if self.WorkerQualityTestEnabled is not None:
+            return bool(self.WorkerQualityTestEnabled)
+        # Fall back to global setting
+        try:
+            from Features.SystemSettings.SystemSettingsRepository import SystemSettingsRepository
+            Repo = SystemSettingsRepository()
+            Value = Repo.GetSystemSetting('QualityTestEnabled')
+            if Value is not None:
+                return Value.strip().lower() in ('1', 'true', 'yes', 'on')
+            return False  # Default OFF
+        except Exception as Ex:
+            LoggingService.LogException("Exception reading QualityTestEnabled, defaulting to False", Ex, "ProcessTranscodeQueueService", "IsQualityTestEnabled")
+            return False
+
     def SetupFilePreparation(self, Job: TranscodeQueueModel, MediaFile: MediaFileModel, TranscodeAttemptId: int) -> Optional[str]:
         """Setup transcoding directories and optionally copy source file.
         Returns the effective input path for FFmpeg, or None on failure.
@@ -871,6 +905,7 @@ class ProcessTranscodeQueueService:
                 'StartTime': StartTime,
                 'FFmpegPath': self.FFmpegPath,
                 'OutputDirectory': self.OutputDirectory,
+                'TranscodeOutputMode': self.GetTranscodeOutputMode(),
                 'MaxCpuThreads': self.MaxCpuThreads
             }
 
@@ -917,7 +952,7 @@ class ProcessTranscodeQueueService:
                 VideoBitrateKbps=ProfileSettings.get('VideoBitrateKbps'),
                 ProfileName=MediaFile.AssignedProfile if hasattr(MediaFile, 'AssignedProfile') else None,
                 VMAF=None,  # Will be set after VMAF analysis
-                QualityTestRequired=True,
+                QualityTestRequired=self.IsQualityTestEnabled(),
                 QualityTestCompleted=False,
                 StartTime=TranscodingSettings.get('StartTime') if TranscodingSettings else None
             )
@@ -1051,7 +1086,7 @@ class ProcessTranscodeQueueService:
                     'NewSizeBytes': NewSizeBytes,
                     'SizeReductionBytes': SizeReductionBytes,
                     'SizeReductionPercent': SizeReductionPercent,
-                    'QualityTestRequired': True  # Mark for quality testing
+                    'QualityTestRequired': self.IsQualityTestEnabled()
                 })
 
                 # Update TranscodeFiles record for overall file status
