@@ -97,7 +97,15 @@ def RunMigration():
         else:
             print("[SKIP] Workers.MaxCpuThreads already exists")
 
-        # 6. WorkerShareMappings table (multi-prefix path translation)
+        # 6. Add AcceptsInterlaced column to Workers (interlaced job routing)
+        if not ColumnExists(cursor, 'workers', 'acceptsinterlaced'):
+            cursor.execute("ALTER TABLE Workers ADD COLUMN AcceptsInterlaced BOOLEAN DEFAULT TRUE")
+            connection.commit()
+            print("[OK] Added AcceptsInterlaced column to Workers")
+        else:
+            print("[SKIP] Workers.AcceptsInterlaced already exists")
+
+        # 7. WorkerShareMappings table (multi-prefix path translation)
         # DriveLetter stores just the letter (e.g. 'T'), not 'T:\'.
         # The service layer owns the ':\ ' separator -- no backslashes in the DB.
         if not TableExists(cursor, 'workersharemappings'):

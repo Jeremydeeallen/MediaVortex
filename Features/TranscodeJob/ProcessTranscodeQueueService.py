@@ -48,6 +48,10 @@ class ProcessTranscodeQueueService:
         RawMaxCpu = self.WorkerConfig.get('MaxCpuThreads') or self.WorkerConfig.get('maxcputhreads')
         self.MaxCpuThreads = int(RawMaxCpu) if RawMaxCpu else None
 
+        # Interlaced routing: FALSE = skip interlaced files, leave for capable workers
+        RawAccepts = self.WorkerConfig.get('AcceptsInterlaced') or self.WorkerConfig.get('acceptsinterlaced')
+        self.AcceptsInterlaced = RawAccepts if RawAccepts is not None else True
+
         # Path translation service for cross-platform support
         # MountMap is a {DriveLetter: LocalMountPrefix} dict from WorkerShareMappings table
         self.PathTranslation = None
@@ -292,9 +296,10 @@ class ProcessTranscodeQueueService:
 
     def GetNextJob(self) -> Optional[TranscodeQueueModel]:
         """Get and atomically claim the next pending job from the queue.
-        Uses SELECT FOR UPDATE SKIP LOCKED for safe distributed operation."""
+        Uses SELECT FOR UPDATE SKIP LOCKED for safe distributed operation.
+        Respects AcceptsInterlaced worker setting to skip interlaced files."""
         try:
-            return self.DatabaseManager.ClaimNextPendingTranscodeJob(self.WorkerName)
+            return self.DatabaseManager.ClaimNextPendingTranscodeJob(self.WorkerName, AcceptsInterlaced=self.AcceptsInterlaced)
         except Exception as e:
             LoggingService.LogException("Exception getting next job", e, "ProcessTranscodeQueueService", "GetNextJob")
             return None

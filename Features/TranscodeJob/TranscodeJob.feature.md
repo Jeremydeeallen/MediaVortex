@@ -17,10 +17,14 @@ Executes FFmpeg transcode jobs from the queue, tracks progress, and handles resu
 - ActiveJobs table tracks running processes for stuck-job detection
 - Distributed workers claim jobs atomically via SELECT FOR UPDATE SKIP LOCKED
 - Worker isolation: all destructive operations (shutdown cleanup, crash recovery, stuck detection, stop) are scoped to the calling worker via ClaimedBy/WorkerName. No worker may reset, kill, or interfere with another worker's jobs.
+- Interlaced routing: workers with AcceptsInterlaced=FALSE skip interlaced files in the claim query. Interlaced files remain Pending until a capable worker claims them.
+- Conditional deinterlacing: yadif is applied by CommandBuilder only when MediaFile.IsInterlaced=TRUE, not based on profile settings. Progressive files never get yadif regardless of profile.
 
 ## Progress
 
 - [x] Single-job transcoding pipeline
 - [x] Distributed worker support (Phase 1)
 - [x] Fix: worker isolation -- SignalHandler, CrashRecovery, StuckJobDetector, QueueManagement scoped by WorkerName
+- [x] Interlaced routing: AcceptsInterlaced flag on Workers, claim query filters by IsInterlaced
+- [x] Conditional deinterlacing: CommandBuilder applies yadif based on MediaFile.IsInterlaced, not profile
 - [ ] Fix: concurrent job progress isolation (see KNOWN-ISSUES.md)

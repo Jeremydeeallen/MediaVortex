@@ -1595,27 +1595,49 @@ class DatabaseManager:
 
         return None
 
-    def ClaimNextPendingTranscodeJob(self, WorkerName: str) -> Optional[TranscodeQueueModel]:
+    def ClaimNextPendingTranscodeJob(self, WorkerName: str, AcceptsInterlaced: bool = True) -> Optional[TranscodeQueueModel]:
         """Atomically claim the next pending job using SELECT FOR UPDATE SKIP LOCKED.
-        Prevents race conditions when multiple workers compete for jobs."""
+        Prevents race conditions when multiple workers compete for jobs.
+        AcceptsInterlaced=False skips interlaced files (leaves them for capable workers)."""
         try:
             import psycopg2.extras
             connection = self.DatabaseService.GetConnection()
             try:
                 cursor = connection.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-                query = """
-                    UPDATE TranscodeQueue
-                    SET Status = 'Running', ClaimedBy = %s, ClaimedAt = NOW(), DateStarted = NOW()
-                    WHERE Id = (
-                        SELECT Id FROM TranscodeQueue
-                        WHERE Status = 'Pending'
-                        ORDER BY SizeMB DESC, DateAdded ASC
-                        LIMIT 1
-                        FOR UPDATE SKIP LOCKED
-                    )
-                    RETURNING Id, FilePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted, ProcessingMode
-                """
-                cursor.execute(query, (WorkerName,))
+
+                if AcceptsInterlaced:
+                    # Accept all files
+                    query = """
+                        UPDATE TranscodeQueue
+                        SET Status = 'Running', ClaimedBy = %s, ClaimedAt = NOW(), DateStarted = NOW()
+                        WHERE Id = (
+                            SELECT Id FROM TranscodeQueue
+                            WHERE Status = 'Pending'
+                            ORDER BY SizeMB DESC, DateAdded ASC
+                            LIMIT 1
+                            FOR UPDATE SKIP LOCKED
+                        )
+                        RETURNING Id, FilePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted, ProcessingMode
+                    """
+                    cursor.execute(query, (WorkerName,))
+                else:
+                    # Skip interlaced files (join MediaFiles to check)
+                    query = """
+                        UPDATE TranscodeQueue
+                        SET Status = 'Running', ClaimedBy = %s, ClaimedAt = NOW(), DateStarted = NOW()
+                        WHERE Id = (
+                            SELECT tq.Id FROM TranscodeQueue tq
+                            JOIN MediaFiles mf ON mf.FilePath = tq.FilePath
+                            WHERE tq.Status = 'Pending'
+                              AND (mf.IsInterlaced = 0 OR mf.IsInterlaced IS NULL)
+                            ORDER BY tq.SizeMB DESC, tq.DateAdded ASC
+                            LIMIT 1
+                            FOR UPDATE SKIP LOCKED
+                        )
+                        RETURNING Id, FilePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted, ProcessingMode
+                    """
+                    cursor.execute(query, (WorkerName,))
+
                 row = cursor.fetchone()
                 connection.commit()
 
@@ -1684,7 +1706,7 @@ class DatabaseManager:
             query = """
                 SELECT WorkerName, Platform, FFmpegPath, FFprobePath, StagingDirectory,
                        ShareMountPrefix, ShareCanonicalPrefix, MaxConcurrentJobs, Status,
-                       MaxCpuThreads
+                       MaxCpuThreads, AcceptsInterlaced
                 FROM Workers WHERE WorkerName = %s
             """
             rows = self.DatabaseService.ExecuteQuery(query, (WorkerName,))

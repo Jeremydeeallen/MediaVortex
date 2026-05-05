@@ -93,8 +93,9 @@ class CommandBuilder:
             if AudioFilter:
                 CommandParts.extend(['-af', f'"{AudioFilter}"'])
             
-            # Add video filters (deinterlacing and scaling)
-            VideoFilter = self.BuildVideoFilters(ProfileSettings, ScaleFilter)
+            # Add video filters (deinterlacing only for interlaced sources, plus scaling)
+            IsInterlaced = getattr(MediaFile, 'IsInterlaced', 0) == 1 if MediaFile else False
+            VideoFilter = self.BuildVideoFilters(ProfileSettings, ScaleFilter, IsInterlaced)
             if VideoFilter:
                 CommandParts.extend(['-vf', f'"{VideoFilter}"'])
             
@@ -353,25 +354,19 @@ class CommandBuilder:
         # Return combined filters or None if no filters
         return ','.join(Filters) if Filters else None
 
-    def BuildVideoFilters(self, ProfileSettings: Dict[str, Any], ScaleFilter: Optional[str]) -> Optional[str]:
-        """Build video filter string from profile settings and scale filter."""
+    def BuildVideoFilters(self, ProfileSettings: Dict[str, Any], ScaleFilter: Optional[str], IsInterlaced: bool = False) -> Optional[str]:
+        """Build video filter string. Yadif applied only when source is interlaced."""
         Filters = []
-        
-        # Add deinterlacing filter if specified - only if not null/blank
-        YadifMode = ProfileSettings.get('YadifMode')
-        YadifParity = ProfileSettings.get('YadifParity')
-        YadifDeint = ProfileSettings.get('YadifDeint')
-        
-        if (YadifMode is not None and YadifMode != '' and YadifMode != 'None' and
-            YadifParity is not None and YadifParity != '' and YadifParity != 'None' and
-            YadifDeint is not None and YadifDeint != '' and YadifDeint != 'None'):
-            YadifFilter = f"yadif={YadifMode}:{YadifParity}:{YadifDeint}"
-            Filters.append(YadifFilter)
-        
+
+        # Apply yadif ONLY for interlaced sources (not based on profile settings).
+        # Uses yadif=1:1:1 (send frame per field, auto parity, deinterlace all frames).
+        if IsInterlaced:
+            Filters.append("yadif=1:1:1")
+
         # Add scale filter if provided
         if ScaleFilter:
             Filters.append(ScaleFilter)
-        
+
         # Return combined filters or None if no filters
         return ','.join(Filters) if Filters else None
     
