@@ -1,0 +1,11 @@
+# docs.export.yml -- declares what this repo publishes to http://docs
+# Full spec: docs-export.feature.md in the claude-config clone.
+project: MediaVortex
+repo_url: https://github.com/TheAdroitDBA/MediaVortex.git
+branch: main
+
+nav:
+  - Overview: README.md
+  - Pipeline: transcode.flow.md
+  # Add feature docs, flow docs, and guides as they are created.
+  # Paths are relative to repo root.

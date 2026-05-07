@@ -6,6 +6,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 MediaVortex is a media transcoding and management system built with Python/Flask. It scans media files, assigns transcode profiles, queues and executes FFmpeg transcoding jobs, and integrates with Jellyfin for playback optimization.
 
+## Token optimization (reading order)
+
+Stop when you have enough context:
+1. `.claude/rules/` -- invariants that never change
+2. `CLAUDE.md` (this file)
+3. Sibling docs (`*.feature.md`, `*.flow.md`) next to the file being edited
+4. `memory/` -- on-demand topic files
+5. Source code -- last resort, read targeted files only
+
 ## Commands
 
 ```bash
@@ -169,3 +178,48 @@ API endpoints are registered via Flask Blueprints in each feature's Controller.
 ## Frontend
 
 Bootstrap 5 + jQuery + Chart.js, served via Jinja2 templates in `Templates/`.
+
+## Where things live
+
+- Feature docs: colocated `*.feature.md` next to primary code
+- Flow docs: colocated `*.flow.md` next to entry-point files
+- Known issues: `KNOWN-ISSUES.md`
+- Current feature anchor: `.claude/current-feature`
+
+## Python environment
+
+- Create venv: `py -m venv venv` (Windows) or `python3 -m venv venv` (Mac/Linux)
+- Activate: `source venv/Scripts/activate` (Windows/Git Bash) or `source venv/bin/activate` (Mac/Linux)
+- After activation, `python` and `pip` work on all platforms.
+- All dependencies in `requirements.txt`. Install: `pip install -r requirements.txt`
+- Never install packages globally or ad-hoc outside requirements.txt.
+- `venv/` must be in `.gitignore`.
+
+## Framework essentials
+
+- **Hard rules:** no emojis in .md files (plain text only); prefer editing existing files over creating new ones; hooks are opt-in per repo via `.claude/feature-doc-required`; all operations idempotent.
+- **Outside-in design:** for features with a user-facing surface, write the flow doc first, then feature doc + criteria. Feature criteria must map to flow steps; they own the no-breaking-changes contract.
+- **Progress checklist:** every in-progress feature doc has a `### Progress` checklist under `## Status`. Update it at every decision point BEFORE the code. Last entry names what to do NEXT.
+- **Fix-or-record rule:** a bug found mid-feature is either blocking (fix now), small+same-file (fix now), or everything else (`/b` record, do not expand scope).
+- **Slash commands:** `/n` new feature, `/f` finalize, `/fs` finalize + full pipeline, `/b` bug record, `/bs` bug success, `/t` troubleshoot, `/w` what's open. Available via the claude-config plugin (`claude --plugin-dir ~/claude-config`).
+
+## Plugin Enforcement
+
+These instructions activate only in repos that have opted in via `.claude/feature-doc-required`. Skip all checks if that marker is absent.
+
+### Feature-doc coverage (before any Edit / Write / MultiEdit / NotebookEdit)
+
+1. Skip if the file path contains `/docs/`, `test`, `spec`, ends in `.json`, `.yml`, `.yaml`, `.toml`, `.md`, or the filename segment starts with `.`.
+2. Walk up from the file's directory looking for `.claude/feature-doc-required`. If not found up to the repo root, skip.
+3. Read `.claude/feature-doc-mode` at the scope root (default: `block`). `off` = skip; `warn` = allow but print a warning; `block` = refuse and explain.
+4. Walk up from the file's directory to the repo root collecting all `*.feature.md` files.
+5. For each feature doc: if it has a `## Scope` section, check whether the file's repo-relative path matches a scope glob. If it has no `## Scope`, it covers its directory and all descendants.
+6. If a feature doc covers the file, proceed. If none do: apply mode decision -- in `block` mode, refuse and explain which feature doc to create or which `## Scope` to extend.
+
+### Stale feature-doc check (at session end)
+
+If `.claude/feature-doc-required` is present, review any `*.feature.md` files touched or read this session. Warn if any are missing a `## Success Criteria` or `## Status` section.
+
+### Flow-doc presence check (when finishing a feature doc)
+
+When completing a `*.feature.md` that has a `## Surface` section with non-trivial content: verify a `*.flow.md` exists within the feature's scope directory. If absent, warn before stopping: "Feature has a `## Surface` declaration but no `*.flow.md` -- create one to document entry points and failure modes."
