@@ -76,12 +76,39 @@ class TranscodeServiceApp:
     def _RegisterAndLoadWorkerConfig(self) -> dict:
         """Register this worker in the Workers table and load its configuration."""
         try:
+            import shutil
+
+            # Detect platform-appropriate FFmpeg/FFprobe paths
+            FFmpegPath = shutil.which('ffmpeg')
+            FFprobePath = shutil.which('ffprobe')
+
+            # CPU thread limit from env var (matches Docker compose cpus limit)
+            MaxCpuThreadsEnv = os.environ.get('MEDIAVORTEX_MAX_CPU_THREADS')
+            MaxCpuThreads = int(MaxCpuThreadsEnv) if MaxCpuThreadsEnv else None
+
             # Register worker (UPSERT - creates or updates)
             self.DatabaseManager.RegisterWorker(
                 WorkerName=self.WorkerName,
-                Platform=self.WorkerPlatform
+                Platform=self.WorkerPlatform,
+                FFmpegPath=FFmpegPath,
+                FFprobePath=FFprobePath,
+                MaxCpuThreads=MaxCpuThreads
             )
-            LoggingService.LogInfo(f"Worker '{self.WorkerName}' registered in Workers table", "TranscodeService", "_RegisterAndLoadWorkerConfig")
+            LoggingService.LogInfo(f"Worker '{self.WorkerName}' registered in Workers table (ffmpeg={FFmpegPath}, ffprobe={FFprobePath}, threads={MaxCpuThreads})", "TranscodeService", "_RegisterAndLoadWorkerConfig")
+
+            # Register share mappings from MEDIAVORTEX_SHARE_MAPPINGS env var
+            # Format: "T=/mnt/media_tv/,M=/mnt/movies/,Z=/mnt/xxx/"
+            ShareMappingsEnv = os.environ.get('MEDIAVORTEX_SHARE_MAPPINGS', '')
+            if ShareMappingsEnv:
+                Mappings = {}
+                for Entry in ShareMappingsEnv.split(','):
+                    Entry = Entry.strip()
+                    if '=' in Entry:
+                        DriveLetter, MountPath = Entry.split('=', 1)
+                        Mappings[DriveLetter.strip()] = MountPath.strip()
+                if Mappings:
+                    self.DatabaseManager.RegisterWorkerShareMappings(self.WorkerName, Mappings)
+                    LoggingService.LogInfo(f"Worker '{self.WorkerName}' registered share mappings: {Mappings}", "TranscodeService", "_RegisterAndLoadWorkerConfig")
 
             # Load worker config from DB
             Config = self.DatabaseManager.GetWorkerConfig(self.WorkerName)

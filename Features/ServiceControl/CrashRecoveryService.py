@@ -205,6 +205,17 @@ class CrashRecoveryService:
         """Clean up progress records for a specific job."""
         try:
             if JobType == "Transcode":
+                # Mark incomplete attempts as failed (prevents ghost rows in Overview query)
+                fail_query = """
+                    UPDATE TranscodeAttempts
+                    SET Success = FALSE, CompletedDate = NOW()
+                    WHERE Success IS NULL
+                      AND FilePath IN (SELECT FilePath FROM TranscodeQueue WHERE Id = %s)
+                """
+                failed_rows = self.DatabaseManager.DatabaseService.ExecuteNonQuery(fail_query, (QueueId,))
+                if failed_rows > 0:
+                    LoggingService.LogInfo(f"Marked {failed_rows} incomplete transcode attempts as failed for queue {QueueId}", "CrashRecoveryService", "CleanupProgressRecords")
+
                 # Clean up TranscodeProgress records
                 query = """
                     DELETE FROM TranscodeProgress
@@ -213,6 +224,7 @@ class CrashRecoveryService:
                         WHERE FilePath IN (
                             SELECT FilePath FROM TranscodeQueue WHERE Id = %s
                         )
+                        AND Success = FALSE
                     )
                 """
                 affected_rows = self.DatabaseManager.DatabaseService.ExecuteNonQuery(query, (QueueId,))

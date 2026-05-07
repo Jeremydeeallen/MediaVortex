@@ -50,10 +50,13 @@ class FFmpegService:
             ProjectFFmpegPath = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'FFmpegMaster', 'bin', 'ffmpeg.exe')
             if os.path.exists(ProjectFFmpegPath):
                 return ProjectFFmpegPath
-            else:
-                LoggingService.LogError(f"Project FFmpeg not found at: {ProjectFFmpegPath}", 'FindFFmpegPath', 'FFmpegService')
-                return None
-            
+            # Fallback: check system PATH (Linux containers, etc.)
+            SystemPath = shutil.which('ffmpeg')
+            if SystemPath:
+                return SystemPath
+            LoggingService.LogError(f"FFmpeg not found (project: {ProjectFFmpegPath}, system PATH: not found)", 'FindFFmpegPath', 'FFmpegService')
+            return None
+
         except Exception as e:
             LoggingService.LogException("Error finding FFmpeg path", e, 'FindFFmpegPath', 'FFmpegService')
             return None
@@ -65,10 +68,13 @@ class FFmpegService:
             ProjectFFprobePath = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'FFmpegMaster', 'bin', 'ffprobe.exe')
             if os.path.exists(ProjectFFprobePath):
                 return ProjectFFprobePath
-            else:
-                LoggingService.LogError(f"Project FFprobe not found at: {ProjectFFprobePath}", 'FindFFprobePath', 'FFmpegService')
-                return None
-            
+            # Fallback: check system PATH (Linux containers, etc.)
+            SystemPath = shutil.which('ffprobe')
+            if SystemPath:
+                return SystemPath
+            LoggingService.LogError(f"FFprobe not found (project: {ProjectFFprobePath}, system PATH: not found)", 'FindFFprobePath', 'FFmpegService')
+            return None
+
         except Exception as e:
             LoggingService.LogException("Error finding FFprobe path", e, 'FindFFprobePath', 'FFmpegService')
             return None

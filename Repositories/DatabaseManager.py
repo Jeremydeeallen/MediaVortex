@@ -1664,13 +1664,14 @@ class DatabaseManager:
 
     def RegisterWorker(self, WorkerName: str, Platform: str = 'windows', FFmpegPath: str = None,
                        FFprobePath: str = None, StagingDirectory: str = None,
-                       ShareMountPrefix: str = None, MaxConcurrentJobs: int = 1) -> bool:
+                       ShareMountPrefix: str = None, MaxConcurrentJobs: int = 1,
+                       MaxCpuThreads: int = None) -> bool:
         """Register or update a worker in the Workers table (UPSERT)."""
         try:
             query = """
                 INSERT INTO Workers (WorkerName, Platform, FFmpegPath, FFprobePath, StagingDirectory,
-                                     ShareMountPrefix, MaxConcurrentJobs, Status, LastHeartbeat, RegisteredAt)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, 'Online', NOW(), NOW())
+                                     ShareMountPrefix, MaxConcurrentJobs, MaxCpuThreads, Status, LastHeartbeat, RegisteredAt)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'Online', NOW(), NOW())
                 ON CONFLICT (WorkerName) DO UPDATE SET
                     Platform = EXCLUDED.Platform,
                     FFmpegPath = COALESCE(EXCLUDED.FFmpegPath, Workers.FFmpegPath),
@@ -1678,12 +1679,13 @@ class DatabaseManager:
                     StagingDirectory = COALESCE(EXCLUDED.StagingDirectory, Workers.StagingDirectory),
                     ShareMountPrefix = COALESCE(EXCLUDED.ShareMountPrefix, Workers.ShareMountPrefix),
                     MaxConcurrentJobs = EXCLUDED.MaxConcurrentJobs,
+                    MaxCpuThreads = COALESCE(EXCLUDED.MaxCpuThreads, Workers.MaxCpuThreads),
                     Status = 'Online',
                     LastHeartbeat = NOW()
             """
             self.DatabaseService.ExecuteNonQuery(query, (
                 WorkerName, Platform, FFmpegPath, FFprobePath,
-                StagingDirectory, ShareMountPrefix, MaxConcurrentJobs
+                StagingDirectory, ShareMountPrefix, MaxConcurrentJobs, MaxCpuThreads
             ))
             return True
         except Exception as e:
@@ -1741,6 +1743,26 @@ class DatabaseManager:
         except Exception as e:
             LoggingService.LogException("Exception in GetWorkerShareMappings", e, "DatabaseManager", "GetWorkerShareMappings")
             return {}
+
+    def RegisterWorkerShareMappings(self, WorkerName: str, Mappings: dict) -> bool:
+        """Register drive letter to mount path mappings for a worker (UPSERT).
+
+        Mappings: dict of {DriveLetter: LocalMountPrefix}
+        e.g. {'T': '/mnt/media_tv/', 'M': '/mnt/movies/', 'Z': '/mnt/xxx/'}
+        """
+        try:
+            query = """
+                INSERT INTO WorkerShareMappings (WorkerName, DriveLetter, LocalMountPrefix)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (WorkerName, DriveLetter) DO UPDATE SET
+                    LocalMountPrefix = EXCLUDED.LocalMountPrefix
+            """
+            for DriveLetter, LocalMountPrefix in Mappings.items():
+                self.DatabaseService.ExecuteNonQuery(query, (WorkerName, DriveLetter, LocalMountPrefix))
+            return True
+        except Exception as e:
+            LoggingService.LogException("Exception in RegisterWorkerShareMappings", e, "DatabaseManager", "RegisterWorkerShareMappings")
+            return False
 
     def UpdateWorkerStatus(self, WorkerName: str, Status: str) -> bool:
         """Update worker status (Online, Offline, Draining)."""
