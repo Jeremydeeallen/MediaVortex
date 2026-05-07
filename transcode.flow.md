@@ -11,8 +11,10 @@ SCAN -> PROBE -> ASSIGN -> QUEUE -> TRANSCODE -> QUALITY -> REPLACE
 
 Stages 1-4 require user action. Stages 5-7 are automatic once TranscodeService is running:
 - QUEUE -> TRANSCODE: automatic (service polls for Pending items)
-- TRANSCODE -> QUALITY: automatic (ShouldQualityTestService.ProcessTranscodedFile triggers after each job)
+- TRANSCODE -> QUALITY or REPLACE: ShouldQualityTestService.ProcessTranscodedFile is the bridge. It checks QualityTestRequired on the TranscodeAttempt: when False, skips directly to FileReplacement; when True, queues a quality test. If the QualityTestService is paused, it also skips directly to replacement.
 - QUALITY -> REPLACE: automatic if VMAF is within threshold range (default 80-100)
+
+**Service dependency model:** All three services communicate exclusively via PostgreSQL. No HTTP calls between them. Each polls the database for its own work. FileReplacement is a library (not a service) that runs in whatever process calls it -- TranscodeService when QualityTest=OFF, QualityTestService when QualityTest=ON, WebService for manual replacement.
 
 ---
 
@@ -411,7 +413,7 @@ End-to-end trace from worker installation through finished product. Every functi
 | 5.1 | Calculate size reduction | `HandleTranscodingResult()` | -- | -- |
 | 5.2 | Mark attempt successful | `DatabaseManager.UpdateTranscodeAttempt()` | `UPDATE TranscodeAttempts SET Success=True, CompletedDate=NOW(), NewSizeBytes=%s, SizeReductionBytes=%s, SizeReductionPercent=%s, QualityTestRequired=True` | Attempt marked successful |
 | 5.3 | Update TranscodeFiles | `UpdateTranscodeFileRecord()` | `INSERT/UPDATE TranscodeFiles (FilePath, SuccessfulAttemptId, ...)` | File-level status updated |
-| 5.4 | Queue quality test | `ShouldQualityTest.ProcessTranscodedFile(AttemptId, OrigPath, OutputPath)` -> `QualityTestQueueService.AddToQualityTestQueue()` | `INSERT INTO QualityTestQueue (TranscodeAttemptId, Status='Pending', ...)` | QualityTestQueue.Status = `Pending` |
+| 5.4 | Bridge: quality test or replace | `ShouldQualityTest.ProcessTranscodedFile(AttemptId, OrigPath, OutputPath)` -- checks `TranscodeAttempts.QualityTestRequired`. If False or service paused: calls `FileReplacementBusinessService.ProcessFileReplacement(AttemptId, BypassVMAFCheck=True)` directly (delete original, update DB). If True: `QualityTestQueueService.AddToQualityTestQueue()` | QualityTestRequired=False: archive + delete original + UPDATE MediaFiles + DELETE TemporaryFilePaths. QualityTestRequired=True: `INSERT INTO QualityTestQueue (...)` | QualityTestQueue.Status = `Pending` (if queued) or file replaced (if skipped) |
 | 5.5 | Delete from TranscodeQueue | `DatabaseManager.DeleteTranscodeQueueItem(Job.Id)` | `DELETE FROM TranscodeQueue WHERE Id = %s` | Job removed from queue |
 | 5.6 | Clean progress | `DatabaseManager.DeleteTranscodeProgress(AttemptId)` | `DELETE FROM TranscodeProgress WHERE TranscodeAttemptId = %s` | -- |
 | 5.7 | Complete ActiveJob | `DatabaseManager.CompleteActiveJob(ActiveJobId, Success=True)` | `UPDATE ActiveJobs SET Status='Completed', CompletedAt=NOW()` | ActiveJobs.Status = `Completed` |
@@ -426,15 +428,18 @@ End-to-end trace from worker installation through finished product. Every functi
 | 6.4 | Store VMAF score | `UpdateTranscodeAttempt()` | `UPDATE TranscodeAttempts SET VMAF = %s, QualityTestCompleted = True` | VMAF score recorded |
 | 6.5 | Decide: pass/fail | VMAF >= 80 = pass | -- | -- |
 
-### Phase 7: File Replacement (if VMAF passes)
+### Phase 7: File Replacement (if VMAF passes, or directly after transcode when QualityTestRequired=False)
 
 | Step | Action | Function | DB Call | Status Change |
 |------|--------|----------|---------|---------------|
-| 7.1 | Trigger replacement | `FileReplacementBusinessService.ProcessFileReplacement(AttemptId)` | -- | -- |
-| 7.2 | Read file paths | from TemporaryFilePaths | `SELECT * FROM TemporaryFilePaths WHERE TranscodeAttemptId = %s` | Canonical paths: `T:\...\Staging\output.mkv` and `T:\...\original.mkv` |
-| 7.3 | Move output -> original | `FileManagerService.ReplaceFile(OriginalPath, StagedPath)` | -- | Same filesystem = instant rename (staging is on the share) |
-| 7.4 | Re-probe new file | FFprobe on replaced file | `UPDATE MediaFiles SET Resolution=..., Codec=..., SizeMB=..., TranscodedByMediaVortex=True` | MediaFiles updated with new metadata |
-| 7.5 | Mark complete | | `UPDATE TranscodeFiles SET ... Status='Completed'` | Done |
+| 7.1 | Trigger replacement | `FileReplacementBusinessService.ProcessFileReplacement(AttemptId, BypassVMAFCheck)` | -- | PathTranslation passed from caller |
+| 7.2 | Read file paths | from TemporaryFilePaths | `SELECT OriginalPath, LocalOutputPath FROM TemporaryFilePaths WHERE TranscodeAttemptId = %s` | Canonical paths: `T:\...\output.mkv` and `T:\...\original.mkv` |
+| 7.3 | Archive original metadata | `_ArchiveOriginalFileDetails()` | `INSERT INTO MediaFilesArchive (...)` | Snapshot before destructive ops |
+| 7.4 | Delete original (or rename if KeepSource) | `_ProcessCompleteFileReplacement()` translates canonical paths via `PathTranslation.ToLocalPath()` | -- | `os.remove(LocalOriginalPath)` or `os.rename(..., .old)` |
+| 7.5 | Move output if needed | InPlace: skip (already in correct dir). Staged: `shutil.move()` | -- | `os.path.normpath` comparison decides |
+| 7.6 | Update MediaFiles | `_UpdateMediaFilesAfterReplacement()` re-probes transcoded file | `UPDATE MediaFiles SET FilePath=..., Resolution=..., Codec=..., SizeMB=..., TranscodedByMediaVortex=True, LastScannedDate=NOW()` | MediaFiles reflects new file |
+| 7.7 | Mark attempt replaced | | `UPDATE TranscodeAttempts SET FileReplaced=True, FileReplacedDate=NOW()` | -- |
+| 7.8 | Cleanup temp paths | `_CleanupTemporaryFilePaths()` | `DELETE FROM TemporaryFilePaths WHERE TranscodeAttemptId = %s` | No orphaned rows |
 
 ### Phase 8: Shutdown (scoped to this worker only)
 

@@ -4,7 +4,6 @@ Should Quality Test Service
 Simple service to determine if a transcoded file should undergo quality testing
 """
 
-import os
 from typing import Optional, Dict, Any
 from Core.Logging.LoggingService import LoggingService
 from Repositories.DatabaseManager import DatabaseManager
@@ -14,35 +13,22 @@ from Services.QualityTestQueueService import QualityTestQueueService
 class ShouldQualityTestService:
     """Simple service to determine if a file should undergo quality testing."""
 
-    def __init__(self):
+    def __init__(self, PathTranslation=None):
         """Initialize the service."""
         self.DatabaseManager = DatabaseManager()
         self.QualityTestQueue = QualityTestQueueService(self.DatabaseManager)
-            # LoggingService.LogInfo("ShouldQualityTestService initialized", "ShouldQualityTestService", "__init__")
+        self.PathTranslation = PathTranslation
 
-    def ShouldTestFile(self, FilePath: str) -> bool:
-        """
-        Determine if a file should undergo quality testing.
-
-        Args:
-            FilePath: Path to the transcoded file
-
-        Returns:
-            bool: True if file should be quality tested, False otherwise
-        """
-        try:
-            LoggingService.LogFunctionEntry("ShouldTestFile", "ShouldQualityTestService", FilePath)
-
-            # Test all files by default
-            ShouldTest = True
-
-                          # LoggingService.LogInfo(f"Quality test decision for {FilePath}: {ShouldTest}", "ShouldQualityTestService", "ShouldTestFile")
-            return ShouldTest
-
-        except Exception as e:
-            LoggingService.LogException("Exception in ShouldTestFile", e, "ShouldQualityTestService", "ShouldTestFile")
-            # Default to True on error to ensure quality testing happens
-            return True
+    def _ReplaceFileDirectly(self, TranscodeAttemptId: int, Reason: str) -> Dict[str, Any]:
+        """Skip quality testing and go straight to file replacement."""
+        from Features.FileReplacement.FileReplacementBusinessService import FileReplacementBusinessService
+        ReplacementService = FileReplacementBusinessService(self.DatabaseManager, PathTranslation=self.PathTranslation)
+        ReplacementResult = ReplacementService.ProcessFileReplacement(TranscodeAttemptId, BypassVMAFCheck=True)
+        return {
+            "Success": ReplacementResult.get("Success", False),
+            "Message": f"File replaced automatically because {Reason}",
+            "QualityTestJobId": None
+        }
 
     def ProcessTranscodedFile(self, TranscodeAttemptId: int, OriginalFilePath: str, TranscodedFilePath: str) -> Dict[str, Any]:
         """
@@ -60,42 +46,24 @@ class ShouldQualityTestService:
             LoggingService.LogFunctionEntry("ProcessTranscodedFile", "ShouldQualityTestService",
                                           TranscodeAttemptId, OriginalFilePath, TranscodedFilePath)
 
-            # Check if quality test service is paused - if so, skip queue and go straight to replacement
+            # Check QualityTestRequired on the TranscodeAttempt (set upstream by IsQualityTestEnabled)
+            TranscodeAttempt = self.DatabaseManager.GetTranscodeAttemptById(TranscodeAttemptId)
+            QualityTestRequired = bool(TranscodeAttempt and getattr(TranscodeAttempt, 'QualityTestRequired', False))
+
+            if not QualityTestRequired:
+                LoggingService.LogInfo(f"Quality testing not required for TranscodeAttempt {TranscodeAttemptId}, proceeding directly to file replacement",
+                                     "ShouldQualityTestService", "ProcessTranscodedFile")
+                return self._ReplaceFileDirectly(TranscodeAttemptId, "Quality testing is disabled for this worker/globally")
+
+            # Quality testing is required -- check if the service is paused
             try:
-                service_status = self.DatabaseManager.GetServiceStatus("QualityTestService")
-                if service_status and service_status.get('Status') == 'Paused':
+                ServiceStatus = self.DatabaseManager.GetServiceStatus("QualityTestService")
+                if ServiceStatus and ServiceStatus.get('Status') == 'Paused':
                     LoggingService.LogInfo(f"Quality test service is paused for TranscodeAttempt {TranscodeAttemptId}, skipping queue and replacing file immediately",
                                          "ShouldQualityTestService", "ProcessTranscodedFile")
-                    from Services.FileReplacementBusinessService import FileReplacementBusinessService
-                    file_replacement_service = FileReplacementBusinessService(self.DatabaseManager)
-                    replacement_result = file_replacement_service.ProcessFileReplacement(TranscodeAttemptId, BypassVMAFCheck=True)
-
-                    return {
-                        "Success": replacement_result.get("Success", False),
-                        "Message": "File replaced automatically because quality testing service is paused",
-                        "QualityTestJobId": None
-                    }
+                    return self._ReplaceFileDirectly(TranscodeAttemptId, "Quality testing service is paused")
             except Exception as e:
                 LoggingService.LogException("Error checking quality test service status", e, "ShouldQualityTestService", "ProcessTranscodedFile")
-
-            # Check if file should be quality tested
-            ShouldTest = self.ShouldTestFile(TranscodedFilePath)
-
-            if not ShouldTest:
-                              # LoggingService.LogInfo(f"File {TranscodedFilePath} should not undergo quality testing",
-                              #                    "ShouldQualityTestService", "ProcessTranscodedFile")
-                # Automatically replace the file if quality testing is disabled
-                LoggingService.LogInfo(f"Quality testing disabled for TranscodeAttempt {TranscodeAttemptId}, triggering automatic file replacement",
-                                     "ShouldQualityTestService", "ProcessTranscodedFile")
-                from Services.FileReplacementBusinessService import FileReplacementBusinessService
-                file_replacement_service = FileReplacementBusinessService(self.DatabaseManager)
-                replacement_result = file_replacement_service.ProcessFileReplacement(TranscodeAttemptId, BypassVMAFCheck=True)
-
-                return {
-                    "Success": replacement_result.get("Success", False),
-                    "Message": "File replaced automatically because quality testing is disabled",
-                    "QualityTestJobId": None
-                }
 
             # Use QualityTestQueueService to add to queue (handles all file path resolution)
             QualityTestJobId = self.QualityTestQueue.AddToQualityTestQueue(TranscodeAttemptId)

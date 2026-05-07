@@ -33,7 +33,7 @@ class ProcessTranscodeQueueService:
         self.CommandBuilder = CommandBuilderInstance or CommandBuilderService()
         self.VideoTranscoding = VideoTranscodingInstance or VideoTranscodingService()
         self.QueueManagement = QueueManagementInstance or QueueManagementService(DatabaseManagerInstance=self.DatabaseManager)
-        self.ShouldQualityTest = ShouldQualityTestInstance or ShouldQualityTestService()
+        self.ShouldQualityTest = ShouldQualityTestInstance  # Set after PathTranslation is initialized
 
         # Worker identity for distributed transcoding
         import socket
@@ -64,6 +64,10 @@ class ProcessTranscodeQueueService:
         if MountMap:
             from Core.Services.PathTranslationService import PathTranslationService
             self.PathTranslation = PathTranslationService(MountMap=MountMap)
+
+        # Initialize ShouldQualityTest with PathTranslation so it can pass it to FileReplacement
+        if not self.ShouldQualityTest:
+            self.ShouldQualityTest = ShouldQualityTestService(PathTranslation=self.PathTranslation)
 
         # Processing state
         self.IsProcessing = False
@@ -360,9 +364,6 @@ class ProcessTranscodeQueueService:
                 self.HandleJobFailure(Job, "Failed to get media file data", TranscodeAttemptId, ActiveJobId)
                 return
 
-            # Archive original file details before transcoding
-            self.ArchiveOriginalFileDetails(MediaFile, TranscodeAttemptId)
-
             # Phase 3: Loading Settings
             self.UpdateTranscodeProgress(TranscodeAttemptId, "Loading Settings", 0.0, "Loading transcoding profile settings...")
 
@@ -488,8 +489,6 @@ class ProcessTranscodeQueueService:
                 self.HandleJobFailure(Job, "Failed to get media file data for remux", TranscodeAttemptId, ActiveJobId)
                 return
 
-            self.ArchiveOriginalFileDetails(MediaFile, TranscodeAttemptId)
-
             # Setup file preparation first (copy or in-place based on setting)
             self.UpdateTranscodeProgress(TranscodeAttemptId, "Preparing Files", 0.0, "Preparing source file...")
             EffectiveInputPath = self.SetupFilePreparation(Job, MediaFile, TranscodeAttemptId)
@@ -580,8 +579,6 @@ class ProcessTranscodeQueueService:
             if not MediaFile:
                 self.HandleJobFailure(Job, "Failed to get media file data for subtitle fix", TranscodeAttemptId, ActiveJobId)
                 return
-
-            self.ArchiveOriginalFileDetails(MediaFile, TranscodeAttemptId)
 
             # Setup file preparation first (copy or in-place based on setting)
             self.UpdateTranscodeProgress(TranscodeAttemptId, "Preparing Files", 0.0, "Preparing source file...")
@@ -1173,6 +1170,10 @@ class ProcessTranscodeQueueService:
                 # Update TranscodeFiles record for overall file status (failure)
                 self.UpdateTranscodeFileRecord(Job.FilePath, AttemptId, False)
 
+            # Clean up partial output file and TemporaryFilePaths for failed attempt
+            if TranscodeAttemptId:
+                self._CleanupFailedAttemptFiles(TranscodeAttemptId)
+
             # Delete job from queue (failed completion)
             self.DatabaseManager.DeleteTranscodeQueueItem(Job.Id)
 
@@ -1195,6 +1196,45 @@ class ProcessTranscodeQueueService:
 
         except Exception as e:
             LoggingService.LogException("Exception handling job failure", e, "ProcessTranscodeQueueService", "HandleJobFailure")
+
+    def _CleanupFailedAttemptFiles(self, TranscodeAttemptId: int):
+        """Clean up partial output file and TemporaryFilePaths row for a failed transcode attempt."""
+        try:
+            LoggingService.LogInfo(f"Cleaning up files for failed TranscodeAttempt {TranscodeAttemptId}",
+                                 "ProcessTranscodeQueueService", "_CleanupFailedAttemptFiles")
+
+            TemporaryFilePathRecord = self.DatabaseManager.GetTemporaryFilePath(TranscodeAttemptId)
+
+            if TemporaryFilePathRecord:
+                # Delete partial output file from disk if it exists
+                LocalOutputPath = TemporaryFilePathRecord.get('LocalOutputPath')
+                if LocalOutputPath:
+                    # Translate canonical path to local mount path if needed
+                    ActualPath = LocalOutputPath
+                    if self.PathTranslation:
+                        ActualPath = self.PathTranslation.ToLocalPath(LocalOutputPath)
+
+                    if os.path.exists(ActualPath):
+                        try:
+                            os.remove(ActualPath)
+                            LoggingService.LogInfo(f"Deleted partial output file: {ActualPath}",
+                                                 "ProcessTranscodeQueueService", "_CleanupFailedAttemptFiles")
+                        except Exception as e:
+                            LoggingService.LogWarning(f"Failed to delete partial output file {ActualPath}: {str(e)}",
+                                                    "ProcessTranscodeQueueService", "_CleanupFailedAttemptFiles")
+                    else:
+                        LoggingService.LogInfo(f"Partial output file does not exist (already cleaned up): {ActualPath}",
+                                             "ProcessTranscodeQueueService", "_CleanupFailedAttemptFiles")
+
+                # Delete the TemporaryFilePaths row
+                self.DatabaseManager.DeleteTemporaryFilePath(TranscodeAttemptId)
+            else:
+                LoggingService.LogInfo(f"No TemporaryFilePaths record found for TranscodeAttempt {TranscodeAttemptId} (nothing to clean up)",
+                                     "ProcessTranscodeQueueService", "_CleanupFailedAttemptFiles")
+
+        except Exception as e:
+            LoggingService.LogException(f"Exception cleaning up failed attempt files for TranscodeAttempt {TranscodeAttemptId}",
+                                       e, "ProcessTranscodeQueueService", "_CleanupFailedAttemptFiles")
 
     def CleanupOrContinue(self, Job: TranscodeQueueModel):
         """Determine next action after job completion."""
@@ -1491,29 +1531,6 @@ class ProcessTranscodeQueueService:
         except Exception as e:
             LoggingService.LogException("Exception updating transcoding progress", e,
                                       "ProcessTranscodeQueueService", "UpdateTranscodeProgress")
-
-    def ArchiveOriginalFileDetails(self, MediaFile: MediaFileModel, TranscodeAttemptId: int) -> bool:
-        """Archive original file details before transcoding to preserve source data."""
-        try:
-            LoggingService.LogFunctionEntry("ArchiveOriginalFileDetails", "ProcessTranscodeQueueService",
-                                          MediaFile.Id, TranscodeAttemptId)
-
-            # Archive original file details using INSERT SELECT
-            ArchiveId = self.DatabaseManager.SaveMediaFileArchive(MediaFile.Id, TranscodeAttemptId)
-
-            if ArchiveId:
-                LoggingService.LogInfo(f"Successfully archived original file details for MediaFile {MediaFile.Id}, Archive ID: {ArchiveId}",
-                                     "ProcessTranscodeQueueService", "ArchiveOriginalFileDetails")
-                return True
-            else:
-                LoggingService.LogError(f"Failed to archive original file details for MediaFile {MediaFile.Id}",
-                                      "ProcessTranscodeQueueService", "ArchiveOriginalFileDetails")
-                return False
-
-        except Exception as e:
-            LoggingService.LogException("Exception archiving original file details", e,
-                                      "ProcessTranscodeQueueService", "ArchiveOriginalFileDetails")
-            return False
 
     def PrivateCreateTemporaryFilePathRecord(self, TranscodeAttemptId: int, OriginalPath: str, LocalSourcePath: str, LocalOutputPath: str = None) -> Optional[int]:
         """Private method to create TemporaryFilePath record."""

@@ -11,9 +11,17 @@ class FileReplacementBusinessService:
     """Business service for manual file replacement operations."""
 
     def __init__(self, DatabaseManagerInstance: DatabaseManager = None,
-                 FileManagerInstance: FileManagerService = None):
+                 FileManagerInstance: FileManagerService = None,
+                 PathTranslation=None):
         self.DatabaseManager = DatabaseManagerInstance or DatabaseManager()
         self.FileManager = FileManagerInstance or FileManagerService()
+        self.PathTranslation = PathTranslation
+
+    def _ToLocalPath(self, CanonicalPath: str) -> str:
+        """Translate a canonical DB path to a local filesystem path using PathTranslation if available."""
+        if self.PathTranslation and CanonicalPath:
+            return self.PathTranslation.ToLocalPath(CanonicalPath)
+        return CanonicalPath
 
     def GenerateOutputFilePath(self, InputFilePath: str) -> str:
         """Generate output file path for transcoded file (same logic as TranscodingBusinessService)."""
@@ -113,47 +121,18 @@ class FileReplacementBusinessService:
                     'ErrorMessage': f'No temporary file path found for transcode attempt {TranscodeAttemptId}'
                 }
 
-            original_path = file_paths_result[0]['OriginalPath']
-            local_source_path = file_paths_result[0]['LocalSourcePath']
-            transcoded_path = file_paths_result[0]['LocalOutputPath']
+            OriginalPath = file_paths_result[0]['OriginalPath']
+            TranscodedPath = file_paths_result[0]['LocalOutputPath']
 
-            # Validate files exist - use LocalSourcePath instead of network path
-            local_source_exists = self.FileManager.ValidateFileExists(local_source_path)
-            transcoded_exists = self.FileManager.ValidateFileExists(transcoded_path)
-            network_transcoded_path = os.path.join(os.path.dirname(original_path), os.path.basename(transcoded_path))
-            network_transcoded_exists = self.FileManager.ValidateFileExists(network_transcoded_path)
+            # Translate canonical paths to local for filesystem validation
+            LocalTranscodedPath = self._ToLocalPath(TranscodedPath)
 
-            # Check if transcoded file exists either locally or at network location
-            if not transcoded_exists and not network_transcoded_exists:
+            # Check if transcoded file exists (using translated local path)
+            if not self.FileManager.ValidateFileExists(LocalTranscodedPath):
                 return {
                     'Success': False,
-                    'ErrorMessage': 'Transcoded file not found at local or network location'
+                    'ErrorMessage': f'Transcoded file not found at: {LocalTranscodedPath}'
                 }
-
-            # If transcoded file is already at network location, just update the database
-            if network_transcoded_exists:
-                # File was already moved, just update the database
-                transcode_attempt.FileReplaced = True
-                transcode_attempt.FileReplacedDate = datetime.now()
-                transcode_attempt.ReplacementType = "Auto"
-                self.DatabaseManager.SaveTranscodeAttempt(transcode_attempt)
-
-                return {
-                    'Success': True,
-                    'Message': 'File was already replaced and moved to network location',
-                    'OriginalFilePath': original_path,
-                    'TranscodedFilePath': network_transcoded_path,
-                    'VMAFScore': VMAFScore,
-                    'KeepSource': False,
-                    'StepsCompleted': ['File already moved to network location', 'Updated database']
-                }
-
-            # If local source doesn't exist but transcoded file exists locally, proceed with move
-            if not local_source_exists and transcoded_exists:
-                # Local source was deleted but transcoded file wasn't moved yet
-                # Proceed with moving the transcoded file to network location
-                LoggingService.LogInfo(f"Local source file was deleted but transcoded file exists, proceeding with move to network location",
-                                     "FileReplacementBusinessService", "ProcessFileReplacementWithVMAF")
 
             # Check if VMAF score meets threshold (unless bypassed for manual replacement)
             if not BypassVMAFCheck:
@@ -206,14 +185,14 @@ class FileReplacementBusinessService:
                 }
 
             # Archive original file details before replacement
-            self._ArchiveOriginalFileDetails(original_path, TranscodeAttemptId)
+            self._ArchiveOriginalFileDetails(OriginalPath, TranscodeAttemptId)
 
-            # Process the complete 3-step file replacement
+            # Process file replacement
             replacement_result = self._ProcessCompleteFileReplacement(
-                original_path,
-                transcoded_path,
+                OriginalPath,
+                TranscodedPath,
                 keep_source,
-                original_path
+                OriginalPath
             )
 
             if replacement_result.get('Success', False):
@@ -223,14 +202,17 @@ class FileReplacementBusinessService:
                 transcode_attempt.ReplacementType = "Auto"
                 self.DatabaseManager.SaveTranscodeAttempt(transcode_attempt)
 
+                # Clean up TemporaryFilePaths
+                self._CleanupTemporaryFilePaths(TranscodeAttemptId)
+
                 LoggingService.LogInfo(f"Successfully replaced file for attempt {TranscodeAttemptId}",
                                      "FileReplacementBusinessService", "ProcessFileReplacementWithVMAF")
 
                 return {
                     'Success': True,
                     'Message': 'File replacement completed successfully',
-                    'OriginalFilePath': original_path,
-                    'TranscodedFilePath': transcoded_path,
+                    'OriginalFilePath': OriginalPath,
+                    'TranscodedFilePath': TranscodedPath,
                     'VMAFScore': VMAFScore,
                     'KeepSource': keep_source,
                     'StepsCompleted': replacement_result.get('StepsCompleted', [])
@@ -291,47 +273,18 @@ class FileReplacementBusinessService:
                     'ErrorMessage': f'No temporary file path found for transcode attempt {TranscodeAttemptId}'
                 }
 
-            original_path = file_paths_result[0]['OriginalPath']
-            local_source_path = file_paths_result[0]['LocalSourcePath']
-            transcoded_path = file_paths_result[0]['LocalOutputPath']
+            OriginalPath = file_paths_result[0]['OriginalPath']
+            TranscodedPath = file_paths_result[0]['LocalOutputPath']
 
-            # Validate files exist - use LocalSourcePath instead of network path
-            local_source_exists = self.FileManager.ValidateFileExists(local_source_path)
-            transcoded_exists = self.FileManager.ValidateFileExists(transcoded_path)
-            network_transcoded_path = os.path.join(os.path.dirname(original_path), os.path.basename(transcoded_path))
-            network_transcoded_exists = self.FileManager.ValidateFileExists(network_transcoded_path)
+            # Translate canonical paths to local for filesystem validation
+            LocalTranscodedPath = self._ToLocalPath(TranscodedPath)
 
-            # Check if transcoded file exists either locally or at network location
-            if not transcoded_exists and not network_transcoded_exists:
+            # Check if transcoded file exists (using translated local path)
+            if not self.FileManager.ValidateFileExists(LocalTranscodedPath):
                 return {
                     'Success': False,
-                    'ErrorMessage': 'Transcoded file not found at local or network location'
+                    'ErrorMessage': f'Transcoded file not found at: {LocalTranscodedPath}'
                 }
-
-            # If transcoded file is already at network location, just update the database
-            if network_transcoded_exists:
-                # File was already moved, just update the database
-                transcode_attempt.FileReplaced = True
-                transcode_attempt.FileReplacedDate = datetime.now()
-                transcode_attempt.ReplacementType = "Auto"
-                self.DatabaseManager.SaveTranscodeAttempt(transcode_attempt)
-
-                return {
-                    'Success': True,
-                    'Message': 'File was already replaced and moved to network location',
-                    'OriginalFilePath': original_path,
-                    'TranscodedFilePath': network_transcoded_path,
-                    'VMAFScore': transcode_attempt.VMAF,
-                    'KeepSource': False,
-                    'StepsCompleted': ['File already moved to network location', 'Updated database']
-                }
-
-            # If local source doesn't exist but transcoded file exists locally, proceed with move
-            if not local_source_exists and transcoded_exists:
-                # Local source was deleted but transcoded file wasn't moved yet
-                # Proceed with moving the transcoded file to network location
-                LoggingService.LogInfo(f"Local source file was deleted but transcoded file exists, proceeding with move to network location",
-                                     "FileReplacementBusinessService", "ProcessFileReplacement")
 
             # Check if VMAF score meets threshold (unless bypassed for manual replacement)
             if not BypassVMAFCheck:
@@ -370,7 +323,7 @@ class FileReplacementBusinessService:
 
                     # Log rejection at Warning level
                     vmafScore = transcode_attempt.VMAF or 0.0
-                    logMessage = f"File replacement rejected due to size: {original_path}. Original: {transcode_attempt.OldSizeBytes:,} bytes, Transcoded: {transcode_attempt.NewSizeBytes:,} bytes. VMAF: {vmafScore:.2f}"
+                    logMessage = f"File replacement rejected due to size: {OriginalPath}. Original: {transcode_attempt.OldSizeBytes:,} bytes, Transcoded: {transcode_attempt.NewSizeBytes:,} bytes. VMAF: {vmafScore:.2f}"
                     LoggingService.LogWarning(logMessage, "FileReplacementBusinessService", "ProcessFileReplacement")
 
                     return {
@@ -387,14 +340,14 @@ class FileReplacementBusinessService:
                 }
 
             # Archive original file details before replacement
-            self._ArchiveOriginalFileDetails(original_path, TranscodeAttemptId)
+            self._ArchiveOriginalFileDetails(OriginalPath, TranscodeAttemptId)
 
-            # Process the complete 3-step file replacement
+            # Process file replacement
             replacement_result = self._ProcessCompleteFileReplacement(
-                original_path,
-                transcoded_path,
+                OriginalPath,
+                TranscodedPath,
                 keep_source,
-                original_path
+                OriginalPath
             )
 
             if replacement_result.get('Success', False):
@@ -403,14 +356,17 @@ class FileReplacementBusinessService:
                 transcode_attempt.FileReplacementDate = datetime.now()
                 self.DatabaseManager.SaveTranscodeAttempt(transcode_attempt)
 
+                # Clean up TemporaryFilePaths
+                self._CleanupTemporaryFilePaths(TranscodeAttemptId)
+
                 LoggingService.LogInfo(f"Successfully replaced file for attempt {TranscodeAttemptId}",
                                      "FileReplacementBusinessService", "ProcessFileReplacement")
 
                 return {
                     'Success': True,
                     'Message': 'File replacement completed successfully',
-                    'OriginalFilePath': original_path,
-                    'TranscodedFilePath': transcoded_path,
+                    'OriginalFilePath': OriginalPath,
+                    'TranscodedFilePath': TranscodedPath,
                     'VMAFScore': transcode_attempt.VMAF,
                     'KeepSource': keep_source,
                     'StepsCompleted': replacement_result.get('StepsCompleted', [])
@@ -483,116 +439,97 @@ class FileReplacementBusinessService:
 
 
     def _ProcessCompleteFileReplacement(self, OriginalFilePath: str, TranscodedFilePath: str, KeepSource: bool, NetworkOriginalPath: str = None) -> Dict[str, Any]:
-        """Process the complete 3-step file replacement process.
+        """Process file replacement: delete original, update DB.
+
+        All paths from the DB are canonical (T:\\...). PathTranslation converts them
+        to local mount paths before any filesystem operation.
 
         Args:
-            OriginalFilePath: Network path to the original file (Z:\\videos\\...)
-            TranscodedFilePath: Path to the transcoded file
+            OriginalFilePath: Canonical path to the original file
+            TranscodedFilePath: Canonical path to the transcoded file
             KeepSource: Whether to keep the original file (rename to .old) or delete it
-            NetworkOriginalPath: Network path to the original file (same as OriginalFilePath for backward compatibility)
+            NetworkOriginalPath: Canonical path for DB lookups (same as OriginalFilePath)
         """
         try:
+            # Translate canonical paths to local filesystem paths
+            LocalOriginalPath = self._ToLocalPath(OriginalFilePath)
+            LocalTranscodedPath = self._ToLocalPath(TranscodedFilePath)
+
             LoggingService.LogFunctionEntry("_ProcessCompleteFileReplacement", "FileReplacementBusinessService",
-                                          OriginalFilePath, TranscodedFilePath, KeepSource)
+                                          LocalOriginalPath, LocalTranscodedPath, KeepSource)
 
-            steps_completed = []
+            StepsCompleted = []
 
-            # Step 1: Delete the temporary local source file from c:\mediavortex\source
-            # This is the local copy used for transcoding
-            temp_source_path = f"C:\\MediaVortex\\Source\\{os.path.basename(OriginalFilePath)}"
-            if os.path.exists(temp_source_path):
+            # Step 1: Handle original file based on KeepSource setting
+            if os.path.exists(LocalOriginalPath):
+                if KeepSource:
+                    OriginalDir = os.path.dirname(LocalOriginalPath)
+                    OriginalFilename = os.path.basename(LocalOriginalPath)
+                    OriginalName, OriginalExt = os.path.splitext(OriginalFilename)
+                    RenamedPath = os.path.join(OriginalDir, f"{OriginalName}.old{OriginalExt}")
+
+                    try:
+                        os.rename(LocalOriginalPath, RenamedPath)
+                        StepsCompleted.append(f"Renamed original file to {RenamedPath}")
+                        LoggingService.LogInfo(f"Successfully renamed original file to: {RenamedPath}",
+                                             "FileReplacementBusinessService", "_ProcessCompleteFileReplacement")
+                    except Exception as e:
+                        ErrorMsg = f"Failed to rename original file to .old: {str(e)}"
+                        LoggingService.LogError(ErrorMsg, "FileReplacementBusinessService", "_ProcessCompleteFileReplacement")
+                        return {'Success': False, 'ErrorMessage': ErrorMsg}
+                else:
+                    try:
+                        os.remove(LocalOriginalPath)
+                        StepsCompleted.append("Deleted original file")
+                        LoggingService.LogInfo(f"Successfully deleted original file: {LocalOriginalPath}",
+                                             "FileReplacementBusinessService", "_ProcessCompleteFileReplacement")
+                    except Exception as e:
+                        ErrorMsg = f"Failed to delete original file: {str(e)}"
+                        LoggingService.LogError(ErrorMsg, "FileReplacementBusinessService", "_ProcessCompleteFileReplacement")
+                        return {'Success': False, 'ErrorMessage': ErrorMsg}
+            else:
+                StepsCompleted.append("Original file was already deleted")
+                LoggingService.LogInfo(f"Original file was already deleted: {LocalOriginalPath}",
+                                     "FileReplacementBusinessService", "_ProcessCompleteFileReplacement")
+
+            # Step 2: Move transcoded file to original directory if needed (InPlace = already there)
+            OriginalDir = os.path.dirname(LocalOriginalPath)
+            TranscodedFilename = os.path.basename(LocalTranscodedPath)
+            TargetPath = os.path.join(OriginalDir, TranscodedFilename)
+
+            if os.path.normpath(LocalTranscodedPath) != os.path.normpath(TargetPath):
                 try:
-                    os.remove(temp_source_path)
-                    steps_completed.append("Deleted temporary local source file")
-                    LoggingService.LogInfo(f"Successfully deleted temporary local source file: {temp_source_path}",
+                    import shutil
+                    shutil.move(LocalTranscodedPath, TargetPath)
+                    StepsCompleted.append(f"Moved transcoded file to {TargetPath}")
+                    LoggingService.LogInfo(f"Successfully moved transcoded file to: {TargetPath}",
                                          "FileReplacementBusinessService", "_ProcessCompleteFileReplacement")
                 except Exception as e:
-                    LoggingService.LogWarning(f"Could not delete temporary local source file {temp_source_path}: {str(e)}",
-                                            "FileReplacementBusinessService", "_ProcessCompleteFileReplacement")
+                    ErrorMsg = f"Failed to move transcoded file to original location: {str(e)}"
+                    LoggingService.LogError(ErrorMsg, "FileReplacementBusinessService", "_ProcessCompleteFileReplacement")
+                    return {'Success': False, 'ErrorMessage': ErrorMsg}
             else:
-                LoggingService.LogInfo(f"Temporary local source file not found (may have been cleaned up): {temp_source_path}",
+                StepsCompleted.append("Transcoded file already in correct location (InPlace)")
+                LoggingService.LogInfo("Transcoded file already in correct location (InPlace output mode)",
                                      "FileReplacementBusinessService", "_ProcessCompleteFileReplacement")
 
-            # Step 2: Handle original file based on KeepSource setting
-            # Check if original file exists before trying to delete/rename it
-            if os.path.exists(OriginalFilePath):
-                if KeepSource:
-                    # Rename original file to .old
-                    original_dir = os.path.dirname(OriginalFilePath)
-                    original_filename = os.path.basename(OriginalFilePath)
-                    original_name, original_ext = os.path.splitext(original_filename)
-                    renamed_path = os.path.join(original_dir, f"{original_name}.old{original_ext}")
-
-                    try:
-                        os.rename(OriginalFilePath, renamed_path)
-                        steps_completed.append(f"Renamed original file to {renamed_path}")
-                        LoggingService.LogInfo(f"Successfully renamed original file to: {renamed_path}",
-                                             "FileReplacementBusinessService", "_ProcessCompleteFileReplacement")
-                    except Exception as e:
-                        error_msg = f"Failed to rename original file to .old: {str(e)}"
-                        LoggingService.LogError(error_msg, "FileReplacementBusinessService", "_ProcessCompleteFileReplacement")
-                        return {'Success': False, 'ErrorMessage': error_msg}
-                else:
-                    # Delete original file
-                    try:
-                        os.remove(OriginalFilePath)
-                        steps_completed.append("Deleted original file")
-                        LoggingService.LogInfo(f"Successfully deleted original file: {OriginalFilePath}",
-                                             "FileReplacementBusinessService", "_ProcessCompleteFileReplacement")
-                    except Exception as e:
-                        error_msg = f"Failed to delete original file: {str(e)}"
-                        LoggingService.LogError(error_msg, "FileReplacementBusinessService", "_ProcessCompleteFileReplacement")
-                        return {'Success': False, 'ErrorMessage': error_msg}
-            else:
-                # Original file doesn't exist (was already deleted)
-                steps_completed.append("Original file was already deleted")
-                LoggingService.LogInfo(f"Original file was already deleted: {OriginalFilePath}",
-                                     "FileReplacementBusinessService", "_ProcessCompleteFileReplacement")
-
-            # Step 3: Move transcoded file to original location
-            try:
-                import shutil
-                # Move transcoded file to same directory as original network path, but keep transcoded filename
-                if NetworkOriginalPath:
-                    original_dir = os.path.dirname(NetworkOriginalPath)
-                else:
-                    original_dir = os.path.dirname(OriginalFilePath)
-                transcoded_filename = os.path.basename(TranscodedFilePath)
-                new_path = os.path.join(original_dir, transcoded_filename)
-                shutil.move(TranscodedFilePath, new_path)
-                steps_completed.append("Moved transcoded file to original location")
-                LoggingService.LogInfo(f"Successfully moved transcoded file to: {new_path}",
-                                     "FileReplacementBusinessService", "_ProcessCompleteFileReplacement")
-            except Exception as e:
-                error_msg = f"Failed to move transcoded file to original location: {str(e)}"
-                LoggingService.LogError(error_msg, "FileReplacementBusinessService", "_ProcessCompleteFileReplacement")
-                return {'Success': False, 'ErrorMessage': error_msg}
-
-
-            # Step 4: Update MediaFiles table with new file information
-            # Calculate the new file path where the transcoded file was moved
-            if NetworkOriginalPath:
-                original_dir = os.path.dirname(NetworkOriginalPath)
-                original_file_path = NetworkOriginalPath
-            else:
-                original_dir = os.path.dirname(OriginalFilePath)
-                original_file_path = OriginalFilePath
-            transcoded_filename = os.path.basename(TranscodedFilePath)
-            new_file_path = os.path.join(original_dir, transcoded_filename)
-            update_result = self._UpdateMediaFilesAfterReplacement(original_file_path, new_file_path)
-            if update_result.get('Success', False):
-                steps_completed.append("Updated MediaFiles table")
+            # Step 3: Update MediaFiles table with new file information
+            # Use canonical path for DB lookup, canonical target path for the new FilePath
+            CanonicalOriginal = NetworkOriginalPath or OriginalFilePath
+            CanonicalNewPath = os.path.join(os.path.dirname(CanonicalOriginal), TranscodedFilename)
+            UpdateResult = self._UpdateMediaFilesAfterReplacement(CanonicalOriginal, CanonicalNewPath)
+            if UpdateResult.get('Success', False):
+                StepsCompleted.append("Updated MediaFiles table")
                 LoggingService.LogInfo("Successfully updated MediaFiles table",
                                      "FileReplacementBusinessService", "_ProcessCompleteFileReplacement")
             else:
-                LoggingService.LogWarning(f"Failed to update MediaFiles table: {update_result.get('ErrorMessage', 'Unknown error')}",
+                LoggingService.LogWarning(f"Failed to update MediaFiles table: {UpdateResult.get('ErrorMessage', 'Unknown error')}",
                                         "FileReplacementBusinessService", "_ProcessCompleteFileReplacement")
-                # Don't fail the entire process for this, but log the warning
 
             return {
                 'Success': True,
-                'StepsCompleted': steps_completed,
-                'Message': f'File replacement completed successfully. Steps: {", ".join(steps_completed)}'
+                'StepsCompleted': StepsCompleted,
+                'Message': f'File replacement completed successfully. Steps: {", ".join(StepsCompleted)}'
             }
 
         except Exception as e:
@@ -699,6 +636,19 @@ class FileReplacementBusinessService:
                 'Success': False,
                 'ErrorMessage': f'Exception updating MediaFiles: {str(e)}'
             }
+
+    def _CleanupTemporaryFilePaths(self, TranscodeAttemptId: int):
+        """Delete the TemporaryFilePaths row after successful replacement."""
+        try:
+            self.DatabaseManager.DatabaseService.ExecuteNonQuery(
+                'DELETE FROM TemporaryFilePaths WHERE TranscodeAttemptId = %s',
+                (TranscodeAttemptId,)
+            )
+            LoggingService.LogInfo(f"Cleaned up TemporaryFilePaths for attempt {TranscodeAttemptId}",
+                                 "FileReplacementBusinessService", "_CleanupTemporaryFilePaths")
+        except Exception as e:
+            LoggingService.LogWarning(f"Failed to clean up TemporaryFilePaths for attempt {TranscodeAttemptId}: {str(e)}",
+                                    "FileReplacementBusinessService", "_CleanupTemporaryFilePaths")
 
     def _ArchiveOriginalFileDetails(self, FilePath: str, TranscodeAttemptId: int) -> bool:
         """Archive original file details before replacement to preserve source data."""

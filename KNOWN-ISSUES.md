@@ -13,6 +13,39 @@ When MaxConcurrentJobs > 1 and a second job starts while the first is still runn
 
 **Fix with:** `/t`
 
+### [FIXED] Post-transcode pipeline does not complete (VMAF + file replacement not firing)
+**Date:** 2026-05-07
+**Fixed:** 2026-05-07
+**Affects:** QualityTesting, FileReplacement -- transcode.flow.md stages 6-7
+
+**Root cause (2 compounding issues):**
+1. ShouldQualityTestService.ShouldTestFile() always returned True, ignoring QualityTestRequired.
+2. FileReplacementBusinessService had no path translation (hardcoded Windows paths).
+
+**Fix:** Removed dead ShouldTestFile(). ProcessTranscodedFile() now reads QualityTestRequired from TranscodeAttempt -- when False, calls FileReplacement directly with BypassVMAFCheck=True. FileReplacementBusinessService accepts PathTranslation, translates canonical paths before all filesystem ops, skips shutil.move for InPlace mode. HandleJobFailure cleans up partial output files and TemporaryFilePaths rows on failure. See post-transcode-pipeline.feature.md.
+
+### [BUG] DatabaseManager.py monolith -- dual database access paths
+**Date:** 2026-05-07
+**Affects:** All features that still import from Repositories/DatabaseManager.py instead of their own Repository
+**Criterion violated:** Feature vertical isolation -- each feature should access the database exclusively through its own Repository
+
+`Repositories/DatabaseManager.py` (630+ lines) is the legacy data access layer. Features are supposed to use `Features/<Name>/<Name>Repository.py`, but some still call DatabaseManager directly. This creates two paths to the database: the feature Repository and the legacy monolith. Unclear where new queries should go, and changing a query may need updates in two places.
+
+**Look first:** `Repositories/DatabaseManager.py` -- audit which features import from it. Cross-reference with each `Features/<Name>/<Name>Repository.py` to find overlap.
+
+**Fix with:** `/n` (this is a migration, not a quick fix -- needs audit of all callers first)
+
+### [BUG] Feature vertical boundaries do not match governed code
+**Date:** 2026-05-07
+**Affects:** TranscodeJob.feature.md, FileReplacement.feature.md, Services/CommandBuilderService.py, Services/FFmpegAnalysisService.py, Core/Services/PathTranslationService.py
+**Criterion violated:** TranscodeJob.feature.md scope/criteria mismatch; FileReplacement.feature.md cross-feature dependency
+
+TranscodeJob.feature.md declares scope `Features/TranscodeJob/**` + `TranscodeService/Main.py`, but its criteria govern behavior in CommandBuilderService (conditional yadif, output mode), FFmpegAnalysisService (per-worker FFprobe), PathTranslationService (multi-prefix translation), and ProcessTranscodeQueueService (VMAF toggle, worker config loading). Separately, FileReplacement depends on MediaProbe for re-probing with no explicit contract.
+
+**Look first:** TranscodeJob.feature.md criteria list -- each criterion that references a file outside the declared scope. `Features/FileReplacement/FileReplacementBusinessService.py` for the MediaProbe call.
+
+**Fix with:** `/n` (architectural boundary redesign -- either expand TranscodeJob scope or extract worker/command-building into separate feature verticals)
+
 ### [FIXED] Yadif deinterlacing applied to progressive files
 **Date:** 2026-05-05
 **Fixed:** 2026-05-05
