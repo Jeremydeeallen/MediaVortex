@@ -52,8 +52,9 @@ Thumbs.db
 *.db-shm
 *.db.backup_*
 
-# ffmpegmaster
+# External binaries
 FFmpegMaster/
+HandBrake/
 
 # VMAF XML files
 xml/
