@@ -95,6 +95,32 @@ Full Windows paths (e.g., `T:\Shows\file.mkv`) are stored as natural keys in at 
 - `QueueManagementService.ResetTranscodeQueueRunningJobs` accepts WorkerName filter
 - All cleanup also clears ClaimedBy/ClaimedAt when resetting to Pending
 
+### [FIXED] Thread-limiting changes degraded worker transcode performance
+**Date:** 2026-05-07
+**Fixed:** 2026-05-07
+**Affects:** TranscodeJob -- CommandBuilder.py svtav1-params, docker-compose CPU settings
+**Criterion violated:** local-staging.feature.md criterion 8 -- CPU utilization >90% with 4 concurrent workers
+
+Changes added to fix thread contention (`lp=8` in svtav1-params, `-threads 8`, `MEDIAVORTEX_MAX_CPU_THREADS=8` env var, Docker `cpus: "8"` limit) resulted in 10% total CPU utilization, load average >90, and ~1 hour per episode. SVT-AV1 creates ~120-132 OS threads per process regardless of `lp` value. Docker CFS throttling starved encoding threads; `lp` added overhead without reducing thread count.
+
+**Fix:** Reverted all three changes: removed `lp=N` from `AddFilmGrainParameter()`, removed `MEDIAVORTEX_MAX_CPU_THREADS` env var from docker-compose.yml, cleared `MaxCpuThreads` from Workers table. Rebuilt image, redeployed. Workers returned to ~100-200% CPU per process (pre-change baseline).
+
+**Lesson:** SVT-AV1's `lp=N` does NOT reduce OS thread count — it only limits encoding pipeline parallelism while still creating the full thread pool. Docker `cpus` CFS throttling is counterproductive when the process has many idle threads that consume quota on wakeup. Any future thread-limiting work needs isolated benchmarking with controlled variables, not live tweaking.
+
+**Remaining:** 4 workers at 480p preset 6 still only use ~10% of a 64-CPU system. This is a separate investigation (480p frame size limits SVT-AV1 parallelism). Do not attempt to fix in the same session as deployment work.
+
+### [FIXED] FFmpegService.py cpu_affinity overrides Docker cpuset pinning
+**Date:** 2026-05-07
+**Fixed:** 2026-05-07
+**Affects:** TranscodeJob -- FFmpegService.py, VideoTranscodingService.py, Docker worker performance
+**Criterion violated:** local-staging.feature.md criterion 8 -- CPU utilization >90% with 4 concurrent workers
+
+`FFmpegService.py:292` unconditionally called `psutil.cpu_affinity(list(range(MaxCpuThreads)))` on every FFmpeg process. Inside Docker containers with NUMA-aligned cpuset (only even or odd CPU IDs), `range(N)` includes CPU IDs that don't exist in the container. psutil intersects with available CPUs, leaving FFmpeg pinned to as few as 4 cores instead of 16. Separately, `VideoTranscodingService.py:68` raised `ValueError` when `MaxCpuThreads` was NULL in SystemSettings, crashing all jobs.
+
+**Root cause:** Two independent app-level affinity code paths (`FFmpegService.py` and `CpuAffinityService.py` via `VideoTranscodingService.py`) that assume sequential CPU IDs starting at 0. Docker cpuset already handles CPU isolation; app-level affinity is redundant and harmful in containerized deployments.
+
+**Fix:** Both `FFmpegService.py` and `VideoTranscodingService.py` now skip affinity calls when `/.dockerenv` exists. Docker cpuset is the sole CPU isolation mechanism in container deployments. The `CpuAffinityEnabled = false` DB setting was already set but only controlled `CpuAffinityService` — `FFmpegService` had its own unchecked path.
+
 ### [FIXED] QueryDatabase.py sql command silently rolls back writes
 **Date:** 2026-05-05
 **Fixed:** 2026-05-05

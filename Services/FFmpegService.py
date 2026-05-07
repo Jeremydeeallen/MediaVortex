@@ -285,15 +285,16 @@ class FFmpegService:
                 text=True
             )
             
-            # Set CPU affinity based on MaxCpuThreads setting
-            try:
-                CurrentProcess = psutil.Process(Process.pid)
-                MaxCpuThreads = self.GetMaxCpuThreads()
-                AffinityCores = list(range(MaxCpuThreads))
-                CurrentProcess.cpu_affinity(AffinityCores)
-                LoggingService.LogDebug(f"Set FFmpeg CPU affinity to cores: {AffinityCores} (MaxCpuThreads: {MaxCpuThreads})", 'ExecuteFFmpeg', 'FFmpegService')
-            except Exception as AffinityError:
-                LoggingService.LogWarning(f"Failed to set CPU affinity: {AffinityError}", 'ExecuteFFmpeg', 'FFmpegService')
+            # Set CPU affinity based on MaxCpuThreads setting (skip in Docker — cpuset handles pinning)
+            if not os.path.exists('/.dockerenv'):
+                try:
+                    CurrentProcess = psutil.Process(Process.pid)
+                    MaxCpuThreads = self.GetMaxCpuThreads()
+                    AffinityCores = list(range(MaxCpuThreads))
+                    CurrentProcess.cpu_affinity(AffinityCores)
+                    LoggingService.LogDebug(f"Set FFmpeg CPU affinity to cores: {AffinityCores} (MaxCpuThreads: {MaxCpuThreads})", 'ExecuteFFmpeg', 'FFmpegService')
+                except Exception as AffinityError:
+                    LoggingService.LogWarning(f"Failed to set CPU affinity: {AffinityError}", 'ExecuteFFmpeg', 'FFmpegService')
             
             # Wait for process with timeout
             try:

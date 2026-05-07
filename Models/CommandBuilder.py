@@ -194,22 +194,21 @@ class CommandBuilder:
         try:
             # Simple decision: Skip for NVIDIA, add for software
             UseNvidiaHardware = ProfileSettings.get('UseNvidiaHardware', 0)
-            
+
             if UseNvidiaHardware == 1:
                 # NVIDIA doesn't support film grain - skip
                 return
-            
+
             # Create a lookup dictionary for codec parameters
             ParamLookup = {}
             for param in CodecParameters:
                 ParamLookup[param['ParameterName']] = param
-            
+
             # Add film grain (for software encoding only)
             if 'film-grain' in ParamLookup:
                 FilmGrain = ProfileSettings.get('FilmGrain')
                 if FilmGrain is not None and FilmGrain != '' and FilmGrain != 'None' and FilmGrain > 0:
-                    SvtAv1Params = [f'film-grain={FilmGrain}']
-                    CommandParts.extend(['-svtav1-params', ':'.join(SvtAv1Params)])
+                    CommandParts.extend(['-svtav1-params', f'film-grain={FilmGrain}'])
                 
         except Exception:
             # If anything goes wrong, continue without adding parameters

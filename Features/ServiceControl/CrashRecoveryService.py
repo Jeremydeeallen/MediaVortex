@@ -93,6 +93,15 @@ class CrashRecoveryService:
             # Clean up ActiveJobs records
             DeletedActiveJobs = self.CleanupActiveJobs(ServiceName)
 
+            # Sweep orphaned progress records from prior crashes (SIGKILL, OOM,
+            # power loss) where the signal handler never ran and ActiveJobs were
+            # cleaned by a previous crash recovery pass without reaching all
+            # associated TranscodeProgress rows.
+            if ServiceName == "TranscodeService":
+                OrphanedCleaned = self.CleanupOrphanedProgressRecords()
+            else:
+                OrphanedCleaned = 0
+
             # Special handling for QualityTestService: Delete only crashed jobs and reset interrupted tests
             if ServiceName == "QualityTestService":
                 # Only delete jobs that were in ActiveJobs (actually crashed)
@@ -119,10 +128,11 @@ class CrashRecoveryService:
 
             result = {
                 "Success": True,
-                "Message": f"Recovered {JobsRecovered} jobs, killed {OrphanedProcessesKilled} orphaned processes",
+                "Message": f"Recovered {JobsRecovered} jobs, killed {OrphanedProcessesKilled} orphaned processes, cleaned {OrphanedCleaned} orphaned progress records",
                 "JobsRecovered": JobsRecovered,
                 "OrphanedProcessesKilled": OrphanedProcessesKilled,
                 "ActiveJobsCleaned": DeletedActiveJobs,
+                "OrphanedProgressCleaned": OrphanedCleaned,
                 "RecoveryDetails": RecoveryDetails
             }
 
@@ -245,6 +255,41 @@ class CrashRecoveryService:
 
         except Exception as e:
             LoggingService.LogException(f"Error cleaning up progress records for {JobType} job {QueueId}", e, "CrashRecoveryService", "CleanupProgressRecords")
+            return 0
+
+    def CleanupOrphanedProgressRecords(self) -> int:
+        """Delete TranscodeProgress rows for any non-successful TranscodeAttempt.
+        Covers both explicit failures (Success = FALSE) and incomplete attempts
+        (Success IS NULL) left by hard kills (SIGKILL, OOM) where no signal handler ran."""
+        try:
+            # First, mark incomplete attempts as failed so they don't masquerade as in-progress.
+            # Exclude attempts with recently-updated progress (active transcodes).
+            mark_query = """
+                UPDATE TranscodeAttempts
+                SET Success = FALSE, CompletedDate = NOW()
+                WHERE Success IS NULL
+                  AND Id NOT IN (
+                      SELECT TranscodeAttemptId FROM TranscodeProgress
+                      WHERE LastProgressUpdate > NOW() - INTERVAL '5 minutes'
+                  )
+            """
+            marked_rows = self.DatabaseManager.DatabaseService.ExecuteNonQuery(mark_query, ())
+            if marked_rows > 0:
+                LoggingService.LogInfo(f"Marked {marked_rows} incomplete transcode attempts as failed", "CrashRecoveryService", "CleanupOrphanedProgressRecords")
+
+            # Then delete progress rows for all failed attempts
+            query = """
+                DELETE FROM TranscodeProgress
+                WHERE TranscodeAttemptId IN (
+                    SELECT Id FROM TranscodeAttempts WHERE Success = FALSE
+                )
+            """
+            affected_rows = self.DatabaseManager.DatabaseService.ExecuteNonQuery(query, ())
+            if affected_rows > 0:
+                LoggingService.LogInfo(f"Cleaned up {affected_rows} orphaned TranscodeProgress records for failed attempts", "CrashRecoveryService", "CleanupOrphanedProgressRecords")
+            return affected_rows
+        except Exception as e:
+            LoggingService.LogException("Error cleaning up orphaned progress records", e, "CrashRecoveryService", "CleanupOrphanedProgressRecords")
             return 0
 
     def CleanupActiveJobs(self, ServiceName: str) -> int:

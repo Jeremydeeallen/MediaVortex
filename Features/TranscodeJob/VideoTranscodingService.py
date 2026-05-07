@@ -58,37 +58,38 @@ class VideoTranscodingService:
 
             LoggingService.LogInfo(f"Process started with PID: {Process.pid}", "VideoTranscodingService", "TranscodeVideo")
 
-            # Set CPU affinity using topology-based core selection (P-cores for transcode)
+            # Set CPU affinity using topology-based core selection (skip in Docker — cpuset handles pinning)
             FFmpegPID = None
-            if MaxCpuThreads:
-                # Per-worker config: use directly (admin already accounted for reserves)
-                CoreCount = MaxCpuThreads
-            else:
-                # Global fallback: read from SystemSettings, subtract 2 for system headroom
-                CoreCount = max(1, self.GetMaxCpuThreads() - 2)
-
-            try:
-                from Services.CpuAffinityService import GetCpuAffinityServiceInstance
-                CpuAffinityServiceInstance = GetCpuAffinityServiceInstance()
-
-                AffinityResult = CpuAffinityServiceInstance.SetFFmpegProcessAffinity(
-                    ShellProcessPID=Process.pid,
-                    CoreCount=CoreCount,
-                    JobId=JobId,
-                    JobType="Transcode",
-                    ServiceName="VideoTranscodingService"
-                )
-
-                if AffinityResult["Success"]:
-                    FFmpegPID = AffinityResult["FFmpegPID"]
-                    if AffinityResult.get("ErrorMessage"):
-                        LoggingService.LogWarning(f"CPU affinity set but with warning: {AffinityResult['ErrorMessage']}",
-                                                 "VideoTranscodingService", "TranscodeVideo")
+            if not os.path.exists('/.dockerenv'):
+                if MaxCpuThreads:
+                    # Per-worker config: use directly (admin already accounted for reserves)
+                    CoreCount = MaxCpuThreads
                 else:
-                    LoggingService.LogWarning(f"Failed to set CPU affinity: {AffinityResult.get('ErrorMessage', 'Unknown error')}",
-                                             "VideoTranscodingService", "TranscodeVideo")
-            except Exception as AffinityError:
-                LoggingService.LogWarning(f"Failed to set CPU affinity: {AffinityError}", "VideoTranscodingService", "TranscodeVideo")
+                    # Global fallback: read from SystemSettings, subtract 2 for system headroom
+                    CoreCount = max(1, self.GetMaxCpuThreads() - 2)
+
+                try:
+                    from Services.CpuAffinityService import GetCpuAffinityServiceInstance
+                    CpuAffinityServiceInstance = GetCpuAffinityServiceInstance()
+
+                    AffinityResult = CpuAffinityServiceInstance.SetFFmpegProcessAffinity(
+                        ShellProcessPID=Process.pid,
+                        CoreCount=CoreCount,
+                        JobId=JobId,
+                        JobType="Transcode",
+                        ServiceName="VideoTranscodingService"
+                    )
+
+                    if AffinityResult["Success"]:
+                        FFmpegPID = AffinityResult["FFmpegPID"]
+                        if AffinityResult.get("ErrorMessage"):
+                            LoggingService.LogWarning(f"CPU affinity set but with warning: {AffinityResult['ErrorMessage']}",
+                                                     "VideoTranscodingService", "TranscodeVideo")
+                    else:
+                        LoggingService.LogWarning(f"Failed to set CPU affinity: {AffinityResult.get('ErrorMessage', 'Unknown error')}",
+                                                 "VideoTranscodingService", "TranscodeVideo")
+                except Exception as AffinityError:
+                    LoggingService.LogWarning(f"Failed to set CPU affinity: {AffinityError}", "VideoTranscodingService", "TranscodeVideo")
 
             # Update ActiveJob with FFmpeg PID if provided (use FFmpeg PID if available, otherwise shell PID)
             ProcessPIDToUse = FFmpegPID if FFmpegPID else Process.pid

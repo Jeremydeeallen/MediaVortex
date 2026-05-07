@@ -413,8 +413,11 @@ class TranscodeServiceApp:
             LoggingService.LogException("Error during shutdown", e, "TranscodeService", "Shutdown")
 
 def SignalHandler(signum, frame):
-    """Handle shutdown signals immediately - kill FFmpeg, cleanup DB, exit.
-    Scoped to this worker only -- never touches other workers' jobs."""
+    """Handle shutdown signals: kill local FFmpeg, mark worker offline, exit.
+    DB job state (ActiveJobs, TranscodeProgress, TranscodeAttempts, TranscodeQueue)
+    is intentionally left dirty — CrashRecoveryService on next startup is the single
+    authority for cleaning all of that. StuckJobDetectionService (heartbeat-based) is
+    the fallback if this worker never comes back."""
     print("\nTranscodeService shutting down...")
 
     if hasattr(Main, 'app') and Main.app:
@@ -434,27 +437,11 @@ def SignalHandler(signum, frame):
         except Exception:
             pass
 
-        # Database cleanup: reset only THIS worker's running queue items and active jobs
+        # Mark worker offline and update service status — nothing else.
+        # ActiveJobs, TranscodeProgress, TranscodeAttempts, and TranscodeQueue
+        # are left as-is so crash recovery on next startup has full context.
         try:
             db = app.DatabaseManager
-            db.DatabaseService.ExecuteNonQuery(
-                "UPDATE TranscodeQueue SET Status = 'Pending', ClaimedBy = NULL, ClaimedAt = NULL WHERE Status IN ('Running', 'Processing') AND ClaimedBy = %s",
-                (WorkerName,)
-            )
-            db.DatabaseService.ExecuteNonQuery(
-                "DELETE FROM ActiveJobs WHERE ServiceName = 'TranscodeService' AND WorkerName = %s",
-                (WorkerName,)
-            )
-            db.DatabaseService.ExecuteNonQuery(
-                """DELETE FROM TranscodeProgress WHERE TranscodeAttemptId IN (
-                    SELECT ta.Id FROM TranscodeAttempts ta
-                    INNER JOIN ActiveJobs aj ON aj.QueueId IN (
-                        SELECT tq.Id FROM TranscodeQueue tq WHERE tq.ClaimedBy = %s
-                    )
-                    WHERE ta.Success IS NULL
-                )""",
-                (WorkerName,)
-            )
             db.UpdateServiceStatus("TranscodeService", {
                 'Status': 'Stopped',
                 'ProcessId': 0,
