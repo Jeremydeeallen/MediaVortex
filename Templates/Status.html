@@ -158,11 +158,13 @@
                     <thead class="table-light">
                         <tr>
                             <th class="ps-3">File</th>
+                            <th style="width: 110px;">Worker</th>
                             <th style="width: 90px;">Size</th>
                             <th style="width: 200px;">Progress</th>
                             <th style="width: 80px;">FPS</th>
                             <th style="width: 80px;">Speed</th>
                             <th style="width: 100px;">ETA</th>
+                            <th style="width: 60px;"></th>
                         </tr>
                     </thead>
                     <tbody id="ActiveJobsBody"></tbody>
@@ -258,6 +260,14 @@
                 </div>
             </div>
         </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════ -->
+    <!-- WORKERS                                             -->
+    <!-- ═══════════════════════════════════════════════════ -->
+    <h6 class="text-muted mb-3"><i class="fas fa-server me-2"></i>Workers</h6>
+    <div class="row g-3 mb-4" id="WorkersContainer">
+        <div class="col-12 text-center text-muted py-2">Loading...</div>
     </div>
 
     <!-- ═══════════════════════════════════════════════════ -->
@@ -419,23 +429,34 @@ function UpdateTranscodeStatus(Data) {
         JobsBody.innerHTML = ActiveJobs.map(function(Job) {
             const FileName = Job.FileName || Job.FilePath.split(/[/\\]/).pop();
             const Pct = (Job.ProgressPercent || 0).toFixed(1);
-            const Details = [];
-            if (Job.CurrentPhase) Details.push(Job.CurrentPhase);
-            return '<tr>' +
-                '<td class="ps-3"><i class="fas fa-spinner fa-spin me-1 text-primary"></i>' +
-                    '<span title="' + (Job.FilePath || '').replace(/"/g, '&quot;') + '">' + FileName + '</span></td>' +
-                '<td>' + (Job.SizeMB ? (Job.SizeMB >= 1024 ? (Job.SizeMB / 1024).toFixed(2) + ' GB' : Math.round(Job.SizeMB) + ' MB') : '-') + '</td>' +
-                '<td><div class="d-flex align-items-center gap-2">' +
+            const IsStuck = Job.IsStuck || false;
+            const StatusIcon = IsStuck
+                ? '<i class="fas fa-exclamation-triangle me-1 text-warning"></i>'
+                : '<i class="fas fa-spinner fa-spin me-1 text-primary"></i>';
+            const RowClass = IsStuck ? ' class="table-warning"' : '';
+            const ResetBtn = IsStuck
+                ? '<button class="btn btn-outline-warning btn-sm py-0 px-1" onclick="ResetStuckJob(' + Job.QueueId + ')" title="Reset to Pending"><i class="fas fa-redo-alt"></i></button>'
+                : '';
+            const ProgressBar = IsStuck
+                ? '<span class="text-warning fw-bold">Stuck</span>'
+                : '<div class="d-flex align-items-center gap-2">' +
                     '<div class="progress flex-grow-1" style="height: 18px;">' +
                         '<div class="progress-bar progress-bar-striped progress-bar-animated bg-primary" ' +
                             'role="progressbar" style="width: ' + Pct + '%" ' +
                             'aria-valuenow="' + Pct + '" aria-valuemin="0" aria-valuemax="100"></div>' +
                     '</div>' +
                     '<small class="text-nowrap">' + Pct + '%</small>' +
-                '</div></td>' +
-                '<td>' + (Job.CurrentFPS ? parseFloat(Job.CurrentFPS).toFixed(1) : '-') + '</td>' +
-                '<td>' + (Job.CurrentSpeed || '-') + '</td>' +
-                '<td>' + (Job.ETA || '-') + '</td>' +
+                '</div>';
+            return '<tr' + RowClass + '>' +
+                '<td class="ps-3">' + StatusIcon +
+                    '<span title="' + (Job.FilePath || '').replace(/"/g, '&quot;') + '">' + FileName + '</span></td>' +
+                '<td>' + (Job.ClaimedBy || '<em class="text-muted">-</em>') + '</td>' +
+                '<td>' + (Job.SizeMB ? (Job.SizeMB >= 1024 ? (Job.SizeMB / 1024).toFixed(2) + ' GB' : Math.round(Job.SizeMB) + ' MB') : '-') + '</td>' +
+                '<td>' + ProgressBar + '</td>' +
+                '<td>' + (IsStuck ? '-' : (Job.CurrentFPS ? parseFloat(Job.CurrentFPS).toFixed(1) : '-')) + '</td>' +
+                '<td>' + (IsStuck ? '-' : (Job.CurrentSpeed || '-')) + '</td>' +
+                '<td>' + (IsStuck ? '-' : (Job.ETA || '-')) + '</td>' +
+                '<td class="text-center">' + ResetBtn + '</td>' +
             '</tr>';
         }).join('');
     } else {
@@ -473,6 +494,25 @@ function ResumeTranscoding() {
                 LoadTranscodeOverview();
             } else {
                 showToastAlert(Result.ErrorMessage || 'Failed to resume.', 'danger');
+            }
+        })
+        .catch(() => showToastAlert('Failed to contact server.', 'danger'));
+}
+
+function ResetStuckJob(QueueId) {
+    if (!confirm('Reset this stuck job back to Pending?')) return;
+    fetch('/api/TeamStatus/ResetStuckJob', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ QueueId: QueueId })
+    })
+        .then(R => R.json())
+        .then(Result => {
+            if (Result.Success) {
+                showToastAlert('Job reset to Pending.', 'success');
+                LoadTranscodeOverview();
+            } else {
+                showToastAlert(Result.ErrorMessage || 'Failed to reset job.', 'danger');
             }
         })
         .catch(() => showToastAlert('Failed to contact server.', 'danger'));
@@ -589,6 +629,7 @@ class ServiceStatusManager {
         this.LoadSystemResources();
         this.LoadServiceStatus();
         this.LoadContinuousScanStatus();
+        this.LoadWorkers();
         LoadTranscodeOverview();
         LoadSavingsByVolume();
         LoadSavingsByDay();
@@ -746,6 +787,60 @@ class ServiceStatusManager {
         } catch (e) {
             showToastAlert('Error: ' + e.message, 'danger');
         }
+    }
+
+    async LoadWorkers() {
+        try {
+            const Resp = await fetch('/api/TeamStatus/Workers');
+            const Data = await Resp.json();
+            if (Data.Success && Data.Data) {
+                this.RenderWorkers(Data.Data);
+            }
+        } catch (e) {
+            console.error('Workers error:', e);
+        }
+    }
+
+    RenderWorkers(Workers) {
+        const Container = document.getElementById('WorkersContainer');
+        Container.innerHTML = '';
+        if (!Workers || Workers.length === 0) {
+            Container.innerHTML = '<div class="col-12 text-center text-muted py-2">No workers registered</div>';
+            return;
+        }
+        Workers.forEach(W => {
+            const IsOnline = W.Status === 'Online';
+            const BadgeCls = IsOnline ? 'bg-success' : 'bg-danger';
+            const BadgeIcon = IsOnline ? 'fa-check-circle' : 'fa-times-circle';
+
+            let HeartbeatText = 'Never';
+            if (W.HeartbeatAgeSec !== null && W.HeartbeatAgeSec !== undefined) {
+                const Sec = Math.floor(W.HeartbeatAgeSec);
+                if (Sec < 60) HeartbeatText = Sec + 's ago';
+                else if (Sec < 3600) HeartbeatText = Math.floor(Sec / 60) + ' min ago';
+                else HeartbeatText = Math.floor(Sec / 3600) + ' hr ago';
+            }
+
+            const Interlaced = W.AcceptsInterlaced ? 'Yes' : 'No';
+
+            const Col = document.createElement('div');
+            Col.className = 'col-6 col-lg-4 col-xl-3';
+            Col.innerHTML = '<div class="card h-100">' +
+                '<div class="card-body py-3">' +
+                    '<h6 class="card-title mb-2 d-flex justify-content-between align-items-center">' +
+                        '<span><i class="fas fa-desktop me-1"></i>' + W.WorkerName + '</span>' +
+                        '<span class="badge ' + BadgeCls + '"><i class="fas ' + BadgeIcon + ' me-1"></i>' + W.Status + '</span>' +
+                    '</h6>' +
+                    '<div class="small text-muted">' +
+                        '<div class="d-flex justify-content-between"><span>Heartbeat:</span><span>' + HeartbeatText + '</span></div>' +
+                        '<div class="d-flex justify-content-between"><span>Max Jobs:</span><span>' + (W.MaxConcurrentJobs || 0) + '</span></div>' +
+                        '<div class="d-flex justify-content-between"><span>CPU Threads:</span><span>' + (W.MaxCpuThreads || 'Auto') + '</span></div>' +
+                        '<div class="d-flex justify-content-between"><span>Interlaced:</span><span>' + Interlaced + '</span></div>' +
+                    '</div>' +
+                '</div>' +
+            '</div>';
+            Container.appendChild(Col);
+        });
     }
 
     async LoadContinuousScanStatus() {

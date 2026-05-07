@@ -47,21 +47,46 @@ def GetOverview():
         ActiveJobsCount = StatusRow.get('ActiveJobsCount', 0) if StatusRow else 0
 
         # Current job info — query ALL active jobs from progress + queue
-        # This supports multiple concurrent transcode workers across machines
+        # Includes ClaimedBy (worker name) and worker heartbeat for stuck detection
         ActiveJobs = []
         JobQuery = """
             SELECT tq.Id AS QueueId, ta.FilePath, tq.FileName, tq.SizeMB,
                    tp.ProgressPercent, tp.CurrentPhase,
                    tp.CurrentFPS, tp.CurrentSpeed, tp.ETA,
-                   tq.DateStarted
+                   tq.DateStarted, tq.ClaimedBy,
+                   w.LastHeartbeat,
+                   EXTRACT(EPOCH FROM (NOW() - w.LastHeartbeat)) AS HeartbeatAgeSec
             FROM TranscodeProgress tp
             JOIN TranscodeAttempts ta ON tp.TranscodeAttemptId = ta.Id
             JOIN TranscodeQueue tq ON tq.FilePath = ta.FilePath AND tq.Status = 'Running'
+            LEFT JOIN Workers w ON w.WorkerName = tq.ClaimedBy
             WHERE ta.Success IS NULL
             ORDER BY tq.DateStarted ASC
         """
         JobRows = DbManager.DatabaseService.ExecuteQuery(JobQuery)
+
+        # Also find Running queue items with NO progress row (stuck before FFmpeg started)
+        StuckFallbackQuery = """
+            SELECT tq.Id AS QueueId, tq.FilePath, tq.FileName, tq.SizeMB,
+                   tq.DateStarted, tq.ClaimedBy,
+                   w.LastHeartbeat,
+                   EXTRACT(EPOCH FROM (NOW() - w.LastHeartbeat)) AS HeartbeatAgeSec
+            FROM TranscodeQueue tq
+            LEFT JOIN Workers w ON w.WorkerName = tq.ClaimedBy
+            WHERE tq.Status = 'Running'
+              AND NOT EXISTS (
+                  SELECT 1 FROM TranscodeProgress tp
+                  JOIN TranscodeAttempts ta ON tp.TranscodeAttemptId = ta.Id
+                  WHERE ta.FilePath = tq.FilePath AND ta.Success IS NULL
+              )
+        """
+        StuckRows = DbManager.DatabaseService.ExecuteQuery(StuckFallbackQuery)
+
+        ProgressQueueIds = set()
         for Row in (JobRows or []):
+            HeartbeatAge = Row.get('HeartbeatAgeSec')
+            IsStuck = HeartbeatAge is not None and HeartbeatAge > 300
+            ProgressQueueIds.add(Row.get('QueueId', 0))
             ActiveJobs.append({
                 "QueueId": Row.get('QueueId', 0),
                 "FilePath": Row.get('FilePath', ''),
@@ -72,7 +97,28 @@ def GetOverview():
                 "CurrentFPS": Row.get('CurrentFPS', 0),
                 "CurrentSpeed": Row.get('CurrentSpeed', ''),
                 "ETA": Row.get('ETA', ''),
-                "DateStarted": str(Row.get('DateStarted', '')) if Row.get('DateStarted') else ''
+                "DateStarted": str(Row.get('DateStarted', '')) if Row.get('DateStarted') else '',
+                "ClaimedBy": Row.get('ClaimedBy', ''),
+                "IsStuck": IsStuck
+            })
+
+        for Row in (StuckRows or []):
+            QueueId = Row.get('QueueId', 0)
+            if QueueId in ProgressQueueIds:
+                continue
+            ActiveJobs.append({
+                "QueueId": QueueId,
+                "FilePath": Row.get('FilePath', ''),
+                "FileName": Row.get('FileName', ''),
+                "SizeMB": Row.get('SizeMB', 0),
+                "ProgressPercent": 0,
+                "CurrentPhase": '',
+                "CurrentFPS": 0,
+                "CurrentSpeed": '',
+                "ETA": '',
+                "DateStarted": str(Row.get('DateStarted', '')) if Row.get('DateStarted') else '',
+                "ClaimedBy": Row.get('ClaimedBy', ''),
+                "IsStuck": True
             })
 
         # Also check for running queue items as a fallback
@@ -185,4 +231,95 @@ def GetSavingsByDay():
     except Exception as e:
         ErrorMsg = f"Exception in GetSavingsByDay: {str(e)}"
         LoggingService.LogException(ErrorMsg, e, "TeamStatusController", "GetSavingsByDay")
+        return jsonify({"Success": False, "ErrorMessage": ErrorMsg}), 500
+
+
+@TeamStatusBlueprint.route('/Workers', methods=['GET'])
+def GetWorkers():
+    """Get all registered workers with status and heartbeat info."""
+    try:
+        LoggingService.LogFunctionEntry("GetWorkers", "TeamStatusController")
+
+        DbManager = DatabaseManager()
+
+        Query = """
+            SELECT WorkerName, Platform, Status, LastHeartbeat,
+                   MaxConcurrentJobs, MaxCpuThreads, AcceptsInterlaced,
+                   EXTRACT(EPOCH FROM (NOW() - LastHeartbeat)) AS HeartbeatAgeSec
+            FROM Workers
+            ORDER BY WorkerName
+        """
+        Rows = DbManager.DatabaseService.ExecuteQuery(Query)
+
+        Workers = []
+        for Row in (Rows or []):
+            HeartbeatAge = Row.get('HeartbeatAgeSec')
+            IsOnline = HeartbeatAge is not None and HeartbeatAge < 300
+            Workers.append({
+                "WorkerName": Row.get('WorkerName', ''),
+                "Platform": Row.get('Platform', ''),
+                "Status": 'Online' if IsOnline else 'Offline',
+                "LastHeartbeat": str(Row.get('LastHeartbeat', '')) if Row.get('LastHeartbeat') else '',
+                "HeartbeatAgeSec": HeartbeatAge,
+                "MaxConcurrentJobs": Row.get('MaxConcurrentJobs', 0),
+                "MaxCpuThreads": Row.get('MaxCpuThreads'),
+                "AcceptsInterlaced": bool(Row.get('AcceptsInterlaced', True))
+            })
+
+        return jsonify({"Success": True, "Data": Workers})
+
+    except Exception as e:
+        ErrorMsg = f"Exception in GetWorkers: {str(e)}"
+        LoggingService.LogException(ErrorMsg, e, "TeamStatusController", "GetWorkers")
+        return jsonify({"Success": False, "ErrorMessage": ErrorMsg}), 500
+
+
+@TeamStatusBlueprint.route('/ResetStuckJob', methods=['POST'])
+def ResetStuckJob():
+    """Reset a stuck queue item back to Pending."""
+    try:
+        LoggingService.LogFunctionEntry("ResetStuckJob", "TeamStatusController")
+
+        Data = request.get_json()
+        QueueId = Data.get('QueueId') if Data else None
+        if not QueueId:
+            return jsonify({"Success": False, "ErrorMessage": "QueueId is required"}), 400
+
+        DbManager = DatabaseManager()
+
+        # Reset the queue item to Pending
+        ResetQuery = """
+            UPDATE TranscodeQueue
+            SET Status = 'Pending', ClaimedBy = NULL, ClaimedAt = NULL, DateStarted = NULL
+            WHERE Id = %s AND Status = 'Running'
+        """
+        RowsAffected = DbManager.DatabaseService.ExecuteNonQuery(ResetQuery, (QueueId,))
+
+        if RowsAffected == 0:
+            return jsonify({"Success": False, "ErrorMessage": f"Queue item {QueueId} not found or not in Running state"}), 404
+
+        # Clean up ActiveJobs for this queue item
+        CleanupQuery = """
+            DELETE FROM ActiveJobs WHERE QueueId = %s
+        """
+        DbManager.DatabaseService.ExecuteNonQuery(CleanupQuery, (QueueId,))
+
+        # Clean up TranscodeProgress for incomplete attempts on this file
+        ProgressCleanupQuery = """
+            DELETE FROM TranscodeProgress
+            WHERE TranscodeAttemptId IN (
+                SELECT ta.Id FROM TranscodeAttempts ta
+                JOIN TranscodeQueue tq ON tq.FilePath = ta.FilePath
+                WHERE tq.Id = %s AND ta.Success IS NULL
+            )
+        """
+        DbManager.DatabaseService.ExecuteNonQuery(ProgressCleanupQuery, (QueueId,))
+
+        LoggingService.LogInfo(f"Reset stuck job QueueId={QueueId} to Pending", "TeamStatusController", "ResetStuckJob")
+
+        return jsonify({"Success": True, "Message": f"Queue item {QueueId} reset to Pending"})
+
+    except Exception as e:
+        ErrorMsg = f"Exception in ResetStuckJob: {str(e)}"
+        LoggingService.LogException(ErrorMsg, e, "TeamStatusController", "ResetStuckJob")
         return jsonify({"Success": False, "ErrorMessage": ErrorMsg}), 500
