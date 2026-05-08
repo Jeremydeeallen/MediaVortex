@@ -88,9 +88,20 @@ class WorkerServiceApp:
     def _RegisterAndLoadWorkerConfig(self) -> dict:
         """Register this worker in the Workers table and load its configuration."""
         try:
-            # Detect platform-appropriate FFmpeg/FFprobe paths
-            FFmpegPath = shutil.which('ffmpeg')
-            FFprobePath = shutil.which('ffprobe')
+            # Detect platform-appropriate FFmpeg/FFprobe paths.
+            # Prefer the project's bundled binaries over PATH so Windows hosts (where
+            # FFmpeg typically isn't on PATH) still get a real value into Workers.
+            # FAIL LOUDLY if neither resolves -- a worker with no FFmpeg cannot do
+            # any work, and silently registering NULL produces the broken-by-default
+            # state we hit today on I9-2024.
+            FFmpegPath = self._ResolveBundledOrPathBinary('ffmpeg')
+            FFprobePath = self._ResolveBundledOrPathBinary('ffprobe')
+            if not FFmpegPath or not FFprobePath:
+                raise RuntimeError(
+                    f"Worker {self.WorkerName} cannot start: FFmpeg/FFprobe binaries not found. "
+                    f"FFmpeg={FFmpegPath!r}, FFprobe={FFprobePath!r}. "
+                    f"Bundle them under FFmpegMaster/bin/ or put them on PATH."
+                )
 
             # CPU thread limit from env var
             MaxCpuThreadsEnv = os.environ.get('MEDIAVORTEX_MAX_CPU_THREADS')
@@ -135,6 +146,19 @@ class WorkerServiceApp:
         except Exception as e:
             LoggingService.LogException("Error registering worker, using defaults", e, "WorkerService", "_RegisterAndLoadWorkerConfig")
             return {}
+
+    def _ResolveBundledOrPathBinary(self, BinaryName: str) -> str:
+        """Resolve ffmpeg or ffprobe binary path. Project bundle first, PATH second.
+        Returns absolute path or empty string. Never logs silently -- caller decides."""
+        ProjectRoot = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        Suffix = ".exe" if platform_mod.system().lower() == "windows" else ""
+        Bundled = os.path.join(ProjectRoot, "FFmpegMaster", "bin", f"{BinaryName}{Suffix}")
+        if os.path.exists(Bundled):
+            return Bundled
+        FromPath = shutil.which(BinaryName)
+        if FromPath:
+            return FromPath
+        return ""
 
     def _LoadCapabilitiesFromDB(self):
         """Load capability flags and status from Workers table."""

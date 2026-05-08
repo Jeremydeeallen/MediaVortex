@@ -221,7 +221,16 @@ class FFmpegService:
             if not InputFile:
                 LoggingService.LogWarning("No input file found in FFmpeg command", 'GetInputFileDuration', 'FFmpegService')
                 return 0.0
-            
+
+            # Guard: subprocess.run([None, ...]) crashes with a confusing TypeError.
+            # Fail loudly with a clear message instead.
+            if not self.FFprobePath:
+                LoggingService.LogError(
+                    "Cannot probe duration: FFprobePath is not set on this FFmpegService instance.",
+                    'GetInputFileDuration', 'FFmpegService'
+                )
+                return 0.0
+
             # Use ffprobe to get duration
             ProbeCommand = [
                 self.FFprobePath,

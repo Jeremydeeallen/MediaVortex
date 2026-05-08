@@ -58,6 +58,35 @@ class ProcessTranscodeQueueService:
                 from Core.Services.PathTranslationService import PathTranslationService
                 self.PathTranslation = PathTranslationService(MountMap=MountMap)
 
+        # Final fallback: if the worker registered with NULL FFmpeg/FFprobe paths
+        # (e.g. shutil.which returned None on Windows) but the project bundles them,
+        # discover them locally so command-build doesn't fail with FFmpegPath=None.
+        # Without this, every job hits a ValueError in CommandBuilder and the
+        # broad except returns None silently.
+        if not self.FFmpegPath or not self.FFprobePath:
+            try:
+                from Services.FFmpegService import FFmpegService
+                Discovery = FFmpegService()
+                if not self.FFmpegPath and Discovery.FFmpegPath:
+                    self.FFmpegPath = Discovery.FFmpegPath
+                    LoggingService.LogWarning(
+                        f"FFmpegPath was NULL on worker init; discovered {self.FFmpegPath}. "
+                        f"Persist this in Workers.FFmpegPath for {self.WorkerName} to avoid the warning.",
+                        "ProcessTranscodeQueueService", "__init__"
+                    )
+                if not self.FFprobePath and Discovery.FFprobePath:
+                    self.FFprobePath = Discovery.FFprobePath
+                    LoggingService.LogWarning(
+                        f"FFprobePath was NULL on worker init; discovered {self.FFprobePath}. "
+                        f"Persist this in Workers.FFprobePath for {self.WorkerName} to avoid the warning.",
+                        "ProcessTranscodeQueueService", "__init__"
+                    )
+            except Exception as Ex:
+                LoggingService.LogException(
+                    "Failed to discover FFmpeg/FFprobe paths during worker init",
+                    Ex, "ProcessTranscodeQueueService", "__init__"
+                )
+
         # Per-worker CPU thread limit (NULL = use global SystemSettings.MaxCpuThreads)
         RawMaxCpu = self.WorkerConfig.get('MaxCpuThreads') or self.WorkerConfig.get('maxcputhreads')
         self.MaxCpuThreads = int(RawMaxCpu) if RawMaxCpu else None

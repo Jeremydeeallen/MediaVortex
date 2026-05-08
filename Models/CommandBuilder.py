@@ -1,5 +1,6 @@
 import os
 from typing import Dict, Any, Optional
+from Core.Logging.LoggingService import LoggingService
 from Models.TranscodeQueueModel import TranscodeQueueModel
 from Models.MediaFileModel import MediaFileModel
 
@@ -137,7 +138,22 @@ class CommandBuilder:
             }
             
         except Exception as e:
-            # Pure function should not log, just return None on error
+            # Log loudly so the failure surfaces in the database with full traceback.
+            # The previous silent return-None hid today's FFmpegPath=None ValueError
+            # behind a generic "Failed to build command" message with no context.
+            JobId = None
+            FilePath = None
+            try:
+                JobObj = CommandData.get('Job') if isinstance(CommandData, dict) else None
+                if JobObj is not None:
+                    JobId = getattr(JobObj, 'Id', None)
+                    FilePath = getattr(JobObj, 'FilePath', None)
+            except Exception:
+                pass
+            LoggingService.LogException(
+                f"CommandBuilder.BuildCommand failed (JobId={JobId}, FilePath={FilePath})",
+                e, "BuildCommand", "CommandBuilder"
+            )
             return None
     
     def ValidateCommandData(self, CommandData: Dict[str, Any]) -> bool:
@@ -434,7 +450,12 @@ class CommandBuilder:
                 'OutputPath': OutputPath
             }
 
-        except Exception:
+        except Exception as e:
+            JobId = getattr(CommandData.get('Job'), 'Id', None) if isinstance(CommandData, dict) else None
+            LoggingService.LogException(
+                f"CommandBuilder.BuildRemuxCommand failed (JobId={JobId})",
+                e, "BuildRemuxCommand", "CommandBuilder"
+            )
             return None
 
     def BuildSubtitleFixCommand(self, CommandData: Dict[str, Any]) -> Optional[Dict[str, str]]:
@@ -493,7 +514,12 @@ class CommandBuilder:
                 'OutputPath': OutputPath
             }
 
-        except Exception:
+        except Exception as e:
+            JobId = getattr(CommandData.get('Job'), 'Id', None) if isinstance(CommandData, dict) else None
+            LoggingService.LogException(
+                f"CommandBuilder.BuildSubtitleFixCommand failed (JobId={JobId})",
+                e, "BuildSubtitleFixCommand", "CommandBuilder"
+            )
             return None
 
     def GetMaxCpuThreads(self) -> int:

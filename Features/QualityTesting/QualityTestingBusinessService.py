@@ -281,9 +281,20 @@ class QualityTestingBusinessService:
             import subprocess
             import re
 
-            # Use FFprobe to get video resolution
+            # Guard: FFmpegPath.replace() crashes with AttributeError if FFmpegPath is None.
+            # Fail loudly so the actual misconfiguration shows in logs instead of a NoneType error.
+            if not FFmpegPath:
+                LoggingService.LogError(
+                    f"GetVideoResolution called with FFmpegPath=None for {VideoFilePath}. "
+                    f"Caller must resolve FFmpegPath before calling this method.",
+                    "GetVideoResolution", "QualityTestingBusinessService"
+                )
+                return None, None
+
+            # Use FFprobe to get video resolution -- derive ffprobe path from ffmpeg path
+            FFprobePath = FFmpegPath.replace("ffmpeg.exe", "ffprobe.exe").replace("ffmpeg", "ffprobe")
             probe_command = [
-                FFmpegPath.replace("ffmpeg.exe", "ffprobe.exe"),
+                FFprobePath,
                 "-v", "quiet",
                 "-select_streams", "v:0",
                 "-show_entries", "stream=width,height",
