@@ -13,6 +13,8 @@ Replaces original media files with verified transcoded output. Archives original
 5. If replacement fails (disk error, size mismatch), the original file is preserved and the error is logged.
 6. [BUG] FileReplacement depends on MediaProbe for re-probing after replacement, but there is no explicit interface contract between them. The post-replace flow (archive -> replace -> re-probe -> update MediaFiles) crosses FileReplacement and MediaProbe boundaries with no documented API or failure mode agreement.
 7. FileReplacement works on any machine (Windows or Linux). _ProcessCompleteFileReplacement() accepts PathTranslation and translates canonical DB paths to local mount paths before all filesystem operations. InPlace output mode skips shutil.move. No hardcoded Windows paths in the cleanup flow.
+8. **Canonical-path math uses `ntpath`, not `os.path`, so it works on Linux workers.** Canonical paths in the DB are always Windows-flavored (`T:\...`); using `os.path.dirname` on a Linux worker silently returned the empty string and produced a filename-only "new path" that the post-replacement re-probe couldn't find. After 2026-05-08 fix, `_ProcessCompleteFileReplacement` uses `ntpath.dirname` / `ntpath.join` so the canonical new-path is always reconstructed correctly regardless of host OS.
+9. **Re-probe failure surfaces in Logs with full context, not just "Failed to update MediaFiles table."** Previously the wrapper stripped the underlying FFprobe error; now `_UpdateMediaFilesAfterReplacement` propagates the original ExceptionMessage with the absolute path that FFprobe could not read.
 
 ## Status
 

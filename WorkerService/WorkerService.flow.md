@@ -10,8 +10,9 @@ Replaces the former `TranscodeService/Main.py` + `QualityTestService/Main.py` du
 
 | Step | Function | What It Does |
 |------|----------|--------------|
+| 0. Path verification (Windows-only) | `_VerifyRequiredPaths()` | Reads distinct drive-letter prefixes from MediaFiles, verifies each is accessible via `os.path.exists()`. Hard-fails before any DB writes if a required drive isn't mounted. Linux containers skip this step (bind mounts are validated by container orchestration). |
 | 1. Identity | `WorkerServiceApp.__init__()` | `WorkerName = socket.gethostname()`, `WorkerPlatform = platform.system().lower()` |
-| 2. Register worker | `_RegisterAndLoadWorkerConfig()` | UPSERT into Workers table (WorkerName, Platform, FFmpegPath via `shutil.which`, FFprobePath, Status=Online). Parses `MEDIAVORTEX_SHARE_MAPPINGS` env var and UPSERTs into WorkerShareMappings. Loads config (StagingDirectory, MaxConcurrentJobs, share mappings). |
+| 2. Register worker | `_RegisterAndLoadWorkerConfig()` | Resolves FFmpeg/FFprobe via `_ResolveBundledOrPathBinary()` (project-bundled `FFmpegMaster/bin/<binary>{.exe?}` first, then `shutil.which`). Raises `RuntimeError` if neither resolves -- previously this silently registered NULL on Windows hosts where FFmpeg isn't on PATH. UPSERTs Workers row (WorkerName, Platform, FFmpegPath, FFprobePath, Status=Online). Parses `MEDIAVORTEX_SHARE_MAPPINGS` env var and UPSERTs into WorkerShareMappings. Loads config (StagingDirectory, MaxConcurrentJobs, share mappings). |
 | 3. WorkerContext | `WorkerContext.Initialize()` | Singleton stores FFmpegPath, FFprobePath, StagingDirectory, ShareMappings. All services in the process resolve tool paths from WorkerContext. |
 | 4. Service status | `_EnsureServiceStatusExists()` | Ensures a ServiceStatus row exists for "WorkerService" |
 | 5. Crash recovery | `_RecoverFromCrash()` | CrashRecoveryService resets orphaned Running/Processing jobs for this worker |
@@ -65,9 +66,22 @@ Capability changes are detected by `_CapabilityPollingLoop()` (60s interval). Wh
 | 1. Signal received | `SignalHandler()` | Catches SIGTERM (Docker stop) or SIGINT (Ctrl+C) |
 | 2. Kill FFmpeg | iterates `VideoTranscoding.ActiveProcesses` | `proc.kill()` for each active FFmpeg subprocess |
 | 3. Update DB | `UpdateServiceStatus()` + `UpdateWorkerStatus()` | Sets ServiceStatus=Stopped, Workers.Status=Offline |
-| 4. Exit | `os._exit(0)` | Immediate process termination |
+| 4. Release DB pool | `DatabaseService._pool.closeall()` | Closes all idle psycopg2 connections so they don't linger after `os._exit` bypasses atexit. Required to prevent connection leaks during crash-restart loops. |
+| 5. Exit | `os._exit(0)` | Immediate process termination |
 
 Queue items left in Running state by this worker are reset to Pending on next startup by crash recovery.
+
+## Crash Recovery (PID 1 self-kill guard)
+
+`Features/ServiceControl/CrashRecoveryService.RecoverServiceJobs()` walks ActiveJobs left over from a prior run and tries to kill any still-running OS process referenced by `ActiveJobs.ProcessId`. In Docker, every Python entrypoint is PID 1 -- so a naive recorded-PID match always finds the new container's own process. Pre-2026-05-08 the worker would SIGTERM itself during recovery, exit cleanly via SignalHandler, and Docker's `restart: unless-stopped` would loop forever.
+
+The guard:
+
+```python
+own_pid = os.getpid()
+if process_id and process_id == own_pid:
+    process_exists = False  # treat as stale, skip kill, just clean up DB rows
+```
 
 ## Environment Variables
 

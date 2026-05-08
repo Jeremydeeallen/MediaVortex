@@ -36,6 +36,8 @@ Both (code fix + deploy-anywhere infrastructure)
 12. PathTranslation is passed from ProcessTranscodeQueueService (which already has it) through to FileReplacementBusinessService and HandleJobFailure. No new DB lookups or config loading in FileReplacement.
 13. [FIXED] The re-probe step in file replacement uses the worker's FFprobe path (from Workers table via WorkerContext), not SystemSettings.FFprobePath. On a Linux worker, re-probing a transcoded file succeeds and MediaFiles is updated with new codec, resolution, and TranscodedByMediaVortex=True.
 
+14. [FIXED 2026-05-08] **Re-probe path math uses `ntpath`, not `os.path`**, so canonical Windows-flavored DB paths reconstruct correctly when run on Linux workers. Previously `os.path.dirname("T:\\Show\\file.mkv")` on Linux returned the empty string, producing a filename-only "new path" that FFprobe couldn't find. Five files (Fire Country, Switched at Birth S01E11/S02E21, Hunting Hitler, 13 Reasons Why) had been transcoded and replaced on disk but their MediaFiles rows kept pointing at the missing original; recovery handled by `Scripts/FixStuckPostReplacementFiles.py`.
+
 ## Status
 
 COMPLETE

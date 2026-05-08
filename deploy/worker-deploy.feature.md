@@ -28,6 +28,16 @@ Dogfood
 
 9. NFS storage traffic between the worker LXC and Brain uses the 20 Gbps bonded backplane (10.0.1.42 → 10.0.1.1, MTU 9000) instead of the LAN switch path. Verified via `ip addr show eth1` on the LXC showing 10.0.1.42/24 on vmbr1.
 
+10. **Worker startup hard-fails when FFmpeg/FFprobe binaries cannot be resolved.** `_ResolveBundledOrPathBinary()` checks the project-bundled `FFmpegMaster/bin/<binary>{.exe?}` first, then falls back to `shutil.which()`. If neither yields a real path, `RuntimeError` is raised before any Workers row is written. Replaces the previous silent registration of `Workers.FFmpegPath = NULL` (root cause of the I9-2024 outage on 2026-05-08).
+
+11. **Crash-recovery does not self-terminate inside Docker containers.** When the recorded `ActiveJobs.ProcessId` matches `os.getpid()`, the worker treats the entry as a stale row from a prior container instance and skips the kill step (in Docker every Python entrypoint runs as PID 1, so a naive recorded-PID match would always hit the new process). Without this guard, the worker SIGTERMs itself during recovery, exits via SignalHandler with code 0, restart-loops forever.
+
+12. **SignalHandler releases the psycopg2 pool before `os._exit()`.** Each crashing-and-restarting worker would otherwise leak its idle DB connections (atexit handlers do not run after `os._exit`), eventually exhausting `max_connections` on the postgres host. Verified by running 4 workers through several restart cycles and confirming no growth in `pg_stat_activity` from the worker LXC IP.
+
+13. **Source-file existence is verified before any TranscodeAttempt row is created.** When `MediaFile.FilePath` (translated to the local mount via PathTranslation) does not exist on disk, the worker increments `MediaFiles.FFprobeFailureCount`, sets `LastFFprobeError = "Source file missing on disk: ..."`, deletes the TranscodeQueue row, and returns. No noisy attempt history. Stops the dead-file retry loop where queue population kept re-adding rows for files deleted between scan and transcode.
+
+14. **CommandBuilder failures surface in the database with a stack trace.** `Models/CommandBuilder.py` previously had a "pure function should not log" doctrine that swallowed every exception and returned `None`. The downstream "Failed to build command" log carried zero context. The wrappers now call `LogException` with `JobId`/`FilePath` before returning, so the `Logs` table has `ExceptionType`, `ExceptionMessage`, and `StackTrace` for every BuildCommand failure.
+
 ## Status
 
 IN PROGRESS
@@ -44,9 +54,16 @@ IN PROGRESS
 - [x] 8. Queue transcode jobs and verify end-to-end processing
 - [x] 9. Stable hostnames (larry-worker-1 through 4) via YAML anchors + hostname directive
 - [x] 10. Crash recovery marks stale TranscodeAttempts as failed (prevents ghost rows in Stats)
-- [ ] 11. Add backplane NIC (10.0.1.42 on vmbr1) for 20 Gbps NFS storage path
+- [x] 11. Crash-recovery skip-self-PID guard (criterion 11)
+- [x] 12. SignalHandler releases DB pool before os._exit (criterion 12)
+- [x] 13. Postgres max_connections raised 30 -> 200 on 10.0.0.15 (also needs to land in infrastructure-repo postgresql.conf so a fresh deploy starts at 200 -- pending)
+- [x] 14. FFmpeg/FFprobe registration falls back to project bundle, hard-fails on neither (criterion 10)
+- [x] 15. Source-file pre-flight check in ProcessJob (criterion 13)
+- [x] 16. CommandBuilder loud-failure pattern (criterion 14)
+- [ ] 17. Add backplane NIC (10.0.1.42 on vmbr1) for 20 Gbps NFS storage path
+- [ ] 18. Persist `max_connections=200` in infrastructure-repo postgresql.conf (so CT 203 rebuild starts at 200)
 
-NEXT: Apply backplane NIC via Terraform (step 11). Flow doc at deploy/worker-deploy.flow.md.
+NEXT: Apply backplane NIC via Terraform (step 17) and persist max_connections in infrastructure repo (step 18). Flow doc at deploy/worker-deploy.flow.md.
 
 ## Scope
 
