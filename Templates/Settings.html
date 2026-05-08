@@ -341,6 +341,101 @@
                 </div>
             </div>
         </div>
+
+        <!-- Display Timezone Section -->
+        <div class="card mt-4">
+            <div class="card-header bg-light" data-bs-toggle="collapse" data-bs-target="#DisplayTimezoneSection" style="cursor: pointer;">
+                <div class="d-flex justify-content-between align-items-center">
+                    <h4 class="mb-0">
+                        <i class="fas fa-globe-americas"></i> Display Timezone
+                    </h4>
+                    <i class="fas fa-chevron-down"></i>
+                </div>
+            </div>
+            <div id="DisplayTimezoneSection" class="collapse show">
+                <div class="card-body">
+                    <p class="text-muted small mb-2">
+                        Storage is always UTC. This setting only changes how timestamps are
+                        rendered in the web UI. WebService caches the value per-process &mdash;
+                        restart it after changing.
+                    </p>
+                    <div class="row g-2 align-items-end">
+                        <div class="col-md-6">
+                            <label class="form-label">IANA timezone name</label>
+                            <select id="DisplayTimezoneSelect" class="form-select">
+                                <option value="UTC">UTC</option>
+                                <option value="America/Chicago">America/Chicago (Central)</option>
+                                <option value="America/New_York">America/New_York (Eastern)</option>
+                                <option value="America/Denver">America/Denver (Mountain)</option>
+                                <option value="America/Los_Angeles">America/Los_Angeles (Pacific)</option>
+                                <option value="America/Phoenix">America/Phoenix (Arizona)</option>
+                                <option value="America/Anchorage">America/Anchorage (Alaska)</option>
+                                <option value="Pacific/Honolulu">Pacific/Honolulu (Hawaii)</option>
+                                <option value="Europe/London">Europe/London</option>
+                                <option value="Europe/Berlin">Europe/Berlin</option>
+                                <option value="Asia/Tokyo">Asia/Tokyo</option>
+                                <option value="Australia/Sydney">Australia/Sydney</option>
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Or enter custom IANA name</label>
+                            <input type="text" id="DisplayTimezoneCustom" class="form-control" placeholder="e.g. Europe/Paris" />
+                        </div>
+                        <div class="col-md-2">
+                            <button class="btn btn-primary w-100" onclick="SaveDisplayTimezone()">
+                                <i class="fas fa-save"></i> Save
+                            </button>
+                        </div>
+                    </div>
+                    <div class="mt-2">
+                        <small class="text-muted">
+                            Current value: <code id="DisplayTimezoneCurrent">(loading...)</code>
+                        </small>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- All System Settings (advanced) -->
+        <div class="card mt-4">
+            <div class="card-header bg-light" data-bs-toggle="collapse" data-bs-target="#AllSettingsSection" style="cursor: pointer;">
+                <div class="d-flex justify-content-between align-items-center">
+                    <h4 class="mb-0">
+                        <i class="fas fa-database"></i> All System Settings (advanced)
+                    </h4>
+                    <i class="fas fa-chevron-down"></i>
+                </div>
+            </div>
+            <div id="AllSettingsSection" class="collapse">
+                <div class="card-body">
+                    <p class="text-muted small mb-2">
+                        Every row in the SystemSettings table. Edit values inline; click outside to save.
+                        Settings managed via the cards above (paths, CPU affinity, scan directories) are also listed here.
+                    </p>
+                    <div class="d-flex gap-2 mb-2">
+                        <input type="text" id="AllSettingsFilter" class="form-control form-control-sm" placeholder="Filter by key..." style="max-width: 300px;" oninput="ApplyAllSettingsFilter()">
+                        <button class="btn btn-sm btn-secondary" onclick="LoadAllSystemSettings()">
+                            <i class="fas fa-sync"></i> Reload
+                        </button>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table table-sm table-striped" id="AllSettingsTable">
+                            <thead>
+                                <tr>
+                                    <th style="width: 30%;">Key</th>
+                                    <th style="width: 45%;">Value</th>
+                                    <th style="width: 10%;">Type</th>
+                                    <th style="width: 15%;">Last Modified</th>
+                                </tr>
+                            </thead>
+                            <tbody id="AllSettingsTableBody">
+                                <tr><td colspan="4" class="text-center text-muted">Click Reload to load all settings</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 </div>
 
@@ -1988,6 +2083,129 @@ function DisableContinuousScanning() {
         Btn.prop('disabled', false).html(OrigHtml);
     });
 }
+
+
+// ============================================================================
+// Display Timezone
+// ============================================================================
+function LoadDisplayTimezone() {
+    $.get('/api/SystemSettings/DisplayTimezone')
+        .done(function(Resp) {
+            const Value = Resp && Resp.Value ? Resp.Value : 'UTC';
+            $('#DisplayTimezoneCurrent').text(Value);
+            const $sel = $('#DisplayTimezoneSelect');
+            if ($sel.find('option[value="' + Value + '"]').length > 0) {
+                $sel.val(Value);
+            } else {
+                $('#DisplayTimezoneCustom').val(Value);
+            }
+        })
+        .fail(function() {
+            $('#DisplayTimezoneCurrent').text('(failed to load)');
+        });
+}
+
+function SaveDisplayTimezone() {
+    const Custom = ($('#DisplayTimezoneCustom').val() || '').trim();
+    const Selected = $('#DisplayTimezoneSelect').val();
+    const Value = Custom || Selected;
+    if (!Value) {
+        ShowAlert('Pick a timezone or enter a custom IANA name', 'warning');
+        return;
+    }
+    $.ajax({
+        url: '/api/SystemSettings/DisplayTimezone',
+        method: 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify({Value: Value, Description: 'IANA timezone for UI display', DataType: 'string'})
+    }).done(function() {
+        ShowAlert('Saved. Restart WebService to clear the per-process cache.', 'success');
+        LoadDisplayTimezone();
+    }).fail(function(xhr) {
+        ShowAlert('Failed to save: ' + (xhr.responseJSON && xhr.responseJSON.Error || xhr.statusText), 'danger');
+    });
+}
+
+
+// ============================================================================
+// All System Settings (generic table)
+// ============================================================================
+let _AllSettingsRows = [];
+
+function LoadAllSystemSettings() {
+    $('#AllSettingsTableBody').html('<tr><td colspan="4" class="text-center text-muted"><i class="fas fa-spinner fa-spin"></i> Loading...</td></tr>');
+    $.get('/api/SystemSettings')
+        .done(function(Resp) {
+            _AllSettingsRows = (Resp && Resp.Settings) || (Array.isArray(Resp) ? Resp : []);
+            RenderAllSettingsTable(_AllSettingsRows);
+        })
+        .fail(function() {
+            $('#AllSettingsTableBody').html('<tr><td colspan="4" class="text-center text-danger">Failed to load. The /api/SystemSettings list endpoint may not exist yet.</td></tr>');
+        });
+}
+
+function RenderAllSettingsTable(Rows) {
+    if (!Rows || Rows.length === 0) {
+        $('#AllSettingsTableBody').html('<tr><td colspan="4" class="text-center text-muted">No settings.</td></tr>');
+        return;
+    }
+    const $body = $('#AllSettingsTableBody').empty();
+    Rows.forEach(function(R) {
+        const Key = R.SettingKey || R.settingkey || '';
+        const Val = R.SettingValue == null ? '' : String(R.SettingValue == null ? (R.settingvalue || '') : R.SettingValue);
+        const Type = R.DataType || R.datatype || '';
+        const ModUtc = R.LastModified || R.lastmodified || '';
+        const ModTd = ModUtc ? '<span class="js-tz" data-utc="' + ModUtc + '" data-fmt="short" title="' + ModUtc + ' (UTC)">' + (window.formatTime ? window.formatTime(ModUtc, 'short') : ModUtc) + '</span>' : '<span class="text-muted">never</span>';
+        const $tr = $('<tr>')
+            .append($('<td>').append($('<code>').text(Key)))
+            .append($('<td>').append($('<input type="text" class="form-control form-control-sm">').val(Val).attr('data-key', Key).attr('data-original', Val).on('change blur', SaveAllSettingsRowOnChange)))
+            .append($('<td>').append($('<small class="text-muted">').text(Type)))
+            .append($('<td>').html(ModTd));
+        $body.append($tr);
+    });
+}
+
+function SaveAllSettingsRowOnChange() {
+    const Key = $(this).attr('data-key');
+    const Original = $(this).attr('data-original');
+    const Value = $(this).val();
+    if (Value === Original) return;
+    const $input = $(this);
+    $input.prop('disabled', true);
+    $.ajax({
+        url: '/api/SystemSettings/' + encodeURIComponent(Key),
+        method: 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify({Value: Value, Description: '', DataType: 'string'})
+    }).done(function() {
+        $input.attr('data-original', Value).addClass('is-valid');
+        setTimeout(function() { $input.removeClass('is-valid'); }, 1500);
+    }).fail(function(xhr) {
+        $input.val(Original).addClass('is-invalid');
+        ShowAlert('Failed to save ' + Key + ': ' + (xhr.responseJSON && xhr.responseJSON.Error || xhr.statusText), 'danger');
+        setTimeout(function() { $input.removeClass('is-invalid'); }, 2500);
+    }).always(function() {
+        $input.prop('disabled', false);
+    });
+}
+
+function ApplyAllSettingsFilter() {
+    const Q = ($('#AllSettingsFilter').val() || '').toLowerCase();
+    if (!Q) {
+        RenderAllSettingsTable(_AllSettingsRows);
+        return;
+    }
+    const Filtered = _AllSettingsRows.filter(function(R) {
+        const Key = (R.SettingKey || R.settingkey || '').toLowerCase();
+        return Key.indexOf(Q) !== -1;
+    });
+    RenderAllSettingsTable(Filtered);
+}
+
+// Auto-load on page ready
+$(function() {
+    LoadDisplayTimezone();
+});
 
 </script>
 {% endblock %}

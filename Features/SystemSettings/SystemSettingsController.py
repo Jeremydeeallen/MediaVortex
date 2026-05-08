@@ -21,6 +21,25 @@ class SystemSettingsController:
     def RegisterRoutes(self):
         """Register all system settings routes."""
 
+        @self.Blueprint.route('/', methods=['GET'])
+        @self.Blueprint.route('', methods=['GET'])
+        def ListAllSystemSettings():
+            """Return every row in SystemSettings for the admin Settings page."""
+            try:
+                Rows = self.Repository.GetAllSystemSettings()
+                return jsonify({
+                    'Success': True,
+                    'Settings': Rows,
+                    'Count': len(Rows),
+                })
+            except Exception as e:
+                LoggingService.LogException("Error listing system settings", e, 'ListAllSystemSettings', 'SystemSettingsController')
+                return jsonify({
+                    'Success': False,
+                    'Error': str(e),
+                    'Settings': [],
+                }), 500
+
         @self.Blueprint.route('/<string:SettingKey>', methods=['GET'])
         def GetSystemSetting(SettingKey: str):
             """Get a system setting value."""
