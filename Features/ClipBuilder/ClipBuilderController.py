@@ -5,7 +5,7 @@ import hashlib
 import subprocess
 import tempfile
 from flask import Blueprint, request, jsonify, Response, send_file
-from Features.ClipBuilder.ClipBuilderBusinessService import ClipBuilderBusinessService, FFMPEG_PATH
+from Features.ClipBuilder.ClipBuilderBusinessService import ClipBuilderBusinessService, _ResolveFFmpegPath
 from Repositories.DatabaseManager import DatabaseManager
 from Core.Logging.LoggingService import LoggingService
 
@@ -382,7 +382,7 @@ def Waveform():
 
         if not os.path.exists(CachePath):
             Cmd = [
-                FFMPEG_PATH,
+                _ResolveFFmpegPath(),
                 "-i", FilePath,
                 "-filter_complex",
                 "aformat=channel_layouts=mono,showwavespic=s=1600x120:colors=#0d6efd50|#0d6efd",
@@ -433,7 +433,7 @@ def Thumbnail():
 
         if not os.path.exists(CachePath):
             Cmd = [
-                FFMPEG_PATH,
+                _ResolveFFmpegPath(),
                 "-ss", str(Time),
                 "-i", FilePath,
                 "-frames:v", "1",
