@@ -2,6 +2,26 @@
 
 ## Open
 
+### [TECH DEBT] Remove legacy TranscodeService/ and QualityTestService/ directories
+**Date:** 2026-05-08
+**Affects:** TranscodeService/, QualityTestService/, Features/ServiceControl/ServiceLifecycleManager.py, Scripts/StopAllTranscodeServices.py, CLAUDE.md, transcode.flow.md
+
+Phase 2 of the architecture redesign unified both services into WorkerService. The directories still exist but nothing imports them as Python modules (zero hard dependencies). They are dead code reachable only via Scripts/StopAllTranscodeServices.py and the SERVICES dict in ServiceLifecycleManager.py. The string identifiers "TranscodeService" / "QualityTestService" remain valid as logical job-type tags in ActiveJobs.ServiceName, ServiceStatus.ServiceName, and CrashRecoveryService — those must NOT be removed.
+
+**Look first:** `TranscodeService/` and `QualityTestService/` directory contents, `Features/ServiceControl/ServiceLifecycleManager.py:29-40` (drop the two SERVICES dict entries), `Scripts/StopAllTranscodeServices.py` (delete or repoint), CLAUDE.md "Two Microservices" section.
+
+**Fix with:** `/n` (cleanup migration -- estimated 30 min: delete two dirs, prune SERVICES dict, sweep docs, leave string literals alone)
+
+### [TECH DEBT] LocalStaging fallback decision duplicated across four sites
+**Date:** 2026-05-08
+**Affects:** Features/TranscodeJob/ProcessTranscodeQueueService.py
+
+`ProcessJob`, `ProcessRemuxJob`, `ProcessSubtitleFixJob`, and `SetupFilePreparation` each independently decide whether LocalStaging mode falls back to InPlace when the worker has no StagingDirectory configured. The first three fix used a local variable that didn't propagate; the fourth re-read the system setting and silently kept building staging paths. Today's fix added the same guard to `SetupFilePreparation` so the four sites agree, but a future change to the fallback logic still has to be made in four places.
+
+**Look first:** `Features/TranscodeJob/ProcessTranscodeQueueService.py:384-390, 526-530, 642-646, 828-836` -- four places computing `IsLocalStaging`. Extract `_GetEffectiveFileMode()` returning the resolved mode after applying the fallback.
+
+**Fix with:** `/t` (single-file refactor)
+
 ### [BUG] Second concurrent job shows first job's progress
 **Date:** 2025-05-05
 **Affects:** TranscodeJob feature -- concurrent job progress tracking

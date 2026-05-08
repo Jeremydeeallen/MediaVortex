@@ -1,4 +1,5 @@
 import os
+import ntpath
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 from Models.TranscodeAttemptModel import TranscodeAttemptModel
@@ -519,9 +520,13 @@ class FileReplacementBusinessService:
                                      "FileReplacementBusinessService", "_ProcessCompleteFileReplacement")
 
             # Step 3: Update MediaFiles table with new file information
-            # Use canonical path for DB lookup, canonical target path for the new FilePath
+            # Use canonical path for DB lookup, canonical target path for the new FilePath.
+            # Canonical paths in the DB are Windows-flavored ("T:\\..."). Use ntpath so
+            # this works on Linux workers too -- os.path.dirname on Linux does not treat
+            # "\\" as a separator and would silently return "", producing a filename-only
+            # CanonicalNewPath that FFprobe cannot resolve during the re-probe step.
             CanonicalOriginal = NetworkOriginalPath or OriginalFilePath
-            CanonicalNewPath = os.path.join(os.path.dirname(CanonicalOriginal), TranscodedFilename)
+            CanonicalNewPath = ntpath.join(ntpath.dirname(CanonicalOriginal), TranscodedFilename)
             UpdateResult = self._UpdateMediaFilesAfterReplacement(CanonicalOriginal, CanonicalNewPath)
             if UpdateResult.get('Success', False):
                 StepsCompleted.append("Updated MediaFiles table")

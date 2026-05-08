@@ -649,10 +649,56 @@ def SignalHandler(signum, frame):
     os._exit(0)
 
 
+def _VerifyRequiredPaths():
+    """Hard-fail at startup if media share paths the queue references are not accessible.
+    On Windows, scans MediaFiles for distinct drive-letter prefixes and checks each via
+    os.path.exists. Mirrors the StartMediaVortex.py mount logic so a worker launched
+    standalone (without StartMediaVortex.py) does not silently claim and fail every job
+    when net use mounts are missing. On non-Windows platforms, bind mounts are the
+    responsibility of the container orchestration layer and this check is skipped."""
+    if platform_mod.system().lower() != 'windows':
+        return
+
+    try:
+        from Core.Database.DatabaseService import DatabaseService
+        Db = DatabaseService()
+        Rows = Db.ExecuteQuery(
+            "SELECT DISTINCT UPPER(LEFT(FilePath, 2)) AS DriveLetter "
+            "FROM MediaFiles WHERE FilePath ~ '^[A-Za-z]:'"
+        )
+    except Exception as Ex:
+        print(f"[FATAL] Could not read MediaFiles to verify required drives: {Ex}", flush=True)
+        sys.exit(1)
+
+    Missing = []
+    for Row in Rows:
+        Drive = Row.get('DriveLetter') or Row.get('driveletter')
+        if not Drive:
+            continue
+        if not os.path.exists(Drive + '\\'):
+            Missing.append(Drive)
+
+    if Missing:
+        Msg = (f"Required network drives not accessible: {', '.join(sorted(Missing))}. "
+               f"Mount with 'net use' or relaunch via StartMediaVortex.py before starting WorkerService.")
+        print(f"\n[FATAL] {Msg}\n", flush=True)
+        try:
+            LoggingService.LogError(Msg, "WorkerService", "_VerifyRequiredPaths")
+        except Exception:
+            pass
+        sys.exit(1)
+
+
 def Main():
     """Main entry point for WorkerService."""
     try:
         LoggingService.LogInfo("Starting WorkerService...", "WorkerService", "Main")
+
+        # Hard-fail before any DB writes if required media drives aren't mounted.
+        # Prevents the worker from registering, claiming jobs, and burning queue items
+        # with FFprobe "no such file" failures when StartMediaVortex.py's net use step
+        # was skipped.
+        _VerifyRequiredPaths()
 
         # Initialize the application
         App = WorkerServiceApp()
