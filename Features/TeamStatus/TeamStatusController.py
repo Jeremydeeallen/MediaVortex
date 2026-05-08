@@ -6,6 +6,26 @@ API endpoints for transcode savings and status overview.
 from flask import Blueprint, request, jsonify
 from Repositories.DatabaseManager import DatabaseManager
 from Services.LoggingService import LoggingService
+from Features.SystemSettings.SystemSettingsRepository import SystemSettingsRepository
+
+
+def _GetDisplayTimezone() -> str:
+    """Read SystemSettings.DisplayTimezone for SQL day-bucketing.
+
+    Day-bucket aggregations (e.g. SavingsByDay) must group on the user's
+    configured timezone, not UTC -- otherwise transcodes finishing late
+    evening Chicago time fall into the next UTC day's bucket on the chart.
+    Defaults to 'UTC' if the setting is missing or unreadable so the query
+    still produces a valid result instead of raising.
+    """
+    try:
+        return SystemSettingsRepository().GetSystemSetting('DisplayTimezone') or 'UTC'
+    except Exception as Ex:
+        LoggingService.LogException(
+            "Failed to read DisplayTimezone for SavingsByDay bucketing -- defaulting to UTC",
+            Ex, "_GetDisplayTimezone", "TeamStatusController"
+        )
+        return 'UTC'
 
 TeamStatusBlueprint = Blueprint('TeamStatus', __name__, url_prefix='/api/TeamStatus')
 
@@ -201,19 +221,26 @@ def GetSavingsByDay():
             Days = 30
 
         DbManager = DatabaseManager()
+        DisplayTz = _GetDisplayTimezone()
 
+        # Bucket the day in the configured display timezone, not UTC. CompletedDate
+        # is stored as a naive UTC TIMESTAMP, so we tell PostgreSQL to interpret it
+        # as UTC and convert to the target zone before truncating to a date.
+        # The date-window filter stays on raw CompletedDate (UTC) -- this slightly
+        # over-fetches at the boundary but the GROUP BY produces correct buckets.
         Query = f"""
-            SELECT DATE(ta.CompletedDate) AS Day, COUNT(*) AS JobCount,
+            SELECT DATE(ta.CompletedDate AT TIME ZONE 'UTC' AT TIME ZONE %s) AS Day,
+                   COUNT(*) AS JobCount,
                    SUM(ta.SizeReductionBytes) AS TotalSavedBytes,
                    SUM(ta.OldSizeBytes) AS TotalOriginalBytes,
                    SUM(ta.NewSizeBytes) AS TotalNewBytes
             FROM TranscodeAttempts ta
             WHERE ta.Success = TRUE AND ta.SizeReductionBytes > 0
               AND ta.CompletedDate >= CURRENT_DATE - {Days} * INTERVAL '1 day'
-            GROUP BY DATE(ta.CompletedDate)
+            GROUP BY DATE(ta.CompletedDate AT TIME ZONE 'UTC' AT TIME ZONE %s)
             ORDER BY Day ASC
         """
-        Rows = DbManager.DatabaseService.ExecuteQuery(Query)
+        Rows = DbManager.DatabaseService.ExecuteQuery(Query, (DisplayTz, DisplayTz))
 
         # Convert date objects to strings for JSON serialization
         Data = []

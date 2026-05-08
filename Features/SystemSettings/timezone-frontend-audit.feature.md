@@ -119,8 +119,12 @@ IN PROGRESS
       working"; if WebService was restarted with current code, dig deeper
 - [ ] Step B7 (Savings chart): the chart consumes labels from the API; the
       fix lives in step C9
-- [ ] Step C9 (SavingsByDay SQL): wrap `CompletedDate` with `AT TIME ZONE`
-      using the configured DisplayTimezone
+- [x] Step C9 (SavingsByDay SQL): `GET /api/TeamStatus/SavingsByDay` reads
+      DisplayTimezone from SystemSettings and buckets via
+      `DATE(ta.CompletedDate AT TIME ZONE 'UTC' AT TIME ZONE :tz)`. Validated
+      against real data: pre-fix had a single "2026-05-08 UTC" bar mixing 45
+      May-7-Chicago jobs with 93 May-8-Chicago jobs; post-fix the bars match
+      Chicago-day rollups exactly (34/28/75/93 etc.).
 - [ ] Step C10 enforcement: add a one-line note to CLAUDE.md or the
       project conventions reminding future authors of the pattern
 - [ ] Step D11 (navbar clock): visual verify post-restart
