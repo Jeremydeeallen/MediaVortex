@@ -50,7 +50,9 @@ class CommandBuilder:
 
             # Start building command - FFmpeg command structure: ffmpeg -i input [options] output -y
             # Use full path to FFmpeg executable (configurable per worker for distributed transcoding)
-            FFmpegPath = CommandData.get('FFmpegPath') or 'C:\\Code\\Automation\\MediaVortex\\FFmpegMaster\\bin\\ffmpeg.exe'
+            FFmpegPath = CommandData.get('FFmpegPath')
+            if not FFmpegPath:
+                raise ValueError("FFmpegPath missing from CommandData. The caller (worker) must resolve this from Workers.FFmpegPath via WorkerContext before invoking the command builder.")
             CommandParts = [FFmpegPath]
             
             # Add start time parameter if specified (must come before -i input)
@@ -400,7 +402,9 @@ class CommandBuilder:
                 OutputDirectory = os.path.dirname(InputPath.strip('"'))
             OutputPath = os.path.join(OutputDirectory, OutputFileName)
 
-            FFmpegPath = CommandData.get('FFmpegPath') or 'C:\\Code\\Automation\\MediaVortex\\FFmpegMaster\\bin\\ffmpeg.exe'
+            FFmpegPath = CommandData.get('FFmpegPath')
+            if not FFmpegPath:
+                raise ValueError("FFmpegPath missing from CommandData. The caller (worker) must resolve this from Workers.FFmpegPath via WorkerContext before invoking the command builder.")
             CommandParts = [FFmpegPath]
             CommandParts.extend(['-i', f'"{InputPath}"'])
 
@@ -455,7 +459,9 @@ class CommandBuilder:
                 OutputDirectory = os.path.dirname(InputPath.strip('"'))
             OutputPath = os.path.join(OutputDirectory, OutputFileName)
 
-            FFmpegPath = CommandData.get('FFmpegPath') or 'C:\\Code\\Automation\\MediaVortex\\FFmpegMaster\\bin\\ffmpeg.exe'
+            FFmpegPath = CommandData.get('FFmpegPath')
+            if not FFmpegPath:
+                raise ValueError("FFmpegPath missing from CommandData. The caller (worker) must resolve this from Workers.FFmpegPath via WorkerContext before invoking the command builder.")
             CommandParts = [FFmpegPath]
             CommandParts.extend(['-i', f'"{InputPath}"'])
 

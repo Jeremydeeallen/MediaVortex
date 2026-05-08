@@ -2,8 +2,19 @@ import os
 import subprocess
 import tempfile
 from Core.Logging.LoggingService import LoggingService
+from Core.WorkerContext import WorkerContext
 
-FFMPEG_PATH = r"C:\Code\Automation\MediaVortex\FFmpegMaster\bin\ffmpeg.exe"
+
+def _ResolveFFmpegPath():
+    """Resolve FFmpeg from WorkerContext (set at worker startup from Workers.FFmpegPath).
+    Raises if no context is available so misconfigurations fail loudly instead of using a stale hardcoded path."""
+    Ctx = WorkerContext.Current()
+    if not Ctx or not Ctx.FFmpegPath:
+        raise RuntimeError(
+            "FFmpeg path not configured. ClipBuilder requires WorkerContext.FFmpegPath to be set "
+            "from the Workers.FFmpegPath column. Configure the worker row before retrying."
+        )
+    return Ctx.FFmpegPath
 
 
 class ClipBuilderBusinessService:
@@ -26,7 +37,7 @@ class ClipBuilderBusinessService:
                 PrimaryClips.append(TempClipPath)
 
                 Cmd = [
-                    FFMPEG_PATH,
+                    _ResolveFFmpegPath(),
                     "-ss", StartTime,
                     "-t", str(ClipDuration),
                     "-i", InputPath,
@@ -65,7 +76,7 @@ class ClipBuilderBusinessService:
 
                     # Stream copy trim — no re-encode needed since clips share encoding
                     TrimCmd = [
-                        FFMPEG_PATH,
+                        _ResolveFFmpegPath(),
                         "-i", PrimaryClip,
                         "-t", str(HalfDuration),
                         "-c", "copy",
@@ -118,7 +129,7 @@ class ClipBuilderBusinessService:
         OutputPath = os.path.join(OutputFolder, f"{OutputName}_{Suffix}.mp4")
 
         ConcatCmd = [
-            FFMPEG_PATH,
+            _ResolveFFmpegPath(),
             "-f", "concat", "-safe", "0",
             "-i", ConcatListPath,
             "-c", "copy",

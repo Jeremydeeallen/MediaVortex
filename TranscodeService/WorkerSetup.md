@@ -16,8 +16,8 @@ How to add a new transcoding worker to MediaVortex. Each worker runs the same `T
 ### 1. Clone the repo
 
 ```powershell
-git clone <repo-url> C:\Code\Automation\MediaVortex
-cd C:\Code\Automation\MediaVortex
+git clone <repo-url> C:\Code\MediaVortex
+cd C:\Code\MediaVortex
 ```
 
 ### 2. Create venv and install dependencies

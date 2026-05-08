@@ -9,7 +9,7 @@ Follow-up TODOs: None
 -->
 
 # MediaVortex Constitution
-our root folder is /Automation/MediaVortex/
+our root folder is /Code/MediaVortex/
 
 ## Core Principles
 

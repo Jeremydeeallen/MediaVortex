@@ -160,7 +160,7 @@ foreach ($Test in $Tests) {
     Write-Host "`n=== Testing $($Test.Name) ===" -ForegroundColor Yellow
     
     # Build the command string
-    $Command = "C:\Code\Automation\MediaVortex\FFmpegMaster\bin\ffmpeg.exe -i `"c:\MediaVortex\Lubed.25.09.30.Myra.Moans.Summer.Dream.XXX.480p.MP4-WRB.19.mp4`" -i `"c:\MediaVortex\Source\Lubed.25.09.30.Myra.Moans.Summer.Dream.XXX.2160p.MP4-WRB.mp4`" -lavfi `"[0:v]scale=854:480[dist];[1:v]scale=854:480[ref];[dist][ref]libvmaf=log_path=vmaf_output.xml:n_subsample=$($Test.SubSample)`" -f null -"
+    $Command = "C:\Code\MediaVortex\FFmpegMaster\bin\ffmpeg.exe -i `"c:\MediaVortex\Lubed.25.09.30.Myra.Moans.Summer.Dream.XXX.480p.MP4-WRB.19.mp4`" -i `"c:\MediaVortex\Source\Lubed.25.09.30.Myra.Moans.Summer.Dream.XXX.2160p.MP4-WRB.mp4`" -lavfi `"[0:v]scale=854:480[dist];[1:v]scale=854:480[ref];[dist][ref]libvmaf=log_path=vmaf_output.xml:n_subsample=$($Test.SubSample)`" -f null -"
     
     Write-Host "Running: $Command" -ForegroundColor Gray
     
