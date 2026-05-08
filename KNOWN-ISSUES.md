@@ -52,7 +52,7 @@ Full Windows paths (e.g., `T:\Shows\file.mkv`) are stored as natural keys in at 
 - [x] MediaFileId BIGINT columns + indexes added to 5 child tables (AddMediaFileIdColumns.py)
 - [x] Backfill completed: 1,952 rows linked, 6,867 orphans (old history with deleted files)
 - [x] All JOINs and INSERTs updated in code to use MediaFileId
-- [ ] FK constraints (AddMediaFileForeignKeys.py) -- deferred until deploy confirmed stable
+- [x] FK constraints added (AddMediaFileForeignKeys.py) -- TranscodeFiles/TranscodeAttempts ON DELETE SET NULL, TranscodeQueue/CompliantFiles/ProblemFiles ON DELETE CASCADE
 - [ ] Drop filepath columns from child tables (point of no return)
 
 ---
