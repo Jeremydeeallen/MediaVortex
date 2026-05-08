@@ -19,24 +19,18 @@ class ServiceLifecycleManager:
     """Shared service for starting, stopping, and managing MediaVortex services."""
 
     # Service configurations
+    # Active services only. The legacy TranscodeService and QualityTestService
+    # entries were unified into WorkerService (capability flags on the Workers row);
+    # their directories were renamed to archive_TranscodeService / archive_QualityTestService
+    # and are no longer launchable. The string identifiers "TranscodeService" /
+    # "QualityTestService" remain valid as logical job-type tags in
+    # ActiveJobs.ServiceName / ServiceStatus.ServiceName -- those must NOT be removed.
     SERVICES = {
         'WebService': {
             'Directory': 'WebService',
             'MainFile': 'Main.py',
             'ProcessName': 'WebService',  # setproctitle name
             'Description': 'Web Interface Service'
-        },
-        'TranscodeService': {
-            'Directory': 'TranscodeService',
-            'MainFile': 'Main.py',
-            'ProcessName': 'TranscodeService',
-            'Description': 'Video Transcoding Service'
-        },
-        'QualityTestService': {
-            'Directory': 'QualityTestService',
-            'MainFile': 'Main.py',
-            'ProcessName': 'QualityTestService',
-            'Description': 'Quality Testing Service'
         },
         'WorkerService': {
             'Directory': 'WorkerService',

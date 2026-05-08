@@ -61,8 +61,12 @@ def ControlService(service_name: str, action: str):
         LoggingService.LogInfo(f"ServiceControl API called: {service_name}/{action}", "ServiceControlController", "ControlService")
         LoggingService.LogInfo(f"Processing service control request for {service_name} with action {action}", "ServiceControlController", "ControlService")
 
-        # Validate service name
-        valid_services = ['WebService', 'TranscodeService', 'QualityTestService']
+        # Validate service name. TranscodeService and QualityTestService were
+        # rolled into WorkerService -- the directories now live under
+        # archive_TranscodeService / archive_QualityTestService and cannot be
+        # started independently. Use Workers.TranscodeEnabled / QualityTestEnabled
+        # capability flags to control transcode / VMAF behavior on a worker.
+        valid_services = ['WebService', 'WorkerService']
         if service_name not in valid_services:
             LoggingService.LogError(f"Invalid service name: {service_name}", "ServiceControlController", "ControlService")
             return jsonify({

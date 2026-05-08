@@ -104,11 +104,16 @@ Observed: Bachelor in Paradise S10E01 was successfully transcoded earlier today,
 
 ---
 
-### [TECH DEBT] Remove legacy TranscodeService/ and QualityTestService/ directories
-**Date:** 2026-05-08
-**Affects:** TranscodeService/, QualityTestService/, Features/ServiceControl/ServiceLifecycleManager.py, Scripts/StopAllTranscodeServices.py, CLAUDE.md, transcode.flow.md
+### [TECH DEBT] Remove legacy archive_TranscodeService/ and archive_QualityTestService/ directories
+**Date:** 2026-05-08 | **Renamed (partial):** 2026-05-08
+**Affects:** archive_TranscodeService/, archive_QualityTestService/, Scripts/StopAllTranscodeServices.py, Scripts/StopAllPythonServices.py, CLAUDE.md "Two Microservices" section, transcode.flow.md
 
-Phase 2 of the architecture redesign unified both services into WorkerService. The directories still exist but nothing imports them as Python modules (zero hard dependencies). They are dead code reachable only via Scripts/StopAllTranscodeServices.py and the SERVICES dict in ServiceLifecycleManager.py. The string identifiers "TranscodeService" / "QualityTestService" remain valid as logical job-type tags in ActiveJobs.ServiceName, ServiceStatus.ServiceName, and CrashRecoveryService — those must NOT be removed.
+Phase 2 of the architecture redesign unified both services into WorkerService. Renamed today to make the deprecation visible in the directory listing. The string identifiers "TranscodeService" / "QualityTestService" remain valid as logical job-type tags in ActiveJobs.ServiceName, ServiceStatus.ServiceName, and CrashRecoveryService — those must NOT be removed.
+
+**Remaining cleanup:**
+- `Scripts/StopAllTranscodeServices.py` and `Scripts/StopAllPythonServices.py` still reference the old names; harmless (process-name match returns no results) but should be deleted or repointed at WorkerService.
+- CLAUDE.md "Two Microservices" section still describes the old split — needs to be rewritten to describe the unified WorkerService + capability flags.
+- Once nothing reads from them for ~1 month, the `archive_*` directories can be deleted entirely.
 
 **Look first:** `TranscodeService/` and `QualityTestService/` directory contents, `Features/ServiceControl/ServiceLifecycleManager.py:29-40` (drop the two SERVICES dict entries), `Scripts/StopAllTranscodeServices.py` (delete or repoint), CLAUDE.md "Two Microservices" section.
 
