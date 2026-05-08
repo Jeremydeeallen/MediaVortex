@@ -11,6 +11,7 @@ import threading
 import time
 from typing import Dict, Any, Optional, List
 from datetime import datetime, timezone
+from Core.DateTimeHelpers import AsAwareUtc
 from Core.Logging.LoggingService import LoggingService
 from Services.SystemMonitoringService import SystemMonitoringService
 from Services.CoreTopologyService import CoreTopologyService
@@ -419,7 +420,7 @@ class CpuAffinityService:
             while True:
                 time.sleep(self.ThermalGateCheckInterval)
 
-                ElapsedSeconds = (datetime.now(timezone.utc) - StartTime).total_seconds()
+                ElapsedSeconds = (datetime.now(timezone.utc) - AsAwareUtc(StartTime)).total_seconds()
                 if ElapsedSeconds >= self.ThermalGateMaxWaitSeconds:
                     LoggingService.LogWarning(
                         f"Thermal clearance timeout after {ElapsedSeconds:.0f}s — allowing job to proceed",
@@ -433,7 +434,7 @@ class CpuAffinityService:
                         "CpuAffinityService", "WaitForThermalClearance")
                     return True
 
-                SecondsSinceLastLog = (datetime.now(timezone.utc) - LastLogTime).total_seconds()
+                SecondsSinceLastLog = (datetime.now(timezone.utc) - AsAwareUtc(LastLogTime)).total_seconds()
                 if SecondsSinceLastLog >= 30:
                     LastLogTime = datetime.now(timezone.utc)
                     LoggingService.LogInfo(

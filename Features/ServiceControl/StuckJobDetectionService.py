@@ -9,6 +9,7 @@ from typing import Dict, Any, List, Optional
 from datetime import datetime, timezone
 from Repositories.DatabaseManager import DatabaseManager
 from Core.Logging.LoggingService import LoggingService
+from Core.DateTimeHelpers import AsAwareUtc
 from Services.ProcessManagementService import ProcessManagementService
 
 
@@ -193,7 +194,7 @@ class StuckJobDetectionService:
             if isinstance(LastHeartbeat, str):
                 LastHeartbeat = datetime.strptime(LastHeartbeat, "%Y-%m-%d %H:%M:%S")
 
-            MinutesSinceHeartbeat = (datetime.now(timezone.utc) - LastHeartbeat).total_seconds() / 60.0
+            MinutesSinceHeartbeat = (datetime.now(timezone.utc) - AsAwareUtc(LastHeartbeat)).total_seconds() / 60.0
 
             if MinutesSinceHeartbeat >= self.WORKER_HEARTBEAT_STALE_MINUTES:
                 return True, f"Last heartbeat was {MinutesSinceHeartbeat:.1f} minutes ago (threshold: {self.WORKER_HEARTBEAT_STALE_MINUTES}min)"
@@ -240,7 +241,7 @@ class StuckJobDetectionService:
                 lastUpdate = datetime.strptime(lastUpdateValue, "%Y-%m-%d %H:%M:%S")
             else:
                 lastUpdate = lastUpdateValue
-            minutesSinceUpdate = (datetime.now(timezone.utc) - lastUpdate).total_seconds() / 60.0
+            minutesSinceUpdate = (datetime.now(timezone.utc) - AsAwareUtc(lastUpdate)).total_seconds() / 60.0
 
             if minutesSinceUpdate >= self.FROZEN_PROGRESS_THRESHOLD_MINUTES:
                 return True, (
@@ -441,7 +442,7 @@ class StuckJobDetectionService:
                 dateAdded = row.get('dateadded')
                 ageHours = 0
                 if dateAdded:
-                    ageHours = (datetime.now(timezone.utc) - dateAdded).total_seconds() / 3600.0
+                    ageHours = (datetime.now(timezone.utc) - AsAwareUtc(dateAdded)).total_seconds() / 3600.0
 
                 LoggingService.LogWarning(
                     f"Stale quality test job detected: Id={jobId}, File={filePath}, DateAdded={dateAdded}, Age={ageHours:.1f} hours",

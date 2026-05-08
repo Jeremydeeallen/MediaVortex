@@ -77,7 +77,8 @@ class HealthMonitor:
     def GetUptime(self) -> str:
         """Get service uptime."""
         try:
-            uptime = datetime.now(timezone.utc) - self.StartTime
+            from Core.DateTimeHelpers import AsAwareUtc
+            uptime = datetime.now(timezone.utc) - AsAwareUtc(self.StartTime)
             total_seconds = int(uptime.total_seconds())
             
             hours = total_seconds // 3600

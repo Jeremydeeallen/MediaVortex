@@ -55,7 +55,8 @@ class TranscodeQueueModel:
     def DurationMinutes(self) -> Optional[float]:
         """Calculate job duration in minutes."""
         if self.DateStarted and self.IsCompleted:
-            duration = datetime.now(timezone.utc) - self.DateStarted
+            from Core.DateTimeHelpers import AsAwareUtc
+            duration = datetime.now(timezone.utc) - AsAwareUtc(self.DateStarted)
             return duration.total_seconds() / 60.0
         return None
 

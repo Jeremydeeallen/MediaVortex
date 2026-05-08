@@ -138,7 +138,8 @@ class ContinuousScanService:
 
                 # Calculate scan duration
                 if IsScanning and ScanResults.ScanStartTime:
-                    Duration = datetime.now(timezone.utc) - ScanResults.ScanStartTime
+                    from Core.DateTimeHelpers import AsAwareUtc
+                    Duration = datetime.now(timezone.utc) - AsAwareUtc(ScanResults.ScanStartTime)
                     Status['CurrentScanDuration'] = str(Duration).split('.')[0]  # Remove microseconds
                 else:
                     Status['CurrentScanDuration'] = None
