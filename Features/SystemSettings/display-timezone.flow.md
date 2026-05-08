@@ -73,11 +73,57 @@ DB (UTC) -> Flask serialization -> JSON over HTTP -> JS parses Date -> formatTim
   computes against the browser's current time (UTC under the hood) and falls
   back to absolute date for ages older than 30 days.
 
-## Stage 6: Configuration changes
+## Stage 6 (extension): Server-side date bucketing -- SQL aggregations
+
+Endpoints that return rows bucketed by day, hour, or any time period must
+do the bucketing in the user's configured display timezone, not in UTC.
+Otherwise a transcode finishing 23:30 Chicago time (04:30 UTC next day)
+falls into the *next* bucket on the chart relative to what the user expects.
+
+The pattern:
+
+```sql
+-- WRONG: buckets by UTC day
+GROUP BY DATE(ta.CompletedDate)
+
+-- RIGHT: buckets by configured display TZ day
+GROUP BY DATE(ta.CompletedDate AT TIME ZONE 'UTC' AT TIME ZONE %s)
+```
+
+The `%s` parameter comes from `SystemSettings.DisplayTimezone`. The double
+`AT TIME ZONE` is the idiomatic PostgreSQL pattern for converting a naive
+`TIMESTAMP` (which is UTC by convention here) to a target TZ before truncating.
+
+Same rule applies to `DATE_TRUNC('day', col)`, `DATE_TRUNC('hour', col)`,
+`EXTRACT(DOW FROM col)`, and any other temporal grouping. The labels rendered
+by the chart on the client side use the same TZ via `formatTime`, so the
+server-bucketing and the axis-label rendering agree.
+
+Audit at 2026-05-08 found exactly one endpoint of this kind:
+`Features/TeamStatus/TeamStatusController.py:193` `GetSavingsByDay`.
+
+## Stage 7 (extension): Date-input filter inputs
+
+`<input type="datetime-local">` reads a wall-clock value with no timezone.
+When the user picks "2026-05-08 09:00" in their Chicago browser, the value
+is the local-naive string `2026-05-08T09:00`. Before sending to the API,
+convert to UTC ISO using the configured display TZ:
+
+```javascript
+function localToUtcIso(localValue, tz) {
+    // localValue is the raw value from <input type="datetime-local">.
+    // tz comes from window.MV_TIMEZONE.
+    // Treat the input as a wall-clock time in `tz`, return the ISO-Z string.
+}
+```
+
+(Helper to be added in `static/js/timezone.js` -- see audit feature doc.)
+
+## Stage 8: Configuration changes
 
 - Operator hits `POST /api/SystemSettings/DisplayTimezone {"Value": "..."}` or
-  edits the value in the `/Admin/SystemSettings` page (the existing iterating
-  UI handles it without modification).
+  edits the value via the new Display Timezone card on `/settings` (commit
+  505fac2 added a dedicated dropdown + custom-text input + Save button).
 - Repository writes the new value. The WebService process keeps using the
   cached value -- new template renders still emit the old `MV_TIMEZONE`.
 - Operator restarts WebService (Ctrl+C, re-launch) to pick up the new value,
