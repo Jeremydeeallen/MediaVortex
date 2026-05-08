@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from Core.DateTimeHelpers import ToUtcIsoZ
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -28,5 +29,5 @@ class PresetOptionsModel:
             'PresetName': self.PresetName,
             'Description': self.Description,
             'SortOrder': self.SortOrder,
-            'CreatedDate': self.CreatedDate.isoformat() if self.CreatedDate else None
+            'CreatedDate': ToUtcIsoZ(self.CreatedDate)
         }

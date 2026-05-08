@@ -30,7 +30,7 @@ class HealthMonitor:
             health_data = {
                 "ServiceName": "TranscodeService",
                 "Status": "Healthy",
-                "Timestamp": datetime.now(timezone.utc).isoformat(),
+                "Timestamp": ToUtcIsoZ(datetime.now(timezone.utc)),
                 "Uptime": self.GetUptime(),
                 "MemoryUsage": self.GetMemoryUsage(),
                 "CPUUsage": self.GetCPUUsage(),
@@ -69,7 +69,7 @@ class HealthMonitor:
             return {
                 "ServiceName": "TranscodeService",
                 "Status": "Unhealthy",
-                "Timestamp": datetime.now(timezone.utc).isoformat(),
+                "Timestamp": ToUtcIsoZ(datetime.now(timezone.utc)),
                 "Error": str(e),
                 "ErrorCount": self.ErrorCount
             }
@@ -77,7 +77,7 @@ class HealthMonitor:
     def GetUptime(self) -> str:
         """Get service uptime."""
         try:
-            from Core.DateTimeHelpers import AsAwareUtc
+            from Core.DateTimeHelpers import AsAwareUtc, ToUtcIsoZ
             uptime = datetime.now(timezone.utc) - AsAwareUtc(self.StartTime)
             total_seconds = int(uptime.total_seconds())
             

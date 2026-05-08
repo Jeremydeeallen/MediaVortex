@@ -4,6 +4,7 @@ from Features.TranscodeJob.TranscodingViewModel import TranscodingViewModel
 from Core.Logging.LoggingService import LoggingService
 
 
+from Core.DateTimeHelpers import ToUtcIsoZ
 class ActivityViewModel:
     """ViewModel for real-time transcoding activity and progress tracking."""
 
@@ -78,7 +79,7 @@ class ActivityViewModel:
 
                 # Add activity-specific information
                 status.update({
-                    "ActivityLastUpdate": self.LastUpdate.isoformat(),
+                    "ActivityLastUpdate": ToUtcIsoZ(self.LastUpdate),
                     "LocalIsTranscoding": self.IsTranscoding
                 })
 
@@ -117,7 +118,7 @@ class ActivityViewModel:
             # Add activity-specific information
             summary.update({
                 "ActivityIsTranscoding": self.IsTranscoding,
-                "ActivityLastUpdate": self.LastUpdate.isoformat() if self.LastUpdate else None,
+                "ActivityLastUpdate": ToUtcIsoZ(self.LastUpdate),
                 "ActivityCurrentProgress": self.CurrentProgress
             })
 
@@ -160,7 +161,7 @@ class ActivityViewModel:
 
                 # Add activity-specific information
                 result.update({
-                    "ActivityLastUpdate": self.LastUpdate.isoformat(),
+                    "ActivityLastUpdate": ToUtcIsoZ(self.LastUpdate),
                     "LocalIsTranscoding": self.IsTranscoding
                 })
 
@@ -181,8 +182,8 @@ class ActivityViewModel:
                 "IsTranscoding": self.IsTranscoding,
                 "CurrentProgress": self.CurrentProgress,
                 "ActiveJobs": self.ActiveJobs,
-                "LastUpdate": self.LastUpdate.isoformat() if self.LastUpdate else None,
-                "Timestamp": datetime.now(timezone.utc).isoformat()
+                "LastUpdate": ToUtcIsoZ(self.LastUpdate),
+                "Timestamp": ToUtcIsoZ(datetime.now(timezone.utc))
             }
 
         except Exception as e:

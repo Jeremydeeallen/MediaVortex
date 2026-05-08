@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from Core.DateTimeHelpers import ToUtcIsoZ
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 import json
@@ -153,6 +154,6 @@ class CodecFlagsModel:
             'FilmGrainMax': self.FilmGrainMax,
             'FilmGrainDefault': self.FilmGrainDefault,
             'TuneOptions': self.TuneOptions,
-            'CreatedDate': self.CreatedDate.isoformat() if self.CreatedDate else None,
-            'LastModified': self.LastModified.isoformat() if self.LastModified else None
+            'CreatedDate': ToUtcIsoZ(self.CreatedDate),
+            'LastModified': ToUtcIsoZ(self.LastModified)
         }

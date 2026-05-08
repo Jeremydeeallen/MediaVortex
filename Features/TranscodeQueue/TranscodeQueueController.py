@@ -2,6 +2,7 @@ from flask import Blueprint, request, jsonify, render_template
 from typing import Dict, Any, Tuple
 from Features.TranscodeQueue.TranscodeQueueViewModel import TranscodeQueueViewModel
 from Core.Logging.LoggingService import LoggingService
+from Core.DateTimeHelpers import ToUtcIsoZ
 from ViewModels.TranscodingViewModel import TranscodingViewModel
 from datetime import datetime, timezone
 
@@ -353,7 +354,7 @@ class TranscodeQueueController:
                 "Success": False,
                 "Error": errorMsg,
                 "ErrorCode": "INTERNAL_SERVER_ERROR",
-                "Timestamp": datetime.now(timezone.utc).isoformat()
+                "Timestamp": ToUtcIsoZ(datetime.now(timezone.utc))
             }, 500
 
     def GetTranscodeStatus(self, JobId: str) -> Tuple[Dict[str, Any], int]:
@@ -381,7 +382,7 @@ class TranscodeQueueController:
                 "Success": False,
                 "Error": errorMsg,
                 "ErrorCode": "INTERNAL_SERVER_ERROR",
-                "Timestamp": datetime.now(timezone.utc).isoformat()
+                "Timestamp": ToUtcIsoZ(datetime.now(timezone.utc))
             }, 500
 
     def GetTranscodeQueue(self) -> Tuple[Dict[str, Any], int]:
@@ -406,5 +407,5 @@ class TranscodeQueueController:
                 "Success": False,
                 "Error": errorMsg,
                 "ErrorCode": "INTERNAL_SERVER_ERROR",
-                "Timestamp": datetime.now(timezone.utc).isoformat()
+                "Timestamp": ToUtcIsoZ(datetime.now(timezone.utc))
             }, 500

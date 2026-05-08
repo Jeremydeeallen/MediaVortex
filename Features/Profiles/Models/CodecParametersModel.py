@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from Core.DateTimeHelpers import ToUtcIsoZ
 from datetime import datetime, timezone
 from typing import Optional, Any, Union
 
@@ -136,7 +137,7 @@ class CodecParametersModel:
             'DefaultValue': self.DefaultValue,
             'Description': self.Description,
             'FFmpegFlag': self.FFmpegFlag,
-            'CreatedDate': self.CreatedDate.isoformat() if self.CreatedDate else None
+            'CreatedDate': ToUtcIsoZ(self.CreatedDate)
         }
     
     @classmethod

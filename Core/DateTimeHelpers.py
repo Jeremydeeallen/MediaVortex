@@ -24,3 +24,27 @@ def AsAwareUtc(Dt: Optional[datetime]) -> Optional[datetime]:
     if Dt is None:
         return None
     return Dt if Dt.tzinfo is not None else Dt.replace(tzinfo=timezone.utc)
+
+
+def ToUtcIsoZ(Dt: Optional[datetime]) -> Optional[str]:
+    """Serialize a datetime as ISO-8601 with the explicit `Z` suffix.
+
+    `dt.isoformat()` on a naive datetime produces a string with NO timezone
+    suffix (`2026-05-08T22:48:16`). The browser's `new Date(...)` parses
+    such strings as LOCAL time per the JS spec, which silently breaks
+    UI timezone conversion -- the configured display TZ becomes a no-op
+    because the moment is already interpreted as local.
+
+    Use this helper anywhere a datetime is being serialized into a dict
+    that will be returned by `jsonify`. The Flask `UtcJsonProvider`
+    handles datetimes that are passed through as objects, but ViewModels
+    that pre-format their datetimes bypass the provider -- this helper
+    is the alternative.
+
+    Always produces a `Z` suffix (not `+00:00`) for consistency with the
+    convention established by `UtcJsonProvider`. JS's `new Date()` parses
+    both correctly, but emitting one form everywhere is easier to grep.
+    """
+    if Dt is None:
+        return None
+    return AsAwareUtc(Dt).strftime('%Y-%m-%dT%H:%M:%S.%fZ')

@@ -8,6 +8,7 @@ import sys
 import os
 import threading
 from datetime import datetime, timezone
+from Core.DateTimeHelpers import ToUtcIsoZ
 
 # Add the project root to the Python path
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -51,7 +52,7 @@ class ThreadingService:
                         'TranscodeAttemptId': 0,
                         'Status': 'Running',
                         'CurrentStep': 'VMAF analysis starting',
-                        'StartTime': datetime.now(timezone.utc).isoformat(),
+                        'StartTime': ToUtcIsoZ(datetime.now(timezone.utc)),
                         'ProgressPercentage': 0,
                         'CurrentFrame': 0,
                         'TotalFrames': 0,
@@ -59,7 +60,7 @@ class ThreadingService:
                         'EstimatedTimeRemaining': 0,
                         'ErrorMessage': None,
                         'SubprocessPID': Process.pid,
-                        'SubprocessStartTime': datetime.now(timezone.utc).isoformat()
+                        'SubprocessStartTime': ToUtcIsoZ(datetime.now(timezone.utc))
                     }
                     DatabaseManager.SaveQualityTestProgress(JobId, progress_data)
                     

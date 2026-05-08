@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from Core.Logging.LoggingService import LoggingService
 
 
+from Core.DateTimeHelpers import ToUtcIsoZ
 class VideoTranscodingService:
     """Tool-agnostic video transcoding service that executes transcoding commands with progress tracking."""
 
@@ -191,8 +192,8 @@ class VideoTranscodingService:
                     "Success": True,
                     "OutputFilePath": OutputFilePath,
                     "NewSizeBytes": NewSizeBytes,
-                    "StartTime": StartTime.isoformat(),
-                    "EndTime": EndTime.isoformat(),
+                    "StartTime": ToUtcIsoZ(StartTime),
+                    "EndTime": ToUtcIsoZ(EndTime),
                     "Duration": Duration,
                     "ErrorMessage": None
                 }
@@ -204,8 +205,8 @@ class VideoTranscodingService:
                 return {
                     "Success": False,
                     "OutputFilePath": None,
-                    "StartTime": StartTime.isoformat(),
-                    "EndTime": EndTime.isoformat(),
+                    "StartTime": ToUtcIsoZ(StartTime),
+                    "EndTime": ToUtcIsoZ(EndTime),
                     "Duration": Duration,
                     "ErrorMessage": ErrorMessage
                 }
@@ -231,8 +232,8 @@ class VideoTranscodingService:
             return {
                 "Success": False,
                 "OutputFilePath": None,
-                "StartTime": datetime.now(timezone.utc).isoformat(),
-                "EndTime": datetime.now(timezone.utc).isoformat(),
+                "StartTime": ToUtcIsoZ(datetime.now(timezone.utc)),
+                "EndTime": ToUtcIsoZ(datetime.now(timezone.utc)),
                 "Duration": 0,
                 "ErrorMessage": ErrorMessage
             }

@@ -120,7 +120,7 @@ class ContinuousScanService:
                 'Success': True,
                 'IsRunning': self.IsRunning,
                 'IntervalMinutes': self.ScanIntervalMinutes,
-                'LastScanTime': self.LastScanTime.isoformat() if self.LastScanTime else None,
+                'LastScanTime': ToUtcIsoZ(self.LastScanTime),
                 'TotalScansPerformed': self.ScanCount,
                 'ThreadAlive': self.ScanThread.is_alive() if self.ScanThread else False
             }
@@ -138,7 +138,7 @@ class ContinuousScanService:
 
                 # Calculate scan duration
                 if IsScanning and ScanResults.ScanStartTime:
-                    from Core.DateTimeHelpers import AsAwareUtc
+                    from Core.DateTimeHelpers import AsAwareUtc, ToUtcIsoZ
                     Duration = datetime.now(timezone.utc) - AsAwareUtc(ScanResults.ScanStartTime)
                     Status['CurrentScanDuration'] = str(Duration).split('.')[0]  # Remove microseconds
                 else:

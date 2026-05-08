@@ -17,6 +17,7 @@ from Services.ShouldQualityTestService import ShouldQualityTestService
 from Core.Logging.LoggingService import LoggingService
 
 
+from Core.DateTimeHelpers import ToUtcIsoZ
 class ProcessTranscodeQueueService:
     """Orchestrates the complete transcoding queue processing workflow using MVVM architecture."""
 
@@ -264,7 +265,7 @@ class ProcessTranscodeQueueService:
                 "ActiveJobsCount": activeJobCount,
                 "CurrentJob": currentJob,
                 "CurrentProgress": currentProgress,
-                "Timestamp": datetime.now(timezone.utc).isoformat()
+                "Timestamp": ToUtcIsoZ(datetime.now(timezone.utc))
             }
 
         except Exception as e:

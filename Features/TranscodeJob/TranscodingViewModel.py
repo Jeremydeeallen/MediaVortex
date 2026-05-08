@@ -6,6 +6,7 @@ from Repositories.DatabaseManager import DatabaseManager
 from Core.Logging.LoggingService import LoggingService
 
 
+from Core.DateTimeHelpers import ToUtcIsoZ
 class TranscodingViewModel:
     """ViewModel for transcoding operations that maintains the existing controller contract."""
 
@@ -204,7 +205,7 @@ class TranscodingViewModel:
                 "Success": True,
                 "Status": status,
                 "CurrentProgress": currentProgress,
-                "Timestamp": datetime.now(timezone.utc).isoformat()
+                "Timestamp": ToUtcIsoZ(datetime.now(timezone.utc))
             }
 
         except Exception as e:

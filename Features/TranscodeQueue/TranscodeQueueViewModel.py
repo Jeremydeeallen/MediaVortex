@@ -6,6 +6,7 @@ from ViewModels.TranscodingViewModel import TranscodingViewModel
 from Core.Logging.LoggingService import LoggingService
 
 
+from Core.DateTimeHelpers import ToUtcIsoZ
 class TranscodeQueueViewModel:
     """Manages transcoding queue UI state and operations."""
 
@@ -285,7 +286,7 @@ class TranscodeQueueViewModel:
                 if isinstance(dt, str):
                     return dt  # Already a string, return as-is
                 if hasattr(dt, 'isoformat'):
-                    return dt.isoformat()
+                    return ToUtcIsoZ(dt)
                 return str(dt)
 
             return {

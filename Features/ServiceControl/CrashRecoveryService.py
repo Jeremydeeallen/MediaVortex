@@ -10,6 +10,7 @@ import os
 from typing import Dict, List, Optional
 from datetime import datetime, timezone
 from Core.Logging.LoggingService import LoggingService
+from Core.DateTimeHelpers import ToUtcIsoZ
 from Services.ProcessManagementService import ProcessManagementService
 
 
@@ -351,7 +352,7 @@ class CrashRecoveryService:
                 "JobsRecovered": JobsRecovered,
                 "OrphanedProcessesKilled": OrphanedProcessesKilled,
                 "RecoveryDetails": RecoveryDetails,
-                "Timestamp": datetime.now(timezone.utc).isoformat()
+                "Timestamp": ToUtcIsoZ(datetime.now(timezone.utc))
             }
 
             # Log the summary
@@ -374,7 +375,7 @@ class CrashRecoveryService:
             return {
                 "ServiceName": ServiceName,
                 "CurrentActiveJobs": len(active_jobs),
-                "LastRecoveryCheck": datetime.now(timezone.utc).isoformat()
+                "LastRecoveryCheck": ToUtcIsoZ(datetime.now(timezone.utc))
             }
 
         except Exception as e:
