@@ -2,6 +2,51 @@
 
 ## Open
 
+### [TECH DEBT] Loud-failure sweep -- Phase 2
+**Date:** 2026-05-08
+**Affects:** Models/CommandBuilder.py, WebService/Main.py, WorkerService/Main.py, Repositories/DatabaseManager.py, Features/Profiles/, Features/FileScanning/, Features/TranscodeQueue/, Services/FFmpegAnalysisService.py, Features/MediaProbe/, Features/FileReplacement/
+
+Phase 1 (commit 6bf51b2) addressed the four highest-risk silent swallows that hid today's Windows-worker FFmpegPath bug. Three parallel agent audits (silent-failure code patterns, recent DB Logs over 48h, FFmpeg path resolution chain) surfaced ~30 more sites and several systemic blind spots that need a follow-up pass. Documented here so the next session can pick it up cleanly.
+
+**Remaining silent-swallow sites (high-risk, code path):**
+- `Models/CommandBuilder.py:190-192, 215-217, 226-228, 359-361` -- `AddCodecParameters` / `BuildAudioFilters` silently drop codec/audio params on exception. Produces wrong-quality transcodes that are hard to diagnose.
+- `Models/CommandBuilder.py:284-285` -- `ExtractResolutionFromFilename` returns None silently. Affects output naming.
+- `Repositories/DatabaseManager.py:258-259, 503-504, 5083-5084` -- DeleteProfile / DeleteRootFolder / RecordProblemFile getsize. Destructive op failures masked as "no rows affected".
+- `Features/FileScanning/FileScanningRepository.py:80-81` and `Features/Profiles/ProfileRepository.py:121-122` -- duplicate of the above in vertical-slice copies.
+- `Features/TranscodeQueue/QueueManagementBusinessService.py:478-479` -- silent skip of show-override lookup; file gets wrong target resolution.
+- `Features/MediaProbe/MediaProbeBusinessService.py:134-135` -- `_DeriveResolutionCategory` returns None silently; NULL `ResolutionCategory` leaks into queue logic.
+- `Features/TranscodeJob/VideoTranscodingService.py:406-408` -- progress parser swallow, "not critical" comment.
+- `Features/TranscodeJob/ProcessTranscodeQueueService.py:1660-1661` -- `_ExtractResolutionFromFilename` swallow.
+
+**Worker lifecycle silent swallows:**
+- `WorkerService/Main.py:251-252` -- scan interval setting parse error silent (falls back to 60min).
+- `WorkerService/Main.py:488-489` -- drain mode silently swallows QualityTestService.Stop() failure; drain may never actually stop.
+- `WorkerService/Main.py:623-626, 638-639` -- shutdown handler swallows FFmpeg-kill and UpdateWorkerStatus(Offline) failures. Worker can stay marked Online after crash exit; FFmpeg children can be leaked.
+- `WorkerService/Main.py:646-647, 687-688` -- DB-pool-close / LogError fallback swallows; masks LoggingService problems.
+
+**WebService stdout-vanishing pattern:**
+- `WebService/Main.py:153, 340, 353, 362, 389, 420, 433, 446, 454, 473` -- 10 occurrences of `except: print(...)` in service-status / polling loops. When WebService is launched detached by `StartMediaVortex.py`, stdout has no consumer and the messages are lost forever. Convert all to `LoggingService.LogException`.
+- `TranscodeService/config.py:110` -- same pattern (TranscodeService is being deprecated -- delete with the dir per the other tech-debt entry above).
+
+**Systemic blind spots from the DB-log audit (48h window):**
+- **439 hits** of `GetFFmpegPathFromSettings: "FFmpeg path from settings not found"` -- ERROR-level, no `ExceptionType`. Three distinct paths recur (`/opt/mediavortex/FFmpeg`, `/opt/mediavortex/MediaVortex/...`, `C:\Code\MediaVortex\...`). The function probes/falls back without surfacing the failure. Caller is silently degraded.
+- **271+ hits** of `DatabaseManager: "Path does not exist, cannot normalize"` -- WARNING. Likely the dead-file pattern from `PrivateNormalizePathToFilesystemCase` running on stale MediaFiles rows. Phase 1's pre-flight check stops new occurrences from creating attempt rows but doesn't sweep the existing stale rows. Need a one-shot script that flags `MediaFiles` where the path doesn't exist on disk for any worker that can reach it.
+- **121 hits** of `_ProcessCompleteFileReplacement: "Failed to update MediaFiles table: Failed to extract metadata"` -- WARNING. Two layers of "Failed to" with no underlying cause. The `ntpath.dirname` fix (commit f5021d2) addresses new occurrences but the wrapper still strips the original exception. Strip the wrapper, log the original.
+- **80+ hits** of `AnalyzeMediaFile: "FFprobe failed for ..."` -- ERROR with no `ExceptionType` and no `StackTrace`. Caller logs only the path, not the FFprobe stderr. Capture stderr into ExceptionMessage so we can see *why* FFprobe failed.
+- **3 occurrences** of `/bin/sh: 1: C:CodeAutomationMediaVortexFFm...` -- Linux Larry workers tried to execute a Windows-flavored path with backslashes shell-stripped. The path purge in commit 87aaf58 removed the source string, but find the call site that constructed it; some code is still concatenating Windows paths on Linux callers.
+
+**Recommended order when picking this up:**
+1. Sweep `WebService/Main.py` `except: print(...)` -> `LogException`. Mechanical, low-risk, big visibility win.
+2. Fix the 4 `CommandBuilder.AddCodecParameters/BuildAudioFilters` silent swallows -- highest-risk because they corrupt transcode quality.
+3. Strip the "Failed to update MediaFiles table:" wrapper in `_ProcessCompleteFileReplacement` so the original exception surfaces.
+4. Capture FFprobe stderr in `AnalyzeMediaFile` exception-path log.
+5. One-shot `Scripts/FlagMissingMediaFiles.py` to mark all existing MediaFiles where the path is unreadable from any registered worker.
+6. Then the lifecycle / DB-delete swallows.
+
+**Fix with:** `/n` (multi-feature sweep, ~2-3 hours)
+
+---
+
 ### [BUG] Workers attempt jobs for MediaFiles entries whose source file no longer exists on disk
 **Date:** 2026-05-08
 **Affects:** TranscodeJob feature (ProcessTranscodeQueueService, FFprobe build step), TranscodeQueue feature (queue population)
