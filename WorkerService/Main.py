@@ -635,7 +635,11 @@ def SignalHandler(signum, frame):
         App = Main.app
         WorkerName = App.WorkerName
 
-        # Kill all active FFmpeg processes immediately (local only)
+        # Kill all active FFmpeg processes immediately (local only).
+        # Per-process kill failure is expected (process may have already died); leave that
+        # inner except silent. Outer failures (e.g. ActiveProcesses dict torn down) are
+        # logged via LogException -- LoggingService prints to stderr before DB write so
+        # the message survives even if the pool is already closed.
         try:
             if App.TranscodeService is not None:
                 ActiveJobIds = App.TranscodeService.VideoTranscoding.GetActiveJobs()
@@ -646,8 +650,13 @@ def SignalHandler(signum, frame):
                             Proc.kill()
                     except Exception:
                         pass
-        except Exception:
-            pass
+        except Exception as e:
+            try:
+                LoggingService.LogException(
+                    "Error killing FFmpeg processes during SignalHandler", e, "SignalHandler", "WorkerService"
+                )
+            except Exception:
+                print(f"EXCEPTION (logger unavailable): killing FFmpeg processes: {e}")
 
         # Mark worker offline and update service status
         try:
@@ -659,16 +668,26 @@ def SignalHandler(signum, frame):
                 'ActiveJobsCount': 0
             })
             Db.UpdateWorkerStatus(WorkerName, "Offline")
-        except Exception:
-            pass
+        except Exception as e:
+            try:
+                LoggingService.LogException(
+                    f"Error marking worker {WorkerName!r} Offline during SignalHandler", e, "SignalHandler", "WorkerService"
+                )
+            except Exception:
+                print(f"EXCEPTION (logger unavailable): marking worker offline: {e}")
 
     # Release pooled DB connections so they don't linger after os._exit() bypasses atexit
     try:
         from Core.Database.DatabaseService import DatabaseService
         if DatabaseService._pool is not None and not DatabaseService._pool.closed:
             DatabaseService._pool.closeall()
-    except Exception:
-        pass
+    except Exception as e:
+        try:
+            LoggingService.LogException(
+                "Error closing DB pool during SignalHandler", e, "SignalHandler", "WorkerService"
+            )
+        except Exception:
+            print(f"EXCEPTION (logger unavailable): closing DB pool: {e}")
 
     os._exit(0)
 

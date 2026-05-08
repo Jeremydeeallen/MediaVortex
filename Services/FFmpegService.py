@@ -180,14 +180,25 @@ class FFmpegService:
             }
             
             if not ResultDict['Success']:
-                ResultDict['ErrorMessage'] = f"FFprobe failed: ReturnCode={Result.returncode}, Error={Result.stderr}"
-                LoggingService.LogError(f"FFprobe failed for {FilePath}: ReturnCode={Result.returncode}, Error={Result.stderr}", 'FFmpegService', 'ExecuteFFprobe')
-            
+                # Truncate stderr to a sensible size for the DB column but keep enough
+                # to diagnose. Captures stdout too in case FFprobe wrote useful info there.
+                StderrSnippet = (Result.stderr or '').strip()[:1500]
+                StdoutSnippet = (Result.stdout or '').strip()[:500]
+                ResultDict['ErrorMessage'] = f"FFprobe failed: ReturnCode={Result.returncode}, Error={StderrSnippet}"
+                LoggingService.LogError(
+                    f"FFprobe failed for {FilePath}\n"
+                    f"  ReturnCode: {Result.returncode}\n"
+                    f"  Stderr: {StderrSnippet or '(empty)'}\n"
+                    f"  Stdout: {StdoutSnippet or '(empty)'}\n"
+                    f"  Command: {CommandString}",
+                    'ExecuteFFprobe', 'FFmpegService'
+                )
+
             return ResultDict
-            
-        except subprocess.TimeoutExpired:
+
+        except subprocess.TimeoutExpired as e:
             ErrorMessage = f"FFprobe timeout for file: {FilePath}"
-            LoggingService.LogError(f"{ErrorMessage}", 'ExecuteFFprobe', 'FFmpegService')
+            LoggingService.LogException(ErrorMessage, e, 'ExecuteFFprobe', 'FFmpegService')
             return {
                 'Success': False,
                 'ErrorMessage': ErrorMessage,
@@ -196,11 +207,11 @@ class FFmpegService:
                 'Command': CommandString
             }
         except Exception as e:
-            ErrorMessage = f"FFprobe execution error: {str(e)}"
-            LoggingService.LogError(f"{ErrorMessage}", 'ExecuteFFprobe', 'FFmpegService')
+            ErrorMessage = f"FFprobe execution error for file: {FilePath}"
+            LoggingService.LogException(ErrorMessage, e, 'ExecuteFFprobe', 'FFmpegService')
             return {
                 'Success': False,
-                'ErrorMessage': ErrorMessage,
+                'ErrorMessage': f"{ErrorMessage}: {str(e)}",
                 'Output': '',
                 'Error': str(e),
                 'Command': CommandString

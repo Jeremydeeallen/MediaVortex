@@ -202,10 +202,15 @@ class CommandBuilder:
             VideoBitrate = ProfileSettings.get('VideoBitrateKbps')
             if VideoBitrate and VideoBitrate != '' and VideoBitrate != 'None':
                 CommandParts.extend(['-maxrate', f'{VideoBitrate}k'])
-                
-        except Exception:
-            # If anything goes wrong, continue without adding parameters
-            pass
+
+        except Exception as e:
+            # Codec parameter failures silently produce wrong-quality output.
+            # Log loudly so the DB Logs table captures the cause; partial command
+            # is still returned so the transcode runs with whatever did get added.
+            LoggingService.LogException(
+                "Error adding codec parameters -- transcode will run with partial/default settings",
+                e, "AddCodecParameters", "CommandBuilder"
+            )
     
     def AddFilmGrainParameter(self, CommandParts: list, CodecParameters: list, ProfileSettings: Dict[str, Any]) -> None:
         """Add film grain parameter for SVT-AV1 (skip for NVIDIA hardware acceleration)."""
@@ -227,10 +232,12 @@ class CommandBuilder:
                 FilmGrain = ProfileSettings.get('FilmGrain')
                 if FilmGrain is not None and FilmGrain != '' and FilmGrain != 'None' and FilmGrain > 0:
                     CommandParts.extend(['-svtav1-params', f'film-grain={FilmGrain}'])
-                
-        except Exception:
-            # If anything goes wrong, continue without adding parameters
-            pass
+
+        except Exception as e:
+            LoggingService.LogException(
+                "Error adding film-grain parameter -- transcode will run without grain synthesis",
+                e, "AddFilmGrainParameter", "CommandBuilder"
+            )
     
     def AddPixelFormatParameter(self, CommandParts: list, CodecParameters: list, ProfileSettings: Dict[str, Any]) -> None:
         """Add pixel format parameter for 10-bit encoding."""
@@ -238,10 +245,12 @@ class CommandBuilder:
             # Always add 10-bit encoding for SVT-AV1 to improve quality and VMAF scores
             # Use yuv420p10le for 10-bit color depth to reduce banding and improve compression efficiency
             CommandParts.extend(['-pix_fmt', 'yuv420p10le'])
-                
-        except Exception:
-            # If anything goes wrong, continue without adding parameters
-            pass
+
+        except Exception as e:
+            LoggingService.LogException(
+                "Error adding pixel format parameter -- transcode will fall back to encoder default",
+                e, "AddPixelFormatParameter", "CommandBuilder"
+            )
 
     def GenerateOutputFileName(self, OriginalFileName: str, SourceResolution: str, TargetResolution: str, ContainerType: str = 'mp4', CrfValue: int = None) -> str:
         """Generate output filename with target resolution and container type.
@@ -371,10 +380,12 @@ class CommandBuilder:
                 # Build loudnorm filter
                 LoudnormFilter = f"loudnorm=I={TargetLoudness}:LRA={LoudnessRange}:TP={TruePeak}"
                 Filters.append(LoudnormFilter)
-                
-        except Exception:
-            # If system settings fail, continue without audio filters
-            pass
+
+        except Exception as e:
+            LoggingService.LogException(
+                "Error reading audio filter settings from DB -- transcode will run without acompressor/loudnorm",
+                e, "BuildAudioFilters", "CommandBuilder"
+            )
         
         # Return combined filters or None if no filters
         return ','.join(Filters) if Filters else None

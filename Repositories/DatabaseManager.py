@@ -251,11 +251,14 @@ class DatabaseManager:
         try:
             # Delete associated thresholds first
             self.DatabaseService.ExecuteNonQuery("DELETE FROM ProfileThresholds WHERE ProfileId = %s", (ProfileId,))
-            
+
             # Delete the profile
             affected_rows = self.DatabaseService.ExecuteNonQuery("DELETE FROM Profiles WHERE Id = %s", (ProfileId,))
             return affected_rows > 0
-        except Exception:
+        except Exception as e:
+            LoggingService.LogException(
+                f"Failed to delete Profile {ProfileId}", e, "DatabaseManager", "DeleteProfile"
+            )
             return False
     
     # Profile Threshold Management Methods
@@ -496,11 +499,14 @@ class DatabaseManager:
             if rfRows:
                 escapedPath = EscapeLikePattern(rfRows[0]['RootFolder'])
                 self.DatabaseService.ExecuteNonQuery("DELETE FROM MediaFiles WHERE LOWER(FilePath) LIKE LOWER(%s) || '%%' ESCAPE '!'", (escapedPath,))
-            
+
             # Delete the root folder
             affectedRows = self.DatabaseService.ExecuteNonQuery("DELETE FROM RootFolders WHERE Id = %s", (RootFolderId,))
             return affectedRows > 0
-        except Exception:
+        except Exception as e:
+            LoggingService.LogException(
+                f"Failed to delete RootFolder {RootFolderId}", e, "DatabaseManager", "DeleteRootFolder"
+            )
             return False
     
     # Media File Management Methods
@@ -5080,8 +5086,11 @@ class DatabaseManager:
                 try:
                     SizeBytes = os.path.getsize(FilePath)
                     SizeMB = SizeBytes / (1024 * 1024)
-                except Exception:
-                    pass
+                except Exception as e:
+                    LoggingService.LogException(
+                        f"Could not stat size of problem file {FilePath!r}; recording with size=0",
+                        e, "DatabaseManager", "AddProblemFile"
+                    )
             
             MediaFileId = self.LookupMediaFileId(FilePath)
             query = """

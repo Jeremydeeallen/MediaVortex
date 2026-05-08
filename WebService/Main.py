@@ -151,7 +151,7 @@ class WebServiceApp:
             status_service = ServiceStatusService()
             return status_service.RegisterServiceStartup("WebService", MaxConcurrentJobs=1)
         except Exception as e:
-            print(f"ERROR: Exception checking for existing WebService instances: {e}")
+            LoggingService.LogException("Exception checking for existing WebService instances", e, "WebService", "PrivateIsServiceAlreadyRunning")
             return True  # Prevent startup on error
     
     def _register_error_handlers(self):
@@ -338,7 +338,7 @@ class WebServiceApp:
             self.ServiceStatusThread.start()
             print("Service status tracking started")
         except Exception as e:
-            print(f"Failed to start service status tracking: {e}")
+            LoggingService.LogException("Failed to start service status tracking", e, "WebService", "PrivateStartServiceStatusTracking")
     
     def PrivateStartStatusPolling(self):
         """Start status polling thread."""
@@ -351,7 +351,7 @@ class WebServiceApp:
             self.StatusPollingThread.start()
             print("Status polling started")
         except Exception as e:
-            print(f"Failed to start status polling: {e}")
+            LoggingService.LogException("Failed to start status polling", e, "WebService", "PrivateStartStatusPolling")
     
     def PrivateServiceStatusLoop(self):
         """Background thread to update service status."""
@@ -360,7 +360,7 @@ class WebServiceApp:
                 self.PrivateUpdateServiceStatus()
                 time.sleep(30)  # Update every 30 seconds
             except Exception as e:
-                print(f"Error updating service status: {e}")
+                LoggingService.LogException("Error updating service status in PrivateServiceStatusLoop", e, "WebService", "PrivateServiceStatusLoop")
                 time.sleep(60)  # Wait longer on error
     
     def PrivateStatusPollingLoop(self):
@@ -385,9 +385,9 @@ class WebServiceApp:
                 
                 # Wait 5 seconds before next check
                 time.sleep(5)
-                
+
             except Exception as e:
-                print(f"Error in status polling loop: {e}")
+                LoggingService.LogException("Error in status polling loop", e, "WebService", "PrivateStatusPollingLoop")
                 time.sleep(10)
     
     def PrivateHandleStatusChange(self, new_status: str):
@@ -416,9 +416,9 @@ class WebServiceApp:
                     daemon=True,
                     name="GracefulStopMonitor"
                 ).start()
-                    
+
         except Exception as e:
-            print(f"Error handling status change: {e}")
+            LoggingService.LogException(f"Error handling status change to '{new_status}'", e, "WebService", "PrivateHandleStatusChange")
     
     def PrivateMonitorGracefulStop(self):
         """Monitor graceful stop progress and complete shutdown when current requests finish."""
@@ -431,7 +431,7 @@ class WebServiceApp:
             self.PrivateUpdateServiceStatus()
             self.ShutdownEvent = True
         except Exception as e:
-            print(f"Error in graceful stop monitoring: {e}")
+            LoggingService.LogException("Error in graceful stop monitoring", e, "WebService", "PrivateMonitorGracefulStop")
             self.ShutdownEvent = True
     
     def PrivateUpdateServiceStatus(self):
@@ -444,7 +444,7 @@ class WebServiceApp:
                 'HealthStatus': 'Healthy'
             })
         except Exception as e:
-            print(f"Error updating service status: {e}")
+            LoggingService.LogException("Error updating service status (heartbeat)", e, "WebService", "PrivateUpdateServiceStatus")
     
     def Run(self):
         """Run the Flask application."""
@@ -452,7 +452,7 @@ class WebServiceApp:
             print("Starting WebService Flask application...")
             self.App.run(host='0.0.0.0', port=5000, debug=False, threaded=True)
         except Exception as e:
-            print(f"Error running WebService: {e}")
+            LoggingService.LogException("Error running WebService Flask application", e, "WebService", "Run")
     
     def Shutdown(self):
         """Gracefully shutdown the service."""
@@ -461,7 +461,7 @@ class WebServiceApp:
             self.ShutdownEvent = True
             print("WebService shutdown complete")
         except Exception as e:
-            print(f"Error during shutdown: {e}")
+            LoggingService.LogException("Error during WebService shutdown", e, "WebService", "Shutdown")
 
 def SignalHandler(signum, frame):
     """Handle shutdown signals immediately."""

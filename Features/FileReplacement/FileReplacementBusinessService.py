@@ -533,8 +533,17 @@ class FileReplacementBusinessService:
                 LoggingService.LogInfo("Successfully updated MediaFiles table",
                                      "FileReplacementBusinessService", "_ProcessCompleteFileReplacement")
             else:
-                LoggingService.LogWarning(f"Failed to update MediaFiles table: {UpdateResult.get('ErrorMessage', 'Unknown error')}",
-                                        "FileReplacementBusinessService", "_ProcessCompleteFileReplacement")
+                # Don't double-wrap the error here -- _UpdateMediaFilesAfterReplacement
+                # already logged the original FFprobe exception via LogError. Just note
+                # at this layer that the post-replace pipeline is incomplete so an operator
+                # following the trail through Logs can see both the cause (FFprobe stderr)
+                # and the consequence (MediaFiles row not updated).
+                LoggingService.LogWarning(
+                    f"MediaFiles update skipped after successful replacement -- transcoded file is on disk "
+                    f"but DB row still reflects the original (see prior LogError for FFprobe cause). "
+                    f"Local: '{UpdateResult.get('LocalNewFilePath')}', Canonical: '{UpdateResult.get('CanonicalNewFilePath')}'",
+                    "FileReplacementBusinessService", "_ProcessCompleteFileReplacement"
+                )
 
             return {
                 'Success': True,
@@ -569,9 +578,20 @@ class FileReplacementBusinessService:
             LocalNewFilePath = self._ToLocalPath(NewFilePath)
             metadata = self.FileManager.ExtractMediaMetadata(LocalNewFilePath)
             if not metadata.get('Success', False):
+                # Surface the original FFprobe error verbatim instead of wrapping it.
+                # The previous "Failed to extract metadata: ..." prefix made it look like
+                # a generic application error in the DB Logs; the actual FFprobe stderr is
+                # what an operator needs to see.
+                OriginalError = metadata.get('ErrorMessage', 'Unknown error')
+                LoggingService.LogError(
+                    f"Re-probe failed for transcoded file at '{LocalNewFilePath}' (canonical: '{NewFilePath}'): {OriginalError}",
+                    "FileReplacementBusinessService", "_UpdateMediaFilesAfterReplacement"
+                )
                 return {
                     'Success': False,
-                    'ErrorMessage': f'Failed to extract metadata from transcoded file: {metadata.get("ErrorMessage", "Unknown error")}'
+                    'ErrorMessage': OriginalError,
+                    'LocalNewFilePath': LocalNewFilePath,
+                    'CanonicalNewFilePath': NewFilePath,
                 }
 
             # Update the MediaFile with new file path and filename

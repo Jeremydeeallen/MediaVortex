@@ -26,31 +26,34 @@ The connectivity indicator answers "can I reach this worker?". The operational s
 
 ---
 
-### [TECH DEBT] Loud-failure sweep -- Phase 2
-**Date:** 2026-05-08
+### [TECH DEBT - PARTIALLY RESOLVED] Loud-failure sweep -- Phase 2
+**Date:** 2026-05-08 | **Phase 2a applied:** 2026-05-08
 **Affects:** Models/CommandBuilder.py, WebService/Main.py, WorkerService/Main.py, Repositories/DatabaseManager.py, Features/Profiles/, Features/FileScanning/, Features/TranscodeQueue/, Services/FFmpegAnalysisService.py, Features/MediaProbe/, Features/FileReplacement/
 
 Phase 1 (commit 6bf51b2) addressed the four highest-risk silent swallows that hid today's Windows-worker FFmpegPath bug. Three parallel agent audits (silent-failure code patterns, recent DB Logs over 48h, FFmpeg path resolution chain) surfaced ~30 more sites and several systemic blind spots that need a follow-up pass. Documented here so the next session can pick it up cleanly.
 
-**Remaining silent-swallow sites (high-risk, code path):**
-- `Models/CommandBuilder.py:190-192, 215-217, 226-228, 359-361` -- `AddCodecParameters` / `BuildAudioFilters` silently drop codec/audio params on exception. Produces wrong-quality transcodes that are hard to diagnose.
+**Phase 2a applied (this session):**
+- [x] WebService/Main.py: 10 `except: print(...)` blocks converted to LoggingService.LogException (lines 154, 341, 354, 363, 390, 421, 434, 447, 455, 464). When WebService is launched detached by StartMediaVortex.py, errors now land in the DB Logs table instead of vanishing to a closed stdout.
+- [x] Models/CommandBuilder.py: 4 codec/audio swallows (`AddCodecParameters`, `AddFilmGrainParameter`, `AddPixelFormatParameter`, `BuildAudioFilters`) now LogException with explicit "transcode will run with partial settings" wording so wrong-quality output is traceable.
+- [x] Features/FileReplacement/FileReplacementBusinessService.py: stripped the `Failed to update MediaFiles table: Failed to extract metadata: ...` double-wrap. Original FFprobe error surfaces verbatim via LogError with both local + canonical paths; outer call site logs an explicit "MediaFiles update skipped after successful replacement" warning so the cause/consequence are linkable in DB Logs.
+- [x] Services/FFmpegService.py ExecuteFFprobe: subprocess timeout and generic exceptions now use LogException (was LogError, no traceback). Non-zero return code log includes truncated stderr + stdout + command in a multi-line block.
+- [x] Services/FFmpegAnalysisService.AnalyzeMediaFile: removed redundant double-log of FFprobe failure (ExecuteFFprobe already logs). JSONDecodeError now LogException with output-snippet for diagnosis.
+- [x] WorkerService/Main.py SignalHandler: 3 silent `except: pass` blocks (FFmpeg-kill outer, mark-Offline, pool-close) now LogException with stderr fallback if logger itself fails (defensive for shutdown teardown).
+- [x] Repositories/DatabaseManager.py: DeleteProfile, DeleteRootFolder, RecordProblemFile getsize -- all 3 now LogException.
+- [x] Scripts/FlagMissingMediaFiles.py created. One-shot to bump FFprobeFailureCount=3 on rows whose source path is missing on disk, so queue-population's existing safety guard skips them. Run with --dry-run first.
+
+**Phase 2b remaining (lower priority, capture for future session):**
+
+**Remaining silent-swallow sites (lower-risk, code path):**
 - `Models/CommandBuilder.py:284-285` -- `ExtractResolutionFromFilename` returns None silently. Affects output naming.
-- `Repositories/DatabaseManager.py:258-259, 503-504, 5083-5084` -- DeleteProfile / DeleteRootFolder / RecordProblemFile getsize. Destructive op failures masked as "no rows affected".
-- `Features/FileScanning/FileScanningRepository.py:80-81` and `Features/Profiles/ProfileRepository.py:121-122` -- duplicate of the above in vertical-slice copies.
+- `Features/FileScanning/FileScanningRepository.py:80-81` and `Features/Profiles/ProfileRepository.py:121-122` -- duplicates of `DeleteProfile` / `DeleteRootFolder` in vertical-slice copies (Phase 2a covered the DatabaseManager versions).
 - `Features/TranscodeQueue/QueueManagementBusinessService.py:478-479` -- silent skip of show-override lookup; file gets wrong target resolution.
 - `Features/MediaProbe/MediaProbeBusinessService.py:134-135` -- `_DeriveResolutionCategory` returns None silently; NULL `ResolutionCategory` leaks into queue logic.
 - `Features/TranscodeJob/VideoTranscodingService.py:406-408` -- progress parser swallow, "not critical" comment.
 - `Features/TranscodeJob/ProcessTranscodeQueueService.py:1660-1661` -- `_ExtractResolutionFromFilename` swallow.
-
-**Worker lifecycle silent swallows:**
 - `WorkerService/Main.py:251-252` -- scan interval setting parse error silent (falls back to 60min).
 - `WorkerService/Main.py:488-489` -- drain mode silently swallows QualityTestService.Stop() failure; drain may never actually stop.
-- `WorkerService/Main.py:623-626, 638-639` -- shutdown handler swallows FFmpeg-kill and UpdateWorkerStatus(Offline) failures. Worker can stay marked Online after crash exit; FFmpeg children can be leaked.
-- `WorkerService/Main.py:646-647, 687-688` -- DB-pool-close / LogError fallback swallows; masks LoggingService problems.
-
-**WebService stdout-vanishing pattern:**
-- `WebService/Main.py:153, 340, 353, 362, 389, 420, 433, 446, 454, 473` -- 10 occurrences of `except: print(...)` in service-status / polling loops. When WebService is launched detached by `StartMediaVortex.py`, stdout has no consumer and the messages are lost forever. Convert all to `LoggingService.LogException`.
-- `TranscodeService/config.py:110` -- same pattern (TranscodeService is being deprecated -- delete with the dir per the other tech-debt entry above).
+- `TranscodeService/config.py:110` -- same `except:print` pattern (TranscodeService is being deprecated -- delete with the dir per the other tech-debt entry above).
 
 **Systemic blind spots from the DB-log audit (48h window):**
 - **439 hits** of `GetFFmpegPathFromSettings: "FFmpeg path from settings not found"` -- ERROR-level, no `ExceptionType`. Three distinct paths recur (`/opt/mediavortex/FFmpeg`, `/opt/mediavortex/MediaVortex/...`, `C:\Code\MediaVortex\...`). The function probes/falls back without surfacing the failure. Caller is silently degraded.

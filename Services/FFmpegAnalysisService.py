@@ -32,26 +32,31 @@ class FFmpegAnalysisService:
             if os.path.exists(FilePath):
                 AnalysisModel.FileSizeMB = os.path.getsize(FilePath) / (1024 * 1024)
             
-            # Execute FFprobe analysis
+            # Execute FFprobe analysis. ExecuteFFprobe is responsible for logging the
+            # subprocess failure (with stderr/stdout/command) -- don't double-log here,
+            # just propagate the error onto the analysis model so the caller has the cause.
             FFprobeResult = self.FFmpegService.ExecuteFFprobe(FilePath)
-            
+
             if not FFprobeResult['Success']:
                 Command = FFprobeResult.get('Command', 'Unknown command')
                 ErrorMessage = FFprobeResult.get('ErrorMessage', 'FFprobe analysis failed')
                 AnalysisModel.ErrorMessage = f"{ErrorMessage} - Command: {Command}"
-                LoggingService.LogError(f"FFprobe failed for {FilePath}: {ErrorMessage} - Command: {Command}", 'AnalyzeMediaFile', 'FFmpegAnalysisService')
                 return AnalysisModel
-            
+
             # Parse FFprobe JSON output
             try:
                 MediaInfo = json.loads(FFprobeResult['Output'])
                 self.ParseFFprobeOutput(AnalysisModel, MediaInfo)
                 AnalysisModel.Success = True
-                
+
             except json.JSONDecodeError as e:
                 Command = FFprobeResult.get('Command', 'Unknown command')
+                OutputSnippet = (FFprobeResult.get('Output') or '')[:500]
                 AnalysisModel.ErrorMessage = f"Failed to parse FFprobe JSON output: {str(e)} - Command: {Command}"
-                LoggingService.LogError(f"FFprobe JSON parsing failed for {FilePath}: {str(e)} - Command: {Command}", 'AnalyzeMediaFile', 'FFmpegAnalysisService')
+                LoggingService.LogException(
+                    f"FFprobe JSON parsing failed for {FilePath}. Output snippet: {OutputSnippet!r}. Command: {Command}",
+                    e, 'AnalyzeMediaFile', 'FFmpegAnalysisService'
+                )
                 return AnalysisModel
             
             # Extract metadata from filename if not found in embedded tags
