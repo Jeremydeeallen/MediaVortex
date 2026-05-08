@@ -8,15 +8,37 @@ The dev workstation does not run Docker. All image builds happen on the LXC (10.
 
 ## Build and Deploy Pipeline
 
-| Step | Command (from dev workstation) | What It Does |
-|------|-------------------------------|--------------|
-| 1. Push source | `scp -r <repo> root@10.0.0.42:/tmp/mediavortex-build/` | Copies repo source to the LXC (filtered by .dockerignore) |
-| 2. Build image | `ssh root@10.0.0.42 'docker build -t mediavortex-worker:latest -f /tmp/mediavortex-build/deploy/Dockerfile /tmp/mediavortex-build/'` | Builds the image on the LXC. Stage 1 downloads BtbN FFmpeg, stage 2 installs Python deps + app code |
-| 3. Verify FFmpeg | `ssh root@10.0.0.42 'docker run --rm --entrypoint ffmpeg mediavortex-worker:latest -encoders 2>/dev/null \| grep libsvtav1'` | Confirms SVT-AV1 encoder is present. Must use `--entrypoint` because the image entrypoint is the Python app |
-| 4. Start workers | `ssh root@10.0.0.42 'cd /opt/mediavortex && docker compose up -d'` | Starts worker containers using the LXC's docker-compose.yml (deployed by Terraform) |
-| 5. Cleanup | `ssh root@10.0.0.42 'rm -rf /tmp/mediavortex-build'` | Removes build source from the LXC |
+Run from the dev workstation (Git Bash). All commands use SSH to the worker-pool LXC at `10.0.0.42`.
 
-For code updates, repeat steps 1-5. The LXC's `/opt/mediavortex/docker-compose.yml` is deployed by Terraform (`terraform/mediavortex-workers/setup.sh`), not by this pipeline. It contains hardcoded DB credentials and no `build:` context.
+```bash
+# 1. Create target dir and copy repo source to the LXC
+ssh root@10.0.0.42 'rm -rf /tmp/mediavortex-build && mkdir -p /tmp/mediavortex-build'
+scp -r /c/Code/MediaVortex/* root@10.0.0.42:/tmp/mediavortex-build/
+
+# 2. Build the Docker image on the LXC
+ssh root@10.0.0.42 'docker build -t mediavortex-worker:latest -f /tmp/mediavortex-build/deploy/Dockerfile /tmp/mediavortex-build/'
+
+# 3. Recreate and start workers (picks up new image automatically)
+ssh root@10.0.0.42 'cd /opt/mediavortex && docker compose up -d'
+
+# 4. Clean up build source
+ssh root@10.0.0.42 'rm -rf /tmp/mediavortex-build'
+```
+
+**Verify** (optional):
+```bash
+# Confirm SVT-AV1 encoder is in the image
+ssh root@10.0.0.42 'docker run --rm --entrypoint ffmpeg mediavortex-worker:latest -encoders 2>/dev/null | grep libsvtav1'
+
+# Confirm workers registered and online
+py Scripts/SQLScripts/QueryDatabase.py sql "SELECT WorkerName, Status, LastHeartbeat FROM Workers WHERE WorkerName LIKE 'larry%' ORDER BY WorkerName"
+```
+
+**Notes:**
+- The LXC's `/opt/mediavortex/docker-compose.yml` is deployed by Terraform (`terraform/mediavortex-workers/setup.sh`), not by this pipeline. It contains DB credentials and volume mounts.
+- `scp` requires the target directory to exist first -- the `mkdir -p` in step 1 handles this.
+- For code-only updates, repeat all 4 steps. The FFmpeg binary is cached in the Docker build layer and only re-downloads if the Dockerfile changes.
+- Workers that are mid-transcode will be stopped by `docker compose up -d` (sends SIGTERM). The SignalHandler resets their queue items to Pending for retry. Wait for workers to finish or gracefully stop them before deploying if you want to avoid re-transcoding.
 
 ## Runtime Pipeline (per container)
 
