@@ -59,6 +59,12 @@ Capabilities are created lazily -- only initialized when enabled for the first t
 
 Capability changes are detected by `_CapabilityPollingLoop()` (60s interval). When a flag changes in the DB, `_ApplyCapabilities()` starts newly-enabled capabilities and stops newly-disabled ones.
 
+Capability flags are set via:
+- `POST /api/TeamStatus/Workers/<name>/Capability` -- Activity page UI per-worker toggle controls (added 2026-05-08 alongside the existing Status endpoint). Body: `{"TranscodeEnabled": true}` -- one or more keys per request, mirrors the Status endpoint shape so the operator does not need to think about partial writes.
+- Direct DB update: `UPDATE Workers SET ScanEnabled = TRUE WHERE WorkerName = 'I9-2024'` (still works; the API endpoint is just a convenience).
+
+The endpoint validates the column name against the allowlist `{TranscodeEnabled, QualityTestEnabled, ScanEnabled}` (rejecting arbitrary writes), accepts boolean values (true/false/null where null means "use global default" -- only meaningful for QualityTestEnabled), and returns the new row state. The worker's capability poller reads the change within 60s without restart.
+
 ## Shutdown (SIGTERM/SIGINT)
 
 | Step | Function | What It Does |

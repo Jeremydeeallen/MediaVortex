@@ -356,6 +356,72 @@ def ResetStuckJob():
         return jsonify({"Success": False, "ErrorMessage": ErrorMsg}), 500
 
 
+@TeamStatusBlueprint.route('/Workers/<WorkerName>/Capability', methods=['POST'])
+def SetWorkerCapability(WorkerName):
+    """Set per-worker capability flags (TranscodeEnabled, QualityTestEnabled, ScanEnabled).
+
+    Body: {"TranscodeEnabled": true, "QualityTestEnabled": false, ...}
+    Any subset of the three keys is accepted; unspecified columns are left untouched.
+    Values must be true / false / null. null on QualityTestEnabled means "use the
+    SystemSettings.QualityTestEnabled global default" -- see WorkerService.feature.md.
+
+    The worker's _CapabilityPollingLoop reads the new value within 60s and starts
+    or stops the corresponding capability without restarting the worker process.
+    """
+    try:
+        LoggingService.LogFunctionEntry("SetWorkerCapability", "TeamStatusController")
+
+        Data = request.get_json() or {}
+        AllowedColumns = {'TranscodeEnabled', 'QualityTestEnabled', 'ScanEnabled'}
+        UpdateColumns = {k: v for k, v in Data.items() if k in AllowedColumns}
+        if not UpdateColumns:
+            return jsonify({"Success": False, "Message": f"Provide at least one of: {', '.join(sorted(AllowedColumns))}"}), 400
+
+        # Validate value types: bool or None
+        for Key, Val in UpdateColumns.items():
+            if Val is not None and not isinstance(Val, bool):
+                return jsonify({"Success": False, "Message": f"{Key} must be true, false, or null"}), 400
+
+        DbManager = DatabaseManager()
+        CheckRows = DbManager.DatabaseService.ExecuteQuery("SELECT 1 FROM Workers WHERE WorkerName = %s", (WorkerName,))
+        if not CheckRows:
+            return jsonify({"Success": False, "Message": f"Worker '{WorkerName}' not found"}), 404
+
+        SetClauses = ", ".join(f"{Col} = %s" for Col in UpdateColumns.keys())
+        Params = tuple(UpdateColumns.values()) + (WorkerName,)
+        UpdateQuery = f"UPDATE Workers SET {SetClauses} WHERE WorkerName = %s"
+        DbManager.DatabaseService.ExecuteNonQuery(UpdateQuery, Params)
+
+        LoggingService.LogInfo(
+            f"Worker '{WorkerName}' capabilities updated: {UpdateColumns}",
+            "TeamStatusController", "SetWorkerCapability"
+        )
+
+        # Return the updated row so the UI can reflect the new state immediately
+        # without re-fetching the whole worker list.
+        FreshRows = DbManager.DatabaseService.ExecuteQuery(
+            "SELECT WorkerName, TranscodeEnabled, QualityTestEnabled, ScanEnabled FROM Workers WHERE WorkerName = %s",
+            (WorkerName,)
+        )
+        Fresh = FreshRows[0] if FreshRows else {}
+        return jsonify({
+            "Success": True,
+            "Message": f"Worker '{WorkerName}' capabilities updated",
+            "Updated": UpdateColumns,
+            "Worker": {
+                "WorkerName": Fresh.get('WorkerName'),
+                "TranscodeEnabled": bool(Fresh.get('TranscodeEnabled')) if Fresh.get('TranscodeEnabled') is not None else None,
+                "QualityTestEnabled": bool(Fresh.get('QualityTestEnabled')) if Fresh.get('QualityTestEnabled') is not None else None,
+                "ScanEnabled": bool(Fresh.get('ScanEnabled')) if Fresh.get('ScanEnabled') is not None else None,
+            }
+        })
+
+    except Exception as e:
+        ErrorMsg = f"Exception in SetWorkerCapability: {str(e)}"
+        LoggingService.LogException(ErrorMsg, e, "TeamStatusController", "SetWorkerCapability")
+        return jsonify({"Success": False, "ErrorMessage": ErrorMsg}), 500
+
+
 @TeamStatusBlueprint.route('/Workers/<WorkerName>/Status', methods=['POST'])
 def SetWorkerStatus(WorkerName):
     """Set per-worker status (Online, Draining, Offline)."""

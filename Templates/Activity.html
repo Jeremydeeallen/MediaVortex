@@ -332,11 +332,24 @@ var ActivityPage = (function() {
                         '<div class="d-flex justify-content-between"><span>CPU Threads:</span><span>' + (W.MaxCpuThreads || 'Auto') + '</span></div>' +
                         '<div class="d-flex justify-content-between"><span>Interlaced:</span><span>' + (W.AcceptsInterlaced ? 'Yes' : 'No') + '</span></div>' +
                     '</div>' +
-                    '<div class="btn-group btn-group-sm w-100" role="group">' +
+                    '<div class="btn-group btn-group-sm w-100 mb-2" role="group">' +
                         '<button class="btn ' + (DisplayStatus === 'Online' ? 'btn-success' : 'btn-outline-success') + '" onclick="ActivityPage.SetWorkerStatus(\'' + WorkerNameEsc.replace(/'/g, "\\'") + '\', \'Online\')">Online</button>' +
                         '<button class="btn ' + (DisplayStatus === 'Draining' ? 'btn-warning' : 'btn-outline-warning') + '" onclick="ActivityPage.SetWorkerStatus(\'' + WorkerNameEsc.replace(/'/g, "\\'") + '\', \'Draining\')">Drain</button>' +
                         '<button class="btn ' + (DisplayStatus === 'Offline' ? 'btn-danger' : 'btn-outline-danger') + '" onclick="ActivityPage.SetWorkerStatus(\'' + WorkerNameEsc.replace(/'/g, "\\'") + '\', \'Offline\')">Offline</button>' +
                     '</div>' +
+                    '<div class="small text-muted mb-1">Capabilities</div>' +
+                    '<div class="btn-group btn-group-sm w-100" role="group" aria-label="Worker capabilities">' +
+                        '<button class="btn ' + (W.TranscodeEnabled ? 'btn-primary' : 'btn-outline-primary') + '" title="Transcode" ' +
+                          'onclick="ActivityPage.ToggleWorkerCapability(\'' + WorkerNameEsc.replace(/'/g, "\\'") + '\', \'TranscodeEnabled\', ' + (W.TranscodeEnabled ? 'true' : 'false') + ')">' +
+                          '<i class="fas fa-film me-1"></i>Transcode</button>' +
+                        '<button class="btn ' + (W.QualityTestEnabled ? 'btn-info' : 'btn-outline-info') + '" title="VMAF quality test" ' +
+                          'onclick="ActivityPage.ToggleWorkerCapability(\'' + WorkerNameEsc.replace(/'/g, "\\'") + '\', \'QualityTestEnabled\', ' + (W.QualityTestEnabled ? 'true' : 'false') + ')">' +
+                          '<i class="fas fa-chart-line me-1"></i>VMAF</button>' +
+                        '<button class="btn ' + (W.ScanEnabled ? 'btn-secondary' : 'btn-outline-secondary') + '" title="Continuous file scanning" ' +
+                          'onclick="ActivityPage.ToggleWorkerCapability(\'' + WorkerNameEsc.replace(/'/g, "\\'") + '\', \'ScanEnabled\', ' + (W.ScanEnabled ? 'true' : 'false') + ')">' +
+                          '<i class="fas fa-search me-1"></i>Scan</button>' +
+                    '</div>' +
+                    '<div class="form-text small mt-1">Capability changes apply within 60s (no restart).</div>' +
                 '</div>' +
             '</div>';
             Container.appendChild(Col);
@@ -366,6 +379,30 @@ var ActivityPage = (function() {
         Workers.forEach(function(W) {
             SetWorkerStatus(W.WorkerName, NewStatus);
         });
+    }
+
+    function ToggleWorkerCapability(WorkerName, Column, CurrentValue) {
+        // Toggle the bool flag. Capability poller in WorkerService picks this up
+        // within 60s and starts/stops the corresponding capability accordingly.
+        var NewValue = !CurrentValue;
+        var Body = {};
+        Body[Column] = NewValue;
+        fetch('/api/TeamStatus/Workers/' + encodeURIComponent(WorkerName) + '/Capability', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(Body)
+        })
+            .then(function(R) { return R.json(); })
+            .then(function(Result) {
+                if (Result.Success) {
+                    var Pretty = Column.replace(/Enabled$/, '');
+                    showToastAlert(WorkerName + ' ' + Pretty + ' set to ' + NewValue, 'success');
+                    LoadWorkers();
+                } else {
+                    showToastAlert(Result.ErrorMessage || Result.Message || 'Failed to update worker capability.', 'danger');
+                }
+            })
+            .catch(function() { showToastAlert('Failed to contact server.', 'danger'); });
     }
 
     // -- Quality Testing Queue --
@@ -542,6 +579,7 @@ var ActivityPage = (function() {
         ResetStuckJob: ResetStuckJob,
         SetWorkerStatus: SetWorkerStatus,
         SetAllWorkersStatus: SetAllWorkersStatus,
+        ToggleWorkerCapability: ToggleWorkerCapability,
         RetryQualityTest: RetryQualityTest
     };
 })();
