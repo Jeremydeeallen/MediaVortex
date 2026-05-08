@@ -2,6 +2,18 @@
 
 ## Open
 
+### [FIXED] LocalStaging mode crashes workers without StagingDirectory configured
+**Date:** 2026-05-07
+**Fixed:** 2026-05-07
+**Affects:** TranscodeJob -- ProcessTranscodeQueueService.py, all job types (transcode, remux, subtitle fix)
+**Criterion violated:** local-staging.feature.md -- LocalStaging should not crash workers that lack the required infrastructure
+
+`TranscodeFileMode` is a global SystemSetting. When set to `LocalStaging` (for Docker workers on Larry), the Windows primary machine also enters LocalStaging mode. `ComputeCanonicalOutputPath()` calls `os.path.join(self.OutputDirectory, ...)` where `self.OutputDirectory` (from `Workers.StagingDirectory`) is NULL for the Windows worker, causing `TypeError: expected str, bytes or os.PathLike object, not NoneType`.
+
+Secondary impact: when the Windows TranscodeService crashed and shut down, it set the shared `ServiceStatus` row to `Stopped`, which caused idle Larry workers (1 and 4) to stop picking up jobs.
+
+**Fix:** All three job types (ProcessJob, ProcessRemuxJob, ProcessSubtitleFixJob) now validate `self.OutputDirectory` before entering LocalStaging mode. If NULL, fall back to InPlace with a warning log. Defense-in-depth guard added in `ComputeCanonicalOutputPath()`.
+
 ### [BUG] Second concurrent job shows first job's progress
 **Date:** 2025-05-05
 **Affects:** TranscodeJob feature -- concurrent job progress tracking
@@ -23,6 +35,15 @@ When MaxConcurrentJobs > 1 and a second job starts while the first is still runn
 2. FileReplacementBusinessService had no path translation (hardcoded Windows paths).
 
 **Fix:** Removed dead ShouldTestFile(). ProcessTranscodedFile() now reads QualityTestRequired from TranscodeAttempt -- when False, calls FileReplacement directly with BypassVMAFCheck=True. FileReplacementBusinessService accepts PathTranslation, translates canonical paths before all filesystem ops, skips shutil.move for InPlace mode. HandleJobFailure cleans up partial output files and TemporaryFilePaths rows on failure. See post-transcode-pipeline.feature.md.
+
+### [FIXED] Concurrent job progress invisible in UI
+**Date:** 2026-05-08
+**Fixed:** 2026-05-08
+**Affects:** TranscodeJob -- progress display when MaxConcurrentJobs > 1
+**Root cause:** `GetCurrentTranscodeProgress()` and `GetAllCurrentTranscodeProgress()` in `DatabaseManager.py` used `INNER JOIN TranscodeQueue ... AND tq.Status = 'Running'` to filter active jobs. Progress display depended on a transient queue row instead of the authoritative `TranscodeAttempts.Success IS NULL`. When a concurrent job's queue row disappeared, the still-running sibling became invisible.
+**Fix:** Removed the `INNER JOIN TranscodeQueue` from both progress queries. Progress now uses `TranscodeProgress + TranscodeAttempts WHERE Success IS NULL` -- no queue dependency.
+
+**Note:** The queue rows for concurrent jobs are still disappearing (cause unknown). An audit trigger (`trg_transcodequeue_delete`) is in place on the DB to capture the next occurrence. The progress fix makes the UI resilient to this regardless.
 
 ### [BUG] DatabaseManager.py monolith -- dual database access paths
 **Date:** 2026-05-07

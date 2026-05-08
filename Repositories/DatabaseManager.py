@@ -2837,7 +2837,6 @@ class DatabaseManager:
                        mf.TotalFrames as MediaFileTotalFrames, ta.FfpmpegCommand
                 FROM TranscodeProgress tp
                 INNER JOIN TranscodeAttempts ta ON tp.TranscodeAttemptId = ta.Id
-                INNER JOIN TranscodeQueue tq ON LOWER(ta.FilePath) = LOWER(tq.FilePath) AND tq.Status = 'Running'
                 LEFT JOIN MediaFiles mf ON ta.FilePath = mf.FilePath
                 WHERE ta.Success IS NULL
                 ORDER BY tp.LastProgressUpdate DESC
@@ -2913,7 +2912,6 @@ class DatabaseManager:
                        mf.TotalFrames as MediaFileTotalFrames, ta.FfpmpegCommand
                 FROM TranscodeProgress tp
                 INNER JOIN TranscodeAttempts ta ON tp.TranscodeAttemptId = ta.Id
-                INNER JOIN TranscodeQueue tq ON LOWER(ta.FilePath) = LOWER(tq.FilePath) AND tq.Status = 'Running'
                 LEFT JOIN MediaFiles mf ON ta.FilePath = mf.FilePath
                 WHERE ta.Success IS NULL
                 ORDER BY tp.LastProgressUpdate DESC

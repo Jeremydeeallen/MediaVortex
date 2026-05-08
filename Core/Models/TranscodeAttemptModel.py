@@ -31,7 +31,8 @@ class TranscodeAttemptModel:
     CompletedDate: Optional[datetime] = None  # Timestamp when the transcode job finished (success or failure)
     StartTime: Optional[str] = None  # Start time offset in HH:MM:SS format or seconds
     PreferredAttempt: bool = False  # Whether this attempt is preferred and should prevent further retranscoding
-    
+    WorkerName: Optional[str] = None  # Name of the worker that executed this transcode
+
     def __post_init__(self):
         if self.AttemptDate is None:
             self.AttemptDate = datetime.now()

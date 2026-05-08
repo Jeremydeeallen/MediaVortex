@@ -35,7 +35,8 @@ class TranscodeJobRepository(BaseRepository):
             FileReplacedDate=row.get('FileReplacedDate'),
             ReplacementType=row.get('ReplacementType'),
             StartTime=row.get('StartTime'),
-            PreferredAttempt=bool(row.get('PreferredAttempt', False))
+            PreferredAttempt=bool(row.get('PreferredAttempt', False)),
+            WorkerName=row.get('WorkerName')
         )
 
     def _MapRowToTranscodeFile(self, row) -> TranscodeFileModel:
@@ -81,7 +82,8 @@ class TranscodeJobRepository(BaseRepository):
         Id, FilePath, AttemptDate, Quality, OldSizeBytes, NewSizeBytes, Success,
         SizeReductionBytes, SizeReductionPercent, ErrorMessage, TranscodeDurationSeconds,
         FfpmpegCommand, AudioBitrateKbps, VideoBitrateKbps, ProfileName, VMAF,
-        FileReplaced, FileReplacedDate, ReplacementType, StartTime, PreferredAttempt
+        FileReplaced, FileReplacedDate, ReplacementType, StartTime, PreferredAttempt,
+        WorkerName
     """
 
     def GetAllTranscodeAttempts(self) -> List[TranscodeAttemptModel]:
@@ -195,8 +197,9 @@ class TranscodeJobRepository(BaseRepository):
                         (FilePath, AttemptDate, Quality, OldSizeBytes, NewSizeBytes, Success,
                          SizeReductionBytes, SizeReductionPercent, ErrorMessage, TranscodeDurationSeconds,
                          FfpmpegCommand, AudioBitrateKbps, VideoBitrateKbps, ProfileName, VMAF,
-                         FileReplaced, FileReplacedDate, ReplacementType, StartTime, PreferredAttempt)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                         FileReplaced, FileReplacedDate, ReplacementType, StartTime, PreferredAttempt,
+                         WorkerName)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         RETURNING Id
                     """
                     parameters = (
@@ -207,7 +210,8 @@ class TranscodeJobRepository(BaseRepository):
                         Attempt.FfpmpegCommand,
                         Attempt.AudioBitrateKbps, Attempt.VideoBitrateKbps, Attempt.ProfileName, Attempt.VMAF,
                         Attempt.FileReplaced, Attempt.FileReplacedDate, Attempt.ReplacementType, Attempt.StartTime,
-                        Attempt.PreferredAttempt
+                        Attempt.PreferredAttempt,
+                        Attempt.WorkerName
                     )
                     LoggingService.LogInfo(f"Insert attempt parameters: {parameters}", "TranscodeJobRepository", "SaveTranscodeAttempt")
                     cursor.execute(query, parameters)
@@ -259,7 +263,7 @@ class TranscodeJobRepository(BaseRepository):
                 'Success', 'SizeReductionBytes', 'SizeReductionPercent', 'ErrorMessage',
                 'TranscodeDurationSeconds', 'FfpmpegCommand', 'AudioBitrateKbps',
                 'VideoBitrateKbps', 'ProfileName', 'VMAF', 'FileReplaced', 'FileReplacedDate',
-                'ReplacementType', 'StartTime', 'PreferredAttempt'
+                'ReplacementType', 'StartTime', 'PreferredAttempt', 'WorkerName'
             ]
 
             # Build dynamic UPDATE query based on provided fields
