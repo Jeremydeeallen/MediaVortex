@@ -74,6 +74,20 @@ Phase 1 (commit 6bf51b2) addressed the four highest-risk silent swallows that hi
 
 ---
 
+### [BUG] Worker capability flags not editable from the UI
+**Date:** 2026-05-08
+**Affects:** WorkerService.feature.md (criterion 14), Activity page, Settings page, `Features/TeamStatus/TeamStatusController.py`
+
+`Workers.TranscodeEnabled`, `Workers.QualityTestEnabled`, `Workers.ScanEnabled` are read by the worker's 60s capability poller, but no UI control writes them -- the operator has to run `UPDATE Workers SET ScanEnabled=true WHERE WorkerName=...` directly via SQL. Same gap as the per-worker Status (Online/Draining/Offline) controls -- but those at least have buttons on the Activity page; capability flags have nothing.
+
+**Look first:** `Features/TeamStatus/TeamStatusController.py` already has `POST /api/TeamStatus/Workers/<name>/Status` for status changes -- mirror that pattern for capability flags. `Templates/Activity.html` worker-row rendering already iterates `/api/TeamStatus/Workers` JSON which includes `TranscodeEnabled`/`QualityTestEnabled`/`ScanEnabled` -- add three toggle controls to each row alongside the existing status buttons.
+
+**Flow doc gap:** `WorkerService.flow.md` covers the read-path (capability polling) but not the write-path. `/t` should extend it with a stage describing the API endpoint contract before the fix.
+
+**Fix with:** `/t` (one new POST endpoint + Activity template change + JS handler; estimate 30-45 min)
+
+---
+
 ### [BUG] SystemSettings not normalized; /settings page does not show every row
 **Date:** 2026-05-08
 **Affects:** SystemSettings.feature.md (criteria 11, 12), `Features/SystemSettings/SystemSettingsRepository.py`, `Templates/Settings.html`
