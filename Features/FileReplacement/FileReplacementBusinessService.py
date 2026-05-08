@@ -15,6 +15,11 @@ class FileReplacementBusinessService:
                  PathTranslation=None, FFprobePath: str = None):
         self.DatabaseManager = DatabaseManagerInstance or DatabaseManager()
         self.FileManager = FileManagerInstance or FileManagerService(FFprobePath=FFprobePath)
+        if PathTranslation is None:
+            from Core.WorkerContext import WorkerContext
+            Ctx = WorkerContext.Current()
+            if Ctx:
+                PathTranslation = Ctx.PathTranslation
         self.PathTranslation = PathTranslation
 
     def _ToLocalPath(self, CanonicalPath: str) -> str:
@@ -555,7 +560,9 @@ class FileReplacementBusinessService:
                 }
 
             # Extract new metadata from the transcoded file at its new location
-            metadata = self.FileManager.ExtractMediaMetadata(NewFilePath)
+            # Translate canonical DB path to local filesystem path for FFprobe
+            LocalNewFilePath = self._ToLocalPath(NewFilePath)
+            metadata = self.FileManager.ExtractMediaMetadata(LocalNewFilePath)
             if not metadata.get('Success', False):
                 return {
                     'Success': False,

@@ -48,7 +48,29 @@ class WebServiceApp:
         self.StatusPollingThread = None
         self.ShutdownEvent = False
         self.CurrentStatus = "Stopped"  # Track current service status
-        
+
+        # Load worker config and initialize WorkerContext singleton
+        import socket
+        import platform as platform_mod
+        try:
+            from Repositories.DatabaseManager import DatabaseManager
+            from Core.WorkerContext import WorkerContext
+            WorkerName = socket.gethostname()
+            WorkerPlatform = platform_mod.system().lower()
+            db_init = DatabaseManager()
+            WorkerConfig = db_init.GetWorkerConfig(WorkerName) or {}
+            WorkerContext.Initialize(
+                WorkerName=WorkerName,
+                Platform=WorkerPlatform,
+                FFmpegPath=WorkerConfig.get('FFmpegPath') or WorkerConfig.get('ffmpegpath'),
+                FFprobePath=WorkerConfig.get('FFprobePath') or WorkerConfig.get('ffprobepath'),
+                StagingDirectory=WorkerConfig.get('StagingDirectory') or WorkerConfig.get('stagingdirectory'),
+                ShareMappings=WorkerConfig.get('ShareMappings') or {}
+            )
+            LoggingService.LogInfo(f"WorkerContext initialized for {WorkerName}", "WebService", "__init__")
+        except Exception as e:
+            LoggingService.LogWarning(f"Could not initialize WorkerContext: {e}", "WebService", "__init__")
+
         # Initialize controllers
         from Features.Profiles.ProfileController import ProfileController
         from Features.FileScanning.FileScanningController import FileScanningController

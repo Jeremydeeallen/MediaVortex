@@ -29,12 +29,31 @@ class QualityTestServiceApp:
     
     def __init__(self):
         """Initialize the QualityTestService application."""
+        import socket
+        import platform as platform_mod
+
         # Check if another instance is already running
         if self.PrivateIsServiceAlreadyRunning():
             LoggingService.LogError("QualityTestService is already running. Preventing duplicate instance.", "QualityTestServiceApp", "__init__")
             sys.exit(1)
-        
+
         self.DatabaseManager = DatabaseManager()
+
+        # Load worker config and initialize WorkerContext singleton
+        WorkerName = socket.gethostname()
+        WorkerPlatform = platform_mod.system().lower()
+        WorkerConfig = self.DatabaseManager.GetWorkerConfig(WorkerName) or {}
+        from Core.WorkerContext import WorkerContext
+        WorkerContext.Initialize(
+            WorkerName=WorkerName,
+            Platform=WorkerPlatform,
+            FFmpegPath=WorkerConfig.get('FFmpegPath') or WorkerConfig.get('ffmpegpath'),
+            FFprobePath=WorkerConfig.get('FFprobePath') or WorkerConfig.get('ffprobepath'),
+            StagingDirectory=WorkerConfig.get('StagingDirectory') or WorkerConfig.get('stagingdirectory'),
+            ShareMappings=WorkerConfig.get('ShareMappings') or {}
+        )
+        LoggingService.LogInfo(f"WorkerContext initialized for {WorkerName}", "QualityTestService", "__init__")
+
         self.ProcessQualityTestQueue = ProcessQualityTestQueueService(
             DatabaseManagerInstance=self.DatabaseManager
         )

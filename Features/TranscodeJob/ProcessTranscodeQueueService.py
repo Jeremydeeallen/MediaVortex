@@ -40,10 +40,23 @@ class ProcessTranscodeQueueService:
         self.WorkerName = WorkerName or socket.gethostname()
         self.WorkerConfig = WorkerConfig or {}
 
-        # Worker-specific paths (from Workers table, with fallback defaults)
-        self.FFmpegPath = self.WorkerConfig.get('FFmpegPath') or self.WorkerConfig.get('ffmpegpath')
-        self.FFprobePath = self.WorkerConfig.get('FFprobePath') or self.WorkerConfig.get('ffprobepath')
-        self.OutputDirectory = self.WorkerConfig.get('StagingDirectory') or self.WorkerConfig.get('stagingdirectory')
+        # Read shared paths from WorkerContext (set at startup), fall back to WorkerConfig dict
+        from Core.WorkerContext import WorkerContext
+        Ctx = WorkerContext.Current()
+        if Ctx:
+            self.FFmpegPath = Ctx.FFmpegPath
+            self.FFprobePath = Ctx.FFprobePath
+            self.OutputDirectory = Ctx.StagingDirectory
+            self.PathTranslation = Ctx.PathTranslation
+        else:
+            self.FFmpegPath = self.WorkerConfig.get('FFmpegPath') or self.WorkerConfig.get('ffmpegpath')
+            self.FFprobePath = self.WorkerConfig.get('FFprobePath') or self.WorkerConfig.get('ffprobepath')
+            self.OutputDirectory = self.WorkerConfig.get('StagingDirectory') or self.WorkerConfig.get('stagingdirectory')
+            self.PathTranslation = None
+            MountMap = self.WorkerConfig.get('ShareMappings') or {}
+            if MountMap:
+                from Core.Services.PathTranslationService import PathTranslationService
+                self.PathTranslation = PathTranslationService(MountMap=MountMap)
 
         # Per-worker CPU thread limit (NULL = use global SystemSettings.MaxCpuThreads)
         RawMaxCpu = self.WorkerConfig.get('MaxCpuThreads') or self.WorkerConfig.get('maxcputhreads')
@@ -57,17 +70,9 @@ class ProcessTranscodeQueueService:
         RawWorkerQT = self.WorkerConfig.get('QualityTestEnabled') or self.WorkerConfig.get('qualitytestenabled')
         self.WorkerQualityTestEnabled = RawWorkerQT  # None means "use global"
 
-        # Path translation service for cross-platform support
-        # MountMap is a {DriveLetter: LocalMountPrefix} dict from WorkerShareMappings table
-        self.PathTranslation = None
-        MountMap = self.WorkerConfig.get('ShareMappings') or {}
-        if MountMap:
-            from Core.Services.PathTranslationService import PathTranslationService
-            self.PathTranslation = PathTranslationService(MountMap=MountMap)
-
-        # Initialize ShouldQualityTest with PathTranslation and FFprobePath so it can pass them to FileReplacement
+        # ShouldQualityTest reads PathTranslation and FFprobePath from WorkerContext automatically
         if not self.ShouldQualityTest:
-            self.ShouldQualityTest = ShouldQualityTestService(PathTranslation=self.PathTranslation, FFprobePath=self.FFprobePath)
+            self.ShouldQualityTest = ShouldQualityTestService()
 
         # Processing state
         self.IsProcessing = False

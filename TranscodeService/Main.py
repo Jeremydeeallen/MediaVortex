@@ -45,6 +45,18 @@ class TranscodeServiceApp:
         # Register worker and load config from Workers table
         self.WorkerConfig = self._RegisterAndLoadWorkerConfig()
 
+        # Initialize WorkerContext singleton (all services in this process read from it)
+        from Core.WorkerContext import WorkerContext
+        WorkerContext.Initialize(
+            WorkerName=self.WorkerName,
+            Platform=self.WorkerPlatform,
+            FFmpegPath=self.WorkerConfig.get('FFmpegPath') or self.WorkerConfig.get('ffmpegpath'),
+            FFprobePath=self.WorkerConfig.get('FFprobePath') or self.WorkerConfig.get('ffprobepath'),
+            StagingDirectory=self.WorkerConfig.get('StagingDirectory') or self.WorkerConfig.get('stagingdirectory'),
+            ShareMappings=self.WorkerConfig.get('ShareMappings') or {}
+        )
+        LoggingService.LogInfo(f"WorkerContext initialized for {self.WorkerName}", "TranscodeService", "__init__")
+
         # Duplicate prevention is now handled in Main() function
         LoggingService.LogInfo(f"Creating ProcessTranscodeQueueService. PID: {current_pid}", "TranscodeService", "__init__")
         self.ProcessTranscodeQueue = ProcessTranscodeQueueService(

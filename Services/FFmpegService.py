@@ -20,18 +20,27 @@ class FFmpegService:
         # Initialize DatabaseManager
         self.DatabaseManager = DatabaseManager()
 
-        # If caller provides an explicit FFprobe path, use it directly (worker override)
+        # Resolve FFprobe path: explicit arg > WorkerContext > cached > SystemSettings
+        from Core.WorkerContext import WorkerContext
+        Ctx = WorkerContext.Current()
         if FFprobePath:
             self.FFprobePath = FFprobePath
+        elif Ctx and Ctx.FFprobePath:
+            self.FFprobePath = Ctx.FFprobePath
+        elif FFmpegService._cached_ffprobe_path is not None:
+            self.FFprobePath = FFmpegService._cached_ffprobe_path
         else:
-            # Use cached paths if available, otherwise find them
-            if FFmpegService._cached_ffprobe_path is None:
-                FFmpegService._cached_ffprobe_path = self.GetFFprobePathFromSettings()
+            FFmpegService._cached_ffprobe_path = self.GetFFprobePathFromSettings()
             self.FFprobePath = FFmpegService._cached_ffprobe_path
 
-        if FFmpegService._cached_ffmpeg_path is None:
+        # Resolve FFmpeg path: WorkerContext > cached > SystemSettings
+        if Ctx and Ctx.FFmpegPath:
+            self.FFmpegPath = Ctx.FFmpegPath
+        elif FFmpegService._cached_ffmpeg_path is not None:
+            self.FFmpegPath = FFmpegService._cached_ffmpeg_path
+        else:
             FFmpegService._cached_ffmpeg_path = self.GetFFmpegPathFromSettings()
-        self.FFmpegPath = FFmpegService._cached_ffmpeg_path
+            self.FFmpegPath = FFmpegService._cached_ffmpeg_path
         
         # Only log once when first instance is created
         if not FFmpegService._logged_initialization:
