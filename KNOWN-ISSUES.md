@@ -2,31 +2,6 @@
 
 ## Open
 
-### [FIXED] Services resolve tool paths and file paths from SystemSettings instead of per-worker config
-**Date:** 2026-05-08
-**Fixed:** 2026-05-08
-**Affects:** FileReplacement, FileScanning, QualityTesting, MediaProbe -- any service that creates FFmpegService() or accesses media file paths without worker-specific config
-**Criterion violated:** post-transcode-pipeline.feature.md criterion 4c, criterion 13
-
-SystemSettings stores FFmpeg/FFprobe paths as Windows-relative values (`FFmpegMaster\bin\ffprobe.exe`). The Workers table stores correct per-worker paths (`/usr/local/bin/ffprobe`). Any service that creates `FFmpegService()` without an explicit override reads from SystemSettings, which breaks on non-Windows workers.
-
-**Fix:** WorkerContext singleton (Core/WorkerContext.py) initialized at process startup from Workers table. FFmpegService.__init__ resolves paths: explicit arg > WorkerContext > cached > SystemSettings. FileReplacementBusinessService.__init__ resolves PathTranslation from WorkerContext when not provided. All previously-identified gaps are covered:
-- QualityTestingBusinessService.CheckAndTriggerAutoReplace/SkipQualityTest: create FileReplacementBusinessService without explicit args, but both FFmpegService and FileReplacementBusinessService auto-read from WorkerContext
-- FileScanning/MediaProbe: chain FileManagerService -> FFmpegAnalysisService -> FFmpegService, all resolve from WorkerContext
-- New call sites get correct paths automatically with no constructor threading needed
-
-### [FIXED] LocalStaging mode crashes workers without StagingDirectory configured
-**Date:** 2026-05-07
-**Fixed:** 2026-05-07
-**Affects:** TranscodeJob -- ProcessTranscodeQueueService.py, all job types (transcode, remux, subtitle fix)
-**Criterion violated:** local-staging.feature.md -- LocalStaging should not crash workers that lack the required infrastructure
-
-`TranscodeFileMode` is a global SystemSetting. When set to `LocalStaging` (for Docker workers on Larry), the Windows primary machine also enters LocalStaging mode. `ComputeCanonicalOutputPath()` calls `os.path.join(self.OutputDirectory, ...)` where `self.OutputDirectory` (from `Workers.StagingDirectory`) is NULL for the Windows worker, causing `TypeError: expected str, bytes or os.PathLike object, not NoneType`.
-
-Secondary impact: when the Windows TranscodeService crashed and shut down, it set the shared `ServiceStatus` row to `Stopped`, which caused idle Larry workers (1 and 4) to stop picking up jobs.
-
-**Fix:** All three job types (ProcessJob, ProcessRemuxJob, ProcessSubtitleFixJob) now validate `self.OutputDirectory` before entering LocalStaging mode. If NULL, fall back to InPlace with a warning log. Defense-in-depth guard added in `ComputeCanonicalOutputPath()`.
-
 ### [BUG] Second concurrent job shows first job's progress
 **Date:** 2025-05-05
 **Affects:** TranscodeJob feature -- concurrent job progress tracking
@@ -37,26 +12,6 @@ When MaxConcurrentJobs > 1 and a second job starts while the first is still runn
 **Look first:** `Features/TranscodeJob/ProcessTranscodeQueueService.py:169` (`GetStatus` returns single `currentProgress`), `GetCurrentTranscodeProgress()` in DatabaseManager (likely returns one row, not per-job), and `VideoTranscodingService.TranscodeVideo` (process spawning).
 
 **Fix with:** `/t`
-
-### [FIXED] Post-transcode pipeline does not complete (VMAF + file replacement not firing)
-**Date:** 2026-05-07
-**Fixed:** 2026-05-07
-**Affects:** QualityTesting, FileReplacement -- transcode.flow.md stages 6-7
-
-**Root cause (2 compounding issues):**
-1. ShouldQualityTestService.ShouldTestFile() always returned True, ignoring QualityTestRequired.
-2. FileReplacementBusinessService had no path translation (hardcoded Windows paths).
-
-**Fix:** Removed dead ShouldTestFile(). ProcessTranscodedFile() now reads QualityTestRequired from TranscodeAttempt -- when False, calls FileReplacement directly with BypassVMAFCheck=True. FileReplacementBusinessService accepts PathTranslation, translates canonical paths before all filesystem ops, skips shutil.move for InPlace mode. HandleJobFailure cleans up partial output files and TemporaryFilePaths rows on failure. See post-transcode-pipeline.feature.md.
-
-### [FIXED] Concurrent job progress invisible in UI
-**Date:** 2026-05-08
-**Fixed:** 2026-05-08
-**Affects:** TranscodeJob -- progress display when MaxConcurrentJobs > 1
-**Root cause:** `GetCurrentTranscodeProgress()` and `GetAllCurrentTranscodeProgress()` in `DatabaseManager.py` used `INNER JOIN TranscodeQueue ... AND tq.Status = 'Running'` to filter active jobs. Progress display depended on a transient queue row instead of the authoritative `TranscodeAttempts.Success IS NULL`. When a concurrent job's queue row disappeared, the still-running sibling became invisible.
-**Fix:** Removed the `INNER JOIN TranscodeQueue` from both progress queries. Progress now uses `TranscodeProgress + TranscodeAttempts WHERE Success IS NULL` -- no queue dependency.
-
-**Note:** The queue rows for concurrent jobs are still disappearing (cause unknown). An audit trigger (`trg_transcodequeue_delete`) is in place on the DB to capture the next occurrence. The progress fix makes the UI resilient to this regardless.
 
 ### [BUG] DatabaseManager.py monolith -- dual database access paths
 **Date:** 2026-05-07
@@ -80,18 +35,6 @@ TranscodeJob.feature.md declares scope `Features/TranscodeJob/**` + `WorkerServi
 
 **Fix with:** `/n` (architectural boundary redesign -- either expand TranscodeJob scope or extract worker/command-building into separate feature verticals)
 
-### [FIXED] Yadif deinterlacing applied to progressive files
-**Date:** 2026-05-05
-**Fixed:** 2026-05-05
-**Affects:** All profiles, CommandBuilder video filter chain
-
-All 12 profiles had YadifMode=1/YadifParity=1/YadifDeint=1 hardcoded. CommandBuilder.BuildVideoFilters applied yadif unconditionally based on profile settings without checking MediaFiles.IsInterlaced. This caused:
-1. Unnecessary deinterlacing on progressive content (majority of queue)
-2. yadif is single-threaded per-frame -- bottlenecked SVT-AV1 to ~2 cores regardless of -threads setting
-3. Encode speed ~8.4 FPS on progressive files vs ~10+ FPS without yadif
-
-**Fix:** Set YadifMode=NULL, YadifParity=NULL on all profiles. CommandBuilder already skips yadif when these values are NULL/blank. Future: CommandBuilder should check IsInterlaced from MediaFile and only apply yadif when the source is actually interlaced.
-
 ### [BUG] FilePath used as denormalized natural key across 6+ tables
 **Date:** 2026-05-05
 **Affects:** Schema-wide -- MediaFiles, TranscodeAttempts, TranscodeFiles, TranscodeQueue, CompliantFiles, ProblemFiles
@@ -112,54 +55,44 @@ Full Windows paths (e.g., `T:\Shows\file.mkv`) are stored as natural keys in at 
 - [ ] FK constraints (AddMediaFileForeignKeys.py) -- deferred until deploy confirmed stable
 - [ ] Drop filepath columns from child tables (point of no return)
 
-### [FIXED] StuckJobDetector breaks distributed transcoding -- orphaned FFmpeg, corrupted results
-**Date:** 2026-05-05
-**Fixed:** 2026-05-05
-**Affects:** Features/ServiceControl/StuckJobDetectionService.py, TranscodeService worker flow
+---
 
-**Root cause (5 compounding failures):**
-1. `GetActiveJobsByService` did not SELECT WorkerName, so Tier 1 heartbeat check never ran and all jobs were treated as local
-2. `IsProcessAlive` checked `'ffmpeg' in process.name()` on the Python worker PID -- always false
-3. `SignalHandler` reset ALL workers' queue items and active jobs, not just its own
-4. `CrashRecoveryService` operated on ALL workers' active jobs, incorrectly resetting remote jobs
-5. `QueueManagementService.Stop()` reset ALL running jobs globally
+## Fixed
 
-**Fix:** All destructive operations scoped by WorkerName/ClaimedBy:
-- `GetActiveJobsByService` now includes WorkerName in SELECT + optional filter
-- `IsProcessAlive` checks `process.is_running()` only (PID reuse guarded by Tier 1 heartbeat)
-- `SignalHandler` uses `AND ClaimedBy = %s` and `AND WorkerName = %s`
-- `CrashRecoveryService` accepts WorkerName, scopes all queries and cleanup
-- `QueueManagementService.ResetTranscodeQueueRunningJobs` accepts WorkerName filter
-- All cleanup also clears ClaimedBy/ClaimedAt when resetting to Pending
+### [FIXED] Services resolve tool paths from SystemSettings instead of per-worker config
+**Date:** 2026-05-08 | **Fixed:** 2026-05-08
+**Fix:** WorkerContext singleton. FFmpegService resolves: explicit arg > WorkerContext > cached > SystemSettings. FileReplacementBusinessService auto-reads PathTranslation from WorkerContext.
+
+### [FIXED] LocalStaging mode crashes workers without StagingDirectory configured
+**Date:** 2026-05-07 | **Fixed:** 2026-05-07
+**Fix:** All three job types validate `self.OutputDirectory` before entering LocalStaging mode. NULL falls back to InPlace.
+
+### [FIXED] Post-transcode pipeline does not complete (VMAF + file replacement not firing)
+**Date:** 2026-05-07 | **Fixed:** 2026-05-07
+**Fix:** Removed dead ShouldTestFile(). ProcessTranscodedFile() reads QualityTestRequired from TranscodeAttempt. FileReplacementBusinessService accepts PathTranslation, translates canonical paths before filesystem ops.
+
+### [FIXED] Concurrent job progress invisible in UI
+**Date:** 2026-05-08 | **Fixed:** 2026-05-08
+**Fix:** Removed `INNER JOIN TranscodeQueue` from progress queries. Progress now uses `TranscodeProgress + TranscodeAttempts WHERE Success IS NULL`.
+**Note:** Queue rows for concurrent jobs still disappear (cause unknown). Audit trigger `trg_transcodequeue_delete` is in place.
+
+### [FIXED] Yadif deinterlacing applied to progressive files
+**Date:** 2026-05-05 | **Fixed:** 2026-05-05
+**Fix:** Set YadifMode=NULL, YadifParity=NULL on all profiles. CommandBuilder skips yadif when NULL.
+
+### [FIXED] StuckJobDetector breaks distributed transcoding
+**Date:** 2026-05-05 | **Fixed:** 2026-05-05
+**Fix:** All destructive operations scoped by WorkerName/ClaimedBy. GetActiveJobsByService includes WorkerName. SignalHandler, CrashRecoveryService, QueueManagementService all filter by worker.
 
 ### [FIXED] Thread-limiting changes degraded worker transcode performance
-**Date:** 2026-05-07
-**Fixed:** 2026-05-07
-**Affects:** TranscodeJob -- CommandBuilder.py svtav1-params, docker-compose CPU settings
-**Criterion violated:** local-staging.feature.md criterion 8 -- CPU utilization >90% with 4 concurrent workers
-
-Changes added to fix thread contention (`lp=8` in svtav1-params, `-threads 8`, `MEDIAVORTEX_MAX_CPU_THREADS=8` env var, Docker `cpus: "8"` limit) resulted in 10% total CPU utilization, load average >90, and ~1 hour per episode. SVT-AV1 creates ~120-132 OS threads per process regardless of `lp` value. Docker CFS throttling starved encoding threads; `lp` added overhead without reducing thread count.
-
-**Fix:** Reverted all three changes: removed `lp=N` from `AddFilmGrainParameter()`, removed `MEDIAVORTEX_MAX_CPU_THREADS` env var from docker-compose.yml, cleared `MaxCpuThreads` from Workers table. Rebuilt image, redeployed. Workers returned to ~100-200% CPU per process (pre-change baseline).
-
-**Lesson:** SVT-AV1's `lp=N` does NOT reduce OS thread count — it only limits encoding pipeline parallelism while still creating the full thread pool. Docker `cpus` CFS throttling is counterproductive when the process has many idle threads that consume quota on wakeup. Any future thread-limiting work needs isolated benchmarking with controlled variables, not live tweaking.
-
-**Remaining:** 4 workers at 480p preset 6 still only use ~10% of a 64-CPU system. This is a separate investigation (480p frame size limits SVT-AV1 parallelism). Do not attempt to fix in the same session as deployment work.
+**Date:** 2026-05-07 | **Fixed:** 2026-05-07
+**Fix:** Reverted `lp=N`, `MEDIAVORTEX_MAX_CPU_THREADS`, Docker `cpus` limit. SVT-AV1 `lp` does not reduce OS thread count; Docker CFS throttling is counterproductive with many idle threads.
+**Remaining:** 4 workers at 480p preset 6 still only use ~10% of a 64-CPU system (480p frame size limits SVT-AV1 parallelism -- separate investigation).
 
 ### [FIXED] FFmpegService.py cpu_affinity overrides Docker cpuset pinning
-**Date:** 2026-05-07
-**Fixed:** 2026-05-07
-**Affects:** TranscodeJob -- FFmpegService.py, VideoTranscodingService.py, Docker worker performance
-**Criterion violated:** local-staging.feature.md criterion 8 -- CPU utilization >90% with 4 concurrent workers
-
-`FFmpegService.py:292` unconditionally called `psutil.cpu_affinity(list(range(MaxCpuThreads)))` on every FFmpeg process. Inside Docker containers with NUMA-aligned cpuset (only even or odd CPU IDs), `range(N)` includes CPU IDs that don't exist in the container. psutil intersects with available CPUs, leaving FFmpeg pinned to as few as 4 cores instead of 16. Separately, `VideoTranscodingService.py:68` raised `ValueError` when `MaxCpuThreads` was NULL in SystemSettings, crashing all jobs.
-
-**Root cause:** Two independent app-level affinity code paths (`FFmpegService.py` and `CpuAffinityService.py` via `VideoTranscodingService.py`) that assume sequential CPU IDs starting at 0. Docker cpuset already handles CPU isolation; app-level affinity is redundant and harmful in containerized deployments.
-
-**Fix:** Both `FFmpegService.py` and `VideoTranscodingService.py` now skip affinity calls when `/.dockerenv` exists. Docker cpuset is the sole CPU isolation mechanism in container deployments. The `CpuAffinityEnabled = false` DB setting was already set but only controlled `CpuAffinityService` — `FFmpegService` had its own unchecked path.
+**Date:** 2026-05-07 | **Fixed:** 2026-05-07
+**Fix:** FFmpegService.py and VideoTranscodingService.py skip affinity calls when `/.dockerenv` exists. Docker cpuset is the sole CPU isolation mechanism in containers.
 
 ### [FIXED] QueryDatabase.py sql command silently rolls back writes
-**Date:** 2026-05-05
-**Fixed:** 2026-05-05
-
-Added `--commit` flag to `QueryDatabase.py sql`. Default behavior unchanged (rollback for safety). setup.sh updated to use `--commit` for worker registration and share mapping writes. Output now explicitly says "(rolled back -- use --commit to persist)" when writes are not committed.
+**Date:** 2026-05-05 | **Fixed:** 2026-05-05
+**Fix:** Added `--commit` flag. Default unchanged (rollback for safety).

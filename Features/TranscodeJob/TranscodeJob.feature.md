@@ -36,5 +36,5 @@ Executes FFmpeg transcode jobs from the queue, tracks progress, and handles resu
 - [x] True in-place output: CommandBuilder uses source file directory instead of OutputDirectory
 - [x] Output location mode: add TranscodeOutputMode setting, respect InPlace vs Staging
 - [x] VMAF toggle: add QualityTestEnabled global setting (default OFF) and per-worker column
-- [ ] Per-worker FFprobe: wire Workers.FFprobePath through to audio stream analysis
+- [x] Per-worker FFprobe: WorkerContext singleton provides FFprobePath to FFmpegService automatically, no explicit threading needed
 - [ ] Fix: concurrent job progress isolation (see KNOWN-ISSUES.md)
