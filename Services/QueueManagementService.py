@@ -72,9 +72,10 @@ class QueueManagementService:
                 transcodeAttemptsQuery = """
                 UPDATE TranscodeAttempts
                 SET Success = FALSE, ErrorMessage = %s
-                WHERE FilePath IN (
-                    SELECT FilePath FROM TranscodeQueue
+                WHERE MediaFileId IN (
+                    SELECT MediaFileId FROM TranscodeQueue
                     WHERE Status = 'Pending' AND DateStarted IS NULL
+                    AND MediaFileId IS NOT NULL
                 ) AND Success IS NULL
                 """
                 attemptsAffectedRows = self.DatabaseManager.DatabaseService.ExecuteNonQuery(transcodeAttemptsQuery, (CancelReason,))

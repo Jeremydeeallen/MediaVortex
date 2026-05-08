@@ -35,7 +35,7 @@ cur.execute("""
            m.Codec, m.Resolution, m.ResolutionCategory, m.ContainerFormat
     FROM MediaFiles m
     WHERE (m.TranscodedByMediaVortex IS NULL OR m.TranscodedByMediaVortex = false)
-      AND m.FilePath NOT IN (SELECT FilePath FROM TranscodeQueue)
+      AND m.Id NOT IN (SELECT MediaFileId FROM TranscodeQueue WHERE MediaFileId IS NOT NULL)
       AND m.SizeMB > 0
       AND m.FilePath LIKE 'T:%%'
     ORDER BY m.SizeMB DESC, m.VideoBitrateKbps DESC
@@ -51,7 +51,7 @@ cur.execute("""
            m.Codec, m.Resolution, m.ResolutionCategory, m.ContainerFormat
     FROM MediaFiles m
     WHERE (m.TranscodedByMediaVortex IS NULL OR m.TranscodedByMediaVortex = false)
-      AND m.FilePath NOT IN (SELECT FilePath FROM TranscodeQueue)
+      AND m.Id NOT IN (SELECT MediaFileId FROM TranscodeQueue WHERE MediaFileId IS NOT NULL)
       AND m.SizeMB > 0
       AND m.FilePath LIKE 'T:%%'
     ORDER BY m.SizeMB DESC, m.VideoBitrateKbps DESC
@@ -68,7 +68,7 @@ cur.execute("""
            m.Codec, m.Resolution, m.ResolutionCategory, m.ContainerFormat
     FROM MediaFiles m
     WHERE (m.TranscodedByMediaVortex IS NULL OR m.TranscodedByMediaVortex = false)
-      AND NOT EXISTS (SELECT 1 FROM TranscodeQueue tq WHERE tq.FilePath = m.FilePath)
+      AND NOT EXISTS (SELECT 1 FROM TranscodeQueue tq WHERE tq.MediaFileId = m.Id)
       AND m.SizeMB > 0
       AND m.FilePath LIKE 'T:%%'
     ORDER BY m.SizeMB DESC, m.VideoBitrateKbps DESC
@@ -84,7 +84,7 @@ cur.execute("""
            m.Codec, m.Resolution, m.ResolutionCategory, m.ContainerFormat
     FROM MediaFiles m
     WHERE (m.TranscodedByMediaVortex IS NULL OR m.TranscodedByMediaVortex = false)
-      AND NOT EXISTS (SELECT 1 FROM TranscodeQueue tq WHERE tq.FilePath = m.FilePath)
+      AND NOT EXISTS (SELECT 1 FROM TranscodeQueue tq WHERE tq.MediaFileId = m.Id)
       AND m.SizeMB > 0
       AND m.FilePath LIKE 'T:%%'
     ORDER BY m.SizeMB DESC, m.VideoBitrateKbps DESC

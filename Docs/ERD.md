@@ -6,6 +6,13 @@ Renderable in GitHub, VS Code (with Mermaid extension), or [mermaid.live](https:
 ```mermaid
 erDiagram
 
+    %% Actual Foreign Keys
+    mediafiles ||--o{ compliantfiles : "mediafileid"
+    mediafiles ||--o{ problemfiles : "mediafileid"
+    mediafiles ||--o{ transcodeattempts : "mediafileid"
+    mediafiles ||--o{ transcodefiles : "mediafileid"
+    mediafiles ||--o{ transcodequeue : "mediafileid"
+
     %% Inferred Relationships (no FK constraint)
     codecflags ||..o{ codecparameters : "codecflagsid"
     seasons ||..o{ mediafiles : "seasonid"
@@ -35,6 +42,40 @@ erDiagram
         text status
         timestamp createdat
         timestamp updatedat
+        text workername
+    }
+
+    clipbuilderexports {
+        int id PK
+        text filename
+        text sourcepath
+        text outputpath60
+        text outputpath30
+        float clipduration
+        text starttimes
+        timestamp exporteddate
+        text outputpath120
+        text outputpathprimary
+        text outputpathhalf
+        int targetlength
+    }
+
+    clipbuilderpresets {
+        int id PK
+        text presetname
+        int fileid
+        text filename
+        text filepath
+        float clipduration
+        text starttimes
+        text outputfolder60
+        text outputfolder30
+        timestamp createddate
+        text outputfolder120
+        int targetlength
+        bool includehalf
+        text outputfolderprimary
+        text outputfolderhalf
     }
 
     codecflags {
@@ -78,6 +119,7 @@ erDiagram
         text reason
         timestamp dateadded
         timestamp lastmodified
+        bigint mediafileid FK
     }
 
     compressionlearningmodels {
@@ -220,6 +262,11 @@ erDiagram
         bigint filesize
         text audiocodec
         text subtitleformats
+        int ffprobefailurecount
+        text lastffprobeerror
+        timestamp lastffprobeattemptdate
+        text audiolanguages
+        bool hasexplicitenglishaudio
     }
 
     mediafilesarchive {
@@ -282,6 +329,7 @@ erDiagram
         timestamp dateencountered
         bigint retrycount
         timestamp lastretry
+        bigint mediafileid FK
     }
 
     profiles {
@@ -298,6 +346,7 @@ erDiagram
         bigint yadifdeint
         bigint codecflagsid FK
         bigint usenvidiahardware
+        int sortorder
     }
 
     profilethresholds {
@@ -496,6 +545,14 @@ erDiagram
         text microservicestatus
     }
 
+    showsettings {
+        int id PK
+        text showfolder
+        text targetresolution
+        timestamp createddate
+        timestamp lastmodifieddate
+    }
+
     systemsettings {
         bigint id PK
         text settingkey
@@ -540,6 +597,8 @@ erDiagram
         text starttime
         bool preferredattempt
         timestamp completeddate
+        text workername
+        bigint mediafileid FK
     }
 
     transcodefiles {
@@ -555,6 +614,7 @@ erDiagram
         bigint totalattempts
         text originalfilepath
         text finalfilepath
+        bigint mediafileid FK
     }
 
     transcodeprogress {
@@ -576,6 +636,7 @@ erDiagram
         timestamp lastprogressupdate
         text handbrakeoutput
         text status
+        timestamp lastframeadvance
     }
 
     transcodequeue {
@@ -590,6 +651,36 @@ erDiagram
         timestamp dateadded
         timestamp datestarted
         text processingmode
+        text claimedby
+        timestamp claimedat
+        bigint mediafileid FK
+    }
+
+    workers {
+        bigint id PK
+        text workername
+        text platform
+        text ffmpegpath
+        text ffprobepath
+        text stagingdirectory
+        text sharemountprefix
+        text sharecanonicalprefix
+        int maxconcurrentjobs
+        text status
+        timestamp lastheartbeat
+        timestamp registeredat
+        int maxcputhreads
+        bool acceptsinterlaced
+        bool qualitytestenabled
+        bool transcodeenabled
+        bool scanenabled
+    }
+
+    workersharemappings {
+        bigint id PK
+        text workername
+        text localmountprefix
+        char driveletter
     }
 ```
 

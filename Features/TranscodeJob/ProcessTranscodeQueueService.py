@@ -737,7 +737,7 @@ class ProcessTranscodeQueueService:
             })
 
             # Update TranscodeFiles record
-            self.UpdateTranscodeFileRecord(Job.FilePath, TranscodeAttemptId, True, OutputFilePath, NewSizeBytes)
+            self.UpdateTranscodeFileRecord(Job.FilePath, TranscodeAttemptId, True, OutputFilePath, NewSizeBytes, MediaFileId=Job.MediaFileId)
 
             # Skip quality testing - go directly to file replacement
             # Use ShouldQualityTest with bypass since video is bit-identical
@@ -959,8 +959,8 @@ class ProcessTranscodeQueueService:
             try:
                 # Query for StartTime from the most recent TranscodeAttempt for this file
                 StartTimeResult = self.DatabaseManager.DatabaseService.ExecuteQuery(
-                    "SELECT StartTime FROM TranscodeAttempts WHERE LOWER(FilePath) = LOWER(%s) ORDER BY AttemptDate DESC LIMIT 1",
-                    (Job.FilePath,)
+                    "SELECT StartTime FROM TranscodeAttempts WHERE MediaFileId = %s ORDER BY AttemptDate DESC LIMIT 1",
+                    (Job.MediaFileId,)
                 )
                 if StartTimeResult and StartTimeResult[0]['StartTime']:
                     StartTime = StartTimeResult[0]['StartTime']
@@ -1015,7 +1015,7 @@ class ProcessTranscodeQueueService:
             if not overrideApplied:
                 from Services.AdaptiveQualityService import AdaptiveQualityService
                 adaptiveService = AdaptiveQualityService(self.DatabaseManager)
-                previousAttempt = adaptiveService.GetLatestTranscodeAttemptWithVMAF(Job.FilePath)
+                previousAttempt = adaptiveService.GetLatestTranscodeAttemptWithVMAF(Job.MediaFileId)
 
                 if previousAttempt:
                     previousCRF = previousAttempt.get('Quality')
@@ -1240,7 +1240,7 @@ class ProcessTranscodeQueueService:
                 })
 
                 # Update TranscodeFiles record for overall file status
-                self.UpdateTranscodeFileRecord(Job.FilePath, TranscodeAttemptId, True, OutputFilePath, NewSizeBytes)
+                self.UpdateTranscodeFileRecord(Job.FilePath, TranscodeAttemptId, True, OutputFilePath, NewSizeBytes, MediaFileId=Job.MediaFileId)
 
                 # LocalOutputPath was already set during command building (single source of truth)
 
@@ -1295,7 +1295,7 @@ class ProcessTranscodeQueueService:
                 })
 
                 # Update TranscodeFiles record for overall file status (failure)
-                self.UpdateTranscodeFileRecord(Job.FilePath, TranscodeAttemptId, False)
+                self.UpdateTranscodeFileRecord(Job.FilePath, TranscodeAttemptId, False, MediaFileId=Job.MediaFileId)
             else:
                 # Create new attempt record for investigation (fallback case)
                 Attempt = TranscodeAttemptModel(
@@ -1320,7 +1320,7 @@ class ProcessTranscodeQueueService:
                 AttemptId = self.DatabaseManager.SaveTranscodeAttempt(Attempt)
 
                 # Update TranscodeFiles record for overall file status (failure)
-                self.UpdateTranscodeFileRecord(Job.FilePath, AttemptId, False)
+                self.UpdateTranscodeFileRecord(Job.FilePath, AttemptId, False, MediaFileId=Job.MediaFileId)
 
             # Clean up partial output file and TemporaryFilePaths for failed attempt
             if TranscodeAttemptId:
@@ -1449,11 +1449,16 @@ class ProcessTranscodeQueueService:
             return None
 
     def UpdateTranscodeFileRecord(self, FilePath: str, TranscodeAttemptId: int, IsSuccess: bool,
-                                 FinalFilePath: str = None, FinalSizeBytes: int = None):
+                                 FinalFilePath: str = None, FinalSizeBytes: int = None,
+                                 MediaFileId: int = None):
         """Update or create TranscodeFiles record for overall file transcoding status."""
         try:
             LoggingService.LogFunctionEntry("UpdateTranscodeFileRecord", "ProcessTranscodeQueueService",
                                           FilePath, TranscodeAttemptId, IsSuccess)
+
+            # Resolve MediaFileId if not provided
+            if not MediaFileId:
+                MediaFileId = self.DatabaseManager.LookupMediaFileId(FilePath)
 
             # Get attempt details to extract quality and other info
             Attempt = self.DatabaseManager.GetTranscodeAttemptById(TranscodeAttemptId)
@@ -1463,7 +1468,7 @@ class ProcessTranscodeQueueService:
                 return
 
             # Check if TranscodeFile record already exists
-            ExistingTranscodeFile = self.DatabaseManager.GetTranscodeFileByFilePath(FilePath)
+            ExistingTranscodeFile = self.DatabaseManager.GetTranscodeFileByMediaFileId(MediaFileId) if MediaFileId else None
 
             if ExistingTranscodeFile:
                 # Update existing record
@@ -1473,7 +1478,7 @@ class ProcessTranscodeQueueService:
                 if IsSuccess:
                     # Success case - update with final details
                     self.DatabaseManager.UpdateTranscodeFileStatus(
-                        FilePath=FilePath,
+                        MediaFileId=MediaFileId,
                         SuccessfullyTranscoded=True,
                         FinalQuality=Attempt.Quality,
                         FinalSizeBytes=FinalSizeBytes,
@@ -1759,13 +1764,13 @@ class ProcessTranscodeQueueService:
             # 2. Mark TranscodeAttempts as cancelled
             self.DatabaseManager.DatabaseService.ExecuteNonQuery(
                 "UPDATE TranscodeAttempts SET Success = FALSE, ErrorMessage = 'Cancelled by user' "
-                "WHERE LOWER(FilePath) = LOWER(%s) AND Success IS NULL", (job.FilePath,))
+                "WHERE MediaFileId = %s AND Success IS NULL", (job.MediaFileId,))
 
             # 3. Clean up TranscodeProgress records
             self.DatabaseManager.DatabaseService.ExecuteNonQuery(
                 "DELETE FROM TranscodeProgress WHERE TranscodeAttemptId IN ("
-                "SELECT Id FROM TranscodeAttempts WHERE LOWER(FilePath) = LOWER(%s) AND Success = FALSE)",
-                (job.FilePath,))
+                "SELECT Id FROM TranscodeAttempts WHERE MediaFileId = %s AND Success = FALSE)",
+                (job.MediaFileId,))
 
             # 4. Delete the queue item (same as queue page cancel)
             self.DatabaseManager.DeleteTranscodeQueueItem(job_id)

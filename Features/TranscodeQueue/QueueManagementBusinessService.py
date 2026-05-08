@@ -82,7 +82,7 @@ class QueueManagementBusinessService:
                 # Check if file was previously transcoded - if so, check VMAF for retranscode decision
                 if mediaFile.FilePath in successfullyTranscodedPaths:
                     # Check if file should be retranscoded based on VMAF
-                    shouldRetranscode, previousAttempt = adaptiveService.ShouldRetranscode(mediaFile.FilePath)
+                    shouldRetranscode, previousAttempt = adaptiveService.ShouldRetranscode(mediaFile.Id)
 
                     if not shouldRetranscode:
                         # VMAF >= 80, quality already acceptable - skip retranscode
@@ -215,7 +215,7 @@ class QueueManagementBusinessService:
             Params = []
             WhereSql = """
                 WHERE (m.TranscodedByMediaVortex IS NULL OR m.TranscodedByMediaVortex = false)
-                  AND m.FilePath NOT IN (SELECT FilePath FROM TranscodeQueue)
+                  AND m.Id NOT IN (SELECT MediaFileId FROM TranscodeQueue WHERE MediaFileId IS NOT NULL)
                   AND m.SizeMB > 0
             """
             if Drive:
@@ -930,7 +930,7 @@ class QueueManagementBusinessService:
             # Check for previous attempts and validate CRF adjustment
             from Services.AdaptiveQualityService import AdaptiveQualityService
             adaptiveService = AdaptiveQualityService(self.DatabaseManager)
-            shouldRetranscode, previousAttempt = adaptiveService.ShouldRetranscode(mediaFile.FilePath)
+            shouldRetranscode, previousAttempt = adaptiveService.ShouldRetranscode(mediaFile.Id)
 
             if not shouldRetranscode:
                 # VMAF >= 80, quality already acceptable - skip retranscode
@@ -1072,8 +1072,8 @@ class QueueManagementBusinessService:
             # 2. Mark TranscodeAttempts as cancelled
             try:
                 self.Repository.DatabaseService.ExecuteNonQuery(
-                    "UPDATE TranscodeAttempts SET Success = FALSE, ErrorMessage = 'Cancelled by user' WHERE LOWER(FilePath) = LOWER(%s) AND Success IS NULL",
-                    (QueueItem.FilePath,)
+                    "UPDATE TranscodeAttempts SET Success = FALSE, ErrorMessage = 'Cancelled by user' WHERE MediaFileId = %s AND Success IS NULL",
+                    (QueueItem.MediaFileId,)
                 )
             except Exception as e:
                 LoggingService.LogException(f"Error updating TranscodeAttempts for job {JobId}", e,
@@ -1083,9 +1083,9 @@ class QueueManagementBusinessService:
             try:
                 self.Repository.DatabaseService.ExecuteNonQuery(
                     """DELETE FROM TranscodeProgress WHERE TranscodeAttemptId IN (
-                        SELECT Id FROM TranscodeAttempts WHERE LOWER(FilePath) = LOWER(%s) AND Success = FALSE
+                        SELECT Id FROM TranscodeAttempts WHERE MediaFileId = %s AND Success = FALSE
                     )""",
-                    (QueueItem.FilePath,)
+                    (QueueItem.MediaFileId,)
                 )
             except Exception as e:
                 LoggingService.LogException(f"Error cleaning TranscodeProgress for job {JobId}", e,

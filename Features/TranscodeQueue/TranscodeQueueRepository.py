@@ -22,6 +22,7 @@ class TranscodeQueueRepository(BaseRepository):
             SizeMB=row['SizeMB'],
             Priority=row['Priority'],
             Status=row['Status'],
+            MediaFileId=row.get('MediaFileId'),
             DateAdded=self.ConvertStringToDateTime(row['DateAdded']) if row.get('DateAdded') else None,
             DateStarted=self.ConvertStringToDateTime(row['DateStarted']) if row.get('DateStarted') else None,
             ProcessingMode=row.get('ProcessingMode') or 'Transcode'
@@ -45,7 +46,7 @@ class TranscodeQueueRepository(BaseRepository):
                 LoggingService.LogWarning(f"Failed to convert date string to datetime: {DateString}", "TranscodeQueueRepository", "ConvertStringToDateTime")
                 return None
 
-    _QUEUE_SELECT_COLS = """Id, FilePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted, ProcessingMode"""
+    _QUEUE_SELECT_COLS = """Id, FilePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted, ProcessingMode, MediaFileId"""
 
     def GetAllTranscodeQueueItems(self) -> List[TranscodeQueueModel]:
         """Get all transcoding queue items."""

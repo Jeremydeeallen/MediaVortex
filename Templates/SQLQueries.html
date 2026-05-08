@@ -236,7 +236,7 @@ class SQLQueriesManager {
             'recent_errors': "SELECT LogLevel, Message, Timestamp, Component, FunctionName FROM Logs WHERE LogLevel IN ('ERROR', 'CRITICAL') AND Timestamp >= NOW() - INTERVAL '24 hours' ORDER BY Timestamp DESC LIMIT 50",
             'service_health': "SELECT ServiceName, Status, HealthStatus, ErrorCount, LastErrorMessage, LastHealthCheck FROM ServiceStatus ORDER BY ServiceName",
             'queue_status': "SELECT Status, COUNT(*) as Count FROM TranscodeQueue GROUP BY Status",
-            'recent_transcodes': "SELECT FilePath, Success, AttemptDate, ProfileName, SizeReductionPercent FROM TranscodeAttempts ORDER BY AttemptDate DESC LIMIT 20",
+            'recent_transcodes': "SELECT mf.FilePath, ta.Success, ta.AttemptDate, ta.ProfileName, ta.SizeReductionPercent FROM TranscodeAttempts ta LEFT JOIN MediaFiles mf ON ta.MediaFileId = mf.Id ORDER BY ta.AttemptDate DESC LIMIT 20",
             'large_queue_items': "SELECT FileName, SizeMB, Status, Priority, DateAdded FROM TranscodeQueue ORDER BY SizeMB DESC LIMIT 20"
         };
         this.LoadRecentFailures();

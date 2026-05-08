@@ -18,6 +18,7 @@ class TranscodeQueueModel:
     AssignedProfile: str = ""  # Profile assigned for transcoding
     ProcessingMode: str = "Transcode"  # "Transcode" or "Remux"
     ClaimedBy: Optional[str] = None  # Worker hostname that claimed this job
+    MediaFileId: Optional[int] = None  # FK to MediaFiles.Id
     DateAdded: Optional[datetime] = None
     DateStarted: Optional[datetime] = None
 

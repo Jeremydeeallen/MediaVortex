@@ -16,30 +16,30 @@ class AdaptiveQualityService:
         """Initialize the service with database manager."""
         self.DatabaseManager = DatabaseManagerInstance
 
-    def GetLatestTranscodeAttemptWithVMAF(self, FilePath: str) -> Optional[Dict[str, Any]]:
+    def GetLatestTranscodeAttemptWithVMAF(self, MediaFileId: int) -> Optional[Dict[str, Any]]:
         """
-        Get the most recent transcode attempt with VMAF score for a file.
+        Get the most recent transcode attempt with VMAF score for a media file.
 
         Args:
-            FilePath: Path to the file to check
+            MediaFileId: ID of the media file to check
 
         Returns:
             Dict with Quality (CRF), VMAF, ProfileName, AttemptDate, Success, or None if no attempts
         """
         try:
-            LoggingService.LogFunctionEntry("GetLatestTranscodeAttemptWithVMAF", "AdaptiveQualityService", FilePath)
+            LoggingService.LogFunctionEntry("GetLatestTranscodeAttemptWithVMAF", "AdaptiveQualityService", MediaFileId)
 
             if not self.DatabaseManager:
                 LoggingService.LogError("DatabaseManager not initialized", "AdaptiveQualityService", "GetLatestTranscodeAttemptWithVMAF")
                 return None
 
-            attempt = self.DatabaseManager.GetLatestTranscodeAttemptWithVMAF(FilePath)
+            attempt = self.DatabaseManager.GetLatestTranscodeAttemptWithVMAF(MediaFileId)
 
             if attempt:
-                LoggingService.LogDebug(f"Found previous attempt for {FilePath}: CRF={attempt.get('Quality')}, VMAF={attempt.get('VMAF')}",
+                LoggingService.LogDebug(f"Found previous attempt for MediaFileId {MediaFileId}: CRF={attempt.get('Quality')}, VMAF={attempt.get('VMAF')}",
                                       "AdaptiveQualityService", "GetLatestTranscodeAttemptWithVMAF")
             else:
-                LoggingService.LogDebug(f"No previous attempt found for {FilePath}",
+                LoggingService.LogDebug(f"No previous attempt found for MediaFileId {MediaFileId}",
                                       "AdaptiveQualityService", "GetLatestTranscodeAttemptWithVMAF")
 
             return attempt
@@ -142,7 +142,7 @@ class AdaptiveQualityService:
             LoggingService.LogException("Exception validating CRF adjustment", e, "AdaptiveQualityService", "ValidateCRFAdjustment")
             return False
 
-    def ShouldRetranscode(self, FilePath: str) -> Tuple[bool, Optional[Dict[str, Any]]]:
+    def ShouldRetranscode(self, MediaFileId: int) -> Tuple[bool, Optional[Dict[str, Any]]]:
         """
         Check if file should be retranscoded based on previous attempt VMAF.
         Skips retranscoding if a preferred attempt exists.
@@ -151,9 +151,9 @@ class AdaptiveQualityService:
             Tuple of (should_retranscode: bool, previous_attempt: Dict or None)
         """
         try:
-            LoggingService.LogFunctionEntry("ShouldRetranscode", "AdaptiveQualityService", FilePath)
+            LoggingService.LogFunctionEntry("ShouldRetranscode", "AdaptiveQualityService", MediaFileId)
 
-            previousAttempt = self.GetLatestTranscodeAttemptWithVMAF(FilePath)
+            previousAttempt = self.GetLatestTranscodeAttemptWithVMAF(MediaFileId)
 
             if not previousAttempt:
                 # No previous attempt - should transcode (first attempt)

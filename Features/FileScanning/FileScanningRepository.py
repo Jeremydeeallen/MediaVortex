@@ -417,9 +417,9 @@ class FileScanningRepository(BaseRepository):
                         'Message': 'No duplicates found'
                     }
 
-                # Build a set of FilePaths that have TranscodeAttempts records
-                cursor.execute("SELECT DISTINCT FilePath FROM TranscodeAttempts")
-                TranscodedPaths = {row['filepath'] for row in cursor.fetchall()}
+                # Build a set of MediaFileIds that have TranscodeAttempts records
+                cursor.execute("SELECT DISTINCT MediaFileId FROM TranscodeAttempts WHERE MediaFileId IS NOT NULL")
+                TranscodedMediaFileIds = {row['mediafileid'] for row in cursor.fetchall()}
 
                 MetadataColumns = [
                     'SeasonId', 'SizeMB', 'VideoBitrateKbps', 'AudioBitrateKbps',
@@ -452,7 +452,7 @@ class FileScanningRepository(BaseRepository):
                     BestKey = None
 
                     for record in Records:
-                        HasTranscodeLink = 1 if record['filepath'] in TranscodedPaths else 0
+                        HasTranscodeLink = 1 if record['id'] in TranscodedMediaFileIds else 0
                         ScanDate = record['lastscanneddate'] or ''
                         MetadataScore = sum(1 for col in MetadataColumns if record.get(col.lower()) is not None)
 

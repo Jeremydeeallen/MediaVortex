@@ -317,11 +317,11 @@ class StuckJobDetectionService:
             attemptUpdateQuery = """
             UPDATE TranscodeAttempts
             SET Success = FALSE, ErrorMessage = %s
-            WHERE LOWER(FilePath) = LOWER(%s) AND Success IS NULL
+            WHERE MediaFileId = %s AND Success IS NULL
             """
             attemptAffected = self.DatabaseManager.DatabaseService.ExecuteNonQuery(
                 attemptUpdateQuery,
-                (f"FFmpeg process died unexpectedly - cleaned by StuckJobDetectionService: {Reason}", jobDetails.FilePath)
+                (f"FFmpeg process died unexpectedly - cleaned by StuckJobDetectionService: {Reason}", jobDetails.MediaFileId)
             )
 
             # 3. Delete TranscodeProgress records
@@ -329,10 +329,10 @@ class StuckJobDetectionService:
             DELETE FROM TranscodeProgress
             WHERE TranscodeAttemptId IN (
                 SELECT Id FROM TranscodeAttempts
-                WHERE LOWER(FilePath) = LOWER(%s) AND Success = FALSE
+                WHERE MediaFileId = %s AND Success = FALSE
             )
             """
-            progressAffected = self.DatabaseManager.DatabaseService.ExecuteNonQuery(progressDeleteQuery, (jobDetails.FilePath,))
+            progressAffected = self.DatabaseManager.DatabaseService.ExecuteNonQuery(progressDeleteQuery, (jobDetails.MediaFileId,))
 
             # 4. Complete ActiveJobs records for this service
             activeJobUpdateQuery = """

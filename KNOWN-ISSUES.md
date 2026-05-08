@@ -53,7 +53,12 @@ Full Windows paths (e.g., `T:\Shows\file.mkv`) are stored as natural keys in at 
 - [x] Backfill completed: 1,952 rows linked, 6,867 orphans (old history with deleted files)
 - [x] All JOINs and INSERTs updated in code to use MediaFileId
 - [x] FK constraints added (AddMediaFileForeignKeys.py) -- TranscodeFiles/TranscodeAttempts ON DELETE SET NULL, TranscodeQueue/CompliantFiles/ProblemFiles ON DELETE CASCADE
-- [ ] Drop filepath columns from child tables (point of no return)
+- [x] All WHERE/JOIN reads switched from FilePath to MediaFileId (Phase 3b Step 1)
+- [x] FilePath removed from INSERT/UPDATE statements for TranscodeAttempts, TranscodeFiles, ProblemFiles (Phase 3b Step 2)
+- [x] NOT NULL constraint dropped from FilePath on TranscodeAttempts, TranscodeFiles, ProblemFiles (was blocking INSERTs)
+- [BLOCKED] Deploy verification -- workers crash-loop after deploy (exit code 0, no log output, process exits in <0.5s). See plan for investigation notes.
+- [ ] Run RenameFilePathColumns.py to soft-rename columns (Phase 3b Step 4)
+- [ ] Drop FilePath_Deprecated columns (Phase 4 -- point of no return)
 
 ---
 

@@ -202,7 +202,7 @@ def QueueByFolder():
                    m.HasExplicitEnglishAudio, m.AudioLanguages
             FROM MediaFiles m
             WHERE (m.TranscodedByMediaVortex IS NULL OR m.TranscodedByMediaVortex = false)
-              AND m.FilePath NOT IN (SELECT FilePath FROM TranscodeQueue)
+              AND m.Id NOT IN (SELECT MediaFileId FROM TranscodeQueue WHERE MediaFileId IS NOT NULL)
               AND m.SizeMB > 0
               AND (m.HasExplicitEnglishAudio IS NULL OR m.HasExplicitEnglishAudio = true)
               AND m.Resolution IS NOT NULL

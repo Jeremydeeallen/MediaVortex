@@ -870,9 +870,12 @@ class FileScanningBusinessService:
                     LoggingService.LogInfo(f"TRANSCODED FILE MATCH FOUND: Original '{DbFile.FilePath}' -> Transcoded '{FilePath}'", 'FindTranscodedFileMatch', 'FileScanningBusinessService')
                     return DbFile
                 else:
-                    # Original still exists, check TranscodeFiles table
-                    TranscodeRecord = self.Repository.GetTranscodeFileByFilePath(DbFile.FilePath)
-                    if TranscodeRecord and TranscodeRecord.SuccessfullyTranscoded:
+                    # Original still exists, check TranscodeFiles table via MediaFileId
+                    TranscodeRows = self.Repository.ExecuteQuery(
+                        "SELECT SuccessfullyTranscoded FROM TranscodeFiles WHERE MediaFileId = %s LIMIT 1",
+                        (DbFile.Id,)
+                    )
+                    if TranscodeRows and TranscodeRows[0].get('SuccessfullyTranscoded'):
                         # Original was transcoded successfully, update DB record
                         LoggingService.LogInfo(f"TRANSCODED FILE MATCH FOUND (original exists but marked as transcoded): Original '{DbFile.FilePath}' -> Transcoded '{FilePath}'", 'FindTranscodedFileMatch', 'FileScanningBusinessService')
                         return DbFile

@@ -777,9 +777,9 @@ class DatabaseManager:
                         'Message': 'No duplicates found'
                     }
 
-                # Build a set of FilePaths that have TranscodeAttempts records
-                cursor.execute("SELECT DISTINCT FilePath FROM TranscodeAttempts")
-                TranscodedPaths = {row['filepath'] for row in cursor.fetchall()}
+                # Build a set of MediaFileIds that have TranscodeAttempts records
+                cursor.execute("SELECT DISTINCT MediaFileId FROM TranscodeAttempts WHERE MediaFileId IS NOT NULL")
+                TranscodedMediaFileIds = {row['mediafileid'] for row in cursor.fetchall()}
 
                 MetadataColumns = [
                     'SeasonId', 'SizeMB', 'VideoBitrateKbps', 'AudioBitrateKbps',
@@ -812,7 +812,7 @@ class DatabaseManager:
                     BestKey = None
 
                     for record in Records:
-                        HasTranscodeLink = 1 if record['filepath'] in TranscodedPaths else 0
+                        HasTranscodeLink = 1 if record['id'] in TranscodedMediaFileIds else 0
                         ScanDate = record['lastscanneddate'] or ''
                         MetadataScore = sum(1 for col in MetadataColumns if record.get(col.lower()) is not None)
 
@@ -1373,7 +1373,7 @@ class DatabaseManager:
     def GetAllTranscodeQueueItems(self) -> List[TranscodeQueueModel]:
         """Get all transcoding queue items."""
         query = """
-            SELECT Id, FilePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted, ProcessingMode
+            SELECT Id, FilePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted, ProcessingMode, MediaFileId
             FROM TranscodeQueue
             ORDER BY Priority DESC, DateAdded ASC
         """
@@ -1392,12 +1392,13 @@ class DatabaseManager:
                 Status=row['Status'],
                 DateAdded=self.ConvertStringToDateTime(row['DateAdded']) if row['DateAdded'] else None,
                 DateStarted=self.ConvertStringToDateTime(row['DateStarted']) if row['DateStarted'] else None,
-                ProcessingMode=row['ProcessingMode'] or 'Transcode'
+                ProcessingMode=row['ProcessingMode'] or 'Transcode',
+                MediaFileId=row.get('MediaFileId')
             )
             queueItems.append(queueItem)
 
         return queueItems
-    
+
     def GetTranscodeQueueItemsPaginated(self, Page: int = 1, PageSize: int = 25, SortBy: str = "SizeMB", SortOrder: str = "DESC"):
         """Get paginated transcoding queue items with SQL-level sorting and pagination."""
         # Whitelist sort columns to prevent SQL injection
@@ -1417,7 +1418,7 @@ class DatabaseManager:
         # Get paginated items
         offset = (Page - 1) * PageSize
         query = f"""
-            SELECT Id, FilePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted, ProcessingMode, ClaimedBy
+            SELECT Id, FilePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted, ProcessingMode, ClaimedBy, MediaFileId
             FROM TranscodeQueue
             ORDER BY {sort_col} {order}, DateAdded ASC
             LIMIT %s OFFSET %s
@@ -1438,7 +1439,8 @@ class DatabaseManager:
                 DateAdded=self.ConvertStringToDateTime(row['DateAdded']) if row['DateAdded'] else None,
                 DateStarted=self.ConvertStringToDateTime(row['DateStarted']) if row['DateStarted'] else None,
                 ProcessingMode=row['ProcessingMode'] or 'Transcode',
-                ClaimedBy=row.get('ClaimedBy')
+                ClaimedBy=row.get('ClaimedBy'),
+                MediaFileId=row.get('MediaFileId')
             ))
 
         return queue_items, total_items
@@ -1446,7 +1448,7 @@ class DatabaseManager:
     def GetTranscodeQueueItemById(self, ItemId: int) -> Optional[TranscodeQueueModel]:
         """Get a specific transcoding queue item by ID."""
         query = """
-            SELECT Id, FilePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted, ProcessingMode
+            SELECT Id, FilePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted, ProcessingMode, MediaFileId
             FROM TranscodeQueue
             WHERE Id = %s
         """
@@ -1467,7 +1469,8 @@ class DatabaseManager:
             Status=row['Status'],
             DateAdded=self.ConvertStringToDateTime(row['DateAdded']) if row['DateAdded'] else None,
             DateStarted=self.ConvertStringToDateTime(row['DateStarted']) if row['DateStarted'] else None,
-            ProcessingMode=row['ProcessingMode'] or 'Transcode'
+            ProcessingMode=row['ProcessingMode'] or 'Transcode',
+            MediaFileId=row.get('MediaFileId')
         )
     
     def SaveTranscodeQueueItem(self, QueueItem: TranscodeQueueModel) -> int:
@@ -1551,7 +1554,7 @@ class DatabaseManager:
     def GetTranscodeQueueItemsByStatus(self, Status: str) -> List[TranscodeQueueModel]:
         """Get all transcoding queue items with a specific status."""
         query = """
-            SELECT Id, FilePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted, ProcessingMode
+            SELECT Id, FilePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted, ProcessingMode, MediaFileId
             FROM TranscodeQueue
             WHERE Status = %s
             ORDER BY Priority DESC, DateAdded ASC
@@ -1571,16 +1574,17 @@ class DatabaseManager:
                 Status=row['Status'],
                 DateAdded=row['DateAdded'],
                 DateStarted=row['DateStarted'],
-                ProcessingMode=row['ProcessingMode'] or 'Transcode'
+                ProcessingMode=row['ProcessingMode'] or 'Transcode',
+                MediaFileId=row.get('MediaFileId')
             )
             queueItems.append(queueItem)
 
         return queueItems
-    
+
     def GetNextPendingTranscodeJob(self) -> Optional[TranscodeQueueModel]:
         """Get the next pending transcoding job (largest files first)."""
         query = """
-            SELECT Id, FilePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted, ProcessingMode
+            SELECT Id, FilePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted, ProcessingMode, MediaFileId
             FROM TranscodeQueue
             WHERE Status = 'Pending'
             ORDER BY SizeMB DESC, DateAdded ASC
@@ -1601,7 +1605,8 @@ class DatabaseManager:
                 Status=row['Status'],
                 DateAdded=row['DateAdded'],
                 DateStarted=row['DateStarted'],
-                ProcessingMode=row['ProcessingMode'] or 'Transcode'
+                ProcessingMode=row['ProcessingMode'] or 'Transcode',
+                MediaFileId=row.get('MediaFileId')
             )
 
         return None
@@ -1628,7 +1633,7 @@ class DatabaseManager:
                             LIMIT 1
                             FOR UPDATE SKIP LOCKED
                         )
-                        RETURNING Id, FilePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted, ProcessingMode
+                        RETURNING Id, FilePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted, ProcessingMode, MediaFileId
                     """
                     cursor.execute(query, (WorkerName,))
                 else:
@@ -1645,7 +1650,7 @@ class DatabaseManager:
                             LIMIT 1
                             FOR UPDATE SKIP LOCKED
                         )
-                        RETURNING Id, FilePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted, ProcessingMode
+                        RETURNING Id, FilePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted, ProcessingMode, MediaFileId
                     """
                     cursor.execute(query, (WorkerName,))
 
@@ -1664,7 +1669,8 @@ class DatabaseManager:
                         Status=row['status'],
                         DateAdded=row['dateadded'],
                         DateStarted=row['datestarted'],
-                        ProcessingMode=row.get('processingmode') or 'Transcode'
+                        ProcessingMode=row.get('processingmode') or 'Transcode',
+                        MediaFileId=row.get('mediafileid')
                     )
                 return None
             finally:
@@ -1894,18 +1900,18 @@ class DatabaseManager:
             )
         return None
     
-    def GetTranscodeAttemptsByFilePath(self, FilePath: str) -> List[TranscodeAttemptModel]:
-        """Get all transcoding attempts for a specific file (case-insensitive)."""
+    def GetTranscodeAttemptsByMediaFileId(self, MediaFileId: int) -> List[TranscodeAttemptModel]:
+        """Get all transcoding attempts for a specific media file by ID."""
         query = """
             SELECT Id, FilePath, AttemptDate, Quality, OldSizeBytes, NewSizeBytes, Success,
                    SizeReductionBytes, SizeReductionPercent, ErrorMessage, TranscodeDurationSeconds,
                    FfpmpegCommand, AudioBitrateKbps, VideoBitrateKbps, ProfileName, VMAF,
                    FileReplaced, FileReplacedDate, ReplacementType, StartTime, PreferredAttempt
-            FROM TranscodeAttempts 
-            WHERE LOWER(FilePath) = LOWER(%s)
+            FROM TranscodeAttempts
+            WHERE MediaFileId = %s
             ORDER BY PreferredAttempt DESC, AttemptDate DESC
         """
-        rows = self.DatabaseService.ExecuteQuery(query, (FilePath,))
+        rows = self.DatabaseService.ExecuteQuery(query, (MediaFileId,))
         
         attempts = []
         for row in rows:
@@ -1938,63 +1944,63 @@ class DatabaseManager:
         
         return attempts
     
-    def GetLatestTranscodeAttemptWithVMAF(self, FilePath: str) -> Optional[Dict[str, Any]]:
+    def GetLatestTranscodeAttemptWithVMAF(self, MediaFileId: int) -> Optional[Dict[str, Any]]:
         """
-        Get the most recent transcode attempt with VMAF score for a file.
+        Get the most recent transcode attempt with VMAF score for a media file.
         Prioritizes preferred attempts if they exist.
-        
+
         Args:
-            FilePath: Path to the file to check
-            
+            MediaFileId: ID of the media file to check
+
         Returns:
             Dict with Quality (CRF), VMAF, ProfileName, AttemptDate, Success, PreferredAttempt, or None if no attempts
         """
         try:
-            LoggingService.LogFunctionEntry("GetLatestTranscodeAttemptWithVMAF", "DatabaseManager", FilePath)
-            
+            LoggingService.LogFunctionEntry("GetLatestTranscodeAttemptWithVMAF", "DatabaseManager", MediaFileId)
+
             # First check for preferred attempts
             preferred_query = """
                 SELECT Quality, VMAF, ProfileName, AttemptDate, Success, PreferredAttempt
-                FROM TranscodeAttempts 
-                WHERE LOWER(FilePath) = LOWER(%s)
+                FROM TranscodeAttempts
+                WHERE MediaFileId = %s
                   AND VMAF IS NOT NULL
                   AND Success = TRUE
                   AND PreferredAttempt = TRUE
                 ORDER BY AttemptDate DESC
                 LIMIT 1
             """
-            
-            rows = self.DatabaseService.ExecuteQuery(preferred_query, (FilePath,))
-            
+
+            rows = self.DatabaseService.ExecuteQuery(preferred_query, (MediaFileId,))
+
             if rows:
                 result = rows[0]
-                LoggingService.LogInfo(f"Found preferred attempt for {FilePath}: CRF={result.get('Quality')}, VMAF={result.get('VMAF')}", 
+                LoggingService.LogInfo(f"Found preferred attempt for MediaFileId {MediaFileId}: CRF={result.get('Quality')}, VMAF={result.get('VMAF')}",
                                      "DatabaseManager", "GetLatestTranscodeAttemptWithVMAF")
                 return result
-            
+
             # If no preferred attempt, get the most recent one
             query = """
                 SELECT Quality, VMAF, ProfileName, AttemptDate, Success, PreferredAttempt
-                FROM TranscodeAttempts 
-                WHERE LOWER(FilePath) = LOWER(%s)
+                FROM TranscodeAttempts
+                WHERE MediaFileId = %s
                   AND VMAF IS NOT NULL
                   AND Success = TRUE
                 ORDER BY AttemptDate DESC
                 LIMIT 1
             """
 
-            rows = self.DatabaseService.ExecuteQuery(query, (FilePath,))
-            
+            rows = self.DatabaseService.ExecuteQuery(query, (MediaFileId,))
+
             if rows:
                 result = rows[0]
-                LoggingService.LogInfo(f"Found latest attempt for {FilePath}: CRF={result.get('Quality')}, VMAF={result.get('VMAF')}", 
+                LoggingService.LogInfo(f"Found latest attempt for MediaFileId {MediaFileId}: CRF={result.get('Quality')}, VMAF={result.get('VMAF')}",
                                      "DatabaseManager", "GetLatestTranscodeAttemptWithVMAF")
                 return result
             else:
-                LoggingService.LogDebug(f"No previous successful attempt with VMAF found for {FilePath}", 
+                LoggingService.LogDebug(f"No previous successful attempt with VMAF found for MediaFileId {MediaFileId}",
                                       "DatabaseManager", "GetLatestTranscodeAttemptWithVMAF")
                 return None
-                
+
         except Exception as e:
             LoggingService.LogException("Exception getting latest transcode attempt with VMAF", e, "DatabaseManager", "GetLatestTranscodeAttemptWithVMAF")
             return None
@@ -2014,16 +2020,16 @@ class DatabaseManager:
                     MediaFileId = self.LookupMediaFileId(Attempt.FilePath)
                     query = """
                         INSERT INTO TranscodeAttempts
-                        (FilePath, AttemptDate, Quality, OldSizeBytes, NewSizeBytes, Success,
+                        (AttemptDate, Quality, OldSizeBytes, NewSizeBytes, Success,
                          SizeReductionBytes, SizeReductionPercent, ErrorMessage, TranscodeDurationSeconds,
                          FfpmpegCommand, AudioBitrateKbps, VideoBitrateKbps, ProfileName, VMAF,
                          FileReplaced, FileReplacedDate, ReplacementType, StartTime, PreferredAttempt,
                          MediaFileId)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         RETURNING Id
                     """
                     parameters = (
-                        Attempt.FilePath, Attempt.AttemptDate, Attempt.Quality,
+                        Attempt.AttemptDate, Attempt.Quality,
                         Attempt.OldSizeBytes, Attempt.NewSizeBytes, Attempt.Success,
                         Attempt.SizeReductionBytes, Attempt.SizeReductionPercent, Attempt.ErrorMessage,
                         Attempt.TranscodeDurationSeconds,
@@ -2042,8 +2048,8 @@ class DatabaseManager:
                     # Update existing attempt
                     LoggingService.LogInfo(f"Updating existing attempt with ID: {Attempt.Id}", "DatabaseManager", "SaveTranscodeAttempt")
                     query = """
-                        UPDATE TranscodeAttempts 
-                        SET FilePath = %s, AttemptDate = %s, Quality = %s, OldSizeBytes = %s, NewSizeBytes = %s,
+                        UPDATE TranscodeAttempts
+                        SET AttemptDate = %s, Quality = %s, OldSizeBytes = %s, NewSizeBytes = %s,
                             Success = %s, SizeReductionBytes = %s, SizeReductionPercent = %s, ErrorMessage = %s,
                             TranscodeDurationSeconds = %s, FfpmpegCommand = %s, AudioBitrateKbps = %s,
                             VideoBitrateKbps = %s, ProfileName = %s, VMAF = %s,
@@ -2051,7 +2057,7 @@ class DatabaseManager:
                         WHERE Id = %s
                     """
                     parameters = (
-                        Attempt.FilePath, Attempt.AttemptDate, Attempt.Quality,
+                        Attempt.AttemptDate, Attempt.Quality,
                         Attempt.OldSizeBytes, Attempt.NewSizeBytes, Attempt.Success,
                         Attempt.SizeReductionBytes, Attempt.SizeReductionPercent, Attempt.ErrorMessage,
                         Attempt.TranscodeDurationSeconds,
@@ -2129,46 +2135,46 @@ class DatabaseManager:
             LoggingService.LogException("Exception in UpdateTranscodeAttempt", e, "DatabaseManager", "UpdateTranscodeAttempt")
             return False
     
-    def SetPreferredAttempt(self, AttemptId: int, FilePath: str, IsPreferred: bool = True) -> bool:
+    def SetPreferredAttempt(self, AttemptId: int, MediaFileId: int, IsPreferred: bool = True) -> bool:
         """
         Set or unset a transcode attempt as preferred for a file.
         When setting an attempt as preferred, all other attempts for the same file are unset.
-        
+
         Args:
             AttemptId: ID of the attempt to set as preferred
-            FilePath: Path to the file (to unset other attempts)
+            MediaFileId: ID of the media file (to unset other attempts)
             IsPreferred: True to set as preferred, False to unset
-            
+
         Returns:
             True if successful, False otherwise
         """
         try:
-            LoggingService.LogFunctionEntry("SetPreferredAttempt", "DatabaseManager", AttemptId, FilePath, IsPreferred)
-            
+            LoggingService.LogFunctionEntry("SetPreferredAttempt", "DatabaseManager", AttemptId, MediaFileId, IsPreferred)
+
             connection = self.DatabaseService.GetConnection()
             try:
                 cursor = connection.cursor()
-                
+
                 if IsPreferred:
                     # First, unset all other preferred attempts for this file
                     unset_query = """
-                        UPDATE TranscodeAttempts 
+                        UPDATE TranscodeAttempts
                         SET PreferredAttempt = FALSE
-                        WHERE LOWER(FilePath) = LOWER(%s)
+                        WHERE MediaFileId = %s
                           AND Id != %s
                     """
-                    cursor.execute(unset_query, (FilePath, AttemptId))
-                    
+                    cursor.execute(unset_query, (MediaFileId, AttemptId))
+
                     # Then set this attempt as preferred
                     set_query = """
-                        UPDATE TranscodeAttempts 
+                        UPDATE TranscodeAttempts
                         SET PreferredAttempt = TRUE
                         WHERE Id = %s
                     """
                     cursor.execute(set_query, (AttemptId,))
                     connection.commit()
-                    
-                    LoggingService.LogInfo(f"Set attempt {AttemptId} as preferred for {FilePath}", 
+
+                    LoggingService.LogInfo(f"Set attempt {AttemptId} as preferred for MediaFileId {MediaFileId}",
                                          "DatabaseManager", "SetPreferredAttempt")
                 else:
                     # Unset this attempt
@@ -2224,16 +2230,16 @@ class DatabaseManager:
         
         return transcodeFiles
     
-    def GetTranscodeFileByFilePath(self, FilePath: str) -> Optional[TranscodeFileModel]:
-        """Get transcoding file record by file path (case-insensitive)."""
+    def GetTranscodeFileByMediaFileId(self, MediaFileId: int) -> Optional[TranscodeFileModel]:
+        """Get transcoding file record by media file ID."""
         query = """
             SELECT Id, FilePath, AllQualitiesFailed, SuccessfullyTranscoded, FirstAttemptDate,
                    LastAttemptDate, SuccessDate, FinalQuality, FinalSizeBytes, TotalAttempts,
                    OriginalFilePath, FinalFilePath
-            FROM TranscodeFiles 
-            WHERE LOWER(FilePath) = LOWER(%s)
+            FROM TranscodeFiles
+            WHERE MediaFileId = %s
         """
-        rows = self.DatabaseService.ExecuteQuery(query, (FilePath,))
+        rows = self.DatabaseService.ExecuteQuery(query, (MediaFileId,))
         
         if not rows:
             return None
@@ -2269,14 +2275,14 @@ class DatabaseManager:
                     MediaFileId = self.LookupMediaFileId(TranscodeFile.FilePath)
                     query = """
                         INSERT INTO TranscodeFiles
-                        (FilePath, AllQualitiesFailed, SuccessfullyTranscoded, FirstAttemptDate,
+                        (AllQualitiesFailed, SuccessfullyTranscoded, FirstAttemptDate,
                          LastAttemptDate, SuccessDate, FinalQuality, FinalSizeBytes, TotalAttempts,
                          OriginalFilePath, FinalFilePath, MediaFileId)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         RETURNING Id
                     """
                     parameters = (
-                        TranscodeFile.FilePath, TranscodeFile.AllQualitiesFailed, TranscodeFile.SuccessfullyTranscoded,
+                        TranscodeFile.AllQualitiesFailed, TranscodeFile.SuccessfullyTranscoded,
                         TranscodeFile.FirstAttemptDate, TranscodeFile.LastAttemptDate, TranscodeFile.SuccessDate,
                         TranscodeFile.FinalQuality, TranscodeFile.FinalSizeBytes, TranscodeFile.TotalAttempts,
                         TranscodeFile.OriginalFilePath, TranscodeFile.FinalFilePath, MediaFileId
@@ -2291,14 +2297,14 @@ class DatabaseManager:
                     # Update existing transcode file
                     LoggingService.LogInfo(f"Updating existing transcode file with ID: {TranscodeFile.Id}", "DatabaseManager", "SaveTranscodeFile")
                     query = """
-                        UPDATE TranscodeFiles 
-                        SET FilePath = %s, AllQualitiesFailed = %s, SuccessfullyTranscoded = %s, FirstAttemptDate = %s,
+                        UPDATE TranscodeFiles
+                        SET AllQualitiesFailed = %s, SuccessfullyTranscoded = %s, FirstAttemptDate = %s,
                             LastAttemptDate = %s, SuccessDate = %s, FinalQuality = %s, FinalSizeBytes = %s,
                             TotalAttempts = %s, OriginalFilePath = %s, FinalFilePath = %s
                         WHERE Id = %s
                     """
                     parameters = (
-                        TranscodeFile.FilePath, TranscodeFile.AllQualitiesFailed, TranscodeFile.SuccessfullyTranscoded,
+                        TranscodeFile.AllQualitiesFailed, TranscodeFile.SuccessfullyTranscoded,
                         TranscodeFile.FirstAttemptDate, TranscodeFile.LastAttemptDate, TranscodeFile.SuccessDate,
                         TranscodeFile.FinalQuality, TranscodeFile.FinalSizeBytes, TranscodeFile.TotalAttempts,
                         TranscodeFile.OriginalFilePath, TranscodeFile.FinalFilePath, TranscodeFile.Id
@@ -2315,53 +2321,53 @@ class DatabaseManager:
             LoggingService.LogException("Exception in SaveTranscodeFile", e, "DatabaseManager", "SaveTranscodeFile")
             raise
     
-    def UpdateTranscodeFileStatus(self, FilePath: str, SuccessfullyTranscoded: bool = None, 
+    def UpdateTranscodeFileStatus(self, MediaFileId: int, SuccessfullyTranscoded: bool = None,
                                  AllQualitiesFailed: bool = None, FinalQuality: int = None,
                                  FinalSizeBytes: int = None, FinalFilePath: str = None) -> bool:
         """Update transcoding file status fields."""
         try:
-            LoggingService.LogFunctionEntry("UpdateTranscodeFileStatus", "DatabaseManager", FilePath, SuccessfullyTranscoded, AllQualitiesFailed)
-            
+            LoggingService.LogFunctionEntry("UpdateTranscodeFileStatus", "DatabaseManager", MediaFileId, SuccessfullyTranscoded, AllQualitiesFailed)
+
             # Build dynamic update query
             updateFields = []
             parameters = []
-            
+
             if SuccessfullyTranscoded is not None:
                 updateFields.append("SuccessfullyTranscoded = %s")
                 parameters.append(SuccessfullyTranscoded)
-            
+
             if AllQualitiesFailed is not None:
                 updateFields.append("AllQualitiesFailed = %s")
                 parameters.append(AllQualitiesFailed)
-            
+
             if FinalQuality is not None:
                 updateFields.append("FinalQuality = %s")
                 parameters.append(FinalQuality)
-            
+
             if FinalSizeBytes is not None:
                 updateFields.append("FinalSizeBytes = %s")
                 parameters.append(FinalSizeBytes)
-            
+
             if FinalFilePath is not None:
                 updateFields.append("FinalFilePath = %s")
                 parameters.append(FinalFilePath)
-            
+
             if not updateFields:
                 LoggingService.LogWarning("No fields to update", "DatabaseManager", "UpdateTranscodeFileStatus")
                 return False
-            
+
             # Add LastAttemptDate update
             updateFields.append("LastAttemptDate = NOW()")
-            
-            # Add FilePath to parameters for WHERE clause
-            parameters.append(FilePath)
-            
-            query = f"UPDATE TranscodeFiles SET {', '.join(updateFields)} WHERE LOWER(FilePath) = LOWER(%s)"
-            
+
+            # Add MediaFileId to parameters for WHERE clause
+            parameters.append(MediaFileId)
+
+            query = f"UPDATE TranscodeFiles SET {', '.join(updateFields)} WHERE MediaFileId = %s"
+
             affectedRows = self.DatabaseService.ExecuteNonQuery(query, parameters)
-            LoggingService.LogInfo(f"Updated transcode file status for {FilePath}, affected {affectedRows} rows", "DatabaseManager", "UpdateTranscodeFileStatus")
+            LoggingService.LogInfo(f"Updated transcode file status for MediaFileId {MediaFileId}, affected {affectedRows} rows", "DatabaseManager", "UpdateTranscodeFileStatus")
             return affectedRows > 0
-            
+
         except Exception as e:
             LoggingService.LogException("Exception in UpdateTranscodeFileStatus", e, "DatabaseManager", "UpdateTranscodeFileStatus")
             return False
@@ -5079,11 +5085,11 @@ class DatabaseManager:
             
             MediaFileId = self.LookupMediaFileId(FilePath)
             query = """
-                INSERT INTO ProblemFiles (FilePath, FileName, Directory, SizeBytes, SizeMB, ErrorType, ErrorMessage, DateEncountered, RetryCount, MediaFileId)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, NOW(), 0, %s)
+                INSERT INTO ProblemFiles (FileName, Directory, SizeBytes, SizeMB, ErrorType, ErrorMessage, DateEncountered, RetryCount, MediaFileId)
+                VALUES (%s, %s, %s, %s, %s, %s, NOW(), 0, %s)
             """
 
-            params = (FilePath, FileName, Directory, SizeBytes, SizeMB, ErrorType, ErrorMessage, MediaFileId)
+            params = (FileName, Directory, SizeBytes, SizeMB, ErrorType, ErrorMessage, MediaFileId)
             
             recordId = self.DatabaseService.ExecuteNonQuery(query, params)
             

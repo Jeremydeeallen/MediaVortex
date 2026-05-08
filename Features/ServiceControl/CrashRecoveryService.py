@@ -220,7 +220,7 @@ class CrashRecoveryService:
                     UPDATE TranscodeAttempts
                     SET Success = FALSE, CompletedDate = NOW()
                     WHERE Success IS NULL
-                      AND FilePath IN (SELECT FilePath FROM TranscodeQueue WHERE Id = %s)
+                      AND MediaFileId = (SELECT MediaFileId FROM TranscodeQueue WHERE Id = %s)
                 """
                 failed_rows = self.DatabaseManager.DatabaseService.ExecuteNonQuery(fail_query, (QueueId,))
                 if failed_rows > 0:
@@ -231,9 +231,7 @@ class CrashRecoveryService:
                     DELETE FROM TranscodeProgress
                     WHERE TranscodeAttemptId IN (
                         SELECT Id FROM TranscodeAttempts
-                        WHERE FilePath IN (
-                            SELECT FilePath FROM TranscodeQueue WHERE Id = %s
-                        )
+                        WHERE MediaFileId = (SELECT MediaFileId FROM TranscodeQueue WHERE Id = %s)
                         AND Success = FALSE
                     )
                 """

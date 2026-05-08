@@ -374,12 +374,12 @@ def GetMediaFileComparison():
                qtr.Status as QualityTestStatus, qtr.ErrorMessage as QualityTestError
         FROM TranscodeAttempts ta
         LEFT JOIN QualityTestResults qtr ON ta.Id = qtr.TranscodeAttemptId
-        WHERE ta.FilePath = %s
+        WHERE ta.MediaFileId = %s
         ORDER BY ta.AttemptDate DESC
         LIMIT 1
         """
 
-        TranscodedResults = SharedDatabaseManager.DatabaseService.ExecuteQuery(TranscodedQuery, (OriginalFile['filepath'],))
+        TranscodedResults = SharedDatabaseManager.DatabaseService.ExecuteQuery(TranscodedQuery, (OriginalFile['id'],))
 
         TranscodedFile = None
         if TranscodedResults:
@@ -393,12 +393,12 @@ def GetMediaFileComparison():
                AudioChannels, AudioSampleRate, AudioSampleFormat, AudioChannelLayout,
                ContainerFormat, OverallBitrate, TranscodeAttemptId
         FROM MediaFilesArchive
-        WHERE LOWER(FilePath) = LOWER(%s)
+        WHERE Id = %s
         ORDER BY ArchiveDate DESC
         LIMIT 1
         """
 
-        ArchivedResults = SharedDatabaseManager.DatabaseService.ExecuteQuery(ArchivedQuery, (OriginalFile['filepath'],))
+        ArchivedResults = SharedDatabaseManager.DatabaseService.ExecuteQuery(ArchivedQuery, (OriginalFile['id'],))
 
         ArchivedFile = None
         if ArchivedResults:

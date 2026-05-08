@@ -526,8 +526,9 @@ def SetPreferredAttempt(attempt_id: int):
             LoggingService.LogError(errorMsg, "TranscodeJobController", "SetPreferredAttempt")
             return jsonify({"Success": False, "ErrorMessage": errorMsg}), 404
 
-        # Set preferred status
-        success = db_manager.SetPreferredAttempt(attempt_id, attempt.FilePath, is_preferred)
+        # Set preferred status using MediaFileId
+        MediaFileId = db_manager.LookupMediaFileId(attempt.FilePath)
+        success = db_manager.SetPreferredAttempt(attempt_id, MediaFileId, is_preferred)
 
         if success:
             action = "set as preferred" if is_preferred else "unset as preferred"
