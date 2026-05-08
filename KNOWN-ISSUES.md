@@ -2,27 +2,18 @@
 
 ## Open
 
-### [BUG] Services resolve tool paths and file paths from SystemSettings instead of per-worker config
+### [FIXED] Services resolve tool paths and file paths from SystemSettings instead of per-worker config
 **Date:** 2026-05-08
+**Fixed:** 2026-05-08
 **Affects:** FileReplacement, FileScanning, QualityTesting, MediaProbe -- any service that creates FFmpegService() or accesses media file paths without worker-specific config
 **Criterion violated:** post-transcode-pipeline.feature.md criterion 4c, criterion 13
 
-SystemSettings stores FFmpeg/FFprobe paths as Windows-relative values (`FFmpegMaster\bin\ffprobe.exe`). The Workers table stores correct per-worker paths (`/usr/local/bin/ffprobe`). Any service that creates `FFmpegService()` without an explicit override reads from SystemSettings, which breaks on non-Windows workers. This prevents running file replacement re-probe, media scanning, quality testing, or any FFprobe-dependent operation on Linux workers.
+SystemSettings stores FFmpeg/FFprobe paths as Windows-relative values (`FFmpegMaster\bin\ffprobe.exe`). The Workers table stores correct per-worker paths (`/usr/local/bin/ffprobe`). Any service that creates `FFmpegService()` without an explicit override reads from SystemSettings, which breaks on non-Windows workers.
 
-The broader issue: tool paths and path translation are per-worker facts, not system-wide settings. No service besides the transcode job itself can currently run on a non-Windows worker.
-
-**Partial fix applied:** FFprobePath threaded through ProcessTranscodeQueueService -> ShouldQualityTestService -> FileReplacementBusinessService -> FileManagerService for the transcode flow. 64 stale MediaFiles records repaired via `Scripts/SQLScripts/FixStaleMediaFiles.py`.
-
-**Remaining gaps:**
-- QualityTestingBusinessService.CheckAndTriggerAutoReplace (line 974) and SkipQualityTest (line 1113) create FileReplacementBusinessService without FFprobePath
-- FileScanning/MediaProbe create FFmpegService() with no worker override -- scanner cannot run on Linux workers
-- Every new call site must remember to thread FFprobePath or it silently breaks
-
-**Root fix:** Add a `WorkerContext` process-level singleton (set once at startup from Workers table). FFmpegService reads from WorkerContext before falling back to SystemSettings. All services get the right paths automatically with zero constructor threading. Remove FFmpegPath/FFprobePath from SystemSettings once WorkerContext is in place.
-
-**Look first:** `Services/FFmpegService.py:19` (constructor reads SystemSettings), `Services/FileManagerService.py:18`, `Features/QualityTesting/QualityTestingBusinessService.py:974`
-
-**Fix with:** `/t`
+**Fix:** WorkerContext singleton (Core/WorkerContext.py) initialized at process startup from Workers table. FFmpegService.__init__ resolves paths: explicit arg > WorkerContext > cached > SystemSettings. FileReplacementBusinessService.__init__ resolves PathTranslation from WorkerContext when not provided. All previously-identified gaps are covered:
+- QualityTestingBusinessService.CheckAndTriggerAutoReplace/SkipQualityTest: create FileReplacementBusinessService without explicit args, but both FFmpegService and FileReplacementBusinessService auto-read from WorkerContext
+- FileScanning/MediaProbe: chain FileManagerService -> FFmpegAnalysisService -> FFmpegService, all resolve from WorkerContext
+- New call sites get correct paths automatically with no constructor threading needed
 
 ### [FIXED] LocalStaging mode crashes workers without StagingDirectory configured
 **Date:** 2026-05-07
@@ -114,9 +105,12 @@ Full Windows paths (e.g., `T:\Shows\file.mkv`) are stored as natural keys in at 
 
 **Scale:** ~67k rows in MediaFiles, ~3.8k in TranscodeFiles, ~2.9k in TranscodeAttempts, ~1.4k in CompliantFiles.
 
-**Look first:** `/data-expert` for schema analysis, then `Scripts/SQLScripts/AddDistributedColumns.py` for migration patterns.
-
-**Fix with:** `/n` (this is a schema redesign, not a quick fix)
+**Migration in progress (Phase 3 of architecture redesign):**
+- [x] MediaFileId BIGINT columns + indexes added to 5 child tables (AddMediaFileIdColumns.py)
+- [x] Backfill completed: 1,952 rows linked, 6,867 orphans (old history with deleted files)
+- [x] All JOINs and INSERTs updated in code to use MediaFileId
+- [ ] FK constraints (AddMediaFileForeignKeys.py) -- deferred until deploy confirmed stable
+- [ ] Drop filepath columns from child tables (point of no return)
 
 ### [FIXED] StuckJobDetector breaks distributed transcoding -- orphaned FFmpeg, corrupted results
 **Date:** 2026-05-05

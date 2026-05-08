@@ -34,11 +34,11 @@ Both (code fix + deploy-anywhere infrastructure)
 10. A Linux worker (e.g., Larry) running WorkerService with QualityTestEnabled=OFF completes the full pipeline: transcode, delete original, update DB. No other service needs to be running.
 11. A Windows worker running WorkerService with QualityTestEnabled=OFF completes the same pipeline identically.
 12. PathTranslation is passed from ProcessTranscodeQueueService (which already has it) through to FileReplacementBusinessService and HandleJobFailure. No new DB lookups or config loading in FileReplacement.
-13. [BUG] The re-probe step in file replacement uses the worker's FFprobe path (from Workers table), not SystemSettings.FFprobePath. On a Linux worker, re-probing a transcoded file succeeds and MediaFiles is updated with new codec, resolution, and TranscodedByMediaVortex=True.
+13. [FIXED] The re-probe step in file replacement uses the worker's FFprobe path (from Workers table via WorkerContext), not SystemSettings.FFprobePath. On a Linux worker, re-probing a transcoded file succeeds and MediaFiles is updated with new codec, resolution, and TranscodedByMediaVortex=True.
 
 ## Status
 
-IN PROGRESS
+COMPLETE
 
 ### Progress
 
@@ -51,8 +51,8 @@ IN PROGRESS
 - [x] Pass PathTranslation from ProcessTranscodeQueueService through ShouldQualityTestService to FileReplacement
 - [x] In HandleJobFailure: delete partial output file from disk (translate TemporaryFilePaths.LocalOutputPath to local path, delete if exists)
 - [x] In HandleJobFailure: DELETE TemporaryFilePaths row for the failed TranscodeAttemptId
-- [ ] Verify on primary Windows machine: transcode completes, original deleted, MediaFiles updated
-- [ ] Verify on Larry (Linux worker): same pipeline completes identically
+- [x] Verify on primary Windows machine: I9 completed DxD S04E01 end-to-end (Success=True, FileReplaced=True, TranscodedByMediaVortex=True, Codec=av1)
+- [x] Verify on Linux worker: Larry workers completed transcode + file replacement, MediaFiles updated correctly
 - [x] Update transcode.flow.md to remove [BUG] annotation and document the corrected bridge behavior
 - [x] Update KNOWN-ISSUES.md to mark the post-transcode pipeline bug as FIXED
 

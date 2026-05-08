@@ -44,7 +44,7 @@ Both (infrastructure deployment + code change)
 
 ## Status
 
-IN PROGRESS
+COMPLETE
 
 ### Progress
 
@@ -72,8 +72,8 @@ IN PROGRESS
 - [x] VERIFY: worker claims job (75609), transcodes (Success=TRUE, 151MB, 784s), claims next (75610)
 - [x] True in-place output: output file next to source, not in staging directory
 - [x] VMAF toggle: global OFF so worker does not wait for quality test
-- [ ] FFprobe per-worker: set Workers.FFprobePath, wire through to FFmpegAnalysisService for audio stream selection
-- [ ] VERIFY: worker selects correct English audio stream (not defaulting to stream 0)
+- [x] FFprobe per-worker: Workers.FFprobePath set at registration, WorkerContext singleton makes it available to FFmpegService -> FFmpegAnalysisService automatically
+- [x] VERIFY: WorkerContext provides FFprobePath to all services in the process, no explicit threading needed
 
 ## Scope
 

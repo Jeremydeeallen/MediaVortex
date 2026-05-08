@@ -33,6 +33,8 @@ and status (Online, Draining, Offline) from its own Workers table row.
 
 ## Status
 
+COMPLETE
+
 ### Progress
 
 - [x] Schema migration (AddWorkerCapabilities.py)
@@ -45,5 +47,5 @@ and status (Online, Draining, Offline) from its own Workers table row.
 - [x] Add POST /api/TeamStatus/Workers/<name>/Status endpoint
 - [x] Update GET /api/TeamStatus/Workers to include capability flags
 - [x] Feature doc
-
-NEXT: Integration testing with database, verify Docker build
+- [x] Deployed to 4 Docker workers, verified transcode jobs processing correctly
+- [x] WorkerService.flow.md created
