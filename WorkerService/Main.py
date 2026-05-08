@@ -627,19 +627,31 @@ class WorkerServiceApp:
             LoggingService.LogException("Error during shutdown", e, "WorkerService", "Shutdown")
 
 
+_SIGNAL_BUDGET_SECONDS = 2.0
+
+
 def SignalHandler(signum, frame):
-    """Handle shutdown signals: kill local FFmpeg, mark worker offline, exit."""
+    """Handle shutdown signals so a single Ctrl+C exits cleanly.
+
+    The handler must NOT block on potentially-slow operations (DB queries can
+    stall when the pool is contended or postgres is unresponsive). Any work
+    that touches the network or DB runs in a daemon thread with a 2s budget;
+    after the budget the process exits via os._exit regardless. Re-entry from
+    a second signal during cleanup is a no-op so spamming Ctrl+C does not
+    confuse the handler.
+    """
+    if getattr(SignalHandler, '_in_progress', False):
+        # Operator hit Ctrl+C again while we were cleaning up. Force exit.
+        print("\nForcing exit (already shutting down)...")
+        os._exit(1)
+    SignalHandler._in_progress = True
+
     print("\nWorkerService shutting down...")
 
+    # Step 1: kill FFmpeg subprocesses inline. proc.kill() does not block --
+    # it just delivers a terminate signal -- so this is safe in the handler.
     if hasattr(Main, 'app') and Main.app:
         App = Main.app
-        WorkerName = App.WorkerName
-
-        # Kill all active FFmpeg processes immediately (local only).
-        # Per-process kill failure is expected (process may have already died); leave that
-        # inner except silent. Outer failures (e.g. ActiveProcesses dict torn down) are
-        # logged via LogException -- LoggingService prints to stderr before DB write so
-        # the message survives even if the pool is already closed.
         try:
             if App.TranscodeService is not None:
                 ActiveJobIds = App.TranscodeService.VideoTranscoding.GetActiveJobs()
@@ -658,37 +670,49 @@ def SignalHandler(signum, frame):
             except Exception:
                 print(f"EXCEPTION (logger unavailable): killing FFmpeg processes: {e}")
 
-        # Mark worker offline and update service status
+    # Step 2: do potentially-slow DB cleanup in a background thread with a hard
+    # budget. Worker-Offline / pool-close are best-effort; if the DB hangs the
+    # heartbeat-staleness check will eventually flip the row to Offline anyway.
+    def _DeferredCleanup():
         try:
-            Db = App.DatabaseManager
-            Db.UpdateServiceStatus("WorkerService", {
-                'Status': 'Stopped',
-                'ProcessId': 0,
-                'IsProcessing': False,
-                'ActiveJobsCount': 0
-            })
-            Db.UpdateWorkerStatus(WorkerName, "Offline")
-        except Exception as e:
+            if hasattr(Main, 'app') and Main.app:
+                App = Main.app
+                try:
+                    Db = App.DatabaseManager
+                    Db.UpdateServiceStatus("WorkerService", {
+                        'Status': 'Stopped',
+                        'ProcessId': 0,
+                        'IsProcessing': False,
+                        'ActiveJobsCount': 0
+                    })
+                    Db.UpdateWorkerStatus(App.WorkerName, "Offline")
+                except Exception as e:
+                    try:
+                        LoggingService.LogException(
+                            f"Error marking worker {App.WorkerName!r} Offline during SignalHandler",
+                            e, "SignalHandler", "WorkerService"
+                        )
+                    except Exception:
+                        print(f"EXCEPTION (logger unavailable): marking worker offline: {e}")
+        finally:
             try:
-                LoggingService.LogException(
-                    f"Error marking worker {WorkerName!r} Offline during SignalHandler", e, "SignalHandler", "WorkerService"
-                )
-            except Exception:
-                print(f"EXCEPTION (logger unavailable): marking worker offline: {e}")
+                from Core.Database.DatabaseService import DatabaseService
+                if DatabaseService._pool is not None and not DatabaseService._pool.closed:
+                    DatabaseService._pool.closeall()
+            except Exception as e:
+                try:
+                    LoggingService.LogException(
+                        "Error closing DB pool during SignalHandler", e, "SignalHandler", "WorkerService"
+                    )
+                except Exception:
+                    print(f"EXCEPTION (logger unavailable): closing DB pool: {e}")
 
-    # Release pooled DB connections so they don't linger after os._exit() bypasses atexit
-    try:
-        from Core.Database.DatabaseService import DatabaseService
-        if DatabaseService._pool is not None and not DatabaseService._pool.closed:
-            DatabaseService._pool.closeall()
-    except Exception as e:
-        try:
-            LoggingService.LogException(
-                "Error closing DB pool during SignalHandler", e, "SignalHandler", "WorkerService"
-            )
-        except Exception:
-            print(f"EXCEPTION (logger unavailable): closing DB pool: {e}")
+    CleanupThread = threading.Thread(target=_DeferredCleanup, name="ShutdownCleanup", daemon=True)
+    CleanupThread.start()
+    CleanupThread.join(timeout=_SIGNAL_BUDGET_SECONDS)
 
+    # Step 3: exit -- whether cleanup finished, timed out, or threw, the
+    # process must terminate now so the operator's Ctrl+C is honored.
     os._exit(0)
 
 
