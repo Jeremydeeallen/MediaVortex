@@ -2,6 +2,30 @@
 
 ## Open
 
+### [TECH DEBT] Activity page conflates worker liveness and operational state
+**Date:** 2026-05-08
+**Affects:** Templates/Activity.html (worker tag display), API endpoints that return worker status
+
+The Activity page shows a single "Online/Offline" badge per worker. It appears to be driven by `Workers.LastHeartbeat` freshness (process-is-alive signal). But the `Workers.Status` column is a separate axis -- it carries the operational state set by the Drain/Offline buttons (`Online` / `Draining` / `Offline`). When the user clicked Offline, the DB column flipped correctly to `Offline`, but the UI badge stayed green because the worker process is still alive and heartbeating (alive AND stopped is a valid combination today).
+
+The four real states from the combination:
+- Status=Online + heartbeat fresh -- alive AND working (the green "Online" users expect)
+- Status=Online + heartbeat stale -- should be working but process is dead (broken, needs investigation)
+- Status=Offline + heartbeat fresh -- alive but stopped (process running, not picking up jobs)
+- Status=Offline + heartbeat stale -- clean shutdown
+
+**Fix:** show two separate visuals per worker row in the Activity table.
+1. Connectivity indicator (dot or pill, color from heartbeat age: green <60s, yellow 60s-5m, red >5m)
+2. Operational state pill (text + color from `Workers.Status`: Online green, Draining amber, Offline gray)
+
+The connectivity indicator answers "can I reach this worker?". The operational state pill answers "should this worker be picking up jobs?". These are independent and both useful.
+
+**Look first:** Templates/Activity.html worker-tag rendering, the API endpoint that feeds it (likely under `Features/TeamStatus/` or `Features/ServiceControl/`), and `Workers` schema (Status + LastHeartbeat already exist, no schema change needed).
+
+**Fix with:** `/n` (template + API change, ~30 min)
+
+---
+
 ### [TECH DEBT] Loud-failure sweep -- Phase 2
 **Date:** 2026-05-08
 **Affects:** Models/CommandBuilder.py, WebService/Main.py, WorkerService/Main.py, Repositories/DatabaseManager.py, Features/Profiles/, Features/FileScanning/, Features/TranscodeQueue/, Services/FFmpegAnalysisService.py, Features/MediaProbe/, Features/FileReplacement/
