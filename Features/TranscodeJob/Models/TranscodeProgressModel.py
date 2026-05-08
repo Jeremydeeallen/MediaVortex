@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 
@@ -22,4 +22,4 @@ class TranscodeProgressModel:
     
     def __post_init__(self):
         if self.LastProgressUpdate is None:
-            self.LastProgressUpdate = datetime.now()
+            self.LastProgressUpdate = datetime.now(timezone.utc)

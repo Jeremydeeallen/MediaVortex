@@ -3,7 +3,7 @@ from typing import Dict, Any, Tuple
 from Features.TranscodeQueue.TranscodeQueueViewModel import TranscodeQueueViewModel
 from Core.Logging.LoggingService import LoggingService
 from ViewModels.TranscodingViewModel import TranscodingViewModel
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 # Create Blueprint for transcoding queue routes
@@ -353,7 +353,7 @@ class TranscodeQueueController:
                 "Success": False,
                 "Error": errorMsg,
                 "ErrorCode": "INTERNAL_SERVER_ERROR",
-                "Timestamp": datetime.now().isoformat()
+                "Timestamp": datetime.now(timezone.utc).isoformat()
             }, 500
 
     def GetTranscodeStatus(self, JobId: str) -> Tuple[Dict[str, Any], int]:
@@ -381,7 +381,7 @@ class TranscodeQueueController:
                 "Success": False,
                 "Error": errorMsg,
                 "ErrorCode": "INTERNAL_SERVER_ERROR",
-                "Timestamp": datetime.now().isoformat()
+                "Timestamp": datetime.now(timezone.utc).isoformat()
             }, 500
 
     def GetTranscodeQueue(self) -> Tuple[Dict[str, Any], int]:
@@ -406,5 +406,5 @@ class TranscodeQueueController:
                 "Success": False,
                 "Error": errorMsg,
                 "ErrorCode": "INTERNAL_SERVER_ERROR",
-                "Timestamp": datetime.now().isoformat()
+                "Timestamp": datetime.now(timezone.utc).isoformat()
             }, 500

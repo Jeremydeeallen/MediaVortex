@@ -1,6 +1,6 @@
 import os
 from typing import Dict, Any, Optional, List
-from datetime import datetime
+from datetime import datetime, timezone
 from Core.Models.MediaFileModel import MediaFileModel
 from Features.MediaProbe.MediaProbeRepository import MediaProbeRepository
 from Services.FileManagerService import FileManagerService
@@ -85,7 +85,7 @@ class MediaProbeBusinessService:
                 # Clear failure tracking on success
                 MediaFile.FFprobeFailureCount = 0
                 MediaFile.LastFFprobeError = None
-                MediaFile.LastFFprobeAttemptDate = datetime.now()
+                MediaFile.LastFFprobeAttemptDate = datetime.now(timezone.utc)
 
                 self.Repository.UpdateMetadata(MediaFile)
 

@@ -7,7 +7,7 @@ Service for managing threading operations in quality testing
 import sys
 import os
 import threading
-from datetime import datetime
+from datetime import datetime, timezone
 
 # Add the project root to the Python path
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -51,7 +51,7 @@ class ThreadingService:
                         'TranscodeAttemptId': 0,
                         'Status': 'Running',
                         'CurrentStep': 'VMAF analysis starting',
-                        'StartTime': datetime.now().isoformat(),
+                        'StartTime': datetime.now(timezone.utc).isoformat(),
                         'ProgressPercentage': 0,
                         'CurrentFrame': 0,
                         'TotalFrames': 0,
@@ -59,7 +59,7 @@ class ThreadingService:
                         'EstimatedTimeRemaining': 0,
                         'ErrorMessage': None,
                         'SubprocessPID': Process.pid,
-                        'SubprocessStartTime': datetime.now().isoformat()
+                        'SubprocessStartTime': datetime.now(timezone.utc).isoformat()
                     }
                     DatabaseManager.SaveQualityTestProgress(JobId, progress_data)
                     

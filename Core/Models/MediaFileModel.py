@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 
@@ -57,4 +57,4 @@ class MediaFileModel:
     
     def __post_init__(self):
         if self.LastScannedDate is None:
-            self.LastScannedDate = datetime.now()
+            self.LastScannedDate = datetime.now(timezone.utc)

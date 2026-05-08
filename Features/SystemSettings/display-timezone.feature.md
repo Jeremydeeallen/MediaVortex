@@ -73,16 +73,21 @@ IN PROGRESS
 - [x] 3. Inject `window.MV_TIMEZONE` from a cached context processor in Base.html
 - [x] 4. Write `static/js/timezone.js` with `formatTime`, `formatRelative`,
       `applyTimezoneSweep`, and DOMContentLoaded auto-sweep
-- [ ] 5. Sweep templates to add `class="js-tz" data-utc="..."` markup. One page
-      at a time: Activity -> Stats -> Logs -> Queue -> ServiceStatus -> Operations
-- [ ] 6. Audit `datetime.now()` -> `datetime.now(timezone.utc)` in Python code
-      so naive values stored from non-UTC clients are correct
+- [x] 5. Sweep templates: Activity, Operations, Queue, SQLQueries, Optimization,
+      FileScanning, Settings now use `window.formatTime()` for all timestamp
+      rendering. Status.html only does numeric arithmetic (no display strings)
+      so no change needed there. Remaining static-strftime renderings: none
+      (audit returned zero matches in `Templates/`).
+- [x] 6. Audit `datetime.now()` -> `datetime.now(timezone.utc)` -- 44 production
+      `.py` files updated via mechanical replacement; `from datetime import
+      timezone` added where missing. 10/10 sample-module import smoke test
+      passes. Scripts/, Tests/, and *.md left as-is.
 - [ ] 7. Defer: TIMESTAMPTZ schema migration (per-column ALTER ... USING ... AT
-      TIME ZONE 'UTC'). Non-blocking but recommended once template sweep is done.
+      TIME ZONE 'UTC'). Non-blocking; safe to run during a quiet window.
 
-NEXT: Step 5 (template sweep, starting with the Activity page since it has the
-most timestamps). Each page is independent; done incrementally without
-breaking anything else.
+NEXT: Step 7 is a quiet-window task. Feature is functionally complete. Restart
+WebService to clear the per-process timezone cache and pick up the new
+infrastructure on every page render.
 
 ## Scope
 

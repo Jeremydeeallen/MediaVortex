@@ -1,5 +1,5 @@
 from typing import List, Optional, Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone
 import os
 from Models.TranscodeProfileModel import TranscodeProfileModel
 from Models.ProfileThresholdModel import ProfileThresholdModel
@@ -3662,7 +3662,7 @@ class DatabaseManager:
         try:
             LoggingService.LogFunctionEntry("UpdateVMAFThresholds", "DatabaseManager", MinThreshold, MaxThreshold)
             
-            current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            current_time = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
             
             # Update min threshold
             min_query = """
@@ -4758,7 +4758,7 @@ class DatabaseManager:
             result = QualityTestResultModel(
                 TranscodeAttemptId=TranscodeAttemptId,
                 Status=Status,
-                DateTested=TestDate or datetime.now(),
+                DateTested=TestDate or datetime.now(timezone.utc),
                 VMAFScore=0.0 if Status == "Running" else None,  # Use 0.0 for running tests
                 ErrorMessage=None
             )

@@ -1935,7 +1935,9 @@ function RenderContinuousScanStatus(Data) {
         $('#ContinuousScanScanned').text((Data.TotalFilesFound || 0).toLocaleString());
         $('#ContinuousScanChanged').text((Data.FilesChanged || 0).toLocaleString());
         if (LastScanTime) {
-            $('#ContinuousScanLastCompleted').text(new Date(LastScanTime).toLocaleTimeString());
+            $('#ContinuousScanLastCompleted').text(
+                window.formatTime ? window.formatTime(LastScanTime, 'time') : new Date(LastScanTime).toLocaleTimeString()
+            );
         }
     } else {
         $('#ScanStatsRow').hide();

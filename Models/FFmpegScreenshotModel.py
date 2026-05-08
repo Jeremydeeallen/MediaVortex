@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from typing import Optional, List
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 @dataclass
@@ -26,7 +26,7 @@ class FFmpegScreenshotModel:
     
     def __post_init__(self):
         if self.GenerationDate is None:
-            self.GenerationDate = datetime.now()
+            self.GenerationDate = datetime.now(timezone.utc)
     
     def GetFullScreenshotPath(self) -> str:
         """Get the full path to the screenshot file."""
@@ -56,7 +56,7 @@ class FFmpegScreenshotBatchModel:
         if self.Screenshots is None:
             self.Screenshots = []
         if self.GenerationDate is None:
-            self.GenerationDate = datetime.now()
+            self.GenerationDate = datetime.now(timezone.utc)
     
     def AddScreenshot(self, Screenshot: FFmpegScreenshotModel):
         """Add a screenshot to the batch."""

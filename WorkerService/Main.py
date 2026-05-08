@@ -16,7 +16,7 @@ import threading
 import socket
 import platform as platform_mod
 import shutil
-from datetime import datetime
+from datetime import datetime, timezone
 
 # Set process title for better visibility in Task Manager
 setproctitle.setproctitle("WorkerService")
@@ -60,7 +60,7 @@ class WorkerServiceApp:
 
         # Threading state
         self.ShutdownEvent = threading.Event()
-        self.StartTime = datetime.now()
+        self.StartTime = datetime.now(timezone.utc)
         self.ProcessId = CurrentPid
 
         # Capability instances (created lazily based on DB config)

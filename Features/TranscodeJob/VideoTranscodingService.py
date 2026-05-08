@@ -4,7 +4,7 @@ import os
 import threading
 import time
 from typing import Dict, Any, Optional, Callable
-from datetime import datetime
+from datetime import datetime, timezone
 from Core.Logging.LoggingService import LoggingService
 
 
@@ -37,7 +37,7 @@ class VideoTranscodingService:
             LoggingService.LogInfo(f"Command type: {type(TranscodeCommand)}", "VideoTranscodingService", "TranscodeVideo")
             LoggingService.LogInfo(f"Command length: {len(TranscodeCommand) if isinstance(TranscodeCommand, str) else 'N/A'}", "VideoTranscodingService", "TranscodeVideo")
 
-            StartTime = datetime.now()
+            StartTime = datetime.now(timezone.utc)
 
             # Execute transcoding command
             LoggingService.LogInfo(f"Working directory: {os.getcwd()}", "VideoTranscodingService", "TranscodeVideo")
@@ -125,7 +125,7 @@ class VideoTranscodingService:
             # Wait for process to complete
             LoggingService.LogInfo(f"Waiting for process to complete...", "VideoTranscodingService", "TranscodeVideo")
             ReturnCode = Process.wait()
-            EndTime = datetime.now()
+            EndTime = datetime.now(timezone.utc)
             Duration = (EndTime - StartTime).total_seconds()
 
             LoggingService.LogInfo(f"Process completed with return code: {ReturnCode}", "VideoTranscodingService", "TranscodeVideo")
@@ -231,8 +231,8 @@ class VideoTranscodingService:
             return {
                 "Success": False,
                 "OutputFilePath": None,
-                "StartTime": datetime.now().isoformat(),
-                "EndTime": datetime.now().isoformat(),
+                "StartTime": datetime.now(timezone.utc).isoformat(),
+                "EndTime": datetime.now(timezone.utc).isoformat(),
                 "Duration": 0,
                 "ErrorMessage": ErrorMessage
             }

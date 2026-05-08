@@ -1,7 +1,7 @@
 import os
 import ntpath
 from typing import Dict, Any, List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 from Models.TranscodeAttemptModel import TranscodeAttemptModel
 from Repositories.DatabaseManager import DatabaseManager
 from Services.FileManagerService import FileManagerService
@@ -204,7 +204,7 @@ class FileReplacementBusinessService:
             if replacement_result.get('Success', False):
                 # Update transcode attempt to mark replacement as completed
                 transcode_attempt.FileReplaced = True
-                transcode_attempt.FileReplacedDate = datetime.now()
+                transcode_attempt.FileReplacedDate = datetime.now(timezone.utc)
                 transcode_attempt.ReplacementType = "Auto"
                 self.DatabaseManager.SaveTranscodeAttempt(transcode_attempt)
 
@@ -359,7 +359,7 @@ class FileReplacementBusinessService:
             if replacement_result.get('Success', False):
                 # Update transcode attempt to mark replacement as completed
                 transcode_attempt.FileReplaced = True
-                transcode_attempt.FileReplacementDate = datetime.now()
+                transcode_attempt.FileReplacementDate = datetime.now(timezone.utc)
                 self.DatabaseManager.SaveTranscodeAttempt(transcode_attempt)
 
                 # Clean up TemporaryFilePaths
@@ -648,7 +648,7 @@ class FileReplacementBusinessService:
 
             # Update LastScannedDate to current time
             from datetime import datetime
-            media_file.LastScannedDate = datetime.now()
+            media_file.LastScannedDate = datetime.now(timezone.utc)
 
             # Save the updated MediaFile
             self.DatabaseManager.SaveMediaFile(media_file)

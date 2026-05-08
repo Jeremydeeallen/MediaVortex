@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Any, Union
 
 
@@ -20,7 +20,7 @@ class CodecParametersModel:
     
     def __post_init__(self):
         if self.CreatedDate is None:
-            self.CreatedDate = datetime.now()
+            self.CreatedDate = datetime.now(timezone.utc)
     
     def IsValueValid(self, value: Any) -> bool:
         """Check if a parameter value is valid for this parameter."""

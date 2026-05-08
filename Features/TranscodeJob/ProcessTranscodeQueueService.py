@@ -1,5 +1,5 @@
 from typing import Dict, Any, Optional, Callable
-from datetime import datetime
+from datetime import datetime, timezone
 import threading
 import time
 import os
@@ -264,7 +264,7 @@ class ProcessTranscodeQueueService:
                 "ActiveJobsCount": activeJobCount,
                 "CurrentJob": currentJob,
                 "CurrentProgress": currentProgress,
-                "Timestamp": datetime.now().isoformat()
+                "Timestamp": datetime.now(timezone.utc).isoformat()
             }
 
         except Exception as e:
@@ -486,7 +486,7 @@ class ProcessTranscodeQueueService:
             # Update attempt record with complete information (keep Success=None to indicate in-progress)
             self.DatabaseManager.UpdateTranscodeAttempt(TranscodeAttemptId, {
                 'FilePath': Job.FilePath,
-                'AttemptDate': datetime.now(),
+                'AttemptDate': datetime.now(timezone.utc),
                 'Quality': TranscodingSettings.get('ProfileSettings', {}).get('Quality', 0),
                 'OldSizeBytes': Job.SizeBytes,
                 'NewSizeBytes': 0,
@@ -613,7 +613,7 @@ class ProcessTranscodeQueueService:
             # Update attempt record (keep Success=None to indicate in-progress)
             self.DatabaseManager.UpdateTranscodeAttempt(TranscodeAttemptId, {
                 'FilePath': Job.FilePath,
-                'AttemptDate': datetime.now(),
+                'AttemptDate': datetime.now(timezone.utc),
                 'Quality': 0,
                 'OldSizeBytes': Job.SizeBytes,
                 'NewSizeBytes': 0,
@@ -729,7 +729,7 @@ class ProcessTranscodeQueueService:
             # Update attempt record (keep Success=None to indicate in-progress)
             self.DatabaseManager.UpdateTranscodeAttempt(TranscodeAttemptId, {
                 'FilePath': Job.FilePath,
-                'AttemptDate': datetime.now(),
+                'AttemptDate': datetime.now(timezone.utc),
                 'Quality': 0,
                 'OldSizeBytes': Job.SizeBytes,
                 'NewSizeBytes': 0,
@@ -784,7 +784,7 @@ class ProcessTranscodeQueueService:
             # Update attempt as successful, no quality test needed
             self.DatabaseManager.UpdateTranscodeAttempt(TranscodeAttemptId, {
                 'Success': True,
-                'CompletedDate': datetime.now(),
+                'CompletedDate': datetime.now(timezone.utc),
                 'TranscodeDurationSeconds': TranscodeResult.get('Duration', 0.0),
                 'NewSizeBytes': NewSizeBytes,
                 'SizeReductionBytes': SizeReductionBytes,
@@ -1176,7 +1176,7 @@ class ProcessTranscodeQueueService:
             # Create attempt record
             Attempt = TranscodeAttemptModel(
                 FilePath=Job.FilePath,
-                AttemptDate=datetime.now(),
+                AttemptDate=datetime.now(timezone.utc),
                 Quality=ProfileSettings.get('Quality', 0),
                 OldSizeBytes=Job.SizeBytes,
                 NewSizeBytes=0,  # Will be updated after transcoding
@@ -1320,7 +1320,7 @@ class ProcessTranscodeQueueService:
                 # Update attempt record with success details
                 self.DatabaseManager.UpdateTranscodeAttempt(TranscodeAttemptId, {
                     'Success': True,
-                    'CompletedDate': datetime.now(),
+                    'CompletedDate': datetime.now(timezone.utc),
                     'TranscodeDurationSeconds': TranscodeResult.get('Duration', 0.0),
                     'NewSizeBytes': NewSizeBytes,
                     'SizeReductionBytes': SizeReductionBytes,
@@ -1380,7 +1380,7 @@ class ProcessTranscodeQueueService:
                 self.DatabaseManager.UpdateTranscodeAttempt(TranscodeAttemptId, {
                     'Success': False,
                     'ErrorMessage': ErrorMessage,
-                    'CompletedDate': datetime.now()
+                    'CompletedDate': datetime.now(timezone.utc)
                 })
 
                 # Update TranscodeFiles record for overall file status (failure)
@@ -1389,7 +1389,7 @@ class ProcessTranscodeQueueService:
                 # Create new attempt record for investigation (fallback case)
                 Attempt = TranscodeAttemptModel(
                     FilePath=Job.FilePath,
-                    AttemptDate=datetime.now(),
+                    AttemptDate=datetime.now(timezone.utc),
                     Quality=0,  # Will be set properly when we have profile info
                     OldSizeBytes=Job.SizeBytes,
                     NewSizeBytes=0,
@@ -1403,7 +1403,7 @@ class ProcessTranscodeQueueService:
                     VideoBitrateKbps=None,
                     ProfileName=None,  # Will be set when we have profile info
                     VMAF=None,
-                    CompletedDate=datetime.now(),
+                    CompletedDate=datetime.now(timezone.utc),
                     WorkerName=self.WorkerName
                 )
                 AttemptId = self.DatabaseManager.SaveTranscodeAttempt(Attempt)
@@ -1580,8 +1580,8 @@ class ProcessTranscodeQueueService:
                         AllQualitiesFailed=ExistingTranscodeFile.AllQualitiesFailed,
                         SuccessfullyTranscoded=True,
                         FirstAttemptDate=ExistingTranscodeFile.FirstAttemptDate,
-                        LastAttemptDate=datetime.now(),
-                        SuccessDate=datetime.now(),
+                        LastAttemptDate=datetime.now(timezone.utc),
+                        SuccessDate=datetime.now(timezone.utc),
                         FinalQuality=Attempt.Quality,
                         FinalSizeBytes=FinalSizeBytes,
                         TotalAttempts=ExistingTranscodeFile.TotalAttempts + 1,
@@ -1597,7 +1597,7 @@ class ProcessTranscodeQueueService:
                         AllQualitiesFailed=ExistingTranscodeFile.AllQualitiesFailed,
                         SuccessfullyTranscoded=ExistingTranscodeFile.SuccessfullyTranscoded,
                         FirstAttemptDate=ExistingTranscodeFile.FirstAttemptDate,
-                        LastAttemptDate=datetime.now(),
+                        LastAttemptDate=datetime.now(timezone.utc),
                         SuccessDate=ExistingTranscodeFile.SuccessDate,
                         FinalQuality=ExistingTranscodeFile.FinalQuality,
                         FinalSizeBytes=ExistingTranscodeFile.FinalSizeBytes,
@@ -1611,7 +1611,7 @@ class ProcessTranscodeQueueService:
                 LoggingService.LogInfo(f"Creating new TranscodeFile record for {FilePath}",
                                      "ProcessTranscodeQueueService", "UpdateTranscodeFileRecord")
 
-                CurrentTime = datetime.now()
+                CurrentTime = datetime.now(timezone.utc)
                 TranscodeFile = TranscodeFileModel(
                     FilePath=FilePath,
                     AllQualitiesFailed=not IsSuccess,  # If first attempt fails, mark as all qualities failed

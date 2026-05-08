@@ -1,5 +1,5 @@
 from typing import List, Optional, Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone
 import os
 from Features.TranscodeQueue.Models.TranscodeQueueModel import TranscodeQueueModel
 from Core.Models.MediaFileModel import MediaFileModel
@@ -339,7 +339,7 @@ class QueueManagementBusinessService:
                     Priority=Priority,
                     Status="Pending",
                     ProcessingMode=Mode,
-                    DateAdded=datetime.now()
+                    DateAdded=datetime.now(timezone.utc)
                 )
 
                 try:
@@ -566,7 +566,7 @@ class QueueManagementBusinessService:
                 SizeMB=MediaFile.SizeMB or 0,
                 Priority=self.CalculatePriority(MediaFile),
                 Status='Pending',
-                DateAdded=datetime.now()
+                DateAdded=datetime.now(timezone.utc)
             )
 
             LoggingService.LogInfo(f"Created simple queue item for {MediaFile.FileName}", "QueueManagementBusinessService", "CreateQueueItemFromMediaFileSimple")
@@ -603,7 +603,7 @@ class QueueManagementBusinessService:
                 SizeMB=MediaFile.SizeMB or 0.0,
                 Priority=priority,
                 Status="Pending",
-                DateAdded=datetime.now()
+                DateAdded=datetime.now(timezone.utc)
             )
 
             LoggingService.LogInfo(f"Created queue item for {fileName} with profile {MediaFile.AssignedProfile} and priority {priority}", "QueueManagementBusinessService", "CreateQueueItemFromMediaFileWithProfile")
@@ -718,7 +718,7 @@ class QueueManagementBusinessService:
                 Priority=self.CalculatePriority(MediaFile),
                 Status="Pending",
                 ProcessingMode="Remux",
-                DateAdded=datetime.now()
+                DateAdded=datetime.now(timezone.utc)
             )
 
             LoggingService.LogInfo(f"Created remux queue item for {fileName}", "QueueManagementBusinessService", "CreateRemuxQueueItem")
@@ -849,7 +849,7 @@ class QueueManagementBusinessService:
                 SizeMB=MediaFile.SizeMB or 0.0,
                 Priority=priority,
                 Status="Pending",
-                DateAdded=datetime.now()
+                DateAdded=datetime.now(timezone.utc)
             )
 
             LoggingService.LogInfo(f"Created queue item for {fileName} with priority {priority}", "QueueManagementBusinessService", "CreateQueueItemFromMediaFile")
@@ -1364,7 +1364,7 @@ class QueueManagementBusinessService:
                     Priority=self.CalculatePriority(mediaFile),
                     Status="Pending",
                     ProcessingMode="SubtitleFix",
-                    DateAdded=datetime.now()
+                    DateAdded=datetime.now(timezone.utc)
                 )
 
                 try:

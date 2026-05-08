@@ -3,7 +3,7 @@ import json
 import re
 import uuid
 from typing import Dict, Any, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from Models.FFmpegAnalysisModel import FFmpegAnalysisModel
 from Services.FFmpegService import FFmpegService
@@ -547,7 +547,7 @@ class FFmpegAnalysisService:
             INSERT INTO ScanJobs (JobId, RootFolderPath, Recursive, Status, StartTime, LastUpdated, ScanType)
             VALUES (%s, %s, %s, 'Pending', %s, %s, 'FFprobe')
             """
-            Now = datetime.now()
+            Now = datetime.now(timezone.utc)
             LoggingService.LogInfo(f"Executing FFprobe query with params: JobId={JobId}, RootFolderPath={RootFolderPath}, Recursive={Recursive}, Now={Now}")
             
             if self.DatabaseService:
@@ -568,14 +568,14 @@ class FFmpegAnalysisService:
             LoggingService.LogFunctionEntry("StartFFprobeScanning", 'FFmpegAnalysisService', f"RootFolder: {RootFolderPath}, Recursive: {Recursive}")
             
             # Generate unique job ID
-            JobId = f"FFprobe_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}"
+            JobId = f"FFprobe_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}"
             
             # Create FFprobe scan job
             self.CreateFFprobeScanJob(JobId, RootFolderPath, Recursive)
             
             # Update job status to running
             Query = "UPDATE ScanJobs SET Status = 'Running', ProcessId = %s, LastUpdated = %s WHERE JobId = %s"
-            Now = datetime.now()
+            Now = datetime.now(timezone.utc)
             
             if self.DatabaseService:
                 self.DatabaseService.ExecuteNonQuery(Query, (os.getpid(), Now, JobId))

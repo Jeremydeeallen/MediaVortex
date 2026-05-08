@@ -10,7 +10,7 @@ import os
 import setproctitle
 import time
 import threading
-from datetime import datetime
+from datetime import datetime, timezone
 from flask import Flask, render_template, request, jsonify, redirect
 from flask_cors import CORS
 
@@ -72,7 +72,7 @@ class WebServiceApp:
         CORS(self.App)
         
         # Initialize service tracking
-        self.StartTime = datetime.now()
+        self.StartTime = datetime.now(timezone.utc)
         self.ServiceStatusThread = None
         self.StatusPollingThread = None
         self.ShutdownEvent = False

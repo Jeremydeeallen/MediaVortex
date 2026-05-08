@@ -1,5 +1,5 @@
 from typing import List, Optional, Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone
 from Features.Profiles.Models.TranscodeProfileModel import TranscodeProfileModel
 from Features.Profiles.Models.ProfileThresholdModel import ProfileThresholdModel
 from Features.Profiles.ProfileService import ProfileService
@@ -177,7 +177,7 @@ class ProfileManagementViewModel:
                 ProfileName=profile_name,
                 Description=description,
                 CreatedDate=existing_profile.CreatedDate,
-                LastModified=datetime.now(),
+                LastModified=datetime.now(timezone.utc),
                 Codec=codec,
                 Preset=preset,
                 FilmGrain=film_grain,

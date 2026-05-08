@@ -10,7 +10,7 @@ import psutil
 import threading
 import time
 from typing import Dict, Any, Optional, List
-from datetime import datetime
+from datetime import datetime, timezone
 from Core.Logging.LoggingService import LoggingService
 from Services.SystemMonitoringService import SystemMonitoringService
 from Services.CoreTopologyService import CoreTopologyService
@@ -230,7 +230,7 @@ class CpuAffinityService:
                 "ProcessPID": ProcessPID,
                 "CoreList": CoreList,
                 "PrePauseCoreList": None,
-                "StartTime": datetime.now(),
+                "StartTime": datetime.now(timezone.utc),
                 "JobType": JobType
             }
         LoggingService.LogInfo(f"Registered {JobType} job {JobId} (PID {ProcessPID}) on cores {CoreList}",
@@ -325,7 +325,7 @@ class CpuAffinityService:
     def _GetCurrentTemperatures(self) -> Optional[Dict[str, Any]]:
         """Get current CPU temperatures, using cache if available."""
         try:
-            CurrentTime = datetime.now()
+            CurrentTime = datetime.now(timezone.utc)
             if (self.TemperatureCache is not None and
                 self.TemperatureCacheTime is not None and
                 (CurrentTime - self.TemperatureCacheTime).total_seconds() < self.TemperatureCacheValidSeconds):
@@ -413,13 +413,13 @@ class CpuAffinityService:
                 f"avg temp: {Result.get('AverageTemp', 'N/A')}°C)",
                 "CpuAffinityService", "WaitForThermalClearance")
 
-            StartTime = datetime.now()
+            StartTime = datetime.now(timezone.utc)
             LastLogTime = StartTime
 
             while True:
                 time.sleep(self.ThermalGateCheckInterval)
 
-                ElapsedSeconds = (datetime.now() - StartTime).total_seconds()
+                ElapsedSeconds = (datetime.now(timezone.utc) - StartTime).total_seconds()
                 if ElapsedSeconds >= self.ThermalGateMaxWaitSeconds:
                     LoggingService.LogWarning(
                         f"Thermal clearance timeout after {ElapsedSeconds:.0f}s — allowing job to proceed",
@@ -433,9 +433,9 @@ class CpuAffinityService:
                         "CpuAffinityService", "WaitForThermalClearance")
                     return True
 
-                SecondsSinceLastLog = (datetime.now() - LastLogTime).total_seconds()
+                SecondsSinceLastLog = (datetime.now(timezone.utc) - LastLogTime).total_seconds()
                 if SecondsSinceLastLog >= 30:
-                    LastLogTime = datetime.now()
+                    LastLogTime = datetime.now(timezone.utc)
                     LoggingService.LogInfo(
                         f"Still waiting for thermal clearance ({ElapsedSeconds:.0f}s, "
                         f"avg temp: {Result.get('AverageTemp', 'N/A')}°C)",

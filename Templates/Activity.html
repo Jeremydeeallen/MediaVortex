@@ -133,8 +133,9 @@ var ActivityPage = (function() {
 
     function FormatDate(DateString) {
         if (!DateString) return '-';
-        var D = new Date(DateString);
-        return D.toLocaleString(undefined, { timeZoneName: 'short' });
+        // Use the configured display timezone from window.MV_TIMEZONE (see static/js/timezone.js).
+        // Storage is always UTC; this converts to the operator-selected zone.
+        return window.formatTime ? window.formatTime(DateString, 'datetime') : new Date(DateString).toLocaleString();
     }
 
     function FormatHeartbeatAge(Sec) {

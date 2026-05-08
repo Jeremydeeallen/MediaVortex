@@ -519,8 +519,8 @@ class TranscodeQueueManager {
 
     formatDate(dateString) {
         if (!dateString) return '-';
-        const date = new Date(dateString);
-        return date.toLocaleString(undefined, { timeZoneName: 'short' });
+        // Use formatTime() so the configured display timezone applies (see static/js/timezone.js)
+        return window.formatTime ? window.formatTime(dateString, 'datetime') : new Date(dateString).toLocaleString();
     }
 
     getStatusBadgeClass(status) {

@@ -1,5 +1,5 @@
 from typing import Dict, Any, List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 from Features.TranscodeJob.TranscodingViewModel import TranscodingViewModel
 from Core.Logging.LoggingService import LoggingService
 
@@ -25,7 +25,7 @@ class ActivityViewModel:
 
             if result.get("Success", False):
                 self.IsTranscoding = True
-                self.LastUpdate = datetime.now()
+                self.LastUpdate = datetime.now(timezone.utc)
                 LoggingService.LogInfo(f"Started transcoding with {MaxConcurrentJobs} concurrent jobs",
                                      "ActivityViewModel", "StartTranscoding")
 
@@ -49,7 +49,7 @@ class ActivityViewModel:
             if result.get("Success", False):
                 self.IsTranscoding = False
                 self.ActiveJobs.clear()
-                self.LastUpdate = datetime.now()
+                self.LastUpdate = datetime.now(timezone.utc)
                 LoggingService.LogInfo("Stopped transcoding", "ActivityViewModel", "StopTranscoding")
 
             return result
@@ -74,7 +74,7 @@ class ActivityViewModel:
                 # Update local state
                 self.IsTranscoding = status.get("IsTranscoding", False)
                 self.CurrentProgress = status.get("CurrentProgress", {})
-                self.LastUpdate = datetime.now()
+                self.LastUpdate = datetime.now(timezone.utc)
 
                 # Add activity-specific information
                 status.update({
@@ -135,7 +135,7 @@ class ActivityViewModel:
 
             # Update local state
             self.CurrentProgress = progress
-            self.LastUpdate = datetime.now()
+            self.LastUpdate = datetime.now(timezone.utc)
 
             return progress
 
@@ -156,7 +156,7 @@ class ActivityViewModel:
                 status = result.get("Status", {})
                 self.IsTranscoding = status.get("IsTranscoding", False)
                 self.CurrentProgress = status.get("CurrentProgress", {})
-                self.LastUpdate = datetime.now()
+                self.LastUpdate = datetime.now(timezone.utc)
 
                 # Add activity-specific information
                 result.update({
@@ -182,7 +182,7 @@ class ActivityViewModel:
                 "CurrentProgress": self.CurrentProgress,
                 "ActiveJobs": self.ActiveJobs,
                 "LastUpdate": self.LastUpdate.isoformat() if self.LastUpdate else None,
-                "Timestamp": datetime.now().isoformat()
+                "Timestamp": datetime.now(timezone.utc).isoformat()
             }
 
         except Exception as e:
@@ -195,7 +195,7 @@ class ActivityViewModel:
             self.IsTranscoding = NewState.get("IsTranscoding", False)
             self.CurrentProgress = NewState.get("CurrentProgress", {})
             self.ActiveJobs = NewState.get("ActiveJobs", [])
-            self.LastUpdate = datetime.now()
+            self.LastUpdate = datetime.now(timezone.utc)
 
         except Exception as e:
             LoggingService.LogException("Exception updating activity state", e, "ActivityViewModel", "UpdateActivityState")

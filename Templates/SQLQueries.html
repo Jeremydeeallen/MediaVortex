@@ -640,7 +640,7 @@ class SQLQueriesManager {
                                 <td><span class="badge bg-${failure.ServiceType === 'Transcode' ? 'primary' : 'info'}">${failure.ServiceType}</span></td>
                                 <td title="${failure.FileName}">${FileName}</td>
                                 <td title="${failure.FailureReason}">${ErrorMessage}</td>
-                                <td>${new Date(failure.FailureDate).toLocaleString(undefined, { timeZoneName: 'short' })}</td>
+                                <td>${window.formatTime(failure.FailureDate, 'datetime')}</td>
                                 <td>${Duration}</td>
                                 <td>
                                     <button class="btn btn-sm btn-outline-primary" onclick="sqlQueriesManager.LoadMediaFileComparisonForPath('${failure.FileName}')">
@@ -717,7 +717,7 @@ class SQLQueriesManager {
                                 <td><span class="badge bg-warning">${job.JobType}</span></td>
                                 <td title="${job.FilePath}">${FileName}</td>
                                 <td><span class="badge bg-danger">${job.Status}</span></td>
-                                <td>${new Date(job.StartedAt).toLocaleString(undefined, { timeZoneName: 'short' })}</td>
+                                <td>${window.formatTime(job.StartedAt, 'datetime')}</td>
                                 <td>${job.Duration}</td>
                             </tr>
                         `;

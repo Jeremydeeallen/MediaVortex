@@ -3,7 +3,7 @@ import uuid
 import re
 import threading
 from typing import List, Optional, Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from Features.FileScanning.Models.RootFolderModel import RootFolderModel
@@ -147,9 +147,9 @@ class FileScanningBusinessService:
 
             # Update job status based on result
             if result.get('Success', False):
-                self.UpdateJobStatus(JobId, 'Completed', Progress=100.0, EndTime=datetime.now())
+                self.UpdateJobStatus(JobId, 'Completed', Progress=100.0, EndTime=datetime.now(timezone.utc))
             else:
-                self.UpdateJobStatus(JobId, 'Failed', ErrorMessage=result.get('Message', 'Unknown error'), EndTime=datetime.now())
+                self.UpdateJobStatus(JobId, 'Failed', ErrorMessage=result.get('Message', 'Unknown error'), EndTime=datetime.now(timezone.utc))
 
             return result
 
@@ -168,7 +168,7 @@ class FileScanningBusinessService:
             INSERT INTO ScanJobs (JobId, RootFolderPath, Recursive, Status, StartTime, LastUpdated, ScanType)
             VALUES (%s, %s, %s, 'Running', %s, %s, 'File')
             """
-            Now = datetime.now()
+            Now = datetime.now(timezone.utc)
             self.Repository.DatabaseService.ExecuteNonQuery(Query, (JobId, RootFolderPath, Recursive, Now, Now))
 
         except Exception as e:
@@ -227,7 +227,7 @@ class FileScanningBusinessService:
 
             # Always update LastUpdated
             UpdateFields.append("LastUpdated = %s")
-            UpdateValues.append(datetime.now())
+            UpdateValues.append(datetime.now(timezone.utc))
 
             # Add JobId for WHERE clause
             UpdateValues.append(JobId)
@@ -416,7 +416,7 @@ class FileScanningBusinessService:
                 }
 
             # Update job status to stopped
-            self.UpdateJobStatus(self.CurrentJobId, 'Stopped', EndTime=datetime.now())
+            self.UpdateJobStatus(self.CurrentJobId, 'Stopped', EndTime=datetime.now(timezone.utc))
 
             # Clear current job and update scanning state
             self.CurrentJobId = None
@@ -554,7 +554,7 @@ class FileScanningBusinessService:
                         if ExistingCanonical == CanonicalPath:
                             # Update existing folder with canonical path
                             Folder.RootFolder = CanonicalPath
-                            Folder.LastScannedDate = datetime.now()
+                            Folder.LastScannedDate = datetime.now(timezone.utc)
                             Folder.TotalSizeGB = TotalSizeGB
                             FolderId = self.Repository.SaveRootFolder(Folder)
                             Folder.Id = FolderId
@@ -567,7 +567,7 @@ class FileScanningBusinessService:
             # Create new root folder with canonical path
             NewFolder = RootFolderModel(
                 RootFolder=CanonicalPath,
-                LastScannedDate=datetime.now(),
+                LastScannedDate=datetime.now(timezone.utc),
                 TotalSizeGB=TotalSizeGB
             )
             FolderId = self.Repository.SaveRootFolder(NewFolder)
@@ -940,7 +940,7 @@ class FileScanningBusinessService:
                     ExistingFile.LastModifiedDate = FileModificationTime
                     ExistingFile.FileSize = FileSize
                     ExistingFile.SeasonId = None  # Season functionality disabled
-                    ExistingFile.LastScannedDate = datetime.now()
+                    ExistingFile.LastScannedDate = datetime.now(timezone.utc)
 
                     # Extract metadata if requested and not already present
                     if ExtractMetadata and self.ShouldExtractMetadata(ExistingFile):
@@ -951,7 +951,7 @@ class FileScanningBusinessService:
                 else:
                     # FILE UNCHANGED - SKIP PROCESSING (HUGE PERFORMANCE WIN!)
                     # Only update LastScannedDate to mark it was checked
-                    ExistingFile.LastScannedDate = datetime.now()
+                    ExistingFile.LastScannedDate = datetime.now(timezone.utc)
                     self.UpdateLastScannedDate(ExistingFile.Id, ExistingFile.LastScannedDate)
                     self.ScanResults.TotalFilesSkipped += 1
                     LoggingService.LogDebug(f"Skipped unchanged file: {FilePath}", 'ProcessSingleMediaFile', 'FileScanningBusinessService')
@@ -967,7 +967,7 @@ class FileScanningBusinessService:
                     FuzzyMatch.SizeMB = FileSizeMB  # Update to new size
                     FuzzyMatch.FileModificationTime = FileModificationTime
                     FuzzyMatch.SeasonId = None  # Season functionality disabled
-                    FuzzyMatch.LastScannedDate = datetime.now()
+                    FuzzyMatch.LastScannedDate = datetime.now(timezone.utc)
                     # Note: RootFolderId is not stored in MediaFiles table - files are associated by FilePath
 
                     # Extract metadata if requested and not already present
@@ -988,7 +988,7 @@ class FileScanningBusinessService:
                         TranscodedMatch.SizeMB = FileSizeMB  # Update to new size
                         TranscodedMatch.FileModificationTime = FileModificationTime
                         TranscodedMatch.TranscodedByMediaVortex = True  # Flag as transcoded
-                        TranscodedMatch.LastScannedDate = datetime.now()
+                        TranscodedMatch.LastScannedDate = datetime.now(timezone.utc)
 
                         # Extract metadata if requested (transcoded files may have different metadata)
                         if ExtractMetadata:
@@ -1008,7 +1008,7 @@ class FileScanningBusinessService:
                             FileModificationTime=FileModificationTime,
                             LastModifiedDate=FileModificationTime,
                             FileSize=FileSize,
-                            LastScannedDate=datetime.now()
+                            LastScannedDate=datetime.now(timezone.utc)
                         )
                         # Note: RootFolderId is not stored in MediaFiles table - files are associated by FilePath
 
@@ -1213,7 +1213,7 @@ class FileScanningBusinessService:
             return datetime.fromtimestamp(ModificationTime)
         except Exception as e:
             LoggingService.LogException(f"Error getting file modification time for {FilePath}", e, 'GetFileModificationTime', 'FileScanningBusinessService')
-            return datetime.now()
+            return datetime.now(timezone.utc)
 
     def HasFileChanged(self, MediaFile: MediaFileModel, CurrentSizeMB: float, CurrentFileName: str, CurrentModificationTime: datetime) -> bool:
         """Check if a file has changed by comparing size, name, and modification time."""
@@ -1356,20 +1356,20 @@ class FileScanningBusinessService:
                 # Clear failure tracking on success
                 MediaFile.FFprobeFailureCount = 0
                 MediaFile.LastFFprobeError = None
-                MediaFile.LastFFprobeAttemptDate = datetime.now()
+                MediaFile.LastFFprobeAttemptDate = datetime.now(timezone.utc)
             else:
                 # Record failure
                 ErrorMessage = MetadataResult.get('ErrorMessage', 'Unknown error')
                 LoggingService.LogWarning(f"Failed to extract metadata for {FilePath}: {ErrorMessage}", 'ExtractAndUpdateMetadata', 'FileScanningBusinessService')
                 MediaFile.FFprobeFailureCount = (MediaFile.FFprobeFailureCount or 0) + 1
                 MediaFile.LastFFprobeError = ErrorMessage
-                MediaFile.LastFFprobeAttemptDate = datetime.now()
+                MediaFile.LastFFprobeAttemptDate = datetime.now(timezone.utc)
 
         except Exception as e:
             LoggingService.LogException("Error extracting and updating metadata", e, 'ExtractAndUpdateMetadata', 'FileScanningBusinessService')
             MediaFile.FFprobeFailureCount = (MediaFile.FFprobeFailureCount or 0) + 1
             MediaFile.LastFFprobeError = str(e)
-            MediaFile.LastFFprobeAttemptDate = datetime.now()
+            MediaFile.LastFFprobeAttemptDate = datetime.now(timezone.utc)
 
     def CleanupMissingFiles(self, RootFolderId: Optional[int] = None):
         """Remove database records for files that no longer exist on disk."""
@@ -1507,7 +1507,7 @@ class FileScanningBusinessService:
                         LoggingService.LogInfo(f"Updating moved file: {MovedFile['OldPath']} -> {MovedFile['NewPath']}", 'DetectMovedFiles', 'FileScanningBusinessService')
                         DbFile.FilePath = MovedFile['NewPath']
                         DbFile.FileName = os.path.basename(MovedFile['NewPath'])
-                        DbFile.LastScannedDate = datetime.now()
+                        DbFile.LastScannedDate = datetime.now(timezone.utc)
                         self.Repository.SaveMediaFile(DbFile)
                         MovedFiles.append({
                             'OldPath': MovedFile['OldPath'],

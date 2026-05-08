@@ -11,7 +11,7 @@ import setproctitle
 import time
 import threading
 import psutil
-from datetime import datetime
+from datetime import datetime, timezone
 
 # Set process title for better visibility in Task Manager
 setproctitle.setproctitle("QualityTestService")
@@ -70,7 +70,7 @@ class QualityTestServiceApp:
         self.HealthCheckThread = None
         self.StatusPollingThread = None
         self.ShutdownEvent = threading.Event()
-        self.StartTime = datetime.now()
+        self.StartTime = datetime.now(timezone.utc)
         self.ProcessId = os.getpid()
         self.CurrentStatus = "Stopped"
         

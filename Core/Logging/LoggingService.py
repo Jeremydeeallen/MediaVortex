@@ -1,7 +1,7 @@
 import os
 import traceback
 from typing import Any, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 from Core.Database.DatabaseService import DatabaseService
 
 
@@ -60,7 +60,7 @@ class LoggingService:
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """
 
-            Now = datetime.now()
+            Now = datetime.now(timezone.utc)
             Params = (
                 Now,           # Timestamp
                 LogLevel,      # LogLevel

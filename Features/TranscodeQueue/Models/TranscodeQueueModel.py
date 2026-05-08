@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 
@@ -24,7 +24,7 @@ class TranscodeQueueModel:
 
     def __post_init__(self):
         if self.DateAdded is None:
-            self.DateAdded = datetime.now()
+            self.DateAdded = datetime.now(timezone.utc)
 
     @property
     def IsCompleted(self) -> bool:
@@ -55,7 +55,7 @@ class TranscodeQueueModel:
     def DurationMinutes(self) -> Optional[float]:
         """Calculate job duration in minutes."""
         if self.DateStarted and self.IsCompleted:
-            duration = datetime.now() - self.DateStarted
+            duration = datetime.now(timezone.utc) - self.DateStarted
             return duration.total_seconds() / 60.0
         return None
 

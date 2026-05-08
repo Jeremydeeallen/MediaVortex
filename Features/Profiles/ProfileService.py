@@ -1,5 +1,5 @@
 from typing import List, Optional, Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone
 from Features.Profiles.Models.TranscodeProfileModel import TranscodeProfileModel
 from Features.Profiles.Models.ProfileThresholdModel import ProfileThresholdModel
 from Features.Profiles.ProfileRepository import ProfileRepository
@@ -30,8 +30,8 @@ class ProfileService:
             profile = TranscodeProfileModel(
                 ProfileName=profile_name,
                 Description=description,
-                CreatedDate=datetime.now(),
-                LastModified=datetime.now(),
+                CreatedDate=datetime.now(timezone.utc),
+                LastModified=datetime.now(timezone.utc),
                 Codec=codec,
                 Preset=preset,
                 FilmGrain=film_grain,
@@ -56,7 +56,7 @@ class ProfileService:
         """Update an existing transcoding profile."""
         try:
             LoggingService.LogFunctionEntry("UpdateProfile", 'ProfileService', profile.Id, profile.ProfileName, profile.Description)
-            profile.LastModified = datetime.now()
+            profile.LastModified = datetime.now(timezone.utc)
             LoggingService.LogInfo("Saving profile to database...", 'UpdateProfile', 'ProfileService')
             profile_id = self.Repository.SaveProfile(profile)
             profile.Id = profile_id

@@ -1,5 +1,5 @@
 from typing import Dict, Any, List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 from Features.TranscodeJob.ProcessTranscodeQueueService import ProcessTranscodeQueueService
 from Features.TranscodeJob.VideoTranscodingService import VideoTranscodingService
 from Repositories.DatabaseManager import DatabaseManager
@@ -204,7 +204,7 @@ class TranscodingViewModel:
                 "Success": True,
                 "Status": status,
                 "CurrentProgress": currentProgress,
-                "Timestamp": datetime.now().isoformat()
+                "Timestamp": datetime.now(timezone.utc).isoformat()
             }
 
         except Exception as e:

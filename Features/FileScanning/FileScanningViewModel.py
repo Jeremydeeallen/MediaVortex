@@ -1,5 +1,5 @@
 from typing import List, Dict, Any, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 import os
 from Features.FileScanning.Models.RootFolderModel import RootFolderModel
 from Core.Models.MediaFileModel import MediaFileModel
@@ -43,7 +43,7 @@ class FileScanningViewModel:
                 self.ScanStatusMessage = "Scan started successfully"
                 self.IsError = False
                 self.ErrorMessage = ""
-                self.LastScanTime = datetime.now()
+                self.LastScanTime = datetime.now(timezone.utc)
             else:
                 self.IsError = True
                 self.ErrorMessage = result.get('Message', 'Unknown error occurred')

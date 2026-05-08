@@ -2,7 +2,7 @@ import os
 import threading
 import time
 from typing import Dict, Any, List
-from datetime import datetime
+from datetime import datetime, timezone
 from Core.Logging.LoggingService import LoggingService
 
 
@@ -138,7 +138,7 @@ class ContinuousScanService:
 
                 # Calculate scan duration
                 if IsScanning and ScanResults.ScanStartTime:
-                    Duration = datetime.now() - ScanResults.ScanStartTime
+                    Duration = datetime.now(timezone.utc) - ScanResults.ScanStartTime
                     Status['CurrentScanDuration'] = str(Duration).split('.')[0]  # Remove microseconds
                 else:
                     Status['CurrentScanDuration'] = None
@@ -306,7 +306,7 @@ class ContinuousScanService:
                     continue
 
             # Update scan statistics
-            self.LastScanTime = datetime.now()
+            self.LastScanTime = datetime.now(timezone.utc)
             self.ScanCount += 1
 
             LoggingService.LogInfo(f"=== CONTINUOUS SCAN ITERATION COMPLETED === Total scans: {self.ScanCount}", 'ContinuousScanService', '_ExecuteScan')

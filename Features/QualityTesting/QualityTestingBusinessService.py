@@ -9,7 +9,7 @@ import os
 import subprocess
 import time
 import threading
-from datetime import datetime
+from datetime import datetime, timezone
 from Core.Logging.LoggingService import LoggingService
 
 
@@ -82,7 +82,7 @@ class QualityTestingBusinessService:
             result_id = self.DatabaseManager.CreateQualityTestResult(
                 TranscodeAttemptId=job_details['TranscodeAttemptId'],
                 Status="Running",
-                TestDate=datetime.now()
+                TestDate=datetime.now(timezone.utc)
             )
 
             if result_id == 0:
@@ -528,7 +528,7 @@ class QualityTestingBusinessService:
                 ) VALUES (%s, %s, %s, %s, %s, %s, %s)
             """
 
-            current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            current_time = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
             transcode_attempt_id = JobDetails.get('TranscodeAttemptId', 0)
 
             result = self.DatabaseManager.DatabaseService.ExecuteNonQuery(query, (
@@ -559,7 +559,7 @@ class QualityTestingBusinessService:
             if ProgressId == 0:
                 return
 
-            current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            current_time = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
 
             # Update progress record (VMAF scores go to QualityTestResults, not here)
             query = """
@@ -584,7 +584,7 @@ class QualityTestingBusinessService:
             LoggingService.LogInfo(f"Final command string: {command}", "QualityTestingBusinessService", "ExecuteFFmpegWithProgress")
 
             # Start timing
-            StartTime = datetime.now()
+            StartTime = datetime.now(timezone.utc)
 
             # Execute FFmpeg command (same pattern as TranscodeService)
             Process = subprocess.Popen(
@@ -651,7 +651,7 @@ class QualityTestingBusinessService:
             # Wait for process to complete (same pattern as TranscodeService)
             LoggingService.LogInfo(f"Waiting for process to complete...", "QualityTestingBusinessService", "ExecuteFFmpegWithProgress")
             ReturnCode = Process.wait()
-            EndTime = datetime.now()
+            EndTime = datetime.now(timezone.utc)
             Duration = (EndTime - StartTime).total_seconds()
 
             # Release job from CpuAffinityService (with cooling wait enabled)
@@ -911,7 +911,7 @@ class QualityTestingBusinessService:
     def UpdateQualityTestResultsWithScore(self, ResultId: int, VMAFScore: float, FFmpegResult):
         """Update QualityTestResults record with VMAF score and test results."""
         try:
-            CurrentTime = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            CurrentTime = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
 
             # Calculate test duration from FFmpegResult if available
             TestDuration = 0.0  # Could extract from FFmpegResult if needed
@@ -1012,7 +1012,7 @@ class QualityTestingBusinessService:
         try:
             LoggingService.LogFunctionEntry("UpdateTranscodeAttemptReplacementStatus", "QualityTestingBusinessService", TranscodeAttemptId, FileReplaced, ReplacementType)
 
-            current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            current_time = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
 
             query = """
                 UPDATE TranscodeAttempts
@@ -1126,7 +1126,7 @@ class QualityTestingBusinessService:
 
             if replacement_result.get("Success", False):
                 # Create quality test result record showing test was skipped but file was replaced successfully
-                CurrentTime = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                CurrentTime = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
                 Query = """
                     INSERT INTO QualityTestResults
                     (TranscodeAttemptId, TestDuration, PassesThreshold, Rank, ErrorMessage, DateTested, FFmpegCommand, Status, VMAFScore)

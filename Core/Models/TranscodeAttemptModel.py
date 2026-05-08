@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 
@@ -35,7 +35,7 @@ class TranscodeAttemptModel:
 
     def __post_init__(self):
         if self.AttemptDate is None:
-            self.AttemptDate = datetime.now()
+            self.AttemptDate = datetime.now(timezone.utc)
     
     @property
     def OldSizeMB(self) -> float:

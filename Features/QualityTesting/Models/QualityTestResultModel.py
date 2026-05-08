@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 
@@ -20,7 +20,7 @@ class QualityTestResultModel:
 
     def __post_init__(self):
         if self.DateTested is None:
-            self.DateTested = datetime.now()
+            self.DateTested = datetime.now(timezone.utc)
 
     @property
     def FileSizeMB(self) -> float:

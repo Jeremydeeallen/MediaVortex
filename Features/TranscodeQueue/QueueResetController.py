@@ -2,7 +2,7 @@ from flask import Blueprint, request, jsonify
 from typing import Dict, Any
 from Core.Logging.LoggingService import LoggingService
 from Features.TranscodeQueue.TranscodeQueueRepository import TranscodeQueueRepository
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 # Create Blueprint for queue reset routes
@@ -68,7 +68,7 @@ def ResetAllQueues():
                 "Message": f"Successfully reset {resetType.lower()} queues",
                 "TotalItemsReset": totalItemsReset,
                 "ResetResults": resetResults,
-                "Timestamp": datetime.now().isoformat()
+                "Timestamp": datetime.now(timezone.utc).isoformat()
             })
         else:
             failedOperations = [name for name, result in resetResults.items() if not result.get('Success', False)]
@@ -278,7 +278,7 @@ def GetQueueStatus():
         return jsonify({
             "Success": True,
             "QueueStatus": queueStatus,
-            "Timestamp": datetime.now().isoformat()
+            "Timestamp": datetime.now(timezone.utc).isoformat()
         })
 
     except Exception as e:

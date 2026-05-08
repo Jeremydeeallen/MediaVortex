@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from typing import Optional, Dict, Any, List
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 @dataclass
@@ -72,7 +72,7 @@ class FFmpegVMAFComparisonModel:
         if self.PooledMetrics is None:
             self.PooledMetrics = []
         if self.GenerationDate is None:
-            self.GenerationDate = datetime.now()
+            self.GenerationDate = datetime.now(timezone.utc)
 
     def GetFullVMAFResultsPath(self) -> str:
         """Get the full path to the VMAF results file."""

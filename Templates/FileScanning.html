@@ -560,8 +560,8 @@ class FileScanningManager {
         document.getElementById('ContinuousScanTotalScans').textContent = totalScans.toLocaleString();
 
         if (lastScanTime) {
-            const scanDate = new Date(lastScanTime);
-            document.getElementById('ContinuousScanLastCompleted').textContent = scanDate.toLocaleTimeString();
+            document.getElementById('ContinuousScanLastCompleted').textContent =
+                window.formatTime ? window.formatTime(lastScanTime, 'time') : new Date(lastScanTime).toLocaleTimeString();
         } else {
             document.getElementById('ContinuousScanLastCompleted').textContent = 'Never';
         }

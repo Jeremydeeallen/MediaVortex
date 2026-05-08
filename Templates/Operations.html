@@ -683,7 +683,7 @@ class OperationsManager {
                             ReductionBadge = '<span class="badge bg-secondary">N/A</span>';
                         }
                         const Duration = item.TranscodeDurationSeconds != null ? `${Math.round(item.TranscodeDurationSeconds)}s` : 'N/A';
-                        const DateStr = item.AttemptDate ? new Date(item.AttemptDate).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'N/A';
+                        const DateStr = item.AttemptDate ? window.formatTime(item.AttemptDate, 'short') : 'N/A';
 
                         html += `
                             <tr>
@@ -754,7 +754,7 @@ class OperationsManager {
                     data.Failures.forEach(failure => {
                         const FileName = failure.FileName ? failure.FileName.split('/').pop() : 'Unknown';
                         const ErrorMessage = failure.FailureReason ? failure.FailureReason.substring(0, 80) + (failure.FailureReason.length > 80 ? '...' : '') : 'No error message';
-                        const DateStr = failure.FailureDate ? new Date(failure.FailureDate).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'N/A';
+                        const DateStr = failure.FailureDate ? window.formatTime(failure.FailureDate, 'short') : 'N/A';
 
                         html += `
                             <tr>
@@ -837,7 +837,7 @@ class OperationsManager {
                                 <td><span class="badge bg-warning">${job.JobType}</span></td>
                                 <td title="${job.FilePath}">${FileName}</td>
                                 <td><span class="badge bg-danger">${job.Status}</span></td>
-                                <td>${new Date(job.StartedAt).toLocaleString(undefined, { timeZoneName: 'short' })}</td>
+                                <td>${window.formatTime(job.StartedAt, 'datetime')}</td>
                                 <td>${job.Duration}</td>
                             </tr>
                         `;

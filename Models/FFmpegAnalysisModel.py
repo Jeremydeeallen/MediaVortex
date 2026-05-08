@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from typing import Optional, Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 @dataclass
@@ -80,7 +80,7 @@ class FFmpegAnalysisModel:
     
     def __post_init__(self):
         if self.AnalysisDate is None:
-            self.AnalysisDate = datetime.now()
+            self.AnalysisDate = datetime.now(timezone.utc)
     
     def ToDict(self) -> Dict[str, Any]:
         """Convert model to dictionary for database storage."""

@@ -1,5 +1,5 @@
 from typing import Optional, List, Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone
 from Core.Database.BaseRepository import BaseRepository
 from Core.Models.MediaFileModel import MediaFileModel
 from Core.Logging.LoggingService import LoggingService
@@ -172,7 +172,7 @@ class MediaProbeRepository(BaseRepository):
                         LastFFprobeError = %s,
                         LastFFprobeAttemptDate = %s
                        WHERE Id = %s"""
-            self.ExecuteNonQuery(Query, (ErrorMessage, datetime.now(), MediaFileId))
+            self.ExecuteNonQuery(Query, (ErrorMessage, datetime.now(timezone.utc), MediaFileId))
         except Exception as Ex:
             LoggingService.LogException(f"Error recording probe failure for file ID {MediaFileId}", Ex, "MediaProbeRepository", "RecordProbeFailure")
 

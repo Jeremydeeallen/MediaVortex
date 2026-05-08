@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 @dataclass
@@ -28,7 +28,7 @@ class FFmpegComparisonModel:
 
     def __post_init__(self):
         if self.GenerationDate is None:
-            self.GenerationDate = datetime.now()
+            self.GenerationDate = datetime.now(timezone.utc)
 
     def GetFullComparisonPath(self) -> str:
         """Get the full path to the comparison video file."""

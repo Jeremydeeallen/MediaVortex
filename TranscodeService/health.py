@@ -8,7 +8,7 @@ import time
 import psutil
 import logging
 from typing import Dict, Any, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +18,7 @@ class HealthMonitor:
     def __init__(self, database_manager=None):
         """Initialize health monitor."""
         self.DatabaseManager = database_manager
-        self.StartTime = datetime.now()
+        self.StartTime = datetime.now(timezone.utc)
         self.LastHealthCheck = None
         self.HealthStatus = "Unknown"
         self.ErrorCount = 0
@@ -30,7 +30,7 @@ class HealthMonitor:
             health_data = {
                 "ServiceName": "TranscodeService",
                 "Status": "Healthy",
-                "Timestamp": datetime.now().isoformat(),
+                "Timestamp": datetime.now(timezone.utc).isoformat(),
                 "Uptime": self.GetUptime(),
                 "MemoryUsage": self.GetMemoryUsage(),
                 "CPUUsage": self.GetCPUUsage(),
@@ -55,7 +55,7 @@ class HealthMonitor:
                 health_data["Issues"] = []
             
             self.HealthStatus = health_data["Status"]
-            self.LastHealthCheck = datetime.now()
+            self.LastHealthCheck = datetime.now(timezone.utc)
             
             # Reset error count on successful health check
             if health_data["Status"] == "Healthy":
@@ -69,7 +69,7 @@ class HealthMonitor:
             return {
                 "ServiceName": "TranscodeService",
                 "Status": "Unhealthy",
-                "Timestamp": datetime.now().isoformat(),
+                "Timestamp": datetime.now(timezone.utc).isoformat(),
                 "Error": str(e),
                 "ErrorCount": self.ErrorCount
             }
@@ -77,7 +77,7 @@ class HealthMonitor:
     def GetUptime(self) -> str:
         """Get service uptime."""
         try:
-            uptime = datetime.now() - self.StartTime
+            uptime = datetime.now(timezone.utc) - self.StartTime
             total_seconds = int(uptime.total_seconds())
             
             hours = total_seconds // 3600

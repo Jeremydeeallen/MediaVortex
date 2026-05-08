@@ -8,7 +8,7 @@ Implements MVVM pattern using MVVM architecture
 import json
 import os
 from typing import Dict, List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 from Core.Logging.LoggingService import LoggingService
 from Services.ProcessManagementService import ProcessManagementService
 
@@ -351,7 +351,7 @@ class CrashRecoveryService:
                 "JobsRecovered": JobsRecovered,
                 "OrphanedProcessesKilled": OrphanedProcessesKilled,
                 "RecoveryDetails": RecoveryDetails,
-                "Timestamp": datetime.now().isoformat()
+                "Timestamp": datetime.now(timezone.utc).isoformat()
             }
 
             # Log the summary
@@ -374,7 +374,7 @@ class CrashRecoveryService:
             return {
                 "ServiceName": ServiceName,
                 "CurrentActiveJobs": len(active_jobs),
-                "LastRecoveryCheck": datetime.now().isoformat()
+                "LastRecoveryCheck": datetime.now(timezone.utc).isoformat()
             }
 
         except Exception as e:

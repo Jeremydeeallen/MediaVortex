@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 import json
 
@@ -26,9 +26,9 @@ class CodecFlagsModel:
     
     def __post_init__(self):
         if self.CreatedDate is None:
-            self.CreatedDate = datetime.now()
+            self.CreatedDate = datetime.now(timezone.utc)
         if self.LastModified is None:
-            self.LastModified = datetime.now()
+            self.LastModified = datetime.now(timezone.utc)
     
     def GetPresetOptionsList(self) -> List[str]:
         """Get preset options as a list (for string presets)."""

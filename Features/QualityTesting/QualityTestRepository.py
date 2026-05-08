@@ -3,7 +3,7 @@
 
 import os
 from typing import Optional, List, Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone
 from Core.Database.BaseRepository import BaseRepository
 from Core.Logging.LoggingService import LoggingService
 from Features.QualityTesting.Models.QualityTestResultModel import QualityTestResultModel
@@ -187,7 +187,7 @@ class QualityTestRepository(BaseRepository):
             result = QualityTestResultModel(
                 TranscodeAttemptId=TranscodeAttemptId,
                 Status=Status,
-                DateTested=TestDate or datetime.now(),
+                DateTested=TestDate or datetime.now(timezone.utc),
                 VMAFScore=0.0 if Status == "Running" else None,
                 ErrorMessage=None
             )
