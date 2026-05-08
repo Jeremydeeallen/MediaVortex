@@ -353,7 +353,40 @@ class ProcessTranscodeQueueService:
             # Update queue status to Running
             self.DatabaseManager.UpdateTranscodeQueueStatus(Job.Id, "Running")
 
-            # Create transcode attempt record early for progress tracking
+            # Step a: Load MediaFile FIRST so we can pre-flight the source path before
+            # any expensive work or attempt-history writes.
+            MediaFile = self.GetMediaFileData(Job)
+            if not MediaFile:
+                # Cannot resolve MediaFile -- this is a queue-integrity issue, record an
+                # attempt for diagnosis and let HandleJobFailure clean up the queue/active job.
+                FallbackAttemptId = self.CreateTranscodeAttempt(Job, None, None, None)
+                self.HandleJobFailure(Job, "Failed to get media file data", FallbackAttemptId, ActiveJobId)
+                return
+
+            # Pre-flight: source file existence check (TranscodeJob.feature.md [BUG] criterion).
+            # When the source has been deleted between scan and transcode (or a prior
+            # replacement step lost the file), do NOT create a TranscodeAttempt or run FFprobe.
+            # Mark the MediaFile so future scans/queue passes can skip it via the
+            # FFprobeFailureCount safety guard, drop the queue/active-job rows, and return.
+            LocalSourcePath = MediaFile.FilePath
+            if self.PathTranslation:
+                LocalSourcePath = self.PathTranslation.ToLocalPath(MediaFile.FilePath)
+            if not os.path.exists(LocalSourcePath):
+                ErrMsg = f"Source file missing on disk: {LocalSourcePath}"
+                LoggingService.LogWarning(ErrMsg, "ProcessTranscodeQueueService", "ProcessJob")
+                self._MarkMediaFileSourceMissing(MediaFile.Id, ErrMsg)
+                try:
+                    self.DatabaseManager.DeleteTranscodeQueueItem(Job.Id)
+                except Exception as DelEx:
+                    LoggingService.LogException("Failed to delete queue item for missing source", DelEx, "ProcessTranscodeQueueService", "ProcessJob")
+                if ActiveJobId:
+                    try:
+                        self.DatabaseManager.DeleteActiveJob(ActiveJobId)
+                    except Exception as DelEx:
+                        LoggingService.LogException("Failed to delete active job for missing source", DelEx, "ProcessTranscodeQueueService", "ProcessJob")
+                return
+
+            # Source exists -- create the attempt record now that we have something to attempt.
             TranscodeAttemptId = self.CreateTranscodeAttempt(Job, None, None, None)
             if not TranscodeAttemptId:
                 self.HandleJobFailure(Job, "Failed to create transcode attempt record", None, ActiveJobId)
@@ -362,14 +395,8 @@ class ProcessTranscodeQueueService:
             # Phase 1: Initializing
             self.UpdateTranscodeProgress(TranscodeAttemptId, "Initializing", 0.0, "Job started, getting ready")
 
-            # Phase 2: Loading Media Data
-            self.UpdateTranscodeProgress(TranscodeAttemptId, "Loading Media Data", 0.0, "Loading file metadata...")
-
-            # Step a: Get MediaFile data
-            MediaFile = self.GetMediaFileData(Job)
-            if not MediaFile:
-                self.HandleJobFailure(Job, "Failed to get media file data", TranscodeAttemptId, ActiveJobId)
-                return
+            # Phase 2: Loading Media Data (already loaded -- progress phase only)
+            self.UpdateTranscodeProgress(TranscodeAttemptId, "Loading Media Data", 0.0, "Media metadata loaded")
 
             # Phase 3: Loading Settings
             self.UpdateTranscodeProgress(TranscodeAttemptId, "Loading Settings", 0.0, "Loading transcoding profile settings...")
@@ -767,6 +794,33 @@ class ProcessTranscodeQueueService:
         except Exception as e:
             LoggingService.LogException("Exception getting media file data", e, "ProcessTranscodeQueueService", "GetMediaFileData")
             return None
+
+    def _MarkMediaFileSourceMissing(self, MediaFileId: int, ErrorMessage: str) -> None:
+        """Record that a worker could not find the source file on disk.
+
+        Mirrors the FFprobe-failure-counter convention used during scanning so the
+        existing 'skip files with FFprobeFailureCount >= 3' guard prevents the
+        queue from re-targeting this MediaFile on subsequent passes. Does not raise --
+        bookkeeping failure must not cascade into the caller's failure handling.
+        """
+        try:
+            Query = """
+                UPDATE MediaFiles
+                SET LastFFprobeError = %s,
+                    LastFFprobeAttemptDate = NOW(),
+                    FFprobeFailureCount = COALESCE(FFprobeFailureCount, 0) + 1
+                WHERE Id = %s
+            """
+            self.DatabaseManager.DatabaseService.ExecuteNonQuery(Query, (ErrorMessage, MediaFileId))
+            LoggingService.LogInfo(
+                f"Marked MediaFile {MediaFileId} as source-missing (FFprobeFailureCount incremented)",
+                "ProcessTranscodeQueueService", "_MarkMediaFileSourceMissing"
+            )
+        except Exception as Ex:
+            LoggingService.LogException(
+                f"Failed to mark MediaFile {MediaFileId} source-missing", Ex,
+                "ProcessTranscodeQueueService", "_MarkMediaFileSourceMissing"
+            )
 
     def GetTranscodeFileMode(self) -> str:
         """Get the transcode file mode from SystemSettings. Returns 'InPlace' (default), 'CopyLocal', or 'LocalStaging'."""

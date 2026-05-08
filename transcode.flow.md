@@ -118,14 +118,16 @@ Stages 1-4 require user action. Stages 5-7 are automatic once WorkerService is r
 - Main loop: polls TranscodeQueue for Pending items, spawns worker threads (up to MaxConcurrentJobs)
 - Each worker calls `ProcessJob()`:
   1. Create ActiveJob record
-  2. Load MediaFile metadata
-  3. Archive original to MediaFilesArchive
-  4. Load profile thresholds (CRF, bitrate, codec settings)
-  5. File preparation (see File Staging below)
-  6. Build FFmpeg command (libsvtav1, preset, CRF, film grain, bitrates)
-  7. Execute FFmpeg via `VideoTranscodingService.TranscodeVideo()`
-  8. Monitor progress (frames / total_frames), update TranscodeProgress
-  9. On completion: record TranscodeAttempt with size reduction, duration, command
+  2. Update queue status -> Running
+  3. Load MediaFile metadata
+  4. **Pre-flight: source file existence check.** Translate `MediaFile.FilePath` to local via PathTranslation, call `os.path.exists()`. If missing: increment `MediaFiles.FFprobeFailureCount`, record `LastFFprobeError = "Source file missing on disk: ..."`, delete TranscodeQueue row, delete ActiveJob row, return -- **no TranscodeAttempt is created**. Stops the dead-file retry loop where queue population kept re-adding rows for files deleted between scan and transcode.
+  5. Create TranscodeAttempt record (only if source confirmed present)
+  6. Load profile thresholds (CRF, bitrate, codec settings)
+  7. File preparation (see File Staging below)
+  8. Build FFmpeg command (libsvtav1, preset, CRF, film grain, bitrates)
+  9. Execute FFmpeg via `VideoTranscodingService.TranscodeVideo()`
+  10. Monitor progress (frames / total_frames), update TranscodeProgress
+  11. On completion: record TranscodeAttempt with size reduction, duration, command
 
 **File staging (controlled by `TranscodeFileMode` SystemSetting):**
 - **InPlace** (default): FFmpeg reads directly from the network path. On the primary machine this is the raw DB path (e.g. `T:\ShowName\file.mkv`). On remote workers, `PathTranslationService.ToLocalPath()` converts to the local mount (e.g. `/mnt/media/ShowName/file.mkv`).

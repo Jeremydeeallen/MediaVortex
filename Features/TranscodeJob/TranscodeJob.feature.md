@@ -25,6 +25,7 @@ Executes FFmpeg transcode jobs from the queue, tracks progress, and handles resu
 - Per-worker FFprobe: Workers.FFprobePath flows through ProcessTranscodeQueueService -> CommandBuilderService -> FFmpegAnalysisService -> FFmpegService. Audio stream selection (English preferred) uses the worker's local FFprobe, not the global SystemSettings path.
 - [FIXED] Progress display must not depend on TranscodeQueue: any job with an active TranscodeProgress record and TranscodeAttempts.Success IS NULL must appear in the progress UI, regardless of whether a TranscodeQueue row exists.
 - [BUG] TranscodeJob scope declares `Features/TranscodeJob/**` and `WorkerService/Main.py`, but criteria govern code in `Services/CommandBuilderService.py`, `Services/FFmpegAnalysisService.py`, `Services/FFmpegService.py`, and `Core/Services/PathTranslationService.py`. Either the scope expands to cover those files, or the criteria that govern them move to separate feature docs that own those files.
+- [BUG] Worker MUST verify the source file exists at the resolved local path BEFORE invoking FFprobe to build the transcode command. When the source is missing, the worker MUST: (a) record `MediaFiles.LastFFprobeError = "Source file missing"` and `LastFFprobeAttemptDate = NOW()`, (b) increment `MediaFiles.FFprobeFailureCount`, (c) DELETE the `TranscodeQueue` row, and (d) NOT create a `TranscodeAttempt` row. This must happen *before* any FFprobe/FFmpeg subprocess so missing files do not generate noisy failed-attempt history that the user has to chase.
 
 ## Progress
 
