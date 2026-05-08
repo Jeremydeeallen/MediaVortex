@@ -2030,8 +2030,8 @@ class DatabaseManager:
                          SizeReductionBytes, SizeReductionPercent, ErrorMessage, TranscodeDurationSeconds,
                          FfpmpegCommand, AudioBitrateKbps, VideoBitrateKbps, ProfileName, VMAF,
                          FileReplaced, FileReplacedDate, ReplacementType, StartTime, PreferredAttempt,
-                         MediaFileId)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                         MediaFileId, WorkerName)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         RETURNING Id
                     """
                     parameters = (
@@ -2042,7 +2042,8 @@ class DatabaseManager:
                         Attempt.FfpmpegCommand,
                         Attempt.AudioBitrateKbps, Attempt.VideoBitrateKbps, Attempt.ProfileName, Attempt.VMAF,
                         Attempt.FileReplaced, Attempt.FileReplacedDate, Attempt.ReplacementType, Attempt.StartTime,
-                        Attempt.PreferredAttempt, MediaFileId
+                        Attempt.PreferredAttempt, MediaFileId,
+                        getattr(Attempt, 'WorkerName', None),
                     )
                     LoggingService.LogInfo(f"Insert attempt parameters: {parameters}", "DatabaseManager", "SaveTranscodeAttempt")
                     cursor.execute(query, parameters)
