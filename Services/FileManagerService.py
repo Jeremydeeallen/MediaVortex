@@ -15,11 +15,11 @@ class FileManagerService:
         '.mp3', '.wav', '.flac', '.aac', '.ogg', '.wma', '.m4a', '.opus'
     }
     
-    def __init__(self):
+    def __init__(self, FFprobePath: str = None):
         self.EncodingErrors = []
         self.ProcessedFiles = 0
         self.SkippedFiles = 0
-        self.FFmpegAnalysisService = FFmpegAnalysisService()
+        self.FFmpegAnalysisService = FFmpegAnalysisService(FFprobePath=FFprobePath)
         self.ExcludedDirectories = self._LoadExcludedDirectories()
 
     def _LoadExcludedDirectories(self) -> List[str]:

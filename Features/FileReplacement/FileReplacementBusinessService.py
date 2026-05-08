@@ -12,9 +12,9 @@ class FileReplacementBusinessService:
 
     def __init__(self, DatabaseManagerInstance: DatabaseManager = None,
                  FileManagerInstance: FileManagerService = None,
-                 PathTranslation=None):
+                 PathTranslation=None, FFprobePath: str = None):
         self.DatabaseManager = DatabaseManagerInstance or DatabaseManager()
-        self.FileManager = FileManagerInstance or FileManagerService()
+        self.FileManager = FileManagerInstance or FileManagerService(FFprobePath=FFprobePath)
         self.PathTranslation = PathTranslation
 
     def _ToLocalPath(self, CanonicalPath: str) -> str:

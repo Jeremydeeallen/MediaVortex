@@ -65,9 +65,9 @@ class ProcessTranscodeQueueService:
             from Core.Services.PathTranslationService import PathTranslationService
             self.PathTranslation = PathTranslationService(MountMap=MountMap)
 
-        # Initialize ShouldQualityTest with PathTranslation so it can pass it to FileReplacement
+        # Initialize ShouldQualityTest with PathTranslation and FFprobePath so it can pass them to FileReplacement
         if not self.ShouldQualityTest:
-            self.ShouldQualityTest = ShouldQualityTestService(PathTranslation=self.PathTranslation)
+            self.ShouldQualityTest = ShouldQualityTestService(PathTranslation=self.PathTranslation, FFprobePath=self.FFprobePath)
 
         # Processing state
         self.IsProcessing = False

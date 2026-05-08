@@ -13,16 +13,17 @@ from Services.QualityTestQueueService import QualityTestQueueService
 class ShouldQualityTestService:
     """Simple service to determine if a file should undergo quality testing."""
 
-    def __init__(self, PathTranslation=None):
+    def __init__(self, PathTranslation=None, FFprobePath: str = None):
         """Initialize the service."""
         self.DatabaseManager = DatabaseManager()
         self.QualityTestQueue = QualityTestQueueService(self.DatabaseManager)
         self.PathTranslation = PathTranslation
+        self.FFprobePath = FFprobePath
 
     def _ReplaceFileDirectly(self, TranscodeAttemptId: int, Reason: str) -> Dict[str, Any]:
         """Skip quality testing and go straight to file replacement."""
         from Features.FileReplacement.FileReplacementBusinessService import FileReplacementBusinessService
-        ReplacementService = FileReplacementBusinessService(self.DatabaseManager, PathTranslation=self.PathTranslation)
+        ReplacementService = FileReplacementBusinessService(self.DatabaseManager, PathTranslation=self.PathTranslation, FFprobePath=self.FFprobePath)
         ReplacementResult = ReplacementService.ProcessFileReplacement(TranscodeAttemptId, BypassVMAFCheck=True)
         return {
             "Success": ReplacementResult.get("Success", False),

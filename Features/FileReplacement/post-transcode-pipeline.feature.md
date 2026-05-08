@@ -34,6 +34,7 @@ Both (code fix + deploy-anywhere infrastructure)
 10. A Linux worker (e.g., Larry) running TranscodeService with QualityTestEnabled=OFF completes the full pipeline: transcode, delete original, update DB. No other service needs to be running.
 11. A Windows worker running TranscodeService with QualityTestEnabled=OFF completes the same pipeline identically.
 12. PathTranslation is passed from ProcessTranscodeQueueService (which already has it) through to FileReplacementBusinessService and HandleJobFailure. No new DB lookups or config loading in FileReplacement.
+13. [BUG] The re-probe step in file replacement uses the worker's FFprobe path (from Workers table), not SystemSettings.FFprobePath. On a Linux worker, re-probing a transcoded file succeeds and MediaFiles is updated with new codec, resolution, and TranscodedByMediaVortex=True.
 
 ## Status
 
