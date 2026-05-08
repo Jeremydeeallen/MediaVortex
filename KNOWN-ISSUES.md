@@ -56,7 +56,7 @@ Full Windows paths (e.g., `T:\Shows\file.mkv`) are stored as natural keys in at 
 - [x] All WHERE/JOIN reads switched from FilePath to MediaFileId (Phase 3b Step 1)
 - [x] FilePath removed from INSERT/UPDATE statements for TranscodeAttempts, TranscodeFiles, ProblemFiles (Phase 3b Step 2)
 - [x] NOT NULL constraint dropped from FilePath on TranscodeAttempts, TranscodeFiles, ProblemFiles (was blocking INSERTs)
-- [BLOCKED] Deploy verification -- workers crash-loop after deploy (exit code 0, no log output, process exits in <0.5s). See plan for investigation notes.
+- [x] Deploy verification -- workers Online and heartbeating (root cause: CrashRecoveryService killed itself because Python is PID 1 in Docker and the recorded ProcessId from a prior crash matched the new container's own PID; also bumped postgres max_connections 30->200 and added pool closeall() before os._exit() to stop connection-leak death spiral)
 - [ ] Run RenameFilePathColumns.py to soft-rename columns (Phase 3b Step 4)
 - [ ] Drop FilePath_Deprecated columns (Phase 4 -- point of no return)
 

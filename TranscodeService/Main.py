@@ -464,6 +464,13 @@ def SignalHandler(signum, frame):
         except Exception:
             pass
 
+    try:
+        from Core.Database.DatabaseService import DatabaseService
+        if DatabaseService._pool is not None and not DatabaseService._pool.closed:
+            DatabaseService._pool.closeall()
+    except Exception:
+        pass
+
     os._exit(0)
 
 def Main():

@@ -6,6 +6,7 @@ Implements MVVM pattern using MVVM architecture
 """
 
 import json
+import os
 from typing import Dict, List, Optional
 from datetime import datetime
 from Core.Logging.LoggingService import LoggingService
@@ -54,8 +55,17 @@ class CrashRecoveryService:
 
                 LoggingService.LogInfo(f"Processing job {job_id} (PID: {process_id}, QueueId: {queue_id})", "CrashRecoveryService", "RecoverServiceJobs")
 
-                # Check if the process is still running
-                process_exists = self.ProcessManager.IsProcessRunning(process_id) if process_id else False
+                # Check if the process is still running.
+                # Skip the live-process check when the recorded PID matches our own PID:
+                # in Docker containers Python runs as PID 1, so a stale ActiveJobs row from a
+                # prior container instance always points back at the new process and would
+                # cause crash recovery to terminate itself.
+                own_pid = os.getpid()
+                if process_id and process_id == own_pid:
+                    process_exists = False
+                    LoggingService.LogInfo(f"Skipping process check for PID {process_id} (matches own PID, treating as dead)", "CrashRecoveryService", "RecoverServiceJobs")
+                else:
+                    process_exists = self.ProcessManager.IsProcessRunning(process_id) if process_id else False
 
                 recovery_action = "ProcessNotFound"
                 if process_exists:
