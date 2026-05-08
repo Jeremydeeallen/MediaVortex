@@ -1,0 +1,892 @@
+{% extends "Base.html" %}
+
+{% block title %}Operations Dashboard - MediaVortex{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    {% include '_admin_subnav.html' %}
+    <div class="row">
+        <div class="col-12">
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <div>
+                    <h1 class="h3 mb-0">
+                        <i class="fas fa-tachometer-alt"></i> Operations Dashboard
+                    </h1>
+                    <p class="text-muted mb-0 mt-1">Recent transcode activity, stuck jobs, and troubleshooting tools.</p>
+                </div>
+                <button type="button" class="btn btn-secondary" onclick="operationsManager.RefreshPage()">
+                    <i class="fas fa-sync-alt"></i> Refresh
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Quick Action Toolbar -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="btn-toolbar" role="toolbar">
+                <div class="btn-group me-2 mb-2" role="group">
+                    <button class="btn btn-outline-primary" onclick="operationsManager.LoadCommonQuery('queue_status')">
+                        <i class="fas fa-list-ol"></i> Queue Status
+                    </button>
+                    <button class="btn btn-outline-info" onclick="operationsManager.LoadActiveJobs()">
+                        <i class="fas fa-tasks"></i> Active Jobs
+                    </button>
+                    <button class="btn btn-outline-danger" onclick="operationsManager.LoadStuckJobs()">
+                        <i class="fas fa-clock"></i> Stuck Jobs
+                    </button>
+                </div>
+                <div class="btn-group me-2 mb-2" role="group">
+                    <button class="btn btn-outline-warning" onclick="operationsManager.LoadCommonQuery('recent_errors')">
+                        <i class="fas fa-exclamation-circle"></i> Recent Errors
+                    </button>
+                    <button class="btn btn-outline-warning" onclick="operationsManager.LoadErrorSummary()">
+                        <i class="fas fa-exclamation-triangle"></i> Error Summary
+                    </button>
+                </div>
+                <div class="btn-group mb-2" role="group">
+                    <button class="btn btn-outline-success" onclick="operationsManager.LoadCommonQuery('service_health')">
+                        <i class="fas fa-heartbeat"></i> Service Health
+                    </button>
+                    <button class="btn btn-outline-secondary" onclick="operationsManager.LoadDatabaseInfo()">
+                        <i class="fas fa-table"></i> Database Info
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Recent Transcodes — Two Cards Side-by-Side -->
+    <div class="row mb-4">
+        <!-- Recent Successes -->
+        <div class="col-lg-6 mb-3 mb-lg-0">
+            <div class="card shadow-sm h-100">
+                <div class="card-header bg-success text-white d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">
+                        <i class="fas fa-check-circle"></i> Recent Successes
+                    </h5>
+                    <button class="btn btn-sm btn-outline-light" onclick="operationsManager.LoadRecentSuccesses()">
+                        <i class="fas fa-sync-alt"></i> Refresh
+                    </button>
+                </div>
+                <div class="card-body">
+                    <div id="RecentSuccessesContainer">
+                        <div class="text-center py-4">
+                            <div class="spinner-border text-success" role="status">
+                                <span class="visually-hidden">Loading...</span>
+                            </div>
+                            <p class="mt-2">Loading recent successes...</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Recent Failures -->
+        <div class="col-lg-6">
+            <div class="card shadow-sm h-100">
+                <div class="card-header bg-danger text-white d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">
+                        <i class="fas fa-exclamation-circle"></i> Recent Failures
+                    </h5>
+                    <button class="btn btn-sm btn-outline-light" onclick="operationsManager.LoadRecentFailures()">
+                        <i class="fas fa-sync-alt"></i> Refresh
+                    </button>
+                </div>
+                <div class="card-body">
+                    <div id="RecentFailuresContainer">
+                        <div class="text-center py-4">
+                            <div class="spinner-border text-danger" role="status">
+                                <span class="visually-hidden">Loading...</span>
+                            </div>
+                            <p class="mt-2">Loading recent failures...</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Stuck Jobs Section -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card shadow-sm">
+                <div class="card-header bg-gradient-dark text-white d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">
+                        <i class="fas fa-clock"></i> Stuck Jobs
+                    </h5>
+                    <button class="btn btn-sm btn-outline-light" onclick="operationsManager.LoadStuckJobs()">
+                        <i class="fas fa-sync-alt"></i> Refresh
+                    </button>
+                </div>
+                <div class="card-body">
+                    <div id="StuckJobsContainer">
+                        <div class="text-center py-4">
+                            <div class="spinner-border text-primary" role="status">
+                                <span class="visually-hidden">Loading...</span>
+                            </div>
+                            <p class="mt-2">Loading stuck jobs...</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Media File Comparison Section -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card shadow-sm">
+                <div class="card-header bg-gradient-secondary text-white d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">
+                        <i class="fas fa-exchange-alt"></i> Media File Comparison
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="row g-3">
+                        <div class="col-md-4">
+                            <label for="FileIdInput" class="form-label">File ID:</label>
+                            <input type="number" class="form-control" id="FileIdInput" placeholder="Enter MediaFile ID">
+                        </div>
+                        <div class="col-md-4">
+                            <label for="FilePathInput" class="form-label">File Path:</label>
+                            <input type="text" class="form-control" id="FilePathInput" placeholder="Enter file path or filename">
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">&nbsp;</label>
+                            <button class="btn btn-primary w-100" onclick="operationsManager.LoadMediaFileComparison()">
+                                <i class="fas fa-search"></i> Load Comparison
+                            </button>
+                        </div>
+                    </div>
+                    <div id="ComparisonResults" class="mt-3" style="display: none;">
+                        <!-- Comparison results will be displayed here -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Quick Queries Section -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card shadow-sm">
+                <div class="card-header bg-gradient-primary text-white d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">
+                        <i class="fas fa-code"></i> Quick Queries
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label class="form-label">Preset Queries:</label>
+                        <div class="d-flex flex-wrap gap-2">
+                            <button class="btn btn-sm btn-outline-secondary" onclick="operationsManager.LoadCommonQuery('recent_errors')">
+                                <i class="fas fa-exclamation-circle"></i> Recent Errors (24h)
+                            </button>
+                            <button class="btn btn-sm btn-outline-secondary" onclick="operationsManager.LoadCommonQuery('service_health')">
+                                <i class="fas fa-heartbeat"></i> Service Health
+                            </button>
+                            <button class="btn btn-sm btn-outline-secondary" onclick="operationsManager.LoadCommonQuery('queue_status')">
+                                <i class="fas fa-list-ol"></i> Queue Status
+                            </button>
+                            <button class="btn btn-sm btn-outline-secondary" onclick="operationsManager.LoadCommonQuery('recent_transcodes')">
+                                <i class="fas fa-film"></i> Recent Transcodes
+                            </button>
+                            <button class="btn btn-sm btn-outline-secondary" onclick="operationsManager.LoadCommonQuery('large_queue_items')">
+                                <i class="fas fa-weight-hanging"></i> Large Queue Items
+                            </button>
+                            <button class="btn btn-sm btn-outline-info" onclick="operationsManager.LoadCommonQuery('worker_performance')">
+                                <i class="fas fa-microchip"></i> Worker Performance
+                            </button>
+                            <button class="btn btn-sm btn-outline-success" onclick="operationsManager.LoadCommonQuery('space_saved')">
+                                <i class="fas fa-hdd"></i> Space Saved (24h)
+                            </button>
+                            <button class="btn btn-sm btn-outline-primary" onclick="operationsManager.LoadCommonQuery('queue_breakdown')">
+                                <i class="fas fa-chart-pie"></i> Queue Breakdown
+                            </button>
+                            <button class="btn btn-sm btn-outline-warning" onclick="operationsManager.LoadCommonQuery('profile_usage')">
+                                <i class="fas fa-sliders-h"></i> Profile Usage (7d)
+                            </button>
+                        </div>
+                    </div>
+                    <hr>
+                    <div class="mb-3">
+                        <label for="CustomQuery" class="form-label">Custom SQL (SELECT only):</label>
+                        <textarea class="form-control" id="CustomQuery" rows="4" placeholder="SELECT * FROM Logs WHERE LogLevel = 'ERROR' ORDER BY Timestamp DESC LIMIT 10"></textarea>
+                    </div>
+                    <div class="row g-3">
+                        <div class="col-md-8">
+                            <input type="text" class="form-control" id="QueryParameters" placeholder="Parameters (comma-separated, optional)">
+                        </div>
+                        <div class="col-md-4">
+                            <button class="btn btn-primary w-100" onclick="operationsManager.ExecuteCustomQuery()">
+                                <i class="fas fa-play"></i> Execute Query
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Results Section -->
+    <div class="row">
+        <div class="col-12">
+            <div class="card shadow-sm">
+                <div class="card-header bg-gradient-dark text-white d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">
+                        <i class="fas fa-table"></i> Query Results
+                    </h5>
+                    <div>
+                        <span class="badge bg-light text-dark" id="ResultCount">0 rows</span>
+                        <button class="btn btn-sm btn-outline-light ms-2" onclick="operationsManager.ClearResults()">
+                            <i class="fas fa-trash"></i> Clear
+                        </button>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div id="LoadingSpinner" class="text-center" style="display: none;">
+                        <div class="spinner-border text-primary" role="status">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                        <p class="mt-2">Executing query...</p>
+                    </div>
+                    <div id="ResultsContainer">
+                        <div class="text-muted text-center py-4">
+                            <i class="fas fa-database fa-3x mb-3"></i>
+                            <p>No results to display. Use the buttons above or enter a custom query.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+class OperationsManager {
+    constructor() {
+        this.CommonQueries = {
+            'recent_errors': "SELECT LogLevel, Message, Timestamp, Component, FunctionName FROM Logs WHERE LogLevel IN ('ERROR', 'CRITICAL') AND Timestamp >= NOW() - INTERVAL '24 hours' ORDER BY Timestamp DESC LIMIT 50",
+            'service_health': "SELECT ServiceName, Status, HealthStatus, ErrorCount, LastErrorMessage, LastHealthCheck FROM ServiceStatus ORDER BY ServiceName",
+            'queue_status': "SELECT Status, COUNT(*) as Count FROM TranscodeQueue GROUP BY Status",
+            'recent_transcodes': "SELECT FilePath, Success, AttemptDate, ProfileName, SizeReductionPercent FROM TranscodeAttempts ORDER BY AttemptDate DESC LIMIT 20",
+            'large_queue_items': "SELECT FileName, SizeMB, Status, Priority, DateAdded FROM TranscodeQueue ORDER BY SizeMB DESC LIMIT 20",
+            'worker_performance': "SELECT ta.WorkerHostname, COUNT(*) as JobCount, ROUND(AVG(ta.FPS)::numeric, 1) as AvgFPS, ROUND(AVG(ta.TranscodeDurationSeconds)::numeric, 0) as AvgDurationSec, ROUND(AVG(ta.SizeReductionPercent)::numeric, 1) as AvgReduction FROM TranscodeAttempts ta WHERE ta.AttemptDate >= NOW() - INTERVAL '7 days' AND ta.Success = TRUE GROUP BY ta.WorkerHostname ORDER BY JobCount DESC",
+            'space_saved': "SELECT COUNT(*) as SuccessfulJobs, pg_size_pretty(SUM(SizeReductionBytes)) as TotalSpaceSaved, ROUND(AVG(SizeReductionPercent)::numeric, 1) as AvgReductionPct FROM TranscodeAttempts WHERE Success = TRUE AND AttemptDate >= NOW() - INTERVAL '24 hours'",
+            'queue_breakdown': "SELECT Status, ProcessingMode, COUNT(*) as Count FROM TranscodeQueue GROUP BY Status, ProcessingMode ORDER BY Status, ProcessingMode",
+            'profile_usage': "SELECT ProfileName, COUNT(*) as UsageCount, SUM(CASE WHEN Success THEN 1 ELSE 0 END) as Successes, SUM(CASE WHEN NOT Success THEN 1 ELSE 0 END) as Failures, ROUND(AVG(SizeReductionPercent)::numeric, 1) as AvgReduction FROM TranscodeAttempts WHERE AttemptDate >= NOW() - INTERVAL '7 days' GROUP BY ProfileName ORDER BY UsageCount DESC"
+        };
+        this.LoadRecentSuccesses();
+        this.LoadRecentFailures();
+        this.LoadStuckJobs();
+    }
+
+    // ---- Utility Methods ----
+
+    showAlert(message, type) {
+        showToastAlert(message, type);
+    }
+
+    ShowLoading() {
+        document.getElementById('LoadingSpinner').style.display = 'block';
+        document.getElementById('ResultsContainer').style.display = 'none';
+    }
+
+    HideLoading() {
+        document.getElementById('LoadingSpinner').style.display = 'none';
+        document.getElementById('ResultsContainer').style.display = 'block';
+    }
+
+    RefreshPage() {
+        this.LoadRecentSuccesses();
+        this.LoadRecentFailures();
+        this.LoadStuckJobs();
+        this.showAlert('Page refreshed', 'info');
+    }
+
+    // ---- Display Methods ----
+
+    DisplayResults(data, title = 'Query Results') {
+        this.HideLoading();
+
+        const container = document.getElementById('ResultsContainer');
+        const countElement = document.getElementById('ResultCount');
+
+        if (!data || data.length === 0) {
+            container.innerHTML = `
+                <div class="text-muted text-center py-4">
+                    <i class="fas fa-info-circle fa-2x mb-3"></i>
+                    <p>No results found.</p>
+                </div>
+            `;
+            countElement.textContent = '0 rows';
+            return;
+        }
+
+        const table = document.createElement('table');
+        table.className = 'table table-striped table-hover';
+
+        const thead = document.createElement('thead');
+        thead.className = 'table-header-dark';
+        const headerRow = document.createElement('tr');
+        const columns = Object.keys(data[0]);
+
+        columns.forEach(column => {
+            const th = document.createElement('th');
+            th.className = 'fw-bold';
+            th.textContent = column;
+            th.style.cursor = 'pointer';
+            th.onclick = () => this.SortTable(table, Array.from(thead.children[0].children).indexOf(th));
+            headerRow.appendChild(th);
+        });
+
+        thead.appendChild(headerRow);
+        table.appendChild(thead);
+
+        const tbody = document.createElement('tbody');
+        data.forEach(row => {
+            const tr = document.createElement('tr');
+            columns.forEach(column => {
+                const td = document.createElement('td');
+                const value = row[column];
+                if (value === null || value === undefined) {
+                    td.textContent = '';
+                    td.className = 'text-muted';
+                } else if (typeof value === 'boolean') {
+                    td.innerHTML = value ? '<span class="badge bg-success">True</span>' : '<span class="badge bg-secondary">False</span>';
+                } else if (typeof value === 'string' && value.length > 100) {
+                    td.innerHTML = `<span title="${value}">${value.substring(0, 100)}...</span>`;
+                } else {
+                    td.textContent = value;
+                }
+                tr.appendChild(td);
+            });
+            tbody.appendChild(tr);
+        });
+
+        table.appendChild(tbody);
+
+        container.innerHTML = '';
+        const tableWrapper = document.createElement('div');
+        tableWrapper.className = 'table-responsive';
+        tableWrapper.appendChild(table);
+        container.appendChild(tableWrapper);
+
+        countElement.textContent = `${data.length} rows`;
+    }
+
+    SortTable(table, columnIndex) {
+        const tbody = table.querySelector('tbody');
+        const rows = Array.from(tbody.querySelectorAll('tr'));
+
+        rows.sort((a, b) => {
+            const aVal = a.children[columnIndex].textContent.trim();
+            const bVal = b.children[columnIndex].textContent.trim();
+
+            const aNum = parseFloat(aVal);
+            const bNum = parseFloat(bVal);
+
+            if (!isNaN(aNum) && !isNaN(bNum)) {
+                return aNum - bNum;
+            }
+
+            return aVal.localeCompare(bVal);
+        });
+
+        rows.forEach(row => tbody.appendChild(row));
+    }
+
+    ClearResults() {
+        document.getElementById('ResultsContainer').innerHTML = `
+            <div class="text-muted text-center py-4">
+                <i class="fas fa-database fa-3x mb-3"></i>
+                <p>No results to display. Use the buttons above or enter a custom query.</p>
+            </div>
+        `;
+        document.getElementById('ResultCount').textContent = '0 rows';
+    }
+
+    DisplayComparisonTable(data) {
+        const ComparisonContainer = document.getElementById('ComparisonResults');
+
+        if (!data.OriginalFile) {
+            ComparisonContainer.innerHTML = `
+                <div class="alert alert-warning">
+                    <i class="fas fa-exclamation-triangle"></i> No original file found.
+                </div>
+            `;
+            return;
+        }
+
+        const OriginalFile = data.OriginalFile;
+        const TranscodedFile = data.TranscodedFile;
+
+        let html = `
+            <div class="row">
+                <div class="col-12">
+                    <h6><i class="fas fa-file-video"></i> ${OriginalFile.FileName}</h6>
+                    <p class="text-muted">${OriginalFile.FilePath}</p>
+                </div>
+            </div>
+            <div class="row">
+                <div class="col-md-6">
+                    <h6 class="text-primary"><i class="fas fa-file"></i> Original File</h6>
+                    <table class="table table-sm">
+                        <tr><td><strong>Size:</strong></td><td>${OriginalFile.SizeMB?.toFixed(2) || 'N/A'} MB</td></tr>
+                        <tr><td><strong>Resolution:</strong></td><td>${OriginalFile.Resolution || 'N/A'}</td></tr>
+                        <tr><td><strong>Codec:</strong></td><td>${OriginalFile.Codec || 'N/A'}</td></tr>
+                        <tr><td><strong>Video Bitrate:</strong></td><td>${OriginalFile.VideoBitrateKbps || 'N/A'} kbps</td></tr>
+                        <tr><td><strong>Audio Bitrate:</strong></td><td>${OriginalFile.AudioBitrateKbps || 'N/A'} kbps</td></tr>
+                        <tr><td><strong>Duration:</strong></td><td>${OriginalFile.DurationMinutes?.toFixed(1) || 'N/A'} min</td></tr>
+                        <tr><td><strong>Frame Rate:</strong></td><td>${OriginalFile.FrameRate || 'N/A'} fps</td></tr>
+                        <tr><td><strong>Profile:</strong></td><td>${OriginalFile.AssignedProfile || 'N/A'}</td></tr>
+                    </table>
+                </div>
+                <div class="col-md-6">
+        `;
+
+        if (TranscodedFile) {
+            const VMAFScore = TranscodedFile.VMAFScore || TranscodedFile.VMAF;
+            const VMAFColor = VMAFScore > 95 ? 'success' : VMAFScore > 90 ? 'warning' : 'danger';
+            const VMAFBadge = VMAFScore ? `<span class="badge bg-${VMAFColor}">${VMAFScore.toFixed(1)}</span>` : '<span class="badge bg-secondary">N/A</span>';
+
+            html += `
+                    <h6 class="text-success"><i class="fas fa-compress"></i> Transcoded File</h6>
+                    <table class="table table-sm">
+                        <tr><td><strong>Size:</strong></td><td>${(TranscodedFile.NewSizeBytes / (1024*1024)).toFixed(2)} MB</td></tr>
+                        <tr><td><strong>Compression:</strong></td><td>${TranscodedFile.SizeReductionPercent?.toFixed(1) || 'N/A'}%</td></tr>
+                        <tr><td><strong>Video Bitrate:</strong></td><td>${TranscodedFile.VideoBitrateKbps || 'N/A'} kbps</td></tr>
+                        <tr><td><strong>Audio Bitrate:</strong></td><td>${TranscodedFile.AudioBitrateKbps || 'N/A'} kbps</td></tr>
+                        <tr><td><strong>Profile:</strong></td><td>${TranscodedFile.ProfileName || 'N/A'}</td></tr>
+                        <tr><td><strong>Quality:</strong></td><td>${TranscodedFile.Quality || 'N/A'}</td></tr>
+                        <tr><td><strong>VMAF Score:</strong></td><td>${VMAFBadge}</td></tr>
+                        <tr><td><strong>Status:</strong></td><td>${TranscodedFile.Success ? '<span class="badge bg-success">Success</span>' : '<span class="badge bg-danger">Failed</span>'}</td></tr>
+                    </table>
+            `;
+
+            if (TranscodedFile.FfpmpegCommand) {
+                html += `
+                    <div class="mt-3">
+                        <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#FFmpegCommand">
+                            <i class="fas fa-code"></i> View FFmpeg Command
+                        </button>
+                        <div class="collapse mt-2" id="FFmpegCommand">
+                            <div class="card card-body">
+                                <code style="font-size: 0.8em; word-break: break-all;">${TranscodedFile.FfpmpegCommand}</code>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+        } else {
+            html += `
+                    <h6 class="text-muted"><i class="fas fa-question-circle"></i> No Transcode Data</h6>
+                    <p class="text-muted">This file has not been transcoded yet.</p>
+            `;
+        }
+
+        html += `
+                </div>
+            </div>
+        `;
+
+        ComparisonContainer.innerHTML = html;
+    }
+
+    // ---- API Methods ----
+
+    async ExecuteCustomQuery() {
+        const query = document.getElementById('CustomQuery').value.trim();
+        const parametersText = document.getElementById('QueryParameters').value.trim();
+
+        if (!query) {
+            this.showAlert('Please enter a SQL query', 'warning');
+            return;
+        }
+
+        this.ShowLoading();
+
+        try {
+            const parameters = parametersText ? parametersText.split(',').map(p => p.trim()) : [];
+
+            const response = await fetch('/api/SQLQueries/ExecuteQuery', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ Query: query, Parameters: parameters })
+            });
+
+            const data = await response.json();
+
+            if (data.Success) {
+                this.DisplayResults(data.Results);
+            } else {
+                this.showAlert('Error: ' + data.ErrorMessage, 'danger');
+                this.HideLoading();
+            }
+        } catch (error) {
+            this.showAlert('Error executing query: ' + error.message, 'danger');
+            this.HideLoading();
+        }
+    }
+
+    async LoadActiveJobs() {
+        this.ShowLoading();
+
+        try {
+            const response = await fetch('/api/SQLQueries/GetActiveJobs');
+            const data = await response.json();
+
+            if (data.Success) {
+                this.DisplayResults(data.ActiveJobs);
+            } else {
+                this.showAlert('Error: ' + data.ErrorMessage, 'danger');
+                this.HideLoading();
+            }
+        } catch (error) {
+            this.showAlert('Error loading active jobs: ' + error.message, 'danger');
+            this.HideLoading();
+        }
+    }
+
+    async LoadErrorSummary() {
+        this.ShowLoading();
+
+        try {
+            const response = await fetch('/api/SQLQueries/GetErrorSummary?Hours=24');
+            const data = await response.json();
+
+            if (data.Success) {
+                const combinedData = [
+                    ...data.ErrorSummary.map(item => ({ ...item, Type: 'Summary' })),
+                    ...data.RecentErrors.map(item => ({ ...item, Type: 'Recent Error' }))
+                ];
+                this.DisplayResults(combinedData);
+            } else {
+                this.showAlert('Error: ' + data.ErrorMessage, 'danger');
+                this.HideLoading();
+            }
+        } catch (error) {
+            this.showAlert('Error loading error summary: ' + error.message, 'danger');
+            this.HideLoading();
+        }
+    }
+
+    async LoadDatabaseInfo() {
+        this.ShowLoading();
+
+        try {
+            const response = await fetch('/api/SQLQueries/GetDatabaseInfo');
+            const data = await response.json();
+
+            if (data.Success) {
+                this.DisplayResults(data.Tables);
+            } else {
+                this.showAlert('Error: ' + data.ErrorMessage, 'danger');
+                this.HideLoading();
+            }
+        } catch (error) {
+            this.showAlert('Error loading database info: ' + error.message, 'danger');
+            this.HideLoading();
+        }
+    }
+
+    LoadCommonQuery(queryType) {
+        const query = this.CommonQueries[queryType];
+        if (query) {
+            document.getElementById('CustomQuery').value = query;
+            this.ExecuteCustomQuery();
+        }
+    }
+
+    async LoadMediaFileComparison() {
+        const FileId = document.getElementById('FileIdInput').value.trim();
+        const FilePath = document.getElementById('FilePathInput').value.trim();
+
+        if (!FileId && !FilePath) {
+            this.showAlert('Please enter either a File ID or File Path', 'warning');
+            return;
+        }
+
+        const ComparisonContainer = document.getElementById('ComparisonResults');
+        ComparisonContainer.innerHTML = `
+            <div class="text-center py-4">
+                <div class="spinner-border text-primary" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+                <p class="mt-2">Loading comparison...</p>
+            </div>
+        `;
+        ComparisonContainer.style.display = 'block';
+
+        try {
+            const params = new URLSearchParams();
+            if (FileId) params.append('FileId', FileId);
+            if (FilePath) params.append('FilePath', FilePath);
+
+            const response = await fetch(`/api/SQLQueries/GetMediaFileComparison?${params}`);
+            const data = await response.json();
+
+            if (data.Success) {
+                this.DisplayComparisonTable(data);
+            } else {
+                ComparisonContainer.innerHTML = `
+                    <div class="alert alert-danger">
+                        <i class="fas fa-exclamation-triangle"></i> Error: ${data.ErrorMessage}
+                    </div>
+                `;
+            }
+        } catch (error) {
+            ComparisonContainer.innerHTML = `
+                <div class="alert alert-danger">
+                    <i class="fas fa-exclamation-triangle"></i> Error loading comparison: ${error.message}
+                </div>
+            `;
+        }
+    }
+
+    async LoadRecentSuccesses() {
+        const Container = document.getElementById('RecentSuccessesContainer');
+
+        try {
+            const response = await fetch('/api/SQLQueries/GetRecentSuccesses?limit=15');
+            const data = await response.json();
+
+            if (data.Success) {
+                if (data.Results && data.Results.length > 0) {
+                    let html = `
+                        <div class="table-responsive">
+                            <table class="table table-striped table-hover table-sm">
+                                <thead class="table-header-dark">
+                                    <tr>
+                                        <th class="fw-bold">File</th>
+                                        <th class="fw-bold">Profile</th>
+                                        <th class="fw-bold">Reduction</th>
+                                        <th class="fw-bold">Duration</th>
+                                        <th class="fw-bold">Date</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                    `;
+
+                    data.Results.forEach(item => {
+                        const FileName = item.FilePath ? item.FilePath.split('/').pop().split('\\').pop() : 'Unknown';
+                        const Reduction = item.SizeReductionPercent != null ? item.SizeReductionPercent.toFixed(1) : 'N/A';
+                        let ReductionBadge;
+                        if (item.SizeReductionPercent != null) {
+                            const color = item.SizeReductionPercent > 50 ? 'success' : item.SizeReductionPercent >= 30 ? 'primary' : 'secondary';
+                            ReductionBadge = `<span class="badge bg-${color}">${Reduction}%</span>`;
+                        } else {
+                            ReductionBadge = '<span class="badge bg-secondary">N/A</span>';
+                        }
+                        const Duration = item.TranscodeDurationSeconds != null ? `${Math.round(item.TranscodeDurationSeconds)}s` : 'N/A';
+                        const DateStr = item.AttemptDate ? new Date(item.AttemptDate).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'N/A';
+
+                        html += `
+                            <tr>
+                                <td title="${item.FilePath}">${FileName}</td>
+                                <td>${item.ProfileName || 'N/A'}</td>
+                                <td>${ReductionBadge}</td>
+                                <td>${Duration}</td>
+                                <td>${DateStr}</td>
+                            </tr>
+                        `;
+                    });
+
+                    html += `
+                                </tbody>
+                            </table>
+                        </div>
+                    `;
+
+                    Container.innerHTML = html;
+                } else {
+                    Container.innerHTML = `
+                        <div class="text-center py-4">
+                            <i class="fas fa-info-circle fa-3x text-muted mb-3"></i>
+                            <p class="text-muted">No recent successful transcodes found.</p>
+                        </div>
+                    `;
+                }
+            } else {
+                Container.innerHTML = `
+                    <div class="alert alert-danger">
+                        <i class="fas fa-exclamation-triangle"></i> Error: ${data.ErrorMessage}
+                    </div>
+                `;
+            }
+        } catch (error) {
+            Container.innerHTML = `
+                <div class="alert alert-danger">
+                    <i class="fas fa-exclamation-triangle"></i> Error loading successes: ${error.message}
+                </div>
+            `;
+        }
+    }
+
+    async LoadRecentFailures() {
+        const Container = document.getElementById('RecentFailuresContainer');
+
+        try {
+            const response = await fetch('/api/FailureTracking/RecentFailures?limit=20');
+            const data = await response.json();
+
+            if (data.Success) {
+                if (data.Failures && data.Failures.length > 0) {
+                    let html = `
+                        <div class="table-responsive">
+                            <table class="table table-striped table-hover table-sm">
+                                <thead class="table-header-dark">
+                                    <tr>
+                                        <th class="fw-bold">Service</th>
+                                        <th class="fw-bold">File</th>
+                                        <th class="fw-bold">Error</th>
+                                        <th class="fw-bold">Date</th>
+                                        <th class="fw-bold">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                    `;
+
+                    data.Failures.forEach(failure => {
+                        const FileName = failure.FileName ? failure.FileName.split('/').pop() : 'Unknown';
+                        const ErrorMessage = failure.FailureReason ? failure.FailureReason.substring(0, 80) + (failure.FailureReason.length > 80 ? '...' : '') : 'No error message';
+                        const DateStr = failure.FailureDate ? new Date(failure.FailureDate).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'N/A';
+
+                        html += `
+                            <tr>
+                                <td><span class="badge bg-${failure.ServiceType === 'Transcode' ? 'primary' : 'info'}">${failure.ServiceType}</span></td>
+                                <td title="${failure.FileName}">${FileName}</td>
+                                <td title="${failure.FailureReason}">${ErrorMessage}</td>
+                                <td>${DateStr}</td>
+                                <td>
+                                    <button class="btn btn-sm btn-outline-primary" onclick="operationsManager.LoadMediaFileComparisonForPath('${failure.FileName}')">
+                                        <i class="fas fa-search"></i>
+                                    </button>
+                                </td>
+                            </tr>
+                        `;
+                    });
+
+                    html += `
+                                </tbody>
+                            </table>
+                        </div>
+                    `;
+
+                    Container.innerHTML = html;
+                } else {
+                    Container.innerHTML = `
+                        <div class="text-center py-4">
+                            <i class="fas fa-check-circle fa-3x text-success mb-3"></i>
+                            <p class="text-muted">No recent failures found.</p>
+                        </div>
+                    `;
+                }
+            } else {
+                Container.innerHTML = `
+                    <div class="alert alert-danger">
+                        <i class="fas fa-exclamation-triangle"></i> Error: ${data.ErrorMessage}
+                    </div>
+                `;
+            }
+        } catch (error) {
+            Container.innerHTML = `
+                <div class="alert alert-danger">
+                    <i class="fas fa-exclamation-triangle"></i> Error loading failures: ${error.message}
+                </div>
+            `;
+        }
+    }
+
+    async LoadStuckJobs() {
+        const Container = document.getElementById('StuckJobsContainer');
+
+        try {
+            const response = await fetch('/api/SQLQueries/GetStuckJobs');
+            const data = await response.json();
+
+            if (data.Success) {
+                if (data.StuckJobs && data.StuckJobs.length > 0) {
+                    let html = `
+                        <div class="alert alert-warning">
+                            <i class="fas fa-exclamation-triangle"></i> Found ${data.Count} stuck jobs that may need attention.
+                        </div>
+                        <div class="table-responsive">
+                            <table class="table table-striped table-hover">
+                                <thead class="table-header-dark">
+                                    <tr>
+                                        <th class="fw-bold">Job Type</th>
+                                        <th class="fw-bold">File/Service</th>
+                                        <th class="fw-bold">Status</th>
+                                        <th class="fw-bold">Started</th>
+                                        <th class="fw-bold">Duration</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                    `;
+
+                    data.StuckJobs.forEach(job => {
+                        const FileName = job.FilePath ? job.FilePath.split('/').pop() : job.FileName;
+
+                        html += `
+                            <tr>
+                                <td><span class="badge bg-warning">${job.JobType}</span></td>
+                                <td title="${job.FilePath}">${FileName}</td>
+                                <td><span class="badge bg-danger">${job.Status}</span></td>
+                                <td>${new Date(job.StartedAt).toLocaleString(undefined, { timeZoneName: 'short' })}</td>
+                                <td>${job.Duration}</td>
+                            </tr>
+                        `;
+                    });
+
+                    html += `
+                                </tbody>
+                            </table>
+                        </div>
+                    `;
+
+                    Container.innerHTML = html;
+                } else {
+                    Container.innerHTML = `
+                        <div class="text-center py-4">
+                            <i class="fas fa-check-circle fa-3x text-success mb-3"></i>
+                            <p class="text-muted">No stuck jobs found. All systems running smoothly!</p>
+                        </div>
+                    `;
+                }
+            } else {
+                Container.innerHTML = `
+                    <div class="alert alert-danger">
+                        <i class="fas fa-exclamation-triangle"></i> Error: ${data.ErrorMessage}
+                    </div>
+                `;
+            }
+        } catch (error) {
+            Container.innerHTML = `
+                <div class="alert alert-danger">
+                    <i class="fas fa-exclamation-triangle"></i> Error loading stuck jobs: ${error.message}
+                </div>
+            `;
+        }
+    }
+
+    LoadMediaFileComparisonForPath(FilePath) {
+        document.getElementById('FilePathInput').value = FilePath;
+        document.getElementById('FileIdInput').value = '';
+        this.LoadMediaFileComparison();
+        // Scroll to comparison section
+        document.getElementById('ComparisonResults').scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+}
+
+// Initialize
+let operationsManager;
+document.addEventListener('DOMContentLoaded', function() {
+    operationsManager = new OperationsManager();
+});
+</script>
+{% endblock %}

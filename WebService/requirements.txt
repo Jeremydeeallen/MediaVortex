@@ -20,4 +20,3 @@ setproctitle
 psycopg2-binary>=2.9.0
 
 WinTmp
-RAMSPDToolkit-NDD

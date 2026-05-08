@@ -24,7 +24,7 @@ For code updates, repeat steps 1-5. The LXC's `/opt/mediavortex/docker-compose.y
 |------|------|--------------|
 | 8. Entry point | `TranscodeService/Main.py` | Calls `Main()` which creates `TranscodeServiceApp` |
 | 9. DB connect | `Core/Database/DatabaseService.py` | Reads `MEDIAVORTEX_DB_*` env vars, creates psycopg2 ThreadedConnectionPool (min=2, max=20) to 10.0.0.15:5432 |
-| 10. Worker identity | `TranscodeService/Main.py:41` | Sets `WorkerName = socket.gethostname()` (Docker container ID), `WorkerPlatform = "linux"` |
+| 10. Worker identity | `TranscodeService/Main.py:41` | Sets `WorkerName = socket.gethostname()` (stable hostname from compose, e.g. `larry-worker-1`), `WorkerPlatform = "linux"` |
 | 11. Register worker | `Repositories/DatabaseManager.py` RegisterWorker() | UPSERT into `Workers` table: inserts or updates WorkerName, Platform, FFmpegPath (via `shutil.which`), FFprobePath, Status='Online', LastHeartbeat=NOW() |
 | 11b. Register share mappings | `Repositories/DatabaseManager.py` RegisterWorkerShareMappings() | Parses `MEDIAVORTEX_SHARE_MAPPINGS` env var (e.g. `T=/mnt/media_tv/,M=/mnt/movies/,Z=/mnt/xxx/`), UPSERTs into `WorkerShareMappings` per drive letter |
 | 12. Load config | `Repositories/DatabaseManager.py` GetWorkerConfig() | SELECT from `Workers` + `WorkerShareMappings` for this WorkerName. Returns FFmpegPath, FFprobePath, StagingDirectory, MaxConcurrentJobs, share drive-letter mappings |
@@ -60,7 +60,7 @@ The compose defaults (in the LXC's docker-compose.yml) override the code default
 | AppArmor blocks Docker build | `unable to apply apparmor profile` during any RUN step | Docker-in-LXC: the kernel AppArmor interface is not exposed into the container. Fix: `apt-get purge -y apparmor` in setup.sh removes the `apparmor_parser` binary so Docker detects AppArmor as unavailable and skips it for builds and runtime. No daemon.json or per-service `security_opt` needed |
 | BtbN download fails during build | Dockerfile stage 1 exits non-zero, `docker compose build` fails | Retry; check GitHub release URL; BtbN releases are tagged `latest` and occasionally rotate |
 | DB unreachable at container start | psycopg2.OperationalError in logs, container restarts (restart: unless-stopped) | Verify 10.0.0.15:5432 is reachable from 10.0.0.42; check PostgreSQL pg_hba.conf allows the worker IP |
-| Worker hostname collision | Two containers get the same Docker-generated hostname (unlikely with Compose) | Scale-down and re-up; each container gets a unique ID like `mediavortex-workers-worker-1` |
+| Stale worker DB entries | Container recreates with random hostnames leave orphaned Workers rows | Fixed: docker-compose.yml uses YAML anchors with explicit `hostname:` per service (larry-worker-1 through 4). `socket.gethostname()` returns the stable name, so registrations survive recreates and crash recovery matches its own previous entries |
 | Bind mount missing on LXC | FFmpeg writes fail with ENOENT or EACCES | Verify LXC mount points: `ls /mnt/media_tv /mnt/movies /mnt/xxx` on 10.0.0.42 |
 | Image not built on LXC | `docker compose up` fails with "image not found" | Re-run scp + docker build pipeline (steps 1-2) |
 | Staging directory not writable | Transcode jobs fail when writing temp output | Check `/mnt/media_tv/MediaVortex/Staging` exists and is writable (Dockerfile creates the mount point, but the real directory must exist on the NFS share) |

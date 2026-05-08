@@ -223,13 +223,17 @@ class WebServiceApp:
                 LoggingService.LogException("Error rendering Status page", e, "WebService", "status")
                 return render_template('Error.html', ErrorCode=500, ErrorMessage="Failed to load page"), 500
 
+        @self.App.route('/Operations')
+        def operations():
+            try:
+                return render_template('Operations.html')
+            except Exception as e:
+                LoggingService.LogException("Error rendering Operations page", e, "WebService", "operations")
+                return render_template('Error.html', ErrorCode=500, ErrorMessage="Failed to load page"), 500
+
         @self.App.route('/SQLQueries')
         def sql_queries():
-            try:
-                return render_template('SQLQueries.html')
-            except Exception as e:
-                LoggingService.LogException("Error rendering SQLQueries page", e, "WebService", "sql_queries")
-                return render_template('Error.html', ErrorCode=500, ErrorMessage="Failed to load page"), 500
+            return redirect('/Operations')
 
         @self.App.route('/TranscodeProgress')
         def transcode_progress():

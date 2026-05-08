@@ -30,6 +30,8 @@ Dogfood
 
 9. The `TranscodeFileMode` SystemSetting gains a third value `LocalStaging` (alongside `InPlace` and `CopyLocal`). Workers read this setting per-job. Changing the setting does not require container restarts. Verified via `POST /api/SystemSettings/TranscodeFileMode` with `{"Value": "LocalStaging"}` and the next job using the local staging path.
 
+11. [BUG] Workers without `StagingDirectory` configured in the Workers table gracefully fall back to InPlace mode when `TranscodeFileMode` is `LocalStaging`. No crash, no data loss. Verified via log message: "LocalStaging mode requires StagingDirectory in Workers table. Falling back to InPlace."
+
 ## Status
 
 IN PROGRESS

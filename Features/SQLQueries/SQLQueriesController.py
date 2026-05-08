@@ -418,6 +418,43 @@ def GetMediaFileComparison():
         LoggingService.LogException(error_msg, e, "SQLQueriesController", "GetMediaFileComparison")
         return jsonify({"Success": False, "ErrorMessage": error_msg}), 500
 
+@SQLQueriesBlueprint.route('/GetRecentSuccesses', methods=['GET'])
+def GetRecentSuccesses():
+    """Get recent successful transcodes."""
+    try:
+        LoggingService.LogFunctionEntry("GetRecentSuccesses", "SQLQueriesController")
+
+        Limit = int(request.args.get('limit', 15))
+
+        query = """
+        SELECT ta.FilePath, ta.ProfileName, ta.SizeReductionPercent,
+               ta.TranscodeDurationSeconds, ta.AttemptDate, ta.NewSizeBytes, ta.OldSizeBytes
+        FROM TranscodeAttempts ta
+        WHERE ta.Success = TRUE
+        ORDER BY ta.AttemptDate DESC
+        LIMIT %s
+        """
+
+        results = SharedDatabaseManager.DatabaseService.ExecuteQuery(query, [Limit])
+
+        if results:
+            rows = [dict(row) for row in results]
+        else:
+            rows = []
+
+        LoggingService.LogInfo(f"Retrieved {len(rows)} recent successful transcodes", "SQLQueriesController", "GetRecentSuccesses")
+
+        return jsonify({
+            "Success": True,
+            "Results": rows,
+            "Count": len(rows)
+        })
+
+    except Exception as e:
+        error_msg = f"Exception getting recent successes: {str(e)}"
+        LoggingService.LogException(error_msg, e, "SQLQueriesController", "GetRecentSuccesses")
+        return jsonify({"Success": False, "ErrorMessage": error_msg}), 500
+
 @SQLQueriesBlueprint.route('/GetStuckJobs', methods=['GET'])
 def GetStuckJobs():
     """Get jobs stuck in processing."""

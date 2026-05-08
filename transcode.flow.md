@@ -130,9 +130,10 @@ Stages 1-4 require user action. Stages 5-7 are automatic once TranscodeService i
 **File staging (controlled by `TranscodeFileMode` SystemSetting):**
 - **InPlace** (default): FFmpeg reads directly from the network path. On the primary machine this is the raw DB path (e.g. `T:\ShowName\file.mkv`). On remote workers, `PathTranslationService.ToLocalPath()` converts to the local mount (e.g. `/mnt/media/ShowName/file.mkv`).
 - **CopyLocal**: copies source to `C:\MediaVortex\Source\{FileName}` before transcoding (legacy behavior). Useful if network is unreliable or for local-only files.
-- Output writes to the worker's configured `StagingDirectory` (from Workers table). Defaults to `C:\MediaVortex\` if not configured.
+- **LocalStaging**: copies source from NFS to the worker's local disk (`/staging/{WorkerName}/`), FFmpeg reads and writes entirely on local storage, then copies the output back to NFS `StagingDirectory` and deletes local files. Eliminates NFS I/O bottleneck for CPU-bound transcodes. Crash recovery skips the source copy if the local file already exists. `TemporaryFilePaths` stores canonical NFS paths so downstream stages (VMAF, FileReplacement) are unaware of local staging.
+- Output writes to the worker's configured `StagingDirectory` (from Workers table). Defaults to `C:\MediaVortex\` if not configured. In LocalStaging mode, output goes to local disk first, then is copied to StagingDirectory.
 - Setting is read per-job via `GetTranscodeFileMode()` -> `SystemSettingsRepository.GetSystemSetting('TranscodeFileMode')`.
-- To change: `POST /api/SystemSettings/TranscodeFileMode` with `{"Value": "CopyLocal"}` or `"InPlace"`.
+- To change: `POST /api/SystemSettings/TranscodeFileMode` with `{"Value": "LocalStaging"}`, `"CopyLocal"`, or `"InPlace"`.
 
 **Path handling for distributed workers:**
 - DB stores all paths in canonical (Windows) format: `T:\ShowName\file.mkv`

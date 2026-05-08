@@ -22,9 +22,11 @@ Dogfood
 
 6. `docker compose up -d --scale worker=N` adjusts the number of running workers. Each new worker self-registers and begins polling. Scaled-down workers stop gracefully (no in-progress jobs abandoned).
 
-7. Worker containers restart automatically after crashes (`restart: unless-stopped`). Resource limits (8 CPUs, 8GB RAM per worker) are enforced via Docker Compose `deploy.resources.limits`.
+7. Worker containers restart automatically after crashes (`restart: unless-stopped`). Workers use stable hostnames (`larry-worker-1` through `larry-worker-4`) via the Docker Compose `hostname` directive, so DB registrations survive container recreates.
 
 8. The staging directory `/mnt/media_tv/MediaVortex/Staging` is writable from inside the worker container.
+
+9. NFS storage traffic between the worker LXC and Brain uses the 20 Gbps bonded backplane (10.0.1.42 → 10.0.1.1, MTU 9000) instead of the LAN switch path. Verified via `ip addr show eth1` on the LXC showing 10.0.1.42/24 on vmbr1.
 
 ## Status
 
@@ -38,11 +40,13 @@ IN PROGRESS
 - [x] 4. Build image on worker-pool LXC and verify FFmpeg SVT-AV1 present
 - [x] 5. ~~Transfer image~~ (built directly on LXC via scp + docker build)
 - [x] 6. Start workers on LXC (docker compose up -d)
-- [x] 7. Verify DB self-registration (Workers table: 2 workers Online with heartbeats)
-- [ ] 8. Queue a test transcode job and verify end-to-end processing
-- [ ] 9. Test scale-up and scale-down
+- [x] 7. Verify DB self-registration (Workers table: 4 workers Online with stable hostnames)
+- [x] 8. Queue transcode jobs and verify end-to-end processing
+- [x] 9. Stable hostnames (larry-worker-1 through 4) via YAML anchors + hostname directive
+- [x] 10. Crash recovery marks stale TranscodeAttempts as failed (prevents ghost rows in Stats)
+- [ ] 11. Add backplane NIC (10.0.1.42 on vmbr1) for 20 Gbps NFS storage path
 
-NEXT: Queue a test transcode job (step 8). Flow doc at deploy/worker-deploy.flow.md.
+NEXT: Apply backplane NIC via Terraform (step 11). Flow doc at deploy/worker-deploy.flow.md.
 
 ## Scope
 
