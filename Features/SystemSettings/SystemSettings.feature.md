@@ -16,10 +16,12 @@ Global configuration management for the application. Stores key-value settings t
 8. QualityTestEnabled (global on/off, default OFF) controls whether VMAF testing runs after transcoding.
 9. All settings persist to the SystemSettings table as key-value pairs.
 10. The /settings page provides the UI for all configuration.
+11. [BUG] The SystemSettings table is properly normalized: (a) `SettingKey` carries a `UNIQUE` constraint and the table contains exactly one row per key (currently has duplicates: `ContinuousScanEnabled`x2, `ContinuousScanIntervalMinutes`x2, `ExcludedDirectories`x4); (b) `DataType` values are case-consistent and constrained to a defined enum (currently mixes `BOOLEAN` / `boolean` / `string` / `INTEGER` / `integer` / `text`); (c) list-shaped values (`AllowedExtensions`, `ExcludedDirectories`) live in dedicated child tables instead of as comma-separated text; (d) per-file overrides (`CRFOverride_<path>` rows) live in a typed override table keyed by `MediaFileId`, not as `SystemSettings` rows with the path mangled into the key. Fixed = a fresh dump of `SystemSettings` shows no duplicate keys, no comma-separated list values, and no `CRFOverride_*` keys.
+12. [BUG] The /settings page renders every row in `SystemSettings` somehow -- either via a dedicated UI control for known keys, or via the generic "All System Settings" advanced table for the rest. Fixed = no SystemSettings row exists in the DB without a corresponding visible row on /settings.
 
 ## Status
 
-COMPLETE
+IN PROGRESS
 
 ## Scope
 

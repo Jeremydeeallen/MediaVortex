@@ -74,6 +74,20 @@ Phase 1 (commit 6bf51b2) addressed the four highest-risk silent swallows that hi
 
 ---
 
+### [BUG] SystemSettings not normalized; /settings page does not show every row
+**Date:** 2026-05-08
+**Affects:** SystemSettings.feature.md (criteria 11, 12), `Features/SystemSettings/SystemSettingsRepository.py`, `Templates/Settings.html`
+
+DB state: no UNIQUE on `SettingKey` (duplicates exist: ContinuousScanEnabled x2, ContinuousScanIntervalMinutes x2, ExcludedDirectories x4). `DataType` mixes BOOLEAN/boolean/string/INTEGER/integer/text. List-shaped values stored as CSV (`AllowedExtensions`, `ExcludedDirectories`). Per-file CRF overrides use `CRFOverride_<long_path>` keys instead of a typed override table. Until tonight's UI patch the /settings page only rendered hardcoded known keys (FFmpegPath, MaxCpuThreads, etc.) -- new keys like `DisplayTimezone` were invisible despite existing in the DB. Tonight's commit 505fac2 added a generic "All System Settings" advanced table; criterion 12 is now achievable but the normalization gaps in criterion 11 remain.
+
+**Look first:** `Scripts/SQLScripts/` -- needs a migration that dedupes by `SettingKey` (keep most-recently `LastModified`), adds `UNIQUE(SettingKey)`, and a CHECK constraint on `DataType`. Then move `AllowedExtensions` / `ExcludedDirectories` to child tables and `CRFOverride_*` to a `MediaFileTranscodeOverrides` table keyed on `MediaFileId`. Frontend code that splits CSV in `Settings.html` (search for `.split(',')` near AllowedExtensions/ExcludedDirectories) needs to follow.
+
+**Flow doc gap:** No general flow doc exists for the SystemSettings pipeline (DB row -> Repository -> Controller -> Settings.html UI -> POST round-trip). `/t` should create one before the fix so the dedupe migration and frontend follow-up have a documented contract.
+
+**Fix with:** `/t` (multi-step migration + UI follow-up; estimate 1-2 hours)
+
+---
+
 ### [BUG] Workers attempt jobs for MediaFiles entries whose source file no longer exists on disk
 **Date:** 2026-05-08
 **Affects:** TranscodeJob feature (ProcessTranscodeQueueService, FFprobe build step), TranscodeQueue feature (queue population)
