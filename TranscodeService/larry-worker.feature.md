@@ -58,7 +58,7 @@ IN PROGRESS
 - [x] Create LXC container on Larry (Terraform module at Infrastructure/terraform/mediavortex-transcode/)
 - [x] Install Python 3.11+, FFmpeg (with libsvtav1), psycopg2-binary inside container (in setup.sh)
 - [x] Configure three media shares via Proxmox bind mounts (same host mounts as mediamanager CT 206)
-- [x] Clone repo, install TranscodeService requirements system-wide (no venv -- in setup.sh)
+- [x] Clone repo, install WorkerService requirements system-wide (no venv -- in setup.sh)
 - [x] Register worker in DB with multi-prefix share mappings (in setup.sh)
 - [x] Set up systemd service for auto-start (in setup.sh)
 - [x] Update WorkerSetup.md with multi-share setup instructions
@@ -81,8 +81,8 @@ IN PROGRESS
 Core/Services/PathTranslationService.py
 Features/TranscodeJob/ProcessTranscodeQueueService.py
 Scripts/SQLScripts/AddDistributedColumns.py
-TranscodeService/Main.py
-TranscodeService/WorkerSetup.md
+WorkerService/Main.py
+WorkerService/WorkerSetup.md
 ```
 
 ## Files
@@ -93,7 +93,7 @@ TranscodeService/WorkerSetup.md
 | Features/TranscodeJob/ProcessTranscodeQueueService.py | Load multi-prefix config from DB, pass to PathTranslationService |
 | Scripts/SQLScripts/AddDistributedColumns.py | Add migration for WorkerShareMappings table |
 | Repositories/DatabaseManager.py | Add GetWorkerShareMappings(), update GetWorkerConfig() to include mappings |
-| TranscodeService/WorkerSetup.md | Document multi-share setup for Linux and Windows workers |
+| WorkerService/WorkerSetup.md | Document multi-share setup for Linux and Windows workers |
 
 ### Infrastructure repo (C:\Code\Infrastructure)
 

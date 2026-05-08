@@ -2,7 +2,7 @@
 
 ## What It Does
 
-Manages the lifecycle and health of all three microservices (WebService, TranscodeService, QualityTestService). Provides start/stop/pause/resume controls, health monitoring, stuck job detection, and crash recovery.
+Manages the lifecycle and health of microservices (WebService, WorkerService). Provides start/stop/pause/resume controls, health monitoring, stuck job detection, and crash recovery. Per-worker status (Online/Draining/Offline) is controlled via the Workers table and the Activity page.
 
 ## Success Criteria
 
@@ -14,7 +14,7 @@ Manages the lifecycle and health of all three microservices (WebService, Transco
 6. Inter-service commands are queued via the ServiceCommands table (no direct inter-process messaging).
 7. System resource monitoring (CPU usage, memory, disk space) is displayed on the /Status page.
 8. CPU core temperatures are displayed individually when available.
-9. StartMediaVortex.py launches all three services. StopMediaVortex.py gracefully shuts them all down.
+9. StartMediaVortex.py launches WebService + WorkerService. StopMediaVortex.py gracefully shuts them down.
 
 ## Status
 

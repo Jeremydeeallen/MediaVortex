@@ -5,7 +5,7 @@ Executes FFmpeg transcode jobs from the queue, tracks progress, and handles resu
 ## Scope
 
 - `Features/TranscodeJob/**`
-- `TranscodeService/Main.py`
+- `WorkerService/Main.py`
 
 ## Criteria
 
@@ -24,7 +24,7 @@ Executes FFmpeg transcode jobs from the queue, tracks progress, and handles resu
 - VMAF quality test toggle: SystemSettings.QualityTestEnabled (global on/off, default OFF). Workers.QualityTestEnabled (per-worker override, NULL = use global). TranscodeAttempts.QualityTestRequired is set from these at job creation time, not hardcoded.
 - Per-worker FFprobe: Workers.FFprobePath flows through ProcessTranscodeQueueService -> CommandBuilderService -> FFmpegAnalysisService -> FFmpegService. Audio stream selection (English preferred) uses the worker's local FFprobe, not the global SystemSettings path.
 - [FIXED] Progress display must not depend on TranscodeQueue: any job with an active TranscodeProgress record and TranscodeAttempts.Success IS NULL must appear in the progress UI, regardless of whether a TranscodeQueue row exists.
-- [BUG] TranscodeJob scope declares `Features/TranscodeJob/**` and `TranscodeService/Main.py`, but criteria govern code in `Services/CommandBuilderService.py`, `Services/FFmpegAnalysisService.py`, `Services/FFmpegService.py`, and `Core/Services/PathTranslationService.py`. Either the scope expands to cover those files, or the criteria that govern them move to separate feature docs that own those files.
+- [BUG] TranscodeJob scope declares `Features/TranscodeJob/**` and `WorkerService/Main.py`, but criteria govern code in `Services/CommandBuilderService.py`, `Services/FFmpegAnalysisService.py`, `Services/FFmpegService.py`, and `Core/Services/PathTranslationService.py`. Either the scope expands to cover those files, or the criteria that govern them move to separate feature docs that own those files.
 
 ## Progress
 

@@ -44,23 +44,24 @@ py Scripts/SQLScripts/QueryDatabase.py sql "SELECT WorkerName, Status, LastHeart
 
 | Step | File | What It Does |
 |------|------|--------------|
-| 8. Entry point | `TranscodeService/Main.py` | Calls `Main()` which creates `TranscodeServiceApp` |
+| 8. Entry point | `WorkerService/Main.py` | Calls `Main()` which creates `WorkerServiceApp` |
 | 9. DB connect | `Core/Database/DatabaseService.py` | Reads `MEDIAVORTEX_DB_*` env vars, creates psycopg2 ThreadedConnectionPool (min=2, max=20) to 10.0.0.15:5432 |
-| 10. Worker identity | `TranscodeService/Main.py:41` | Sets `WorkerName = socket.gethostname()` (stable hostname from compose, e.g. `larry-worker-1`), `WorkerPlatform = "linux"` |
+| 10. Worker identity | `WorkerService/Main.py` | Sets `WorkerName = socket.gethostname()` (stable hostname from compose, e.g. `larry-worker-1`), `WorkerPlatform = platform.system().lower()` |
 | 11. Register worker | `Repositories/DatabaseManager.py` RegisterWorker() | UPSERT into `Workers` table: inserts or updates WorkerName, Platform, FFmpegPath (via `shutil.which`), FFprobePath, Status='Online', LastHeartbeat=NOW() |
 | 11b. Register share mappings | `Repositories/DatabaseManager.py` RegisterWorkerShareMappings() | Parses `MEDIAVORTEX_SHARE_MAPPINGS` env var (e.g. `T=/mnt/media_tv/,M=/mnt/movies/,Z=/mnt/xxx/`), UPSERTs into `WorkerShareMappings` per drive letter |
-| 12. Load config | `Repositories/DatabaseManager.py` GetWorkerConfig() | SELECT from `Workers` + `WorkerShareMappings` for this WorkerName. Returns FFmpegPath, FFprobePath, StagingDirectory, MaxConcurrentJobs, share drive-letter mappings |
-| 13. Service status | `TranscodeService/Main.py` EnsureServiceStatusExists() | Ensures a row exists in `ServiceStatus` for "TranscodeService" |
+| 12. Initialize WorkerContext | `Core/WorkerContext.py` | Singleton initialized with FFmpegPath, FFprobePath, PathTranslation from Workers/WorkerShareMappings. All services in the process resolve tool paths from WorkerContext. |
+| 13. Load capabilities | `WorkerService/Main.py` _LoadCapabilitiesFromDB() | Reads `TranscodeEnabled`, `QualityTestEnabled`, `ScanEnabled` from Workers row. Starts/stops capability loops accordingly. |
 | 14. Crash recovery | `Services/CrashRecoveryService.py` | Resets any jobs left in Running/Processing state by this worker from a previous crash |
-| 15. Health loop | `TranscodeService/Main.py` HealthCheckLoop() | Thread: updates `Workers.LastHeartbeat` and `ServiceStatus.HealthStatus` every 30s |
-| 16. Status poll | `TranscodeService/Main.py` PrivateStatusPollingLoop() | Thread: reads `ServiceStatus.Status` every 5s, starts/stops transcoding based on status changes |
-| 17. Main loop | `TranscodeService/Main.py` MainLoop() | Blocks on ShutdownEvent, checking every 10s. SIGTERM/SIGINT triggers SignalHandler |
+| 15. Health loop | `WorkerService/Main.py` _HealthCheckLoop() | Thread: updates `Workers.LastHeartbeat` every 30s |
+| 16. Status poll | `WorkerService/Main.py` _StatusPollingLoop() | Thread: reads `Workers.Status` every 5s, handles Online/Draining/Offline transitions |
+| 16b. Capability poll | `WorkerService/Main.py` _CapabilityPollingLoop() | Thread: reads capability flags from Workers every 60s, starts/stops transcode/VMAF/scan loops on change |
+| 17. Main loop | `WorkerService/Main.py` Run() | Blocks on ShutdownEvent. SIGTERM/SIGINT triggers SignalHandler |
 
 ## Shutdown (SIGTERM from Docker)
 
 | Step | File | What It Does |
 |------|------|--------------|
-| 18. Signal handler | `TranscodeService/Main.py` SignalHandler() | Kills active FFmpeg processes, resets this worker's Running/Processing queue items to Pending, deletes ActiveJobs entries, sets worker Status='Offline', calls os._exit(0) |
+| 18. Signal handler | `WorkerService/Main.py` _SignalHandler() | Kills active FFmpeg processes, resets this worker's Running/Processing queue items to Pending, deletes ActiveJobs entries, sets worker Status='Offline', calls os._exit(0) |
 
 ## Environment Variables
 
@@ -86,5 +87,5 @@ The compose defaults (in the LXC's docker-compose.yml) override the code default
 | Bind mount missing on LXC | FFmpeg writes fail with ENOENT or EACCES | Verify LXC mount points: `ls /mnt/media_tv /mnt/movies /mnt/xxx` on 10.0.0.42 |
 | Image not built on LXC | `docker compose up` fails with "image not found" | Re-run scp + docker build pipeline (steps 1-2) |
 | Staging directory not writable | Transcode jobs fail when writing temp output | Check `/mnt/media_tv/MediaVortex/Staging` exists and is writable (Dockerfile creates the mount point, but the real directory must exist on the NFS share) |
-| Worker not picking up jobs | Worker registered but idle | Check `ServiceStatus.Status` is 'Running' for TranscodeService; workers respect status polling and won't process unless status is Running |
+| Worker not picking up jobs | Worker registered but idle | Check `Workers.Status` is 'Online' for the worker; workers poll their own status and won't process unless status is Online. Also verify capability flags (TranscodeEnabled, QualityTestEnabled) are set. |
 | Graceful shutdown timeout | Container kill after Docker's stop timeout (default 10s) | Long-running FFmpeg jobs may not finish; SignalHandler kills FFmpeg immediately and resets queue items to Pending for retry |

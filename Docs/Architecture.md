@@ -7,8 +7,7 @@ MediaVortex is a comprehensive media transcoding and management system built usi
 
 ### Services Layer
 - **SystemMonitoringService**: Monitors system resources including CPU, memory, disk usage, and temperature
-- **TranscodeService**: Handles media file transcoding operations
-- **QualityTestService**: Performs quality analysis and VMAF testing
+- **WorkerService**: Unified worker -- handles transcoding, VMAF quality testing, and file scanning based on per-worker capability flags
 - **WebService**: Provides REST API and web interface
 
 ### Models Layer
@@ -95,7 +94,7 @@ MediaVortex is a comprehensive media transcoding and management system built usi
 - **Caching strategies** for frequently accessed data
 
 ## Deployment Architecture
-- **Microservices**: Three services (WebService, TranscodeService, QualityTestService)
+- **Microservices**: Two services (WebService, WorkerService)
 - **Local PostgreSQL**: Database runs locally (not Docker)
 - **Configuration management**: Environment-based settings
 - **Logging**: Comprehensive logging across all services via centralized LoggingService

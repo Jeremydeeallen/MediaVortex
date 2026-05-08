@@ -2,7 +2,7 @@
 
 ## What It Does
 
-Builds and deploys MediaVortex TranscodeService workers as Docker containers. Workers are stateless processes that poll the database for transcode jobs, run FFmpeg, and write output to shared media mounts. They scale horizontally via `docker compose up --scale worker=N` on the worker-pool LXC (provisioned by the infrastructure repo).
+Builds and deploys MediaVortex WorkerService instances as Docker containers. Workers are stateless processes that poll the database for transcode jobs (and optionally VMAF quality tests and file scanning), run FFmpeg, and write output to shared media mounts. They scale horizontally via `docker compose up --scale worker=N` on the worker-pool LXC (provisioned by the infrastructure repo).
 
 ## Concern
 
@@ -10,7 +10,7 @@ Dogfood
 
 ## Success Criteria
 
-1. `docker compose build` produces a `mediavortex-worker:latest` image containing Python 3.12, FFmpeg with SVT-AV1 2.x (`libsvtav1` encoder present), and the TranscodeService code. No GitHub deploy token is baked into the image.
+1. `docker compose build` produces a `mediavortex-worker:latest` image containing Python 3.12, FFmpeg with SVT-AV1 2.x (`libsvtav1` encoder present), and the WorkerService code. No GitHub deploy token is baked into the image.
 
 2. Each worker container connects to the MediaVortex PostgreSQL database (10.0.0.15:5432) using environment variables and self-registers in the `Workers` table using its container hostname as `WorkerName`. Registration includes the worker's platform-correct FFmpeg and FFprobe paths (e.g. `/usr/local/bin/ffmpeg` on Linux, `FFmpegMaster\bin\ffmpeg.exe` on Windows).
 
@@ -55,7 +55,7 @@ deploy/Dockerfile
 deploy/docker-compose.yml
 deploy/worker-deploy.feature.md
 deploy/worker-deploy.flow.md
-TranscodeService/Main.py
+WorkerService/Main.py
 Services/FFmpegService.py
 ```
 
@@ -64,7 +64,7 @@ Services/FFmpegService.py
 - `deploy/Dockerfile` - Multi-stage Docker image build
 - `deploy/docker-compose.yml` - Compose config for building and running workers
 - `deploy/worker-deploy.flow.md` - Build, deploy, and runtime flow doc
-- `TranscodeService/Main.py` - Worker entry point
+- `WorkerService/Main.py` - Unified worker entry point
 - `Repositories/DatabaseManager.py` - RegisterWorker(), GetWorkerConfig(), GetWorkerShareMappings()
 - `Services/FFmpegService.py` - FFmpeg/FFprobe path resolution (reads per-worker config, then systemsettings, then hardcoded discovery)
 - `Core/Database/DatabaseService.py` - PostgreSQL connection pooling (reads MEDIAVORTEX_DB_* env vars)

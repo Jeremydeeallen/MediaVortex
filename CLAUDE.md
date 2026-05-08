@@ -18,7 +18,7 @@ Stop when you have enough context:
 ## Commands
 
 ```bash
-# Start all services (web, transcode, quality test)
+# Start all services (web + worker)
 py StartMediaVortex.py
 
 # Stop all services
@@ -67,13 +67,12 @@ Each feature contains its own Controller, ViewModel, BusinessService, Repository
 
 Legacy code in top-level `Controllers/`, `ViewModels/`, `Services/`, `Models/` is being migrated into `Features/`.
 
-### Three Microservices
+### Two Microservices
 Separate processes coordinated via database records:
-- **WebService** — Flask web app (API + UI), port 5000
-- **TranscodeService** — Executes FFmpeg transcode jobs
-- **QualityTestService** — Runs VMAF quality analysis
+- **WebService** -- Flask web app (API + UI), port 5000
+- **WorkerService** -- Unified worker: transcoding, VMAF quality testing, and file scanning. Replaces the former TranscodeService + QualityTestService. Each worker reads capability flags (TranscodeEnabled, QualityTestEnabled, ScanEnabled) and status (Online/Draining/Offline) from its Workers table row.
 
-`ServiceLifecycleManager` orchestrates startup/shutdown of all three.
+`ServiceLifecycleManager` orchestrates startup/shutdown. `StartMediaVortex.py` launches WebService + WorkerService.
 
 ## Core Data Flow
 
@@ -82,8 +81,8 @@ Separate processes coordinated via database records:
 2. PROBE: MediaProbe runs FFprobe → populates Resolution, Codec, AudioLanguages, etc.
 3. ASSIGN: User selects folder + profile in UI → bulk-updates MediaFiles.AssignedProfile
 4. QUEUE: PopulateQueue filters by resolution vs ProfileThresholds.TranscodeDownTo → creates TranscodeQueue items
-5. TRANSCODE: TranscodeService picks up queue items → runs FFmpeg → writes TranscodeAttempts
-6. QUALITY: QualityTestService runs VMAF → updates TranscodeAttempts.VMAF
+5. TRANSCODE: WorkerService picks up queue items → runs FFmpeg → writes TranscodeAttempts
+6. QUALITY: WorkerService runs VMAF → updates TranscodeAttempts.VMAF
 7. REPLACE: FileReplacement archives original → moves transcoded to original location → re-probes → updates MediaFiles
 ```
 

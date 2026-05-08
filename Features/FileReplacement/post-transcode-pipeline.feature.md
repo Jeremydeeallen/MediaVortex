@@ -12,8 +12,8 @@ Both (code fix + deploy-anywhere infrastructure)
 
 ### Bridge decision (ShouldQualityTestService)
 1. When QualityTestRequired=False on the TranscodeAttempt, ShouldQualityTestService skips the quality test queue entirely and proceeds directly to file cleanup. No QualityTestQueue row is created.
-2. When QualityTestRequired=True, the existing VMAF queue flow is unchanged -- quality test is queued, QualityTestService processes it, auto-replace triggers if VMAF is in range.
-3. When QualityTestService DB status is missing or "Stopped" (not "Paused"), and QualityTestRequired=True, the quality test is still queued. The bridge does not conflate "service not running" with "testing disabled."
+2. When QualityTestRequired=True, the existing VMAF queue flow is unchanged -- quality test is queued, WorkerService (with QualityTestEnabled) processes it, auto-replace triggers if VMAF is in range.
+3. When quality testing capability is not running and QualityTestRequired=True, the quality test is still queued. The bridge does not conflate "capability not running" with "testing disabled."
 
 ### File cleanup (FileReplacementBusinessService)
 4. After a successful transcode with QualityTestEnabled=OFF, the full DB state chain completes in order:
@@ -31,8 +31,8 @@ Both (code fix + deploy-anywhere infrastructure)
 9. When a transcode fails, the TemporaryFilePaths row for that TranscodeAttemptId is deleted. No orphaned path records accumulate for attempts that will never reach replacement or VMAF.
 
 ### Deploy-anywhere
-10. A Linux worker (e.g., Larry) running TranscodeService with QualityTestEnabled=OFF completes the full pipeline: transcode, delete original, update DB. No other service needs to be running.
-11. A Windows worker running TranscodeService with QualityTestEnabled=OFF completes the same pipeline identically.
+10. A Linux worker (e.g., Larry) running WorkerService with QualityTestEnabled=OFF completes the full pipeline: transcode, delete original, update DB. No other service needs to be running.
+11. A Windows worker running WorkerService with QualityTestEnabled=OFF completes the same pipeline identically.
 12. PathTranslation is passed from ProcessTranscodeQueueService (which already has it) through to FileReplacementBusinessService and HandleJobFailure. No new DB lookups or config loading in FileReplacement.
 13. [BUG] The re-probe step in file replacement uses the worker's FFprobe path (from Workers table), not SystemSettings.FFprobePath. On a Linux worker, re-probing a transcoded file succeeds and MediaFiles is updated with new codec, resolution, and TranscodedByMediaVortex=True.
 

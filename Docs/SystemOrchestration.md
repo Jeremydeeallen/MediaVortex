@@ -8,18 +8,15 @@ MediaVortex uses a microservices architecture with multiple services that need t
 
 ### Services
 
-1. **WebService** - Main Flask web application (port 5000) - replaces MediaVortex.py
-2. **TranscodeService** - Microservice for transcoding operations
-3. **QualityTestService** - Microservice for quality testing operations - replaces MicroServiceQualityTest
+1. **WebService** - Main Flask web application (port 5000)
+2. **WorkerService** - Unified worker: transcoding, VMAF quality testing, and file scanning (replaces former TranscodeService + QualityTestService)
 
 ### Service Dependencies
 
 ```
 WebService (Web UI)
     ↓
-TranscodeService (depends on WebService)
-    ↓
-QualityTestService (depends on WebService)
+WorkerService (depends on WebService for API)
 ```
 
 ## Startup Options

@@ -28,15 +28,14 @@ Web UI available at `http://localhost:5000`.
 
 ## Architecture
 
-Three microservices coordinated via PostgreSQL:
+Two microservices coordinated via PostgreSQL:
 
 | Service | Purpose |
 |---------|---------|
 | **WebService** | Flask web app (API + UI), port 5000 |
-| **TranscodeService** | Executes FFmpeg transcode jobs |
-| **QualityTestService** | Runs VMAF quality analysis |
+| **WorkerService** | Unified worker: transcoding, VMAF quality testing, and file scanning |
 
-Services can run on the same machine or be distributed across multiple workers.
+Workers read per-worker capability flags (TranscodeEnabled, QualityTestEnabled, ScanEnabled) and status (Online/Draining/Offline) from the Workers table. Workers can run on the same machine or be distributed across multiple hosts.
 
 ## Core Pipeline
 
@@ -69,7 +68,7 @@ Full guide: [TranscodeService/WorkerSetup.md](TranscodeService/WorkerSetup.md)
 5. Run the migration: `python Scripts/SQLScripts/AddDistributedColumns.py`
 6. Register the worker in the database (INSERT into Workers table)
 7. Create the staging directory on the network share
-8. Start: `python TranscodeService/Main.py`
+8. Start: `python WorkerService/Main.py`
 
 ### How Workers Operate
 
@@ -115,8 +114,7 @@ PostgreSQL 16. Key tables:
 ```
 MediaVortex/
   WebService/           Flask web app
-  TranscodeService/     Transcode worker service
-  QualityTestService/   VMAF quality analysis service
+  WorkerService/        Unified worker service (transcode, VMAF, scanning)
   Features/             Feature verticals (Controller/ViewModel/BusinessService/Repository)
   Core/                 Shared services (Database, Logging, PathTranslation)
   Templates/            Jinja2 HTML templates (Bootstrap 5 + jQuery)

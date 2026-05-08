@@ -9,12 +9,12 @@ SCAN -> PROBE -> ASSIGN -> QUEUE -> TRANSCODE -> QUALITY -> REPLACE
  (1)     (2)      (3)      (4)       (5)          (6)       (7)
 ```
 
-Stages 1-4 require user action. Stages 5-7 are automatic once TranscodeService is running:
+Stages 1-4 require user action. Stages 5-7 are automatic once WorkerService is running:
 - QUEUE -> TRANSCODE: automatic (service polls for Pending items)
-- TRANSCODE -> QUALITY or REPLACE: ShouldQualityTestService.ProcessTranscodedFile is the bridge. It checks QualityTestRequired on the TranscodeAttempt: when False, skips directly to FileReplacement; when True, queues a quality test. If the QualityTestService is paused, it also skips directly to replacement.
+- TRANSCODE -> QUALITY or REPLACE: ShouldQualityTestService.ProcessTranscodedFile is the bridge. It checks QualityTestRequired on the TranscodeAttempt: when False, skips directly to FileReplacement; when True, queues a quality test. If quality testing is paused, it also skips directly to replacement.
 - QUALITY -> REPLACE: automatic if VMAF is within threshold range (default 80-100)
 
-**Service dependency model:** All three services communicate exclusively via PostgreSQL. No HTTP calls between them. Each polls the database for its own work. FileReplacement is a library (not a service) that runs in whatever process calls it -- TranscodeService when QualityTest=OFF, QualityTestService when QualityTest=ON, WebService for manual replacement.
+**Service dependency model:** Both services communicate exclusively via PostgreSQL. No HTTP calls between them. Each polls the database for its own work. FileReplacement is a library (not a service) that runs in whatever process calls it -- WorkerService when QualityTest=OFF, WorkerService's quality test loop when QualityTest=ON, WebService for manual replacement.
 
 ---
 
@@ -111,10 +111,10 @@ Stages 1-4 require user action. Stages 5-7 are automatic once TranscodeService i
 
 ## Stage 5: TRANSCODE -- FFmpeg Job Execution
 
-**Trigger:** TranscodeService running (started via `StartMediaVortex.py` or `POST /api/Transcode/Start`)
+**Trigger:** WorkerService running with TranscodeEnabled=TRUE (started via `StartMediaVortex.py` or per-worker Online status)
 
 **Code path:**
-- `TranscodeService/Main.py` -> `ProcessTranscodeQueueService.ProcessQueueLoop()`
+- `WorkerService/Main.py` -> `ProcessTranscodeQueueService.ProcessQueueLoop()`
 - Main loop: polls TranscodeQueue for Pending items, spawns worker threads (up to MaxConcurrentJobs)
 - Each worker calls `ProcessJob()`:
   1. Create ActiveJob record
@@ -175,7 +175,7 @@ Stages 1-4 require user action. Stages 5-7 are automatic once TranscodeService i
 **Trigger:** Automatic after transcode if quality testing enabled, or manual via QualityTesting UI
 
 **Code path:**
-- `QualityTestService/Main.py` -> `QualityTestingBusinessService.ProcessQualityTestQueue()`
+- `WorkerService/Main.py` (QualityTestEnabled=TRUE) -> `QualityTestingBusinessService.ProcessQualityTestQueue()`
 - For each pending test:
   1. Get TranscodeAttempt (original path, transcoded path)
   2. Build FFmpeg VMAF command: compare original vs transcoded using `libvmaf`
@@ -230,15 +230,14 @@ TranscodeAttempt.VMAF        -- set at QUALITY, checked at QUEUE (retranscode de
 TranscodeAttempt.FileReplaced -- set at REPLACE, prevents re-replacement
 ```
 
-## Three Microservices
+## Two Microservices
 
 | Service | Process | Port | Role |
 |---------|---------|------|------|
 | WebService | `WebService/Main.py` | 5000 | Flask API + UI. Handles stages 1-4 and 7 |
-| TranscodeService | `TranscodeService/Main.py` | -- | Stage 5. Polls queue, runs FFmpeg |
-| QualityTestService | `QualityTestService/Main.py` | -- | Stage 6. Runs VMAF analysis |
+| WorkerService | `WorkerService/Main.py` | -- | Stages 5-6. Transcode, VMAF, and scanning based on per-worker capability flags |
 
-All three coordinated via `ServiceLifecycleManager` in `StartMediaVortex.py`.
+Coordinated via `ServiceLifecycleManager` in `StartMediaVortex.py`.
 
 ## SystemSettings Infrastructure
 
@@ -264,25 +263,26 @@ Runtime-configurable key-value store in PostgreSQL. Used for transcode file mode
 
 ## Service Architecture
 
-### TranscodeService Startup Sequence
+### WorkerService Startup Sequence
 
 ```
-TranscodeService/Main.py
+WorkerService/Main.py
   -> Main()
-    -> TranscodeServiceApp.__init__()
+    -> WorkerServiceApp.__init__()
       -> DatabaseManager created
+      -> Worker identity (hostname, platform)
+      -> RegisterWorker() -- UPSERT into Workers table
+      -> WorkerContext.Initialize() -- singleton with FFmpeg/FFprobe paths, share mappings
       -> ProcessTranscodeQueueService created
-      -> GracefulStopService created
     -> app.Run()
-      -> EnsureServiceStatusExists()       -- creates ServiceStatus row if missing
-      -> UpdateServiceStatus("Starting")
       -> RecoverFromCrash()                -- CrashRecoveryService resets orphaned jobs
       -> DetectAndCleanStuckJobs()         -- StuckJobDetectionService cleans frozen jobs
-      -> StartHealthMonitoring()           -- 30-second heartbeat thread
-      -> PrivateStartStatusPolling()       -- 5-second status polling thread
-      -> StartTranscodingProcessing()      -- placeholder (actual start by status poll)
-      -> UpdateServiceStatus("Running")
-      -> MainLoop()                        -- blocks on ShutdownEvent, checks every 10s
+      -> _StartHealthMonitoring()          -- 30-second heartbeat thread
+      -> _StartStatusPolling()             -- 5-second status polling (Workers.Status)
+      -> _StartCapabilityPolling()         -- 60-second capability polling
+      -> _LoadCapabilitiesFromDB()         -- reads TranscodeEnabled, QualityTestEnabled, ScanEnabled
+      -> _ApplyCapabilities()              -- starts/stops capability loops
+      -> MainLoop()                        -- blocks on ShutdownEvent
 ```
 
 ### Job Claiming Mechanism
@@ -329,16 +329,15 @@ Cleanup: resets TranscodeQueue to Pending (clears ClaimedBy/ClaimedAt), marks Tr
 
 ### ServiceLifecycleManager
 
-`StartMediaVortex.py` uses `ServiceLifecycleManager` to start all three services:
+`StartMediaVortex.py` uses `ServiceLifecycleManager` to start both services:
 - WebService (Flask, port 5000) -- in-process
-- TranscodeService -- separate process via subprocess
-- QualityTestService -- separate process via subprocess
+- WorkerService -- separate process via subprocess
 
 Each service registers in `ServiceStatus` table with ProcessId, enabling cross-service health monitoring.
 
 ### Worker Registration (Distributed)
 
-In distributed mode, each TranscodeService instance:
+In distributed mode, each WorkerService instance:
 1. Calls `RegisterWorker(WorkerName)` on startup (UPSERT into Workers table)
 2. Updates `Workers.LastHeartbeat` every 30 seconds via HealthCheckLoop
 3. Loads its config (FFmpegPath, StagingDirectory, ShareMountPrefix, MaxConcurrentJobs) from Workers row
@@ -355,7 +354,7 @@ End-to-end trace from worker installation through finished product. Every functi
 | Step | Action | Function/Command | DB Call | Status Change |
 |------|--------|-----------------|---------|---------------|
 | 0.1 | Clone repo | `git clone` | -- | -- |
-| 0.2 | Create venv + install deps | `pip install -r TranscodeService/requirements.txt` | -- | -- |
+| 0.2 | Create venv + install deps | `pip install -r requirements.txt` | -- | -- |
 | 0.3 | Mount network share | `net use T:` / `mount -t cifs` | -- | -- |
 | 0.4 | Set env vars | `MEDIAVORTEX_DB_HOST`, `_PORT`, `_NAME`, `_USER`, `_PASSWORD` | -- | -- |
 | 0.5 | Run migration | `python Scripts/SQLScripts/AddDistributedColumns.py` | `CREATE TABLE Workers (...)`, `ALTER TABLE TranscodeQueue ADD COLUMN ClaimedBy`, `ALTER TABLE TranscodeQueue ADD COLUMN ClaimedAt`, `ALTER TABLE ActiveJobs ADD COLUMN WorkerName` | -- |
@@ -366,15 +365,16 @@ End-to-end trace from worker installation through finished product. Every functi
 
 | Step | Action | Function | DB Call | Status Change |
 |------|--------|----------|---------|---------------|
-| 1.1 | Identify self | `TranscodeServiceApp.__init__()` | -- | `WorkerName = socket.gethostname()` |
+| 1.1 | Identify self | `WorkerServiceApp.__init__()` | -- | `WorkerName = socket.gethostname()` |
 | 1.2 | Register + load config | `_RegisterAndLoadWorkerConfig()` | `INSERT INTO Workers ... ON CONFLICT DO UPDATE SET Status='Online', LastHeartbeat=NOW()` then `SELECT * FROM Workers WHERE WorkerName = %s` | Workers.Status = `Online` |
-| 1.3 | Create ProcessTranscodeQueueService | `ProcessTranscodeQueueService.__init__()` | -- | PathTranslationService initialized if ShareMountPrefix set |
-| 1.4 | Ensure ServiceStatus exists | `EnsureServiceStatusExists()` | `INSERT INTO ServiceStatus ... ON CONFLICT DO NOTHING` | ServiceStatus.Status = `Starting` |
+| 1.3 | Initialize WorkerContext | `WorkerContext.Initialize()` | -- | Singleton stores FFmpeg/FFprobe paths, share mappings for all services in the process |
+| 1.4 | Create ProcessTranscodeQueueService | `ProcessTranscodeQueueService.__init__()` | -- | PathTranslationService initialized from WorkerContext |
 | 1.5 | Crash recovery | `RecoverFromCrash()` -> `CrashRecoveryService.RecoverServiceJobs()` | `UPDATE TranscodeQueue SET Status='Pending' WHERE Status='Running'` (for orphaned jobs) | Orphaned jobs -> `Pending` |
 | 1.6 | Stuck job detection | `DetectAndCleanStuckJobs()` -> `StuckJobDetectionService.DetectAndCleanStuckTranscodeJobs()` | Checks `ActiveJobs`, `Workers.LastHeartbeat`, `TranscodeProgress` | Stuck jobs -> `Failed` |
-| 1.7 | Start health monitor | `StartHealthMonitoring()` -> `HealthCheckLoop()` (30s interval) | `UPDATE Workers SET LastHeartbeat = NOW()` + `UPDATE ServiceStatus SET HealthStatus='Healthy'` | Heartbeat ticking |
-| 1.8 | Start status polling | `PrivateStartStatusPolling()` -> `PrivateStatusPollingLoop()` (5s interval) | `SELECT * FROM ServiceStatus WHERE ServiceName='TranscodeService'` | Watching for start/stop commands |
-| 1.9 | Set Running | `UpdateServiceStatus("Running")` | `UPDATE ServiceStatus SET Status='Running'` | ServiceStatus.Status = `Running` |
+| 1.7 | Start health monitor | `_StartHealthMonitoring()` -> `_HealthCheckLoop()` (30s interval) | `UPDATE Workers SET LastHeartbeat = NOW()` | Heartbeat ticking |
+| 1.8 | Start status polling | `_StartStatusPolling()` -> `_StatusPollingLoop()` (5s interval) | `SELECT Status FROM Workers WHERE WorkerName = %s` | Watching for Online/Draining/Offline |
+| 1.8b | Start capability polling | `_StartCapabilityPolling()` -> `_CapabilityPollingLoop()` (60s interval) | `SELECT TranscodeEnabled, QualityTestEnabled, ScanEnabled FROM Workers WHERE WorkerName = %s` | Watching for capability changes |
+| 1.9 | Load + apply capabilities | `_LoadCapabilitiesFromDB()` + `_ApplyCapabilities()` | reads Workers row | Starts/stops transcode, VMAF, scan loops based on flags |
 
 ### Phase 2: Job Claiming (Atomic)
 
@@ -419,11 +419,11 @@ End-to-end trace from worker installation through finished product. Every functi
 | 5.6 | Clean progress | `DatabaseManager.DeleteTranscodeProgress(AttemptId)` | `DELETE FROM TranscodeProgress WHERE TranscodeAttemptId = %s` | -- |
 | 5.7 | Complete ActiveJob | `DatabaseManager.CompleteActiveJob(ActiveJobId, Success=True)` | `UPDATE ActiveJobs SET Status='Completed', CompletedAt=NOW()` | ActiveJobs.Status = `Completed` |
 
-### Phase 6: Quality Testing (QualityTestService -- runs on primary machine)
+### Phase 6: Quality Testing (WorkerService with QualityTestEnabled=TRUE)
 
 | Step | Action | Function | DB Call | Status Change |
 |------|--------|----------|---------|---------------|
-| 6.1 | Claim quality job | QualityTestService polls | `SELECT FROM QualityTestQueue WHERE Status='Pending'` | QualityTestQueue.Status = `Running` |
+| 6.1 | Claim quality job | WorkerService quality test loop polls | `SELECT FROM QualityTestQueue WHERE Status='Pending'` | QualityTestQueue.Status = `Running` |
 | 6.2 | Read paths from DB | Reads TemporaryFilePaths | `SELECT OriginalPath, LocalOutputPath FROM TemporaryFilePaths WHERE TranscodeAttemptId = %s` | Paths are canonical `T:\...` -- accessible from primary machine |
 | 6.3 | Run VMAF | FFmpeg VMAF comparison (original vs transcoded) | -- | Both files read from network share via canonical paths |
 | 6.4 | Store VMAF score | `UpdateTranscodeAttempt()` | `UPDATE TranscodeAttempts SET VMAF = %s, QualityTestCompleted = True` | VMAF score recorded |
@@ -446,7 +446,7 @@ End-to-end trace from worker installation through finished product. Every functi
 
 | Step | Action | Function | DB Call | Status Change |
 |------|--------|----------|---------|---------------|
-| 8.1 | SIGINT/SIGTERM received | `SignalHandler()` or `Shutdown()` | -- | -- |
+| 8.1 | SIGINT/SIGTERM received | `_SignalHandler()` or `Shutdown()` | -- | -- |
 | 8.2 | Kill local FFmpeg processes | `proc.kill()` for active jobs | -- | Only kills local processes |
 | 8.3 | Reset this worker's jobs | | `UPDATE TranscodeQueue SET Status='Pending', ClaimedBy=NULL, ClaimedAt=NULL WHERE Status IN ('Running', 'Processing') AND ClaimedBy = %s` | This worker's jobs back to Pending |
 | 8.4 | Clear this worker's active jobs | | `DELETE FROM ActiveJobs WHERE ServiceName='TranscodeService' AND WorkerName = %s` | -- |

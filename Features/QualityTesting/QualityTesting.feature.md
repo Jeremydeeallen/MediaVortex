@@ -11,7 +11,7 @@ Runs VMAF quality analysis comparing transcoded files against originals. Scores 
 3. Files with VMAF >= 80 pass quality testing and are eligible for file replacement.
 4. Files with VMAF < 80 trigger CRF adjustment for the next transcode attempt.
 5. Quality test results are recorded in TranscodeAttempts with the VMAF score.
-6. The QualityTestService runs as a separate microservice, polling for queued quality tests.
+6. Quality testing runs as a capability within WorkerService (QualityTestEnabled flag). Workers with this capability enabled poll for queued quality tests.
 7. Quality test progress (current file, percentage) is reported in real time.
 8. Quality testing can be paused, resumed, or gracefully stopped (finish current test then stop).
 9. SystemSettings.QualityTestEnabled controls whether quality testing runs globally (default OFF). Workers.QualityTestEnabled provides per-worker override (NULL = use global).
@@ -26,7 +26,7 @@ COMPLETE
 
 ```
 Features/QualityTesting/**
-QualityTestService/**
+WorkerService/**
 ```
 
 ## Files
@@ -36,4 +36,4 @@ QualityTestService/**
 | Features/QualityTesting/QualityTestingController.py | Flask Blueprint -- quality test endpoints |
 | Features/QualityTesting/QualityTestingBusinessService.py | VMAF execution, scoring logic |
 | Features/QualityTesting/QualityTestingRepository.py | Quality test queue and results queries |
-| QualityTestService/Main.py | Quality test microservice entry point |
+| WorkerService/Main.py | Unified worker entry point (runs quality testing when QualityTestEnabled=TRUE) |
