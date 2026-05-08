@@ -827,6 +827,12 @@ class ProcessTranscodeQueueService:
 
             FileMode = self.GetTranscodeFileMode()
 
+            # Workers without a configured StagingDirectory cannot use LocalStaging.
+            # Match the fallback decision made in ProcessJob/ProcessRemuxJob/ProcessSubtitleFixJob
+            # so this method does not silently keep building staging paths.
+            if FileMode == 'LocalStaging' and not self.OutputDirectory:
+                FileMode = 'InPlace'
+
             if FileMode == 'LocalStaging':
                 # Copy source to local staging disk (skip if already exists — crash recovery)
                 SourcePath = Job.FilePath
