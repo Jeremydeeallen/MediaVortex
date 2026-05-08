@@ -4,1371 +4,545 @@
 
 {% block content %}
 <div class="container-fluid">
-    {% include '_admin_subnav.html' %}
-    <div class="row">
-        <div class="col-12">
-            <div class="d-flex justify-content-between align-items-center mb-4">
-                <h1 class="h3 mb-0">Activity</h1>
-                <div class="btn-group" role="group">
-                    <button type="button" class="btn btn-success" id="StartTranscodingBtn">
-                        <i class="fas fa-play"></i> <span id="StartTranscodingText">Start Transcoding</span>
-                    </button>
-                    <button type="button" class="btn btn-warning" id="StopTranscodingBtn" style="display: none;">
-                        <i class="fas fa-stop"></i> Stop Transcoding
-                    </button>
-                    <button type="button" class="btn btn-secondary" id="RefreshBtn">
-                        <i class="fas fa-sync-alt"></i> Refresh
-                    </button>
-                </div>
+    <!-- Header -->
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h1 class="h3 mb-0"><i class="fas fa-heartbeat me-2"></i>Activity</h1>
+        <div class="btn-group" role="group">
+            <button type="button" class="btn btn-outline-primary btn-sm" id="RefreshBtn">
+                <i class="fas fa-sync-alt me-1"></i>Refresh
+            </button>
+            <button type="button" class="btn btn-success btn-sm" id="AutoRefreshBtn">
+                <i class="fas fa-pause me-1"></i>Auto
+            </button>
+        </div>
+    </div>
+
+    <!-- Active Transcode Jobs -->
+    <div class="card mb-4">
+        <div class="card-header py-2 d-flex justify-content-between align-items-center">
+            <h6 class="mb-0"><i class="fas fa-film me-2"></i>Active Transcode Jobs</h6>
+            <div class="d-flex align-items-center gap-2">
+                <span id="TranscodeStatusBadge" class="badge bg-secondary">Loading...</span>
+                <button id="BtnStopAfterJob" class="btn btn-warning btn-sm" onclick="ActivityPage.StopAfterJob()" disabled>
+                    <i class="fas fa-stop-circle me-1"></i>Stop After This Job
+                </button>
+                <button id="BtnResume" class="btn btn-success btn-sm d-none" onclick="ActivityPage.ResumeTranscoding()">
+                    <i class="fas fa-play-circle me-1"></i>Resume
+                </button>
             </div>
-
-            <!-- Current Transcode Job -->
-            <div class="row mb-4">
-                <div class="col-12">
-                    <div class="card">
-                        <div class="card-header d-flex justify-content-between align-items-center">
-                            <h5 class="mb-0">
-                                <i class="fas fa-cog"></i> Transcode Job
-                            </h5>
-                            <div class="d-flex align-items-center gap-3">
-                                <a href="#" id="StopTranscodeAfterCurrentLink" class="text-warning text-decoration-none small" style="display: none;" onclick="activityManager.stopTranscodeAfterCurrent(event)">
-                                    <i class="fas fa-stop-circle"></i> Stop after current job
-                                </a>
-                                <span class="badge bg-info" id="TranscodeJobCount">0 running</span>
-                            </div>
-                        </div>
-                        <div class="card-body">
-                            <div class="table-responsive">
-                                <table class="table table-hover" id="TranscodeJobTable">
-                                    <thead class="table-header-gradient">
-                                        <tr>
-                                            <th class="fw-bold">File Name</th>
-                                            <th class="fw-bold">Start Time</th>
-                                            <th class="fw-bold">Progress</th>
-                                            <th class="fw-bold">ETA</th>
-                                            <th class="fw-bold">Command</th>
-                                            <th class="fw-bold">Action</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody id="TranscodeJobTableBody">
-                                        <!-- Current transcode job will be populated here -->
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-                    </div>
-                </div>
+        </div>
+        <div class="card-body p-0">
+            <div id="NoJobInfo" class="text-muted py-3 px-3"><em>No active transcode jobs</em></div>
+            <div id="ActiveJobsTable" class="d-none">
+                <table class="table table-sm table-hover mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th class="ps-3">File</th>
+                            <th style="width: 110px;">Worker</th>
+                            <th style="width: 90px;">Size</th>
+                            <th style="width: 200px;">Progress</th>
+                            <th style="width: 80px;">FPS</th>
+                            <th style="width: 80px;">Speed</th>
+                            <th style="width: 100px;">ETA</th>
+                            <th style="width: 60px;"></th>
+                        </tr>
+                    </thead>
+                    <tbody id="ActiveJobsBody"></tbody>
+                </table>
             </div>
+        </div>
+    </div>
 
-
-            <!-- Running Quality Checks -->
-            <div class="row mb-4">
-                <div class="col-12">
-                    <div class="card">
-                        <div class="card-header d-flex justify-content-between align-items-center">
-                            <h5 class="mb-0">
-                                <i class="fas fa-chart-line"></i> Running Quality Checks
-                            </h5>
-                            <div class="d-flex align-items-center gap-3">
-                                <a href="#" id="StopQualityTestAfterCurrentLink" class="text-warning text-decoration-none small" style="display: none;" onclick="activityManager.stopQualityTestAfterCurrent(event)">
-                                    <i class="fas fa-stop-circle"></i> Stop after current job
-                                </a>
-                                <span class="badge bg-info" id="RunningQualityTestingCount">0 running</span>
-                            </div>
-                        </div>
-                        <div class="card-body">
-                            <div class="table-responsive">
-                                <table class="table table-hover" id="RunningQualityTestingTable">
-                                    <thead class="table-header-secondary">
-                                        <tr>
-                                            <th class="fw-bold">File Name</th>
-                                            <th class="fw-bold">Start Time</th>
-                                            <th class="fw-bold">Progress</th>
-                                            <th class="fw-bold">ETA</th>
-                                            <th class="fw-bold">Action</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody id="RunningQualityTestingTableBody">
-                                        <!-- Running quality testing operations will be populated here -->
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-                    </div>
-                </div>
+    <!-- Workers -->
+    <div class="card mb-4">
+        <div class="card-header py-2 d-flex justify-content-between align-items-center">
+            <h6 class="mb-0"><i class="fas fa-server me-2"></i>Workers</h6>
+            <div class="btn-group btn-group-sm" role="group">
+                <button class="btn btn-outline-success" onclick="ActivityPage.SetAllWorkersStatus('Online')" title="Set All Online">
+                    <i class="fas fa-play"></i> All Online
+                </button>
+                <button class="btn btn-outline-warning" onclick="ActivityPage.SetAllWorkersStatus('Draining')" title="Drain All">
+                    <i class="fas fa-hourglass-half"></i> Drain All
+                </button>
+                <button class="btn btn-outline-danger" onclick="ActivityPage.SetAllWorkersStatus('Offline')" title="Set All Offline">
+                    <i class="fas fa-power-off"></i> All Offline
+                </button>
             </div>
-
-            <!-- Recent Transcode Attempts -->
-            <div class="row mb-4">
-                <div class="col-12">
-                    <div class="card">
-                        <div class="card-header d-flex justify-content-between align-items-center">
-                            <h5 class="mb-0">
-                                <i class="fas fa-video"></i> Recent Transcode Attempts
-                            </h5>
-                            <span class="badge bg-secondary" id="RecentAttemptsCount">0 attempts</span>
-                        </div>
-                        <div class="card-body">
-                            <div class="table-responsive">
-                                <table class="table table-hover" id="RecentAttemptsTable">
-                                    <thead class="table-header-dark">
-                                        <tr>
-                                            <th class="fw-bold">File Name</th>
-                                            <th class="fw-bold">Date</th>
-                                            <th class="fw-bold">Status</th>
-                                            <th class="fw-bold">CRF</th>
-                                            <th class="fw-bold">Before (MB)</th>
-                                            <th class="fw-bold">After (MB)</th>
-                                            <th class="fw-bold">Space Saved</th>
-                                            <th class="fw-bold">Duration</th>
-                                            <th class="fw-bold">Profile</th>
-                                            <th class="fw-bold">Error</th>
-                                            <th class="fw-bold">Actions</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody id="RecentAttemptsTableBody">
-                                        <!-- Recent attempts will be populated here -->
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-                    </div>
-                </div>
+        </div>
+        <div class="card-body">
+            <div class="row g-3" id="WorkersContainer">
+                <div class="col-12 text-center text-muted py-2">Loading...</div>
             </div>
+        </div>
+    </div>
 
-            <!-- Quality Test Queue -->
-            <div class="row mb-4">
-                <div class="col-12">
-                    <div class="card">
-                        <div class="card-header d-flex justify-content-between align-items-center">
-                            <h5 class="mb-0">
-                                <i class="fas fa-list"></i> Quality Test Queue
-                            </h5>
-                            <span class="badge bg-warning" id="QualityTestQueueCount">0 pending</span>
-                        </div>
-                        <div class="card-body">
-                            <div class="table-responsive">
-                                <table class="table table-hover" id="QualityTestQueueTable">
-                                    <thead class="table-header-success">
-                                        <tr>
-                                            <th class="fw-bold">File Name</th>
-                                            <th class="fw-bold">Date Added</th>
-                                            <th class="fw-bold">Priority</th>
-                                            <th class="fw-bold">Action</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody id="QualityTestQueueTableBody">
-                                        <!-- Quality test queue items will be populated here -->
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Recent Quality Testing Results -->
-            <div class="row">
-                <div class="col-12">
-                    <div class="card">
-                        <div class="card-header d-flex justify-content-between align-items-center">
-                            <h5 class="mb-0">
-                                <i class="fas fa-chart-line"></i> Recent Quality Tests
-                            </h5>
-                            <span class="badge bg-info" id="RecentQualityTestingCount">0 results</span>
-                        </div>
-                        <div class="card-body">
-                            <div class="table-responsive">
-                                <table class="table table-hover" id="RecentQualityTestingTable">
-                                    <thead class="table-header-dark">
-                                        <tr>
-                                            <th class="fw-bold">File Name</th>
-                                            <th class="fw-bold">Quality Score</th>
-                                            <th class="fw-bold">Profile</th>
-                                            <th class="fw-bold">Size Reduction</th>
-                                            <th class="fw-bold">Replacement Status</th>
-                                            <th class="fw-bold">Action</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody id="RecentQualityTestingTableBody">
-                                        <!-- Recent quality testing results will be populated here -->
-                                    </tbody>
-                                </table>
-                            </div>
-                            <!-- Pagination Controls -->
-                            <div class="d-flex justify-content-between align-items-center mt-3">
-                                <div class="pagination-info">
-                                    <span id="QualityTestPaginationInfo">Showing 0-0 of 0 results</span>
-                                </div>
-                                <nav aria-label="Quality test results pagination">
-                                    <ul class="pagination pagination-sm mb-0" id="QualityTestPagination">
-                                        <!-- Pagination buttons will be populated here -->
-                                    </ul>
-                                </nav>
-                            </div>
-                        </div>
-                    </div>
-                </div>
+    <!-- Quality Testing Queue -->
+    <div class="card mb-4">
+        <div class="card-header py-2 d-flex justify-content-between align-items-center">
+            <h6 class="mb-0"><i class="fas fa-chart-line me-2"></i>Quality Testing Queue</h6>
+            <button type="button" class="btn btn-sm btn-outline-secondary" id="RefreshQualityTestingBtn">
+                <i class="fas fa-sync-alt"></i> Refresh
+            </button>
+        </div>
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-striped table-hover" id="QualityTestingQueueTable">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>File Name</th>
+                            <th>Status</th>
+                            <th>Priority</th>
+                            <th>VMAF Score</th>
+                            <th>Progress</th>
+                            <th>Date Added</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="QualityTestingQueueTableBody">
+                        <tr><td colspan="8" class="text-center text-muted py-4"><i class="fas fa-inbox fa-2x mb-2"></i><br>Loading...</td></tr>
+                    </tbody>
+                </table>
             </div>
         </div>
     </div>
 </div>
+{% endblock %}
 
-
+{% block scripts %}
 <script>
-class ActivityManager {
-    constructor() {
-        this.isTranscoding = false;
-        this.currentJob = null;
-        this.qualityTestPagination = {
-            currentPage: 1,
-            pageSize: 10,
-            totalCount: 0,
-            totalPages: 0
+var ActivityPage = (function() {
+    var Workers = [];
+    var AutoRefreshEnabled = true;
+    var OverviewInterval = null;
+    var QTProgressInterval = null;
+    var CurrentQTProgress = null;
+
+    // -- Utilities --
+    function FormatSizeMB(SizeMB) {
+        var Size = parseFloat(SizeMB) || 0;
+        if (Size >= 1024) return (Size / 1024).toFixed(2) + ' GB';
+        return Math.round(Size) + ' MB';
+    }
+
+    function EscapeHtml(Text) {
+        var Div = document.createElement('div');
+        Div.textContent = Text || '';
+        return Div.innerHTML;
+    }
+
+    function FormatDate(DateString) {
+        if (!DateString) return '-';
+        var D = new Date(DateString);
+        return D.toLocaleString(undefined, { timeZoneName: 'short' });
+    }
+
+    function FormatHeartbeatAge(Sec) {
+        if (Sec === null || Sec === undefined) return 'Never';
+        Sec = Math.floor(Sec);
+        if (Sec < 60) return Sec + 's ago';
+        if (Sec < 3600) return Math.floor(Sec / 60) + ' min ago';
+        return Math.floor(Sec / 3600) + ' hr ago';
+    }
+
+    function GetWorkerStatusBadge(Status) {
+        var Map = {
+            'Online': 'bg-success',
+            'Draining': 'bg-warning text-dark',
+            'Offline': 'bg-danger'
         };
-        this.initializeEventListeners();
-        this.loadProgressData();
-        this.startAutoRefresh();
+        return Map[Status] || 'bg-secondary';
     }
 
-    initializeEventListeners() {
-        // Start/Stop Transcoding
-        document.getElementById('StartTranscodingBtn').addEventListener('click', () => {
-            this.startTranscoding();
-        });
-
-        document.getElementById('StopTranscodingBtn').addEventListener('click', () => {
-            this.stopTranscoding();
-        });
-
-        // Refresh
-        document.getElementById('RefreshBtn').addEventListener('click', () => {
-            this.loadProgressData();
-        });
+    function GetQTStatusBadgeClass(Status) {
+        var Map = { 'Pending': 'bg-warning', 'Running': 'bg-info', 'Completed': 'bg-success', 'Failed': 'bg-danger' };
+        return Map[Status] || 'bg-secondary';
     }
 
-    async loadProgressData() {
-        try {
-            // Always start progress monitoring to show the card
-            this.startFFmpegProgressMonitoring();
-            
-            // Get transcoding status
-            try {
-                const statusResponse = await fetch('/api/Transcode/Status');
-                const contentType = statusResponse.headers.get('content-type');
-                if (!contentType || !contentType.includes('application/json')) {
-                    console.error('Transcode Status API returned HTML instead of JSON. Status:', statusResponse.status);
-                    throw new Error(`API returned HTML instead of JSON (Status: ${statusResponse.status})`);
-                }
-                const statusData = await statusResponse.json();
-
-                if (statusData.Success) {
-                    await this.updateTranscodingStatus(statusData);
-                }
-            } catch (error) {
-                console.error('Error loading transcoding status:', error);
-                this.showAlert('Error loading transcoding status: ' + error.message, 'warning');
-            }
-
-            // Get recent attempts (limited to 5)
-            try {
-                const historyResponse = await fetch('/api/Transcode/RecentAttempts?Limit=5');
-                const contentType = historyResponse.headers.get('content-type');
-                if (!contentType || !contentType.includes('application/json')) {
-                    console.error('Recent Attempts API returned HTML instead of JSON. Status:', historyResponse.status);
-                    throw new Error(`API returned HTML instead of JSON (Status: ${historyResponse.status})`);
-                }
-                const historyData = await historyResponse.json();
-
-                if (historyData.Success) {
-                    this.updateRecentAttempts(historyData.RecentAttempts);
-                }
-            } catch (error) {
-                console.error('Error loading recent attempts:', error);
-                this.showAlert('Error loading recent attempts: ' + error.message, 'warning');
-            }
-
-            // Get recent quality testing results with pagination
-            try {
-                const page = this.qualityTestPagination.currentPage;
-                const limit = this.qualityTestPagination.pageSize;
-                const qualityTestingHistoryResponse = await fetch(`/api/QualityTesting/History?Page=${page}&Limit=${limit}`);
-                const contentType = qualityTestingHistoryResponse.headers.get('content-type');
-                if (!contentType || !contentType.includes('application/json')) {
-                    console.error('Quality Testing History API returned HTML instead of JSON. Status:', qualityTestingHistoryResponse.status);
-                    throw new Error(`API returned HTML instead of JSON (Status: ${qualityTestingHistoryResponse.status})`);
-                }
-                const qualityTestingHistoryData = await qualityTestingHistoryResponse.json();
-
-                if (qualityTestingHistoryData.Success) {
-                    this.updateRecentQualityTestingResults(qualityTestingHistoryData.QualityTestingResults, qualityTestingHistoryData.Pagination);
-                }
-            } catch (error) {
-                console.error('Error loading quality testing history:', error);
-                this.showAlert('Error loading quality testing history: ' + error.message, 'warning');
-            }
-
-            // Get quality test queue
-            try {
-                const qualityTestQueueResponse = await fetch('/api/QualityTest/Queue');
-                const contentType = qualityTestQueueResponse.headers.get('content-type');
-                if (!contentType || !contentType.includes('application/json')) {
-                    console.error('Quality Test Queue API returned HTML instead of JSON. Status:', qualityTestQueueResponse.status);
-                    throw new Error(`API returned HTML instead of JSON (Status: ${qualityTestQueueResponse.status})`);
-                }
-                const qualityTestQueueData = await qualityTestQueueResponse.json();
-
-                if (qualityTestQueueData.Success) {
-                    this.updateQualityTestQueue(qualityTestQueueData.Jobs);
-                }
-            } catch (error) {
-                console.error('Error loading quality test queue:', error);
-                this.showAlert('Error loading quality test queue: ' + error.message, 'warning');
-            }
-
-            // Get running quality testing operations
-            try {
-                const qualityTestingResponse = await fetch('/api/QualityTesting/Progress');
-                const contentType = qualityTestingResponse.headers.get('content-type');
-                if (!contentType || !contentType.includes('application/json')) {
-                    console.error('Quality Testing Progress API returned HTML instead of JSON. Status:', qualityTestingResponse.status);
-                    throw new Error(`API returned HTML instead of JSON (Status: ${qualityTestingResponse.status})`);
-                }
-                const qualityTestingData = await qualityTestingResponse.json();
-
-                if (qualityTestingData.Success && qualityTestingData.IsRunning && qualityTestingData.CurrentJob) {
-                    // Convert single current job to array format for consistency
-                    const runningOperations = [{
-                        Id: qualityTestingData.CurrentJob.Id,
-                        QualityTestingQueueId: qualityTestingData.CurrentJob.Id,
-                        TranscodeAttemptId: qualityTestingData.CurrentJob.TranscodeAttemptId,
-                        Status: "Running",
-                        ProgressPercentage: qualityTestingData.Progress ? qualityTestingData.Progress.ProgressPercentage : 0,
-                        CurrentStep: qualityTestingData.Progress ? qualityTestingData.Progress.CurrentStep : "Processing...",
-                        StartTime: qualityTestingData.Progress ? qualityTestingData.Progress.StartTime : null,
-                        EndTime: qualityTestingData.Progress ? qualityTestingData.Progress.EndTime : null,
-                        ETA: qualityTestingData.Progress ? qualityTestingData.Progress.ETA : "Unknown",
-                        ErrorMessage: qualityTestingData.Progress ? qualityTestingData.Progress.ErrorMessage : null,
-                        FileName: qualityTestingData.CurrentJob.FileName,
-                        OriginalFilePath: qualityTestingData.CurrentJob.OriginalFilePath,
-                        TranscodedFilePath: qualityTestingData.CurrentJob.TranscodedFilePath
-                    }];
-                    this.updateRunningQualityTestingOperations(runningOperations);
-                } else {
-                    // No running operations
-                    this.updateRunningQualityTestingOperations([]);
-                }
-            } catch (error) {
-                console.error('Error loading quality testing operations:', error);
-                this.showAlert('Error loading quality testing operations: ' + error.message, 'warning');
-            }
-
-        } catch (error) {
-            console.error('General error loading progress data:', error);
-            this.showAlert('Error loading progress data: ' + error.message, 'danger');
-        }
+    function GetPriorityBadgeClass(Priority) {
+        if (Priority >= 80) return 'bg-danger';
+        if (Priority >= 60) return 'bg-warning';
+        if (Priority >= 40) return 'bg-info';
+        return 'bg-secondary';
     }
 
-    async updateTranscodingStatus(statusData) {
-        this.isTranscoding = statusData.IsTranscoding;
+    // -- Active Transcode Jobs --
+    function LoadOverview() {
+        fetch('/api/TeamStatus/Overview')
+            .then(function(R) { return R.json(); })
+            .then(function(Result) {
+                if (!Result.Success) return;
+                RenderActiveJobs(Result.Data);
+            })
+            .catch(function() {});
+    }
 
-        const startBtn = document.getElementById('StartTranscodingBtn');
-        const stopBtn = document.getElementById('StopTranscodingBtn');
-        const stopLink = document.getElementById('StopTranscodeAfterCurrentLink');
-        const startText = document.getElementById('StartTranscodingText');
+    function RenderActiveJobs(D) {
+        var Status = D.ServiceStatus;
+        var IsProcessing = D.IsProcessing;
+        var ActiveJobs = D.ActiveJobs || [];
 
-        // Manage the start/stop buttons and graceful stop link
-        if (this.isTranscoding) {
-            startBtn.style.display = 'none';
-            stopBtn.style.display = 'inline-block';
-            stopLink.style.display = 'inline';
-            startText.textContent = 'Start Transcoding';
+        var Badge = document.getElementById('TranscodeStatusBadge');
+        var BtnStop = document.getElementById('BtnStopAfterJob');
+        var BtnResume = document.getElementById('BtnResume');
+        var NoJob = document.getElementById('NoJobInfo');
+        var JobsTable = document.getElementById('ActiveJobsTable');
+        var JobsBody = document.getElementById('ActiveJobsBody');
+
+        var R = RenderTranscodeStatusBadge(Badge, Status, IsProcessing);
+        BtnStop.disabled = R.StopDisabled;
+        BtnResume.classList.toggle('d-none', !R.ShowResume);
+
+        if (ActiveJobs.length > 0) {
+            NoJob.classList.add('d-none');
+            JobsTable.classList.remove('d-none');
+            JobsBody.innerHTML = ActiveJobs.map(function(Job) {
+                var FileName = Job.FileName || Job.FilePath.split(/[/\\]/).pop();
+                var Pct = (Job.ProgressPercent || 0).toFixed(1);
+                var IsStuck = Job.IsStuck || false;
+                var StatusIcon = IsStuck
+                    ? '<i class="fas fa-exclamation-triangle me-1 text-warning"></i>'
+                    : '<i class="fas fa-spinner fa-spin me-1 text-primary"></i>';
+                var RowClass = IsStuck ? ' class="table-warning"' : '';
+                var ResetBtn = IsStuck
+                    ? '<button class="btn btn-outline-warning btn-sm py-0 px-1" onclick="ActivityPage.ResetStuckJob(' + Job.QueueId + ')" title="Reset to Pending"><i class="fas fa-redo-alt"></i></button>'
+                    : '';
+                var ProgressBar = IsStuck
+                    ? '<span class="text-warning fw-bold">Stuck</span>'
+                    : '<div class="d-flex align-items-center gap-2">' +
+                        '<div class="progress flex-grow-1" style="height: 18px;">' +
+                            '<div class="progress-bar progress-bar-striped progress-bar-animated bg-primary" ' +
+                                'role="progressbar" style="width: ' + Pct + '%" ' +
+                                'aria-valuenow="' + Pct + '" aria-valuemin="0" aria-valuemax="100"></div>' +
+                        '</div>' +
+                        '<small class="text-nowrap">' + Pct + '%</small>' +
+                    '</div>';
+                return '<tr' + RowClass + '>' +
+                    '<td class="ps-3">' + StatusIcon +
+                        '<span title="' + (Job.FilePath || '').replace(/"/g, '&quot;') + '">' + EscapeHtml(FileName) + '</span></td>' +
+                    '<td>' + (Job.ClaimedBy ? EscapeHtml(Job.ClaimedBy) : '<em class="text-muted">-</em>') + '</td>' +
+                    '<td>' + (Job.SizeMB ? FormatSizeMB(Job.SizeMB) : '-') + '</td>' +
+                    '<td>' + ProgressBar + '</td>' +
+                    '<td>' + (IsStuck ? '-' : (Job.CurrentFPS ? parseFloat(Job.CurrentFPS).toFixed(1) : '-')) + '</td>' +
+                    '<td>' + (IsStuck ? '-' : (Job.CurrentSpeed || '-')) + '</td>' +
+                    '<td>' + (IsStuck ? '-' : (Job.ETA || '-')) + '</td>' +
+                    '<td class="text-center">' + ResetBtn + '</td>' +
+                '</tr>';
+            }).join('');
         } else {
-            startBtn.style.display = 'inline-block';
-            stopBtn.style.display = 'none';
-            stopLink.style.display = 'none';
-            // Check if we're in a gracefully stopped state
-            if (statusData.Status === 'GracefulStop') {
-                startText.textContent = 'Start Processing';
-            } else {
-                startText.textContent = 'Start Transcoding';
-            }
+            NoJob.classList.remove('d-none');
+            JobsTable.classList.add('d-none');
+            JobsBody.innerHTML = '';
         }
     }
 
+    function StopAfterJob() {
+        if (!confirm('Stop transcoding after the current job finishes?')) return;
+        fetch('/api/Transcode/Stop', { method: 'POST' })
+            .then(function(R) { return R.json(); })
+            .then(function(Result) {
+                if (Result.Success) {
+                    showToastAlert('Transcode will stop after the current job.', 'success');
+                    LoadOverview();
+                } else {
+                    showToastAlert(Result.ErrorMessage || 'Failed to stop.', 'danger');
+                }
+            })
+            .catch(function() { showToastAlert('Failed to contact server.', 'danger'); });
+    }
 
-    updateRecentAttempts(attempts) {
-        const tbody = document.getElementById('RecentAttemptsTableBody');
-        tbody.innerHTML = '';
+    function ResumeTranscoding() {
+        fetch('/api/Transcode/Start', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ MaxConcurrentJobs: 1 })
+        })
+            .then(function(R) { return R.json(); })
+            .then(function(Result) {
+                if (Result.Success) {
+                    showToastAlert('Transcoding resumed.', 'success');
+                    LoadOverview();
+                } else {
+                    showToastAlert(Result.ErrorMessage || 'Failed to resume.', 'danger');
+                }
+            })
+            .catch(function() { showToastAlert('Failed to contact server.', 'danger'); });
+    }
 
-        document.getElementById('RecentAttemptsCount').textContent = `${attempts.length} attempts`;
+    function ResetStuckJob(QueueId) {
+        if (!confirm('Reset this stuck job back to Pending?')) return;
+        fetch('/api/TeamStatus/ResetStuckJob', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ QueueId: QueueId })
+        })
+            .then(function(R) { return R.json(); })
+            .then(function(Result) {
+                if (Result.Success) {
+                    showToastAlert('Job reset to Pending.', 'success');
+                    LoadOverview();
+                } else {
+                    showToastAlert(Result.ErrorMessage || 'Failed to reset job.', 'danger');
+                }
+            })
+            .catch(function() { showToastAlert('Failed to contact server.', 'danger'); });
+    }
 
-        attempts.forEach(attempt => {
-            // Extract filename from FilePath
-            const fileName = attempt.FilePath ? attempt.FilePath.split('/').pop().split('\\').pop() : '-';
-            
-            // Calculate space saved
-            let spaceSaved = '-';
-            if (attempt.OldSizeBytes && attempt.NewSizeBytes) {
-                const savedBytes = attempt.OldSizeBytes - attempt.NewSizeBytes;
-                const savedMB = savedBytes / 1024 / 1024;
-                spaceSaved = `<span class="text-success">${savedMB.toFixed(1)} MB</span>`;
-            }
-            
-            // Determine status from Success boolean
-            const statusText = attempt.Success ? 'Success' : (attempt.ErrorMessage ? 'Failed' : 'Running');
-            const statusClass = attempt.Success ? 'bg-success' : (attempt.ErrorMessage ? 'bg-danger' : 'bg-warning');
-            
-            const row = document.createElement('tr');
-            row.innerHTML = `
-                <td>${this.escapeHtml(fileName)}</td>
-                <td>${this.formatDate(attempt.CompletedDate || attempt.AttemptDate)}</td>
-                <td>
-                    <span class="badge ${statusClass}">
-                        ${statusText}
-                    </span>
-                </td>
-                <td>${attempt.Quality || '-'}</td>
-                <td>
-                    ${attempt.OldSizeBytes ? 
-                        `<span class="text-primary">${(attempt.OldSizeBytes / 1024 / 1024).toFixed(1)}</span>` : 
-                        '<span class="text-muted">-</span>'
-                    }
-                </td>
-                <td>
-                    ${attempt.Success && attempt.NewSizeBytes ? 
-                        `<span class="text-success">${(attempt.NewSizeBytes / 1024 / 1024).toFixed(1)}</span>` : 
-                        '<span class="text-muted">-</span>'
-                    }
-                </td>
-                <td>${spaceSaved}</td>
-                <td>${this.formatDuration(attempt.Duration || attempt.TranscodeDurationSeconds)}</td>
-                <td>${this.escapeHtml(attempt.ProfileName || '-')}</td>
-                <td>
-                    ${attempt.ErrorMessage ?
-                        `<span class="text-danger" style="cursor:pointer;" onclick="activityManager.ShowErrorModal('${this.escapeHtml(attempt.ErrorMessage).replace(/'/g, "\\'")}')"><i class="fas fa-exclamation-circle me-1"></i>View Error</span>` :
-                        '<span class="text-muted">-</span>'
-                    }
-                </td>
-                <td>
-                    <div class="btn-group" role="group">
-                        ${attempt.Success ? 
-                            `<button class="btn btn-sm btn-primary" onclick="activityManager.AddToQualityQueue(${attempt.Id})">Add to Quality Queue</button>` : 
-                            '<span class="text-muted">-</span>'
-                        }
-                        <button class="btn btn-sm btn-info" onclick="activityManager.ShowCRFOverrideModal('${this.escapeHtml(attempt.FilePath)}', ${attempt.Quality || 'null'})" title="Set CRF Override">
-                            <i class="fas fa-sliders-h"></i> CRF Override
-                        </button>
-                    </div>
-                </td>
-            `;
-            tbody.appendChild(row);
+    // -- Workers --
+    function LoadWorkers() {
+        fetch('/api/TeamStatus/Workers')
+            .then(function(R) { return R.json(); })
+            .then(function(Data) {
+                if (Data.Success && Data.Data) {
+                    Workers = Data.Data;
+                    RenderWorkers(Workers);
+                }
+            })
+            .catch(function(E) { console.error('Workers error:', E); });
+    }
+
+    function RenderWorkers(WorkerList) {
+        var Container = document.getElementById('WorkersContainer');
+        Container.innerHTML = '';
+        if (!WorkerList || WorkerList.length === 0) {
+            Container.innerHTML = '<div class="col-12 text-center text-muted py-2">No workers registered</div>';
+            return;
+        }
+        WorkerList.forEach(function(W) {
+            var HeartbeatAge = W.HeartbeatAgeSec;
+            var IsOnline = HeartbeatAge !== null && HeartbeatAge !== undefined && HeartbeatAge < 300;
+            var DisplayStatus = IsOnline ? (W.Status || 'Online') : 'Offline';
+            var BadgeCls = GetWorkerStatusBadge(DisplayStatus);
+            var HeartbeatText = FormatHeartbeatAge(HeartbeatAge);
+            var WorkerNameEsc = EscapeHtml(W.WorkerName);
+
+            var Col = document.createElement('div');
+            Col.className = 'col-6 col-lg-4 col-xl-3';
+            Col.innerHTML = '<div class="card h-100">' +
+                '<div class="card-body py-3">' +
+                    '<h6 class="card-title mb-2 d-flex justify-content-between align-items-center">' +
+                        '<span><i class="fas fa-desktop me-1"></i>' + WorkerNameEsc + '</span>' +
+                        '<span class="badge ' + BadgeCls + '">' + DisplayStatus + '</span>' +
+                    '</h6>' +
+                    '<div class="small text-muted mb-2">' +
+                        '<div class="d-flex justify-content-between"><span>Platform:</span><span>' + EscapeHtml(W.Platform || '-') + '</span></div>' +
+                        '<div class="d-flex justify-content-between"><span>Heartbeat:</span><span>' + HeartbeatText + '</span></div>' +
+                        '<div class="d-flex justify-content-between"><span>Max Jobs:</span><span>' + (W.MaxConcurrentJobs || 0) + '</span></div>' +
+                        '<div class="d-flex justify-content-between"><span>CPU Threads:</span><span>' + (W.MaxCpuThreads || 'Auto') + '</span></div>' +
+                        '<div class="d-flex justify-content-between"><span>Interlaced:</span><span>' + (W.AcceptsInterlaced ? 'Yes' : 'No') + '</span></div>' +
+                    '</div>' +
+                    '<div class="btn-group btn-group-sm w-100" role="group">' +
+                        '<button class="btn ' + (DisplayStatus === 'Online' ? 'btn-success' : 'btn-outline-success') + '" onclick="ActivityPage.SetWorkerStatus(\'' + WorkerNameEsc.replace(/'/g, "\\'") + '\', \'Online\')">Online</button>' +
+                        '<button class="btn ' + (DisplayStatus === 'Draining' ? 'btn-warning' : 'btn-outline-warning') + '" onclick="ActivityPage.SetWorkerStatus(\'' + WorkerNameEsc.replace(/'/g, "\\'") + '\', \'Draining\')">Drain</button>' +
+                        '<button class="btn ' + (DisplayStatus === 'Offline' ? 'btn-danger' : 'btn-outline-danger') + '" onclick="ActivityPage.SetWorkerStatus(\'' + WorkerNameEsc.replace(/'/g, "\\'") + '\', \'Offline\')">Offline</button>' +
+                    '</div>' +
+                '</div>' +
+            '</div>';
+            Container.appendChild(Col);
         });
     }
 
-    getFileNameFromPath(filePath) {
-        if (!filePath) return '-';
-        return filePath.split('/').pop().split('\\').pop();
+    function SetWorkerStatus(WorkerName, NewStatus) {
+        fetch('/api/TeamStatus/Workers/' + encodeURIComponent(WorkerName) + '/Status', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ Status: NewStatus })
+        })
+            .then(function(R) { return R.json(); })
+            .then(function(Result) {
+                if (Result.Success) {
+                    showToastAlert(WorkerName + ' set to ' + NewStatus, 'success');
+                    LoadWorkers();
+                } else {
+                    showToastAlert(Result.ErrorMessage || 'Failed to update worker status.', 'danger');
+                }
+            })
+            .catch(function() { showToastAlert('Failed to contact server.', 'danger'); });
     }
 
-    calculateSizeReduction(result) {
-        // If we have a pre-calculated percentage, use it
-        if (result.SizeReductionPercent && result.SizeReductionPercent > 0) {
-            return `${result.SizeReductionPercent.toFixed(1)}%`;
+    function SetAllWorkersStatus(NewStatus) {
+        if (!confirm('Set all workers to ' + NewStatus + '?')) return;
+        Workers.forEach(function(W) {
+            SetWorkerStatus(W.WorkerName, NewStatus);
+        });
+    }
+
+    // -- Quality Testing Queue --
+    function LoadQualityTestingQueue() {
+        fetch('/api/QualityTest/Queue')
+            .then(function(R) {
+                var ContentType = R.headers.get('content-type');
+                if (!ContentType || !ContentType.includes('application/json')) return null;
+                return R.json();
+            })
+            .then(function(Data) {
+                if (!Data) return;
+                if (Data.Success) RenderQualityTestingQueue(Data.Jobs);
+            })
+            .catch(function(E) { console.error('Quality testing queue error:', E); });
+    }
+
+    function RenderQualityTestingQueue(QueueItems) {
+        var Tbody = document.getElementById('QualityTestingQueueTableBody');
+        Tbody.innerHTML = '';
+
+        if (!QueueItems || QueueItems.length === 0) {
+            Tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted py-4"><i class="fas fa-inbox fa-2x mb-2"></i><br>No quality testing queue items found</td></tr>';
+            return;
         }
-        
-        // Otherwise calculate from bytes
-        if (result.OldSizeBytes && result.NewSizeBytes && result.OldSizeBytes > 0) {
-            const reductionPercent = ((result.OldSizeBytes - result.NewSizeBytes) / result.OldSizeBytes) * 100;
-            return `${reductionPercent.toFixed(1)}%`;
+
+        QueueItems.forEach(function(Item) {
+            var Row = document.createElement('tr');
+            Row.dataset.qtItemId = Item.Id;
+            Row.dataset.qtStatus = Item.Status;
+
+            var FileName = Item.FileName || (Item.OriginalFilePath ? Item.OriginalFilePath.split('\\').pop() : 'Unknown');
+            var VMAFHtml = '-';
+            if (Item.VMAFScore) {
+                var VMAFClass = Item.VMAFScore >= 80 ? 'bg-success' : (Item.VMAFScore >= 60 ? 'bg-warning' : 'bg-danger');
+                VMAFHtml = '<span class="badge ' + VMAFClass + '">' + Item.VMAFScore.toFixed(2) + '</span>';
+            }
+
+            var ActionsHtml = '-';
+            if (Item.Status === 'Failed' && (Item.RetryCount || 0) < (Item.MaxRetries || 3)) {
+                ActionsHtml = '<button type="button" class="btn btn-sm btn-outline-warning" onclick="ActivityPage.RetryQualityTest(' + Item.Id + ')" title="Retry Quality Test"><i class="fas fa-redo"></i></button>';
+            } else if (Item.ErrorMessage) {
+                ActionsHtml = '<span class="text-danger" title="' + EscapeHtml(Item.ErrorMessage) + '"><i class="fas fa-exclamation-triangle"></i></span>';
+            }
+
+            Row.innerHTML =
+                '<td>' + Item.Id + '</td>' +
+                '<td><div class="text-truncate" style="max-width: 250px;" title="' + EscapeHtml(Item.OriginalFilePath || '') + '">' + EscapeHtml(FileName) + '</div></td>' +
+                '<td><span class="badge ' + GetQTStatusBadgeClass(Item.Status) + '">' + Item.Status + '</span></td>' +
+                '<td><span class="badge ' + GetPriorityBadgeClass(Item.Priority || 50) + '">' + (Item.Priority || 50) + '</span></td>' +
+                '<td>' + VMAFHtml + '</td>' +
+                '<td class="qt-progress-cell">' + RenderQTProgressCell(Item) + '</td>' +
+                '<td>' + FormatDate(Item.DateAdded || Item.CreatedDate) + '</td>' +
+                '<td>' + ActionsHtml + '</td>';
+            Tbody.appendChild(Row);
+        });
+    }
+
+    function RenderQTProgressCell(Item) {
+        if (Item.Status === 'Running') {
+            return '<div class="d-flex align-items-center"><div class="spinner-border spinner-border-sm text-info me-2" role="status"></div><small class="text-muted">Loading...</small></div>';
         }
-        
+        if (Item.Status === 'Completed') {
+            return '<span class="badge bg-success"><i class="fas fa-check"></i> Done</span>';
+        }
+        if (Item.Status === 'Failed') {
+            return '<span class="badge bg-danger"><i class="fas fa-times"></i> Failed</span>';
+        }
         return '-';
     }
 
-    updateRecentQualityTestingResults(results, pagination = null) {
-        const tbody = document.getElementById('RecentQualityTestingTableBody');
-        tbody.innerHTML = '';
-
-        // Update pagination state if provided
-        if (pagination) {
-            this.qualityTestPagination = {
-                currentPage: pagination.CurrentPage,
-                pageSize: pagination.PageSize,
-                totalCount: pagination.TotalCount,
-                totalPages: pagination.TotalPages
-            };
-        }
-
-        // Update count display
-        const startItem = (this.qualityTestPagination.currentPage - 1) * this.qualityTestPagination.pageSize + 1;
-        const endItem = Math.min(startItem + results.length - 1, this.qualityTestPagination.totalCount);
-        document.getElementById('RecentQualityTestingCount').textContent = `${this.qualityTestPagination.totalCount} results`;
-        
-        // Update pagination info
-        document.getElementById('QualityTestPaginationInfo').textContent = 
-            `Showing ${startItem}-${endItem} of ${this.qualityTestPagination.totalCount} results`;
-
-        if (results.length === 0) {
-            const row = document.createElement('tr');
-            row.innerHTML = `
-                <td colspan="6" class="text-center text-muted">
-                    <i class="fas fa-info-circle"></i> No quality test results available
-                </td>
-            `;
-            tbody.appendChild(row);
-            return;
-        }
-
-        results.forEach(result => {
-            const row = document.createElement('tr');
-            
-            // Determine VMAF score badge color based on auto-replace thresholds (88-94)
-            let vmafBadgeClass = 'bg-secondary';
-            let vmafStatus = 'Unknown';
-            let shouldShowReplaceButton = false;
-            
-            if (result.VMAFScore !== null && result.VMAFScore !== undefined) {
-                if (result.VMAFScore >= 88 && result.VMAFScore <= 94) {
-                    vmafBadgeClass = 'bg-success';
-                    vmafStatus = 'Auto-Replace Range';
-                } else if (result.VMAFScore > 94) {
-                    vmafBadgeClass = 'bg-warning';
-                    vmafStatus = 'High Quality';
-                } else if (result.VMAFScore >= 80) {
-                    vmafBadgeClass = 'bg-warning';
-                    vmafStatus = 'Good';
-                } else {
-                    vmafBadgeClass = 'bg-danger';
-                    vmafStatus = 'Poor';
-                }
-            }
-            
-            // Show manual replace button for all files that haven't been replaced yet
-            // This gives users the option to manually replace any file, regardless of VMAF score
-            if (result.FileReplaced !== true && result.FileReplaced !== 1) {
-                shouldShowReplaceButton = true;
-            }
-            
-            // Determine status badge
-            const isSuccess = (result.Success === true || result.Success === 1) && !result.ErrorMessage;
-            const statusBadge = isSuccess ? 'bg-success' : 'bg-danger';
-            const statusText = isSuccess ? 'Success' : 'Failed';
-            
-            // Determine replacement status
-            let replacementStatus = '';
-            let replacementBadge = '';
-            if (result.FileReplaced === true || result.FileReplaced === 1) {
-                replacementStatus = result.ReplacementType === 'Auto' ? 'Auto-Replaced' : 'Manually Replaced';
-                replacementBadge = 'bg-success';
-            } else {
-                replacementStatus = 'Not Replaced';
-                replacementBadge = 'bg-secondary';
-            }
-            
-            // Create replacement action button
-            let replacementAction = '';
-            if (result.FileReplaced === true || result.FileReplaced === 1) {
-                replacementAction = `<span class="badge bg-success"><i class="fas fa-check"></i> Replaced</span>`;
-            } else if (shouldShowReplaceButton) {
-                // Show manual replace button for any file that hasn't been replaced, regardless of quality test success
-                replacementAction = `<button class="btn btn-sm btn-primary" onclick="activityManager.ReplaceFile(${result.TranscodeAttemptId})">
-                    <i class="fas fa-exchange-alt"></i> Replace File
-                </button>`;
-            } else {
-                replacementAction = '<span class="text-muted">-</span>';
-            }
-            
-            row.innerHTML = `
-                <td>${this.escapeHtml(result.TranscodedFileName || this.getFileNameFromPath(result.FilePath) || '-')}</td>
-                <td>
-                    ${result.VMAFScore !== null && result.VMAFScore !== undefined ? 
-                        `<span class="badge ${vmafBadgeClass}" title="${vmafStatus}">${result.VMAFScore.toFixed(2)}</span>` : 
-                        '<span class="text-muted">-</span>'
-                    }
-                </td>
-                <td>
-                    ${this.escapeHtml(result.TranscodeProfileName || '-')}
-                </td>
-                <td>
-                    ${this.calculateSizeReduction(result)}
-                </td>
-                <td>
-                    <span class="badge ${replacementBadge}">
-                        ${replacementStatus}
-                    </span>
-                </td>
-                <td>
-                    ${replacementAction}
-                </td>
-            `;
-            tbody.appendChild(row);
-        });
-        
-        // Update pagination controls
-        this.updateQualityTestPaginationControls();
+    function UpdateQTProgress() {
+        fetch('/api/QualityTesting/Progress')
+            .then(function(R) { return R.json(); })
+            .then(function(Data) {
+                CurrentQTProgress = Data;
+                UpdateQTProgressCells();
+            })
+            .catch(function() {});
     }
 
-    updateRunningQualityTestingOperations(operations) {
-        const tbody = document.getElementById('RunningQualityTestingTableBody');
-        tbody.innerHTML = '';
-
-        document.getElementById('RunningQualityTestingCount').textContent = `${operations.length} running`;
-
-        // Show/hide graceful stop link based on running operations
-        const stopLink = document.getElementById('StopQualityTestAfterCurrentLink');
-        if (operations.length > 0) {
-            stopLink.style.display = 'inline';
-        } else {
-            stopLink.style.display = 'none';
-        }
-
-        if (operations.length === 0) {
-            const row = document.createElement('tr');
-            row.innerHTML = `
-                <td colspan="4" class="text-center text-muted">
-                    <i class="fas fa-info-circle"></i> No quality checks currently running
-                </td>
-            `;
-            tbody.appendChild(row);
-            return;
-        }
-
-        operations.forEach(operation => {
-            const row = document.createElement('tr');
-            row.innerHTML = `
-                <td>
-                    <strong>${this.escapeHtml(operation.FileName)}</strong>
-                </td>
-                <td>
-                    <small class="text-muted">${this.formatDate(operation.StartTime)}</small>
-                </td>
-                <td>
-                    <div class="d-flex align-items-center">
-                        <div class="progress me-2" style="width: 100px; height: 20px;">
-                            <div class="progress-bar progress-bar-striped progress-bar-animated bg-info" 
-                                 role="progressbar" 
-                                 style="width: ${operation.ProgressPercentage}%"
-                                 aria-valuenow="${operation.ProgressPercentage}" 
-                                 aria-valuemin="0" 
-                                 aria-valuemax="100">
-                            </div>
-                        </div>
-                        <small class="text-muted">${operation.ProgressPercentage}%</small>
-                    </div>
-                    <small class="text-muted d-block">${this.escapeHtml(operation.CurrentStep || 'Processing...')}</small>
-                </td>
-                <td>
-                    <span class="badge bg-secondary">${this.escapeHtml(operation.ETA || 'Unknown')}</span>
-                </td>
-                <td>
-                    <button class="btn btn-sm btn-danger" onclick="activityManager.CancelActiveQualityTest()">
-                        <i class="fas fa-stop"></i> Cancel
-                    </button>
-                </td>
-            `;
-            tbody.appendChild(row);
+    function UpdateQTProgressCells() {
+        var RunningRows = document.querySelectorAll('#QualityTestingQueueTableBody tr[data-qt-status="Running"]');
+        RunningRows.forEach(function(Row) {
+            var Cell = Row.querySelector('.qt-progress-cell');
+            if (Cell && CurrentQTProgress && CurrentQTProgress.Success && CurrentQTProgress.IsRunning) {
+                var P = CurrentQTProgress.Progress || {};
+                var Pct = P.ProgressPercentage || 0;
+                Cell.innerHTML =
+                    '<div class="d-flex align-items-center">' +
+                        '<div class="progress me-2" style="width: 80px; height: 18px;">' +
+                            '<div class="progress-bar progress-bar-striped progress-bar-animated bg-info" role="progressbar" style="width: ' + Pct + '%" aria-valuenow="' + Pct + '" aria-valuemin="0" aria-valuemax="100"></div>' +
+                        '</div>' +
+                        '<small>' + (Pct.toFixed ? Pct.toFixed(1) : Pct) + '%</small>' +
+                    '</div>' +
+                    '<small class="text-muted">' + (P.ETA ? 'ETA: ' + P.ETA : (P.CurrentStep || '')) + '</small>';
+            }
         });
     }
 
-    updateQualityTestQueue(queueItems) {
-        const tbody = document.getElementById('QualityTestQueueTableBody');
-        tbody.innerHTML = '';
-
-        document.getElementById('QualityTestQueueCount').textContent = `${queueItems.length} pending`;
-
-        if (queueItems.length === 0) {
-            const row = document.createElement('tr');
-            row.innerHTML = `
-                <td colspan="4" class="text-center text-muted">
-                    <i class="fas fa-info-circle"></i> No quality tests in queue
-                </td>
-            `;
-            tbody.appendChild(row);
-            return;
-        }
-
-        queueItems.forEach(item => {
-            const row = document.createElement('tr');
-            
-            // Extract filename from file path
-            const fileName = item.OriginalFilePath ? item.OriginalFilePath.split('/').pop().split('\\').pop() : '-';
-            
-            row.innerHTML = `
-                <td>${this.escapeHtml(fileName)}</td>
-                <td>
-                    <small class="text-muted">${this.formatDate(item.DateAdded)}</small>
-                </td>
-                <td>
-                    <span class="badge bg-warning">Normal</span>
-                </td>
-                <td>
-                    <button class="btn btn-sm btn-warning" onclick="activityManager.SkipQualityTest(${item.TranscodeAttemptId})">
-                        <i class="fas fa-forward"></i> Skip
-                    </button>
-                </td>
-            `;
-            tbody.appendChild(row);
-        });
-    }
-
-    async startTranscoding() {
-        try {
-            // First check current status to determine if this is start or resume
-            const statusResponse = await fetch('/api/Transcode/Status');
-            const statusData = await statusResponse.json();
-            
-            if (statusData.Success && statusData.Status === 'Paused') {
-                // Resume from paused state
-                const response = await fetch('/api/Transcode/Resume', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' }
-                });
-                
-                const data = await response.json();
-                
-                if (data.Success) {
-                    this.showAlert('Transcoding resumed successfully', 'success');
-                    this.loadProgressData();
-                } else {
-                    this.showAlert(data.ErrorMessage || 'Failed to resume transcoding', 'danger');
-                }
-            } else {
-                // Normal start
-                const response = await fetch('/api/Transcode/Start', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ MaxConcurrentJobs: 1 })
-                });
-                
-                const data = await response.json();
-                
-                if (data.Success) {
-                    this.showAlert('Transcoding started successfully', 'success');
-                    this.loadProgressData();
-                } else {
-                    this.showAlert(data.ErrorMessage || 'Failed to start transcoding', 'danger');
-                }
-            }
-        } catch (error) {
-            this.showAlert('Error with transcoding: ' + error.message, 'danger');
-        }
-    }
-
-    async stopTranscoding() {
-        if (!confirm('Are you sure you want to stop the transcoding process?')) {
-            return;
-        }
-
-        try {
-            const response = await fetch('/api/Transcode/Stop', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                }
-            });
-
-            const data = await response.json();
-
-            if (data.Success) {
-                this.showAlert('Transcoding stopped successfully', 'success');
-                this.loadProgressData();
-            } else {
-                this.showAlert('Error stopping transcoding: ' + data.ErrorMessage, 'danger');
-            }
-        } catch (error) {
-            this.showAlert('Error stopping transcoding: ' + error.message, 'danger');
-        }
-    }
-
-    startAutoRefresh() {
-        // Refresh every 10 seconds for real-time updates
-        setInterval(() => {
-            this.loadProgressData();
-        }, 10000);
-    }
-
-    startFFmpegProgressMonitoring() {
-        // Clear any existing monitoring
-        this.stopFFmpegProgressMonitoring();
-        
-        // Start monitoring FFmpeg progress every 2 seconds
-        this.ffmpegProgressInterval = setInterval(() => {
-            this.updateFFmpegProgress();
-        }, 2000);
-    }
-
-    stopFFmpegProgressMonitoring() {
-        if (this.ffmpegProgressInterval) {
-            clearInterval(this.ffmpegProgressInterval);
-            this.ffmpegProgressInterval = null;
-        }
-    }
-
-    async updateFFmpegProgress() {
-        try {
-            const response = await fetch('/api/Transcode/Progress');
-            const data = await response.json();
-            
-            // Update the transcode job table only if data is not null
-            if (data) {
-                this.updateTranscodeJobTable(data);
-            } else {
-                // Handle case when no jobs are running
-                this.updateTranscodeJobTable(null);
-            }
-        } catch (error) {
-            console.error('Error updating FFmpeg progress:', error);
-        }
-    }
-
-    updateTranscodeJobTable(progressData) {
-        const tbody = document.getElementById('TranscodeJobTableBody');
-        tbody.innerHTML = '';
-
-        if (progressData && progressData.Success && progressData.FileName) {
-            // Show active job
-            document.getElementById('TranscodeJobCount').textContent = '1 running';
-            
-            const row = document.createElement('tr');
-            row.innerHTML = `
-                <td>
-                    <strong>${this.escapeHtml(progressData.FileName)}</strong>
-                </td>
-                <td>
-                    <small class="text-muted">${this.formatDate(progressData.StartTime)}</small>
-                </td>
-                <td>
-                    <div class="d-flex align-items-center">
-                        <div class="progress me-2" style="width: 100px; height: 20px;">
-                            <div class="progress-bar progress-bar-striped progress-bar-animated bg-primary" 
-                                 role="progressbar" 
-                                 style="width: ${progressData.ProgressPercent || 0}%"
-                                 aria-valuenow="${progressData.ProgressPercent || 0}" 
-                                 aria-valuemin="0" 
-                                 aria-valuemax="100">
-                            </div>
-                        </div>
-                        <small class="text-muted">${(progressData.ProgressPercent || 0).toFixed(1)}%</small>
-                    </div>
-                    <small class="text-muted d-block">${this.escapeHtml(progressData.CurrentPhase || 'Processing...')}</small>
-                </td>
-                <td>
-                    <span class="badge bg-secondary">${this.escapeHtml(progressData.ETA || 'Unknown')}</span>
-                </td>
-                <td>
-                    ${progressData.Command ? 
-                        `<code class="text-wrap" style="font-size: 0.75rem; max-width: 400px; display: block; white-space: pre-wrap; word-break: break-all;">${this.escapeHtml(progressData.Command)}</code>` : 
-                        '<span class="text-muted">-</span>'
-                    }
-                </td>
-                <td>
-                    <button type="button" class="btn btn-danger btn-sm" onclick="cancelTranscodeJob()">
-                        <i class="fas fa-times"></i> Cancel
-                    </button>
-                </td>
-            `;
-            tbody.appendChild(row);
-        } else {
-            // Show no active job
-            document.getElementById('TranscodeJobCount').textContent = '0 running';
-            
-            const row = document.createElement('tr');
-            row.innerHTML = `
-                <td colspan="6" class="text-center text-muted">
-                    <i class="fas fa-info-circle"></i> No transcode job currently running
-                </td>
-            `;
-            tbody.appendChild(row);
-        }
-    }
-
-
-    formatTime(seconds) {
-        const hours = Math.floor(seconds / 3600);
-        const minutes = Math.floor((seconds % 3600) / 60);
-        const secs = seconds % 60;
-        return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-    }
-
-    // Utility functions
-    formatDate(dateString) {
-        if (!dateString) return '-';
-        const date = new Date(dateString);
-        return date.toLocaleString(undefined, { timeZoneName: 'short' });
-    }
-
-    formatDuration(seconds) {
-        if (!seconds || seconds === 0) return '-';
-        
-        const hours = Math.floor(seconds / 3600);
-        const minutes = Math.floor((seconds % 3600) / 60);
-        const secs = Math.floor(seconds % 60);
-        
-        if (hours > 0) {
-            return `${hours}h ${minutes}m ${secs}s`;
-        } else if (minutes > 0) {
-            return `${minutes}m ${secs}s`;
-        } else {
-            return `${secs}s`;
-        }
-    }
-
-    escapeHtml(text) {
-        if (!text) return '-';
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
-    }
-
-    showAlert(message, type) {
-        showToastAlert(message, type);
-    }
-
-    async AddToQualityQueue(AttemptId) {
-        try {
-            // Show loading indicator
-            this.showAlert('Adding to quality test queue...', 'info');
-            
-            const response = await fetch('/api/QualityTest/AddToQueue', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ TranscodeAttemptId: AttemptId })
-            });
-
-            const data = await response.json();
-
-            if (data.Success) {
-                this.showAlert('Added to quality test queue successfully', 'success');
-                // Refresh the page data
-                this.loadProgressData();
-            } else {
-                this.showAlert(data.Message || 'Failed to add to quality test queue', 'danger');
-            }
-        } catch (error) {
-            console.error('Error adding to quality test queue:', error);
-            this.showAlert('Error adding to quality test queue: ' + error.message, 'danger');
-        }
-    }
-
-    async ReplaceFile(TranscodeAttemptId) {
-        try {
-            // Show loading indicator
-            this.showAlert('Processing file replacement...', 'info');
-            
-            const response = await fetch(`/api/FileReplacement/Process/${TranscodeAttemptId}`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                }
-            });
-
-            const data = await response.json();
-
-            if (data.Success) {
-                this.showAlert('File replacement completed successfully', 'success');
-                // Refresh the page data
-                this.loadProgressData();
-            } else {
-                this.showAlert(data.ErrorMessage || 'Failed to replace file', 'danger');
-            }
-        } catch (error) {
-            console.error('Error replacing file:', error);
-            this.showAlert('Error replacing file: ' + error.message, 'danger');
-        }
-    }
-
-    async SkipQualityTest(TranscodeAttemptId) {
-        try {
-            // Show loading indicator
-            this.showAlert('Skipping quality test and replacing file...', 'info');
-            
-            const response = await fetch('/api/QualityTest/Skip', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ TranscodeAttemptId: TranscodeAttemptId })
-            });
-
-            const data = await response.json();
-
-            if (data.Success) {
-                this.showAlert(data.Message || 'Quality test skipped and file replaced successfully', 'success');
-                // Refresh the page data to show updated status
-                setTimeout(() => this.loadProgressData(), 1000);
-            } else {
-                this.showAlert(data.Message || 'Failed to skip quality test', 'danger');
-            }
-        } catch (error) {
-            console.error('Error skipping quality test:', error);
-            this.showAlert('Error skipping quality test: ' + error.message, 'danger');
-        }
-    }
-
-    async CancelActiveQualityTest() {
-        try {
-            // Show loading indicator
-            this.showAlert('Cancelling active quality test...', 'info');
-            
-            const response = await fetch('/api/QualityTest/CancelActive', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                }
-            });
-
-            const data = await response.json();
-
-            if (data.Success) {
-                this.showAlert('Active quality test cancelled successfully', 'success');
-                // Refresh the page data
-                this.loadProgressData();
-            } else {
-                this.showAlert(data.Message || 'Failed to cancel quality test', 'danger');
-            }
-        } catch (error) {
-            console.error('Error cancelling quality test:', error);
-            this.showAlert('Error cancelling quality test: ' + error.message, 'danger');
-        }
-    }
-
-    updateQualityTestPaginationControls() {
-        const paginationContainer = document.getElementById('QualityTestPagination');
-        paginationContainer.innerHTML = '';
-
-        const { currentPage, totalPages, hasPreviousPage, hasNextPage } = this.qualityTestPagination;
-
-        // Previous button
-        const prevButton = document.createElement('li');
-        prevButton.className = `page-item ${!hasPreviousPage ? 'disabled' : ''}`;
-        prevButton.innerHTML = `<a class="page-link" href="#" onclick="activityManager.goToQualityTestPage(${currentPage - 1})">Previous</a>`;
-        paginationContainer.appendChild(prevButton);
-
-        // Page numbers
-        const startPage = Math.max(1, currentPage - 2);
-        const endPage = Math.min(totalPages, currentPage + 2);
-
-        if (startPage > 1) {
-            const firstButton = document.createElement('li');
-            firstButton.className = 'page-item';
-            firstButton.innerHTML = `<a class="page-link" href="#" onclick="activityManager.goToQualityTestPage(1)">1</a>`;
-            paginationContainer.appendChild(firstButton);
-
-            if (startPage > 2) {
-                const ellipsis = document.createElement('li');
-                ellipsis.className = 'page-item disabled';
-                ellipsis.innerHTML = '<span class="page-link">...</span>';
-                paginationContainer.appendChild(ellipsis);
-            }
-        }
-
-        for (let i = startPage; i <= endPage; i++) {
-            const pageButton = document.createElement('li');
-            pageButton.className = `page-item ${i === currentPage ? 'active' : ''}`;
-            pageButton.innerHTML = `<a class="page-link" href="#" onclick="activityManager.goToQualityTestPage(${i})">${i}</a>`;
-            paginationContainer.appendChild(pageButton);
-        }
-
-        if (endPage < totalPages) {
-            if (endPage < totalPages - 1) {
-                const ellipsis = document.createElement('li');
-                ellipsis.className = 'page-item disabled';
-                ellipsis.innerHTML = '<span class="page-link">...</span>';
-                paginationContainer.appendChild(ellipsis);
-            }
-
-            const lastButton = document.createElement('li');
-            lastButton.className = 'page-item';
-            lastButton.innerHTML = `<a class="page-link" href="#" onclick="activityManager.goToQualityTestPage(${totalPages})">${totalPages}</a>`;
-            paginationContainer.appendChild(lastButton);
-        }
-
-        // Next button
-        const nextButton = document.createElement('li');
-        nextButton.className = `page-item ${!hasNextPage ? 'disabled' : ''}`;
-        nextButton.innerHTML = `<a class="page-link" href="#" onclick="activityManager.goToQualityTestPage(${currentPage + 1})">Next</a>`;
-        paginationContainer.appendChild(nextButton);
-    }
-
-    async goToQualityTestPage(page) {
-        if (page < 1 || page > this.qualityTestPagination.totalPages) {
-            return;
-        }
-
-        this.qualityTestPagination.currentPage = page;
-        await this.loadProgressData();
-    }
-
-    async stopTranscodeAfterCurrent(event) {
-        event.preventDefault();
-        
-        if (!confirm('Pause transcoding after the current job completes?')) {
-            return;
-        }
-
-        try {
-            const response = await fetch('/api/Transcode/Pause', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                }
-            });
-
-            const data = await response.json();
-
-            if (data.Success) {
-                this.showAlert('Transcoding will pause after current job completes', 'success');
-                document.getElementById('StopTranscodeAfterCurrentLink').style.display = 'none';
-                document.getElementById('StartTranscodingText').textContent = 'Resume Processing';
-                this.loadProgressData();
-            } else {
-                this.showAlert('Error pausing transcoding: ' + data.ErrorMessage, 'danger');
-            }
-        } catch (error) {
-            this.showAlert('Error pausing transcoding: ' + error.message, 'danger');
-        }
-    }
-
-    async stopQualityTestAfterCurrent(event) {
-        event.preventDefault();
-        
-        if (!confirm('Pause quality testing after the current job completes?')) {
-            return;
-        }
-
-        try {
-            const response = await fetch('/api/QualityTest/Pause', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                }
-            });
-
-            const data = await response.json();
-
-            if (data.Success) {
-                this.showAlert('Quality testing will pause after current job completes', 'success');
-                document.getElementById('StopQualityTestAfterCurrentLink').style.display = 'none';
-                this.loadProgressData();
-            } else {
-                this.showAlert('Error pausing quality testing: ' + data.ErrorMessage, 'danger');
-            }
-        } catch (error) {
-            this.showAlert('Error pausing quality testing: ' + error.message, 'danger');
-        }
-    }
-
-    ShowCRFOverrideModal(FilePath, CurrentCRF) {
-        // Store the file path for the modal
-        this.currentCRFOverrideFilePath = FilePath;
-        
-        // Create or update modal
-        let modal = document.getElementById('CRFOverrideModal');
-        if (!modal) {
-            modal = document.createElement('div');
-            modal.id = 'CRFOverrideModal';
-            modal.className = 'modal fade';
-            modal.innerHTML = `
-                <div class="modal-dialog">
-                    <div class="modal-content">
-                        <div class="modal-header">
-                            <h5 class="modal-title">Set CRF Override</h5>
-                            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                        </div>
-                        <div class="modal-body">
-                            <p class="text-muted small">Override the adaptive quality system to retry this file at a specific CRF value.</p>
-                            <div class="mb-3">
-                                <label for="CRFOverrideInput" class="form-label">CRF Value (15-51)</label>
-                                <input type="number" class="form-control" id="CRFOverrideInput" min="15" max="51" placeholder="Enter CRF value">
-                                <div class="form-text">Current attempt used CRF: ${CurrentCRF || 'N/A'}</div>
-                            </div>
-                            <div class="mb-3">
-                                <button type="button" class="btn btn-sm btn-danger" onclick="activityManager.ClearCRFOverride()">Clear Override</button>
-                                <span class="text-muted small ms-2">Remove override to return to adaptive quality</span>
-                            </div>
-                        </div>
-                        <div class="modal-footer">
-                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                            <button type="button" class="btn btn-primary" onclick="activityManager.SetCRFOverride()">Set Override</button>
-                        </div>
-                    </div>
-                </div>
-            `;
-            document.body.appendChild(modal);
-        } else {
-            // Update current CRF display
-            const formText = modal.querySelector('.form-text');
-            if (formText) {
-                formText.textContent = `Current attempt used CRF: ${CurrentCRF || 'N/A'}`;
-            }
-        }
-        
-        // Show modal
-        const bsModal = new bootstrap.Modal(modal);
-        bsModal.show();
-    }
-
-    async SetCRFOverride() {
-        if (!this.currentCRFOverrideFilePath) {
-            this.showAlert('No file path specified', 'danger');
-            return;
-        }
-        
-        const crfInput = document.getElementById('CRFOverrideInput');
-        const crfValue = crfInput ? parseInt(crfInput.value) : null;
-        
-        if (!crfValue || crfValue < 15 || crfValue > 51) {
-            this.showAlert('Please enter a valid CRF value between 15 and 51', 'warning');
-            return;
-        }
-        
-        try {
-            this.showAlert('Setting CRF override...', 'info');
-            
-            const response = await fetch('/api/Transcode/SetCRFOverride', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    FilePath: this.currentCRFOverrideFilePath,
-                    CRF: crfValue
-                })
-            });
-            
-            const data = await response.json();
-            
-            if (data.Success) {
-                this.showAlert(`CRF override set to ${crfValue} for this file`, 'success');
-                // Close modal
-                const modal = bootstrap.Modal.getInstance(document.getElementById('CRFOverrideModal'));
-                if (modal) {
-                    modal.hide();
-                }
-                // Refresh data
-                this.loadProgressData();
-            } else {
-                this.showAlert(data.ErrorMessage || 'Failed to set CRF override', 'danger');
-            }
-        } catch (error) {
-            console.error('Error setting CRF override:', error);
-            this.showAlert('Error setting CRF override: ' + error.message, 'danger');
-        }
-    }
-
-    async ClearCRFOverride() {
-        if (!this.currentCRFOverrideFilePath) {
-            this.showAlert('No file path specified', 'danger');
-            return;
-        }
-
-        if (!confirm('Clear CRF override for this file? The system will return to adaptive quality calculation.')) {
-            return;
-        }
-
-        try {
-            this.showAlert('Clearing CRF override...', 'info');
-
-            const response = await fetch('/api/Transcode/SetCRFOverride', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    FilePath: this.currentCRFOverrideFilePath,
-                    CRF: null
-                })
-            });
-
-            const data = await response.json();
-
-            if (data.Success) {
-                this.showAlert('CRF override cleared successfully', 'success');
-                // Close modal
-                const modal = bootstrap.Modal.getInstance(document.getElementById('CRFOverrideModal'));
-                if (modal) {
-                    modal.hide();
-                }
-                // Refresh data
-                this.loadProgressData();
-            } else {
-                this.showAlert(data.ErrorMessage || 'Failed to clear CRF override', 'danger');
-            }
-        } catch (error) {
-            console.error('Error clearing CRF override:', error);
-            this.showAlert('Error clearing CRF override: ' + error.message, 'danger');
-        }
-    }
-
-    ShowErrorModal(errorMessage) {
-        let modal = document.getElementById('ErrorDetailModal');
-        if (!modal) {
-            document.body.insertAdjacentHTML('beforeend', `
-                <div class="modal fade" id="ErrorDetailModal" tabindex="-1">
-                    <div class="modal-dialog modal-lg">
-                        <div class="modal-content">
-                            <div class="modal-header bg-danger text-white">
-                                <h5 class="modal-title"><i class="fas fa-exclamation-circle me-2"></i>Error Details</h5>
-                                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-                            </div>
-                            <div class="modal-body">
-                                <pre id="ErrorDetailContent" class="mb-0" style="white-space: pre-wrap; word-break: break-word; font-size: 0.8rem; max-height: 400px; overflow-y: auto;"></pre>
-                            </div>
-                            <div class="modal-footer">
-                                <button type="button" class="btn btn-sm btn-outline-secondary" onclick="navigator.clipboard.writeText(document.getElementById('ErrorDetailContent').textContent)">
-                                    <i class="fas fa-copy me-1"></i>Copy
-                                </button>
-                                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            `);
-            modal = document.getElementById('ErrorDetailModal');
-        }
-        document.getElementById('ErrorDetailContent').textContent = errorMessage;
-        new bootstrap.Modal(modal).show();
-    }
-}
-
-// Global function for cancel button
-async function cancelTranscodeJob() {
-    try {
-        if (!confirm('Are you sure you want to cancel the current transcode job?')) {
-            return;
-        }
-
-        const response = await fetch('/api/Transcode/CancelActive', {
+    function RetryQualityTest(QualityTestId) {
+        fetch('/api/QualityTest/Retry', {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            }
-        });
-
-        const result = await response.json();
-
-        if (result.Success) {
-            showToastAlert('Transcode job cancelled successfully', 'success');
-            // Refresh the page to update the display
-            location.reload();
-        } else {
-            showPersistentError('Failed to cancel transcode job: ' + (result.ErrorMessage || 'Unknown error'));
-        }
-    } catch (error) {
-        console.error('Error cancelling transcode job:', error);
-        showPersistentError('Error cancelling transcode job: ' + error.message);
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ JobId: QualityTestId })
+        })
+            .then(function(R) {
+                var ContentType = R.headers.get('content-type');
+                if (!ContentType || !ContentType.includes('application/json')) return null;
+                return R.json();
+            })
+            .then(function(Data) {
+                if (!Data) return;
+                if (Data.Success) {
+                    showToastAlert('Quality test retry initiated for job ' + QualityTestId, 'success');
+                    LoadQualityTestingQueue();
+                } else {
+                    showToastAlert('Failed to retry quality test: ' + Data.Message, 'danger');
+                }
+            })
+            .catch(function(E) { showToastAlert('Error retrying quality test: ' + E.message, 'danger'); });
     }
-}
 
-// Initialize the activity manager when the page loads
-let activityManager;
-document.addEventListener('DOMContentLoaded', function() {
-    activityManager = new ActivityManager();
-});
+    // -- Refresh / Polling --
+    function RefreshAll() {
+        LoadOverview();
+        LoadWorkers();
+        LoadQualityTestingQueue();
+    }
+
+    function StartPolling() {
+        // Overview polls at 10s for general status, but active jobs need faster updates
+        OverviewInterval = setInterval(LoadOverview, 2000);
+        QTProgressInterval = setInterval(UpdateQTProgress, 3000);
+    }
+
+    function StopPolling() {
+        if (OverviewInterval) { clearInterval(OverviewInterval); OverviewInterval = null; }
+        if (QTProgressInterval) { clearInterval(QTProgressInterval); QTProgressInterval = null; }
+    }
+
+    function ToggleAutoRefresh() {
+        var Btn = document.getElementById('AutoRefreshBtn');
+        if (AutoRefreshEnabled) {
+            StopPolling();
+            AutoRefreshEnabled = false;
+            Btn.innerHTML = '<i class="fas fa-play me-1"></i>Auto';
+            Btn.classList.remove('btn-success');
+            Btn.classList.add('btn-outline-success');
+        } else {
+            StartPolling();
+            AutoRefreshEnabled = true;
+            Btn.innerHTML = '<i class="fas fa-pause me-1"></i>Auto';
+            Btn.classList.remove('btn-outline-success');
+            Btn.classList.add('btn-success');
+        }
+    }
+
+    // -- Init --
+    function Init() {
+        document.getElementById('RefreshBtn').addEventListener('click', RefreshAll);
+        document.getElementById('AutoRefreshBtn').addEventListener('click', ToggleAutoRefresh);
+        document.getElementById('RefreshQualityTestingBtn').addEventListener('click', LoadQualityTestingQueue);
+
+        RefreshAll();
+        StartPolling();
+    }
+
+    document.addEventListener('DOMContentLoaded', Init);
+
+    return {
+        StopAfterJob: StopAfterJob,
+        ResumeTranscoding: ResumeTranscoding,
+        ResetStuckJob: ResetStuckJob,
+        SetWorkerStatus: SetWorkerStatus,
+        SetAllWorkersStatus: SetAllWorkersStatus,
+        RetryQualityTest: RetryQualityTest
+    };
+})();
 </script>
 {% endblock %}

@@ -70,17 +70,18 @@ class TranscodeQueueRepository(BaseRepository):
                 cursor = connection.cursor()
                 if QueueItem.Id is None:
                     LoggingService.LogInfo("Inserting new transcoding queue item...", "TranscodeQueueRepository", "SaveTranscodeQueueItem")
+                    MediaFileId = self.LookupMediaFileId(QueueItem.FilePath)
                     query = """
                         INSERT INTO TranscodeQueue
-                        (FilePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted, ProcessingMode)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        (FilePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted, ProcessingMode, MediaFileId)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         RETURNING Id
                     """
                     parameters = (
                         QueueItem.FilePath, QueueItem.FileName, QueueItem.Directory,
                         QueueItem.SizeBytes, QueueItem.SizeMB, QueueItem.Priority,
                         QueueItem.Status, QueueItem.DateAdded, QueueItem.DateStarted,
-                        QueueItem.ProcessingMode
+                        QueueItem.ProcessingMode, MediaFileId
                     )
                     cursor.execute(query, parameters)
                     itemId = cursor.fetchone()[0]

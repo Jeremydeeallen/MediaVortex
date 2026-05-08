@@ -22,6 +22,16 @@ class DatabaseManager:
     def __init__(self, DatabaseServiceInstance: DatabaseService = None):
         self.DatabaseService = DatabaseServiceInstance or DatabaseService()
 
+    def LookupMediaFileId(self, FilePath: str):
+        """Look up MediaFiles.Id by FilePath (case-insensitive). Returns None if not found."""
+        if not FilePath:
+            return None
+        Result = self.DatabaseService.ExecuteScalar(
+            "SELECT Id FROM MediaFiles WHERE LOWER(FilePath) = LOWER(%s) LIMIT 1",
+            (FilePath,)
+        )
+        return Result
+
     def RunMigrations(self):
         """Run database schema migrations. Safe to call multiple times."""
         try:
@@ -1472,17 +1482,18 @@ class DatabaseManager:
                 if QueueItem.Id is None:
                     # Insert new queue item
                     LoggingService.LogInfo("Inserting new transcoding queue item...", "DatabaseManager", "SaveTranscodeQueueItem")
+                    MediaFileId = self.LookupMediaFileId(QueueItem.FilePath)
                     query = """
                         INSERT INTO TranscodeQueue
-                        (FilePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted, ProcessingMode)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        (FilePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted, ProcessingMode, MediaFileId)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         RETURNING Id
                     """
                     parameters = (
                         QueueItem.FilePath, QueueItem.FileName, QueueItem.Directory,
                         QueueItem.SizeBytes, QueueItem.SizeMB, QueueItem.Priority,
                         QueueItem.Status, QueueItem.DateAdded, QueueItem.DateStarted,
-                        QueueItem.ProcessingMode
+                        QueueItem.ProcessingMode, MediaFileId
                     )
                     LoggingService.LogInfo(f"Insert queue item parameters: {parameters}", "DatabaseManager", "SaveTranscodeQueueItem")
                     cursor.execute(query, parameters)
@@ -1627,7 +1638,7 @@ class DatabaseManager:
                         SET Status = 'Running', ClaimedBy = %s, ClaimedAt = NOW(), DateStarted = NOW()
                         WHERE Id = (
                             SELECT tq.Id FROM TranscodeQueue tq
-                            JOIN MediaFiles mf ON mf.FilePath = tq.FilePath
+                            JOIN MediaFiles mf ON tq.MediaFileId = mf.Id
                             WHERE tq.Status = 'Pending'
                               AND (mf.IsInterlaced IS NULL OR mf.IsInterlaced = '0')
                             ORDER BY tq.SizeMB DESC, tq.DateAdded ASC
@@ -2000,13 +2011,15 @@ class DatabaseManager:
                 if Attempt.Id is None:
                     # Insert new attempt
                     LoggingService.LogInfo("Inserting new transcoding attempt...", "DatabaseManager", "SaveTranscodeAttempt")
+                    MediaFileId = self.LookupMediaFileId(Attempt.FilePath)
                     query = """
-                        INSERT INTO TranscodeAttempts 
+                        INSERT INTO TranscodeAttempts
                         (FilePath, AttemptDate, Quality, OldSizeBytes, NewSizeBytes, Success,
                          SizeReductionBytes, SizeReductionPercent, ErrorMessage, TranscodeDurationSeconds,
                          FfpmpegCommand, AudioBitrateKbps, VideoBitrateKbps, ProfileName, VMAF,
-                         FileReplaced, FileReplacedDate, ReplacementType, StartTime, PreferredAttempt)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                         FileReplaced, FileReplacedDate, ReplacementType, StartTime, PreferredAttempt,
+                         MediaFileId)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         RETURNING Id
                     """
                     parameters = (
@@ -2017,7 +2030,7 @@ class DatabaseManager:
                         Attempt.FfpmpegCommand,
                         Attempt.AudioBitrateKbps, Attempt.VideoBitrateKbps, Attempt.ProfileName, Attempt.VMAF,
                         Attempt.FileReplaced, Attempt.FileReplacedDate, Attempt.ReplacementType, Attempt.StartTime,
-                        Attempt.PreferredAttempt
+                        Attempt.PreferredAttempt, MediaFileId
                     )
                     LoggingService.LogInfo(f"Insert attempt parameters: {parameters}", "DatabaseManager", "SaveTranscodeAttempt")
                     cursor.execute(query, parameters)
@@ -2253,19 +2266,20 @@ class DatabaseManager:
                 if TranscodeFile.Id is None:
                     # Insert new transcode file
                     LoggingService.LogInfo("Inserting new transcoding file record...", "DatabaseManager", "SaveTranscodeFile")
+                    MediaFileId = self.LookupMediaFileId(TranscodeFile.FilePath)
                     query = """
-                        INSERT INTO TranscodeFiles 
+                        INSERT INTO TranscodeFiles
                         (FilePath, AllQualitiesFailed, SuccessfullyTranscoded, FirstAttemptDate,
                          LastAttemptDate, SuccessDate, FinalQuality, FinalSizeBytes, TotalAttempts,
-                         OriginalFilePath, FinalFilePath)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                         OriginalFilePath, FinalFilePath, MediaFileId)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         RETURNING Id
                     """
                     parameters = (
                         TranscodeFile.FilePath, TranscodeFile.AllQualitiesFailed, TranscodeFile.SuccessfullyTranscoded,
                         TranscodeFile.FirstAttemptDate, TranscodeFile.LastAttemptDate, TranscodeFile.SuccessDate,
                         TranscodeFile.FinalQuality, TranscodeFile.FinalSizeBytes, TranscodeFile.TotalAttempts,
-                        TranscodeFile.OriginalFilePath, TranscodeFile.FinalFilePath
+                        TranscodeFile.OriginalFilePath, TranscodeFile.FinalFilePath, MediaFileId
                     )
                     LoggingService.LogInfo(f"Insert transcode file parameters: {parameters}", "DatabaseManager", "SaveTranscodeFile")
                     cursor.execute(query, parameters)
@@ -2837,7 +2851,7 @@ class DatabaseManager:
                        mf.TotalFrames as MediaFileTotalFrames, ta.FfpmpegCommand
                 FROM TranscodeProgress tp
                 INNER JOIN TranscodeAttempts ta ON tp.TranscodeAttemptId = ta.Id
-                LEFT JOIN MediaFiles mf ON ta.FilePath = mf.FilePath
+                LEFT JOIN MediaFiles mf ON ta.MediaFileId = mf.Id
                 WHERE ta.Success IS NULL
                 ORDER BY tp.LastProgressUpdate DESC
                 LIMIT 1
@@ -2912,7 +2926,7 @@ class DatabaseManager:
                        mf.TotalFrames as MediaFileTotalFrames, ta.FfpmpegCommand
                 FROM TranscodeProgress tp
                 INNER JOIN TranscodeAttempts ta ON tp.TranscodeAttemptId = ta.Id
-                LEFT JOIN MediaFiles mf ON ta.FilePath = mf.FilePath
+                LEFT JOIN MediaFiles mf ON ta.MediaFileId = mf.Id
                 WHERE ta.Success IS NULL
                 ORDER BY tp.LastProgressUpdate DESC
             """
@@ -3345,9 +3359,9 @@ class DatabaseManager:
         try:
             # Get the KeepSource setting directly from MediaFiles table
             query = '''
-            SELECT mf.KeepSource 
+            SELECT mf.KeepSource
             FROM MediaFiles mf
-            JOIN TranscodeAttempts ta ON mf.FilePath = ta.FilePath
+            JOIN TranscodeAttempts ta ON ta.MediaFileId = mf.Id
             WHERE ta.Id = %s
             '''
             result = self.DatabaseService.ExecuteQuery(query, (TranscodeAttemptId,))
@@ -5063,12 +5077,13 @@ class DatabaseManager:
                 except Exception:
                     pass
             
+            MediaFileId = self.LookupMediaFileId(FilePath)
             query = """
-                INSERT INTO ProblemFiles (FilePath, FileName, Directory, SizeBytes, SizeMB, ErrorType, ErrorMessage, DateEncountered, RetryCount)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, NOW(), 0)
+                INSERT INTO ProblemFiles (FilePath, FileName, Directory, SizeBytes, SizeMB, ErrorType, ErrorMessage, DateEncountered, RetryCount, MediaFileId)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, NOW(), 0, %s)
             """
-            
-            params = (FilePath, FileName, Directory, SizeBytes, SizeMB, ErrorType, ErrorMessage)
+
+            params = (FilePath, FileName, Directory, SizeBytes, SizeMB, ErrorType, ErrorMessage, MediaFileId)
             
             recordId = self.DatabaseService.ExecuteNonQuery(query, params)
             

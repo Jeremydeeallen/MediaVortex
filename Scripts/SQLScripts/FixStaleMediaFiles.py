@@ -29,7 +29,7 @@ def Main():
                ta.ffpmpegcommand,
                ta.quality
         FROM TranscodeAttempts ta
-        JOIN MediaFiles mf ON mf.filepath = ta.filepath
+        JOIN MediaFiles mf ON ta.mediafileid = mf.id
         WHERE ta.success = true
           AND ta.filereplaced = true
           AND (mf.transcodedbymediavortex IS NULL OR mf.transcodedbymediavortex = false)

@@ -1791,7 +1791,7 @@ class ProcessTranscodeQueueService:
             query = """
                 SELECT ta.Id
                 FROM TranscodeAttempts ta
-                JOIN TranscodeQueue tq ON ta.FilePath = tq.FilePath
+                JOIN TranscodeQueue tq ON ta.MediaFileId = tq.MediaFileId
                 WHERE tq.Id = %s
                 ORDER BY ta.AttemptDate DESC
                 LIMIT 1

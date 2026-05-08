@@ -37,6 +37,12 @@ class ServiceLifecycleManager:
             'MainFile': 'Main.py',
             'ProcessName': 'QualityTestService',
             'Description': 'Quality Testing Service'
+        },
+        'WorkerService': {
+            'Directory': 'WorkerService',
+            'MainFile': 'Main.py',
+            'ProcessName': 'WorkerService',
+            'Description': 'Unified Worker Service'
         }
     }
 

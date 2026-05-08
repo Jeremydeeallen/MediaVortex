@@ -26,8 +26,8 @@ Services = [
         "MainFile": "Main.py",
     },
     {
-        "Name": "TranscodeService",
-        "Directory": os.path.join(RootDirectory, "TranscodeService"),
+        "Name": "WorkerService",
+        "Directory": os.path.join(RootDirectory, "WorkerService"),
         "MainFile": "Main.py",
     },
 ]

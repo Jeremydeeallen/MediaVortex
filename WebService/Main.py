@@ -103,47 +103,8 @@ class WebServiceApp:
         except Exception as e:
             LoggingService.LogWarning(f"Could not clean up stale scans: {e}", "WebService", "__init__")
 
-        # Initialize ContinuousScanService (single shared instance)
-        from Services.ContinuousScanService import ContinuousScanService
-        self.ContinuousScanService = ContinuousScanService()
-        LoggingService.LogInfo("ContinuousScanService initialized", "WebService", "__init__")
-
-        # Share ContinuousScanService with the FileScanningController's ViewModel
-        self.FileScanningController.ViewModel.ContinuousScanService = self.ContinuousScanService
-
-        # Auto-start continuous scanning based on SystemSettings
-        try:
-            from Repositories.DatabaseManager import DatabaseManager
-            db_manager = DatabaseManager()
-
-            # Check if continuous scanning is enabled in database
-            enabled_setting = db_manager.GetSystemSetting('ContinuousScanEnabled')
-            interval_setting = db_manager.GetSystemSetting('ContinuousScanIntervalMinutes')
-
-            # Create settings if they don't exist
-            if enabled_setting is None:
-                db_manager.AddOrUpdateSystemSetting('ContinuousScanEnabled', '0', 'Enable/disable continuous file scanning', 'boolean')
-                enabled_setting = '0'
-                LoggingService.LogInfo("Created ContinuousScanEnabled setting (default: disabled)", "WebService", "__init__")
-
-            if interval_setting is None:
-                db_manager.AddOrUpdateSystemSetting('ContinuousScanIntervalMinutes', '60', 'Interval in minutes for continuous scanning', 'integer')
-                interval_setting = '60'
-                LoggingService.LogInfo("Created ContinuousScanIntervalMinutes setting (default: 60)", "WebService", "__init__")
-
-            # Auto-start if enabled
-            if enabled_setting == '1':
-                interval = int(interval_setting) if interval_setting else 60
-                result = self.ContinuousScanService.StartContinuousScanning(interval)
-                if result.get('Success'):
-                    LoggingService.LogInfo(f"Auto-started continuous scanning with {interval} minute interval", "WebService", "__init__")
-                else:
-                    LoggingService.LogWarning(f"Could not auto-start continuous scanning: {result.get('ErrorMessage')}", "WebService", "__init__")
-            else:
-                LoggingService.LogInfo("Continuous scanning is disabled (not starting automatically)", "WebService", "__init__")
-
-        except Exception as e:
-            LoggingService.LogWarning(f"Could not check/start continuous scanning: {e}", "WebService", "__init__")
+        # ContinuousScanService is now managed by WorkerService (ScanEnabled capability).
+        # FileScanningController creates its own instance lazily for on-demand API scans.
 
         # Auto-sync Jellyfin FFmpeg logs on startup (background thread)
         self._start_jellyfin_sync()
@@ -235,6 +196,14 @@ class WebServiceApp:
                 return render_template('Queue.html')
             except Exception as e:
                 LoggingService.LogException("Error rendering Queue page", e, "WebService", "transcode_queue")
+                return render_template('Error.html', ErrorCode=500, ErrorMessage="Failed to load page"), 500
+
+        @self.App.route('/Activity')
+        def activity():
+            try:
+                return render_template('Activity.html')
+            except Exception as e:
+                LoggingService.LogException("Error rendering Activity page", e, "WebService", "activity")
                 return render_template('Error.html', ErrorCode=500, ErrorMessage="Failed to load page"), 500
 
         @self.App.route('/Stats')

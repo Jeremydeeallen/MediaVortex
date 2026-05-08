@@ -192,14 +192,15 @@ class TranscodeJobRepository(BaseRepository):
                 if Attempt.Id is None:
                     # Insert new attempt
                     LoggingService.LogInfo("Inserting new transcoding attempt...", "TranscodeJobRepository", "SaveTranscodeAttempt")
+                    MediaFileId = self.LookupMediaFileId(Attempt.FilePath)
                     query = """
                         INSERT INTO TranscodeAttempts
                         (FilePath, AttemptDate, Quality, OldSizeBytes, NewSizeBytes, Success,
                          SizeReductionBytes, SizeReductionPercent, ErrorMessage, TranscodeDurationSeconds,
                          FfpmpegCommand, AudioBitrateKbps, VideoBitrateKbps, ProfileName, VMAF,
                          FileReplaced, FileReplacedDate, ReplacementType, StartTime, PreferredAttempt,
-                         WorkerName)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                         WorkerName, MediaFileId)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         RETURNING Id
                     """
                     parameters = (
@@ -211,7 +212,7 @@ class TranscodeJobRepository(BaseRepository):
                         Attempt.AudioBitrateKbps, Attempt.VideoBitrateKbps, Attempt.ProfileName, Attempt.VMAF,
                         Attempt.FileReplaced, Attempt.FileReplacedDate, Attempt.ReplacementType, Attempt.StartTime,
                         Attempt.PreferredAttempt,
-                        Attempt.WorkerName
+                        Attempt.WorkerName, MediaFileId
                     )
                     LoggingService.LogInfo(f"Insert attempt parameters: {parameters}", "TranscodeJobRepository", "SaveTranscodeAttempt")
                     cursor.execute(query, parameters)
@@ -416,19 +417,20 @@ class TranscodeJobRepository(BaseRepository):
                 if TranscodeFile.Id is None:
                     # Insert new transcode file
                     LoggingService.LogInfo("Inserting new transcoding file record...", "TranscodeJobRepository", "SaveTranscodeFile")
+                    MediaFileId = self.LookupMediaFileId(TranscodeFile.FilePath)
                     query = """
                         INSERT INTO TranscodeFiles
                         (FilePath, AllQualitiesFailed, SuccessfullyTranscoded, FirstAttemptDate,
                          LastAttemptDate, SuccessDate, FinalQuality, FinalSizeBytes, TotalAttempts,
-                         OriginalFilePath, FinalFilePath)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                         OriginalFilePath, FinalFilePath, MediaFileId)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         RETURNING Id
                     """
                     parameters = (
                         TranscodeFile.FilePath, TranscodeFile.AllQualitiesFailed, TranscodeFile.SuccessfullyTranscoded,
                         TranscodeFile.FirstAttemptDate, TranscodeFile.LastAttemptDate, TranscodeFile.SuccessDate,
                         TranscodeFile.FinalQuality, TranscodeFile.FinalSizeBytes, TranscodeFile.TotalAttempts,
-                        TranscodeFile.OriginalFilePath, TranscodeFile.FinalFilePath
+                        TranscodeFile.OriginalFilePath, TranscodeFile.FinalFilePath, MediaFileId
                     )
                     LoggingService.LogInfo(f"Insert transcode file parameters: {parameters}", "TranscodeJobRepository", "SaveTranscodeFile")
                     cursor.execute(query, parameters)
@@ -668,8 +670,8 @@ class TranscodeJobRepository(BaseRepository):
                        mf.TotalFrames as MediaFileTotalFrames, ta.FfpmpegCommand
                 FROM TranscodeProgress tp
                 INNER JOIN TranscodeAttempts ta ON tp.TranscodeAttemptId = ta.Id
-                INNER JOIN TranscodeQueue tq ON LOWER(ta.FilePath) = LOWER(tq.FilePath) AND tq.Status = 'Running'
-                LEFT JOIN MediaFiles mf ON ta.FilePath = mf.FilePath
+                INNER JOIN TranscodeQueue tq ON ta.MediaFileId = tq.MediaFileId AND tq.Status = 'Running'
+                LEFT JOIN MediaFiles mf ON ta.MediaFileId = mf.Id
                 WHERE ta.Success IS NULL
                 ORDER BY tp.LastProgressUpdate DESC
                 LIMIT 1
@@ -776,7 +778,7 @@ class TranscodeJobRepository(BaseRepository):
             query = '''
             SELECT mf.KeepSource
             FROM MediaFiles mf
-            JOIN TranscodeAttempts ta ON mf.FilePath = ta.FilePath
+            JOIN TranscodeAttempts ta ON ta.MediaFileId = mf.Id
             WHERE ta.Id = %s
             '''
             result = self.DatabaseService.ExecuteQuery(query, (TranscodeAttemptId,))

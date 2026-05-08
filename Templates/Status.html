@@ -18,9 +18,7 @@
         </div>
     </div>
 
-    <!-- ═══════════════════════════════════════════════════ -->
-    <!-- LIBRARY STATISTICS                                  -->
-    <!-- ═══════════════════════════════════════════════════ -->
+    <!-- LIBRARY STATISTICS -->
     <div class="row g-3 mb-4">
         <div class="col-6 col-lg">
             <div class="card h-100 text-center">
@@ -64,9 +62,7 @@
         </div>
     </div>
 
-    <!-- ═══════════════════════════════════════════════════ -->
-    <!-- SAVINGS BY DAY — Chart + Table                      -->
-    <!-- ═══════════════════════════════════════════════════ -->
+    <!-- SAVINGS BY DAY -- Chart -->
     <div class="card mb-4">
         <div class="card-header py-2 d-flex justify-content-between align-items-center">
             <h6 class="mb-0"><i class="fas fa-calendar-alt me-2"></i>Savings by Day</h6>
@@ -82,9 +78,7 @@
         </div>
     </div>
 
-    <!-- ═══════════════════════════════════════════════════ -->
-    <!-- SYSTEM RESOURCES                                    -->
-    <!-- ═══════════════════════════════════════════════════ -->
+    <!-- SYSTEM RESOURCES -->
     <div class="row g-3 mb-4">
         <div class="col-6 col-lg-3">
             <div class="card h-100 text-center">
@@ -135,47 +129,7 @@
         </div>
     </div>
 
-    <!-- ═══════════════════════════════════════════════════ -->
-    <!-- TRANSCODE CONTROLS + CURRENT JOB                    -->
-    <!-- ═══════════════════════════════════════════════════ -->
-    <div class="card mb-4">
-        <div class="card-header py-2 d-flex justify-content-between align-items-center">
-            <h6 class="mb-0"><i class="fas fa-film me-2"></i>Active Transcode Jobs</h6>
-            <div class="d-flex align-items-center gap-2">
-                <span id="TranscodeStatusBadge" class="badge bg-secondary">Loading...</span>
-                <button id="BtnStopAfterJob" class="btn btn-warning btn-sm" onclick="StopAfterJob()" disabled>
-                    <i class="fas fa-stop-circle me-1"></i>Stop After This Job
-                </button>
-                <button id="BtnResume" class="btn btn-success btn-sm d-none" onclick="ResumeTranscoding()">
-                    <i class="fas fa-play-circle me-1"></i>Resume
-                </button>
-            </div>
-        </div>
-        <div class="card-body p-0">
-            <div id="NoJobInfo" class="text-muted py-3 px-3"><em>No active transcode jobs</em></div>
-            <div id="ActiveJobsTable" class="d-none">
-                <table class="table table-sm table-hover mb-0">
-                    <thead class="table-light">
-                        <tr>
-                            <th class="ps-3">File</th>
-                            <th style="width: 110px;">Worker</th>
-                            <th style="width: 90px;">Size</th>
-                            <th style="width: 200px;">Progress</th>
-                            <th style="width: 80px;">FPS</th>
-                            <th style="width: 80px;">Speed</th>
-                            <th style="width: 100px;">ETA</th>
-                            <th style="width: 60px;"></th>
-                        </tr>
-                    </thead>
-                    <tbody id="ActiveJobsBody"></tbody>
-                </table>
-            </div>
-        </div>
-    </div>
-
-    <!-- ═══════════════════════════════════════════════════ -->
-    <!-- TRANSCODE SAVINGS SUMMARY                           -->
-    <!-- ═══════════════════════════════════════════════════ -->
+    <!-- TRANSCODE SAVINGS SUMMARY -->
     <div class="row g-3 mb-4">
         <div class="col-md-4">
             <div class="card text-center h-100">
@@ -229,9 +183,7 @@
         </div>
     </div>
 
-    <!-- ═══════════════════════════════════════════════════ -->
-    <!-- CONTINUOUS SCANNING (summary — full controls on File Scanning page) -->
-    <!-- ═══════════════════════════════════════════════════ -->
+    <!-- CONTINUOUS SCANNING -->
     <div class="card mb-4">
         <div class="card-header py-2 d-flex justify-content-between align-items-center">
             <h6 class="mb-0"><i class="fas fa-sync-alt me-2"></i>Continuous File Scanning</h6>
@@ -261,44 +213,13 @@
             </div>
         </div>
     </div>
-
-    <!-- ═══════════════════════════════════════════════════ -->
-    <!-- WORKERS                                             -->
-    <!-- ═══════════════════════════════════════════════════ -->
-    <h6 class="text-muted mb-3"><i class="fas fa-server me-2"></i>Workers</h6>
-    <div class="row g-3 mb-4" id="WorkersContainer">
-        <div class="col-12 text-center text-muted py-2">Loading...</div>
-    </div>
-
-    <!-- ═══════════════════════════════════════════════════ -->
-    <!-- SERVICES                                            -->
-    <!-- ═══════════════════════════════════════════════════ -->
-    <h6 class="text-muted mb-3"><i class="fas fa-cubes me-2"></i>Services</h6>
-    <div class="row g-3 mb-4" id="ServicesContainer"></div>
-
-    <!-- Loading Indicator -->
-    <div class="row d-none" id="LoadingIndicator">
-        <div class="col-12 text-center py-4">
-            <div class="spinner-border text-primary" role="status"></div>
-            <p class="mt-2 text-muted">Loading...</p>
-        </div>
-    </div>
-
-    <!-- No Services Message -->
-    <div class="row d-none" id="NoServicesMessage">
-        <div class="col-12">
-            <div class="alert alert-info">
-                <i class="fas fa-info-circle me-2"></i>No services found.
-            </div>
-        </div>
-    </div>
 </div>
 {% endblock %}
 
 {% block scripts %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script>
-// ─── Utilities ───────────────────────────────────────────
+// -- Utilities --
 function FormatBytes(Bytes) {
     if (!Bytes || Bytes === 0) return '0 B';
     const Units = ['B', 'KB', 'MB', 'GB', 'TB'];
@@ -311,7 +232,7 @@ function BytesToGB(Bytes) {
     return (Bytes / (1024 * 1024 * 1024)).toFixed(2);
 }
 
-// ─── Chart ───────────────────────────────────────────────
+// -- Chart --
 let SavingsChart = null;
 
 function RenderSavingsChart(Data) {
@@ -406,119 +327,7 @@ function RenderSavingsChart(Data) {
     });
 }
 
-// ─── Transcode Controls ─────────────────────────────────
-function UpdateTranscodeStatus(Data) {
-    const Status = Data.ServiceStatus;
-    const IsProcessing = Data.IsProcessing;
-    const ActiveJobs = Data.ActiveJobs || [];
-
-    const Badge = document.getElementById('TranscodeStatusBadge');
-    const BtnStop = document.getElementById('BtnStopAfterJob');
-    const BtnResume = document.getElementById('BtnResume');
-    const NoJob = document.getElementById('NoJobInfo');
-    const JobsTable = document.getElementById('ActiveJobsTable');
-    const JobsBody = document.getElementById('ActiveJobsBody');
-
-    const R = RenderTranscodeStatusBadge(Badge, Status, IsProcessing);
-    BtnStop.disabled = R.StopDisabled;
-    BtnResume.classList.toggle('d-none', !R.ShowResume);
-
-    if (ActiveJobs.length > 0) {
-        NoJob.classList.add('d-none');
-        JobsTable.classList.remove('d-none');
-        JobsBody.innerHTML = ActiveJobs.map(function(Job) {
-            const FileName = Job.FileName || Job.FilePath.split(/[/\\]/).pop();
-            const Pct = (Job.ProgressPercent || 0).toFixed(1);
-            const IsStuck = Job.IsStuck || false;
-            const StatusIcon = IsStuck
-                ? '<i class="fas fa-exclamation-triangle me-1 text-warning"></i>'
-                : '<i class="fas fa-spinner fa-spin me-1 text-primary"></i>';
-            const RowClass = IsStuck ? ' class="table-warning"' : '';
-            const ResetBtn = IsStuck
-                ? '<button class="btn btn-outline-warning btn-sm py-0 px-1" onclick="ResetStuckJob(' + Job.QueueId + ')" title="Reset to Pending"><i class="fas fa-redo-alt"></i></button>'
-                : '';
-            const ProgressBar = IsStuck
-                ? '<span class="text-warning fw-bold">Stuck</span>'
-                : '<div class="d-flex align-items-center gap-2">' +
-                    '<div class="progress flex-grow-1" style="height: 18px;">' +
-                        '<div class="progress-bar progress-bar-striped progress-bar-animated bg-primary" ' +
-                            'role="progressbar" style="width: ' + Pct + '%" ' +
-                            'aria-valuenow="' + Pct + '" aria-valuemin="0" aria-valuemax="100"></div>' +
-                    '</div>' +
-                    '<small class="text-nowrap">' + Pct + '%</small>' +
-                '</div>';
-            return '<tr' + RowClass + '>' +
-                '<td class="ps-3">' + StatusIcon +
-                    '<span title="' + (Job.FilePath || '').replace(/"/g, '&quot;') + '">' + FileName + '</span></td>' +
-                '<td>' + (Job.ClaimedBy || '<em class="text-muted">-</em>') + '</td>' +
-                '<td>' + (Job.SizeMB ? (Job.SizeMB >= 1024 ? (Job.SizeMB / 1024).toFixed(2) + ' GB' : Math.round(Job.SizeMB) + ' MB') : '-') + '</td>' +
-                '<td>' + ProgressBar + '</td>' +
-                '<td>' + (IsStuck ? '-' : (Job.CurrentFPS ? parseFloat(Job.CurrentFPS).toFixed(1) : '-')) + '</td>' +
-                '<td>' + (IsStuck ? '-' : (Job.CurrentSpeed || '-')) + '</td>' +
-                '<td>' + (IsStuck ? '-' : (Job.ETA || '-')) + '</td>' +
-                '<td class="text-center">' + ResetBtn + '</td>' +
-            '</tr>';
-        }).join('');
-    } else {
-        NoJob.classList.remove('d-none');
-        JobsTable.classList.add('d-none');
-        JobsBody.innerHTML = '';
-    }
-}
-
-function StopAfterJob() {
-    if (!confirm('Stop transcoding after the current job finishes?')) return;
-    fetch('/api/Transcode/Stop', { method: 'POST' })
-        .then(R => R.json())
-        .then(Result => {
-            if (Result.Success) {
-                showToastAlert('Transcode will stop after the current job.', 'success');
-                LoadTranscodeOverview();
-            } else {
-                showToastAlert(Result.ErrorMessage || 'Failed to stop.', 'danger');
-            }
-        })
-        .catch(() => showToastAlert('Failed to contact server.', 'danger'));
-}
-
-function ResumeTranscoding() {
-    fetch('/api/Transcode/Start', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ MaxConcurrentJobs: 1 })
-    })
-        .then(R => R.json())
-        .then(Result => {
-            if (Result.Success) {
-                showToastAlert('Transcoding resumed.', 'success');
-                LoadTranscodeOverview();
-            } else {
-                showToastAlert(Result.ErrorMessage || 'Failed to resume.', 'danger');
-            }
-        })
-        .catch(() => showToastAlert('Failed to contact server.', 'danger'));
-}
-
-function ResetStuckJob(QueueId) {
-    if (!confirm('Reset this stuck job back to Pending?')) return;
-    fetch('/api/TeamStatus/ResetStuckJob', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ QueueId: QueueId })
-    })
-        .then(R => R.json())
-        .then(Result => {
-            if (Result.Success) {
-                showToastAlert('Job reset to Pending.', 'success');
-                LoadTranscodeOverview();
-            } else {
-                showToastAlert(Result.ErrorMessage || 'Failed to reset job.', 'danger');
-            }
-        })
-        .catch(() => showToastAlert('Failed to contact server.', 'danger'));
-}
-
-// ─── Data Loading ────────────────────────────────────────
+// -- Data Loading --
 function LoadTranscodeOverview() {
     fetch('/api/TeamStatus/Overview')
         .then(R => R.json())
@@ -528,7 +337,6 @@ function LoadTranscodeOverview() {
             document.getElementById('TotalSaved').textContent = FormatBytes(D.TotalSavedBytes);
             document.getElementById('TotalJobs').textContent = D.JobCount.toLocaleString();
             document.getElementById('AvgSavings').textContent = D.AvgSavingsPercent + '%';
-            UpdateTranscodeStatus(D);
         })
         .catch(() => {});
 }
@@ -573,7 +381,7 @@ function LoadSavingsByDay() {
         .catch(() => {});
 }
 
-// ─── Library Statistics ──────────────────────────────────
+// -- Library Statistics --
 function LoadLibraryStats() {
     fetch('/api/Statistics')
         .then(R => R.json())
@@ -597,7 +405,7 @@ function LoadLibraryStats() {
         .catch(() => {});
 }
 
-// ─── ServiceStatusManager ────────────────────────────────
+// -- ServiceStatusManager --
 class ServiceStatusManager {
     constructor() {
         this.AutoRefreshInterval = null;
@@ -621,15 +429,11 @@ class ServiceStatusManager {
                 document.getElementById('CoreTemperaturesChevron').className = 'fas fa-chevron-down';
             });
         }
-
-        // Continuous scan controls moved to FileScanning page — Status page is read-only summary
     }
 
     RefreshAll() {
         this.LoadSystemResources();
-        this.LoadServiceStatus();
         this.LoadContinuousScanStatus();
-        this.LoadWorkers();
         LoadTranscodeOverview();
         LoadSavingsByVolume();
         LoadSavingsByDay();
@@ -727,122 +531,6 @@ class ServiceStatusManager {
         });
     }
 
-    async LoadServiceStatus() {
-        try {
-            document.getElementById('LoadingIndicator').classList.remove('d-none');
-            const Resp = await fetch('/api/Status');
-            const Data = await Resp.json();
-            if (Data.Success && Data.Services) {
-                this.RenderServices(Data.Services);
-            }
-        } catch (e) {
-            console.error('Service status error:', e);
-        } finally {
-            document.getElementById('LoadingIndicator').classList.add('d-none');
-        }
-    }
-
-    RenderServices(Services) {
-        const Container = document.getElementById('ServicesContainer');
-        Container.innerHTML = '';
-        if (!Services || Services.length === 0) {
-            document.getElementById('NoServicesMessage').classList.remove('d-none');
-            return;
-        }
-        document.getElementById('NoServicesMessage').classList.add('d-none');
-        Services.forEach(S => {
-            const IsHealthy = S.Status === 'Running' && S.HealthStatus === 'Healthy';
-            const Cls = IsHealthy ? 'success' : 'danger';
-            const Icon = IsHealthy ? 'fa-check-circle' : 'fa-times-circle';
-            const IsQT = S.ServiceName === 'QualityTestingService' || S.ServiceName === 'QualityTestService';
-
-            let Html = '<div class="card h-100"><div class="card-body text-center py-3">' +
-                '<h6 class="card-title mb-1"><i class="fas fa-server me-1"></i>' + S.ServiceName + '</h6>' +
-                '<span class="badge bg-' + Cls + '"><i class="fas ' + Icon + ' me-1"></i>' + (IsHealthy ? 'Running' : S.Status) + '</span>';
-            if (IsQT) {
-                const Enabled = IsHealthy;
-                Html += '<div class="mt-2"><button class="btn btn-sm ' + (Enabled ? 'btn-warning' : 'btn-success') + '" onclick="window.serviceStatusManager.ToggleQualityTest(' + Enabled + ')">' +
-                    '<i class="fas ' + (Enabled ? 'fa-pause' : 'fa-play') + ' me-1"></i>' + (Enabled ? 'Pause' : 'Resume') + '</button></div>';
-            }
-            Html += '</div></div>';
-
-            const Col = document.createElement('div');
-            Col.className = 'col-6 col-lg-4 col-xl-3';
-            Col.innerHTML = Html;
-            Container.appendChild(Col);
-        });
-    }
-
-    async ToggleQualityTest(IsEnabled) {
-        try {
-            const Endpoint = IsEnabled ? '/api/QualityTest/Pause' : '/api/QualityTest/Resume';
-            const Resp = await fetch(Endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' } });
-            const Data = await Resp.json();
-            if (Data.Success) {
-                showToastAlert('Quality testing ' + (IsEnabled ? 'paused' : 'resumed'), 'success');
-                this.LoadServiceStatus();
-            } else {
-                showToastAlert('Failed: ' + (Data.ErrorMessage || 'Unknown error'), 'danger');
-            }
-        } catch (e) {
-            showToastAlert('Error: ' + e.message, 'danger');
-        }
-    }
-
-    async LoadWorkers() {
-        try {
-            const Resp = await fetch('/api/TeamStatus/Workers');
-            const Data = await Resp.json();
-            if (Data.Success && Data.Data) {
-                this.RenderWorkers(Data.Data);
-            }
-        } catch (e) {
-            console.error('Workers error:', e);
-        }
-    }
-
-    RenderWorkers(Workers) {
-        const Container = document.getElementById('WorkersContainer');
-        Container.innerHTML = '';
-        if (!Workers || Workers.length === 0) {
-            Container.innerHTML = '<div class="col-12 text-center text-muted py-2">No workers registered</div>';
-            return;
-        }
-        Workers.forEach(W => {
-            const IsOnline = W.Status === 'Online';
-            const BadgeCls = IsOnline ? 'bg-success' : 'bg-danger';
-            const BadgeIcon = IsOnline ? 'fa-check-circle' : 'fa-times-circle';
-
-            let HeartbeatText = 'Never';
-            if (W.HeartbeatAgeSec !== null && W.HeartbeatAgeSec !== undefined) {
-                const Sec = Math.floor(W.HeartbeatAgeSec);
-                if (Sec < 60) HeartbeatText = Sec + 's ago';
-                else if (Sec < 3600) HeartbeatText = Math.floor(Sec / 60) + ' min ago';
-                else HeartbeatText = Math.floor(Sec / 3600) + ' hr ago';
-            }
-
-            const Interlaced = W.AcceptsInterlaced ? 'Yes' : 'No';
-
-            const Col = document.createElement('div');
-            Col.className = 'col-6 col-lg-4 col-xl-3';
-            Col.innerHTML = '<div class="card h-100">' +
-                '<div class="card-body py-3">' +
-                    '<h6 class="card-title mb-2 d-flex justify-content-between align-items-center">' +
-                        '<span><i class="fas fa-desktop me-1"></i>' + W.WorkerName + '</span>' +
-                        '<span class="badge ' + BadgeCls + '"><i class="fas ' + BadgeIcon + ' me-1"></i>' + W.Status + '</span>' +
-                    '</h6>' +
-                    '<div class="small text-muted">' +
-                        '<div class="d-flex justify-content-between"><span>Heartbeat:</span><span>' + HeartbeatText + '</span></div>' +
-                        '<div class="d-flex justify-content-between"><span>Max Jobs:</span><span>' + (W.MaxConcurrentJobs || 0) + '</span></div>' +
-                        '<div class="d-flex justify-content-between"><span>CPU Threads:</span><span>' + (W.MaxCpuThreads || 'Auto') + '</span></div>' +
-                        '<div class="d-flex justify-content-between"><span>Interlaced:</span><span>' + Interlaced + '</span></div>' +
-                    '</div>' +
-                '</div>' +
-            '</div>';
-            Container.appendChild(Col);
-        });
-    }
-
     async LoadContinuousScanStatus() {
         try {
             const Resp = await fetch('/api/Scan/ContinuousStatus');
@@ -871,7 +559,6 @@ class ServiceStatusManager {
         } else {
             document.getElementById('ContinuousScanLastScan').textContent = 'Never';
         }
-
     }
 }
 

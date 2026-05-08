@@ -526,7 +526,7 @@ class FileScanningRepository(BaseRepository):
                 SELECT LOWER(m.Codec) AS Codec, LOWER(COALESCE(m.ResolutionCategory, 'unknown')) AS ResolutionCategory,
                        AVG(t.SizeReductionPercent) AS AvgReduction
                 FROM TranscodeAttempts t
-                JOIN MediaFiles m ON LOWER(m.FilePath) = LOWER(t.FilePath)
+                JOIN MediaFiles m ON t.MediaFileId = m.Id
                 WHERE t.Success = true AND t.SizeReductionPercent > 0
                 GROUP BY LOWER(m.Codec), LOWER(COALESCE(m.ResolutionCategory, 'unknown'))
             """

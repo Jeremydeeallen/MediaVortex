@@ -34,6 +34,11 @@
                               style="position: absolute; top: 2px; right: -6px; font-size: 0.65em; padding: 3px 6px; pointer-events: none;"></span>
                     </li>
                     <li class="nav-item">
+                        <a class="nav-link {% if request.endpoint == 'activity' %}active{% endif %}" href="/Activity">
+                            <i class="fas fa-heartbeat"></i> Activity
+                        </a>
+                    </li>
+                    <li class="nav-item">
                         <a class="nav-link {% if request.endpoint in ['status', 'sql_queries', 'optimization', 'settings'] %}active{% endif %}" href="/settings">
                             <i class="fas fa-tools"></i> Admin
                         </a>

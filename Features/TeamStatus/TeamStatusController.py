@@ -58,7 +58,7 @@ def GetOverview():
                    EXTRACT(EPOCH FROM (NOW() - w.LastHeartbeat)) AS HeartbeatAgeSec
             FROM TranscodeProgress tp
             JOIN TranscodeAttempts ta ON tp.TranscodeAttemptId = ta.Id
-            JOIN TranscodeQueue tq ON tq.FilePath = ta.FilePath AND tq.Status = 'Running'
+            JOIN TranscodeQueue tq ON tq.MediaFileId = ta.MediaFileId AND tq.Status = 'Running'
             LEFT JOIN Workers w ON w.WorkerName = tq.ClaimedBy
             WHERE ta.Success IS NULL
             ORDER BY tq.DateStarted ASC
@@ -77,7 +77,7 @@ def GetOverview():
               AND NOT EXISTS (
                   SELECT 1 FROM TranscodeProgress tp
                   JOIN TranscodeAttempts ta ON tp.TranscodeAttemptId = ta.Id
-                  WHERE ta.FilePath = tq.FilePath AND ta.Success IS NULL
+                  WHERE ta.MediaFileId = tq.MediaFileId AND ta.Success IS NULL
               )
         """
         StuckRows = DbManager.DatabaseService.ExecuteQuery(StuckFallbackQuery)
@@ -245,6 +245,7 @@ def GetWorkers():
         Query = """
             SELECT WorkerName, Platform, Status, LastHeartbeat,
                    MaxConcurrentJobs, MaxCpuThreads, AcceptsInterlaced,
+                   TranscodeEnabled, QualityTestEnabled, ScanEnabled,
                    EXTRACT(EPOCH FROM (NOW() - LastHeartbeat)) AS HeartbeatAgeSec
             FROM Workers
             ORDER BY WorkerName
@@ -263,7 +264,10 @@ def GetWorkers():
                 "HeartbeatAgeSec": HeartbeatAge,
                 "MaxConcurrentJobs": Row.get('MaxConcurrentJobs', 0),
                 "MaxCpuThreads": Row.get('MaxCpuThreads'),
-                "AcceptsInterlaced": bool(Row.get('AcceptsInterlaced', True))
+                "AcceptsInterlaced": bool(Row.get('AcceptsInterlaced', True)),
+                "TranscodeEnabled": bool(Row.get('TranscodeEnabled', True)),
+                "QualityTestEnabled": bool(Row.get('QualityTestEnabled', False)),
+                "ScanEnabled": bool(Row.get('ScanEnabled', False))
             })
 
         return jsonify({"Success": True, "Data": Workers})
@@ -309,7 +313,7 @@ def ResetStuckJob():
             DELETE FROM TranscodeProgress
             WHERE TranscodeAttemptId IN (
                 SELECT ta.Id FROM TranscodeAttempts ta
-                JOIN TranscodeQueue tq ON tq.FilePath = ta.FilePath
+                JOIN TranscodeQueue tq ON ta.MediaFileId = tq.MediaFileId
                 WHERE tq.Id = %s AND ta.Success IS NULL
             )
         """
@@ -322,4 +326,41 @@ def ResetStuckJob():
     except Exception as e:
         ErrorMsg = f"Exception in ResetStuckJob: {str(e)}"
         LoggingService.LogException(ErrorMsg, e, "TeamStatusController", "ResetStuckJob")
+        return jsonify({"Success": False, "ErrorMessage": ErrorMsg}), 500
+
+
+@TeamStatusBlueprint.route('/Workers/<WorkerName>/Status', methods=['POST'])
+def SetWorkerStatus(WorkerName):
+    """Set per-worker status (Online, Draining, Offline)."""
+    try:
+        LoggingService.LogFunctionEntry("SetWorkerStatus", "TeamStatusController")
+
+        Data = request.get_json()
+        if not Data or 'Status' not in Data:
+            return jsonify({"Success": False, "Message": "Status is required"}), 400
+
+        NewStatus = Data['Status']
+        ValidStatuses = ('Online', 'Draining', 'Offline')
+        if NewStatus not in ValidStatuses:
+            return jsonify({"Success": False, "Message": f"Status must be one of: {', '.join(ValidStatuses)}"}), 400
+
+        DbManager = DatabaseManager()
+
+        # Verify worker exists
+        CheckQuery = "SELECT 1 FROM Workers WHERE WorkerName = %s"
+        Rows = DbManager.DatabaseService.ExecuteQuery(CheckQuery, (WorkerName,))
+        if not Rows:
+            return jsonify({"Success": False, "Message": f"Worker '{WorkerName}' not found"}), 404
+
+        # Update worker status
+        UpdateQuery = "UPDATE Workers SET Status = %s WHERE WorkerName = %s"
+        DbManager.DatabaseService.ExecuteNonQuery(UpdateQuery, (NewStatus, WorkerName))
+
+        LoggingService.LogInfo(f"Worker '{WorkerName}' status set to {NewStatus}", "TeamStatusController", "SetWorkerStatus")
+
+        return jsonify({"Success": True, "Message": f"Worker '{WorkerName}' status set to {NewStatus}"})
+
+    except Exception as e:
+        ErrorMsg = f"Exception in SetWorkerStatus: {str(e)}"
+        LoggingService.LogException(ErrorMsg, e, "TeamStatusController", "SetWorkerStatus")
         return jsonify({"Success": False, "ErrorMessage": ErrorMsg}), 500

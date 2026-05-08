@@ -18,3 +18,13 @@ class BaseRepository:
 
     def GetLastInsertId(self) -> int:
         return self.DatabaseService.GetLastInsertId()
+
+    def LookupMediaFileId(self, FilePath: str):
+        """Look up MediaFiles.Id by FilePath (case-insensitive). Returns None if not found."""
+        if not FilePath:
+            return None
+        Result = self.DatabaseService.ExecuteScalar(
+            "SELECT Id FROM MediaFiles WHERE LOWER(FilePath) = LOWER(%s) LIMIT 1",
+            (FilePath,)
+        )
+        return Result

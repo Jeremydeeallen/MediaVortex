@@ -34,7 +34,7 @@ def Main():
           AND FilePath IN (
               SELECT tf.FilePath
               FROM TranscodeFiles tf
-              JOIN MediaFiles mf ON tf.FilePath = mf.FilePath
+              JOIN MediaFiles mf ON tf.MediaFileId = mf.Id
               WHERE mf.Codec NOT IN ('av1')
           )
     """)
