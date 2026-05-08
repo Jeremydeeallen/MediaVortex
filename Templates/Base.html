@@ -76,6 +76,13 @@
     <script src="{{ url_for('static', filename='js/TranscodeStatus.js') }}"></script>
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     <script>
+        // Display timezone resolved from SystemSettings.DisplayTimezone (server-injected).
+        // All datetime values from the API arrive as UTC ISO-8601 strings (with Z suffix);
+        // formatTime() in timezone.js converts them for display in this TZ.
+        window.MV_TIMEZONE = "{{ display_timezone or 'UTC' }}";
+    </script>
+    <script src="{{ url_for('static', filename='js/timezone.js') }}"></script>
+    <script>
     // Global persistent error display functions
     function showPersistentError(message) {
         const errorDisplay = document.getElementById('ErrorDisplay');

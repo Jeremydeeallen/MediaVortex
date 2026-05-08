@@ -36,10 +36,39 @@ class WebServiceApp:
         template_dir = os.path.join(project_root, 'Templates')
         static_dir = os.path.join(project_root, 'static')
         
-        self.App = Flask(__name__, 
+        self.App = Flask(__name__,
                         template_folder=template_dir,
                         static_folder=static_dir)
         self.App.config['SECRET_KEY'] = 'mediavortex-secret-key-2024'
+
+        # Serialize every datetime in JSON responses as UTC ISO-8601 with the
+        # explicit `Z` suffix. Templates/JS can then parse and convert to the
+        # configured display timezone via formatTime() -- see Static/js/timezone.js.
+        from Core.Web.UtcJsonProvider import UtcJsonProvider
+        self.App.json = UtcJsonProvider(self.App)
+
+        # Inject the configured display timezone into every template render so
+        # Base.html can emit `window.MV_TIMEZONE`. Cached per-process; updated
+        # only on Flask reload or process restart. Operators changing the value
+        # via /Admin/SystemSettings should refresh their browser to pick up the
+        # new value (the DB write is immediate; this avoids a per-request DB hit).
+        self._CachedDisplayTimezone = None
+
+        @self.App.context_processor
+        def InjectDisplayTimezone():
+            if self._CachedDisplayTimezone is None:
+                try:
+                    from Features.SystemSettings.SystemSettingsRepository import SystemSettingsRepository
+                    Repo = SystemSettingsRepository()
+                    self._CachedDisplayTimezone = Repo.GetSystemSetting('DisplayTimezone') or 'UTC'
+                except Exception as Ex:
+                    LoggingService.LogException(
+                        "Failed to read DisplayTimezone setting -- defaulting to UTC",
+                        Ex, "InjectDisplayTimezone", "WebService"
+                    )
+                    self._CachedDisplayTimezone = 'UTC'
+            return {'display_timezone': self._CachedDisplayTimezone}
+
         CORS(self.App)
         
         # Initialize service tracking
