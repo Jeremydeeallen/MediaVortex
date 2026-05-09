@@ -410,18 +410,23 @@ class CommandBuilder:
     MP4_COMPATIBLE_AUDIO = ['aac', 'ac3', 'eac3', 'mp3']
 
     def BuildRemuxCommand(self, CommandData: Dict[str, Any]) -> Optional[Dict[str, str]]:
-        """Build FFmpeg remux command: copy video, re-encode audio with normalization,
-        output MP4 to a SIDE-BY-SIDE path. Original is never touched by FFmpeg.
+        """Build FFmpeg remux command: copy video, re-encode audio with
+        normalization, output MP4 directly to the final target path.
 
-        Output path is ALWAYS `<basename>_remuxed.mp4`, regardless of source
-        extension. FileReplacement moves the side-by-side file over the original
-        only after verifying the output is complete and valid. If the remux
-        fails for any reason, the original is guaranteed untouched.
+        Contract: the caller (worker) MUST have called
+        FileReplacementBusinessService.PrepareReplacement BEFORE invoking
+        this. PrepareReplacement renames `original.ext` to
+        `original.ext.orig`, freeing the original's path so FFmpeg can write
+        directly into it. No side-by-side suffix or strip step is needed --
+        FFmpeg's input is the .orig backup, output is the final name.
 
-        Pre-2026-05-09 a path-collision bug existed: source `.mp4` + InPlace
-        mode produced OutputPath == InputPath, FFmpeg with `-y` truncated the
-        source before erroring. One file was lost during the smoke test that
-        surfaced the bug. Fix: always write to a distinct sibling path.
+        InputPath in CommandData should point to the .orig backup.
+        OutputPath, when supplied, is used directly. Otherwise it is derived
+        from MediaFile.FileName + .mp4 in the OutputDirectory.
+
+        Defense in depth: if OutputPath would equal InputPath (collision),
+        refuse to build the command rather than risk a -y overwrite. This
+        guards against a caller that forgot to call PrepareReplacement.
         """
         try:
             Job = CommandData.get('Job')
@@ -433,26 +438,32 @@ class CommandBuilder:
 
             InputPath = CommandData.get('InputPath', f"c:\\MediaVortex\\Source\\{MediaFile.FileName}")
             BaseName = os.path.splitext(MediaFile.FileName)[0]
-            # Always use the side-by-side suffix. FileReplacement strips it
-            # when moving the new file over the original. Never reuse the
-            # source basename -- see docstring above.
-            OutputFileName = BaseName + "_remuxed.mp4"
 
-            OutputMode = CommandData.get('TranscodeOutputMode', 'InPlace')
-            if OutputMode == 'Staging':
-                OutputDirectory = CommandData.get('OutputDirectory') or 'c:\\MediaVortex'
+            # Output path: prefer explicit OutputPath in CommandData (caller
+            # passed in the freed source path). Fall back to deriving from
+            # MediaFile.FileName + .mp4 -- backward-compat for callers that
+            # haven't been refactored to use PrepareReplacement.
+            ExplicitOutputPath = CommandData.get('OutputPath')
+            if ExplicitOutputPath:
+                OutputPath = ExplicitOutputPath
             else:
-                OutputDirectory = os.path.dirname(InputPath.strip('"'))
-            OutputPath = os.path.join(OutputDirectory, OutputFileName)
+                OutputFileName = BaseName + ".mp4"
+                OutputMode = CommandData.get('TranscodeOutputMode', 'InPlace')
+                if OutputMode == 'Staging':
+                    OutputDirectory = CommandData.get('OutputDirectory') or 'c:\\MediaVortex'
+                else:
+                    OutputDirectory = os.path.dirname(InputPath.strip('"'))
+                OutputPath = os.path.join(OutputDirectory, OutputFileName)
 
-            # Defense in depth: refuse to build a command where output path
-            # would equal input path. Should be unreachable given the suffix
-            # above, but a regression here would silently destroy source
-            # files. Cheap insurance.
+            # Critical safety guard: if OutputPath would equal InputPath, the
+            # caller forgot to call PrepareReplacement. Refuse to build the
+            # command rather than risk FFmpeg's `-y` truncating the source.
             if os.path.normcase(os.path.normpath(OutputPath)) == os.path.normcase(os.path.normpath(InputPath.strip('"'))):
                 LoggingService.LogError(
-                    f"BuildRemuxCommand: refusing to build a command where OutputPath == InputPath ({InputPath}). "
-                    f"This must never happen given the unconditional `_remuxed` suffix.",
+                    f"BuildRemuxCommand: OutputPath equals InputPath ({InputPath}). "
+                    f"The caller must call FileReplacementBusinessService.PrepareReplacement "
+                    f"before invoking this builder, so InputPath points to .orig and OutputPath "
+                    f"can use the freed original path.",
                     "CommandBuilder", "BuildRemuxCommand"
                 )
                 return None
@@ -512,12 +523,12 @@ class CommandBuilder:
 
     def BuildSubtitleFixCommand(self, CommandData: Dict[str, Any]) -> Optional[Dict[str, str]]:
         """Build FFmpeg subtitle fix command: copy video, re-encode audio with
-        normalization, convert ASS/SSA subtitle to mov_text, output MP4 to a
-        SIDE-BY-SIDE path. Original is never touched by FFmpeg.
+        normalization, convert ASS/SSA subtitle to mov_text, output MP4
+        directly to the final target path.
 
-        Output path is ALWAYS `<basename>_subfix.mp4`, never reuses the source
-        basename. FileReplacement performs the swap after validating the new
-        file. Same safety contract as BuildRemuxCommand.
+        Contract: caller MUST have called PrepareReplacement before invoking
+        this builder -- InputPath should point to .orig, OutputPath to the
+        freed source path. Same safety pattern as BuildRemuxCommand.
         """
         try:
             Job = CommandData.get('Job')
@@ -531,22 +542,23 @@ class CommandBuilder:
 
             InputPath = CommandData.get('InputPath', f"c:\\MediaVortex\\Source\\{MediaFile.FileName}")
             BaseName = os.path.splitext(MediaFile.FileName)[0]
-            # Always use the side-by-side suffix.
-            OutputFileName = BaseName + "_subfix.mp4"
 
-            OutputMode = CommandData.get('TranscodeOutputMode', 'InPlace')
-            if OutputMode == 'Staging':
-                OutputDirectory = CommandData.get('OutputDirectory') or 'c:\\MediaVortex'
+            ExplicitOutputPath = CommandData.get('OutputPath')
+            if ExplicitOutputPath:
+                OutputPath = ExplicitOutputPath
             else:
-                OutputDirectory = os.path.dirname(InputPath.strip('"'))
-            OutputPath = os.path.join(OutputDirectory, OutputFileName)
+                OutputFileName = BaseName + ".mp4"
+                OutputMode = CommandData.get('TranscodeOutputMode', 'InPlace')
+                if OutputMode == 'Staging':
+                    OutputDirectory = CommandData.get('OutputDirectory') or 'c:\\MediaVortex'
+                else:
+                    OutputDirectory = os.path.dirname(InputPath.strip('"'))
+                OutputPath = os.path.join(OutputDirectory, OutputFileName)
 
-            # Defense in depth: refuse to build a command where output path
-            # equals input path. Unreachable with the unconditional suffix
-            # above, but a regression here destroys source files silently.
+            # Defense in depth: same as BuildRemuxCommand.
             if os.path.normcase(os.path.normpath(OutputPath)) == os.path.normcase(os.path.normpath(InputPath.strip('"'))):
                 LoggingService.LogError(
-                    f"BuildSubtitleFixCommand: refusing to build a command where OutputPath == InputPath ({InputPath}).",
+                    f"BuildSubtitleFixCommand: OutputPath equals InputPath ({InputPath}). Caller must call PrepareReplacement first.",
                     "CommandBuilder", "BuildSubtitleFixCommand"
                 )
                 return None
