@@ -14,6 +14,15 @@ from Repositories.DatabaseManager import DatabaseManager
 class QueueManagementBusinessService:
     """Handles transcoding queue operations and population logic."""
 
+    # Compliance evaluation constants. See transcode-vs-remux-routing.feature.md.
+    # MIN_SAVINGS_MB and COMPATIBLE_CONTAINERS will move to SystemSettings in a
+    # follow-up; hardcoded here to keep the initial cascade landing surgical.
+    MIN_SAVINGS_MB = 150
+    COMPATIBLE_CONTAINERS = frozenset({'mp4', 'mov', 'm4v'})
+    ACCEPTABLE_VIDEO_CODECS = frozenset({'h264', 'hevc', 'av1'})
+    MP4_COMPATIBLE_AUDIO_CODECS = frozenset({'aac', 'ac3', 'eac3', 'mp3'})
+    RESOLUTION_RANK = {'480p': 0, '720p': 1, '1080p': 2, '2160p': 3}
+
     def __init__(self, RepositoryInstance: TranscodeQueueRepository = None):
         self.Repository = RepositoryInstance or TranscodeQueueRepository()
         self.DatabaseManager = DatabaseManager()
@@ -1024,13 +1033,16 @@ class QueueManagementBusinessService:
             return 1  # Lowest non-zero so the queue item still saves; never 0
 
     def _LoadPriorityLookupTable(self) -> Dict[tuple, tuple]:
-        """Pre-compute {(ProfileName, SourceResolutionCategory): (TargetVideoKbps, TargetAudioKbps)}.
+        """Pre-compute {(ProfileName, SourceResolutionCategory): (TargetVideoKbps, TargetAudioKbps, TargetResolutionCategory)}.
 
         Resolves TranscodeDownTo: when a source resolution downscales to a different
-        target, the target's bitrates are returned. ProfileThresholds is small (~50
-        rows), so this is one DB round-trip and then everything is in-memory.
+        target, the target's bitrates are returned. The third tuple element is the
+        target ResolutionCategory after downscale (same as source if no downscale),
+        used by compliance evaluation to detect "this file is above the configured
+        downscale target." ProfileThresholds is small (~50 rows), so this is one DB
+        round-trip and then everything is in-memory.
 
-        Used by ComputePriorityScoresForFiles bulk path. Single-file path goes through
+        Used by RecomputeForFiles bulk path. Single-file path goes through
         DatabaseManager.GetProfileSettingsForTargetResolution which has additional
         VR-resolution fallback logic.
         """
@@ -1054,10 +1066,208 @@ class QueueManagementBusinessService:
             for src_res, (downto, vk, ak) in by_res.items():
                 if downto and downto != 'No downscaling' and downto in by_res:
                     _, target_vk, target_ak = by_res[downto]
-                    lookup[(pn, src_res)] = (target_vk, target_ak)
+                    lookup[(pn, src_res)] = (target_vk, target_ak, downto)
                 else:
-                    lookup[(pn, src_res)] = (vk, ak)
+                    lookup[(pn, src_res)] = (vk, ak, src_res)
         return lookup
+
+    def _LoadDefaultProfileName(self) -> Optional[str]:
+        """Read SystemSetting('DefaultProfileName'). One query per recompute call."""
+        try:
+            from Features.SystemSettings.SystemSettingsRepository import SystemSettingsRepository
+            return SystemSettingsRepository().GetSystemSetting('DefaultProfileName')
+        except Exception as Ex:
+            LoggingService.LogException(
+                "Failed to read SystemSetting('DefaultProfileName'); compliance evaluation will be undecidable",
+                Ex, "QueueManagementBusinessService", "_LoadDefaultProfileName"
+            )
+            return None
+
+    def _LoadShowProfileOverrides(self) -> Dict[str, str]:
+        """Return {ShowFolder: AssignedProfile} for shows with a non-NULL override.
+
+        ShowFolder is stored as 'T:\\Survivor' (drive letter + first segment).
+        Used by _GetEffectiveProfileFromCache to resolve per-show overrides.
+        """
+        from Core.Database.DatabaseService import DatabaseService
+        try:
+            rows = DatabaseService().ExecuteQuery(
+                "SELECT ShowFolder, AssignedProfile FROM ShowSettings WHERE AssignedProfile IS NOT NULL"
+            )
+            return {(r['ShowFolder'] or '').lower(): r['AssignedProfile'] for r in rows if r['ShowFolder']}
+        except Exception as Ex:
+            LoggingService.LogException(
+                "Failed to load ShowSettings overrides; per-show overrides will not apply this cycle",
+                Ex, "QueueManagementBusinessService", "_LoadShowProfileOverrides"
+            )
+            return {}
+
+    def _LoadAudioNormalizedSet(self, MediaFileIds: List[int]) -> set:
+        """Return the subset of MediaFileIds whose most-recent successful TranscodeAttempt
+        had `loudnorm` in its FFpmpegCommand.
+
+        Files with no successful attempts do NOT appear in the returned set -- they
+        are treated as un-normalized by compliance evaluation (criterion 13). The
+        column name `FFpmpegCommand` carries a known double-`p` typo (see CLAUDE.md).
+        """
+        if not MediaFileIds:
+            return set()
+        from Core.Database.DatabaseService import DatabaseService
+        try:
+            placeholders = ','.join(['%s'] * len(MediaFileIds))
+            rows = DatabaseService().ExecuteQuery(
+                f"""
+                SELECT DISTINCT ON (a.MediaFileId) a.MediaFileId,
+                       (a.FFpmpegCommand ILIKE '%%loudnorm%%') AS HasLoudnorm
+                FROM TranscodeAttempts a
+                WHERE a.MediaFileId IN ({placeholders})
+                  AND a.Success = true
+                  AND a.FFpmpegCommand IS NOT NULL
+                ORDER BY a.MediaFileId, a.AttemptDate DESC
+                """,
+                tuple(MediaFileIds)
+            )
+            return {int(r['MediaFileId']) for r in rows if r.get('HasLoudnorm')}
+        except Exception as Ex:
+            LoggingService.LogException(
+                f"Failed to load audio-normalized set for {len(MediaFileIds)} ids; treating all as un-normalized",
+                Ex, "QueueManagementBusinessService", "_LoadAudioNormalizedSet"
+            )
+            return set()
+
+    @staticmethod
+    def _ResolutionCategoryFromPixels(Resolution: Optional[str]) -> Optional[str]:
+        """Derive '480p' / '720p' / '1080p' / '2160p' from a 'WIDTHxHEIGHT' string.
+
+        Mirrors DatabaseManager._ConvertPixelDimensionsToResolutionCategory but
+        returns None on bad input rather than echoing the original. Used as a
+        fallback in the compliance cascade when the cached ResolutionCategory
+        column is NULL but raw Resolution is populated -- common on older
+        MediaVortex outputs where the post-replacement re-probe didn't set the
+        cached column.
+        """
+        if not Resolution or 'x' not in Resolution:
+            return None
+        try:
+            height = int(Resolution.split('x')[1])
+        except (ValueError, IndexError):
+            return None
+        if height >= 2160:
+            return '2160p'
+        if height >= 1080:
+            return '1080p'
+        if height >= 720:
+            return '720p'
+        if height >= 480:
+            return '480p'
+        return '480p'
+
+    @staticmethod
+    def _ExtractShowFolder(FilePath: Optional[str]) -> Optional[str]:
+        """Extract 'T:\\Survivor' from 'T:\\Survivor\\Season 1\\file.mkv'. Same shape
+        as ShowSettings.ShowFolder so a dict lookup matches without normalization."""
+        if not FilePath:
+            return None
+        Parts = FilePath.replace('\\', '/').split('/')
+        if len(Parts) >= 2 and Parts[0] and Parts[1]:
+            return Parts[0] + '\\' + Parts[1]
+        return None
+
+    def _GetEffectiveProfileFromCache(
+        self,
+        FilePath: Optional[str],
+        ShowOverrides: Dict[str, str],
+        DefaultProfileName: Optional[str],
+    ) -> Optional[str]:
+        """Resolve the cascade: ShowSettings.AssignedProfile -> SystemSettings('DefaultProfileName').
+
+        Pure function over the pre-loaded caches -- no DB calls. Used per row in
+        the bulk RecomputeForFiles loop. Returns None if the SystemSetting is
+        unset (compliance becomes undecidable).
+        """
+        ShowFolder = self._ExtractShowFolder(FilePath)
+        if ShowFolder:
+            Override = ShowOverrides.get(ShowFolder.lower())
+            if Override:
+                return Override
+        return DefaultProfileName
+
+    def _EvaluateCompliance(
+        self,
+        Row: Dict[str, Any],
+        EffectiveProfile: Optional[str],
+        Lookup: Dict[tuple, tuple],
+        NormalizedIds: set,
+    ) -> tuple:
+        """Pure compliance cascade. Returns (IsCompliant, RecommendedMode).
+
+        Mirrors transcode-vs-remux-routing.feature.md criterion 11. None for
+        IsCompliant means "undecidable" (hard-block or missing inputs);
+        otherwise true/false. RecommendedMode is 'Transcode', 'Remux', or None.
+        """
+        # a. Hard block: no English audio
+        if Row.get('HasExplicitEnglishAudio') is False:
+            return (None, None)
+
+        # b. Effective profile cannot be resolved
+        if not EffectiveProfile:
+            return (None, None)
+
+        # Need a resolution category for the lookup key. Prefer the cached
+        # ResolutionCategory column; fall back to deriving from raw Resolution
+        # when the cache is NULL (older MediaVortex outputs and pre-cache rows).
+        ResKey = Row.get('ResolutionCategory')
+        if not ResKey:
+            ResKey = self._ResolutionCategoryFromPixels(Row.get('Resolution'))
+        if not ResKey:
+            return (None, None)
+
+        Settings = Lookup.get((EffectiveProfile, ResKey))
+        if not Settings:
+            return (None, None)
+
+        TargetVideoKbps, TargetAudioKbps, TargetResCat = Settings
+        if TargetVideoKbps is None or TargetAudioKbps is None:
+            return (None, None)
+
+        # c. Transcode wins -- video codec acceptability, downscale-needed, savings threshold
+        VideoCodec = (Row.get('Codec') or '').lower()
+        if VideoCodec and VideoCodec not in self.ACCEPTABLE_VIDEO_CODECS:
+            return (False, 'Transcode')
+
+        # Resolution downscale needed?
+        SrcRank = self.RESOLUTION_RANK.get(ResKey, -1)
+        TgtRank = self.RESOLUTION_RANK.get(TargetResCat, -1)
+        if SrcRank > 0 and TgtRank >= 0 and SrcRank > TgtRank:
+            return (False, 'Transcode')
+
+        # Estimated savings >= threshold?
+        SizeMB = Row.get('SizeMB') or 0
+        DurationMin = Row.get('DurationMinutes') or 0
+        if SizeMB > 0 and DurationMin > 0 and (TargetVideoKbps or 0) > 0:
+            TargetSizeMB = ((TargetVideoKbps + (TargetAudioKbps or 0)) * DurationMin * 60.0) / (8 * 1024)
+            EstSavingsMB = SizeMB - TargetSizeMB
+            if EstSavingsMB >= self.MIN_SAVINGS_MB:
+                return (False, 'Transcode')
+
+        # d. Remux is enough -- container, audio codec, audio normalization.
+        # ContainerFormat from FFprobe is a comma-separated list of equivalent
+        # format names (e.g. 'mov,mp4,m4a,3gp,3g2,mj2' for the MP4 family,
+        # 'matroska,webm' for MKV). Compatible if ANY part matches.
+        ContainerRaw = (Row.get('ContainerFormat') or '').lower()
+        ContainerParts = {p.strip() for p in ContainerRaw.split(',') if p.strip()}
+        AudioCodec = (Row.get('AudioCodec') or '').lower()
+        IsNormalized = int(Row.get('Id') or 0) in NormalizedIds
+
+        if ContainerParts and not (ContainerParts & self.COMPATIBLE_CONTAINERS):
+            return (False, 'Remux')
+        if AudioCodec and AudioCodec not in self.MP4_COMPATIBLE_AUDIO_CODECS:
+            return (False, 'Remux')
+        if not IsNormalized:
+            return (False, 'Remux')
+
+        # e. Already compliant
+        return (True, None)
 
     def ComputePriorityScore(self, MediaFileId: int) -> Optional[int]:
         """Recompute and persist MediaFiles.PriorityScore for a single file.
@@ -1107,99 +1317,144 @@ class QueueManagementBusinessService:
             )
             return None
 
-    def ComputePriorityScoresForFiles(self, MediaFileIds: List[int]) -> int:
-        """Bulk-recompute MediaFiles.PriorityScore for the given IDs.
+    def RecomputeForFiles(self, MediaFileIds: List[int]) -> int:
+        """Bulk-recompute the four cached fields on MediaFiles for the given IDs.
 
-        Single round-trip per batch using a profile-thresholds cache and a
-        single bulk UPDATE FROM VALUES. Returns the count of rows updated.
-        Failures in individual rows do not abort the batch -- they are logged
-        and the affected row is skipped.
+        Computes in a single pass per row:
+          - AssignedProfile  (cascade: ShowSettings -> SystemSettings.DefaultProfileName)
+          - PriorityScore    (existing impact-based score against the cascade-resolved profile)
+          - IsCompliant      (NULL/true/false per the compliance cascade)
+          - RecommendedMode  ('Transcode' / 'Remux' / NULL)
+
+        Single round-trip for the rows; one bulk UPDATE FROM VALUES for the writes.
+        Replaces the prior ComputePriorityScoresForFiles. Returns rows updated.
+        Failures on individual rows do not abort the batch.
         """
         if not MediaFileIds:
             return 0
         try:
             from Core.Database.DatabaseService import DatabaseService
             db = DatabaseService()
-            lookup = self._LoadPriorityLookupTable()
+
+            # Load all caches once per call.
+            Lookup = self._LoadPriorityLookupTable()
+            DefaultProfile = self._LoadDefaultProfileName()
+            ShowOverrides = self._LoadShowProfileOverrides()
+            NormalizedIds = self._LoadAudioNormalizedSet(MediaFileIds)
 
             placeholders = ','.join(['%s'] * len(MediaFileIds))
             rows = db.ExecuteQuery(
                 f"""
-                SELECT Id, FileName, SizeMB, DurationMinutes, AssignedProfile,
-                       ResolutionCategory, Resolution
+                SELECT Id, FilePath, FileName, SizeMB, DurationMinutes, AssignedProfile,
+                       ResolutionCategory, Resolution, Codec, ContainerFormat,
+                       AudioCodec, HasExplicitEnglishAudio
                 FROM MediaFiles WHERE Id IN ({placeholders})
                 """,
                 tuple(MediaFileIds)
             )
 
-            updates = []  # list[(id, score)]
-            fallbackCount = 0
+            updates = []  # list[(id, profile_or_none, score, is_compliant_or_none, recommended_or_none)]
             for r in rows:
                 try:
+                    EffectiveProfile = self._GetEffectiveProfileFromCache(
+                        r.get('FilePath'), ShowOverrides, DefaultProfile
+                    )
+
+                    # Priority calc -- prefer ResolutionCategory, derive from
+                    # raw Resolution as fallback (same logic the compliance
+                    # cascade uses).
+                    ResKey = r.get('ResolutionCategory')
+                    if not ResKey:
+                        ResKey = self._ResolutionCategoryFromPixels(r.get('Resolution'))
+                    TargetVideoKbps = None
+                    TargetAudioKbps = None
+                    if EffectiveProfile and ResKey:
+                        Settings = Lookup.get((EffectiveProfile, ResKey))
+                        if Settings:
+                            TargetVideoKbps = Settings[0]
+                            TargetAudioKbps = Settings[1]
+
                     class _Row:
                         pass
-                    m = _Row()
-                    m.Id = r['Id']
-                    m.FileName = r.get('FileName')
-                    m.SizeMB = r.get('SizeMB') or 0
-                    m.DurationMinutes = r.get('DurationMinutes') or 0
-
-                    profile = r.get('AssignedProfile')
-                    res_key = r.get('ResolutionCategory') or r.get('Resolution')
-
-                    targetVideoKbps = None
-                    targetAudioKbps = None
-                    if profile and res_key:
-                        settings = lookup.get((profile, res_key))
-                        if settings:
-                            targetVideoKbps, targetAudioKbps = settings
-
-                    if not (targetVideoKbps is not None and targetAudioKbps is not None and m.DurationMinutes > 0):
-                        fallbackCount += 1
-
-                    score = self.CalculatePriority(
-                        m,
-                        TargetVideoKbps=targetVideoKbps,
-                        TargetAudioKbps=targetAudioKbps,
+                    M = _Row()
+                    M.Id = r['Id']
+                    M.FileName = r.get('FileName')
+                    M.SizeMB = r.get('SizeMB') or 0
+                    M.DurationMinutes = r.get('DurationMinutes') or 0
+                    Score = self.CalculatePriority(
+                        M,
+                        TargetVideoKbps=TargetVideoKbps,
+                        TargetAudioKbps=TargetAudioKbps,
                         SuppressFallbackWarning=True,
                     )
-                    updates.append((int(r['Id']), int(score)))
+
+                    # Compliance evaluation
+                    IsCompliant, RecommendedMode = self._EvaluateCompliance(
+                        r, EffectiveProfile, Lookup, NormalizedIds
+                    )
+
+                    updates.append((
+                        int(r['Id']),
+                        EffectiveProfile,
+                        int(Score),
+                        IsCompliant,
+                        RecommendedMode,
+                    ))
                 except Exception as RowEx:
                     LoggingService.LogException(
-                        f"Per-row compute failed for MediaFileId={r.get('Id')}",
-                        RowEx, "QueueManagementBusinessService", "ComputePriorityScoresForFiles"
+                        f"Per-row recompute failed for MediaFileId={r.get('Id')}",
+                        RowEx, "QueueManagementBusinessService", "RecomputeForFiles"
                     )
                     continue
-
-            if fallbackCount > 0:
-                LoggingService.LogWarning(
-                    f"ComputePriorityScoresForFiles: {fallbackCount}/{len(rows)} rows "
-                    f"used the size*0.5 fallback (missing AssignedProfile, ProfileThresholds, "
-                    f"or DurationMinutes). Per-row IDs not enumerated to avoid log spam; "
-                    f"query MediaFiles WHERE PriorityScore IS NOT NULL AND AssignedProfile "
-                    f"IS NULL to find them.",
-                    "QueueManagementBusinessService", "ComputePriorityScoresForFiles"
-                )
 
             if not updates:
                 return 0
 
-            # Bulk UPDATE via VALUES clause. Both id and score are ints (validated
-            # above), so format-string interpolation is injection-safe here.
-            values_clause = ','.join(f"({i},{s})" for i, s in updates)
+            # Bulk UPDATE via VALUES. Quote NULLable text fields properly. id and
+            # score are ints (validated). Booleans -> 'true'/'false'/'NULL'.
+            def _SqlText(s):
+                if s is None:
+                    return 'NULL'
+                # Escape single quotes to keep the inline VALUES safe. ProfileName
+                # comes from Profiles.ProfileName which we control, but defense in
+                # depth -- this isn't a tight loop.
+                return "'" + str(s).replace("'", "''") + "'"
+
+            def _SqlBool(b):
+                if b is None:
+                    return 'NULL'
+                return 'true' if b else 'false'
+
+            values_clause = ','.join(
+                f"({i},{_SqlText(p)},{s},{_SqlBool(ic)},{_SqlText(rm)})"
+                for i, p, s, ic, rm in updates
+            )
             db.ExecuteNonQuery(f"""
                 UPDATE MediaFiles
-                SET PriorityScore = v.score
-                FROM (VALUES {values_clause}) AS v(id, score)
+                SET AssignedProfile = v.profile,
+                    PriorityScore = v.score,
+                    IsCompliant = v.compliant::boolean,
+                    RecommendedMode = v.mode
+                FROM (VALUES {values_clause}) AS v(id, profile, score, compliant, mode)
                 WHERE MediaFiles.Id = v.id
             """)
             return len(updates)
         except Exception as Ex:
             LoggingService.LogException(
-                f"ComputePriorityScoresForFiles failed for {len(MediaFileIds)} ids",
-                Ex, "QueueManagementBusinessService", "ComputePriorityScoresForFiles"
+                f"RecomputeForFiles failed for {len(MediaFileIds)} ids",
+                Ex, "QueueManagementBusinessService", "RecomputeForFiles"
             )
             return 0
+
+    def ComputePriorityScoresForFiles(self, MediaFileIds: List[int]) -> int:
+        """Backwards-compat alias for RecomputeForFiles.
+
+        Older callers (BackfillPriorityScores.py, queue-time recompute hooks
+        added by priority-materialization.feature.md) still use this name. Now
+        wired to the unified updater; computes priority + compliance + cached
+        AssignedProfile in one pass.
+        """
+        return self.RecomputeForFiles(MediaFileIds)
 
     def AddJobToQueue(self, MediaFileId: int, Priority: int = None, ProfileId: int = None, StartTime: str = None, ForceAdd: bool = False) -> Dict[str, Any]:
         """Add a specific media file to the transcoding queue. Simple logic: if it has a profile or user selects one, add it."""

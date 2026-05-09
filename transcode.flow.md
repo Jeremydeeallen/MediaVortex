@@ -250,16 +250,17 @@ Rationale: ordering by raw size (the legacy behavior) put already-efficient AV1 
   2. Validate both original and transcoded files exist on disk
   3. **Post-flight benefit gate** (no-benefit-handling.feature.md): compare `attempt.NewSizeMB` to `attempt.OriginalSizeMB`. If `New >= Original`, the transcode produced an equal-or-larger output. Refuse to replace, delete the staged transcoded file, set `MediaFiles.LastTranscodeOutcome = 'NoSavings'`, log loudly, and return without touching the original. Stage 4's no-savings filter then prevents re-queueing.
   4. Archive original metadata to MediaFilesArchive
-  5. Delete original file from disk
-  6. Move transcoded file to original location
-  7. Re-probe new file via FFprobe (fresh metadata)
-  8. Update MediaFiles with new metadata
-  9. Set `TranscodedByMediaVortex = true`
+  5. **Atomic rename-and-replace** (was a plain delete + move pre-2026-05-09): rename `original.ext -> original.ext.orig` first, then move staged file to the original location with the side-by-side suffix stripped. Verify target is non-zero. On any filesystem-level failure, rollback restores the `.orig` and returns `Success=false`. Pre-existing `.orig` from a prior failed run causes refusal, not overwrite.
+  6. Re-probe new file via FFprobe (fresh metadata)
+  7. Update MediaFiles with new metadata
+  8. Set `TranscodedByMediaVortex = true`
+  9. Settle the `.orig` backup: delete it if `KeepSource=false`, rename to legacy `.old<ext>` if `KeepSource=true`. The original is never deleted until after the new file is verified on disk.
 
 **Tables written:** MediaFiles (new metadata, TranscodedByMediaVortex=true OR LastTranscodeOutcome='NoSavings'), MediaFilesArchive (snapshot), TranscodeAttempt (FileReplaced, FileReplacedDate)
 
 **Safety guards:**
 - Archive before delete: original metadata always saved
+- **Rename-then-replace with rollback**: original is renamed to `.orig` *before* the staged file is moved into its place. Any filesystem failure rolls back the rename. Original is never destroyed until after the new file is verified on disk. The 2026-05-09 incident (FFmpeg truncated source via output==input collision) cannot recur even if a future bug re-introduces a similar fault, because the original is no longer at the path FFmpeg writes to.
 - FileReplaced flag prevents duplicate replacements
 - Re-probe after move ensures metadata reflects actual file
 - `TranscodedByMediaVortex = true` prevents infinite re-queue loops

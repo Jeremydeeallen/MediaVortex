@@ -445,19 +445,42 @@ class FileReplacementBusinessService:
 
 
     def _ProcessCompleteFileReplacement(self, OriginalFilePath: str, TranscodedFilePath: str, KeepSource: bool, NetworkOriginalPath: str = None) -> Dict[str, Any]:
-        """Process file replacement: delete original, update DB.
+        """Atomic-replace pattern with rollback. Never mutates the original until
+        a verified new file is in place; never leaves the disk in a half-moved
+        state on failure.
+
+        Sequence:
+          1. Rename `original.ext` -> `original.ext.orig` (backup; instant on
+             same filesystem). Refuses to clobber a pre-existing `.orig`.
+          2. Compute final TargetPath. If the staged filename ends in
+             `_remuxed.mp4` or `_subfix.mp4`, strip that side-by-side suffix
+             so the final name matches the operator's expectation. Transcode
+             jobs keep their resolution suffix (e.g. `_480p.mp4`).
+          3. Move staged file to TargetPath.
+          4. Verify TargetPath exists on disk and is non-zero.
+          5. Update MediaFiles row (re-probe + metadata refresh).
+          6. Settle the .orig backup: delete it if !KeepSource, otherwise
+             rename to legacy `.old<ext>` convention for the operator.
+
+        Rollback (any failure between steps 2-5):
+          - Delete TargetPath if a partial new file landed there.
+          - Rename `original.ext.orig` back to `original.ext`.
+          - Return Success=False; original is bit-identical to its pre-call state.
+
+        Step 5's DB update failure does NOT roll back -- the file is on disk
+        correctly and a future probe reconciles the row. Same as before.
 
         All paths from the DB are canonical (T:\\...). PathTranslation converts them
         to local mount paths before any filesystem operation.
 
         Args:
             OriginalFilePath: Canonical path to the original file
-            TranscodedFilePath: Canonical path to the transcoded file
-            KeepSource: Whether to keep the original file (rename to .old) or delete it
+            TranscodedFilePath: Canonical path to the staged file (e.g. file_remuxed.mp4)
+            KeepSource: True keeps the .orig backup as `.old<ext>`; False deletes it
             NetworkOriginalPath: Canonical path for DB lookups (same as OriginalFilePath)
         """
+        import shutil
         try:
-            # Translate canonical paths to local filesystem paths
             LocalOriginalPath = self._ToLocalPath(OriginalFilePath)
             LocalTranscodedPath = self._ToLocalPath(TranscodedFilePath)
 
@@ -466,65 +489,111 @@ class FileReplacementBusinessService:
 
             StepsCompleted = []
 
-            # Step 1: Handle original file based on KeepSource setting
-            if os.path.exists(LocalOriginalPath):
-                if KeepSource:
-                    OriginalDir = os.path.dirname(LocalOriginalPath)
-                    OriginalFilename = os.path.basename(LocalOriginalPath)
-                    OriginalName, OriginalExt = os.path.splitext(OriginalFilename)
-                    RenamedPath = os.path.join(OriginalDir, f"{OriginalName}.old{OriginalExt}")
-
-                    try:
-                        os.rename(LocalOriginalPath, RenamedPath)
-                        StepsCompleted.append(f"Renamed original file to {RenamedPath}")
-                        LoggingService.LogInfo(f"Successfully renamed original file to: {RenamedPath}",
-                                             "FileReplacementBusinessService", "_ProcessCompleteFileReplacement")
-                    except Exception as e:
-                        ErrorMsg = f"Failed to rename original file to .old: {str(e)}"
-                        LoggingService.LogError(ErrorMsg, "FileReplacementBusinessService", "_ProcessCompleteFileReplacement")
-                        return {'Success': False, 'ErrorMessage': ErrorMsg}
-                else:
-                    try:
-                        os.remove(LocalOriginalPath)
-                        StepsCompleted.append("Deleted original file")
-                        LoggingService.LogInfo(f"Successfully deleted original file: {LocalOriginalPath}",
-                                             "FileReplacementBusinessService", "_ProcessCompleteFileReplacement")
-                    except Exception as e:
-                        ErrorMsg = f"Failed to delete original file: {str(e)}"
-                        LoggingService.LogError(ErrorMsg, "FileReplacementBusinessService", "_ProcessCompleteFileReplacement")
-                        return {'Success': False, 'ErrorMessage': ErrorMsg}
-            else:
-                StepsCompleted.append("Original file was already deleted")
-                LoggingService.LogInfo(f"Original file was already deleted: {LocalOriginalPath}",
-                                     "FileReplacementBusinessService", "_ProcessCompleteFileReplacement")
-
-            # Step 2: Move transcoded file to original directory if needed (InPlace = already there)
+            # Compute the final target path. Strip side-by-side suffixes so the
+            # operator-visible filename matches expectations after remux/subfix.
             OriginalDir = os.path.dirname(LocalOriginalPath)
             TranscodedFilename = os.path.basename(LocalTranscodedPath)
+            for SideBySideSuffix in ("_remuxed.mp4", "_subfix.mp4"):
+                if TranscodedFilename.endswith(SideBySideSuffix):
+                    TranscodedFilename = TranscodedFilename[: -len(SideBySideSuffix)] + ".mp4"
+                    break
             TargetPath = os.path.join(OriginalDir, TranscodedFilename)
 
-            if os.path.normpath(LocalTranscodedPath) != os.path.normpath(TargetPath):
+            # Step 1: rename original to .orig (atomic backup). Track the
+            # backup path so any subsequent failure can roll back.
+            OrigBackupPath = None
+            if os.path.exists(LocalOriginalPath):
+                CandidateBackup = LocalOriginalPath + ".orig"
+                if os.path.exists(CandidateBackup):
+                    ErrorMsg = (
+                        f"Pre-existing .orig backup at {CandidateBackup}. Refusing to overwrite -- "
+                        f"a prior replacement may have failed and needs manual cleanup before this can proceed."
+                    )
+                    LoggingService.LogError(ErrorMsg, "FileReplacementBusinessService", "_ProcessCompleteFileReplacement")
+                    return {'Success': False, 'ErrorMessage': ErrorMsg}
                 try:
-                    import shutil
-                    shutil.move(LocalTranscodedPath, TargetPath)
-                    StepsCompleted.append(f"Moved transcoded file to {TargetPath}")
-                    LoggingService.LogInfo(f"Successfully moved transcoded file to: {TargetPath}",
+                    os.rename(LocalOriginalPath, CandidateBackup)
+                    OrigBackupPath = CandidateBackup
+                    StepsCompleted.append(f"Renamed original to backup: {OrigBackupPath}")
+                    LoggingService.LogInfo(f"Renamed original to backup: {OrigBackupPath}",
                                          "FileReplacementBusinessService", "_ProcessCompleteFileReplacement")
                 except Exception as e:
-                    ErrorMsg = f"Failed to move transcoded file to original location: {str(e)}"
+                    ErrorMsg = f"Failed to rename original to .orig backup: {str(e)}"
                     LoggingService.LogError(ErrorMsg, "FileReplacementBusinessService", "_ProcessCompleteFileReplacement")
                     return {'Success': False, 'ErrorMessage': ErrorMsg}
             else:
-                StepsCompleted.append("Transcoded file already in correct location (InPlace)")
-                LoggingService.LogInfo("Transcoded file already in correct location (InPlace output mode)",
+                StepsCompleted.append("Original was already absent (no backup needed)")
+                LoggingService.LogInfo(f"Original was already absent: {LocalOriginalPath}",
                                      "FileReplacementBusinessService", "_ProcessCompleteFileReplacement")
 
-            # Step 3: Update MediaFiles table with new file information
-            # Use canonical path for DB lookup, canonical target path for the new FilePath.
-            # Canonical paths in the DB are Windows-flavored ("T:\\..."). Use ntpath so
-            # this works on Linux workers too -- os.path.dirname on Linux does not treat
-            # "\\" as a separator and would silently return "", producing a filename-only
-            # CanonicalNewPath that FFprobe cannot resolve during the re-probe step.
+            def _Rollback(Reason: str) -> None:
+                """Restore original from .orig backup. Removes any partial
+                target file first. Logs the rollback reason loudly."""
+                try:
+                    if os.path.exists(TargetPath):
+                        try:
+                            os.remove(TargetPath)
+                            LoggingService.LogInfo(f"Rollback: removed partial target {TargetPath}",
+                                                 "FileReplacementBusinessService", "_ProcessCompleteFileReplacement")
+                        except Exception as RmEx:
+                            LoggingService.LogException(
+                                f"Rollback: could not remove partial target {TargetPath}",
+                                RmEx, "FileReplacementBusinessService", "_ProcessCompleteFileReplacement"
+                            )
+                    if OrigBackupPath and os.path.exists(OrigBackupPath):
+                        os.rename(OrigBackupPath, LocalOriginalPath)
+                        LoggingService.LogWarning(
+                            f"Rollback complete -- original restored from {OrigBackupPath} (cause: {Reason})",
+                            "FileReplacementBusinessService", "_ProcessCompleteFileReplacement"
+                        )
+                except Exception as RbEx:
+                    LoggingService.LogException(
+                        f"CRITICAL: rollback failed -- original may be at {OrigBackupPath} requiring manual recovery",
+                        RbEx, "FileReplacementBusinessService", "_ProcessCompleteFileReplacement"
+                    )
+
+            # Step 2/3: move staged file to TargetPath. shutil.move is atomic
+            # rename within the same filesystem.
+            try:
+                if os.path.normpath(LocalTranscodedPath) == os.path.normpath(TargetPath):
+                    # The staged file is already at the final target path.
+                    # This means CommandBuilder did not apply a side-by-side
+                    # suffix -- a critical contract violation. Refuse to
+                    # proceed because we have no clear way to know whether
+                    # the file at TargetPath is the new output or the original
+                    # (pre-rename) source.
+                    _Rollback("staging path equals final target path -- side-by-side suffix not applied by CommandBuilder")
+                    return {
+                        'Success': False,
+                        'ErrorMessage': (
+                            "Staged file is at the final target path. The side-by-side suffix contract "
+                            "from BuildRemuxCommand/BuildCommand was not honored; refusing to overwrite."
+                        )
+                    }
+                shutil.move(LocalTranscodedPath, TargetPath)
+                StepsCompleted.append(f"Moved staged file to {TargetPath}")
+                LoggingService.LogInfo(f"Moved staged file to {TargetPath}",
+                                     "FileReplacementBusinessService", "_ProcessCompleteFileReplacement")
+            except Exception as e:
+                _Rollback(f"shutil.move failed: {str(e)}")
+                return {'Success': False, 'ErrorMessage': f"Failed to move staged file to target: {str(e)}"}
+
+            # Step 4: verify target file is non-zero on disk before declaring success.
+            try:
+                TargetSize = os.path.getsize(TargetPath)
+            except Exception as e:
+                _Rollback(f"could not stat target after move: {str(e)}")
+                return {'Success': False, 'ErrorMessage': f"Could not stat target after move: {str(e)}"}
+            if TargetSize <= 0:
+                _Rollback(f"target file is empty after move (size={TargetSize})")
+                return {'Success': False, 'ErrorMessage': f"Target file is empty: {TargetPath}"}
+            StepsCompleted.append(f"Verified target file exists and has {TargetSize} bytes")
+
+            # Step 5: Update MediaFiles table with new file information.
+            # NOTE: failure here does NOT roll back -- the new file is on disk
+            # correctly; a future probe will reconcile the DB row. This matches
+            # prior behavior. Only steps 1-4 (filesystem operations) trigger
+            # rollback.
             CanonicalOriginal = NetworkOriginalPath or OriginalFilePath
             CanonicalNewPath = ntpath.join(ntpath.dirname(CanonicalOriginal), TranscodedFilename)
             UpdateResult = self._UpdateMediaFilesAfterReplacement(CanonicalOriginal, CanonicalNewPath)
@@ -533,17 +602,41 @@ class FileReplacementBusinessService:
                 LoggingService.LogInfo("Successfully updated MediaFiles table",
                                      "FileReplacementBusinessService", "_ProcessCompleteFileReplacement")
             else:
-                # Don't double-wrap the error here -- _UpdateMediaFilesAfterReplacement
-                # already logged the original FFprobe exception via LogError. Just note
-                # at this layer that the post-replace pipeline is incomplete so an operator
-                # following the trail through Logs can see both the cause (FFprobe stderr)
-                # and the consequence (MediaFiles row not updated).
                 LoggingService.LogWarning(
                     f"MediaFiles update skipped after successful replacement -- transcoded file is on disk "
                     f"but DB row still reflects the original (see prior LogError for FFprobe cause). "
                     f"Local: '{UpdateResult.get('LocalNewFilePath')}', Canonical: '{UpdateResult.get('CanonicalNewFilePath')}'",
                     "FileReplacementBusinessService", "_ProcessCompleteFileReplacement"
                 )
+
+            # Step 6: settle the .orig backup. Replacement succeeded; original
+            # is no longer needed unless KeepSource=True.
+            if OrigBackupPath and os.path.exists(OrigBackupPath):
+                if KeepSource:
+                    OriginalFilename = os.path.basename(LocalOriginalPath)
+                    OriginalName, OriginalExt = os.path.splitext(OriginalFilename)
+                    LegacyOldPath = os.path.join(OriginalDir, f"{OriginalName}.old{OriginalExt}")
+                    try:
+                        os.rename(OrigBackupPath, LegacyOldPath)
+                        StepsCompleted.append(f"Kept original backup as {LegacyOldPath}")
+                        LoggingService.LogInfo(f"Kept original backup at {LegacyOldPath}",
+                                             "FileReplacementBusinessService", "_ProcessCompleteFileReplacement")
+                    except Exception as e:
+                        LoggingService.LogWarning(
+                            f"Could not rename .orig to .old (left at {OrigBackupPath}): {str(e)}",
+                            "FileReplacementBusinessService", "_ProcessCompleteFileReplacement"
+                        )
+                else:
+                    try:
+                        os.remove(OrigBackupPath)
+                        StepsCompleted.append("Deleted .orig backup")
+                        LoggingService.LogInfo(f"Deleted .orig backup at {OrigBackupPath}",
+                                             "FileReplacementBusinessService", "_ProcessCompleteFileReplacement")
+                    except Exception as e:
+                        LoggingService.LogWarning(
+                            f"Could not delete .orig backup (left at {OrigBackupPath}): {str(e)}",
+                            "FileReplacementBusinessService", "_ProcessCompleteFileReplacement"
+                        )
 
             return {
                 'Success': True,

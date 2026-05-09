@@ -410,7 +410,19 @@ class CommandBuilder:
     MP4_COMPATIBLE_AUDIO = ['aac', 'ac3', 'eac3', 'mp3']
 
     def BuildRemuxCommand(self, CommandData: Dict[str, Any]) -> Optional[Dict[str, str]]:
-        """Build FFmpeg remux command: copy video, handle audio conditionally, output MP4."""
+        """Build FFmpeg remux command: copy video, re-encode audio with normalization,
+        output MP4 to a SIDE-BY-SIDE path. Original is never touched by FFmpeg.
+
+        Output path is ALWAYS `<basename>_remuxed.mp4`, regardless of source
+        extension. FileReplacement moves the side-by-side file over the original
+        only after verifying the output is complete and valid. If the remux
+        fails for any reason, the original is guaranteed untouched.
+
+        Pre-2026-05-09 a path-collision bug existed: source `.mp4` + InPlace
+        mode produced OutputPath == InputPath, FFmpeg with `-y` truncated the
+        source before erroring. One file was lost during the smoke test that
+        surfaced the bug. Fix: always write to a distinct sibling path.
+        """
         try:
             Job = CommandData.get('Job')
             MediaFile = CommandData.get('MediaFile')
@@ -420,7 +432,11 @@ class CommandBuilder:
                 return None
 
             InputPath = CommandData.get('InputPath', f"c:\\MediaVortex\\Source\\{MediaFile.FileName}")
-            OutputFileName = os.path.splitext(MediaFile.FileName)[0] + ".mp4"
+            BaseName = os.path.splitext(MediaFile.FileName)[0]
+            # Always use the side-by-side suffix. FileReplacement strips it
+            # when moving the new file over the original. Never reuse the
+            # source basename -- see docstring above.
+            OutputFileName = BaseName + "_remuxed.mp4"
 
             OutputMode = CommandData.get('TranscodeOutputMode', 'InPlace')
             if OutputMode == 'Staging':
@@ -428,6 +444,18 @@ class CommandBuilder:
             else:
                 OutputDirectory = os.path.dirname(InputPath.strip('"'))
             OutputPath = os.path.join(OutputDirectory, OutputFileName)
+
+            # Defense in depth: refuse to build a command where output path
+            # would equal input path. Should be unreachable given the suffix
+            # above, but a regression here would silently destroy source
+            # files. Cheap insurance.
+            if os.path.normcase(os.path.normpath(OutputPath)) == os.path.normcase(os.path.normpath(InputPath.strip('"'))):
+                LoggingService.LogError(
+                    f"BuildRemuxCommand: refusing to build a command where OutputPath == InputPath ({InputPath}). "
+                    f"This must never happen given the unconditional `_remuxed` suffix.",
+                    "CommandBuilder", "BuildRemuxCommand"
+                )
+                return None
 
             FFmpegPath = CommandData.get('FFmpegPath')
             if not FFmpegPath:
@@ -442,8 +470,16 @@ class CommandBuilder:
             # Video: always copy (no re-encode)
             CommandParts.extend(['-c:v', 'copy'])
 
-            # Tag HEVC as hvc1 for broad device compatibility (Android TV, Apple, etc.)
-            CommandParts.extend(['-tag:v', 'hvc1'])
+            # Tag HEVC as hvc1 for broad device compatibility (Android TV,
+            # Apple, etc.). Only valid for HEVC sources -- applying hvc1 to
+            # an h264/avc1 stream causes FFmpeg to refuse the muxing
+            # ("Tag hvc1 incompatible with output codec id '27' (avc1)").
+            # Pre-2026-05-09 this was unconditional and silently fine because
+            # nothing routed h264 sources through remux; the routing cascade
+            # changes that.
+            VideoCodec = (getattr(MediaFile, 'Codec', '') or '').lower()
+            if VideoCodec in ('hevc', 'h265', 'x265'):
+                CommandParts.extend(['-tag:v', 'hvc1'])
 
             # Audio: always re-encode to AAC so the loudness-normalization
             # filter chain can apply (filters require decoded audio). Stream
@@ -475,7 +511,14 @@ class CommandBuilder:
             return None
 
     def BuildSubtitleFixCommand(self, CommandData: Dict[str, Any]) -> Optional[Dict[str, str]]:
-        """Build FFmpeg subtitle fix command: copy video+audio, convert ASS/SSA subtitle to mov_text, output MP4."""
+        """Build FFmpeg subtitle fix command: copy video, re-encode audio with
+        normalization, convert ASS/SSA subtitle to mov_text, output MP4 to a
+        SIDE-BY-SIDE path. Original is never touched by FFmpeg.
+
+        Output path is ALWAYS `<basename>_subfix.mp4`, never reuses the source
+        basename. FileReplacement performs the swap after validating the new
+        file. Same safety contract as BuildRemuxCommand.
+        """
         try:
             Job = CommandData.get('Job')
             MediaFile = CommandData.get('MediaFile')
@@ -487,7 +530,9 @@ class CommandBuilder:
                 return None
 
             InputPath = CommandData.get('InputPath', f"c:\\MediaVortex\\Source\\{MediaFile.FileName}")
-            OutputFileName = os.path.splitext(MediaFile.FileName)[0] + ".mp4"
+            BaseName = os.path.splitext(MediaFile.FileName)[0]
+            # Always use the side-by-side suffix.
+            OutputFileName = BaseName + "_subfix.mp4"
 
             OutputMode = CommandData.get('TranscodeOutputMode', 'InPlace')
             if OutputMode == 'Staging':
@@ -495,6 +540,16 @@ class CommandBuilder:
             else:
                 OutputDirectory = os.path.dirname(InputPath.strip('"'))
             OutputPath = os.path.join(OutputDirectory, OutputFileName)
+
+            # Defense in depth: refuse to build a command where output path
+            # equals input path. Unreachable with the unconditional suffix
+            # above, but a regression here destroys source files silently.
+            if os.path.normcase(os.path.normpath(OutputPath)) == os.path.normcase(os.path.normpath(InputPath.strip('"'))):
+                LoggingService.LogError(
+                    f"BuildSubtitleFixCommand: refusing to build a command where OutputPath == InputPath ({InputPath}).",
+                    "CommandBuilder", "BuildSubtitleFixCommand"
+                )
+                return None
 
             FFmpegPath = CommandData.get('FFmpegPath')
             if not FFmpegPath:
@@ -508,8 +563,11 @@ class CommandBuilder:
             # Video: copy (no re-encode)
             CommandParts.extend(['-c:v', 'copy'])
 
-            # Tag HEVC as hvc1 for broad device compatibility
-            CommandParts.extend(['-tag:v', 'hvc1'])
+            # Tag HEVC as hvc1 only for actual HEVC sources -- see same
+            # comment in BuildRemuxCommand. Applying hvc1 to h264/av1 fails.
+            VideoCodec = (getattr(MediaFile, 'Codec', '') or '').lower()
+            if VideoCodec in ('hevc', 'h265', 'x265'):
+                CommandParts.extend(['-tag:v', 'hvc1'])
 
             # Audio: always re-encode to AAC so the loudness-normalization
             # filter chain can apply -- same rationale as BuildRemuxCommand.

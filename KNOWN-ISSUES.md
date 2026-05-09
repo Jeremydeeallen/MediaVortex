@@ -2,6 +2,45 @@
 
 ## Open
 
+### [BUG - FIXED 2026-05-09] BuildRemuxCommand path-collision destroyed source file
+**Date:** 2026-05-09 | **Fixed:** 2026-05-09 (atomic rename-and-replace in FileReplacement)
+**Affects:** `Models/CommandBuilder.py` (`BuildRemuxCommand`, `BuildSubtitleFixCommand`), `Features/FileReplacement/FileReplacementBusinessService.py:_ProcessCompleteFileReplacement`. **One file lost: T:\IT - Welcome to Derry\Season 1\IT - Welcome to Derry - S01E04 - The Great Swirling Apparatus of Our Planet's Function WEBDL-480p.42.mp4** (MediaFileId 61707).
+
+Pre-2026-05-09 `BuildRemuxCommand` computed `OutputPath = OriginalDir + os.path.splitext(MediaFile.FileName)[0] + ".mp4"`. For an .mp4 source in InPlace mode that resolved to OutputPath == InputPath. FFmpeg invoked with `-y` truncates the output before validating that input != output (return code -22 EINVAL), so the source got zeroed and FFmpeg cleaned up the empty output. The original file was destroyed.
+
+The bug existed for the lifetime of `BuildRemuxCommand` but never triggered because the only Mode='Remux' producer (`PopulateQueueForRemux`) only fed .mkv sources where output extension `.mp4` differs from source. The cascade in `transcode-vs-remux-routing.feature.md` is the first thing that routes .mp4 sources to remux; the smoke test that surfaced the bug used a real production file.
+
+**Two-layer fix:**
+1. `Models/CommandBuilder.py`: `BuildRemuxCommand` and `BuildSubtitleFixCommand` ALWAYS use side-by-side suffix (`_remuxed.mp4` / `_subfix.mp4`) regardless of source extension. Defense-in-depth check refuses to build a command if OutputPath == InputPath would somehow occur.
+2. `Features/FileReplacement/FileReplacementBusinessService.py`: `_ProcessCompleteFileReplacement` rewritten to a rename-then-replace pattern with rollback. Original is renamed to `.orig` BEFORE the staged file is moved; on any filesystem-level failure the rollback restores the `.orig` and reports failure. Original is never deleted until after the new file is verified non-zero on disk. See `transcode.flow.md` Stage 7 and `Features/TranscodeQueue/remux.flow.md` "Safety contract."
+
+**Prior single-copy at risk:** the destroyed file was a 480p MediaVortex output from a 2026-03-26 transcode of an original 4K hevc source (snapshot in MediaFilesArchive, no file content). Operator should re-acquire via Sonarr or backup if available.
+
+**Look first if a similar shape ever recurs:** `Models/CommandBuilder.py` `BuildRemuxCommand` line 412-466 (suffix is unconditional now), `Features/FileReplacement/FileReplacementBusinessService.py:447` (`_ProcessCompleteFileReplacement` rollback path).
+
+**Lessons recorded:**
+- Smoke tests against real production files should require an explicit `--sandbox` opt-in or operate on a known-disposable copy.
+- Worker process restarts must be verified with a code-loaded check, not assumed.
+- Any file-replacement flow that doesn't preserve the original until after explicit verification is one bad command away from a destructive bug.
+
+---
+
+### [BUG] QualityTestEnabled flip mid-run does not reach the transcode producer; in-flight job replaces file with no VMAF
+**Date:** 2026-05-09
+**Affects:** WorkerService.feature.md (criterion 2, criterion 15), `Features/TranscodeJob/ProcessTranscodeQueueService.py:100-101, 885-900, 1329`, `Features/QualityTesting/ShouldQualityTestService.py:34-57`
+
+`ProcessTranscodeQueueService` caches `WorkerQualityTestEnabled` from the `WorkerConfig` dict at construction time. `WorkerConfig` is loaded once in `WorkerService._RegisterAndLoadWorkerConfig` at process startup and never refreshed, so toggling `Workers.QualityTestEnabled` mid-run does not change `IsQualityTestEnabled()` for the producer side. The capability poller does flip the *consumer* (start/stop QualityTestService), but the producer keeps writing `TranscodeAttempts.QualityTestRequired=False`. `ShouldQualityTestService` reads that False and calls `_ReplaceFileDirectly` (BypassVMAFCheck=True) -- original deleted, transcoded moved in, next job starts. Observed today on i9: VMAF was added mid-job, the in-flight transcode finished, file got replaced without VMAF, and the worker picked up the next job. Repro by starting a worker with `QualityTestEnabled=False`, queuing a job, flipping the flag (or the global) while the job runs, watching the post-success path skip the quality queue.
+
+Secondary trap at line 100-101: `Config.get('QualityTestEnabled') or Config.get('qualitytestenabled')` silently treats a stored `False` the same as an explicit override (cached as False, shadows global), but a missing key collapses to None and falls through to global. The two paths should not behave differently.
+
+**Violates:** WorkerService.feature.md criterion 2 ("Changing a capability flag in the Workers table takes effect within 60 seconds without restarting the process") -- the contract holds for the capability lifecycle but not for the transcode producer's QualityTestEnabled gate.
+
+**Look first:** `Features/TranscodeJob/ProcessTranscodeQueueService.py:885-900` (`IsQualityTestEnabled` -- read live from DB instead of cached snapshot), lines 100-101 (tri-state load, drop the `or` collapse), line 1329 (the call site that stamps `QualityTestRequired` onto the success row), and `WorkerService/Main.py:88-145` (`_RegisterAndLoadWorkerConfig` is the cached snapshot source -- decide whether to refresh it on the capability poll or bypass it for read-mostly settings). Principle going forward: do not cache DB-backed settings on long-lived service instances; read fresh.
+
+**Fix with:** `/t`
+
+---
+
 ### [BUG] Stuck scans have no auto-detection or recovery
 **Date:** 2026-05-09
 **Affects:** ScanJobs table, ContinuousScanService, Features/FileScanning/

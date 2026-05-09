@@ -60,3 +60,6 @@ HandBrake/
 xml/
 vmaf_debug_output.txt
 
+
+# Sandbox dir for _test_remux_sandbox.py (binary media artifacts)
+test_remux_sandbox/
