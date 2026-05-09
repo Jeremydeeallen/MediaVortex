@@ -109,21 +109,20 @@ Stages 1-4 require user action. Stages 5-7 are automatic once WorkerService is r
 
 **Priority calculation (impact-based, range 1-194):**
 
-Every queue insertion runs `QueueManagementBusinessService.CalculatePriority(MediaFile)` which returns an integer between 1 and 194. Workers claim with `ORDER BY Priority DESC, DateAdded ASC`, so higher priority is more urgent.
+Every queue insertion runs `QueueManagementBusinessService.CalculatePriority(MediaFile, ProfileSettings)` which returns an integer between 1 and 194. Workers claim with `ORDER BY Priority DESC, DateAdded ASC`, so higher priority is more urgent.
 
-Inputs (all from the MediaFile row at queue time):
-- `SizeMB`: linear "how much there is to compress"
-- `Codec`: multiplicative "how much compression ratio remains" (h264 -> AV1 ~50%, hevc -> AV1 ~30%, av1 -> av1 ~5%)
-- `OverallBitrate` vs the standard for the resolution category: bitrate-headroom multiplier in [0.5, 2.0]
+Score is the bytes-saved estimate, computed deterministically from the configured profile target:
 
-Score formula:
-1. `EstimatedSavingsMB = SizeMB * ExpectedReductionByCodec * BitrateHeadroom`
-2. `Score = log10(EstimatedSavingsMB + 1)` -- log dampens outliers so a single 30 GB rip doesn't swamp the queue
-3. `Priority = clamp(1 + (Score / 5.0) * 193, 1, 194)`
+1. `target_size_mb = ((profile.VideoBitrateKbps + profile.AudioBitrateKbps) * MediaFile.DurationMinutes * 60) / (8 * 1024)`
+2. `estimated_savings_mb = max(0, MediaFile.SizeMB - target_size_mb)`
+3. `score = log10(estimated_savings_mb + 1)` -- log dampens outliers so a single 30 GB rip doesn't swamp the queue
+4. `priority = clamp(1 + (score / 5.0) * 193, 1, 194)`
 
 The 6-slot window 195-200 is reserved for manual user overrides (the `POST /api/TranscodeQueue/PrioritizeJob` endpoint). Auto-assignment never produces a value in that range, so a manually-set 200 always beats any auto-prioritized item.
 
-Rationale: ordering by raw size (the legacy behavior) put already-efficient AV1 files at the top of the queue and ignored compression headroom. Impact-based ordering surfaces the highest-bytes-saved transcodes first without making the operator think about it. See `Features/TranscodeQueue/queue-priority.feature.md` for the full criteria and lookup tables.
+When `MediaFile.DurationMinutes` or `MediaFile.AssignedProfile` is NULL, or when no `ProfileThresholds` row exists for the resolution category, the function falls back to `estimated_savings_mb = SizeMB * 0.5` and emits a `LogWarning` naming the MediaFileId and the missing input. Silent fallbacks are forbidden per the Phase 2a loud-failure rule.
+
+Rationale: ordering by raw size (the legacy behavior) put already-efficient AV1 files at the top of the queue and ignored compression headroom. Reading the actual configured profile target (rather than guessing via a codec multiplier) means already-efficient sources correctly land at savings = 0 -> priority 1, and a profile change automatically reflects in the next CalculatePriority call. See `Features/TranscodeQueue/queue-priority.feature.md` for the full criteria.
 
 ---
 

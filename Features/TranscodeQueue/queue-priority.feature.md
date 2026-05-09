@@ -24,31 +24,29 @@ beat the auto-set values.
 
 ### A. Score formula
 
-1. `QueueManagementBusinessService.CalculatePriority(MediaFile)` returns an
-   integer in `[1, 194]`. Inputs are `MediaFile.SizeMB`, `MediaFile.Codec`,
-   `MediaFile.OverallBitrate`, and `MediaFile.ResolutionCategory`. Pure
-   function -- same inputs always produce the same output.
+1. `QueueManagementBusinessService.CalculatePriority(MediaFile, ProfileSettings)`
+   returns an integer in `[1, 194]`. Inputs are `MediaFile.SizeMB`,
+   `MediaFile.DurationMinutes`, `MediaFile.AssignedProfile`,
+   `MediaFile.ResolutionCategory`, plus the matching `ProfileThresholds`
+   row (`VideoBitrateKbps`, `AudioBitrateKbps`) for that profile and
+   resolution. Pure function -- same inputs always produce the same output.
 
-2. Codec multiplier is read from a constant `EXPECTED_REDUCTION` dict whose
-   values are the documented expected savings ratios:
-   - `mpeg4` / `mpeg2video`: 0.65 / 0.70
-   - `h264`: 0.50
-   - `hevc`: 0.30
-   - `vp9`: 0.10
-   - `av1`: 0.05
-   - unknown codec or NULL: 0.40 (default, conservative)
-   The dict lives in `QueueManagementBusinessService.py` as a module-level
-   constant alongside `STANDARD_KBPS`.
-
-3. Bitrate headroom is `clamp(OverallBitrate / 1000 / STANDARD_KBPS_FOR_RESOLUTION, 0.5, 2.0)`.
-   The standard-bitrate lookup is per `ResolutionCategory`:
-   - `480p`: 1500 kbps, `720p`: 3000, `1080p`: 6000, `2160p`: 15000.
-   - Unknown / NULL category: default 3000 (treats it as 720p for the
-     headroom calculation).
-
-4. Final priority is computed via:
+2. The estimated post-transcode size is computed deterministically from the
+   profile target bitrate:
    ```python
-   estimated_savings_mb = size_mb * expected_reduction * headroom
+   target_size_mb = ((video_kbps + audio_kbps) * duration_minutes * 60) / (8 * 1024)
+   estimated_savings_mb = max(0, size_mb - target_size_mb)
+   ```
+   Reading the actual configured profile target (instead of guessing via a
+   codec multiplier) means already-efficient sources (av1 at profile bitrate,
+   files barely above target) correctly land at savings = 0 -> priority 1,
+   and a profile change automatically reflects in the next CalculatePriority
+   call without any code change. No `EXPECTED_REDUCTION` or `STANDARD_KBPS`
+   constants are needed.
+
+3. Final priority is computed via:
+   ```python
+   import math
    score = math.log10(estimated_savings_mb + 1)        # 0..5+
    priority = int(round(1 + min(193, (score / 5.0) * 193)))
    priority = max(1, min(194, priority))
@@ -56,6 +54,15 @@ beat the auto-set values.
    Log scaling is required: a 30 GB save is ~4x more urgent than a 300 MB
    save, not 100x. Linear scaling on raw size produces a top-heavy queue
    where one BluRay rip suppresses everything else.
+
+4. Fallback when any required input is NULL or missing
+   (`DurationMinutes`, `AssignedProfile`, or no `ProfileThresholds` row
+   for the resolution category): use `estimated_savings_mb = size_mb * 0.5`
+   so the file gets a rough non-zero priority instead of erroring or
+   landing at the bottom. The fallback path logs a warning via
+   `LoggingService.LogWarning` naming the MediaFileId and which input was
+   missing -- per the Phase 2a loud-failure rule, silent fallbacks are
+   forbidden.
 
 5. Files with `MediaFile.SizeMB` NULL or 0 receive `Priority = 1` (lowest
    non-zero) so the queue does not error on partial-scan rows.
@@ -117,13 +124,16 @@ IN PROGRESS
 
 - [x] Flow doc extended (`transcode.flow.md` Stage 4, "Priority calculation" subsection)
 - [x] Feature doc drafted (this file)
-- [ ] Implement `CalculatePriority` rewrite + module constants
+- [x] Refined formula to profile-target (criteria A1-A4 rewritten 2026-05-09)
+- [ ] Implement `CalculatePriority(MediaFile, ProfileSettings)` rewrite -- pure function, no DB calls inside the function itself; callers fetch `ProfileThresholds` and pass it in
+- [ ] Update every queue-population caller (`PopulateQueue`, `QueueByFolder`, `AddSuggestionsToQueue`, single-file `AddJobToQueue`) to look up `ProfileThresholds` for `(AssignedProfile, ResolutionCategory)` and pass to `CalculatePriority`. Each caller already has access to the MediaFile and profile context.
 - [ ] Update server-side validation in `TranscodeQueueController` (PrioritizeJob, AddJob: 100 -> 200)
 - [ ] Update template input bounds + hint text (`Queue.html` two sites: PriorityModal + AddJob)
 - [ ] Update `getPriorityBadgeClass` JS color brackets in `Queue.html`
-- [ ] Write `Scripts/SQLScripts/RecalculateQueuePriorities.py` (optional rebalance, dry-run by default)
+- [ ] Write `Scripts/SQLScripts/RecalculateQueuePriorities.py` (optional rebalance, dry-run by default; uses the same `CalculatePriority` + `ProfileThresholds` lookup)
 - [ ] Smoke test: PopulateQueue against current MediaFiles, query `MIN/MAX/AVG(Priority)` on the result
-- [ ] Live verify: queue a file via UI, confirm assigned priority lands in 1-194 and is reasonable
+- [ ] Live verify: queue a file via UI, confirm assigned priority lands in 1-194 and is reasonable for its size/profile combination
+- [ ] Live verify: an already-transcoded av1 file at profile bitrate gets priority = 1 (savings clamps to 0)
 - [ ] Live verify: set a job to 200 manually via the modal, confirm the API accepts it and the worker claims it next
 
 NEXT: implement Step 3 (`CalculatePriority` rewrite) once criteria are
@@ -143,7 +153,7 @@ transcode.flow.md                                             -- Stage 4 priorit
 
 | File | Role |
 |------|------|
-| `Features/TranscodeQueue/QueueManagementBusinessService.py` | `CalculatePriority(MediaFile)` rewrite from `int(SizeMB)` to log-scaled impact score; new `EXPECTED_REDUCTION` and `STANDARD_KBPS` module constants |
+| `Features/TranscodeQueue/QueueManagementBusinessService.py` | `CalculatePriority(MediaFile, ProfileSettings)` rewrite from `int(SizeMB)` to log-scaled impact score using the profile's target bitrate. Each queue-population caller looks up the `ProfileThresholds` row once and passes it in -- no module constants needed. |
 | `Features/TranscodeQueue/TranscodeQueueController.py` | `PrioritizeJob` endpoint bounds check 1-100 -> 1-200; `AddJob` Priority bounds check |
 | `Templates/Queue.html` | PriorityModal `min`/`max` attributes (line 106), AddJob Priority input (line 134), `getPriorityBadgeClass` JS color thresholds (around line 326) |
 | `Scripts/SQLScripts/RecalculateQueuePriorities.py` | NEW. Walks current TranscodeQueue, recomputes Priority per the new formula, dry-run by default. Operator opts in to rebalance an existing queue without re-populating |
