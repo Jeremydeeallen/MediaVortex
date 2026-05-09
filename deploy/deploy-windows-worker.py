@@ -5,6 +5,14 @@ Wraps the 8-step sequence in deploy/windows-worker.flow.md "Deploy Sequence
 workstation against any Windows host that has Python 3.12+ and OpenSSH
 Server installed.
 
+WHEN TO USE THIS SCRIPT vs the hot-swap flow:
+  - Fresh host, host rebuild, env-vars or SMB creds changed: this script.
+  - In-place code update on a running worker (most common case): use the
+    manual sequence in deploy/windows-worker.flow.md "Code-Only Update
+    (Hot-Swap)" -- this script assumes a fresh host and does NOT stop the
+    running worker before scp, so the running Python process holds file
+    locks and the scp will fail or partially overwrite.
+
 Steps:
   1. Pre-flight checks (Python, sshd, NetworkCategory, port reachability)
   2. scp the MediaVortex repo to C:\\Code\\MediaVortex
