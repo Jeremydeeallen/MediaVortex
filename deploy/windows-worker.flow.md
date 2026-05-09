@@ -127,14 +127,20 @@ Set at User scope so they survive across sessions. Worker startup reads them onc
 
 ## First Run
 
-The path-verification step rejects the launch if any required drive is missing in the worker's session. Always mount drives in the **same session** that launches the worker, or use a launcher script (e.g. an analog of `StartMediaVortex.py` for worker-only startup).
+The path-verification step rejects the launch if any required drive is missing in the worker's session. Always mount drives in the **same session** that launches the worker. Use `StartWorker.py` (added 2026-05-09) -- it mounts T:/M:/Z: in its own process, then launches `WorkerService\Main.py` inline.
 
 ```powershell
-# In one PowerShell session:
-New-SmbMapping ... (per Drive Mappings table)
-Set-Location C:\Code\MediaVortex
-.\venv\Scripts\python.exe WorkerService\Main.py
+# Single command, ad-hoc test from a logged-in shell:
+cd C:\Code\MediaVortex
+.\venv\Scripts\python.exe StartWorker.py            # mount + verify + launch
+.\venv\Scripts\python.exe StartWorker.py --dry-run  # mount + verify; do not launch
+.\venv\Scripts\python.exe StartWorker.py --no-mount # drives already mounted
 ```
+
+`StartWorker.py` resolves SMB credentials in this priority:
+1. Env vars `MEDIAVORTEX_BRAIN_PASSWORD` / `MEDIAVORTEX_SYNOLOGY_PASSWORD` (set at User scope for non-interactive Task Scheduler use, or per-shell for ad-hoc testing).
+2. Vault helper at `MEDIAVORTEX_VAULT_HELPER` (default `C:\Code\infrastructure\terraform\secrets.py`). Calls `<python> <helper> get <key>` and uses stdout. Requires the worker host to have the infrastructure repo, the `bw` CLI, and a DPAPI session cache (`tools\bw-cache-session.ps1`). Recommended -- no plaintext passwords on the host.
+3. If neither yields a password for a required drive, the launcher exits with code 2.
 
 Expected first-run sequence (visible in stdout / `Logs` table):
 
@@ -172,10 +178,55 @@ For production, run the worker outside an SSH session so disconnects do not kill
 
 | Option | Pros | Cons |
 |---|---|---|
-| Task Scheduler "On user logon" | Simple, runs as the logged-in user (sees user-mounted drives) | Requires user to log in interactively after reboot |
-| NSSM (`nssm install MediaVortexWorker ...`) | Runs as service account, survives reboot without logon | Service account doesn't inherit user SMB mappings; needs system-wide mappings or in-startup mount |
+| Task Scheduler "On user logon" | Simple, runs as the logged-in user (sees user-mounted drives, inherits DPAPI). | Requires user to log in interactively after reboot. |
+| NSSM (`nssm install MediaVortexWorker ...`) | Runs as service account, survives reboot without logon. | Service account doesn't inherit user SMB mappings; needs system-wide mappings or in-startup mount; credentials must live in the SYSTEM-scoped Credential Manager or the service config. |
 
-A purpose-built `StartWorker.py` (analogous to `StartMediaVortex.py` but worker-only) that mounts drives via `_MountSmbDrives()` then launches `WorkerService\Main.py` removes the session-isolation pain for both options. Not yet in the repo as of 2026-05-09.
+`StartWorker.py` (in the repo root) handles drive mounting in either option. **Recommended: Task Scheduler** for hosts that double as a workstation (REMINGTON), so the worker yields whenever the user logs off; **NSSM** for dedicated worker hosts.
+
+### Register the Task Scheduler entry
+
+Run `deploy\Register-WorkerTask.ps1` ON the worker host (not the dev workstation):
+
+```powershell
+cd C:\Code\MediaVortex
+.\deploy\Register-WorkerTask.ps1
+```
+
+The script registers a task named `MediaVortex Worker` that:
+- Triggers when the current user logs on
+- Runs `<MediaVortex>\venv\Scripts\python.exe StartWorker.py` with `MediaVortex` as cwd
+- Runs in the user's interactive context (so it inherits DPAPI / Credential Manager)
+- Restarts up to 3 times on failure, 1 minute apart
+- Stops automatically when the user logs off (interactive task scope)
+
+Idempotent -- re-run after edits to overwrite the existing definition.
+
+Verify, trigger manually, or unregister:
+
+```powershell
+Get-ScheduledTask -TaskName "MediaVortex Worker"
+Get-ScheduledTaskInfo -TaskName "MediaVortex Worker"
+Start-ScheduledTask -TaskName "MediaVortex Worker"
+Unregister-ScheduledTask -TaskName "MediaVortex Worker" -Confirm:$false
+```
+
+### Credential placement on the worker host
+
+Pick one (DPAPI cache is the recommended steady state):
+
+**Option A: DPAPI cache (recommended)** -- One-time setup, no plaintext passwords on disk:
+1. Clone the infrastructure repo to `C:\Code\infrastructure`.
+2. `npm install -g @bitwarden/cli`.
+3. `bw login` (interactive, master password).
+4. `cd C:\Code\infrastructure; .\tools\bw-cache-session.ps1` (interactive, master password again).
+5. `StartWorker.py` will auto-resolve credentials via `secrets.py` on every launch.
+
+**Option B: User env vars** -- Faster bootstrap, but passwords live in `HKCU\Environment` (plaintext registry, scoped to user):
+```powershell
+# On the worker host, paste from `py terraform\secrets.py get ...` on the dev workstation:
+[Environment]::SetEnvironmentVariable('MEDIAVORTEX_BRAIN_PASSWORD','<value>','User')
+[Environment]::SetEnvironmentVariable('MEDIAVORTEX_SYNOLOGY_PASSWORD','<value>','User')
+```
 
 ## Failure Modes
 
