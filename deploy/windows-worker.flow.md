@@ -128,18 +128,18 @@ The worker's Step 0 `_VerifyRequiredPaths()` reads `DISTINCT LEFT(FilePath,2)` f
 
 | Letter | UNC | Server | User | Vault key for password |
 |---|---|---|---|---|
-| T: | `\\10.0.0.40\Media_tv` | Brain | `media` | `homelab/brain/cifs-media` |
-| M: | `\\10.0.0.61\_video\Adults\Movies` | Synology | `jallen11` | `homelab/synology/jallen11` |
-| Z: | `\\10.0.0.61\xxx` | Synology | `jallen11` | `homelab/synology/jallen11` |
-| F: | `\\10.0.0.40\Media` | Brain | `media` | `homelab/brain/cifs-media` (only required for dev workstation, not transcode workers) |
+| T: | `\\10.0.0.40\Media_tv` | Brain | `media` | `homelab/brain/cifs/media` |
+| M: | `\\10.0.0.61\_video\Adults\Movies` | Synology | `jallen11` | `homelab/synology/cifs/jallen11` |
+| Z: | `\\10.0.0.61\xxx` | Synology | `jallen11` | `homelab/synology/cifs/jallen11` |
+| F: | `\\10.0.0.40\Media` | Brain | `media` | `homelab/brain/cifs/media` (only required for dev workstation, not transcode workers) |
 
 Credentials live in the homelab Vaultwarden (`https://vault.jarremy.xyz`). Retrieve via the infrastructure repo's `terraform/secrets.py` helper or the `infra-vault` skill. Never paste the literal password into this repo, the worker host, or a chat transcript.
 
 ```powershell
 # From the dev workstation (where bw is unlocked and BW_SESSION is set), pull the values:
 cd C:\Code\infrastructure
-$brainPwd = py terraform\secrets.py get homelab/brain/cifs-media
-$synoPwd  = py terraform\secrets.py get homelab/synology/jallen11
+$brainPwd = py terraform\secrets.py get homelab/brain/cifs/media
+$synoPwd  = py terraform\secrets.py get homelab/synology/cifs/jallen11
 
 # Then pipe to the target host. Mount within the SAME session that will launch WorkerService.
 # Persistent mappings reconnect at interactive logon, but SSH sessions and Task Scheduler runs do NOT inherit them.

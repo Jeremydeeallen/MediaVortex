@@ -65,8 +65,8 @@ RemoteRoot = r"C:\Code\MediaVortex"
 DefaultVaultHelper = Path(r"C:\Code\infrastructure\terraform\secrets.py")
 
 # Vault keys for SMB share creds.
-VaultKeyBrain = "homelab/brain/cifs-media"
-VaultKeySynology = "homelab/synology/jallen11"
+VaultKeyBrain = "homelab/brain/cifs/media"
+VaultKeySynology = "homelab/synology/cifs/jallen11"
 
 # DB defaults (match deploy/windows-worker.flow.md "Environment Variables").
 DbDefaults = {

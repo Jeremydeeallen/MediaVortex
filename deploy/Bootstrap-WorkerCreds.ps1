@@ -34,8 +34,8 @@
     import json, subprocess
     from terraform import secrets
     creds = {
-      '10.0.0.40': {'user':'media','password':secrets.get('homelab/brain/cifs-media')},
-      '10.0.0.61': {'user':'jallen11','password':secrets.get('homelab/synology/jallen11')},
+      '10.0.0.40': {'user':'media','password':secrets.get('homelab/brain/cifs/media')},
+      '10.0.0.61': {'user':'jallen11','password':secrets.get('homelab/synology/cifs/jallen11')},
     }
     subprocess.run(
       ['ssh','owner@<target-ip>',
