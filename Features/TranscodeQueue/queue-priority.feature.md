@@ -135,13 +135,13 @@ IN PROGRESS
 - [x] Close priority-bypass paths (2026-05-09, after operator reported Priority=1076 on a Media-page-added Survivor episode): `SmartPopulateQueue` no longer pre-fills `Priority` in suggestion dicts; `AddSuggestionsToQueue` recomputes via `CalculatePriority` with profile bitrates; `AddJobToQueue` uses the profile-aware queue-item path and caps the manual-bonus at 194 (not 100). `Templates/ShowSettings.html` no longer sends `S.Priority` from the SmartPopulate UI.
 - [x] Fix worker claim path (2026-05-09, found while verifying first criterion-11 dogfood): the live atomic claim in `DatabaseManager.ClaimNextPendingTranscodeJob` and the two peek/list paths in `DatabaseManager.GetNextPendingTranscodeJob` + `Features/TranscodeQueue/TranscodeQueueRepository.py` were ordering by `SizeMB DESC, DateAdded ASC` -- Priority was selected but never used. Changed all four queries to `ORDER BY Priority DESC, DateAdded ASC`. `transcode.flow.md:403` Stage 2.2 updated to match. Without this fix the entire feature was a no-op at the worker.
 - [x] Queue UI default sort flipped from `SizeMB` to `Priority DESC` (`Templates/Queue.html:202`) so the visible row order matches worker claim order.
-- [ ] Live verify (post-WebService restart): queue a file via UI, confirm assigned priority lands in 1-194 and is reasonable for its size/profile combination
-- [ ] Live verify: an already-transcoded av1 file at profile bitrate gets priority = 1 (savings clamps to 0)
-- [ ] Live verify: set a job to 200 manually via the modal, confirm the API accepts it and the worker claims it next
+- [x] Live verify (DB-confirmed 2026-05-09): live queue inspection on 40 rows showed `MIN=1, MAX=90, AVG=33`, all values in [1,194]; `manual_195_200=0`; recent UI-added rows (Outlander, The Deuce, Project Runway) landed at sensible priorities for their size/profile combos. Two natural Priority=1 examples (Project Runway 720p HDTV-MKV at ~930 MB, already at/below profile target bitrate) confirm savings-clamp-to-zero behavior on the live data.
+- [x] Live verify (DB-confirmed 2026-05-09): worker claim path is taking highest-priority items first. Running rows at priorities 90/89/59/54 ahead of 54-priority pending rows -- pre-fix behavior would have ordered by SizeMB and the larger 924+ MB files would have been claimed before the 90-priority Expedition Unknown. Criterion 11 PASSING in production.
+- [ ] Live verify (UI only): set a job to 200 manually via the PriorityModal, confirm the API accepts it and the worker claims it next. (Not DB-verifiable; left open until next operator interaction.)
+- [ ] Live verify (UI only): badge color brackets render correctly on `/TranscodeQueue` (>=195 red, >=150 yellow, >=75 blue, <75 gray). (Not DB-verifiable; left open until next operator interaction.)
 - [x] Fix paginated Queue page sort whitelist (2026-05-09): `Repositories/DatabaseManager.GetTranscodeQueueItemsPaginated` mapped `'Priority' -> 'SizeMB'`, so the JS-driven Priority sort silently degraded to size sort. Fixed; controller + viewmodel defaults also flipped from `SizeMB` to `Priority`.
 
-NEXT: implement Step 3 (`CalculatePriority` rewrite) once criteria are
-explicitly approved per `/n` protocol.
+NEXT: two UI-only verifies remain (priority 200 modal accept + badge colors). Both are non-blocking for downstream features and can be confirmed during the next operator session on the Queue page.
 
 ## Scope
 
