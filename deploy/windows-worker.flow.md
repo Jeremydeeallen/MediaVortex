@@ -6,6 +6,92 @@ Deploys a MediaVortex `WorkerService` instance natively on a Windows host (not D
 
 `scp` the repo from the dev workstation to the target Windows host, recreate the venv, set env vars, mount required SMB shares, run `WorkerService\Main.py`.
 
+## Host Inventory (active Windows workers)
+
+| Hostname | IP | SSH user | Repo path | Notes |
+|---|---|---|---|---|
+| `Remington` | `10.0.0.230` | `owner` | `C:\Code\MediaVortex` | OpenSSH Server enabled; `git` is NOT on PATH (use scp for updates, not `git pull` on remote) |
+| `I9-2024` | (dev workstation, varies) | (operator) | `C:\Code\MediaVortex` | Hosts both WebService + a co-located WorkerService process |
+
+**SSH from dev workstation to a worker:**
+
+```bash
+# Verify reachable + identify which host
+ssh owner@10.0.0.230 'hostname'
+# -> Remington
+
+# Default SSH user across Windows workers in this homelab is `owner`.
+# It is NOT root/Administrator/jeremy; the deploy-windows-worker.py
+# script's --user flag defaults to `owner` for the same reason.
+```
+
+If `Permission denied (publickey,password)` -- the host is up but the dev workstation's key isn't authorised, or password auth is disabled. The OpenSSH Server install path on the deploy doc handles this; an existing host already has the right keys in the operator's `~/.ssh/authorized_keys` on the worker.
+
+## Code-Only Update (Hot-Swap, the most common case)
+
+When you've shipped a code change to `main` and want to roll it out to a Windows worker without re-running the full deploy (no venv rebuild, no creds, no SMB mounts -- just code + restart), use this exact sequence.
+
+**Step 1 -- stop the scheduled task on the worker.** Required, otherwise scp fails or partially overwrites because the running Python process holds file locks.
+
+```bash
+ssh owner@10.0.0.230 'powershell -Command "Stop-ScheduledTask -TaskName \"MediaVortex Worker\" -ErrorAction SilentlyContinue; Start-Sleep -Seconds 3; (Get-ScheduledTask -TaskName \"MediaVortex Worker\").State"'
+# Expected output: Ready (was Running)
+```
+
+**Step 2 -- scp the changed files from dev workstation.**
+
+```bash
+# CRITICAL: scp paths MUST use Windows-style `C:/Code/...`, NOT `/c/Code/...`.
+# The /c/ form errors with "No such file or directory" even though Test-Path
+# on the worker returns True for the same path. This is an OpenSSH/scp Windows
+# server quirk. Sample of a correct invocation:
+
+scp Models/CommandBuilder.py 'owner@10.0.0.230:C:/Code/MediaVortex/Models/CommandBuilder.py'
+scp Features/FileReplacement/FileReplacementBusinessService.py 'owner@10.0.0.230:C:/Code/MediaVortex/Features/FileReplacement/FileReplacementBusinessService.py'
+# ...etc, one file at a time, or scp -r a directory.
+```
+
+**Step 3 -- clear .pyc caches on the worker.** Python normally invalidates a `.pyc` whose source mtime is newer than the cached compile, but scp can produce mtimes that confuse the cache check (clock skew, filesystem timestamp granularity). Belt-and-suspenders:
+
+```bash
+ssh owner@10.0.0.230 'powershell -Command "Remove-Item -Force -ErrorAction SilentlyContinue C:\Code\MediaVortex\Models\__pycache__\CommandBuilder*.pyc, C:\Code\MediaVortex\Features\FileReplacement\__pycache__\FileReplacementBusinessService*.pyc; Write-Host pyc-cleared"'
+```
+
+**Step 4 -- start the scheduled task.**
+
+```bash
+ssh owner@10.0.0.230 'powershell -Command "Start-ScheduledTask -TaskName \"MediaVortex Worker\"; Start-Sleep -Seconds 4; (Get-ScheduledTask -TaskName \"MediaVortex Worker\").State"'
+# Expected output: Running
+```
+
+**Step 5 -- verify Workers row is Online with a fresh heartbeat.** Run from the dev workstation against the production DB:
+
+```bash
+sleep 8 && py Scripts/SQLScripts/QueryDatabase.py sql "SELECT WorkerName, Status, AGE(NOW(), LastHeartbeat) AS HeartbeatAge FROM Workers WHERE WorkerName = 'Remington'"
+# Expected: Status=Online, HeartbeatAge under ~30 seconds.
+```
+
+**Step 6 (optional but recommended) -- verify the new code is actually loaded.** Queue a single test job and inspect the resulting `TranscodeAttempts.FFpmpegCommand` for a known signature of the new code. For the 2026-05-09 remux safety fix the signature is `_remuxed.mp4` in the output path:
+
+```bash
+py Scripts/SQLScripts/QueueRemux.py --pick-one
+# Wait ~10s, then:
+py Scripts/SQLScripts/QueryDatabase.py sql "SELECT FFpmpegCommand FROM TranscodeAttempts ORDER BY Id DESC LIMIT 1"
+# Confirm the OUTPUT path (last quoted string in the command) ends with _remuxed.mp4.
+# If it does not, the worker did not pick up the new code -- restart again.
+```
+
+This whole sequence takes about 30 seconds end-to-end and is idempotent. Use this for routine code shipping; reserve the full `deploy-windows-worker.py` only for fresh hosts or when env vars / SMB mounts changed.
+
+### Gotchas
+
+- **`git` is not on Remington's PATH.** scp from the dev workstation is the only update channel. Don't waste time trying `git pull` on the remote.
+- **Unix tools (`head`, `tail`, `grep`) don't exist on Remington's default shell.** Wrap remote commands in PowerShell and use `Select-Object -First N` for truncation.
+- **scp path syntax must be `C:/Code/...` (forward slashes, drive-prefix form), not `/c/Code/...`.** Same path in a remote PowerShell command works either way; the asymmetry is specific to scp's path parser when the target is a Windows OpenSSH server.
+- **Stopping the scheduled task does not always kill the Python child immediately.** The `Start-Sleep -Seconds 3` after `Stop-ScheduledTask` gives the process time to exit cleanly; if you skip the sleep, scp can race the still-holding-file-locks worker.
+- **`__pycache__` directories sometimes survive an scp + restart cycle and serve stale bytecode.** The Step 3 explicit removal eliminates the variable.
+- **The deploy-windows-worker.py automation does NOT stop the running worker before scp.** It assumes a fresh host. For an in-place code update on a running worker, prefer the manual sequence above.
+
 ## When To Use This Flow
 
 - Adding a new physical Windows workstation as a CPU-only transcode worker
