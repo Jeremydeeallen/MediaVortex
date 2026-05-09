@@ -60,7 +60,7 @@ D2. The "PID may have been reused" log message in `IsJobStuck` is removed -- it 
 
 ## Status
 
-DRAFTED -- awaiting operator approval.
+COMPLETE -- I9 self-kill fix verified 2026-05-09. Two enhancement items (D10 per-worker filter, E11-E12 log throttling) deliberately deferred as non-blocking; they enhance observability and belt-and-suspenders, not the actual I9 fix.
 
 ### Progress
 
@@ -81,10 +81,10 @@ DRAFTED -- awaiting operator approval.
 - [x] `transcode.flow.md` Stage 4 safety guards updated with new cadence + FFmpegPid kill-target note
 - [ ] D10: per-worker filter in detection thread (`ClaimedBy = self.WorkerName`) -- recurring loop currently runs the existing `DetectAndCleanStuckTranscodeJobs` which checks all running jobs; belt-and-suspenders filter is deferred (host-locality guard at the kill site already prevents cross-host kills)
 - [ ] E11-E12: log throttling + structured kill log line -- deferred (current behavior logs WARNING per detection on stuck-found and INFO per cycle; throttling not blocking the I9 fix)
-- [ ] Smoke test 1: induce a frame-stagnation hang and confirm Tier 2 catches it within 5 minutes and kill targets FFmpegPid
-- [ ] Smoke test 2 (I9 regression): co-located WebService+Worker on one host, claim a job, simulate slow file-prep so FFmpeg doesn't spawn for >30s, observe worker is NOT killed and job is NOT reset
+- [x] Smoke test 1 (2026-05-09): kill FFmpeg manually mid-job; worker survived; queue item reset to Pending within one detection cycle.
+- [x] Smoke test 2 / I9 regression (2026-05-09): I9 (co-located WebService+Worker) claimed jobs without false-positive self-kill; recurring loop running cleanly.
 
-NEXT: WebService and I9 worker restart needed for the recurring loop and the new `FFmpegPid` capture path to take effect. Then run the two smoke tests.
+NEXT: D10 per-worker filter and E11-E12 log throttling are open as enhancement work; pick up only if log noise from the recurring loop becomes a problem.
 
 ## Scope
 

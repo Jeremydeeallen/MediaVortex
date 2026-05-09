@@ -10,6 +10,33 @@
     <div class="col-12">
         <h2><i class="fas fa-cog"></i> Settings</h2>
 
+        <!-- Library Default Profile (always visible, no collapse) -->
+        <div class="card mt-3 border-warning">
+            <div class="card-header bg-warning bg-opacity-25">
+                <h5 class="mb-0"><i class="fas fa-star text-warning me-2"></i> Library Default Profile</h5>
+            </div>
+            <div class="card-body">
+                <p class="text-muted small mb-2">
+                    All shows inherit this profile unless explicitly overridden on the
+                    <a href="/ShowSettings">Media page</a>. Drives compliance evaluation
+                    (<code>IsCompliant</code>, <code>RecommendedMode</code>, queue routing).
+                </p>
+                <div class="row g-2 align-items-center">
+                    <div class="col-md-8">
+                        <select id="DefaultProfileSelect" class="form-select">
+                            <option value="">-- Loading... --</option>
+                        </select>
+                    </div>
+                    <div class="col-md-4">
+                        <button class="btn btn-primary w-100" id="SaveDefaultProfileBtn" onclick="SaveDefaultProfile()" disabled>
+                            <i class="fas fa-save me-1"></i> Save Default
+                        </button>
+                    </div>
+                </div>
+                <small class="text-muted mt-2 d-block" id="DefaultProfileStatus"></small>
+            </div>
+        </div>
+
 
         <!-- Scan Directory Management Section -->
         <div class="card mt-4">
@@ -117,6 +144,7 @@
             </div>
             <div class="collapse" id="ProfileManagementSection">
                 <div class="card-body">
+
                     <div class="d-flex justify-content-between align-items-center mb-3">
                         <h6 class="mb-0">Transcoding Profiles</h6>
                         <button class="btn btn-primary" onclick="ShowCreateProfileModal()">
@@ -932,6 +960,7 @@ $(document).ready(function() {
     LoadFFmpegPaths();
     LoadExcludedDirectories();
     LoadContinuousScanStatus();
+    LoadDefaultProfile();
 
     // Auto-refresh scan status every 15 seconds
     setInterval(LoadContinuousScanStatus, 15000);
@@ -1030,6 +1059,7 @@ function LoadProfiles() {
             if (Response.success) {
                 AllLoadedProfiles = Response.profiles || [];
                 DisplayProfiles(AllLoadedProfiles);
+                PopulateDefaultProfileSelect(AllLoadedProfiles);
             } else {
                 ShowAlert('Failed to load profiles: ' + Response.error, 'danger');
             }
@@ -1037,6 +1067,73 @@ function LoadProfiles() {
         .fail(function() {
             ShowAlert('Failed to load profiles', 'danger');
         });
+}
+
+// ── Library Default Profile (transcode-vs-remux-routing.feature.md C4) ──
+
+let CurrentDefaultProfile = null;
+
+function PopulateDefaultProfileSelect(Profiles) {
+    const Sel = $('#DefaultProfileSelect');
+    Sel.empty();
+    Profiles.forEach(function(P) {
+        const Opt = $('<option>').val(P.ProfileName).text(P.ProfileName);
+        if (CurrentDefaultProfile && P.ProfileName === CurrentDefaultProfile) {
+            Opt.prop('selected', true);
+        }
+        Sel.append(Opt);
+    });
+    $('#SaveDefaultProfileBtn').prop('disabled', false);
+}
+
+function LoadDefaultProfile() {
+    $.get('/api/SystemSettings/DefaultProfile')
+        .done(function(Response) {
+            if (Response.Success) {
+                CurrentDefaultProfile = Response.Value || null;
+                $('#DefaultProfileStatus').text(
+                    CurrentDefaultProfile
+                        ? 'Current: ' + CurrentDefaultProfile
+                        : 'Not set -- pick a default and click Save.'
+                );
+                if (Array.isArray(AllLoadedProfiles) && AllLoadedProfiles.length) {
+                    PopulateDefaultProfileSelect(AllLoadedProfiles);
+                }
+            }
+        });
+}
+
+function SaveDefaultProfile() {
+    const NewName = $('#DefaultProfileSelect').val();
+    if (!NewName) {
+        ShowAlert('Pick a profile first', 'warning');
+        return;
+    }
+    const Btn = $('#SaveDefaultProfileBtn');
+    Btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin me-1"></i> Saving...');
+    $.ajax({
+        url: '/api/SystemSettings/DefaultProfile',
+        method: 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify({ ProfileName: NewName })
+    })
+    .done(function(Response) {
+        if (Response.Success) {
+            CurrentDefaultProfile = Response.Value;
+            $('#DefaultProfileStatus').text('Current: ' + Response.Value);
+            ShowAlert('Default profile updated to "' + Response.Value + '". '
+                + 'Library compliance recompute will run on the next probe / admin sweep.', 'success');
+        } else {
+            ShowAlert('Failed: ' + (Response.Error || 'Unknown error'), 'danger');
+        }
+    })
+    .fail(function(XHR) {
+        const Msg = (XHR.responseJSON && XHR.responseJSON.Error) || 'Request failed';
+        ShowAlert('Failed: ' + Msg, 'danger');
+    })
+    .always(function() {
+        Btn.prop('disabled', false).html('<i class="fas fa-save me-1"></i> Save Default');
+    });
 }
 
 function DisplayProfiles(Profiles) {

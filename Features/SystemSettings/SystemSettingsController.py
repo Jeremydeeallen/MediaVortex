@@ -66,6 +66,59 @@ class SystemSettingsController:
                     'Error': str(e)
                 }), 500
 
+        @self.Blueprint.route('/DefaultProfile', methods=['GET'])
+        def GetDefaultProfile():
+            """Return the current library-wide DefaultProfileName.
+
+            Used by /settings page to populate the Default Profile dropdown.
+            See transcode-vs-remux-routing.feature.md criterion 4.
+            """
+            try:
+                Value = self.Repository.GetSystemSetting('DefaultProfileName')
+                return jsonify({'Success': True, 'Value': Value})
+            except Exception as e:
+                LoggingService.LogException("Error getting DefaultProfileName", e, 'GetDefaultProfile', 'SystemSettingsController')
+                return jsonify({'Success': False, 'Error': str(e)}), 500
+
+        @self.Blueprint.route('/DefaultProfile', methods=['POST'])
+        def SetDefaultProfile():
+            """Set the library-wide DefaultProfileName, validating against Profiles.
+
+            Body: {"ProfileName": "<name>"}. ProfileName must exist in
+            Profiles.ProfileName -- otherwise 400. See
+            transcode-vs-remux-routing.feature.md criterion 4 + 6.
+            """
+            try:
+                Data = request.get_json() or {}
+                ProfileName = Data.get('ProfileName')
+                if not ProfileName or not isinstance(ProfileName, str):
+                    return jsonify({'Success': False, 'Error': 'ProfileName is required'}), 400
+
+                from Core.Database.DatabaseService import DatabaseService
+                Rows = DatabaseService().ExecuteQuery(
+                    "SELECT 1 FROM Profiles WHERE ProfileName = %s LIMIT 1",
+                    (ProfileName,)
+                )
+                if not Rows:
+                    return jsonify({
+                        'Success': False,
+                        'Error': f"Profile {ProfileName!r} does not exist in Profiles table"
+                    }), 400
+
+                self.Repository.AddOrUpdateSystemSetting(
+                    'DefaultProfileName',
+                    ProfileName,
+                    'Library-wide default profile name. ShowSettings.AssignedProfile per-show overrides this.'
+                )
+                LoggingService.LogInfo(
+                    f"DefaultProfileName updated to {ProfileName!r}",
+                    'SystemSettingsController', 'SetDefaultProfile'
+                )
+                return jsonify({'Success': True, 'Value': ProfileName})
+            except Exception as e:
+                LoggingService.LogException("Error setting DefaultProfileName", e, 'SetDefaultProfile', 'SystemSettingsController')
+                return jsonify({'Success': False, 'Error': str(e)}), 500
+
         @self.Blueprint.route('/<string:SettingKey>', methods=['POST'])
         def SetSystemSetting(SettingKey: str):
             """Set a system setting value."""

@@ -172,7 +172,7 @@ admin endpoint for full-library backfill. See `transcode.flow.md` Stage
 
 ## Status
 
-DRAFTED -- awaiting operator approval.
+COMPLETE -- all criteria verified 2026-05-09. Two deferred admin items (manual recompute endpoint, ProfileThresholds-change UI hook) are documented as deliberately deferred, not blocking.
 
 ### Progress
 
@@ -187,10 +187,10 @@ DRAFTED -- awaiting operator approval.
 - [x] `transcode.flow.md` extended with Stage 3.5 PRIORITY (and stage overview updated).
 - [x] One-shot backfill script `Scripts/SQLScripts/BackfillPriorityScores.py` (batched, idempotent, --dry-run + --limit + --batch-size flags).
 - [x] Live verified criterion 12: full backfill of 58195 rows in 7.5s (target <60s -- 8x headroom).
-- [ ] Live verify criterion 7: probe a single file, observe PriorityScore updated for that row.
-- [ ] Live verify criterion 8: bulk-assign a profile to a folder, confirm affected MediaFiles rows refreshed.
-- [ ] Live verify criterion 14: induce recompute failure (e.g. delete ProfileThresholds row mid-flight), observe triggering operation still returns Success=True and prior PriorityScore unchanged.
-- [ ] Live verify criterion 16: pick a file, queue it, confirm TranscodeQueue.Priority equals MediaFiles.PriorityScore for that (file, profile) pair.
+- [x] Live verify criterion 7 (2026-05-09): probe → PriorityScore update confirmed.
+- [x] Live verify criterion 8 (2026-05-09): bulk-assign → affected rows refreshed.
+- [x] Live verify criterion 14 (2026-05-09): recompute failure non-blocking; triggering op still Success=True.
+- [x] Live verify criterion 16 (2026-05-09): TranscodeQueue.Priority matches MediaFiles.PriorityScore for queued items.
 - [ ] (Deferred) `POST /api/PriorityMaterialization/Recompute` admin endpoint -- backfill script covers the full-library case today; the admin endpoint is deferred until needed for finer-grained scope (e.g. recompute only one profile after threshold change).
 - [ ] (Deferred) ProfileThresholds-change UI hook -- the Scripts/ backfill script is the MVP per criterion 9; UI offer can come later.
 

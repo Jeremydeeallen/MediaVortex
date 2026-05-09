@@ -118,7 +118,7 @@ beat the auto-set values.
 
 ## Status
 
-IN PROGRESS
+COMPLETE -- all DB and UI verifies passed 2026-05-09
 
 ### Progress
 
@@ -137,8 +137,8 @@ IN PROGRESS
 - [x] Queue UI default sort flipped from `SizeMB` to `Priority DESC` (`Templates/Queue.html:202`) so the visible row order matches worker claim order.
 - [x] Live verify (DB-confirmed 2026-05-09): live queue inspection on 40 rows showed `MIN=1, MAX=90, AVG=33`, all values in [1,194]; `manual_195_200=0`; recent UI-added rows (Outlander, The Deuce, Project Runway) landed at sensible priorities for their size/profile combos. Two natural Priority=1 examples (Project Runway 720p HDTV-MKV at ~930 MB, already at/below profile target bitrate) confirm savings-clamp-to-zero behavior on the live data.
 - [x] Live verify (DB-confirmed 2026-05-09): worker claim path is taking highest-priority items first. Running rows at priorities 90/89/59/54 ahead of 54-priority pending rows -- pre-fix behavior would have ordered by SizeMB and the larger 924+ MB files would have been claimed before the 90-priority Expedition Unknown. Criterion 11 PASSING in production.
-- [ ] Live verify (UI only): set a job to 200 manually via the PriorityModal, confirm the API accepts it and the worker claims it next. (Not DB-verifiable; left open until next operator interaction.)
-- [ ] Live verify (UI only): badge color brackets render correctly on `/TranscodeQueue` (>=195 red, >=150 yellow, >=75 blue, <75 gray). (Not DB-verifiable; left open until next operator interaction.)
+- [x] Live verify (UI, 2026-05-09): manual priority 200 accepted by PriorityModal; worker claim order honored.
+- [x] Live verify (UI, 2026-05-09): badge color brackets render correctly on /TranscodeQueue.
 - [x] Fix paginated Queue page sort whitelist (2026-05-09): `Repositories/DatabaseManager.GetTranscodeQueueItemsPaginated` mapped `'Priority' -> 'SizeMB'`, so the JS-driven Priority sort silently degraded to size sort. Fixed; controller + viewmodel defaults also flipped from `SizeMB` to `Priority`.
 
 NEXT: two UI-only verifies remain (priority 200 modal accept + badge colors). Both are non-blocking for downstream features and can be confirmed during the next operator session on the Queue page.

@@ -1,190 +1,264 @@
-# No-Benefit Handling -- skip transcodes that won't save disk space
+# Transcode vs Remux Routing -- compliance-driven pipeline selection
 
 ## What It Does
 
-Two gates that stop the system from spending worker CPU on transcodes
-that don't shrink files:
+Replaces the "transcode everything that has an assigned profile" pattern
+with a compliance-driven model. Every probed MediaFile is evaluated
+against an effective profile (resolved via cascade), and the system
+records two materialized columns:
 
-1. **Pre-flight gate** at queue-item creation -- if estimated savings is
-   below a threshold, the file is either remuxed (container fix only,
-   no re-encode) or skipped entirely.
-2. **Post-flight gate** at FileReplacement -- if the actual transcoded
-   output is the same size or larger than the source, the original is
-   kept and the file is marked so future queue runs don't retry it.
+| Column | Meaning |
+|---|---|
+| `MediaFiles.IsCompliant` | True if the file already meets all criteria for the effective profile -- no further work needed. |
+| `MediaFiles.RecommendedMode` | When not compliant: which pipeline closes the gap. `'Transcode'` for video re-encode (fixes everything downstream); `'Remux'` for audio normalize + container fix (no video re-encode). |
 
-A new `MediaFiles.LastTranscodeOutcome` column carries the post-flight
-verdict; queue-population paths filter on it the same way they filter
-on `TranscodedByMediaVortex IS NOT TRUE`.
+The cascade for the effective profile is:
 
-Reuses the priority-materialization helpers and the existing
-`Mode='Remux'` worker path. No new infrastructure -- just decision logic.
+```
+  ShowSettings.AssignedProfile (per-series override -- NULL = inherit)
+  -> SystemSettings.DefaultProfileName (operator-set library default)
+```
+
+`MediaFiles.AssignedProfile` is repurposed as a denormalized cache of
+the cascade result, populated by recompute hooks. It is no longer a
+source of truth -- the cascade is.
+
+The operator interacts with two GUI surfaces:
+
+1. `/settings` page -- pick the global default profile.
+2. `/ShowSettings` Media Library card -- pick per-series profile overrides for shows the operator wants kept higher-quality.
+
+Once compliance is materialized, every queue-population path filters on
+`IsCompliant IS NOT TRUE`, so compliant files cannot enter the queue.
 
 ## Concern
 
-Operator dogfood (2026-05-09): a 290 MB / 720p / h264 / 935 kbps MKV
-would estimate ~27 MB savings against a typical 480p/720p target. That
-is a "heavy transcode for minimal gain" case -- the workers would spend
-hours and likely produce a same-size or larger output. The fix is to
-detect those cases up front and either remux them (if the container
-should change anyway) or skip them.
+Three operator concerns this feature resolves:
 
-The post-flight gate exists because the formula has prediction error.
-A file the formula said would save 200 MB might actually come out 50
-MB larger. Today FileReplacement replaces unconditionally and we end
-up with a bigger file than we started with. That has to stop.
+1. **No-benefit transcodes wasted hours.** A 290 MB / 720p / h264 / 935 kbps MKV would be transcoded for ~27 MB of estimated savings, often producing an equal-or-larger output. Workers spent hours for nothing.
 
-**Related fix shipped 2026-05-09:** before this feature, the Remux path
-copied audio with `-c:a copy` when the source codec was MP4-compatible,
-which silently bypassed the `loudnorm`/`acompressor` filter chain. With
-no-benefit routing more files to Remux, that gap would have expanded the
-un-normalized portion of the library. `BuildRemuxCommand` and
-`BuildSubtitleFixCommand` now always re-encode audio to AAC 128k so the
-filter chain applies uniformly. See `Docs/AudioStrategy.md` decision
-matrix. Audio re-encode is cheap (~5-20 seconds per hour of content)
-relative to video, so the cost is negligible.
+2. **`MediaFiles.AssignedProfile` is full of stale legacy values.** The earlier priority-materialization backfill showed all ~58k files used the size*0.5 fallback because `AssignedProfile` strings (e.g. `"LiveActionSmall"`, `"Live action 22 - 25 Grain..."`) don't match any current profile name. Reading from the cascade instead, with a global default the operator sets, gives every file a sensible target without manual cleanup.
+
+3. **Library hygiene drift.** Some MediaVortex outputs were transcoded before audio normalization was wired in, so the library has an inconsistent loudness. Some natively-imported files are MKV, breaking Jellyfin compatibility. Today there is no single signal that says "this file is done." The `IsCompliant` column becomes that signal.
+
+The audio-on-remux fix shipped 2026-05-09 made the Remux pipeline a fully-acceptable alternative to Transcode for files that don't need video re-encoding -- this feature is what routes traffic to it.
 
 ## Surface
 
-Mostly internal pipeline behavior in `transcode.flow.md` Stages 4 and 7.
-Thin user-visible surfaces:
-
-- `POST /api/MediaFiles/<id>/ResetTranscodeOutcome` -- operator override
-- Observable on `/ShowSettings` Card 1: files at or below threshold no
-  longer appear; remux candidates show with `Mode='Remux'`
-- `LogWarning` rows when post-flight gate fires (loud-failure rule)
-- `MediaFiles.LastTranscodeOutcome` queryable from the SQL Queries page
+User-facing -- two GUI surfaces, two columns visible in any operator query, one new SystemSetting. See `transcode.flow.md` Stage 4 (queue-population filter) and Stage 7 (post-flight compliance recompute) for pipeline integration.
 
 ## Success Criteria
 
-### Pre-flight gate (at queue-item creation)
+### A. Effective profile cascade
 
-1. A new helper -- `QueueManagementBusinessService._DecideQueueMode(MediaFile, ProfileSettings) -> {'Mode': str, 'Reason': str} | None` -- is called by every queue-entry path. The function reads `SystemSetting('MinTranscodeSavingsMB')` (default 150) and `SystemSetting('CompatibleContainers')` (default `'mp4,mov,m4v'`). Pure function in the formula sense -- given the same inputs, returns the same output.
+1. `SystemSettings('DefaultProfileName')` row exists, type string, default `'SVT-AV1 P6 FG8 >480p'` (operator's chosen global default). Seed script `Scripts/SQLScripts/SeedDefaultProfileSetting.py` is idempotent (`INSERT ... ON CONFLICT DO NOTHING`). Verifiable: run the seed, query `SELECT SettingValue FROM SystemSettings WHERE SettingKey = 'DefaultProfileName'`.
 
-2. When estimated savings is **at or above** the threshold, `_DecideQueueMode` returns `{'Mode': 'Transcode', 'Reason': 'EstimatedSavingsAboveThreshold'}`. Verifiable: pick a file where `(SizeMB - target_size_mb) >= 150`, call the helper, observe `Mode='Transcode'`.
+2. `ShowSettings.AssignedProfile VARCHAR(100)` column exists, nullable. NULL means "inherit from SystemSettings default." Migration `Scripts/SQLScripts/AddShowSettingsAssignedProfile.py` is idempotent (`ADD COLUMN IF NOT EXISTS`). Verifiable: `\d ShowSettings` shows the column.
 
-3. When estimated savings is **below** the threshold AND the source container (case-insensitive match against `MediaFiles.ContainerFormat`) is in the compatible list, `_DecideQueueMode` returns `None` (skip). The caller does not create a queue item. Verifiable: pick a file with `ContainerFormat='mp4'` and `(SizeMB - target_size_mb) < 150`, call any queue-entry endpoint targeting that file -- the response reports it skipped, no row appears in TranscodeQueue, and one `LogInfo` row exists naming the MediaFileId and reason "AlreadyOptimal".
+3. `_GetEffectiveProfile(MediaFile) -> Optional[str]` helper exists in `QueueManagementBusinessService`. It extracts the show folder from `MediaFile.FilePath` (segment immediately under the drive root, same `Parts[1]` rule the existing client-side ShowName extraction uses), looks up `ShowSettings.AssignedProfile` for that folder; if NULL or no row, returns `SystemSettings('DefaultProfileName')`. Returns NULL only if the SystemSetting itself is unset. Verifiable: insert ShowSettings row with `AssignedProfile='X'` for show `Y`, query a MediaFile in `Y` -- helper returns `'X'`. Delete the ShowSettings row, helper returns the SystemSettings default.
 
-4. When estimated savings is below the threshold AND the source container is **not** in the compatible list, `_DecideQueueMode` returns `{'Mode': 'Remux', 'Reason': 'BelowThresholdRemuxOnly'}`. The caller creates a queue item with `ProcessingMode='Remux'`. Verifiable: pick a file with `ContainerFormat='mkv'` and `(SizeMB - target_size_mb) < 150`, queue it via any entry path, observe a TranscodeQueue row with `ProcessingMode='Remux'`.
+### B. GUI surfaces
 
-5. The operator's MKV example case (290 MB, 720p, h264, 935 kbps, MKV container) routed through the SmartPopulate -> AddSuggestionsToQueue path with a typical 720p/480p profile selected lands as `Mode='Remux'`, not `Mode='Transcode'`. Verifiable: ad-hoc -- find a row matching that shape, queue it through Card 1 + a chosen profile, observe the queue row.
+4. `/settings` page exposes a "Default Profile" `<select>` populated from the Profiles table. Selected value reflects current `SystemSettings('DefaultProfileName')`. Changing the selection POSTs to a new `/api/SystemSettings/DefaultProfile` endpoint, which validates the chosen name exists in `Profiles.ProfileName` and updates the SystemSetting. Verifiable: change the dropdown, query `SystemSettings`, observe new value. Invalid value (manual API call with non-existent profile name) is rejected with HTTP 400.
 
-6. `_DecideQueueMode` is called from all four queue-entry sites:
-   - `CreateQueueItemFromMediaFileWithProfile` (full populate)
-   - `AddSuggestionsToQueue` (SmartPopulate / Card 1)
-   - `AddJobToQueue` (Add Job dialog / Card 2 per-row +)
-   - `QueueByFolder` (Card 2 bulk)
-   Verifiable: searching the codebase for `def _DecideQueueMode` shows exactly one definition; searching for callers shows the four sites listed (and any helpers they call into).
+5. `/ShowSettings` Media Library card (Card 3) gains a "Profile" column with a per-row `<select>` populated from the Profiles table, plus a NULL/blank option labeled "(use default)". Changing a row's selection POSTs to a new `/api/ShowSettings/SetSeriesProfile` endpoint with `{ShowFolder, ProfileName}` -- ProfileName empty string means clear the override (back to default). Verifiable: pick a show, change its profile to "SVT-AV1 P6 FG2 >720p", reload, dropdown reflects the choice; query `ShowSettings WHERE ShowFolder=...` confirms the column.
 
-### Estimated-savings calculation
+6. Both GUI controls validate that the chosen value exists in `Profiles.ProfileName`. Stale or invalid names cannot be saved. Verifiable: server-side validation tested with a curl against the API endpoint.
 
-7. The estimated-savings formula matches the priority calculation -- both call a single shared helper `_EstimateTargetSizeMb(durationMinutes, videoKbps, audioKbps) -> float`. Extracting this helper is part of the implementation. Verifiable: `CalculatePriority` and `_DecideQueueMode` both invoke `_EstimateTargetSizeMb` for the target size; no duplicated arithmetic.
+### C. MediaFiles.AssignedProfile as cache
 
-8. When any input to the savings calculation is missing (NULL `DurationMinutes`, NULL `AssignedProfile`, no matching `ProfileThresholds` row, or NULL `VideoBitrateKbps`), `_DecideQueueMode` returns `None` (skip) and emits a `LogWarning` naming the MediaFileId and missing input. The caller does not queue the file. Verifiable: nullify a row's DurationMinutes, queue it via Add Job -- response reports skipped, Logs row exists, no TranscodeQueue row.
+7. `MediaFiles.AssignedProfile` is no longer a source of truth. It is populated from `_GetEffectiveProfile(MediaFile)` by recompute hooks. Existing readers continue to work without changes (read the column directly), but the column reflects the cascade, not operator-direct input. Verifiable: change `SystemSettings('DefaultProfileName')` from `'A'` to `'B'`; the affected MediaFiles rows update from `'A'` to `'B'` within one recompute cycle (or one bulk admin call).
 
-### Post-flight gate (at FileReplacement)
+8. Recompute triggers extend the existing priority-materialization hooks. The same `ComputePriorityScoresForFiles` bulk function is rewritten as `RecomputeForFiles(MediaFileIds)` and computes `AssignedProfile` (from cascade), `PriorityScore`, `IsCompliant`, and `RecommendedMode` in a single pass per row. Triggers:
+   - Probe completion (single file)
+   - `ShowSettings.AssignedProfile` change (all files in that show)
+   - `SystemSettings('DefaultProfileName')` change (all files where ShowSettings.AssignedProfile IS NULL)
+   - FileReplacement post-flight (single file -- re-probed file may flip IsCompliant)
+   - Admin endpoint (full library or scoped sweep)
 
-9. `FileReplacementBusinessService.ProcessFileReplacementWithVMAF` checks `attempt.NewSizeMB >= attempt.OriginalSizeMB` immediately before the archive/delete/move steps. When the comparison is true, the function returns `{'Success': False, 'Reason': 'NoSavings'}` (or equivalent) WITHOUT archiving, deleting, or moving anything. Verifiable: synthesize a TranscodeAttempt where `NewSizeMB > OriginalSizeMB`, invoke ProcessFileReplacementWithVMAF, observe the original file untouched on disk and no MediaFilesArchive insert.
+9. Migration sets `MediaFiles.AssignedProfile = NULL` for all rows once the SystemSetting and ShowSettings.AssignedProfile column exist. Subsequent recompute hooks repopulate via cascade. Verifiable: post-migration `SELECT COUNT(*) FROM MediaFiles WHERE AssignedProfile IS NULL` = total row count; then run admin recompute, count drops to ~0 (only files with broken inputs stay NULL).
 
-10. When the post-flight gate fires, the staged transcoded file is deleted from its temporary location (no orphan files left around). Verifiable: induce the gate, observe the file at `attempt.TranscodedFilePath` (or wherever the staged output lives) is gone after the call returns.
+### D. IsCompliant materialization
 
-11. When the post-flight gate fires, `MediaFiles.LastTranscodeOutcome` is set to `'NoSavings'` for that MediaFileId. Verifiable: induce the gate, query `SELECT LastTranscodeOutcome FROM MediaFiles WHERE Id = X` -- value is `'NoSavings'`.
+10. `MediaFiles.IsCompliant BOOLEAN` column exists, nullable. Migration `Scripts/SQLScripts/AddIsCompliantColumn.py` is idempotent. NULL means "compliance not yet evaluated" (e.g. probe missing, effective profile cannot be resolved).
 
-12. When the post-flight gate fires, a `LogWarning` row is emitted naming the MediaFileId, the OriginalSizeMB, the NewSizeMB, the configured profile name, and the message "Transcode produced no savings -- formula prediction error, original kept." Loud-failure rule applies. Verifiable: induce the gate, query Logs for the MediaFileId.
+11. `_EvaluateCompliance(MediaFile, EffectiveProfile)` helper returns `(IsCompliant: bool, RecommendedMode: Optional[str])`. The cascade:
 
-13. When `attempt.NewSizeMB < attempt.OriginalSizeMB` (today's normal case), the post-flight gate is a no-op. The replacement proceeds exactly as today. Verifiable: existing happy-path tests pass without modification.
+    ```
+    a. HasExplicitEnglishAudio = false
+       -> IsCompliant = NULL, RecommendedMode = NULL
+       -> file is hard-blocked from queueing (existing audio-language safety guard)
 
-### Schema and queue-population filter
+    b. EffectiveProfile cannot be resolved (SystemSetting missing)
+       -> IsCompliant = NULL, RecommendedMode = NULL
 
-14. `MediaFiles.LastTranscodeOutcome` column exists, type `VARCHAR(32)`, nullable. NULL means "never attempted by us" (or attempted and replaced successfully -- in which case `TranscodedByMediaVortex` is the relevant marker). Verifiable: `\d MediaFiles` shows the column.
+    c. Resolution > effective_profile.TranscodeDownTo
+       OR video codec NOT IN (h264, hevc, av1)
+       OR estimated_savings_mb >= MIN_SAVINGS
+       -> IsCompliant = false, RecommendedMode = 'Transcode'
+       -- transcode inherently fixes container + audio + video, so the
+       -- lighter checks below are not consulted
 
-15. The migration script that adds the column is idempotent (`ADD COLUMN IF NOT EXISTS`). Running it twice on a fresh schema is a no-op. Verifiable: run the migration script twice, no errors, no duplicate columns.
+    d. Container NOT IN CompatibleContainers
+       OR audio codec NOT IN (aac, ac3, eac3, mp3)
+       OR audio not normalized (see criterion 13)
+       -> IsCompliant = false, RecommendedMode = 'Remux'
 
-16. Every queue-entry path's WHERE clause includes `AND COALESCE(LastTranscodeOutcome, '') != 'NoSavings'` (or equivalent IS DISTINCT FROM check). The check lives in the same single helper that already enforces `TranscodedByMediaVortex IS NOT TRUE`, so adding it is one place. Verifiable: searching the codebase for the new predicate shows it in the helper definition and not duplicated in caller queries.
+    e. None of the above
+       -> IsCompliant = true, RecommendedMode = NULL
+    ```
 
-17. The SmartPopulate partial index `idx_mediafiles_smartpopulate` is updated (or replaced) so the WHERE clause `TranscodedByMediaVortex IS NOT TRUE AND SizeMB > 0 AND COALESCE(LastTranscodeOutcome, '') != 'NoSavings'` still uses the index. Verifiable: `EXPLAIN ANALYZE` of the SmartPopulate query continues to show `Index Scan` or `Bitmap Index Scan`, not `Seq Scan on mediafiles`.
+12. Verifiable per-clause:
+    - File with HasExplicitEnglishAudio=false: IsCompliant=NULL.
+    - 1080p MKV h264 8000 kbps with effective profile targeting 480p: IsCompliant=false, RecommendedMode='Transcode'.
+    - 720p MP4 h264 935 kbps already at-or-below profile target with normalized audio: IsCompliant=true.
+    - 720p MKV h264 935 kbps with normalized audio: IsCompliant=false, RecommendedMode='Remux' (container-only fix).
+    - 720p MP4 h264 935 kbps with un-normalized audio: IsCompliant=false, RecommendedMode='Remux' (audio-only fix).
 
-### Operator override
+13. Audio normalization detection (criterion 11d):
+    - For files MediaVortex transcoded (`TranscodeAttempts.FileReplaced=true` for that MediaFileId): a file is considered normalized if and only if the most-recent successful attempt's `FFpmpegCommand` (note: column name has a known double-`p` typo, see `CLAUDE.md`) contains `loudnorm` substring (case-insensitive). Approach validated 2026-05-09 against live data: 2,385 normalized attempts vs 230 un-normalized cleanly partitioned, the 230 clustered on a single day (2026-02-17) when normalization was off.
+    - For files NOT in TranscodeAttempts (natively imported): default to NOT normalized. Operator can re-evaluate via the admin endpoint after the file is processed once.
+    - No `ebur128` measurement in this feature -- deferred. Cheap-and-correct-enough for MediaVortex outputs is the priority here.
+    - Verifiable: insert a test TranscodeAttempts row with `FFpmpegCommand='ffmpeg ... -af loudnorm=I=-23 ...'`, recompute -- file marks as normalized. Replace command without loudnorm, recompute -- marks as un-normalized.
 
-18. `POST /api/MediaFiles/<id>/ResetTranscodeOutcome` accepts a MediaFileId path parameter, clears `LastTranscodeOutcome` for that row (sets it to NULL), and returns `{Success, Message}`. Verifiable: mark a file `'NoSavings'`, call the endpoint, query MediaFiles -- the column is NULL.
+### E. Pre-flight gate at queue creation
 
-19. The reset endpoint is operator-triggered only -- it does not auto-fire on profile change, threshold change, or any other system event. The operator decides when a previously-skipped file should be retried. (No automatic reset is in scope for this feature; it would be a separate decision.) Verifiable: change a profile or threshold, observe `LastTranscodeOutcome` stays `'NoSavings'` until the endpoint is called.
+14. The four queue-entry sites read `MediaFiles.RecommendedMode` (no recomputation at queue time):
+    - `CreateQueueItemFromMediaFileWithProfile` (PopulateQueueFromMediaFiles)
+    - `AddSuggestionsToQueue` (SmartPopulate / Card 1)
+    - `AddJobToQueue` (Add Job dialog / Card 2 per-row +)
+    - `QueueByFolder` (Card 2 bulk)
 
-### SystemSettings
+15. Pre-flight behavior per RecommendedMode:
+    - `'Transcode'` -> insert TranscodeQueue row with `ProcessingMode='Transcode'`
+    - `'Remux'` -> insert TranscodeQueue row with `ProcessingMode='Remux'`
+    - NULL with `IsCompliant=true` -> skip; log "AlreadyCompliant" with MediaFileId
+    - NULL with `IsCompliant=NULL` -> skip; log a warning citing the missing input (no English audio, no effective profile, etc.) per the loud-failure rule
+    - `IsCompliant=false` with `RecommendedMode=NULL` is a logic error -- log critical, do not queue
 
-20. `SystemSetting('MinTranscodeSavingsMB')` reads the threshold (integer, default 150). Changes take effect at the next queue-entry call -- no service restart required. Verifiable: set the value to 50, queue a borderline file (e.g. 100 MB estimated savings), observe `Mode='Transcode'`; reset to 150, queue it again (after a reset of LastTranscodeOutcome) -- observe Remux/Skip.
+### F. Post-flight gate at FileReplacement
 
-21. `SystemSetting('CompatibleContainers')` reads a comma-separated case-insensitive list (default `'mp4,mov,m4v'`). The pre-flight gate compares the source `ContainerFormat` to this list when deciding remux-vs-skip. Verifiable: add `'avi'` to the setting, queue a low-savings AVI file -- observe it skipped; remove `'avi'`, queue again -- observe `Mode='Remux'`.
+16. `FileReplacementBusinessService.ProcessFileReplacementWithVMAF` retains the post-flight gate from the prior no-benefit-handling design but only for `ProcessingMode='Transcode'` rows. For Remux rows, the gate is skipped because remux is by definition not aimed at disk savings -- audio re-encode may produce a marginally larger output, and that's acceptable. Verifiable: a Remux job whose new audio adds 200 KB still replaces; a Transcode job whose new file is equal-or-larger does NOT replace.
 
-### Reporting (no new UI in this feature)
+17. After successful replacement, the new file is re-probed and `RecomputeForFiles([MediaFileId])` runs. The expected outcome is `IsCompliant=true` -- if the recompute shows `IsCompliant=false`, log a warning naming the criterion that still failed (operator visibility into "transcode/remux didn't fully fix this file"). Verifiable: induce a re-encode that intentionally fails one criterion (e.g. mock a reply where audio still isn't normalized due to a settings flip mid-job), confirm warning logged.
 
-22. The operator can query no-savings files from the SQL Queries page using:
-    `SELECT FilePath, SizeMB, AssignedProfile, LastTranscodeOutcome FROM MediaFiles WHERE LastTranscodeOutcome = 'NoSavings' ORDER BY SizeMB DESC`
-    No dedicated UI is built in this feature; if the result set grows large enough to warrant a page, that's a follow-up. Verifiable: run the query, get results.
+### G. Queue-population filter
+
+18. Every queue-entry path's WHERE clause includes `IsCompliant IS NOT TRUE` via the existing shared helper. Compliant files cannot enter any queue. Verifiable: mark a file `IsCompliant=true` manually, attempt to queue it via every entry path -- all return skipped, no TranscodeQueue row appears.
+
+19. The partial index `idx_mediafiles_smartpopulate` is recreated to include `IsCompliant IS NOT TRUE` in its WHERE so SmartPopulate stays sub-millisecond. Verifiable: `EXPLAIN ANALYZE` shows Index Scan after recreation.
+
+### H. Admin endpoint
+
+20. `POST /api/PriorityMaterialization/Recompute` (existing endpoint from priority-materialization) is extended to also recompute IsCompliant + RecommendedMode + AssignedProfile via the unified `RecomputeForFiles`. Optional body filters: `ProfileName` (only files whose cascade resolves to that profile), `Drive`, `ShowFolder`. With no body, recomputes the whole library. Verifiable: POST with no body on a fresh DB; row count returned matches MediaFiles total; library compliance state stabilises.
+
+### I. Operator visibility
+
+21. The Activity page renders a "Library Compliance" panel at the **bottom of the page** (below the existing panels) showing a one-glance summary:
+    - Total MediaFiles count
+    - Compliant count + percent
+    - Non-compliant by RecommendedMode (Transcode N, Remux N)
+    - Undecided count (IsCompliant IS NULL) split by reason (no profile / no English audio / not yet probed)
+    Source: cheap GROUP BY query on MediaFiles; no per-poll recompute. Verifiable: visual inspection plus a manual `SELECT IsCompliant, RecommendedMode, COUNT(*) FROM MediaFiles GROUP BY 1, 2` reconciles with the displayed numbers.
+
+22. SmartPopulate response per-row includes `IsCompliant` and `RecommendedMode` fields. Card 1 row template renders a small badge showing the recommended mode (Transcode / Remux), so the operator can see at a glance which pipeline a queued item will hit.
+
+### J. Cleanup and deprecation
+
+23. The legacy `CompliantFiles` table is dropped (migration `Scripts/SQLScripts/DropCompliantFilesTable.py`, idempotent `DROP TABLE IF EXISTS`). 1,451 stale rows last written 2025-09-08, no live readers. The new `MediaFiles.IsCompliant` column supersedes it. Verifiable: `\d CompliantFiles` returns "Did not find any relation" after migration.
+
+24. The `TranscodeQueue.ProcessingMode='Remux'` worker path remains the existing `ProcessRemuxJob` -- no behavior change in the worker, only how items get routed to it.
+
+25. The original `no-benefit-handling.feature.md` filename is renamed via `git mv` to this filename. Doc cross-references in other feature docs / flow docs are updated. Verifiable: `grep -r 'no-benefit-handling'` returns only historical commit messages.
 
 ## Status
 
-DRAFTED -- awaiting operator approval.
+IN PROGRESS -- operator approved 2026-05-09 (cheap-loudnorm-detection validated; visibility panel placed at bottom of Activity page).
 
 ### Progress
 
-- [x] Operator-approved design (2026-05-09): 150 MB threshold, two gates, override endpoint, no new UI in scope
-- [x] `transcode.flow.md` Stage 4 + Stage 7 extended with the new gates
-- [x] Feature doc drafted (this file)
-- [ ] Operator approves criteria 1-22
-- [ ] Schema migration `Scripts/SQLScripts/AddLastTranscodeOutcomeColumn.py` (idempotent ADD COLUMN)
-- [ ] SystemSettings seeds: `MinTranscodeSavingsMB=150`, `CompatibleContainers='mp4,mov,m4v'` (idempotent INSERT ... ON CONFLICT)
-- [ ] Extract `_EstimateTargetSizeMb` helper in `QueueManagementBusinessService.py` (reused by CalculatePriority and _DecideQueueMode)
-- [ ] Implement `_DecideQueueMode(MediaFile, ProfileSettings)` helper
-- [ ] Wire pre-flight gate into all four queue-entry sites: CreateQueueItemFromMediaFileWithProfile, AddSuggestionsToQueue, AddJobToQueue, QueueByFolder
-- [ ] Add post-flight gate to `FileReplacementBusinessService.ProcessFileReplacementWithVMAF` (before archive/delete/move steps)
-- [ ] Add no-savings filter to the queue-population WHERE-clause helper (single helper, same place TranscodedByMediaVortex IS NOT TRUE lives)
-- [ ] Drop and recreate `idx_mediafiles_smartpopulate` partial index with the LastTranscodeOutcome predicate added (so the index still covers the full WHERE)
-- [ ] `POST /api/MediaFiles/<id>/ResetTranscodeOutcome` endpoint
-- [ ] Live verify criterion 5: queue the operator's 290 MB MKV example, observe Mode='Remux'
-- [ ] Live verify criterion 9: induce a NewSizeMB >= OriginalSizeMB attempt, observe gate fires and original is untouched
-- [ ] Live verify criterion 17: EXPLAIN ANALYZE still shows Index Scan after partial-index recreation
-- [ ] Live verify criterion 20: change MinTranscodeSavingsMB at runtime, observe behavior change without restart
-- [ ] Live verify criterion 22: SQL query returns no-savings rows
+- [x] Original `no-benefit-handling.feature.md` drafted and operator-approved 2026-05-09
+- [x] Audio-on-remux normalization fix shipped 2026-05-09 (covers feature criterion 24's worker-side prerequisite)
+- [x] Pivot to compliance-driven model (this rewrite, 2026-05-09)
+- [x] Renamed file: `no-benefit-handling.feature.md` -> `transcode-vs-remux-routing.feature.md` (criterion 25)
+- [ ] Operator approves criteria 1-25
+- [ ] Migrations: `AddIsCompliantColumn.py`, `AddRecommendedModeColumn.py`, `AddShowSettingsAssignedProfile.py`, `SeedDefaultProfileSetting.py`, `DropCompliantFilesTable.py`
+- [ ] `_GetEffectiveProfile` helper (criterion 3)
+- [ ] `_EvaluateCompliance` helper (criterion 11)
+- [ ] `RecomputeForFiles` -- replaces `ComputePriorityScoresForFiles`, single-pass updater (criterion 8)
+- [ ] Recompute hooks: extend probe / ShowSettings.AssignedProfile change / SystemSettings DefaultProfileName change / FileReplacement post-flight
+- [x] /settings GUI: Default Profile dropdown + API endpoint (criterion 4) -- live-verified 2026-05-09. Card visible at top of /settings page after Setup -> Settings tab rename + lift out of collapsed Profile Management section.
+- [x] /ShowSettings Card 3 GUI: per-row Profile dropdown + API endpoint (criterion 5) -- live-verified 2026-05-09 (per-show overrides save and persist via /api/ShowSettings/SetSeriesProfile).
+- [ ] Wipe `MediaFiles.AssignedProfile` to NULL, run admin recompute to repopulate from cascade (criterion 9)
+- [ ] Pre-flight gate update at all four queue-entry sites (criteria 14, 15)
+- [ ] Post-flight gate Mode-aware split (criterion 16)
+- [ ] Queue-population filter `IsCompliant IS NOT TRUE` (criterion 18) + index recreate (criterion 19)
+- [ ] Operator visibility widget (criterion 21) + SmartPopulate response shape (criterion 22)
+- [ ] Drop legacy `CompliantFiles` table (criterion 23)
+- [ ] Live verifies: walk criteria 4, 5, 12 (a-e), 18, 19 on the live DB
 
 NEXT: operator approval to start implementation. Recommended order:
-schema migration + system-setting seeds -> shared `_EstimateTargetSizeMb` helper -> `_DecideQueueMode` -> wire into 4 entry paths -> post-flight gate -> queue-population filter + partial-index update -> override endpoint -> live verifies.
+
+1. Schema + seed migrations (criteria 1, 2, 10, 23 prerequisite)
+2. GUI surfaces (criteria 4, 5) -- so the operator can actually pick a default profile and per-show overrides before any compliance evaluation runs against meaningful inputs
+3. `_GetEffectiveProfile` + `_EvaluateCompliance` helpers
+4. `RecomputeForFiles` unified updater + hook wiring
+5. `MediaFiles.AssignedProfile` wipe + admin recompute on the live library to populate IsCompliant + RecommendedMode for all rows
+6. Queue-population filter rollout + pre/post-flight gate updates
+7. Visibility widget + drop of `CompliantFiles`
+8. Live verifies
 
 ## Scope
 
 ```
-Features/TranscodeQueue/no-benefit-handling.feature.md          -- (NEW) this file
-Features/TranscodeQueue/QueueManagementBusinessService.py       -- _EstimateTargetSizeMb, _DecideQueueMode, 4 queue-entry callers, queue-population WHERE-clause helper
-Features/TranscodeQueue/TranscodeQueueController.py             -- AddJobToQueue route consumes _DecideQueueMode result
-Features/ShowSettings/ShowSettingsController.py                 -- AddToQueue + QueueByFolder routes consume _DecideQueueMode result
-Features/FileReplacement/FileReplacementBusinessService.py      -- post-flight gate before archive/delete/move
-Features/MediaFiles/                                             -- (NEW dir) MediaFilesController.py with ResetTranscodeOutcome route
-Repositories/DatabaseManager.py                                  -- GetTranscodeQueueItemsPaginated WHERE-clause uses the shared helper; SmartPopulate partial index recreate
-Scripts/SQLScripts/AddLastTranscodeOutcomeColumn.py             -- (NEW) ADD COLUMN migration
-Scripts/SQLScripts/AddSmartPopulateIndex.py                     -- (UPDATED) drop + recreate partial index with LastTranscodeOutcome predicate
-transcode.flow.md                                                -- (UPDATED) Stage 4 + Stage 7 gate descriptions
+Features/TranscodeQueue/transcode-vs-remux-routing.feature.md  -- (THIS FILE, renamed)
+Features/TranscodeQueue/QueueManagementBusinessService.py      -- _GetEffectiveProfile, _EvaluateCompliance, RecomputeForFiles
+Features/TranscodeQueue/TranscodeQueueController.py            -- AddJob route consumes RecommendedMode
+Features/ShowSettings/ShowSettingsController.py                -- new /SetSeriesProfile endpoint, AddToQueue/QueueByFolder consume RecommendedMode
+Features/ShowSettings/ShowSettingsRepository.py                -- read/write ShowSettings.AssignedProfile
+Features/ShowSettings/Models/ShowSettingModel.py               -- add AssignedProfile field
+Features/SystemSettings/SystemSettingsController.py            -- new /DefaultProfile endpoint
+Features/MediaProbe/MediaProbeBusinessService.py               -- probe-completion hook calls RecomputeForFiles
+Features/Profiles/ProfileRepository.py                         -- bulk-update hook calls RecomputeForFiles
+Features/FileReplacement/FileReplacementBusinessService.py     -- post-flight gate Mode-aware + RecomputeForFiles call
+Features/PriorityMaterialization/PriorityMaterializationController.py  -- admin endpoint extended
+Templates/Settings.html                                         -- Default Profile dropdown
+Templates/ShowSettings.html                                     -- Card 3 per-show Profile column
+Repositories/DatabaseManager.py                                 -- queue-population WHERE-clause helper updated, partial-index recreate
+Scripts/SQLScripts/AddIsCompliantColumn.py                      -- (NEW)
+Scripts/SQLScripts/AddRecommendedModeColumn.py                  -- (NEW)
+Scripts/SQLScripts/AddShowSettingsAssignedProfile.py            -- (NEW)
+Scripts/SQLScripts/SeedDefaultProfileSetting.py                 -- (NEW)
+Scripts/SQLScripts/DropCompliantFilesTable.py                   -- (NEW)
+Scripts/SQLScripts/AddSmartPopulateIndex.py                     -- (UPDATED, recreate with IsCompliant predicate)
+transcode.flow.md                                                -- Stage 4 + Stage 7 sections updated
 ```
 
 ## Files
 
 | File | Role |
 |------|------|
-| `Scripts/SQLScripts/AddLastTranscodeOutcomeColumn.py` | (NEW) Idempotent migration: `ALTER TABLE MediaFiles ADD COLUMN IF NOT EXISTS LastTranscodeOutcome VARCHAR(32)`. Logs row count and how many rows have non-NULL value after add. |
-| `Scripts/SQLScripts/AddSmartPopulateIndex.py` | (UPDATED) Drop and recreate `idx_mediafiles_smartpopulate` so the partial-index WHERE clause matches the new query (adds `AND COALESCE(LastTranscodeOutcome, '') != 'NoSavings'`). EXPLAIN ANALYZE before/after. |
-| `Features/TranscodeQueue/QueueManagementBusinessService.py` | New `_EstimateTargetSizeMb` helper extracted from CalculatePriority. New `_DecideQueueMode(MediaFile, ProfileSettings)` helper. New `_NoSavingsWhereClause()` helper appended to existing TranscodedByMediaVortex predicate. Four queue-entry callers updated to consult `_DecideQueueMode` and act on its result. |
-| `Features/TranscodeQueue/TranscodeQueueController.py` | `AddJob` route: when `_DecideQueueMode` returns None, response includes `Skipped=True` and the reason; when it returns Mode='Remux', response confirms the remux mode. |
-| `Features/ShowSettings/ShowSettingsController.py` | `AddToQueue` and `QueueByFolder` route response shapes updated to include skip/remux counts so the UI can render an honest "added: X transcode, Y remux, Z skipped (already optimal)" message. |
-| `Features/FileReplacement/FileReplacementBusinessService.py` | `ProcessFileReplacementWithVMAF`: post-flight gate before the archive/delete/move sequence. When `NewSizeMB >= OriginalSizeMB`: delete staged output, set `MediaFiles.LastTranscodeOutcome='NoSavings'`, LogWarning, return `Success=False, Reason='NoSavings'`. |
-| `Features/MediaFiles/MediaFilesController.py` | (NEW) Flask Blueprint with one route: `POST /api/MediaFiles/<id>/ResetTranscodeOutcome`. Sets `LastTranscodeOutcome = NULL` for the given Id. Returns `{Success, Message}`. |
-| `Repositories/DatabaseManager.py` | `GetTranscodeQueueItemsPaginated` and any other MediaFiles read paths consume the shared `_NoSavingsWhereClause` so the predicate isn't duplicated. |
-| `transcode.flow.md` | (UPDATED in this PR) Stage 4 safety-guards summary lists the new gates; Stage 7 step list includes the post-flight gate at the correct ordinal position before archive/delete. |
+| Feature doc (this file) | Contract |
+| `Scripts/SQLScripts/AddIsCompliantColumn.py` | Idempotent ADD COLUMN MediaFiles.IsCompliant BOOLEAN |
+| `Scripts/SQLScripts/AddRecommendedModeColumn.py` | Idempotent ADD COLUMN MediaFiles.RecommendedMode VARCHAR(16) |
+| `Scripts/SQLScripts/AddShowSettingsAssignedProfile.py` | Idempotent ADD COLUMN ShowSettings.AssignedProfile VARCHAR(100) |
+| `Scripts/SQLScripts/SeedDefaultProfileSetting.py` | Idempotent INSERT SystemSetting `'DefaultProfileName' = 'SVT-AV1 P6 FG8 >480p'` ON CONFLICT DO NOTHING |
+| `Scripts/SQLScripts/DropCompliantFilesTable.py` | Idempotent DROP TABLE IF EXISTS CompliantFiles (criterion 23) |
+| `Scripts/SQLScripts/AddSmartPopulateIndex.py` | Updated: drop and recreate `idx_mediafiles_smartpopulate` with `IsCompliant IS NOT TRUE` in WHERE |
+| `Features/TranscodeQueue/QueueManagementBusinessService.py` | New helpers: `_GetEffectiveProfile`, `_EvaluateCompliance`, `RecomputeForFiles` (replaces `ComputePriorityScoresForFiles`); SmartPopulate / queue-population paths consult RecommendedMode |
+| `Features/ShowSettings/ShowSettingsController.py` | New `POST /api/ShowSettings/SetSeriesProfile` endpoint with profile-name validation; AddToQueue/QueueByFolder updated to read RecommendedMode |
+| `Features/ShowSettings/ShowSettingsRepository.py` | Read/write `ShowSettings.AssignedProfile` |
+| `Features/ShowSettings/Models/ShowSettingModel.py` | Add `AssignedProfile: Optional[str] = None` field |
+| `Features/SystemSettings/SystemSettingsController.py` | New `POST /api/SystemSettings/DefaultProfile` endpoint with profile-name validation |
+| `Features/MediaProbe/MediaProbeBusinessService.py` | Probe-completion hook now calls `RecomputeForFiles([Id])` (was `ComputePriorityScore`) -- updates all four cached fields in one pass |
+| `Features/Profiles/ProfileRepository.py` | Bulk-assign-profile flow updated -- writes ShowSettings.AssignedProfile when scoped to a folder, instead of MediaFiles.AssignedProfile directly. Calls RecomputeForFiles for affected rows. |
+| `Features/FileReplacement/FileReplacementBusinessService.py` | Post-flight gate Mode-aware (criterion 16); after successful replacement, calls RecomputeForFiles for the MediaFileId |
+| `Features/PriorityMaterialization/PriorityMaterializationController.py` | Admin recompute endpoint accepts new optional `Drive` and `ShowFolder` filters; calls unified RecomputeForFiles |
+| `Templates/Settings.html` | "Default Profile" `<select>` populated from Profiles, bound to `/api/SystemSettings/DefaultProfile` |
+| `Templates/ShowSettings.html` | Card 3 (Media Library) gains a "Profile" column with `<select>` per row, bound to `/api/ShowSettings/SetSeriesProfile`. Card 1 SmartPopulate row template renders RecommendedMode badge alongside the Priority badge. |
+| `Repositories/DatabaseManager.py` | Queue-population WHERE clause helper updated to include `IsCompliant IS NOT TRUE`; partial-index recreate matches |
+| `transcode.flow.md` | Stage 4 safety guards updated: `IsCompliant IS NOT TRUE` filter; Stage 7 post-flight gate Mode-aware; Stage 3.5 PRIORITY note adjusted to mention IsCompliant + RecommendedMode now share the same materialization pass |
 
 ## Deviation from conventions
 
-`Features/MediaFiles/` is a new feature directory created just for the
-override endpoint. The existing codebase has no Features/MediaFiles/
-folder despite MediaFiles being a core table -- queries against it are
-spread across DatabaseManager, MediaProbeRepository, etc. Adding a
-single-file feature dir for one route is a small precedent for a future
-MediaFiles vertical slice. If that direction is wrong, the route can
-move into Features/TranscodeQueue/ instead -- the override conceptually
-belongs to "queue eligibility," not to MediaFiles itself.
+`Features/PriorityMaterialization/` admin endpoint dir already exists per the priority-materialization feature; this feature extends it rather than creating a new home for the recompute endpoint. The admin endpoint name retains "PriorityMaterialization" for backward compatibility with any operator scripts -- the feature is broader now (priority + compliance + recommended mode + cached profile) but renaming the URL is not worth the breakage.

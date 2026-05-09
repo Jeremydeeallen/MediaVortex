@@ -89,6 +89,49 @@ def BulkUpdateShowSettings():
         return jsonify({'Success': False, 'Message': str(Ex)}), 500
 
 
+@ShowSettingsBlueprint.route('/SetSeriesProfile', methods=['POST'])
+def SetSeriesProfile():
+    """Set or clear the per-show profile override.
+
+    Body: {"ShowFolder": "<full path e.g. T:\\Survivor>", "ProfileName": "<name or empty string to clear>"}.
+    Empty/missing ProfileName clears the override -- show then inherits SystemSettings.DefaultProfileName.
+    Non-empty ProfileName must exist in Profiles.ProfileName -- otherwise 400.
+
+    Owns: transcode-vs-remux-routing.feature.md criteria 5, 6.
+    """
+    try:
+        Data = request.get_json() or {}
+        ShowFolder = (Data.get('ShowFolder') or '').strip()
+        ProfileName = (Data.get('ProfileName') or '').strip()
+
+        if not ShowFolder:
+            return jsonify({'Success': False, 'Message': 'ShowFolder is required'}), 400
+
+        if ProfileName:
+            from Core.Database.DatabaseService import DatabaseService
+            Rows = DatabaseService().ExecuteQuery(
+                "SELECT 1 FROM Profiles WHERE ProfileName = %s LIMIT 1",
+                (ProfileName,)
+            )
+            if not Rows:
+                return jsonify({
+                    'Success': False,
+                    'Message': f"Profile '{ProfileName}' does not exist in Profiles table"
+                }), 400
+
+        # ProfileName == '' clears the override (writes NULL).
+        Repository.SetSeriesAssignedProfile(ShowFolder, ProfileName or None)
+        DescVal = repr(ProfileName) if ProfileName else 'NULL (inherit default)'
+        LoggingService.LogInfo(
+            f"ShowSettings.AssignedProfile for '{ShowFolder}' set to {DescVal}",
+            "ShowSettingsController", "SetSeriesProfile"
+        )
+        return jsonify({'Success': True, 'ShowFolder': ShowFolder, 'AssignedProfile': ProfileName or None})
+    except Exception as Ex:
+        LoggingService.LogException("Exception in SetSeriesProfile", Ex, "ShowSettingsController", "SetSeriesProfile")
+        return jsonify({'Success': False, 'Message': str(Ex)}), 500
+
+
 @ShowSettingsBlueprint.route('/Default', methods=['GET'])
 def GetDefaultSetting():
     """Get the default target resolution."""

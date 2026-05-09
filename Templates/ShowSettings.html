@@ -140,10 +140,11 @@
                             <th style="width: 100px;">Source Res</th>
                             <th style="width: 90px;">Codec</th>
                             <th style="width: 90px;">Done</th>
+                            <th style="width: 220px;">Profile <small class="text-muted fw-normal">(blank = use default)</small></th>
                         </tr>
                     </thead>
                     <tbody id="LibraryTableBody">
-                        <tr><td colspan="6" class="text-center py-3 text-muted">Loading...</td></tr>
+                        <tr><td colspan="7" class="text-center py-3 text-muted">Loading...</td></tr>
                     </tbody>
                 </table>
             </div>
@@ -397,15 +398,29 @@ function RenderLibrary() {
     // Render
     const Tbody = $('#LibraryTableBody');
     if (Shows.length === 0) {
-        Tbody.html('<tr><td colspan="6" class="text-center py-3 text-muted">No media found</td></tr>');
+        Tbody.html('<tr><td colspan="7" class="text-center py-3 text-muted">No media found</td></tr>');
         return;
     }
 
     let Html = '';
-    Shows.forEach(function(Show) {
+    Shows.forEach(function(Show, Idx) {
         const DoneRatio = Show.TranscodedCount + '/' + Show.FileCount;
         const DonePercent = Show.FileCount > 0 ? Math.round((Show.TranscodedCount / Show.FileCount) * 100) : 0;
         const DoneClass = DonePercent === 100 ? 'text-success' : (DonePercent > 0 ? 'text-info' : '');
+
+        // Per-show profile dropdown -- writes to ShowSettings.AssignedProfile
+        // via /api/ShowSettings/SetSeriesProfile. Empty value = clear override
+        // (inherit SystemSettings.DefaultProfileName).
+        const ShowFolder = Show.ShowFolder || '';
+        const Current = Show.AssignedProfile || '';
+        let ProfileOpts = '<option value="">(use default)</option>';
+        AllProfiles.forEach(function(P) {
+            const Sel = (P.ProfileName === Current) ? ' selected' : '';
+            ProfileOpts += '<option value="' + EscapeAttr(P.ProfileName) + '"' + Sel + '>' + EscapeHtml(P.ProfileName) + '</option>';
+        });
+        const ProfileSelect = '<select class="form-select form-select-sm" '
+            + 'data-show-folder="' + EscapeAttr(ShowFolder) + '" '
+            + 'onchange="SaveSeriesProfile(this)">' + ProfileOpts + '</select>';
 
         Html += '<tr>'
             + '<td>' + EscapeHtml(Show.ShowName || 'Unknown') + '</td>'
@@ -414,10 +429,48 @@ function RenderLibrary() {
             + '<td><span class="badge bg-secondary">' + EscapeHtml(Show.CommonResolution || 'N/A') + '</span></td>'
             + '<td><span class="badge ' + GetCodecBadgeClass(Show.CommonCodec) + '">' + EscapeHtml(Show.CommonCodec || 'N/A') + '</span></td>'
             + '<td class="' + DoneClass + '">' + DoneRatio + '</td>'
+            + '<td>' + ProfileSelect + '</td>'
             + '</tr>';
     });
 
     Tbody.html(Html);
+}
+
+function SaveSeriesProfile(SelectEl) {
+    const ShowFolder = SelectEl.getAttribute('data-show-folder');
+    const ProfileName = SelectEl.value || '';
+    if (!ShowFolder) {
+        ShowNotification('No ShowFolder for this row -- cannot save profile', 'danger');
+        return;
+    }
+    SelectEl.disabled = true;
+    $.ajax({
+        url: '/api/ShowSettings/SetSeriesProfile',
+        method: 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify({ ShowFolder: ShowFolder, ProfileName: ProfileName })
+    })
+    .done(function(Response) {
+        if (Response.Success) {
+            const ShortFolder = ShowFolder.split('\\').pop() || ShowFolder;
+            const Msg = ProfileName
+                ? 'Set "' + ShortFolder + '" to ' + ProfileName
+                : 'Cleared override for "' + ShortFolder + '" (now inherits default)';
+            ShowNotification(Msg, 'success');
+            // Update in-memory model so subsequent re-renders show the new value.
+            const Match = AllShows.find(function(S) { return S.ShowFolder === ShowFolder; });
+            if (Match) Match.AssignedProfile = ProfileName || null;
+        } else {
+            ShowNotification('Failed: ' + (Response.Message || 'Unknown error'), 'danger');
+        }
+    })
+    .fail(function(XHR) {
+        const Msg = (XHR.responseJSON && XHR.responseJSON.Message) || 'Request failed';
+        ShowNotification('Failed: ' + Msg, 'danger');
+    })
+    .always(function() {
+        SelectEl.disabled = false;
+    });
 }
 
 function SortLibrary(Column) {

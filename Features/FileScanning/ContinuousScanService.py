@@ -4,6 +4,7 @@ import time
 from typing import Dict, Any, List
 from datetime import datetime, timezone
 from Core.Logging.LoggingService import LoggingService
+from Core.DateTimeHelpers import AsAwareUtc, ToUtcIsoZ
 
 
 class ContinuousScanService:
@@ -138,7 +139,6 @@ class ContinuousScanService:
 
                 # Calculate scan duration
                 if IsScanning and ScanResults.ScanStartTime:
-                    from Core.DateTimeHelpers import AsAwareUtc, ToUtcIsoZ
                     Duration = datetime.now(timezone.utc) - AsAwareUtc(ScanResults.ScanStartTime)
                     Status['CurrentScanDuration'] = str(Duration).split('.')[0]  # Remove microseconds
                 else:

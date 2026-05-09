@@ -81,6 +81,38 @@ class ShowSettingsRepository(BaseRepository):
             LoggingService.LogException("Exception saving show setting", Ex, "ShowSettingsRepository", "SaveShowSetting")
             return 0
 
+    def SetSeriesAssignedProfile(self, ShowFolder: str, AssignedProfile: Optional[str]) -> int:
+        """Set or clear the per-show AssignedProfile.
+
+        Owns: transcode-vs-remux-routing.feature.md (per-show profile override).
+        AssignedProfile=None clears the override; the show then inherits
+        SystemSettings.DefaultProfileName via _GetEffectiveProfile.
+        Caller is responsible for validating AssignedProfile against Profiles.
+        Returns the Id of the affected ShowSettings row.
+        """
+        try:
+            Existing = self.GetShowSettingByFolder(ShowFolder)
+            if Existing:
+                self.ExecuteNonQuery(
+                    """UPDATE ShowSettings
+                       SET AssignedProfile = %s, LastModifiedDate = NOW()
+                       WHERE ShowFolder = %s""",
+                    (AssignedProfile, ShowFolder),
+                )
+                return Existing.Id
+            self.ExecuteNonQuery(
+                """INSERT INTO ShowSettings (ShowFolder, TargetResolution, AssignedProfile, CreatedDate, LastModifiedDate)
+                   VALUES (%s, '', %s, NOW(), NOW())""",
+                (ShowFolder, AssignedProfile),
+            )
+            return self.GetLastInsertId()
+        except Exception as Ex:
+            LoggingService.LogException(
+                f"Exception setting AssignedProfile for {ShowFolder!r}",
+                Ex, "ShowSettingsRepository", "SetSeriesAssignedProfile"
+            )
+            return 0
+
     def BulkUpdateTargetResolution(self, ShowFolders: List[str], TargetResolution: str) -> int:
         """Update target resolution for multiple shows at once. Creates settings for shows that don't have one."""
         try:
@@ -135,7 +167,7 @@ class ShowSettingsRepository(BaseRepository):
                 Params = (RootDrive + '%',)
 
             query = f"""
-                SELECT 
+                SELECT
                     split_part(replace(mf.FilePath, '\\', '/'), '/', 2) as ShowName,
                     MIN(split_part(mf.FilePath, '\\', 1) || '\\' || split_part(replace(mf.FilePath, '\\', '/'), '/', 2)) as ShowFolder,
                     COUNT(*) as FileCount,
@@ -143,11 +175,12 @@ class ShowSettingsRepository(BaseRepository):
                     MODE() WITHIN GROUP (ORDER BY mf.ResolutionCategory) as CommonResolution,
                     MODE() WITHIN GROUP (ORDER BY mf.Codec) as CommonCodec,
                     ss.TargetResolution as TargetResolution,
+                    ss.AssignedProfile as AssignedProfile,
                     SUM(CASE WHEN mf.TranscodedByMediaVortex = true THEN 1 ELSE 0 END) as TranscodedCount
                 FROM MediaFiles mf
                 LEFT JOIN ShowSettings ss ON ss.ShowFolder = split_part(mf.FilePath, '\\', 1) || '\\' || split_part(replace(mf.FilePath, '\\', '/'), '/', 2)
                 {DriveFilter}
-                GROUP BY ShowName, ss.TargetResolution
+                GROUP BY ShowName, ss.TargetResolution, ss.AssignedProfile
                 HAVING COUNT(*) > 0
                 ORDER BY SUM(mf.SizeMB) DESC
             """

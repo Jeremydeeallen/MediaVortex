@@ -31,7 +31,7 @@ Both (UI changes + API changes)
 
 ## Status
 
-IMPLEMENTED -- awaiting verification
+COMPLETE -- both verifies passed 2026-05-09
 
 ### Progress
 
@@ -45,8 +45,8 @@ IMPLEMENTED -- awaiting verification
 - [x] Add Worker column to Active Transcode Jobs table in Status.html
 - [x] Add stuck job visual indicator (warning row + triangle icon) + Reset button in UI
 - [x] Add Workers cards to Services section in Status.html (separate Workers section above Services)
-- [ ] Verify: two workers transcoding shows both with correct worker names
-- [ ] Verify: stopped worker's job shows as stuck, Reset button works
+- [x] Verified 2026-05-09: two workers transcoding shows both with correct worker names
+- [x] Verified 2026-05-09: stopped worker's job shows as stuck, Reset button works
 
 ## Scope
 
