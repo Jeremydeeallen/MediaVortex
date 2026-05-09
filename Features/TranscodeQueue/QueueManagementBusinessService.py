@@ -253,6 +253,11 @@ class QueueManagementBusinessService:
                 Parts = FilePath.replace('\\', '/').split('/')
                 ShowName = Parts[1] if len(Parts) >= 2 else 'Unknown'
 
+                # Priority is intentionally NOT computed here -- the user has not
+                # picked a profile yet at the suggestion-listing stage, so the real
+                # impact-based score (queue-priority.feature.md) cannot be calculated.
+                # AddSuggestionsToQueue computes the authoritative priority when the
+                # user actually adds the item with a profile.
                 Suggestions.append({
                     'MediaFileId': Row.get('Id'),
                     'FilePath': FilePath,
@@ -265,7 +270,6 @@ class QueueManagementBusinessService:
                     'BitrateKbps': int(Row.get('VideoBitrateKbps', 0) or 0),
                     'ContainerFormat': Row.get('ContainerFormat', '') or '',
                     'Mode': 'Transcode',
-                    'Priority': int(float(Row.get('SizeMB', 0) or 0)),
                 })
 
             Result = {
@@ -314,21 +318,53 @@ class QueueManagementBusinessService:
                     ItemsSkipped += 1
                     continue
 
+                # Resolve the MediaFile (needed for impact-based priority and for the
+                # optional profile assignment below). Without it we have to fall back.
+                MediaFileId = Item.get('MediaFileId')
+                MediaFile = self.DatabaseManager.GetMediaFileById(MediaFileId) if MediaFileId else None
+
                 # Assign profile to the media file if specified
-                if ProfileName:
-                    MediaFileId = Item.get('MediaFileId')
-                    if MediaFileId:
-                        MediaFile = self.DatabaseManager.GetMediaFileById(MediaFileId)
-                        if MediaFile:
-                            MediaFile.AssignedProfile = ProfileName
-                            self.DatabaseManager.SaveMediaFile(MediaFile)
+                if ProfileName and MediaFile:
+                    MediaFile.AssignedProfile = ProfileName
+                    self.DatabaseManager.SaveMediaFile(MediaFile)
 
                 PathParts = FilePath.replace("\\", "/").split("/")
                 Directory = "/".join(PathParts[:-1]) if len(PathParts) > 1 else ""
                 FileName = PathParts[-1] if PathParts else ""
                 SizeMB = float(Item.get('SizeMB', 0))
                 Mode = Item.get('Mode', 'Transcode')
-                Priority = int(Item.get('Priority', 0))
+
+                # Compute impact-based priority via the canonical CalculatePriority
+                # path. If the operator passed an explicit Priority on the item dict
+                # (e.g. a manual override 195-200), respect it; otherwise compute fresh.
+                ExplicitPriority = Item.get('Priority')
+                if isinstance(ExplicitPriority, int) and 1 <= ExplicitPriority <= 200:
+                    Priority = ExplicitPriority
+                elif MediaFile:
+                    TargetVideoKbps = None
+                    TargetAudioKbps = None
+                    if MediaFile.AssignedProfile and MediaFile.Resolution:
+                        try:
+                            Settings = self.DatabaseManager.GetProfileSettingsForTargetResolution(
+                                MediaFile.AssignedProfile, MediaFile.Resolution
+                            )
+                            if Settings:
+                                TargetVideoKbps = Settings.get('VideoBitrateKbps')
+                                TargetAudioKbps = Settings.get('AudioBitrateKbps')
+                        except Exception as Ex:
+                            LoggingService.LogException(
+                                f"Could not look up ProfileThresholds for priority calc on {FileName}",
+                                Ex, "QueueManagementBusinessService", "AddSuggestionsToQueue"
+                            )
+                    Priority = self.CalculatePriority(
+                        MediaFile,
+                        TargetVideoKbps=TargetVideoKbps,
+                        TargetAudioKbps=TargetAudioKbps,
+                    )
+                else:
+                    # No MediaFile linkage at all (shouldn't happen for SmartPopulate
+                    # suggestions, but be defensive). Fallback path.
+                    Priority = 1
 
                 QueueItem = TranscodeQueueModel(
                     FilePath=FilePath,
@@ -1055,20 +1091,32 @@ class QueueManagementBusinessService:
 
                         return {"Success": False, "ErrorMessage": errorMsg}
 
-            # Create queue item directly from media file (no threshold matching needed)
-            queueItem = self.CreateQueueItemFromMediaFileSimple(mediaFile)
+            # Create queue item -- use the profile-aware path when the MediaFile
+            # has a profile assigned so CalculatePriority can use the deterministic
+            # profile-target formula. Falls back to the Simple path otherwise.
+            if mediaFile.AssignedProfile:
+                queueItem = self.CreateQueueItemFromMediaFileWithProfile(mediaFile)
+            else:
+                queueItem = self.CreateQueueItemFromMediaFileSimple(mediaFile)
             if not queueItem:
                 errorMsg = f"Failed to create queue item for {mediaFile.FileName}"
                 LoggingService.LogError(errorMsg, "QueueManagementBusinessService", "AddJobToQueue")
                 return {"Success": False, "ErrorMessage": errorMsg}
 
-            # Override priority if specified, or add bonus for manual addition
+            # Override priority if specified (operator can set 1-200 explicitly,
+            # including the 195-200 manual-override window). Otherwise add a small
+            # bonus to acknowledge that the user explicitly clicked + (this file is
+            # more important to them than a generic queue-populate batch).
             if Priority is not None:
                 queueItem.Priority = Priority
             else:
-                # Add 15 points to priority for manual addition via + button
-                queueItem.Priority = min(100, queueItem.Priority + 15)
-                LoggingService.LogInfo(f"Added manual addition bonus (+15) to priority for {mediaFile.FileName}. New priority: {queueItem.Priority}", "QueueManagementBusinessService", "AddJobToQueue")
+                # +15 bonus, capped at 194 so auto-assignment never leaks into the
+                # manual-override window (195-200 is reserved per queue-priority.feature.md).
+                queueItem.Priority = min(194, queueItem.Priority + 15)
+                LoggingService.LogInfo(
+                    f"Added manual addition bonus (+15, capped at 194) to priority for {mediaFile.FileName}. New priority: {queueItem.Priority}",
+                    "QueueManagementBusinessService", "AddJobToQueue"
+                )
 
             # Save to database
             itemId = self.Repository.SaveTranscodeQueueItem(queueItem)

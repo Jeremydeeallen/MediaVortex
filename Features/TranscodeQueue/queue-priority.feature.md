@@ -132,6 +132,7 @@ IN PROGRESS
 - [x] Update `getPriorityBadgeClass` JS color brackets in `Queue.html` (>=195 red, >=150 yellow, >=75 blue, <75 gray)
 - [x] Write `Scripts/SQLScripts/RecalculateQueuePriorities.py` (optional rebalance, dry-run by default; manual-override range 195-200 excluded by query)
 - [x] Smoke test PASSED: profile-target path produces 107/136/150/173 across 1.5/4/8/30 GB. Already-efficient files clamp to priority 1. 200 GB worst case caps at 194.
+- [x] Close priority-bypass paths (2026-05-09, after operator reported Priority=1076 on a Media-page-added Survivor episode): `SmartPopulateQueue` no longer pre-fills `Priority` in suggestion dicts; `AddSuggestionsToQueue` recomputes via `CalculatePriority` with profile bitrates; `AddJobToQueue` uses the profile-aware queue-item path and caps the manual-bonus at 194 (not 100). `Templates/ShowSettings.html` no longer sends `S.Priority` from the SmartPopulate UI.
 - [ ] Live verify (post-WebService restart): queue a file via UI, confirm assigned priority lands in 1-194 and is reasonable for its size/profile combination
 - [ ] Live verify: an already-transcoded av1 file at profile bitrate gets priority = 1 (savings clamps to 0)
 - [ ] Live verify: set a job to 200 manually via the modal, confirm the API accepts it and the worker claims it next

@@ -489,12 +489,14 @@ function AddBatchToQueue() {
     }
 
     const Items = BatchItems.map(function(S) {
+        // Priority is intentionally NOT sent here -- the server's
+        // AddSuggestionsToQueue computes the impact-based priority once the
+        // user has selected a profile (see queue-priority.feature.md).
         return {
             FilePath: S.FilePath,
             MediaFileId: S.MediaFileId,
             SizeMB: S.SizeMB,
             Mode: 'Transcode',
-            Priority: S.Priority,
         };
     });
 
