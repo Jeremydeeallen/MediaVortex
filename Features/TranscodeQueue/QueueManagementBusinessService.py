@@ -208,7 +208,7 @@ class QueueManagementBusinessService:
             return {"Success": False, "ErrorMessage": errorMsg, "ItemsAdded": 0}
 
     def SmartPopulateQueue(self, Limit: int = 100, Offset: int = 0, Drive: str = '',
-                            Search: Optional[str] = None) -> Dict[str, Any]:
+                            Search: Optional[str] = None, Mode: Optional[str] = None) -> Dict[str, Any]:
         """Get untranscoded MediaFiles ranked by materialized PriorityScore.
 
         Reads MediaFiles.PriorityScore (maintained by the priority-materialization
@@ -216,10 +216,13 @@ class QueueManagementBusinessService:
         SizeMB DESC as tiebreaker so unscored files still land in a sensible order.
 
         Excludes files already in queue and already-MediaVortex-transcoded files.
-        Optional Drive filter (e.g. 'T:') and Search substring filter.
+        Optional Drive filter (e.g. 'T:'), Search substring filter, and Mode
+        filter ('Transcode' | 'Remux') that scopes by `MediaFiles.RecommendedMode`
+        per `Features/ShowSettings/remux-populate-card.feature.md` criterion 4.
+        Invalid Mode is silently ignored (returns the unscoped set).
         """
         try:
-            LoggingService.LogFunctionEntry("SmartPopulateQueue", "QueueManagementBusinessService", Limit, Offset, Drive, Search)
+            LoggingService.LogFunctionEntry("SmartPopulateQueue", "QueueManagementBusinessService", Limit, Offset, Drive, Search, Mode)
 
             from Core.Database.DatabaseService import DatabaseService, EscapeLikePattern
 
@@ -241,6 +244,15 @@ class QueueManagementBusinessService:
                   AND m.Id NOT IN (SELECT MediaFileId FROM TranscodeQueue WHERE MediaFileId IS NOT NULL)
                   AND m.SizeMB > 0
             """
+
+            # Mode filter (remux-populate-card.feature.md criterion 4). When supplied,
+            # scopes by RecommendedMode -- the cascade-decided pipeline. Card 1
+            # passes Mode='Transcode'; Card 1.5 passes Mode='Remux'. Invalid /
+            # missing Mode = no scoping (backward-compat with pre-Card-1.5 callers).
+            if Mode in ('Transcode', 'Remux'):
+                WhereSql += " AND m.RecommendedMode = %s"
+                Params.append(Mode)
+
             if Drive:
                 DrivePrefix = Drive.rstrip(':\\/') + ':'
                 WhereSql += " AND m.FilePath LIKE %s ESCAPE '!'"
@@ -296,7 +308,7 @@ class QueueManagementBusinessService:
                     'BitrateKbps': int(Row.get('VideoBitrateKbps', 0) or 0),
                     'ContainerFormat': Row.get('ContainerFormat', '') or '',
                     'PriorityScore': Row.get('PriorityScore'),
-                    'Mode': 'Transcode',
+                    'Mode': Mode if Mode in ('Transcode', 'Remux') else 'Transcode',
                 })
 
             Result = {
@@ -306,6 +318,7 @@ class QueueManagementBusinessService:
                 "Offset": Offset,
                 "Limit": Limit,
                 "Search": Search or '',
+                "Mode": Mode if Mode in ('Transcode', 'Remux') else None,
                 "HasMore": (Offset + len(Suggestions)) < TotalCandidates,
             }
             LoggingService.LogInfo(f"SmartPopulate: fetched {len(Rows)} of {TotalCandidates} candidates (offset={Offset}, search='{Search or ''}')", "QueueManagementBusinessService", "SmartPopulateQueue")
@@ -316,7 +329,7 @@ class QueueManagementBusinessService:
             LoggingService.LogException(ErrorMsg, Ex, "QueueManagementBusinessService", "SmartPopulateQueue")
             return {"Success": False, "ErrorMessage": ErrorMsg, "Suggestions": []}
 
-    def AddSuggestionsToQueue(self, Items: List[Dict[str, Any]], ProfileId: int = None) -> Dict[str, Any]:
+    def AddSuggestionsToQueue(self, Items: List[Dict[str, Any]], ProfileId: int = None, Mode: str = None) -> Dict[str, Any]:
         """Add approved suggestions to the transcode queue.
         
         Each item should have FilePath, TargetResolution, Mode, SizeMB, Priority.
@@ -368,7 +381,11 @@ class QueueManagementBusinessService:
                 Directory = "/".join(PathParts[:-1]) if len(PathParts) > 1 else ""
                 FileName = PathParts[-1] if PathParts else ""
                 SizeMB = float(Item.get('SizeMB', 0))
-                Mode = Item.get('Mode', 'Transcode')
+                # Batch-level Mode (from /AddToQueue?Mode=Remux) overrides any
+                # per-item Mode field. Default 'Transcode' preserves backward
+                # compatibility with callers that don't supply Mode.
+                # See remux-populate-card.feature.md criteria 5, 10.
+                ItemMode = Mode if Mode in ('Transcode', 'Remux') else Item.get('Mode', 'Transcode')
 
                 # Compute impact-based priority via the canonical CalculatePriority
                 # path. If the operator passed an explicit Priority on the item dict
@@ -410,7 +427,7 @@ class QueueManagementBusinessService:
                     SizeMB=SizeMB,
                     Priority=Priority,
                     Status="Pending",
-                    ProcessingMode=Mode,
+                    ProcessingMode=ItemMode,
                     DateAdded=datetime.now(timezone.utc)
                 )
 

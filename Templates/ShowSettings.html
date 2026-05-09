@@ -19,13 +19,15 @@
                 <div class="d-flex align-items-center gap-2 flex-wrap">
                     <input id="BatchSearch" type="search" class="form-control form-control-sm" placeholder="Search title or file..." style="width: 200px;" maxlength="100">
                     <label class="mb-0 text-white text-nowrap small">Size:</label>
-                    <select id="BatchSizeSelect" class="form-select form-select-sm" style="width: 80px;">
-                        <option value="25">25</option>
-                        <option value="50">50</option>
-                        <option value="100" selected>100</option>
-                        <option value="250">250</option>
-                        <option value="500">500</option>
-                    </select>
+                    <input id="BatchSizeSelect" type="number" min="1" max="500" step="1" value="100" class="form-control form-control-sm" style="width: 80px;" list="BatchSizeChoices">
+                    <datalist id="BatchSizeChoices">
+                        <option value="1"></option>
+                        <option value="25"></option>
+                        <option value="50"></option>
+                        <option value="100"></option>
+                        <option value="250"></option>
+                        <option value="500"></option>
+                    </datalist>
                     <label class="mb-0 text-white text-nowrap small">Profile:</label>
                     <select id="BatchProfileSelect" class="form-select form-select-sm" style="width: 220px;">
                         <option value="">-- Select a Profile --</option>
@@ -61,6 +63,59 @@
                             <td colspan="2"></td>
                             <td colspan="2">Batch Total</td>
                             <td id="BatchTotalSize" class="text-end"></td>
+                            <td colspan="3"></td>
+                        </tr>
+                    </tfoot>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Card 1.5: Next Remux Batch (sibling of Card 1, scoped to RecommendedMode='Remux') -->
+    <div class="card border-info mb-3" id="RemuxCard">
+        <div class="card-header bg-info text-white py-2">
+            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <div>
+                    <h5 class="mb-0 d-inline">Next Remux Batch</h5>
+                    <span id="RemuxCount" class="badge bg-light text-info ms-2">0</span>
+                    <small class="fw-normal ms-2 opacity-75" style="font-size: 0.75rem;">Audio normalize + container fix (no video re-encode)</small>
+                </div>
+                <div class="d-flex align-items-center gap-2 flex-wrap">
+                    <input id="RemuxSearch" type="search" class="form-control form-control-sm" placeholder="Search title or file..." style="width: 200px;" maxlength="100">
+                    <label class="mb-0 text-white text-nowrap small">Size:</label>
+                    <input id="RemuxSizeSelect" type="number" min="1" max="500" step="1" value="250" class="form-control form-control-sm" style="width: 80px;" list="BatchSizeChoices">
+                    <small class="text-white text-nowrap fst-italic opacity-75 mx-2">no profile needed</small>
+                    <button class="btn btn-light btn-sm" onclick="AddRemuxBatchToQueue()" id="AddRemuxBatchBtn">Add Batch</button>
+                    <button class="btn btn-outline-light btn-sm" onclick="SmartPopulateRemux()" id="RemuxAnalyzeBtn">Re-Analyze</button>
+                </div>
+            </div>
+        </div>
+        <div class="card-body p-0">
+            <div id="RemuxBatchInfo" class="px-3 py-2 border-bottom bg-light">
+                <small class="text-muted">Loading remux candidates...</small>
+            </div>
+            <div class="table-responsive">
+                <table class="table table-hover table-sm mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th style="width: 30px;"></th>
+                            <th style="width: 70px;" class="text-center">Priority</th>
+                            <th>Title</th>
+                            <th>File</th>
+                            <th style="width: 90px;" class="text-end">Size</th>
+                            <th style="width: 80px;">Codec</th>
+                            <th style="width: 100px;" class="text-end">Bitrate</th>
+                            <th style="width: 100px;">Resolution</th>
+                        </tr>
+                    </thead>
+                    <tbody id="RemuxTableBody">
+                        <tr><td colspan="8" class="text-center py-3 text-muted">Analyzing...</td></tr>
+                    </tbody>
+                    <tfoot class="table-light">
+                        <tr class="fw-bold">
+                            <td colspan="2"></td>
+                            <td colspan="2">Batch Total</td>
+                            <td id="RemuxTotalSize" class="text-end"></td>
                             <td colspan="3"></td>
                         </tr>
                     </tfoot>
@@ -161,11 +216,11 @@ let SearchResults = [];
 let SelectedShows = new Set();
 let LibrarySort = { Column: 'TotalGB', Direction: 'desc' };
 
-// Batch state
+// Card 1 (Transcode) batch state
 let AllSuggestions = [];
 let BatchItems = [];
 let AllProfiles = [];
-// BATCH_SIZE / PAGE_SIZE are operator-controlled via the size selector in
+// BATCH_SIZE / PAGE_SIZE are operator-controlled via the size input in
 // Card 1 (smart-populate.feature.md criterion 9). Default 100.
 let BATCH_SIZE = 100;
 let PAGE_SIZE = 100;
@@ -174,6 +229,19 @@ let SearchDebounceTimer = null;
 let CurrentOffset = 0;
 let TotalCandidates = 0;
 let HasMore = false;
+
+// Card 1.5 (Remux) batch state -- INDEPENDENT of Card 1 per
+// remux-populate-card.feature.md criterion 7. Each card has its own
+// search, batch size, offset, debounce timer.
+let RemuxAllSuggestions = [];
+let RemuxBatchItems = [];
+let REMUX_BATCH_SIZE = 250;  // Card 1.5 default is higher (criterion 8)
+let REMUX_PAGE_SIZE = 250;
+let RemuxCurrentSearch = '';
+let RemuxSearchDebounceTimer = null;
+let RemuxCurrentOffset = 0;
+let RemuxTotalCandidates = 0;
+let RemuxHasMore = false;
 
 
 $(document).ready(function() {
@@ -190,7 +258,8 @@ $(document).ready(function() {
         }, 300);
     });
 
-    // Batch-size selector (criteria 9-10).
+    // Batch-size input (criteria 9-10). Now an <input type="number">; fires
+    // on `change` (commit) which covers blur, Enter, and arrow-key step.
     $('#BatchSizeSelect').on('change', function() {
         const NewSize = parseInt($(this).val(), 10);
         if (Number.isFinite(NewSize) && NewSize >= 1 && NewSize <= 500) {
@@ -200,7 +269,27 @@ $(document).ready(function() {
         }
     });
 
+    // ── Card 1.5 (Remux) handlers -- parallel to Card 1, independent state ──
+    $('#RemuxSearch').on('input', function() {
+        const Val = $(this).val() || '';
+        clearTimeout(RemuxSearchDebounceTimer);
+        RemuxSearchDebounceTimer = setTimeout(function() {
+            RemuxCurrentSearch = Val;
+            SmartPopulateRemux();
+        }, 300);
+    });
+
+    $('#RemuxSizeSelect').on('change', function() {
+        const NewSize = parseInt($(this).val(), 10);
+        if (Number.isFinite(NewSize) && NewSize >= 1 && NewSize <= 500) {
+            REMUX_BATCH_SIZE = NewSize;
+            REMUX_PAGE_SIZE = NewSize;
+            SmartPopulateRemux();
+        }
+    });
+
     SmartPopulate();
+    SmartPopulateRemux();
 });
 
 // ── Data Loading ──
@@ -510,7 +599,8 @@ function SmartPopulate(IsNextPage) {
         Drive: 'T:',
         Limit: PAGE_SIZE,
         Offset: CurrentOffset,
-        Search: CurrentSearch || ''
+        Search: CurrentSearch || '',
+        Mode: 'Transcode'
     };
 
     $.ajax({
@@ -537,6 +627,7 @@ function SmartPopulate(IsNextPage) {
                     ? ' matching "' + EscapeHtml(CurrentSearch) + '"'
                     : '';
                 $('#BatchInfo').html('<small><strong>' + TotalCandidates.toLocaleString() + '</strong> candidates' + FilterText + '. Showing top ' + BATCH_SIZE + ' by priority.</small>');
+                $('#BatchCount').text(TotalCandidates);
                 RenderBatch();
             } else {
                 ShowNotification('Batch error: ' + (Response.Message || Response.ErrorMessage || 'Unknown error'), 'danger');
@@ -545,6 +636,160 @@ function SmartPopulate(IsNextPage) {
         error: function() {
             Btn.prop('disabled', false).html(OrigText);
             ShowNotification('Failed to run batch analysis', 'danger');
+        }
+    });
+}
+
+// ── Card 1.5: Next Remux Batch (parallel to SmartPopulate / RenderBatch / AddBatchToQueue) ──
+
+function SmartPopulateRemux(IsNextPage) {
+    const Btn = $('#RemuxAnalyzeBtn');
+    const OrigText = Btn.html();
+
+    if (!IsNextPage) {
+        RemuxCurrentOffset = 0;
+        RemuxAllSuggestions = [];
+        RemuxBatchItems = [];
+        Btn.prop('disabled', true).text('Analyzing...');
+    }
+
+    const Payload = {
+        Drive: 'T:',
+        Limit: REMUX_PAGE_SIZE,
+        Offset: RemuxCurrentOffset,
+        Search: RemuxCurrentSearch || '',
+        Mode: 'Remux'
+    };
+
+    $.ajax({
+        url: '/api/ShowSettings/SmartPopulate',
+        method: 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify(Payload),
+        timeout: 30000,
+        success: function(Response) {
+            Btn.prop('disabled', false).html(OrigText);
+            if (Response.Success) {
+                const NewItems = Response.Suggestions || [];
+                RemuxTotalCandidates = Response.TotalCandidates || 0;
+                RemuxHasMore = Response.HasMore || false;
+                RemuxCurrentOffset += NewItems.length;
+
+                RemuxAllSuggestions = RemuxAllSuggestions.concat(NewItems);
+
+                if (RemuxBatchItems.length === 0) {
+                    RemuxBatchItems = RemuxAllSuggestions.splice(0, REMUX_BATCH_SIZE);
+                }
+
+                const FilterText = RemuxCurrentSearch
+                    ? ' matching "' + EscapeHtml(RemuxCurrentSearch) + '"'
+                    : '';
+                $('#RemuxBatchInfo').html('<small><strong>' + RemuxTotalCandidates.toLocaleString() + '</strong> remux candidates' + FilterText + '. Showing top ' + REMUX_BATCH_SIZE + '.</small>');
+                $('#RemuxCount').text(RemuxTotalCandidates);
+                RenderRemuxBatch();
+            } else {
+                ShowNotification('Remux batch error: ' + (Response.Message || Response.ErrorMessage || 'Unknown error'), 'danger');
+            }
+        },
+        error: function() {
+            Btn.prop('disabled', false).html(OrigText);
+            ShowNotification('Failed to run remux batch analysis', 'danger');
+        }
+    });
+}
+
+function RenderRemuxBatch() {
+    const Tbody = $('#RemuxTableBody');
+
+    if (RemuxBatchItems.length === 0) {
+        const EmptyMsg = RemuxCurrentSearch
+            ? 'No remux matches for "' + EscapeHtml(RemuxCurrentSearch) + '"'
+            : (RemuxTotalCandidates === 0
+                ? 'No remux candidates -- library hygiene is clean for this scope'
+                : 'Remux batch is empty');
+        Tbody.html('<tr><td colspan="8" class="text-center py-3 text-muted">' + EmptyMsg + '</td></tr>');
+        $('#RemuxTotalSize').text('');
+        return;
+    }
+
+    let Html = '';
+    let TotalSize = 0;
+
+    RemuxBatchItems.forEach(function(S, Idx) {
+        TotalSize += S.SizeMB;
+        const PriorityCell = (S.PriorityScore != null)
+            ? '<span class="badge ' + GetPriorityBadgeClass(S.PriorityScore) + '">' + S.PriorityScore + '</span>'
+            : '<span class="text-muted small">-</span>';
+        Html += '<tr>'
+            + '<td><button class="btn btn-sm btn-outline-danger py-0 px-1" onclick="RemoveFromRemuxBatch(' + Idx + ')" title="Remove">x</button></td>'
+            + '<td class="text-center">' + PriorityCell + '</td>'
+            + '<td>' + EscapeHtml(S.ShowName) + '</td>'
+            + '<td title="' + EscapeAttr(S.FilePath) + '">' + EscapeHtml(S.FileName) + '</td>'
+            + '<td class="text-end">' + FormatSize(S.SizeMB) + '</td>'
+            + '<td><span class="badge ' + GetCodecBadgeClass(S.Codec) + '">' + EscapeHtml(S.Codec) + '</span></td>'
+            + '<td class="text-end">' + FormatBitrate(S.BitrateKbps) + '</td>'
+            + '<td>' + EscapeHtml(S.Resolution) + '</td>'
+            + '</tr>';
+    });
+
+    Tbody.html(Html);
+    $('#RemuxTotalSize').text(FormatSize(TotalSize));
+}
+
+function RemoveFromRemuxBatch(Idx) {
+    RemuxBatchItems.splice(Idx, 1);
+    RenderRemuxBatch();
+}
+
+function AddRemuxBatchToQueue() {
+    if (RemuxBatchItems.length === 0) {
+        ShowNotification('Remux batch is empty', 'danger');
+        return;
+    }
+
+    // Remux requires NO profile -- the cascade has already decided. Server
+    // accepts ProfileId=null when Mode='Remux'.
+    const Items = RemuxBatchItems.map(function(S) {
+        return {
+            FilePath: S.FilePath,
+            MediaFileId: S.MediaFileId,
+            SizeMB: S.SizeMB,
+            Mode: 'Remux'
+        };
+    });
+
+    const Btn = $('#AddRemuxBatchBtn');
+    const OrigText = Btn.html();
+    Btn.prop('disabled', true).text('Adding...');
+
+    $.ajax({
+        url: '/api/ShowSettings/AddToQueue',
+        method: 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify({ Items: Items, Mode: 'Remux', ProfileId: null }),
+        timeout: 30000,
+        success: function(Response) {
+            Btn.prop('disabled', false).html(OrigText);
+            if (Response.Success) {
+                const Added = Response.ItemsAdded || Items.length;
+                ShowNotification('Queued ' + Added + ' remux job(s)', 'success');
+                RemuxBatchItems = [];
+                if (RemuxAllSuggestions.length > 0) {
+                    RemuxBatchItems = RemuxAllSuggestions.splice(0, REMUX_BATCH_SIZE);
+                    RenderRemuxBatch();
+                } else if (RemuxHasMore) {
+                    SmartPopulateRemux(true);
+                } else {
+                    RenderRemuxBatch();
+                }
+            } else {
+                ShowNotification('Failed: ' + (Response.Message || Response.ErrorMessage || 'Unknown error'), 'danger');
+            }
+        },
+        error: function(XHR) {
+            Btn.prop('disabled', false).html(OrigText);
+            const Msg = (XHR.responseJSON && (XHR.responseJSON.Message || XHR.responseJSON.ErrorMessage)) || 'Request failed';
+            ShowNotification('Failed: ' + Msg, 'danger');
         }
     });
 }

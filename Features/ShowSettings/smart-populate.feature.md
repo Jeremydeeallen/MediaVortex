@@ -151,7 +151,9 @@ failure modes. Criteria below are numbered to map to flow stages.
 
 ## Status
 
-COMPLETE -- all criteria verified 2026-05-09 (pivoted from request-time to materialized column during this work)
+COMPLETE -- all criteria verified 2026-05-09 (pivoted from request-time to materialized column during this work).
+
+The Card 1.5 sibling card "Next Remux Batch" -- which surfaces `RecommendedMode='Remux'` candidates in parallel with this Card 1 -- is owned by `Features/ShowSettings/remux-populate-card.feature.md`, not this doc. Card 1's existing search/batch-size/pagination behavior is preserved unchanged by that feature.
 (approved by operator 2026-05-09).
 
 ### Progress

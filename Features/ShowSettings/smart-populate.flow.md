@@ -2,14 +2,22 @@
 
 ## Entry Point
 
-`Templates/ShowSettings.html` -- Card 1 "Next Batch". The user lands on
-`/ShowSettings` to find untranscoded files worth queuing. The "Next Batch"
-card surfaces a ranked list of candidates and accepts the user's commit
-to the transcode queue.
+`Templates/ShowSettings.html` -- Card 1 "Next Batch" + Card 1.5 "Next
+Remux Batch" (parallel sibling). The user lands on `/ShowSettings` to
+find files worth queuing. Both cards surface ranked candidates, scoped
+by `MediaFiles.RecommendedMode`, and accept the user's commit to the
+queue.
 
 API entry: `POST /api/ShowSettings/SmartPopulate` ->
 `Features/ShowSettings/ShowSettingsController.SmartPopulateQueue` ->
 `Features/TranscodeQueue/QueueManagementBusinessService.SmartPopulateQueue`.
+
+The endpoint accepts a `Mode` parameter (`Transcode` | `Remux`) that
+filters to the matching `RecommendedMode` and routes the resulting
+queue items to the corresponding `ProcessingMode`. Both cards hit the
+same endpoint with their own `Mode` value plus independent state
+(search, batch size, offset) so an operator can search Survivor on
+the Transcode side without affecting the Remux side, and vice versa.
 
 The ranking value (`MediaFiles.PriorityScore`) is **maintained
 continuously** by the priority materialization pipeline -- see

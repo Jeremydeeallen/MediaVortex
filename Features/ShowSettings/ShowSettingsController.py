@@ -189,7 +189,7 @@ def DeleteShowSetting():
 
 @ShowSettingsBlueprint.route('/SmartPopulate', methods=['POST'])
 def SmartPopulateQueue():
-    """Generate suggested transcodes ranked by MediaFiles.PriorityScore.
+    """Generate suggested queue items ranked by MediaFiles.PriorityScore.
 
     Body params (all optional):
       Drive   -- drive-letter prefix filter (e.g. 'T:')
@@ -197,6 +197,10 @@ def SmartPopulateQueue():
       Offset  -- pagination offset (default 0)
       Search  -- substring match on FileName or show-folder segment, case-insensitive,
                  max 100 chars. Empty/whitespace = no filter.
+      Mode    -- 'Transcode' | 'Remux'. Filters by MediaFiles.RecommendedMode so
+                 Card 1 ('Transcode') and Card 1.5 ('Remux') get scoped result sets.
+                 See remux-populate-card.feature.md criterion 4. Invalid value is
+                 silently ignored (returns the unscoped set, backward-compat).
 
     Service is the source of truth for sort order (PriorityScore DESC NULLS LAST,
     SizeMB DESC). See smart-populate.flow.md for the user journey.
@@ -207,12 +211,13 @@ def SmartPopulateQueue():
         Offset = Data.get('Offset', 0)
         Drive = Data.get('Drive', '')
         Search = Data.get('Search', '') or ''
+        Mode = Data.get('Mode')
         if isinstance(Search, str) and len(Search) > 100:
             Search = Search[:100]
 
         from Features.TranscodeQueue.QueueManagementBusinessService import QueueManagementBusinessService
         Service = QueueManagementBusinessService()
-        Result = Service.SmartPopulateQueue(Limit=Limit, Offset=Offset, Drive=Drive, Search=Search)
+        Result = Service.SmartPopulateQueue(Limit=Limit, Offset=Offset, Drive=Drive, Search=Search, Mode=Mode)
 
         return jsonify(Result)
     except Exception as Ex:
@@ -294,7 +299,18 @@ def QueueByFolder():
 
 @ShowSettingsBlueprint.route('/AddToQueue', methods=['POST'])
 def AddSuggestionsToQueue():
-    """Add user-approved suggestions to the transcode queue."""
+    """Add user-approved suggestions to the queue.
+
+    Body:
+      Items     -- list of {MediaFileId, FilePath, FileName, SizeMB, ...}
+      ProfileId -- (optional) integer Profiles.Id. Required when Mode='Transcode'.
+                   For Mode='Remux' must be null/missing -- the cascade has
+                   already decided "container/audio fix only" so no profile
+                   choice is needed. See remux-populate-card.feature.md
+                   criterion 5.
+      Mode      -- 'Transcode' (default) or 'Remux'. Validated against this
+                   tuple; other values return HTTP 400 (criterion 6).
+    """
     try:
         Data = request.get_json()
         if not Data:
@@ -304,13 +320,20 @@ def AddSuggestionsToQueue():
         if not Items:
             return jsonify({'Success': False, 'Message': 'No items provided'}), 400
 
+        Mode = Data.get('Mode', 'Transcode') or 'Transcode'
+        if Mode not in ('Transcode', 'Remux'):
+            return jsonify({'Success': False, 'Message': f'Invalid Mode: {Mode!r}. Must be "Transcode" or "Remux".'}), 400
+
         ProfileId = Data.get('ProfileId')
         if ProfileId is not None:
-            ProfileId = int(ProfileId)
+            try:
+                ProfileId = int(ProfileId)
+            except (TypeError, ValueError):
+                return jsonify({'Success': False, 'Message': 'ProfileId must be an integer or null'}), 400
 
         from Features.TranscodeQueue.QueueManagementBusinessService import QueueManagementBusinessService
         Service = QueueManagementBusinessService()
-        Result = Service.AddSuggestionsToQueue(Items, ProfileId=ProfileId)
+        Result = Service.AddSuggestionsToQueue(Items, ProfileId=ProfileId, Mode=Mode)
 
         return jsonify(Result)
     except Exception as Ex:
