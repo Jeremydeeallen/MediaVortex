@@ -400,7 +400,7 @@ End-to-end trace from worker installation through finished product. Every functi
 | Step | Action | Function | DB Call | Status Change |
 |------|--------|----------|---------|---------------|
 | 2.1 | Check for work | `ProcessQueueLoop()` polls every 2s | -- | -- |
-| 2.2 | Claim job atomically | `GetNextJob()` -> `DatabaseManager.ClaimNextPendingTranscodeJob(WorkerName)` | `UPDATE TranscodeQueue SET Status='Running', ClaimedBy=%s, ClaimedAt=NOW(), DateStarted=NOW() WHERE Id = (SELECT Id FROM TranscodeQueue WHERE Status='Pending' ORDER BY SizeMB DESC, DateAdded ASC LIMIT 1 FOR UPDATE SKIP LOCKED) RETURNING *` | TranscodeQueue.Status = `Running`, ClaimedBy = hostname |
+| 2.2 | Claim job atomically | `GetNextJob()` -> `DatabaseManager.ClaimNextPendingTranscodeJob(WorkerName)` | `UPDATE TranscodeQueue SET Status='Running', ClaimedBy=%s, ClaimedAt=NOW(), DateStarted=NOW() WHERE Id = (SELECT Id FROM TranscodeQueue WHERE Status='Pending' ORDER BY Priority DESC, DateAdded ASC LIMIT 1 FOR UPDATE SKIP LOCKED) RETURNING *` | TranscodeQueue.Status = `Running`, ClaimedBy = hostname |
 | 2.3 | Create ActiveJob | `DatabaseManager.CreateActiveJob(ServiceName, JobType, QueueId, ProcessId, ThreadId, WorkerName)` | `INSERT INTO ActiveJobs (ServiceName, JobType, QueueId, ProcessId, ThreadId, WorkerName, Status, StartedAt) VALUES (...)` | ActiveJobs row created, Status = `Running` |
 
 ### Phase 3: Job Processing

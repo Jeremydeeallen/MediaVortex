@@ -1588,12 +1588,12 @@ class DatabaseManager:
         return queueItems
 
     def GetNextPendingTranscodeJob(self) -> Optional[TranscodeQueueModel]:
-        """Get the next pending transcoding job (largest files first)."""
+        """Get the next pending transcoding job (highest priority first, oldest tiebreaker)."""
         query = """
             SELECT Id, FilePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted, ProcessingMode, MediaFileId
             FROM TranscodeQueue
             WHERE Status = 'Pending'
-            ORDER BY SizeMB DESC, DateAdded ASC
+            ORDER BY Priority DESC, DateAdded ASC
             LIMIT 1
         """
         rows = self.DatabaseService.ExecuteQuery(query)
@@ -1635,7 +1635,7 @@ class DatabaseManager:
                         WHERE Id = (
                             SELECT Id FROM TranscodeQueue
                             WHERE Status = 'Pending'
-                            ORDER BY SizeMB DESC, DateAdded ASC
+                            ORDER BY Priority DESC, DateAdded ASC
                             LIMIT 1
                             FOR UPDATE SKIP LOCKED
                         )
@@ -1652,7 +1652,7 @@ class DatabaseManager:
                             JOIN MediaFiles mf ON tq.MediaFileId = mf.Id
                             WHERE tq.Status = 'Pending'
                               AND (mf.IsInterlaced IS NULL OR mf.IsInterlaced = '0')
-                            ORDER BY tq.SizeMB DESC, tq.DateAdded ASC
+                            ORDER BY tq.Priority DESC, tq.DateAdded ASC
                             LIMIT 1
                             FOR UPDATE SKIP LOCKED
                         )

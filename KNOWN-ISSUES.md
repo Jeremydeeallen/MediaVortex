@@ -2,6 +2,21 @@
 
 ## Open
 
+### [BUG - FIXED 2026-05-09] Worker claim path orders by SizeMB, ignoring Priority entirely
+**Date:** 2026-05-09
+**Affects:** `Repositories/DatabaseManager.py:1596,1638,1655`, `Features/TranscodeQueue/TranscodeQueueRepository.py:143,163`
+**Fix:** all four claim/peek queries changed to `ORDER BY Priority DESC, DateAdded ASC`. `transcode.flow.md` Stage 2.2 updated to match. Verify post-WebService restart that the highest-priority pending job is the one a worker claims next.
+
+The atomic claim path used by every worker (`ProcessTranscodeQueueService.py:346 -> DatabaseManager.ClaimNextPendingTranscodeJob`) orders pending rows by `SizeMB DESC, DateAdded ASC`. The `Priority` column is selected and returned but **never appears in any ORDER BY**. This means the entire `queue-priority.feature.md` work (impact-based scoring, manual override window 195-200) is computed at populate time and immediately ignored at claim time -- workers are still picking the largest file regardless of priority. Discovered after operator noticed the Queue UI default sort matched worker behavior, both ordering by SizeMB.
+
+**Violates:** `queue-priority.feature.md` Success Criterion 11 ("The first item a worker would claim from a fresh queue per `ORDER BY Priority DESC, DateAdded ASC LIMIT 1` is a high-impact file").
+
+**Fix:** change all four claim/peek queries to `ORDER BY Priority DESC, DateAdded ASC`. Update `transcode.flow.md:403` Stage 2.2 to match. The duplicate vertical-slice copy in `Features/TranscodeQueue/TranscodeQueueRepository.py` is dead code (legacy `DatabaseManager.py` is the live path) but should be fixed for consistency.
+
+**Look first:** `Repositories/DatabaseManager.py` lines 1590-1686.
+
+---
+
 ### [TECH DEBT] Activity page conflates worker liveness and operational state
 **Date:** 2026-05-08
 **Affects:** Templates/Activity.html (worker tag display), API endpoints that return worker status

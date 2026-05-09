@@ -139,8 +139,8 @@ class TranscodeQueueRepository(BaseRepository):
         return [self._MapRowToQueueItem(row) for row in rows]
 
     def GetNextPendingTranscodeJob(self) -> Optional[TranscodeQueueModel]:
-        """Get the next pending transcoding job (largest files first)."""
-        query = f"SELECT {self._QUEUE_SELECT_COLS} FROM TranscodeQueue WHERE Status = 'Pending' ORDER BY SizeMB DESC, DateAdded ASC LIMIT 1"
+        """Get the next pending transcoding job (highest priority first, oldest tiebreaker)."""
+        query = f"SELECT {self._QUEUE_SELECT_COLS} FROM TranscodeQueue WHERE Status = 'Pending' ORDER BY Priority DESC, DateAdded ASC LIMIT 1"
         rows = self.ExecuteQuery(query)
         if rows:
             return self._MapRowToQueueItem(rows[0])
@@ -160,7 +160,7 @@ class TranscodeQueueRepository(BaseRepository):
                     WHERE Id = (
                         SELECT Id FROM TranscodeQueue
                         WHERE Status = 'Pending'
-                        ORDER BY SizeMB DESC, DateAdded ASC
+                        ORDER BY Priority DESC, DateAdded ASC
                         LIMIT 1
                         FOR UPDATE SKIP LOCKED
                     )
