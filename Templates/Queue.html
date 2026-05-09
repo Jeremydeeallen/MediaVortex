@@ -103,8 +103,8 @@
             <div class="modal-body">
                 <div class="mb-3">
                     <label for="NewPriorityInput" class="form-label">New Priority</label>
-                    <input type="number" class="form-control" id="NewPriorityInput" min="1" max="100">
-                    <div class="form-text">Priority from 1 (lowest) to 100 (highest)</div>
+                    <input type="number" class="form-control" id="NewPriorityInput" min="1" max="200">
+                    <div class="form-text">1-194 = auto-assigned by impact score. 195-200 = reserved for manual override (always wins over auto).</div>
                 </div>
             </div>
             <div class="modal-footer">
@@ -131,8 +131,8 @@
                 </div>
                 <div class="mb-3">
                     <label for="JobPriorityInput" class="form-label">Priority (Optional)</label>
-                    <input type="number" class="form-control" id="JobPriorityInput" min="1" max="100" placeholder="50">
-                    <div class="form-text">Priority from 1 (lowest) to 100 (highest). Leave empty for default.</div>
+                    <input type="number" class="form-control" id="JobPriorityInput" min="1" max="200" placeholder="(auto)">
+                    <div class="form-text">Leave empty for impact-based auto-priority (1-194). Set 195-200 to manually jump the queue.</div>
                 </div>
             </div>
             <div class="modal-footer">
@@ -535,10 +535,12 @@ class TranscodeQueueManager {
     }
 
     getPriorityBadgeClass(priority) {
-        if (priority >= 80) return 'bg-danger';
-        if (priority >= 60) return 'bg-warning';
-        if (priority >= 40) return 'bg-info';
-        return 'bg-secondary';
+        // Brackets calibrated to the 1-200 range with 195-200 reserved for
+        // manual override. Calibration in queue-priority.feature.md criterion D14.
+        if (priority >= 195) return 'bg-danger';   // manual override -- always wins
+        if (priority >= 150) return 'bg-warning';  // high impact (large savings)
+        if (priority >= 75)  return 'bg-info';     // medium impact
+        return 'bg-secondary';                      // low impact
     }
 
     escapeHtml(text) {

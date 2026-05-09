@@ -581,8 +581,29 @@ class QueueManagementBusinessService:
         try:
             LoggingService.LogFunctionEntry("CreateQueueItemFromMediaFileWithProfile", "QueueManagementBusinessService", MediaFile.FileName, MediaFile.AssignedProfile)
 
-            # Calculate priority based on compression potential and file size
-            priority = self.CalculatePriority(MediaFile)
+            # Profile-target priority: look up the matching ProfileThresholds row for
+            # this file's resolution and pass bitrates to CalculatePriority. Falls back
+            # gracefully if the lookup returns nothing (function logs a warning).
+            targetVideoKbps = None
+            targetAudioKbps = None
+            try:
+                profileSettings = self.DatabaseManager.GetProfileSettingsForTargetResolution(
+                    MediaFile.AssignedProfile, MediaFile.Resolution
+                )
+                if profileSettings:
+                    targetVideoKbps = profileSettings.get('VideoBitrateKbps')
+                    targetAudioKbps = profileSettings.get('AudioBitrateKbps')
+            except Exception as Ex:
+                LoggingService.LogException(
+                    f"Could not look up ProfileThresholds for priority calc on {MediaFile.FileName}",
+                    Ex, "QueueManagementBusinessService", "CreateQueueItemFromMediaFileWithProfile"
+                )
+
+            priority = self.CalculatePriority(
+                MediaFile,
+                TargetVideoKbps=targetVideoKbps,
+                TargetAudioKbps=targetAudioKbps,
+            )
 
             # Extract directory from file path
             filePath = MediaFile.FilePath or ""
@@ -827,8 +848,13 @@ class QueueManagementBusinessService:
         try:
             LoggingService.LogFunctionEntry("CreateQueueItemFromMediaFile", "QueueManagementBusinessService", MediaFile.FileName, Threshold.ProfileId)
 
-            # Calculate priority based on compression potential and file size
-            priority = self.CalculatePriority(MediaFile)
+            # Profile-target priority: pass the threshold's bitrates so CalculatePriority
+            # uses the deterministic post-transcode size estimate (see queue-priority.feature.md A2).
+            priority = self.CalculatePriority(
+                MediaFile,
+                TargetVideoKbps=Threshold.VideoBitrateKbps,
+                TargetAudioKbps=Threshold.AudioBitrateKbps,
+            )
 
             # Extract directory from file path
             filePath = MediaFile.FilePath or ""
@@ -859,21 +885,75 @@ class QueueManagementBusinessService:
             LoggingService.LogException("Exception creating queue item", e, "QueueManagementBusinessService", "CreateQueueItemFromMediaFile")
             return None
 
-    def CalculatePriority(self, MediaFile: MediaFileModel) -> int:
-        """Calculate priority for a queue item based on file size (largest first)."""
+    def CalculatePriority(self, MediaFile: MediaFileModel,
+                          TargetVideoKbps: Optional[int] = None,
+                          TargetAudioKbps: Optional[int] = None) -> int:
+        """Calculate impact-based priority for a queue item, range 1-194.
+
+        See Features/TranscodeQueue/queue-priority.feature.md for the contract.
+        Workers claim with ORDER BY Priority DESC, so higher priority is more urgent.
+        The 6-slot window 195-200 is reserved for manual user overrides; this
+        function never produces a value in that range.
+
+        Inputs:
+            MediaFile: source row (uses SizeMB and DurationMinutes)
+            TargetVideoKbps / TargetAudioKbps: from the matching ProfileThresholds row
+                for the file's resolution category. When BOTH are provided AND
+                MediaFile.DurationMinutes is set, the formula uses the deterministic
+                profile-target estimate. Otherwise it falls back to SizeMB * 0.5
+                with a loud warning (per Phase 2a loud-failure rule).
+
+        Returns int in [1, 194].
+        """
         try:
-            LoggingService.LogFunctionEntry("CalculatePriority", "QueueManagementBusinessService", MediaFile.FileName)
+            import math
 
-            # Use file size directly as priority (larger files = higher priority)
             sizeMB = MediaFile.SizeMB or 0
-            priority = int(sizeMB)  # Convert to integer for priority
+            if sizeMB <= 0:
+                # NULL or 0 size: no meaningful estimate, lowest non-zero priority.
+                return 1
 
-            LoggingService.LogDebug(f"Calculated priority {priority} for {MediaFile.FileName} (size: {sizeMB}MB)", "QueueManagementBusinessService", "CalculatePriority")
+            durationMinutes = MediaFile.DurationMinutes or 0
+
+            if (TargetVideoKbps is not None and TargetAudioKbps is not None
+                    and durationMinutes > 0):
+                # Profile-target path -- deterministic from configured profile bitrate.
+                # target_size_mb = total_kbps * seconds / (8 bits/byte * 1024 KB/MB)
+                targetSizeMB = ((TargetVideoKbps + TargetAudioKbps)
+                                * durationMinutes * 60.0) / (8 * 1024)
+                estimatedSavingsMB = max(0, sizeMB - targetSizeMB)
+            else:
+                # Fallback path -- log loudly so the missing input is visible.
+                missing = []
+                if TargetVideoKbps is None or TargetAudioKbps is None:
+                    missing.append("ProfileThresholds bitrate")
+                if durationMinutes <= 0:
+                    missing.append("MediaFile.DurationMinutes")
+                LoggingService.LogWarning(
+                    f"CalculatePriority falling back to size*0.5 for "
+                    f"MediaFileId={MediaFile.Id} ({MediaFile.FileName}) -- "
+                    f"missing: {', '.join(missing)}",
+                    "QueueManagementBusinessService", "CalculatePriority"
+                )
+                estimatedSavingsMB = sizeMB * 0.5
+
+            score = math.log10(estimatedSavingsMB + 1)  # 0..5+
+            priority = int(round(1 + min(193, (score / 5.0) * 193)))
+            priority = max(1, min(194, priority))
+
+            LoggingService.LogDebug(
+                f"Priority {priority} for {MediaFile.FileName} "
+                f"(size={sizeMB:.0f}MB, savings_est={estimatedSavingsMB:.0f}MB)",
+                "QueueManagementBusinessService", "CalculatePriority"
+            )
             return priority
 
         except Exception as e:
-            LoggingService.LogException("Exception calculating priority", e, "QueueManagementBusinessService", "CalculatePriority")
-            return 0  # Default priority for files with no size
+            LoggingService.LogException(
+                f"Exception calculating priority for MediaFileId={getattr(MediaFile, 'Id', '?')}",
+                e, "QueueManagementBusinessService", "CalculatePriority"
+            )
+            return 1  # Lowest non-zero so the queue item still saves; never 0
 
     def AddJobToQueue(self, MediaFileId: int, Priority: int = None, ProfileId: int = None, StartTime: str = None, ForceAdd: bool = False) -> Dict[str, Any]:
         """Add a specific media file to the transcoding queue. Simple logic: if it has a profile or user selects one, add it."""

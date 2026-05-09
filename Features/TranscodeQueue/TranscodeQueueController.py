@@ -169,8 +169,10 @@ def AddJob():
             LoggingService.LogError(errorMsg, "TranscodeQueueController", "AddJob")
             return jsonify({"Success": False, "ErrorMessage": errorMsg}), 400
 
-        if priority is not None and (not isinstance(priority, int) or priority < 1 or priority > 100):
-            errorMsg = "Priority must be an integer between 1 and 100"
+        if priority is not None and (not isinstance(priority, int) or priority < 1 or priority > 200):
+            # Auto-assignment uses 1-194 (impact-based score). Operators can manually
+            # set 195-200 to guarantee jumping ahead of any auto-prioritized item.
+            errorMsg = "Priority must be an integer between 1 and 200"
             LoggingService.LogError(errorMsg, "TranscodeQueueController", "AddJob")
             return jsonify({"Success": False, "ErrorMessage": errorMsg}), 400
 
@@ -295,8 +297,10 @@ def PrioritizeJob():
             LoggingService.LogError(errorMsg, "TranscodeQueueController", "PrioritizeJob")
             return jsonify({"Success": False, "ErrorMessage": errorMsg}), 400
 
-        if not isinstance(newPriority, int) or newPriority < 1 or newPriority > 100:
-            errorMsg = "NewPriority must be an integer between 1 and 100"
+        if not isinstance(newPriority, int) or newPriority < 1 or newPriority > 200:
+            # Auto-assignment uses 1-194 (impact-based score). Operators can manually
+            # set 195-200 to guarantee jumping ahead of any auto-prioritized item.
+            errorMsg = "NewPriority must be an integer between 1 and 200"
             LoggingService.LogError(errorMsg, "TranscodeQueueController", "PrioritizeJob")
             return jsonify({"Success": False, "ErrorMessage": errorMsg}), 400
 

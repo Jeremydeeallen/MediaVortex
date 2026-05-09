@@ -125,14 +125,14 @@ IN PROGRESS
 - [x] Flow doc extended (`transcode.flow.md` Stage 4, "Priority calculation" subsection)
 - [x] Feature doc drafted (this file)
 - [x] Refined formula to profile-target (criteria A1-A4 rewritten 2026-05-09)
-- [ ] Implement `CalculatePriority(MediaFile, ProfileSettings)` rewrite -- pure function, no DB calls inside the function itself; callers fetch `ProfileThresholds` and pass it in
-- [ ] Update every queue-population caller (`PopulateQueue`, `QueueByFolder`, `AddSuggestionsToQueue`, single-file `AddJobToQueue`) to look up `ProfileThresholds` for `(AssignedProfile, ResolutionCategory)` and pass to `CalculatePriority`. Each caller already has access to the MediaFile and profile context.
-- [ ] Update server-side validation in `TranscodeQueueController` (PrioritizeJob, AddJob: 100 -> 200)
-- [ ] Update template input bounds + hint text (`Queue.html` two sites: PriorityModal + AddJob)
-- [ ] Update `getPriorityBadgeClass` JS color brackets in `Queue.html`
-- [ ] Write `Scripts/SQLScripts/RecalculateQueuePriorities.py` (optional rebalance, dry-run by default; uses the same `CalculatePriority` + `ProfileThresholds` lookup)
-- [ ] Smoke test: PopulateQueue against current MediaFiles, query `MIN/MAX/AVG(Priority)` on the result
-- [ ] Live verify: queue a file via UI, confirm assigned priority lands in 1-194 and is reasonable for its size/profile combination
+- [x] Implement `CalculatePriority(MediaFile, TargetVideoKbps, TargetAudioKbps)` rewrite -- pure function with kbps params; callers pass them in. Fallback path with loud `LogWarning` when inputs missing.
+- [x] Update profile-aware callers: `CreateQueueItemFromMediaFile` (passes Threshold bitrates directly), `CreateQueueItemFromMediaFileWithProfile` (looks up via `GetProfileSettingsForTargetResolution`). Remux + SubtitleFix + Simple paths intentionally use the fallback.
+- [x] Update server-side validation in `TranscodeQueueController` (PrioritizeJob and AddJob: 100 -> 200)
+- [x] Update template input bounds + hint text (`Queue.html` PriorityModal + AddJob)
+- [x] Update `getPriorityBadgeClass` JS color brackets in `Queue.html` (>=195 red, >=150 yellow, >=75 blue, <75 gray)
+- [x] Write `Scripts/SQLScripts/RecalculateQueuePriorities.py` (optional rebalance, dry-run by default; manual-override range 195-200 excluded by query)
+- [x] Smoke test PASSED: profile-target path produces 107/136/150/173 across 1.5/4/8/30 GB. Already-efficient files clamp to priority 1. 200 GB worst case caps at 194.
+- [ ] Live verify (post-WebService restart): queue a file via UI, confirm assigned priority lands in 1-194 and is reasonable for its size/profile combination
 - [ ] Live verify: an already-transcoded av1 file at profile bitrate gets priority = 1 (savings clamps to 0)
 - [ ] Live verify: set a job to 200 manually via the modal, confirm the API accepts it and the worker claims it next
 
