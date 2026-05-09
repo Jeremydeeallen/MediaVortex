@@ -31,12 +31,30 @@ If `Permission denied (publickey,password)` -- the host is up but the dev workst
 
 When you've shipped a code change to `main` and want to roll it out to a Windows worker without re-running the full deploy (no venv rebuild, no creds, no SMB mounts -- just code + restart), use this exact sequence.
 
-**Step 1 -- stop the scheduled task on the worker.** Required, otherwise scp fails or partially overwrites because the running Python process holds file locks.
+**Step 1 -- stop the scheduled task AND explicitly kill the Python child processes.** This is critical and easy to get wrong. `Stop-ScheduledTask` only marks the scheduler entry as stopped; **it does NOT kill the python.exe processes the task spawned**. Those processes keep running, holding file locks, and -- worse -- continue to claim and process queue jobs with stale in-memory code. A subsequent `Start-ScheduledTask` then spawns a SECOND set of processes alongside the first, accumulating zombie workers.
+
+This was discovered the hard way on 2026-05-09 when a remux job built an FFmpeg command with pre-fix shape (unconditional `-tag:v hvc1`, `-c:a copy`, no `loudnorm`) hours after the fix was deployed. Six zombie Python processes had accumulated on Remington across multiple "stop -> deploy -> start" cycles, and a stale one claimed the job. The fix below kills them explicitly.
 
 ```bash
-ssh owner@10.0.0.230 'powershell -Command "Stop-ScheduledTask -TaskName \"MediaVortex Worker\" -ErrorAction SilentlyContinue; Start-Sleep -Seconds 3; (Get-ScheduledTask -TaskName \"MediaVortex Worker\").State"'
-# Expected output: Ready (was Running)
+ssh owner@10.0.0.230 'powershell -Command "
+  Stop-ScheduledTask -TaskName \"MediaVortex Worker\" -ErrorAction SilentlyContinue;
+  Get-Process python* -ErrorAction SilentlyContinue | Where-Object {
+    (Get-CimInstance Win32_Process -Filter \"ProcessId=\$(\$_.Id)\").CommandLine -like \"*MediaVortex*\"
+  } | ForEach-Object {
+    Write-Host \"Killing PID \$(\$_.Id) (started \$(\$_.StartTime))\";
+    Stop-Process -Id \$_.Id -Force -ErrorAction SilentlyContinue
+  };
+  Start-Sleep -Seconds 3;
+  $count = (Get-Process python* -ErrorAction SilentlyContinue | Where-Object {
+    (Get-CimInstance Win32_Process -Filter \"ProcessId=\$(\$_.Id)\").CommandLine -like \"*MediaVortex*\"
+  } | Measure-Object).Count;
+  Write-Host \"Remaining MediaVortex python procs: \$count\"
+"'
+# Expected: list of killed PIDs (often 1-6 depending on accumulated zombies),
+# then "Remaining MediaVortex python procs: 0".
 ```
+
+The CommandLine filter (`*MediaVortex*`) catches every Python process whose command line includes the repo path, regardless of whether they were spawned by the scheduled task, by `StartWorker.py`, or directly. **Do not skip the explicit-kill step on Windows hosts** -- the doc's old version did and it caused a real production incident.
 
 **Step 2 -- scp the changed files from dev workstation.**
 
@@ -88,7 +106,7 @@ This whole sequence takes about 30 seconds end-to-end and is idempotent. Use thi
 - **`git` is not on Remington's PATH.** scp from the dev workstation is the only update channel. Don't waste time trying `git pull` on the remote.
 - **Unix tools (`head`, `tail`, `grep`) don't exist on Remington's default shell.** Wrap remote commands in PowerShell and use `Select-Object -First N` for truncation.
 - **scp path syntax must be `C:/Code/...` (forward slashes, drive-prefix form), not `/c/Code/...`.** Same path in a remote PowerShell command works either way; the asymmetry is specific to scp's path parser when the target is a Windows OpenSSH server.
-- **Stopping the scheduled task does not always kill the Python child immediately.** The `Start-Sleep -Seconds 3` after `Stop-ScheduledTask` gives the process time to exit cleanly; if you skip the sleep, scp can race the still-holding-file-locks worker.
+- **Stopping the scheduled task does NOT kill the Python child processes.** It only marks the scheduler entry as stopped. The Python processes keep running and claiming jobs with their stale in-memory code -- and a subsequent `Start-ScheduledTask` spawns ANOTHER set of processes on top, accumulating zombies. **You must explicitly `Stop-Process` every Python process whose command line includes "MediaVortex"** before scp + restart. The Step 1 snippet above does this. (Discovered 2026-05-09 after a remux job ran with stale code despite three rounds of "successful" hot-swap; six zombie pythons had accumulated.)
 - **`__pycache__` directories sometimes survive an scp + restart cycle and serve stale bytecode.** The Step 3 explicit removal eliminates the variable.
 - **The deploy-windows-worker.py automation does NOT stop the running worker before scp.** It assumes a fresh host. For an in-place code update on a running worker, prefer the manual sequence above.
 
