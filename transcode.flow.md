@@ -107,6 +107,24 @@ Stages 1-4 require user action. Stages 5-7 are automatic once WorkerService is r
 - **Resolution filtering**: source must be > target resolution (full populate path only)
 - **Dedup**: files already in queue are skipped
 
+**Priority calculation (impact-based, range 1-194):**
+
+Every queue insertion runs `QueueManagementBusinessService.CalculatePriority(MediaFile)` which returns an integer between 1 and 194. Workers claim with `ORDER BY Priority DESC, DateAdded ASC`, so higher priority is more urgent.
+
+Inputs (all from the MediaFile row at queue time):
+- `SizeMB`: linear "how much there is to compress"
+- `Codec`: multiplicative "how much compression ratio remains" (h264 -> AV1 ~50%, hevc -> AV1 ~30%, av1 -> av1 ~5%)
+- `OverallBitrate` vs the standard for the resolution category: bitrate-headroom multiplier in [0.5, 2.0]
+
+Score formula:
+1. `EstimatedSavingsMB = SizeMB * ExpectedReductionByCodec * BitrateHeadroom`
+2. `Score = log10(EstimatedSavingsMB + 1)` -- log dampens outliers so a single 30 GB rip doesn't swamp the queue
+3. `Priority = clamp(1 + (Score / 5.0) * 193, 1, 194)`
+
+The 6-slot window 195-200 is reserved for manual user overrides (the `POST /api/TranscodeQueue/PrioritizeJob` endpoint). Auto-assignment never produces a value in that range, so a manually-set 200 always beats any auto-prioritized item.
+
+Rationale: ordering by raw size (the legacy behavior) put already-efficient AV1 files at the top of the queue and ignored compression headroom. Impact-based ordering surfaces the highest-bytes-saved transcodes first without making the operator think about it. See `Features/TranscodeQueue/queue-priority.feature.md` for the full criteria and lookup tables.
+
 ---
 
 ## Stage 5: TRANSCODE -- FFmpeg Job Execution
