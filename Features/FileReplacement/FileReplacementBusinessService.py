@@ -444,6 +444,112 @@ class FileReplacementBusinessService:
             }
 
 
+    def PrepareReplacement(self, OriginalFilePath: str) -> Dict[str, Any]:
+        """Rename source to `.orig` BEFORE FFmpeg runs.
+
+        With the rename done up front, FFmpeg can write directly to the
+        original source path (now free) -- no side-by-side suffix or strip
+        step needed. Use this in worker job processors (ProcessRemuxJob,
+        ProcessSubtitleFixJob) right after SetupFilePreparation and before
+        BuildRemuxCommand. On any later failure, call RollbackReplacement
+        to restore the original. On success, FinalizeReplacement (or the
+        existing _ProcessCompleteFileReplacement which detects the
+        already-renamed state) settles the .orig per KeepSource.
+
+        Returns {Success, OrigBackupPath, Message}. Refuses to clobber a
+        pre-existing `.orig` -- a prior failed run needs manual cleanup.
+        """
+        try:
+            LocalOriginalPath = self._ToLocalPath(OriginalFilePath)
+            if not os.path.exists(LocalOriginalPath):
+                return {
+                    'Success': False,
+                    'ErrorMessage': f'Source file does not exist: {LocalOriginalPath}'
+                }
+            CandidateBackup = LocalOriginalPath + '.orig'
+            if os.path.exists(CandidateBackup):
+                return {
+                    'Success': False,
+                    'ErrorMessage': (
+                        f"Pre-existing .orig backup at {CandidateBackup}. Refusing to "
+                        f"overwrite -- a prior replacement may have failed and needs "
+                        f"manual cleanup before this can proceed."
+                    )
+                }
+            os.rename(LocalOriginalPath, CandidateBackup)
+            LoggingService.LogInfo(
+                f"PrepareReplacement: renamed {LocalOriginalPath} -> {CandidateBackup}",
+                "FileReplacementBusinessService", "PrepareReplacement"
+            )
+            return {
+                'Success': True,
+                'OrigBackupPath': CandidateBackup,
+                'Message': f'Renamed source to {CandidateBackup}'
+            }
+        except Exception as e:
+            LoggingService.LogException(
+                f"PrepareReplacement failed for {OriginalFilePath}",
+                e, "FileReplacementBusinessService", "PrepareReplacement"
+            )
+            return {'Success': False, 'ErrorMessage': f'PrepareReplacement failed: {str(e)}'}
+
+    def RollbackReplacement(self, OriginalFilePath: str, OrigBackupPath: str,
+                             TargetFilePath: str = None) -> Dict[str, Any]:
+        """Undo PrepareReplacement on any failure between Prepare and Finalize.
+
+        - If TargetFilePath is supplied and exists, delete it (partial output).
+        - If OrigBackupPath exists, rename it back to OriginalFilePath.
+
+        Idempotent on the .orig rename: if the original is already in place
+        (e.g. we're called twice), returns success silently. The TargetFilePath
+        cleanup is best-effort -- a stuck partial file is logged but doesn't
+        block the rename-back.
+        """
+        import shutil  # noqa: F401 (mirror imports of sibling methods)
+        try:
+            LocalOriginalPath = self._ToLocalPath(OriginalFilePath)
+            LocalOrigBackup = self._ToLocalPath(OrigBackupPath)
+            if TargetFilePath:
+                LocalTargetPath = self._ToLocalPath(TargetFilePath)
+                if os.path.exists(LocalTargetPath):
+                    try:
+                        os.remove(LocalTargetPath)
+                        LoggingService.LogInfo(
+                            f"Rollback: removed partial target {LocalTargetPath}",
+                            "FileReplacementBusinessService", "RollbackReplacement"
+                        )
+                    except Exception as RmEx:
+                        LoggingService.LogException(
+                            f"Rollback: could not remove partial target {LocalTargetPath} (continuing)",
+                            RmEx, "FileReplacementBusinessService", "RollbackReplacement"
+                        )
+
+            if os.path.exists(LocalOrigBackup):
+                if os.path.exists(LocalOriginalPath):
+                    LoggingService.LogWarning(
+                        f"Rollback: original at {LocalOriginalPath} AND backup at {LocalOrigBackup} both exist. "
+                        f"Refusing to clobber. Manual review required.",
+                        "FileReplacementBusinessService", "RollbackReplacement"
+                    )
+                    return {
+                        'Success': False,
+                        'ErrorMessage': 'Both original and .orig exist; manual review required'
+                    }
+                os.rename(LocalOrigBackup, LocalOriginalPath)
+                LoggingService.LogWarning(
+                    f"Rollback: restored {LocalOriginalPath} from {LocalOrigBackup}",
+                    "FileReplacementBusinessService", "RollbackReplacement"
+                )
+                return {'Success': True, 'Message': f'Restored {LocalOriginalPath} from .orig'}
+            # No .orig to rollback (e.g. PrepareReplacement was never called)
+            return {'Success': True, 'Message': 'No .orig backup to rollback'}
+        except Exception as e:
+            LoggingService.LogException(
+                f"RollbackReplacement failed for {OriginalFilePath}",
+                e, "FileReplacementBusinessService", "RollbackReplacement"
+            )
+            return {'Success': False, 'ErrorMessage': f'RollbackReplacement failed: {str(e)}'}
+
     def _ProcessCompleteFileReplacement(self, OriginalFilePath: str, TranscodedFilePath: str, KeepSource: bool, NetworkOriginalPath: str = None) -> Dict[str, Any]:
         """Atomic-replace pattern with rollback. Never mutates the original until
         a verified new file is in place; never leaves the disk in a half-moved
@@ -499,15 +605,20 @@ class FileReplacementBusinessService:
                     break
             TargetPath = os.path.join(OriginalDir, TranscodedFilename)
 
-            # Step 1: rename original to .orig (atomic backup). Track the
-            # backup path so any subsequent failure can roll back.
+            # Step 1: rename original to .orig (atomic backup). Two paths:
+            # - "Self-managed" (legacy / transcode): we do the rename here
+            # - "Pre-renamed" (rename-before-encode flow used by remux): the
+            #   worker called PrepareReplacement before FFmpeg, so the
+            #   original is already at .orig. We detect that and just track
+            #   the backup path for the settle step.
             OrigBackupPath = None
+            CandidateBackup = LocalOriginalPath + ".orig"
             if os.path.exists(LocalOriginalPath):
-                CandidateBackup = LocalOriginalPath + ".orig"
+                # Original is at its source path -- self-managed flow. Rename now.
                 if os.path.exists(CandidateBackup):
                     ErrorMsg = (
-                        f"Pre-existing .orig backup at {CandidateBackup}. Refusing to overwrite -- "
-                        f"a prior replacement may have failed and needs manual cleanup before this can proceed."
+                        f"Pre-existing .orig backup at {CandidateBackup} AND original is still at {LocalOriginalPath}. "
+                        f"Inconsistent state -- a prior replacement failed mid-stream. Manual cleanup required."
                     )
                     LoggingService.LogError(ErrorMsg, "FileReplacementBusinessService", "_ProcessCompleteFileReplacement")
                     return {'Success': False, 'ErrorMessage': ErrorMsg}
@@ -521,7 +632,17 @@ class FileReplacementBusinessService:
                     ErrorMsg = f"Failed to rename original to .orig backup: {str(e)}"
                     LoggingService.LogError(ErrorMsg, "FileReplacementBusinessService", "_ProcessCompleteFileReplacement")
                     return {'Success': False, 'ErrorMessage': ErrorMsg}
+            elif os.path.exists(CandidateBackup):
+                # Pre-renamed flow: PrepareReplacement already ran. Track the backup.
+                OrigBackupPath = CandidateBackup
+                StepsCompleted.append(f"Found pre-renamed backup at {OrigBackupPath} (PrepareReplacement was called)")
+                LoggingService.LogInfo(
+                    f"Pre-renamed flow: tracking existing .orig at {OrigBackupPath}",
+                    "FileReplacementBusinessService", "_ProcessCompleteFileReplacement"
+                )
             else:
+                # Neither original nor backup is present -- file was deleted by
+                # something outside our control (operator, another process, etc.).
                 StepsCompleted.append("Original was already absent (no backup needed)")
                 LoggingService.LogInfo(f"Original was already absent: {LocalOriginalPath}",
                                      "FileReplacementBusinessService", "_ProcessCompleteFileReplacement")
@@ -552,28 +673,39 @@ class FileReplacementBusinessService:
                         RbEx, "FileReplacementBusinessService", "_ProcessCompleteFileReplacement"
                     )
 
-            # Step 2/3: move staged file to TargetPath. shutil.move is atomic
-            # rename within the same filesystem.
+            # Step 2/3: move staged file to TargetPath when needed. Two paths:
+            # - "Side-by-side" (legacy / transcode): staged path differs from
+            #   target -- shutil.move it into place.
+            # - "Pre-renamed" (rename-before-encode): staged path EQUALS target
+            #   because PrepareReplacement freed the source path before FFmpeg
+            #   wrote there directly. Skip the move; FFmpeg already produced
+            #   the file at the right location.
+            # shutil.move within the same filesystem is an atomic rename.
             try:
                 if os.path.normpath(LocalTranscodedPath) == os.path.normpath(TargetPath):
-                    # The staged file is already at the final target path.
-                    # This means CommandBuilder did not apply a side-by-side
-                    # suffix -- a critical contract violation. Refuse to
-                    # proceed because we have no clear way to know whether
-                    # the file at TargetPath is the new output or the original
-                    # (pre-rename) source.
-                    _Rollback("staging path equals final target path -- side-by-side suffix not applied by CommandBuilder")
-                    return {
-                        'Success': False,
-                        'ErrorMessage': (
-                            "Staged file is at the final target path. The side-by-side suffix contract "
-                            "from BuildRemuxCommand/BuildCommand was not honored; refusing to overwrite."
-                        )
-                    }
-                shutil.move(LocalTranscodedPath, TargetPath)
-                StepsCompleted.append(f"Moved staged file to {TargetPath}")
-                LoggingService.LogInfo(f"Moved staged file to {TargetPath}",
-                                     "FileReplacementBusinessService", "_ProcessCompleteFileReplacement")
+                    # Pre-renamed flow -- file is already at target. Verify the
+                    # original was indeed renamed (OrigBackupPath set above);
+                    # if not, something is wrong (we'd be looking at the
+                    # original itself, not the new output).
+                    if not OrigBackupPath:
+                        _Rollback("staging path equals target path AND no .orig backup exists -- this would clobber an original")
+                        return {
+                            'Success': False,
+                            'ErrorMessage': (
+                                "Staged file is at the target path with no .orig backup tracked. "
+                                "Cannot safely distinguish new output from untouched original."
+                            )
+                        }
+                    StepsCompleted.append(f"Staged file is already at target {TargetPath} (pre-renamed flow); no move needed")
+                    LoggingService.LogInfo(
+                        f"Pre-renamed flow: skipping move (staged file already at {TargetPath})",
+                        "FileReplacementBusinessService", "_ProcessCompleteFileReplacement"
+                    )
+                else:
+                    shutil.move(LocalTranscodedPath, TargetPath)
+                    StepsCompleted.append(f"Moved staged file to {TargetPath}")
+                    LoggingService.LogInfo(f"Moved staged file to {TargetPath}",
+                                         "FileReplacementBusinessService", "_ProcessCompleteFileReplacement")
             except Exception as e:
                 _Rollback(f"shutil.move failed: {str(e)}")
                 return {'Success': False, 'ErrorMessage': f"Failed to move staged file to target: {str(e)}"}
