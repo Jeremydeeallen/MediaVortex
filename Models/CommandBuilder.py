@@ -445,11 +445,16 @@ class CommandBuilder:
             # Tag HEVC as hvc1 for broad device compatibility (Android TV, Apple, etc.)
             CommandParts.extend(['-tag:v', 'hvc1'])
 
-            # Audio: copy if MP4-compatible, otherwise re-encode to AAC
-            if AudioCodec.lower() in self.MP4_COMPATIBLE_AUDIO:
-                CommandParts.extend(['-c:a', 'copy'])
-            else:
-                CommandParts.extend(['-c:a', 'aac', '-b:a', '128k'])
+            # Audio: always re-encode to AAC so the loudness-normalization
+            # filter chain can apply (filters require decoded audio). Stream
+            # copy is no longer used here -- see Docs/AudioStrategy.md
+            # decision matrix. Audio re-encode is cheap (~5-20 seconds per
+            # hour of content) compared to video, and library-wide loudness
+            # consistency is the goal.
+            CommandParts.extend(['-c:a', 'aac', '-b:a', '128k'])
+            AudioFilter = self.BuildAudioFilters({})
+            if AudioFilter:
+                CommandParts.extend(['-af', f'"{AudioFilter}"'])
 
             # MP4 container flags
             CommandParts.extend(['-movflags', '+faststart'])
@@ -506,11 +511,13 @@ class CommandBuilder:
             # Tag HEVC as hvc1 for broad device compatibility
             CommandParts.extend(['-tag:v', 'hvc1'])
 
-            # Audio: copy if MP4-compatible, otherwise re-encode to AAC
-            if AudioCodec.lower() in self.MP4_COMPATIBLE_AUDIO:
-                CommandParts.extend(['-c:a', 'copy'])
-            else:
-                CommandParts.extend(['-c:a', 'aac', '-b:a', '128k'])
+            # Audio: always re-encode to AAC so the loudness-normalization
+            # filter chain can apply -- same rationale as BuildRemuxCommand.
+            # See Docs/AudioStrategy.md.
+            CommandParts.extend(['-c:a', 'aac', '-b:a', '128k'])
+            AudioFilter = self.BuildAudioFilters({})
+            if AudioFilter:
+                CommandParts.extend(['-af', f'"{AudioFilter}"'])
 
             # Subtitle: convert to mov_text (MP4-native text format)
             CommandParts.extend(['-c:s', 'mov_text'])

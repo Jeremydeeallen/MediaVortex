@@ -34,33 +34,26 @@ Dynamic range compression is also available (configurable via system settings):
 
 Both filters are toggled independently via `AudioNormalizationEnabled` and `AudioCompressionEnabled` system settings.
 
-**Applies to:** Transcode path only. Remux path copies audio without re-encoding when the codec is already compatible (see rule 3), so normalization is not applied during remux.
+**Applies to:** Transcode, Remux, and SubtitleFix paths. All three re-encode audio to AAC, so the same `loudnorm` + optional `acompressor` chain is applied uniformly. The library-wide loudness consistency promise is upheld regardless of which pipeline produced the file.
 
 ### 3. Codec: Jellyfin-Compatible Output
 Output audio uses codecs that Jellyfin can direct-play on all clients.
 
-**Transcode path:** Always re-encodes to AAC at the profile's configured bitrate (default 128 kbps). This is required because normalization filters need decoded audio.
+**Transcode, Remux, and SubtitleFix paths:** All three re-encode audio to AAC at 128 kbps so the normalization chain can be applied. Audio re-encoding is cheap relative to video (typically 5-20 seconds for a 60-minute file), so the cost of normalizing during remux is negligible compared to the consistency benefit.
 
-**Remux path:** Copies the audio stream if it is already MP4-compatible. Otherwise re-encodes to AAC 128k.
+MP4 container audio compatibility note (informational, not a decision branch any longer):
+- `aac`, `ac3`, `eac3`, `mp3` are MP4-compatible codecs
+- `dts`, `dts-hd`, `truehd`, `flac`, `pcm_*` are not
 
-MP4-compatible codecs (copied as-is during remux):
-- `aac`
-- `ac3` (Dolby Digital)
-- `eac3` (Dolby Digital Plus)
-- `mp3`
-
-Codecs that trigger re-encoding to AAC:
-- `dts` / `dts-hd` (licensing issues, many clients can't decode)
-- `truehd` (Dolby TrueHD — not supported in MP4 container)
-- `flac` (lossless, not supported in MP4)
-- `pcm_*` (uncompressed, massive file size)
+Prior versions of the remux path copied audio when the codec was already MP4-compatible. That branch was removed so loudness normalization is applied uniformly.
 
 ## Decision Matrix
 
 | Path | English Selection | Normalization | Output Codec |
 |------|------------------|---------------|--------------|
 | **Transcode** | Yes (via `-map`) | Yes (`loudnorm` + optional `acompressor`) | AAC (always re-encoded) |
-| **Remux** | Yes (via `-map`) | No (stream copied) | Copy if compatible, else AAC |
+| **Remux** | Yes (via `-map`) | Yes (`loudnorm` + optional `acompressor`) | AAC 128k (always re-encoded; video stream still copied) |
+| **SubtitleFix** | Yes (via `-map`) | Yes (`loudnorm` + optional `acompressor`) | AAC 128k (always re-encoded; video and subtitle streams handled separately) |
 
 ## Key Files
 - `Services/FFmpegAnalysisService.py` — `SelectPreferredAudioStream()` picks the English track

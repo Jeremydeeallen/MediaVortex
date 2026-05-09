@@ -33,6 +33,16 @@ A file the formula said would save 200 MB might actually come out 50
 MB larger. Today FileReplacement replaces unconditionally and we end
 up with a bigger file than we started with. That has to stop.
 
+**Related fix shipped 2026-05-09:** before this feature, the Remux path
+copied audio with `-c:a copy` when the source codec was MP4-compatible,
+which silently bypassed the `loudnorm`/`acompressor` filter chain. With
+no-benefit routing more files to Remux, that gap would have expanded the
+un-normalized portion of the library. `BuildRemuxCommand` and
+`BuildSubtitleFixCommand` now always re-encode audio to AAC 128k so the
+filter chain applies uniformly. See `Docs/AudioStrategy.md` decision
+matrix. Audio re-encode is cheap (~5-20 seconds per hour of content)
+relative to video, so the cost is negligible.
+
 ## Surface
 
 Mostly internal pipeline behavior in `transcode.flow.md` Stages 4 and 7.
