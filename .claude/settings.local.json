@@ -79,7 +79,9 @@
       "WebFetch(domain:help.unsplash.com)",
       "WebFetch(domain:images.unsplash.com)",
       "WebFetch(domain:www.pexels.com)",
-      "Bash(py *)"
+      "Bash(py *)",
+      "PowerShell(Get-Process *)",
+      "PowerShell(Stop-Process *)"
     ]
   }
 }

@@ -1,3 +1,7 @@
+# Claude Code harness ephemera (lock files change every session)
+.claude/*.bak
+.claude/*.lock
+
 # Log files
 *.log
 *.log.cutree
