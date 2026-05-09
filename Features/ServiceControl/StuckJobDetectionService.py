@@ -100,8 +100,29 @@ class StuckJobDetectionService:
                 "JobsCleaned": 0
             }
 
-    # If no progress update for this many minutes, consider the job frozen (even if FFmpeg process is alive)
-    FROZEN_PROGRESS_THRESHOLD_MINUTES = 15
+    # Default frame-stagnation threshold in minutes if SystemSetting is missing.
+    # Lowered from 15 to 5 (stuck-job-detection.feature.md criterion 3); SVT-AV1
+    # at observed FPS rates never goes >30s without a frame advance during a
+    # normal encode, so 5 min is well clear of any legitimate transient pause.
+    # The actual threshold is read from SystemSettings.FrozenProgressThresholdMin
+    # at every detection cycle (criterion 4) so the operator can tune at runtime.
+    FROZEN_PROGRESS_THRESHOLD_MINUTES = 5
+
+    def _GetFrozenProgressThresholdMin(self) -> int:
+        """Read FrozenProgressThresholdMin from SystemSettings each cycle.
+
+        Falls back to FROZEN_PROGRESS_THRESHOLD_MINUTES when the setting is
+        missing or unparseable. No caching -- per-cycle read so operator
+        changes take effect without restart.
+        """
+        try:
+            from Features.SystemSettings.SystemSettingsRepository import SystemSettingsRepository
+            value = SystemSettingsRepository().GetSystemSetting('FrozenProgressThresholdMin')
+            if value is None:
+                return self.FROZEN_PROGRESS_THRESHOLD_MINUTES
+            return max(1, int(value))
+        except Exception:
+            return self.FROZEN_PROGRESS_THRESHOLD_MINUTES
 
     # Quality test queue jobs sitting with DateStarted=NULL longer than this are stale (never picked up)
     STALE_QUALITY_TEST_THRESHOLD_MINUTES = 60
@@ -138,31 +159,39 @@ class StuckJobDetectionService:
                 if isWorkerOffline:
                     return True, f"Worker '{JobWorkerName}' is offline: {workerReason}"
 
-            processId = relevantActiveJob.get('ProcessId')
-            if not processId:
-                # No process ID recorded yet - might be stuck
-                return True, "No ProcessId recorded in ActiveJob"
+            workerPid = relevantActiveJob.get('ProcessId')  # Python worker PID -- never killed
+            ffmpegPid = relevantActiveJob.get('FFmpegPid')   # FFmpeg subprocess PID -- correct kill target
 
-            # Tier 2: Progress stagnation check (works across all machines)
+            # Tier 2: Progress stagnation check (works across all machines).
+            # Run BEFORE Tier 3 so a stalled FFmpeg with a still-alive PID is
+            # caught regardless of locality.
             isFrozen, frozenReason = self._IsJobFrozen(Job)
             if isFrozen:
                 return True, frozenReason
 
-            # Tier 3: Local PID check (only for jobs on this machine)
+            # Tier 3: FFmpeg-PID liveness (local jobs only).
+            # The "no FFmpeg processes on system" heuristic was REMOVED in
+            # stuck-job-detection.feature.md criterion D1: it false-positived
+            # during the gap between job claim and FFmpeg spawn (especially
+            # when LocalStaging falls back to InPlace), self-killing the
+            # worker on 2026-05-09 (Incident 2 in the feature doc).
             LocalHostname = socket.gethostname()
             IsLocalJob = (not JobWorkerName) or (JobWorkerName == LocalHostname)
 
             if IsLocalJob:
-                # Check if the tracked process is still alive and is actually FFmpeg
-                isAlive = self.IsProcessAlive(processId)
+                if ffmpegPid is None:
+                    # FFmpeg has not started yet (or row predates this feature).
+                    # Defer to Tier 2; do NOT flag stuck on PID-absence alone.
+                    return False, "FFmpegPid not yet recorded -- relying on frame-stagnation check"
 
-                if not isAlive:
-                    return True, f"FFmpeg process {processId} not found or is no longer FFmpeg (process died or PID reused)"
-
-                # Secondary check: verify there are actually FFmpeg processes on the system
-                ffmpegProcesses = self.ProcessManagementService.FindFFmpegProcesses()
-                if not ffmpegProcesses:
-                    return True, f"No FFmpeg processes running on system but job status is Running (PID {processId} may have been reused)"
+                # Verify the recorded FFmpegPid is alive AND still an FFmpeg
+                # process by name (D1). Anything else means FFmpeg exited and
+                # the PID may have been reused by an unrelated process.
+                actualName = self._GetProcessName(ffmpegPid)
+                if actualName is None:
+                    return True, f"FFmpeg PID {ffmpegPid} recorded for job {Job.Id} is no longer alive"
+                if not self._IsFFmpegProcessName(actualName):
+                    return True, f"FFmpeg PID {ffmpegPid} recorded for job {Job.Id} is no longer alive (process name was '{actualName}')"
 
             return False, "Process is alive and making progress"
 
@@ -243,10 +272,11 @@ class StuckJobDetectionService:
                 lastUpdate = lastUpdateValue
             minutesSinceUpdate = (datetime.now(timezone.utc) - AsAwareUtc(lastUpdate)).total_seconds() / 60.0
 
-            if minutesSinceUpdate >= self.FROZEN_PROGRESS_THRESHOLD_MINUTES:
+            thresholdMin = self._GetFrozenProgressThresholdMin()
+            if minutesSinceUpdate >= thresholdMin:
                 return True, (
                     f"FFmpeg process is alive but frozen - no frame advance for {minutesSinceUpdate:.1f} minutes "
-                    f"(threshold: {self.FROZEN_PROGRESS_THRESHOLD_MINUTES}min). "
+                    f"(threshold: {thresholdMin}min). "
                     f"Last progress: {progressPercent:.1f}%, FPS: {currentFPS}"
                 )
 
@@ -275,6 +305,39 @@ class StuckJobDetectionService:
                                       "StuckJobDetectionService", "IsProcessAlive")
             return False
 
+    def _GetProcessName(self, ProcessId: int) -> Optional[str]:
+        """Return the process name for a PID, or None if the process is not alive.
+
+        Used by stuck-job detection and cleanup to verify a kill target is
+        actually an FFmpeg/shell process before sending SIGTERM. Never returns
+        None for transient failures -- those raise so the caller can decide.
+        """
+        try:
+            if not ProcessId or ProcessId <= 0:
+                return None
+            return psutil.Process(ProcessId).name()
+        except (psutil.NoSuchProcess, psutil.ZombieProcess):
+            return None
+        except psutil.AccessDenied:
+            # Process exists but we can't read its name. Treat as "alive but
+            # opaque" -- safer than assuming dead.
+            return "<access-denied>"
+
+    def _IsFFmpegProcessName(self, Name: Optional[str]) -> bool:
+        """True if Name looks like an FFmpeg or its shell parent.
+
+        On Windows with shell=True, Popen.pid is cmd.exe (whose only purpose
+        is to spawn ffmpeg.exe). Treat both as legitimate FFmpeg-related kill
+        targets. python/python.exe is NEVER a legitimate target -- that's the
+        worker process.
+        """
+        if not Name:
+            return False
+        n = Name.lower()
+        if 'python' in n:
+            return False
+        return ('ffmpeg' in n) or n in ('cmd.exe', 'cmd', 'sh', 'bash')
+
     def CleanupStuckJob(self, QueueId: int, Reason: str) -> Dict[str, Any]:
         """Clean up a stuck job by killing the hung FFmpeg process and resetting its status."""
         try:
@@ -288,19 +351,92 @@ class StuckJobDetectionService:
                     "ErrorMessage": f"TranscodeQueue job {QueueId} not found"
                 }
 
-            # Kill the hung FFmpeg process before resetting DB records
+            # Kill the hung FFmpeg process before resetting DB records.
+            # Three guards to prevent killing the wrong target:
+            #   1. FFmpegPid (NEW column, criterion 6) -- not ProcessId, which
+            #      is the Python worker PID and must never be killed.
+            #   2. Host-locality (criterion 9) -- only kill PIDs on this host.
+            #   3. Process name (D1) -- target must be an FFmpeg-or-shell, not
+            #      python/python.exe.
             try:
+                import socket as _socket
+                LocalHostname = _socket.gethostname()
                 activeJobs = self.DatabaseManager.GetActiveJobsByService("TranscodeService")
                 for activeJob in activeJobs:
-                    if activeJob.get('QueueId') == QueueId:
-                        processId = activeJob.get('ProcessId')
-                        if processId and self.IsProcessAlive(processId):
-                            LoggingService.LogInfo(f"Killing hung FFmpeg process {processId} for stuck job {QueueId}",
-                                                 "StuckJobDetectionService", "CleanupStuckJob")
-                            self.ProcessManagementService.KillProcess(processId, Graceful=True)
-                            LoggingService.LogInfo(f"Killed FFmpeg process {processId} for stuck job {QueueId}",
-                                                 "StuckJobDetectionService", "CleanupStuckJob")
+                    if activeJob.get('QueueId') != QueueId:
+                        continue
+
+                    jobWorkerName = activeJob.get('WorkerName')
+                    ffmpegPid = activeJob.get('FFmpegPid')
+
+                    # Host-locality guard: cross-host jobs get DB-only cleanup.
+                    if jobWorkerName and jobWorkerName != LocalHostname:
+                        LoggingService.LogInfo(
+                            f"Skipping kill for stuck job {QueueId}: owned by '{jobWorkerName}', "
+                            f"this host is '{LocalHostname}'. DB cleanup will still run.",
+                            "StuckJobDetectionService", "CleanupStuckJob"
+                        )
                         break
+
+                    # FFmpegPid path: target the recorded subprocess PID.
+                    killTarget = None
+                    if ffmpegPid:
+                        targetName = self._GetProcessName(ffmpegPid)
+                        if targetName is None:
+                            LoggingService.LogInfo(
+                                f"Stuck job {QueueId}: FFmpegPid {ffmpegPid} already gone, skipping kill",
+                                "StuckJobDetectionService", "CleanupStuckJob"
+                            )
+                        elif self._IsFFmpegProcessName(targetName):
+                            killTarget = ffmpegPid
+                        else:
+                            # Recorded PID is alive but is NOT FFmpeg (worker
+                            # PID, or a reused PID belonging to something
+                            # unrelated). This is exactly the I9-2024
+                            # self-kill scenario; refuse to kill.
+                            LoggingService.LogWarning(
+                                f"Stuck job {QueueId}: refusing to kill PID {ffmpegPid} "
+                                f"-- name '{targetName}' is not an FFmpeg/shell process. "
+                                f"DB cleanup will still run.",
+                                "StuckJobDetectionService", "CleanupStuckJob"
+                            )
+
+                    # Legacy fallback: ActiveJobs row from before FFmpegPid
+                    # column existed. Find FFmpeg children of the worker PID.
+                    if killTarget is None and ffmpegPid is None:
+                        workerPid = activeJob.get('ProcessId')
+                        if workerPid and self.IsProcessAlive(workerPid):
+                            try:
+                                workerProc = psutil.Process(workerPid)
+                                for child in workerProc.children(recursive=True):
+                                    childName = child.name() or ''
+                                    if self._IsFFmpegProcessName(childName) and 'ffmpeg' in childName.lower():
+                                        killTarget = child.pid
+                                        LoggingService.LogInfo(
+                                            f"Stuck job {QueueId}: legacy row, found FFmpeg child {killTarget} of worker {workerPid}",
+                                            "StuckJobDetectionService", "CleanupStuckJob"
+                                        )
+                                        break
+                            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                                pass
+
+                    if killTarget:
+                        # Final pre-flight name check (paranoia: PID could have
+                        # changed identity since we read it).
+                        finalName = self._GetProcessName(killTarget)
+                        if not self._IsFFmpegProcessName(finalName):
+                            LoggingService.LogWarning(
+                                f"Stuck job {QueueId}: final name check failed for PID {killTarget} "
+                                f"(name='{finalName}'), skipping kill",
+                                "StuckJobDetectionService", "CleanupStuckJob"
+                            )
+                        else:
+                            LoggingService.LogInfo(
+                                f"Killing FFmpeg PID {killTarget} (name='{finalName}') for stuck job {QueueId}",
+                                "StuckJobDetectionService", "CleanupStuckJob"
+                            )
+                            self.ProcessManagementService.KillProcess(killTarget, Graceful=True)
+                    break
             except Exception as killEx:
                 LoggingService.LogException(f"Error killing FFmpeg process for stuck job {QueueId} (continuing with DB cleanup)", killEx,
                                           "StuckJobDetectionService", "CleanupStuckJob")

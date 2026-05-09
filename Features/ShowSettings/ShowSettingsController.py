@@ -146,16 +146,30 @@ def DeleteShowSetting():
 
 @ShowSettingsBlueprint.route('/SmartPopulate', methods=['POST'])
 def SmartPopulateQueue():
-    """Generate suggested transcodes based on ShowSettings target resolutions (does NOT add to queue)."""
+    """Generate suggested transcodes ranked by MediaFiles.PriorityScore.
+
+    Body params (all optional):
+      Drive   -- drive-letter prefix filter (e.g. 'T:')
+      Limit   -- page size, 1-500 (default 100); the business service coerces.
+      Offset  -- pagination offset (default 0)
+      Search  -- substring match on FileName or show-folder segment, case-insensitive,
+                 max 100 chars. Empty/whitespace = no filter.
+
+    Service is the source of truth for sort order (PriorityScore DESC NULLS LAST,
+    SizeMB DESC). See smart-populate.flow.md for the user journey.
+    """
     try:
         Data = request.get_json() or {}
-        Limit = int(Data.get('Limit', 100))
-        Offset = int(Data.get('Offset', 0))
+        Limit = Data.get('Limit', 100)
+        Offset = Data.get('Offset', 0)
         Drive = Data.get('Drive', '')
+        Search = Data.get('Search', '') or ''
+        if isinstance(Search, str) and len(Search) > 100:
+            Search = Search[:100]
 
         from Features.TranscodeQueue.QueueManagementBusinessService import QueueManagementBusinessService
         Service = QueueManagementBusinessService()
-        Result = Service.SmartPopulateQueue(Limit=Limit, Offset=Offset, Drive=Drive)
+        Result = Service.SmartPopulateQueue(Limit=Limit, Offset=Offset, Drive=Drive, Search=Search)
 
         return jsonify(Result)
     except Exception as Ex:

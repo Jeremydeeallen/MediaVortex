@@ -59,6 +59,20 @@ class VideoTranscodingService:
 
             LoggingService.LogInfo(f"Process started with PID: {Process.pid}", "VideoTranscodingService", "TranscodeVideo")
 
+            # Record FFmpeg subprocess PID into ActiveJobs.FFmpegPid (shell-pid on
+            # Windows shell=True, which is the parent of ffmpeg.exe -- the kill
+            # path uses taskkill /T to terminate the whole tree). This is the
+            # correct kill target for stuck-job cleanup. See
+            # stuck-job-detection.feature.md criterion 6.
+            if ActiveJobId and DatabaseManager:
+                try:
+                    DatabaseManager.SetActiveJobFFmpegPid(ActiveJobId, Process.pid)
+                except Exception as PidEx:
+                    LoggingService.LogException(
+                        f"Failed to record FFmpegPid={Process.pid} for ActiveJobId={ActiveJobId}",
+                        PidEx, "VideoTranscodingService", "TranscodeVideo"
+                    )
+
             # Set CPU affinity using topology-based core selection (skip in Docker — cpuset handles pinning)
             FFmpegPID = None
             if not os.path.exists('/.dockerenv'):

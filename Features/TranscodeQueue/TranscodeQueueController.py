@@ -20,7 +20,7 @@ def GetQueue():
         # Get query parameters
         page = int(request.args.get('page', 1))
         pageSize = int(request.args.get('pageSize', 25))
-        sortBy = request.args.get('sortBy', 'SizeMB')
+        sortBy = request.args.get('sortBy', 'Priority')
         sortOrder = request.args.get('sortOrder', 'DESC')
 
         # Validate parameters
@@ -29,7 +29,7 @@ def GetQueue():
         if pageSize < 1 or pageSize > 100:
             pageSize = 25
         if sortBy not in ['SizeMB', 'Priority', 'DateAdded', 'FileName']:
-            sortBy = 'SizeMB'
+            sortBy = 'Priority'
         if sortOrder not in ['ASC', 'DESC']:
             sortOrder = 'DESC'
 

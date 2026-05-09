@@ -89,6 +89,17 @@ class MediaProbeBusinessService:
 
                 self.Repository.UpdateMetadata(MediaFile)
 
+                # Materialize PriorityScore (priority-materialization.feature.md criterion 7).
+                # Failure here must NOT roll back the probe (criterion 14).
+                try:
+                    from Features.TranscodeQueue.QueueManagementBusinessService import QueueManagementBusinessService
+                    QueueManagementBusinessService().ComputePriorityScore(MediaFile.Id)
+                except Exception as PriorityEx:
+                    LoggingService.LogException(
+                        f"Priority recompute after probe failed for MediaFileId={MediaFile.Id} -- probe data is saved",
+                        PriorityEx, "MediaProbeBusinessService", "_ExecuteProbe"
+                    )
+
                 LoggingService.LogInfo(f"Probe succeeded: {FilePath} ({MediaFile.Resolution}, {MediaFile.Codec})", "MediaProbeBusinessService", "_ExecuteProbe")
                 return {
                     'Success': True,

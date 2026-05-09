@@ -273,21 +273,46 @@ class ProfileRepository(BaseRepository):
         return affected_rows > 0
 
     def UpdateMediaFilesProfileByRootFolder(self, RootFolderPath: str, ProfileId: int) -> int:
-        """Update AssignedProfile for all MediaFiles in a specific root folder."""
+        """Update AssignedProfile for all MediaFiles in a specific root folder.
+
+        Triggers PriorityScore recompute for affected files (priority-materialization.feature.md
+        criterion 8). Recompute failure does not roll back the AssignedProfile update.
+        """
         try:
             LoggingService.LogFunctionEntry("UpdateMediaFilesProfileByRootFolder", "ProfileRepository", RootFolderPath, ProfileId)
 
             profile = self.GetProfileById(ProfileId)
             profileName = profile.ProfileName if profile else f"ProfileId_{ProfileId}"
 
+            # First, capture the IDs that will be affected (so we can recompute their priority).
+            escapedPath = EscapeLikePattern(RootFolderPath)
+            affectedRows = self.ExecuteQuery(
+                "SELECT Id FROM MediaFiles WHERE LOWER(FilePath) LIKE LOWER(%s) || '%%' ESCAPE '!'",
+                (escapedPath,)
+            )
+            affectedIds = [r['Id'] for r in affectedRows]
+
             query = """
                 UPDATE MediaFiles
                 SET AssignedProfile = %s
                 WHERE LOWER(FilePath) LIKE LOWER(%s) || '%%' ESCAPE '!'
             """
-            escapedPath = EscapeLikePattern(RootFolderPath)
             filesUpdated = self.ExecuteNonQuery(query, (profileName, escapedPath))
             LoggingService.LogInfo(f"Updated {filesUpdated} media files in root folder '{RootFolderPath}' to use profile '{profileName}'", "ProfileRepository", "UpdateMediaFilesProfileByRootFolder")
+
+            if affectedIds:
+                try:
+                    from Features.TranscodeQueue.QueueManagementBusinessService import QueueManagementBusinessService
+                    Service = QueueManagementBusinessService()
+                    # Process in batches to keep the bulk UPDATE VALUES clause manageable.
+                    BatchSize = 1000
+                    for i in range(0, len(affectedIds), BatchSize):
+                        Service.ComputePriorityScoresForFiles(affectedIds[i:i+BatchSize])
+                except Exception as PriorityEx:
+                    LoggingService.LogException(
+                        f"Priority recompute after AssignedProfile bulk-update failed for {len(affectedIds)} files in '{RootFolderPath}' -- profile is assigned, scores stale",
+                        PriorityEx, "ProfileRepository", "UpdateMediaFilesProfileByRootFolder"
+                    )
 
             return filesUpdated
 

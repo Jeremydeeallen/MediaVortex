@@ -331,6 +331,10 @@ class WorkerServiceApp:
             # Start capability polling (60s interval for capability changes)
             self._StartCapabilityPolling()
 
+            # Start recurring stuck-job detection (default 120s interval).
+            # See stuck-job-detection.feature.md criterion 1.
+            self._StartStuckJobDetection()
+
             # Start enabled capabilities if worker is Online
             if self.WorkerStatus == "Online":
                 self._ApplyCapabilities()
@@ -434,6 +438,57 @@ class WorkerServiceApp:
             self._StopScanCapability()
 
     # --- Polling threads ---
+
+    def _StartStuckJobDetection(self):
+        """Start recurring stuck-job detection thread.
+
+        Reads SystemSettings.StuckJobDetectionIntervalSec each cycle (default
+        120). Owns stuck-job-detection.feature.md criterion 1.
+        """
+        try:
+            self.StuckDetectionThread = threading.Thread(
+                target=self._StuckJobDetectionLoop,
+                daemon=True,
+                name="StuckJobDetector"
+            )
+            self.StuckDetectionThread.start()
+            LoggingService.LogInfo("Stuck job detection loop started", "WorkerService", "_StartStuckJobDetection")
+        except Exception as e:
+            LoggingService.LogException("Error starting stuck job detection loop", e, "WorkerService", "_StartStuckJobDetection")
+
+    def _StuckJobDetectionLoop(self):
+        """Run stuck-job detection on a configurable interval until shutdown."""
+        # Avoid double-firing immediately after the startup-time call in
+        # _DetectAndCleanStuckJobs by sleeping the interval first.
+        from Features.SystemSettings.SystemSettingsRepository import SystemSettingsRepository
+        SettingsRepo = SystemSettingsRepository()
+
+        def _ReadInterval():
+            try:
+                v = SettingsRepo.GetSystemSetting('StuckJobDetectionIntervalSec')
+                return max(30, int(v)) if v is not None else 120
+            except Exception:
+                return 120
+
+        # Initial wait so startup-time detection isn't duplicated.
+        self.ShutdownEvent.wait(_ReadInterval())
+
+        while not self.ShutdownEvent.is_set():
+            try:
+                from Services.StuckJobDetectionService import StuckJobDetectionService
+                DetectionService = StuckJobDetectionService(self.DatabaseManager)
+                # Transcode side
+                if self.TranscodeEnabled:
+                    DetectionService.DetectAndCleanStuckTranscodeJobs()
+                # Quality test side (cheap, runs even with QualityTest disabled
+                # since the detector returns no-op when no QT jobs exist)
+                try:
+                    DetectionService.DetectAndCleanStuckQualityTestJobs()
+                except Exception as qtEx:
+                    LoggingService.LogException("Error in stuck quality-test detection cycle", qtEx, "WorkerService", "_StuckJobDetectionLoop")
+            except Exception as e:
+                LoggingService.LogException("Error in stuck job detection cycle", e, "WorkerService", "_StuckJobDetectionLoop")
+            self.ShutdownEvent.wait(_ReadInterval())
 
     def _StartHealthMonitoring(self):
         """Start health monitoring thread."""

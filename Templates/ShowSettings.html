@@ -9,19 +9,30 @@
 
     <!-- Card 1: Next Batch -->
     <div class="card border-primary mb-3" id="BatchCard">
-        <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center py-2">
-            <div>
-                <h5 class="mb-0 d-inline">Next Batch</h5>
-                <span id="BatchCount" class="badge bg-light text-primary ms-2">0</span>
-                <small class="fw-normal ms-2 opacity-75" style="font-size: 0.75rem;">Top 10 largest files -- select a profile, then add to queue</small>
-            </div>
-            <div class="d-flex align-items-center gap-2">
-                <label class="mb-0 text-white text-nowrap small">Profile:</label>
-                <select id="BatchProfileSelect" class="form-select form-select-sm" style="width: 220px;">
-                    <option value="">-- Select a Profile --</option>
-                </select>
-                <button class="btn btn-light btn-sm" onclick="AddBatchToQueue()" id="AddBatchBtn">Add Batch</button>
-                <button class="btn btn-outline-light btn-sm" onclick="SmartPopulate()" id="AnalyzeBtn">Re-Analyze</button>
+        <div class="card-header bg-primary text-white py-2">
+            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <div>
+                    <h5 class="mb-0 d-inline">Next Batch</h5>
+                    <span id="BatchCount" class="badge bg-light text-primary ms-2">0</span>
+                    <small class="fw-normal ms-2 opacity-75" style="font-size: 0.75rem;">Ranked by post-transcode impact</small>
+                </div>
+                <div class="d-flex align-items-center gap-2 flex-wrap">
+                    <input id="BatchSearch" type="search" class="form-control form-control-sm" placeholder="Search title or file..." style="width: 200px;" maxlength="100">
+                    <label class="mb-0 text-white text-nowrap small">Size:</label>
+                    <select id="BatchSizeSelect" class="form-select form-select-sm" style="width: 80px;">
+                        <option value="25">25</option>
+                        <option value="50">50</option>
+                        <option value="100" selected>100</option>
+                        <option value="250">250</option>
+                        <option value="500">500</option>
+                    </select>
+                    <label class="mb-0 text-white text-nowrap small">Profile:</label>
+                    <select id="BatchProfileSelect" class="form-select form-select-sm" style="width: 220px;">
+                        <option value="">-- Select a Profile --</option>
+                    </select>
+                    <button class="btn btn-light btn-sm" onclick="AddBatchToQueue()" id="AddBatchBtn">Add Batch</button>
+                    <button class="btn btn-outline-light btn-sm" onclick="SmartPopulate()" id="AnalyzeBtn">Re-Analyze</button>
+                </div>
             </div>
         </div>
         <div class="card-body p-0">
@@ -33,6 +44,7 @@
                     <thead class="table-light">
                         <tr>
                             <th style="width: 30px;"></th>
+                            <th style="width: 70px;" class="text-center">Priority</th>
                             <th>Title</th>
                             <th>File</th>
                             <th style="width: 90px;" class="text-end">Size</th>
@@ -42,11 +54,11 @@
                         </tr>
                     </thead>
                     <tbody id="BatchTableBody">
-                        <tr><td colspan="7" class="text-center py-3 text-muted">Analyzing...</td></tr>
+                        <tr><td colspan="8" class="text-center py-3 text-muted">Analyzing...</td></tr>
                     </tbody>
                     <tfoot class="table-light">
                         <tr class="fw-bold">
-                            <td></td>
+                            <td colspan="2"></td>
                             <td colspan="2">Batch Total</td>
                             <td id="BatchTotalSize" class="text-end"></td>
                             <td colspan="3"></td>
@@ -152,8 +164,12 @@ let LibrarySort = { Column: 'TotalGB', Direction: 'desc' };
 let AllSuggestions = [];
 let BatchItems = [];
 let AllProfiles = [];
-const BATCH_SIZE = 10;
-const PAGE_SIZE = 100;
+// BATCH_SIZE / PAGE_SIZE are operator-controlled via the size selector in
+// Card 1 (smart-populate.feature.md criterion 9). Default 100.
+let BATCH_SIZE = 100;
+let PAGE_SIZE = 100;
+let CurrentSearch = '';
+let SearchDebounceTimer = null;
 let CurrentOffset = 0;
 let TotalCandidates = 0;
 let HasMore = false;
@@ -162,6 +178,27 @@ let HasMore = false;
 $(document).ready(function() {
     LoadShows();
     LoadProfiles();
+
+    // Search box: debounce 300ms (criterion 5).
+    $('#BatchSearch').on('input', function() {
+        const Val = $(this).val() || '';
+        clearTimeout(SearchDebounceTimer);
+        SearchDebounceTimer = setTimeout(function() {
+            CurrentSearch = Val;
+            SmartPopulate();
+        }, 300);
+    });
+
+    // Batch-size selector (criteria 9-10).
+    $('#BatchSizeSelect').on('change', function() {
+        const NewSize = parseInt($(this).val(), 10);
+        if (Number.isFinite(NewSize) && NewSize >= 1 && NewSize <= 500) {
+            BATCH_SIZE = NewSize;
+            PAGE_SIZE = NewSize;
+            SmartPopulate();
+        }
+    });
+
     SmartPopulate();
 });
 
@@ -395,6 +432,16 @@ function SortLibrary(Column) {
 
 // ── Card 1: Next Batch ──
 
+function GetPriorityBadgeClass(Priority) {
+    // Mirrors Templates/Queue.html getPriorityBadgeClass.
+    // Brackets per queue-priority.feature.md criterion 14.
+    if (Priority == null) return 'bg-light text-muted';
+    if (Priority >= 195) return 'bg-danger';
+    if (Priority >= 150) return 'bg-warning';
+    if (Priority >= 75)  return 'bg-info';
+    return 'bg-secondary';
+}
+
 function SmartPopulate(IsNextPage) {
     const Btn = $('#AnalyzeBtn');
     const OrigText = Btn.html();
@@ -406,11 +453,18 @@ function SmartPopulate(IsNextPage) {
         Btn.prop('disabled', true).text('Analyzing...');
     }
 
+    const Payload = {
+        Drive: 'T:',
+        Limit: PAGE_SIZE,
+        Offset: CurrentOffset,
+        Search: CurrentSearch || ''
+    };
+
     $.ajax({
         url: '/api/ShowSettings/SmartPopulate',
         method: 'POST',
         contentType: 'application/json',
-        data: JSON.stringify({ Drive: 'T:', Limit: PAGE_SIZE, Offset: CurrentOffset }),
+        data: JSON.stringify(Payload),
         timeout: 30000,
         success: function(Response) {
             Btn.prop('disabled', false).html(OrigText);
@@ -426,7 +480,10 @@ function SmartPopulate(IsNextPage) {
                     BatchItems = AllSuggestions.splice(0, BATCH_SIZE);
                 }
 
-                $('#BatchInfo').html('<small><strong>' + TotalCandidates.toLocaleString() + '</strong> candidates on T: drive. Showing top ' + BATCH_SIZE + ' by size.</small>');
+                const FilterText = CurrentSearch
+                    ? ' matching "' + EscapeHtml(CurrentSearch) + '"'
+                    : '';
+                $('#BatchInfo').html('<small><strong>' + TotalCandidates.toLocaleString() + '</strong> candidates' + FilterText + '. Showing top ' + BATCH_SIZE + ' by priority.</small>');
                 RenderBatch();
             } else {
                 ShowNotification('Batch error: ' + (Response.Message || Response.ErrorMessage || 'Unknown error'), 'danger');
@@ -444,7 +501,10 @@ function RenderBatch() {
     $('#BatchCount').text(BatchItems.length);
 
     if (BatchItems.length === 0) {
-        Tbody.html('<tr><td colspan="7" class="text-center py-3 text-muted">Batch is empty</td></tr>');
+        const EmptyMsg = CurrentSearch
+            ? 'No matches for "' + EscapeHtml(CurrentSearch) + '"'
+            : 'Batch is empty';
+        Tbody.html('<tr><td colspan="8" class="text-center py-3 text-muted">' + EmptyMsg + '</td></tr>');
         $('#BatchTotalSize').text('');
         return;
     }
@@ -454,8 +514,12 @@ function RenderBatch() {
 
     BatchItems.forEach(function(S, Idx) {
         TotalSize += S.SizeMB;
+        const PriorityCell = (S.PriorityScore != null)
+            ? '<span class="badge ' + GetPriorityBadgeClass(S.PriorityScore) + '">' + S.PriorityScore + '</span>'
+            : '<span class="text-muted small">-</span>';
         Html += '<tr>'
             + '<td><button class="btn btn-sm btn-outline-danger py-0 px-1" onclick="RemoveFromBatch(' + Idx + ')" title="Remove">x</button></td>'
+            + '<td class="text-center">' + PriorityCell + '</td>'
             + '<td>' + EscapeHtml(S.ShowName) + '</td>'
             + '<td title="' + EscapeAttr(S.FilePath) + '">' + EscapeHtml(S.FileName) + '</td>'
             + '<td class="text-end">' + FormatSize(S.SizeMB) + '</td>'

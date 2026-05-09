@@ -1405,16 +1405,16 @@ class DatabaseManager:
 
         return queueItems
 
-    def GetTranscodeQueueItemsPaginated(self, Page: int = 1, PageSize: int = 25, SortBy: str = "SizeMB", SortOrder: str = "DESC"):
+    def GetTranscodeQueueItemsPaginated(self, Page: int = 1, PageSize: int = 25, SortBy: str = "Priority", SortOrder: str = "DESC"):
         """Get paginated transcoding queue items with SQL-level sorting and pagination."""
         # Whitelist sort columns to prevent SQL injection
         sort_columns = {
             'SizeMB': 'SizeMB',
-            'Priority': 'SizeMB',  # Priority sorts by size as per existing behavior
+            'Priority': 'Priority',
             'DateAdded': 'DateAdded',
             'FileName': 'FileName'
         }
-        sort_col = sort_columns.get(SortBy, 'SizeMB')
+        sort_col = sort_columns.get(SortBy, 'Priority')
         order = 'DESC' if SortOrder == 'DESC' else 'ASC'
 
         # Get total count
@@ -3529,7 +3529,7 @@ class DatabaseManager:
                 params.append(WorkerName)
 
             query = """
-                SELECT Id, ServiceName, JobType, QueueId, ProcessId, ThreadId,
+                SELECT Id, ServiceName, JobType, QueueId, ProcessId, FFmpegPid, ThreadId,
                        StartedAt, Status, CreatedAt, UpdatedAt, WorkerName
                 FROM ActiveJobs
                 WHERE {}
@@ -4726,6 +4726,27 @@ class DatabaseManager:
             LoggingService.LogException("Exception resetting queue jobs to pending", e, "DatabaseManager", "ResetQueueJobsToPending")
             return 0
     
+    def SetActiveJobFFmpegPid(self, ActiveJobId: int, FFmpegPid: int) -> bool:
+        """Record the FFmpeg subprocess PID for an active job.
+
+        ActiveJobs.ProcessId is the worker's Python PID (per IsProcessAlive
+        documentation in StuckJobDetectionService). ActiveJobs.FFmpegPid is
+        the FFmpeg subprocess PID -- the correct kill target for stuck-job
+        cleanup. See stuck-job-detection.feature.md criterion 6.
+
+        Returns True if a row was updated, False otherwise.
+        """
+        try:
+            query = "UPDATE ActiveJobs SET FFmpegPid = %s, UpdatedAt = NOW() WHERE Id = %s"
+            affected = self.DatabaseService.ExecuteNonQuery(query, (FFmpegPid, ActiveJobId))
+            return affected > 0
+        except Exception as e:
+            LoggingService.LogException(
+                f"SetActiveJobFFmpegPid({ActiveJobId}, {FFmpegPid}) failed",
+                e, "DatabaseManager", "SetActiveJobFFmpegPid"
+            )
+            return False
+
     def UpdateActiveJobProcessId(self, ActiveJobId: int, ProcessId: int) -> bool:
         """Update the ProcessId for an active job (for FFmpeg PID tracking)."""
         try:

@@ -20,7 +20,7 @@ class TranscodeQueueViewModel:
         self.ErrorMessage = ""
         self.SuccessMessage = ""
 
-    def LoadQueueItems(self, Page: int = 1, PageSize: int = 25, SortBy: str = "SizeMB", SortOrder: str = "DESC") -> Dict[str, Any]:
+    def LoadQueueItems(self, Page: int = 1, PageSize: int = 25, SortBy: str = "Priority", SortOrder: str = "DESC") -> Dict[str, Any]:
         """Load transcoding queue items with database-level pagination and sorting."""
         try:
             LoggingService.LogFunctionEntry("LoadQueueItems", "TranscodeQueueViewModel", Page, PageSize, SortBy, SortOrder)

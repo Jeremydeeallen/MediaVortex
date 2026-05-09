@@ -198,66 +198,83 @@ class QueueManagementBusinessService:
             LoggingService.LogException(errorMsg, e, "QueueManagementBusinessService", "PopulateQueueFromMediaFiles")
             return {"Success": False, "ErrorMessage": errorMsg, "ItemsAdded": 0}
 
-    def SmartPopulateQueue(self, Limit: int = 100, Offset: int = 0, Drive: str = '') -> Dict[str, Any]:
-        """Get the biggest untranscoded files sorted by size then bitrate.
-        
-        Simple DB query — no target resolution analysis. User picks target and profile in the UI.
-        Excludes files already in queue and already successfully transcoded by MediaVortex.
-        Optionally filters by drive letter (e.g. 'T:').
-        Uses server-side pagination (Limit/Offset) to avoid returning all candidates at once.
+    def SmartPopulateQueue(self, Limit: int = 100, Offset: int = 0, Drive: str = '',
+                            Search: Optional[str] = None) -> Dict[str, Any]:
+        """Get untranscoded MediaFiles ranked by materialized PriorityScore.
+
+        Reads MediaFiles.PriorityScore (maintained by the priority-materialization
+        pipeline -- see transcode.flow.md Stage 3.5). NULL scores sort last, with
+        SizeMB DESC as tiebreaker so unscored files still land in a sensible order.
+
+        Excludes files already in queue and already-MediaVortex-transcoded files.
+        Optional Drive filter (e.g. 'T:') and Search substring filter.
         """
         try:
-            LoggingService.LogFunctionEntry("SmartPopulateQueue", "QueueManagementBusinessService", Limit, Offset)
+            LoggingService.LogFunctionEntry("SmartPopulateQueue", "QueueManagementBusinessService", Limit, Offset, Drive, Search)
 
-            from Core.Database.DatabaseService import DatabaseService
+            from Core.Database.DatabaseService import DatabaseService, EscapeLikePattern
 
-            # Build WHERE clause once for both COUNT and SELECT
+            # Validate Limit (criterion 11): coerce to [1, 500].
+            try:
+                Limit = max(1, min(500, int(Limit)))
+            except (TypeError, ValueError):
+                Limit = 100
+            try:
+                Offset = max(0, int(Offset))
+            except (TypeError, ValueError):
+                Offset = 0
+
+            # Predicate uses IS NOT TRUE so the partial index idx_mediafiles_smartpopulate
+            # is usable (criterion 16 of smart-populate.feature.md).
             Params = []
             WhereSql = """
-                WHERE (m.TranscodedByMediaVortex IS NULL OR m.TranscodedByMediaVortex = false)
+                WHERE m.TranscodedByMediaVortex IS NOT TRUE
                   AND m.Id NOT IN (SELECT MediaFileId FROM TranscodeQueue WHERE MediaFileId IS NOT NULL)
                   AND m.SizeMB > 0
             """
             if Drive:
-                # Filter by drive letter prefix (e.g. 'T:')
                 DrivePrefix = Drive.rstrip(':\\/') + ':'
                 WhereSql += " AND m.FilePath LIKE %s ESCAPE '!'"
-                from Core.Database.DatabaseService import EscapeLikePattern
                 Params.append(EscapeLikePattern(DrivePrefix) + '%')
+
+            if Search and Search.strip():
+                # Case-insensitive substring match on FileName OR the show-folder
+                # segment (the path component immediately under the drive root).
+                # SPLIT_PART(FilePath, separator, n) -- segment 2 of "T:\Show\..." is "Show".
+                # We escape the user input via EscapeLikePattern + ESCAPE '!'.
+                Term = '%' + EscapeLikePattern(Search.strip().lower()) + '%'
+                WhereSql += """
+                    AND (LOWER(m.FileName) LIKE %s ESCAPE '!'
+                         OR LOWER(SPLIT_PART(REPLACE(m.FilePath, '\\\\', '/'), '/', 2)) LIKE %s ESCAPE '!')
+                """
+                Params.append(Term)
+                Params.append(Term)
 
             ParamsTuple = tuple(Params)
 
-            # Cheap COUNT query for total candidates
+            # Cheap COUNT query for total candidates (reflects all filters).
             CountSql = f"SELECT COUNT(*) as TotalCount FROM MediaFiles m {WhereSql}"
             CountRows = DatabaseService().ExecuteQuery(CountSql, ParamsTuple)
             TotalCandidates = int(CountRows[0].get('TotalCount', 0)) if CountRows else 0
 
-            # Paginated data query
             Sql = f"""
                 SELECT m.Id, m.FilePath, m.FileName, m.SizeMB, m.VideoBitrateKbps,
-                       m.Codec, m.Resolution, m.ResolutionCategory, m.ContainerFormat
+                       m.Codec, m.Resolution, m.ResolutionCategory, m.ContainerFormat,
+                       m.PriorityScore
                 FROM MediaFiles m
                 {WhereSql}
-                ORDER BY m.SizeMB DESC, m.VideoBitrateKbps DESC
+                ORDER BY m.PriorityScore DESC NULLS LAST, m.SizeMB DESC
                 LIMIT {int(Limit)} OFFSET {int(Offset)}
             """
-
             Rows = DatabaseService().ExecuteQuery(Sql, ParamsTuple)
-            LoggingService.LogInfo(f"SmartPopulate: fetched {len(Rows)} of {TotalCandidates} candidates (offset={Offset})", "QueueManagementBusinessService", "SmartPopulateQueue")
 
             Suggestions = []
             for Row in Rows:
                 FilePath = Row.get('FilePath', '')
                 FileName = Row.get('FileName', '')
-                # Extract show name from path: "T:\ShowName\Season\file" -> "ShowName"
                 Parts = FilePath.replace('\\', '/').split('/')
                 ShowName = Parts[1] if len(Parts) >= 2 else 'Unknown'
 
-                # Priority is intentionally NOT computed here -- the user has not
-                # picked a profile yet at the suggestion-listing stage, so the real
-                # impact-based score (queue-priority.feature.md) cannot be calculated.
-                # AddSuggestionsToQueue computes the authoritative priority when the
-                # user actually adds the item with a profile.
                 Suggestions.append({
                     'MediaFileId': Row.get('Id'),
                     'FilePath': FilePath,
@@ -269,6 +286,7 @@ class QueueManagementBusinessService:
                     'ResolutionCategory': Row.get('ResolutionCategory', '') or '',
                     'BitrateKbps': int(Row.get('VideoBitrateKbps', 0) or 0),
                     'ContainerFormat': Row.get('ContainerFormat', '') or '',
+                    'PriorityScore': Row.get('PriorityScore'),
                     'Mode': 'Transcode',
                 })
 
@@ -278,9 +296,10 @@ class QueueManagementBusinessService:
                 "TotalCandidates": TotalCandidates,
                 "Offset": Offset,
                 "Limit": Limit,
+                "Search": Search or '',
                 "HasMore": (Offset + len(Suggestions)) < TotalCandidates,
             }
-            LoggingService.LogInfo(f"SmartPopulate complete: {len(Suggestions)} fetched, {TotalCandidates} total (offset={Offset})", "QueueManagementBusinessService", "SmartPopulateQueue")
+            LoggingService.LogInfo(f"SmartPopulate: fetched {len(Rows)} of {TotalCandidates} candidates (offset={Offset}, search='{Search or ''}')", "QueueManagementBusinessService", "SmartPopulateQueue")
             return Result
 
         except Exception as Ex:
@@ -323,10 +342,18 @@ class QueueManagementBusinessService:
                 MediaFileId = Item.get('MediaFileId')
                 MediaFile = self.DatabaseManager.GetMediaFileById(MediaFileId) if MediaFileId else None
 
-                # Assign profile to the media file if specified
+                # Assign profile to the media file if specified, then refresh
+                # PriorityScore (priority-materialization.feature.md criterion 10).
                 if ProfileName and MediaFile:
                     MediaFile.AssignedProfile = ProfileName
                     self.DatabaseManager.SaveMediaFile(MediaFile)
+                    try:
+                        self.ComputePriorityScore(MediaFile.Id)
+                    except Exception as PriorityEx:
+                        LoggingService.LogException(
+                            f"PriorityScore refresh after AssignedProfile change failed for MediaFileId={MediaFile.Id}",
+                            PriorityEx, "QueueManagementBusinessService", "AddSuggestionsToQueue"
+                        )
 
                 PathParts = FilePath.replace("\\", "/").split("/")
                 Directory = "/".join(PathParts[:-1]) if len(PathParts) > 1 else ""
@@ -923,7 +950,8 @@ class QueueManagementBusinessService:
 
     def CalculatePriority(self, MediaFile: MediaFileModel,
                           TargetVideoKbps: Optional[int] = None,
-                          TargetAudioKbps: Optional[int] = None) -> int:
+                          TargetAudioKbps: Optional[int] = None,
+                          SuppressFallbackWarning: bool = False) -> int:
         """Calculate impact-based priority for a queue item, range 1-194.
 
         See Features/TranscodeQueue/queue-priority.feature.md for the contract.
@@ -959,18 +987,22 @@ class QueueManagementBusinessService:
                                 * durationMinutes * 60.0) / (8 * 1024)
                 estimatedSavingsMB = max(0, sizeMB - targetSizeMB)
             else:
-                # Fallback path -- log loudly so the missing input is visible.
-                missing = []
-                if TargetVideoKbps is None or TargetAudioKbps is None:
-                    missing.append("ProfileThresholds bitrate")
-                if durationMinutes <= 0:
-                    missing.append("MediaFile.DurationMinutes")
-                LoggingService.LogWarning(
-                    f"CalculatePriority falling back to size*0.5 for "
-                    f"MediaFileId={MediaFile.Id} ({MediaFile.FileName}) -- "
-                    f"missing: {', '.join(missing)}",
-                    "QueueManagementBusinessService", "CalculatePriority"
-                )
+                # Fallback path. Loud-failure rule applies at the queue-write
+                # caller (one row at a time, operator-visible). Bulk recompute
+                # callers pass SuppressFallbackWarning=True and emit a single
+                # rolled-up warning at the end.
+                if not SuppressFallbackWarning:
+                    missing = []
+                    if TargetVideoKbps is None or TargetAudioKbps is None:
+                        missing.append("ProfileThresholds bitrate")
+                    if durationMinutes <= 0:
+                        missing.append("MediaFile.DurationMinutes")
+                    LoggingService.LogWarning(
+                        f"CalculatePriority falling back to size*0.5 for "
+                        f"MediaFileId={MediaFile.Id} ({MediaFile.FileName}) -- "
+                        f"missing: {', '.join(missing)}",
+                        "QueueManagementBusinessService", "CalculatePriority"
+                    )
                 estimatedSavingsMB = sizeMB * 0.5
 
             score = math.log10(estimatedSavingsMB + 1)  # 0..5+
@@ -990,6 +1022,184 @@ class QueueManagementBusinessService:
                 e, "QueueManagementBusinessService", "CalculatePriority"
             )
             return 1  # Lowest non-zero so the queue item still saves; never 0
+
+    def _LoadPriorityLookupTable(self) -> Dict[tuple, tuple]:
+        """Pre-compute {(ProfileName, SourceResolutionCategory): (TargetVideoKbps, TargetAudioKbps)}.
+
+        Resolves TranscodeDownTo: when a source resolution downscales to a different
+        target, the target's bitrates are returned. ProfileThresholds is small (~50
+        rows), so this is one DB round-trip and then everything is in-memory.
+
+        Used by ComputePriorityScoresForFiles bulk path. Single-file path goes through
+        DatabaseManager.GetProfileSettingsForTargetResolution which has additional
+        VR-resolution fallback logic.
+        """
+        from Core.Database.DatabaseService import DatabaseService
+        rows = DatabaseService().ExecuteQuery("""
+            SELECT p.ProfileName, pt.Resolution, pt.TranscodeDownTo,
+                   pt.VideoBitrateKbps, pt.AudioBitrateKbps
+            FROM ProfileThresholds pt
+            JOIN Profiles p ON pt.ProfileId = p.Id
+        """)
+        by_profile: Dict[str, Dict[str, tuple]] = {}
+        for r in rows:
+            pn = r['ProfileName']
+            by_profile.setdefault(pn, {})[r['Resolution']] = (
+                (r['TranscodeDownTo'] or 'No downscaling'),
+                r['VideoBitrateKbps'],
+                r['AudioBitrateKbps'],
+            )
+        lookup: Dict[tuple, tuple] = {}
+        for pn, by_res in by_profile.items():
+            for src_res, (downto, vk, ak) in by_res.items():
+                if downto and downto != 'No downscaling' and downto in by_res:
+                    _, target_vk, target_ak = by_res[downto]
+                    lookup[(pn, src_res)] = (target_vk, target_ak)
+                else:
+                    lookup[(pn, src_res)] = (vk, ak)
+        return lookup
+
+    def ComputePriorityScore(self, MediaFileId: int) -> Optional[int]:
+        """Recompute and persist MediaFiles.PriorityScore for a single file.
+
+        Returns the new score, or None if the recompute could not run (in which
+        case the existing PriorityScore in the DB is left untouched, per
+        priority-materialization.feature.md criterion 15).
+        """
+        try:
+            mediaFile = self.DatabaseManager.GetMediaFileById(MediaFileId)
+            if not mediaFile:
+                LoggingService.LogWarning(
+                    f"ComputePriorityScore: MediaFileId={MediaFileId} not found",
+                    "QueueManagementBusinessService", "ComputePriorityScore"
+                )
+                return None
+
+            targetVideoKbps = None
+            targetAudioKbps = None
+            if mediaFile.AssignedProfile and mediaFile.Resolution:
+                try:
+                    profileSettings = self.DatabaseManager.GetProfileSettingsForTargetResolution(
+                        mediaFile.AssignedProfile, mediaFile.Resolution
+                    )
+                    if profileSettings:
+                        targetVideoKbps = profileSettings.get('VideoBitrateKbps')
+                        targetAudioKbps = profileSettings.get('AudioBitrateKbps')
+                except Exception as Ex:
+                    LoggingService.LogException(
+                        f"ProfileThresholds lookup failed for MediaFileId={MediaFileId}",
+                        Ex, "QueueManagementBusinessService", "ComputePriorityScore"
+                    )
+                    # Fall through to CalculatePriority's fallback path
+
+            score = self.CalculatePriority(mediaFile, TargetVideoKbps=targetVideoKbps, TargetAudioKbps=targetAudioKbps)
+
+            from Core.Database.DatabaseService import DatabaseService
+            DatabaseService().ExecuteNonQuery(
+                "UPDATE MediaFiles SET PriorityScore = %s WHERE Id = %s",
+                (score, MediaFileId)
+            )
+            return score
+        except Exception as Ex:
+            LoggingService.LogException(
+                f"ComputePriorityScore failed for MediaFileId={MediaFileId}",
+                Ex, "QueueManagementBusinessService", "ComputePriorityScore"
+            )
+            return None
+
+    def ComputePriorityScoresForFiles(self, MediaFileIds: List[int]) -> int:
+        """Bulk-recompute MediaFiles.PriorityScore for the given IDs.
+
+        Single round-trip per batch using a profile-thresholds cache and a
+        single bulk UPDATE FROM VALUES. Returns the count of rows updated.
+        Failures in individual rows do not abort the batch -- they are logged
+        and the affected row is skipped.
+        """
+        if not MediaFileIds:
+            return 0
+        try:
+            from Core.Database.DatabaseService import DatabaseService
+            db = DatabaseService()
+            lookup = self._LoadPriorityLookupTable()
+
+            placeholders = ','.join(['%s'] * len(MediaFileIds))
+            rows = db.ExecuteQuery(
+                f"""
+                SELECT Id, FileName, SizeMB, DurationMinutes, AssignedProfile,
+                       ResolutionCategory, Resolution
+                FROM MediaFiles WHERE Id IN ({placeholders})
+                """,
+                tuple(MediaFileIds)
+            )
+
+            updates = []  # list[(id, score)]
+            fallbackCount = 0
+            for r in rows:
+                try:
+                    class _Row:
+                        pass
+                    m = _Row()
+                    m.Id = r['Id']
+                    m.FileName = r.get('FileName')
+                    m.SizeMB = r.get('SizeMB') or 0
+                    m.DurationMinutes = r.get('DurationMinutes') or 0
+
+                    profile = r.get('AssignedProfile')
+                    res_key = r.get('ResolutionCategory') or r.get('Resolution')
+
+                    targetVideoKbps = None
+                    targetAudioKbps = None
+                    if profile and res_key:
+                        settings = lookup.get((profile, res_key))
+                        if settings:
+                            targetVideoKbps, targetAudioKbps = settings
+
+                    if not (targetVideoKbps is not None and targetAudioKbps is not None and m.DurationMinutes > 0):
+                        fallbackCount += 1
+
+                    score = self.CalculatePriority(
+                        m,
+                        TargetVideoKbps=targetVideoKbps,
+                        TargetAudioKbps=targetAudioKbps,
+                        SuppressFallbackWarning=True,
+                    )
+                    updates.append((int(r['Id']), int(score)))
+                except Exception as RowEx:
+                    LoggingService.LogException(
+                        f"Per-row compute failed for MediaFileId={r.get('Id')}",
+                        RowEx, "QueueManagementBusinessService", "ComputePriorityScoresForFiles"
+                    )
+                    continue
+
+            if fallbackCount > 0:
+                LoggingService.LogWarning(
+                    f"ComputePriorityScoresForFiles: {fallbackCount}/{len(rows)} rows "
+                    f"used the size*0.5 fallback (missing AssignedProfile, ProfileThresholds, "
+                    f"or DurationMinutes). Per-row IDs not enumerated to avoid log spam; "
+                    f"query MediaFiles WHERE PriorityScore IS NOT NULL AND AssignedProfile "
+                    f"IS NULL to find them.",
+                    "QueueManagementBusinessService", "ComputePriorityScoresForFiles"
+                )
+
+            if not updates:
+                return 0
+
+            # Bulk UPDATE via VALUES clause. Both id and score are ints (validated
+            # above), so format-string interpolation is injection-safe here.
+            values_clause = ','.join(f"({i},{s})" for i, s in updates)
+            db.ExecuteNonQuery(f"""
+                UPDATE MediaFiles
+                SET PriorityScore = v.score
+                FROM (VALUES {values_clause}) AS v(id, score)
+                WHERE MediaFiles.Id = v.id
+            """)
+            return len(updates)
+        except Exception as Ex:
+            LoggingService.LogException(
+                f"ComputePriorityScoresForFiles failed for {len(MediaFileIds)} ids",
+                Ex, "QueueManagementBusinessService", "ComputePriorityScoresForFiles"
+            )
+            return 0
 
     def AddJobToQueue(self, MediaFileId: int, Priority: int = None, ProfileId: int = None, StartTime: str = None, ForceAdd: bool = False) -> Dict[str, Any]:
         """Add a specific media file to the transcoding queue. Simple logic: if it has a profile or user selects one, add it."""
