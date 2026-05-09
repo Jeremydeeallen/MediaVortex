@@ -127,21 +127,40 @@ class MediaProbeBusinessService:
             return {'Success': False, 'Message': ErrorMessage}
 
     def _DeriveResolutionCategory(self, Resolution: str) -> str:
-        """Convert pixel dimensions (e.g. '1920x1080') to resolution category (e.g. '1080p')."""
+        """Convert pixel dimensions (e.g. '1920x1080') to resolution category.
+
+        Width-primary because mastering targets are width-fixed (1280 = 720p,
+        1920 = 1080p, 3840 = 4K) but heights vary with cropping/letterboxing
+        (e.g. 1280x718 is broadcast 720p with cropping; the strict
+        `height >= 720` cutoff misclassifies thousands of real files).
+
+        Same logic as DatabaseManager._ConvertPixelDimensionsToResolutionCategory
+        and QueueManagementBusinessService._ResolutionCategoryFromPixels; should
+        be unified into a Core helper in a follow-up.
+        """
         try:
             if not Resolution or 'x' not in Resolution:
                 return None
-            Height = int(Resolution.split('x')[1])
-            if Height >= 2160:
+            Parts = Resolution.split('x', 1)
+            Width = int(Parts[0])
+            Height = int(Parts[1])
+            # Width-primary discrimination
+            if Width >= 3000:
                 return "2160p"
-            elif Height >= 1080:
+            if Width >= 1700:
                 return "1080p"
-            elif Height >= 720:
+            if Width >= 1100:
                 return "720p"
-            elif Height >= 480:
+            if Width >= 600:
                 return "480p"
-            else:
-                return "480p"
+            # Fall through to height for narrow/portrait content
+            if Height >= 2000:
+                return "2160p"
+            if Height >= 950:
+                return "1080p"
+            if Height >= 650:
+                return "720p"
+            return "480p"
         except Exception:
             return None
 

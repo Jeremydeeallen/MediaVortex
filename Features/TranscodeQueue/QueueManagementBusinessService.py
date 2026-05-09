@@ -1156,27 +1156,47 @@ class QueueManagementBusinessService:
     def _ResolutionCategoryFromPixels(Resolution: Optional[str]) -> Optional[str]:
         """Derive '480p' / '720p' / '1080p' / '2160p' from a 'WIDTHxHEIGHT' string.
 
-        Mirrors DatabaseManager._ConvertPixelDimensionsToResolutionCategory but
-        returns None on bad input rather than echoing the original. Used as a
-        fallback in the compliance cascade when the cached ResolutionCategory
-        column is NULL but raw Resolution is populated -- common on older
-        MediaVortex outputs where the post-replacement re-probe didn't set the
-        cached column.
+        Width-primary because mastering targets are width-fixed (1280 = 720p,
+        1920 = 1080p, 3840 = 4K) but heights vary with cropping/letterboxing
+        (1280x718 is real broadcast 720p with 2-pixel crop). A strict
+        height-based cutoff misclassifies thousands of real files (~7,300
+        files in the live DB had height 700-720 misclassified as 480p
+        before this fix).
+
+        Falls back to height-based discrimination for narrow/portrait video
+        where width-primary would give the wrong answer.
+
+        Returns None on bad input. Used as a fallback in the compliance
+        cascade when the cached ResolutionCategory column is NULL.
+
+        Same logic as MediaProbeBusinessService._DeriveResolutionCategory and
+        DatabaseManager._ConvertPixelDimensionsToResolutionCategory; the three
+        should be unified into a Core helper in a follow-up.
         """
         if not Resolution or 'x' not in Resolution:
             return None
         try:
-            height = int(Resolution.split('x')[1])
+            Parts = Resolution.split('x', 1)
+            Width = int(Parts[0])
+            Height = int(Parts[1])
         except (ValueError, IndexError):
             return None
-        if height >= 2160:
+        # Width-primary discrimination (handles broadcast cropping).
+        if Width >= 3000:
             return '2160p'
-        if height >= 1080:
+        if Width >= 1700:
             return '1080p'
-        if height >= 720:
+        if Width >= 1100:
             return '720p'
-        if height >= 480:
+        if Width >= 600:
             return '480p'
+        # Fall through to height for narrow/portrait content.
+        if Height >= 2000:
+            return '2160p'
+        if Height >= 950:
+            return '1080p'
+        if Height >= 650:
+            return '720p'
         return '480p'
 
     @staticmethod
