@@ -14,6 +14,23 @@ Deploys a MediaVortex `WorkerService` instance natively on a Windows host (not D
 
 For Linux containerized workers (which scale via `docker compose`), use `worker-deploy.flow.md` instead.
 
+## Deploy Sequence (Quick Reference)
+
+Run `deploy/deploy-windows-worker.py <target-ip>` from the dev workstation for the automated path. The script wraps every step below in order, idempotent. Manual sections in this doc remain canonical for one-off recovery and for understanding what the automation does.
+
+| # | Step | Where | Owner |
+|---|---|---|---|
+| 1 | Pre-flight checks (Python, sshd, NetworkCategory, port reachability) | Worker host (queried over SSH) | `deploy-windows-worker.py --check` |
+| 2 | scp the repo to `C:\Code\MediaVortex` | Dev workstation -> Worker | `scp -r ...` |
+| 3 | Recreate venv (the source venv's `pyvenv.cfg` paths don't translate) | Worker host | `py -m venv venv && pip install -r requirements.txt` |
+| 4 | Set `MEDIAVORTEX_DB_*` and `MEDIAVORTEX_*_PASSWORD` env vars at User scope | Worker host (creds piped via SSH stdin from dev-workstation vault) | `[Environment]::SetEnvironmentVariable(..., 'User')` |
+| 5 | (Optional) Initialize a dedicated scratch volume as `S:`; set `Workers.StagingDirectory` post-registration | Worker host | Disk Management UI + DB UPDATE |
+| 6 | Register the `MediaVortex Worker` Task Scheduler entry | Worker host | `deploy\Register-WorkerTask.ps1` |
+| 7 | Trigger the task once to validate; future runs fire on user logon | Worker host | `Start-ScheduledTask -TaskName 'MediaVortex Worker'` |
+| 8 | Verify the `Workers` row is Online with a recent heartbeat | Dev workstation (DB query) | `QueryDatabase.py sql ...` |
+
+Expected timing on a host with a built venv and reachable network: full sequence completes in **~2-4 minutes**. Worker registration appears in the DB within **~10s** of triggering the task; first job claim within **~60s** of registration if the queue is non-empty.
+
 ## Pre-Flight Checks
 
 | Check | Command | Required outcome |
@@ -80,6 +97,30 @@ ssh owner@<target-ip> "cd C:\Code\MediaVortex && py -m venv venv && venv\Scripts
 ```
 
 The repo's `venv/`, `WebService/venv/`, and any archived `*/venv/` directories scp over but are unusable on the target — Python venvs bake absolute paths into `pyvenv.cfg`. Always recreate.
+
+## Deploy Automation (`deploy/deploy-windows-worker.py`)
+
+A single-command wrapper around steps 1-8 above. Lives at `deploy/deploy-windows-worker.py` in the MediaVortex repo. Designed to be run from the dev workstation against a fresh Windows host that has only Python 3.12 and OpenSSH Server installed.
+
+```powershell
+# Full deploy from scratch:
+cd C:\Code\MediaVortex
+.\venv\Scripts\python.exe deploy\deploy-windows-worker.py 10.0.0.230
+
+# Pre-flight only (no changes made):
+.\venv\Scripts\python.exe deploy\deploy-windows-worker.py 10.0.0.230 --check
+
+# Skip steps that are already done (idempotent re-run):
+.\venv\Scripts\python.exe deploy\deploy-windows-worker.py 10.0.0.230 --skip-scp --skip-venv
+```
+
+The script:
+- Resolves SMB and DB credentials from Vaultwarden via `infrastructure/terraform/secrets.py` (no plaintext on the command line, in the script, or in the operator's transcript)
+- Pipes credential values through SSH stdin into a remote PowerShell `-EncodedCommand` block on the worker host (the only safe quoting strategy across Bash/PS/SSH layers; see Failure Modes for what happens if you try plain `-Command "..."`)
+- Verifies the `Workers` row reaches `Status='Online'` with a heartbeat <60s old within 90s of triggering the task; exits non-zero if not
+- Idempotent: each step has a "skip if already done" check, so re-running on a partially-deployed host completes only the missing steps
+
+Manual deploy is still supported -- every section below documents the by-hand command equivalents the script wraps.
 
 ## Drive Mappings
 
@@ -160,6 +201,14 @@ FROM Workers WHERE WorkerName = '<hostname>';
 
 Expected: row exists, `FFmpegPath` populated (NOT `NULL`), `Platform='windows'`, `LastHeartbeat` updating every 30 s.
 
+Expected timing after `Start-ScheduledTask`:
+- **0-10 s**: process visible in `Get-Process python` filtered to the venv path
+- **0-10 s**: `Workers` row UPSERT-ed (Status=Online, FFmpegPath populated, LastHeartbeat = now)
+- **0-30 s**: capability poller updates `TranscodeEnabled=true`
+- **0-60 s**: first job claim if the queue has eligible work
+
+If the row does not appear within 30 s, check `Get-ScheduledTaskInfo -TaskName 'MediaVortex Worker'` for `LastTaskResult` (267009 = currently running, 0 = exited cleanly, anything else = failure) and read `Logs` table entries with `Source='WorkerService'` for the worker host.
+
 ```sql
 -- Watch a job get claimed
 SELECT QueueId, ClaimedBy, Status, DateStarted FROM TranscodeQueue
@@ -239,3 +288,6 @@ Pick one (DPAPI cache is the recommended steady state):
 | FFmpeg pegs all logical cores despite `MEDIAVORTEX_MAX_CPU_THREADS=12` | `Get-Counter '\Processor(*)\% Processor Time'` shows every core at 100% | The env var sets FFmpeg `-threads` but SVT-AV1's internal worker pool ignores it. Use `-svtav1-params lp=12` if real thread limiting is required (would need a profile-level change). For the kids-PC use case, prefer reducing `MaxConcurrentJobs` or scheduling to off-hours instead. |
 | `net use` over SSH fails despite correct credentials | system error 67 even on shares known to be valid | Use `New-SmbMapping` instead. The `net use \\host\share /user:USER PASSWORD` positional-password syntax frequently breaks through SSH. |
 | psql fails because `psql` not installed on dev workstation | `psql: command not found` | Use the project's QueryDatabase.py: `cd C:\Code\MediaVortex && .\venv\Scripts\python.exe Scripts\SQLScripts\QueryDatabase.py sql "..."` |
+| `cmdkey /add:<host> ...` over SSH returns `Credentials cannot be saved from this logon session` | Trying to stash SMB creds in Credential Manager from an SSH session for the DPAPI-cache path | Windows blocks credential-store writes from Network-logon sessions (which is what SSH establishes). The fix is to run `deploy\Bootstrap-WorkerCreds.ps1` from RDP or the physical console, OR fall back to User-scope env vars (which CAN be set over SSH). The deploy automation defaults to the env-var path for this reason. |
+| `Register-ScheduledTask` exits with `HRESULT 0x80070534` ("No mapping between account names and security IDs was done") | Workgroup-only Windows host: `$env:USERDOMAIN` returns the literal string `WORKGROUP`, which is not a real SID-resolvable principal | Register-WorkerTask.ps1 uses `$env:COMPUTERNAME\$env:USERNAME` as the task UserId; if that ever changes, restore that pattern. Do NOT use `$env:USERDOMAIN` -- on domain-joined hosts it works, on workgroup hosts it does not, and worker hosts are typically workgroup. |
+| Inline PowerShell `-Command "..."` over SSH drops or merges quotes (`length : The term 'length' is not recognized as a cmdlet`) | The Bash/cmd/PS quote layers each strip a level of quoting; what the local shell sees is not what PS receives | Use `-EncodedCommand <base64>` with UTF-16-LE-encoded script bytes -- this carries the script through all three layers untouched. The deploy automation always uses this form for any inline PowerShell over SSH. Reserve `-File` for scripts that are already on the remote host. |

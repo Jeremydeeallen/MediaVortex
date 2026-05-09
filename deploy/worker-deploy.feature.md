@@ -38,6 +38,16 @@ Dogfood
 
 14. **CommandBuilder failures surface in the database with a stack trace.** `Models/CommandBuilder.py` previously had a "pure function should not log" doctrine that swallowed every exception and returned `None`. The downstream "Failed to build command" log carried zero context. The wrappers now call `LogException` with `JobId`/`FilePath` before returning, so the `Logs` table has `ExceptionType`, `ExceptionMessage`, and `StackTrace` for every BuildCommand failure.
 
+### Windows-Native Deploy Automation
+
+15. **`deploy/deploy-windows-worker.py <target-ip>` deploys a Windows worker end-to-end in a single invocation from the dev workstation.** The script wraps the 8-step sequence in `windows-worker.flow.md` ("Deploy Sequence (Quick Reference)"). Verifiable: on a fresh Windows host with only Python 3.12 and OpenSSH Server installed, running the script with no flags produces a `Workers` row with `Status='Online'`, `Platform='windows'`, populated `FFmpegPath`, and a `LastHeartbeat` less than 60 s old, all within 90 s of the script's exit.
+
+16. **Deploy is idempotent.** Re-running `deploy-windows-worker.py` against an already-deployed host completes without error, skips work that has already been done (existing venv, env vars, registered task), and leaves the same final state. Verifiable: two consecutive runs against the same target both exit 0; the second run reports each step as "skipped (already done)" or "verified (no change)" rather than re-doing it.
+
+17. **No credential value appears on a process command line, in the operator's transcript, or on disk in plaintext during deploy.** Credentials are read from Vaultwarden via `infrastructure/terraform/secrets.py`, passed to remote PowerShell via SSH stdin into `-EncodedCommand` blocks, and never logged or echoed. Verifiable: `grep` the script's source for any literal credential value returns zero hits; running the script with `--dry-run` and grepping the captured stdout/stderr for the literal Synology password returns zero hits; `Get-WinEvent` and `ps` on the target during deploy never show the values.
+
+18. **Deploy verification fails the script with a non-zero exit code if the worker does not register within 90 s of triggering the task.** The script polls the `Workers` row after `Start-ScheduledTask` and treats absence-of-row OR `LastHeartbeat` older than 60 s as a deploy failure. Verifiable: pointing the script at a target where Task Scheduler will not fire (e.g., a wrong IP) results in exit code != 0 and a log line naming the verification step that timed out.
+
 ## Status
 
 IN PROGRESS
@@ -62,8 +72,10 @@ IN PROGRESS
 - [x] 16. CommandBuilder loud-failure pattern (criterion 14)
 - [ ] 17. Add backplane NIC (10.0.1.42 on vmbr1) for 20 Gbps NFS storage path
 - [ ] 18. Persist `max_connections=200` in infrastructure-repo postgresql.conf (so CT 203 rebuild starts at 200)
+- [x] 19. `StartWorker.py` + `deploy/Register-WorkerTask.ps1` + `deploy/Bootstrap-WorkerCreds.ps1` shipped (per-host setup pieces; verified on REMINGTON 2026-05-09 — Workers row Online with heartbeating)
+- [x] 20. `deploy/deploy-windows-worker.py` written (2026-05-09). Meets criteria 15-18: end-to-end automation in 8 steps, idempotent (auto-skips already-built venv via pre-flight detection, `Register-WorkerTask.ps1` overwrites with `-Force`), no plaintext leak (vault read via importlib + SSH stdin into `-EncodedCommand` blocks), verified Online polling against `Workers` row with 90s timeout. Tested against REMINGTON: full idempotent re-run completes in ~15s with `Workers.Remington: Status=Online, FFmpegPath set, heartbeat 8s old`. Manual verification of criterion 17 needed: outsider should grep the script for literal credential values (returns zero) and inspect a deploy run's stdout/stderr (no values).
 
-NEXT: Apply backplane NIC via Terraform (step 17) and persist max_connections in infrastructure repo (step 18). Flow doc at deploy/worker-deploy.flow.md.
+NEXT: Apply the backplane NIC (step 17) and persist max_connections (step 18). Windows-deploy automation is feature-complete pending user PASS verification of criterion 17. Flow docs: `deploy/worker-deploy.flow.md` (Linux/Docker) and `deploy/windows-worker.flow.md` (Windows-native).
 
 ## Scope
 
@@ -72,16 +84,26 @@ deploy/Dockerfile
 deploy/docker-compose.yml
 deploy/worker-deploy.feature.md
 deploy/worker-deploy.flow.md
+deploy/windows-worker.flow.md
+deploy/deploy-windows-worker.py
+deploy/Register-WorkerTask.ps1
+deploy/Bootstrap-WorkerCreds.ps1
+StartWorker.py
 WorkerService/Main.py
 Services/FFmpegService.py
 ```
 
 ## Files
 
-- `deploy/Dockerfile` - Multi-stage Docker image build
-- `deploy/docker-compose.yml` - Compose config for building and running workers
-- `deploy/worker-deploy.flow.md` - Build, deploy, and runtime flow doc
-- `WorkerService/Main.py` - Unified worker entry point
+- `deploy/Dockerfile` - Multi-stage Docker image build (Linux/Docker path)
+- `deploy/docker-compose.yml` - Compose config for building and running workers (Linux/Docker path)
+- `deploy/worker-deploy.flow.md` - Build, deploy, and runtime flow doc (Linux/Docker path)
+- `deploy/windows-worker.flow.md` - Build, deploy, and runtime flow doc (Windows-native path)
+- `deploy/deploy-windows-worker.py` - End-to-end Windows-native deploy automation (criteria 15-18)
+- `deploy/Register-WorkerTask.ps1` - Idempotent Task Scheduler registration for the Windows-native worker
+- `deploy/Bootstrap-WorkerCreds.ps1` - DPAPI/Credential-Manager hardening for Windows hosts (run from RDP/console only -- cmdkey refuses from SSH)
+- `StartWorker.py` - Windows-native launcher: mounts SMB shares in-process, then launches WorkerService\Main.py
+- `WorkerService/Main.py` - Unified worker entry point (both platforms)
 - `Repositories/DatabaseManager.py` - RegisterWorker(), GetWorkerConfig(), GetWorkerShareMappings()
 - `Services/FFmpegService.py` - FFmpeg/FFprobe path resolution (reads per-worker config, then systemsettings, then hardcoded discovery)
 - `Core/Database/DatabaseService.py` - PostgreSQL connection pooling (reads MEDIAVORTEX_DB_* env vars)
