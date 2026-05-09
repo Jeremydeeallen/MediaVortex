@@ -71,6 +71,7 @@ def GetOverview():
         ActiveJobs = []
         JobQuery = """
             SELECT tq.Id AS QueueId, ta.FilePath, tq.FileName, tq.SizeMB,
+                   tq.ProcessingMode,
                    tp.ProgressPercent, tp.CurrentPhase,
                    tp.CurrentFPS, tp.CurrentSpeed, tp.ETA,
                    tq.DateStarted, tq.ClaimedBy,
@@ -88,6 +89,7 @@ def GetOverview():
         # Also find Running queue items with NO progress row (stuck before FFmpeg started)
         StuckFallbackQuery = """
             SELECT tq.Id AS QueueId, tq.FilePath, tq.FileName, tq.SizeMB,
+                   tq.ProcessingMode,
                    tq.DateStarted, tq.ClaimedBy,
                    w.LastHeartbeat,
                    EXTRACT(EPOCH FROM (NOW() - w.LastHeartbeat)) AS HeartbeatAgeSec
@@ -112,6 +114,7 @@ def GetOverview():
                 "FilePath": Row.get('FilePath', ''),
                 "FileName": Row.get('FileName', ''),
                 "SizeMB": Row.get('SizeMB', 0),
+                "ProcessingMode": Row.get('ProcessingMode', 'Transcode') or 'Transcode',
                 "ProgressPercent": Row.get('ProgressPercent', 0),
                 "CurrentPhase": Row.get('CurrentPhase', ''),
                 "CurrentFPS": Row.get('CurrentFPS', 0),
@@ -131,6 +134,7 @@ def GetOverview():
                 "FilePath": Row.get('FilePath', ''),
                 "FileName": Row.get('FileName', ''),
                 "SizeMB": Row.get('SizeMB', 0),
+                "ProcessingMode": Row.get('ProcessingMode', 'Transcode') or 'Transcode',
                 "ProgressPercent": 0,
                 "CurrentPhase": '',
                 "CurrentFPS": 0,

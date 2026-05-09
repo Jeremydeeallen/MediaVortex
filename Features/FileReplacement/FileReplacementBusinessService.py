@@ -852,16 +852,34 @@ class FileReplacementBusinessService:
             media_file.AudioLanguages = metadata.get('AudioLanguages')
             media_file.HasExplicitEnglishAudio = metadata.get('HasExplicitEnglishAudio')
 
-            # Derive ResolutionCategory from new Resolution
+            # Derive ResolutionCategory from new Resolution. Width-primary
+            # mapping (matches MediaProbeBusinessService._DeriveResolutionCategory,
+            # DatabaseManager._ConvertPixelDimensionsToResolutionCategory, and
+            # QueueManagementBusinessService._ResolutionCategoryFromPixels). The
+            # strict-height-cutoff version of this logic misclassified 1280x718
+            # broadcast-720p content as 480p, leaving Flash S05E14 marked
+            # IsCompliant=false even after a successful remux. See the
+            # 2026-05-09 width-primary fix.
             NewResolution = media_file.Resolution or ''
             if NewResolution and 'x' in NewResolution:
                 try:
-                    Height = int(NewResolution.split('x')[1])
-                    if Height >= 2160:
+                    Parts = NewResolution.split('x', 1)
+                    Width = int(Parts[0])
+                    Height = int(Parts[1])
+                    # Width-primary discrimination
+                    if Width >= 3000:
                         media_file.ResolutionCategory = "2160p"
-                    elif Height >= 1080:
+                    elif Width >= 1700:
                         media_file.ResolutionCategory = "1080p"
-                    elif Height >= 720:
+                    elif Width >= 1100:
+                        media_file.ResolutionCategory = "720p"
+                    elif Width >= 600:
+                        media_file.ResolutionCategory = "480p"
+                    elif Height >= 2000:
+                        media_file.ResolutionCategory = "2160p"
+                    elif Height >= 950:
+                        media_file.ResolutionCategory = "1080p"
+                    elif Height >= 650:
                         media_file.ResolutionCategory = "720p"
                     else:
                         media_file.ResolutionCategory = "480p"

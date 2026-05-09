@@ -17,10 +17,10 @@
         </div>
     </div>
 
-    <!-- Active Transcode Jobs -->
+    <!-- Active Jobs -->
     <div class="card mb-4">
         <div class="card-header py-2 d-flex justify-content-between align-items-center">
-            <h6 class="mb-0"><i class="fas fa-film me-2"></i>Active Transcode Jobs</h6>
+            <h6 class="mb-0"><i class="fas fa-film me-2"></i>Active Jobs</h6>
             <div class="d-flex align-items-center gap-2">
                 <span id="TranscodeStatusBadge" class="badge bg-secondary">Loading...</span>
                 <button id="BtnStopAfterJob" class="btn btn-warning btn-sm" onclick="ActivityPage.StopAfterJob()" disabled>
@@ -32,12 +32,13 @@
             </div>
         </div>
         <div class="card-body p-0">
-            <div id="NoJobInfo" class="text-muted py-3 px-3"><em>No active transcode jobs</em></div>
+            <div id="NoJobInfo" class="text-muted py-3 px-3"><em>No active jobs</em></div>
             <div id="ActiveJobsTable" class="d-none">
                 <table class="table table-sm table-hover mb-0">
                     <thead class="table-light">
                         <tr>
                             <th class="ps-3">File</th>
+                            <th style="width: 80px;">Type</th>
                             <th style="width: 110px;">Worker</th>
                             <th style="width: 90px;">Size</th>
                             <th style="width: 200px;">Progress</th>
@@ -218,9 +219,14 @@ var ActivityPage = (function() {
                         '</div>' +
                         '<small class="text-nowrap">' + Pct + '%</small>' +
                     '</div>';
+                var Mode = Job.ProcessingMode || 'Transcode';
+                var ModeBadgeClass = (Mode === 'Remux') ? 'bg-info'
+                                    : (Mode === 'SubtitleFix') ? 'bg-warning text-dark'
+                                    : 'bg-primary';
                 return '<tr' + RowClass + '>' +
                     '<td class="ps-3">' + StatusIcon +
                         '<span title="' + (Job.FilePath || '').replace(/"/g, '&quot;') + '">' + EscapeHtml(FileName) + '</span></td>' +
+                    '<td><span class="badge ' + ModeBadgeClass + '">' + EscapeHtml(Mode) + '</span></td>' +
                     '<td>' + (Job.ClaimedBy ? EscapeHtml(Job.ClaimedBy) : '<em class="text-muted">-</em>') + '</td>' +
                     '<td>' + (Job.SizeMB ? FormatSizeMB(Job.SizeMB) : '-') + '</td>' +
                     '<td>' + ProgressBar + '</td>' +
