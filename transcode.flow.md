@@ -5,8 +5,8 @@ Entry point: `StartMediaVortex.py` (all services) or individual service scripts.
 ## Stage Overview
 
 ```
-SCAN -> PROBE -> ASSIGN -> QUEUE -> TRANSCODE -> QUALITY -> REPLACE
- (1)     (2)      (3)      (4)       (5)          (6)       (7)
+SCAN -> PROBE -> ASSIGN -> PRIORITY -> QUEUE -> TRANSCODE -> QUALITY -> REPLACE
+ (1)     (2)      (3)       (3.5)      (4)       (5)          (6)       (7)
 ```
 
 Stages 1-4 require user action. Stages 5-7 are automatic once WorkerService is running:
@@ -71,6 +71,33 @@ Stages 1-4 require user action. Stages 5-7 are automatic once WorkerService is r
 
 ---
 
+## Stage 3.5: PRIORITY -- Score Materialization
+
+**Trigger:** Three event sources keep `MediaFiles.PriorityScore` current:
+
+1. **Probe completion** -- `MediaProbeBusinessService.ProbeFile` invokes `QueueManagementBusinessService.ComputePriorityScore(MediaFileId)` immediately after writing the probe result.
+2. **AssignedProfile change** -- `Features/Profiles/ProfilesController.AssignProfileToRootFolder`, `Features/ShowSettings/ShowSettingsController.Save`, and `BulkUpdate` invoke `ComputePriorityScoresForFiles` for the affected MediaFileIds after the AssignedProfile UPDATE commits. Single-file paths (`AddSuggestionsToQueue`, `QueueByFolder`) call the single-file variant.
+3. **ProfileThresholds change** -- explicit operator action via `POST /api/PriorityMaterialization/Recompute` (no automatic recompute; thresholds change rarely and a sweep can be expensive).
+
+**Code path (recompute):**
+- `Features/TranscodeQueue/QueueManagementBusinessService.py`:
+  - `ComputePriorityScore(MediaFileId)` -- loads MediaFile + AssignedProfile + ProfileThresholds, calls `CalculatePriority`, writes `MediaFiles.PriorityScore`.
+  - `ComputePriorityScoresForFiles(MediaFileIds)` -- bulk variant; caches ProfileThresholds lookups across rows.
+- `Features/PriorityMaterialization/PriorityMaterializationController.py` -- `POST /api/PriorityMaterialization/Recompute` admin endpoint accepting optional `ProfileName` / `Drive` filters.
+
+**Tables written:** MediaFiles (PriorityScore column).
+
+**Failure semantics:**
+- The recompute hook never blocks the triggering operation. If recompute fails (DB error, missing inputs), the trigger (probe / assign) still returns Success=True.
+- A failed recompute leaves the prior PriorityScore value untouched -- never silently zeroed or nulled.
+- A `LogWarning` row is emitted naming the MediaFileId and reason whenever the fallback path runs (NULL AssignedProfile, no ProfileThresholds row). Per the loud-failure rule, silent fallbacks are forbidden.
+
+**Output:** every untranscoded MediaFiles row carries an up-to-date `PriorityScore` (or NULL if never probed). Consumers (`SmartPopulate`, future automation, ad-hoc operator queries) read the column; none of them recompute.
+
+See `Features/TranscodeQueue/priority-materialization.feature.md` for criteria.
+
+---
+
 ## Stage 4: QUEUE -- TranscodeQueue Population
 
 **Trigger:** Multiple paths to queue files:
@@ -106,6 +133,8 @@ Stages 1-4 require user action. Stages 5-7 are automatic once WorkerService is r
 - **CRF floor**: adjusted CRF cannot go below 15; files logged to ProblemFiles
 - **Resolution filtering**: source must be > target resolution (full populate path only)
 - **Dedup**: files already in queue are skipped
+- **No-savings filter**: files with `MediaFiles.LastTranscodeOutcome = 'NoSavings'` are blocked from re-queueing at all entry paths (set by Stage 7 post-flight gate)
+- **Pre-flight benefit gate** (no-benefit-handling.feature.md): every queue-item creation computes estimated savings; entries below `SystemSetting('MinTranscodeSavingsMB')` (default 150) are either flipped to `Mode='Remux'` (when source container is not in the compatible list) or skipped entirely (when container is already streaming-friendly). Stops workers from spending CPU on files that won't shrink.
 
 **Priority calculation (impact-based, range 1-194):**
 
@@ -182,8 +211,9 @@ Rationale: ordering by raw size (the legacy behavior) put already-efficient AV1 
 **Safety guards:**
 - Atomic job claiming: `SELECT FOR UPDATE SKIP LOCKED` prevents two workers claiming the same job
 - Crash recovery: stuck jobs (>12h) reset to Pending on service start
-- ActiveJob tracking prevents duplicate processing (includes WorkerName for distributed identification)
+- ActiveJob tracking prevents duplicate processing (includes WorkerName for distributed identification). `ActiveJobs.ProcessId` is the worker's Python PID; `ActiveJobs.FFmpegPid` (added by stuck-job-detection.feature.md) is the FFmpeg subprocess PID -- the only legitimate kill target for stuck-job cleanup
 - Worker heartbeat: 30-second interval, stale >5 min = worker offline, its jobs marked stuck
+- Recurring stuck-job detection: each worker self-monitors its own jobs every `SystemSettings.StuckJobDetectionIntervalSec` (default 120s). Tier 1 catches dead workers via heartbeat, Tier 2 catches frame-stagnation hangs (default 5 min via `FrozenProgressThresholdMin`), Tier 3 catches dead-FFmpeg cases via `FFmpegPid` liveness + name check. Cleanup kills only `FFmpegPid` (never the worker), gated by host-locality. See `Features/ServiceControl/stuck-job-detection.flow.md`.
 - CPU thermal management: waits for cool-down between jobs
 - FFmpeg errors captured in TranscodeAttempt.ErrorMessage
 
@@ -218,20 +248,24 @@ Rationale: ordering by raw size (the legacy behavior) put already-efficient AV1 
 - `Features/FileReplacement/FileReplacementController.py` -> `FileReplacementBusinessService.ProcessFileReplacementWithVMAF()`
   1. Validate TranscodeAttempt exists and FileReplaced = false
   2. Validate both original and transcoded files exist on disk
-  3. Archive original metadata to MediaFilesArchive
-  4. Delete original file from disk
-  5. Move transcoded file to original location
-  6. Re-probe new file via FFprobe (fresh metadata)
-  7. Update MediaFiles with new metadata
-  8. Set `TranscodedByMediaVortex = true`
+  3. **Post-flight benefit gate** (no-benefit-handling.feature.md): compare `attempt.NewSizeMB` to `attempt.OriginalSizeMB`. If `New >= Original`, the transcode produced an equal-or-larger output. Refuse to replace, delete the staged transcoded file, set `MediaFiles.LastTranscodeOutcome = 'NoSavings'`, log loudly, and return without touching the original. Stage 4's no-savings filter then prevents re-queueing.
+  4. Archive original metadata to MediaFilesArchive
+  5. Delete original file from disk
+  6. Move transcoded file to original location
+  7. Re-probe new file via FFprobe (fresh metadata)
+  8. Update MediaFiles with new metadata
+  9. Set `TranscodedByMediaVortex = true`
 
-**Tables written:** MediaFiles (new metadata, TranscodedByMediaVortex=true), MediaFilesArchive (snapshot), TranscodeAttempt (FileReplaced, FileReplacedDate)
+**Tables written:** MediaFiles (new metadata, TranscodedByMediaVortex=true OR LastTranscodeOutcome='NoSavings'), MediaFilesArchive (snapshot), TranscodeAttempt (FileReplaced, FileReplacedDate)
 
 **Safety guards:**
 - Archive before delete: original metadata always saved
 - FileReplaced flag prevents duplicate replacements
 - Re-probe after move ensures metadata reflects actual file
 - `TranscodedByMediaVortex = true` prevents infinite re-queue loops
+- **Post-flight benefit gate** (above) prevents replacing originals with same-size-or-larger outputs and marks the file so Stage 4 won't re-queue it
+
+**Operator override:** `POST /api/MediaFiles/<id>/ResetTranscodeOutcome` clears `LastTranscodeOutcome` so a file that was marked NoSavings can be retried (e.g. after a profile change or a new SVT-AV1 release).
 
 ---
 

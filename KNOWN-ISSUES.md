@@ -2,6 +2,18 @@
 
 ## Open
 
+### [BUG] Stuck scans have no auto-detection or recovery
+**Date:** 2026-05-09
+**Affects:** ScanJobs table, ContinuousScanService, Features/FileScanning/
+
+A worker that crashes mid-scan leaves its `ScanJobs` row in `Status='Running'` indefinitely. There is no equivalent of `StuckJobDetectionService` for scans -- nothing watches `LastUpdated` staleness, nothing resets stale rows, nothing kicks the next scheduled scan past the orphaned row. `scanning-on-activity-page.feature.md` criterion G15 surfaces the staleness as an amber UI indicator but does not auto-clean.
+
+**Look first:** `Features/ServiceControl/StuckJobDetectionService.py` is the natural extension point -- the existing `_IsJobFrozen` shape (LastFrameAdvance / LastProgressUpdate threshold) translates to `ScanJobs.LastUpdated` directly. Once `stuck-job-detection.feature.md` ships (closing the four gaps in transcode-job stuck detection), extending it to cover scans is small.
+
+**Fix with:** `/n` (probably folded into a future iteration of `stuck-job-detection.feature.md`, or its own small `/n` if scoping pressure delays that)
+
+---
+
 ### [BUG - FIXED 2026-05-09] Worker claim path orders by SizeMB, ignoring Priority entirely
 **Date:** 2026-05-09
 **Affects:** `Repositories/DatabaseManager.py:1596,1638,1655`, `Features/TranscodeQueue/TranscodeQueueRepository.py:143,163`

@@ -138,6 +138,7 @@ IN PROGRESS
 - [ ] Live verify (post-WebService restart): queue a file via UI, confirm assigned priority lands in 1-194 and is reasonable for its size/profile combination
 - [ ] Live verify: an already-transcoded av1 file at profile bitrate gets priority = 1 (savings clamps to 0)
 - [ ] Live verify: set a job to 200 manually via the modal, confirm the API accepts it and the worker claims it next
+- [x] Fix paginated Queue page sort whitelist (2026-05-09): `Repositories/DatabaseManager.GetTranscodeQueueItemsPaginated` mapped `'Priority' -> 'SizeMB'`, so the JS-driven Priority sort silently degraded to size sort. Fixed; controller + viewmodel defaults also flipped from `SizeMB` to `Priority`.
 
 NEXT: implement Step 3 (`CalculatePriority` rewrite) once criteria are
 explicitly approved per `/n` protocol.
@@ -145,11 +146,12 @@ explicitly approved per `/n` protocol.
 ## Scope
 
 ```
-Features/TranscodeQueue/QueueManagementBusinessService.py   -- CalculatePriority and module constants
-Features/TranscodeQueue/TranscodeQueueController.py         -- bounds validation
-Templates/Queue.html                                         -- modal/input bounds + JS color brackets
-Scripts/SQLScripts/RecalculateQueuePriorities.py             -- optional rebalance script (NEW)
-transcode.flow.md                                             -- Stage 4 priority subsection
+Features/TranscodeQueue/QueueManagementBusinessService.py    -- CalculatePriority and module constants
+Features/TranscodeQueue/TranscodeQueueController.py          -- bounds validation; paginated sort default
+Repositories/DatabaseManager.py                              -- GetTranscodeQueueItemsPaginated whitelist
+Templates/Queue.html                                          -- modal bounds, color brackets, default sort
+Scripts/SQLScripts/RecalculateQueuePriorities.py              -- optional rebalance script (NEW)
+transcode.flow.md                                              -- Stage 4 priority subsection
 ```
 
 ## Files
