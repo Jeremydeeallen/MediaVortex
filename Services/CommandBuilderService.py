@@ -274,6 +274,7 @@ class CommandBuilderService:
                 'InputPath': SourcePath,
                 'FFmpegPath': TranscodingSettings.get('FFmpegPath') if TranscodingSettings else None,
                 'OutputDirectory': TranscodingSettings.get('OutputDirectory') if TranscodingSettings else None,
+                'OutputPath': TranscodingSettings.get('OutputPath') if TranscodingSettings else None,
                 'TranscodeOutputMode': TranscodingSettings.get('TranscodeOutputMode', 'InPlace') if TranscodingSettings else 'InPlace'
             }
 

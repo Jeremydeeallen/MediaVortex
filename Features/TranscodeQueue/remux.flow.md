@@ -19,36 +19,38 @@ the file needs only audio + container fixes.
 A remux job:
 1. Copies the video stream byte-for-byte (`-c:v copy`) -- no quality loss, no encoder time.
 2. Re-encodes audio to AAC 128k with `loudnorm` (and `acompressor` if `AudioCompressionEnabled`) so the output joins the rest of the library at -23 LUFS.
-3. Outputs to a **side-by-side path** with the `_remuxed` suffix (e.g. source `file.mp4` -> `file_remuxed.mp4`). FFmpeg never writes to the source path -- guaranteed by the unconditional suffix in `BuildRemuxCommand`.
-4. After FFmpeg success, FileReplacement performs an **atomic rename-and-rollback swap** (see "Safety contract" below). Original is preserved on any failure.
+3. **Renames the source to `.orig` BEFORE FFmpeg runs** so FFmpeg can write directly to the freed source path -- no intermediate filename, no suffix-strip step.
+4. On FFmpeg success: FileReplacement verifies + settles the `.orig` per `KeepSource`. On any failure between rename and final verify: rollback restores the original from `.orig`.
 5. Re-probes the new file and updates `MediaFiles` (Resolution, Codec, AudioCodec, ContainerFormat, IsCompliant via the recompute hook).
 6. Skips VMAF entirely -- video is bit-identical, no quality test makes sense.
 
 Worker time per file: typically 5-30 seconds for a 1-hour episode (audio re-encode is the only CPU work; everything else is I/O).
 
-## Safety contract -- atomic rename-and-replace
+## Safety contract -- rename-before-encode
 
-The replacement step in `FileReplacementBusinessService._ProcessCompleteFileReplacement` is the only place the original file is touched, and it follows a strict ordered sequence with rollback on any failure:
+The original file is renamed to `.orig` BEFORE FFmpeg runs. With the source path now free, FFmpeg writes directly to the final target name -- no `_remuxed` suffix, no suffix-strip step at the end. If anything fails between rename and final verification, rollback restores the source from `.orig`:
 
 ```
 Original on disk:        T:\Show\episode.mp4    (the only copy of this content)
-Staged output:           T:\Show\episode_remuxed.mp4  (FFmpeg output)
 
-Step 1  [BACKUP]   Rename original -> original.orig:
+Step 1  [PREPARE]  PrepareReplacement:
                    T:\Show\episode.mp4  ->  T:\Show\episode.mp4.orig
                    Refuses to clobber a pre-existing .orig (forces operator
                    to clean up after a prior crash).
 
-Step 2  [PROMOTE]  Move staged -> original location with stripped name:
-                   T:\Show\episode_remuxed.mp4  ->  T:\Show\episode.mp4
-                   shutil.move is an atomic rename within one filesystem.
+Step 2  [ENCODE]   FFmpeg reads from .orig, writes to the freed source path:
+                   ffmpeg -i T:\Show\episode.mp4.orig ... T:\Show\episode.mp4
+                   No path collision because the original is no longer at
+                   that path -- it lives at .orig.
 
-Step 3  [VERIFY]   os.path.getsize(target) > 0 ?
-                   Empty file = move was incomplete; treat as failure.
+Step 3  [VERIFY]   FileReplacement._ProcessCompleteFileReplacement detects
+                   the pre-renamed state (Step 1's .orig already exists),
+                   skips its own rename step, and verifies the new file at
+                   T:\Show\episode.mp4 is present and non-zero.
 
 Step 4  [DB]       Update MediaFiles row + recompute compliance.
                    Failure here does NOT roll back -- file is on disk; future
-                   probe reconciles. (Existing pre-2026-05-09 behavior.)
+                   probe reconciles.
 
 Step 5  [SETTLE]   Settle the .orig backup based on KeepSource:
                    - KeepSource=true  -> rename to legacy `.old<ext>`
@@ -56,11 +58,14 @@ Step 5  [SETTLE]   Settle the .orig backup based on KeepSource:
 ```
 
 **Rollback on any failure in steps 2-3:**
-- Delete partial target file if one landed
+- Delete partial target file at the freed path if one landed
 - Rename `.orig` back to its original path
-- Return `Success=false`; original is bit-identical to its pre-call state
+- Return failure; original is bit-identical to its pre-call state
 
-This pattern is what protects against the 2026-05-09 incident where a path-collision in `BuildRemuxCommand` caused FFmpeg to truncate the source. Even if FFmpeg or the move ever produced a 0-byte file again, the rollback would restore the .orig and report failure rather than leave the operator with a destroyed file.
+The 2026-05-09 incident (FFmpeg truncated source via output==input collision) cannot recur because:
+1. The source is no longer at the path FFmpeg writes to (PrepareReplacement moved it).
+2. `BuildRemuxCommand` refuses to build a command where output==input as a defense-in-depth check.
+3. If both layers ever fail, rollback restores the `.orig`.
 
 ## Stages
 

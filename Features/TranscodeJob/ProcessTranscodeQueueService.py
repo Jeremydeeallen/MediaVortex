@@ -541,11 +541,28 @@ class ProcessTranscodeQueueService:
             self.HandleJobFailure(Job, f"Exception during processing: {str(e)}")
 
     def ProcessRemuxJob(self, Job: TranscodeQueueModel):
-        """Process a remux (compatibility-only) job: copy video, handle audio, change container to MP4."""
+        """Process a remux job using the rename-before-encode pattern.
+
+        Sequence:
+          1. SetupFilePreparation -- handle InPlace / LocalStaging staging
+          2. PrepareReplacement -- rename source to .orig, freeing the source
+             path so FFmpeg can write directly to it (InPlace mode)
+          3. BuildRemuxCommand with InputPath=.orig, OutputPath=freed source
+          4. ExecuteTranscoding -- FFmpeg writes to the freed source path
+          5. On success: HandleRemuxResult -> FileReplacement (which detects
+             the pre-renamed .orig and skips the rename step, just verifies
+             and settles)
+          6. On any failure between steps 2-5: RollbackReplacement to
+             restore the original from .orig
+
+        See remux.flow.md and the 2026-05-09 KNOWN-ISSUES entry for the
+        path-collision incident that motivated this design.
+        """
         ActiveJobId = None
         TranscodeAttemptId = None
         LocalStagingSourcePath = None
         LocalStagingOutputPath = None
+        OrigBackupPath = None  # set after PrepareReplacement
         try:
             LoggingService.LogInfo(f"Starting remux job processing for job ID: {Job.Id}", "ProcessTranscodeQueueService", "ProcessRemuxJob")
 
@@ -595,10 +612,52 @@ class ProcessTranscodeQueueService:
             if IsLocalStaging:
                 LocalStagingSourcePath = EffectiveInputPath
 
-            # Build remux command (pass effective input path)
+            # Rename source to .orig BEFORE FFmpeg runs. This frees the
+            # original path so FFmpeg can write directly to the final
+            # target name (no _remuxed suffix needed; no suffix-strip in
+            # FileReplacement). On InPlace the .orig sits next to where
+            # FFmpeg writes; on LocalStaging the .orig sits on NFS while
+            # FFmpeg works in /staging/. Either way the original file is
+            # untouched until Finalize confirms the new file is good.
+            from Features.FileReplacement.FileReplacementBusinessService import FileReplacementBusinessService
+            FrbService = FileReplacementBusinessService()
+            PrepResult = FrbService.PrepareReplacement(Job.FilePath)
+            if not PrepResult.get('Success'):
+                self.HandleJobFailure(
+                    Job,
+                    f"PrepareReplacement failed: {PrepResult.get('ErrorMessage', 'unknown')}",
+                    TranscodeAttemptId, ActiveJobId,
+                )
+                return
+            OrigBackupPath = PrepResult['OrigBackupPath']
+
+            # Compute the final target path. For InPlace: same dir as source,
+            # basename + .mp4. EffectiveInputPath is the local-mounted path
+            # SetupFilePreparation returned; for InPlace this equals the
+            # original source path (which has just been renamed to .orig).
+            # We strip the .orig suffix to recover the freed source path,
+            # then change the extension to .mp4.
+            import os as _os
+            EffectiveInputForFfmpeg = OrigBackupPath  # FFmpeg reads from .orig
+            FreedSourceLocalPath = OrigBackupPath[:-len('.orig')] if OrigBackupPath.endswith('.orig') else OrigBackupPath
+            BaseName, _ = _os.path.splitext(_os.path.basename(FreedSourceLocalPath))
+            TargetLocalPath = _os.path.join(_os.path.dirname(FreedSourceLocalPath), BaseName + '.mp4')
+
+            # Build remux command. Caller-supplied OutputPath overrides the
+            # builder's filename derivation (no _remuxed suffix needed).
             self.UpdateTranscodeProgress(TranscodeAttemptId, "Building Command", 0.0, "Building remux command...")
-            CommandResult = self.CommandBuilder.BuildRemuxCommand(Job, MediaFile, InputPath=EffectiveInputPath, TranscodingSettings={'FFmpegPath': self.FFmpegPath, 'OutputDirectory': EffectiveOutputDir})
+            CommandResult = self.CommandBuilder.BuildRemuxCommand(
+                Job, MediaFile,
+                InputPath=EffectiveInputForFfmpeg,
+                TranscodingSettings={
+                    'FFmpegPath': self.FFmpegPath,
+                    'OutputDirectory': EffectiveOutputDir,
+                    'OutputPath': TargetLocalPath,
+                },
+            )
             if not CommandResult:
+                # Roll back the .orig rename before bailing.
+                FrbService.RollbackReplacement(Job.FilePath, OrigBackupPath, TargetLocalPath)
                 self.HandleJobFailure(Job, "Failed to build remux command", TranscodeAttemptId, ActiveJobId)
                 return
 
@@ -629,6 +688,11 @@ class ProcessTranscodeQueueService:
             TranscodeResult = self.ExecuteTranscoding(Job, RemuxCommand, TranscodeAttemptId, MediaFile, ActiveJobId)
             if not TranscodeResult.get("Success", False):
                 self.CleanupLocalStagingFiles(LocalStagingSourcePath, LocalStagingOutputPath)
+                # Roll back the .orig rename so the source file is restored
+                # to its original path. Without this, the operator would see
+                # an .orig file and no original on a failed remux.
+                if OrigBackupPath:
+                    FrbService.RollbackReplacement(Job.FilePath, OrigBackupPath, TargetLocalPath)
                 self.HandleJobFailure(Job, f"Remux failed: {TranscodeResult.get('ErrorMessage', 'Unknown error')}", TranscodeAttemptId, ActiveJobId)
                 return
 
@@ -638,6 +702,8 @@ class ProcessTranscodeQueueService:
                 NfsCopyPath = self.CopyBackFromLocalStaging(LocalStagingOutputPath)
                 if not NfsCopyPath:
                     self.CleanupLocalStagingFiles(LocalStagingSourcePath, LocalStagingOutputPath)
+                    if OrigBackupPath:
+                        FrbService.RollbackReplacement(Job.FilePath, OrigBackupPath, TargetLocalPath)
                     self.HandleJobFailure(Job, "Failed to copy remux output from local staging to NFS storage", TranscodeAttemptId, ActiveJobId)
                     return
                 TranscodeResult['OutputFilePath'] = NfsCopyPath
@@ -653,6 +719,22 @@ class ProcessTranscodeQueueService:
 
         except Exception as e:
             self.CleanupLocalStagingFiles(LocalStagingSourcePath, LocalStagingOutputPath)
+            # If we got past PrepareReplacement before the exception, the
+            # source is sitting at .orig and needs to be restored before we
+            # mark the job failed -- otherwise the operator sees an .orig
+            # and no original.
+            if OrigBackupPath:
+                try:
+                    from Features.FileReplacement.FileReplacementBusinessService import FileReplacementBusinessService
+                    FileReplacementBusinessService().RollbackReplacement(
+                        Job.FilePath, OrigBackupPath,
+                        TargetLocalPath if 'TargetLocalPath' in dir() else None,
+                    )
+                except Exception as RbEx:
+                    LoggingService.LogException(
+                        f"Rollback during exception cleanup also failed for job {Job.Id}",
+                        RbEx, "ProcessTranscodeQueueService", "ProcessRemuxJob"
+                    )
             LoggingService.LogException(f"Exception processing remux job {Job.Id}", e, "ProcessTranscodeQueueService", "ProcessRemuxJob")
             self.HandleJobFailure(Job, f"Exception during remux: {str(e)}", TranscodeAttemptId, ActiveJobId)
 

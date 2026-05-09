@@ -122,19 +122,41 @@ def Main():
         Resolution = "1280x720"
         Codec = "h264"
 
+    # Rename-before-encode flow: call PrepareReplacement to rename source
+    # to .orig FIRST, then build the command with InputPath=.orig and
+    # OutputPath=freed source path. This mirrors what ProcessRemuxJob does
+    # in production.
+    from Features.FileReplacement.FileReplacementBusinessService import FileReplacementBusinessService
+    Frb = FileReplacementBusinessService()
+    Frb._ToLocalPath = lambda x: x  # canonical == local in sandbox
+    PrepResult = Frb.PrepareReplacement(str(SourceCopy))
+    if not PrepResult.get('Success'):
+        print(f"PrepareReplacement FAIL: {PrepResult.get('ErrorMessage')}")
+        sys.exit(1)
+    OrigBackupPath = PrepResult['OrigBackupPath']
+    print(f"  Source renamed to: {OrigBackupPath}")
+
+    # The freed source path = original SourceCopy path (since SourceCopy was
+    # the only thing there, and it has now been renamed to .orig).
+    FreedSourcePath = str(SourceCopy)
+    BaseName, _ = os.path.splitext(os.path.basename(FreedSourcePath))
+    TargetLocalPath = os.path.join(os.path.dirname(FreedSourcePath), BaseName + ".mp4")
+
     Cb = CommandBuilder()
     Result = Cb.BuildRemuxCommand({
         "Job": _Job(),
         "MediaFile": _MediaFile(),
         "AudioCodec": "aac",
         "AudioStreamIndex": 0,
-        "InputPath": str(SourceCopy),
+        "InputPath": OrigBackupPath,
+        "OutputPath": TargetLocalPath,
         "FFmpegPath": FFMPEG,
         "OutputDirectory": str(SANDBOX),
         "TranscodeOutputMode": "InPlace",
     })
     if not Result:
         print("BuildRemuxCommand returned None -- FAIL")
+        Frb.RollbackReplacement(str(SourceCopy), OrigBackupPath, TargetLocalPath)
         sys.exit(1)
     Cmd = Result["Command"]
     OutputPath = Result["OutputPath"]
@@ -142,9 +164,10 @@ def Main():
     print(f"  OutputPath: {OutputPath}")
 
     Checks = []
-    Checks.append(("OutputPath has _remuxed suffix", "_remuxed.mp4" in OutputPath, OutputPath.endswith("_remuxed.mp4")))
-    Checks.append(("OutputPath != InputPath", os.path.normcase(os.path.normpath(OutputPath)) != os.path.normcase(os.path.normpath(str(SourceCopy))), True))
-    Checks.append(("Command includes -af loudnorm", "loudnorm" in Cmd.lower(), "loudnorm" in Cmd.lower()))
+    Checks.append(("OutputPath has NO _remuxed suffix", "_remuxed.mp4" not in OutputPath, True))
+    Checks.append(("OutputPath ends with .mp4 (not .m4v)", OutputPath.endswith(".mp4") and "_remuxed" not in OutputPath, True))
+    Checks.append(("InputPath in command points to .orig", ".orig" in Cmd, True))
+    Checks.append(("Command includes -af loudnorm", "loudnorm" in Cmd.lower(), True))
     Checks.append(("Command includes -c:a aac", "-c:a aac" in Cmd, True))
     Checks.append(("Command does NOT include -c:a copy", "-c:a copy" not in Cmd, True))
     Checks.append(("Command video codec is copy", "-c:v copy" in Cmd, True))
@@ -170,29 +193,28 @@ def Main():
 
     if not os.path.exists(OutputPath):
         print(f"  [FAIL] Staged output does not exist at {OutputPath}")
+        Frb.RollbackReplacement(str(SourceCopy), OrigBackupPath, TargetLocalPath)
         sys.exit(1)
     StagedSize = os.path.getsize(OutputPath)
-    print(f"  Staged output: {StagedSize:,} bytes at {OutputPath}")
+    print(f"  Output written to: {StagedSize:,} bytes at {OutputPath}")
 
-    if not os.path.exists(SourceCopy):
-        print(f"  [CATASTROPHIC] Source file disappeared at {SourceCopy} -- BUG IN COMMAND BUILDER")
+    # In the rename-before-encode flow, the source has been renamed to .orig,
+    # so the original source path is now a NEW file (FFmpeg's output). Verify
+    # the .orig backup is still bit-identical to what we copied in.
+    if not os.path.exists(OrigBackupPath):
+        print(f"  [CATASTROPHIC] .orig backup disappeared at {OrigBackupPath} -- BUG")
         sys.exit(1)
-    SourceCopyAfterFFmpegSize = os.path.getsize(SourceCopy)
-    if SourceCopyAfterFFmpegSize != SourceCopyBeforeSize:
-        print(f"  [FAIL] Source file size changed during FFmpeg run: {SourceCopyBeforeSize} -> {SourceCopyAfterFFmpegSize}")
+    OrigBackupSize = os.path.getsize(OrigBackupPath)
+    if OrigBackupSize != SourceCopyBeforeSize:
+        print(f"  [FAIL] .orig backup size changed: {SourceCopyBeforeSize} -> {OrigBackupSize}")
         sys.exit(1)
-    print(f"  [PASS] Source file untouched (still {SourceCopyAfterFFmpegSize:,} bytes)")
+    print(f"  [PASS] .orig backup preserves original ({OrigBackupSize:,} bytes)")
 
     # ---------------------------------------------------------------
-    # STEP 3 -- Exercise _ProcessCompleteFileReplacement (rename-replace dance)
+    # STEP 3 -- _ProcessCompleteFileReplacement detects pre-renamed flow
     # ---------------------------------------------------------------
-    Banner("STEP 3 -- Atomic rename-replace via FileReplacementBusinessService")
+    Banner("STEP 3 -- _ProcessCompleteFileReplacement (pre-renamed flow)")
 
-    from Features.FileReplacement.FileReplacementBusinessService import FileReplacementBusinessService
-
-    # Stub _ToLocalPath to identity (canonical == local in sandbox)
-    Frb = FileReplacementBusinessService()
-    Frb._ToLocalPath = lambda x: x
     # Stub the DB-side metadata refresh so it doesn't try to find a real MediaFile row
     Frb._UpdateMediaFilesAfterReplacement = lambda OriginalFilePath, NewFilePath: {
         'Success': True,
