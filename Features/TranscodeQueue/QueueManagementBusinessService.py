@@ -1733,9 +1733,13 @@ class QueueManagementBusinessService:
         try:
             LoggingService.LogFunctionEntry("PrioritizeJob", "QueueManagementBusinessService", ItemId, NewPriority)
 
-            # Validate priority range
-            if NewPriority < 1 or NewPriority > 100:
-                errorMsg = f"Priority must be between 1 and 100, got {NewPriority}"
+            # Validate priority range. Auto-assigned values land in [1, 194];
+            # the manual-override window is [195, 200] (queue-priority.feature.md
+            # criterion 6). The 1-100 check this used to have was left over
+            # from the pre-impact-based-priority era and should have been
+            # raised when the controller bound was raised to 200.
+            if NewPriority < 1 or NewPriority > 200:
+                errorMsg = f"Priority must be between 1 and 200, got {NewPriority}"
                 LoggingService.LogError(errorMsg, "QueueManagementBusinessService", "PrioritizeJob")
                 return {"Success": False, "ErrorMessage": errorMsg}
 
