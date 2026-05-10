@@ -39,23 +39,6 @@ class ShowSettingsRepository(BaseRepository):
             LoggingService.LogException("Exception getting show setting by folder", Ex, "ShowSettingsRepository", "GetShowSettingByFolder")
             return None
 
-    def GetDefaultTargetResolution(self) -> Optional[str]:
-        """Get the default target resolution (ShowFolder = '*')."""
-        try:
-            query = """
-                SELECT TargetResolution
-                FROM ShowSettings
-                WHERE ShowFolder = '*'
-                LIMIT 1
-            """
-            Rows = self.ExecuteQuery(query, ())
-            if Rows:
-                return Rows[0]['TargetResolution']
-            return None
-        except Exception as Ex:
-            LoggingService.LogException("Exception getting default target resolution", Ex, "ShowSettingsRepository", "GetDefaultTargetResolution")
-            return None
-
     def SaveShowSetting(self, Setting: ShowSettingModel) -> int:
         """Insert or update a show setting. Returns the Id."""
         try:
@@ -137,17 +120,11 @@ class ShowSettingsRepository(BaseRepository):
             LoggingService.LogException("Exception deleting show setting", Ex, "ShowSettingsRepository", "DeleteShowSetting")
             return False
 
-    def GetSpecificTargetResolutionForFile(self, FilePath: str) -> Optional[str]:
-        """Get the target resolution ONLY when there is a per-show ShowSettings row.
+    def GetTargetResolutionForFile(self, FilePath: str) -> Optional[str]:
+        """Per-show target resolution override, or None when no show row exists.
 
-        Returns None when no specific row matches -- callers MUST then fall back
-        to the profile's own `TranscodeDownTo` value, NOT to the `ShowFolder='*'`
-        global default. This is the precedence the queue admission and worker
-        paths use: profile drives default; ShowSettings overrides only when
-        the operator has explicitly opted that show in.
-
-        See `ShowSettings.feature.md` Success Criterion 1 and `KNOWN-ISSUES.md`
-        for the regression this method prevents.
+        Profile.TranscodeDownTo drives the default; ShowSettings overrides only
+        when the operator has explicitly opted a specific show in.
         """
         try:
             ShowFolder = self._ExtractShowFolder(FilePath)
@@ -155,26 +132,6 @@ class ShowSettingsRepository(BaseRepository):
                 return None
             Setting = self.GetShowSettingByFolder(ShowFolder)
             return Setting.TargetResolution if Setting else None
-        except Exception as Ex:
-            LoggingService.LogException(
-                "Exception getting specific target resolution for file", Ex,
-                "ShowSettingsRepository", "GetSpecificTargetResolutionForFile",
-            )
-            return None
-
-    def GetTargetResolutionForFile(self, FilePath: str) -> Optional[str]:
-        """Specific match if present; otherwise the `*` global default.
-
-        DEPRECATED for the worker / queue-admission paths -- those should call
-        `GetSpecificTargetResolutionForFile` and let the profile drive default
-        behavior. Retained for UI display contexts (e.g. the Media page) where
-        showing the effective target including the global default is correct.
-        """
-        try:
-            Specific = self.GetSpecificTargetResolutionForFile(FilePath)
-            if Specific is not None:
-                return Specific
-            return self.GetDefaultTargetResolution()
         except Exception as Ex:
             LoggingService.LogException(
                 "Exception getting target resolution for file", Ex,

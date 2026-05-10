@@ -1106,7 +1106,7 @@ class ProcessTranscodeQueueService:
             try:
                 from Features.ShowSettings.ShowSettingsRepository import ShowSettingsRepository
                 ShowSettingsRepo = ShowSettingsRepository()
-                ShowTargetResolution = ShowSettingsRepo.GetSpecificTargetResolutionForFile(Job.FilePath)
+                ShowTargetResolution = ShowSettingsRepo.GetTargetResolutionForFile(Job.FilePath)
                 if ShowTargetResolution:
                     OriginalTarget = ProfileSettings.get('TargetResolution', '')
                     ProfileSettings['TargetResolution'] = ShowTargetResolution

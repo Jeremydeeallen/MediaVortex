@@ -589,7 +589,7 @@ class QueueManagementBusinessService:
                 FileTargetResolution = targetResolution
                 if ShowSettingsRepo:
                     try:
-                        ShowOverride = ShowSettingsRepo.GetSpecificTargetResolutionForFile(mediaFile.FilePath)
+                        ShowOverride = ShowSettingsRepo.GetTargetResolutionForFile(mediaFile.FilePath)
                         if ShowOverride:
                             FileTargetResolution = ShowOverride
                     except Exception:

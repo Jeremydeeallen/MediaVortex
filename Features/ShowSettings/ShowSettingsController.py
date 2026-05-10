@@ -15,8 +15,7 @@ def GetShows():
     try:
         Drive = request.args.get('Drive', None)
         Shows = Repository.GetShowsWithStats(Drive)
-        Default = Repository.GetDefaultTargetResolution()
-        return jsonify({'Success': True, 'Data': Shows, 'DefaultTargetResolution': Default or ''})
+        return jsonify({'Success': True, 'Data': Shows})
     except Exception as Ex:
         LoggingService.LogException("Exception getting shows", Ex, "ShowSettingsController", "GetShows")
         return jsonify({'Success': False, 'Message': str(Ex)}), 500
@@ -129,39 +128,6 @@ def SetSeriesProfile():
         return jsonify({'Success': True, 'ShowFolder': ShowFolder, 'AssignedProfile': ProfileName or None})
     except Exception as Ex:
         LoggingService.LogException("Exception in SetSeriesProfile", Ex, "ShowSettingsController", "SetSeriesProfile")
-        return jsonify({'Success': False, 'Message': str(Ex)}), 500
-
-
-@ShowSettingsBlueprint.route('/Default', methods=['GET'])
-def GetDefaultSetting():
-    """Get the default target resolution."""
-    try:
-        Default = Repository.GetDefaultTargetResolution()
-        return jsonify({'Success': True, 'DefaultTargetResolution': Default or ''})
-    except Exception as Ex:
-        LoggingService.LogException("Exception getting default", Ex, "ShowSettingsController", "GetDefaultSetting")
-        return jsonify({'Success': False, 'Message': str(Ex)}), 500
-
-
-@ShowSettingsBlueprint.route('/Default', methods=['POST'])
-def SetDefaultSetting():
-    """Set the default target resolution (applies to shows without specific settings)."""
-    try:
-        Data = request.get_json()
-        if not Data:
-            return jsonify({'Success': False, 'Message': 'No data provided'}), 400
-
-        TargetResolution = Data.get('TargetResolution', '').strip()
-
-        ValidResolutions = ['480p', '720p', '1080p', '2160p', '']
-        if TargetResolution not in ValidResolutions:
-            return jsonify({'Success': False, 'Message': f'Invalid TargetResolution. Must be one of: {ValidResolutions}'}), 400
-
-        Setting = ShowSettingModel(ShowFolder='*', TargetResolution=TargetResolution)
-        Repository.SaveShowSetting(Setting)
-        return jsonify({'Success': True, 'Message': f'Default target resolution set to {TargetResolution or "profile default"}'})
-    except Exception as Ex:
-        LoggingService.LogException("Exception setting default", Ex, "ShowSettingsController", "SetDefaultSetting")
         return jsonify({'Success': False, 'Message': str(Ex)}), 500
 
 

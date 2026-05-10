@@ -25,15 +25,15 @@ The Media page (`/ShowSettings`) lets users browse all discovered media (shows, 
 
 ## Data Model
 
-- `ShowSettings` table: `Id`, `ShowFolder` (UNIQUE), `TargetResolution`, `CreatedDate`, `LastModifiedDate`
-- Special row: `ShowFolder = '*'` stores the global default resolution
-- `TargetResolution` values: `480p`, `720p`, `1080p`, `2160p`, or empty string (use profile default)
+- `ShowSettings` table: `Id`, `ShowFolder` (UNIQUE), `TargetResolution`, `CreatedDate`, `LastModifiedDate`, `AssignedProfile`
+- `TargetResolution` values: `480p`, `720p`, `1080p`, `2160p`, or empty string (defer to profile)
 - Titles are derived from `MediaFiles` table by grouping on folder path
+- **No global default row.** The `ShowFolder='*'` row was removed (and the cascade that consulted it deleted) on 2026-05-10 -- profiles already encode the default behavior via `ProfileThresholds.TranscodeDownTo`. ShowSettings now only carries explicit per-show overrides.
 - **Note:** TargetResolution is maintained in the backend but not exposed in the UI. Profile selection (which includes per-resolution TranscodeDownTo thresholds) is the sole user-facing control for transcode targeting.
 
 ## Success Criteria
 
-1. [BUG] **ShowSettings target-resolution cascade is specific-wins, not default-wins.** When a file does NOT have a `ShowSettings` row whose `ShowFolder` matches the file's show folder exactly, the worker MUST use the profile's `TranscodeDownTo` value as the target resolution. The `ShowFolder = '*'` global-default row MUST NOT silently override an explicit profile assignment. Verifiable: assign a profile with `TranscodeDownTo='720p'` for 1080p sources to a file whose show has no specific `ShowSettings` row, populate the queue, observe the FFmpeg command in `TranscodeAttempts.FFpmpegCommand` contains `scale=1280:720` (or no `scale=` filter when source equals target). Regression check: a `ShowSettings.*` row with `TargetResolution='480p'` MUST NOT cause a 1080p source assigned an `>720p` profile to scale to 480p.
+1. **ShowSettings only overrides when a per-show row exists.** When a file's show folder has no row in `ShowSettings`, the worker MUST use the profile's `TranscodeDownTo` value as the target resolution. There is no global default row; profiles drive default behavior. Verifiable: assign a profile with `TranscodeDownTo='720p'` for 1080p sources to a file whose show has no `ShowSettings` row, populate the queue, observe the FFmpeg command in `TranscodeAttempts.FFpmpegCommand` contains `scale=1280:720`. Regression check: querying `SELECT * FROM ShowSettings WHERE ShowFolder='*'` returns zero rows.
 
 ## API Endpoints (all under `/api/ShowSettings/`)
 

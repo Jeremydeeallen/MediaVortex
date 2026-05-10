@@ -2,17 +2,20 @@
 
 ## Open
 
-### [BUG] ShowSettings global-default `*` overrides explicit profile assignment (target resolution)
-**Date:** 2026-05-10
-**Affects:** `Features/ShowSettings/ShowSettingsRepository.py` (`GetTargetResolutionForFile`), `Features/TranscodeJob/ProcessTranscodeQueueService.py:1101-1117` (`GetTranscodingSettings`), `Features/TranscodeQueue/QueueManagementBusinessService.py:589` (`GetMediaFilesByFolderAndResolutionFilter`).
+### [BUG - FIXED 2026-05-10] ShowSettings global-default `*` overrides explicit profile assignment (target resolution)
+**Date:** 2026-05-10 | **Fixed:** 2026-05-10 (cascade + global-default row entirely removed)
+**Affects:** `Features/ShowSettings/ShowSettingsRepository.py`, `Features/ShowSettings/ShowSettingsController.py`, `Features/TranscodeJob/ProcessTranscodeQueueService.py`, `Features/TranscodeQueue/QueueManagementBusinessService.py`, `ShowSettings.feature.md`.
 
-`ShowSettingsRepository.GetTargetResolutionForFile(FilePath)` returns the `ShowFolder='*'` default when no per-show row matches. The worker then unconditionally clobbers `ProfileSettings['TargetResolution']` with that value -- so the global default beats an explicit per-profile `TranscodeDownTo`. Today (2026-05-10) Sister Wives S04E05 was queued under `AV1 P4 FG6 >720p` (1080p source, profile says target=720p) but the FFmpeg command emitted `scale=852:480` because `ShowSettings.* = 480p` clobbered the profile choice. Cascade direction is wrong: specific should beat general; defaults should fall through.
+Sister Wives S04E05 was queued under `AV1 P4 FG6 >720p` (1080p source, profile says target=720p) but the FFmpeg command emitted `scale=852:480` because `ShowSettings.ShowFolder='*' / TargetResolution='480p'` clobbered the profile. `GetTargetResolutionForFile` cascaded specific match -> `*` default and the worker unconditionally overrode `ProfileSettings['TargetResolution']`.
 
-**Violates:** `ShowSettings.feature.md` Success Criterion 1 (added with this bug).
+**Fix:** removed the cascade entirely.
+- `GetDefaultTargetResolution()` deleted from repository.
+- `GetTargetResolutionForFile()` now returns the per-show row only (or None); no fallback to `*`.
+- The `ShowFolder='*'` row was deleted from the live DB.
+- `GET /api/ShowSettings/Default` and `POST /api/ShowSettings/Default` endpoints deleted; `GET /Shows` no longer returns `DefaultTargetResolution`.
+- Profile.TranscodeDownTo is now the sole source of default target behavior; ShowSettings carries explicit per-show overrides only.
 
-**Look first:** `ShowSettingsRepository.GetTargetResolutionForFile` (folds `*` into the same return as a specific match), and the two call sites in `ProcessTranscodeQueueService.GetTranscodingSettings:1105` and `QueueManagementBusinessService.GetMediaFilesByFolderAndResolutionFilter:589`.
-
-**Fix with:** `/t` (in progress -- this entry recorded immediately before the fix).
+**Violates / closed:** `ShowSettings.feature.md` Success Criterion 1.
 
 ---
 
