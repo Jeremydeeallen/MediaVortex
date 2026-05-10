@@ -2,6 +2,19 @@
 
 ## Open
 
+### [BUG] env-driven config in singleton `__new__` never fires; operator-controllable knobs scattered across env / KV / fossilized rows
+**Date:** 2026-05-10
+
+**Today's specific instance (fixed in commit `e291ca4`):** `Core/Logging/LoggingService.py` read its verbosity flags inside `__new__`, but every callsite in the codebase uses the `@classmethod` form (`LoggingService.LogInfo(...)`) without instantiating -- so `__new__` never executed and `_InfoEnabled` stayed `False` regardless of the `MEDIAVORTEX_LOG_INFO` env var. WorkerService produced zero INFO logs anywhere (terminal or DB) for the entire post-disposition feature work. Discovered during the i9 smoke test when no QT-loop diagnostics were visible. The fix moved env reads to class-attribute initialization (runs at import) and split `LogInfo` so the DB audit write is unconditional while only the terminal print stays gated.
+
+**Broader concern (still open):** operator-controllable knobs are spread across three surfaces today -- env vars (`MEDIAVORTEX_LOG_INFO`, `MEDIAVORTEX_DEBUG`, `MEDIAVORTEX_SHARE_MAPPINGS`, `MEDIAVORTEX_DB_*`), legacy `SystemSettings` KV rows (mostly retired by the post-transcode-disposition feature 2026-05-10), and fossilized state rows (`ServiceStatus.QualityTestService`, fixed in commit `afdca4a`). No doc owns the rule "which kind of knob lives where". Future config bugs will keep slipping through this gap. The path-storage entry below retires the share-mapping env-vars; the typed `PostTranscodeGateConfig` retired a slice of legacy KV; what's left needs an explicit policy.
+
+**Look first:** `grep -rn "os.getenv" --include="*.py"` outside DB connection strings and process-local startup constants. Each match is a candidate for the same trap or worse: an env-driven knob the operator can't change without restarting workers, with no audit, no UI, no per-worker visibility, no hot-reload.
+
+**Fix with:** `/n config-plane.feature.md` -- when scoped, define a typed config table for operator knobs and the explicit rule "env vars only for genuinely process-local startup constants". Also audit other singletons (e.g. `WorkerContext`, `FFmpegService` cached path) for the `__new__`-runs-once-on-instantiation trap. Not in scope today; the immediate observability bug is patched.
+
+---
+
 ### [BUG - CRITICAL - WORKAROUND IN PLACE] Canonical path storage is OS-coupled
 **Date:** 2026-05-10
 **Single source of truth for this issue.** Every other doc that touches path translation, share mappings, drive letters, or platform-specific path handling MUST link to this entry rather than re-describing the problem. If you find a duplicate description in any feature/flow doc, replace it with a link to here.
