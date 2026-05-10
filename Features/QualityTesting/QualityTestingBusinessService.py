@@ -1111,6 +1111,114 @@ class QualityTestingBusinessService:
     # no SystemSettings KV) and returns Replace / NoReplace / Requeue / Discard
     # with an explicit Reason. See post-transcode-disposition.feature.md.
 
+    def GenerateComparisonStills(self, TranscodeAttemptId: int, TimestampSeconds: float) -> dict:
+        """Return {Success, SourcePath, TranscodedPath, CachedKey, ErrorMessage}.
+        Generates two PNG stills via FFmpeg at the given timestamp from the
+        source and the transcoded output for this attempt. Cached by
+        (attempt, timestamp) to skip re-extraction on repeat requests.
+        """
+        try:
+            from Core.WorkerContext import WorkerContext
+            Db = self.DatabaseManager.DatabaseService
+
+            Rows = Db.ExecuteQuery(
+                "SELECT FilePath, FileReplaced FROM TranscodeAttempts WHERE Id = %s",
+                (TranscodeAttemptId,),
+            )
+            if not Rows:
+                return {'Success': False, 'ErrorMessage': f'TranscodeAttempt {TranscodeAttemptId} not found'}
+            CanonicalFilePath = Rows[0]['FilePath']
+            FileReplaced = bool(Rows[0]['FileReplaced'])
+
+            SourceCanonical = None
+            TranscodedCanonical = None
+
+            if FileReplaced:
+                Dir = os.path.dirname(CanonicalFilePath)
+                BaseName = os.path.basename(CanonicalFilePath)
+                Stem, Ext = os.path.splitext(BaseName)
+                if Stem.endswith('-mv'):
+                    TranscodedCanonical = CanonicalFilePath
+                    OriginalStem = Stem[:-3]
+                else:
+                    TranscodedCanonical = os.path.join(Dir, f"{Stem}-mv.mp4")
+                    OriginalStem = Stem
+                # Look for the KeepSource=True backup: `<base>.old.<ext>` alongside.
+                # Try common source extensions in priority order.
+                CtxTmp = WorkerContext.Current()
+                TranslateProbe = CtxTmp.PathTranslation.ToLocalPath if (CtxTmp and CtxTmp.PathTranslation) else (lambda P: P)
+                for Cand in ('.mkv', '.mp4', '.avi', '.m4v', '.mov'):
+                    Try = os.path.join(Dir, f"{OriginalStem}.old{Cand}")
+                    if os.path.exists(TranslateProbe(Try)):
+                        SourceCanonical = Try
+                        break
+                if not SourceCanonical:
+                    return {
+                        'Success': False,
+                        'ErrorMessage': f'Attempt {TranscodeAttemptId} has FileReplaced=true and no `.old` backup was found alongside the replaced file. Original source not available for comparison (KeepSource was false).',
+                    }
+            else:
+                TfpRows = Db.ExecuteQuery(
+                    "SELECT OriginalPath, LocalOutputPath FROM TemporaryFilePaths WHERE TranscodeAttemptId = %s",
+                    (TranscodeAttemptId,),
+                )
+                if not TfpRows:
+                    return {'Success': False, 'ErrorMessage': f'No TemporaryFilePaths row for attempt {TranscodeAttemptId} and FileReplaced is false'}
+                SourceCanonical = TfpRows[0]['OriginalPath']
+                TranscodedCanonical = TfpRows[0]['LocalOutputPath']
+
+            Ctx = WorkerContext.Current()
+            Translate = Ctx.PathTranslation.ToLocalPath if (Ctx and Ctx.PathTranslation) else (lambda P: P)
+            LocalSource = Translate(SourceCanonical)
+            LocalTranscoded = Translate(TranscodedCanonical)
+
+            if not os.path.exists(LocalSource):
+                return {'Success': False, 'ErrorMessage': f'Source file not found: {LocalSource}'}
+            if not os.path.exists(LocalTranscoded):
+                return {'Success': False, 'ErrorMessage': f'Transcoded file not found: {LocalTranscoded}'}
+
+            CacheDir = self._GetComparisonCacheDir()
+            os.makedirs(CacheDir, exist_ok=True)
+            TsTag = f"{TimestampSeconds:.2f}".replace('.', '_')
+            CacheKey = f"cmp_{TranscodeAttemptId}_{TsTag}"
+            SourceStill = os.path.join(CacheDir, f"{CacheKey}_source.png")
+            TranscodedStill = os.path.join(CacheDir, f"{CacheKey}_transcoded.png")
+
+            FFmpeg = (Ctx.FFmpegPath if (Ctx and Ctx.FFmpegPath) else None) or r"C:\Code\MediaVortex\FFmpegMaster\bin\ffmpeg.exe"
+
+            for InputPath, OutputPath in ((LocalSource, SourceStill), (LocalTranscoded, TranscodedStill)):
+                if os.path.exists(OutputPath):
+                    continue
+                Cmd = [FFmpeg, "-hide_banner", "-loglevel", "error",
+                       "-ss", str(TimestampSeconds), "-i", InputPath,
+                       "-frames:v", "1", "-y", OutputPath]
+                R = subprocess.run(Cmd, capture_output=True, text=True)
+                if R.returncode != 0 or not os.path.exists(OutputPath):
+                    return {
+                        'Success': False,
+                        'ErrorMessage': f'FFmpeg failed extracting frame from {os.path.basename(InputPath)}: {(R.stderr or "")[:200]}',
+                    }
+
+            return {
+                'Success': True,
+                'CacheKey': CacheKey,
+                'SourceFilename': os.path.basename(SourceStill),
+                'TranscodedFilename': os.path.basename(TranscodedStill),
+                'SourceCanonical': SourceCanonical,
+                'TranscodedCanonical': TranscodedCanonical,
+            }
+
+        except Exception as Ex:
+            LoggingService.LogException(
+                f"GenerateComparisonStills failed for attempt {TranscodeAttemptId} at ts={TimestampSeconds}",
+                Ex, "QualityTestingBusinessService", "GenerateComparisonStills",
+            )
+            return {'Success': False, 'ErrorMessage': f'Exception: {Ex}'}
+
+    def _GetComparisonCacheDir(self) -> str:
+        Root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        return os.path.join(Root, "cache", "vmaf-compare")
+
     def _HandleRequeueDisposition(self, TranscodeAttemptId: int, AuditPayload: dict) -> None:
         """Action handler for Disposition='Requeue' (VMAF below min threshold).
 

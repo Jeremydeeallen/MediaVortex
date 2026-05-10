@@ -335,6 +335,48 @@ def GetQualityTestProgress():
         LoggingService.LogException(ErrorMsg, e, "QualityTestController", "GetQualityTestProgress")
         return jsonify({"Success": False, "Message": "Failed to get quality test progress", "Error": ErrorMsg}), 500
 
+@QualityTestBlueprint.route('/api/QualityTest/CompareStills', methods=['GET'])
+def CompareStills():
+    try:
+        AttemptId = int(request.args.get('attempt') or 0)
+        Timestamp = float(request.args.get('ts') or 60.0)
+        if AttemptId <= 0:
+            return jsonify({'Success': False, 'ErrorMessage': 'attempt query param required'}), 400
+        from Features.QualityTesting.QualityTestingBusinessService import QualityTestingBusinessService
+        Svc = QualityTestingBusinessService(DatabaseManagerInstance=DatabaseManager())
+        Result = Svc.GenerateComparisonStills(AttemptId, Timestamp)
+        if not Result.get('Success'):
+            return jsonify(Result), 200
+        Result['SourceUrl'] = f"/api/QualityTest/CompareStill/{Result['SourceFilename']}"
+        Result['TranscodedUrl'] = f"/api/QualityTest/CompareStill/{Result['TranscodedFilename']}"
+        return jsonify(Result)
+    except Exception as e:
+        ErrorMsg = f"CompareStills failed: {e}"
+        LoggingService.LogException(ErrorMsg, e, "QualityTestController", "CompareStills")
+        return jsonify({"Success": False, "ErrorMessage": ErrorMsg}), 500
+
+
+@QualityTestBlueprint.route('/api/QualityTest/CompareStill/<Filename>', methods=['GET'])
+def ServeCompareStill(Filename):
+    from flask import send_from_directory, abort
+    if '..' in Filename or '/' in Filename or '\\' in Filename:
+        abort(400)
+    from Features.QualityTesting.QualityTestingBusinessService import QualityTestingBusinessService
+    Svc = QualityTestingBusinessService()
+    CacheDir = Svc._GetComparisonCacheDir()
+    if not os.path.exists(os.path.join(CacheDir, Filename)):
+        abort(404)
+    return send_from_directory(CacheDir, Filename)
+
+
+@QualityTestBlueprint.route('/VmafCompare', methods=['GET'])
+def VmafComparePage():
+    from flask import render_template
+    AttemptId = request.args.get('attempt')
+    Timestamp = request.args.get('ts', '60')
+    return render_template('VmafCompare.html', AttemptId=AttemptId, Timestamp=Timestamp)
+
+
 @QualityTestBlueprint.route('/api/QualityTesting/LogError', methods=['POST'])
 def LogQualityTestError():
     try:

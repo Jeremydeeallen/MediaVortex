@@ -1,0 +1,130 @@
+{% extends "Base.html" %}
+
+{% block title %}VMAF Compare - MediaVortex{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h1 class="h3 mb-0"><i class="fas fa-images me-2"></i>VMAF Comparison</h1>
+    </div>
+
+    <div class="card mb-3">
+        <div class="card-body py-2">
+            <form id="LoadForm" class="row g-2 align-items-end">
+                <div class="col-auto">
+                    <label class="form-label small mb-0">Attempt ID</label>
+                    <input type="number" id="AttemptInput" class="form-control form-control-sm" value="{{ AttemptId or '' }}" min="1" required style="width:140px;">
+                </div>
+                <div class="col-auto">
+                    <label class="form-label small mb-0">Timestamp (s)</label>
+                    <input type="number" id="TsInput" class="form-control form-control-sm" value="{{ Timestamp }}" min="0" step="0.1" style="width:140px;">
+                </div>
+                <div class="col-auto">
+                    <button type="submit" class="btn btn-primary btn-sm">
+                        <i class="fas fa-bolt me-1"></i>Load
+                    </button>
+                </div>
+                <div class="col-auto">
+                    <div class="btn-group btn-group-sm" role="group" aria-label="Quick timestamps">
+                        <button type="button" class="btn btn-outline-secondary qt-quick" data-ts="60">1m</button>
+                        <button type="button" class="btn btn-outline-secondary qt-quick" data-ts="300">5m</button>
+                        <button type="button" class="btn btn-outline-secondary qt-quick" data-ts="600">10m</button>
+                        <button type="button" class="btn btn-outline-secondary qt-quick" data-ts="900">15m</button>
+                    </div>
+                </div>
+                <div class="col">
+                    <div id="MetaLine" class="text-muted small ms-2"></div>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div id="LoadingPanel" class="text-center text-muted py-5 d-none">
+        <div class="spinner-border text-primary mb-2" role="status"></div>
+        <div>Extracting stills...</div>
+    </div>
+
+    <div id="ErrorPanel" class="alert alert-danger d-none"></div>
+
+    <div id="SliderPanel" class="card d-none">
+        <div class="card-header d-flex justify-content-between align-items-center py-2">
+            <span class="small text-muted">Drag the divider to compare. Left = source, right = transcoded.</span>
+            <div class="small">
+                <span class="badge bg-secondary me-1">Source</span>
+                <i class="fas fa-arrows-left-right text-muted mx-1"></i>
+                <span class="badge bg-info">Transcoded</span>
+            </div>
+        </div>
+        <div class="card-body p-0">
+            <img-comparison-slider id="Slider" hover="false" value="50" style="display:block; width:100%; --divider-width:2px; --divider-color:#dc3545;">
+                <img slot="first" id="ImgSource" src="" alt="Source" style="width:100%; display:block;">
+                <img slot="second" id="ImgTranscoded" src="" alt="Transcoded" style="width:100%; display:block;">
+            </img-comparison-slider>
+        </div>
+    </div>
+</div>
+
+<script type="module" src="https://unpkg.com/img-comparison-slider@8/dist/index.js"></script>
+<script>
+(function() {
+    function $(id) { return document.getElementById(id); }
+    var LastUrls = { src: null, tx: null };
+
+    function Show(panelId) {
+        ['LoadingPanel', 'ErrorPanel', 'SliderPanel'].forEach(function(id) {
+            $(id).classList.toggle('d-none', id !== panelId);
+        });
+    }
+
+    function Load(Attempt, Ts) {
+        if (!Attempt) {
+            $('ErrorPanel').textContent = 'Attempt ID required';
+            Show('ErrorPanel');
+            return;
+        }
+        Show('LoadingPanel');
+        var Url = '/api/QualityTest/CompareStills?attempt=' + encodeURIComponent(Attempt) + '&ts=' + encodeURIComponent(Ts);
+        fetch(Url)
+            .then(function(R) { return R.json(); })
+            .then(function(D) {
+                if (!D.Success) {
+                    $('ErrorPanel').textContent = D.ErrorMessage || 'Unknown error';
+                    Show('ErrorPanel');
+                    return;
+                }
+                LastUrls.src = D.SourceUrl;
+                LastUrls.tx = D.TranscodedUrl;
+                $('ImgSource').src = D.SourceUrl + '?cb=' + Date.now();
+                $('ImgTranscoded').src = D.TranscodedUrl + '?cb=' + Date.now();
+                var Meta = 'attempt ' + Attempt + ' @ ' + Ts + 's';
+                if (D.SourceCanonical) Meta += ' — ' + D.SourceCanonical.split(/[\\/]/).pop();
+                $('MetaLine').textContent = Meta;
+                Show('SliderPanel');
+                // Sync URL so the page is bookmarkable at the chosen ts.
+                var NewUrl = '/VmafCompare?attempt=' + encodeURIComponent(Attempt) + '&ts=' + encodeURIComponent(Ts);
+                history.replaceState({}, '', NewUrl);
+            })
+            .catch(function(E) {
+                $('ErrorPanel').textContent = 'Fetch failed: ' + E.message;
+                Show('ErrorPanel');
+            });
+    }
+
+    $('LoadForm').addEventListener('submit', function(E) {
+        E.preventDefault();
+        Load($('AttemptInput').value, $('TsInput').value);
+    });
+    Array.from(document.querySelectorAll('.qt-quick')).forEach(function(B) {
+        B.addEventListener('click', function() {
+            $('TsInput').value = B.dataset.ts;
+            Load($('AttemptInput').value, B.dataset.ts);
+        });
+    });
+
+    // Auto-load if attempt and ts came in via URL
+    if ($('AttemptInput').value) {
+        Load($('AttemptInput').value, $('TsInput').value || '60');
+    }
+})();
+</script>
+{% endblock %}
