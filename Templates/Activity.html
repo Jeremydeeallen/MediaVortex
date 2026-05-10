@@ -77,36 +77,8 @@
         </div>
     </div>
 
-    <!-- Quality Testing Queue -->
-    <div class="card mb-4">
-        <div class="card-header py-2 d-flex justify-content-between align-items-center">
-            <h6 class="mb-0"><i class="fas fa-chart-line me-2"></i>Quality Testing Queue</h6>
-            <button type="button" class="btn btn-sm btn-outline-secondary" id="RefreshQualityTestingBtn">
-                <i class="fas fa-sync-alt"></i> Refresh
-            </button>
-        </div>
-        <div class="card-body">
-            <div class="table-responsive">
-                <table class="table table-striped table-hover" id="QualityTestingQueueTable">
-                    <thead>
-                        <tr>
-                            <th>ID</th>
-                            <th>File Name</th>
-                            <th>Status</th>
-                            <th>Priority</th>
-                            <th>VMAF Score</th>
-                            <th>Progress</th>
-                            <th>Date Added</th>
-                            <th>Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody id="QualityTestingQueueTableBody">
-                        <tr><td colspan="8" class="text-center text-muted py-4"><i class="fas fa-inbox fa-2x mb-2"></i><br>Loading...</td></tr>
-                    </tbody>
-                </table>
-            </div>
-        </div>
-    </div>
+    <!-- Quality Testing Queue moved to /Queue page (post-transcode-disposition feature, 2026-05-10).
+         Active VMAF jobs (in-flight, not pending) appear in the Active Jobs section above. -->
 </div>
 {% endblock %}
 
@@ -116,8 +88,7 @@ var ActivityPage = (function() {
     var Workers = [];
     var AutoRefreshEnabled = true;
     var OverviewInterval = null;
-    var QTProgressInterval = null;
-    var CurrentQTProgress = null;
+    // QT-specific polling moved to /Queue page; only OverviewInterval remains here.
 
     // -- Utilities --
     function FormatSizeMB(SizeMB) {
@@ -156,25 +127,18 @@ var ActivityPage = (function() {
         return Map[Status] || 'bg-secondary';
     }
 
-    function GetQTStatusBadgeClass(Status) {
-        var Map = { 'Pending': 'bg-warning', 'Running': 'bg-info', 'Completed': 'bg-success', 'Failed': 'bg-danger' };
-        return Map[Status] || 'bg-secondary';
-    }
+    // GetQTStatusBadgeClass / GetPriorityBadgeClass moved to /Queue (the QT
+    // queue table is the only consumer and lives there now).
 
-    function GetPriorityBadgeClass(Priority) {
-        if (Priority >= 80) return 'bg-danger';
-        if (Priority >= 60) return 'bg-warning';
-        if (Priority >= 40) return 'bg-info';
-        return 'bg-secondary';
-    }
-
-    // -- Active Transcode Jobs --
+    // -- Active Jobs (transcode + VMAF rendered into the same table) --
     function LoadOverview() {
         fetch('/api/TeamStatus/Overview')
             .then(function(R) { return R.json(); })
             .then(function(Result) {
                 if (!Result.Success) return;
                 RenderActiveJobs(Result.Data);
+                // Append any running VMAF job after the transcode rows.
+                LoadActiveVmaf();
             })
             .catch(function() {});
     }
@@ -411,143 +375,73 @@ var ActivityPage = (function() {
             .catch(function() { showToastAlert('Failed to contact server.', 'danger'); });
     }
 
-    // -- Quality Testing Queue --
-    function LoadQualityTestingQueue() {
-        fetch('/api/QualityTest/Queue')
-            .then(function(R) {
-                var ContentType = R.headers.get('content-type');
-                if (!ContentType || !ContentType.includes('application/json')) return null;
-                return R.json();
-            })
-            .then(function(Data) {
-                if (!Data) return;
-                if (Data.Success) RenderQualityTestingQueue(Data.Jobs);
-            })
-            .catch(function(E) { console.error('Quality testing queue error:', E); });
-    }
-
-    function RenderQualityTestingQueue(QueueItems) {
-        var Tbody = document.getElementById('QualityTestingQueueTableBody');
-        Tbody.innerHTML = '';
-
-        if (!QueueItems || QueueItems.length === 0) {
-            Tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted py-4"><i class="fas fa-inbox fa-2x mb-2"></i><br>No quality testing queue items found</td></tr>';
-            return;
-        }
-
-        QueueItems.forEach(function(Item) {
-            var Row = document.createElement('tr');
-            Row.dataset.qtItemId = Item.Id;
-            Row.dataset.qtStatus = Item.Status;
-
-            var FileName = Item.FileName || (Item.OriginalFilePath ? Item.OriginalFilePath.split('\\').pop() : 'Unknown');
-            var VMAFHtml = '-';
-            if (Item.VMAFScore) {
-                var VMAFClass = Item.VMAFScore >= 80 ? 'bg-success' : (Item.VMAFScore >= 60 ? 'bg-warning' : 'bg-danger');
-                VMAFHtml = '<span class="badge ' + VMAFClass + '">' + Item.VMAFScore.toFixed(2) + '</span>';
-            }
-
-            var ActionsHtml = '-';
-            if (Item.Status === 'Failed' && (Item.RetryCount || 0) < (Item.MaxRetries || 3)) {
-                ActionsHtml = '<button type="button" class="btn btn-sm btn-outline-warning" onclick="ActivityPage.RetryQualityTest(' + Item.Id + ')" title="Retry Quality Test"><i class="fas fa-redo"></i></button>';
-            } else if (Item.ErrorMessage) {
-                ActionsHtml = '<span class="text-danger" title="' + EscapeHtml(Item.ErrorMessage) + '"><i class="fas fa-exclamation-triangle"></i></span>';
-            }
-
-            Row.innerHTML =
-                '<td>' + Item.Id + '</td>' +
-                '<td><div class="text-truncate" style="max-width: 250px;" title="' + EscapeHtml(Item.OriginalFilePath || '') + '">' + EscapeHtml(FileName) + '</div></td>' +
-                '<td><span class="badge ' + GetQTStatusBadgeClass(Item.Status) + '">' + Item.Status + '</span></td>' +
-                '<td><span class="badge ' + GetPriorityBadgeClass(Item.Priority || 50) + '">' + (Item.Priority || 50) + '</span></td>' +
-                '<td>' + VMAFHtml + '</td>' +
-                '<td class="qt-progress-cell">' + RenderQTProgressCell(Item) + '</td>' +
-                '<td>' + FormatDate(Item.DateAdded || Item.CreatedDate) + '</td>' +
-                '<td>' + ActionsHtml + '</td>';
-            Tbody.appendChild(Row);
-        });
-    }
-
-    function RenderQTProgressCell(Item) {
-        if (Item.Status === 'Running') {
-            return '<div class="d-flex align-items-center"><div class="spinner-border spinner-border-sm text-info me-2" role="status"></div><small class="text-muted">Loading...</small></div>';
-        }
-        if (Item.Status === 'Completed') {
-            return '<span class="badge bg-success"><i class="fas fa-check"></i> Done</span>';
-        }
-        if (Item.Status === 'Failed') {
-            return '<span class="badge bg-danger"><i class="fas fa-times"></i> Failed</span>';
-        }
-        return '-';
-    }
-
-    function UpdateQTProgress() {
+    // -- Active VMAF jobs (rendered into the same Active Jobs table as transcodes) --
+    // The QT queue itself has moved to /Queue. This function fetches the single
+    // currently-running VMAF (MaxConcurrentJobs=1 today) and appends a row to
+    // the Active Jobs table after the transcode rows are rendered.
+    function LoadActiveVmaf() {
         fetch('/api/QualityTesting/Progress')
             .then(function(R) { return R.json(); })
             .then(function(Data) {
-                CurrentQTProgress = Data;
-                UpdateQTProgressCells();
+                if (!Data || !Data.Success || !Data.IsRunning) return;
+                var P = Data.Progress || Data.CurrentJob || {};
+                AppendActiveVmafRow(P);
             })
             .catch(function() {});
     }
 
-    function UpdateQTProgressCells() {
-        var RunningRows = document.querySelectorAll('#QualityTestingQueueTableBody tr[data-qt-status="Running"]');
-        RunningRows.forEach(function(Row) {
-            var Cell = Row.querySelector('.qt-progress-cell');
-            if (Cell && CurrentQTProgress && CurrentQTProgress.Success && CurrentQTProgress.IsRunning) {
-                var P = CurrentQTProgress.Progress || {};
-                var Pct = P.ProgressPercentage || 0;
-                Cell.innerHTML =
-                    '<div class="d-flex align-items-center">' +
-                        '<div class="progress me-2" style="width: 80px; height: 18px;">' +
-                            '<div class="progress-bar progress-bar-striped progress-bar-animated bg-info" role="progressbar" style="width: ' + Pct + '%" aria-valuenow="' + Pct + '" aria-valuemin="0" aria-valuemax="100"></div>' +
-                        '</div>' +
-                        '<small>' + (Pct.toFixed ? Pct.toFixed(1) : Pct) + '%</small>' +
-                    '</div>' +
-                    '<small class="text-muted">' + (P.ETA ? 'ETA: ' + P.ETA : (P.CurrentStep || '')) + '</small>';
-            }
-        });
-    }
+    function AppendActiveVmafRow(P) {
+        var JobsTable = document.getElementById('ActiveJobsTable');
+        var JobsBody = document.getElementById('ActiveJobsBody');
+        var NoJob = document.getElementById('NoJobInfo');
+        if (!JobsBody) return;
 
-    function RetryQualityTest(QualityTestId) {
-        fetch('/api/QualityTest/Retry', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ JobId: QualityTestId })
-        })
-            .then(function(R) {
-                var ContentType = R.headers.get('content-type');
-                if (!ContentType || !ContentType.includes('application/json')) return null;
-                return R.json();
-            })
-            .then(function(Data) {
-                if (!Data) return;
-                if (Data.Success) {
-                    showToastAlert('Quality test retry initiated for job ' + QualityTestId, 'success');
-                    LoadQualityTestingQueue();
-                } else {
-                    showToastAlert('Failed to retry quality test: ' + Data.Message, 'danger');
-                }
-            })
-            .catch(function(E) { showToastAlert('Error retrying quality test: ' + E.message, 'danger'); });
+        // Make sure the table is visible (in case there are no transcode rows but a VMAF is running)
+        NoJob.classList.add('d-none');
+        JobsTable.classList.remove('d-none');
+
+        var FileName = P.FileName || (P.OriginalFilePath ? P.OriginalFilePath.split(/[/\\]/).pop() : 'VMAF');
+        var Pct = (parseFloat(P.ProgressPercentage) || 0).toFixed(1);
+        var Speed = P.ProcessingSpeed || '-';
+        var Eta = P.ETA || '-';
+        var ProgressBar =
+            '<div class="d-flex align-items-center gap-2">' +
+                '<div class="progress flex-grow-1" style="height: 18px;">' +
+                    '<div class="progress-bar progress-bar-striped progress-bar-animated bg-info" ' +
+                        'role="progressbar" style="width: ' + Pct + '%" ' +
+                        'aria-valuenow="' + Pct + '" aria-valuemin="0" aria-valuemax="100"></div>' +
+                '</div>' +
+                '<small class="text-nowrap">' + Pct + '%</small>' +
+            '</div>';
+
+        var Row = document.createElement('tr');
+        Row.innerHTML =
+            '<td class="ps-3"><i class="fas fa-chart-line me-1 text-info"></i>' +
+                '<span title="' + EscapeHtml(P.OriginalFilePath || '') + '">' + EscapeHtml(FileName) + '</span></td>' +
+            '<td><span class="badge bg-info">VMAF</span></td>' +
+            '<td>-</td>' +
+            '<td>-</td>' +
+            '<td>' + ProgressBar + '</td>' +
+            '<td>-</td>' +
+            '<td>' + EscapeHtml(String(Speed)) + '</td>' +
+            '<td>' + EscapeHtml(String(Eta)) + '</td>' +
+            '<td>-</td>';
+        JobsBody.appendChild(Row);
     }
 
     // -- Refresh / Polling --
     function RefreshAll() {
         LoadOverview();
         LoadWorkers();
-        LoadQualityTestingQueue();
     }
 
     function StartPolling() {
-        // Overview polls at 10s for general status, but active jobs need faster updates
+        // Overview polls at 2s for active-job progress.
         OverviewInterval = setInterval(LoadOverview, 2000);
-        QTProgressInterval = setInterval(UpdateQTProgress, 3000);
     }
 
     function StopPolling() {
         if (OverviewInterval) { clearInterval(OverviewInterval); OverviewInterval = null; }
-        if (QTProgressInterval) { clearInterval(QTProgressInterval); QTProgressInterval = null; }
     }
 
     function ToggleAutoRefresh() {
@@ -571,7 +465,7 @@ var ActivityPage = (function() {
     function Init() {
         document.getElementById('RefreshBtn').addEventListener('click', RefreshAll);
         document.getElementById('AutoRefreshBtn').addEventListener('click', ToggleAutoRefresh);
-        document.getElementById('RefreshQualityTestingBtn').addEventListener('click', LoadQualityTestingQueue);
+        // RefreshQualityTestingBtn moved to /Queue page.
 
         RefreshAll();
         StartPolling();
@@ -585,8 +479,8 @@ var ActivityPage = (function() {
         ResetStuckJob: ResetStuckJob,
         SetWorkerStatus: SetWorkerStatus,
         SetAllWorkersStatus: SetAllWorkersStatus,
-        ToggleWorkerCapability: ToggleWorkerCapability,
-        RetryQualityTest: RetryQualityTest
+        ToggleWorkerCapability: ToggleWorkerCapability
+        // RetryQualityTest moved to /Queue page.
     };
 })();
 </script>

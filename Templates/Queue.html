@@ -31,6 +31,39 @@
                 </div>
             </div>
 
+            <!-- Quality Testing Queue (moved from /Activity 2026-05-10) -->
+            <div class="card mb-4">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <div class="d-flex align-items-center gap-2">
+                        <h5 class="mb-0"><i class="fas fa-chart-line me-2"></i>Quality Testing Queue</h5>
+                    </div>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" id="RefreshQualityTestingBtn">
+                        <i class="fas fa-sync-alt"></i> Refresh
+                    </button>
+                </div>
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table table-striped table-hover" id="QualityTestingQueueTable">
+                            <thead>
+                                <tr>
+                                    <th>ID</th>
+                                    <th>File Name</th>
+                                    <th>Status</th>
+                                    <th>Priority</th>
+                                    <th>VMAF Score</th>
+                                    <th>Progress</th>
+                                    <th>Date Added</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="QualityTestingQueueTableBody">
+                                <tr><td colspan="8" class="text-center text-muted py-4"><i class="fas fa-inbox fa-2x mb-2"></i><br>Loading...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
             <!-- Queue Table -->
             <div class="card">
                 <div class="card-header d-flex justify-content-between align-items-center">
@@ -652,6 +685,175 @@ class TranscodeQueueManager {
 let queueManager;
 document.addEventListener('DOMContentLoaded', function() {
     queueManager = new TranscodeQueueManager();
+    QualityTestingQueueModule.Init();
 });
+
+// ---------------------------------------------------------------------------
+// Quality Testing Queue (moved from /Activity 2026-05-10).
+// Renders the QT queue table + auto-polls running-VMAF progress for the
+// running row. Active VMAF jobs (running, not pending) appear in the
+// Active Jobs section on /Activity.
+// ---------------------------------------------------------------------------
+var QualityTestingQueueModule = (function() {
+    var ProgressInterval = null;
+    var CurrentQTProgress = null;
+
+    function EscapeHtml(Text) {
+        var Div = document.createElement('div');
+        Div.textContent = Text || '';
+        return Div.innerHTML;
+    }
+
+    function FormatDate(DateString) {
+        if (!DateString) return '-';
+        return window.formatTime ? window.formatTime(DateString, 'datetime') : new Date(DateString).toLocaleString();
+    }
+
+    function GetQTStatusBadgeClass(Status) {
+        var Map = { 'Pending': 'bg-warning', 'Running': 'bg-info', 'Completed': 'bg-success', 'Failed': 'bg-danger' };
+        return Map[Status] || 'bg-secondary';
+    }
+
+    function GetPriorityBadgeClass(Priority) {
+        if (Priority >= 80) return 'bg-danger';
+        if (Priority >= 60) return 'bg-warning';
+        if (Priority >= 40) return 'bg-info';
+        return 'bg-secondary';
+    }
+
+    function Load() {
+        fetch('/api/QualityTest/Queue')
+            .then(function(R) {
+                var ContentType = R.headers.get('content-type');
+                if (!ContentType || !ContentType.includes('application/json')) return null;
+                return R.json();
+            })
+            .then(function(Data) {
+                if (!Data) return;
+                if (Data.Success) Render(Data.Jobs);
+            })
+            .catch(function(E) { console.error('Quality testing queue error:', E); });
+    }
+
+    function Render(QueueItems) {
+        var Tbody = document.getElementById('QualityTestingQueueTableBody');
+        if (!Tbody) return;
+        Tbody.innerHTML = '';
+
+        if (!QueueItems || QueueItems.length === 0) {
+            Tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted py-4"><i class="fas fa-inbox fa-2x mb-2"></i><br>No quality testing queue items found</td></tr>';
+            return;
+        }
+
+        QueueItems.forEach(function(Item) {
+            var Row = document.createElement('tr');
+            Row.dataset.qtItemId = Item.Id;
+            Row.dataset.qtStatus = Item.Status;
+
+            var FileName = Item.FileName || (Item.OriginalFilePath ? Item.OriginalFilePath.split('\\').pop() : 'Unknown');
+            var VMAFHtml = '-';
+            if (Item.VMAFScore) {
+                var VMAFClass = Item.VMAFScore >= 80 ? 'bg-success' : (Item.VMAFScore >= 60 ? 'bg-warning' : 'bg-danger');
+                VMAFHtml = '<span class="badge ' + VMAFClass + '">' + Item.VMAFScore.toFixed(2) + '</span>';
+            }
+
+            var ActionsHtml = '-';
+            if (Item.Status === 'Failed' && (Item.RetryCount || 0) < (Item.MaxRetries || 3)) {
+                ActionsHtml = '<button type="button" class="btn btn-sm btn-outline-warning" onclick="QualityTestingQueueModule.Retry(' + Item.Id + ')" title="Retry Quality Test"><i class="fas fa-redo"></i></button>';
+            } else if (Item.ErrorMessage) {
+                ActionsHtml = '<span class="text-danger" title="' + EscapeHtml(Item.ErrorMessage) + '"><i class="fas fa-exclamation-triangle"></i></span>';
+            }
+
+            Row.innerHTML =
+                '<td>' + Item.Id + '</td>' +
+                '<td><div class="text-truncate" style="max-width: 250px;" title="' + EscapeHtml(Item.OriginalFilePath || '') + '">' + EscapeHtml(FileName) + '</div></td>' +
+                '<td><span class="badge ' + GetQTStatusBadgeClass(Item.Status) + '">' + Item.Status + '</span></td>' +
+                '<td><span class="badge ' + GetPriorityBadgeClass(Item.Priority || 50) + '">' + (Item.Priority || 50) + '</span></td>' +
+                '<td>' + VMAFHtml + '</td>' +
+                '<td class="qt-progress-cell">' + RenderProgressCell(Item) + '</td>' +
+                '<td>' + FormatDate(Item.DateAdded || Item.CreatedDate) + '</td>' +
+                '<td>' + ActionsHtml + '</td>';
+            Tbody.appendChild(Row);
+        });
+    }
+
+    function RenderProgressCell(Item) {
+        if (Item.Status === 'Running') {
+            return '<div class="d-flex align-items-center"><div class="spinner-border spinner-border-sm text-info me-2" role="status"></div><small class="text-muted">Loading...</small></div>';
+        }
+        if (Item.Status === 'Completed') {
+            return '<span class="badge bg-success"><i class="fas fa-check"></i> Done</span>';
+        }
+        if (Item.Status === 'Failed') {
+            return '<span class="badge bg-danger"><i class="fas fa-times"></i> Failed</span>';
+        }
+        return '-';
+    }
+
+    function PollProgress() {
+        fetch('/api/QualityTesting/Progress')
+            .then(function(R) { return R.json(); })
+            .then(function(Data) {
+                CurrentQTProgress = Data;
+                UpdateRunningRows();
+            })
+            .catch(function() {});
+    }
+
+    function UpdateRunningRows() {
+        var RunningRows = document.querySelectorAll('#QualityTestingQueueTableBody tr[data-qt-status="Running"]');
+        RunningRows.forEach(function(Row) {
+            var Cell = Row.querySelector('.qt-progress-cell');
+            if (Cell && CurrentQTProgress && CurrentQTProgress.Success && CurrentQTProgress.IsRunning) {
+                var P = CurrentQTProgress.Progress || {};
+                var Pct = P.ProgressPercentage || 0;
+                Cell.innerHTML =
+                    '<div class="d-flex align-items-center">' +
+                        '<div class="progress me-2" style="width: 80px; height: 18px;">' +
+                            '<div class="progress-bar progress-bar-striped progress-bar-animated bg-info" role="progressbar" style="width: ' + Pct + '%" aria-valuenow="' + Pct + '" aria-valuemin="0" aria-valuemax="100"></div>' +
+                        '</div>' +
+                        '<small>' + (Pct.toFixed ? Pct.toFixed(1) : Pct) + '%</small>' +
+                    '</div>' +
+                    '<small class="text-muted">' + (P.ETA ? 'ETA: ' + P.ETA : (P.CurrentStep || '')) + '</small>';
+            }
+        });
+    }
+
+    function Retry(JobId) {
+        fetch('/api/QualityTest/Retry', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ JobId: JobId })
+        })
+            .then(function(R) {
+                var ContentType = R.headers.get('content-type');
+                if (!ContentType || !ContentType.includes('application/json')) return null;
+                return R.json();
+            })
+            .then(function(Data) {
+                if (!Data) return;
+                if (Data.Success) {
+                    showToastAlert('Quality test retry initiated for job ' + JobId, 'success');
+                    Load();
+                } else {
+                    showToastAlert('Failed to retry quality test: ' + Data.Message, 'danger');
+                }
+            })
+            .catch(function(E) { showToastAlert('Error retrying quality test: ' + E.message, 'danger'); });
+    }
+
+    function Init() {
+        var BtnRefresh = document.getElementById('RefreshQualityTestingBtn');
+        if (BtnRefresh) BtnRefresh.addEventListener('click', Load);
+        Load();
+        ProgressInterval = setInterval(PollProgress, 3000);
+    }
+
+    return {
+        Init: Init,
+        Load: Load,
+        Retry: Retry
+    };
+})();
 </script>
 {% endblock %}
