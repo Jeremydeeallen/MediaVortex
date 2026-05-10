@@ -2,6 +2,20 @@
 
 ## Open
 
+### [BUG] ShowSettings global-default `*` overrides explicit profile assignment (target resolution)
+**Date:** 2026-05-10
+**Affects:** `Features/ShowSettings/ShowSettingsRepository.py` (`GetTargetResolutionForFile`), `Features/TranscodeJob/ProcessTranscodeQueueService.py:1101-1117` (`GetTranscodingSettings`), `Features/TranscodeQueue/QueueManagementBusinessService.py:589` (`GetMediaFilesByFolderAndResolutionFilter`).
+
+`ShowSettingsRepository.GetTargetResolutionForFile(FilePath)` returns the `ShowFolder='*'` default when no per-show row matches. The worker then unconditionally clobbers `ProfileSettings['TargetResolution']` with that value -- so the global default beats an explicit per-profile `TranscodeDownTo`. Today (2026-05-10) Sister Wives S04E05 was queued under `AV1 P4 FG6 >720p` (1080p source, profile says target=720p) but the FFmpeg command emitted `scale=852:480` because `ShowSettings.* = 480p` clobbered the profile choice. Cascade direction is wrong: specific should beat general; defaults should fall through.
+
+**Violates:** `ShowSettings.feature.md` Success Criterion 1 (added with this bug).
+
+**Look first:** `ShowSettingsRepository.GetTargetResolutionForFile` (folds `*` into the same return as a specific match), and the two call sites in `ProcessTranscodeQueueService.GetTranscodingSettings:1105` and `QueueManagementBusinessService.GetMediaFilesByFolderAndResolutionFilter:589`.
+
+**Fix with:** `/t` (in progress -- this entry recorded immediately before the fix).
+
+---
+
 ### [BUG] QueueManagementBusinessService.py Cursor-era cleanup backlog
 **Date:** 2026-05-10
 **Affects:** `Features/TranscodeQueue/QueueManagementBusinessService.py` (2,064 LOC, 35 methods)

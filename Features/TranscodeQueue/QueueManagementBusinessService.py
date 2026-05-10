@@ -582,11 +582,14 @@ class QueueManagementBusinessService:
                     if not sourceResolution:
                         continue
 
-                # Check for per-show target resolution override
+                # Check for per-show target resolution override (specific only).
+                # The `*` global default does NOT override the profile target
+                # here -- profile.TranscodeDownTo is the default. See
+                # ShowSettings.feature.md criterion 1.
                 FileTargetResolution = targetResolution
                 if ShowSettingsRepo:
                     try:
-                        ShowOverride = ShowSettingsRepo.GetTargetResolutionForFile(mediaFile.FilePath)
+                        ShowOverride = ShowSettingsRepo.GetSpecificTargetResolutionForFile(mediaFile.FilePath)
                         if ShowOverride:
                             FileTargetResolution = ShowOverride
                     except Exception:

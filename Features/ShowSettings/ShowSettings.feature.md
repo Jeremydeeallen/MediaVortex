@@ -31,6 +31,10 @@ The Media page (`/ShowSettings`) lets users browse all discovered media (shows, 
 - Titles are derived from `MediaFiles` table by grouping on folder path
 - **Note:** TargetResolution is maintained in the backend but not exposed in the UI. Profile selection (which includes per-resolution TranscodeDownTo thresholds) is the sole user-facing control for transcode targeting.
 
+## Success Criteria
+
+1. [BUG] **ShowSettings target-resolution cascade is specific-wins, not default-wins.** When a file does NOT have a `ShowSettings` row whose `ShowFolder` matches the file's show folder exactly, the worker MUST use the profile's `TranscodeDownTo` value as the target resolution. The `ShowFolder = '*'` global-default row MUST NOT silently override an explicit profile assignment. Verifiable: assign a profile with `TranscodeDownTo='720p'` for 1080p sources to a file whose show has no specific `ShowSettings` row, populate the queue, observe the FFmpeg command in `TranscodeAttempts.FFpmpegCommand` contains `scale=1280:720` (or no `scale=` filter when source equals target). Regression check: a `ShowSettings.*` row with `TargetResolution='480p'` MUST NOT cause a 1080p source assigned an `>720p` profile to scale to 480p.
+
 ## API Endpoints (all under `/api/ShowSettings/`)
 
 | Endpoint | Method | Purpose |

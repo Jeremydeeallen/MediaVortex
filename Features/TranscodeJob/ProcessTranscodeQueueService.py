@@ -1098,11 +1098,15 @@ class ProcessTranscodeQueueService:
             if not ProfileSettings:
                 return None
 
-            # Apply ShowSettings override for target resolution if configured
+            # Apply ShowSettings override only when a per-show row exists for
+            # this file. The `*` global default does NOT override an explicit
+            # profile target -- profile.TranscodeDownTo is the default, and
+            # ShowSettings overrides only when the operator has opted that
+            # specific show in. See ShowSettings.feature.md criterion 1.
             try:
                 from Features.ShowSettings.ShowSettingsRepository import ShowSettingsRepository
                 ShowSettingsRepo = ShowSettingsRepository()
-                ShowTargetResolution = ShowSettingsRepo.GetTargetResolutionForFile(Job.FilePath)
+                ShowTargetResolution = ShowSettingsRepo.GetSpecificTargetResolutionForFile(Job.FilePath)
                 if ShowTargetResolution:
                     OriginalTarget = ProfileSettings.get('TargetResolution', '')
                     ProfileSettings['TargetResolution'] = ShowTargetResolution
