@@ -89,11 +89,16 @@ class MediaProbeBusinessService:
 
                 self.Repository.UpdateMetadata(MediaFile)
 
-                # Materialize PriorityScore (priority-materialization.feature.md criterion 7).
-                # Failure here must NOT roll back the probe (criterion 14).
+                # Materialize PriorityScore + AssignedProfile + IsCompliant + RecommendedMode
+                # via the unified updater. RecomputeForFiles applies the ShowSettings ->
+                # SystemSettings.DefaultProfileName cascade so newly-discovered files get
+                # a sensible profile (and a deterministic priority) instead of falling back
+                # to the size*0.5 proxy. See transcode-vs-remux-routing.feature.md.
+                # Failure here must NOT roll back the probe (priority-materialization
+                # criterion 14).
                 try:
                     from Features.TranscodeQueue.QueueManagementBusinessService import QueueManagementBusinessService
-                    QueueManagementBusinessService().ComputePriorityScore(MediaFile.Id)
+                    QueueManagementBusinessService().RecomputeForFiles([MediaFile.Id])
                 except Exception as PriorityEx:
                     LoggingService.LogException(
                         f"Priority recompute after probe failed for MediaFileId={MediaFile.Id} -- probe data is saved",

@@ -134,9 +134,24 @@ class FFmpegAnalysisService:
         try:
             # Extract format information
             Format = MediaInfo.get('format', {})
-            
-            # Duration
+
+            # Duration -- prefer format.duration, fall back to the longest stream
+            # duration (some MKV/AVI containers don't populate format.duration).
+            # Mutate Format so downstream consumers (e.g. ExtractTotalFrames
+            # Strategy 3) see the resolved value too.
             DurationSeconds = Format.get('duration')
+            if not DurationSeconds:
+                StreamDurations = []
+                for Stream in MediaInfo.get('streams', []):
+                    StreamDur = Stream.get('duration')
+                    if StreamDur:
+                        try:
+                            StreamDurations.append(float(StreamDur))
+                        except (ValueError, TypeError):
+                            pass
+                if StreamDurations:
+                    DurationSeconds = max(StreamDurations)
+                    Format['duration'] = DurationSeconds
             if DurationSeconds:
                 try:
                     AnalysisModel.DurationMinutes = float(DurationSeconds) / 60.0
