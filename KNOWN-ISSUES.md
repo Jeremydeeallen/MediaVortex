@@ -2,6 +2,21 @@
 
 ## Open
 
+### [BUG] `MonitorVMAFProgress` stops emitting updates ~25% before FFmpeg exits
+**Date:** 2026-05-10
+
+**What breaks:** On attempt 4396 (Steven Universe S05E14, 16,080 frames), the progress log went silent at frame 12,000 (74.6%) and then `Process completed return code: 0` appeared ~25 seconds later. No exception was thrown; no error in the Logs table for that window. Same monitor failure leaves `QualityTestProgress.Status` stuck at `'Processing'` (or `'Started'` with pre-`RETURNING Id` worker code) and `ProgressPercentage` stuck wherever the last successful poll landed -- so the Activity UI shows a phantom "running" row forever even though the VMAF actually finished.
+
+**Data integrity NOT affected:** the FFmpeg process itself completes normally. `vmaf_output.xml` is well-formed (verified: 1,609 frame elements covering frames 0-16080), `QualityTestResults.VMAFScore` is parsed correctly from the XML, and the disposition function reads the right value. The bug is purely on the operator-visibility side.
+
+**Violates:** `Features/QualityTesting/QualityTesting.feature.md` criterion 7 ("Quality test progress is reported in real time"). [BUG] criterion 7b added with this entry.
+
+**Look first:** `Features/QualityTesting/QualityTestingBusinessService.py:722` (`MonitorVMAFProgress`) and `ParseFFmpegProgressLine` (~line 803). Most likely: the FFmpeg stderr read loop terminates on a short/empty read that gets interpreted as EOF before FFmpeg has actually written its final stderr buffer. Or: a poll-timeout in the monitor loop is shorter than FFmpeg's final-flush interval. The thread that runs `MonitorVMAFProgress` should keep reading until FFmpeg's `wait()` returns, and should emit a final `UpdateProgressRecord(..., Status='Completed', ProgressPercentage=100)` regardless of whether stderr produced a tail progress line.
+
+**Fix with:** `/t`. Same monitor handles two visible symptoms (no late-stage progress lines, `Status` never advancing to `Completed`); fix once.
+
+---
+
 ### [BUG] env-driven config in singleton `__new__` never fires; operator-controllable knobs scattered across env / KV / fossilized rows
 **Date:** 2026-05-10
 

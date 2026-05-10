@@ -81,7 +81,8 @@
       "WebFetch(domain:www.pexels.com)",
       "Bash(py *)",
       "PowerShell(Get-Process *)",
-      "PowerShell(Stop-Process *)"
+      "PowerShell(Stop-Process *)",
+      "PowerShell($env:PGPASSWORD='mediavortex'; & 'C:\\\\Program Files\\\\PostgreSQL\\\\16\\\\bin\\\\psql.exe' -h 10.0.0.15 -U mediavortex -d mediavortex -At -c \"SELECT FilePath FROM MediaFiles WHERE Id = 52476\")"
     ]
   }
 }
