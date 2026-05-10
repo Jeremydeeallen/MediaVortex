@@ -253,7 +253,7 @@ The disposition decision is **the only post-transcode branch point**. It reads f
 | `TranscodeAttempt.QualityTestRequired` | per-attempt flag, set at attempt creation from `Workers.QualityTestEnabled` |
 | `TranscodeAttempt.NewSizeBytes` vs `OldSizeBytes` | post-flight savings gate |
 | `QualityTestResults.VMAFScore` | populated by VMAF run, NULL when no test ran |
-| `ServiceStatus.QualityTestService` | operational state of the VMAF service (Running/Paused/Stopped) |
+| `VmafCapableWorkerOnline` (computed) | `SELECT 1 FROM Workers WHERE QualityTestEnabled=TRUE AND Status='Online' AND LastHeartbeat > NOW() - INTERVAL '90 seconds'`. Replaces the legacy `ServiceStatus.QualityTestService` row, which was a fossil written only by the retired QualityTestService process. |
 | `PostTranscodeGateConfig.VmafAutoReplaceMinThreshold` | typed column, default 88 |
 | `PostTranscodeGateConfig.VmafAutoReplaceMaxThreshold` | typed column, default 98 |
 | `PostTranscodeGateConfig.WhenVmafUnavailable` | `'block'` (default, safe) or `'bypass'` (operator opt-in) |
@@ -261,17 +261,17 @@ The disposition decision is **the only post-transcode branch point**. It reads f
 
 **Decision table** (canonical -- code MUST mirror this 1:1):
 
-| Success | NewSize >= OldSize | QualityTestRequired | VMAF score | ServiceStatus | WhenVmafUnavailable | Disposition | Reason |
+| Success | NewSize >= OldSize | QualityTestRequired | VMAF score | VmafCapableWorkerOnline | WhenVmafUnavailable | Disposition | Reason |
 |---|---|---|---|---|---|---|---|
 | false | n/a | n/a | n/a | any | any | `Discard` | `TranscodeFailed` |
 | true | true (no savings) | any | any | any | any | `Discard` | `NoSavings` |
 | true | false | false | n/a | any | any | `BypassReplace` | `QualityTestNotRequired` |
-| true | false | true | NULL | Running | any | `Pending` | `AwaitingVmaf` |
+| true | false | true | NULL | true | any | `Pending` | `AwaitingVmaf` |
 | true | false | true | < min | any | any | `Requeue` | `VmafBelowMin` |
 | true | false | true | >= min, <= max | any | any | `Replace` | `VmafPassed` |
 | true | false | true | > max | any | any | `NoReplace` | `VmafAboveMax` |
-| true | false | true | NULL | Paused/Stopped | block | `NoReplace` | `VmafServicePaused` |
-| true | false | true | NULL | Paused/Stopped | bypass | `BypassReplace` | `VmafServicePausedBypassed` |
+| true | false | true | NULL | false | block | `NoReplace` | `VmafServicePaused` |
+| true | false | true | NULL | false | bypass | `BypassReplace` | `VmafServicePausedBypassed` |
 
 **Disposition outcomes:**
 
@@ -280,7 +280,7 @@ The disposition decision is **the only post-transcode branch point**. It reads f
 | `Replace` | FileReplacement proceeds: archive original, atomic rename, re-probe, update MediaFiles, settle `.orig` per `KeepSource`. |
 | `BypassReplace` | Same as `Replace` mechanically -- the only difference is the audit reason. The file IS replaced; operator can query why VMAF was skipped. |
 | `NoReplace` | Both files left in place. Staged transcoded output retained on the worker's `StagingDirectory` for operator inspection / manual replay. The TranscodeAttempt is final (no requeue). |
-| `Requeue` | Staged file deleted. CRF adjusted via `AdaptiveQualityService.CalculateAdjustedCRF`. New TranscodeQueue row created at lower CRF, unless adjusted CRF < 15 floor (then logs to ProblemFiles). |
+| `Requeue` | Staged file deleted. ProblemFiles row created with `ErrorType='VmafBelowMin'` and the VMAF score / min-threshold in the message. Operator action required: choose a profile with a lower CRF or accept the result. **Not auto-creating a new TranscodeQueue row** -- TranscodeQueue has no CRF column, so a new row would re-run at the same CRF and reproduce the low VMAF. Real auto-requeue requires a schema change (a `QualityOverride` column or a stricter sibling profile) -- tracked separately. |
 | `Discard` | Staged file deleted. `MediaFiles.LastTranscodeOutcome='NoSavings'` set when reason is NoSavings; queue's no-savings filter prevents re-queueing. |
 | `Pending` | No action yet. The TranscodeAttempt's disposition is re-evaluated when the VMAF result lands. The worker's VMAF processing loop calls `DecidePostTranscodeDisposition` again after writing the score. |
 

@@ -40,7 +40,7 @@
 
 ---
 
-### [BUG] Post-transcode pipeline has 5 split decision sites, 5+ scattered config sources, no audit trail
+### [BUG - FIXED 2026-05-10] Post-transcode pipeline had 5 split decision sites, 5+ scattered config sources, no audit trail
 **Date:** 2026-05-10
 **Affects:** `Features/QualityTesting/ShouldQualityTestService.py`, `Features/QualityTesting/QualityTestingBusinessService.py` (`UpdateQualityTestResults`, `CheckAndTriggerAutoReplace`), `Features/FileReplacement/FileReplacementBusinessService.py` (`ProcessFileReplacement`/`ProcessFileReplacementWithVMAF` with `BypassVMAFCheck` parameter), `Features/TranscodeJob/ProcessTranscodeQueueService.py` (`IsQualityTestEnabled`), `SystemSettings` rows for `VMAFAutoReplaceMinThreshold` / `MaxThreshold` / `QualityTestEnabled`.
 
@@ -50,7 +50,12 @@ After a transcode completes, the decision "do we run VMAF, replace, requeue, or 
 
 **Fix:** unified `DecidePostTranscodeDisposition` function + `PostTranscodeGateConfig` typed-column table + `Disposition`/`DispositionReason`/`DispositionDecidedAt` columns on `TranscodeAttempts`. Legacy ShouldQualityTestService / BypassVMAFCheck / ProcessFileReplacementWithVMAF / CheckAndTriggerAutoReplace deleted.
 
-**Fix with:** `/n` -- doc-first feature pending operator approval (this entry was recorded by step 11 of `/n`).
+**Follow-up bugs caught during sight-test before redeploy (also fixed 2026-05-10):**
+- **Wrong dict key:** `QualityTestingBusinessService.py:271` read `JobDetails.get('transcode_attempt_id')` (snake_case) when the dict uses `'TranscodeAttemptId'` (PascalCase). Effect: `DecidePostTranscodeDisposition` was never re-called after VMAF score landed; `Disposition` stayed `Pending` forever; FileReplacement never triggered. The decision-table conformance test missed it (pure unit test, didn't exercise wiring).
+- **Fossilized gate input:** the disposition function read `ServiceStatus.QualityTestService.Status` as a live gate. Every live writer of that row is in `archive_QualityTestService/Main.py`; the new unified WorkerService never updates it. The row had been frozen at `Status='Paused', UpdatedAt='2026-01-26'` for 3.5 months. Effect: every transcode hit decision-table row 8 (`NoReplace, VmafServicePaused`) regardless of actual worker capability. **Fix:** replaced the gate with a computed query against `Workers` (`QualityTestEnabled=TRUE AND Status='Online' AND fresh heartbeat`). Reason names retained for audit-history compatibility.
+- **Honest Requeue dispatch:** `Disposition='Requeue'` was a no-op (audit-only). `_HandleRequeueDisposition` now deletes the staged file and writes a ProblemFiles row. NOT auto-creating a new TranscodeQueue at adjusted CRF -- TranscodeQueue has no CRF column, so a new row would re-run the same profile at the same CRF. Real auto-requeue requires a schema change (tracked separately).
+
+**Fix with:** `/n` -- doc-first feature, shipped 2026-05-10. Two latent wiring bugs and one no-op branch caught and fixed before the larry redeploy.
 
 ---
 

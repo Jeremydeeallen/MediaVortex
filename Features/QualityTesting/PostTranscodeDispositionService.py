@@ -111,8 +111,22 @@ class PostTranscodeDispositionService:
             QualityTestRequired = bool(Row.get('QualityTestRequired'))
             VmafScore = Row.get('VMAF')
 
-            ServiceStatusRow = self.DatabaseManager.GetServiceStatus("QualityTestService")
-            ServiceStatus = (ServiceStatusRow or {}).get('Status') if ServiceStatusRow else None
+            # "Is VMAF operationally available?" -- replaces the legacy
+            # ServiceStatus.QualityTestService gate, which was a fossil row
+            # last written by the retired QualityTestService process in
+            # January 2026 and never updated by the unified WorkerService.
+            # The new gate is computed: any worker with the capability flag
+            # ON, status Online, and a fresh heartbeat counts as "available".
+            CapableRows = DatabaseService().ExecuteQuery(
+                """
+                SELECT 1 FROM Workers
+                WHERE QualityTestEnabled = TRUE
+                  AND Status = 'Online'
+                  AND LastHeartbeat > NOW() - INTERVAL '90 seconds'
+                LIMIT 1
+                """,
+            )
+            VmafCapableWorkerOnline = bool(CapableRows)
 
             GateConfig = self.GateConfigRepo.Get()
 
@@ -123,7 +137,7 @@ class PostTranscodeDispositionService:
                 'NewSizeBytes': NewSize,
                 'QualityTestRequired': QualityTestRequired,
                 'VmafScore': VmafScore,
-                'ServiceStatus': ServiceStatus,
+                'VmafCapableWorkerOnline': VmafCapableWorkerOnline,
                 'VmafAutoReplaceMinThreshold': GateConfig.VmafAutoReplaceMinThreshold,
                 'VmafAutoReplaceMaxThreshold': GateConfig.VmafAutoReplaceMaxThreshold,
                 'WhenVmafUnavailable': GateConfig.WhenVmafUnavailable,
@@ -136,7 +150,7 @@ class PostTranscodeDispositionService:
                 NewSize=NewSize,
                 QualityTestRequired=QualityTestRequired,
                 VmafScore=VmafScore,
-                ServiceStatus=ServiceStatus,
+                VmafCapableWorkerOnline=VmafCapableWorkerOnline,
                 GateConfig=GateConfig,
             )
 
@@ -164,12 +178,16 @@ class PostTranscodeDispositionService:
             return DispositionResult(Disposition='Pending', Reason='', AuditPayload={'error': str(Ex)})
 
     def _DecideFromInputs(self, Success, OldSize, NewSize, QualityTestRequired,
-                          VmafScore, ServiceStatus, GateConfig) -> Tuple[str, str]:
+                          VmafScore, VmafCapableWorkerOnline, GateConfig) -> Tuple[str, str]:
         """The decision table from `transcode.flow.md` Stage 6, encoded.
 
         Order matches the table top-to-bottom -- first match wins. Adding /
         removing / changing a branch here MUST be accompanied by the matching
         flow-doc edit in the same PR (criterion 4).
+
+        `VmafCapableWorkerOnline` is computed by the caller from the live
+        `Workers` table (capability flag ON + status Online + fresh heartbeat),
+        not from the legacy ServiceStatus.QualityTestService row.
         """
         # Row 1: transcode failed -> always Discard.
         if not Success:
@@ -183,11 +201,8 @@ class PostTranscodeDispositionService:
         if not QualityTestRequired:
             return ('BypassReplace', 'QualityTestNotRequired')
 
-        # The remaining rows depend on VMAF score and ServiceStatus.
-        ServiceIsHealthy = (ServiceStatus or '').lower() == 'running'
-
-        # Row 4: VMAF required, no score yet, service running -> wait for VMAF.
-        if VmafScore is None and ServiceIsHealthy:
+        # Row 4: VMAF required, no score yet, capable worker online -> wait for VMAF.
+        if VmafScore is None and VmafCapableWorkerOnline:
             return ('Pending', 'AwaitingVmaf')
 
         # Rows 5-7: VMAF score available -> compare to thresholds.
@@ -203,7 +218,10 @@ class PostTranscodeDispositionService:
                     return ('Replace', 'VmafPassed')
                 return ('NoReplace', 'VmafAboveMax')
 
-        # Rows 8-9: VMAF required, no score, service NOT healthy.
+        # Rows 8-9: VMAF required, no score, no capable worker available.
+        # Reason names retained for audit-history compatibility -- their
+        # semantic meaning shifted from "ServiceStatus=Paused" to "no live
+        # worker has the capability". Both observably mean: VMAF didn't run.
         if GateConfig.WhenVmafUnavailable == 'bypass':
             return ('BypassReplace', 'VmafServicePausedBypassed')
         # Default: 'block'.

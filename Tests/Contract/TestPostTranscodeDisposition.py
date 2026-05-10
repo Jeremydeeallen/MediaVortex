@@ -6,7 +6,7 @@ Covers feature criteria 4 and 5 of post-transcode-disposition.feature.md:
   - Each row is asserted twice (deterministic re-run) to catch any nondeterminism.
 
 The tests target `_DecideFromInputs` because it is the pure function that encodes
-the table; the surrounding I/O (DB read of TranscodeAttempts, ServiceStatus
+the table; the surrounding I/O (DB read of TranscodeAttempts, VmafCapableWorkerOnline
 lookup, audit UPDATE) is exercised separately. Decoupling the table from I/O
 keeps the table-conformance test fast and total.
 
@@ -49,7 +49,7 @@ class TestPostTranscodeDispositionTable(unittest.TestCase):
             NewSize=500_000_000,
             QualityTestRequired=True,
             VmafScore=None,
-            ServiceStatus='Running',
+            VmafCapableWorkerOnline=True,
             GateConfig=self.DefaultConfig,
         )
         Defaults.update(Kwargs)
@@ -78,11 +78,11 @@ class TestPostTranscodeDispositionTable(unittest.TestCase):
             QualityTestRequired=False,
         )
 
-    # Row 4: VMAF required, no score, service Running -> Pending / AwaitingVmaf.
+    # Row 4: VMAF required, no score, capable worker online -> Pending / AwaitingVmaf.
     def test_Row4_AwaitingVmaf(self):
         self._AssertDeterministic(
             ('Pending', 'AwaitingVmaf'),
-            VmafScore=None, ServiceStatus='Running',
+            VmafScore=None, VmafCapableWorkerOnline=True,
         )
 
     # Row 5: VMAF score below min -> Requeue / VmafBelowMin.
@@ -106,29 +106,21 @@ class TestPostTranscodeDispositionTable(unittest.TestCase):
     def test_Row7_VmafAboveMax(self):
         self._AssertDeterministic(('NoReplace', 'VmafAboveMax'), VmafScore=99.5)
 
-    # Row 8: VMAF unavailable, ServiceStatus Paused, WhenVmafUnavailable='block'
+    # Row 8: VMAF required, no score, no capable worker online, WhenVmafUnavailable='block'
     #        -> NoReplace / VmafServicePaused.
-    def test_Row8_VmafServicePaused_Block(self):
+    def test_Row8_NoCapableWorker_Block(self):
         self._AssertDeterministic(
             ('NoReplace', 'VmafServicePaused'),
-            VmafScore=None, ServiceStatus='Paused',
+            VmafScore=None, VmafCapableWorkerOnline=False,
             GateConfig=FakeGateConfig(WhenVmafUnavailable='block'),
         )
 
-    def test_Row8_VmafServicePaused_Block_Stopped(self):
-        # Stopped is also non-Running -> same branch as Paused.
-        self._AssertDeterministic(
-            ('NoReplace', 'VmafServicePaused'),
-            VmafScore=None, ServiceStatus='Stopped',
-            GateConfig=FakeGateConfig(WhenVmafUnavailable='block'),
-        )
-
-    # Row 9: VMAF unavailable, ServiceStatus Paused, WhenVmafUnavailable='bypass'
+    # Row 9: same as row 8 but WhenVmafUnavailable='bypass'
     #        -> BypassReplace / VmafServicePausedBypassed.
-    def test_Row9_VmafServicePaused_Bypass(self):
+    def test_Row9_NoCapableWorker_Bypass(self):
         self._AssertDeterministic(
             ('BypassReplace', 'VmafServicePausedBypassed'),
-            VmafScore=None, ServiceStatus='Paused',
+            VmafScore=None, VmafCapableWorkerOnline=False,
             GateConfig=FakeGateConfig(WhenVmafUnavailable='bypass'),
         )
 
@@ -145,7 +137,7 @@ class TestPostTranscodeDispositionTable(unittest.TestCase):
     def test_TranscodeFailed_BeatsEverything(self):
         self._AssertDeterministic(
             ('Discard', 'TranscodeFailed'),
-            Success=False, QualityTestRequired=True, VmafScore=95.0, ServiceStatus='Paused',
+            Success=False, QualityTestRequired=True, VmafScore=95.0, VmafCapableWorkerOnline=False,
         )
 
 

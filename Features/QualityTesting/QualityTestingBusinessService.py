@@ -268,7 +268,7 @@ class QualityTestingBusinessService:
                 # and return Replace / NoReplace / Requeue with an explicit Reason.
                 # Replaces the legacy CheckAndTriggerAutoReplace path.
                 from Features.QualityTesting.PostTranscodeDispositionService import PostTranscodeDispositionService
-                ta_id = JobDetails.get('transcode_attempt_id')
+                ta_id = JobDetails.get('TranscodeAttemptId')
                 AutoReplaceTriggered = False
                 if ta_id:
                     DispositionResult = PostTranscodeDispositionService(self.DatabaseManager).DecidePostTranscodeDisposition(ta_id)
@@ -276,9 +276,22 @@ class QualityTestingBusinessService:
                         from Features.FileReplacement.FileReplacementBusinessService import FileReplacementBusinessService
                         FileReplacementBusinessService(self.DatabaseManager).ProcessFileReplacement(ta_id)
                         AutoReplaceTriggered = True
-                    # Disposition='Requeue' / 'NoReplace' / 'Discard' -- the audit
-                    # row is already persisted; no action here. Future iterations
-                    # can wire automatic Requeue without changing this contract.
+                    elif DispositionResult.Disposition == 'Requeue':
+                        # VMAF below min threshold. Honest implementation:
+                        #   1. Delete the staged transcoded file (Stage 8 contract).
+                        #   2. Record a ProblemFiles row so the operator sees this
+                        #      in the FailureTracking surface.
+                        # NOT auto-creating a new TranscodeQueue row at adjusted
+                        # CRF because TranscodeQueue has no CRF column today --
+                        # a new row would re-run the same profile at the same
+                        # CRF and produce the same low VMAF. Real auto-requeue
+                        # requires a schema change (QualityOverride column or a
+                        # second profile with stricter thresholds) -- tracked
+                        # separately, not in scope for this fix.
+                        self._HandleRequeueDisposition(ta_id, DispositionResult.AuditPayload)
+                    # Disposition='NoReplace' / 'Discard' -- the audit row is
+                    # already persisted; staged file remains in StagingDirectory
+                    # for operator inspection.
 
                 return {"Success": True, "VMAFScore": vmaf_score, "FFmpegCommand": FFmpegCommandString, "AutoReplaceTriggered": AutoReplaceTriggered}
             else:
@@ -980,6 +993,84 @@ class QualityTestingBusinessService:
     # function checks the score against PostTranscodeGateConfig (typed columns,
     # no SystemSettings KV) and returns Replace / NoReplace / Requeue / Discard
     # with an explicit Reason. See post-transcode-disposition.feature.md.
+
+    def _HandleRequeueDisposition(self, TranscodeAttemptId: int, AuditPayload: dict) -> None:
+        """Action handler for Disposition='Requeue' (VMAF below min threshold).
+
+        Honest implementation -- delete the staged file and record the file in
+        ProblemFiles so the operator sees it in the FailureTracking surface.
+
+        We do NOT auto-create a new TranscodeQueue row at an adjusted CRF
+        because TranscodeQueue has no CRF column today; a new row would
+        re-run the same profile at the same CRF and reproduce the low VMAF.
+        Real auto-requeue requires a schema change (a QualityOverride column,
+        or a second profile with stricter thresholds), which is out of scope
+        for this fix. Tracked separately.
+        """
+        try:
+            # 1. Look up the staged file path so we can clean it up.
+            FilePathRows = self.DatabaseManager.DatabaseService.ExecuteQuery(
+                """
+                SELECT OriginalPath, LocalOutputPath FROM TemporaryFilePaths
+                WHERE TranscodeAttemptId = %s
+                """,
+                (TranscodeAttemptId,),
+            )
+            OriginalPath = None
+            LocalOutputPath = None
+            if FilePathRows:
+                OriginalPath = FilePathRows[0].get('OriginalPath')
+                LocalOutputPath = FilePathRows[0].get('LocalOutputPath')
+
+            # 2. Delete the staged transcoded file (per Stage 8 contract).
+            if LocalOutputPath:
+                try:
+                    from Core.WorkerContext import WorkerContext
+                    Ctx = WorkerContext.Current()
+                    StagedLocal = (
+                        Ctx.PathTranslation.ToLocalPath(LocalOutputPath)
+                        if Ctx and Ctx.PathTranslation else LocalOutputPath
+                    )
+                    if os.path.exists(StagedLocal):
+                        os.remove(StagedLocal)
+                        LoggingService.LogInfo(
+                            f"Requeue: deleted staged file {StagedLocal} for TranscodeAttempt {TranscodeAttemptId}",
+                            "QualityTestingBusinessService", "_HandleRequeueDisposition",
+                        )
+                except Exception as CleanupEx:
+                    # Cleanup failure is non-fatal -- the audit row is already
+                    # committed and the operator can manually delete.
+                    LoggingService.LogWarning(
+                        f"Requeue: failed to delete staged file for TranscodeAttempt {TranscodeAttemptId}: {CleanupEx}",
+                        "QualityTestingBusinessService", "_HandleRequeueDisposition",
+                    )
+
+            # 3. Record in ProblemFiles for operator visibility.
+            if OriginalPath:
+                VmafScore = AuditPayload.get('VmafScore')
+                MinThreshold = AuditPayload.get('VmafAutoReplaceMinThreshold')
+                ErrorMessage = (
+                    f"VMAF score {VmafScore} below minimum threshold {MinThreshold}. "
+                    f"TranscodeAttemptId={TranscodeAttemptId}. "
+                    f"Auto-requeue not implemented -- operator action required: "
+                    f"either choose a profile with a lower CRF or accept the result."
+                )
+                ProblemId = self.DatabaseManager.AddProblemFile(
+                    FilePath=OriginalPath,
+                    ErrorType='VmafBelowMin',
+                    ErrorMessage=ErrorMessage,
+                )
+                if ProblemId:
+                    LoggingService.LogInfo(
+                        f"Requeue: ProblemFiles row {ProblemId} created for {OriginalPath} "
+                        f"(VMAF={VmafScore}, Min={MinThreshold})",
+                        "QualityTestingBusinessService", "_HandleRequeueDisposition",
+                    )
+        except Exception as Ex:
+            LoggingService.LogException(
+                f"_HandleRequeueDisposition failed for TranscodeAttempt {TranscodeAttemptId}",
+                Ex, "QualityTestingBusinessService", "_HandleRequeueDisposition",
+            )
 
     def UpdateTranscodeAttemptReplacementStatus(self, TranscodeAttemptId: int, FileReplaced: bool, ReplacementType: str) -> bool:
         """Update TranscodeAttempts table with file replacement status."""
