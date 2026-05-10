@@ -263,14 +263,19 @@ class QualityTestingBusinessService:
                 self.UpdateProgressRecord(ProgressId, "Processing", 95, "VMAF analysis completed, parsing results")
 
             if result.returncode == 0:
-                # Parse VMAF score from XML file (FFmpeg creates vmaf_output.xml)
-                vmaf_score = self.ParseVMAFScore("")
+                # Parse full VMAF metrics from XML (mean + min/max/harmonic_mean +
+                # stddev + percentiles). The mean is what we always used; the
+                # rest captures distribution shape that the operator (and the
+                # future CRF-recommendation feature) needs to answer "where did
+                # this run actually struggle?" without re-analysis. See
+                # QualityTesting.feature.md criterion 7b.
+                vmaf_metrics = self.ParseVMAFMetrics('vmaf_output.xml')
+                vmaf_score = vmaf_metrics.get('Mean', 0.0)
 
-
-                # Update QualityTestResults table with VMAF score
+                # Update QualityTestResults with full metrics dict.
                 result_id = JobDetails.get('result_id')
                 if ProgressId and result_id:
-                    self.UpdateQualityTestResultsWithScore(result_id, vmaf_score, result)
+                    self.UpdateQualityTestResultsWithScore(result_id, vmaf_score, result, vmaf_metrics)
 
                 # CRITICAL: write the VMAF score to TranscodeAttempts BEFORE
                 # re-deciding the disposition. DecidePostTranscodeDisposition
@@ -405,6 +410,73 @@ class QualityTestingBusinessService:
         except Exception as e:
             LoggingService.LogException("Error determining VMAF target resolution", e, "QualityTestingBusinessService", "DetermineVMAFTargetResolution")
             return (1920, 1080)  # Default fallback
+
+    def ParseVMAFMetrics(self, XmlPath: str = 'vmaf_output.xml') -> dict:
+        """Parse full VMAF metrics from the libvmaf XML log.
+
+        Returns a dict with mean (the score we already track), plus the
+        richer metrics libvmaf produces but that we previously discarded:
+        min, max, harmonic_mean, stddev (computed from per-frame), and
+        percentiles 1/5/10/25 (which capture "the worst N% of frames" --
+        much more informative than the mean for "where did this run
+        actually struggle?"). See QualityTesting.feature.md criterion 7b.
+
+        Returns None values when the XML can't be parsed or pooled
+        metrics are missing -- the caller should treat None as "unknown"
+        and not fail. Mean falls back to 0.0 to preserve the legacy
+        ParseVMAFScore behavior.
+        """
+        Result = {
+            'Mean': 0.0,
+            'Min': None, 'Max': None, 'HarmonicMean': None, 'StdDev': None,
+            'P1': None, 'P5': None, 'P10': None, 'P25': None,
+        }
+        try:
+            import xml.etree.ElementTree as ET
+            if not os.path.exists(XmlPath):
+                LoggingService.LogWarning(f"VMAF XML not found: {XmlPath}",
+                                          "QualityTestingBusinessService", "ParseVMAFMetrics")
+                return Result
+            Tree = ET.parse(XmlPath)
+            Root = Tree.getroot()
+
+            # Pooled metrics (the easy ones libvmaf already computed).
+            Pooled = Root.find('.//pooled_metrics/metric[@name="vmaf"]')
+            if Pooled is None:
+                Pooled = Root.find('.//metric[@name="vmaf"]')
+            if Pooled is not None:
+                for Key, Attr in (('Mean', 'mean'), ('Min', 'min'),
+                                  ('Max', 'max'), ('HarmonicMean', 'harmonic_mean')):
+                    Val = Pooled.get(Attr)
+                    if Val is not None:
+                        try:
+                            Result[Key] = float(Val)
+                        except (TypeError, ValueError):
+                            pass
+
+            # Per-frame -> stddev + percentiles. libvmaf doesn't compute
+            # these directly; we derive from the per-frame scores.
+            PerFrame = []
+            for F in Root.findall('.//frame'):
+                Vmaf = F.get('vmaf')
+                if Vmaf is not None:
+                    try:
+                        PerFrame.append(float(Vmaf))
+                    except (TypeError, ValueError):
+                        pass
+            if PerFrame:
+                Sorted_ = sorted(PerFrame)
+                N = len(Sorted_)
+                Mean = sum(PerFrame) / N
+                Variance = sum((X - Mean) ** 2 for X in PerFrame) / N
+                Result['StdDev'] = Variance ** 0.5
+                for Key, Pct in (('P1', 0.01), ('P5', 0.05), ('P10', 0.10), ('P25', 0.25)):
+                    Idx = max(0, min(N - 1, int(Pct * N)))
+                    Result[Key] = Sorted_[Idx]
+        except Exception as Ex:
+            LoggingService.LogException("Error parsing VMAF metrics", Ex,
+                                        "QualityTestingBusinessService", "ParseVMAFMetrics")
+        return Result
 
     def ParseVMAFScore(self, Output: str) -> float:
         """Parse VMAF score from FFmpeg output."""
@@ -961,8 +1033,17 @@ class QualityTestingBusinessService:
             LoggingService.LogException("Error parsing FFmpeg progress line", e, "QualityTestingBusinessService", "ParseFFmpegProgressLine")
             return None
 
-    def UpdateQualityTestResultsWithScore(self, ResultId: int, VMAFScore: float, FFmpegResult):
-        """Update QualityTestResults record with VMAF score and test results."""
+    def UpdateQualityTestResultsWithScore(self, ResultId: int, VMAFScore: float, FFmpegResult, Metrics: dict = None):
+        """Update QualityTestResults with VMAF mean + detail metrics.
+
+        `Metrics` is the dict returned by ParseVMAFMetrics: Min, Max,
+        HarmonicMean, StdDev, P1, P5, P10, P25. When None (legacy callers),
+        only the mean (VMAFScore) is written and the detail columns stay
+        NULL. New writers should pass Metrics so the per-run statistics
+        get captured -- distribution shape is what makes "where did this
+        VMAF run actually struggle?" queryable from the DB instead of
+        requiring re-analysis from a since-overwritten XML file.
+        """
         try:
             CurrentTime = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
 
@@ -981,6 +1062,7 @@ class QualityTestingBusinessService:
                                and VMAFScore <= float(GateConfig.VmafAutoReplaceMaxThreshold))
             Rank = 1 if PassesThreshold else 0
 
+            M = Metrics or {}
             Query = """
                 UPDATE QualityTestResults
                 SET VMAFScore = %s,
@@ -988,7 +1070,15 @@ class QualityTestingBusinessService:
                     PassesThreshold = %s,
                     Rank = %s,
                     DateTested = %s,
-                    Status = 'Success'
+                    Status = 'Success',
+                    VMAFMin = %s,
+                    VMAFMax = %s,
+                    VMAFHarmonicMean = %s,
+                    VMAFStdDev = %s,
+                    VMAFP1 = %s,
+                    VMAFP5 = %s,
+                    VMAFP10 = %s,
+                    VMAFP25 = %s
                 WHERE Id = %s
             """
 
@@ -998,6 +1088,8 @@ class QualityTestingBusinessService:
                 PassesThreshold,
                 Rank,
                 CurrentTime,
+                M.get('Min'), M.get('Max'), M.get('HarmonicMean'), M.get('StdDev'),
+                M.get('P1'), M.get('P5'), M.get('P10'), M.get('P25'),
                 ResultId
             ))
 
