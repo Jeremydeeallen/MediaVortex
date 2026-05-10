@@ -1,4 +1,4 @@
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 from datetime import datetime, timezone
 import os
 from Features.TranscodeQueue.Models.TranscodeQueueModel import TranscodeQueueModel
@@ -6,6 +6,9 @@ from Core.Models.MediaFileModel import MediaFileModel
 from Features.Profiles.Models.ProfileThresholdModel import ProfileThresholdModel
 from Features.Profiles.Models.TranscodeProfileModel import TranscodeProfileModel
 from Features.TranscodeQueue.TranscodeQueueRepository import TranscodeQueueRepository
+from Features.TranscodeQueue.CrfBitrateEstimateRepository import CrfBitrateEstimateRepository
+from Features.TranscodeQueue.QueueAdmissionConfigRepository import QueueAdmissionConfigRepository
+from Features.TranscodeQueue.CodecCompatibilityRepository import CodecCompatibilityRepository
 from Core.Logging.LoggingService import LoggingService
 from Services.FileManagerService import FileManagerService
 from Repositories.DatabaseManager import DatabaseManager
@@ -14,19 +17,21 @@ from Repositories.DatabaseManager import DatabaseManager
 class QueueManagementBusinessService:
     """Handles transcoding queue operations and population logic."""
 
-    # Compliance evaluation constants. See transcode-vs-remux-routing.feature.md.
-    # MIN_SAVINGS_MB and COMPATIBLE_CONTAINERS will move to SystemSettings in a
-    # follow-up; hardcoded here to keep the initial cascade landing surgical.
-    MIN_SAVINGS_MB = 150
-    COMPATIBLE_CONTAINERS = frozenset({'mp4', 'mov', 'm4v'})
-    ACCEPTABLE_VIDEO_CODECS = frozenset({'h264', 'hevc', 'av1'})
-    MP4_COMPATIBLE_AUDIO_CODECS = frozenset({'aac', 'ac3', 'eac3', 'mp3'})
+    # Resolution rank used by the compliance cascade for "is this a downscale?".
+    # Codec/container/audio acceptability and the savings threshold moved to
+    # normalized DB tables (CodecCompatibility, QueueAdmissionConfig) -- see
+    # marginal-savings-gate.feature.md.
     RESOLUTION_RANK = {'480p': 0, '720p': 1, '1080p': 2, '2160p': 3}
 
     def __init__(self, RepositoryInstance: TranscodeQueueRepository = None):
         self.Repository = RepositoryInstance or TranscodeQueueRepository()
         self.DatabaseManager = DatabaseManager()
         self.FileManager = FileManagerService()
+        # Data-driven gate config (per marginal-savings-gate.feature.md). Each
+        # call site reads fresh from these repositories; no in-memory caching.
+        self.CrfBitrateEstimateRepo = CrfBitrateEstimateRepository()
+        self.QueueAdmissionConfigRepo = QueueAdmissionConfigRepository()
+        self.CodecCompatibilityRepo = CodecCompatibilityRepository()
 
     def PopulateQueueFromMediaFiles(self, RootFolderPath: str = None, ProfileId: int = None, CompatibilityOnly: bool = False) -> Dict[str, Any]:
         """Populate transcoding queue from MediaFiles that have assigned profiles, ordered by largest disk space."""
@@ -81,6 +86,10 @@ class QueueManagementBusinessService:
             itemsSkippedDueToResolution = 0
             itemsSkippedDueToQuality = 0  # Track files skipped because VMAF >= 80
             itemsSkippedDueToAudio = 0  # Track files skipped because no English audio found
+            # Per-reason counters for the marginal-savings gate (criterion 16).
+            gateCounts = {'Upscale': 0, 'MarginalSavings': 0, 'MissingProfile': 0, 'MissingEstimate': 0}
+            # Load admission config once -- shared across all rows in this run.
+            admissionConfig = self.QueueAdmissionConfigRepo.Get()
 
             for mediaFile in mediaFilesWithProfiles:
                 # Skip if already in queue
@@ -136,13 +145,22 @@ class QueueManagementBusinessService:
                     LoggingService.LogInfo(f"File {mediaFile.FileName} will be retranscoded: Previous VMAF < 80", "QueueManagementBusinessService", "PopulateQueueFromMediaFiles")
                 # else: File not in successfullyTranscodedPaths, proceed with normal queue addition
 
-                # Resolution filtering is already done when RootFolderPath is provided, so skip the check here
-                # Only check resolution if no folder was specified (using old behavior)
+                # Marginal-savings gate (replaces ShouldSkipDueToResolution -- see
+                # marginal-savings-gate.feature.md). Resolution filtering is
+                # already applied when RootFolderPath is set, so this only fires
+                # in the no-folder-specified path.
                 if not RootFolderPath:
-                    shouldSkip, skipReason = self.ShouldSkipDueToResolution(mediaFile, mediaFile.AssignedProfile)
+                    shouldSkip, skipReason = self.EvaluateQueueAdmissionForProfile(
+                        mediaFile, mediaFile.AssignedProfile, AdmissionConfig=admissionConfig
+                    )
                     if shouldSkip:
                         itemsSkippedDueToResolution += 1
-                        LoggingService.LogInfo(f"Skipped {mediaFile.FileName} due to resolution: {skipReason}", "QueueManagementBusinessService", "PopulateQueueFromMediaFiles")
+                        # Bucket per reason for the rolled-up summary.
+                        for Bucket in gateCounts:
+                            if skipReason.startswith(Bucket):
+                                gateCounts[Bucket] += 1
+                                break
+                        LoggingService.LogInfo(f"Skipped {mediaFile.FileName}: {skipReason}", "QueueManagementBusinessService", "PopulateQueueFromMediaFiles")
                         continue
 
                 # Skip files without confirmed English audio to prevent destructive transcoding
@@ -199,7 +217,14 @@ class QueueManagementBusinessService:
                 "Message": friendlyMessage
             }
 
-            LoggingService.LogInfo(f"Queue population completed: {itemsAdded} added, {itemsSkipped} skipped (duplicate/transcoded), {itemsSkippedDueToQuality} skipped (quality acceptable), {itemsSkippedDueToResolution} skipped (resolution check), {itemsSkippedDueToAudio} skipped (no English audio) from {len(mediaFilesWithProfiles)} files with profiles", "QueueManagementBusinessService", "PopulateQueueFromMediaFiles")
+            LoggingService.LogInfo(f"Queue population completed: {itemsAdded} added, {itemsSkipped} skipped (duplicate/transcoded), {itemsSkippedDueToQuality} skipped (quality acceptable), {itemsSkippedDueToResolution} skipped (gate), {itemsSkippedDueToAudio} skipped (no English audio) from {len(mediaFilesWithProfiles)} files with profiles", "QueueManagementBusinessService", "PopulateQueueFromMediaFiles")
+            # Marginal-savings gate rolled-up summary (criterion 16).
+            LoggingService.LogInfo(
+                f"Marginal-savings gate: {itemsAdded} admitted, {itemsSkippedDueToResolution} blocked "
+                f"(Marginal: {gateCounts['MarginalSavings']}, Upscale: {gateCounts['Upscale']}, "
+                f"MissingEstimate: {gateCounts['MissingEstimate']}, MissingProfile: {gateCounts['MissingProfile']})",
+                "QueueManagementBusinessService", "PopulateQueueFromMediaFiles",
+            )
             return result
 
         except Exception as e:
@@ -622,8 +647,8 @@ class QueueManagementBusinessService:
                 if not mediaFile.Resolution:
                     self.ProbeAndUpdateMissingMetadata(mediaFile)
 
-                # Check resolution using the file's assigned profile
-                shouldSkip, skipReason = self.ShouldSkipDueToResolution(mediaFile, mediaFile.AssignedProfile)
+                # Marginal-savings gate (replaces ShouldSkipDueToResolution).
+                shouldSkip, skipReason = self.EvaluateQueueAdmissionForProfile(mediaFile, mediaFile.AssignedProfile)
                 if shouldSkip:
                     LoggingService.LogDebug(f"Skipping {mediaFile.FileName}: {skipReason}", "QueueManagementBusinessService", "GetMediaFilesByFolderWithResolutionFilterUsingAssignedProfiles")
                     continue
@@ -887,13 +912,14 @@ class QueueManagementBusinessService:
                 # Get profile name from ProfileId
                 profile = self.DatabaseManager.GetProfileById(Threshold.ProfileId)
                 if profile and profile.ProfileName:
-                    shouldSkip, reason = self.ShouldSkipDueToResolution(MediaFile, profile.ProfileName)
+                    # Marginal-savings gate (replaces ShouldSkipDueToResolution).
+                    shouldSkip, reason = self.EvaluateQueueAdmissionForProfile(MediaFile, profile.ProfileName)
                     if shouldSkip:
                         LoggingService.LogDebug(f"Skipped {MediaFile.FileName}: {reason}",
                                                "QueueManagementBusinessService", "EvaluateThresholdCriteria")
                         return False
                 else:
-                    LoggingService.LogWarning(f"Could not get profile name for ProfileId {Threshold.ProfileId}, skipping resolution check",
+                    LoggingService.LogWarning(f"Could not get profile name for ProfileId {Threshold.ProfileId}, skipping admission check",
                                             "QueueManagementBusinessService", "EvaluateThresholdCriteria")
             except Exception as e:
                 LoggingService.LogException("Exception checking resolution skip", e, "QueueManagementBusinessService", "EvaluateThresholdCriteria")
@@ -1235,12 +1261,22 @@ class QueueManagementBusinessService:
         EffectiveProfile: Optional[str],
         Lookup: Dict[tuple, tuple],
         NormalizedIds: set,
+        AcceptableVideoCodecs: Optional[set] = None,
+        AcceptableContainers: Optional[set] = None,
+        AcceptableAudioCodecsMp4: Optional[set] = None,
+        MinSavingsMB: Optional[int] = None,
     ) -> tuple:
         """Pure compliance cascade. Returns (IsCompliant, RecommendedMode).
 
         Mirrors transcode-vs-remux-routing.feature.md criterion 11. None for
         IsCompliant means "undecidable" (hard-block or missing inputs);
         otherwise true/false. RecommendedMode is 'Transcode', 'Remux', or None.
+
+        Codec / container / audio acceptability and the savings threshold are
+        loaded from the data-driven tables (`CodecCompatibility`,
+        `QueueAdmissionConfig`). Callers in tight loops should pass the
+        pre-loaded sets / threshold to avoid per-row DB round-trips. When
+        omitted, this method loads them fresh per call.
         """
         # a. Hard block: no English audio
         if Row.get('HasExplicitEnglishAudio') is False:
@@ -1249,6 +1285,16 @@ class QueueManagementBusinessService:
         # b. Effective profile cannot be resolved
         if not EffectiveProfile:
             return (None, None)
+
+        # Lazy-load gate config when caller didn't provide pre-loaded sets.
+        if AcceptableVideoCodecs is None:
+            AcceptableVideoCodecs = self.CodecCompatibilityRepo.GetAcceptableSet('VideoCodec')
+        if AcceptableContainers is None:
+            AcceptableContainers = self.CodecCompatibilityRepo.GetAcceptableSet('Container')
+        if AcceptableAudioCodecsMp4 is None:
+            AcceptableAudioCodecsMp4 = self.CodecCompatibilityRepo.GetAcceptableSet('AudioCodecMp4')
+        if MinSavingsMB is None:
+            MinSavingsMB = self.QueueAdmissionConfigRepo.Get().MinTranscodeSavingsMB
 
         # Need a resolution category for the lookup key. Prefer the cached
         # ResolutionCategory column; fall back to deriving from raw Resolution
@@ -1269,7 +1315,7 @@ class QueueManagementBusinessService:
 
         # c. Transcode wins -- video codec acceptability, downscale-needed, savings threshold
         VideoCodec = (Row.get('Codec') or '').lower()
-        if VideoCodec and VideoCodec not in self.ACCEPTABLE_VIDEO_CODECS:
+        if VideoCodec and VideoCodec not in AcceptableVideoCodecs:
             return (False, 'Transcode')
 
         # Resolution downscale needed?
@@ -1284,7 +1330,7 @@ class QueueManagementBusinessService:
         if SizeMB > 0 and DurationMin > 0 and (TargetVideoKbps or 0) > 0:
             TargetSizeMB = ((TargetVideoKbps + (TargetAudioKbps or 0)) * DurationMin * 60.0) / (8 * 1024)
             EstSavingsMB = SizeMB - TargetSizeMB
-            if EstSavingsMB >= self.MIN_SAVINGS_MB:
+            if EstSavingsMB >= MinSavingsMB:
                 return (False, 'Transcode')
 
         # d. Remux is enough -- container, audio codec, audio normalization.
@@ -1296,15 +1342,168 @@ class QueueManagementBusinessService:
         AudioCodec = (Row.get('AudioCodec') or '').lower()
         IsNormalized = int(Row.get('Id') or 0) in NormalizedIds
 
-        if ContainerParts and not (ContainerParts & self.COMPATIBLE_CONTAINERS):
+        if ContainerParts and not (ContainerParts & AcceptableContainers):
             return (False, 'Remux')
-        if AudioCodec and AudioCodec not in self.MP4_COMPATIBLE_AUDIO_CODECS:
+        if AudioCodec and AudioCodec not in AcceptableAudioCodecsMp4:
             return (False, 'Remux')
         if not IsNormalized:
             return (False, 'Remux')
 
         # e. Already compliant
         return (True, None)
+
+    # ─── Marginal-savings gate (data-driven queue admission) ──────────────
+    # Owns marginal-savings-gate.feature.md criteria 1-7. Two collaborators:
+    #   EstimateTargetSizeMB -- bitrate formula or CRF lookup
+    #   EvaluateQueueAdmission -- upscale + savings checks against config
+
+    def EstimateTargetSizeMB(
+        self,
+        MediaFile: MediaFileModel,
+        ProfileSettings: Dict[str, Any],
+    ) -> Tuple[Optional[float], bool]:
+        """Estimate the post-transcode size in MB.
+
+        Returns (target_mb, missing_estimate_flag). Branches:
+
+          - Profile.VideoBitrateKbps > 0 -> bitrate formula. Returns (mb, False).
+          - Profile.VideoBitrateKbps == 0 (CRF only) -> CrfBitrateEstimates lookup
+            keyed on (Codec, TargetResolution, Quality/CRF). Found -> (mb, False);
+            not found -> (None, True) -- caller decides admit/block.
+          - DurationMinutes <= 0 -> (None, False). Cannot estimate; not a missing-
+            estimate problem.
+        """
+        if not ProfileSettings:
+            return (None, False)
+
+        Duration = getattr(MediaFile, 'DurationMinutes', None) or 0
+        if Duration <= 0:
+            return (None, False)
+
+        VideoKbps = ProfileSettings.get('VideoBitrateKbps') or 0
+        AudioKbps = ProfileSettings.get('AudioBitrateKbps') or 0
+
+        if VideoKbps > 0:
+            TargetKbps = VideoKbps + (AudioKbps or 0)
+            TargetMB = (TargetKbps * Duration * 60.0) / (8.0 * 1024.0)
+            return (TargetMB, False)
+
+        # CRF-only profile -- look up the empirical estimate for this
+        # (Codec, TargetResolution, CRF) triple.
+        Codec = (ProfileSettings.get('Codec') or '').lower()
+        TargetResolution = ProfileSettings.get('TargetResolution') or ''
+        Crf = ProfileSettings.get('Quality')
+        if not Codec or not TargetResolution or Crf is None:
+            return (None, True)
+
+        # Normalize TargetResolution -- it may be canonical category ('720p')
+        # or a pixel string ('1280x720'). The estimate table keys on category.
+        ResolutionCategory = TargetResolution
+        if 'x' in str(TargetResolution):
+            ResolutionCategory = self._ResolutionCategoryFromPixels(TargetResolution) or TargetResolution
+
+        try:
+            CrfInt = int(Crf)
+        except (TypeError, ValueError):
+            return (None, True)
+
+        EstimatedKbps = self.CrfBitrateEstimateRepo.GetEstimatedKbps(
+            Codec, ResolutionCategory, CrfInt
+        )
+        if EstimatedKbps is None:
+            return (None, True)
+
+        TargetMB = (EstimatedKbps * Duration * 60.0) / (8.0 * 1024.0)
+        return (TargetMB, False)
+
+    def EvaluateQueueAdmission(
+        self,
+        MediaFile: MediaFileModel,
+        ProfileSettings: Dict[str, Any],
+        AdmissionConfig=None,
+    ) -> Tuple[bool, str]:
+        """Decide whether a file should be admitted to the transcode queue.
+
+        Returns (should_block, reason). When should_block is False, reason is
+        empty. When True, reason is one of: 'Upscale', 'MarginalSavings',
+        'MissingProfile', 'MissingEstimate'.
+
+        Replaces ShouldSkipDueToResolution. Same-resolution + sufficient-savings
+        is admitted; only true upscales (source < target) are hard-blocked.
+
+        AdmissionConfig may be passed in for tight-loop callers; otherwise
+        loaded fresh per call.
+        """
+        if not ProfileSettings:
+            return (True, 'MissingProfile')
+
+        if AdmissionConfig is None:
+            AdmissionConfig = self.QueueAdmissionConfigRepo.Get()
+
+        # 1. Upscale block: source resolution < target resolution.
+        SourceResolution = getattr(MediaFile, 'Resolution', None) or ''
+        TargetResolution = ProfileSettings.get('TargetResolution') or ''
+        if SourceResolution and TargetResolution:
+            try:
+                from Services.ResolutionService import ResolutionService
+                Cmp = ResolutionService().CompareResolutions(SourceResolution, TargetResolution)
+                if Cmp is not None and Cmp < 0:
+                    return (True, f"Upscale (source {SourceResolution} < target {TargetResolution})")
+            except Exception as Ex:
+                LoggingService.LogException(
+                    f"Resolution compare failed for {SourceResolution} vs {TargetResolution}",
+                    Ex, "QueueManagementBusinessService", "EvaluateQueueAdmission",
+                )
+
+        # 2. Estimated savings gate.
+        TargetMB, MissingEstimate = self.EstimateTargetSizeMB(MediaFile, ProfileSettings)
+        if MissingEstimate:
+            if AdmissionConfig.MissingEstimatePolicy == 'block':
+                return (True, 'MissingEstimate')
+            return (False, '')  # admit fail-open; caller logs rolled-up summary
+
+        if TargetMB is None:
+            # Couldn't estimate (e.g. duration unknown). Admit -- duration gaps
+            # are surfaced via CalculatePriority's existing fallback warnings.
+            return (False, '')
+
+        SourceMB = getattr(MediaFile, 'SizeMB', None) or 0
+        if SourceMB <= 0:
+            return (False, '')  # no source size to compare against; admit
+
+        EstimatedSavingsMB = SourceMB - TargetMB
+        if EstimatedSavingsMB < AdmissionConfig.MinTranscodeSavingsMB:
+            return (
+                True,
+                f"MarginalSavings (source={SourceMB:.0f}MB target={TargetMB:.0f}MB "
+                f"savings={EstimatedSavingsMB:.0f}MB threshold={AdmissionConfig.MinTranscodeSavingsMB}MB)",
+            )
+
+        return (False, '')
+
+    def EvaluateQueueAdmissionForProfile(
+        self,
+        MediaFile: MediaFileModel,
+        ProfileName: str,
+        AdmissionConfig=None,
+    ) -> Tuple[bool, str]:
+        """Resolve ProfileSettings from ProfileName + MediaFile.Resolution, then
+        delegate to EvaluateQueueAdmission. Convenience wrapper for callers that
+        only have a profile name -- the four queue-admission entry paths.
+        """
+        if not ProfileName or not getattr(MediaFile, 'Resolution', None):
+            return (True, 'MissingProfile')
+        try:
+            ProfileSettings = self.DatabaseManager.GetProfileSettingsForTargetResolution(
+                ProfileName, MediaFile.Resolution
+            )
+        except Exception as Ex:
+            LoggingService.LogException(
+                f"Failed to load ProfileSettings for {ProfileName} / {MediaFile.Resolution}",
+                Ex, "QueueManagementBusinessService", "EvaluateQueueAdmissionForProfile",
+            )
+            return (True, 'MissingProfile')
+        return self.EvaluateQueueAdmission(MediaFile, ProfileSettings or {}, AdmissionConfig)
 
     def ComputePriorityScore(self, MediaFileId: int) -> Optional[int]:
         """Recompute and persist MediaFiles.PriorityScore for a single file.
@@ -1378,6 +1577,11 @@ class QueueManagementBusinessService:
             DefaultProfile = self._LoadDefaultProfileName()
             ShowOverrides = self._LoadShowProfileOverrides()
             NormalizedIds = self._LoadAudioNormalizedSet(MediaFileIds)
+            # Gate config -- load once, pass through to _EvaluateCompliance per row.
+            AcceptableVideoCodecs = self.CodecCompatibilityRepo.GetAcceptableSet('VideoCodec')
+            AcceptableContainers = self.CodecCompatibilityRepo.GetAcceptableSet('Container')
+            AcceptableAudioCodecsMp4 = self.CodecCompatibilityRepo.GetAcceptableSet('AudioCodecMp4')
+            MinSavingsMB = self.QueueAdmissionConfigRepo.Get().MinTranscodeSavingsMB
 
             placeholders = ','.join(['%s'] * len(MediaFileIds))
             rows = db.ExecuteQuery(
@@ -1425,9 +1629,14 @@ class QueueManagementBusinessService:
                         SuppressFallbackWarning=True,
                     )
 
-                    # Compliance evaluation
+                    # Compliance evaluation -- pre-loaded gate config keeps
+                    # this loop's DB round-trips bounded.
                     IsCompliant, RecommendedMode = self._EvaluateCompliance(
-                        r, EffectiveProfile, Lookup, NormalizedIds
+                        r, EffectiveProfile, Lookup, NormalizedIds,
+                        AcceptableVideoCodecs=AcceptableVideoCodecs,
+                        AcceptableContainers=AcceptableContainers,
+                        AcceptableAudioCodecsMp4=AcceptableAudioCodecsMp4,
+                        MinSavingsMB=MinSavingsMB,
                     )
 
                     updates.append((
@@ -1532,18 +1741,18 @@ class QueueManagementBusinessService:
                 LoggingService.LogWarning(errorMsg, "QueueManagementBusinessService", "AddJobToQueue")
                 return {"Success": False, "ErrorMessage": errorMsg}
 
-            # Check if should skip due to resolution (allow "No downscaling" for manual assignment)
-            # Only skip "No downscaling" if not manually assigned (ProfileId is None means batch processing)
+            # Marginal-savings gate (replaces ShouldSkipDueToResolution). The
+            # ForceAdd path bypasses the gate entirely so an operator can pin
+            # a same-resolution compression-only re-encode through the manual
+            # /AddJob endpoint regardless of estimated savings.
             if not ForceAdd:
-                skipNoDownscaling = ProfileId is None  # Only skip "No downscaling" if not manually assigned
-                useShowSettings = ProfileId is None  # Don't override with ShowSettings when user explicitly picked a profile
-                shouldSkip, skipReason = self.ShouldSkipDueToResolution(mediaFile, mediaFile.AssignedProfile, SkipNoDownscaling=skipNoDownscaling, UseShowSettings=useShowSettings)
+                shouldSkip, skipReason = self.EvaluateQueueAdmissionForProfile(mediaFile, mediaFile.AssignedProfile)
                 if shouldSkip:
                     errorMsg = f"Cannot add {mediaFile.FileName} to queue: {skipReason}"
                     LoggingService.LogInfo(errorMsg, "QueueManagementBusinessService", "AddJobToQueue")
                     return {"Success": False, "ErrorMessage": errorMsg, "CanOverride": True}
             else:
-                LoggingService.LogWarning(f"Force adding {mediaFile.FileName} to queue (resolution check overridden)", "QueueManagementBusinessService", "AddJobToQueue")
+                LoggingService.LogWarning(f"Force adding {mediaFile.FileName} to queue (admission gate overridden)", "QueueManagementBusinessService", "AddJobToQueue")
 
             # Check for previous attempts and validate CRF adjustment
             from Services.AdaptiveQualityService import AdaptiveQualityService
@@ -1856,97 +2065,11 @@ class QueueManagementBusinessService:
             LoggingService.LogException(f"Exception probing metadata for {MediaFile.FileName}", e, "QueueManagementBusinessService", "ProbeAndUpdateMissingMetadata")
             return False
 
-    def ShouldSkipDueToResolution(self, MediaFile: MediaFileModel, ProfileName: str, SkipNoDownscaling: bool = True, UseShowSettings: bool = True) -> tuple[bool, str]:
-        """
-        Check if a media file should be skipped due to resolution being equal to or less than target.
-
-        Args:
-            MediaFile: The media file to check
-            ProfileName: The assigned profile name
-            SkipNoDownscaling: If True, skip files when profile has "No downscaling" setting.
-                              If False, allow transcoding even with "No downscaling" (for manual assignments).
-                              Default: True (backward compatible behavior)
-            UseShowSettings: If True, allow ShowSettings to override the profile's target resolution.
-                            If False, use only the profile's target resolution (for manual profile selection).
-                            Default: True
-
-        Returns:
-            Tuple of (should_skip: bool, reason: str)
-        """
-        try:
-            LoggingService.LogFunctionEntry("ShouldSkipDueToResolution", "QueueManagementBusinessService", MediaFile.FileName, ProfileName)
-
-            # Get profile by name first, then get thresholds by ProfileId
-            allProfiles = self.DatabaseManager.GetAllProfiles()
-            matchingProfile = next((p for p in allProfiles if p.ProfileName == ProfileName), None)
-
-            if not matchingProfile:
-                reason = f"Profile {ProfileName} not found in database"
-                LoggingService.LogError(f"Cannot determine resolution skip for {MediaFile.FileName}: {reason}", "QueueManagementBusinessService", "ShouldSkipDueToResolution")
-                return True, reason  # Skip on error - fail safe by not processing
-
-            # Get profile thresholds for this file's resolution
-            profileThresholds = self.DatabaseManager.GetThresholdsByProfileId(matchingProfile.Id)
-            if not profileThresholds:
-                reason = f"No profile thresholds found for profile {ProfileName}"
-                LoggingService.LogError(f"Cannot determine resolution skip for {MediaFile.FileName}: {reason}", "QueueManagementBusinessService", "ShouldSkipDueToResolution")
-                return True, reason  # Skip on error - fail safe by not processing
-
-            # Find matching threshold for the file's resolution
-            from Services.ResolutionService import ResolutionService
-            resolutionService = ResolutionService()
-            matchingThreshold = resolutionService.FindMatchingThreshold(MediaFile.Resolution or "", profileThresholds)
-
-            if not matchingThreshold:
-                reason = f"No matching threshold found for resolution {MediaFile.Resolution} in profile {ProfileName}"
-                LoggingService.LogError(f"Cannot determine resolution skip for {MediaFile.FileName}: {reason}", "QueueManagementBusinessService", "ShouldSkipDueToResolution")
-                return True, reason  # Skip on error - fail safe by not processing
-
-            # Get the target resolution (TranscodeDownTo)
-            targetResolution = matchingThreshold.TranscodeDownTo or ""
-
-            # Check ShowSettings for per-show target resolution override (only for batch/auto processing)
-            if UseShowSettings:
-                try:
-                    from Features.ShowSettings.ShowSettingsRepository import ShowSettingsRepository
-                    ShowSettingsRepo = ShowSettingsRepository()
-                    ShowTargetResolution = ShowSettingsRepo.GetTargetResolutionForFile(MediaFile.FilePath)
-                    if ShowTargetResolution:
-                        LoggingService.LogInfo(f"ShowSettings override for {MediaFile.FileName}: target resolution '{targetResolution}' -> '{ShowTargetResolution}'", "QueueManagementBusinessService", "ShouldSkipDueToResolution")
-                        targetResolution = ShowTargetResolution
-                except Exception:
-                    pass  # ShowSettings table may not exist yet; fall through to profile default
-
-            # Handle "No downscaling" case - only skip if SkipNoDownscaling is True (batch processing)
-            # When SkipNoDownscaling is False (manual assignment), allow transcoding even with "No downscaling"
-            if SkipNoDownscaling and (not targetResolution or targetResolution.strip() == "" or targetResolution.lower() == "no downscaling"):
-                reason = f"Profile {ProfileName} has 'No downscaling' setting - no benefit to transcode"
-                LoggingService.LogInfo(f"Skipped {MediaFile.FileName}: {reason}", "QueueManagementBusinessService", "ShouldSkipDueToResolution")
-                return True, reason
-
-            # Compare source vs target resolution
-            sourceResolution = MediaFile.Resolution or ""
-            comparison = resolutionService.CompareResolutions(sourceResolution, targetResolution)
-
-            # If comparison cannot be determined, skip to be safe
-            if comparison is None:
-                reason = f"Cannot compare resolutions: source={sourceResolution}, target={targetResolution}"
-                LoggingService.LogError(f"Cannot determine resolution skip for {MediaFile.FileName}: {reason}", "QueueManagementBusinessService", "ShouldSkipDueToResolution")
-                return True, reason  # Skip on error - fail safe by not processing
-
-            if comparison <= 0:  # Source <= target
-                reason = f"Source resolution {sourceResolution} is <= target resolution {targetResolution}"
-                LoggingService.LogInfo(f"Skipped {MediaFile.FileName}: {reason}", "QueueManagementBusinessService", "ShouldSkipDueToResolution")
-                return True, reason
-
-            # Source > target, should transcode
-            LoggingService.LogDebug(f"File {MediaFile.FileName} will be added to queue: source {sourceResolution} > target {targetResolution}", "QueueManagementBusinessService", "ShouldSkipDueToResolution")
-            return False, ""
-
-        except Exception as e:
-            reason = f"Exception checking resolution skip: {str(e)}"
-            LoggingService.LogException(f"Cannot determine resolution skip for {MediaFile.FileName}", e, "QueueManagementBusinessService", "ShouldSkipDueToResolution")
-            return True, reason  # Skip on error - fail safe by not processing
+    # ShouldSkipDueToResolution removed 2026-05-10 -- replaced by
+    # EvaluateQueueAdmissionForProfile / EvaluateQueueAdmission per
+    # marginal-savings-gate.feature.md. Same-resolution + sufficient-savings
+    # is now admitted; only true upscales and marginal-savings cases are
+    # blocked.
 
     def GetMkvFileCount(self) -> int:
         """Get count of MKV files in the database."""
