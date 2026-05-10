@@ -2,6 +2,25 @@
 
 ## Open
 
+### [BUG] QueueManagementBusinessService.py Cursor-era cleanup backlog
+**Date:** 2026-05-10
+**Affects:** `Features/TranscodeQueue/QueueManagementBusinessService.py` (2,064 LOC, 35 methods)
+
+Pre-claude-rails (Cursor-written) patterns that the marginal-savings-gate feature explicitly DID NOT clean up to keep its scope tight. Recorded here so they're not lost:
+
+1. **Class is too big.** 2,064 LOC across 7 distinct concerns: queue population, priority calculation, compliance evaluation, recompute, job add/remove, statistics, subtitle-fix population. Fold into smaller services, one per concern.
+2. **Silent except blocks** at lines 548-549, 567-568, 1485-1493 (and others). Pattern: `except Exception: pass` with a comment justifying defensiveness. Violates the Phase 2a loud-failure rule. Sweep to `LogException` + re-raise or `LogWarning` with explicit reason.
+3. **`LogFunctionEntry(...)` boilerplate** at almost every public method's first line. Useful in early dev, log-spam at scale. Remove or gate on `LOG_LEVEL=DEBUG`.
+4. **Boilerplate docstrings** that restate the function name (e.g. line 32 docstring "Populate transcoding queue from MediaFiles..." on `PopulateQueueFromMediaFiles`). CLAUDE.md says "default to writing no comments." Sweep to remove redundant docstrings; keep only ones with WHY content.
+5. **Conditional imports inside try blocks** (e.g. line 546). Defensive against modules that always exist. Move to top-level imports.
+6. **Legacy `self.DatabaseManager` use** -- 30 call sites of `Repositories/DatabaseManager.py` instead of the feature-local `TranscodeQueueRepository`. The marginal-savings gate replaces this only inside its own touched paths (~5 call sites); remaining 25+ are legacy code paths that need migration to the vertical-slice repo per `KNOWN-ISSUES.md:146`.
+
+**Look first:** `Features/TranscodeQueue/QueueManagementBusinessService.py` -- start with the function-list scan to plan the split, then attack one concern at a time.
+
+**Fix with:** `/n` (this is a refactor, not a single bug -- needs its own feature doc + criteria, especially around the class split which has API-surface implications)
+
+---
+
 ### [BUG - FIXED 2026-05-09] File scanner runs on whichever worker has ScanEnabled, not the one with fastest storage access
 **Date:** 2026-05-09 | **Fixed:** 2026-05-09 (host-affinity column + per-rootfolder claim guard + cap as SystemSetting)
 **Affects:** `Features/FileScanning/FileScanningBusinessService.py` (`DetectMovedFiles`, `CleanupMissingFiles`, `ProcessMediaFilesWithMetadata`), `Features/FileScanning/ContinuousScanService.py`, `FileScanning.feature.md` criteria 11 and 12, `FileScanning.flow.md` "Continuous Mode Specifics"

@@ -117,13 +117,13 @@ See `Features/TranscodeQueue/priority-materialization.feature.md` for criteria.
   2. Previously transcoded with VMAF >= 80? Skip
   3. Previously transcoded with VMAF < 80? Check CRF adjustment. If adjusted CRF < 15 floor -> log to ProblemFiles, skip
   4. `HasExplicitEnglishAudio = false`? Skip (NULL is allowed through)
-  5. Resolution <= target TranscodeDownTo? Skip
+  5. **Marginal-savings gate** (new behaviour, criterion-tracked in `marginal-savings-gate.feature.md`): admit when source resolution >= target resolution AND estimated savings >= `SystemSettings('MinTranscodeSavingsMB')`. Same-resolution-target combinations (e.g. 720p -> 720p with a slower preset / lower CRF) are admitted as long as savings clear the threshold. Upscales (source < target) are always blocked.
 - Creates TranscodeQueueModel, saves to TranscodeQueue
 
 **QueueByFolder code path** (Media page `+` button):
 - `Features/ShowSettings/ShowSettingsController.py` -> `QueueByFolder()`
 - SQL query filters: not transcoded, not in queue, `HasExplicitEnglishAudio IS NULL OR true`, SizeMB > 0
-- Passes to `AddSuggestionsToQueue()` which assigns profile and creates queue items
+- Passes to `AddSuggestionsToQueue()` which assigns profile and consults the marginal-savings gate before inserting queue rows.
 
 **Tables written:** TranscodeQueue (new items), ProblemFiles (if CRF adjustment fails)
 
@@ -131,10 +131,31 @@ See `Features/TranscodeQueue/priority-materialization.feature.md` for criteria.
 - **Audio language** (CRITICAL): files with `HasExplicitEnglishAudio = false` blocked at all queue paths
 - **VMAF quality gate**: files with VMAF >= 80 not re-transcoded
 - **CRF floor**: adjusted CRF cannot go below 15; files logged to ProblemFiles
-- **Resolution filtering**: source must be > target resolution (full populate path only)
+- **Marginal-savings gate** (`marginal-savings-gate.feature.md`): see below.
 - **Dedup**: files already in queue are skipped
 - **No-savings filter**: files with `MediaFiles.LastTranscodeOutcome = 'NoSavings'` are blocked from re-queueing at all entry paths (set by Stage 7 post-flight gate)
-- **Pre-flight benefit gate** (no-benefit-handling.feature.md): every queue-item creation computes estimated savings; entries below `SystemSetting('MinTranscodeSavingsMB')` (default 150) are either flipped to `Mode='Remux'` (when source container is not in the compatible list) or skipped entirely (when container is already streaming-friendly). Stops workers from spending CPU on files that won't shrink.
+
+**Marginal-savings gate (estimated bytes saved):**
+
+Replaces the legacy "source must be strictly greater than target resolution" filter. The new evaluator returns `(admit, reason)` per file. Block reasons: `Upscale`, `MarginalSavings`, `MissingProfile`.
+
+Estimated target size formula:
+
+| Profile shape | Formula | Notes |
+|---|---|---|
+| `ProfileThresholds.VideoBitrateKbps > 0` | `target_mb = ((video_kbps + audio_kbps) * duration_min * 60) / (8 * 1024)` | Same formula as `CalculatePriority`. Used for fixed-bitrate profiles. |
+| `ProfileThresholds.VideoBitrateKbps = 0` (CRF only) | `target_mb = (CrfBitrateEstimates.EstimatedKbps * duration_min * 60) / (8 * 1024)` | Lookup keyed on `(Codec, TargetResolution, CRF)`. The estimate table is normalized, GUI-editable, and seeded from observed `TranscodeAttempts` averages. |
+| Estimate row missing for `(Codec, Resolution, CRF)` | (no estimate computed) | Gate **fails open** -- file admitted, single `WARNING` logged per missing key per populate run. |
+
+Configuration knobs (data-driven, all in **dedicated normalized tables -- not the legacy SystemSettings KV store**, all GUI-editable on the `/settings` page in the "Queue Tuning" card):
+
+| Knob | Storage | Default |
+|---|---|---|
+| Threshold | `QueueAdmissionConfig.MinTranscodeSavingsMB` (single-row config, `Id=1` CHECK) | 150 |
+| Missing-estimate policy | `QueueAdmissionConfig.MissingEstimatePolicy` | `'admit'` (fail-open) |
+| CRF -> bitrate estimates | `CrfBitrateEstimates` table, columns `(Id, Codec, Resolution, Crf, EstimatedKbps, LastUpdated, Source)` | seeded from `TranscodeAttempts` history on migration |
+
+Both tables are read fresh per call (no caching, per the standing rule against cached DB-backed settings -- see `memory/feedback_no_cached_db_settings.md`).
 
 **Priority calculation (impact-based, range 1-194):**
 
