@@ -40,11 +40,25 @@ class MediaProbeBusinessService:
             return {'Success': False, 'Message': f'Error: {str(Ex)}'}
 
     def _ExecuteProbe(self, MediaFile: MediaFileModel) -> Dict[str, Any]:
-        """Execute FFprobe against a media file and update the database."""
+        """Execute FFprobe against a media file and update the database.
+
+        MediaFile.FilePath is the canonical (Windows-style) DB path. On Linux
+        workers we translate to the local mount before any fs op (existence
+        check, ffprobe invocation). The MediaFile row stays canonical.
+        """
         FilePath = MediaFile.FilePath
+        # Canonical -> local for fs/ffprobe access. No-op on Windows or when
+        # WorkerContext has no share mappings.
         try:
-            if not os.path.exists(FilePath):
-                ErrorMsg = f"File does not exist on disk: {FilePath}"
+            from Core.WorkerContext import WorkerContext
+            _Ctx = WorkerContext.Current()
+            LocalPath = (_Ctx.PathTranslation.ToLocalPath(FilePath)
+                         if (_Ctx and _Ctx.PathTranslation) else FilePath)
+        except Exception:
+            LocalPath = FilePath
+        try:
+            if not os.path.exists(LocalPath):
+                ErrorMsg = f"File does not exist on disk: {FilePath} (local: {LocalPath})"
                 LoggingService.LogWarning(ErrorMsg, "MediaProbeBusinessService", "_ExecuteProbe")
                 self.Repository.RecordProbeFailure(MediaFile.Id, ErrorMsg)
                 return {'Success': False, 'Message': ErrorMsg}
@@ -52,8 +66,8 @@ class MediaProbeBusinessService:
             if not self.FileManager.IsMediaAnalysisAvailable():
                 return {'Success': False, 'Message': 'FFprobe is not available'}
 
-            # Run FFprobe via FileManagerService
-            MetadataResult = self.FileManager.ExtractMediaMetadata(FilePath)
+            # Run FFprobe via FileManagerService against the local path.
+            MetadataResult = self.FileManager.ExtractMediaMetadata(LocalPath)
 
             if MetadataResult.get('Success', False):
                 # Apply metadata to model

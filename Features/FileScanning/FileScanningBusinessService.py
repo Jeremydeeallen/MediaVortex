@@ -657,7 +657,8 @@ class FileScanningBusinessService:
                 # Check for fuzzy match criteria
                 if self.IsFuzzyMatch(FileShowInfo, DbShowInfo, FileSizeMB, DbFile.SizeMB):
                     # Only update if old file doesn't exist on filesystem
-                    if not os.path.exists(DbFile.FilePath):
+                    # (translate canonical -> local for the fs check)
+                    if not os.path.exists(self._ToLocalPath(DbFile.FilePath)):
                         return DbFile
                     else:
                         return None
@@ -669,38 +670,38 @@ class FileScanningBusinessService:
             return None
 
     def ProcessSingleMediaFile(self, FilePath: str, RootFolderId: Optional[int], RootFolderPath: str = "", ExtractMetadata: bool = True):
-        """Process a single media file with fuzzy matching and optional metadata extraction."""
+        """Process a single media file with fuzzy matching and optional metadata extraction.
+
+        FilePath is the canonical (Windows-style) path stored in the DB. On Linux
+        containers, fs ops use LocalPath (translated via WorkerContext); DB lookups
+        and inserts use the canonical FilePath so MediaFiles rows stay portable.
+        """
         try:
-            # Normalize the path upfront so all lookups and inserts use the same canonical path
-            # This prevents duplicates caused by path normalization differences between
-            # GetMediaFileByPath (raw path) and SaveMediaFile (normalized path)
+            # Canonicalize path string for DB consistency (lookups vs inserts).
             FilePath = os.path.normpath(FilePath)
+            LocalPath = self._ToLocalPath(FilePath)
 
-            # First check if the file actually exists on disk
-            if not os.path.exists(FilePath):
-                LoggingService.LogWarning(f"File does not exist on disk: {FilePath}", 'ProcessSingleMediaFile', 'FileScanningBusinessService')
+            # Existence check uses the translated local path.
+            if not os.path.exists(LocalPath):
+                LoggingService.LogWarning(f"File does not exist on disk: {FilePath} (local: {LocalPath})", 'ProcessSingleMediaFile', 'FileScanningBusinessService')
 
-                # Check if there's a database entry for this file path and delete it
                 ExistingFile = self.Repository.GetMediaFileByPath(FilePath)
                 if ExistingFile:
                     LoggingService.LogInfo(f"Deleting database entry for missing file: {FilePath} (ID: {ExistingFile.Id})", 'ProcessSingleMediaFile', 'FileScanningBusinessService')
                     self.Repository.DeleteMediaFile(ExistingFile.Id)
-                    LoggingService.LogInfo(f"Successfully deleted database entry for missing file: {FilePath}", 'ProcessSingleMediaFile', 'FileScanningBusinessService')
                 else:
                     LoggingService.LogDebug(f"No database entry found for missing file: {FilePath}", 'ProcessSingleMediaFile', 'FileScanningBusinessService')
 
-                # Don't process further if file doesn't exist
                 return
 
-            # Get file information (FAST - no ffprobe yet)
-            FileSizeMB = self.FileManager.GetFileSizeMB(FilePath)
+            # Filesystem reads use LocalPath; DB writes use canonical FilePath.
+            FileSizeMB = self.FileManager.GetFileSizeMB(LocalPath)
             FileName = self.FileManager.GetFileNameFromPath(FilePath)
-            FileModificationTime = self.GetFileModificationTime(FilePath)
+            FileModificationTime = self.GetFileModificationTime(LocalPath)
 
-            # Get file size in bytes for new FileSize column
             try:
-                FileSize = os.path.getsize(FilePath)
-            except:
+                FileSize = os.path.getsize(LocalPath)
+            except Exception:
                 FileSize = int(FileSizeMB * 1024 * 1024) if FileSizeMB else 0
 
             # Check if this file already exists in database (exact match)
@@ -723,7 +724,7 @@ class FileScanningBusinessService:
 
                     # Extract metadata if requested and not already present
                     if ExtractMetadata and self.ShouldExtractMetadata(ExistingFile):
-                        self.ExtractAndUpdateMetadata(ExistingFile, FilePath)
+                        self.ExtractAndUpdateMetadata(ExistingFile, LocalPath)
 
                     self.Repository.SaveMediaFile(ExistingFile)
                     self.ScanResults.TotalFilesProcessed += 1
@@ -751,7 +752,7 @@ class FileScanningBusinessService:
 
                     # Extract metadata if requested and not already present
                     if ExtractMetadata and self.ShouldExtractMetadata(FuzzyMatch):
-                        self.ExtractAndUpdateMetadata(FuzzyMatch, FilePath)
+                        self.ExtractAndUpdateMetadata(FuzzyMatch, LocalPath)
 
                     self.Repository.SaveMediaFile(FuzzyMatch)
                     self.ScanResults.TotalFilesProcessed += 1
@@ -773,7 +774,7 @@ class FileScanningBusinessService:
                     )
 
                     if ExtractMetadata:
-                        self.ExtractAndUpdateMetadata(NewFile, FilePath)
+                        self.ExtractAndUpdateMetadata(NewFile, LocalPath)
 
                     self.Repository.SaveMediaFile(NewFile)
                     self.ScanResults.TotalFilesProcessed += 1
@@ -1224,9 +1225,10 @@ class FileScanningBusinessService:
                 LoggingService.LogInfo(f"Checking {len(DatabaseFiles)} total database files", 'CleanupMissingFiles', 'FileScanningBusinessService')
 
             # Check each database file to see if it actually exists on disk
+            # Translate canonical (Windows-style) DB path to local for the fs check.
             DeletedCount = 0
             for DbFile in DatabaseFiles:
-                if not os.path.exists(DbFile.FilePath):
+                if not os.path.exists(self._ToLocalPath(DbFile.FilePath)):
                     LoggingService.LogInfo(f"FILE NOT FOUND ON DISK - DELETING FROM DATABASE: {DbFile.FilePath}", 'CleanupMissingFiles', 'FileScanningBusinessService')
 
                     # Delete directly using the database service
@@ -1259,29 +1261,32 @@ class FileScanningBusinessService:
             # Get all root folders
             AllRootFolders = self.Repository.GetAllRootFolders()
 
-            # Search each root folder for matching filename
+            # Search each root folder for matching filename. Translate the
+            # canonical RootFolder path to local for fs ops; convert any found
+            # local path back to canonical before returning so DB stays portable.
             for RootFolder in AllRootFolders:
-                if not os.path.exists(RootFolder.RootFolder):
-                    LoggingService.LogDebug(f"Root folder does not exist: {RootFolder.RootFolder}", 'FindMovedFile', 'FileScanningBusinessService')
+                LocalRoot = self._ToLocalPath(RootFolder.RootFolder)
+                if not os.path.exists(LocalRoot):
+                    LoggingService.LogDebug(f"Root folder does not exist (local: {LocalRoot}): {RootFolder.RootFolder}", 'FindMovedFile', 'FileScanningBusinessService')
                     continue
 
                 try:
-                    # Use os.walk to search for file
-                    for root, dirs, files in os.walk(RootFolder.RootFolder):
+                    for root, dirs, files in os.walk(LocalRoot):
                         for file in files:
                             if file == SearchFileName:
-                                FoundPath = os.path.join(root, file)
+                                FoundLocalPath = os.path.join(root, file)
+                                FoundCanonicalPath = self._ToCanonicalPath(FoundLocalPath)
 
                                 # Skip if this is the original path (not moved)
-                                if FoundPath.lower() == DbFile.FilePath.lower():
+                                if FoundCanonicalPath.lower() == DbFile.FilePath.lower():
                                     continue
 
-                                # Verify it's the same file (size + modification time)
-                                if self.IsSameFile(DbFile, FoundPath):
-                                    LoggingService.LogInfo(f"MOVED FILE FOUND: '{DbFile.FilePath}' -> '{FoundPath}'", 'FindMovedFile', 'FileScanningBusinessService')
+                                # Verify it's the same file (uses local path for fs reads)
+                                if self.IsSameFile(DbFile, FoundLocalPath):
+                                    LoggingService.LogInfo(f"MOVED FILE FOUND: '{DbFile.FilePath}' -> '{FoundCanonicalPath}'", 'FindMovedFile', 'FileScanningBusinessService')
                                     return {
                                         'OldPath': DbFile.FilePath,
-                                        'NewPath': FoundPath
+                                        'NewPath': FoundCanonicalPath,
                                     }
 
                 except Exception as e:
@@ -1346,9 +1351,9 @@ class FileScanningBusinessService:
                     'Reason': f'File count exceeds limit ({len(DatabaseFiles)} > {MaxFiles})'
                 }
 
-            # Check each file for moves
+            # Check each file for moves (translate canonical -> local for fs check)
             for DbFile in DatabaseFiles:
-                if not os.path.exists(DbFile.FilePath):
+                if not os.path.exists(self._ToLocalPath(DbFile.FilePath)):
                     # File missing - try to find it
                     MovedFile = self.FindMovedFile(DbFile)
 
