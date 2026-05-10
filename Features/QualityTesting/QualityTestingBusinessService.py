@@ -1091,6 +1091,15 @@ class QualityTestingBusinessService:
                         f"(VMAF={VmafScore}, Min={MinThreshold})",
                         "QualityTestingBusinessService", "_HandleRequeueDisposition",
                     )
+
+            # 4. Delete the TemporaryFilePaths handoff row -- it has no purpose
+            # once the disposition is final. Replace path does the equivalent
+            # via FileReplacementBusinessService._CleanupTemporaryFilePaths;
+            # symmetric cleanup keeps the table from accumulating stale rows.
+            self.DatabaseManager.DatabaseService.ExecuteNonQuery(
+                "DELETE FROM TemporaryFilePaths WHERE TranscodeAttemptId = %s",
+                (TranscodeAttemptId,),
+            )
         except Exception as Ex:
             LoggingService.LogException(
                 f"_HandleRequeueDisposition failed for TranscodeAttempt {TranscodeAttemptId}",
