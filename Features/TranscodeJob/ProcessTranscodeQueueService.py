@@ -13,7 +13,7 @@ from Features.TranscodeJob.TranscodingFileManagerService import TranscodingFileM
 from Services.CommandBuilderService import CommandBuilderService
 from Features.TranscodeJob.VideoTranscodingService import VideoTranscodingService
 from Services.QueueManagementService import QueueManagementService
-from Services.ShouldQualityTestService import ShouldQualityTestService
+from Features.QualityTesting.PostTranscodeDispositionService import PostTranscodeDispositionService
 from Core.Logging.LoggingService import LoggingService
 
 
@@ -26,7 +26,7 @@ class ProcessTranscodeQueueService:
                  CommandBuilderInstance: CommandBuilderService = None,
                  VideoTranscodingInstance: VideoTranscodingService = None,
                  QueueManagementInstance: QueueManagementService = None,
-                 ShouldQualityTestInstance: ShouldQualityTestService = None,
+                 DispositionInstance: PostTranscodeDispositionService = None,
                  WorkerName: str = None,
                  WorkerConfig: dict = None):
         self.DatabaseManager = DatabaseManagerInstance or DatabaseManager()
@@ -34,7 +34,9 @@ class ProcessTranscodeQueueService:
         self.CommandBuilder = CommandBuilderInstance or CommandBuilderService()
         self.VideoTranscoding = VideoTranscodingInstance or VideoTranscodingService()
         self.QueueManagement = QueueManagementInstance or QueueManagementService(DatabaseManagerInstance=self.DatabaseManager)
-        self.ShouldQualityTest = ShouldQualityTestInstance  # Set after PathTranslation is initialized
+        # Unified post-transcode disposition (replaces ShouldQualityTestService).
+        # See Features/QualityTesting/post-transcode-disposition.feature.md.
+        self.Disposition = DispositionInstance or PostTranscodeDispositionService(self.DatabaseManager)
 
         # Worker identity for distributed transcoding
         import socket
@@ -96,13 +98,11 @@ class ProcessTranscodeQueueService:
         RawAccepts = self.WorkerConfig.get('AcceptsInterlaced') or self.WorkerConfig.get('acceptsinterlaced')
         self.AcceptsInterlaced = RawAccepts if RawAccepts is not None else True
 
-        # VMAF quality test: per-worker override (NULL = use global setting)
-        RawWorkerQT = self.WorkerConfig.get('QualityTestEnabled') or self.WorkerConfig.get('qualitytestenabled')
-        self.WorkerQualityTestEnabled = RawWorkerQT  # None means "use global"
-
-        # ShouldQualityTest reads PathTranslation and FFprobePath from WorkerContext automatically
-        if not self.ShouldQualityTest:
-            self.ShouldQualityTest = ShouldQualityTestService()
+        # Per-worker QualityTestEnabled is no longer cached on this service
+        # instance -- the disposition function reads ServiceStatus and the
+        # gate config fresh per call. Per-worker capability still gates which
+        # workers claim VMAF jobs (handled by ProcessQualityTestQueueService),
+        # but it does not influence the per-attempt decision.
 
         # Processing state
         self.IsProcessing = False
@@ -878,14 +878,11 @@ class ProcessTranscodeQueueService:
             # Update TranscodeFiles record
             self.UpdateTranscodeFileRecord(Job.FilePath, TranscodeAttemptId, True, OutputFilePath, NewSizeBytes, MediaFileId=Job.MediaFileId)
 
-            # Skip quality testing - go directly to file replacement
-            # Use ShouldQualityTest with bypass since video is bit-identical
-            QualityTestResult = self.ShouldQualityTest.ProcessTranscodedFile(TranscodeAttemptId, Job.FilePath, OutputFilePath)
-
-            if QualityTestResult.get("Success"):
-                LoggingService.LogInfo(f"Remux file replacement processed for TranscodeAttempt {TranscodeAttemptId}", "ProcessTranscodeQueueService", "HandleRemuxResult")
-            else:
-                LoggingService.LogWarning(f"Remux file replacement issue for TranscodeAttempt {TranscodeAttemptId}: {QualityTestResult.get('Message')}", "ProcessTranscodeQueueService", "HandleRemuxResult")
+            # Decide disposition + act. For remuxes the input row's
+            # QualityTestRequired was set False above, so the disposition
+            # function returns BypassReplace/QualityTestNotRequired and the
+            # dispatcher hands off to FileReplacement.
+            self.DispatchDisposition(TranscodeAttemptId, Job, OutputFilePath)
 
             # Delete job from queue
             self.DatabaseManager.DeleteTranscodeQueueItem(Job.Id)
@@ -906,6 +903,58 @@ class ProcessTranscodeQueueService:
         except Exception as e:
             LoggingService.LogException("Exception getting media file data", e, "ProcessTranscodeQueueService", "GetMediaFileData")
             return None
+
+    def DispatchDisposition(self, TranscodeAttemptId: int, Job: TranscodeQueueModel,
+                            OutputFilePath: str) -> None:
+        """Decide the disposition for a finished transcode and act on it.
+
+        Delegates the decision to PostTranscodeDispositionService (single source
+        of truth). Acts on the result:
+
+          Replace / BypassReplace -> hand off to FileReplacementBusinessService
+          Pending (AwaitingVmaf)   -> enqueue to QualityTestQueue
+          Discard / NoReplace / Requeue -> audit row already committed by the
+            disposition function; staged file remains in StagingDirectory for
+            operator inspection. (Action paths for these are deferred -- the
+            disposition + audit trail give the operator visibility today.)
+
+        Replaces the legacy `ShouldQualityTestService.ProcessTranscodedFile`
+        call. See Features/QualityTesting/post-transcode-disposition.feature.md.
+        """
+        try:
+            Result = self.Disposition.DecidePostTranscodeDisposition(TranscodeAttemptId)
+            Disposition = Result.Disposition
+
+            if Disposition in ('Replace', 'BypassReplace'):
+                from Features.FileReplacement.FileReplacementBusinessService import FileReplacementBusinessService
+                ReplacementService = FileReplacementBusinessService(
+                    self.DatabaseManager,
+                    PathTranslation=self.PathTranslation,
+                    FFprobePath=self.FFprobePath,
+                )
+                ReplacementService.ProcessFileReplacement(TranscodeAttemptId)
+
+            elif Disposition == 'Pending':
+                # AwaitingVmaf -- enqueue VMAF; the QT worker will re-call
+                # DecidePostTranscodeDisposition once the score lands.
+                from Services.QualityTestQueueService import QualityTestQueueService
+                QualityTestQueueService(self.DatabaseManager).AddToQualityTestQueue(TranscodeAttemptId)
+
+            else:
+                # Discard / NoReplace / Requeue: audit row is already committed.
+                # The action layer for these dispositions is intentionally minimal
+                # in this iteration -- staged file persists in StagingDirectory,
+                # operator can query
+                #   SELECT FilePath, Disposition, DispositionReason
+                #   FROM TranscodeAttempts WHERE Disposition='<value>'
+                # and decide manually. Future iterations can wire automatic
+                # cleanup / requeue without changing the disposition contract.
+                pass
+        except Exception as Ex:
+            LoggingService.LogException(
+                f"DispatchDisposition failed for TranscodeAttempt {TranscodeAttemptId}",
+                Ex, "ProcessTranscodeQueueService", "DispatchDisposition",
+            )
 
     def _MarkMediaFileSourceMissing(self, MediaFileId: int, ErrorMessage: str) -> None:
         """Record that a worker could not find the source file on disk.
@@ -963,23 +1012,6 @@ class ProcessTranscodeQueueService:
         except Exception as Ex:
             LoggingService.LogException("Exception reading TranscodeOutputMode, defaulting to InPlace", Ex, "ProcessTranscodeQueueService", "GetTranscodeOutputMode")
             return 'InPlace'
-
-    def IsQualityTestEnabled(self) -> bool:
-        """Resolve whether quality test is enabled. Per-worker override > global setting."""
-        # Per-worker override takes priority
-        if self.WorkerQualityTestEnabled is not None:
-            return bool(self.WorkerQualityTestEnabled)
-        # Fall back to global setting
-        try:
-            from Features.SystemSettings.SystemSettingsRepository import SystemSettingsRepository
-            Repo = SystemSettingsRepository()
-            Value = Repo.GetSystemSetting('QualityTestEnabled')
-            if Value is not None:
-                return Value.strip().lower() in ('1', 'true', 'yes', 'on')
-            return False  # Default OFF
-        except Exception as Ex:
-            LoggingService.LogException("Exception reading QualityTestEnabled, defaulting to False", Ex, "ProcessTranscodeQueueService", "IsQualityTestEnabled")
-            return False
 
     def SetupFilePreparation(self, Job: TranscodeQueueModel, MediaFile: MediaFileModel, TranscodeAttemptId: int) -> Optional[str]:
         """Setup transcoding directories and optionally copy source file.
@@ -1277,7 +1309,7 @@ class ProcessTranscodeQueueService:
                 VideoBitrateKbps=ProfileSettings.get('VideoBitrateKbps'),
                 ProfileName=MediaFile.AssignedProfile if hasattr(MediaFile, 'AssignedProfile') else None,
                 VMAF=None,  # Will be set after VMAF analysis
-                QualityTestRequired=self.IsQualityTestEnabled(),
+                QualityTestRequired=True,  # Disposition function decides if VMAF actually runs based on ServiceStatus + gate config
                 QualityTestCompleted=False,
                 StartTime=TranscodingSettings.get('StartTime') if TranscodingSettings else None,
                 WorkerName=self.WorkerName
@@ -1412,7 +1444,7 @@ class ProcessTranscodeQueueService:
                     'NewSizeBytes': NewSizeBytes,
                     'SizeReductionBytes': SizeReductionBytes,
                     'SizeReductionPercent': SizeReductionPercent,
-                    'QualityTestRequired': self.IsQualityTestEnabled()
+                    'QualityTestRequired': True  # Disposition function decides at post-flight
                 })
 
                 # Update TranscodeFiles record for overall file status
@@ -1420,19 +1452,10 @@ class ProcessTranscodeQueueService:
 
                 # LocalOutputPath was already set during command building (single source of truth)
 
-                # Let ShouldQualityTest service handle the complete process
-                QualityTestResult = self.ShouldQualityTest.ProcessTranscodedFile(TranscodeAttemptId, Job.FilePath, OutputFilePath)
-
-                if QualityTestResult["Success"]:
-                    if QualityTestResult["QualityTestJobId"]:
-                        LoggingService.LogInfo(f"Quality test job {QualityTestResult['QualityTestJobId']} created for TranscodeAttempt {TranscodeAttemptId}: {QualityTestResult['Message']}",
-                                             "ProcessTranscodeQueueService", "HandleTranscodingResult")
-                    else:
-                        LoggingService.LogInfo(f"Quality test processing completed for TranscodeAttempt {TranscodeAttemptId}: {QualityTestResult['Message']}",
-                                             "ProcessTranscodeQueueService", "HandleTranscodingResult")
-                else:
-                    LoggingService.LogError(f"Quality test processing failed for TranscodeAttempt {TranscodeAttemptId}: {QualityTestResult['Message']}",
-                                          "ProcessTranscodeQueueService", "HandleTranscodingResult")
+                # Decide disposition + act. The disposition function logs a
+                # single rolled-up INFO line per decision and persists the
+                # audit columns to TranscodeAttempts.
+                self.DispatchDisposition(TranscodeAttemptId, Job, OutputFilePath)
 
                 # Delete job from queue (successful completion)
                 self.DatabaseManager.DeleteTranscodeQueueItem(Job.Id)

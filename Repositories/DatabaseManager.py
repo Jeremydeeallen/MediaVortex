@@ -3639,74 +3639,10 @@ class DatabaseManager:
             LoggingService.LogException("Exception updating transcode attempt VMAF", e, "DatabaseManager", "UpdateTranscodeAttemptVMAF")
             return False
     
-    def GetVMAFThresholds(self) -> dict:
-        """Get VMAF auto-replace thresholds from SystemSettings."""
-        try:
-            LoggingService.LogFunctionEntry("GetVMAFThresholds", "DatabaseManager")
-            
-            min_threshold_query = "SELECT SettingValue FROM SystemSettings WHERE SettingKey = 'VMAFAutoReplaceMinThreshold'"
-            max_threshold_query = "SELECT SettingValue FROM SystemSettings WHERE SettingKey = 'VMAFAutoReplaceMaxThreshold'"
-            
-            min_result = self.DatabaseService.ExecuteQuery(min_threshold_query)
-            max_result = self.DatabaseService.ExecuteQuery(max_threshold_query)
-            
-            if not min_result or len(min_result) == 0:
-                LoggingService.LogError("VMAFAutoReplaceMinThreshold not found in SystemSettings", "DatabaseManager", "GetVMAFThresholds")
-                raise ValueError("VMAFAutoReplaceMinThreshold setting not found in database")
-            
-            if not max_result or len(max_result) == 0:
-                LoggingService.LogError("VMAFAutoReplaceMaxThreshold not found in SystemSettings", "DatabaseManager", "GetVMAFThresholds")
-                raise ValueError("VMAFAutoReplaceMaxThreshold setting not found in database")
-            
-            min_threshold = float(min_result[0]['settingvalue'])
-            max_threshold = float(max_result[0]['settingvalue'])
-            
-            LoggingService.LogInfo(f"Retrieved VMAF thresholds: Min={min_threshold}, Max={max_threshold}", 
-                                 "DatabaseManager", "GetVMAFThresholds")
-            
-            return {
-                'MinThreshold': min_threshold,
-                'MaxThreshold': max_threshold
-            }
-            
-        except Exception as e:
-            LoggingService.LogException("Error getting VMAF thresholds", e, "DatabaseManager", "GetVMAFThresholds")
-            raise  # Re-raise the exception instead of masking with defaults
-    
-    def UpdateVMAFThresholds(self, MinThreshold: float, MaxThreshold: float) -> bool:
-        """Update VMAF auto-replace thresholds in SystemSettings."""
-        try:
-            LoggingService.LogFunctionEntry("UpdateVMAFThresholds", "DatabaseManager", MinThreshold, MaxThreshold)
-            
-            current_time = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
-            
-            # Update min threshold
-            min_query = """
-                UPDATE SystemSettings 
-                SET SettingValue = %s, LastModified = %s
-                WHERE SettingKey = 'VMAFAutoReplaceMinThreshold'
-            """
-            min_result = self.DatabaseService.ExecuteNonQuery(min_query, (str(MinThreshold), current_time))
-            
-            # Update max threshold
-            max_query = """
-                UPDATE SystemSettings 
-                SET SettingValue = %s, LastModified = %s
-                WHERE SettingKey = 'VMAFAutoReplaceMaxThreshold'
-            """
-            max_result = self.DatabaseService.ExecuteNonQuery(max_query, (str(MaxThreshold), current_time))
-            
-            if min_result and max_result:
-                LoggingService.LogInfo(f"Updated VMAF thresholds: Min={MinThreshold}, Max={MaxThreshold}", 
-                                     "DatabaseManager", "UpdateVMAFThresholds")
-                return True
-            else:
-                LoggingService.LogError("Failed to update VMAF thresholds", "DatabaseManager", "UpdateVMAFThresholds")
-                return False
-                
-        except Exception as e:
-            LoggingService.LogException("Error updating VMAF thresholds", e, "DatabaseManager", "UpdateVMAFThresholds")
-            return False
+    # GetVMAFThresholds / UpdateVMAFThresholds deleted 2026-05-10. The thresholds
+    # moved to PostTranscodeGateConfig (typed columns) and are accessed via
+    # PostTranscodeGateConfigRepository. The legacy SystemSettings KV rows
+    # (VMAFAutoReplaceMinThreshold, MaxThreshold) were dropped by the migration.
 
     def MarkQualityTestCompleted(self, TranscodeAttemptId: int) -> bool:
         """Mark quality test as completed for a transcode attempt."""

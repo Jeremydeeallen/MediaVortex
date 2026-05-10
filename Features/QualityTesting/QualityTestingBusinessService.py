@@ -262,10 +262,25 @@ class QualityTestingBusinessService:
                 if ProgressId and result_id:
                     self.UpdateQualityTestResultsWithScore(result_id, vmaf_score, result)
 
-                # Check if auto-replace should be triggered based on VMAF score
-                auto_replace_result = self.CheckAndTriggerAutoReplace(JobDetails, vmaf_score)
+                # Re-decide the disposition now that the VMAF score has landed.
+                # The disposition function (single source of truth) will look at
+                # the score against PostTranscodeGateConfig.VmafAutoReplaceMin/Max
+                # and return Replace / NoReplace / Requeue with an explicit Reason.
+                # Replaces the legacy CheckAndTriggerAutoReplace path.
+                from Features.QualityTesting.PostTranscodeDispositionService import PostTranscodeDispositionService
+                ta_id = JobDetails.get('transcode_attempt_id')
+                AutoReplaceTriggered = False
+                if ta_id:
+                    DispositionResult = PostTranscodeDispositionService(self.DatabaseManager).DecidePostTranscodeDisposition(ta_id)
+                    if DispositionResult.Disposition in ('Replace', 'BypassReplace'):
+                        from Features.FileReplacement.FileReplacementBusinessService import FileReplacementBusinessService
+                        FileReplacementBusinessService(self.DatabaseManager).ProcessFileReplacement(ta_id)
+                        AutoReplaceTriggered = True
+                    # Disposition='Requeue' / 'NoReplace' / 'Discard' -- the audit
+                    # row is already persisted; no action here. Future iterations
+                    # can wire automatic Requeue without changing this contract.
 
-                return {"Success": True, "VMAFScore": vmaf_score, "FFmpegCommand": FFmpegCommandString, "AutoReplaceTriggered": auto_replace_result.get('Triggered', False)}
+                return {"Success": True, "VMAFScore": vmaf_score, "FFmpegCommand": FFmpegCommandString, "AutoReplaceTriggered": AutoReplaceTriggered}
             else:
                 error_msg = f"FFmpeg failed with return code {result.returncode}"
                 return {"Success": False, "Error": error_msg}
@@ -916,21 +931,16 @@ class QualityTestingBusinessService:
             # Calculate test duration from FFmpegResult if available
             TestDuration = 0.0  # Could extract from FFmpegResult if needed
 
-            # Determine if it passes threshold. Read fresh from the DB
-            # (VMAFAutoReplaceMinThreshold) so the per-row PassesThreshold flag
-            # agrees with the auto-replace gate. No caching, per the standing
-            # rule against cached DB-backed settings.
-            PassThresholdMin = 80.0  # fallback when DB lookup fails
-            try:
-                Thresholds = self.DatabaseManager.GetVMAFThresholds()
-                if Thresholds and Thresholds.get('MinThreshold') is not None:
-                    PassThresholdMin = float(Thresholds['MinThreshold'])
-            except Exception as TEx:
-                LoggingService.LogException(
-                    "GetVMAFThresholds failed; falling back to PassThresholdMin=80.0",
-                    TEx, "QualityTestingBusinessService", "UpdateQualityTestResults",
-                )
-            PassesThreshold = VMAFScore >= PassThresholdMin
+            # PassesThreshold is now driven by the disposition function -- this
+            # row just stores the raw VMAF score and a snapshot of whether it
+            # passed the gate config. The disposition function (called next in
+            # ProcessQualityTestQueue) is the authoritative comparison; this
+            # boolean is for QualityTestResults display only.
+            from Features.QualityTesting.PostTranscodeGateConfigRepository import PostTranscodeGateConfigRepository
+            GateConfig = PostTranscodeGateConfigRepository().Get()
+            PassesThreshold = (VMAFScore is not None
+                               and VMAFScore >= float(GateConfig.VmafAutoReplaceMinThreshold)
+                               and VMAFScore <= float(GateConfig.VmafAutoReplaceMaxThreshold))
             Rank = 1 if PassesThreshold else 0
 
             Query = """
@@ -964,61 +974,12 @@ class QualityTestingBusinessService:
             LoggingService.LogException(f"Error updating QualityTestResults for record {ResultId}", e,
                                        "QualityTestingBusinessService", "UpdateQualityTestResultsWithScore")
 
-    def CheckAndTriggerAutoReplace(self, JobDetails: dict, VMAFScore: float) -> dict:
-        """Check VMAF score against thresholds and trigger auto-replace if within range."""
-        try:
-            LoggingService.LogFunctionEntry("CheckAndTriggerAutoReplace", "QualityTestingBusinessService", VMAFScore)
-
-            # Get VMAF thresholds from database
-            thresholds = self.DatabaseManager.GetVMAFThresholds()
-            min_threshold = thresholds.get('MinThreshold')
-            max_threshold = thresholds.get('MaxThreshold')
-
-            if min_threshold is None or max_threshold is None:
-                LoggingService.LogError("VMAF thresholds not properly retrieved from database", "QualityTestingBusinessService", "CheckAndTriggerAutoReplace")
-                return {"Triggered": False, "Error": "VMAF thresholds not found in database"}
-
-            LoggingService.LogInfo(f"Checking VMAF score {VMAFScore} against thresholds: Min={min_threshold}, Max={max_threshold}",
-                                 "QualityTestingBusinessService", "CheckAndTriggerAutoReplace")
-
-            # Check if VMAF score is within auto-replace range
-            if min_threshold <= VMAFScore <= max_threshold:
-                LoggingService.LogInfo(f"VMAF score {VMAFScore} is within auto-replace range, triggering file replacement",
-                                     "QualityTestingBusinessService", "CheckAndTriggerAutoReplace")
-
-                # Get transcode attempt ID
-                transcode_attempt_id = JobDetails.get('TranscodeAttemptId')
-                if not transcode_attempt_id:
-                    LoggingService.LogError("No TranscodeAttemptId found in job details for auto-replace",
-                                           "QualityTestingBusinessService", "CheckAndTriggerAutoReplace")
-                    return {"Triggered": False, "Error": "No TranscodeAttemptId found"}
-
-                # Trigger file replacement
-                from Services.FileReplacementBusinessService import FileReplacementBusinessService
-                file_replacement_service = FileReplacementBusinessService(self.DatabaseManager)
-
-                # Pass the VMAF score directly to avoid race condition with database update
-                replacement_result = file_replacement_service.ProcessFileReplacementWithVMAF(transcode_attempt_id, VMAFScore, BypassVMAFCheck=False)
-
-                if replacement_result.get('Success', False):
-                    # Update TranscodeAttempts table with replacement info
-                    self.UpdateTranscodeAttemptReplacementStatus(transcode_attempt_id, True, "Auto")
-
-                    LoggingService.LogInfo(f"Auto-replace completed successfully for TranscodeAttempt {transcode_attempt_id}",
-                                         "QualityTestingBusinessService", "CheckAndTriggerAutoReplace")
-                    return {"Triggered": True, "Success": True}
-                else:
-                    LoggingService.LogError(f"Auto-replace failed for TranscodeAttempt {transcode_attempt_id}: {replacement_result.get('ErrorMessage', 'Unknown error')}",
-                                           "QualityTestingBusinessService", "CheckAndTriggerAutoReplace")
-                    return {"Triggered": True, "Success": False, "Error": replacement_result.get('ErrorMessage', 'Unknown error')}
-            else:
-                LoggingService.LogInfo(f"VMAF score {VMAFScore} is outside auto-replace range (Min={min_threshold}, Max={max_threshold}), manual review required",
-                                     "QualityTestingBusinessService", "CheckAndTriggerAutoReplace")
-                return {"Triggered": False, "Reason": "VMAF score outside auto-replace range"}
-
-        except Exception as e:
-            LoggingService.LogException("Error checking and triggering auto-replace", e, "QualityTestingBusinessService", "CheckAndTriggerAutoReplace")
-            return {"Triggered": False, "Error": str(e)}
+    # CheckAndTriggerAutoReplace deleted 2026-05-10. The auto-replace decision
+    # is now owned by PostTranscodeDispositionService which is called from
+    # ProcessQualityTestQueue after the VMAF score lands. The disposition
+    # function checks the score against PostTranscodeGateConfig (typed columns,
+    # no SystemSettings KV) and returns Replace / NoReplace / Requeue / Discard
+    # with an explicit Reason. See post-transcode-disposition.feature.md.
 
     def UpdateTranscodeAttemptReplacementStatus(self, TranscodeAttemptId: int, FileReplaced: bool, ReplacementType: str) -> bool:
         """Update TranscodeAttempts table with file replacement status."""
@@ -1130,12 +1091,17 @@ class QualityTestingBusinessService:
                 # Complete the active job
                 self.DatabaseManager.CompleteActiveJob(active_job['Id'], False, "Cancelled by user skip request")
 
-            # Now trigger file replacement immediately since quality test is being skipped
-            LoggingService.LogInfo(f"Quality test skipped for TranscodeAttempt {TranscodeAttemptId}, triggering immediate file replacement",
+            # Run the disposition decision now that QualityTestRequired=FALSE
+            # (set by DatabaseManager.SkipQualityTest above). The disposition
+            # function returns (BypassReplace, QualityTestNotRequired) and
+            # commits the audit row. ProcessFileReplacement then executes.
+            LoggingService.LogInfo(f"Quality test skipped for TranscodeAttempt {TranscodeAttemptId}, deciding disposition",
                                  "QualityTestingBusinessService", "SkipQualityTest")
+            from Features.QualityTesting.PostTranscodeDispositionService import PostTranscodeDispositionService
+            PostTranscodeDispositionService(self.DatabaseManager).DecidePostTranscodeDisposition(TranscodeAttemptId)
             from Services.FileReplacementBusinessService import FileReplacementBusinessService
             file_replacement_service = FileReplacementBusinessService(self.DatabaseManager)
-            replacement_result = file_replacement_service.ProcessFileReplacement(TranscodeAttemptId, BypassVMAFCheck=True)
+            replacement_result = file_replacement_service.ProcessFileReplacement(TranscodeAttemptId)
 
             if replacement_result.get("Success", False):
                 # Create quality test result record showing test was skipped but file was replaced successfully

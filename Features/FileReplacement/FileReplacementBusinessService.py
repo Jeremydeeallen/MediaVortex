@@ -94,306 +94,154 @@ class FileReplacementBusinessService:
                                      "FileReplacementBusinessService", "GetFailedFileReplacements")
             return []
 
-    def ProcessFileReplacementWithVMAF(self, TranscodeAttemptId: int, VMAFScore: float, BypassVMAFCheck: bool = True) -> Dict[str, Any]:
-        """Process file replacement with a specific VMAF score (used by auto-replace to avoid race conditions)."""
-        try:
-            LoggingService.LogFunctionEntry("ProcessFileReplacementWithVMAF", "FileReplacementBusinessService", TranscodeAttemptId, VMAFScore)
+    def ProcessFileReplacement(self, TranscodeAttemptId: int) -> Dict[str, Any]:
+        """Execute the file replacement for a transcode attempt.
 
-            # Get the transcode attempt
-            transcode_attempt = self.DatabaseManager.GetTranscodeAttemptById(TranscodeAttemptId)
-            if not transcode_attempt:
-                return {
-                    'Success': False,
-                    'ErrorMessage': f'Transcode attempt {TranscodeAttemptId} not found'
-                }
+        Single entry point. The disposition decision (whether to replace,
+        what reason, whether VMAF was satisfied or bypassed) is owned by
+        `PostTranscodeDispositionService` -- this function only EXECUTES the
+        decision. Refuses to run unless the attempt's `Disposition` is
+        `Replace` or `BypassReplace`.
 
-            # Check if file was already replaced
-            if transcode_attempt.FileReplaced:
-                return {
-                    'Success': False,
-                    'ErrorMessage': f'File for transcode attempt {TranscodeAttemptId} was already replaced on {transcode_attempt.FileReplacedDate}'
-                }
-
-            # Get the file paths from TemporaryFilePaths
-            file_paths_query = '''
-            SELECT OriginalPath, LocalSourcePath, LocalOutputPath FROM TemporaryFilePaths
-            WHERE TranscodeAttemptId = %s
-            '''
-            file_paths_result = self.DatabaseManager.DatabaseService.ExecuteQuery(file_paths_query, (TranscodeAttemptId,))
-
-            if not file_paths_result:
-                return {
-                    'Success': False,
-                    'ErrorMessage': f'No temporary file path found for transcode attempt {TranscodeAttemptId}'
-                }
-
-            OriginalPath = file_paths_result[0]['OriginalPath']
-            TranscodedPath = file_paths_result[0]['LocalOutputPath']
-
-            # Translate canonical paths to local for filesystem validation
-            LocalTranscodedPath = self._ToLocalPath(TranscodedPath)
-
-            # Check if transcoded file exists (using translated local path)
-            if not self.FileManager.ValidateFileExists(LocalTranscodedPath):
-                return {
-                    'Success': False,
-                    'ErrorMessage': f'Transcoded file not found at: {LocalTranscodedPath}'
-                }
-
-            # Check if VMAF score meets threshold (unless bypassed for manual replacement)
-            if not BypassVMAFCheck:
-                vmaf_thresholds = self.DatabaseManager.GetVMAFThresholds()
-                if not vmaf_thresholds:
-                    return {
-                        'Success': False,
-                        'ErrorMessage': 'Could not retrieve VMAF thresholds from system settings'
-                    }
-
-                min_threshold = vmaf_thresholds.get('MinThreshold')
-                max_threshold = vmaf_thresholds.get('MaxThreshold')
-
-                if min_threshold is None or max_threshold is None:
-                    return {
-                        'Success': False,
-                        'ErrorMessage': 'VMAF thresholds not found in database'
-                    }
-
-                if not VMAFScore or VMAFScore < min_threshold or VMAFScore > max_threshold:
-                    return {
-                        'Success': False,
-                        'ErrorMessage': f'VMAF score {VMAFScore} does not meet quality threshold ({min_threshold}-{max_threshold})'
-                    }
-            else:
-                LoggingService.LogInfo(f"Bypassing VMAF threshold check for manual replacement of attempt {TranscodeAttemptId}",
-                                     "FileReplacementBusinessService", "ProcessFileReplacementWithVMAF")
-
-            # CRITICAL: Check file size - never replace smaller file with larger file
-            # This is especially important when CRF is lowered (higher quality = larger file size)
-            if transcode_attempt.NewSizeBytes is not None and transcode_attempt.OldSizeBytes is not None:
-                if transcode_attempt.NewSizeBytes >= transcode_attempt.OldSizeBytes:
-                    errorMsg = f"Cannot replace file: transcoded file is not smaller than original (New: {transcode_attempt.NewSizeBytes:,} bytes >= Old: {transcode_attempt.OldSizeBytes:,} bytes)"
-
-                    # Log rejection at Warning level
-                    logMessage = f"File replacement rejected due to size: {original_path}. Original: {transcode_attempt.OldSizeBytes:,} bytes, Transcoded: {transcode_attempt.NewSizeBytes:,} bytes. VMAF: {VMAFScore:.2f}"
-                    LoggingService.LogWarning(logMessage, "FileReplacementBusinessService", "ProcessFileReplacementWithVMAF")
-
-                    return {
-                        'Success': False,
-                        'ErrorMessage': errorMsg
-                    }
-
-            # Get KeepSource setting from profile threshold
-            keep_source = self.DatabaseManager.GetKeepSourceSetting(transcode_attempt.Id)
-            if keep_source is None:
-                return {
-                    'Success': False,
-                    'ErrorMessage': 'Could not determine KeepSource setting for this transcode attempt'
-                }
-
-            # Archive original file details before replacement
-            self._ArchiveOriginalFileDetails(OriginalPath, TranscodeAttemptId)
-
-            # Process file replacement
-            replacement_result = self._ProcessCompleteFileReplacement(
-                OriginalPath,
-                TranscodedPath,
-                keep_source,
-                OriginalPath
-            )
-
-            if replacement_result.get('Success', False):
-                # Update transcode attempt to mark replacement as completed
-                transcode_attempt.FileReplaced = True
-                transcode_attempt.FileReplacedDate = datetime.now(timezone.utc)
-                transcode_attempt.ReplacementType = "Auto"
-                self.DatabaseManager.SaveTranscodeAttempt(transcode_attempt)
-
-                # Clean up TemporaryFilePaths
-                self._CleanupTemporaryFilePaths(TranscodeAttemptId)
-
-                LoggingService.LogInfo(f"Successfully replaced file for attempt {TranscodeAttemptId}",
-                                     "FileReplacementBusinessService", "ProcessFileReplacementWithVMAF")
-
-                return {
-                    'Success': True,
-                    'Message': 'File replacement completed successfully',
-                    'OriginalFilePath': OriginalPath,
-                    'TranscodedFilePath': TranscodedPath,
-                    'VMAFScore': VMAFScore,
-                    'KeepSource': keep_source,
-                    'StepsCompleted': replacement_result.get('StepsCompleted', [])
-                }
-            else:
-                error_message = replacement_result.get('ErrorMessage', 'Unknown error during file replacement')
-                LoggingService.LogError(f"File replacement failed for attempt {TranscodeAttemptId}: {error_message}",
-                                      "FileReplacementBusinessService", "ProcessFileReplacementWithVMAF")
-
-                return {
-                    'Success': False,
-                    'ErrorMessage': error_message
-                }
-
-        except Exception as e:
-            LoggingService.LogException(f"Exception processing file replacement for attempt {TranscodeAttemptId}", e,
-                                      "FileReplacementBusinessService", "ProcessFileReplacementWithVMAF")
-            return {
-                'Success': False,
-                'ErrorMessage': f'Exception during file replacement: {str(e)}'
-            }
-
-    def ProcessFileReplacement(self, TranscodeAttemptId: int, BypassVMAFCheck: bool = True) -> Dict[str, Any]:
-        """Process manual file replacement for a specific transcode attempt.
-
-        Args:
-            TranscodeAttemptId: ID of the transcode attempt to replace
-            BypassVMAFCheck: If True, bypass VMAF threshold check (default for manual replacement)
+        See `Features/QualityTesting/post-transcode-disposition.feature.md`
+        criteria 3, 14.
         """
         try:
-            LoggingService.LogFunctionEntry("ProcessFileReplacement", "FileReplacementBusinessService", TranscodeAttemptId)
+            # Read the disposition + the basic columns we need in one query
+            # (avoids the model-coupling tax we'd otherwise pay).
+            DispositionRows = self.DatabaseManager.DatabaseService.ExecuteQuery(
+                """
+                SELECT Disposition, DispositionReason, FileReplaced, FileReplacedDate,
+                       NewSizeBytes, OldSizeBytes, VMAF, ProfileName
+                FROM TranscodeAttempts WHERE Id = %s
+                """,
+                (TranscodeAttemptId,),
+            )
+            if not DispositionRows:
+                return {'Success': False, 'ErrorMessage': f'Transcode attempt {TranscodeAttemptId} not found'}
+            DispositionRow = DispositionRows[0]
 
-            # Get the transcode attempt
+            Disposition = DispositionRow.get('Disposition')
+            if Disposition not in ('Replace', 'BypassReplace'):
+                return {
+                    'Success': False,
+                    'ErrorMessage': (
+                        f"Refusing to replace TranscodeAttempt {TranscodeAttemptId}: "
+                        f"Disposition={Disposition!r} (must be Replace or BypassReplace). "
+                        f"Reason={DispositionRow.get('DispositionReason')!r}."
+                    ),
+                }
+
+            if DispositionRow.get('FileReplaced'):
+                return {
+                    'Success': False,
+                    'ErrorMessage': (
+                        f"File for transcode attempt {TranscodeAttemptId} was already "
+                        f"replaced on {DispositionRow.get('FileReplacedDate')}"
+                    ),
+                }
+
+            # Pull the model for the rest of the work (archive, save, etc.)
             transcode_attempt = self.DatabaseManager.GetTranscodeAttemptById(TranscodeAttemptId)
             if not transcode_attempt:
-                return {
-                    'Success': False,
-                    'ErrorMessage': f'Transcode attempt {TranscodeAttemptId} not found'
-                }
+                return {'Success': False, 'ErrorMessage': f'Transcode attempt {TranscodeAttemptId} not found'}
 
-            # Check if file was already replaced
-            if transcode_attempt.FileReplaced:
-                return {
-                    'Success': False,
-                    'ErrorMessage': f'File for transcode attempt {TranscodeAttemptId} was already replaced on {transcode_attempt.FileReplacedDate}'
-                }
-
-            # Get the file paths from TemporaryFilePaths
-            file_paths_query = '''
-            SELECT OriginalPath, LocalSourcePath, LocalOutputPath FROM TemporaryFilePaths
-            WHERE TranscodeAttemptId = %s
-            '''
-            file_paths_result = self.DatabaseManager.DatabaseService.ExecuteQuery(file_paths_query, (TranscodeAttemptId,))
-
+            # File paths
+            file_paths_result = self.DatabaseManager.DatabaseService.ExecuteQuery(
+                """
+                SELECT OriginalPath, LocalSourcePath, LocalOutputPath FROM TemporaryFilePaths
+                WHERE TranscodeAttemptId = %s
+                """,
+                (TranscodeAttemptId,),
+            )
             if not file_paths_result:
                 return {
                     'Success': False,
-                    'ErrorMessage': f'No temporary file path found for transcode attempt {TranscodeAttemptId}'
+                    'ErrorMessage': f'No temporary file path found for transcode attempt {TranscodeAttemptId}',
                 }
-
             OriginalPath = file_paths_result[0]['OriginalPath']
             TranscodedPath = file_paths_result[0]['LocalOutputPath']
-
-            # Translate canonical paths to local for filesystem validation
             LocalTranscodedPath = self._ToLocalPath(TranscodedPath)
 
-            # Check if transcoded file exists (using translated local path)
             if not self.FileManager.ValidateFileExists(LocalTranscodedPath):
                 return {
                     'Success': False,
-                    'ErrorMessage': f'Transcoded file not found at: {LocalTranscodedPath}'
+                    'ErrorMessage': f'Transcoded file not found at: {LocalTranscodedPath}',
                 }
 
-            # Check if VMAF score meets threshold (unless bypassed for manual replacement)
-            if not BypassVMAFCheck:
-                vmaf_thresholds = self.DatabaseManager.GetVMAFThresholds()
-                if not vmaf_thresholds:
-                    return {
-                        'Success': False,
-                        'ErrorMessage': 'Could not retrieve VMAF thresholds from system settings'
-                    }
+            # Defense-in-depth size guard (the disposition function should already
+            # have routed NoSavings to Discard, but guard against bugs upstream).
+            # Remux/SubtitleFix legitimately produce similar-or-slightly-larger
+            # outputs (container change + audio re-encode) and are exempt.
+            isRemux = (transcode_attempt.ProfileName or '') in ('Remux', 'SubtitleFix')
+            if (not isRemux
+                and transcode_attempt.NewSizeBytes is not None
+                and transcode_attempt.OldSizeBytes is not None
+                and transcode_attempt.NewSizeBytes >= transcode_attempt.OldSizeBytes):
+                errorMsg = (
+                    f"Defense-in-depth: refusing to replace because "
+                    f"NewSize ({transcode_attempt.NewSizeBytes:,}) >= "
+                    f"OldSize ({transcode_attempt.OldSizeBytes:,}). "
+                    f"This case should have been routed to Disposition='Discard' "
+                    f"upstream -- log a bug if it reaches here."
+                )
+                LoggingService.LogWarning(errorMsg, "FileReplacementBusinessService", "ProcessFileReplacement")
+                return {'Success': False, 'ErrorMessage': errorMsg}
 
-                min_threshold = vmaf_thresholds.get('MinThreshold')
-                max_threshold = vmaf_thresholds.get('MaxThreshold')
-
-                if min_threshold is None or max_threshold is None:
-                    return {
-                        'Success': False,
-                        'ErrorMessage': 'VMAF thresholds not found in database'
-                    }
-
-                if not transcode_attempt.VMAF or transcode_attempt.VMAF < min_threshold or transcode_attempt.VMAF > max_threshold:
-                    return {
-                        'Success': False,
-                        'ErrorMessage': f'VMAF score {transcode_attempt.VMAF} does not meet quality threshold ({min_threshold}-{max_threshold})'
-                    }
-            else:
-                LoggingService.LogInfo(f"Bypassing VMAF threshold check for manual replacement of attempt {TranscodeAttemptId}",
-                                     "FileReplacementBusinessService", "ProcessFileReplacement")
-
-            # CRITICAL: Check file size - never replace smaller file with larger file
-            # This is especially important when CRF is lowered (higher quality = larger file size)
-            # Skip this check for remux jobs (container change may produce similar or slightly larger file)
-            isRemux = transcode_attempt.ProfileName in ('Remux', 'SubtitleFix')
-            if not isRemux and transcode_attempt.NewSizeBytes is not None and transcode_attempt.OldSizeBytes is not None:
-                if transcode_attempt.NewSizeBytes >= transcode_attempt.OldSizeBytes:
-                    errorMsg = f"Cannot replace file: transcoded file is not smaller than original (New: {transcode_attempt.NewSizeBytes:,} bytes >= Old: {transcode_attempt.OldSizeBytes:,} bytes)"
-
-                    # Log rejection at Warning level
-                    vmafScore = transcode_attempt.VMAF or 0.0
-                    logMessage = f"File replacement rejected due to size: {OriginalPath}. Original: {transcode_attempt.OldSizeBytes:,} bytes, Transcoded: {transcode_attempt.NewSizeBytes:,} bytes. VMAF: {vmafScore:.2f}"
-                    LoggingService.LogWarning(logMessage, "FileReplacementBusinessService", "ProcessFileReplacement")
-
-                    return {
-                        'Success': False,
-                        'ErrorMessage': errorMsg
-                    }
-
-            # Get KeepSource setting from profile threshold
             keep_source = self.DatabaseManager.GetKeepSourceSetting(transcode_attempt.Id)
             if keep_source is None:
                 return {
                     'Success': False,
-                    'ErrorMessage': 'Could not determine KeepSource setting for this transcode attempt'
+                    'ErrorMessage': 'Could not determine KeepSource setting for this transcode attempt',
                 }
 
-            # Archive original file details before replacement
             self._ArchiveOriginalFileDetails(OriginalPath, TranscodeAttemptId)
 
-            # Process file replacement
             replacement_result = self._ProcessCompleteFileReplacement(
-                OriginalPath,
-                TranscodedPath,
-                keep_source,
-                OriginalPath
+                OriginalPath, TranscodedPath, keep_source, OriginalPath,
             )
 
             if replacement_result.get('Success', False):
-                # Update transcode attempt to mark replacement as completed
                 transcode_attempt.FileReplaced = True
-                transcode_attempt.FileReplacementDate = datetime.now(timezone.utc)
+                transcode_attempt.FileReplacedDate = datetime.now(timezone.utc)
+                transcode_attempt.ReplacementType = (
+                    'Bypass' if Disposition == 'BypassReplace' else 'Auto'
+                )
                 self.DatabaseManager.SaveTranscodeAttempt(transcode_attempt)
 
-                # Clean up TemporaryFilePaths
                 self._CleanupTemporaryFilePaths(TranscodeAttemptId)
 
-                LoggingService.LogInfo(f"Successfully replaced file for attempt {TranscodeAttemptId}",
-                                     "FileReplacementBusinessService", "ProcessFileReplacement")
+                LoggingService.LogInfo(
+                    f"Replaced file for TranscodeAttempt {TranscodeAttemptId} "
+                    f"(Disposition={Disposition}, Reason={DispositionRow.get('DispositionReason')})",
+                    "FileReplacementBusinessService", "ProcessFileReplacement",
+                )
 
                 return {
                     'Success': True,
                     'Message': 'File replacement completed successfully',
                     'OriginalFilePath': OriginalPath,
                     'TranscodedFilePath': TranscodedPath,
+                    'Disposition': Disposition,
+                    'DispositionReason': DispositionRow.get('DispositionReason'),
                     'VMAFScore': transcode_attempt.VMAF,
                     'KeepSource': keep_source,
-                    'StepsCompleted': replacement_result.get('StepsCompleted', [])
+                    'StepsCompleted': replacement_result.get('StepsCompleted', []),
                 }
-            else:
-                error_message = replacement_result.get('ErrorMessage', 'Unknown error during file replacement')
-                LoggingService.LogError(f"File replacement failed for attempt {TranscodeAttemptId}: {error_message}",
-                                      "FileReplacementBusinessService", "ProcessFileReplacement")
 
-                return {
-                    'Success': False,
-                    'ErrorMessage': error_message
-                }
+            error_message = replacement_result.get('ErrorMessage', 'Unknown error during file replacement')
+            LoggingService.LogError(
+                f"File replacement failed for attempt {TranscodeAttemptId}: {error_message}",
+                "FileReplacementBusinessService", "ProcessFileReplacement",
+            )
+            return {'Success': False, 'ErrorMessage': error_message}
 
         except Exception as e:
-            LoggingService.LogException(f"Exception processing file replacement for attempt {TranscodeAttemptId}", e,
-                                      "FileReplacementBusinessService", "ProcessFileReplacement")
-            return {
-                'Success': False,
-                'ErrorMessage': f'Exception during file replacement: {str(e)}'
-            }
+            LoggingService.LogException(
+                f"Exception processing file replacement for attempt {TranscodeAttemptId}", e,
+                "FileReplacementBusinessService", "ProcessFileReplacement",
+            )
+            return {'Success': False, 'ErrorMessage': f'Exception during file replacement: {str(e)}'}
 
     def GetFileReplacementStatus(self, TranscodeAttemptId: int) -> Dict[str, Any]:
         """Get the current status of file replacement for a transcode attempt."""
