@@ -338,13 +338,20 @@ def GetQualityTestProgress():
 @QualityTestBlueprint.route('/api/QualityTest/CompareStills', methods=['GET'])
 def CompareStills():
     try:
-        AttemptId = int(request.args.get('attempt') or 0)
         Timestamp = float(request.args.get('ts') or 60.0)
-        if AttemptId <= 0:
-            return jsonify({'Success': False, 'ErrorMessage': 'attempt query param required'}), 400
+        SourcePath = request.args.get('source_path')
+        TranscodedPath = request.args.get('transcoded_path')
+        AttemptId = int(request.args.get('attempt') or 0)
         from Features.QualityTesting.QualityTestingBusinessService import QualityTestingBusinessService
         Svc = QualityTestingBusinessService(DatabaseManagerInstance=DatabaseManager())
-        Result = Svc.GenerateComparisonStills(AttemptId, Timestamp)
+
+        if SourcePath and TranscodedPath:
+            Result = Svc.GenerateComparisonStillsFromPaths(SourcePath, TranscodedPath, Timestamp)
+        elif AttemptId > 0:
+            Result = Svc.GenerateComparisonStills(AttemptId, Timestamp)
+        else:
+            return jsonify({'Success': False, 'ErrorMessage': 'either `attempt` or (`source_path` AND `transcoded_path`) required'}), 400
+
         if not Result.get('Success'):
             return jsonify(Result), 200
         Result['SourceUrl'] = f"/api/QualityTest/CompareStill/{Result['SourceFilename']}"
@@ -375,6 +382,59 @@ def VmafComparePage():
     AttemptId = request.args.get('attempt')
     Timestamp = request.args.get('ts', '60')
     return render_template('VmafCompare.html', AttemptId=AttemptId, Timestamp=Timestamp)
+
+
+@QualityTestBlueprint.route('/api/QualityTest/RecentAttempts', methods=['GET'])
+def RecentAttempts():
+    """Paginated list of recent TranscodeAttempts to populate the comparison
+    page's browseable picker. Returns most-recent first, with the data the
+    operator needs to choose what to inspect."""
+    try:
+        Page = max(1, int(request.args.get('page', 1)))
+        PageSize = max(1, min(50, int(request.args.get('pageSize', 10))))
+        Offset = (Page - 1) * PageSize
+        Db = DatabaseManager().DatabaseService
+
+        Total = Db.ExecuteQuery("SELECT COUNT(*) AS N FROM TranscodeAttempts")[0]['N']
+        Rows = Db.ExecuteQuery(
+            """
+            SELECT ta.Id, ta.FilePath, ta.ProfileName, ta.AttemptDate,
+                   ta.Success, ta.FileReplaced, ta.Disposition, ta.DispositionReason,
+                   ta.VMAF, ta.OldSizeBytes, ta.NewSizeBytes
+            FROM TranscodeAttempts ta
+            ORDER BY ta.AttemptDate DESC
+            LIMIT %s OFFSET %s
+            """,
+            (PageSize, Offset),
+        )
+        return jsonify({
+            'Success': True,
+            'Page': Page,
+            'PageSize': PageSize,
+            'Total': Total,
+            'TotalPages': (Total + PageSize - 1) // PageSize,
+            'Rows': [
+                {
+                    'Id': R['Id'],
+                    'FilePath': R['FilePath'],
+                    'FileName': os.path.basename(R['FilePath'] or ''),
+                    'ProfileName': R['ProfileName'],
+                    'AttemptDate': R['AttemptDate'].isoformat() if R['AttemptDate'] else None,
+                    'Success': R['Success'],
+                    'FileReplaced': R['FileReplaced'],
+                    'Disposition': R['Disposition'],
+                    'DispositionReason': R['DispositionReason'],
+                    'VMAF': float(R['VMAF']) if R['VMAF'] is not None else None,
+                    'OldSizeMB': round((R['OldSizeBytes'] or 0) / (1024 * 1024), 1),
+                    'NewSizeMB': round((R['NewSizeBytes'] or 0) / (1024 * 1024), 1),
+                }
+                for R in Rows
+            ],
+        })
+    except Exception as e:
+        ErrorMsg = f"RecentAttempts failed: {e}"
+        LoggingService.LogException(ErrorMsg, e, "QualityTestController", "RecentAttempts")
+        return jsonify({'Success': False, 'ErrorMessage': ErrorMsg}), 500
 
 
 @QualityTestBlueprint.route('/api/QualityTesting/LogError', methods=['POST'])

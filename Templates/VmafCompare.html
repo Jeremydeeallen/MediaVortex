@@ -13,7 +13,7 @@
             <form id="LoadForm" class="row g-2 align-items-end">
                 <div class="col-auto">
                     <label class="form-label small mb-0">Attempt ID</label>
-                    <input type="number" id="AttemptInput" class="form-control form-control-sm" value="{{ AttemptId or '' }}" min="1" required style="width:140px;">
+                    <input type="number" id="AttemptInput" class="form-control form-control-sm" value="{{ AttemptId or '' }}" min="1" style="width:140px;">
                 </div>
                 <div class="col-auto">
                     <label class="form-label small mb-0">Timestamp (s)</label>
@@ -32,10 +32,61 @@
                         <button type="button" class="btn btn-outline-secondary qt-quick" data-ts="900">15m</button>
                     </div>
                 </div>
+                <div class="col-auto">
+                    <button type="button" id="ToggleRawBtn" class="btn btn-outline-secondary btn-sm">
+                        <i class="fas fa-file-import me-1"></i>Raw paths
+                    </button>
+                </div>
                 <div class="col">
                     <div id="MetaLine" class="text-muted small ms-2"></div>
                 </div>
             </form>
+            <div id="RawPathsPanel" class="row g-2 mt-2 d-none">
+                <div class="col-12 col-md-6">
+                    <label class="form-label small mb-0">Source path (canonical, e.g. T:\...)</label>
+                    <input type="text" id="SourcePathInput" class="form-control form-control-sm" placeholder="T:\Path\To\source.mkv">
+                </div>
+                <div class="col-12 col-md-6">
+                    <label class="form-label small mb-0">Transcoded path</label>
+                    <input type="text" id="TranscodedPathInput" class="form-control form-control-sm" placeholder="T:\Path\To\output.mp4">
+                </div>
+                <div class="col-12 small text-muted">
+                    Raw-paths mode bypasses the TranscodeAttempt lookup. Useful for ad-hoc A/B testing of files that aren't tied to a pipeline attempt.
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card mb-3">
+        <div class="card-header py-2 d-flex justify-content-between align-items-center">
+            <h6 class="mb-0"><i class="fas fa-list me-2"></i>Recent attempts</h6>
+            <div class="btn-group btn-group-sm" role="group">
+                <button type="button" class="btn btn-outline-secondary" id="RecentPrev"><i class="fas fa-chevron-left"></i></button>
+                <span class="btn btn-outline-secondary disabled" id="RecentPageLabel">Page 1</span>
+                <button type="button" class="btn btn-outline-secondary" id="RecentNext"><i class="fas fa-chevron-right"></i></button>
+                <button type="button" class="btn btn-outline-secondary" id="RecentRefresh" title="Refresh"><i class="fas fa-sync-alt"></i></button>
+            </div>
+        </div>
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-sm table-hover mb-0 small">
+                    <thead class="table-light">
+                        <tr>
+                            <th style="width:60px;">Id</th>
+                            <th>File</th>
+                            <th style="width:140px;">Profile</th>
+                            <th style="width:90px;">VMAF</th>
+                            <th style="width:120px;">Disposition</th>
+                            <th style="width:80px;">Replaced</th>
+                            <th style="width:160px;">Date</th>
+                            <th style="width:90px;"></th>
+                        </tr>
+                    </thead>
+                    <tbody id="RecentBody">
+                        <tr><td colspan="8" class="text-center text-muted py-3">Loading...</td></tr>
+                    </tbody>
+                </table>
+            </div>
         </div>
     </div>
 
@@ -68,7 +119,9 @@
 <script>
 (function() {
     function $(id) { return document.getElementById(id); }
-    var LastUrls = { src: null, tx: null };
+    function EscapeHtml(T) { var D=document.createElement('div'); D.textContent=T||''; return D.innerHTML; }
+    var RecentPage = 1;
+    var RecentTotalPages = 1;
 
     function Show(panelId) {
         ['LoadingPanel', 'ErrorPanel', 'SliderPanel'].forEach(function(id) {
@@ -76,14 +129,29 @@
         });
     }
 
-    function Load(Attempt, Ts) {
-        if (!Attempt) {
-            $('ErrorPanel').textContent = 'Attempt ID required';
+    function BuildLoadUrl(Ts) {
+        var Params = ['ts=' + encodeURIComponent(Ts)];
+        var Src = $('SourcePathInput').value.trim();
+        var Tx  = $('TranscodedPathInput').value.trim();
+        if (Src && Tx) {
+            Params.push('source_path=' + encodeURIComponent(Src));
+            Params.push('transcoded_path=' + encodeURIComponent(Tx));
+        } else {
+            var A = $('AttemptInput').value;
+            if (!A) return null;
+            Params.push('attempt=' + encodeURIComponent(A));
+        }
+        return '/api/QualityTest/CompareStills?' + Params.join('&');
+    }
+
+    function Load(Ts) {
+        var Url = BuildLoadUrl(Ts);
+        if (!Url) {
+            $('ErrorPanel').textContent = 'Attempt ID or both raw paths required';
             Show('ErrorPanel');
             return;
         }
         Show('LoadingPanel');
-        var Url = '/api/QualityTest/CompareStills?attempt=' + encodeURIComponent(Attempt) + '&ts=' + encodeURIComponent(Ts);
         fetch(Url)
             .then(function(R) { return R.json(); })
             .then(function(D) {
@@ -92,17 +160,16 @@
                     Show('ErrorPanel');
                     return;
                 }
-                LastUrls.src = D.SourceUrl;
-                LastUrls.tx = D.TranscodedUrl;
                 $('ImgSource').src = D.SourceUrl + '?cb=' + Date.now();
                 $('ImgTranscoded').src = D.TranscodedUrl + '?cb=' + Date.now();
-                var Meta = 'attempt ' + Attempt + ' @ ' + Ts + 's';
+                var Meta = '@ ' + Ts + 's';
                 if (D.SourceCanonical) Meta += ' — ' + D.SourceCanonical.split(/[\\/]/).pop();
                 $('MetaLine').textContent = Meta;
                 Show('SliderPanel');
-                // Sync URL so the page is bookmarkable at the chosen ts.
-                var NewUrl = '/VmafCompare?attempt=' + encodeURIComponent(Attempt) + '&ts=' + encodeURIComponent(Ts);
-                history.replaceState({}, '', NewUrl);
+                var A = $('AttemptInput').value;
+                if (A && !($('SourcePathInput').value || $('TranscodedPathInput').value)) {
+                    history.replaceState({}, '', '/VmafCompare?attempt=' + encodeURIComponent(A) + '&ts=' + encodeURIComponent(Ts));
+                }
             })
             .catch(function(E) {
                 $('ErrorPanel').textContent = 'Fetch failed: ' + E.message;
@@ -110,20 +177,83 @@
             });
     }
 
+    function LoadRecent(Page) {
+        RecentPage = Page || 1;
+        $('RecentBody').innerHTML = '<tr><td colspan="8" class="text-center text-muted py-3">Loading...</td></tr>';
+        fetch('/api/QualityTest/RecentAttempts?page=' + RecentPage + '&pageSize=10')
+            .then(function(R) { return R.json(); })
+            .then(function(D) {
+                if (!D.Success) {
+                    $('RecentBody').innerHTML = '<tr><td colspan="8" class="text-danger py-2">' + EscapeHtml(D.ErrorMessage || 'load failed') + '</td></tr>';
+                    return;
+                }
+                RecentTotalPages = D.TotalPages || 1;
+                $('RecentPageLabel').textContent = 'Page ' + D.Page + ' / ' + RecentTotalPages + '  (' + D.Total + ' attempts)';
+                if (!D.Rows.length) {
+                    $('RecentBody').innerHTML = '<tr><td colspan="8" class="text-center text-muted py-3">No attempts</td></tr>';
+                    return;
+                }
+                $('RecentBody').innerHTML = D.Rows.map(function(R) {
+                    var Vmaf = R.VMAF !== null ? R.VMAF.toFixed(2) : '-';
+                    var VmafBadge = R.VMAF !== null
+                        ? '<span class="badge ' + (R.VMAF >= 80 ? 'bg-success' : R.VMAF >= 70 ? 'bg-warning text-dark' : 'bg-danger') + '">' + Vmaf + '</span>'
+                        : '<span class="text-muted">-</span>';
+                    var DispBadge = R.Disposition
+                        ? '<span class="badge bg-secondary" title="' + EscapeHtml(R.DispositionReason || '') + '">' + EscapeHtml(R.Disposition) + '</span>'
+                        : '<span class="text-muted">-</span>';
+                    var ReplacedBadge = R.FileReplaced
+                        ? '<span class="badge bg-success">yes</span>'
+                        : '<span class="badge bg-light text-dark">no</span>';
+                    var Date_ = R.AttemptDate ? R.AttemptDate.replace('T', ' ').substring(0, 19) : '-';
+                    return '<tr>' +
+                        '<td>' + R.Id + '</td>' +
+                        '<td><div class="text-truncate" style="max-width:380px;" title="' + EscapeHtml(R.FilePath || '') + '">' + EscapeHtml(R.FileName) + '</div></td>' +
+                        '<td><small>' + EscapeHtml(R.ProfileName || '-') + '</small></td>' +
+                        '<td>' + VmafBadge + '</td>' +
+                        '<td>' + DispBadge + '</td>' +
+                        '<td>' + ReplacedBadge + '</td>' +
+                        '<td><small class="text-muted">' + Date_ + '</small></td>' +
+                        '<td><button type="button" class="btn btn-sm btn-outline-primary recent-pick" data-id="' + R.Id + '">Compare</button></td>' +
+                        '</tr>';
+                }).join('');
+                Array.from(document.querySelectorAll('.recent-pick')).forEach(function(B) {
+                    B.addEventListener('click', function() {
+                        $('AttemptInput').value = B.dataset.id;
+                        $('SourcePathInput').value = '';
+                        $('TranscodedPathInput').value = '';
+                        Load($('TsInput').value || '60');
+                    });
+                });
+                $('RecentPrev').disabled = RecentPage <= 1;
+                $('RecentNext').disabled = RecentPage >= RecentTotalPages;
+            })
+            .catch(function(E) {
+                $('RecentBody').innerHTML = '<tr><td colspan="8" class="text-danger py-2">Fetch failed: ' + EscapeHtml(E.message) + '</td></tr>';
+            });
+    }
+
     $('LoadForm').addEventListener('submit', function(E) {
         E.preventDefault();
-        Load($('AttemptInput').value, $('TsInput').value);
+        Load($('TsInput').value);
     });
     Array.from(document.querySelectorAll('.qt-quick')).forEach(function(B) {
         B.addEventListener('click', function() {
             $('TsInput').value = B.dataset.ts;
-            Load($('AttemptInput').value, B.dataset.ts);
+            Load(B.dataset.ts);
         });
     });
+    $('ToggleRawBtn').addEventListener('click', function() {
+        $('RawPathsPanel').classList.toggle('d-none');
+    });
+    $('RecentPrev').addEventListener('click', function() { if (RecentPage > 1) LoadRecent(RecentPage - 1); });
+    $('RecentNext').addEventListener('click', function() { if (RecentPage < RecentTotalPages) LoadRecent(RecentPage + 1); });
+    $('RecentRefresh').addEventListener('click', function() { LoadRecent(RecentPage); });
+
+    LoadRecent(1);
 
     // Auto-load if attempt and ts came in via URL
     if ($('AttemptInput').value) {
-        Load($('AttemptInput').value, $('TsInput').value || '60');
+        Load($('TsInput').value || '60');
     }
 })();
 </script>

@@ -1111,6 +1111,22 @@ class QualityTestingBusinessService:
     # no SystemSettings KV) and returns Replace / NoReplace / Requeue / Discard
     # with an explicit Reason. See post-transcode-disposition.feature.md.
 
+    def GenerateComparisonStillsFromPaths(self, SourceCanonical: str, TranscodedCanonical: str, TimestampSeconds: float) -> dict:
+        """Path-driven variant of GenerateComparisonStills. Useful when the
+        operator wants to A/B test two arbitrary files without going through
+        a TranscodeAttempt record. Cache key hashes the paths + timestamp.
+        """
+        try:
+            import hashlib
+            Key = hashlib.sha1(f"{SourceCanonical}|{TranscodedCanonical}|{TimestampSeconds:.2f}".encode()).hexdigest()[:16]
+            return self._ExtractStillPair(SourceCanonical, TranscodedCanonical, TimestampSeconds, f"raw_{Key}")
+        except Exception as Ex:
+            LoggingService.LogException(
+                f"GenerateComparisonStillsFromPaths failed",
+                Ex, "QualityTestingBusinessService", "GenerateComparisonStillsFromPaths",
+            )
+            return {'Success': False, 'ErrorMessage': f'Exception: {Ex}'}
+
     def GenerateComparisonStills(self, TranscodeAttemptId: int, TimestampSeconds: float) -> dict:
         """Return {Success, SourcePath, TranscodedPath, CachedKey, ErrorMessage}.
         Generates two PNG stills via FFmpeg at the given timestamp from the
@@ -1167,46 +1183,8 @@ class QualityTestingBusinessService:
                 SourceCanonical = TfpRows[0]['OriginalPath']
                 TranscodedCanonical = TfpRows[0]['LocalOutputPath']
 
-            Ctx = WorkerContext.Current()
-            Translate = Ctx.PathTranslation.ToLocalPath if (Ctx and Ctx.PathTranslation) else (lambda P: P)
-            LocalSource = Translate(SourceCanonical)
-            LocalTranscoded = Translate(TranscodedCanonical)
-
-            if not os.path.exists(LocalSource):
-                return {'Success': False, 'ErrorMessage': f'Source file not found: {LocalSource}'}
-            if not os.path.exists(LocalTranscoded):
-                return {'Success': False, 'ErrorMessage': f'Transcoded file not found: {LocalTranscoded}'}
-
-            CacheDir = self._GetComparisonCacheDir()
-            os.makedirs(CacheDir, exist_ok=True)
             TsTag = f"{TimestampSeconds:.2f}".replace('.', '_')
-            CacheKey = f"cmp_{TranscodeAttemptId}_{TsTag}"
-            SourceStill = os.path.join(CacheDir, f"{CacheKey}_source.png")
-            TranscodedStill = os.path.join(CacheDir, f"{CacheKey}_transcoded.png")
-
-            FFmpeg = (Ctx.FFmpegPath if (Ctx and Ctx.FFmpegPath) else None) or r"C:\Code\MediaVortex\FFmpegMaster\bin\ffmpeg.exe"
-
-            for InputPath, OutputPath in ((LocalSource, SourceStill), (LocalTranscoded, TranscodedStill)):
-                if os.path.exists(OutputPath):
-                    continue
-                Cmd = [FFmpeg, "-hide_banner", "-loglevel", "error",
-                       "-ss", str(TimestampSeconds), "-i", InputPath,
-                       "-frames:v", "1", "-y", OutputPath]
-                R = subprocess.run(Cmd, capture_output=True, text=True)
-                if R.returncode != 0 or not os.path.exists(OutputPath):
-                    return {
-                        'Success': False,
-                        'ErrorMessage': f'FFmpeg failed extracting frame from {os.path.basename(InputPath)}: {(R.stderr or "")[:200]}',
-                    }
-
-            return {
-                'Success': True,
-                'CacheKey': CacheKey,
-                'SourceFilename': os.path.basename(SourceStill),
-                'TranscodedFilename': os.path.basename(TranscodedStill),
-                'SourceCanonical': SourceCanonical,
-                'TranscodedCanonical': TranscodedCanonical,
-            }
+            return self._ExtractStillPair(SourceCanonical, TranscodedCanonical, TimestampSeconds, f"cmp_{TranscodeAttemptId}_{TsTag}")
 
         except Exception as Ex:
             LoggingService.LogException(
@@ -1214,6 +1192,47 @@ class QualityTestingBusinessService:
                 Ex, "QualityTestingBusinessService", "GenerateComparisonStills",
             )
             return {'Success': False, 'ErrorMessage': f'Exception: {Ex}'}
+
+    def _ExtractStillPair(self, SourceCanonical, TranscodedCanonical, TimestampSeconds, CacheKey):
+        from Core.WorkerContext import WorkerContext
+        Ctx = WorkerContext.Current()
+        Translate = Ctx.PathTranslation.ToLocalPath if (Ctx and Ctx.PathTranslation) else (lambda P: P)
+        LocalSource = Translate(SourceCanonical)
+        LocalTranscoded = Translate(TranscodedCanonical)
+
+        if not os.path.exists(LocalSource):
+            return {'Success': False, 'ErrorMessage': f'Source file not found: {LocalSource}'}
+        if not os.path.exists(LocalTranscoded):
+            return {'Success': False, 'ErrorMessage': f'Transcoded file not found: {LocalTranscoded}'}
+
+        CacheDir = self._GetComparisonCacheDir()
+        os.makedirs(CacheDir, exist_ok=True)
+        SourceStill = os.path.join(CacheDir, f"{CacheKey}_source.png")
+        TranscodedStill = os.path.join(CacheDir, f"{CacheKey}_transcoded.png")
+
+        FFmpeg = (Ctx.FFmpegPath if (Ctx and Ctx.FFmpegPath) else None) or r"C:\Code\MediaVortex\FFmpegMaster\bin\ffmpeg.exe"
+
+        for InputPath, OutputPath in ((LocalSource, SourceStill), (LocalTranscoded, TranscodedStill)):
+            if os.path.exists(OutputPath):
+                continue
+            Cmd = [FFmpeg, "-hide_banner", "-loglevel", "error",
+                   "-ss", str(TimestampSeconds), "-i", InputPath,
+                   "-frames:v", "1", "-y", OutputPath]
+            R = subprocess.run(Cmd, capture_output=True, text=True)
+            if R.returncode != 0 or not os.path.exists(OutputPath):
+                return {
+                    'Success': False,
+                    'ErrorMessage': f'FFmpeg failed extracting frame from {os.path.basename(InputPath)}: {(R.stderr or "")[:200]}',
+                }
+
+        return {
+            'Success': True,
+            'CacheKey': CacheKey,
+            'SourceFilename': os.path.basename(SourceStill),
+            'TranscodedFilename': os.path.basename(TranscodedStill),
+            'SourceCanonical': SourceCanonical,
+            'TranscodedCanonical': TranscodedCanonical,
+        }
 
     def _GetComparisonCacheDir(self) -> str:
         Root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
