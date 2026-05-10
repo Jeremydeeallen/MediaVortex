@@ -10,10 +10,13 @@ Both (code fix + deploy-anywhere infrastructure)
 
 ## Success Criteria
 
-### Bridge decision (ShouldQualityTestService)
-1. When QualityTestRequired=False on the TranscodeAttempt, ShouldQualityTestService skips the quality test queue entirely and proceeds directly to file cleanup. No QualityTestQueue row is created.
-2. When QualityTestRequired=True, the existing VMAF queue flow is unchanged -- quality test is queued, WorkerService (with QualityTestEnabled) processes it, auto-replace triggers if VMAF is in range.
-3. When quality testing capability is not running and QualityTestRequired=True, the quality test is still queued. The bridge does not conflate "capability not running" with "testing disabled."
+### Bridge decision (ShouldQualityTestService) -- SUPERSEDED 2026-05-10
+
+**Criteria 1, 2, 3 are superseded by `Features/QualityTesting/post-transcode-disposition.feature.md`.** The split bridge decisions are replaced by a single `DecidePostTranscodeDisposition(TranscodeAttemptId)` function with explicit `(Disposition, Reason)` outputs persisted to `TranscodeAttempts`. `ShouldQualityTestService` is deleted entirely; the criteria below remain documented for the historical fix that landed before the unified disposition was designed, but the implementation is no longer present.
+
+1. ~~When QualityTestRequired=False on the TranscodeAttempt, ShouldQualityTestService skips the quality test queue entirely and proceeds directly to file cleanup. No QualityTestQueue row is created.~~ Superseded -- the disposition function returns `(BypassReplace, QualityTestNotRequired)` for this case.
+2. ~~When QualityTestRequired=True, the existing VMAF queue flow is unchanged -- quality test is queued, WorkerService (with QualityTestEnabled) processes it, auto-replace triggers if VMAF is in range.~~ Superseded -- disposition returns `Pending` until VMAF lands, then re-decides per the canonical decision table.
+3. ~~When quality testing capability is not running and QualityTestRequired=True, the quality test is still queued. The bridge does not conflate "capability not running" with "testing disabled."~~ Superseded -- `WhenVmafUnavailable='block'` (default) returns `(NoReplace, VmafServicePaused)`; `'bypass'` returns `(BypassReplace, VmafServicePausedBypassed)`. The conflation is impossible because the reason vocabulary distinguishes them.
 
 ### File cleanup (FileReplacementBusinessService)
 4. After a successful transcode with QualityTestEnabled=OFF, the full DB state chain completes in order:

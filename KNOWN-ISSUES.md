@@ -2,6 +2,38 @@
 
 ## Open
 
+### [BUG] Post-transcode pipeline has 5 split decision sites, 5+ scattered config sources, no audit trail
+**Date:** 2026-05-10
+**Affects:** `Features/QualityTesting/ShouldQualityTestService.py`, `Features/QualityTesting/QualityTestingBusinessService.py` (`UpdateQualityTestResults`, `CheckAndTriggerAutoReplace`), `Features/FileReplacement/FileReplacementBusinessService.py` (`ProcessFileReplacement`/`ProcessFileReplacementWithVMAF` with `BypassVMAFCheck` parameter), `Features/TranscodeJob/ProcessTranscodeQueueService.py` (`IsQualityTestEnabled`), `SystemSettings` rows for `VMAFAutoReplaceMinThreshold` / `MaxThreshold` / `QualityTestEnabled`.
+
+After a transcode completes, the decision "do we run VMAF, replace, requeue, or discard?" is split across five files. Inputs come from five different storage shapes (per-worker capability, global SystemSettings KV, ServiceStatus, per-attempt flag, ProfileThresholds). No place captures the final decision and the reason for it. Today (2026-05-10) Sister Wives S04E05 transcode succeeded but `ServiceStatus.QualityTestService='Paused'` silently routed to bypass-replace which then silently failed -- the 720p output was deleted by failure cleanup, no detail logs, no queryable reason for why it didn't replace. The opaque "Quality test processing failed for TranscodeAttempt X: File replaced automatically because Quality testing service is paused" log claims success while `FileReplaced=false`.
+
+**Violates:** `Features/QualityTesting/post-transcode-disposition.feature.md` (drafted 2026-05-10, all 17 criteria).
+
+**Fix:** unified `DecidePostTranscodeDisposition` function + `PostTranscodeGateConfig` typed-column table + `Disposition`/`DispositionReason`/`DispositionDecidedAt` columns on `TranscodeAttempts`. Legacy ShouldQualityTestService / BypassVMAFCheck / ProcessFileReplacementWithVMAF / CheckAndTriggerAutoReplace deleted.
+
+**Fix with:** `/n` -- doc-first feature pending operator approval (this entry was recorded by step 11 of `/n`).
+
+---
+
+### [BUG - CRITICAL] Profile-less savings estimate uses misleading `SizeMB * 0.5` proxy
+**Date:** 2026-05-10
+**Affects:** `Features/TranscodeQueue/QueueManagementBusinessService.py:CalculatePriority` (size*0.5 fallback at line 1032), `_EvaluateCompliance` (returns undecidable when profile missing), `EstimateTargetSizeMB` (returns None when profile missing).
+
+When a `MediaFile` has no `AssignedProfile` (and the profile cascade doesn't resolve), every estimate-of-savings path either falls back to `SizeMB * 0.5` (priority calc) or returns "undecidable" (compliance / admission). Result: profile-less files all rank by file size, regardless of compression headroom -- a 5 GB already-AV1 source ranks the same as a 5 GB h264 source. The operator looking at the library to decide which titles to assign profiles to next is sorted by the wrong signal.
+
+**The probed metadata is already there** -- `MediaFiles.Codec`, `OverallBitrate`, `VideoBitrateKbps`, `AudioBitrateKbps`, `DurationMinutes`, `ResolutionCategory` -- nothing reads them for a profile-agnostic compression-potential estimate.
+
+**Why critical:** profile assignment is operator-driven; the operator needs a ranked "next candidates to look at" view that works WITHOUT a profile already being set. Otherwise the assignment-then-queue loop has a chicken-and-egg.
+
+**Violates:** `queue-priority.feature.md` Success Criterion 15 (added with this bug).
+
+**Look first:** `QueueManagementBusinessService.CalculatePriority` (the size*0.5 fallback path) and the `EstimateTargetSizeMB` helper introduced by `marginal-savings-gate.feature.md`. The fix is a profile-agnostic estimator that reads `Codec` + `OverallBitrate` + `ResolutionCategory` and looks up an expected-output-bitrate table (could extend `CrfBitrateEstimates` or add a sibling table -- design choice for the `/t` session).
+
+**Fix with:** `/t`
+
+---
+
 ### [BUG - FIXED 2026-05-10] ShowSettings global-default `*` overrides explicit profile assignment (target resolution)
 **Date:** 2026-05-10 | **Fixed:** 2026-05-10 (cascade + global-default row entirely removed)
 **Affects:** `Features/ShowSettings/ShowSettingsRepository.py`, `Features/ShowSettings/ShowSettingsController.py`, `Features/TranscodeJob/ProcessTranscodeQueueService.py`, `Features/TranscodeQueue/QueueManagementBusinessService.py`, `ShowSettings.feature.md`.

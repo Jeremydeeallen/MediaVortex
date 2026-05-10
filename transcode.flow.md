@@ -240,54 +240,126 @@ Rationale: ordering by raw size (the legacy behavior) put already-efficient AV1 
 
 ---
 
-## Stage 6: QUALITY -- VMAF Analysis
+## Stage 6: DISPOSITION -- Post-Transcode Decision
 
-**Trigger:** Automatic after transcode if quality testing enabled, or manual via QualityTesting UI
+**Trigger:** Worker calls `DecidePostTranscodeDisposition(TranscodeAttemptId)` immediately after a successful transcode (TranscodeAttempt.Success=true). Single function, single call site, single return.
 
-**Code path:**
-- `WorkerService/Main.py` (QualityTestEnabled=TRUE) -> `QualityTestingBusinessService.ProcessQualityTestQueue()`
-- For each pending test:
-  1. Get TranscodeAttempt (original path, transcoded path)
-  2. Build FFmpeg VMAF command: compare original vs transcoded using `libvmaf`
-  3. Execute, parse JSON output for VMAF score (0-100)
-  4. Record QualityTestResult with score
+The disposition decision is **the only post-transcode branch point**. It reads from data-driven config and returns `(Disposition, Reason, AuditPayload)`. All five legacy decision sites (`ShouldQualityTestService`, `_ReplaceFileDirectly`, `CheckAndTriggerAutoReplace`, `ProcessFileReplacement`'s `BypassVMAFCheck` parameter, `ProcessFileReplacementWithVMAF`) are retired in favor of this one function. See `Features/QualityTesting/post-transcode-disposition.feature.md`.
 
-**Tables written:** QualityTestResult (new), TranscodeAttempt (VMAF score, QualityTestCompleted)
+**Inputs (data-driven):**
 
-**VMAF thresholds:**
-- >= 80: quality acceptable, eligible for file replacement
-- < 80: quality insufficient, CRF will be adjusted on next queue population (lower CRF = higher quality)
-- < 80 with adjusted CRF < 15: logged to ProblemFiles, file cannot be improved further
+| Input | Source |
+|---|---|
+| `TranscodeAttempt.QualityTestRequired` | per-attempt flag, set at attempt creation from `Workers.QualityTestEnabled` |
+| `TranscodeAttempt.NewSizeBytes` vs `OldSizeBytes` | post-flight savings gate |
+| `QualityTestResults.VMAFScore` | populated by VMAF run, NULL when no test ran |
+| `ServiceStatus.QualityTestService` | operational state of the VMAF service (Running/Paused/Stopped) |
+| `PostTranscodeGateConfig.VmafAutoReplaceMinThreshold` | typed column, default 88 |
+| `PostTranscodeGateConfig.VmafAutoReplaceMaxThreshold` | typed column, default 98 |
+| `PostTranscodeGateConfig.WhenVmafUnavailable` | `'block'` (default, safe) or `'bypass'` (operator opt-in) |
+| `ProfileThresholds.KeepSource` | per-profile, controls `.orig` cleanup post-replace |
+
+**Decision table** (canonical -- code MUST mirror this 1:1):
+
+| Success | NewSize >= OldSize | QualityTestRequired | VMAF score | ServiceStatus | WhenVmafUnavailable | Disposition | Reason |
+|---|---|---|---|---|---|---|---|
+| false | n/a | n/a | n/a | any | any | `Discard` | `TranscodeFailed` |
+| true | true (no savings) | any | any | any | any | `Discard` | `NoSavings` |
+| true | false | false | n/a | any | any | `BypassReplace` | `QualityTestNotRequired` |
+| true | false | true | NULL | Running | any | `Pending` | `AwaitingVmaf` |
+| true | false | true | < min | any | any | `Requeue` | `VmafBelowMin` |
+| true | false | true | >= min, <= max | any | any | `Replace` | `VmafPassed` |
+| true | false | true | > max | any | any | `NoReplace` | `VmafAboveMax` |
+| true | false | true | NULL | Paused/Stopped | block | `NoReplace` | `VmafServicePaused` |
+| true | false | true | NULL | Paused/Stopped | bypass | `BypassReplace` | `VmafServicePausedBypassed` |
+
+**Disposition outcomes:**
+
+| Disposition | What happens |
+|---|---|
+| `Replace` | FileReplacement proceeds: archive original, atomic rename, re-probe, update MediaFiles, settle `.orig` per `KeepSource`. |
+| `BypassReplace` | Same as `Replace` mechanically -- the only difference is the audit reason. The file IS replaced; operator can query why VMAF was skipped. |
+| `NoReplace` | Both files left in place. Staged transcoded output retained on the worker's `StagingDirectory` for operator inspection / manual replay. The TranscodeAttempt is final (no requeue). |
+| `Requeue` | Staged file deleted. CRF adjusted via `AdaptiveQualityService.CalculateAdjustedCRF`. New TranscodeQueue row created at lower CRF, unless adjusted CRF < 15 floor (then logs to ProblemFiles). |
+| `Discard` | Staged file deleted. `MediaFiles.LastTranscodeOutcome='NoSavings'` set when reason is NoSavings; queue's no-savings filter prevents re-queueing. |
+| `Pending` | No action yet. The TranscodeAttempt's disposition is re-evaluated when the VMAF result lands. The worker's VMAF processing loop calls `DecidePostTranscodeDisposition` again after writing the score. |
+
+**Audit trail (queryable):**
+
+`TranscodeAttempts` gains three columns recording the disposition decision:
+
+| Column | Type | Purpose |
+|---|---|---|
+| `Disposition` | text | One of the values in the table above. Indexed for operator queries like "what didn't replace and why?". |
+| `DispositionReason` | text | The exact enum value from the Reason column. Free-text NOT permitted. |
+| `DispositionDecidedAt` | timestamp | When the decision was committed. Distinguishes "decided NoReplace" from "still Pending". |
+
+Operator query for the "why didn't this replace?" question:
+```sql
+SELECT FilePath, Disposition, DispositionReason, DispositionDecidedAt
+FROM TranscodeAttempts
+WHERE Success=true AND FileReplaced=false AND Disposition <> 'Pending'
+ORDER BY DispositionDecidedAt DESC;
+```
+
+**Tables written:** TranscodeAttempts (Disposition, DispositionReason, DispositionDecidedAt), QualityTestQueue (when disposition='Pending' and not yet queued), MediaFiles (LastTranscodeOutcome on Discard/NoSavings), ProblemFiles (when Requeue with adjusted CRF below floor).
 
 ---
 
-## Stage 7: REPLACE -- Original File Replacement
+## Stage 7: VMAF -- Quality Test Execution (when Disposition='Pending' on first decision)
 
-**Trigger:** Automatic if auto-replace enabled and VMAF >= 80, or manual via `POST /api/FileReplacement/Replace`
+**Trigger:** Worker with `Workers.QualityTestEnabled=true` polls `QualityTestQueue` for rows added by the disposition function (Stage 6 row `Pending`/`AwaitingVmaf`).
 
 **Code path:**
-- `Features/FileReplacement/FileReplacementController.py` -> `FileReplacementBusinessService.ProcessFileReplacementWithVMAF()`
-  1. Validate TranscodeAttempt exists and FileReplaced = false
-  2. Validate both original and transcoded files exist on disk
-  3. **Post-flight benefit gate** (no-benefit-handling.feature.md): compare `attempt.NewSizeMB` to `attempt.OriginalSizeMB`. If `New >= Original`, the transcode produced an equal-or-larger output. Refuse to replace, delete the staged transcoded file, set `MediaFiles.LastTranscodeOutcome = 'NoSavings'`, log loudly, and return without touching the original. Stage 4's no-savings filter then prevents re-queueing.
-  4. Archive original metadata to MediaFilesArchive
-  5. **Atomic rename-and-replace** (was a plain delete + move pre-2026-05-09): rename `original.ext -> original.ext.orig` first, then move staged file to the original location with the side-by-side suffix stripped. Verify target is non-zero. On any filesystem-level failure, rollback restores the `.orig` and returns `Success=false`. Pre-existing `.orig` from a prior failed run causes refusal, not overwrite.
-  6. Re-probe new file via FFprobe (fresh metadata)
-  7. Update MediaFiles with new metadata
-  8. Set `TranscodedByMediaVortex = true`
-  9. Settle the `.orig` backup: delete it if `KeepSource=false`, rename to legacy `.old<ext>` if `KeepSource=true`. The original is never deleted until after the new file is verified on disk.
+- `WorkerService/Main.py` -> `QualityTestingBusinessService.ProcessQualityTestQueue()`
+- For each pending test:
+  1. Build FFmpeg VMAF command: compare original vs transcoded using `libvmaf`
+  2. Execute, parse JSON output for VMAF score (0-100)
+  3. Insert `QualityTestResults` row with the score
+  4. Re-call `DecidePostTranscodeDisposition(TranscodeAttemptId)` -- this time the VMAF score is available, the disposition will be `Replace` / `NoReplace` / `Requeue` per the table.
 
-**Tables written:** MediaFiles (new metadata, TranscodedByMediaVortex=true OR LastTranscodeOutcome='NoSavings'), MediaFilesArchive (snapshot), TranscodeAttempt (FileReplaced, FileReplacedDate)
+**Tables written:** QualityTestResults (new), TranscodeAttempts (VMAF score, QualityTestCompleted, Disposition+Reason re-decided).
+
+---
+
+## Stage 8: ACTION -- Execute the Disposition
+
+**Trigger:** Disposition committed (anything other than `Pending`).
+
+**Replace / BypassReplace path:**
+- `Features/FileReplacement/FileReplacementBusinessService.ProcessFileReplacement(TranscodeAttemptId)` -- single entry point, no `BypassVMAFCheck` parameter (the disposition told us already).
+  1. Validate TranscodeAttempt exists and FileReplaced=false
+  2. Validate both original and transcoded files exist (path translation applied)
+  3. Archive original metadata to MediaFilesArchive
+  4. **Atomic rename-and-replace**: rename `original.ext -> original.ext.orig`, move staged file to original location, verify target non-zero. On any filesystem-level failure, rollback restores the `.orig` and returns Success=false.
+  5. Re-probe new file via FFprobe (worker's FFprobe path)
+  6. Update MediaFiles with new metadata, set TranscodedByMediaVortex=true
+  7. Settle `.orig` per `ProfileThresholds.KeepSource` (delete or rename to `.old<ext>`)
+
+**Discard path:**
+- Delete staged transcoded file from worker's `StagingDirectory`
+- When reason is `NoSavings`: `MediaFiles.LastTranscodeOutcome='NoSavings'`
+
+**Requeue path:**
+- Delete staged transcoded file
+- `AdaptiveQualityService.CalculateAdjustedCRF(previous_crf, vmaf_score)` -> new CRF
+- If adjusted CRF >= 15 floor: insert new TranscodeQueue row with the lower CRF
+- Else: log to ProblemFiles (file cannot be improved further)
+
+**NoReplace path:**
+- No filesystem changes. Staged file remains in `StagingDirectory` until operator manually clears or `Scripts/SQLScripts/CleanStagingOlderThan.py` runs.
+
+**Tables written:** MediaFiles (new metadata on Replace/BypassReplace), MediaFilesArchive (snapshot before replace), TranscodeAttempts (FileReplaced, FileReplacedDate), TranscodeQueue (new row on Requeue), ProblemFiles (CRF floor breach), QualityTestQueue (cleared on disposition commit).
 
 **Safety guards:**
-- Archive before delete: original metadata always saved
-- **Rename-then-replace with rollback**: original is renamed to `.orig` *before* the staged file is moved into its place. Any filesystem failure rolls back the rename. Original is never destroyed until after the new file is verified on disk. The 2026-05-09 incident (FFmpeg truncated source via output==input collision) cannot recur even if a future bug re-introduces a similar fault, because the original is no longer at the path FFmpeg writes to.
-- FileReplaced flag prevents duplicate replacements
-- Re-probe after move ensures metadata reflects actual file
-- `TranscodedByMediaVortex = true` prevents infinite re-queue loops
-- **Post-flight benefit gate** (above) prevents replacing originals with same-size-or-larger outputs and marks the file so Stage 4 won't re-queue it
+- Archive-before-delete: original metadata always saved before the rename.
+- Rename-then-replace with rollback: original is never destroyed until the new file is verified.
+- `FileReplaced` flag prevents duplicate replacements.
+- Re-probe after move ensures metadata reflects actual file.
+- `TranscodedByMediaVortex=true` prevents infinite re-queue loops.
+- **Disposition is final** for non-Pending values. The function is idempotent: calling `DecidePostTranscodeDisposition` again on a row that already has Disposition set returns the existing decision unchanged (no double-replace, no decision drift).
 
-**Operator override:** `POST /api/MediaFiles/<id>/ResetTranscodeOutcome` clears `LastTranscodeOutcome` so a file that was marked NoSavings can be retried (e.g. after a profile change or a new SVT-AV1 release).
+**Operator override:** `POST /api/MediaFiles/<id>/ResetTranscodeOutcome` clears `LastTranscodeOutcome` so a NoSavings file can be retried.
 
 ---
 
