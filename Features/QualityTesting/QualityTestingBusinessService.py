@@ -116,9 +116,14 @@ class QualityTestingBusinessService:
                 if result["Success"]:
                     # VMAF score and Status='Success' are already updated by UpdateQualityTestResultsWithScore
                     # Update TranscodeAttempt
+                    # QualityTestCompleted is BOOLEAN in PostgreSQL -- pass `True`,
+                    # not literal `1` (psycopg2 type-binds 1 as integer; PG rejects).
+                    # The same fields are also written by the disposition wiring
+                    # inside BuildVMAFCommand BEFORE DecidePostTranscodeDisposition --
+                    # this call is the safety-net "all VMAF work succeeded" marker.
                     self.DatabaseManager.UpdateTranscodeAttempt(
                         job_details['TranscodeAttemptId'],
-                        {"QualityTestCompleted": 1, "VMAF": result["VMAFScore"]}
+                        {"QualityTestCompleted": True, "VMAF": result["VMAFScore"]}
                     )
                     self.UpdateProgressRecord(progress_id, "Completed", 100, "VMAF analysis completed successfully", result["VMAFScore"])
                     self.DatabaseManager.CompleteActiveJob(active_job_id, True)
@@ -267,15 +272,24 @@ class QualityTestingBusinessService:
                 if ProgressId and result_id:
                     self.UpdateQualityTestResultsWithScore(result_id, vmaf_score, result)
 
-                # Re-decide the disposition now that the VMAF score has landed.
-                # The disposition function (single source of truth) will look at
-                # the score against PostTranscodeGateConfig.VmafAutoReplaceMin/Max
-                # and return Replace / NoReplace / Requeue with an explicit Reason.
-                # Replaces the legacy CheckAndTriggerAutoReplace path.
+                # CRITICAL: write the VMAF score to TranscodeAttempts BEFORE
+                # re-deciding the disposition. DecidePostTranscodeDisposition
+                # reads `TranscodeAttempts.VMAF` (not QualityTestResults.VMAFScore --
+                # different table), and the outer StartQualityTest call that
+                # used to do this update ran AFTER BuildVMAFCommand returned --
+                # so the disposition saw VMAF=NULL and returned Pending forever.
+                # Surfaced on attempt 4394 during the i9 smoke test 2026-05-10:
+                # VMAF ran successfully (score 84.05), score landed in
+                # QualityTestResults, but TranscodeAttempts.VMAF stayed NULL
+                # and the file never got replaced.
                 from Features.QualityTesting.PostTranscodeDispositionService import PostTranscodeDispositionService
                 ta_id = JobDetails.get('TranscodeAttemptId')
                 AutoReplaceTriggered = False
                 if ta_id:
+                    self.DatabaseManager.UpdateTranscodeAttempt(
+                        ta_id,
+                        {"VMAF": vmaf_score, "QualityTestCompleted": True}
+                    )
                     DispositionResult = PostTranscodeDispositionService(self.DatabaseManager).DecidePostTranscodeDisposition(ta_id)
                     if DispositionResult.Disposition in ('Replace', 'BypassReplace'):
                         from Features.FileReplacement.FileReplacementBusinessService import FileReplacementBusinessService
