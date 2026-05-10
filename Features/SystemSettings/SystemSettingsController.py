@@ -302,6 +302,47 @@ class SystemSettingsController:
                 LoggingService.LogException("Error upserting CodecCompatibility", e, 'UpsertCodecCompatibility', 'SystemSettingsController')
                 return jsonify({'Success': False, 'Error': str(e)}), 500
 
+        # ─── Post-Transcode Disposition Gate (post-transcode-disposition.feature.md) ──
+
+        @self.Blueprint.route('/PostTranscodeGateConfig', methods=['GET'])
+        def GetPostTranscodeGateConfig():
+            """Return the single-row PostTranscodeGateConfig (Id=1)."""
+            try:
+                from Features.QualityTesting.PostTranscodeGateConfigRepository import PostTranscodeGateConfigRepository
+                Cfg = PostTranscodeGateConfigRepository().Get()
+                return jsonify({
+                    'Success': True,
+                    'Config': {
+                        'Id': Cfg.Id,
+                        'VmafAutoReplaceMinThreshold': float(Cfg.VmafAutoReplaceMinThreshold),
+                        'VmafAutoReplaceMaxThreshold': float(Cfg.VmafAutoReplaceMaxThreshold),
+                        'WhenVmafUnavailable': Cfg.WhenVmafUnavailable,
+                        'LastUpdated': Cfg.LastUpdated.isoformat() if Cfg.LastUpdated else None,
+                    },
+                })
+            except Exception as e:
+                LoggingService.LogException("Error getting PostTranscodeGateConfig", e, 'GetPostTranscodeGateConfig', 'SystemSettingsController')
+                return jsonify({'Success': False, 'Error': str(e)}), 500
+
+        @self.Blueprint.route('/PostTranscodeGateConfig', methods=['PUT'])
+        def UpdatePostTranscodeGateConfig():
+            """Update PostTranscodeGateConfig scalar fields."""
+            try:
+                Data = request.get_json() or {}
+                from Features.QualityTesting.PostTranscodeGateConfigRepository import PostTranscodeGateConfigRepository
+                Repo = PostTranscodeGateConfigRepository()
+                Ok = Repo.Update(
+                    VmafAutoReplaceMinThreshold=Data.get('VmafAutoReplaceMinThreshold'),
+                    VmafAutoReplaceMaxThreshold=Data.get('VmafAutoReplaceMaxThreshold'),
+                    WhenVmafUnavailable=Data.get('WhenVmafUnavailable'),
+                )
+                if not Ok:
+                    return jsonify({'Success': False, 'Error': 'Update rejected (see logs)'}), 400
+                return jsonify({'Success': True, 'Message': 'PostTranscodeGateConfig updated'})
+            except Exception as e:
+                LoggingService.LogException("Error updating PostTranscodeGateConfig", e, 'UpdatePostTranscodeGateConfig', 'SystemSettingsController')
+                return jsonify({'Success': False, 'Error': str(e)}), 500
+
         @self.Blueprint.route('/TestFFmpegPaths', methods=['POST'])
         def TestFFmpegPaths():
             """Test FFmpeg and FFprobe paths."""

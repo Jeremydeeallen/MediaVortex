@@ -505,6 +505,56 @@
             </div>
         </div>
 
+        <!-- Post-Transcode Disposition -->
+        <div class="card mt-4">
+            <div class="card-header bg-light" data-bs-toggle="collapse" data-bs-target="#PostTranscodeSection" style="cursor: pointer;">
+                <div class="d-flex justify-content-between align-items-center">
+                    <h4 class="mb-0">
+                        <i class="fas fa-balance-scale"></i> Post-Transcode Disposition
+                    </h4>
+                    <i class="fas fa-chevron-down"></i>
+                </div>
+            </div>
+            <div id="PostTranscodeSection" class="collapse">
+                <div class="card-body">
+                    <p class="text-muted small mb-3">
+                        After a transcode finishes, the disposition gate decides Replace vs BypassReplace vs NoReplace based on VMAF and service status.
+                        VMAF below Min &rarr; NoReplace (re-encode candidate). Min &le; VMAF &le; Max &rarr; Replace. VMAF above Max &rarr; Replace (efficiency win, but flagged).
+                    </p>
+
+                    <div class="row g-2 mb-3">
+                        <div class="col-md-3">
+                            <label class="form-label small">Auto-replace VMAF minimum</label>
+                            <input type="number" step="0.1" id="VmafAutoReplaceMinThreshold" class="form-control form-control-sm" min="0" max="100">
+                            <div class="form-text small">VMAF &lt; this value &rarr; NoReplace</div>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label small">Auto-replace VMAF maximum</label>
+                            <input type="number" step="0.1" id="VmafAutoReplaceMaxThreshold" class="form-control form-control-sm" min="0" max="100">
+                            <div class="form-text small">VMAF &gt; this value &rarr; Replace (logged as above-max)</div>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label small">When VMAF unavailable</label>
+                            <select id="WhenVmafUnavailable" class="form-select form-select-sm">
+                                <option value="block">block (NoReplace, audit reason)</option>
+                                <option value="bypass">bypass (Replace without VMAF)</option>
+                            </select>
+                            <div class="form-text small">Applies when QualityTestService is paused or no capable worker</div>
+                        </div>
+                        <div class="col-md-3 d-flex align-items-end">
+                            <button class="btn btn-sm btn-primary" onclick="SavePostTranscodeGateConfig()">
+                                <i class="fas fa-save"></i> Save
+                            </button>
+                        </div>
+                    </div>
+
+                    <p class="text-muted small mb-0">
+                        <span id="PostTranscodeLastUpdated"></span>
+                    </p>
+                </div>
+            </div>
+        </div>
+
         <!-- All System Settings (advanced) -->
         <div class="card mt-4">
             <div class="card-header bg-light" data-bs-toggle="collapse" data-bs-target="#AllSettingsSection" style="cursor: pointer;">
@@ -2493,6 +2543,45 @@ function ToggleCodecCompatibility(InputEl) {
     });
 }
 
+function LoadPostTranscodeGateConfig() {
+    $.get('/api/SystemSettings/PostTranscodeGateConfig').done(function(R) {
+        if (!R.Success) return;
+        $('#VmafAutoReplaceMinThreshold').val(R.Config.VmafAutoReplaceMinThreshold);
+        $('#VmafAutoReplaceMaxThreshold').val(R.Config.VmafAutoReplaceMaxThreshold);
+        $('#WhenVmafUnavailable').val(R.Config.WhenVmafUnavailable);
+        if (R.Config.LastUpdated) {
+            $('#PostTranscodeLastUpdated').text('Last updated: ' + R.Config.LastUpdated.substring(0, 19).replace('T', ' '));
+        }
+    });
+}
+
+function SavePostTranscodeGateConfig() {
+    var Min = parseFloat($('#VmafAutoReplaceMinThreshold').val());
+    var Max = parseFloat($('#VmafAutoReplaceMaxThreshold').val());
+    if (isNaN(Min) || isNaN(Max) || Min > Max) {
+        alert('Invalid thresholds: Min must be <= Max and both must be numbers.');
+        return;
+    }
+    var Body = {
+        VmafAutoReplaceMinThreshold: Min,
+        VmafAutoReplaceMaxThreshold: Max,
+        WhenVmafUnavailable: $('#WhenVmafUnavailable').val()
+    };
+    $.ajax({
+        url: '/api/SystemSettings/PostTranscodeGateConfig',
+        method: 'PUT',
+        contentType: 'application/json',
+        data: JSON.stringify(Body)
+    }).done(function(R) {
+        if (R.Success) {
+            alert('Post-transcode gate config saved.');
+            LoadPostTranscodeGateConfig();
+        } else {
+            alert('Save failed: ' + (R.Error || 'unknown'));
+        }
+    }).fail(function(X) { alert('Save failed: ' + X.responseText); });
+}
+
 // Auto-load Queue Tuning data when the section is opened (lazy).
 $(function() {
     LoadDisplayTimezone();
@@ -2500,6 +2589,9 @@ $(function() {
         LoadQueueAdmissionConfig();
         LoadCrfBitrateEstimates();
         LoadCodecCompatibility();
+    });
+    $('#PostTranscodeSection').on('shown.bs.collapse', function() {
+        LoadPostTranscodeGateConfig();
     });
 });
 

@@ -103,16 +103,16 @@ Operator dogfood, 2026-05-10. Sister Wives S04E05 transcode succeeded but VMAF n
 - [x] 2. Identify the five split decision sites and the five+ scattered config sources
 - [x] 3. Draft this feature doc with the canonical decision table
 - [x] 4. Update `transcode.flow.md` Stages 6+7 with the unified disposition flow + decision table (committed in this `/n`)
-- [ ] 5. Operator approval of criteria 1-17
-- [ ] 6. SQL migration `Scripts/SQLScripts/AddPostTranscodeDisposition.py` (criteria 6, 7, 8) -- creates `PostTranscodeGateConfig` (single row, typed columns); adds `Disposition`, `DispositionReason`, `DispositionDecidedAt` to `TranscodeAttempts` with CHECK + index; deletes the three legacy `SystemSettings` rows.
-- [ ] 7. New repository: `PostTranscodeGateConfigRepository.Get() / Update()`. Read-fresh per call. (Criterion 6.)
-- [ ] 8. Implement `DecidePostTranscodeDisposition(TranscodeAttemptId)` in a new module `Features/QualityTesting/PostTranscodeDispositionService.py`. Returns `(Disposition, Reason, AuditPayload)`. Idempotent. (Criteria 1, 2, 5.)
-- [ ] 9. Wire the function as the **only** post-transcode call from `ProcessTranscodeQueueService.ProcessJob` and `QualityTestingBusinessService.ProcessQualityTestQueue` (re-decide after VMAF lands). (Criterion 3.)
-- [ ] 10. Update `FileReplacementBusinessService.ProcessFileReplacement` to require `Disposition IN ('Replace','BypassReplace')` on the attempt, refuse otherwise. Drop `BypassVMAFCheck` parameter. Delete `ProcessFileReplacementWithVMAF` (collapse). (Criterion 14.)
-- [ ] 11. Implement the audit-trail UPDATE in the disposition function (Disposition, DispositionReason, DispositionDecidedAt). (Criteria 9, 11.)
-- [ ] 12. Add the rolled-up INFO log line. Remove the opaque "Quality test processing failed" pattern. (Criteria 12, 13.)
-- [ ] 13. Delete the legacy symbols listed in criterion 14. Update `post-transcode-pipeline.feature.md` per criterion 15.
-- [ ] 14. Add `/settings` "Post-Transcode" card and the two new endpoints. (Criteria 16, 17.)
+- [x] 5. Operator approval of criteria 1-17
+- [x] 6. SQL migration `Scripts/SQLScripts/AddPostTranscodeDisposition.py` (criteria 6, 7, 8) -- creates `PostTranscodeGateConfig` (single row, typed columns); adds `Disposition`, `DispositionReason`, `DispositionDecidedAt` to `TranscodeAttempts` with CHECK + index; deletes the three legacy `SystemSettings` rows.
+- [x] 7. New repository: `PostTranscodeGateConfigRepository.Get() / Update()`. Read-fresh per call. (Criterion 6.)
+- [x] 8. Implement `DecidePostTranscodeDisposition(TranscodeAttemptId)` in a new module `Features/QualityTesting/PostTranscodeDispositionService.py`. Returns `(Disposition, Reason, AuditPayload)`. Idempotent. (Criteria 1, 2, 5.)
+- [x] 9. Wire the function as the **only** post-transcode call from `ProcessTranscodeQueueService.ProcessJob` and `QualityTestingBusinessService.ProcessQualityTestQueue` (re-decide after VMAF lands). (Criterion 3.)
+- [x] 10. Update `FileReplacementBusinessService.ProcessFileReplacement` to require `Disposition IN ('Replace','BypassReplace')` on the attempt, refuse otherwise. Drop `BypassVMAFCheck` parameter. Delete `ProcessFileReplacementWithVMAF` (collapse). (Criterion 14.)
+- [x] 11. Implement the audit-trail UPDATE in the disposition function (Disposition, DispositionReason, DispositionDecidedAt). (Criteria 9, 11.)
+- [x] 12. Add the rolled-up INFO log line. Remove the opaque "Quality test processing failed" pattern. (Criteria 12, 13.)
+- [x] 13. Delete the legacy symbols listed in criterion 14. Update `post-transcode-pipeline.feature.md` per criterion 15.
+- [x] 14. Add `/settings` "Post-Transcode" card and the two new endpoints. (Criteria 16, 17.)
 - [ ] 15. Integration tests: one per decision-table row (criterion 4); idempotency test (criterion 2); audit-query test (criterion 11).
 - [ ] 16. Smoke test: re-run the Sister Wives S04E05 scenario that motivated this feature. With `ServiceStatus.QualityTestService='Paused'` and `WhenVmafUnavailable='block'`, expect `Disposition='NoReplace', Reason='VmafServicePaused'`. With `WhenVmafUnavailable='bypass'`, expect `Disposition='BypassReplace', Reason='VmafServicePausedBypassed'`. With `ServiceStatus='Running'` and a real VMAF score in [88, 98], expect `Disposition='Replace', Reason='VmafPassed'`.
 

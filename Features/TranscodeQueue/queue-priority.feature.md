@@ -67,6 +67,45 @@ beat the auto-set values.
 5. Files with `MediaFile.SizeMB` NULL or 0 receive `Priority = 1` (lowest
    non-zero) so the queue does not error on partial-scan rows.
 
+15. **[BUG -- CRITICAL] Profile-less files use a profile-agnostic estimate
+   based on probed source bitrate, not the `SizeMB * 0.5` proxy.** When
+   `MediaFile.AssignedProfile` is NULL or the profile cascade does not
+   resolve, the estimate MUST use a deterministic formula keyed on the
+   probed `Codec` + `OverallBitrate` (or `VideoBitrateKbps + AudioBitrateKbps`)
+   + `ResolutionCategory` and a configurable expected-output-bitrate table
+   (e.g. "AV1 at 720p ~ 1500 kbps"). The `SizeMB * 0.5` fallback in
+   criterion 4 is replaced for any file that has been probed (Codec +
+   OverallBitrate present); the file-size proxy remains only as the
+   absolute-last-resort case where no probe data exists.
+
+   Why critical: profile-less files are the population the operator looks
+   at to decide which titles to assign profiles to next. The current
+   `size * 0.5` proxy ranks bloated-but-already-efficient files (e.g. a
+   large AV1 source) the same as a bloated h264 source -- the operator
+   ends up sorting by file size instead of compression headroom, which
+   misses the highest-impact transcode candidates.
+
+   Verifiable:
+   (a) Two files with identical `SizeMB` and `DurationMinutes` but
+       different `Codec` (h264 vs av1) and different `OverallBitrate`
+       (8 Mbps vs 2 Mbps) get DIFFERENT `PriorityScore` values when
+       neither has an `AssignedProfile`. The h264/8 Mbps file ranks
+       higher than the av1/2 Mbps file.
+   (b) An h264 file with `OverallBitrate` already below the expected
+       AV1-at-its-resolution target ranks at `Priority = 1` (no
+       headroom) without a profile, instead of the `SizeMB * 0.5`
+       proxy giving it a misleading mid-range priority.
+   (c) The expected-output-bitrate table is operator-tunable from the
+       `/settings` "Queue Tuning" card (reuses `CrfBitrateEstimates` if
+       extended with a "no-profile default codec" row, OR a new sibling
+       table). Source of truth is the DB, not a Python constant.
+   (d) Files with NO probe data (Codec NULL or OverallBitrate NULL)
+       still receive the `SizeMB * 0.5` last-resort estimate so the
+       queue keeps populating during partial-probe windows.
+
+   Owns the `KNOWN-ISSUES.md` "Profile-less savings estimate uses
+   misleading SizeMB * 0.5 proxy" entry recorded 2026-05-10.
+
 ### B. Manual override window
 
 6. The Priority modal in `Templates/Queue.html` (line 106 input min/max)
