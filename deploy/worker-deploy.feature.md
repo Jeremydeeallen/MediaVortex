@@ -4,6 +4,8 @@
 
 Builds and deploys MediaVortex WorkerService instances as Docker containers. Workers are stateless processes that poll the database for transcode jobs (and optionally VMAF quality tests and file scanning), run FFmpeg, and write output to shared media mounts. They scale horizontally via `docker compose up --scale worker=N` on the worker-pool LXC (provisioned by the infrastructure repo).
 
+> **Note on share mappings:** the `MEDIAVORTEX_SHARE_MAPPINGS` env var and the `WorkerShareMappings` registration step described below are the boot-side of a known workaround for OS-coupled path storage. See `KNOWN-ISSUES.md` -- entry `[BUG - CRITICAL - WORKAROUND IN PLACE] Canonical path storage is OS-coupled` -- for the diagnosis and target architecture (`path-storage.feature.md`). Do not document the path-translation problem in this doc; link to KNOWN-ISSUES.md.
+
 ## Concern
 
 Dogfood

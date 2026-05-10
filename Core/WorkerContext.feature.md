@@ -2,6 +2,8 @@
 
 Process-level singleton providing per-worker configuration to all services in the process.
 
+> **Note on path translation:** the `PathTranslation` field exposed by this singleton is the runtime side of a known workaround for OS-coupled path storage. See `KNOWN-ISSUES.md` -- entry `[BUG - CRITICAL - WORKAROUND IN PLACE] Canonical path storage is OS-coupled` -- for the diagnosis, full symptom list, and the target architecture (`path-storage.feature.md`). Do not document the path-translation problem here; link to KNOWN-ISSUES.md.
+
 ## Surface
 
 Internal API only -- no UI or HTTP surface. Consumed by FFmpegService, FileReplacementBusinessService, ProcessTranscodeQueueService, and any service that needs worker-specific paths.

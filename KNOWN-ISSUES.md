@@ -2,6 +2,44 @@
 
 ## Open
 
+### [BUG - CRITICAL - WORKAROUND IN PLACE] Canonical path storage is OS-coupled
+**Date:** 2026-05-10
+**Single source of truth for this issue.** Every other doc that touches path translation, share mappings, drive letters, or platform-specific path handling MUST link to this entry rather than re-describing the problem. If you find a duplicate description in any feature/flow doc, replace it with a link to here.
+
+**Affects:** every path column in the database. Concretely: `MediaFiles.FilePath`, `TranscodeQueue.FilePath`, `RootFolders.RootFolder`, `ShowSettings.ShowFolder`, `TranscodeAttempts` path columns, `MediaFilesArchive.FilePath`, and any future column shaped like a path. Also: `Services/PathTranslationService.py`, `Core/WorkerContext.py`, `Repositories/DatabaseManager.py:RegisterWorkerShareMappings`, the `WorkerShareMappings` table, and the `MEDIAVORTEX_SHARE_MAPPINGS` env var.
+
+**Diagnosis:** the canonical form of every path stored in the DB is Windows-shaped -- drive letter + backslashes (`T:\Show\Season 1\file.mkv`). The schema decided, at the row level, that one specific OS shape is the source of truth. Linux workers cannot use the canonical value directly; every read/write has to translate `T:\…` to `/mnt/media_tv/…` via a runtime layer. The translation layer works, but it is a workaround for a schema decision, not a feature.
+
+**Symptoms (all observable in DB Logs):**
+- 271+ "Path does not exist, cannot normalize" WARNINGs (`PrivateNormalizePathToFilesystemCase`).
+- 80+ "FFprobe failed for ..." ERRORs with no captured stderr.
+- 439 "FFmpeg path from settings not found" ERRORs across three distinct path shapes.
+- 3 "/bin/sh: 1: C:CodeAutomationMediaVortex..." Linux failures (Windows backslashes shell-stripped).
+- The full existence of `PathTranslationService`, `WorkerContext.PathTranslation`, and `WorkerShareMappings` -- all of these are workaround scaffolding.
+
+**Current workaround (in production, working, do NOT touch without a feature):**
+- `Services/PathTranslationService.py` translates `T:\…` to per-worker mount on every read/write.
+- `WorkerShareMappings` table holds per-worker drive-letter -> local-mount rows (12 rows today: 4 workers x 3 letters M/T/Z).
+- `MEDIAVORTEX_SHARE_MAPPINGS` env var on each container seeds those rows at registration time.
+- `WorkerContext.Current().PathTranslation` is the runtime entry point all services call.
+- `Core/WorkerContext.feature.md` and `deploy/worker-deploy.feature.md` document the workaround surfaces.
+
+**Violates:** `path-storage.feature.md` (repo root) -- success criteria 1, 2, 4. Criterion 1 is the [BUG] criterion: no row in any DB table contains a drive letter or backslash in a path field.
+
+**The right shape (deferred -- scoped in `path-storage.feature.md`):**
+- Path columns become `(RootId BIGINT REFERENCES RootFolders(Id), RelativePath TEXT)`. Forward slashes, no drive letter, no leading slash.
+- New table `RootFolderResolutions` replaces `WorkerShareMappings`: one row per `(RootId, WorkerName)` with the worker's absolute path for that root.
+- Absolute paths are computed at I/O boundaries (FFmpeg invocation, `open()`, `os.path.exists`) by joining root resolution + relative path. Never stored.
+- `PathTranslationService` reduces to a join lookup (< 50 LOC, no regex, no drive-letter parsing).
+
+**Look first:** `Services/PathTranslationService.py`, `Core/WorkerContext.py`, `Repositories/DatabaseManager.py:RegisterWorkerShareMappings`, schema of `RootFolders` and `WorkerShareMappings`, and any code site that splits or constructs a path with a drive letter (grep for `[A-Za-z]:\\\\` and `os.sep`).
+
+**Fix with:** `/n` against `path-storage.feature.md`. This is a real project (~8-12 Progress steps when planned). Migration is the bulk of the work; the rule is precise. Do NOT attempt incrementally -- the contract has to flip atomically (schema migration + code cutover + backfill in one operator window).
+
+**Note for future bug records:** symptoms of OS-coupled storage (Windows-flavored paths on Linux, drive-letter assumptions, mount-prefix mismatches) append context HERE rather than open a new entry. This issue is the umbrella.
+
+---
+
 ### [BUG] Post-transcode pipeline has 5 split decision sites, 5+ scattered config sources, no audit trail
 **Date:** 2026-05-10
 **Affects:** `Features/QualityTesting/ShouldQualityTestService.py`, `Features/QualityTesting/QualityTestingBusinessService.py` (`UpdateQualityTestResults`, `CheckAndTriggerAutoReplace`), `Features/FileReplacement/FileReplacementBusinessService.py` (`ProcessFileReplacement`/`ProcessFileReplacementWithVMAF` with `BypassVMAFCheck` parameter), `Features/TranscodeJob/ProcessTranscodeQueueService.py` (`IsQualityTestEnabled`), `SystemSettings` rows for `VMAFAutoReplaceMinThreshold` / `MaxThreshold` / `QualityTestEnabled`.
