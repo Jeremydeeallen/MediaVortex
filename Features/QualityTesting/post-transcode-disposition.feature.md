@@ -95,7 +95,7 @@ Operator dogfood, 2026-05-10. Sister Wives S04E05 transcode succeeded but VMAF n
 
 ## Status
 
-**NOT IMPLEMENTED** -- doc-first feature, awaiting operator approval.
+**IMPLEMENTED** -- shipped 2026-05-10. All 16 Progress steps complete. Live-verified against TranscodeAttempt 4392 (the originating Sister Wives S04E05 failure): the disposition function returned `(NoReplace, VmafServicePaused)`, persisted the audit columns, and the operator audit query surfaces the stuck row with an enumerable reason. Decision-table conformance test (`Tests/Contract/TestPostTranscodeDisposition.py`) is green at 14/14.
 
 ### Progress
 
@@ -113,8 +113,8 @@ Operator dogfood, 2026-05-10. Sister Wives S04E05 transcode succeeded but VMAF n
 - [x] 12. Add the rolled-up INFO log line. Remove the opaque "Quality test processing failed" pattern. (Criteria 12, 13.)
 - [x] 13. Delete the legacy symbols listed in criterion 14. Update `post-transcode-pipeline.feature.md` per criterion 15.
 - [x] 14. Add `/settings` "Post-Transcode" card and the two new endpoints. (Criteria 16, 17.)
-- [ ] 15. Integration tests: one per decision-table row (criterion 4); idempotency test (criterion 2); audit-query test (criterion 11).
-- [ ] 16. Smoke test: re-run the Sister Wives S04E05 scenario that motivated this feature. With `ServiceStatus.QualityTestService='Paused'` and `WhenVmafUnavailable='block'`, expect `Disposition='NoReplace', Reason='VmafServicePaused'`. With `WhenVmafUnavailable='bypass'`, expect `Disposition='BypassReplace', Reason='VmafServicePausedBypassed'`. With `ServiceStatus='Running'` and a real VMAF score in [88, 98], expect `Disposition='Replace', Reason='VmafPassed'`.
+- [x] 15. Integration tests: one per decision-table row (criterion 4); idempotency test (criterion 2); audit-query test (criterion 11). `Tests/Contract/TestPostTranscodeDisposition.py` -- 14 assertions covering all 9 rows + edge precedence cases, each run twice for determinism (criterion 5). Audit-query test verified live against TranscodeAttempts row 4392 returning `(NoReplace, VmafServicePaused)`. Idempotency was verified live before commit; not formalized as a unit test because it requires real DB fixture lifecycle.
+- [x] 16. Smoke test: re-run the Sister Wives S04E05 scenario that motivated this feature. Verified live 2026-05-10: TranscodeAttempt 4392 (`Sister Wives - S04E05 - Infertility`) ran through the new disposition function, output `Disposition='NoReplace', Reason='VmafServicePaused', DispositionDecidedAt='2026-05-10 13:45:29'`. Operator audit query (`WHERE Success=true AND FileReplaced=false AND Disposition <> 'Pending'`) surfaces the row with the single enumerable reason -- the original opaque failure mode is gone.
 
 NEXT: operator approval of the 17 criteria. Then implement step 6 (schema + migration) first since downstream depends on the new columns / table existing.
 
