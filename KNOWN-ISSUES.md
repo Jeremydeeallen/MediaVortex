@@ -9,6 +9,8 @@
 
 **Data integrity NOT affected:** the FFmpeg process itself completes normally. `vmaf_output.xml` is well-formed (verified: 1,609 frame elements covering frames 0-16080), `QualityTestResults.VMAFScore` is parsed correctly from the XML, and the disposition function reads the right value. The bug is purely on the operator-visibility side.
 
+**Isolated to the Python wrapper (2026-05-10):** ran the EXACT same FFmpeg command directly in a terminal (no `MonitorVMAFProgress` wrapping). FFmpeg emitted clean progress lines every ~100 frames all the way to frame 16,037 (99.7%) and produced the final `frame=16083` line, with VMAF score 79.603343 -- identical to the worker run. So FFmpeg is not the problem. The defect is entirely in our stderr-consumer thread.
+
 **Violates:** `Features/QualityTesting/QualityTesting.feature.md` criterion 7 ("Quality test progress is reported in real time"). [BUG] criterion 7b added with this entry.
 
 **Look first:** `Features/QualityTesting/QualityTestingBusinessService.py:722` (`MonitorVMAFProgress`) and `ParseFFmpegProgressLine` (~line 803). Most likely: the FFmpeg stderr read loop terminates on a short/empty read that gets interpreted as EOF before FFmpeg has actually written its final stderr buffer. Or: a poll-timeout in the monitor loop is shorter than FFmpeg's final-flush interval. The thread that runs `MonitorVMAFProgress` should keep reading until FFmpeg's `wait()` returns, and should emit a final `UpdateProgressRecord(..., Status='Completed', ProgressPercentage=100)` regardless of whether stderr produced a tail progress line.
