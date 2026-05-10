@@ -1483,7 +1483,23 @@ class DatabaseManager:
         """Save a transcoding queue item (insert or update) and return the item ID."""
         try:
             LoggingService.LogFunctionEntry("SaveTranscodeQueueItem", "DatabaseManager", QueueItem.Id, QueueItem.FilePath, QueueItem.Status)
-            
+
+            # Refuse to admit a queue row whose source is already a MediaVortex
+            # transcoded artifact (filename ending in `-mv.<ext>`). Mirrored in
+            # TranscodeQueueRepository.SaveTranscodeQueueItem -- whichever path
+            # callers go through, the guard fires. See
+            # Features/FileReplacement/transcoded-output-placement.feature.md
+            # criterion 6.
+            if QueueItem.Id is None and QueueItem.FilePath:
+                _Lower = QueueItem.FilePath.lower()
+                _Stem, _Ext = os.path.splitext(_Lower)
+                if _Stem.endswith("-mv") and _Ext:
+                    LoggingService.LogWarning(
+                        f"Refusing to admit queue row -- source already MediaVortex-transcoded ({QueueItem.FilePath})",
+                        "DatabaseManager", "SaveTranscodeQueueItem",
+                    )
+                    return 0
+
             connection = self.DatabaseService.GetConnection()
             try:
                 cursor = connection.cursor()

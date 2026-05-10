@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """TranscodeQueueRepository.py - Repository for transcode queue data access"""
 
+import os
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 from Core.Database.BaseRepository import BaseRepository
@@ -66,6 +67,23 @@ class TranscodeQueueRepository(BaseRepository):
         """Save a transcoding queue item (insert or update) and return the item ID."""
         try:
             LoggingService.LogFunctionEntry("SaveTranscodeQueueItem", "TranscodeQueueRepository", QueueItem.Id, QueueItem.FilePath, QueueItem.Status)
+            # Refuse to admit a queue row whose source is already a MediaVortex
+            # transcoded artifact (filename ending in `-mv.<ext>`). Re-transcoding
+            # a -mv file would either produce -mv-mv (visibly broken) or replace
+            # an already-transcoded output back through the pipeline. Defense-in-
+            # depth: same protection as Disposition='Discard' for already-good
+            # files, but at the admission layer. See
+            # Features/FileReplacement/transcoded-output-placement.feature.md
+            # criterion 6.
+            if QueueItem.Id is None and QueueItem.FilePath:
+                _Lower = QueueItem.FilePath.lower()
+                _Stem, _Ext = os.path.splitext(_Lower)
+                if _Stem.endswith("-mv") and _Ext:
+                    LoggingService.LogWarning(
+                        f"Refusing to admit queue row -- source already MediaVortex-transcoded ({QueueItem.FilePath})",
+                        "TranscodeQueueRepository", "SaveTranscodeQueueItem",
+                    )
+                    return 0
             connection = self.DatabaseService.GetConnection()
             try:
                 cursor = connection.cursor()

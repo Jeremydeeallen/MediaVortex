@@ -65,8 +65,23 @@ class FileManagerService:
             return False
     
     def IsMediaFile(self, filePath: str) -> bool:
-        """Check if a file is a media file based on its extension."""
+        """Check if a file is a media file based on its extension.
+
+        Skips MediaVortex artifacts:
+          - `.old.<ext>` -- the original kept aside after a Replace when
+            ProfileThresholds.KeepSource=True. Not a separate media file.
+          - `.orig` -- mid-replacement backup that should never be visible
+            to a scan, but we filter defensively.
+        See Features/FileReplacement/transcoded-output-placement.feature.md criterion 9.
+        """
         try:
+            FileNameLower = Path(filePath).name.lower()
+            # Strip `.<ext>` and check if remaining ends with `.old` -> artifact.
+            Stem = Path(FileNameLower).stem
+            if Stem.endswith(".old"):
+                return False
+            if FileNameLower.endswith(".orig"):
+                return False
             fileExtension = Path(filePath).suffix.lower()
             return fileExtension in self.MediaExtensions
         except Exception as e:

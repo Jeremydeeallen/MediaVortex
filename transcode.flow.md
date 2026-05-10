@@ -331,10 +331,10 @@ ORDER BY DispositionDecidedAt DESC;
   1. Validate TranscodeAttempt exists and FileReplaced=false
   2. Validate both original and transcoded files exist (path translation applied)
   3. Archive original metadata to MediaFilesArchive
-  4. **Atomic rename-and-replace**: rename `original.ext -> original.ext.orig`, move staged file to original location, verify target non-zero. On any filesystem-level failure, rollback restores the `.orig` and returns Success=false.
+  4. **Atomic rename-and-replace**: rename `original.ext -> original.ext.orig` as a backup, then move the staged file to `<originalbasename>-mv.<output-ext>` in the same directory. Verify target non-zero. On any filesystem-level failure, rollback restores the `.orig` and returns Success=false. The `-mv` suffix is the canonical MediaVortex on-disk marker -- structurally distinct from the source filename, defending against same-name collision regressions and giving operators a glance-readable "this was transcoded" signal. See `Features/FileReplacement/transcoded-output-placement.feature.md`.
   5. Re-probe new file via FFprobe (worker's FFprobe path)
-  6. Update MediaFiles with new metadata, set TranscodedByMediaVortex=true
-  7. Settle `.orig` per `ProfileThresholds.KeepSource` (delete or rename to `.old<ext>`)
+  6. Update MediaFiles with new metadata, set TranscodedByMediaVortex=true. `MediaFiles.FilePath` now ends in `-mv.<ext>`.
+  7. Settle `.orig` per `ProfileThresholds.KeepSource` (delete or rename to `<originalbasename>.old.<orig-ext>`). FileScanning skips `.old.<ext>` artifacts.
 
 **Discard path:**
 - Delete staged transcoded file from worker's `StagingDirectory`

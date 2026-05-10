@@ -59,22 +59,22 @@ Operator dogfood, 2026-05-10. Two adjacent topics surfaced in the same conversat
 
 ## Status
 
-**NOT IMPLEMENTED** -- doc-first feature, awaiting operator approval.
+**PHASE 1 IMPLEMENTED 2026-05-10** -- the on-disk naming convention, queue admission guard, scanning exclusion, and a pragmatic point-fix for the cross-worker staging drift ship now. Phase 2 (full `Workers.StagingDirectory` retirement) is deferred to a focused session because it's a multi-file refactor across `Core/WorkerContext`, `Repositories/DatabaseManager`, both Main.py entry points, and `ProcessTranscodeQueueService` mode-handling. Splitting the feature into two phases keeps tonight's diff bounded enough to ship before opening the multi-worker fleet, while still closing the operator-visibility win and the `larry-worker-1` reachability bug.
 
 ### Progress
 
 - [x] 1. Surfaced two related concerns (cross-worker scratch reachability, on-disk audit gap) on 2026-05-10
 - [x] 2. Confirmed via DB query that i9 already InPlace (`StagingDirectory=NULL`) and three of four larry workers use the shared NFS staging path; `larry-worker-1` is the outlier
 - [x] 3. Drafted this feature doc with 12 success criteria
-- [ ] 4. Operator approval of criteria 1-12
-- [ ] 5. SQL migration `Scripts/SQLScripts/DropWorkersStagingDirectory.py` (criteria 11, 12)
-- [ ] 6. Update `ProcessTranscodeQueueService` to compute side-by-side staging path unconditionally; remove `StagingDirectory` reads (criteria 1, 2)
-- [ ] 7. Update `_ProcessCompleteFileReplacement` to compute final `TargetPath` as `<basename>-mv.<ext>` (criteria 4, 5)
-- [ ] 8. Add the `-mv` admission guard to queue populate paths (criterion 6)
-- [ ] 9. Update `FileScanning` exclusion list to recognize `.old.<ext>` (criterion 9)
-- [ ] 10. Update `transcode.flow.md` Stage 8 with the new naming and the dropped `StagingDirectory` input
-- [ ] 11. Cross-worker smoke test: worker A produces, worker B consumes the VMAF (criterion 3)
-- [ ] 12. End-to-end smoke on both i9 and larry: a `Show-mv.mp4` lands in `MediaFiles`, no double-suffix anywhere on disk
+- [x] 4. Operator approval of criteria (granted in same conversation; phase split agreed)
+- [x] 5. **Phase 1.1.** Pragmatic point-fix: `UPDATE Workers SET StagingDirectory='/mnt/media_tv/MediaVortex/Staging' WHERE WorkerName='larry-worker-1'` -- closes criterion 3's blast radius for tonight's smoke without the full refactor. (Criterion 3, partial.)
+- [x] 6. **Phase 1.2.** Update `_ProcessCompleteFileReplacement` to compute final `TargetPath` as `<originalbasename>-mv<ext>`, derived from the original filename rather than the staged filename's various suffixes (`_remuxed.mp4`, `_subfix.mp4`, resolution suffixes, etc.). (Criteria 4, 5.)
+- [x] 7. **Phase 1.3.** Add the `-mv` admission guard to queue populate paths (criterion 6).
+- [x] 8. **Phase 1.4.** Update `FileScanning` exclusion list to recognize `.old.<ext>` (criterion 9).
+- [x] 9. **Phase 1.5.** Update `transcode.flow.md` Stage 8 with the new naming.
+- [x] 10. **Phase 1.6.** Smoke script `Scripts/Smoke/RunPostDispositionPipelineTest.py` to verify attempt 4394 end-to-end (lower threshold + manual disposition + FileReplacement + restore threshold).
+- [ ] 11. **Phase 2.** SQL migration `Scripts/SQLScripts/DropWorkersStagingDirectory.py` (criteria 11, 12). Touches `Core/WorkerContext`, `Repositories/DatabaseManager` RegisterWorker INSERT/SELECT, both Main.py entry points, `ProcessTranscodeQueueService.py` LocalStaging-mode logic + `GetTranscodeFileMode` / `GetTranscodeOutputMode`. Wide blast radius, multi-file mechanical refactor; bundled to one session.
+- [ ] 12. **Phase 2.** Cross-worker integration smoke test: worker A produces, worker B consumes the VMAF (criterion 3 in full).
 
 ## Scope
 

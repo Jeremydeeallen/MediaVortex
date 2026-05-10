@@ -443,15 +443,23 @@ class FileReplacementBusinessService:
 
             StepsCompleted = []
 
-            # Compute the final target path. Strip side-by-side suffixes so the
-            # operator-visible filename matches expectations after remux/subfix.
+            # Compute the final target path: <original-basename>-mv<output-ext>.
+            # Derives from the ORIGINAL filename (not the staged filename) so any
+            # encode-time suffixes the staged file carries -- `_remuxed.mp4`,
+            # `_subfix.mp4`, resolution suffixes like `_480p.mp4`, etc. -- are
+            # uniformly retired into the single `-mv` marker.
+            #
+            # The `-mv` suffix is the canonical "MediaVortex transcoded this"
+            # marker on disk. It is structurally distinct from any source
+            # filename, which closes the same-name collision class that
+            # destroyed source files in the BuildRemuxCommand bug fixed
+            # 2026-05-09 (KNOWN-ISSUES.md:104) -- defense-in-depth at the
+            # filename level. See Features/FileReplacement/transcoded-output-placement.feature.md
+            # criteria 4, 5.
             OriginalDir = os.path.dirname(LocalOriginalPath)
-            TranscodedFilename = os.path.basename(LocalTranscodedPath)
-            for SideBySideSuffix in ("_remuxed.mp4", "_subfix.mp4"):
-                if TranscodedFilename.endswith(SideBySideSuffix):
-                    TranscodedFilename = TranscodedFilename[: -len(SideBySideSuffix)] + ".mp4"
-                    break
-            TargetPath = os.path.join(OriginalDir, TranscodedFilename)
+            OriginalBasename = os.path.splitext(os.path.basename(LocalOriginalPath))[0]
+            TargetExt = os.path.splitext(LocalTranscodedPath)[1] or ".mp4"
+            TargetPath = os.path.join(OriginalDir, OriginalBasename + "-mv" + TargetExt)
 
             # Step 1: rename original to .orig (atomic backup). Two paths:
             # - "Self-managed" (legacy / transcode): we do the rename here
