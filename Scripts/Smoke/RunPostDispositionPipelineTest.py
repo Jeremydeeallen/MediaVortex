@@ -131,28 +131,27 @@ def Main(TranscodeAttemptId: int):
         if not V['FileReplaced']:
             Fail("TranscodeAttempts.FileReplaced is still false after ProcessFileReplacement.")
 
-        Step(8, "Verify MediaFiles.FilePath ends with `-mv.<ext>` if -mv naming is live")
-        # Find the corresponding MediaFile row by joining via OriginalFilePath (canonical)
+        Step(8, "Verify on disk -- expect <originalbasename>-mv.<ext> in source folder")
         OrigPath = R['FilePath']
-        MfRows = Db.ExecuteQuery(
-            "SELECT FilePath, TranscodedByMediaVortex FROM MediaFiles WHERE FilePath LIKE %s",
-            (os.path.dirname(OrigPath).replace('\\', '!\\').replace('%', '!%').replace('_', '!_') + '\\\\%',),
-        )
-        # Simple substring match instead -- LIKE escaping is brittle for this script.
         Folder = os.path.dirname(OrigPath)
-        Stem = os.path.splitext(os.path.basename(OrigPath))[0]
-        Found = None
-        for Mf in MfRows:
-            if Stem.lower() in os.path.basename(Mf['FilePath']).lower():
-                Found = Mf
-                break
-        if Found:
-            print(f"    MediaFiles.FilePath = {Found['FilePath']}")
-            print(f"    TranscodedByMediaVortex = {Found['TranscodedByMediaVortex']}")
-            if not Found['FilePath'].lower().endswith(('-mv.mp4', '-mv.mkv')):
-                print("    NOTE: Filename does not end in `-mv` -- the -mv naming change may not be live yet on this code.")
-        else:
-            print("    NOTE: Could not auto-locate the corresponding MediaFiles row; check manually.")
+        OriginalBase = os.path.splitext(os.path.basename(OrigPath))[0]
+        # Filesystem listing -- prefer this over a MediaFiles SELECT (which
+        # is updated by ProcessFileReplacement -> _UpdateMediaFilesAfterReplacement
+        # asynchronously after probe).
+        from Core.WorkerContext import WorkerContext as _Wc
+        _Ctx = _Wc.Current()
+        LocalFolder = _Ctx.PathTranslation.ToLocalPath(Folder) if _Ctx and _Ctx.PathTranslation else Folder
+        try:
+            FsEntries = os.listdir(LocalFolder)
+        except OSError as Ex:
+            print(f"    Could not list {LocalFolder}: {Ex}")
+            FsEntries = []
+        MvCandidates = [E for E in FsEntries if OriginalBase.lower() in E.lower() and "-mv." in E.lower()]
+        OldCandidates = [E for E in FsEntries if OriginalBase.lower() in E.lower() and ".old." in E.lower()]
+        print(f"    Found {len(MvCandidates)} -mv candidate(s): {MvCandidates}")
+        print(f"    Found {len(OldCandidates)} .old candidate(s): {OldCandidates}")
+        if not MvCandidates:
+            print("    NOTE: No `-mv.<ext>` file present. Either the -mv naming change isn't live, or the rename failed silently.")
 
         print("\nPASS")
 
