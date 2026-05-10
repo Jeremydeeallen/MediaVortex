@@ -89,14 +89,16 @@ class CommandBuilder:
             # Add parameters using CodecParameters database values
             self.AddCodecParameters(CommandParts, CodecParameters, ProfileSettings)
             
-            # Add audio codec and bitrate - always use AAC for normalization compatibility
-            # Downmix to stereo to avoid unsupported channel layouts (e.g. 5.1 surround)
-            AudioBitrate = ProfileSettings.get('AudioBitrateKbps')
-            if AudioBitrate and AudioBitrate != '' and AudioBitrate != 'None':
-                CommandParts.extend(['-c:a', 'aac', '-ac', '2', '-b:a', f'{AudioBitrate}k'])
-            else:
-                # Use default AAC bitrate when none specified (never use copy for audio normalization)
-                CommandParts.extend(['-c:a', 'aac', '-ac', '2', '-b:a', '128k'])
+            # Audio: source-preserving policy (codec + channel count + bitrate
+            # match source for MP4-compatible codecs; EAC3 fallback for lossless).
+            # Profile.AudioBitrateKbps is the operator override -- when 0/NULL,
+            # the policy reads source bitrate via MediaFile.AudioBitrateKbps.
+            ProfileAudioBitrate = ProfileSettings.get('AudioBitrateKbps')
+            try:
+                ProfileAudioBitrate = int(ProfileAudioBitrate) if ProfileAudioBitrate not in (None, '', 'None') else 0
+            except (TypeError, ValueError):
+                ProfileAudioBitrate = 0
+            CommandParts.extend(self.BuildAudioCodecArgs(MediaFile, ProfileAudioBitrate))
             
             # Add audio filters (normalization)
             AudioFilter = self.BuildAudioFilters(ProfileSettings)
@@ -406,8 +408,70 @@ class CommandBuilder:
         # Return combined filters or None if no filters
         return ','.join(Filters) if Filters else None
     
-    # MP4-compatible audio codecs that can be copied without re-encoding
-    MP4_COMPATIBLE_AUDIO = ['aac', 'ac3', 'eac3', 'mp3']
+    # MP4-compatible audio codecs (we re-encode to the same codec to keep
+    # source format/channels through the loudnorm decode-filter-encode pass).
+    MP4_COMPATIBLE_AUDIO = ('aac', 'ac3', 'eac3', 'mp3')
+
+    # Channel-aware default bitrates when source bitrate is missing or the
+    # source codec is being replaced (DTS/FLAC/TrueHD/PCM -> EAC3).
+    _AUDIO_DEFAULT_BITRATE_BY_CHANNELS = {
+        1: 96,   # mono
+        2: 128,  # stereo
+        6: 256,  # 5.1
+        8: 384,  # 7.1
+    }
+
+    @classmethod
+    def _DefaultAudioBitrateForChannels(cls, Channels: Optional[int]) -> int:
+        if not Channels or Channels < 1:
+            return 128
+        # Round up to the nearest known channel count
+        for Threshold in sorted(cls._AUDIO_DEFAULT_BITRATE_BY_CHANNELS.keys()):
+            if Channels <= Threshold:
+                return cls._AUDIO_DEFAULT_BITRATE_BY_CHANNELS[Threshold]
+        return 384
+
+    def BuildAudioCodecArgs(self, MediaFile, ProfileBitrate: Optional[int]) -> list:
+        """Resolve `-c:a / -b:a` args for the loudnorm-aware re-encode pass.
+
+        Policy (chosen 2026-05-10, replaces forced AAC stereo):
+        - Operator override: if ProfileBitrate is non-zero, treat the profile
+          as authoritative for bitrate. Codec/channels still match source per
+          MP4-compatibility rules below.
+        - MP4-compatible source codec (aac/ac3/eac3/mp3): re-encode to same
+          codec, preserve channel count (no `-ac` flag), match source bitrate
+          when known. Channel-aware default fallback when source bitrate is
+          NULL.
+        - mp3 source: convert to aac (more universal in MP4) preserving
+          channels and bitrate.
+        - Anything else (dts/flac/truehd/pcm/unknown): re-encode to eac3 with
+          channel-aware default bitrate. EAC3 fits MP4 and supports up to 7.1.
+
+        Note: no `-ac` flag is emitted -- FFmpeg defaults to source channel
+        count, which is what we want. The previous forced `-ac 2` downmix
+        was removed deliberately.
+        """
+        SourceCodec = (getattr(MediaFile, 'AudioCodec', None) or '').lower()
+        SourceChannels = getattr(MediaFile, 'AudioChannels', None)
+        SourceBitrate = getattr(MediaFile, 'AudioBitrateKbps', None)
+        OperatorOverride = bool(ProfileBitrate)  # 0 / None / '' -> use source
+
+        if SourceCodec in ('aac', 'ac3', 'eac3'):
+            Bitrate = ProfileBitrate if OperatorOverride else (
+                SourceBitrate or self._DefaultAudioBitrateForChannels(SourceChannels)
+            )
+            return ['-c:a', SourceCodec, '-b:a', f'{Bitrate}k']
+
+        if SourceCodec == 'mp3':
+            Bitrate = ProfileBitrate if OperatorOverride else (
+                SourceBitrate or self._DefaultAudioBitrateForChannels(SourceChannels)
+            )
+            return ['-c:a', 'aac', '-b:a', f'{Bitrate}k']
+
+        # Lossless / unknown -> EAC3 preserving channels, channel-aware default
+        # (source bitrate is meaningless for lossless inputs).
+        Bitrate = ProfileBitrate if OperatorOverride else self._DefaultAudioBitrateForChannels(SourceChannels)
+        return ['-c:a', 'eac3', '-b:a', f'{Bitrate}k']
 
     def BuildRemuxCommand(self, CommandData: Dict[str, Any]) -> Optional[Dict[str, str]]:
         """Build FFmpeg remux command: copy video, re-encode audio with
@@ -492,13 +556,12 @@ class CommandBuilder:
             if VideoCodec in ('hevc', 'h265', 'x265'):
                 CommandParts.extend(['-tag:v', 'hvc1'])
 
-            # Audio: always re-encode to AAC so the loudness-normalization
-            # filter chain can apply (filters require decoded audio). Stream
-            # copy is no longer used here -- see Docs/AudioStrategy.md
-            # decision matrix. Audio re-encode is cheap (~5-20 seconds per
-            # hour of content) compared to video, and library-wide loudness
-            # consistency is the goal.
-            CommandParts.extend(['-c:a', 'aac', '-b:a', '128k'])
+            # Audio: source-preserving re-encode (codec + channel count +
+            # bitrate match source for MP4-compatible codecs; EAC3 fallback
+            # for lossless inputs). Re-encode is mandatory because the
+            # loudnorm filter chain needs decoded audio. Remux has no
+            # ProfileSettings -- always use source-matching policy.
+            CommandParts.extend(self.BuildAudioCodecArgs(MediaFile, ProfileBitrate=0))
             AudioFilter = self.BuildAudioFilters({})
             if AudioFilter:
                 CommandParts.extend(['-af', f'"{AudioFilter}"'])
@@ -581,10 +644,9 @@ class CommandBuilder:
             if VideoCodec in ('hevc', 'h265', 'x265'):
                 CommandParts.extend(['-tag:v', 'hvc1'])
 
-            # Audio: always re-encode to AAC so the loudness-normalization
-            # filter chain can apply -- same rationale as BuildRemuxCommand.
+            # Audio: source-preserving re-encode (same policy as BuildRemuxCommand).
             # See Docs/AudioStrategy.md.
-            CommandParts.extend(['-c:a', 'aac', '-b:a', '128k'])
+            CommandParts.extend(self.BuildAudioCodecArgs(MediaFile, ProfileBitrate=0))
             AudioFilter = self.BuildAudioFilters({})
             if AudioFilter:
                 CommandParts.extend(['-af', f'"{AudioFilter}"'])

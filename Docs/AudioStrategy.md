@@ -36,24 +36,36 @@ Both filters are toggled independently via `AudioNormalizationEnabled` and `Audi
 
 **Applies to:** Transcode, Remux, and SubtitleFix paths. All three re-encode audio to AAC, so the same `loudnorm` + optional `acompressor` chain is applied uniformly. The library-wide loudness consistency promise is upheld regardless of which pipeline produced the file.
 
-### 3. Codec: Jellyfin-Compatible Output
-Output audio uses codecs that Jellyfin can direct-play on all clients.
+### 3. Codec: Source-Preserving with MP4 Fallback (revised 2026-05-10)
+Output audio matches the source codec, channel count, and bitrate whenever the source is MP4-compatible. The previous "always AAC stereo 128k" policy was retired because audio is a small fraction of total bitrate (~10% on a 720p AV1 file) and forcing stereo AAC threw away surround sound for very little space saved.
 
-**Transcode, Remux, and SubtitleFix paths:** All three re-encode audio to AAC at 128 kbps so the normalization chain can be applied. Audio re-encoding is cheap relative to video (typically 5-20 seconds for a 60-minute file), so the cost of normalizing during remux is negligible compared to the consistency benefit.
+**Policy** (implemented in `CommandBuilder.BuildAudioCodecArgs`):
 
-MP4 container audio compatibility note (informational, not a decision branch any longer):
-- `aac`, `ac3`, `eac3`, `mp3` are MP4-compatible codecs
-- `dts`, `dts-hd`, `truehd`, `flac`, `pcm_*` are not
+| Source Codec | Output Codec | Channels | Bitrate |
+|---|---|---|---|
+| `aac` | aac | match source (no `-ac` flag) | match source, fall back to channel-aware default |
+| `ac3` | ac3 | match source | match source, fall back to channel-aware default |
+| `eac3` | eac3 | match source | match source, fall back to channel-aware default |
+| `mp3` | aac | match source | match source, fall back to channel-aware default |
+| `dts`, `flac`, `truehd`, `pcm_*`, anything else | **eac3** | match source | channel-aware default (source bitrate is meaningless for lossless) |
 
-Prior versions of the remux path copied audio when the codec was already MP4-compatible. That branch was removed so loudness normalization is applied uniformly.
+**Channel-aware default bitrates** (used when source bitrate is NULL or for lossless-to-eac3 fallback):
+- mono → 96 kbps
+- stereo → 128 kbps
+- 5.1 → 256 kbps
+- 7.1 → 384 kbps
+
+**Operator override:** `ProfileThresholds.AudioBitrateKbps` is the override knob. **Zero (0) means "use source policy"**; any non-zero value forces that bitrate regardless of source. As of 2026-05-10 every existing row was reset to 0 to make source-matching the default everywhere. To pin a profile to a specific bitrate, edit the `ProfileThresholds` row for that profile + resolution.
+
+**Why re-encode at all?** The loudness-normalization filter chain requires decoded audio. Stream-copy is incompatible with `loudnorm` / `acompressor`, so audio passes through a decode → filter → re-encode cycle even when the codec is unchanged. Cost: ~5-20 seconds per hour of content.
 
 ## Decision Matrix
 
-| Path | English Selection | Normalization | Output Codec |
-|------|------------------|---------------|--------------|
-| **Transcode** | Yes (via `-map`) | Yes (`loudnorm` + optional `acompressor`) | AAC (always re-encoded) |
-| **Remux** | Yes (via `-map`) | Yes (`loudnorm` + optional `acompressor`) | AAC 128k (always re-encoded; video stream still copied) |
-| **SubtitleFix** | Yes (via `-map`) | Yes (`loudnorm` + optional `acompressor`) | AAC 128k (always re-encoded; video and subtitle streams handled separately) |
+| Path | English Selection | Normalization | Output Codec | Channels | Bitrate |
+|------|------------------|---------------|--------------|----------|---------|
+| **Transcode** (`BuildCommand`) | Yes | Yes | source-matching (per table above) | preserved | source / channel-aware default / profile override |
+| **Remux** (`BuildRemuxCommand`) | Yes | Yes | source-matching (per table above) | preserved | source / channel-aware default (no profile override) |
+| **SubtitleFix** (`BuildSubtitleFixCommand`) | Yes | Yes | source-matching (per table above) | preserved | source / channel-aware default (no profile override) |
 
 ## Key Files
 - `Services/FFmpegAnalysisService.py` — `SelectPreferredAudioStream()` picks the English track
