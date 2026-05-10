@@ -565,20 +565,30 @@ class QualityTestingBusinessService:
             LoggingService.LogException(f"Error monitoring progress for job {JobId}", e, "QualityTestingBusinessService", "MonitorProgress")
 
     def CreateProgressRecord(self, JobId: int, JobDetails: dict) -> int:
-        """Create a progress tracking record for the quality test."""
+        """Create a progress tracking record for the quality test.
+
+        Uses `RETURNING Id` so DatabaseService.ExecuteNonQuery captures the
+        new row's id into `LastInsertId`. Without RETURNING, GetLastInsertId
+        either returns 0 (no prior INSERT this connection) or a stale id
+        from an unrelated INSERT -- both of which made `progress_id` wrong
+        and caused every subsequent UpdateProgressRecord call to silently
+        no-op. Effect was: Status stayed at 'Started' forever, and the
+        Activity page's `GetRunningQualityTestProgress` query (which
+        filters on Status='Processing') saw nothing. Surfaced 2026-05-10.
+        """
         try:
-            # Insert progress record
             query = """
                 INSERT INTO QualityTestProgress (
                     TranscodeAttemptId, Status, ProgressPercentage, CurrentStep,
                     StartTime, UpdatedAt, CreatedAt
                 ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+                RETURNING Id
             """
 
             current_time = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
             transcode_attempt_id = JobDetails.get('TranscodeAttemptId', 0)
 
-            result = self.DatabaseManager.DatabaseService.ExecuteNonQuery(query, (
+            self.DatabaseManager.DatabaseService.ExecuteNonQuery(query, (
                 transcode_attempt_id,
                 "Started",
                 0,
@@ -588,11 +598,7 @@ class QualityTestingBusinessService:
                 current_time
             ))
 
-            if result:
-                progress_id = self.DatabaseManager.DatabaseService.GetLastInsertId()
-            else:
-                progress_id = 0
-
+            progress_id = self.DatabaseManager.DatabaseService.GetLastInsertId() or 0
             return progress_id
 
         except Exception as e:
