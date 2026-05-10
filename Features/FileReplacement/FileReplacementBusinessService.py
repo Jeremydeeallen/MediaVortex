@@ -583,7 +583,11 @@ class FileReplacementBusinessService:
             # prior behavior. Only steps 1-4 (filesystem operations) trigger
             # rollback.
             CanonicalOriginal = NetworkOriginalPath or OriginalFilePath
-            CanonicalNewPath = ntpath.join(ntpath.dirname(CanonicalOriginal), TranscodedFilename)
+            # Compute canonical (DB-shape) path for the new file: same directory
+            # as the canonical original, basename matches the locally-resolved
+            # TargetPath (which is `<originalbasename>-mv<ext>` after the
+            # naming-convention change in transcoded-output-placement.feature.md).
+            CanonicalNewPath = ntpath.join(ntpath.dirname(CanonicalOriginal), os.path.basename(TargetPath))
             UpdateResult = self._UpdateMediaFilesAfterReplacement(CanonicalOriginal, CanonicalNewPath)
             if UpdateResult.get('Success', False):
                 StepsCompleted.append("Updated MediaFiles table")
