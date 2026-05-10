@@ -308,9 +308,16 @@ class ContinuousScanService:
                     break
 
                 try:
-                    # Check if root folder exists
-                    if not os.path.exists(RootFolder.RootFolder):
-                        LoggingService.LogWarning(f"Root folder does not exist, skipping: {RootFolder.RootFolder}", 'ContinuousScanService', '_ExecuteScan')
+                    # Translate canonical (Windows-style) path to local for the
+                    # existence check. On Linux containers, T:\ paths are mapped
+                    # to /mnt/media_tv/ via WorkerContext.PathTranslation. No-op
+                    # on Windows or when no mappings are configured.
+                    from Core.WorkerContext import WorkerContext
+                    _Ctx = WorkerContext.Current()
+                    LocalRootPath = (_Ctx.PathTranslation.ToLocalPath(RootFolder.RootFolder)
+                                     if (_Ctx and _Ctx.PathTranslation) else RootFolder.RootFolder)
+                    if not os.path.exists(LocalRootPath):
+                        LoggingService.LogWarning(f"Root folder does not exist, skipping: {RootFolder.RootFolder} (local: {LocalRootPath})", 'ContinuousScanService', '_ExecuteScan')
                         continue
 
                     # Import FileScanningBusinessService to trigger scan

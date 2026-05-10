@@ -41,6 +41,38 @@ class FileScanningBusinessService:
         except Exception as Ex:
             LoggingService.LogException("Error checking existing scans on init", Ex, 'FileScanningBusinessService', '__init__')
 
+    def _ToLocalPath(self, CanonicalPath: str) -> str:
+        """Translate a canonical (Windows-style, e.g. 'T:\\Foo') DB path to the
+        local worker filesystem path (e.g. '/mnt/media_tv/Foo' on a Linux
+        container). No-op on Windows or when WorkerContext has no mappings.
+
+        Use for any os.path.exists / os.walk / os.listdir / os.path.isdir
+        call against a path that came out of RootFolders or MediaFiles.
+        """
+        try:
+            from Core.WorkerContext import WorkerContext
+            Ctx = WorkerContext.Current()
+            if Ctx and Ctx.PathTranslation:
+                return Ctx.PathTranslation.ToLocalPath(CanonicalPath)
+        except Exception:
+            pass
+        return CanonicalPath
+
+    def _ToCanonicalPath(self, LocalPath: str) -> str:
+        """Inverse of _ToLocalPath -- translate a local worker filesystem path
+        back to canonical (Windows-style) for DB persistence. Use whenever
+        os.walk / os.listdir on Linux returns a path that needs to be stored
+        in MediaFiles.FilePath / RootFolders.RootFolder.
+        """
+        try:
+            from Core.WorkerContext import WorkerContext
+            Ctx = WorkerContext.Current()
+            if Ctx and Ctx.PathTranslation:
+                return Ctx.PathTranslation.ToCanonicalPath(LocalPath)
+        except Exception:
+            pass
+        return LocalPath
+
     def StartScanning(self, RootFolderPath: str, Recursive: bool = True, SkipDuplicateCleanup: bool = False, WorkerName: Optional[str] = None) -> Dict[str, Any]:
         """Start scanning a root folder for media files directly in the main process.
 
@@ -84,61 +116,39 @@ class FileScanningBusinessService:
                     'Error': 'EmptyPath'
                 }
 
-            # Normalize the path
-            NormalizedPath = os.path.normpath(RootFolderPath)
-            LoggingService.LogInfo(f"Normalized path: '{NormalizedPath}'", 'FileScanningBusinessService', 'StartScanning')
+            # Translate canonical (Windows-style) path to local for filesystem
+            # checks. RootFolderPath stays canonical for DB persistence; only
+            # the validation path uses the translated form. On Windows or
+            # without share mappings, this is a no-op.
+            LocalPath = self._ToLocalPath(RootFolderPath)
+            NormalizedPath = os.path.normpath(LocalPath)
+            LoggingService.LogInfo(f"Normalized local path: '{NormalizedPath}' (canonical: '{RootFolderPath}')", 'FileScanningBusinessService', 'StartScanning')
 
             # Check if path exists
             PathExists = os.path.exists(NormalizedPath)
-            LoggingService.LogInfo(f"os.path.exists('{NormalizedPath}') = {PathExists}", 'FileScanningBusinessService', 'StartScanning')
 
             if not PathExists:
-                # Additional debugging for failed path
-                LoggingService.LogError(f"Path does not exist: '{NormalizedPath}'", 'FileScanningBusinessService', 'StartScanning')
-
-                # Try alternative validation methods
+                LoggingService.LogError(f"Path does not exist: local='{NormalizedPath}', canonical='{RootFolderPath}'", 'FileScanningBusinessService', 'StartScanning')
                 try:
                     ListDirResult = os.listdir(NormalizedPath)
                     LoggingService.LogInfo(f"os.listdir succeeded, found {len(ListDirResult)} items", 'FileScanningBusinessService', 'StartScanning')
-                    PathExists = True  # Override if listdir works
+                    PathExists = True
                 except Exception as e:
                     LoggingService.LogError(f"os.listdir also failed: {str(e)}", 'FileScanningBusinessService', 'StartScanning')
 
                 if not PathExists:
                     return {
                         'Success': False,
-                        'Message': f'Root folder does not exist: {RootFolderPath}',
+                        'Message': f'Root folder does not exist: {RootFolderPath} (local: {NormalizedPath})',
                         'Error': 'InvalidPath'
                     }
 
-            # Check if it's a directory
-            IsDirectory = os.path.isdir(NormalizedPath)
-            LoggingService.LogInfo(f"os.path.isdir('{NormalizedPath}') = {IsDirectory}", 'FileScanningBusinessService', 'StartScanning')
-
-            if not IsDirectory:
-                LoggingService.LogError(f"Path is not a directory: '{NormalizedPath}'", 'FileScanningBusinessService', 'StartScanning')
+            if not os.path.isdir(NormalizedPath):
                 return {
                     'Success': False,
                     'Message': f'Path is not a directory: {RootFolderPath}',
                     'Error': 'NotDirectory'
                 }
-
-            # Additional validation for network drives
-            if len(NormalizedPath) >= 2 and NormalizedPath[1] == ':' and NormalizedPath[0].isalpha():
-                LoggingService.LogInfo(f"Detected network drive: {NormalizedPath[0]}:", 'FileScanningBusinessService', 'StartScanning')
-                try:
-                    # Test if we can actually access the directory
-                    TestFiles = os.listdir(NormalizedPath)
-                    LoggingService.LogInfo(f"Network drive access test successful, found {len(TestFiles)} items", 'FileScanningBusinessService', 'StartScanning')
-                except Exception as e:
-                    LoggingService.LogError(f"Network drive access test failed: {str(e)}", 'FileScanningBusinessService', 'StartScanning')
-                    return {
-                        'Success': False,
-                        'Message': f'Cannot access network drive: {RootFolderPath}',
-                        'Error': 'NetworkDriveAccessFailed'
-                    }
-
-            LoggingService.LogInfo(f"Path validation successful for: '{NormalizedPath}'", 'FileScanningBusinessService', 'StartScanning')
 
             # Generate unique job ID
             JobId = str(uuid.uuid4())
@@ -300,9 +310,16 @@ class FileScanningBusinessService:
             LoggingService.LogException("Error cleaning up scan jobs", e)
 
     def PerformScan(self, RootFolderPath: str, Recursive: bool, SkipDuplicateCleanup: bool = False) -> Dict[str, Any]:
-        """Perform the actual scanning process."""
+        """Perform the actual scanning process.
+
+        RootFolderPath is the canonical (Windows-style) path stored in the DB.
+        On Linux containers we translate to a local mount for filesystem ops
+        and translate the walked file paths back to canonical for DB writes.
+        """
         try:
             LoggingService.LogInfo("Starting scan of directory: {}", RootFolderPath)
+
+            LocalRootPath = self._ToLocalPath(RootFolderPath)
 
             # Step 0: Clean up any existing duplicate records before scanning
             # Skipped during continuous scans where cleanup runs once before the loop
@@ -311,11 +328,11 @@ class FileScanningBusinessService:
                 if CleanupResult.get('DuplicatesRemoved', 0) > 0:
                     LoggingService.LogInfo(f"Pre-scan cleanup removed {CleanupResult['DuplicatesRemoved']} duplicate records", 'PerformScan', 'FileScanningBusinessService')
 
-            # Step 1: Calculate directory size
+            # Step 1: Calculate directory size (uses local path)
             self.ScanProgress = 10.0
-            TotalSizeGB = self.FileManager.CalculateDirectorySize(RootFolderPath)
+            TotalSizeGB = self.FileManager.CalculateDirectorySize(LocalRootPath)
 
-            # Step 2: Get or create root folder record
+            # Step 2: Get or create root folder record (canonical path stored in DB)
             self.ScanProgress = 20.0
             RootFolder = self.GetOrCreateRootFolder(RootFolderPath, TotalSizeGB)
 
@@ -327,9 +344,11 @@ class FileScanningBusinessService:
                     'Error': 'RootFolderCreationFailed'
                 }
 
-            # Step 3: Scan for media files
+            # Step 3: Walk the LOCAL path; convert results back to canonical
+            # for DB storage so MediaFiles.FilePath stays portable across hosts.
             self.ScanProgress = 30.0
-            MediaFiles = self.FileManager.ScanDirectory(RootFolderPath, Recursive)
+            LocalMediaFiles = self.FileManager.ScanDirectory(LocalRootPath, Recursive)
+            MediaFiles = [self._ToCanonicalPath(p) for p in LocalMediaFiles]
             self.ScanResults.TotalFilesFound = len(MediaFiles)
             self.ScanResults.RootFolderId = RootFolder.Id
 
@@ -383,23 +402,41 @@ class FileScanningBusinessService:
 
 
     def GetOrCreateRootFolder(self, RootFolderPath: str, TotalSizeGB: float) -> RootFolderModel:
-        """Get existing root folder or create a new one using filesystem validation."""
+        """Get existing root folder or create a new one.
+
+        RootFolderPath is canonical (Windows-style). On Windows we walk the
+        filesystem to recover correct case; on Linux containers the raw path
+        does not exist on the fs (it's an SMB drive letter), so we trust the
+        canonical input as authoritative and skip fs canonicalization.
+        """
         try:
-            # Get canonical path from filesystem
-            CanonicalPath = self.GetCanonicalPathFromFilesystem(RootFolderPath)
+            from Core.WorkerContext import WorkerContext
+            Ctx = WorkerContext.Current()
+            UseFsCanonicalization = not (Ctx and Ctx.PathTranslation and Ctx.PathTranslation.IsLinux)
 
-            # Check if root folder already exists (case-insensitive via canonical paths)
+            CanonicalPath = (self.GetCanonicalPathFromFilesystem(RootFolderPath)
+                             if UseFsCanonicalization else RootFolderPath)
+
+            # Find an existing row by canonical match. On Linux we compare strings
+            # directly (case-sensitive); on Windows we additionally pass through
+            # GetCanonicalPathFromFilesystem to recover the on-disk case.
             ExistingFolders = self.Repository.GetAllRootFolders()
-
             for Folder in ExistingFolders:
-                # Compare using canonical paths from filesystem
-                # Only check if the path exists to avoid warnings for inaccessible drives
                 try:
-                    if os.path.exists(Folder.RootFolder):
-                        ExistingCanonical = self.GetCanonicalPathFromFilesystem(Folder.RootFolder)
-                        if ExistingCanonical == CanonicalPath:
-                            # Update existing folder with canonical path
-                            Folder.RootFolder = CanonicalPath
+                    if UseFsCanonicalization:
+                        if os.path.exists(Folder.RootFolder):
+                            ExistingCanonical = self.GetCanonicalPathFromFilesystem(Folder.RootFolder)
+                            if ExistingCanonical == CanonicalPath:
+                                Folder.RootFolder = CanonicalPath
+                                Folder.LastScannedDate = datetime.now(timezone.utc)
+                                Folder.TotalSizeGB = TotalSizeGB
+                                FolderId = self.Repository.SaveRootFolder(Folder)
+                                Folder.Id = FolderId
+                                LoggingService.LogInfo(f"Updated existing root folder: {CanonicalPath}")
+                                return Folder
+                    else:
+                        # Linux container: trust the canonical strings.
+                        if Folder.RootFolder == CanonicalPath:
                             Folder.LastScannedDate = datetime.now(timezone.utc)
                             Folder.TotalSizeGB = TotalSizeGB
                             FolderId = self.Repository.SaveRootFolder(Folder)
@@ -407,10 +444,8 @@ class FileScanningBusinessService:
                             LoggingService.LogInfo(f"Updated existing root folder: {CanonicalPath}")
                             return Folder
                 except Exception:
-                    # Skip folders that can't be accessed (e.g., T: drive not mapped in this session)
                     continue
 
-            # Create new root folder with canonical path
             NewFolder = RootFolderModel(
                 RootFolder=CanonicalPath,
                 LastScannedDate=datetime.now(timezone.utc),
