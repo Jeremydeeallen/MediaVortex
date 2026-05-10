@@ -74,6 +74,7 @@ class MediaProbeBusinessService:
                 MediaFile.VideoBitrateKbps = MetadataResult.get('VideoBitrateKbps')
                 MediaFile.AudioBitrateKbps = MetadataResult.get('AudioBitrateKbps')
                 MediaFile.Resolution = MetadataResult.get('Resolution')
+                MediaFile.ResolutionCategory = self._DeriveResolutionCategory(MediaFile.Resolution)
                 MediaFile.Codec = MetadataResult.get('VideoCodec')
                 MediaFile.DurationMinutes = MetadataResult.get('DurationMinutes')
                 MediaFile.FrameRate = MetadataResult.get('FrameRate')
