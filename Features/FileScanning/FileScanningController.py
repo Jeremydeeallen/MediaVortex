@@ -714,9 +714,10 @@ class FileScanningController:
 
                 if result['Success']:
                     try:
-                        repo = FileScanningRepository()
-                        repo.AddOrUpdateScanDirectory('ContinuousScanEnabled', '1', 'Enable/disable continuous file scanning', 'boolean')
-                        repo.AddOrUpdateScanDirectory('ContinuousScanIntervalMinutes', str(IntervalMinutes), 'Interval in minutes for continuous scanning', 'integer')
+                        from Features.SystemSettings.SystemSettingsRepository import SystemSettingsRepository
+                        settings = SystemSettingsRepository()
+                        settings.AddOrUpdateSystemSetting('ContinuousScanEnabled', '1', 'Enable/disable continuous file scanning', 'boolean')
+                        settings.AddOrUpdateSystemSetting('ContinuousScanIntervalMinutes', str(IntervalMinutes), 'Interval in minutes for continuous scanning', 'integer')
                         LoggingService.LogInfo(f"Saved continuous scanning settings to database (enabled, interval: {IntervalMinutes})", "FileScanningController", "EnableContinuousScanning")
                     except Exception as e:
                         LoggingService.LogWarning(f"Could not save continuous scan settings to database: {e}", "FileScanningController", "EnableContinuousScanning")
@@ -738,7 +739,6 @@ class FileScanningController:
             """Disable continuous/periodic scanning."""
             try:
                 LoggingService.LogInfo("DisableContinuousScanning endpoint called", "FileScanningController", "DisableContinuousScanning")
-                from Features.FileScanning.FileScanningRepository import FileScanningRepository
 
                 if not hasattr(self.ViewModel, 'ContinuousScanService') or self.ViewModel.ContinuousScanService is None:
                     return jsonify({
@@ -751,8 +751,8 @@ class FileScanningController:
 
                 if result['Success']:
                     try:
-                        repo = FileScanningRepository()
-                        repo.AddOrUpdateScanDirectory('ContinuousScanEnabled', '0', 'Enable/disable continuous file scanning', 'boolean')
+                        from Features.SystemSettings.SystemSettingsRepository import SystemSettingsRepository
+                        SystemSettingsRepository().AddOrUpdateSystemSetting('ContinuousScanEnabled', '0', 'Enable/disable continuous file scanning', 'boolean')
                         LoggingService.LogInfo("Saved continuous scanning disabled state to database", "FileScanningController", "DisableContinuousScanning")
                     except Exception as e:
                         LoggingService.LogWarning(f"Could not save continuous scan settings to database: {e}", "FileScanningController", "DisableContinuousScanning")

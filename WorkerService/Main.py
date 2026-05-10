@@ -402,6 +402,14 @@ class WorkerServiceApp:
                     f"Stuck quality test job detection: {Result.get('StuckJobsFound', 0)} found, {Result.get('JobsCleaned', 0)} cleaned",
                     "WorkerService", "_DetectAndCleanStuckJobs"
                 )
+
+            # Clean stuck scan jobs (FileScanning.feature.md criterion 18 stuck-scan side)
+            Result = DetectionService.DetectAndCleanStuckScanJobs()
+            if Result.get("Success", False):
+                LoggingService.LogInfo(
+                    f"Stuck scan job detection: {Result.get('StuckScansFound', 0)} found, {Result.get('ScansCleaned', 0)} cleaned",
+                    "WorkerService", "_DetectAndCleanStuckJobs"
+                )
         except Exception as e:
             LoggingService.LogException("Error during stuck job detection", e, "WorkerService", "_DetectAndCleanStuckJobs")
 
@@ -486,6 +494,15 @@ class WorkerServiceApp:
                     DetectionService.DetectAndCleanStuckQualityTestJobs()
                 except Exception as qtEx:
                     LoggingService.LogException("Error in stuck quality-test detection cycle", qtEx, "WorkerService", "_StuckJobDetectionLoop")
+
+                # Scan side (cheap, runs unconditionally -- the detector returns
+                # no-op when no Running scans exist, and any ScanEnabled worker
+                # in the cluster can clean stale rows so other workers' crashes
+                # don't leak into this worker's continuous-scan ticks)
+                try:
+                    DetectionService.DetectAndCleanStuckScanJobs()
+                except Exception as scanEx:
+                    LoggingService.LogException("Error in stuck scan detection cycle", scanEx, "WorkerService", "_StuckJobDetectionLoop")
             except Exception as e:
                 LoggingService.LogException("Error in stuck job detection cycle", e, "WorkerService", "_StuckJobDetectionLoop")
             self.ShutdownEvent.wait(_ReadInterval())

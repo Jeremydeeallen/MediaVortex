@@ -259,6 +259,37 @@ class ContinuousScanService:
                 'ContinuousScanService', '_ExecuteScan'
             )
 
+            # Resolve this worker's identity for affinity filtering and ScanJobs attribution.
+            # WorkerContext is set at WorkerService startup; absence falls back to hostname.
+            ThisWorkerName = None
+            try:
+                from Core.WorkerContext import WorkerContext
+                Ctx = WorkerContext.Current()
+                if Ctx is not None:
+                    ThisWorkerName = Ctx.WorkerName
+            except Exception:
+                pass
+            if not ThisWorkerName:
+                import socket
+                ThisWorkerName = socket.gethostname()
+
+            # Apply per-rootfolder host affinity. RootFolders.PreferredWorkerName=NULL means
+            # any ScanEnabled worker may pick it up; a non-null value pins the rootfolder to
+            # the named worker (e.g. larry-worker-1 has the fast backplane to brain).
+            EligibleFolders = []
+            SkippedAffinity = 0
+            for Folder in TopLevelFolders:
+                Preferred = getattr(Folder, 'PreferredWorkerName', None)
+                if Preferred and Preferred != ThisWorkerName:
+                    SkippedAffinity += 1
+                    continue
+                EligibleFolders.append(Folder)
+            if SkippedAffinity > 0:
+                LoggingService.LogInfo(
+                    f"Worker {ThisWorkerName} skipping {SkippedAffinity} root folder(s) pinned to other workers; will scan {len(EligibleFolders)}",
+                    'ContinuousScanService', '_ExecuteScan'
+                )
+
             # Run duplicate cleanup once before the loop instead of per-folder
             try:
                 if not self.FileScanningService:
@@ -270,8 +301,8 @@ class ContinuousScanService:
             except Exception as e:
                 LoggingService.LogException("Error during pre-scan duplicate cleanup", e, 'ContinuousScanService', '_ExecuteScan')
 
-            # Scan each top-level root folder
-            for RootFolder in TopLevelFolders:
+            # Scan each eligible root folder
+            for RootFolder in EligibleFolders:
                 if self.StopEvent.is_set():
                     LoggingService.LogInfo("Stop event received during scan, aborting", 'ContinuousScanService', '_ExecuteScan')
                     break
@@ -287,20 +318,29 @@ class ContinuousScanService:
                         from Features.FileScanning.FileScanningBusinessService import FileScanningBusinessService
                         self.FileScanningService = FileScanningBusinessService()
 
-                    # Check if we can start a new scan (respects concurrent scan limits)
-                    if not self.FileScanningService.CanStartNewScan():
-                        LoggingService.LogWarning("Cannot start new scan (max concurrent scans reached), skipping this interval", 'ContinuousScanService', '_ExecuteScan')
-                        break
+                    # Per-rootfolder claim guard (criterion 11) inside StartScanning
+                    # is the only concurrency check now. The global cap was retired
+                    # with criterion 18c -- it contradicted per-rootfolder claim
+                    # semantics on multi-worker setups.
 
                     LoggingService.LogInfo(f"Starting scan for root folder: {RootFolder.RootFolder}", 'ContinuousScanService', '_ExecuteScan')
 
-                    # Trigger scan for this root folder (skip duplicate cleanup - already ran once above)
-                    ScanResult = self.FileScanningService.StartScanning(RootFolder.RootFolder, Recursive=True, SkipDuplicateCleanup=True)
+                    # Trigger scan for this root folder (skip duplicate cleanup - already ran once above).
+                    # WorkerName is recorded on the ScanJobs row and used by the per-rootfolder duplicate guard.
+                    ScanResult = self.FileScanningService.StartScanning(
+                        RootFolder.RootFolder,
+                        Recursive=True,
+                        SkipDuplicateCleanup=True,
+                        WorkerName=ThisWorkerName,
+                    )
 
                     if ScanResult.get('Success'):
                         LoggingService.LogInfo(f"Scan completed successfully for: {RootFolder.RootFolder}", 'ContinuousScanService', '_ExecuteScan')
+                    elif ScanResult.get('Error') == 'ScanAlreadyRunning':
+                        # Another worker beat us to this rootfolder this tick. Expected with multiple ScanEnabled workers.
+                        LoggingService.LogInfo(f"Skipping {RootFolder.RootFolder}: scan already running on another worker", 'ContinuousScanService', '_ExecuteScan')
                     else:
-                        LoggingService.LogError(f"Scan failed for {RootFolder.RootFolder}: {ScanResult.get('ErrorMessage')}", 'ContinuousScanService', '_ExecuteScan')
+                        LoggingService.LogError(f"Scan failed for {RootFolder.RootFolder}: {ScanResult.get('Message') or ScanResult.get('ErrorMessage')}", 'ContinuousScanService', '_ExecuteScan')
 
                 except Exception as e:
                     LoggingService.LogException(f"Error scanning root folder: {RootFolder.RootFolder}", e, 'ContinuousScanService', '_ExecuteScan')
@@ -315,15 +355,3 @@ class ContinuousScanService:
         except Exception as e:
             LoggingService.LogException("Error executing scan", e, 'ContinuousScanService', '_ExecuteScan')
 
-    def CanStartNewScan(self) -> bool:
-        """Check if a new scan can be started (delegates to FileScanningBusinessService)."""
-        try:
-            if not self.FileScanningService:
-                from Features.FileScanning.FileScanningBusinessService import FileScanningBusinessService
-                self.FileScanningService = FileScanningBusinessService()
-
-            return self.FileScanningService.CanStartNewScan()
-
-        except Exception as e:
-            LoggingService.LogException("Error checking if new scan can start", e, 'ContinuousScanService', 'CanStartNewScan')
-            return False

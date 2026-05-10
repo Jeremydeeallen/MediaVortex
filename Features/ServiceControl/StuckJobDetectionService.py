@@ -130,6 +130,23 @@ class StuckJobDetectionService:
     # If worker heartbeat is older than this many minutes, consider the worker offline
     WORKER_HEARTBEAT_STALE_MINUTES = 5
 
+    # ScanJobs in Status='Running' with LastUpdated older than this are stuck.
+    # Default 15 min: a healthy scan ticks LastUpdated every few seconds during
+    # the walk; 15 min is well clear of any legitimate transient pause. Operator
+    # override via SystemSettings('StuckScanThresholdMin').
+    STUCK_SCAN_THRESHOLD_MINUTES = 15
+
+    def _GetStuckScanThresholdMin(self) -> int:
+        """Read StuckScanThresholdMin from SystemSettings each cycle (no cache)."""
+        try:
+            from Features.SystemSettings.SystemSettingsRepository import SystemSettingsRepository
+            value = SystemSettingsRepository().GetSystemSetting('StuckScanThresholdMin')
+            if value is None:
+                return self.STUCK_SCAN_THRESHOLD_MINUTES
+            return max(1, int(value))
+        except Exception:
+            return self.STUCK_SCAN_THRESHOLD_MINUTES
+
     def IsJobStuck(self, Job) -> tuple[bool, str]:
         """Check if a specific job is stuck using three-tier detection:
         1. Worker heartbeat (distributed) - if the owning worker is offline
@@ -852,6 +869,119 @@ class StuckJobDetectionService:
                 "Success": False,
                 "ErrorMessage": errorMsg
             }
+
+    def DetectAndCleanStuckScanJobs(self) -> Dict[str, Any]:
+        """Detect and reset ScanJobs rows stuck in Status='Running' with stale LastUpdated.
+
+        A scan is stuck if either:
+          - LastUpdated is older than StuckScanThresholdMin (default 15) -- the
+            scan thread is dead but no one cleared the row, OR
+          - WorkerName is set and that worker's heartbeat is stale (WorkerService
+            crashed mid-scan).
+
+        Stuck rows are flipped to Status='Failed' with an ErrorMessage explaining
+        the cleanup. The next continuous-scan tick (or manual scan) is then free
+        to claim the rootfolder again -- the per-rootfolder duplicate guard
+        (`IsScanRunningForRootFolder`) only blocks Pending/Running rows.
+
+        Owns FileScanning.feature.md criterion 18 stuck-scan side and the
+        [BUG] entry in KNOWN-ISSUES.md.
+        """
+        try:
+            LoggingService.LogFunctionEntry("DetectAndCleanStuckScanJobs", "StuckJobDetectionService")
+
+            thresholdMin = self._GetStuckScanThresholdMin()
+
+            # Pull all running scans -- typically a handful, so per-row work is fine.
+            query = """
+                SELECT Id, JobId, RootFolderPath, WorkerName, LastUpdated, StartTime
+                FROM ScanJobs
+                WHERE Status = 'Running'
+            """
+            runningRows = self.DatabaseManager.DatabaseService.ExecuteQuery(query)
+
+            if not runningRows:
+                LoggingService.LogInfo("Stuck scan detection: no running scans",
+                                     "StuckJobDetectionService", "DetectAndCleanStuckScanJobs")
+                return {"Success": True, "StuckScansFound": 0, "ScansCleaned": 0}
+
+            stuckIds = []
+            cleanedIds = []
+            now = datetime.now(timezone.utc)
+
+            for row in runningRows:
+                scanId = row.get('Id') or row.get('id')
+                jobId = row.get('JobId') or row.get('jobid')
+                rootFolderPath = row.get('RootFolderPath') or row.get('rootfolderpath')
+                workerName = row.get('WorkerName') or row.get('workername')
+                lastUpdated = row.get('LastUpdated') or row.get('lastupdated')
+
+                isStuck = False
+                reason = None
+
+                # Tier 1: worker heartbeat staleness (if scan is owned by a known worker)
+                if workerName:
+                    workerOffline, workerReason = self._IsWorkerOffline(workerName)
+                    if workerOffline:
+                        isStuck = True
+                        reason = f"Owning worker '{workerName}' is offline: {workerReason}"
+
+                # Tier 2: LastUpdated staleness
+                if not isStuck and lastUpdated:
+                    minutesSinceUpdate = (now - AsAwareUtc(lastUpdated)).total_seconds() / 60.0
+                    if minutesSinceUpdate >= thresholdMin:
+                        isStuck = True
+                        reason = (
+                            f"ScanJobs.LastUpdated stale -- {minutesSinceUpdate:.1f} min ago "
+                            f"(threshold: {thresholdMin}min)"
+                        )
+
+                if not isStuck:
+                    continue
+
+                LoggingService.LogWarning(
+                    f"Stuck scan detected: ScanJobs.Id={scanId}, RootFolder='{rootFolderPath}', "
+                    f"Worker='{workerName}', JobId={jobId}, Reason={reason}",
+                    "StuckJobDetectionService", "DetectAndCleanStuckScanJobs"
+                )
+                stuckIds.append(scanId)
+
+                # Flip to Failed so the next scan tick can re-claim the rootfolder.
+                # The per-rootfolder duplicate guard only blocks Pending/Running.
+                cleanupQuery = """
+                    UPDATE ScanJobs
+                    SET Status = 'Failed',
+                        EndTime = NOW(),
+                        ErrorMessage = %s
+                    WHERE Id = %s AND Status = 'Running'
+                """
+                cleanupMessage = f"Stuck scan cleaned by StuckJobDetectionService: {reason}"
+                affected = self.DatabaseManager.DatabaseService.ExecuteNonQuery(
+                    cleanupQuery, (cleanupMessage, scanId)
+                )
+                if affected > 0:
+                    cleanedIds.append(scanId)
+                    LoggingService.LogInfo(
+                        f"Stuck scan {scanId} flipped to Failed",
+                        "StuckJobDetectionService", "DetectAndCleanStuckScanJobs"
+                    )
+
+            LoggingService.LogInfo(
+                f"Stuck scan detection completed - found {len(stuckIds)}, cleaned {len(cleanedIds)}",
+                "StuckJobDetectionService", "DetectAndCleanStuckScanJobs"
+            )
+            return {
+                "Success": True,
+                "StuckScansFound": len(stuckIds),
+                "ScansCleaned": len(cleanedIds),
+                "StuckScans": stuckIds,
+                "CleanedScans": cleanedIds
+            }
+
+        except Exception as e:
+            errorMsg = f"Exception during stuck scan detection: {str(e)}"
+            LoggingService.LogException(errorMsg, e, "StuckJobDetectionService", "DetectAndCleanStuckScanJobs")
+            return {"Success": False, "ErrorMessage": errorMsg, "StuckScansFound": 0, "ScansCleaned": 0}
 
     def DetectAndCleanAllStuckJobs(self) -> Dict[str, Any]:
         """Detect and clean stuck jobs for both transcode and quality test."""

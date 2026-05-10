@@ -2,6 +2,37 @@
 
 ## Open
 
+### [BUG - FIXED 2026-05-09] File scanner runs on whichever worker has ScanEnabled, not the one with fastest storage access
+**Date:** 2026-05-09 | **Fixed:** 2026-05-09 (host-affinity column + per-rootfolder claim guard + cap as SystemSetting)
+**Affects:** `Features/FileScanning/FileScanningBusinessService.py` (`DetectMovedFiles`, `CleanupMissingFiles`, `ProcessMediaFilesWithMetadata`), `Features/FileScanning/ContinuousScanService.py`, `FileScanning.feature.md` criteria 11 and 12, `FileScanning.flow.md` "Continuous Mode Specifics"
+
+Two related deficiencies surfaced together:
+
+1. **No host-affinity for scan work.** `ContinuousScanService` runs on every worker with `Workers.ScanEnabled=true` and iterates every `RootFolders` row independently. There is no claim/lease coordination, so two ScanEnabled workers can both walk the same rootfolder at the same time. Worse, the worker with the slowest storage path (e.g. WebService over SMB to brain) wins by default if it ticks first, while a backplane-attached worker like larry-worker-1 sits idle. Operator already flipped `larry-worker-1.ScanEnabled=true` for a fast-path TV scan but cannot guarantee the work lands there.
+
+2. **Move detection silently disabled for libraries >10k files.** `DetectMovedFiles` skips at `MaxFiles=10000` (`FileScanningBusinessService.py:1488`). Library has 48,035 rows -> always skipped. The next-step `CleanupMissingFiles` walks the same row set with the same `os.path.exists` checks and is not capped, so the supposed "save" is zero. Net effect: file moves/renames outside MediaVortex become delete+create, dropping AssignedProfile / IsCompliant / RecommendedMode / TranscodedByMediaVortex / probe metadata.
+
+**Violates:** `FileScanning.feature.md` criteria 11 and 12 (added with this bug).
+
+**Look first:**
+- `Features/FileScanning/ContinuousScanService.py` -- the per-worker tick that needs claim/lease semantics.
+- `Features/FileScanning/FileScanningBusinessService.py:1487-1497` -- the 10k cap.
+- `Features/FileScanning/FileScanningBusinessService.py:1374-1410` -- `CleanupMissingFiles` (uncapped, walks same rows).
+- `RootFolders` schema -- candidate for a `PreferredWorkerName` column for affinity, or move to a separate `ScanAffinity` table.
+- `ScanJobs` -- already exists; could carry a claim semantic similar to `TranscodeQueue.ClaimedBy`.
+
+**Flow doc gap:** `FileScanning.flow.md` lines 46-51 ("Continuous Mode Specifics") describes the unscoped per-worker iteration as the current behavior. It is not yet updated for distributed claim semantics; `/t` should rewrite that section before the fix.
+
+**Fix:** `Scripts/SQLScripts/AddScanAffinityColumns.py` adds `RootFolders.PreferredWorkerName`, `ScanJobs.WorkerName`, and seeds `SystemSettings('MoveDetectionMaxFiles', '100000')`. `RootFolderModel`/`FileScanningRepository` carry the new column. `FileScanningBusinessService.IsScanRunningForRootFolder` is the per-rootfolder duplicate-scan guard called from `StartScanning` before the global cap. `_GetMoveDetectionMaxFiles` reads the cap fresh per call (no cache, per memory rule). `ContinuousScanService._ExecuteScan` resolves WorkerName from `WorkerContext.Current()`, drops rootfolders pinned to other workers, and passes its name through to `StartScanning`.
+
+**Operator usage:**
+- Pin a rootfolder to the backplane-attached worker: `UPDATE RootFolders SET PreferredWorkerName='larry-worker-1' WHERE RootFolder='T:\';`
+- Raise the move-detection cap: `UPDATE SystemSettings SET SettingValue='200000' WHERE SettingKey='MoveDetectionMaxFiles';`
+
+**Deploy:** WorkerService and WebService both need to load the new code. SQL migration is already applied (587 RootFolders, all `PreferredWorkerName=NULL`). Scans continue to work pre-deploy because the Python signature change is backward-compatible (`WorkerName` defaults to `None`); only the affinity skip is dormant until the new code lands.
+
+---
+
 ### [BUG - FIXED 2026-05-09] BuildRemuxCommand path-collision destroyed source file
 **Date:** 2026-05-09 | **Fixed:** 2026-05-09 (atomic rename-and-replace in FileReplacement)
 **Affects:** `Models/CommandBuilder.py` (`BuildRemuxCommand`, `BuildSubtitleFixCommand`), `Features/FileReplacement/FileReplacementBusinessService.py:_ProcessCompleteFileReplacement`. **One file lost: T:\IT - Welcome to Derry\Season 1\IT - Welcome to Derry - S01E04 - The Great Swirling Apparatus of Our Planet's Function WEBDL-480p.42.mp4** (MediaFileId 61707).
@@ -41,15 +72,55 @@ Secondary trap at line 100-101: `Config.get('QualityTestEnabled') or Config.get(
 
 ---
 
-### [BUG] Stuck scans have no auto-detection or recovery
-**Date:** 2026-05-09
-**Affects:** ScanJobs table, ContinuousScanService, Features/FileScanning/
+### [BUG - FIXED 2026-05-10] Stuck-scan detection missing + scanner is overengineered (rewrite together)
+**Date:** 2026-05-09 (stuck-scan) | **Expanded:** 2026-05-10 (overengineering rolled in) | **Fixed:** 2026-05-10
+**Affects:** ScanJobs table, Features/ServiceControl/StuckJobDetectionService.py, WorkerService/Main.py, Features/FileScanning/FileScanningBusinessService.py, Features/FileScanning/FileScanningRepository.py, Features/FileScanning/FileScanningController.py, Features/FileScanning/ContinuousScanService.py
 
-A worker that crashes mid-scan leaves its `ScanJobs` row in `Status='Running'` indefinitely. There is no equivalent of `StuckJobDetectionService` for scans -- nothing watches `LastUpdated` staleness, nothing resets stale rows, nothing kicks the next scheduled scan past the orphaned row. `scanning-on-activity-page.feature.md` criterion G15 surfaces the staleness as an amber UI indicator but does not auto-clean.
+**Fix:**
+- Stuck-scan side: `StuckJobDetectionService.DetectAndCleanStuckScanJobs` added (matches the existing `DetectAndCleanStuckTranscodeJobs` shape -- two-tier detection on owning worker's heartbeat + `ScanJobs.LastUpdated` staleness). Wired into `WorkerService._DetectAndCleanStuckJobs` (startup) and `_StuckJobDetectionLoop` (recurring 120s cycle, configurable via `StuckJobDetectionIntervalSec`). Threshold read fresh from `SystemSettings.StuckScanThresholdMin` (default 15min, no caching per memory rule).
+- 18a: `FindTranscodedFileMatch` + `IsValidTranscodeResolutionChange` deleted (post-`FileReplacement` `_transcoded/` subdir doesn't exist; zero external callers).
+- 18b: 8 is-running methods consolidated to one `Repository.GetRunningScans(RootFolderPath=None)`. `__init__`'s self-state lookup, `StartScanning`'s claim guard, and the public `GetScanStatus` API all derive from this single query.
+- 18c: `MaxConcurrentScans=2` and `CanStartNewScan` deleted (contradicted criterion 11's per-rootfolder claim semantics).
+- 18d: `ScanDirectories` CRUD duplicates deleted from `FileScanningRepository`. Business-service wrappers route through `SystemSettingsRepository`. `FileScanningController.EnableContinuousScanning`/`DisableContinuousScanning` were misusing `AddOrUpdateScanDirectory` to write `ContinuousScanEnabled`/`IntervalMinutes` -- now use `SystemSettingsRepository.AddOrUpdateSystemSetting` correctly.
 
-**Look first:** `Features/ServiceControl/StuckJobDetectionService.py` is the natural extension point -- the existing `_IsJobFrozen` shape (LastFrameAdvance / LastProgressUpdate threshold) translates to `ScanJobs.LastUpdated` directly. Once `stuck-job-detection.feature.md` ships (closing the four gaps in transcode-job stuck detection), extending it to cover scans is small.
+**Net LOC**: `FileScanningBusinessService.py` 1815 -> 1546 (-15%); `FileScanningRepository.py` -38 (ScanDir CRUD); `ContinuousScanService.py` -12 (CanStartNewScan delegate); `StuckJobDetectionService.py` +120 (additive); `WorkerService/Main.py` +14 (wiring).
 
-**Fix with:** `/n` (probably folded into a future iteration of `stuck-job-detection.feature.md`, or its own small `/n` if scoping pressure delays that)
+**18e dropped from scope (intentional):** folding `ContinuousScanService` and `DuplicateDetectionService` into `FileScanningBusinessService` was reconsidered. `ContinuousScanService` has independent threading state (LastScanTime, ScanCount, ScanThread, StopEvent) and `DuplicateDetectionService` is only used by `Scripts/FindDuplicates.py` -- the live duplicate handling at `FileScanningBusinessService.py:310` already calls `Repository.CleanupDuplicateMediaFiles` directly. Neither merge would shrink real LOC, just relocate it. Original entry was overzealous on this point.
+
+**Verify:**
+- `py -c "import ast; ast.parse(open('Features/FileScanning/FileScanningBusinessService.py').read())"` syntax-clean.
+- Scripts/SQLScripts/QueryDatabase.py sql "UPDATE ScanJobs SET LastUpdated=NOW()-INTERVAL '20 minutes', Status='Running' WHERE Id=<some completed row>" then wait one StuckJobDetectionIntervalSec cycle -> row should flip to Status='Failed' with ErrorMessage explaining the cleanup.
+- `grep -rn "FindTranscodedFileMatch\|IsValidTranscodeResolutionChange\|CanStartNewScan\|MaxConcurrentScans" Features/ Scripts/` returns no hits in code (KNOWN-ISSUES.md mentions excluded).
+
+---
+
+### [HISTORICAL] Stuck-scan + overengineering bug (pre-fix context)
+**Affects:** ScanJobs table, ContinuousScanService, DuplicateDetectionService, Features/FileScanning/ (entire feature -- 5,020 LOC across 7 files)
+
+**Part 1: stuck-scan detection.** A worker that crashes mid-scan leaves its `ScanJobs` row in `Status='Running'` indefinitely. There is no equivalent of `StuckJobDetectionService` for scans -- nothing watches `LastUpdated` staleness, nothing resets stale rows, nothing kicks the next scheduled scan past the orphaned row. `scanning-on-activity-page.feature.md` criterion G15 surfaces the staleness as an amber UI indicator but does not auto-clean.
+
+**Part 2: scanner is overengineered.** Audit on 2026-05-10 against the 17 success criteria in `FileScanning.feature.md` (after criteria 13-17 were added) found ~30-35% of the LOC has no contract backing. Rolling this into the stuck-scan rewrite because the structural cuts touch the same files the stuck-detection wiring will modify -- doing them separately means the second pass redoes most of the first.
+
+Concrete cuts identified:
+1. **`FindTranscodedFileMatch` + `IsValidTranscodeResolutionChange`** (~110 LOC, `FileScanningBusinessService.py:802-930`): predates `FileReplacement`. The current data flow writes transcoded output to the original path atomically -- there is no `_transcoded/` subdirectory anymore. Genuinely dead.
+2. **Eight "is a scan running?" methods** in `FileScanningBusinessService.py`: `CheckForExistingRunningScan`, `IsScanRunning`, `IsScanRunningForRootFolder`, `GetRunningScanCount`, `CanStartNewScan`, `GetScanJobStatus`, `GetCurrentScanStatus`, `GetAllRunningScans`. Should collapse to one repository query backed by criteria 5, 8, 11.
+3. **`MaxConcurrentScans=2` lever** (`CanStartNewScan`): contradicts criterion 11 (one scan per rootfolder cluster-wide). Dead concept post-host-affinity fix.
+4. **`ScanDirectories` table/concept** (`GetScanDirectories`, `AddOrUpdateScanDirectory`, `DeleteScanDirectory`): criteria 9 and 10 use `RootFolders` exclusively. The `ScanDirectories` path has no criterion -- looks like an abandoned alternative. Pick one.
+5. **`ContinuousScanService` (369 LOC) and `DuplicateDetectionService` (218 LOC) as separate classes**: criterion 5 is a timer + a call into `StartScanning`; criterion 4 is a repository query. Neither needs its own class with its own lifecycle. Fold back into `FileScanningBusinessService` -- the host-affinity claim guard from `FileScanning.feature.md` criterion 11 lives there too.
+
+Net: ~1,500-1,800 LOC cuttable, all in cosmetic class boundaries and the dead `_transcoded/` reconciliation path.
+
+**Look first:**
+- `Features/ServiceControl/StuckJobDetectionService.py` -- natural extension point for stuck-scan; existing `_IsJobFrozen` shape (LastFrameAdvance / LastProgressUpdate threshold) translates to `ScanJobs.LastUpdated` directly.
+- `Features/FileScanning/FileScanningBusinessService.py:802-930` -- dead `_transcoded/` reconciliation.
+- `Features/FileScanning/FileScanningBusinessService.py:36-456` -- the eight is-running methods.
+- `Features/FileScanning/ContinuousScanService.py`, `DuplicateDetectionService.py` -- merge candidates.
+
+**Violates:** `FileScanning.feature.md` criterion 18 (added with this expansion). The stuck-scan side also violates `scanning-on-activity-page.feature.md` G15 indirectly (G15 surfaces but doesn't auto-clean).
+
+**Flow doc gap:** `FileScanning.flow.md` exists. It documents the current per-worker tick model (which the host-affinity fix already targets to rewrite). The simplification pass should rewrite the "Continuous Mode Specifics" section in the same `/t` to keep flow + feature + code in sync.
+
+**Fix with:** `/t` (single rewrite covering stuck-scan detection + simplification; estimate 4-6 hours since both touch the same files)
 
 ---
 

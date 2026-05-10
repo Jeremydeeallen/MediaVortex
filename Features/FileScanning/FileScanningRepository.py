@@ -12,29 +12,82 @@ from Features.FileScanning.Models.SeasonModel import SeasonModel
 class FileScanningRepository(BaseRepository):
     """Repository for FileScanning-related database operations."""
 
+    # ─── ScanJobs Queries ──────────────────────────────────────────────
+
+    def GetRunningScans(self, RootFolderPath: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Return ScanJobs rows in Status IN ('Pending', 'Running').
+
+        Optionally filtered to a single rootfolder path. The single source of
+        truth for "is a scan running?" -- callers derive bool/count/list from
+        the result. Replaces CheckForExistingRunningScan, IsScanRunning,
+        IsScanRunningForRootFolder, GetRunningScanCount, GetAllRunningScans
+        per FileScanning.feature.md criterion 18b.
+        """
+        try:
+            if RootFolderPath:
+                query = """
+                    SELECT Id, JobId, RootFolderPath, Recursive, Status, ProcessId,
+                           StartTime, EndTime, Progress, CurrentDirectory,
+                           TotalFiles, ProcessedFiles, SkippedFiles, EncodingErrors,
+                           NewFiles, UpdatedFiles, DeletedFiles, ErrorMessage,
+                           LastUpdated, WorkerName
+                    FROM ScanJobs
+                    WHERE RootFolderPath = %s AND Status IN ('Pending', 'Running')
+                    ORDER BY StartTime ASC
+                """
+                rows = self.ExecuteQuery(query, (RootFolderPath,))
+            else:
+                query = """
+                    SELECT Id, JobId, RootFolderPath, Recursive, Status, ProcessId,
+                           StartTime, EndTime, Progress, CurrentDirectory,
+                           TotalFiles, ProcessedFiles, SkippedFiles, EncodingErrors,
+                           NewFiles, UpdatedFiles, DeletedFiles, ErrorMessage,
+                           LastUpdated, WorkerName
+                    FROM ScanJobs
+                    WHERE Status IN ('Pending', 'Running')
+                    ORDER BY StartTime ASC
+                """
+                rows = self.ExecuteQuery(query)
+            return rows or []
+        except Exception as e:
+            LoggingService.LogException("Error querying running scans", e, "FileScanningRepository", "GetRunningScans")
+            return []
+
     # ─── Root Folder Methods ───────────────────────────────────────────
 
     def GetAllRootFolders(self, SortColumn='RootFolder', SortOrder='ASC') -> List[RootFolderModel]:
-        ValidColumns = ['Id', 'RootFolder', 'LastScannedDate', 'TotalSizeGB']
+        ValidColumns = ['Id', 'RootFolder', 'LastScannedDate', 'TotalSizeGB', 'PreferredWorkerName']
         if SortColumn not in ValidColumns:
             SortColumn = 'RootFolder'
         if SortOrder.upper() not in ['ASC', 'DESC']:
             SortOrder = 'ASC'
-        query = f"SELECT Id, RootFolder, LastScannedDate, TotalSizeGB FROM RootFolders ORDER BY {SortColumn} {SortOrder.upper()}"
+        query = f"SELECT Id, RootFolder, LastScannedDate, TotalSizeGB, PreferredWorkerName FROM RootFolders ORDER BY {SortColumn} {SortOrder.upper()}"
         rows = self.ExecuteQuery(query)
         rootFolders = []
         for row in rows:
-            rootFolder = RootFolderModel(Id=row['Id'], RootFolder=row['RootFolder'], LastScannedDate=row['LastScannedDate'], TotalSizeGB=row['TotalSizeGB'])
+            rootFolder = RootFolderModel(
+                Id=row['Id'],
+                RootFolder=row['RootFolder'],
+                LastScannedDate=row['LastScannedDate'],
+                TotalSizeGB=row['TotalSizeGB'],
+                PreferredWorkerName=row.get('PreferredWorkerName'),
+            )
             rootFolders.append(rootFolder)
         return rootFolders
 
     def GetRootFolderById(self, RootFolderId: int) -> Optional[RootFolderModel]:
-        query = "SELECT Id, RootFolder, LastScannedDate, TotalSizeGB FROM RootFolders WHERE Id = %s"
+        query = "SELECT Id, RootFolder, LastScannedDate, TotalSizeGB, PreferredWorkerName FROM RootFolders WHERE Id = %s"
         rows = self.ExecuteQuery(query, (RootFolderId,))
         if not rows:
             return None
         row = rows[0]
-        return RootFolderModel(Id=row['Id'], RootFolder=row['RootFolder'], LastScannedDate=row['LastScannedDate'], TotalSizeGB=row['TotalSizeGB'])
+        return RootFolderModel(
+            Id=row['Id'],
+            RootFolder=row['RootFolder'],
+            LastScannedDate=row['LastScannedDate'],
+            TotalSizeGB=row['TotalSizeGB'],
+            PreferredWorkerName=row.get('PreferredWorkerName'),
+        )
 
     def SaveRootFolder(self, RootFolder: RootFolderModel) -> int:
         try:
@@ -837,45 +890,6 @@ class FileScanningRepository(BaseRepository):
             season = SeasonModel(Id=row['Id'], RootFolderId=row['RootFolderId'], SeasonName=row['SeasonName'])
             seasons.append(season)
         return seasons
-
-    # ─── Scan Directory Methods ────────────────────────────────────────
-
-    def GetScanDirectories(self) -> List[Dict[str, str]]:
-        query = "SELECT SettingKey, SettingValue, Description FROM SystemSettings WHERE SettingKey LIKE 'ScanDir%%' ORDER BY SettingKey"
-        rows = self.ExecuteQuery(query)
-        scanDirs = []
-        for row in rows:
-            if row['SettingValue'] and row['SettingValue'].strip():
-                scanDirs.append({'Key': row['SettingKey'], 'Path': row['SettingValue'], 'Description': row['Description']})
-        return scanDirs
-
-    def AddOrUpdateScanDirectory(self, SettingKey, SettingValue, Description, DataType='string') -> bool:
-        try:
-            query = "SELECT COUNT(*) as Count FROM SystemSettings WHERE SettingKey = %s"
-            rows = self.ExecuteQuery(query, (SettingKey,))
-            exists = rows[0]['Count'] > 0 if rows else False
-            if exists:
-                self.ExecuteNonQuery(
-                    "UPDATE SystemSettings SET SettingValue = %s, Description = %s, DataType = %s WHERE SettingKey = %s",
-                    (SettingValue, Description, DataType, SettingKey)
-                )
-            else:
-                self.ExecuteNonQuery(
-                    "INSERT INTO SystemSettings (SettingKey, SettingValue, Description, DataType) VALUES (%s, %s, %s, %s)",
-                    (SettingKey, SettingValue, Description, DataType)
-                )
-            return True
-        except Exception as e:
-            LoggingService.LogException("Exception in AddOrUpdateScanDirectory", e, "FileScanningRepository", "AddOrUpdateScanDirectory")
-            return False
-
-    def DeleteScanDirectory(self, SettingKey) -> bool:
-        try:
-            affectedRows = self.ExecuteNonQuery("DELETE FROM SystemSettings WHERE SettingKey = %s", (SettingKey,))
-            return affectedRows > 0
-        except Exception as e:
-            LoggingService.LogException("Exception in DeleteScanDirectory", e, "FileScanningRepository", "DeleteScanDirectory")
-            return False
 
     # ─── Helper Methods ────────────────────────────────────────────────
 
