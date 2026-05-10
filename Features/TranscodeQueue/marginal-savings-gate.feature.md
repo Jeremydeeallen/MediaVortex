@@ -58,27 +58,27 @@ Operator dogfood (2026-05-10). Operator wanted to use `AV1 P4 FG6 >720p` to comp
 
 ## Status
 
-**NOT IMPLEMENTED** -- doc-first feature, awaiting operator approval.
+**COMPLETE** (pending WebService restart for the new HTTP endpoints to load).
 
 ### Progress
 
 - [x] 1. Read existing flow + feature docs (`transcode.flow.md` Stage 4, `TranscodeQueue.feature.md`)
 - [x] 2. Identify the gap: `ShouldSkipDueToResolution` is too strict; `_EvaluateCompliance` savings logic is not wired into queue admission; `MIN_SAVINGS_MB` is hardcoded; CRF-only profiles bypass the savings estimate
 - [x] 3. Draft this feature doc
-- [x] 4. Update `transcode.flow.md` Stage 4 to describe the new gate (this commit)
-- [ ] 5. Operator approval of criteria 1-13
-- [ ] 6. SQL migration `Scripts/SQLScripts/AddQueueAdmissionTables.py` (criteria 8, 9, 10, 11, 12) -- creates THREE tables (`CrfBitrateEstimates`, `QueueAdmissionConfig`, `CodecCompatibility`); inserts `QueueAdmissionConfig.Id=1` default row; seeds `CodecCompatibility` from the existing class constants; computes `CrfBitrateEstimates` seed rows from `TranscodeAttempts` averages
-- [ ] 7. Repository helpers: `CrfBitrateEstimateRepository.GetEstimatedKbps(Codec, Resolution, Crf) -> Optional[int]`; `QueueAdmissionConfigRepository.Get() -> QueueAdmissionConfigModel`; `CodecCompatibilityRepository.GetAcceptableSet(Kind) -> set` (Kind in {'VideoCodec','AudioCodecMp4','Container'}). All read-fresh, no cache.
-- [ ] 8. Helper `EstimateTargetSizeMB(MediaFile, ProfileSettings)` -- branches on `VideoBitrateKbps > 0` (criterion 5) vs CRF lookup (criterion 6) vs `MissingEstimatePolicy` (criterion 7)
-- [ ] 9. Replace `ShouldSkipDueToResolution` with `EvaluateQueueAdmission(MediaFile, ProfileSettings) -> Tuple[bool, str]` returning `(True, reason)` for blocks. Block reasons: `Upscale`, `MarginalSavings`, `MissingProfile`. Same-resolution + sufficient-savings is **admitted**.
-- [ ] 10. Replace the class constants `COMPATIBLE_CONTAINERS`, `ACCEPTABLE_VIDEO_CODECS`, `MP4_COMPATIBLE_AUDIO_CODECS` with calls into `CodecCompatibilityRepository.GetAcceptableSet(...)`. Delete the constants. `_EvaluateCompliance` and any other callers updated.
-- [ ] 11. Replace any `self.DatabaseManager.<...>` calls inside the new gate code (`EvaluateQueueAdmission`, `EstimateTargetSizeMB`, replaced compliance branches) with `self.Repository.<...>` calls -- vertical-slice cleanup limited to the touched code path.
-- [ ] 12. Wire the new gate into the four queue-admission paths in `transcode.flow.md` Stage 4 (PopulateQueue, AddJob, QueueByFolder, AddSuggestionsToQueue)
-- [ ] 13. Rolled-up `INFO` summary log line at end of each populate run (criterion 16)
-- [ ] 14. New "Queue Tuning" card on `/settings` page: scalar controls for `MinTranscodeSavingsMB` + `MissingEstimatePolicy` bound to `QueueAdmissionConfig`; inline table editor for `CrfBitrateEstimates`; toggleable lists for `CodecCompatibility` (criteria 13, 14, 15). API endpoints under existing `/api/SystemSettings/...` namespace.
-- [ ] 15. Smoke test: assign `AV1 P4 FG6 >720p` to a known 720p file > 400 MB, populate, observe queue row created with `Mode='Transcode'`. Then UPDATE `QueueAdmissionConfig.MinTranscodeSavingsMB=500` and re-populate the same file at a smaller size, observe block with `Reason='MarginalSavings'`.
+- [x] 4. Update `transcode.flow.md` Stage 4 to describe the new gate
+- [x] 5. Operator approval of criteria 1-16
+- [x] 6. SQL migration `Scripts/SQLScripts/AddQueueAdmissionTables.py` (criteria 8, 9, 10, 11, 12) -- THREE tables created; QueueAdmissionConfig.Id=1 seeded; CodecCompatibility seeded with 10 rows from current class constants; CrfBitrateEstimates seeded with 8 rows from observed history (after fixing a duplicate-row bug in the seed query where MediaFilesArchive snapshots multiplied the join).
+- [x] 7. Repository helpers: `CrfBitrateEstimateRepository.GetEstimatedKbps`, `QueueAdmissionConfigRepository.Get`, `CodecCompatibilityRepository.GetAcceptableSet`. Read-fresh per call, no cache.
+- [x] 8. Helper `EstimateTargetSizeMB(MediaFile, ProfileSettings)` -- bitrate-mode formula when VideoBitrateKbps>0; CrfBitrateEstimates lookup otherwise; (None, True) when key missing.
+- [x] 9. `EvaluateQueueAdmission(MediaFile, ProfileSettings, AdmissionConfig=None) -> (bool, str)` plus `EvaluateQueueAdmissionForProfile(MediaFile, ProfileName)` convenience wrapper. Block reasons: `Upscale`, `MarginalSavings`, `MissingProfile`, `MissingEstimate`. `ShouldSkipDueToResolution` removed.
+- [x] 10. Class constants `COMPATIBLE_CONTAINERS`, `ACCEPTABLE_VIDEO_CODECS`, `MP4_COMPATIBLE_AUDIO_CODECS`, `MIN_SAVINGS_MB` deleted. `_EvaluateCompliance` accepts pre-loaded sets/threshold; `RecomputeForFiles` loads them once at top of the bulk loop and passes through.
+- [x] 11. No DatabaseManager calls inside the new gate code (gate only uses the three new repositories + ResolutionService). The wider DatabaseManager-cleanup is deferred per the KNOWN-ISSUES.md backlog entry.
+- [x] 12. Wired into the four queue-admission paths: `PopulateQueueFromMediaFiles` (full populate), `GetMediaFilesByFolderWithResolutionFilterUsingAssignedProfiles` (folder), `EvaluateThresholdCriteria` (legacy single-file), `AddJobToQueue` (manual; `ForceAdd=True` still bypasses).
+- [x] 13. Rolled-up `INFO` summary log line at end of each populate run: `"Marginal-savings gate: <admit> admitted, <block> blocked (Marginal: N, Upscale: N, MissingEstimate: N, MissingProfile: N)"`.
+- [x] 14. "Queue Tuning" card on `/settings` page: scalar controls for `MinTranscodeSavingsMB` + `MissingEstimatePolicy`; inline table editor for `CrfBitrateEstimates`; toggleable lists for `CodecCompatibility`. Six new endpoints under `/api/SystemSettings/{QueueAdmissionConfig,CrfBitrateEstimates,CodecCompatibility}` (GET + PUT each).
+- [x] 15. Smoke test executed: Star Wars Rebels S02E16 (541 MB 720p, 22.1 min, AV1 P4 FG6 >720p profile) -- target estimated 337 MB, savings 204 MB. With threshold=150 MB the gate ADMITS; raising threshold to 500 MB via `UPDATE QueueAdmissionConfig SET MinTranscodeSavingsMB=500` flips the same file to BLOCK with reason `MarginalSavings (source=541MB target=337MB savings=204MB threshold=500MB)`. No restart between threshold changes -- config read fresh per call. Threshold restored to 150 after test.
 
-NEXT: operator approval. Then implement step 6 (schema + seed) first since downstream depends on the tables existing.
+NEXT: User restarts the WebService process so the six new HTTP endpoints (`/api/SystemSettings/QueueAdmissionConfig`, `/CrfBitrateEstimates`, `/CodecCompatibility`) are available to the /settings page. Until then the gate behavior is fully live (only the editor UI is gated on restart).
 
 ## Scope
 

@@ -171,6 +171,137 @@ class SystemSettingsController:
                     'Error': str(e)
                 }), 500
 
+        # ─── Queue Tuning (marginal-savings-gate.feature.md criteria 13-15) ──
+        # Three normalized data sources surfaced in the Settings page card.
+        # No SystemSettings KV rows -- dedicated tables, edited in place.
+
+        @self.Blueprint.route('/QueueAdmissionConfig', methods=['GET'])
+        def GetQueueAdmissionConfig():
+            """Return the single-row QueueAdmissionConfig (Id=1)."""
+            try:
+                from Features.TranscodeQueue.QueueAdmissionConfigRepository import QueueAdmissionConfigRepository
+                Cfg = QueueAdmissionConfigRepository().Get()
+                return jsonify({
+                    'Success': True,
+                    'Config': {
+                        'Id': Cfg.Id,
+                        'MinTranscodeSavingsMB': Cfg.MinTranscodeSavingsMB,
+                        'MissingEstimatePolicy': Cfg.MissingEstimatePolicy,
+                        'LastUpdated': Cfg.LastUpdated.isoformat() if Cfg.LastUpdated else None,
+                    },
+                })
+            except Exception as e:
+                LoggingService.LogException("Error getting QueueAdmissionConfig", e, 'GetQueueAdmissionConfig', 'SystemSettingsController')
+                return jsonify({'Success': False, 'Error': str(e)}), 500
+
+        @self.Blueprint.route('/QueueAdmissionConfig', methods=['PUT'])
+        def UpdateQueueAdmissionConfig():
+            """Update QueueAdmissionConfig scalar fields."""
+            try:
+                Data = request.get_json() or {}
+                from Features.TranscodeQueue.QueueAdmissionConfigRepository import QueueAdmissionConfigRepository
+                Repo = QueueAdmissionConfigRepository()
+                Ok = Repo.Update(
+                    MinTranscodeSavingsMB=Data.get('MinTranscodeSavingsMB'),
+                    MissingEstimatePolicy=Data.get('MissingEstimatePolicy'),
+                )
+                if not Ok:
+                    return jsonify({'Success': False, 'Error': 'Update rejected (see logs)'}), 400
+                return jsonify({'Success': True, 'Message': 'QueueAdmissionConfig updated'})
+            except Exception as e:
+                LoggingService.LogException("Error updating QueueAdmissionConfig", e, 'UpdateQueueAdmissionConfig', 'SystemSettingsController')
+                return jsonify({'Success': False, 'Error': str(e)}), 500
+
+        @self.Blueprint.route('/CrfBitrateEstimates', methods=['GET'])
+        def GetAllCrfBitrateEstimates():
+            """Return all CrfBitrateEstimates rows for the editor table."""
+            try:
+                from Features.TranscodeQueue.CrfBitrateEstimateRepository import CrfBitrateEstimateRepository
+                Rows = CrfBitrateEstimateRepository().GetAll()
+                return jsonify({
+                    'Success': True,
+                    'Estimates': [{
+                        'Id': R.Id,
+                        'Codec': R.Codec,
+                        'Resolution': R.Resolution,
+                        'Crf': R.Crf,
+                        'EstimatedKbps': R.EstimatedKbps,
+                        'LastUpdated': R.LastUpdated.isoformat() if R.LastUpdated else None,
+                        'Source': R.Source,
+                    } for R in Rows],
+                })
+            except Exception as e:
+                LoggingService.LogException("Error listing CrfBitrateEstimates", e, 'GetAllCrfBitrateEstimates', 'SystemSettingsController')
+                return jsonify({'Success': False, 'Error': str(e)}), 500
+
+        @self.Blueprint.route('/CrfBitrateEstimates', methods=['PUT'])
+        def UpsertCrfBitrateEstimate():
+            """Upsert a CrfBitrateEstimates row by (Codec, Resolution, Crf).
+            Stamps Source='OperatorOverride'."""
+            try:
+                Data = request.get_json() or {}
+                from Features.TranscodeQueue.CrfBitrateEstimateRepository import CrfBitrateEstimateRepository
+                from Features.TranscodeQueue.Models.CrfBitrateEstimateModel import CrfBitrateEstimateModel
+                Model = CrfBitrateEstimateModel(
+                    Codec=(Data.get('Codec') or '').lower(),
+                    Resolution=Data.get('Resolution') or '',
+                    Crf=int(Data.get('Crf') or 0),
+                    EstimatedKbps=int(Data.get('EstimatedKbps') or 0),
+                    Source='OperatorOverride',
+                )
+                if not Model.Codec or not Model.Resolution or Model.Crf <= 0 or Model.EstimatedKbps <= 0:
+                    return jsonify({'Success': False, 'Error': 'Codec, Resolution, Crf>0, EstimatedKbps>0 required'}), 400
+                Ok = CrfBitrateEstimateRepository().Upsert(Model)
+                return jsonify({'Success': Ok, 'Message': 'Estimate saved' if Ok else 'Save failed'}), (200 if Ok else 500)
+            except Exception as e:
+                LoggingService.LogException("Error upserting CrfBitrateEstimate", e, 'UpsertCrfBitrateEstimate', 'SystemSettingsController')
+                return jsonify({'Success': False, 'Error': str(e)}), 500
+
+        @self.Blueprint.route('/CodecCompatibility', methods=['GET'])
+        def GetAllCodecCompatibility():
+            """Return all CodecCompatibility rows grouped by Kind for the editor."""
+            try:
+                from Features.TranscodeQueue.CodecCompatibilityRepository import CodecCompatibilityRepository
+                Rows = CodecCompatibilityRepository().GetAll()
+                Grouped = {'Container': [], 'VideoCodec': [], 'AudioCodecMp4': []}
+                for R in Rows:
+                    Grouped.setdefault(R.Kind, []).append({
+                        'Id': R.Id,
+                        'Kind': R.Kind,
+                        'Name': R.Name,
+                        'IsAcceptable': R.IsAcceptable,
+                        'Description': R.Description,
+                        'LastUpdated': R.LastUpdated.isoformat() if R.LastUpdated else None,
+                        'Source': R.Source,
+                    })
+                return jsonify({'Success': True, 'Compatibility': Grouped})
+            except Exception as e:
+                LoggingService.LogException("Error listing CodecCompatibility", e, 'GetAllCodecCompatibility', 'SystemSettingsController')
+                return jsonify({'Success': False, 'Error': str(e)}), 500
+
+        @self.Blueprint.route('/CodecCompatibility', methods=['PUT'])
+        def UpsertCodecCompatibility():
+            """Upsert a CodecCompatibility row by (Kind, Name).
+            Stamps Source='OperatorOverride'."""
+            try:
+                Data = request.get_json() or {}
+                from Features.TranscodeQueue.CodecCompatibilityRepository import CodecCompatibilityRepository
+                from Features.TranscodeQueue.Models.CodecCompatibilityModel import CodecCompatibilityModel
+                Model = CodecCompatibilityModel(
+                    Kind=Data.get('Kind') or '',
+                    Name=(Data.get('Name') or '').lower(),
+                    IsAcceptable=bool(Data.get('IsAcceptable', True)),
+                    Description=Data.get('Description'),
+                    Source='OperatorOverride',
+                )
+                if not Model.Kind or not Model.Name:
+                    return jsonify({'Success': False, 'Error': 'Kind and Name required'}), 400
+                Ok = CodecCompatibilityRepository().Upsert(Model)
+                return jsonify({'Success': Ok, 'Message': 'Compatibility saved' if Ok else 'Save failed'}), (200 if Ok else 500)
+            except Exception as e:
+                LoggingService.LogException("Error upserting CodecCompatibility", e, 'UpsertCodecCompatibility', 'SystemSettingsController')
+                return jsonify({'Success': False, 'Error': str(e)}), 500
+
         @self.Blueprint.route('/TestFFmpegPaths', methods=['POST'])
         def TestFFmpegPaths():
             """Test FFmpeg and FFprobe paths."""

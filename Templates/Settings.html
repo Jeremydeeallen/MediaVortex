@@ -424,6 +424,87 @@
             </div>
         </div>
 
+        <!-- Queue Tuning -- marginal-savings-gate.feature.md criteria 13-15 -->
+        <div class="card mt-4">
+            <div class="card-header bg-light" data-bs-toggle="collapse" data-bs-target="#QueueTuningSection" style="cursor: pointer;">
+                <div class="d-flex justify-content-between align-items-center">
+                    <h4 class="mb-0">
+                        <i class="fas fa-filter"></i> Queue Tuning
+                    </h4>
+                    <i class="fas fa-chevron-down"></i>
+                </div>
+            </div>
+            <div id="QueueTuningSection" class="collapse">
+                <div class="card-body">
+                    <p class="text-muted small mb-3">
+                        Data-driven knobs for the transcode queue admission gate.
+                        Same-resolution + sufficient-savings is admitted; upscales and marginal-savings cases are blocked.
+                    </p>
+
+                    <h5 class="mt-2">Gate threshold</h5>
+                    <div class="row g-2 mb-3">
+                        <div class="col-md-4">
+                            <label class="form-label small">Minimum estimated savings (MB)</label>
+                            <input type="number" id="MinTranscodeSavingsMB" class="form-control form-control-sm" min="0">
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label small">Missing-estimate policy</label>
+                            <select id="MissingEstimatePolicy" class="form-select form-select-sm">
+                                <option value="admit">admit (fail-open, log warning)</option>
+                                <option value="block">block (fail-closed)</option>
+                            </select>
+                        </div>
+                        <div class="col-md-4 d-flex align-items-end">
+                            <button class="btn btn-sm btn-primary" onclick="SaveQueueAdmissionConfig()">
+                                <i class="fas fa-save"></i> Save threshold
+                            </button>
+                        </div>
+                    </div>
+
+                    <h5 class="mt-4">CRF -> kbps estimates</h5>
+                    <p class="text-muted small mb-2">
+                        Used when a profile is CRF-only (VideoBitrateKbps=0). Seeded from observed transcode history; edit to override.
+                    </p>
+                    <div class="table-responsive">
+                        <table class="table table-sm table-striped" id="CrfEstimatesTable">
+                            <thead>
+                                <tr>
+                                    <th>Codec</th>
+                                    <th>Resolution</th>
+                                    <th>CRF</th>
+                                    <th>Estimated kbps</th>
+                                    <th>Source</th>
+                                    <th>Last updated</th>
+                                </tr>
+                            </thead>
+                            <tbody id="CrfEstimatesTableBody">
+                                <tr><td colspan="6" class="text-center text-muted">Loading...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <h5 class="mt-4">Codec compatibility</h5>
+                    <p class="text-muted small mb-2">
+                        Acceptable video codecs, MP4-compatible audio codecs, and acceptable containers. Toggle to disable a value (the gate will then route files using that codec/container differently).
+                    </p>
+                    <div class="row g-3">
+                        <div class="col-md-4">
+                            <h6 class="text-muted small">Containers</h6>
+                            <div id="CompatContainers" class="border rounded p-2"></div>
+                        </div>
+                        <div class="col-md-4">
+                            <h6 class="text-muted small">Video codecs</h6>
+                            <div id="CompatVideoCodecs" class="border rounded p-2"></div>
+                        </div>
+                        <div class="col-md-4">
+                            <h6 class="text-muted small">Audio codecs (MP4)</h6>
+                            <div id="CompatAudioCodecs" class="border rounded p-2"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- All System Settings (advanced) -->
         <div class="card mt-4">
             <div class="card-header bg-light" data-bs-toggle="collapse" data-bs-target="#AllSettingsSection" style="cursor: pointer;">
@@ -2299,9 +2380,127 @@ function ApplyAllSettingsFilter() {
     RenderAllSettingsTable(Filtered);
 }
 
-// Auto-load on page ready
+// ─── Queue Tuning (marginal-savings-gate.feature.md criteria 13-15) ──
+
+function LoadQueueAdmissionConfig() {
+    $.get('/api/SystemSettings/QueueAdmissionConfig').done(function(R) {
+        if (!R.Success) return;
+        $('#MinTranscodeSavingsMB').val(R.Config.MinTranscodeSavingsMB);
+        $('#MissingEstimatePolicy').val(R.Config.MissingEstimatePolicy);
+    });
+}
+
+function SaveQueueAdmissionConfig() {
+    var Body = {
+        MinTranscodeSavingsMB: parseInt($('#MinTranscodeSavingsMB').val()),
+        MissingEstimatePolicy: $('#MissingEstimatePolicy').val()
+    };
+    $.ajax({
+        url: '/api/SystemSettings/QueueAdmissionConfig',
+        method: 'PUT',
+        contentType: 'application/json',
+        data: JSON.stringify(Body)
+    }).done(function(R) {
+        if (R.Success) {
+            alert('Queue admission config saved.');
+        } else {
+            alert('Save failed: ' + (R.Error || 'unknown'));
+        }
+    }).fail(function(X) { alert('Save failed: ' + X.responseText); });
+}
+
+function LoadCrfBitrateEstimates() {
+    $.get('/api/SystemSettings/CrfBitrateEstimates').done(function(R) {
+        var Tbody = $('#CrfEstimatesTableBody').empty();
+        if (!R.Success || !R.Estimates || R.Estimates.length === 0) {
+            Tbody.append('<tr><td colspan="6" class="text-center text-muted">No estimates yet. Run a few transcodes to seed from history.</td></tr>');
+            return;
+        }
+        R.Estimates.forEach(function(E) {
+            var Last = E.LastUpdated ? E.LastUpdated.substring(0, 19).replace('T', ' ') : '';
+            Tbody.append(
+                '<tr data-codec="' + E.Codec + '" data-resolution="' + E.Resolution + '" data-crf="' + E.Crf + '">' +
+                '<td>' + E.Codec + '</td>' +
+                '<td>' + E.Resolution + '</td>' +
+                '<td>' + E.Crf + '</td>' +
+                '<td><input type="number" class="form-control form-control-sm crf-kbps-input" value="' + E.EstimatedKbps + '" min="1" style="max-width: 120px;" onchange="SaveCrfEstimateRow(this)"></td>' +
+                '<td><span class="badge bg-secondary">' + (E.Source || '') + '</span></td>' +
+                '<td>' + Last + '</td>' +
+                '</tr>'
+            );
+        });
+    });
+}
+
+function SaveCrfEstimateRow(InputEl) {
+    var Tr = $(InputEl).closest('tr');
+    var Body = {
+        Codec: Tr.data('codec'),
+        Resolution: Tr.data('resolution'),
+        Crf: parseInt(Tr.data('crf')),
+        EstimatedKbps: parseInt($(InputEl).val())
+    };
+    $.ajax({
+        url: '/api/SystemSettings/CrfBitrateEstimates',
+        method: 'PUT',
+        contentType: 'application/json',
+        data: JSON.stringify(Body)
+    }).done(function(R) {
+        if (R.Success) {
+            Tr.find('.badge').removeClass('bg-secondary').addClass('bg-success').text('OperatorOverride');
+        } else {
+            alert('Save failed: ' + (R.Error || 'unknown'));
+        }
+    }).fail(function(X) { alert('Save failed: ' + X.responseText); });
+}
+
+function LoadCodecCompatibility() {
+    $.get('/api/SystemSettings/CodecCompatibility').done(function(R) {
+        if (!R.Success) return;
+        var Render = function(Container, Rows) {
+            Container.empty();
+            (Rows || []).forEach(function(C) {
+                var Id = 'compat-' + C.Id;
+                Container.append(
+                    '<div class="form-check form-switch">' +
+                    '<input class="form-check-input" type="checkbox" id="' + Id + '" data-id="' + C.Id + '" data-kind="' + C.Kind + '" data-name="' + C.Name + '" ' + (C.IsAcceptable ? 'checked' : '') + ' onchange="ToggleCodecCompatibility(this)">' +
+                    '<label class="form-check-label" for="' + Id + '">' + C.Name + (C.Description ? ' <small class="text-muted">(' + C.Description + ')</small>' : '') + '</label>' +
+                    '</div>'
+                );
+            });
+        };
+        Render($('#CompatContainers'), R.Compatibility.Container);
+        Render($('#CompatVideoCodecs'), R.Compatibility.VideoCodec);
+        Render($('#CompatAudioCodecs'), R.Compatibility.AudioCodecMp4);
+    });
+}
+
+function ToggleCodecCompatibility(InputEl) {
+    var Body = {
+        Kind: $(InputEl).data('kind'),
+        Name: $(InputEl).data('name'),
+        IsAcceptable: $(InputEl).is(':checked')
+    };
+    $.ajax({
+        url: '/api/SystemSettings/CodecCompatibility',
+        method: 'PUT',
+        contentType: 'application/json',
+        data: JSON.stringify(Body)
+    }).fail(function(X) {
+        alert('Save failed: ' + X.responseText);
+        // Revert UI
+        $(InputEl).prop('checked', !$(InputEl).is(':checked'));
+    });
+}
+
+// Auto-load Queue Tuning data when the section is opened (lazy).
 $(function() {
     LoadDisplayTimezone();
+    $('#QueueTuningSection').on('shown.bs.collapse', function() {
+        LoadQueueAdmissionConfig();
+        LoadCrfBitrateEstimates();
+        LoadCodecCompatibility();
+    });
 });
 
 </script>
