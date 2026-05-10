@@ -426,11 +426,17 @@ def GetRecentSuccesses():
 
         Limit = int(request.args.get('limit', 15))
 
+        # "Recent successes" = files that actually got replaced on disk,
+        # not Requeue'd intermediate attempts that succeeded as transcodes
+        # but whose output was deleted. Without the FileReplaced filter,
+        # an operator looking at this dashboard would see the same file
+        # listed multiple times (each retry attempt) when only one of
+        # them actually saved bytes.
         query = """
         SELECT ta.FilePath, ta.ProfileName, ta.SizeReductionPercent,
                ta.TranscodeDurationSeconds, ta.AttemptDate, ta.NewSizeBytes, ta.OldSizeBytes
         FROM TranscodeAttempts ta
-        WHERE ta.Success = TRUE
+        WHERE ta.Success = TRUE AND ta.FileReplaced = TRUE
         ORDER BY ta.AttemptDate DESC
         LIMIT %s
         """

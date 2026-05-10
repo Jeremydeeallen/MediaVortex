@@ -38,7 +38,12 @@ def GetOverview():
 
         DbManager = DatabaseManager()
 
-        # Summary stats from successful transcode attempts
+        # Summary stats from successful transcode attempts that ACTUALLY
+        # landed on disk (FileReplaced=TRUE). Without that filter, Requeued
+        # intermediate attempts get their delta double-counted -- the
+        # staged file was deleted by Requeue cleanup so no real disk
+        # savings, but ta.SizeReductionBytes still records "would have
+        # saved this much." Only the winning attempt actually saves bytes.
         StatsQuery = """
             SELECT COUNT(*) AS JobCount,
                    COALESCE(SUM(ta.OldSizeBytes), 0) AS TotalOriginalBytes,
@@ -46,6 +51,7 @@ def GetOverview():
                    COALESCE(SUM(ta.SizeReductionBytes), 0) AS TotalSavedBytes
             FROM TranscodeAttempts ta
             WHERE ta.Success = TRUE AND ta.SizeReductionBytes > 0
+              AND ta.FileReplaced = TRUE
         """
         StatsRows = DbManager.DatabaseService.ExecuteQuery(StatsQuery)
         Stats = StatsRows[0] if StatsRows else {}
@@ -190,6 +196,9 @@ def GetSavingsByVolume():
 
         DbManager = DatabaseManager()
 
+        # FileReplaced=TRUE filter: only count attempts whose output actually
+        # landed on disk -- otherwise multi-attempt files (Requeue -> Replace)
+        # double-count their savings. See StatsQuery comment above.
         Query = """
             SELECT UPPER(LEFT(ta.FilePath, 3)) AS Volume,
                    COUNT(*) AS JobCount,
@@ -198,6 +207,7 @@ def GetSavingsByVolume():
                    SUM(ta.SizeReductionBytes) AS TotalSavedBytes
             FROM TranscodeAttempts ta
             WHERE ta.Success = TRUE AND ta.SizeReductionBytes > 0
+              AND ta.FileReplaced = TRUE
             GROUP BY UPPER(LEFT(ta.FilePath, 3))
             ORDER BY TotalSavedBytes DESC
         """
@@ -232,6 +242,9 @@ def GetSavingsByDay():
         # as UTC and convert to the target zone before truncating to a date.
         # The date-window filter stays on raw CompletedDate (UTC) -- this slightly
         # over-fetches at the boundary but the GROUP BY produces correct buckets.
+        # FileReplaced=TRUE filter: only count attempts whose output actually
+        # landed on disk -- otherwise multi-attempt files double-count their
+        # daily savings deltas. See StatsQuery comment above.
         Query = f"""
             SELECT DATE(ta.CompletedDate AT TIME ZONE 'UTC' AT TIME ZONE %s) AS Day,
                    COUNT(*) AS JobCount,
@@ -240,6 +253,7 @@ def GetSavingsByDay():
                    SUM(ta.NewSizeBytes) AS TotalNewBytes
             FROM TranscodeAttempts ta
             WHERE ta.Success = TRUE AND ta.SizeReductionBytes > 0
+              AND ta.FileReplaced = TRUE
               AND ta.CompletedDate >= CURRENT_DATE - {Days} * INTERVAL '1 day'
             GROUP BY DATE(ta.CompletedDate AT TIME ZONE 'UTC' AT TIME ZONE %s)
             ORDER BY Day ASC
