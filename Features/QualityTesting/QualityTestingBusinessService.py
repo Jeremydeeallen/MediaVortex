@@ -165,12 +165,17 @@ class QualityTestingBusinessService:
             if not os.path.exists(transcoded_file):
                 return {"Success": False, "Error": f"Transcoded file not found: {transcoded_file}"}
 
-            # Get the full path to FFmpeg executable
-            ffmpeg_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "FFmpegMaster", "bin", "ffmpeg.exe")
-
-            # Verify FFmpeg exists
-            if not os.path.exists(ffmpeg_path):
-                return {"Success": False, "Error": f"FFmpeg executable not found: {ffmpeg_path}"}
+            # Resolve FFmpeg from WorkerContext (canonical -- registered at
+            # worker boot per Workers.FFmpegPath). Replaces an older hand-rolled
+            # `os.path.dirname(os.path.dirname(__file__))` lookup that broke
+            # silently when this file moved into Features/QualityTesting/
+            # (one level deeper than Services/, so "up two" landed in
+            # Features\FFmpegMaster\bin\ffmpeg.exe -- a path that doesn't exist).
+            from Core.WorkerContext import WorkerContext
+            Ctx = WorkerContext.Current()
+            ffmpeg_path = Ctx.FFmpegPath if Ctx and Ctx.FFmpegPath else None
+            if not ffmpeg_path or not os.path.exists(ffmpeg_path):
+                return {"Success": False, "Error": f"FFmpeg executable not found: {ffmpeg_path or '<no WorkerContext.FFmpegPath registered>'}"}
 
             # Get video resolutions to check if scaling is needed
             original_resolution = self.GetVideoResolution(original_file, ffmpeg_path)
@@ -1114,10 +1119,12 @@ class QualityTestingBusinessService:
             if not transcoded_file or not os.path.exists(transcoded_file):
                 return 0.0
 
-            # Get the full path to FFprobe executable
-            ffprobe_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "FFmpegMaster", "bin", "ffprobe.exe")
-
-            if not os.path.exists(ffprobe_path):
+            # Resolve FFprobe from WorkerContext (canonical -- same fix as
+            # the FFmpeg lookup at line 169 area).
+            from Core.WorkerContext import WorkerContext
+            Ctx = WorkerContext.Current()
+            ffprobe_path = Ctx.FFprobePath if Ctx and Ctx.FFprobePath else None
+            if not ffprobe_path or not os.path.exists(ffprobe_path):
                 return 0.0
 
             # Use FFprobe to get video duration
