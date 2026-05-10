@@ -131,19 +131,27 @@ var ActivityPage = (function() {
     // queue table is the only consumer and lives there now).
 
     // -- Active Jobs (transcode + VMAF rendered into the same table) --
+    // Both fetches go in parallel and the table is rendered ONCE with combined
+    // data. Earlier two-step approach (RenderActiveJobs first, LoadActiveVmaf
+    // appending after) caused visible flicker -- the table was cleared and
+    // rebuilt with only transcode rows, then ~50ms later the VMAF row was
+    // appended; transitions through "no transcode but VMAF running" briefly
+    // showed the "No active jobs" message. Promise.all gives a single render.
     function LoadOverview() {
-        fetch('/api/TeamStatus/Overview')
-            .then(function(R) { return R.json(); })
-            .then(function(Result) {
-                if (!Result.Success) return;
-                RenderActiveJobs(Result.Data);
-                // Append any running VMAF job after the transcode rows.
-                LoadActiveVmaf();
-            })
-            .catch(function() {});
+        var OverviewP = fetch('/api/TeamStatus/Overview').then(function(R) { return R.json(); }).catch(function() { return null; });
+        var VmafP = fetch('/api/QualityTesting/Progress').then(function(R) { return R.json(); }).catch(function() { return null; });
+        Promise.all([OverviewP, VmafP]).then(function(Both) {
+            var Overview = Both[0];
+            var VmafResp = Both[1];
+            if (!Overview || !Overview.Success) return;
+            var VmafJob = (VmafResp && VmafResp.Success && VmafResp.IsRunning)
+                ? (VmafResp.Progress || VmafResp.CurrentJob || null)
+                : null;
+            RenderActiveJobs(Overview.Data, VmafJob);
+        });
     }
 
-    function RenderActiveJobs(D) {
+    function RenderActiveJobs(D, VmafJob) {
         var Status = D.ServiceStatus;
         var IsProcessing = D.IsProcessing;
         var ActiveJobs = D.ActiveJobs || [];
@@ -159,47 +167,79 @@ var ActivityPage = (function() {
         BtnStop.disabled = R.StopDisabled;
         BtnResume.classList.toggle('d-none', !R.ShowResume);
 
-        if (ActiveJobs.length > 0) {
+        var TranscodeRows = ActiveJobs.map(function(Job) {
+            var FileName = Job.FileName || Job.FilePath.split(/[/\\]/).pop();
+            var Pct = (Job.ProgressPercent || 0).toFixed(1);
+            var IsStuck = Job.IsStuck || false;
+            var StatusIcon = IsStuck
+                ? '<i class="fas fa-exclamation-triangle me-1 text-warning"></i>'
+                : '<i class="fas fa-spinner fa-spin me-1 text-primary"></i>';
+            var RowClass = IsStuck ? ' class="table-warning"' : '';
+            var ResetBtn = IsStuck
+                ? '<button class="btn btn-outline-warning btn-sm py-0 px-1" onclick="ActivityPage.ResetStuckJob(' + Job.QueueId + ')" title="Reset to Pending"><i class="fas fa-redo-alt"></i></button>'
+                : '';
+            var ProgressBar = IsStuck
+                ? '<span class="text-warning fw-bold">Stuck</span>'
+                : '<div class="d-flex align-items-center gap-2">' +
+                    '<div class="progress flex-grow-1" style="height: 18px;">' +
+                        '<div class="progress-bar progress-bar-striped progress-bar-animated bg-primary" ' +
+                            'role="progressbar" style="width: ' + Pct + '%" ' +
+                            'aria-valuenow="' + Pct + '" aria-valuemin="0" aria-valuemax="100"></div>' +
+                    '</div>' +
+                    '<small class="text-nowrap">' + Pct + '%</small>' +
+                '</div>';
+            var Mode = Job.ProcessingMode || 'Transcode';
+            var ModeBadgeClass = (Mode === 'Remux') ? 'bg-info'
+                                : (Mode === 'SubtitleFix') ? 'bg-warning text-dark'
+                                : 'bg-primary';
+            return '<tr' + RowClass + '>' +
+                '<td class="ps-3">' + StatusIcon +
+                    '<span title="' + (Job.FilePath || '').replace(/"/g, '&quot;') + '">' + EscapeHtml(FileName) + '</span></td>' +
+                '<td><span class="badge ' + ModeBadgeClass + '">' + EscapeHtml(Mode) + '</span></td>' +
+                '<td>' + (Job.ClaimedBy ? EscapeHtml(Job.ClaimedBy) : '<em class="text-muted">-</em>') + '</td>' +
+                '<td>' + (Job.SizeMB ? FormatSizeMB(Job.SizeMB) : '-') + '</td>' +
+                '<td>' + ProgressBar + '</td>' +
+                '<td>' + (IsStuck ? '-' : (Job.CurrentFPS ? parseFloat(Job.CurrentFPS).toFixed(1) : '-')) + '</td>' +
+                '<td>' + (IsStuck ? '-' : (Job.CurrentSpeed || '-')) + '</td>' +
+                '<td>' + (IsStuck ? '-' : (Job.ETA || '-')) + '</td>' +
+                '<td class="text-center">' + ResetBtn + '</td>' +
+            '</tr>';
+        });
+
+        var VmafRow = '';
+        if (VmafJob) {
+            var VFile = VmafJob.FileName || (VmafJob.OriginalFilePath ? VmafJob.OriginalFilePath.split(/[/\\]/).pop() : 'VMAF');
+            var VPct = (parseFloat(VmafJob.ProgressPercentage) || 0).toFixed(1);
+            VmafRow = '<tr>' +
+                '<td class="ps-3"><i class="fas fa-chart-line me-1 text-info"></i>' +
+                    '<span title="' + EscapeHtml(VmafJob.OriginalFilePath || '') + '">' + EscapeHtml(VFile) + '</span></td>' +
+                '<td><span class="badge bg-info">VMAF</span></td>' +
+                '<td><em class="text-muted">-</em></td>' +
+                '<td>-</td>' +
+                '<td><div class="d-flex align-items-center gap-2">' +
+                    '<div class="progress flex-grow-1" style="height: 18px;">' +
+                        '<div class="progress-bar progress-bar-striped progress-bar-animated bg-info" ' +
+                            'role="progressbar" style="width: ' + VPct + '%" ' +
+                            'aria-valuenow="' + VPct + '" aria-valuemin="0" aria-valuemax="100"></div>' +
+                    '</div>' +
+                    '<small class="text-nowrap">' + VPct + '%</small>' +
+                '</div></td>' +
+                '<td>-</td>' +
+                '<td>' + EscapeHtml(String(VmafJob.ProcessingSpeed || '-')) + '</td>' +
+                '<td>' + EscapeHtml(String(VmafJob.ETA || '-')) + '</td>' +
+                '<td>-</td>' +
+            '</tr>';
+        }
+
+        // Single-pass render: combined transcode + VMAF rows. Visibility derived
+        // from the COMBINED count, not just transcode count -- earlier two-step
+        // approach hid the table whenever transcode finished but VMAF was still
+        // running, then unhid it on the next async tick (visible flicker).
+        var CombinedHtml = TranscodeRows.join('') + VmafRow;
+        if (CombinedHtml) {
             NoJob.classList.add('d-none');
             JobsTable.classList.remove('d-none');
-            JobsBody.innerHTML = ActiveJobs.map(function(Job) {
-                var FileName = Job.FileName || Job.FilePath.split(/[/\\]/).pop();
-                var Pct = (Job.ProgressPercent || 0).toFixed(1);
-                var IsStuck = Job.IsStuck || false;
-                var StatusIcon = IsStuck
-                    ? '<i class="fas fa-exclamation-triangle me-1 text-warning"></i>'
-                    : '<i class="fas fa-spinner fa-spin me-1 text-primary"></i>';
-                var RowClass = IsStuck ? ' class="table-warning"' : '';
-                var ResetBtn = IsStuck
-                    ? '<button class="btn btn-outline-warning btn-sm py-0 px-1" onclick="ActivityPage.ResetStuckJob(' + Job.QueueId + ')" title="Reset to Pending"><i class="fas fa-redo-alt"></i></button>'
-                    : '';
-                var ProgressBar = IsStuck
-                    ? '<span class="text-warning fw-bold">Stuck</span>'
-                    : '<div class="d-flex align-items-center gap-2">' +
-                        '<div class="progress flex-grow-1" style="height: 18px;">' +
-                            '<div class="progress-bar progress-bar-striped progress-bar-animated bg-primary" ' +
-                                'role="progressbar" style="width: ' + Pct + '%" ' +
-                                'aria-valuenow="' + Pct + '" aria-valuemin="0" aria-valuemax="100"></div>' +
-                        '</div>' +
-                        '<small class="text-nowrap">' + Pct + '%</small>' +
-                    '</div>';
-                var Mode = Job.ProcessingMode || 'Transcode';
-                var ModeBadgeClass = (Mode === 'Remux') ? 'bg-info'
-                                    : (Mode === 'SubtitleFix') ? 'bg-warning text-dark'
-                                    : 'bg-primary';
-                return '<tr' + RowClass + '>' +
-                    '<td class="ps-3">' + StatusIcon +
-                        '<span title="' + (Job.FilePath || '').replace(/"/g, '&quot;') + '">' + EscapeHtml(FileName) + '</span></td>' +
-                    '<td><span class="badge ' + ModeBadgeClass + '">' + EscapeHtml(Mode) + '</span></td>' +
-                    '<td>' + (Job.ClaimedBy ? EscapeHtml(Job.ClaimedBy) : '<em class="text-muted">-</em>') + '</td>' +
-                    '<td>' + (Job.SizeMB ? FormatSizeMB(Job.SizeMB) : '-') + '</td>' +
-                    '<td>' + ProgressBar + '</td>' +
-                    '<td>' + (IsStuck ? '-' : (Job.CurrentFPS ? parseFloat(Job.CurrentFPS).toFixed(1) : '-')) + '</td>' +
-                    '<td>' + (IsStuck ? '-' : (Job.CurrentSpeed || '-')) + '</td>' +
-                    '<td>' + (IsStuck ? '-' : (Job.ETA || '-')) + '</td>' +
-                    '<td class="text-center">' + ResetBtn + '</td>' +
-                '</tr>';
-            }).join('');
+            JobsBody.innerHTML = CombinedHtml;
         } else {
             NoJob.classList.remove('d-none');
             JobsTable.classList.add('d-none');
@@ -375,59 +415,9 @@ var ActivityPage = (function() {
             .catch(function() { showToastAlert('Failed to contact server.', 'danger'); });
     }
 
-    // -- Active VMAF jobs (rendered into the same Active Jobs table as transcodes) --
-    // The QT queue itself has moved to /Queue. This function fetches the single
-    // currently-running VMAF (MaxConcurrentJobs=1 today) and appends a row to
-    // the Active Jobs table after the transcode rows are rendered.
-    function LoadActiveVmaf() {
-        fetch('/api/QualityTesting/Progress')
-            .then(function(R) { return R.json(); })
-            .then(function(Data) {
-                if (!Data || !Data.Success || !Data.IsRunning) return;
-                var P = Data.Progress || Data.CurrentJob || {};
-                AppendActiveVmafRow(P);
-            })
-            .catch(function() {});
-    }
-
-    function AppendActiveVmafRow(P) {
-        var JobsTable = document.getElementById('ActiveJobsTable');
-        var JobsBody = document.getElementById('ActiveJobsBody');
-        var NoJob = document.getElementById('NoJobInfo');
-        if (!JobsBody) return;
-
-        // Make sure the table is visible (in case there are no transcode rows but a VMAF is running)
-        NoJob.classList.add('d-none');
-        JobsTable.classList.remove('d-none');
-
-        var FileName = P.FileName || (P.OriginalFilePath ? P.OriginalFilePath.split(/[/\\]/).pop() : 'VMAF');
-        var Pct = (parseFloat(P.ProgressPercentage) || 0).toFixed(1);
-        var Speed = P.ProcessingSpeed || '-';
-        var Eta = P.ETA || '-';
-        var ProgressBar =
-            '<div class="d-flex align-items-center gap-2">' +
-                '<div class="progress flex-grow-1" style="height: 18px;">' +
-                    '<div class="progress-bar progress-bar-striped progress-bar-animated bg-info" ' +
-                        'role="progressbar" style="width: ' + Pct + '%" ' +
-                        'aria-valuenow="' + Pct + '" aria-valuemin="0" aria-valuemax="100"></div>' +
-                '</div>' +
-                '<small class="text-nowrap">' + Pct + '%</small>' +
-            '</div>';
-
-        var Row = document.createElement('tr');
-        Row.innerHTML =
-            '<td class="ps-3"><i class="fas fa-chart-line me-1 text-info"></i>' +
-                '<span title="' + EscapeHtml(P.OriginalFilePath || '') + '">' + EscapeHtml(FileName) + '</span></td>' +
-            '<td><span class="badge bg-info">VMAF</span></td>' +
-            '<td>-</td>' +
-            '<td>-</td>' +
-            '<td>' + ProgressBar + '</td>' +
-            '<td>-</td>' +
-            '<td>' + EscapeHtml(String(Speed)) + '</td>' +
-            '<td>' + EscapeHtml(String(Eta)) + '</td>' +
-            '<td>-</td>';
-        JobsBody.appendChild(Row);
-    }
+    // VMAF rows are now rendered inline by RenderActiveJobs (combined-pass).
+    // The previous LoadActiveVmaf/AppendActiveVmafRow helpers are removed --
+    // see LoadOverview's Promise.all pattern.
 
     // -- Refresh / Polling --
     function RefreshAll() {
