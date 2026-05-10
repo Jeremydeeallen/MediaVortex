@@ -74,13 +74,13 @@ def Main(TranscodeAttemptId: int):
 
     Step(2, "Backfill VMAF on TranscodeAttempts from QualityTestResults if missing")
     QtrRows = Db.ExecuteQuery(
-        "SELECT VMAF FROM QualityTestResults WHERE TranscodeAttemptId = %s AND VMAF IS NOT NULL ORDER BY Id DESC LIMIT 1",
+        "SELECT VMAFScore FROM QualityTestResults WHERE TranscodeAttemptId = %s AND VMAFScore IS NOT NULL ORDER BY Id DESC LIMIT 1",
         (TranscodeAttemptId,),
     )
     if not QtrRows:
-        Fail(f"No QualityTestResults row with VMAF for TranscodeAttempt {TranscodeAttemptId}.")
-    SourceVmaf = float(QtrRows[0]['VMAF'])
-    print(f"    QualityTestResults VMAF = {SourceVmaf}")
+        Fail(f"No QualityTestResults row with VMAFScore for TranscodeAttempt {TranscodeAttemptId}.")
+    SourceVmaf = float(QtrRows[0]['VMAFScore'])
+    print(f"    QualityTestResults.VMAFScore = {SourceVmaf}")
 
     if R['VMAF'] is None or float(R['VMAF']) != SourceVmaf:
         Db.ExecuteNonQuery(
