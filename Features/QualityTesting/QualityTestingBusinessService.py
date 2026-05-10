@@ -916,8 +916,21 @@ class QualityTestingBusinessService:
             # Calculate test duration from FFmpegResult if available
             TestDuration = 0.0  # Could extract from FFmpegResult if needed
 
-            # Determine if it passes threshold
-            PassesThreshold = VMAFScore >= 80.0
+            # Determine if it passes threshold. Read fresh from the DB
+            # (VMAFAutoReplaceMinThreshold) so the per-row PassesThreshold flag
+            # agrees with the auto-replace gate. No caching, per the standing
+            # rule against cached DB-backed settings.
+            PassThresholdMin = 80.0  # fallback when DB lookup fails
+            try:
+                Thresholds = self.DatabaseManager.GetVMAFThresholds()
+                if Thresholds and Thresholds.get('MinThreshold') is not None:
+                    PassThresholdMin = float(Thresholds['MinThreshold'])
+            except Exception as TEx:
+                LoggingService.LogException(
+                    "GetVMAFThresholds failed; falling back to PassThresholdMin=80.0",
+                    TEx, "QualityTestingBusinessService", "UpdateQualityTestResults",
+                )
+            PassesThreshold = VMAFScore >= PassThresholdMin
             Rank = 1 if PassesThreshold else 0
 
             Query = """
