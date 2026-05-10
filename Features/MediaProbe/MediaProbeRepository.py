@@ -47,15 +47,22 @@ class MediaProbeRepository(BaseRepository):
     def GetFilesNeedingProbe(self, RootFolderId: Optional[int] = None, MaxFailures: int = 3) -> List[MediaFileModel]:
         """Get files that need FFprobe metadata extraction.
 
-        Returns files where:
-        - Resolution is NULL (never probed or probe failed) AND
-        - FFprobeFailureCount < MaxFailures (haven't exceeded retry limit)
+        Returns files where any required metadata column is NULL AND
+        FFprobeFailureCount < MaxFailures (haven't exceeded retry limit).
+
+        AudioCodec is included alongside Resolution/TotalFrames because the
+        AudioStrategy.md source-preserving codec policy needs it to fire its
+        codec-matching branch -- without AudioCodec the policy falls through
+        to the EAC3 fallback for every file. Files probed before AudioCodec
+        was wired up (~86% of the library as of 2026-05-10) need re-probing
+        to populate that column; this trigger naturally catches them on the
+        next probe loop without a separate backfill.
 
         Optionally filtered by root folder.
         """
         try:
             Conditions = [
-                "(Resolution IS NULL OR TotalFrames IS NULL)",
+                "(Resolution IS NULL OR TotalFrames IS NULL OR AudioCodec IS NULL)",
                 f"COALESCE(FFprobeFailureCount, 0) < %s"
             ]
             Params = [MaxFailures]

@@ -255,36 +255,48 @@ class CommandBuilder:
             )
 
     def GenerateOutputFileName(self, OriginalFileName: str, SourceResolution: str, TargetResolution: str, ContainerType: str = 'mp4', CrfValue: int = None) -> str:
-        """Generate output filename with target resolution and container type.
-        CrfValue parameter is accepted for backwards compatibility but no longer embedded in filenames.
-        CRF is tracked in the TranscodeAttempts table."""
+        """Generate the staged output filename: <basename>[-resolution]-mv.<ext>.
+
+        The `-mv` suffix is appended unconditionally at the WRITE step (not just
+        at FileReplacement time, which is Phase 1 of transcoded-output-placement.
+        feature.md). This is defense-in-depth against the 2026-05-09 BuildRemux
+        Command bug pattern: when source codec/ext matches output codec/ext AND
+        no resolution downscale is requested, FFmpeg invoked with `-y` would
+        destroy the source by writing to the same path. The `-mv` suffix makes
+        the staged filename structurally distinct from any plausible source
+        filename, so the same-name collision class is impossible by construction.
+
+        See criterion 6 of `Features/FileReplacement/transcoded-output-placement.feature.md`.
+
+        CrfValue parameter is accepted for backwards compatibility but no longer
+        embedded in filenames -- CRF is tracked in the TranscodeAttempts table.
+        """
         try:
             # Get the base filename without extension
             BaseName = os.path.splitext(OriginalFileName)[0]
 
-            # If resolutions are the same, just change extension
+            # If resolutions are the same, just change extension + -mv marker
             if SourceResolution == TargetResolution:
-                return f"{BaseName}.{ContainerType}"
+                return f"{BaseName}-mv.{ContainerType}"
 
             # Extract resolution from filename (e.g., "1080p", "720p")
             SourceResolutionStr = self.ExtractResolutionFromFilename(OriginalFileName)
             if not SourceResolutionStr:
-                # If no resolution found in filename, add target resolution
+                # If no resolution found in filename, add target resolution + -mv
                 TargetResolutionStr = self.FormatResolutionForFilename(TargetResolution)
-                return f"{BaseName}{TargetResolutionStr}.{ContainerType}"
+                return f"{BaseName}{TargetResolutionStr}-mv.{ContainerType}"
 
-            # Replace source resolution with target resolution
+            # Replace source resolution with target resolution + -mv
             TargetResolutionStr = self.FormatResolutionForFilename(TargetResolution)
             NewBaseName = OriginalFileName.replace(SourceResolutionStr, TargetResolutionStr)
             NewBaseName = os.path.splitext(NewBaseName)[0]  # Remove old extension
 
-            # Add container type extension
-            return f"{NewBaseName}.{ContainerType}"
+            return f"{NewBaseName}-mv.{ContainerType}"
 
         except Exception:
-            # If anything goes wrong, return original filename with container extension
+            # Fallback: original filename with -mv + container extension
             BaseName = os.path.splitext(OriginalFileName)[0]
-            return f"{BaseName}.{ContainerType}"
+            return f"{BaseName}-mv.{ContainerType}"
     
     def ExtractResolutionFromFilename(self, Filename: str) -> Optional[str]:
         """Extract resolution string from filename (e.g., '1080p', '720p')."""
