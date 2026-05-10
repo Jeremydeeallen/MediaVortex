@@ -13,6 +13,8 @@
 
 **Fix with:** `/n config-plane.feature.md` -- when scoped, define a typed config table for operator knobs and the explicit rule "env vars only for genuinely process-local startup constants". Also audit other singletons (e.g. `WorkerContext`, `FFmpegService` cached path) for the `__new__`-runs-once-on-instantiation trap. Not in scope today; the immediate observability bug is patched.
 
+**Related (also fixed 2026-05-10):** `ServiceStatus.<X>Service.Status` was being read as a live gate inside `ProcessQualityTestQueueService.ProcessQueueLoop` and `ProcessTranscodeQueueService.ProcessQueueLoop` -- the same fossilized-row anti-pattern as the disposition function. Retired in `Features/ServiceControl/capability-control-plane.feature.md`. The single gate for "should this worker run capability X right now?" is now `Workers.<X>Enabled + Workers.Status='Online' + fresh heartbeat`, full stop.
+
 ---
 
 ### [BUG - CRITICAL - WORKAROUND IN PLACE] Canonical path storage is OS-coupled

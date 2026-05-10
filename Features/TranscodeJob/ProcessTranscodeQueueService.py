@@ -282,17 +282,12 @@ class ProcessTranscodeQueueService:
             LoggingService.LogInfo("Starting transcoding queue processing loop", "ProcessTranscodeQueueService", "ProcessQueueLoop")
 
             while not self.StopRequested:
-                # Check if service is paused
-                try:
-                    service_status = self.DatabaseManager.GetServiceStatus("TranscodeService")
-                    if service_status and service_status.get('Status') == 'Paused':
-                        LoggingService.LogInfo("TranscodeService is paused, skipping queue processing",
-                                             "ProcessTranscodeQueueService", "ProcessQueueLoop")
-                        time.sleep(5)
-                        continue
-                except Exception as e:
-                    LoggingService.LogException("Error checking service status", e,
-                                              "ProcessTranscodeQueueService", "ProcessQueueLoop")
+                # Single control plane: this loop runs iff the capability poller
+                # (WorkerService._CapabilityPollingLoop) deems Workers.TranscodeEnabled
+                # is True for our worker. The legacy ServiceStatus.TranscodeService
+                # gate that lived here was a fossil from the retired multi-process
+                # architecture and is intentionally NOT read. See
+                # Features/ServiceControl/capability-control-plane.feature.md.
 
                 # Check thermal clearance before starting new job
                 from Services.CpuAffinityService import GetCpuAffinityServiceInstance
