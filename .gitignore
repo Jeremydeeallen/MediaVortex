@@ -8,6 +8,7 @@
 ffmpeg2pass-*.log
 x265_2pass.log*
 vmaf_results.json
+vmaf_output.xml
 # Python
 __pycache__/
 *.py[cod]
