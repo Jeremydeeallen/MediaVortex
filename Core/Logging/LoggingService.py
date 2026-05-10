@@ -6,21 +6,25 @@ from Core.Database.DatabaseService import DatabaseService
 
 
 class LoggingService:
-    """Centralized logging service for MediaVortex that logs to database."""
+    """Centralized logging service for MediaVortex that logs to database.
+
+    Verbosity flags are read at import time (class-attribute initialization)
+    rather than inside `__new__`. Earlier versions read them in `__new__`,
+    which only fires on `LoggingService()` instantiation -- but every callsite
+    in the codebase uses the `@classmethod` form (`LoggingService.LogInfo(...)`)
+    without instantiating, so the flags stayed at their `False` defaults and
+    setting the env var had no effect on WorkerService.
+    """
 
     _Instance = None
-    _DebugEnabled = False
-    _InfoEnabled = False
+    _DebugEnabled = os.getenv('MEDIAVORTEX_DEBUG', 'false').lower() in ('true', '1', 'yes', 'on')
+    _InfoEnabled = os.getenv('MEDIAVORTEX_LOG_INFO', 'false').lower() in ('true', '1', 'yes', 'on')
     DatabaseService = None
 
     def __new__(cls):
         if cls._Instance is None:
             cls._Instance = super(LoggingService, cls).__new__(cls)
             cls.DatabaseService = DatabaseService()
-            # Check environment variable for debug mode
-            cls._DebugEnabled = os.getenv('MEDIAVORTEX_DEBUG', 'false').lower() in ('true', '1', 'yes', 'on')
-            # Check environment variable for info logging (off by default to reduce noise)
-            cls._InfoEnabled = os.getenv('MEDIAVORTEX_LOG_INFO', 'false').lower() in ('true', '1', 'yes', 'on')
         return cls._Instance
 
     @classmethod
@@ -86,15 +90,19 @@ class LoggingService:
 
     @classmethod
     def LogInfo(cls, Message: str, FunctionName: str = '', Component: str = 'System', Operation: str = ''):
-        """Log an info message if info logging is enabled."""
-        if not cls._InfoEnabled:
-            return
-        try:
-            print(f"INFO: {Message}")
-        except OSError:
-            # Ignore OSError when stdout is not available (e.g., in service context)
-            pass
+        """Log an info message.
+
+        DB write is unconditional -- the audit trail is a system invariant, not
+        an operator preference. Terminal print is gated by `_InfoEnabled`
+        (defaults off; `MEDIAVORTEX_LOG_INFO=true` makes it chatty).
+        """
         cls.LogToDatabase('INFO', Message, FunctionName, Component, Operation)
+        if cls._InfoEnabled:
+            try:
+                print(f"INFO: {Message}")
+            except OSError:
+                # stdout not available (e.g., service context) -- DB write already happened.
+                pass
 
     @classmethod
     def LogError(cls, Message: str, FunctionName: str = '', Component: str = 'System', Operation: str = ''):
