@@ -1392,7 +1392,7 @@ class DatabaseManager:
     def GetAllTranscodeQueueItems(self) -> List[TranscodeQueueModel]:
         """Get all transcoding queue items."""
         query = """
-            SELECT Id, FilePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted, ProcessingMode, MediaFileId
+            SELECT Id, StorageRootId, RelativePath, FilePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted, ProcessingMode, MediaFileId
             FROM TranscodeQueue
             ORDER BY Priority DESC, DateAdded ASC
         """
@@ -1402,6 +1402,8 @@ class DatabaseManager:
         for row in rows:
             queueItem = TranscodeQueueModel(
                 Id=row['Id'],
+                StorageRootId=row.get('StorageRootId'),
+                RelativePath=row.get('RelativePath') or '',
                 FilePath=row['FilePath'],
                 FileName=row['FileName'],
                 Directory=row['Directory'],
@@ -1448,6 +1450,8 @@ class DatabaseManager:
         for row in rows:
             queue_items.append(TranscodeQueueModel(
                 Id=row['Id'],
+                StorageRootId=row.get('StorageRootId'),
+                RelativePath=row.get('RelativePath') or '',
                 FilePath=row['FilePath'],
                 FileName=row['FileName'],
                 Directory=row['Directory'],
@@ -1467,7 +1471,7 @@ class DatabaseManager:
     def GetTranscodeQueueItemById(self, ItemId: int) -> Optional[TranscodeQueueModel]:
         """Get a specific transcoding queue item by ID."""
         query = """
-            SELECT Id, FilePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted, ProcessingMode, MediaFileId
+            SELECT Id, StorageRootId, RelativePath, FilePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted, ProcessingMode, MediaFileId
             FROM TranscodeQueue
             WHERE Id = %s
         """
@@ -1479,7 +1483,9 @@ class DatabaseManager:
         row = rows[0]
         return TranscodeQueueModel(
             Id=row['Id'],
-            FilePath=row['FilePath'],
+            StorageRootId=row.get('StorageRootId'),
+                RelativePath=row.get('RelativePath') or '',
+                FilePath=row['FilePath'],
             FileName=row['FileName'],
             Directory=row['Directory'],
             SizeBytes=row['SizeBytes'],
@@ -1589,7 +1595,7 @@ class DatabaseManager:
     def GetTranscodeQueueItemsByStatus(self, Status: str) -> List[TranscodeQueueModel]:
         """Get all transcoding queue items with a specific status."""
         query = """
-            SELECT Id, FilePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted, ProcessingMode, MediaFileId
+            SELECT Id, StorageRootId, RelativePath, FilePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted, ProcessingMode, MediaFileId
             FROM TranscodeQueue
             WHERE Status = %s
             ORDER BY Priority DESC, DateAdded ASC
@@ -1600,6 +1606,8 @@ class DatabaseManager:
         for row in rows:
             queueItem = TranscodeQueueModel(
                 Id=row['Id'],
+                StorageRootId=row.get('StorageRootId'),
+                RelativePath=row.get('RelativePath') or '',
                 FilePath=row['FilePath'],
                 FileName=row['FileName'],
                 Directory=row['Directory'],
@@ -1619,7 +1627,7 @@ class DatabaseManager:
     def GetNextPendingTranscodeJob(self) -> Optional[TranscodeQueueModel]:
         """Get the next pending transcoding job (highest priority first, oldest tiebreaker)."""
         query = """
-            SELECT Id, FilePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted, ProcessingMode, MediaFileId
+            SELECT Id, StorageRootId, RelativePath, FilePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted, ProcessingMode, MediaFileId
             FROM TranscodeQueue
             WHERE Status = 'Pending'
             ORDER BY Priority DESC, DateAdded ASC
@@ -1631,6 +1639,8 @@ class DatabaseManager:
             row = rows[0]
             return TranscodeQueueModel(
                 Id=row['Id'],
+                StorageRootId=row.get('StorageRootId'),
+                RelativePath=row.get('RelativePath') or '',
                 FilePath=row['FilePath'],
                 FileName=row['FileName'],
                 Directory=row['Directory'],
@@ -1668,7 +1678,7 @@ class DatabaseManager:
                             LIMIT 1
                             FOR UPDATE SKIP LOCKED
                         )
-                        RETURNING Id, FilePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted, ProcessingMode, MediaFileId, TestVariantSetId
+                        RETURNING Id, StorageRootId, RelativePath, FilePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted, ProcessingMode, MediaFileId, TestVariantSetId
                     """
                     cursor.execute(query, (WorkerName,))
                 else:
@@ -1685,7 +1695,7 @@ class DatabaseManager:
                             LIMIT 1
                             FOR UPDATE SKIP LOCKED
                         )
-                        RETURNING Id, FilePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted, ProcessingMode, MediaFileId, TestVariantSetId
+                        RETURNING Id, StorageRootId, RelativePath, FilePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted, ProcessingMode, MediaFileId, TestVariantSetId
                     """
                     cursor.execute(query, (WorkerName,))
 
@@ -1695,6 +1705,8 @@ class DatabaseManager:
                 if row:
                     return TranscodeQueueModel(
                         Id=row['id'],
+                        StorageRootId=row.get('storagerootid'),
+                        RelativePath=row.get('relativepath') or '',
                         FilePath=row['filepath'],
                         FileName=row['filename'],
                         Directory=row['directory'],
@@ -1883,7 +1895,7 @@ class DatabaseManager:
     def GetAllTranscodeAttempts(self) -> List[TranscodeAttemptModel]:
         """Get all transcoding attempts."""
         query = """
-            SELECT Id, FilePath, AttemptDate, Quality, OldSizeBytes, NewSizeBytes, Success,
+            SELECT Id, StorageRootId, RelativePath, FilePath, AttemptDate, Quality, OldSizeBytes, NewSizeBytes, Success,
                    SizeReductionBytes, SizeReductionPercent, ErrorMessage, TranscodeDurationSeconds,
                    FfpmpegCommand, AudioBitrateKbps, VideoBitrateKbps, ProfileName, VMAF,
                    FileReplaced, FileReplacedDate, ReplacementType, StartTime, PreferredAttempt
@@ -1898,6 +1910,8 @@ class DatabaseManager:
             row_dict = row
             attempt = TranscodeAttemptModel(
                 Id=row_dict['Id'],
+                StorageRootId=row_dict.get('StorageRootId'),
+                RelativePath=row_dict.get('RelativePath') or '',
                 FilePath=row_dict['FilePath'],
                 AttemptDate=row_dict['AttemptDate'],
                 Quality=row_dict['Quality'],
@@ -1926,7 +1940,7 @@ class DatabaseManager:
     def GetTranscodeAttemptById(self, AttemptId: int) -> Optional[TranscodeAttemptModel]:
         """Get a specific transcoding attempt by ID."""
         query = """
-            SELECT Id, FilePath, AttemptDate, Quality, OldSizeBytes, NewSizeBytes, Success,
+            SELECT Id, StorageRootId, RelativePath, FilePath, AttemptDate, Quality, OldSizeBytes, NewSizeBytes, Success,
                    SizeReductionBytes, SizeReductionPercent, ErrorMessage, TranscodeDurationSeconds,
                    FfpmpegCommand, AudioBitrateKbps, VideoBitrateKbps, ProfileName, VMAF,
                    FileReplaced, FileReplacedDate, ReplacementType, StartTime, PreferredAttempt
@@ -1941,6 +1955,8 @@ class DatabaseManager:
             row_dict = row
             return TranscodeAttemptModel(
                 Id=row_dict['Id'],
+                StorageRootId=row_dict.get('StorageRootId'),
+                RelativePath=row_dict.get('RelativePath') or '',
                 FilePath=row_dict['FilePath'],
                 AttemptDate=row_dict['AttemptDate'],
                 Quality=row_dict['Quality'],
@@ -1967,7 +1983,7 @@ class DatabaseManager:
     def GetTranscodeAttemptsByMediaFileId(self, MediaFileId: int) -> List[TranscodeAttemptModel]:
         """Get all transcoding attempts for a specific media file by ID."""
         query = """
-            SELECT Id, FilePath, AttemptDate, Quality, OldSizeBytes, NewSizeBytes, Success,
+            SELECT Id, StorageRootId, RelativePath, FilePath, AttemptDate, Quality, OldSizeBytes, NewSizeBytes, Success,
                    SizeReductionBytes, SizeReductionPercent, ErrorMessage, TranscodeDurationSeconds,
                    FfpmpegCommand, AudioBitrateKbps, VideoBitrateKbps, ProfileName, VMAF,
                    FileReplaced, FileReplacedDate, ReplacementType, StartTime, PreferredAttempt
@@ -1983,6 +1999,8 @@ class DatabaseManager:
             row_dict = row
             attempt = TranscodeAttemptModel(
                 Id=row_dict['Id'],
+                StorageRootId=row_dict.get('StorageRootId'),
+                RelativePath=row_dict.get('RelativePath') or '',
                 FilePath=row_dict['FilePath'],
                 AttemptDate=row_dict['AttemptDate'],
                 Quality=row_dict['Quality'],
@@ -2149,7 +2167,8 @@ class DatabaseManager:
             
             # Define all valid fields from TranscodeAttemptModel (excluding Id which is the key)
             valid_fields = [
-                'FilePath', 'AttemptDate', 'Quality', 'OldSizeBytes', 'NewSizeBytes',
+                'FilePath', 'StorageRootId', 'RelativePath',
+                'AttemptDate', 'Quality', 'OldSizeBytes', 'NewSizeBytes',
                 'Success', 'SizeReductionBytes', 'SizeReductionPercent', 'ErrorMessage',
                 'TranscodeDurationSeconds', 'FfpmpegCommand', 'AudioBitrateKbps',
                 'VideoBitrateKbps', 'ProfileName', 'VMAF', 'FileReplaced', 'FileReplacedDate',
