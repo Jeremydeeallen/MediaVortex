@@ -13,41 +13,45 @@ See `KNOWN-ISSUES.md` — single source of truth for the diagnosis, the current 
 ## Target Schema
 
 ```sql
--- Existing table, slightly amended (no breaking changes to other consumers)
-RootFolders
-  Id            BIGSERIAL PRIMARY KEY
-  Name          TEXT NOT NULL UNIQUE        -- 'media_tv', 'movies', 'xxx'
-  Description   TEXT
-  ScanEnabled   BOOLEAN DEFAULT TRUE
-  -- (existing columns preserved during migration)
+-- IMPORTANT: existing RootFolders table is the PER-SHOW SCAN REGISTRY (110+
+-- rows like 'T:\The IT Crowd', 'T:\The Mandalorian'). It is NOT the share-
+-- root table. The path-storage rewrite introduces a NEW StorageRoots table
+-- for share roots; RootFolders stays as-is for scan targeting.
 
--- NEW table: per-(root × worker) resolution
-RootFolderResolutions
+-- NEW table: share-root registry (one row per logical share)
+StorageRoots
   Id              BIGSERIAL PRIMARY KEY
-  RootFolderId    BIGINT NOT NULL REFERENCES RootFolders(Id) ON DELETE CASCADE
+  Name            TEXT NOT NULL UNIQUE        -- 'media_tv', 'movies', 'xxx'
+  Description     TEXT
+  CanonicalPrefix TEXT NOT NULL UNIQUE        -- 'T:\' or '\\10.0.0.61\xxx\' -- informational, used by backfill
+
+-- NEW table: per-(storage-root x worker) resolution
+StorageRootResolutions
+  Id              BIGSERIAL PRIMARY KEY
+  StorageRootId   BIGINT NOT NULL REFERENCES StorageRoots(Id) ON DELETE CASCADE
   WorkerName      TEXT NOT NULL                -- or '__default__' fallback
   Platform        TEXT NOT NULL                -- 'windows' | 'linux' | 'mac'
   AbsolutePath    TEXT NOT NULL                -- 'T:\' or '/mnt/media_tv/' or '/Volumes/media_tv/'
   IsActive        BOOLEAN NOT NULL DEFAULT TRUE
-  UNIQUE (RootFolderId, WorkerName)
+  UNIQUE (StorageRootId, WorkerName)
 
 -- Every path-bearing table gains two columns:
 MediaFiles, TranscodeQueue, TranscodeAttempts, TemporaryFilePaths,
 ShowSettings, MediaFilesArchive
-  ADD COLUMN RootId        BIGINT REFERENCES RootFolders(Id)
-  ADD COLUMN RelativePath  TEXT
-  -- with a CHECK constraint enforcing format:
+  ADD COLUMN StorageRootId  BIGINT REFERENCES StorageRoots(Id)
+  ADD COLUMN RelativePath   TEXT
+  -- with a CHECK constraint (activated in Phase 4) enforcing format:
   --   no leading slash/backslash, forward slashes only, no '..',
   --   no drive letter (no `[A-Za-z]:` prefix)
 ```
 
 After migration:
 
-- `Resolve(RootId, RelativePath, WorkerName) -> AbsolutePath` is the only path-resolution path. Single function. < 30 LOC.
+- `Resolve(StorageRootId, RelativePath, WorkerName) -> AbsolutePath` is the only path-resolution path. Single function. < 30 LOC.
 - `WorkerShareMappings` table is dropped.
 - `Workers.ShareCanonicalPrefix`, `Workers.ShareMountPrefix` are dropped.
 - `PathTranslationService` shrinks to a thin Resolve wrapper or is deleted entirely.
-- `MEDIAVORTEX_SHARE_MAPPINGS` env var is retired (worker reads its `RootFolderResolutions` rows on boot).
+- `MEDIAVORTEX_SHARE_MAPPINGS` env var is retired (worker reads its `StorageRootResolutions` rows on boot).
 - Legacy `FilePath` columns are dropped from every table.
 
 ## Migration Phases (reversible until Phase 5)
@@ -66,7 +70,7 @@ Each phase merges separately. Each phase has its own validation criterion. Phase
 
 1. **[BUG]** No row in any DB table contains a drive letter or backslash in a path field. Verifiable: `SELECT COUNT(*) FROM MediaFiles WHERE FilePath ~ '^[A-Za-z]:' OR FilePath LIKE '%\\\\%'` returns 0; same query against `TranscodeQueue.FilePath`, `TranscodeAttempts` path columns, `RootFolders.RootFolder`, `ShowSettings.ShowFolder`, and any future schema addition with a path-shaped column. CI lint refuses any new column that stores an OS-shaped path. (Stub criterion 1.)
 
-2. **Storage shape**. Path storage is `(RootId BIGINT REFERENCES RootFolders(Id), RelativePath TEXT)`. `RelativePath` uses forward slashes, no leading slash, no drive letter, no trailing slash, no `..` segments. Verifiable: schema dump shows the column shape; CHECK constraint enforces format on every path-bearing table. (Stub criterion 2.)
+2. **Storage shape**. Path storage is `(RootId BIGINT REFERENCES StorageRoots(Id), RelativePath TEXT)`. `RelativePath` uses forward slashes, no leading slash, no drive letter, no trailing slash, no `..` segments. Verifiable: schema dump shows the column shape; CHECK constraint enforces format on every path-bearing table. (Stub criterion 2.)
 
 3. **New OS adds by data row**. A new worker on a new OS (mac, BSD, second Linux distro with different mount layout) is added by inserting one `RootFolderResolutions` row per registered root. No code change. Verifiable: deploy a third-OS worker against a clean migration; it picks up jobs and reads/writes correct files end-to-end. (Stub criterion 3.)
 
