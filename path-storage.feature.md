@@ -94,6 +94,14 @@ Each phase merges separately. Each phase has its own validation criterion. Phase
 
 13. **The KNOWN-ISSUES entry is marked RESOLVED at end of Phase 5**. The entry moves from `## Open` to `## Resolved` with a date and a one-line summary of the resolution. Verifiable: read `KNOWN-ISSUES.md` after Phase 5 merges.
 
+14. **No legacy path-translation references survive in code or docs.** Searching the entire repo for `Workers.ShareCanonicalPrefix`, `Workers.ShareMountPrefix`, `WorkerShareMappings`, `MEDIAVORTEX_SHARE_MAPPINGS`, `PathTranslationService`, `LocalMountPrefix`, `Drive Letter`, and `ShareCanonicalPrefix` returns hits only in: (a) this feature doc, (b) `KNOWN-ISSUES.md`'s resolved entry, (c) git history. No commented-out code blocks referencing the legacy system. No historical strings in feature/flow docs that aren't explicitly tagged as historical. Verifiable: `grep -rn` the patterns above against `Features/`, `Services/`, `Repositories/`, `Core/`, `WorkerService/`, `Templates/`, `Scripts/`, `deploy/`, and root-level docs; expected match count is 0 outside the allowlist.
+
+15. **DB is backed up before any destructive migration step (Phase 5).** `pg_dump` snapshot stored at a durable location (Larry filesystem outside the LXC, or another machine), timestamped, kept for at least 30 days. Phase 5 migration script refuses to run without verifying the backup file exists and is newer than 24 hours old. Verifiable: backup file exists at `/mnt/pve/Media/MediaVortex/backups/pre-phase5-<timestamp>.sql.gz` (or equivalent) with a manifest listing schema + row counts; restoring it on a sandbox produces a working pre-Phase-5 DB.
+
+16. **Flow documents reference real code locations.** `path-storage.flow.md` and any updated `transcode.flow.md` / `worker-deploy.flow.md` steps that touch path resolution name the actual function + file path being called at each step (e.g., "Step 4: source resolution via `PathStorage.Resolve(StorageRootId, RelativePath, WorkerName)` -- `Core/PathStorage.py:Resolve`"). Verifiable: pick any 5 path-resolution steps from any flow doc; each names a function that exists at the referenced location and is on the actual execution path for that step.
+
+17. **End-of-rewrite code walk done before fleet deploy.** Operator walks each flow doc top-to-bottom against the live code; signs off in writing (a comment in this feature doc's Progress checklist, or a dated note in `## Status`). Workers are not redeployed to the new image until the walk is complete and signed off. Verifiable: this feature doc's Progress checklist has a checked item naming the walk date + signer.
+
 ## Code Touch List
 
 Writers (set paths into DB rows):
@@ -167,10 +175,13 @@ The orphan list is the operator's signal: add a new RootFolders entry covering t
 - [ ] 11. **Phase 3 burn-in**: run for a fleet-week. Validate that no drift WARNINGs accumulate. Validate that all new rows have `(RootId, RelativePath)` populated. If passing, advance.
 - [ ] 12. **Phase 4 — Read switch**: enumerated reader touch list above. One PR per consumer. Each reads `(RootId, RelativePath)` via Resolve; activates CHECK constraints; legacy `FilePath` stops being read.
 - [ ] 13. **Phase 4 burn-in**: run for a fleet-week. Validate paths resolve correctly for all I/O. Tail logs for any "file not found" regressions.
-- [ ] 14. **Phase 5 — Cleanup**:
-  - `Scripts/SQLScripts/DropLegacyPathColumns.py` — drops `FilePath` from each table, drops `WorkerShareMappings`, drops `Workers.ShareCanonicalPrefix`/`ShareMountPrefix`
+- [ ] 13b. **DB backup (REQUIRED before Phase 5)**: `pg_dump` the entire `mediavortex` DB to a durable location (e.g., `/mnt/pve/Media/MediaVortex/backups/pre-phase5-<timestamp>.sql.gz`). Verify size + sample restore. `Scripts/SQLScripts/DropLegacyPathColumns.py` refuses to run without a fresh backup.
+- [ ] 13c. **Code walk against flow docs**: walk `path-storage.flow.md`, `transcode.flow.md`, `worker-deploy.flow.md` top-to-bottom; verify every path-resolution step matches the running code; record a dated sign-off in this checklist.
+- [ ] 14. **Phase 5 — Cleanup** (gated on 13b + 13c sign-off):
+  - `Scripts/SQLScripts/DropLegacyPathColumns.py` — drops `FilePath` from each table, drops `WorkerShareMappings`, drops `Workers.ShareCanonicalPrefix`/`ShareMountPrefix`. First operation: verify backup file exists + is recent + checksum matches manifest; exit if not.
   - Delete `Services/PathTranslationService.py` (or shrink to <50 LOC wrapper)
   - Delete `MEDIAVORTEX_SHARE_MAPPINGS` env var handling
+  - Grep + delete all remaining references to retired symbols (`ShareCanonicalPrefix`, `WorkerShareMappings`, etc.) from code and docs per criterion 14
   - Mark `KNOWN-ISSUES` entry RESOLVED with date
 - [ ] 15. Update `Core/WorkerContext.feature.md`, `deploy/worker-deploy.feature.md`, `deploy/worker-deploy.flow.md`, `CLAUDE.md` to reflect the new model
 

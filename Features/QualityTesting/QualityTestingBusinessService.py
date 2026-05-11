@@ -158,9 +158,43 @@ class QualityTestingBusinessService:
             self.DatabaseManager.DeleteQualityTestQueueItem(JobId)
 
     def BuildVMAFCommand(self, JobDetails: dict, ProgressId: int = None) -> dict:
-        """Run FFmpeg VMAF comparison with resolution scaling."""
+        """Run FFmpeg VMAF comparison with resolution scaling.
+
+        Source path resolution (Phase 4 path-storage rewrite):
+        1) Prefer TemporaryFilePaths.(StorageRootId, RelativePath) joined via
+           TranscodeAttemptId -- the canonical (OS-independent) location, fed
+           through Core.PathStorage.Resolve to get a worker-local absolute.
+        2) Fall back to JobDetails['LocalSourcePath'] for rows that haven't
+           been backfilled yet (Phase 4 transitional). Eventually retired in
+           Phase 5 cleanup. See path-storage.feature.md.
+        """
         try:
-            original_file = JobDetails["LocalSourcePath"]
+            from Core.PathStorage import Resolve, PathStorageError
+            from Core.WorkerContext import WorkerContext
+            Ctx = WorkerContext.Current()
+            WorkerName = Ctx.WorkerName if Ctx and Ctx.WorkerName else None
+
+            original_file = None
+            TaId = JobDetails.get("TranscodeAttemptId")
+            if TaId and WorkerName:
+                Rows = self.DatabaseManager.DatabaseService.ExecuteQuery(
+                    "SELECT StorageRootId, RelativePath FROM TemporaryFilePaths WHERE TranscodeAttemptId = %s",
+                    (TaId,),
+                )
+                if Rows and Rows[0].get('StorageRootId') and Rows[0].get('RelativePath'):
+                    try:
+                        original_file = Resolve(
+                            Rows[0]['StorageRootId'],
+                            Rows[0]['RelativePath'],
+                            WorkerName,
+                        )
+                    except PathStorageError as Ex:
+                        LoggingService.LogWarning(
+                            f"PathStorage Resolve failed for attempt {TaId}: {Ex}; falling back to legacy LocalSourcePath",
+                            "QualityTestingBusinessService", "BuildVMAFCommand",
+                        )
+            if not original_file:
+                original_file = JobDetails["LocalSourcePath"]
             transcoded_file = JobDetails["TranscodedFilePath"]
 
             # Verify files exist
