@@ -77,3 +77,5 @@ cache/
 vmaf_4k_*.xml
 vmaf_vb_*.xml
 vmaf_debug_*.xml
+vmaf_CuteSheer*.xml
+vmaf_*-1080p-*.xml

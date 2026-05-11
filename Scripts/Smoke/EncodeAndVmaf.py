@@ -363,7 +363,7 @@ def Main():
         "source_info": SrcInfo,
         "comparison_resolution": Args.compare_scale,
         "vmaf_model": "vmaf_v0.6.1",
-        "encoder": {"name": "libsvtav1", "preset": 4, "svtav1_params": SVT_PARAMS},
+        "encoder": {"name": "libsvtav1", "preset": 4, "default_film_grain": DEFAULT_FILM_GRAIN},
         "variants": Variants,
     }
     with open(SidecarPath, 'w', encoding='utf-8') as F:
