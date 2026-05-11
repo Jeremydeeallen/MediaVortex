@@ -160,42 +160,32 @@ class QualityTestingBusinessService:
     def BuildVMAFCommand(self, JobDetails: dict, ProgressId: int = None) -> dict:
         """Run FFmpeg VMAF comparison with resolution scaling.
 
-        Source path resolution (Phase 4 path-storage rewrite):
-        1) Prefer TemporaryFilePaths.(StorageRootId, RelativePath) joined via
-           TranscodeAttemptId -- the canonical (OS-independent) location, fed
-           through Core.PathStorage.Resolve to get a worker-local absolute.
-        2) Fall back to JobDetails['LocalSourcePath'] for rows that haven't
-           been backfilled yet (Phase 4 transitional). Eventually retired in
-           Phase 5 cleanup. See path-storage.feature.md.
+        Path resolution: source and transcoded paths are read from
+        TemporaryFilePaths.(StorageRootId, RelativePath) joined via
+        TranscodeAttemptId, then resolved to worker-local paths via
+        Core.PathStorage.Resolve. No fallback. No legacy column reads.
         """
         try:
-            from Core.PathStorage import Resolve, PathStorageError
+            from Core.PathStorage import Resolve
             from Core.WorkerContext import WorkerContext
             Ctx = WorkerContext.Current()
-            WorkerName = Ctx.WorkerName if Ctx and Ctx.WorkerName else None
+            if not Ctx or not Ctx.WorkerName:
+                return {"Success": False, "Error": "No WorkerContext.WorkerName registered; cannot resolve paths"}
+            WorkerName = Ctx.WorkerName
 
-            original_file = None
-            TaId = JobDetails.get("TranscodeAttemptId")
-            if TaId and WorkerName:
-                Rows = self.DatabaseManager.DatabaseService.ExecuteQuery(
-                    "SELECT StorageRootId, RelativePath FROM TemporaryFilePaths WHERE TranscodeAttemptId = %s",
-                    (TaId,),
-                )
-                if Rows and Rows[0].get('StorageRootId') and Rows[0].get('RelativePath'):
-                    try:
-                        original_file = Resolve(
-                            Rows[0]['StorageRootId'],
-                            Rows[0]['RelativePath'],
-                            WorkerName,
-                        )
-                    except PathStorageError as Ex:
-                        LoggingService.LogWarning(
-                            f"PathStorage Resolve failed for attempt {TaId}: {Ex}; falling back to legacy LocalSourcePath",
-                            "QualityTestingBusinessService", "BuildVMAFCommand",
-                        )
-            if not original_file:
-                original_file = JobDetails["LocalSourcePath"]
-            transcoded_file = JobDetails["TranscodedFilePath"]
+            TaId = JobDetails["TranscodeAttemptId"]
+            Rows = self.DatabaseManager.DatabaseService.ExecuteQuery(
+                "SELECT SourceStorageRootId, SourceRelativePath, OutputStorageRootId, OutputRelativePath "
+                "FROM TemporaryFilePaths WHERE TranscodeAttemptId = %s",
+                (TaId,),
+            )
+            if not Rows:
+                return {"Success": False, "Error": f"No TemporaryFilePaths row for TranscodeAttemptId={TaId}"}
+            R = Rows[0]
+            if not R.get('SourceStorageRootId') or not R.get('OutputStorageRootId'):
+                return {"Success": False, "Error": f"TemporaryFilePaths row for {TaId} missing source or output (StorageRootId, RelativePath)"}
+            original_file = Resolve(R['SourceStorageRootId'], R['SourceRelativePath'], WorkerName)
+            transcoded_file = Resolve(R['OutputStorageRootId'], R['OutputRelativePath'], WorkerName)
 
             # Verify files exist
             if not os.path.exists(original_file):

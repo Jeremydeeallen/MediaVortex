@@ -71,3 +71,29 @@ def LoadStorageRoots(Db=None) -> list:
         "ORDER BY length(CanonicalPrefix) DESC"
     )
     return [{'Id': R['Id'], 'Name': R['Name'], 'Prefix': R['Prefix']} for R in Rows]
+
+
+_PREFIX_BY_ID_CACHE = {}
+
+
+def CanonicalFor(StorageRootId: int, RelativePath: str, Db=None) -> str:
+    """Return the canonical Windows-shaped path (StorageRoots.CanonicalPrefix +
+    RelativePath, joined with backslashes). For display in operator-facing
+    surfaces (UI tables, logs, error messages). Cached per-process by
+    StorageRootId. Workers should call Resolve for actual I/O, not this."""
+    if StorageRootId is None or RelativePath is None:
+        return ''
+    if StorageRootId not in _PREFIX_BY_ID_CACHE:
+        if Db is None:
+            from Core.Database.DatabaseService import DatabaseService
+            Db = DatabaseService()
+        Rows = Db.ExecuteQuery(
+            "SELECT CanonicalPrefix FROM StorageRoots WHERE Id = %s LIMIT 1",
+            (StorageRootId,),
+        )
+        if not Rows:
+            raise PathStorageError(f"StorageRoot Id={StorageRootId} not found")
+        _PREFIX_BY_ID_CACHE[StorageRootId] = Rows[0]['CanonicalPrefix']
+    Prefix = _PREFIX_BY_ID_CACHE[StorageRootId]
+    Rel = (RelativePath or '').replace('/', '\\').lstrip('\\')
+    return Prefix + Rel
