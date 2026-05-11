@@ -9,7 +9,9 @@ class MediaFileModel:
     
     Id: Optional[int] = None
     SeasonId: Optional[int] = None
-    FilePath: str = ""
+    StorageRootId: Optional[int] = None
+    RelativePath: str = ""
+    FilePath: str = ""  # Legacy column; populated via Resolve at construction for worker I/O. Dropped in Phase F.
     FileName: str = ""
     SizeMB: float = 0.0
     VideoBitrateKbps: Optional[int] = None

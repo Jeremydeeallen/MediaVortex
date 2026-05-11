@@ -8,7 +8,9 @@ class TranscodeAttemptModel:
     """Represents individual transcoding attempts using TranscodeAttempts table."""
     
     Id: Optional[int] = None
-    FilePath: str = ""
+    StorageRootId: Optional[int] = None
+    RelativePath: str = ""
+    FilePath: str = ""  # Legacy column; populated via Resolve at construction for worker I/O. Dropped in Phase F.
     AttemptDate: Optional[datetime] = None
     Quality: int = 0
     OldSizeBytes: int = 0
