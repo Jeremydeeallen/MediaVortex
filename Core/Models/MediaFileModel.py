@@ -60,3 +60,12 @@ class MediaFileModel:
     def __post_init__(self):
         if self.LastScannedDate is None:
             self.LastScannedDate = datetime.now(timezone.utc)
+        # Compute FilePath (canonical) from (StorageRootId, RelativePath) if not
+        # explicitly supplied. After Phase F drops the FilePath column from DB,
+        # this becomes the only way FilePath is populated.
+        if not self.FilePath and self.StorageRootId is not None and self.RelativePath:
+            try:
+                from Core.PathStorage import CanonicalFor
+                self.FilePath = CanonicalFor(self.StorageRootId, self.RelativePath)
+            except Exception:
+                pass

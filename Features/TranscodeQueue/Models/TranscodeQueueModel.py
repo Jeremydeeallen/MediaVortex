@@ -8,7 +8,9 @@ class TranscodeQueueModel:
     """Represents a single transcoding job using TranscodeQueue table."""
 
     Id: Optional[int] = None
-    FilePath: str = ""
+    StorageRootId: Optional[int] = None
+    RelativePath: str = ""
+    FilePath: str = ""  # Legacy column; populated via Resolve at construction. Dropped in Phase F.
     FileName: str = ""
     Directory: str = ""
     SizeBytes: int = 0
@@ -26,6 +28,18 @@ class TranscodeQueueModel:
     def __post_init__(self):
         if self.DateAdded is None:
             self.DateAdded = datetime.now(timezone.utc)
+        if not self.FilePath and self.StorageRootId is not None and self.RelativePath:
+            try:
+                from Core.PathStorage import CanonicalFor
+                self.FilePath = CanonicalFor(self.StorageRootId, self.RelativePath)
+                if not self.FileName:
+                    import os as _os
+                    self.FileName = _os.path.basename(self.FilePath)
+                if not self.Directory:
+                    import os as _os
+                    self.Directory = _os.path.dirname(self.FilePath)
+            except Exception:
+                pass
 
     @property
     def IsCompleted(self) -> bool:

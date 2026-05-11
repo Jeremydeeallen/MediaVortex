@@ -513,7 +513,7 @@ class DatabaseManager:
     def GetAllMediaFiles(self) -> List[MediaFileModel]:
         """Get all media files."""
         query = """
-            SELECT Id, SeasonId, FilePath, FileName, SizeMB, VideoBitrateKbps, AudioBitrateKbps,
+            SELECT Id, SeasonId, StorageRootId, RelativePath, FilePath, FileName, SizeMB, VideoBitrateKbps, AudioBitrateKbps,
                    Resolution, Codec, DurationMinutes, FrameRate, LastScannedDate,
                    CompressionPotential, AssignedProfile, IsInterlaced, ResolutionCategory,
                    FileModificationTime, TotalFrames, CodecProfile, ColorRange, FieldOrder,
@@ -529,6 +529,8 @@ class DatabaseManager:
             mediaFile = MediaFileModel(
                 Id=row['Id'],
                 SeasonId=row['SeasonId'],
+                StorageRootId=row.get('StorageRootId'),
+                RelativePath=row.get('RelativePath') or '',
                 FilePath=row['FilePath'],
                 FileName=row['FileName'],
                 SizeMB=row['SizeMB'],
@@ -569,7 +571,7 @@ class DatabaseManager:
     def GetMediaFileById(self, MediaFileId: int) -> Optional[MediaFileModel]:
         """Get a specific media file by ID."""
         query = """
-            SELECT Id, SeasonId, FilePath, FileName, SizeMB, VideoBitrateKbps, AudioBitrateKbps,
+            SELECT Id, SeasonId, StorageRootId, RelativePath, FilePath, FileName, SizeMB, VideoBitrateKbps, AudioBitrateKbps,
                    Resolution, Codec, DurationMinutes, FrameRate, LastScannedDate,
                    CompressionPotential, AssignedProfile, IsInterlaced, ResolutionCategory,
                    FileModificationTime, TotalFrames, CodecProfile, ColorRange, FieldOrder,
@@ -588,7 +590,9 @@ class DatabaseManager:
         return MediaFileModel(
             Id=row['Id'],
             SeasonId=row['SeasonId'],
-            FilePath=row['FilePath'],
+            StorageRootId=row.get('StorageRootId'),
+                RelativePath=row.get('RelativePath') or '',
+                FilePath=row['FilePath'],
             FileName=row['FileName'],
             SizeMB=row['SizeMB'],
             VideoBitrateKbps=row['VideoBitrateKbps'],
@@ -677,18 +681,19 @@ class DatabaseManager:
                     LoggingService.LogInfo("Inserting new media file...")
                     query = """
                         INSERT INTO MediaFiles
-                        (SeasonId, FilePath, FileName, SizeMB, VideoBitrateKbps, AudioBitrateKbps,
+                        (SeasonId, StorageRootId, RelativePath, FilePath, FileName, SizeMB, VideoBitrateKbps, AudioBitrateKbps,
                          Resolution, Codec, DurationMinutes, FrameRate, LastScannedDate,
                          CompressionPotential, AssignedProfile, FileModificationTime,
                          TotalFrames, CodecProfile, ColorRange, FieldOrder, HasBFrames, RefFrames,
                          PixelFormat, Level, AudioChannels, AudioSampleRate, AudioSampleFormat,
                          AudioChannelLayout, AudioCodec, SubtitleFormats,
                          ContainerFormat, OverallBitrate, TranscodedByMediaVortex)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         RETURNING Id
                     """
                     parameters = (
-                        MediaFile.SeasonId, MediaFile.FilePath, MediaFile.FileName, MediaFile.SizeMB,
+                        MediaFile.SeasonId, MediaFile.StorageRootId, MediaFile.RelativePath,
+                        MediaFile.FilePath, MediaFile.FileName, MediaFile.SizeMB,
                         MediaFile.VideoBitrateKbps, MediaFile.AudioBitrateKbps, MediaFile.Resolution,
                         MediaFile.Codec, MediaFile.DurationMinutes, MediaFile.FrameRate,
                         MediaFile.LastScannedDate, MediaFile.CompressionPotential, MediaFile.AssignedProfile,
@@ -709,8 +714,9 @@ class DatabaseManager:
                     # Update existing media file
                     LoggingService.LogInfo(f"Updating existing media file with ID: {MediaFile.Id}", "DatabaseManager", "SaveMediaFile")
                     query = """
-                        UPDATE MediaFiles 
-                        SET SeasonId = %s, FilePath = %s, FileName = %s, SizeMB = %s, VideoBitrateKbps = %s,
+                        UPDATE MediaFiles
+                        SET SeasonId = %s, StorageRootId = %s, RelativePath = %s,
+                            FilePath = %s, FileName = %s, SizeMB = %s, VideoBitrateKbps = %s,
                             AudioBitrateKbps = %s, Resolution = %s, Codec = %s, DurationMinutes = %s,
                             FrameRate = %s, LastScannedDate = %s, CompressionPotential = %s, AssignedProfile = %s,
                             FileModificationTime = %s, TotalFrames = %s, CodecProfile = %s, ColorRange = %s,
@@ -721,7 +727,8 @@ class DatabaseManager:
                         WHERE Id = %s
                     """
                     parameters = (
-                        MediaFile.SeasonId, MediaFile.FilePath, MediaFile.FileName, MediaFile.SizeMB,
+                        MediaFile.SeasonId, MediaFile.StorageRootId, MediaFile.RelativePath,
+                        MediaFile.FilePath, MediaFile.FileName, MediaFile.SizeMB,
                         MediaFile.VideoBitrateKbps, MediaFile.AudioBitrateKbps, MediaFile.Resolution,
                         MediaFile.Codec, MediaFile.DurationMinutes, MediaFile.FrameRate,
                         MediaFile.LastScannedDate, MediaFile.CompressionPotential, MediaFile.AssignedProfile,
@@ -885,7 +892,7 @@ class DatabaseManager:
     def GetMediaFilesByRootFolder(self, RootFolderPath: str) -> List[MediaFileModel]:
         """Get all media files for a specific root folder."""
         query = """
-            SELECT Id, SeasonId, FilePath, FileName, SizeMB, VideoBitrateKbps, AudioBitrateKbps,
+            SELECT Id, SeasonId, StorageRootId, RelativePath, FilePath, FileName, SizeMB, VideoBitrateKbps, AudioBitrateKbps,
                    Resolution, Codec, DurationMinutes, FrameRate, LastScannedDate,
                    CompressionPotential, AssignedProfile, IsInterlaced, ResolutionCategory,
                    FileModificationTime, TotalFrames, CodecProfile, ColorRange, FieldOrder,
@@ -903,6 +910,8 @@ class DatabaseManager:
             mediaFile = MediaFileModel(
                 Id=row['Id'],
                 SeasonId=row['SeasonId'],
+                StorageRootId=row.get('StorageRootId'),
+                RelativePath=row.get('RelativePath') or '',
                 FilePath=row['FilePath'],
                 FileName=row['FileName'],
                 SizeMB=row['SizeMB'],
@@ -953,7 +962,7 @@ class DatabaseManager:
         
         # Then get files that start with that path
         query = """
-            SELECT Id, SeasonId, FilePath, FileName, SizeMB, VideoBitrateKbps, AudioBitrateKbps,
+            SELECT Id, SeasonId, StorageRootId, RelativePath, FilePath, FileName, SizeMB, VideoBitrateKbps, AudioBitrateKbps,
                    Resolution, Codec, DurationMinutes, FrameRate, LastScannedDate,
                    CompressionPotential, AssignedProfile, IsInterlaced, ResolutionCategory,
                    FileModificationTime, TotalFrames, CodecProfile, ColorRange, FieldOrder,
@@ -970,6 +979,8 @@ class DatabaseManager:
             mediaFile = MediaFileModel(
                 Id=row['Id'],
                 SeasonId=row['SeasonId'],
+                StorageRootId=row.get('StorageRootId'),
+                RelativePath=row.get('RelativePath') or '',
                 FilePath=row['FilePath'],
                 FileName=row['FileName'],
                 SizeMB=row['SizeMB'],
@@ -1108,7 +1119,7 @@ class DatabaseManager:
     def GetMediaFileByPath(self, FilePath: str) -> Optional[MediaFileModel]:
         """Get a media file by exact path match (case-insensitive)."""
         query = """
-            SELECT Id, SeasonId, FilePath, FileName, SizeMB, VideoBitrateKbps, AudioBitrateKbps,
+            SELECT Id, SeasonId, StorageRootId, RelativePath, FilePath, FileName, SizeMB, VideoBitrateKbps, AudioBitrateKbps,
                    Resolution, Codec, DurationMinutes, FrameRate, LastScannedDate,
                    CompressionPotential, AssignedProfile, IsInterlaced, ResolutionCategory,
                    FileModificationTime, TotalFrames, CodecProfile, ColorRange, FieldOrder,
@@ -1127,7 +1138,9 @@ class DatabaseManager:
         return MediaFileModel(
             Id=row['Id'],
             SeasonId=row['SeasonId'],
-            FilePath=row['FilePath'],
+            StorageRootId=row.get('StorageRootId'),
+                RelativePath=row.get('RelativePath') or '',
+                FilePath=row['FilePath'],
             FileName=row['FileName'],
             SizeMB=row['SizeMB'],
             VideoBitrateKbps=row['VideoBitrateKbps'],
@@ -3457,14 +3470,14 @@ class DatabaseManager:
             
             query = """
                 INSERT INTO MediaFilesArchive
-                (Id, SeasonId, FilePath, FileName, SizeMB, VideoBitrateKbps, AudioBitrateKbps,
+                (Id, SeasonId, StorageRootId, RelativePath, FilePath, FileName, SizeMB, VideoBitrateKbps, AudioBitrateKbps,
                  Resolution, Codec, DurationMinutes, FrameRate, LastScannedDate,
                  CompressionPotential, AssignedProfile, IsInterlaced, ResolutionCategory,
                  FileModificationTime, KeepSource, TotalFrames, CodecProfile, ColorRange,
                  FieldOrder, HasBFrames, RefFrames, PixelFormat, Level, AudioChannels,
                  AudioSampleRate, AudioSampleFormat, AudioChannelLayout, ContainerFormat,
                  OverallBitrate, TranscodedByMediaVortex, ArchiveDate, TranscodeAttemptId)
-                SELECT Id, SeasonId, FilePath, FileName, SizeMB, VideoBitrateKbps, AudioBitrateKbps,
+                SELECT Id, SeasonId, StorageRootId, RelativePath, FilePath, FileName, SizeMB, VideoBitrateKbps, AudioBitrateKbps,
                        Resolution, Codec, DurationMinutes, FrameRate, LastScannedDate,
                        CompressionPotential, AssignedProfile, IsInterlaced, ResolutionCategory,
                        FileModificationTime, KeepSource, TotalFrames, CodecProfile, ColorRange,
@@ -5415,7 +5428,7 @@ class DatabaseManager:
         Uses same 3-tier fuzzy matching as GetMediaFileByFileName."""
         try:
             import os
-            selectCols = """Id, SeasonId, FilePath, FileName, SizeMB, VideoBitrateKbps, AudioBitrateKbps,
+            selectCols = """Id, SeasonId, StorageRootId, RelativePath, FilePath, FileName, SizeMB, VideoBitrateKbps, AudioBitrateKbps,
                        Resolution, Codec, DurationMinutes, FrameRate, LastScannedDate,
                        CompressionPotential, AssignedProfile, IsInterlaced, ResolutionCategory,
                        FileModificationTime, TotalFrames, CodecProfile, ColorRange, FieldOrder,

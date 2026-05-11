@@ -38,6 +38,12 @@ class TranscodeAttemptModel:
     def __post_init__(self):
         if self.AttemptDate is None:
             self.AttemptDate = datetime.now(timezone.utc)
+        if not self.FilePath and self.StorageRootId is not None and self.RelativePath:
+            try:
+                from Core.PathStorage import CanonicalFor
+                self.FilePath = CanonicalFor(self.StorageRootId, self.RelativePath)
+            except Exception:
+                pass
     
     @property
     def OldSizeMB(self) -> float:
