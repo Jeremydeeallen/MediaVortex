@@ -184,31 +184,45 @@ def query_table(conn, table_name, columns=None, where=None, order=None, limit=50
 def run_raw_sql(conn, sql, commit=False):
     """Execute a raw SQL query and display results.
     By default, non-SELECT statements are rolled back (safe for troubleshooting).
-    Pass commit=True for writes that must persist (e.g., worker registration)."""
+    Pass commit=True for writes that must persist (e.g., worker registration).
+
+    The commit/rollback decision is honored regardless of whether the statement
+    returned rows -- INSERT/UPDATE/DELETE with a RETURNING clause are write
+    statements that need to commit too, even though psycopg2 reports rows for them."""
     try:
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cur.execute(sql)
 
-        if cur.description is None:
-            if commit:
-                conn.commit()
-                print(f"Query executed and committed. Rows affected: {cur.rowcount}")
+        # Capture rows up front if the statement returned any
+        has_rows = cur.description is not None
+        rows = cur.fetchall() if has_rows else []
+
+        # Persistence: commit OR rollback every statement -- DO NOT fall through
+        # with an open transaction. Previously, INSERT/UPDATE/DELETE...RETURNING
+        # would silently rollback at connection close because this branch was
+        # only reached for cur.description == None (no-RETURNING writes).
+        if commit:
+            conn.commit()
+            persistence_msg = f"Committed. Rows affected: {cur.rowcount}."
+        else:
+            conn.rollback()
+            persistence_msg = f"Rolled back -- use --commit to persist. Rows affected: {cur.rowcount}."
+
+        if has_rows:
+            if not rows:
+                print("(no rows)")
             else:
-                conn.rollback()
-                print(f"Query executed (rolled back -- use --commit to persist). Rows affected: {cur.rowcount}")
-            return
+                headers = list(rows[0].keys())
+                data = [list(row.values()) for row in rows]
+                print(f"\n{len(rows)} rows returned\n")
+                print_table(headers, data)
+                print()
 
-        rows = cur.fetchall()
-        if not rows:
-            print("(no rows)")
-            return
-
-        headers = list(rows[0].keys())
-        data = [list(row.values()) for row in rows]
-
-        print(f"\n{len(rows)} rows returned\n")
-        print_table(headers, data)
-        print()
+        # Show persistence note for write statements so the operator gets
+        # explicit confirmation that the commit landed (or didn't).
+        first_word = sql.strip().split()[0].upper() if sql.strip() else ''
+        if first_word in ('INSERT', 'UPDATE', 'DELETE', 'MERGE', 'CREATE', 'DROP', 'ALTER', 'TRUNCATE'):
+            print(persistence_msg)
 
     except psycopg2.Error as e:
         print(f"SQL error: {e}")

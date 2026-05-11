@@ -1655,7 +1655,7 @@ class DatabaseManager:
                             LIMIT 1
                             FOR UPDATE SKIP LOCKED
                         )
-                        RETURNING Id, FilePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted, ProcessingMode, MediaFileId
+                        RETURNING Id, FilePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted, ProcessingMode, MediaFileId, TestVariantSetId
                     """
                     cursor.execute(query, (WorkerName,))
                 else:
@@ -1672,7 +1672,7 @@ class DatabaseManager:
                             LIMIT 1
                             FOR UPDATE SKIP LOCKED
                         )
-                        RETURNING Id, FilePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted, ProcessingMode, MediaFileId
+                        RETURNING Id, FilePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted, ProcessingMode, MediaFileId, TestVariantSetId
                     """
                     cursor.execute(query, (WorkerName,))
 
@@ -1692,13 +1692,42 @@ class DatabaseManager:
                         DateAdded=row['dateadded'],
                         DateStarted=row['datestarted'],
                         ProcessingMode=row.get('processingmode') or 'Transcode',
-                        MediaFileId=row.get('mediafileid')
+                        MediaFileId=row.get('mediafileid'),
+                        TestVariantSetId=row.get('testvariantsetid'),
                     )
                 return None
             finally:
                 self.DatabaseService.CloseConnection(connection)
         except Exception as e:
             LoggingService.LogException("Exception in ClaimNextPendingTranscodeJob", e, "DatabaseManager", "ClaimNextPendingTranscodeJob")
+            return None
+
+    def GetTestVariantSet(self, VariantSetId: int) -> Optional[Dict[str, Any]]:
+        """Fetch a TestVariantSet row by Id. Returns dict with Id, Name, Description,
+        and Variants (parsed from VariantsJson). Returns None if not found."""
+        try:
+            Rows = self.DatabaseService.ExecuteQuery(
+                "SELECT Id, Name, Description, VariantsJson FROM TestVariantSets WHERE Id = %s",
+                (VariantSetId,),
+            )
+            if not Rows:
+                return None
+            R = Rows[0]
+            Vj = R.get('VariantsJson')
+            if isinstance(Vj, str):
+                import json as _json
+                try:
+                    Vj = _json.loads(Vj)
+                except (ValueError, TypeError):
+                    Vj = []
+            return {
+                'Id': R.get('Id'),
+                'Name': R.get('Name'),
+                'Description': R.get('Description'),
+                'Variants': Vj or [],
+            }
+        except Exception as e:
+            LoggingService.LogException(f"Exception fetching TestVariantSet {VariantSetId}", e, "DatabaseManager", "GetTestVariantSet")
             return None
 
     def RegisterWorker(self, WorkerName: str, Platform: str = 'windows', FFmpegPath: str = None,
@@ -2112,7 +2141,8 @@ class DatabaseManager:
                 'TranscodeDurationSeconds', 'FfpmpegCommand', 'AudioBitrateKbps',
                 'VideoBitrateKbps', 'ProfileName', 'VMAF', 'FileReplaced', 'FileReplacedDate',
                 'ReplacementType', 'StartTime', 'PreferredAttempt', 'CompletedDate',
-                'QualityTestRequired', 'QualityTestCompleted'
+                'QualityTestRequired', 'QualityTestCompleted',
+                'TestVariantSetId', 'TestVariantName'
             ]
             
             # Build dynamic UPDATE query based on provided fields

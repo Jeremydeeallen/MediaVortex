@@ -2,6 +2,31 @@
 
 ## Open
 
+### [BUG - CRITICAL] VMAF distribution becomes bimodal on MKV-source transcodes -- mean/HMean/P5 unreliable for trending
+**Date:** 2026-05-10
+
+**What breaks:** Same encoder recipe (libsvtav1 preset 4, FG 0, CRF sweep, lanczos scale, compare at 1280:720) produces wildly different VMAF distribution shapes depending on source container. Reference data point from the FourK test: 4K MP4 source -> Mean 95.77, HMean 95.75, StdDev 1.18, P5 94.30 across 1080p/720p/480p output variants. Unimodal, tight, exactly what we expect from a clean source. The three MKV sources tested today (Minnie's Bow-Toons S04E07 8.6 Mbps WEBDL-1080p, Black Butler S02 Extras 13 Mbps 10-bit anime, The Office S00E05 7.1 Mbps WEBDL-1080p) all returned bimodal distributions: roughly 56% of frames score VMAF 90+, but ~7% score near zero with a continuous bad-frame gradient in between. Concrete numbers for Minnie's 1080p CRF32 variant: Mean 74.60, HMean 11.20, StdDev 32.58, P5 0.00, P10 14.06, P25 54.12.
+
+**The metric is wrong, not the encoder:** extracted source-vs-encoded PNG stills at one of the "VMAF=0" frames (Minnie's frame 150 at 0:06.26). The images are visually indistinguishable. So the encoder is producing the correct picture; libvmaf is assigning a near-zero score to a frame that looks identical to the reference. The user-visible slider remains useful (it shows you the actual frames); the per-attempt numeric VMAF score does not currently reflect perceptual quality on MKV-source transcodes.
+
+**Ruled out:** frame desync (`ffprobe -count_frames` returned 2181 frames on source and on each of the three Minnie's encoded variants -- identical counts, identical r_frame_rate 24000/1001, identical duration 90.97s). VMAF subsampling drift (re-ran with `n_subsample=10` removed entirely; distribution stayed bimodal, P5 went from 0.29 to 0.00, StdDev got slightly worse). FPS mismatch (rates match across variants).
+
+**Most likely cause:** color metadata mismatch confusing libvmaf's per-frame scoring on dark or transitional frames. ffprobe on Minnie's source reports `pix_fmt=yuv420p` 8-bit `color_range=tv color_space=bt709`; encoded reports `pix_fmt=yuv420p10le` 10-bit `color_range=tv color_space=unknown`. Black Butler source: `pix_fmt=yuv420p10le` `color_range=unknown color_space=unknown`; encoded: `pix_fmt=yuv420p10le color_range=tv color_space=unknown`. The `format=yuv420p` step in our VMAF filter chain downconverts the encoded stream to 8-bit but does NOT enforce a matching color_range -- so for "unknown"-tagged source frames libvmaf may interpret pixel values in one range while the encoded stream is interpreted in another, producing huge synthetic differences on dark pixels (where the limited-vs-full range gap is largest).
+
+**Why critical:** tier-threshold calibration (the entire point of the source-quality work) cannot proceed while Mean/HMean/P5 from MKV-source attempts are not comparable to MP4-source numbers. The auto-replace gate (`VmafAutoReplaceMinThreshold=88` in `PostTranscodeGateConfig`) is currently making decisions on a metric that measures different things depending on source container. The 80/78-VMAF "ceiling" we have been attributing to source bitrate may be partly a measurement artifact when source is MKV. Operator-facing implication: do not trust per-attempt VMAF numbers for MKV-source transcodes until this is resolved; visual slider inspection remains valid.
+
+**Violates:** `Features/QualityTesting/QualityTesting.feature.md` criterion 2 ("VMAF scoring compares the transcoded file against the original and produces a numeric score (0-100)") -- the score is being produced but does not correspond to perceptual quality on MKV inputs. [BUG] criterion 2b added with this entry.
+
+**Candidate mitigation suggested by operator:** remux MKV sources to MP4 before transcoding. Remux is bytewise-identical to the source video stream (no quality loss) and would normalize container-level timing and pixel-format metadata. Risk: pre-transcode remux adds a stage to the pipeline (storage, time, failure mode); the metadata change may not be the actual cause and the fix won't work. Validate the hypothesis on ONE source first: remux Minnie's to MP4, re-run the same harness, compare VMAF distribution shape. If clean unimodal scores result, remux-before-transcode is the answer; if still bimodal, color metadata is not the cause and the investigation goes deeper.
+
+**Other candidate mitigations to try in order of cost:** (a) add `setparams=range=tv:colorspace=bt709` to both filter streams (metadata-only, no pixel conversion -- might tell libvmaf to interpret both consistently); (b) add explicit `scale=...:in_range=auto:out_range=tv` to source stream (active range conversion); (c) use `zscale` filter for color management if available in the FFmpeg build; (d) compare both as 10-bit (`format=yuv420p10le` for both) to keep encoded native; (e) remux source MKV->MP4 before VMAF only (not before transcode), see if the VMAF measurement alone normalizes; (f) the operator's mitigation: remux before transcode entirely.
+
+**Look first:** `Features/QualityTesting/QualityTestingBusinessService.py:BuildVMAFCommand` for the production VMAF filter chain. `Scripts/Smoke/EncodeAndVmaf.py:Vmaf` for the smoke-test harness filter chain (identical shape). The relevant FFmpeg subprocess invocation and lavfi string are the only surface for this bug. Reproducer: run `py Scripts/Smoke/EncodeAndVmaf.py --vmaf-only Scripts/Smoke/MinnieBowToons-S04E07-Animation8Mbps.results.json` and observe Mean ~74 / P5 0.
+
+**Fix with:** `/t`. Try mitigation (a) first; iterate down the list. Track which fix changed the distribution shape so we know which metadata mismatch was actually responsible.
+
+---
+
 ### [BUG] `MonitorVMAFProgress` stops emitting updates ~25% before FFmpeg exits
 **Date:** 2026-05-10
 

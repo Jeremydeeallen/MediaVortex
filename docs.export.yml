@@ -7,5 +7,6 @@ branch: main
 nav:
   - Overview: README.md
   - Pipeline: transcode.flow.md
+  - Source Quality Tiers: docs/SourceQualityTiers.md
   # Add feature docs, flow docs, and guides as they are created.
   # Paths are relative to repo root.

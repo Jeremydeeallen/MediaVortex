@@ -1,0 +1,3 @@
+[
+  {"name": "A", "label": "1080p CRF28 FG4 AQ2+tune0+LA60", "scale": "1920:1080", "crf": 28, "film_grain": 4, "aq_mode": 2, "tune": 0, "lookahead": 60, "height": 1080}
+]

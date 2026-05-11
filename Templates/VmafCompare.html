@@ -58,6 +58,54 @@
     </div>
 
     <div class="card mb-3">
+        <div class="card-header py-2">
+            <h6 class="mb-0"><i class="fas fa-vials me-2"></i>Queue for testing</h6>
+        </div>
+        <div class="card-body py-2">
+            <div class="row g-2">
+                <div class="col-md-4">
+                    <label class="form-label small mb-0">Variant set</label>
+                    <select id="QtsVariantSet" class="form-select form-select-sm"></select>
+                    <div id="QtsVariantSetDesc" class="small text-muted mt-1"></div>
+                </div>
+                <div class="col-md-7">
+                    <label class="form-label small mb-0">File paths (one per line, must exist in MediaFiles)</label>
+                    <textarea id="QtsFilePaths" class="form-control form-control-sm" rows="4" placeholder="T:\Show\Season 1\file.mkv"></textarea>
+                </div>
+                <div class="col-md-1 d-flex align-items-end">
+                    <button type="button" id="QtsSubmit" class="btn btn-primary btn-sm w-100"><i class="fas fa-plus me-1"></i>Queue</button>
+                </div>
+            </div>
+            <div id="QtsResult" class="mt-2 small"></div>
+        </div>
+    </div>
+
+    <div class="card mb-3">
+        <div class="card-header py-2 d-flex justify-content-between align-items-center">
+            <h6 class="mb-0"><i class="fas fa-flask me-2"></i>Test bench (smoke results)</h6>
+            <button type="button" class="btn btn-outline-secondary btn-sm" id="TbRefresh" title="Refresh"><i class="fas fa-sync-alt"></i></button>
+        </div>
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-sm table-hover mb-0 small">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Test</th>
+                            <th>Source file</th>
+                            <th style="width:80px;">Variants</th>
+                            <th style="width:160px;">Modified</th>
+                            <th style="width:90px;"></th>
+                        </tr>
+                    </thead>
+                    <tbody id="TbBody">
+                        <tr><td colspan="5" class="text-center text-muted py-3">Loading...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div class="card mb-3">
         <div class="card-header py-2 d-flex justify-content-between align-items-center">
             <h6 class="mb-0"><i class="fas fa-list me-2"></i>Recent attempts</h6>
             <div class="btn-group btn-group-sm" role="group">
@@ -90,6 +138,17 @@
         </div>
     </div>
 
+    <div id="VariantPanel" class="card mb-3 d-none">
+        <div class="card-header py-2 d-flex justify-content-between align-items-center">
+            <span class="small"><i class="fas fa-layer-group me-2"></i><strong>Variants for:</strong> <span id="VpSourceName" class="text-muted"></span></span>
+            <button type="button" class="btn btn-sm btn-outline-secondary" id="VpClose"><i class="fas fa-times me-1"></i>Close</button>
+        </div>
+        <div class="card-body py-2">
+            <div id="VpPills" class="d-flex flex-wrap gap-2"></div>
+            <div class="small text-muted mt-2">Click a variant to load it into the slider against the source.</div>
+        </div>
+    </div>
+
     <div id="LoadingPanel" class="text-center text-muted py-5 d-none">
         <div class="spinner-border text-primary mb-2" role="status"></div>
         <div>Extracting stills...</div>
@@ -98,13 +157,30 @@
     <div id="ErrorPanel" class="alert alert-danger d-none"></div>
 
     <div id="SliderPanel" class="card d-none">
-        <div class="card-header d-flex justify-content-between align-items-center py-2">
-            <span class="small text-muted">Drag the divider to compare. Left = source, right = transcoded.</span>
-            <div class="small">
-                <span class="badge bg-secondary me-1">Source</span>
-                <i class="fas fa-arrows-left-right text-muted mx-1"></i>
-                <span class="badge bg-info">Transcoded</span>
+        <div class="card-header d-flex justify-content-between align-items-center py-2 flex-wrap gap-2">
+            <div class="small d-flex align-items-center gap-2">
+                <label class="form-label small mb-0 me-1">Compare against:</label>
+                <select id="CompareAgainst" class="form-select form-select-sm" style="max-width:260px;">
+                    <option value="__source__">Source (default)</option>
+                </select>
             </div>
+            <div class="small d-flex align-items-center gap-2 flex-wrap">
+                <div class="btn-group btn-group-sm" role="group" aria-label="View mode">
+                    <input type="radio" class="btn-check" name="ViewMode" id="ViewTvFair" value="tv_fair" checked>
+                    <label class="btn btn-outline-secondary" for="ViewTvFair" title="Scale all variants to 1080p with lanczos+unsharp (TV-fair)">TV-fair (1080p)</label>
+                    <input type="radio" class="btn-check" name="ViewMode" id="ViewNative" value="native">
+                    <label class="btn btn-outline-secondary" for="ViewNative" title="Render each variant at its native pixel size (diagnostic mode)">Native pixels</label>
+                </div>
+            </div>
+        </div>
+        <div id="PairingIndicator" class="card-body py-1 border-bottom small text-muted text-center" style="background:#f8f9fa;">
+            <span id="PairingLeft" class="badge bg-secondary">Source</span>
+            <i class="fas fa-arrows-left-right mx-2"></i>
+            <span id="PairingRight" class="badge bg-info">Transcoded</span>
+            <span id="PairingTs" class="ms-2 text-muted"></span>
+        </div>
+        <div id="ThumbStrip" class="card-body py-2 border-bottom" style="background:#f8f9fa;">
+            <div id="ThumbRow" class="d-flex flex-wrap gap-2"></div>
         </div>
         <div class="card-body p-0">
             <img-comparison-slider id="Slider" hover="false" value="50" style="display:block; width:100%; --divider-width:2px; --divider-color:#dc3545;">
@@ -124,13 +200,31 @@
     var RecentTotalPages = 1;
 
     function Show(panelId) {
+        var SavedY = window.scrollY;
+        var SliderWasVisible = !$('SliderPanel').classList.contains('d-none');
+        // If slider was already visible and we're showing the LoadingPanel,
+        // keep the slider visible too so the page doesn't shrink and bounce
+        // the operator back to the top of the document.
+        if (panelId === 'LoadingPanel' && SliderWasVisible) {
+            $('ErrorPanel').classList.add('d-none');
+            // Don't toggle SliderPanel off; let the new images replace the old.
+            return;
+        }
         ['LoadingPanel', 'ErrorPanel', 'SliderPanel'].forEach(function(id) {
             $(id).classList.toggle('d-none', id !== panelId);
         });
+        // Restore scroll synchronously after the panel toggle so the operator
+        // stays where they were viewing.
+        window.scrollTo(0, SavedY);
     }
 
-    function BuildLoadUrl(Ts) {
-        var Params = ['ts=' + encodeURIComponent(Ts)];
+    function CurrentViewMode() {
+        var R = document.querySelector('input[name="ViewMode"]:checked');
+        return R ? R.value : 'tv_fair';
+    }
+
+    function BuildIdentityParams() {
+        var Params = [];
         var Src = $('SourcePathInput').value.trim();
         var Tx  = $('TranscodedPathInput').value.trim();
         if (Src && Tx) {
@@ -141,18 +235,187 @@
             if (!A) return null;
             Params.push('attempt=' + encodeURIComponent(A));
         }
-        return '/api/QualityTest/CompareStills?' + Params.join('&');
+        Params.push('view=' + encodeURIComponent(CurrentViewMode()));
+        return Params;
     }
 
-    function Load(Ts) {
-        var Url = BuildLoadUrl(Ts);
-        if (!Url) {
+    var ActiveBatchItems = [];
+    var ActiveBatchTs = null;
+    // Peer-comparison state: ActivePeers is the list of OTHER variants in the
+    // current group that can occupy the slider's left side instead of the source.
+    // ActivePeerSelection = '__source__' means default behavior (left=source).
+    // Otherwise, it's the index into ActivePeers of the chosen peer.
+    var ActivePeers = [];
+    var ActivePeerSelection = '__source__';
+    var ActiveRightLabel = 'Transcoded';
+    var ActiveSourceLabel = 'Source';
+
+    function PopulatePeerSelector(Peers, RightLabel) {
+        ActivePeers = Peers || [];
+        ActiveRightLabel = RightLabel || 'Transcoded';
+        ActivePeerSelection = '__source__';
+        var Sel = $('CompareAgainst');
+        Sel.innerHTML = '<option value="__source__">Source (default)</option>' +
+            ActivePeers.map(function(P, I) {
+                return '<option value="' + I + '">' + EscapeHtml(P.Label || ('Variant ' + I)) + '</option>';
+            }).join('');
+        Sel.parentElement.style.display = ActivePeers.length > 0 ? '' : 'none';
+        UpdatePairingIndicator();
+    }
+
+    function UpdatePairingIndicator() {
+        var Mins = ActiveBatchTs !== null ? Math.floor(ActiveBatchTs / 60) : 0;
+        var Secs = ActiveBatchTs !== null ? Math.floor(ActiveBatchTs % 60) : 0;
+        var TsLabel = ActiveBatchTs !== null ? ('@ ' + Mins + ':' + (Secs < 10 ? '0' : '') + Secs) : '';
+        var LeftLabel;
+        if (ActivePeerSelection === '__source__') {
+            LeftLabel = ActiveSourceLabel;
+            $('PairingLeft').classList.remove('bg-warning', 'text-dark');
+            $('PairingLeft').classList.add('bg-secondary');
+        } else {
+            var P = ActivePeers[parseInt(ActivePeerSelection, 10)];
+            LeftLabel = P ? (P.Label || ('Variant ' + ActivePeerSelection)) : ActiveSourceLabel;
+            $('PairingLeft').classList.remove('bg-secondary');
+            $('PairingLeft').classList.add('bg-warning', 'text-dark');
+        }
+        $('PairingLeft').textContent = LeftLabel;
+        $('PairingRight').textContent = ActiveRightLabel;
+        $('PairingTs').textContent = TsLabel + ' (' + CurrentViewMode() + ')';
+    }
+
+    function RenderThumbnails(Items, ActiveTs) {
+        $('ThumbRow').innerHTML = Items.map(function(I, Idx) {
+            var IsActive = (ActiveTs === null && Idx === 0) || (Math.abs(I.Ts - (ActiveTs || -1)) < 0.01);
+            var Cls = IsActive ? 'btn-primary' : 'btn-outline-primary';
+            var Mins = Math.floor(I.Ts / 60);
+            var Secs = Math.floor(I.Ts % 60);
+            var Label = Mins + ':' + (Secs < 10 ? '0' : '') + Secs;
+            return '<button type="button" class="btn btn-sm ' + Cls + ' thumb-pick text-start p-1" data-ts="' + I.Ts + '" style="width:160px;">' +
+                '<div class="d-flex align-items-center gap-2">' +
+                    '<img src="' + I.TranscodedUrl + '" alt="t=' + I.Ts + '" style="width:80px; height:45px; object-fit:cover; border-radius:2px;">' +
+                    '<span class="small fw-bold">' + Label + '</span>' +
+                '</div>' +
+            '</button>';
+        }).join('');
+        Array.from(document.querySelectorAll('.thumb-pick')).forEach(function(B) {
+            B.addEventListener('click', function() {
+                var Ts = parseFloat(B.dataset.ts);
+                ActivateBatchItem(Ts);
+            });
+        });
+    }
+
+    function ActivateBatchItem(Ts) {
+        var Item = ActiveBatchItems.find(function(I) { return Math.abs(I.Ts - Ts) < 0.01; });
+        if (!Item) return;
+        var SavedY = window.scrollY;
+        ActiveBatchTs = Ts;
+        $('ImgTranscoded').src = Item.TranscodedUrl + '?cb=' + Date.now();
+        $('TsInput').value = Ts;
+        var Meta = '@ ' + Ts + 's (' + CurrentViewMode() + ')';
+        $('MetaLine').textContent = Meta;
+        RenderThumbnails(ActiveBatchItems, Ts);
+        Show('SliderPanel');
+        ApplyLeftPairing(Item);
+        window.scrollTo(0, SavedY);
+    }
+
+    function ApplyLeftPairing(ActiveItem) {
+        // ActiveItem = the currently active batch item (right side of slider).
+        // If pairing is __source__, left = active item's SourceUrl.
+        // Else: fetch the chosen peer's transcoded still at the current ts+view,
+        // then point ImgSource at it. The right side remains the active item.
+        var SavedY = window.scrollY;
+        if (ActivePeerSelection === '__source__') {
+            $('ImgSource').src = ActiveItem.SourceUrl + '?cb=' + Date.now();
+            UpdatePairingIndicator();
+            window.scrollTo(0, SavedY);
+            return;
+        }
+        var Peer = ActivePeers[parseInt(ActivePeerSelection, 10)];
+        if (!Peer) {
+            $('ImgSource').src = ActiveItem.SourceUrl + '?cb=' + Date.now();
+            UpdatePairingIndicator();
+            return;
+        }
+        // Build a single-pair fetch for the peer at the current timestamp + view.
+        var Params = ['ts=' + encodeURIComponent(ActiveBatchTs), 'view=' + encodeURIComponent(CurrentViewMode())];
+        if (Peer.AttemptId) {
+            Params.push('attempt=' + encodeURIComponent(Peer.AttemptId));
+        } else if (Peer.SourcePath && Peer.OutPath) {
+            Params.push('source_path=' + encodeURIComponent(Peer.SourcePath));
+            Params.push('transcoded_path=' + encodeURIComponent(Peer.OutPath));
+        } else {
+            $('ImgSource').src = ActiveItem.SourceUrl + '?cb=' + Date.now();
+            UpdatePairingIndicator();
+            return;
+        }
+        fetch('/api/QualityTest/CompareStills?' + Params.join('&'))
+            .then(function(R) { return R.json(); })
+            .then(function(D) {
+                if (D.Success) {
+                    $('ImgSource').src = D.TranscodedUrl + '?cb=' + Date.now();
+                } else {
+                    $('ImgSource').src = ActiveItem.SourceUrl + '?cb=' + Date.now();
+                }
+                UpdatePairingIndicator();
+                window.scrollTo(0, SavedY);
+            })
+            .catch(function() {
+                $('ImgSource').src = ActiveItem.SourceUrl + '?cb=' + Date.now();
+                UpdatePairingIndicator();
+                window.scrollTo(0, SavedY);
+            });
+    }
+
+    document.addEventListener('change', function(E) {
+        if (E.target && E.target.id === 'CompareAgainst') {
+            ActivePeerSelection = E.target.value;
+            var ActiveItem = ActiveBatchItems.find(function(I) { return Math.abs(I.Ts - ActiveBatchTs) < 0.01; });
+            if (ActiveItem) ApplyLeftPairing(ActiveItem);
+        }
+    });
+
+    function LoadBatch() {
+        var Params = BuildIdentityParams();
+        if (!Params) {
             $('ErrorPanel').textContent = 'Attempt ID or both raw paths required';
             Show('ErrorPanel');
             return;
         }
         Show('LoadingPanel');
-        fetch(Url)
+        fetch('/api/QualityTest/CompareStillsBatch?' + Params.join('&'))
+            .then(function(R) { return R.json(); })
+            .then(function(D) {
+                if (!D.Success) {
+                    $('ErrorPanel').textContent = D.ErrorMessage || 'Unknown error';
+                    Show('ErrorPanel');
+                    return;
+                }
+                ActiveBatchItems = D.Items || [];
+                if (!ActiveBatchItems.length) {
+                    $('ErrorPanel').textContent = 'No stills extracted';
+                    Show('ErrorPanel');
+                    return;
+                }
+                ActivateBatchItem(ActiveBatchItems[0].Ts);
+            })
+            .catch(function(E) {
+                $('ErrorPanel').textContent = 'Fetch failed: ' + E.message;
+                Show('ErrorPanel');
+            });
+    }
+
+    function Load(Ts) {
+        var Params = BuildIdentityParams();
+        if (!Params) {
+            $('ErrorPanel').textContent = 'Attempt ID or both raw paths required';
+            Show('ErrorPanel');
+            return;
+        }
+        Params.unshift('ts=' + encodeURIComponent(Ts));
+        Show('LoadingPanel');
+        fetch('/api/QualityTest/CompareStills?' + Params.join('&'))
             .then(function(R) { return R.json(); })
             .then(function(D) {
                 if (!D.Success) {
@@ -162,9 +425,12 @@
                 }
                 $('ImgSource').src = D.SourceUrl + '?cb=' + Date.now();
                 $('ImgTranscoded').src = D.TranscodedUrl + '?cb=' + Date.now();
-                var Meta = '@ ' + Ts + 's';
+                var Meta = '@ ' + Ts + 's (' + CurrentViewMode() + ')';
                 if (D.SourceCanonical) Meta += ' — ' + D.SourceCanonical.split(/[\\/]/).pop();
                 $('MetaLine').textContent = Meta;
+                ActiveBatchItems = [{ Ts: parseFloat(Ts), SourceUrl: D.SourceUrl, TranscodedUrl: D.TranscodedUrl }];
+                ActiveBatchTs = parseFloat(Ts);
+                RenderThumbnails(ActiveBatchItems, ActiveBatchTs);
                 Show('SliderPanel');
                 var A = $('AttemptInput').value;
                 if (A && !($('SourcePathInput').value || $('TranscodedPathInput').value)) {
@@ -193,7 +459,36 @@
                     $('RecentBody').innerHTML = '<tr><td colspan="8" class="text-center text-muted py-3">No attempts</td></tr>';
                     return;
                 }
-                $('RecentBody').innerHTML = D.Rows.map(function(R) {
+                var Groups = [];
+                var GroupIndex = {};
+                D.Rows.forEach(function(R) {
+                    var Key = (R.TestVariantSetId && R.MediaFileId) ? ('g:' + R.MediaFileId + ':' + R.TestVariantSetId) : ('a:' + R.Id);
+                    if (GroupIndex[Key] === undefined) {
+                        GroupIndex[Key] = Groups.length;
+                        Groups.push({ Key: Key, IsGroup: !!R.TestVariantSetId, Items: [] });
+                    }
+                    Groups[GroupIndex[Key]].Items.push(R);
+                });
+                $('RecentBody').innerHTML = Groups.map(function(G) {
+                    if (G.IsGroup) {
+                        var First = G.Items[0];
+                        var Date_ = First.AttemptDate ? First.AttemptDate.replace('T', ' ').substring(0, 19) : '-';
+                        var Avg = G.Items.filter(function(I) { return I.VMAF !== null; }).map(function(I) { return I.VMAF; });
+                        var AvgVmaf = Avg.length ? (Avg.reduce(function(A,B){return A+B;}, 0) / Avg.length) : null;
+                        var VmafBadge = AvgVmaf !== null
+                            ? '<span class="badge ' + (AvgVmaf >= 80 ? 'bg-success' : AvgVmaf >= 70 ? 'bg-warning text-dark' : 'bg-danger') + '" title="avg of ' + Avg.length + ' variants">' + AvgVmaf.toFixed(2) + ' avg</span>'
+                            : '<span class="text-muted">-</span>';
+                        return '<tr class="table-info">' +
+                            '<td><span class="badge bg-info">test</span></td>' +
+                            '<td><div style="max-width:560px;" title="' + EscapeHtml(First.FilePath || '') + '"><small class="text-muted d-block text-truncate">' + EscapeHtml((First.FilePath || '').substring(0, (First.FilePath || '').length - (First.FileName || '').length).replace(/[\\/]+$/, '')) + '</small><strong class="d-block text-truncate">' + EscapeHtml(First.FileName) + '</strong><small class="text-muted">' + EscapeHtml(First.TestVariantSetName || '?') + ' &middot; ' + G.Items.length + ' variants</small></div></td>' +
+                            '<td><small>' + EscapeHtml(First.ProfileName || '-') + '</small></td>' +
+                            '<td>' + VmafBadge + '</td>' +
+                            '<td colspan="2"><span class="badge bg-secondary" title="test mode: source preserved">test mode</span></td>' +
+                            '<td><small class="text-muted">' + Date_ + '</small></td>' +
+                            '<td><button type="button" class="btn btn-sm btn-outline-primary recent-group" data-key="' + EscapeHtml(G.Key) + '">Open</button></td>' +
+                            '</tr>';
+                    }
+                    var R = G.Items[0];
                     var Vmaf = R.VMAF !== null ? R.VMAF.toFixed(2) : '-';
                     var VmafBadge = R.VMAF !== null
                         ? '<span class="badge ' + (R.VMAF >= 80 ? 'bg-success' : R.VMAF >= 70 ? 'bg-warning text-dark' : 'bg-danger') + '">' + Vmaf + '</span>'
@@ -207,7 +502,7 @@
                     var Date_ = R.AttemptDate ? R.AttemptDate.replace('T', ' ').substring(0, 19) : '-';
                     return '<tr>' +
                         '<td>' + R.Id + '</td>' +
-                        '<td><div class="text-truncate" style="max-width:380px;" title="' + EscapeHtml(R.FilePath || '') + '">' + EscapeHtml(R.FileName) + '</div></td>' +
+                        '<td><div style="max-width:560px;" title="' + EscapeHtml(R.FilePath || '') + '"><small class="text-muted d-block text-truncate">' + EscapeHtml((R.FilePath || '').substring(0, (R.FilePath || '').length - (R.FileName || '').length).replace(/[\\/]+$/, '')) + '</small><span class="d-block text-truncate">' + EscapeHtml(R.FileName) + '</span></div></td>' +
                         '<td><small>' + EscapeHtml(R.ProfileName || '-') + '</small></td>' +
                         '<td>' + VmafBadge + '</td>' +
                         '<td>' + DispBadge + '</td>' +
@@ -221,7 +516,15 @@
                         $('AttemptInput').value = B.dataset.id;
                         $('SourcePathInput').value = '';
                         $('TranscodedPathInput').value = '';
-                        Load($('TsInput').value || '60');
+                        PopulatePeerSelector([], 'Transcoded');
+                        LoadBatch();
+                    });
+                });
+                Array.from(document.querySelectorAll('.recent-group')).forEach(function(B) {
+                    B.addEventListener('click', function() {
+                        var Key = B.dataset.key;
+                        var G = Groups.find(function(X) { return X.Key === Key; });
+                        if (G) OpenAttemptGroup(G);
                     });
                 });
                 $('RecentPrev').disabled = RecentPage <= 1;
@@ -234,6 +537,7 @@
 
     $('LoadForm').addEventListener('submit', function(E) {
         E.preventDefault();
+        PopulatePeerSelector([], 'Transcoded');
         Load($('TsInput').value);
     });
     Array.from(document.querySelectorAll('.qt-quick')).forEach(function(B) {
@@ -249,11 +553,230 @@
     $('RecentNext').addEventListener('click', function() { if (RecentPage < RecentTotalPages) LoadRecent(RecentPage + 1); });
     $('RecentRefresh').addEventListener('click', function() { LoadRecent(RecentPage); });
 
+    var ActiveTestBench = null;
+
+    function LoadTestBench() {
+        $('TbBody').innerHTML = '<tr><td colspan="5" class="text-center text-muted py-3">Loading...</td></tr>';
+        fetch('/api/QualityTest/TestBench/List')
+            .then(function(R) { return R.json(); })
+            .then(function(D) {
+                if (!D.Success) {
+                    $('TbBody').innerHTML = '<tr><td colspan="5" class="text-danger py-2">' + EscapeHtml(D.ErrorMessage || 'load failed') + '</td></tr>';
+                    return;
+                }
+                if (!D.Rows.length) {
+                    $('TbBody').innerHTML = '<tr><td colspan="5" class="text-center text-muted py-3">No smoke test results in Scripts/Smoke/</td></tr>';
+                    return;
+                }
+                $('TbBody').innerHTML = D.Rows.map(function(R) {
+                    var When = R.ModifiedAt ? R.ModifiedAt.replace('T', ' ') : '-';
+                    return '<tr>' +
+                        '<td><strong>' + EscapeHtml(R.TestName) + '</strong></td>' +
+                        '<td><div style="max-width:560px;" title="' + EscapeHtml(R.SourcePath || R.SourceFileName) + '"><small class="text-muted d-block text-truncate">' + EscapeHtml((R.SourcePath || '').substring(0, (R.SourcePath || '').length - (R.SourceFileName || '').length).replace(/[\\/]+$/, '')) + '</small><span class="d-block text-truncate">' + EscapeHtml(R.SourceFileName) + '</span></div></td>' +
+                        '<td><span class="badge bg-secondary">' + R.VariantCount + '</span></td>' +
+                        '<td><small class="text-muted">' + EscapeHtml(When) + '</small></td>' +
+                        '<td><button type="button" class="btn btn-sm btn-outline-primary tb-open" data-file="' + EscapeHtml(R.Filename) + '">Open</button></td>' +
+                        '</tr>';
+                }).join('');
+                Array.from(document.querySelectorAll('.tb-open')).forEach(function(B) {
+                    B.addEventListener('click', function() { OpenTestBench(B.dataset.file); });
+                });
+            })
+            .catch(function(E) {
+                $('TbBody').innerHTML = '<tr><td colspan="5" class="text-danger py-2">Fetch failed: ' + EscapeHtml(E.message) + '</td></tr>';
+            });
+    }
+
+    function OpenTestBench(Filename) {
+        fetch('/api/QualityTest/TestBench/Detail?file=' + encodeURIComponent(Filename))
+            .then(function(R) { return R.json(); })
+            .then(function(D) {
+                if (!D.Success) {
+                    $('ErrorPanel').textContent = D.ErrorMessage || 'Failed to load test detail';
+                    Show('ErrorPanel');
+                    return;
+                }
+                ActiveTestBench = D;
+                $('VpSourceName').textContent = D.SourceFileName || D.Source;
+                $('VpPills').innerHTML = D.Variants.map(function(V, I) {
+                    var Vmaf = (V.Vmaf !== null && V.Vmaf !== undefined) ? V.Vmaf.toFixed(2) : '-';
+                    var VmafCls = (V.Vmaf >= 90) ? 'bg-success' : (V.Vmaf >= 80 ? 'bg-info text-dark' : (V.Vmaf >= 70 ? 'bg-warning text-dark' : 'bg-danger'));
+                    var Bitrate = V.BitrateKbps ? Math.round(V.BitrateKbps) + ' kbps' : '';
+                    var Size = V.SizeBytes ? (V.SizeBytes / 1024 / 1024).toFixed(0) + ' MB' : '';
+                    var SubLine = [Bitrate, Size].filter(function(S) { return S; }).join(' &middot; ');
+                    return '<button type="button" class="btn btn-outline-primary tb-variant text-start" data-idx="' + I + '" style="min-width:220px;">' +
+                        '<div class="d-flex justify-content-between align-items-center">' +
+                            '<span><strong>' + EscapeHtml(V.Label || V.Name) + '</strong></span>' +
+                            '<span class="badge ' + VmafCls + ' ms-2">VMAF ' + Vmaf + '</span>' +
+                        '</div>' +
+                        (SubLine ? '<div class="small text-muted mt-1">' + SubLine + '</div>' : '') +
+                    '</button>';
+                }).join('');
+                Array.from(document.querySelectorAll('.tb-variant')).forEach(function(B) {
+                    B.addEventListener('click', function() {
+                        Array.from(document.querySelectorAll('.tb-variant')).forEach(function(X) {
+                            X.classList.remove('btn-primary');
+                            X.classList.add('btn-outline-primary');
+                        });
+                        B.classList.remove('btn-outline-primary');
+                        B.classList.add('btn-primary');
+                        var Idx = parseInt(B.dataset.idx, 10);
+                        var V = ActiveTestBench.Variants[Idx];
+                        $('SourcePathInput').value = ActiveTestBench.Source;
+                        $('TranscodedPathInput').value = V.OutPath;
+                        $('RawPathsPanel').classList.remove('d-none');
+                        $('AttemptInput').value = '';
+                        ActiveSourceLabel = 'Source';
+                        var Peers = ActiveTestBench.Variants
+                            .map(function(VP, J) { return { Idx: J, Label: VP.Label || VP.Name, SourcePath: ActiveTestBench.Source, OutPath: VP.OutPath }; })
+                            .filter(function(P) { return P.Idx !== Idx; });
+                        PopulatePeerSelector(Peers, V.Label || V.Name);
+                        LoadBatch();
+                    });
+                });
+                $('VariantPanel').classList.remove('d-none');
+                $('VariantPanel').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            })
+            .catch(function(E) {
+                $('ErrorPanel').textContent = 'Test detail fetch failed: ' + E.message;
+                Show('ErrorPanel');
+            });
+    }
+
+    function OpenAttemptGroup(Group) {
+        if (!Group || !Group.Items.length) return;
+        var First = Group.Items[0];
+        ActiveTestBench = null;
+        $('VpSourceName').textContent = (First.TestVariantSetName ? '[' + First.TestVariantSetName + '] ' : '') + (First.FileName || First.FilePath || '');
+        $('VpPills').innerHTML = Group.Items.map(function(I) {
+            var Vmaf = (I.VMAF !== null && I.VMAF !== undefined) ? I.VMAF.toFixed(2) : '-';
+            var VmafCls = (I.VMAF >= 90) ? 'bg-success' : (I.VMAF >= 80 ? 'bg-info text-dark' : (I.VMAF >= 70 ? 'bg-warning text-dark' : 'bg-danger'));
+            var SizeLine = '';
+            if (I.NewSizeMB) SizeLine = I.NewSizeMB + ' MB';
+            return '<button type="button" class="btn btn-outline-primary attempt-variant text-start" data-attempt="' + I.Id + '" style="min-width:240px;">' +
+                '<div class="d-flex justify-content-between align-items-center">' +
+                    '<span><strong>' + EscapeHtml(I.TestVariantName || ('#' + I.Id)) + '</strong></span>' +
+                    '<span class="badge ' + VmafCls + ' ms-2">VMAF ' + Vmaf + '</span>' +
+                '</div>' +
+                (SizeLine ? '<div class="small text-muted mt-1">' + SizeLine + '</div>' : '') +
+            '</button>';
+        }).join('');
+        Array.from(document.querySelectorAll('.attempt-variant')).forEach(function(B) {
+            B.addEventListener('click', function() {
+                Array.from(document.querySelectorAll('.attempt-variant')).forEach(function(X) {
+                    X.classList.remove('btn-primary');
+                    X.classList.add('btn-outline-primary');
+                });
+                B.classList.remove('btn-outline-primary');
+                B.classList.add('btn-primary');
+                var ActiveAttemptId = parseInt(B.dataset.attempt, 10);
+                $('AttemptInput').value = String(ActiveAttemptId);
+                $('SourcePathInput').value = '';
+                $('TranscodedPathInput').value = '';
+                ActiveSourceLabel = 'Source';
+                var ActiveItem = Group.Items.find(function(I) { return I.Id === ActiveAttemptId; });
+                var ActiveLabel = ActiveItem ? (ActiveItem.TestVariantName || ('#' + ActiveItem.Id)) : ('#' + ActiveAttemptId);
+                var Peers = Group.Items
+                    .filter(function(I) { return I.Id !== ActiveAttemptId; })
+                    .map(function(I) { return { AttemptId: I.Id, Label: I.TestVariantName || ('#' + I.Id) }; });
+                PopulatePeerSelector(Peers, ActiveLabel);
+                LoadBatch();
+            });
+        });
+        $('VariantPanel').classList.remove('d-none');
+        $('VariantPanel').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+
+    var QtsVariantSets = [];
+    function LoadVariantSets() {
+        fetch('/api/QualityTest/VariantSets')
+            .then(function(R) { return R.json(); })
+            .then(function(D) {
+                if (!D.Success) {
+                    $('QtsVariantSet').innerHTML = '<option value="">(load failed)</option>';
+                    return;
+                }
+                QtsVariantSets = D.Sets || [];
+                $('QtsVariantSet').innerHTML = QtsVariantSets.map(function(S) {
+                    return '<option value="' + S.Id + '">' + EscapeHtml(S.Name) + ' (' + S.VariantCount + ')</option>';
+                }).join('');
+                UpdateVariantSetDesc();
+            })
+            .catch(function() {
+                $('QtsVariantSet').innerHTML = '<option value="">(network error)</option>';
+            });
+    }
+    function UpdateVariantSetDesc() {
+        var SelId = parseInt($('QtsVariantSet').value, 10);
+        var S = QtsVariantSets.find(function(X) { return X.Id === SelId; });
+        $('QtsVariantSetDesc').textContent = S ? (S.Description || '') : '';
+    }
+    function SubmitQueueTestRun() {
+        var SetId = parseInt($('QtsVariantSet').value, 10);
+        var Raw = $('QtsFilePaths').value || '';
+        var Paths = Raw.split('\n').map(function(L) { return L.trim(); }).filter(function(L) { return L; });
+        if (!SetId || !Paths.length) {
+            $('QtsResult').innerHTML = '<div class="alert alert-warning py-1 mb-0">Pick a variant set and paste at least one file path.</div>';
+            return;
+        }
+        $('QtsSubmit').disabled = true;
+        $('QtsResult').innerHTML = '<div class="text-muted">Submitting...</div>';
+        fetch('/api/QualityTest/QueueTestRun', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ VariantSetId: SetId, FilePaths: Paths }),
+        })
+            .then(function(R) { return R.json(); })
+            .then(function(D) {
+                $('QtsSubmit').disabled = false;
+                if (!D.Success) {
+                    $('QtsResult').innerHTML = '<div class="alert alert-danger py-1 mb-0">' + EscapeHtml(D.ErrorMessage || 'Submit failed') + '</div>';
+                    return;
+                }
+                var Html = '<div class="alert alert-success py-1 mb-1">Queued ' + D.AcceptedCount + ' file(s) into "' + EscapeHtml(D.VariantSetName || ('set ' + D.VariantSetId)) + '"</div>';
+                if (D.RejectedCount > 0) {
+                    Html += '<div class="alert alert-warning py-1 mb-0"><strong>' + D.RejectedCount + ' rejected:</strong><ul class="mb-0">';
+                    D.Rejected.forEach(function(R) {
+                        Html += '<li><code>' + EscapeHtml(R.FilePath) + '</code> - ' + EscapeHtml(R.Reason) + '</li>';
+                    });
+                    Html += '</ul></div>';
+                }
+                $('QtsResult').innerHTML = Html;
+                if (D.AcceptedCount > 0) {
+                    $('QtsFilePaths').value = '';
+                    LoadRecent(1);
+                }
+            })
+            .catch(function(E) {
+                $('QtsSubmit').disabled = false;
+                $('QtsResult').innerHTML = '<div class="alert alert-danger py-1 mb-0">Network error: ' + EscapeHtml(E.message) + '</div>';
+            });
+    }
+    $('QtsVariantSet').addEventListener('change', UpdateVariantSetDesc);
+    $('QtsSubmit').addEventListener('click', SubmitQueueTestRun);
+    LoadVariantSets();
+
+    $('TbRefresh').addEventListener('click', LoadTestBench);
+    $('VpClose').addEventListener('click', function() {
+        $('VariantPanel').classList.add('d-none');
+        ActiveTestBench = null;
+    });
+
+    LoadTestBench();
     LoadRecent(1);
 
-    // Auto-load if attempt and ts came in via URL
+    Array.from(document.querySelectorAll('input[name="ViewMode"]')).forEach(function(R) {
+        R.addEventListener('change', function() {
+            if (ActiveBatchItems.length > 1) {
+                LoadBatch();
+            } else if ($('AttemptInput').value || ($('SourcePathInput').value && $('TranscodedPathInput').value)) {
+                Load($('TsInput').value || '60');
+            }
+        });
+    });
+
     if ($('AttemptInput').value) {
-        Load($('TsInput').value || '60');
+        LoadBatch();
     }
 })();
 </script>

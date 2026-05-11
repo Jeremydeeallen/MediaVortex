@@ -295,6 +295,13 @@ class QualityTestingBusinessService:
                         ta_id,
                         {"VMAF": vmaf_score, "QualityTestCompleted": True}
                     )
+                    try:
+                        self._AutoCaptureStillsIfPolicyFires(ta_id)
+                    except Exception as AutoCapEx:
+                        LoggingService.LogException(
+                            f"Auto-capture stills failed (non-fatal) for attempt {ta_id}",
+                            AutoCapEx, "QualityTestingBusinessService", "_AutoCaptureStillsIfPolicyFires",
+                        )
                     DispositionResult = PostTranscodeDispositionService(self.DatabaseManager).DecidePostTranscodeDisposition(ta_id)
                     if DispositionResult.Disposition in ('Replace', 'BypassReplace'):
                         from Features.FileReplacement.FileReplacementBusinessService import FileReplacementBusinessService
@@ -1111,15 +1118,15 @@ class QualityTestingBusinessService:
     # no SystemSettings KV) and returns Replace / NoReplace / Requeue / Discard
     # with an explicit Reason. See post-transcode-disposition.feature.md.
 
-    def GenerateComparisonStillsFromPaths(self, SourceCanonical: str, TranscodedCanonical: str, TimestampSeconds: float) -> dict:
+    def GenerateComparisonStillsFromPaths(self, SourceCanonical: str, TranscodedCanonical: str, TimestampSeconds: float, ViewMode: str = 'tv_fair') -> dict:
         """Path-driven variant of GenerateComparisonStills. Useful when the
         operator wants to A/B test two arbitrary files without going through
-        a TranscodeAttempt record. Cache key hashes the paths + timestamp.
+        a TranscodeAttempt record. Cache key hashes the paths + timestamp + view.
         """
         try:
             import hashlib
-            Key = hashlib.sha1(f"{SourceCanonical}|{TranscodedCanonical}|{TimestampSeconds:.2f}".encode()).hexdigest()[:16]
-            return self._ExtractStillPair(SourceCanonical, TranscodedCanonical, TimestampSeconds, f"raw_{Key}")
+            Key = hashlib.sha1(f"{SourceCanonical}|{TranscodedCanonical}|{TimestampSeconds:.2f}|{ViewMode}".encode()).hexdigest()[:16]
+            return self._ExtractStillPair(SourceCanonical, TranscodedCanonical, TimestampSeconds, f"raw_{Key}_{ViewMode}", ViewMode)
         except Exception as Ex:
             LoggingService.LogException(
                 f"GenerateComparisonStillsFromPaths failed",
@@ -1127,7 +1134,7 @@ class QualityTestingBusinessService:
             )
             return {'Success': False, 'ErrorMessage': f'Exception: {Ex}'}
 
-    def GenerateComparisonStills(self, TranscodeAttemptId: int, TimestampSeconds: float) -> dict:
+    def GenerateComparisonStills(self, TranscodeAttemptId: int, TimestampSeconds: float, ViewMode: str = 'tv_fair') -> dict:
         """Return {Success, SourcePath, TranscodedPath, CachedKey, ErrorMessage}.
         Generates two PNG stills via FFmpeg at the given timestamp from the
         source and the transcoded output for this attempt. Cached by
@@ -1184,7 +1191,7 @@ class QualityTestingBusinessService:
                 TranscodedCanonical = TfpRows[0]['LocalOutputPath']
 
             TsTag = f"{TimestampSeconds:.2f}".replace('.', '_')
-            return self._ExtractStillPair(SourceCanonical, TranscodedCanonical, TimestampSeconds, f"cmp_{TranscodeAttemptId}_{TsTag}")
+            return self._ExtractStillPair(SourceCanonical, TranscodedCanonical, TimestampSeconds, f"cmp_{TranscodeAttemptId}_{TsTag}_{ViewMode}", ViewMode)
 
         except Exception as Ex:
             LoggingService.LogException(
@@ -1193,7 +1200,15 @@ class QualityTestingBusinessService:
             )
             return {'Success': False, 'ErrorMessage': f'Exception: {Ex}'}
 
-    def _ExtractStillPair(self, SourceCanonical, TranscodedCanonical, TimestampSeconds, CacheKey):
+    def _ExtractStillPair(self, SourceCanonical, TranscodedCanonical, TimestampSeconds, CacheKey, ViewMode='tv_fair'):
+        """Extract one frame from each of source and transcoded at the given
+        timestamp. ViewMode controls display normalization:
+        - 'tv_fair' (default): scale=1920:1080:flags=lanczos,unsharp=5:5:0.5 applied
+          symmetrically to both streams so different-resolution variants are compared
+          on visually equal ground (approximates a generic TV upscaler).
+        - 'native': no filter; PNGs are at the file's native dimensions.
+        Cache key MUST include ViewMode so the two views cache independently.
+        """
         from Core.WorkerContext import WorkerContext
         Ctx = WorkerContext.Current()
         Translate = Ctx.PathTranslation.ToLocalPath if (Ctx and Ctx.PathTranslation) else (lambda P: P)
@@ -1212,12 +1227,16 @@ class QualityTestingBusinessService:
 
         FFmpeg = (Ctx.FFmpegPath if (Ctx and Ctx.FFmpegPath) else None) or r"C:\Code\MediaVortex\FFmpegMaster\bin\ffmpeg.exe"
 
+        ViewFilter = "scale=1920:1080:flags=lanczos,unsharp=5:5:0.5" if ViewMode == 'tv_fair' else None
+
         for InputPath, OutputPath in ((LocalSource, SourceStill), (LocalTranscoded, TranscodedStill)):
             if os.path.exists(OutputPath):
                 continue
             Cmd = [FFmpeg, "-hide_banner", "-loglevel", "error",
-                   "-ss", str(TimestampSeconds), "-i", InputPath,
-                   "-frames:v", "1", "-y", OutputPath]
+                   "-ss", str(TimestampSeconds), "-i", InputPath]
+            if ViewFilter:
+                Cmd += ["-vf", ViewFilter]
+            Cmd += ["-frames:v", "1", "-y", OutputPath]
             R = subprocess.run(Cmd, capture_output=True, text=True)
             if R.returncode != 0 or not os.path.exists(OutputPath):
                 return {
@@ -1232,11 +1251,109 @@ class QualityTestingBusinessService:
             'TranscodedFilename': os.path.basename(TranscodedStill),
             'SourceCanonical': SourceCanonical,
             'TranscodedCanonical': TranscodedCanonical,
+            'ViewMode': ViewMode,
         }
 
     def _GetComparisonCacheDir(self) -> str:
         Root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         return os.path.join(Root, "cache", "vmaf-compare")
+
+    def _AutoCaptureStillsIfPolicyFires(self, TranscodeAttemptId: int) -> None:
+        """Read VmafStillCapturePolicy fresh from SystemSettings and, when the
+        policy fires, pre-generate comparison stills at the configured timestamp
+        set. Never raises -- caller wraps and swallows so disposition is never
+        blocked by capture failures. See vmaf-comparison-slider.feature.md
+        criteria 11-15."""
+        Db = self.DatabaseManager.DatabaseService
+        PolicyRow = Db.ExecuteQuery(
+            "SELECT SettingValue FROM SystemSettings WHERE SettingKey = %s",
+            ('VmafStillCapturePolicy',),
+        )
+        Policy = (PolicyRow[0]['SettingValue'] if PolicyRow else 'Off').strip()
+        PolicyLc = Policy.lower()
+        if PolicyLc == 'off':
+            return
+        if PolicyLc not in ('all', 'uncharacterizedprofiles'):
+            LoggingService.LogWarning(
+                f"Unknown VmafStillCapturePolicy={Policy!r}; treating as Off",
+                "QualityTestingBusinessService", "_AutoCaptureStillsIfPolicyFires",
+            )
+            return
+
+        Rows = Db.ExecuteQuery(
+            """
+            SELECT ta.ProfileName, ta.MediaFileId, mf.ResolutionCategory, mf.DurationMinutes
+            FROM TranscodeAttempts ta
+            LEFT JOIN MediaFiles mf ON ta.MediaFileId = mf.Id
+            WHERE ta.Id = %s
+            """,
+            (TranscodeAttemptId,),
+        )
+        if not Rows:
+            return
+        ProfileName = Rows[0]['ProfileName']
+        ResolutionCategory = Rows[0]['ResolutionCategory']
+        DurationMinutes = Rows[0]['DurationMinutes'] or 0
+
+        if PolicyLc == 'uncharacterizedprofiles':
+            MinRow = Db.ExecuteQuery(
+                "SELECT SettingValue FROM SystemSettings WHERE SettingKey = %s",
+                ('VmafStillCaptureMinSamples',),
+            )
+            try:
+                MinSamples = int(MinRow[0]['SettingValue']) if MinRow else 10
+            except (ValueError, TypeError):
+                MinSamples = 10
+            CountRow = Db.ExecuteQuery(
+                """
+                SELECT COUNT(*) AS N
+                FROM TranscodeAttempts ta
+                JOIN MediaFiles mf ON ta.MediaFileId = mf.Id
+                WHERE ta.ProfileName = %s
+                  AND mf.ResolutionCategory = %s
+                  AND ta.VMAF IS NOT NULL
+                  AND ta.Id <> %s
+                """,
+                (ProfileName, ResolutionCategory, TranscodeAttemptId),
+            )
+            SampleCount = CountRow[0]['N'] if CountRow else 0
+            if SampleCount >= MinSamples:
+                LoggingService.LogInfo(
+                    f"Skip auto-capture for attempt {TranscodeAttemptId}: "
+                    f"({ProfileName}, {ResolutionCategory}) has {SampleCount} prior samples >= MinSamples={MinSamples}",
+                    "QualityTestingBusinessService", "_AutoCaptureStillsIfPolicyFires",
+                )
+                return
+
+        TsRow = Db.ExecuteQuery(
+            "SELECT SettingValue FROM SystemSettings WHERE SettingKey = %s",
+            ('VmafStillCaptureTimestamps',),
+        )
+        TsRaw = (TsRow[0]['SettingValue'] if TsRow else '60,300,600,900') or ''
+        try:
+            TsList = [float(X.strip()) for X in TsRaw.split(',') if X.strip()]
+        except ValueError:
+            TsList = [60.0, 300.0, 600.0, 900.0]
+        DurationSeconds = float(DurationMinutes) * 60.0 if DurationMinutes else 0.0
+        if DurationSeconds > 0:
+            TsList = [T for T in TsList if T < DurationSeconds]
+        if not TsList:
+            return
+
+        Captured = 0
+        for T in TsList:
+            Result = self.GenerateComparisonStills(TranscodeAttemptId, T)
+            if Result.get('Success'):
+                Captured += 1
+            else:
+                LoggingService.LogWarning(
+                    f"Still capture at ts={T} for attempt {TranscodeAttemptId} failed: {Result.get('ErrorMessage')}",
+                    "QualityTestingBusinessService", "_AutoCaptureStillsIfPolicyFires",
+                )
+        LoggingService.LogInfo(
+            f"Auto-captured {Captured}/{len(TsList)} stills for attempt {TranscodeAttemptId} (policy={Policy})",
+            "QualityTestingBusinessService", "_AutoCaptureStillsIfPolicyFires",
+        )
 
     def _HandleRequeueDisposition(self, TranscodeAttemptId: int, AuditPayload: dict) -> None:
         """Action handler for Disposition='Requeue' (VMAF below min threshold).

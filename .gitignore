@@ -70,3 +70,10 @@ vmaf_debug_output.txt
 
 # Sandbox dir for _test_remux_sandbox.py (binary media artifacts)
 test_remux_sandbox/
+
+# Comparison-slider PNG cache (generated)
+cache/
+# Smoke-test VMAF XMLs
+vmaf_4k_*.xml
+vmaf_vb_*.xml
+vmaf_debug_*.xml

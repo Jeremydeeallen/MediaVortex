@@ -1,0 +1,3 @@
+[
+  {"name": "A", "label": "2160p CRF32 FG4 (4K->4K)", "scale": "3840:2160", "crf": 32, "film_grain": 4, "height": 2160}
+]

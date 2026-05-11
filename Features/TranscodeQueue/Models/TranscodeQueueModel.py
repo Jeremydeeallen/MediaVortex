@@ -21,6 +21,7 @@ class TranscodeQueueModel:
     MediaFileId: Optional[int] = None  # FK to MediaFiles.Id
     DateAdded: Optional[datetime] = None
     DateStarted: Optional[datetime] = None
+    TestVariantSetId: Optional[int] = None  # FK to TestVariantSets.Id; NULL = normal production transcode
 
     def __post_init__(self):
         if self.DateAdded is None:
@@ -69,6 +70,11 @@ class TranscodeQueueModel:
     def IsSubtitleFix(self) -> bool:
         """Check if this is a subtitle fix job (ASS/SSA -> SRT conversion)."""
         return self.ProcessingMode == "SubtitleFix"
+
+    @property
+    def IsTestMode(self) -> bool:
+        """Check if this row should run as a multi-variant test (does not replace source)."""
+        return self.TestVariantSetId is not None
 
     @property
     def SizeGB(self) -> float:

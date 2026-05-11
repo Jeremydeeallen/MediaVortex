@@ -46,6 +46,7 @@ REASONS = (
     'VmafServicePaused',
     'VmafServicePausedBypassed',
     'VmafCapabilityNotConfigured',
+    'TestMode',
 )
 
 
@@ -74,7 +75,7 @@ class PostTranscodeDispositionService:
             Rows = Db.ExecuteQuery(
                 """
                 SELECT Success, OldSizeBytes, NewSizeBytes, QualityTestRequired, VMAF,
-                       Disposition, DispositionReason
+                       Disposition, DispositionReason, TestVariantSetId
                 FROM TranscodeAttempts WHERE Id = %s
                 """,
                 (TranscodeAttemptId,),
@@ -102,6 +103,23 @@ class PostTranscodeDispositionService:
                     Disposition=ExistingDisposition,
                     Reason=ExistingReason or '',
                     AuditPayload={'cached': True},
+                )
+
+            # Test-mode short-circuit: test attempts must NEVER replace the source.
+            # First check after idempotency guard so it overrides every other input.
+            # See Features/TranscodeJob/multi-variant-testing.feature.md criterion 7.
+            TestVariantSetId = Row.get('TestVariantSetId')
+            if TestVariantSetId is not None:
+                self._CommitDisposition(TranscodeAttemptId, 'NoReplace', 'TestMode')
+                LoggingService.LogInfo(
+                    f"Disposition for TranscodeAttempt {TranscodeAttemptId}: NoReplace "
+                    f"(Reason=TestMode, TestVariantSetId={TestVariantSetId}) -- source preservation guaranteed",
+                    "PostTranscodeDispositionService", "DecidePostTranscodeDisposition",
+                )
+                return DispositionResult(
+                    Disposition='NoReplace',
+                    Reason='TestMode',
+                    AuditPayload={'TranscodeAttemptId': TranscodeAttemptId, 'TestVariantSetId': TestVariantSetId, 'shortCircuit': True},
                 )
 
             # Gather inputs.

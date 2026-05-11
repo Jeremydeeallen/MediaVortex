@@ -1,0 +1,5 @@
+[
+  {"name": "A", "label": "1080p CRF29 FG0", "scale": "1920:1080", "crf": 29, "film_grain": 0, "height": 1080},
+  {"name": "B", "label": "1080p CRF28 FG4", "scale": "1920:1080", "crf": 28, "film_grain": 4, "height": 1080},
+  {"name": "C", "label": "1080p CRF28 FG8", "scale": "1920:1080", "crf": 28, "film_grain": 8, "height": 1080}
+]

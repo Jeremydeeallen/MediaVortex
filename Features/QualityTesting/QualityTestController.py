@@ -342,13 +342,16 @@ def CompareStills():
         SourcePath = request.args.get('source_path')
         TranscodedPath = request.args.get('transcoded_path')
         AttemptId = int(request.args.get('attempt') or 0)
+        ViewMode = (request.args.get('view') or 'tv_fair').strip().lower()
+        if ViewMode not in ('tv_fair', 'native'):
+            ViewMode = 'tv_fair'
         from Features.QualityTesting.QualityTestingBusinessService import QualityTestingBusinessService
         Svc = QualityTestingBusinessService(DatabaseManagerInstance=DatabaseManager())
 
         if SourcePath and TranscodedPath:
-            Result = Svc.GenerateComparisonStillsFromPaths(SourcePath, TranscodedPath, Timestamp)
+            Result = Svc.GenerateComparisonStillsFromPaths(SourcePath, TranscodedPath, Timestamp, ViewMode)
         elif AttemptId > 0:
-            Result = Svc.GenerateComparisonStills(AttemptId, Timestamp)
+            Result = Svc.GenerateComparisonStills(AttemptId, Timestamp, ViewMode)
         else:
             return jsonify({'Success': False, 'ErrorMessage': 'either `attempt` or (`source_path` AND `transcoded_path`) required'}), 400
 
@@ -360,6 +363,79 @@ def CompareStills():
     except Exception as e:
         ErrorMsg = f"CompareStills failed: {e}"
         LoggingService.LogException(ErrorMsg, e, "QualityTestController", "CompareStills")
+        return jsonify({"Success": False, "ErrorMessage": ErrorMsg}), 500
+
+
+@QualityTestBlueprint.route('/api/QualityTest/CompareStillsBatch', methods=['GET'])
+def CompareStillsBatch():
+    """Multi-timestamp variant of CompareStills. Reads the configured timestamp
+    set from SystemSettings (`VmafStillCaptureTimestamps`, default 60,300,600,900),
+    extracts/caches one source+transcoded pair per timestamp, returns a list
+    so the UI can render a thumbnail strip without N round-trips."""
+    try:
+        SourcePath = request.args.get('source_path')
+        TranscodedPath = request.args.get('transcoded_path')
+        AttemptId = int(request.args.get('attempt') or 0)
+        ViewMode = (request.args.get('view') or 'tv_fair').strip().lower()
+        if ViewMode not in ('tv_fair', 'native'):
+            ViewMode = 'tv_fair'
+        TsParam = request.args.get('timestamps') or ''
+
+        from Features.QualityTesting.QualityTestingBusinessService import QualityTestingBusinessService
+        Svc = QualityTestingBusinessService(DatabaseManagerInstance=DatabaseManager())
+
+        if TsParam.strip():
+            TsRaw = TsParam
+        else:
+            Rows = DatabaseManager().DatabaseService.ExecuteQuery(
+                "SELECT SettingValue FROM SystemSettings WHERE SettingKey = %s",
+                ('VmafStillCaptureTimestamps',),
+            )
+            TsRaw = (Rows[0]['SettingValue'] if Rows else '60,300,600,900') or '60,300,600,900'
+        try:
+            Timestamps = [float(X.strip()) for X in TsRaw.split(',') if X.strip()]
+        except ValueError:
+            Timestamps = [60.0, 300.0, 600.0, 900.0]
+        if not Timestamps:
+            return jsonify({'Success': False, 'ErrorMessage': 'no timestamps configured'}), 400
+
+        Items = []
+        FirstError = None
+        for Ts in Timestamps:
+            if SourcePath and TranscodedPath:
+                Result = Svc.GenerateComparisonStillsFromPaths(SourcePath, TranscodedPath, Ts, ViewMode)
+            elif AttemptId > 0:
+                Result = Svc.GenerateComparisonStills(AttemptId, Ts, ViewMode)
+            else:
+                return jsonify({'Success': False, 'ErrorMessage': 'either `attempt` or (`source_path` AND `transcoded_path`) required'}), 400
+
+            if Result.get('Success'):
+                Items.append({
+                    'Ts': Ts,
+                    'SourceUrl': f"/api/QualityTest/CompareStill/{Result['SourceFilename']}",
+                    'TranscodedUrl': f"/api/QualityTest/CompareStill/{Result['TranscodedFilename']}",
+                    'ViewMode': Result.get('ViewMode', ViewMode),
+                })
+            else:
+                if FirstError is None:
+                    FirstError = Result.get('ErrorMessage', 'extraction failed')
+                LoggingService.LogWarning(
+                    f"CompareStillsBatch: ts={Ts} failed -- {Result.get('ErrorMessage')}",
+                    "QualityTestController", "CompareStillsBatch",
+                )
+
+        if not Items:
+            return jsonify({'Success': False, 'ErrorMessage': FirstError or 'all timestamps failed'}), 200
+
+        return jsonify({
+            'Success': True,
+            'ViewMode': ViewMode,
+            'Items': Items,
+            'PartialFailureCount': len(Timestamps) - len(Items),
+        })
+    except Exception as e:
+        ErrorMsg = f"CompareStillsBatch failed: {e}"
+        LoggingService.LogException(ErrorMsg, e, "QualityTestController", "CompareStillsBatch")
         return jsonify({"Success": False, "ErrorMessage": ErrorMsg}), 500
 
 
@@ -400,8 +476,11 @@ def RecentAttempts():
             """
             SELECT ta.Id, ta.FilePath, ta.ProfileName, ta.AttemptDate,
                    ta.Success, ta.FileReplaced, ta.Disposition, ta.DispositionReason,
-                   ta.VMAF, ta.OldSizeBytes, ta.NewSizeBytes
+                   ta.VMAF, ta.OldSizeBytes, ta.NewSizeBytes,
+                   ta.MediaFileId, ta.TestVariantSetId, ta.TestVariantName,
+                   tvs.Name AS TestVariantSetName
             FROM TranscodeAttempts ta
+            LEFT JOIN TestVariantSets tvs ON ta.TestVariantSetId = tvs.Id
             ORDER BY ta.AttemptDate DESC
             LIMIT %s OFFSET %s
             """,
@@ -427,6 +506,10 @@ def RecentAttempts():
                     'VMAF': float(R['VMAF']) if R['VMAF'] is not None else None,
                     'OldSizeMB': round((R['OldSizeBytes'] or 0) / (1024 * 1024), 1),
                     'NewSizeMB': round((R['NewSizeBytes'] or 0) / (1024 * 1024), 1),
+                    'MediaFileId': R.get('MediaFileId'),
+                    'TestVariantSetId': R.get('TestVariantSetId'),
+                    'TestVariantName': R.get('TestVariantName'),
+                    'TestVariantSetName': R.get('TestVariantSetName'),
                 }
                 for R in Rows
             ],
@@ -434,6 +517,216 @@ def RecentAttempts():
     except Exception as e:
         ErrorMsg = f"RecentAttempts failed: {e}"
         LoggingService.LogException(ErrorMsg, e, "QualityTestController", "RecentAttempts")
+        return jsonify({'Success': False, 'ErrorMessage': ErrorMsg}), 500
+
+
+@QualityTestBlueprint.route('/api/QualityTest/VariantSets', methods=['GET'])
+def VariantSetsList():
+    """List all TestVariantSets for the queue admission UI dropdown."""
+    try:
+        Rows = DatabaseManager().DatabaseService.ExecuteQuery(
+            "SELECT Id, Name, Description, jsonb_array_length(VariantsJson) AS VariantCount FROM TestVariantSets ORDER BY Id"
+        )
+        return jsonify({
+            'Success': True,
+            'Sets': [
+                {
+                    'Id': R['Id'],
+                    'Name': R['Name'],
+                    'Description': R.get('Description'),
+                    'VariantCount': R.get('VariantCount') or 0,
+                }
+                for R in Rows
+            ],
+        })
+    except Exception as e:
+        ErrorMsg = f"VariantSetsList failed: {e}"
+        LoggingService.LogException(ErrorMsg, e, "QualityTestController", "VariantSetsList")
+        return jsonify({'Success': False, 'ErrorMessage': ErrorMsg}), 500
+
+
+@QualityTestBlueprint.route('/api/QualityTest/QueueTestRun', methods=['POST'])
+def QueueTestRun():
+    """Admit one or more files into the transcode queue for multi-variant testing.
+    Body: {"VariantSetId": <int>, "FilePaths": ["...", "..."]}.
+    Each file must already exist as a MediaFiles row (so it has been scanned and
+    has an AssignedProfile). Returns per-file accept/reject status."""
+    try:
+        Data = request.get_json() or {}
+        VariantSetId = Data.get('VariantSetId')
+        FilePaths = Data.get('FilePaths') or []
+        if not isinstance(VariantSetId, int):
+            return jsonify({'Success': False, 'ErrorMessage': 'VariantSetId (int) required'}), 400
+        if not isinstance(FilePaths, list) or not FilePaths:
+            return jsonify({'Success': False, 'ErrorMessage': 'FilePaths (non-empty list) required'}), 400
+
+        Db = DatabaseManager().DatabaseService
+        SetRows = Db.ExecuteQuery(
+            "SELECT Id, Name FROM TestVariantSets WHERE Id = %s",
+            (VariantSetId,),
+        )
+        if not SetRows:
+            return jsonify({'Success': False, 'ErrorMessage': f'TestVariantSet {VariantSetId} not found'}), 400
+        SetName = SetRows[0].get('Name')
+
+        DefaultProfileRows = Db.ExecuteQuery(
+            "SELECT SettingValue FROM SystemSettings WHERE SettingKey = 'DefaultProfileName'"
+        )
+        DefaultProfileName = DefaultProfileRows[0].get('SettingValue') if DefaultProfileRows else None
+
+        Accepted = []
+        Rejected = []
+        for Raw in FilePaths:
+            Path_ = (Raw or '').strip()
+            if not Path_:
+                continue
+            MfRows = Db.ExecuteQuery(
+                "SELECT Id, AssignedProfile, SizeMB FROM MediaFiles WHERE FilePath = %s",
+                (Path_,),
+            )
+            if not MfRows:
+                Rejected.append({'FilePath': Path_, 'Reason': 'MediaFiles row not found (file may not be scanned)'})
+                continue
+            Mf = MfRows[0]
+            Profile = Mf.get('AssignedProfile') or DefaultProfileName
+            if not Profile:
+                Rejected.append({'FilePath': Path_, 'Reason': 'No AssignedProfile on MediaFile and no DefaultProfileName set'})
+                continue
+            ExistingRow = Db.ExecuteQuery(
+                "SELECT Id FROM TranscodeQueue WHERE FilePath = %s AND Status = 'Pending' AND TestVariantSetId = %s",
+                (Path_, VariantSetId),
+            )
+            if ExistingRow:
+                Rejected.append({'FilePath': Path_, 'Reason': f'already pending for this variant set (queue Id {ExistingRow[0]["Id"]})'})
+                continue
+            try:
+                InsertedRow = Db.ExecuteQuery(
+                    """
+                    INSERT INTO TranscodeQueue
+                        (FilePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status,
+                         AssignedProfile, MediaFileId, TestVariantSetId, DateAdded)
+                    VALUES (%s, %s, %s, %s, %s, %s, 'Pending', %s, %s, %s, NOW())
+                    RETURNING Id
+                    """,
+                    (
+                        Path_,
+                        os.path.basename(Path_),
+                        os.path.dirname(Path_),
+                        int((Mf.get('SizeMB') or 0) * 1024 * 1024),
+                        Mf.get('SizeMB') or 0,
+                        50,
+                        Profile,
+                        Mf.get('Id'),
+                        VariantSetId,
+                    ),
+                )
+                NewId = InsertedRow[0]['Id'] if InsertedRow else None
+                Accepted.append({'FilePath': Path_, 'QueueId': NewId, 'Profile': Profile})
+            except Exception as InsEx:
+                LoggingService.LogException(
+                    f"QueueTestRun insert failed for {Path_}",
+                    InsEx, "QualityTestController", "QueueTestRun",
+                )
+                Rejected.append({'FilePath': Path_, 'Reason': f'insert failed: {InsEx}'})
+
+        LoggingService.LogInfo(
+            f"QueueTestRun: VariantSet={SetName!r} ({VariantSetId}); accepted={len(Accepted)}, rejected={len(Rejected)}",
+            "QualityTestController", "QueueTestRun",
+        )
+        return jsonify({
+            'Success': True,
+            'VariantSetId': VariantSetId,
+            'VariantSetName': SetName,
+            'AcceptedCount': len(Accepted),
+            'RejectedCount': len(Rejected),
+            'Accepted': Accepted,
+            'Rejected': Rejected,
+        })
+    except Exception as e:
+        ErrorMsg = f"QueueTestRun failed: {e}"
+        LoggingService.LogException(ErrorMsg, e, "QualityTestController", "QueueTestRun")
+        return jsonify({'Success': False, 'ErrorMessage': ErrorMsg}), 500
+
+
+@QualityTestBlueprint.route('/api/QualityTest/TestBench/List', methods=['GET'])
+def TestBenchList():
+    """Enumerate Scripts/Smoke/*.results.json sidecars for the operator's test-bench
+    picker. Read-only file-system enumeration -- smoke tests live outside the DB
+    on purpose (see vmaf-comparison-slider.feature.md). Most-recently-modified first."""
+    try:
+        from datetime import datetime
+        RepoRoot = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        SmokeDir = os.path.join(RepoRoot, 'Scripts', 'Smoke')
+        Rows = []
+        if os.path.isdir(SmokeDir):
+            Entries = [E for E in os.listdir(SmokeDir) if E.endswith('.results.json')]
+            for FN in sorted(Entries, key=lambda N: os.path.getmtime(os.path.join(SmokeDir, N)), reverse=True):
+                Full = os.path.join(SmokeDir, FN)
+                try:
+                    with open(Full, 'r', encoding='utf-8') as F:
+                        Data = json.load(F)
+                    Src = Data.get('source') or (Data.get('Source') or {}).get('Path') or ''
+                    Variants = Data.get('variants') or Data.get('Variants') or []
+                    Rows.append({
+                        'Filename': FN,
+                        'TestName': FN.replace('.results.json', ''),
+                        'SourcePath': Src,
+                        'SourceFileName': os.path.basename(Src) if Src else '(unknown)',
+                        'VariantCount': len(Variants),
+                        'ModifiedAt': datetime.fromtimestamp(os.path.getmtime(Full)).isoformat(timespec='seconds'),
+                    })
+                except Exception as Inner:
+                    LoggingService.LogWarning(f"TestBench skip unparseable {FN}: {Inner}", "QualityTestController", "TestBenchList")
+        return jsonify({'Success': True, 'Rows': Rows})
+    except Exception as e:
+        ErrorMsg = f"TestBenchList failed: {e}"
+        LoggingService.LogException(ErrorMsg, e, "QualityTestController", "TestBenchList")
+        return jsonify({'Success': False, 'ErrorMessage': ErrorMsg}), 500
+
+
+@QualityTestBlueprint.route('/api/QualityTest/TestBench/Detail', methods=['GET'])
+def TestBenchDetail():
+    """Return one sidecar's parsed contents with variant fields normalized to
+    PascalCase keys. The compare slider uses Source + each Variant.OutPath via
+    the existing raw-paths CompareStills endpoint."""
+    try:
+        FN = request.args.get('file', '')
+        if not FN or '..' in FN or '/' in FN or '\\' in FN or not FN.endswith('.results.json'):
+            return jsonify({'Success': False, 'ErrorMessage': 'invalid file parameter'}), 400
+        RepoRoot = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        Full = os.path.join(RepoRoot, 'Scripts', 'Smoke', FN)
+        if not os.path.exists(Full):
+            return jsonify({'Success': False, 'ErrorMessage': f'sidecar not found: {FN}'}), 404
+        with open(Full, 'r', encoding='utf-8') as F:
+            Data = json.load(F)
+        Src = Data.get('source') or (Data.get('Source') or {}).get('Path') or ''
+        SrcSize = Data.get('source_size_bytes') or Data.get('SourceSizeBytes')
+        Variants = Data.get('variants') or Data.get('Variants') or []
+        Normalized = []
+        for V in Variants:
+            Normalized.append({
+                'Name': V.get('name') or V.get('Name') or '',
+                'Label': V.get('label') or V.get('Label') or '',
+                'OutPath': V.get('out_path') or V.get('OutPath') or '',
+                'Scale': V.get('scale') or V.get('Scale') or '',
+                'Crf': V.get('crf') if V.get('crf') is not None else V.get('Crf'),
+                'BitrateKbps': V.get('bitrate_kbps') if V.get('bitrate_kbps') is not None else V.get('BitrateKbps'),
+                'SizeBytes': V.get('size_bytes') if V.get('size_bytes') is not None else V.get('SizeBytes'),
+                'DurationSeconds': V.get('duration_seconds') if V.get('duration_seconds') is not None else V.get('DurationSeconds'),
+                'Vmaf': V.get('vmaf') if V.get('vmaf') is not None else V.get('Vmaf'),
+            })
+        return jsonify({
+            'Success': True,
+            'Filename': FN,
+            'TestName': FN.replace('.results.json', ''),
+            'Source': Src,
+            'SourceFileName': os.path.basename(Src) if Src else '(unknown)',
+            'SourceSizeBytes': SrcSize,
+            'Variants': Normalized,
+        })
+    except Exception as e:
+        ErrorMsg = f"TestBenchDetail failed: {e}"
+        LoggingService.LogException(ErrorMsg, e, "QualityTestController", "TestBenchDetail")
         return jsonify({'Success': False, 'ErrorMessage': ErrorMsg}), 500
 
 

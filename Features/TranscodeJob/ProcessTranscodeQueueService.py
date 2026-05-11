@@ -352,6 +352,9 @@ class ProcessTranscodeQueueService:
         if Job.IsSubtitleFix:
             self.ProcessSubtitleFixJob(Job)
             return
+        if Job.IsTestMode:
+            self.ProcessTestVariantJob(Job)
+            return
 
         ActiveJobId = None  # Initialize for error handling
         LocalStagingSourcePath = None
@@ -534,6 +537,251 @@ class ProcessTranscodeQueueService:
             self.CleanupLocalStagingFiles(LocalStagingSourcePath, LocalStagingOutputPath)
             LoggingService.LogException(f"Exception processing job {Job.Id}", e, "ProcessTranscodeQueueService", "ProcessJob")
             self.HandleJobFailure(Job, f"Exception during processing: {str(e)}")
+
+    def ProcessTestVariantJob(self, Job: TranscodeQueueModel):
+        """Handle a queue row flagged for multi-variant testing. Loads the
+        variant set from the DB, runs each variant sequentially as its own
+        TranscodeAttempt with TestVariantSetId+TestVariantName populated. The
+        disposition function (PostTranscodeDispositionService) short-circuits
+        to NoReplace whenever TestVariantSetId is set -- source file is never
+        touched. See Features/TranscodeJob/multi-variant-testing.feature.md."""
+        ActiveJobId = None
+        try:
+            LoggingService.LogInfo(
+                f"Starting test-variant job processing for queue ID: {Job.Id} (variant set {Job.TestVariantSetId})",
+                "ProcessTranscodeQueueService", "ProcessTestVariantJob",
+            )
+
+            VariantSet = self.DatabaseManager.GetTestVariantSet(Job.TestVariantSetId)
+            if not VariantSet or not VariantSet.get('Variants'):
+                self.HandleJobFailure(Job, f"TestVariantSet {Job.TestVariantSetId} not found or empty", None, None)
+                return
+            Variants = VariantSet['Variants']
+            LoggingService.LogInfo(
+                f"Test set {VariantSet.get('Name')!r} has {len(Variants)} variants",
+                "ProcessTranscodeQueueService", "ProcessTestVariantJob",
+            )
+
+            ActiveJobId = self.DatabaseManager.CreateActiveJob(
+                ServiceName="TranscodeService",
+                JobType="TestVariant",
+                QueueId=Job.Id,
+                ProcessId=os.getpid(),
+                ThreadId=threading.get_ident(),
+                WorkerName=self.WorkerName,
+            )
+            if ActiveJobId == 0:
+                self.HandleJobFailure(Job, "Failed to create active job (test mode)", None, None)
+                return
+
+            self.DatabaseManager.UpdateTranscodeQueueStatus(Job.Id, "Running")
+
+            MediaFile = self.GetMediaFileData(Job)
+            if not MediaFile:
+                self.HandleJobFailure(Job, "Failed to get media file data (test mode)", None, ActiveJobId)
+                return
+
+            LocalSourcePath = MediaFile.FilePath
+            if self.PathTranslation:
+                LocalSourcePath = self.PathTranslation.ToLocalPath(MediaFile.FilePath)
+            if not os.path.exists(LocalSourcePath):
+                ErrMsg = f"Source file missing on disk: {LocalSourcePath}"
+                LoggingService.LogWarning(ErrMsg, "ProcessTranscodeQueueService", "ProcessTestVariantJob")
+                self._MarkMediaFileSourceMissing(MediaFile.Id, ErrMsg)
+                self._CleanupTestQueueRow(Job, ActiveJobId)
+                return
+
+            SuccessCount = 0
+            FailureCount = 0
+            for V in Variants:
+                Name = V.get('Name', '?')
+                Label = V.get('Label', Name)
+                LoggingService.LogInfo(
+                    f"  Variant {Name}: {Label} (CRF={V.get('Crf')}, FG={V.get('FilmGrain')})",
+                    "ProcessTranscodeQueueService", "ProcessTestVariantJob",
+                )
+                try:
+                    AttemptId = self._ProcessSingleVariant(Job, MediaFile, V, ActiveJobId)
+                    if AttemptId:
+                        SuccessCount += 1
+                    else:
+                        FailureCount += 1
+                except Exception as VEx:
+                    FailureCount += 1
+                    LoggingService.LogException(
+                        f"Variant {Name} threw exception",
+                        VEx, "ProcessTranscodeQueueService", "ProcessTestVariantJob",
+                    )
+
+            LoggingService.LogInfo(
+                f"Test variant job {Job.Id} complete: {SuccessCount} succeeded, {FailureCount} failed ({len(Variants)} variants total)",
+                "ProcessTranscodeQueueService", "ProcessTestVariantJob",
+            )
+
+            self._CleanupTestQueueRow(Job, ActiveJobId)
+
+        except Exception as e:
+            LoggingService.LogException(
+                f"Exception processing test variant job {Job.Id}",
+                e, "ProcessTranscodeQueueService", "ProcessTestVariantJob",
+            )
+            self.HandleJobFailure(Job, f"Exception during test variant processing: {str(e)}", None, ActiveJobId)
+
+    def _ProcessSingleVariant(self, Job: TranscodeQueueModel, MediaFile, Variant: Dict[str, Any], ActiveJobId: int) -> Optional[int]:
+        """Run one variant's full encode + queue-VMAF flow. Each variant gets
+        its own TranscodeAttempt with TestVariantSetId+TestVariantName populated.
+        Returns the attempt id on encoder success, None on failure. Failures in
+        one variant do not block other variants in the same queue row."""
+        VariantName = Variant.get('Name', '?')
+        LocalStagingSourcePath = None
+        LocalStagingOutputPath = None
+
+        TranscodeAttemptId = self.CreateTranscodeAttempt(Job, None, None, None)
+        if not TranscodeAttemptId:
+            LoggingService.LogError(
+                f"Failed to create attempt for variant {VariantName}",
+                "ProcessTranscodeQueueService", "_ProcessSingleVariant",
+            )
+            return None
+
+        # Tag the attempt with test-variant metadata BEFORE any encode work so the
+        # disposition short-circuit (NoReplace) sees it on every read.
+        self.DatabaseManager.UpdateTranscodeAttempt(TranscodeAttemptId, {
+            'TestVariantSetId': Job.TestVariantSetId,
+            'TestVariantName': VariantName,
+        })
+
+        self.UpdateTranscodeProgress(TranscodeAttemptId, "Initializing", 0.0, f"Variant {VariantName}: starting")
+        self.UpdateTranscodeProgress(TranscodeAttemptId, "Loading Settings", 0.0, f"Variant {VariantName}: loading settings")
+
+        TranscodingSettings = self.GetTranscodingSettings(Job, MediaFile)
+        if not TranscodingSettings:
+            self.DatabaseManager.UpdateTranscodeAttempt(TranscodeAttemptId, {
+                'Success': False, 'ErrorMessage': 'Failed to get transcoding settings',
+            })
+            return None
+
+        # Variant overrides applied to ProfileSettings dict that BuildTranscodeCommand reads.
+        # Scale override is deferred to v2 per the feature doc; for v1, only Crf and FilmGrain.
+        Ps = TranscodingSettings.setdefault('ProfileSettings', {})
+        if Variant.get('Crf') is not None:
+            Ps['Quality'] = Variant['Crf']
+        if Variant.get('FilmGrain') is not None:
+            Ps['FilmGrain'] = Variant['FilmGrain']
+
+        IsLocalStaging = self.GetTranscodeFileMode() == 'LocalStaging'
+        if IsLocalStaging and not self.OutputDirectory:
+            IsLocalStaging = False
+        if IsLocalStaging:
+            TranscodingSettings['OutputDirectory'] = self.GetLocalStagingDir()
+            TranscodingSettings['TranscodeOutputMode'] = 'Staging'
+
+        self.UpdateTranscodeProgress(TranscodeAttemptId, "Preparing Files", 0.0, f"Variant {VariantName}: preparing")
+        EffectiveInputPath = self.SetupFilePreparation(Job, MediaFile, TranscodeAttemptId)
+        if not EffectiveInputPath:
+            self.DatabaseManager.UpdateTranscodeAttempt(TranscodeAttemptId, {
+                'Success': False, 'ErrorMessage': 'Failed to setup file preparation',
+            })
+            return None
+        if IsLocalStaging:
+            LocalStagingSourcePath = EffectiveInputPath
+
+        self.UpdateTranscodeProgress(TranscodeAttemptId, "Building Command", 0.0, f"Variant {VariantName}: building command")
+        TranscodingSettings['InputPath'] = EffectiveInputPath
+        CommandResult = self.BuildTranscodeCommand(Job, MediaFile, TranscodingSettings)
+        if not CommandResult:
+            self.DatabaseManager.UpdateTranscodeAttempt(TranscodeAttemptId, {
+                'Success': False, 'ErrorMessage': 'Failed to build transcoding command',
+            })
+            return None
+
+        OriginalOutputPath = CommandResult['OutputPath']
+        VariantOutputPath = self._VariantizeOutputPath(OriginalOutputPath, VariantName)
+        if VariantOutputPath != OriginalOutputPath:
+            CommandResult['OutputPath'] = VariantOutputPath
+            CommandResult['Command'] = CommandResult['Command'].replace(OriginalOutputPath, VariantOutputPath)
+        TranscodeCommand = CommandResult['Command']
+        OutputPath = CommandResult['OutputPath']
+        if IsLocalStaging:
+            LocalStagingOutputPath = OutputPath
+
+        CanonicalSourcePath = Job.FilePath
+        CanonicalOutputPath = self.ComputeCanonicalOutputPath(OutputPath, IsLocalStaging)
+        self.PrivateCreateTemporaryFilePathRecord(TranscodeAttemptId, Job.FilePath, CanonicalSourcePath, CanonicalOutputPath)
+
+        self.DatabaseManager.UpdateTranscodeAttempt(TranscodeAttemptId, {
+            'FilePath': Job.FilePath,
+            'AttemptDate': datetime.now(timezone.utc),
+            'Quality': Ps.get('Quality', 0),
+            'OldSizeBytes': Job.SizeBytes,
+            'NewSizeBytes': 0,
+            'Success': None,
+            'SizeReductionBytes': 0,
+            'SizeReductionPercent': 0.0,
+            'ErrorMessage': None,
+            'TranscodeDurationSeconds': 0.0,
+            'FfpmpegCommand': TranscodeCommand,
+            'AudioBitrateKbps': Ps.get('AudioBitrateKbps'),
+            'VideoBitrateKbps': Ps.get('VideoBitrateKbps'),
+            'ProfileName': MediaFile.AssignedProfile,
+            'VMAF': None,
+            'TestVariantSetId': Job.TestVariantSetId,
+            'TestVariantName': VariantName,
+        })
+
+        self.UpdateTranscodeProgress(TranscodeAttemptId, "Starting Transcode", 0.0, f"Variant {VariantName}: encoding")
+        TranscodeResult = self.ExecuteTranscoding(Job, TranscodeCommand, TranscodeAttemptId, MediaFile, ActiveJobId)
+        if not TranscodeResult.get("Success", False):
+            if IsLocalStaging:
+                self.CleanupLocalStagingFiles(LocalStagingSourcePath, LocalStagingOutputPath)
+            self.DatabaseManager.UpdateTranscodeAttempt(TranscodeAttemptId, {
+                'Success': False,
+                'ErrorMessage': TranscodeResult.get('ErrorMessage', 'Encode failed'),
+            })
+            return None
+
+        if IsLocalStaging:
+            self.UpdateTranscodeProgress(TranscodeAttemptId, "Copying Back", 0.0, f"Variant {VariantName}: copy-back")
+            NfsCopyPath = self.CopyBackFromLocalStaging(LocalStagingOutputPath)
+            if not NfsCopyPath:
+                self.CleanupLocalStagingFiles(LocalStagingSourcePath, LocalStagingOutputPath)
+                self.DatabaseManager.UpdateTranscodeAttempt(TranscodeAttemptId, {
+                    'Success': False, 'ErrorMessage': 'Copy-back from staging failed',
+                })
+                return None
+            TranscodeResult['OutputFilePath'] = NfsCopyPath
+            self.CleanupLocalStagingFiles(LocalStagingSourcePath, LocalStagingOutputPath)
+
+        self.UpdateTranscodeProgress(TranscodeAttemptId, "Finalizing", 0.0, f"Variant {VariantName}: queuing VMAF")
+        self.HandleTranscodingResult(Job, TranscodeResult, TranscodeAttemptId, ActiveJobId)
+        return TranscodeAttemptId
+
+    def _VariantizeOutputPath(self, OutputPath: str, VariantName: str) -> str:
+        """Insert -test-<VariantName> before -mv. so test variants get distinct
+        on-disk filenames and never overwrite each other or a production attempt."""
+        if '-mv.' in OutputPath:
+            return OutputPath.replace('-mv.', f'-test-{VariantName}-mv.')
+        Dir = os.path.dirname(OutputPath)
+        Base = os.path.basename(OutputPath)
+        Stem, Ext = os.path.splitext(Base)
+        return os.path.join(Dir, f"{Stem}-test-{VariantName}{Ext}")
+
+    def _CleanupTestQueueRow(self, Job: TranscodeQueueModel, ActiveJobId: Optional[int]) -> None:
+        """Mark the queue row complete and delete the ActiveJob row. Called once
+        per queue row after all variants attempt (regardless of per-variant success)."""
+        try:
+            self.DatabaseManager.UpdateTranscodeQueueStatus(Job.Id, "Completed")
+        except Exception as Ex:
+            LoggingService.LogException("Failed to mark test queue row Completed", Ex, "ProcessTranscodeQueueService", "_CleanupTestQueueRow")
+        try:
+            self.DatabaseManager.DeleteTranscodeQueueItem(Job.Id)
+        except Exception as Ex:
+            LoggingService.LogException("Failed to delete test queue row", Ex, "ProcessTranscodeQueueService", "_CleanupTestQueueRow")
+        if ActiveJobId:
+            try:
+                self.DatabaseManager.DeleteActiveJob(ActiveJobId)
+            except Exception:
+                pass
 
     def ProcessRemuxJob(self, Job: TranscodeQueueModel):
         """Process a remux job using the rename-before-encode pattern.
