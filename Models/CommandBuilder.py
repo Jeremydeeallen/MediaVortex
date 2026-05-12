@@ -272,7 +272,8 @@ class CommandBuilder:
         embedded in filenames -- CRF is tracked in the TranscodeAttempts table.
         """
         try:
-            # Get the base filename without extension
+            import ntpath as _ntpath
+            OriginalFileName = _ntpath.basename(_ntpath.basename(OriginalFileName or ''))
             BaseName = os.path.splitext(OriginalFileName)[0]
 
             # If resolutions are the same, just change extension + -mv marker

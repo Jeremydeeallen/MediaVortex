@@ -1,4 +1,5 @@
 import os
+import ntpath
 import uuid
 import re
 import threading
@@ -1021,7 +1022,7 @@ class FileScanningBusinessService:
             try:
                 if os.path.exists(MediaFile.FilePath):
                     CurrentSizeMB = os.path.getsize(MediaFile.FilePath) / (1024 * 1024)
-                    CurrentFileName = os.path.basename(MediaFile.FilePath)
+                    CurrentFileName = ntpath.basename(MediaFile.FilePath)
                     CurrentModificationTime = self.GetFileModificationTime(MediaFile.FilePath)
 
                     if self.HasFileChanged(MediaFile, CurrentSizeMB, CurrentFileName, CurrentModificationTime):
@@ -1367,7 +1368,7 @@ class FileScanningBusinessService:
                         # File was moved, update path
                         LoggingService.LogInfo(f"Updating moved file: {MovedFile['OldPath']} -> {MovedFile['NewPath']}", 'DetectMovedFiles', 'FileScanningBusinessService')
                         DbFile.FilePath = MovedFile['NewPath']
-                        DbFile.FileName = os.path.basename(MovedFile['NewPath'])
+                        DbFile.FileName = ntpath.basename(MovedFile['NewPath'])
                         DbFile.LastScannedDate = datetime.now(timezone.utc)
                         self.Repository.SaveMediaFile(DbFile)
                         MovedFiles.append({

@@ -700,7 +700,7 @@ class FileReplacementBusinessService:
 
             # Update the MediaFile with new file path and filename
             media_file.FilePath = NewFilePath  # Update to new file path
-            media_file.FileName = os.path.basename(NewFilePath)  # Update to new filename
+            media_file.FileName = ntpath.basename(NewFilePath)
             # Path-storage: derive (StorageRootId, RelativePath) for the new path so
             # SaveMediaFile writes them as the canonical identifier, not just FilePath.
             try:
