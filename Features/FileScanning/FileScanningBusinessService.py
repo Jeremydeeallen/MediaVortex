@@ -740,15 +740,19 @@ class FileScanningBusinessService:
                 # File doesn't exist in database - check for fuzzy match (renamed file)
                 FuzzyMatch = self.FindFuzzyFileMatch(FilePath, FileName, FileSizeMB, RootFolderId)
 
+                from Core.PathStorage import LoadStorageRoots, Parse as PathParse
+                StorageRootId, RelativePath = PathParse(FilePath, LoadStorageRoots())
+
                 if FuzzyMatch:
                     # Found a fuzzy match - this is likely a renamed file
                     FuzzyMatch.FilePath = FilePath  # Update to new path
+                    FuzzyMatch.StorageRootId = StorageRootId
+                    FuzzyMatch.RelativePath = RelativePath or ''
                     FuzzyMatch.FileName = FileName  # Update to new filename
                     FuzzyMatch.SizeMB = FileSizeMB  # Update to new size
                     FuzzyMatch.FileModificationTime = FileModificationTime
                     FuzzyMatch.SeasonId = None  # Season functionality disabled
                     FuzzyMatch.LastScannedDate = datetime.now(timezone.utc)
-                    # Note: RootFolderId is not stored in MediaFiles table - files are associated by FilePath
 
                     # Extract metadata if requested and not already present
                     if ExtractMetadata and self.ShouldExtractMetadata(FuzzyMatch):
@@ -764,6 +768,8 @@ class FileScanningBusinessService:
                     LoggingService.LogInfo(f"New file discovered: {FilePath}", 'ProcessSingleMediaFile', 'FileScanningBusinessService')
                     NewFile = MediaFileModel(
                         SeasonId=None,  # Season functionality disabled
+                        StorageRootId=StorageRootId,
+                        RelativePath=RelativePath or '',
                         FilePath=FilePath,
                         FileName=FileName,
                         SizeMB=FileSizeMB,

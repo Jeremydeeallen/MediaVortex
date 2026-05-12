@@ -59,10 +59,16 @@ def Parse(CanonicalPath: str, StorageRoots: list) -> tuple:
     return (None, None)
 
 
-def LoadStorageRoots(Db=None) -> list:
+_STORAGE_ROOTS_CACHE = None
+
+
+def LoadStorageRoots(Db=None, ForceReload: bool = False) -> list:
     """Convenience: load StorageRoots from DB sorted by prefix length DESC so
-    Parse picks the longest match first. Cached at process scope is fine but
-    not necessary here -- 3-5 rows."""
+    Parse picks the longest match first. Cached at process scope (3-5 rows,
+    rarely change). Pass ForceReload=True after schema changes."""
+    global _STORAGE_ROOTS_CACHE
+    if _STORAGE_ROOTS_CACHE is not None and not ForceReload:
+        return _STORAGE_ROOTS_CACHE
     if Db is None:
         from Core.Database.DatabaseService import DatabaseService
         Db = DatabaseService()
@@ -70,7 +76,8 @@ def LoadStorageRoots(Db=None) -> list:
         "SELECT Id, Name, CanonicalPrefix AS Prefix FROM StorageRoots "
         "ORDER BY length(CanonicalPrefix) DESC"
     )
-    return [{'Id': R['Id'], 'Name': R['Name'], 'Prefix': R['Prefix']} for R in Rows]
+    _STORAGE_ROOTS_CACHE = [{'Id': R['Id'], 'Name': R['Name'], 'Prefix': R['Prefix']} for R in Rows]
+    return _STORAGE_ROOTS_CACHE
 
 
 _PREFIX_BY_ID_CACHE = {}
