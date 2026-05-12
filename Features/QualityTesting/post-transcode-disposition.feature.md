@@ -89,7 +89,7 @@ Operator dogfood, 2026-05-10. Sister Wives S04E05 transcode succeeded but VMAF n
 
 ### G. GUI (single source of truth)
 
-16. The `/settings` page contains a "Post-Transcode" card (sibling to "Queue Tuning") with editable controls for the three `PostTranscodeGateConfig` columns: `VmafAutoReplaceMinThreshold`, `VmafAutoReplaceMaxThreshold`, `WhenVmafUnavailable`. Saving an edit updates the table and the next disposition call reads the new value (no caching, per the standing rule). Verifiable: change the threshold to 90, run a transcode that produces VMAF=89, observe `Disposition='NoReplace', Reason='VmafBelowMin'`; change back to 88, re-decide via test endpoint, observe `Replace`.
+16. **[VERIFIED 2026-05-12]** The `/settings` page contains a "Post-Transcode" card (sibling to "Queue Tuning") with editable controls for the three `PostTranscodeGateConfig` columns: `VmafAutoReplaceMinThreshold`, `VmafAutoReplaceMaxThreshold`, `WhenVmafUnavailable`. Saving an edit updates the table and the next disposition call reads the new value (no caching, per the standing rule). Verifiable: change the threshold to 90, run a transcode that produces VMAF=89, observe `Disposition='NoReplace', Reason='VmafBelowMin'`; change back to 88, re-decide via test endpoint, observe `Replace`.
 
 17. Endpoints under existing `/api/SystemSettings/` namespace: `GET /api/SystemSettings/PostTranscodeGateConfig`, `PUT /api/SystemSettings/PostTranscodeGateConfig`. No separate controller -- consistent with the QueueTuning pattern.
 

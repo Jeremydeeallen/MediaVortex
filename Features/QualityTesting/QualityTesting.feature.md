@@ -22,6 +22,8 @@ Runs VMAF quality analysis comparing transcoded files against originals. Scores 
 10. Test result history is viewable with pagination.
 11. ShouldQualityTestService.ProcessTranscodedFile() respects QualityTestRequired. When QualityTestRequired=False on the TranscodeAttempt, the bridge skips the quality test queue and goes directly to file replacement.
 
+11b. **[BUG 2026-05-12]** Terminology inconsistency: "quality test" (what -- the policy/concept of validating an encode) and "VMAF" (how -- one specific metric implementation) are used interchangeably across the codebase, DB columns, settings keys, log messages, UI labels, and class names (e.g. `QualityTestEnabled` vs `VMAFAutoReplaceMinThreshold`, `QualityTestProgress` vs `MonitorVMAFProgress`, `QualityTestingBusinessService.BuildVMAFCommand`). The concepts are not synonymous: VMAF is one possible quality-test implementation; a future SSIMU2/PSNR/visual-comparison path would be a quality test that is not VMAF. The mixing makes search, refactoring, and operator messaging harder, and bakes the current metric choice into surfaces that should be metric-agnostic. Verifiable when fixed: a documented glossary in `Features/QualityTesting/QualityTesting.feature.md` defining "quality test" (the policy/decision -- accept/requeue/discard) vs "VMAF" (one specific scoring metric), and every identifier in code / DB / UI uses the term that matches the layer it lives at (policy-layer surfaces never name a specific metric; metric-layer surfaces never claim to be "the quality test"). Look first: `Features/QualityTesting/QualityTestingBusinessService.py`, `Repositories/DatabaseManager.py` (column names), `Templates/*.html` (button labels), `Core/Logging` (log strings). Fix with `/t`.
+
 ## Status
 
 COMPLETE

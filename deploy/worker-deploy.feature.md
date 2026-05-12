@@ -50,6 +50,8 @@ Dogfood
 
 18. **Deploy verification fails the script with a non-zero exit code if the worker does not register within 90 s of triggering the task.** The script polls the `Workers` row after `Start-ScheduledTask` and treats absence-of-row OR `LastHeartbeat` older than 60 s as a deploy failure. Verifiable: pointing the script at a target where Task Scheduler will not fire (e.g., a wrong IP) results in exit code != 0 and a log line naming the verification step that timed out.
 
+19. **[BUG 2026-05-12]** The Linux-worker scp step `scp -r /c/Code/MediaVortex/* root@10.0.0.42:/tmp/mediavortex-build/` copies the entire repo blindly -- including content that has no place in the Docker build context (`venv/`, `.git/`, `__pycache__/`, `Tests/`, ad-hoc `Scripts/Smoke/` test artifacts, screenshots, local DB dumps, etc.). Wastes bandwidth/time and bloats the Docker build context. Verifiable when fixed: the deploy step copies only the files the Dockerfile actually consumes (or rsyncs with explicit `--exclude` patterns covering venv, .git, __pycache__, Tests, *.log, *.dump). `du -sh /tmp/mediavortex-build` on the LXC after copy is bounded; documented in `deploy/worker-deploy.flow.md` step 1. Look first: `deploy/worker-deploy.flow.md` step 1 (the scp command) and check whether `.dockerignore` already enumerates exclusions the copy step could mirror. Fix with `/t`.
+
 ## Status
 
 IN PROGRESS

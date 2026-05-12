@@ -2,6 +2,32 @@
 
 ## Open
 
+### [BUG] Worker deploy scp copies the entire repo (venv, .git, Tests, etc.) instead of just build inputs
+**Date:** 2026-05-12
+
+**What breaks:** Step 1 of `deploy/worker-deploy.flow.md` runs `scp -r /c/Code/MediaVortex/* root@10.0.0.42:/tmp/mediavortex-build/` -- a blind recursive copy that drags `venv/`, `.git/`, `__pycache__/`, `Tests/`, smoke-test artifacts, screenshots, ad-hoc dumps, and anything else sitting in the working directory across the wire. Wastes bandwidth and time on every deploy and bloats the Docker build context for no payoff.
+
+**Violates:** `deploy/worker-deploy.feature.md` criterion 19 (added with this entry).
+
+**Look first:** `deploy/worker-deploy.flow.md` step 1 (the scp command). Check whether `.dockerignore` already enumerates exclusions the copy step could mirror; consider switching to `rsync -a --exclude-from=.dockerignore` (or an explicit `--exclude` list) so the copy and the Docker context agree on what's in scope.
+
+**Fix with:** `/t`.
+
+---
+
+### [BUG] Terminology inconsistency: "quality test" (what) and "VMAF" (how) used interchangeably
+**Date:** 2026-05-12
+
+**What breaks:** Code, DB columns, settings keys, log messages, and UI labels mix the policy term ("quality test" -- the decision to accept/requeue/discard a transcode) with the specific implementation term ("VMAF" -- one numeric metric). Examples: `QualityTestEnabled` (policy flag) coexists with `VMAFAutoReplaceMinThreshold` (metric-specific); `QualityTestProgress` table updated by `MonitorVMAFProgress` function; `QualityTestingBusinessService.BuildVMAFCommand`. The mixing bakes the current metric choice into surfaces that should be metric-agnostic and makes a future SSIMU2/PSNR/visual-comparison alternative awkward to add.
+
+**Violates:** `Features/QualityTesting/QualityTesting.feature.md` criterion 11b (added with this entry).
+
+**Look first:** `Features/QualityTesting/QualityTestingBusinessService.py` (mixed naming across method names); `Repositories/DatabaseManager.py` (column names, e.g. `QualityTestRequired` vs `VMAF`); `Templates/*.html` (operator-facing labels); `Core/Logging` strings. Fix needs a documented glossary first, then a careful rename pass; expect schema migrations for any DB columns renamed.
+
+**Fix with:** `/t`.
+
+---
+
 ### [BUG - CRITICAL] VMAF distribution becomes bimodal on MKV-source transcodes -- mean/HMean/P5 unreliable for trending
 **Date:** 2026-05-10
 

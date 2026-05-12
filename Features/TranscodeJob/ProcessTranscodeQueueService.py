@@ -475,7 +475,7 @@ class ProcessTranscodeQueueService:
             # For local staging, map output to NFS staging dir so downstream stages find the file after copy-back
             CanonicalSourcePath = Job.FilePath  # Already canonical
             CanonicalOutputPath = self.ComputeCanonicalOutputPath(OutputPath, IsLocalStaging)
-            SrcId, SrcRel, OutId, OutRel = self._ResolveTfpPathParts(Job, CanonicalOutputPath)
+            SrcId, SrcRel, OutId, OutRel = self._ResolveTfpPathParts(Job, OutputPath, IsLocalStaging)
             TemporaryFilePathId = self.PrivateCreateTemporaryFilePathRecord(
                 TranscodeAttemptId, Job.FilePath, CanonicalSourcePath, CanonicalOutputPath,
                 SourceStorageRootId=SrcId, SourceRelativePath=SrcRel,
@@ -709,7 +709,7 @@ class ProcessTranscodeQueueService:
 
         CanonicalSourcePath = Job.FilePath
         CanonicalOutputPath = self.ComputeCanonicalOutputPath(OutputPath, IsLocalStaging)
-        SrcId, SrcRel, OutId, OutRel = self._ResolveTfpPathParts(Job, CanonicalOutputPath)
+        SrcId, SrcRel, OutId, OutRel = self._ResolveTfpPathParts(Job, OutputPath, IsLocalStaging)
         self.PrivateCreateTemporaryFilePathRecord(
             TranscodeAttemptId, Job.FilePath, CanonicalSourcePath, CanonicalOutputPath,
             SourceStorageRootId=SrcId, SourceRelativePath=SrcRel,
@@ -917,7 +917,7 @@ class ProcessTranscodeQueueService:
 
             # Create TemporaryFilePaths record with canonical paths
             CanonicalOutputPath = self.ComputeCanonicalOutputPath(OutputPath, IsLocalStaging)
-            SrcId, SrcRel, OutId, OutRel = self._ResolveTfpPathParts(Job, CanonicalOutputPath)
+            SrcId, SrcRel, OutId, OutRel = self._ResolveTfpPathParts(Job, OutputPath, IsLocalStaging)
             TemporaryFilePathId = self.PrivateCreateTemporaryFilePathRecord(
                 TranscodeAttemptId, Job.FilePath, Job.FilePath, CanonicalOutputPath,
                 SourceStorageRootId=SrcId, SourceRelativePath=SrcRel,
@@ -1060,7 +1060,7 @@ class ProcessTranscodeQueueService:
 
             # Create TemporaryFilePaths record with canonical paths
             CanonicalOutputPath = self.ComputeCanonicalOutputPath(OutputPath, IsLocalStaging)
-            SrcId, SrcRel, OutId, OutRel = self._ResolveTfpPathParts(Job, CanonicalOutputPath)
+            SrcId, SrcRel, OutId, OutRel = self._ResolveTfpPathParts(Job, OutputPath, IsLocalStaging)
             TemporaryFilePathId = self.PrivateCreateTemporaryFilePathRecord(
                 TranscodeAttemptId, Job.FilePath, Job.FilePath, CanonicalOutputPath,
                 SourceStorageRootId=SrcId, SourceRelativePath=SrcRel,
@@ -2139,23 +2139,29 @@ class ProcessTranscodeQueueService:
             LoggingService.LogException("Exception updating transcoding progress", e,
                                       "ProcessTranscodeQueueService", "UpdateTranscodeProgress")
 
-    def _ResolveTfpPathParts(self, Job, CanonicalOutputPath: str):
+    def _ResolveTfpPathParts(self, Job, OutputPath: str, IsLocalStaging: bool):
         """Compute (SrcId, SrcRel, OutId, OutRel) for TemporaryFilePaths writes.
 
-        Source side comes from Job.StorageRootId / Job.RelativePath (populated by Phase B model fields).
-        Output side parses CanonicalOutputPath against StorageRoots so VMAF can Resolve later."""
-        try:
-            from Core.PathStorage import LoadStorageRoots, Parse as PathParse
-            Roots = LoadStorageRoots(self.DatabaseManager.DatabaseService)
-            OutId, OutRel = PathParse(CanonicalOutputPath, Roots)
-        except Exception as e:
-            LoggingService.LogException(
-                f"Failed to parse CanonicalOutputPath {CanonicalOutputPath!r} for StorageRoots",
-                e, "ProcessTranscodeQueueService", "_ResolveTfpPathParts",
-            )
-            OutId, OutRel = None, None
+        Output side is derived from Job.RelativePath (canonical, always '/'-separated)
+        and the basename of the worker-local OutputPath. Parsing the worker-local
+        OutputPath against StorageRoots was fragile (Linux os.path.basename on a
+        Windows-shaped canonical string returned the whole string, polluting the
+        stored relative path with 'T:/' fragments). The two layouts:
+          - LocalStaging: MediaVortex/Staging/<WorkerName>/<output_basename>
+          - InPlace:      <dirname(Job.RelativePath)>/<output_basename>
+        OutputStorageRootId is always the source's StorageRootId -- the staging
+        area lives inside the same physical StorageRoot as the source media."""
+        import os as _os
         SrcId = getattr(Job, 'StorageRootId', None)
         SrcRel = getattr(Job, 'RelativePath', None) or None
+        OutBase = _os.path.basename(OutputPath) if OutputPath else ''
+        OutId = SrcId
+        if IsLocalStaging:
+            OutRel = f"MediaVortex/Staging/{self.WorkerName}/{OutBase}" if OutBase else None
+        else:
+            SrcDirRel = SrcRel.rsplit('/', 1)[0] if (SrcRel and '/' in SrcRel) else ''
+            OutRel = f"{SrcDirRel}/{OutBase}" if SrcDirRel else OutBase
+            OutRel = OutRel or None
         return SrcId, SrcRel, OutId, OutRel
 
     def PrivateCreateTemporaryFilePathRecord(self, TranscodeAttemptId: int, OriginalPath: str, LocalSourcePath: str, LocalOutputPath: str = None,

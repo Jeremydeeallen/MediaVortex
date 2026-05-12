@@ -13,8 +13,8 @@ Run from the dev workstation (Git Bash). All commands use SSH to the worker-pool
 ```bash
 # 1. Create target dir and copy repo source to the LXC
 ssh root@10.0.0.42 'rm -rf /tmp/mediavortex-build && mkdir -p /tmp/mediavortex-build'
-scp -r /c/Code/MediaVortex/* root@10.0.0.42:/tmp/mediavortex-build/
-
+scp -r c:/Code/MediaVortex/* root@10.0.0.42:/tmp/mediavortex-build/
+cls
 # 2. Build the Docker image on the LXC
 ssh root@10.0.0.42 'docker build -t mediavortex-worker:latest -f /tmp/mediavortex-build/deploy/Dockerfile /tmp/mediavortex-build/'
 
