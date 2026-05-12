@@ -47,13 +47,18 @@ class MediaProbeBusinessService:
         check, ffprobe invocation). The MediaFile row stays canonical.
         """
         FilePath = MediaFile.FilePath
-        # Canonical -> local for fs/ffprobe access. No-op on Windows or when
-        # WorkerContext has no share mappings.
+        # Canonical -> worker-local via PathStorage.Resolve when the model has
+        # (StorageRootId, RelativePath); otherwise fall back to FilePath as-is.
         try:
+            import socket
             from Core.WorkerContext import WorkerContext
+            from Core.PathStorage import Resolve as PathResolve
             _Ctx = WorkerContext.Current()
-            LocalPath = (_Ctx.PathTranslation.ToLocalPath(FilePath)
-                         if (_Ctx and _Ctx.PathTranslation) else FilePath)
+            _WorkerName = (_Ctx.WorkerName if _Ctx else None) or socket.gethostname()
+            if MediaFile.StorageRootId is not None and MediaFile.RelativePath:
+                LocalPath = PathResolve(MediaFile.StorageRootId, MediaFile.RelativePath, _WorkerName)
+            else:
+                LocalPath = FilePath
         except Exception:
             LocalPath = FilePath
         try:
