@@ -90,13 +90,21 @@ class QualityTestingBusinessService:
                 LoggingService.LogError(error_msg, "QualityTestingBusinessService", "StartQualityTest")
                 return {"Success": False, "Message": "Failed to create quality test result"}
 
-            # Create active job record
+            import socket as _socket
+            _WorkerName = None
+            try:
+                from Core.WorkerContext import WorkerContext as _Wc
+                _Ctx = _Wc.Current()
+                _WorkerName = (_Ctx.WorkerName if _Ctx else None) or _socket.gethostname()
+            except Exception:
+                _WorkerName = _socket.gethostname()
             active_job_id = self.DatabaseManager.CreateActiveJob(
                 ServiceName="QualityTestService",
                 JobType="QualityTest",
                 QueueId=JobId,
                 ProcessId=os.getpid(),
-                ThreadId=threading.get_ident()
+                ThreadId=threading.get_ident(),
+                WorkerName=_WorkerName,
             )
 
             if active_job_id == 0:
