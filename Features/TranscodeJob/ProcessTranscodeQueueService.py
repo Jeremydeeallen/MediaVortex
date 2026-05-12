@@ -396,9 +396,8 @@ class ProcessTranscodeQueueService:
             # replacement step lost the file), do NOT create a TranscodeAttempt or run FFprobe.
             # Mark the MediaFile so future scans/queue passes can skip it via the
             # FFprobeFailureCount safety guard, drop the queue/active-job rows, and return.
-            LocalSourcePath = MediaFile.FilePath
-            if self.PathTranslation:
-                LocalSourcePath = self.PathTranslation.ToLocalPath(MediaFile.FilePath)
+            from Core.PathStorage import Resolve as PathResolve
+            LocalSourcePath = PathResolve(MediaFile.StorageRootId, MediaFile.RelativePath, self.WorkerName, self.DatabaseManager.DatabaseService)
             if not os.path.exists(LocalSourcePath):
                 ErrMsg = f"Source file missing on disk: {LocalSourcePath}"
                 LoggingService.LogWarning(ErrMsg, "ProcessTranscodeQueueService", "ProcessJob")
@@ -585,9 +584,8 @@ class ProcessTranscodeQueueService:
                 self.HandleJobFailure(Job, "Failed to get media file data (test mode)", None, ActiveJobId)
                 return
 
-            LocalSourcePath = MediaFile.FilePath
-            if self.PathTranslation:
-                LocalSourcePath = self.PathTranslation.ToLocalPath(MediaFile.FilePath)
+            from Core.PathStorage import Resolve as PathResolve
+            LocalSourcePath = PathResolve(MediaFile.StorageRootId, MediaFile.RelativePath, self.WorkerName, self.DatabaseManager.DatabaseService)
             if not os.path.exists(LocalSourcePath):
                 ErrMsg = f"Source file missing on disk: {LocalSourcePath}"
                 LoggingService.LogWarning(ErrMsg, "ProcessTranscodeQueueService", "ProcessTestVariantJob")
@@ -1290,11 +1288,11 @@ class ProcessTranscodeQueueService:
             if FileMode == 'LocalStaging' and not self.OutputDirectory:
                 FileMode = 'InPlace'
 
+            from Core.PathStorage import Resolve as PathResolve
+            SourcePath = PathResolve(Job.StorageRootId, Job.RelativePath, self.WorkerName, self.DatabaseManager.DatabaseService)
+
             if FileMode == 'LocalStaging':
                 # Copy source to local staging disk (skip if already exists — crash recovery)
-                SourcePath = Job.FilePath
-                if self.PathTranslation:
-                    SourcePath = self.PathTranslation.ToLocalPath(SourcePath)
                 LocalStagingDir = self.GetLocalStagingDir()
                 os.makedirs(LocalStagingDir, exist_ok=True)
                 DestinationPath = os.path.join(LocalStagingDir, MediaFile.FileName)
@@ -1308,9 +1306,6 @@ class ProcessTranscodeQueueService:
                 return DestinationPath
             elif FileMode == 'CopyLocal':
                 # Copy file to local source directory
-                SourcePath = Job.FilePath
-                if self.PathTranslation:
-                    SourcePath = self.PathTranslation.ToLocalPath(SourcePath)
                 DestinationPath = f"C:\\MediaVortex\\Source\\{MediaFile.FileName}"
                 CopyResult = self.FileManager.CopyFile(SourcePath, DestinationPath)
                 if not CopyResult:
@@ -1318,12 +1313,9 @@ class ProcessTranscodeQueueService:
                 LoggingService.LogInfo(f"CopyLocal mode: copied {SourcePath} to {DestinationPath}", "ProcessTranscodeQueueService", "SetupFilePreparation")
                 return DestinationPath
             else:
-                # InPlace mode: translate canonical DB path to local worker path
-                LocalPath = Job.FilePath
-                if self.PathTranslation:
-                    LocalPath = self.PathTranslation.ToLocalPath(Job.FilePath)
-                LoggingService.LogInfo(f"InPlace mode: using path: {LocalPath}", "ProcessTranscodeQueueService", "SetupFilePreparation")
-                return LocalPath
+                # InPlace mode: SourcePath is already the worker-local path from Resolve()
+                LoggingService.LogInfo(f"InPlace mode: using path: {SourcePath}", "ProcessTranscodeQueueService", "SetupFilePreparation")
+                return SourcePath
 
         except Exception as e:
             LoggingService.LogException("Exception in file preparation", e, "ProcessTranscodeQueueService", "SetupFilePreparation")
