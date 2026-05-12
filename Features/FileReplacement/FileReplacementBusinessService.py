@@ -13,21 +13,40 @@ class FileReplacementBusinessService:
 
     def __init__(self, DatabaseManagerInstance: DatabaseManager = None,
                  FileManagerInstance: FileManagerService = None,
-                 PathTranslation=None, FFprobePath: str = None):
+                 PathTranslation=None, FFprobePath: str = None, WorkerName: str = None):
         self.DatabaseManager = DatabaseManagerInstance or DatabaseManager()
         self.FileManager = FileManagerInstance or FileManagerService(FFprobePath=FFprobePath)
-        if PathTranslation is None:
+        # PathTranslation kept on signature for backward compat with callers that
+        # still pass it; actual path resolution now goes through PathStorage.Resolve.
+        self.PathTranslation = PathTranslation
+        if WorkerName is None:
+            import socket
             from Core.WorkerContext import WorkerContext
             Ctx = WorkerContext.Current()
-            if Ctx:
-                PathTranslation = Ctx.PathTranslation
-        self.PathTranslation = PathTranslation
+            WorkerName = (Ctx.WorkerName if Ctx else None) or socket.gethostname()
+        self.WorkerName = WorkerName
 
     def _ToLocalPath(self, CanonicalPath: str) -> str:
-        """Translate a canonical DB path to a local filesystem path using PathTranslation if available."""
-        if self.PathTranslation and CanonicalPath:
-            return self.PathTranslation.ToLocalPath(CanonicalPath)
-        return CanonicalPath
+        """Translate a canonical DB path to a local filesystem path.
+
+        Parses CanonicalPath against StorageRoots to derive (StorageRootId, RelativePath),
+        then resolves to the worker-local path. If the path does not match any
+        StorageRoot (or PathStorage cannot resolve for this worker) the original
+        string is returned unchanged."""
+        if not CanonicalPath:
+            return CanonicalPath
+        try:
+            from Core.PathStorage import LoadStorageRoots, Parse as PathParse, Resolve as PathResolve
+            SrId, Rel = PathParse(CanonicalPath, LoadStorageRoots(self.DatabaseManager.DatabaseService))
+            if SrId is None or Rel is None:
+                return CanonicalPath
+            return PathResolve(SrId, Rel, self.WorkerName, self.DatabaseManager.DatabaseService)
+        except Exception as e:
+            LoggingService.LogException(
+                f"_ToLocalPath fallthrough for {CanonicalPath!r}",
+                e, "FileReplacementBusinessService", "_ToLocalPath",
+            )
+            return CanonicalPath
 
     def GenerateOutputFilePath(self, InputFilePath: str) -> str:
         """Generate output file path for transcoded file (same logic as TranscodingBusinessService)."""
@@ -682,6 +701,19 @@ class FileReplacementBusinessService:
             # Update the MediaFile with new file path and filename
             media_file.FilePath = NewFilePath  # Update to new file path
             media_file.FileName = os.path.basename(NewFilePath)  # Update to new filename
+            # Path-storage: derive (StorageRootId, RelativePath) for the new path so
+            # SaveMediaFile writes them as the canonical identifier, not just FilePath.
+            try:
+                from Core.PathStorage import LoadStorageRoots, Parse as PathParse
+                NewSrId, NewRel = PathParse(NewFilePath, LoadStorageRoots(self.DatabaseManager.DatabaseService))
+                if NewSrId is not None:
+                    media_file.StorageRootId = NewSrId
+                    media_file.RelativePath = NewRel or ''
+            except Exception as e:
+                LoggingService.LogException(
+                    f"Failed to derive StorageRootId/RelativePath for new path {NewFilePath!r}",
+                    e, "FileReplacementBusinessService", "_UpdateMediaFilesAfterReplacement",
+                )
 
             # Update all FFProbe columns with new transcoded file data
             media_file.SizeMB = metadata.get('FileSizeMB', media_file.SizeMB)
