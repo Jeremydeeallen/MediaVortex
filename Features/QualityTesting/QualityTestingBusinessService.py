@@ -249,8 +249,11 @@ class QualityTestingBusinessService:
             # Add input files (no CUDA acceleration) - quote paths to handle spaces
             command_parts.extend(["-i", f'"{original_file}"', "-i", f'"{transcoded_file}"'])
 
-            # Add VMAF filter and output options
-            command_parts.extend(["-lavfi", vmaf_filter, "-f", "null", "-"])
+            # Add VMAF filter and output options.
+            # Quote vmaf_filter so bash does not split on ';' or interpret '[' / ']'
+            # when the command is run with shell=True. cmd.exe also tolerates the
+            # double quotes, so this works cross-platform without branching.
+            command_parts.extend(["-lavfi", f'"{vmaf_filter}"', "-f", "null", "-"])
 
             # Build final command string
             command = " ".join(command_parts)
