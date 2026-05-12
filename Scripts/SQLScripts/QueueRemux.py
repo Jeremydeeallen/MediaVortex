@@ -75,7 +75,7 @@ def Main():
 
     Rows = Db.ExecuteQuery(
         """
-        SELECT Id, FilePath, FileName, FileSize AS SizeBytes, SizeMB, ContainerFormat,
+        SELECT Id, StorageRootId, RelativePath, FilePath, FileName, FileSize AS SizeBytes, SizeMB, ContainerFormat,
                Codec, AudioCodec, ResolutionCategory, RecommendedMode, IsCompliant
         FROM MediaFiles WHERE Id = %s
         """,
@@ -125,12 +125,14 @@ def Main():
     Db.ExecuteNonQuery(
         """
         INSERT INTO TranscodeQueue (
-            FilePath, FileName, Directory, SizeBytes, SizeMB,
+            StorageRootId, RelativePath, FilePath, FileName, Directory, SizeBytes, SizeMB,
             Priority, Status, ProcessingMode, DateAdded, MediaFileId
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """,
         (
+            M.get('StorageRootId'),
+            M.get('RelativePath') or '',
             FilePath,
             FileName,
             Directory,

@@ -87,16 +87,31 @@ class TranscodeQueueRepository(BaseRepository):
             connection = self.DatabaseService.GetConnection()
             try:
                 cursor = connection.cursor()
+                # Path-storage: if (StorageRootId, RelativePath) not yet set on the model, derive from FilePath
+                if QueueItem.StorageRootId is None or not QueueItem.RelativePath:
+                    try:
+                        from Core.PathStorage import LoadStorageRoots, Parse as PathParse
+                        SrId, Rel = PathParse(QueueItem.FilePath, LoadStorageRoots(self.DatabaseService))
+                        if SrId is not None:
+                            QueueItem.StorageRootId = SrId
+                            QueueItem.RelativePath = Rel or ''
+                    except Exception as PathEx:
+                        LoggingService.LogException(
+                            f"Failed to derive StorageRootId/RelativePath for {QueueItem.FilePath!r}",
+                            PathEx, "TranscodeQueueRepository", "SaveTranscodeQueueItem",
+                        )
+
                 if QueueItem.Id is None:
                     LoggingService.LogInfo("Inserting new transcoding queue item...", "TranscodeQueueRepository", "SaveTranscodeQueueItem")
                     MediaFileId = self.LookupMediaFileId(QueueItem.FilePath)
                     query = """
                         INSERT INTO TranscodeQueue
-                        (FilePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted, ProcessingMode, MediaFileId)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        (StorageRootId, RelativePath, FilePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted, ProcessingMode, MediaFileId)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         RETURNING Id
                     """
                     parameters = (
+                        QueueItem.StorageRootId, QueueItem.RelativePath,
                         QueueItem.FilePath, QueueItem.FileName, QueueItem.Directory,
                         QueueItem.SizeBytes, QueueItem.SizeMB, QueueItem.Priority,
                         QueueItem.Status, QueueItem.DateAdded, QueueItem.DateStarted,
@@ -111,11 +126,12 @@ class TranscodeQueueRepository(BaseRepository):
                     LoggingService.LogInfo(f"Updating existing queue item with ID: {QueueItem.Id}", "TranscodeQueueRepository", "SaveTranscodeQueueItem")
                     query = """
                         UPDATE TranscodeQueue
-                        SET FilePath = %s, FileName = %s, Directory = %s, SizeBytes = %s, SizeMB = %s,
+                        SET StorageRootId = %s, RelativePath = %s, FilePath = %s, FileName = %s, Directory = %s, SizeBytes = %s, SizeMB = %s,
                             Priority = %s, Status = %s, DateAdded = %s, DateStarted = %s, ProcessingMode = %s
                         WHERE Id = %s
                     """
                     parameters = (
+                        QueueItem.StorageRootId, QueueItem.RelativePath,
                         QueueItem.FilePath, QueueItem.FileName, QueueItem.Directory,
                         QueueItem.SizeBytes, QueueItem.SizeMB, QueueItem.Priority,
                         QueueItem.Status, QueueItem.DateAdded, QueueItem.DateStarted,
