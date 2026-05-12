@@ -4363,37 +4363,51 @@ class DatabaseManager:
             LoggingService.LogException("Exception deleting quality test records", e, "DatabaseManager", "DeleteQualityTestRecordsByAttemptId")
             return False
     
-    def CreateTemporaryFilePath(self, TranscodeAttemptId: int, OriginalPath: str, LocalSourcePath: str, LocalOutputPath: str = None) -> Optional[int]:
-        """Create a new temporary file path record."""
+    def CreateTemporaryFilePath(self, TranscodeAttemptId: int, OriginalPath: str, LocalSourcePath: str, LocalOutputPath: str = None,
+                                SourceStorageRootId: int = None, SourceRelativePath: str = None,
+                                OutputStorageRootId: int = None, OutputRelativePath: str = None) -> Optional[int]:
+        """Create a new temporary file path record.
+
+        Phase C dual-write: populates both legacy path strings (OriginalPath, LocalSourcePath, LocalOutputPath)
+        and the new (SourceStorageRootId, SourceRelativePath, OutputStorageRootId, OutputRelativePath) columns.
+        BuildVMAFCommand reads exclusively from the new columns, so callers MUST pass them."""
         try:
-            LoggingService.LogFunctionEntry("CreateTemporaryFilePath", "DatabaseManager", 
-                                          TranscodeAttemptId, OriginalPath, LocalSourcePath, LocalOutputPath)
-            
+            LoggingService.LogFunctionEntry("CreateTemporaryFilePath", "DatabaseManager",
+                                          TranscodeAttemptId, OriginalPath, LocalSourcePath, LocalOutputPath,
+                                          SourceStorageRootId, SourceRelativePath,
+                                          OutputStorageRootId, OutputRelativePath)
+
             # Validate TranscodeAttemptId exists
             if not self.PrivateValidateTranscodeAttemptId(TranscodeAttemptId):
                 LoggingService.LogError(f"Invalid TranscodeAttemptId: {TranscodeAttemptId}", "DatabaseManager", "CreateTemporaryFilePath")
                 return None
-            
+
             # NORMALIZE TO FILESYSTEM CASE THEN NORMALIZE PATH FORMAT
             NormalizedOriginalPath = self.PrivateNormalizeFilePath(
                 self.PrivateNormalizePathToFilesystemCase(OriginalPath))
             NormalizedLocalSourcePath = self.PrivateNormalizeFilePath(LocalSourcePath)  # Local paths don't need case norm
             NormalizedLocalOutputPath = self.PrivateNormalizeFilePath(LocalOutputPath) if LocalOutputPath else None
-            
+
             if LocalOutputPath:
                 query = """
                     INSERT INTO TemporaryFilePaths (
-                        TranscodeAttemptId, OriginalPath, LocalSourcePath, LocalOutputPath, CreatedDate
-                    ) VALUES (%s, %s, %s, %s, NOW())
+                        TranscodeAttemptId, OriginalPath, LocalSourcePath, LocalOutputPath,
+                        SourceStorageRootId, SourceRelativePath, OutputStorageRootId, OutputRelativePath,
+                        CreatedDate
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW())
                 """
-                params = (TranscodeAttemptId, NormalizedOriginalPath, NormalizedLocalSourcePath, NormalizedLocalOutputPath)
+                params = (TranscodeAttemptId, NormalizedOriginalPath, NormalizedLocalSourcePath, NormalizedLocalOutputPath,
+                          SourceStorageRootId, SourceRelativePath, OutputStorageRootId, OutputRelativePath)
             else:
                 query = """
                     INSERT INTO TemporaryFilePaths (
-                        TranscodeAttemptId, OriginalPath, LocalSourcePath, CreatedDate
-                    ) VALUES (%s, %s, %s, NOW())
+                        TranscodeAttemptId, OriginalPath, LocalSourcePath,
+                        SourceStorageRootId, SourceRelativePath,
+                        CreatedDate
+                    ) VALUES (%s, %s, %s, %s, %s, NOW())
                 """
-                params = (TranscodeAttemptId, NormalizedOriginalPath, NormalizedLocalSourcePath)
+                params = (TranscodeAttemptId, NormalizedOriginalPath, NormalizedLocalSourcePath,
+                          SourceStorageRootId, SourceRelativePath)
             
             RecordId = self.DatabaseService.ExecuteNonQuery(query, params)
             

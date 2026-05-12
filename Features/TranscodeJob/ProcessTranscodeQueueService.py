@@ -476,7 +476,11 @@ class ProcessTranscodeQueueService:
             # For local staging, map output to NFS staging dir so downstream stages find the file after copy-back
             CanonicalSourcePath = Job.FilePath  # Already canonical
             CanonicalOutputPath = self.ComputeCanonicalOutputPath(OutputPath, IsLocalStaging)
-            TemporaryFilePathId = self.PrivateCreateTemporaryFilePathRecord(TranscodeAttemptId, Job.FilePath, CanonicalSourcePath, CanonicalOutputPath)
+            SrcId, SrcRel, OutId, OutRel = self._ResolveTfpPathParts(Job, CanonicalOutputPath)
+            TemporaryFilePathId = self.PrivateCreateTemporaryFilePathRecord(
+                TranscodeAttemptId, Job.FilePath, CanonicalSourcePath, CanonicalOutputPath,
+                SourceStorageRootId=SrcId, SourceRelativePath=SrcRel,
+                OutputStorageRootId=OutId, OutputRelativePath=OutRel)
             if not TemporaryFilePathId:
                 LoggingService.LogWarning(f"Failed to create TemporaryFilePath record for TranscodeAttempt {TranscodeAttemptId}, but file preparation succeeded",
                                         "ProcessTranscodeQueueService", "ProcessJob")
@@ -707,7 +711,11 @@ class ProcessTranscodeQueueService:
 
         CanonicalSourcePath = Job.FilePath
         CanonicalOutputPath = self.ComputeCanonicalOutputPath(OutputPath, IsLocalStaging)
-        self.PrivateCreateTemporaryFilePathRecord(TranscodeAttemptId, Job.FilePath, CanonicalSourcePath, CanonicalOutputPath)
+        SrcId, SrcRel, OutId, OutRel = self._ResolveTfpPathParts(Job, CanonicalOutputPath)
+        self.PrivateCreateTemporaryFilePathRecord(
+            TranscodeAttemptId, Job.FilePath, CanonicalSourcePath, CanonicalOutputPath,
+            SourceStorageRootId=SrcId, SourceRelativePath=SrcRel,
+            OutputStorageRootId=OutId, OutputRelativePath=OutRel)
 
         self.DatabaseManager.UpdateTranscodeAttempt(TranscodeAttemptId, {
             'FilePath': Job.FilePath,
@@ -911,7 +919,11 @@ class ProcessTranscodeQueueService:
 
             # Create TemporaryFilePaths record with canonical paths
             CanonicalOutputPath = self.ComputeCanonicalOutputPath(OutputPath, IsLocalStaging)
-            TemporaryFilePathId = self.PrivateCreateTemporaryFilePathRecord(TranscodeAttemptId, Job.FilePath, Job.FilePath, CanonicalOutputPath)
+            SrcId, SrcRel, OutId, OutRel = self._ResolveTfpPathParts(Job, CanonicalOutputPath)
+            TemporaryFilePathId = self.PrivateCreateTemporaryFilePathRecord(
+                TranscodeAttemptId, Job.FilePath, Job.FilePath, CanonicalOutputPath,
+                SourceStorageRootId=SrcId, SourceRelativePath=SrcRel,
+                OutputStorageRootId=OutId, OutputRelativePath=OutRel)
 
             # Update attempt record (keep Success=None to indicate in-progress)
             self.DatabaseManager.UpdateTranscodeAttempt(TranscodeAttemptId, {
@@ -1050,7 +1062,11 @@ class ProcessTranscodeQueueService:
 
             # Create TemporaryFilePaths record with canonical paths
             CanonicalOutputPath = self.ComputeCanonicalOutputPath(OutputPath, IsLocalStaging)
-            TemporaryFilePathId = self.PrivateCreateTemporaryFilePathRecord(TranscodeAttemptId, Job.FilePath, Job.FilePath, CanonicalOutputPath)
+            SrcId, SrcRel, OutId, OutRel = self._ResolveTfpPathParts(Job, CanonicalOutputPath)
+            TemporaryFilePathId = self.PrivateCreateTemporaryFilePathRecord(
+                TranscodeAttemptId, Job.FilePath, Job.FilePath, CanonicalOutputPath,
+                SourceStorageRootId=SrcId, SourceRelativePath=SrcRel,
+                OutputStorageRootId=OutId, OutputRelativePath=OutRel)
 
             # Update attempt record (keep Success=None to indicate in-progress)
             self.DatabaseManager.UpdateTranscodeAttempt(TranscodeAttemptId, {
@@ -2131,13 +2147,44 @@ class ProcessTranscodeQueueService:
             LoggingService.LogException("Exception updating transcoding progress", e,
                                       "ProcessTranscodeQueueService", "UpdateTranscodeProgress")
 
-    def PrivateCreateTemporaryFilePathRecord(self, TranscodeAttemptId: int, OriginalPath: str, LocalSourcePath: str, LocalOutputPath: str = None) -> Optional[int]:
-        """Private method to create TemporaryFilePath record."""
+    def _ResolveTfpPathParts(self, Job, CanonicalOutputPath: str):
+        """Compute (SrcId, SrcRel, OutId, OutRel) for TemporaryFilePaths writes.
+
+        Source side comes from Job.StorageRootId / Job.RelativePath (populated by Phase B model fields).
+        Output side parses CanonicalOutputPath against StorageRoots so VMAF can Resolve later."""
+        try:
+            from Core.PathStorage import LoadStorageRoots, Parse as PathParse
+            Roots = LoadStorageRoots(self.DatabaseManager.DatabaseService)
+            OutId, OutRel = PathParse(CanonicalOutputPath, Roots)
+        except Exception as e:
+            LoggingService.LogException(
+                f"Failed to parse CanonicalOutputPath {CanonicalOutputPath!r} for StorageRoots",
+                e, "ProcessTranscodeQueueService", "_ResolveTfpPathParts",
+            )
+            OutId, OutRel = None, None
+        SrcId = getattr(Job, 'StorageRootId', None)
+        SrcRel = getattr(Job, 'RelativePath', None) or None
+        return SrcId, SrcRel, OutId, OutRel
+
+    def PrivateCreateTemporaryFilePathRecord(self, TranscodeAttemptId: int, OriginalPath: str, LocalSourcePath: str, LocalOutputPath: str = None,
+                                              SourceStorageRootId: int = None, SourceRelativePath: str = None,
+                                              OutputStorageRootId: int = None, OutputRelativePath: str = None) -> Optional[int]:
+        """Private method to create TemporaryFilePath record.
+
+        Source side comes from the Job's (StorageRootId, RelativePath). Output side is parsed
+        from the canonical output path via PathStorage.Parse so BuildVMAFCommand can resolve
+        the encoded file on any worker without relying on legacy LocalOutputPath strings."""
         try:
             LoggingService.LogFunctionEntry("PrivateCreateTemporaryFilePathRecord", "ProcessTranscodeQueueService",
-                                          TranscodeAttemptId, OriginalPath, LocalSourcePath, LocalOutputPath)
+                                          TranscodeAttemptId, OriginalPath, LocalSourcePath, LocalOutputPath,
+                                          SourceStorageRootId, SourceRelativePath,
+                                          OutputStorageRootId, OutputRelativePath)
 
-            TemporaryFilePathId = self.DatabaseManager.CreateTemporaryFilePath(TranscodeAttemptId, OriginalPath, LocalSourcePath, LocalOutputPath)
+            TemporaryFilePathId = self.DatabaseManager.CreateTemporaryFilePath(
+                TranscodeAttemptId, OriginalPath, LocalSourcePath, LocalOutputPath,
+                SourceStorageRootId=SourceStorageRootId, SourceRelativePath=SourceRelativePath,
+                OutputStorageRootId=OutputStorageRootId, OutputRelativePath=OutputRelativePath,
+            )
 
             if TemporaryFilePathId:
                 LoggingService.LogInfo(f"Successfully created TemporaryFilePath record {TemporaryFilePathId} for TranscodeAttempt {TranscodeAttemptId}",

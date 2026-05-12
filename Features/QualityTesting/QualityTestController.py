@@ -581,7 +581,7 @@ def QueueTestRun():
             if not Path_:
                 continue
             MfRows = Db.ExecuteQuery(
-                "SELECT Id, AssignedProfile, SizeMB FROM MediaFiles WHERE FilePath = %s",
+                "SELECT Id, AssignedProfile, SizeMB, StorageRootId, RelativePath FROM MediaFiles WHERE FilePath = %s",
                 (Path_,),
             )
             if not MfRows:
@@ -592,9 +592,14 @@ def QueueTestRun():
             if not Profile:
                 Rejected.append({'FilePath': Path_, 'Reason': 'No AssignedProfile on MediaFile and no DefaultProfileName set'})
                 continue
+            MfStorageRootId = Mf.get('StorageRootId')
+            MfRelativePath = Mf.get('RelativePath') or ''
+            if MfStorageRootId is None or not MfRelativePath:
+                Rejected.append({'FilePath': Path_, 'Reason': 'MediaFile missing StorageRootId/RelativePath (re-scan required)'})
+                continue
             ExistingRow = Db.ExecuteQuery(
-                "SELECT Id FROM TranscodeQueue WHERE FilePath = %s AND Status = 'Pending' AND TestVariantSetId = %s",
-                (Path_, VariantSetId),
+                "SELECT Id FROM TranscodeQueue WHERE StorageRootId = %s AND RelativePath = %s AND Status = 'Pending' AND TestVariantSetId = %s",
+                (MfStorageRootId, MfRelativePath, VariantSetId),
             )
             if ExistingRow:
                 Rejected.append({'FilePath': Path_, 'Reason': f'already pending for this variant set (queue Id {ExistingRow[0]["Id"]})'})
@@ -603,12 +608,14 @@ def QueueTestRun():
                 InsertedRow = Db.ExecuteQuery(
                     """
                     INSERT INTO TranscodeQueue
-                        (FilePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status,
+                        (StorageRootId, RelativePath, FilePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status,
                          AssignedProfile, MediaFileId, TestVariantSetId, DateAdded)
-                    VALUES (%s, %s, %s, %s, %s, %s, 'Pending', %s, %s, %s, NOW())
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'Pending', %s, %s, %s, NOW())
                     RETURNING Id
                     """,
                     (
+                        MfStorageRootId,
+                        MfRelativePath,
                         Path_,
                         os.path.basename(Path_),
                         os.path.dirname(Path_),
