@@ -605,7 +605,7 @@ def QueueTestRun():
                 Rejected.append({'FilePath': Path_, 'Reason': f'already pending for this variant set (queue Id {ExistingRow[0]["Id"]})'})
                 continue
             try:
-                InsertedRow = Db.ExecuteQuery(
+                Db.ExecuteNonQuery(
                     """
                     INSERT INTO TranscodeQueue
                         (StorageRootId, RelativePath, FilePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status,
@@ -626,7 +626,7 @@ def QueueTestRun():
                         VariantSetId,
                     ),
                 )
-                NewId = InsertedRow[0]['Id'] if InsertedRow else None
+                NewId = Db.LastInsertId
                 Accepted.append({'FilePath': Path_, 'QueueId': NewId, 'Profile': Profile})
             except Exception as InsEx:
                 LoggingService.LogException(
