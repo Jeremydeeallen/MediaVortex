@@ -609,8 +609,8 @@ def QueueTestRun():
                     """
                     INSERT INTO TranscodeQueue
                         (StorageRootId, RelativePath, FilePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status,
-                         AssignedProfile, MediaFileId, TestVariantSetId, DateAdded)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'Pending', %s, %s, %s, NOW())
+                         MediaFileId, TestVariantSetId, DateAdded)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'Pending', %s, %s, NOW())
                     RETURNING Id
                     """,
                     (
@@ -622,7 +622,6 @@ def QueueTestRun():
                         int((Mf.get('SizeMB') or 0) * 1024 * 1024),
                         Mf.get('SizeMB') or 0,
                         50,
-                        Profile,
                         Mf.get('Id'),
                         VariantSetId,
                     ),
