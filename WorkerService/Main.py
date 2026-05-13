@@ -66,11 +66,13 @@ class WorkerServiceApp:
         # Capability instances (created lazily based on DB config)
         self.TranscodeService = None
         self.QualityTestService = None
+        self.RemuxService = None
         self.ContinuousScanService = None
 
         # Current capabilities and status from DB
         self.TranscodeEnabled = False
         self.QualityTestEnabled = False
+        self.RemuxEnabled = False
         self.ScanEnabled = False
         self.WorkerStatus = "Offline"
 
@@ -131,7 +133,12 @@ class WorkerServiceApp:
                         Mappings[DriveLetter.strip()] = MountPath.strip()
                 if Mappings:
                     self.DatabaseManager.RegisterWorkerShareMappings(self.WorkerName, Mappings)
+                    self.DatabaseManager.RegisterStorageRootResolutions(self.WorkerName, self.WorkerPlatform, Mappings)
                     LoggingService.LogInfo(f"Worker '{self.WorkerName}' registered share mappings: {Mappings}", "WorkerService", "_RegisterAndLoadWorkerConfig")
+            else:
+                # Windows workers: no share mappings env var, register StorageRootResolutions
+                # using canonical prefixes as the local paths (drive letters ARE the paths)
+                self.DatabaseManager.RegisterStorageRootResolutionsFromCanonical(self.WorkerName, self.WorkerPlatform)
 
             # Load worker config from DB
             Config = self.DatabaseManager.GetWorkerConfig(self.WorkerName)
@@ -164,7 +171,7 @@ class WorkerServiceApp:
         """Load capability flags and status from Workers table."""
         try:
             Query = """
-                SELECT TranscodeEnabled, QualityTestEnabled, ScanEnabled, Status
+                SELECT TranscodeEnabled, QualityTestEnabled, ScanEnabled, RemuxEnabled, Status
                 FROM Workers
                 WHERE WorkerName = %s
             """
@@ -173,18 +180,32 @@ class WorkerServiceApp:
                 Row = Rows[0]
                 self.TranscodeEnabled = bool(Row.get('TranscodeEnabled', True))
                 self.QualityTestEnabled = bool(Row.get('QualityTestEnabled', False))
+                self.RemuxEnabled = bool(Row.get('RemuxEnabled', True))
                 self.ScanEnabled = bool(Row.get('ScanEnabled', False))
                 self.WorkerStatus = Row.get('Status', 'Online') or 'Online'
             else:
                 LoggingService.LogWarning(f"No Workers row found for '{self.WorkerName}', using defaults", "WorkerService", "_LoadCapabilitiesFromDB")
                 self.TranscodeEnabled = True
                 self.QualityTestEnabled = False
+                self.RemuxEnabled = True
                 self.ScanEnabled = False
                 self.WorkerStatus = "Online"
         except Exception as e:
             LoggingService.LogException("Error loading capabilities from DB", e, "WorkerService", "_LoadCapabilitiesFromDB")
 
     # --- Capability lifecycle ---
+
+    def _GetPerCapabilityConcurrency(self, CapabilityKey: str, Default: int = 1) -> int:
+        """Read per-capability MaxConcurrentJobs from WorkerConfig.
+        Falls back to legacy MaxConcurrentJobs, then to provided default."""
+        Value = self.WorkerConfig.get(CapabilityKey) or self.WorkerConfig.get(CapabilityKey.lower())
+        if Value:
+            return max(1, min(5, int(Value)))
+        # Fallback to legacy single column
+        Legacy = self.WorkerConfig.get('MaxConcurrentJobs') or self.WorkerConfig.get('maxconcurrentjobs')
+        if Legacy:
+            return max(1, min(5, int(Legacy)))
+        return Default
 
     def _StartTranscodeCapability(self):
         """Initialize and start the transcode processing capability."""
@@ -199,9 +220,10 @@ class WorkerServiceApp:
             )
             self.TranscodeCurrentStatus = "Running"
             self.TranscodeManuallyStopped = False
-            Result = self.TranscodeService.Run(MaxConcurrentJobs=1)
+            MaxJobs = self._GetPerCapabilityConcurrency('MaxConcurrentTranscodeJobs', Default=1)
+            Result = self.TranscodeService.Run(MaxConcurrentJobs=MaxJobs)
             if Result.get("Success", False):
-                LoggingService.LogInfo("Transcode capability started", "WorkerService", "_StartTranscodeCapability")
+                LoggingService.LogInfo(f"Transcode capability started ({MaxJobs} concurrent jobs)", "WorkerService", "_StartTranscodeCapability")
             else:
                 LoggingService.LogError(f"Failed to start transcode: {Result.get('ErrorMessage', 'Unknown')}", "WorkerService", "_StartTranscodeCapability")
         except Exception as e:
@@ -237,9 +259,10 @@ class WorkerServiceApp:
             self.QualityTestService = ProcessQualityTestQueueService(
                 DatabaseManagerInstance=self.DatabaseManager
             )
-            Result = self.QualityTestService.Run(MaxConcurrentJobs=1)
+            MaxJobs = self._GetPerCapabilityConcurrency('MaxConcurrentQualityTestJobs', Default=2)
+            Result = self.QualityTestService.Run(MaxConcurrentJobs=MaxJobs)
             if Result.get("Success", False):
-                LoggingService.LogInfo("Quality test capability started", "WorkerService", "_StartQualityTestCapability")
+                LoggingService.LogInfo(f"Quality test capability started ({MaxJobs} concurrent jobs)", "WorkerService", "_StartQualityTestCapability")
             else:
                 LoggingService.LogError(f"Failed to start quality test: {Result.get('ErrorMessage', 'Unknown')}", "WorkerService", "_StartQualityTestCapability")
         except Exception as e:
@@ -257,6 +280,42 @@ class WorkerServiceApp:
             self.QualityTestService = None
         except Exception as e:
             LoggingService.LogException("Error stopping quality test capability", e, "WorkerService", "_StopQualityTestCapability")
+
+    def _StartRemuxCapability(self):
+        """Initialize and start the remux processing capability."""
+        if self.RemuxService is not None:
+            return
+        try:
+            from Features.TranscodeJob.ProcessRemuxQueueService import ProcessRemuxQueueService
+            self.RemuxService = ProcessRemuxQueueService(
+                DatabaseManagerInstance=self.DatabaseManager,
+                WorkerName=self.WorkerName,
+                WorkerConfig=self.WorkerConfig
+            )
+            MaxJobs = self._GetPerCapabilityConcurrency('MaxConcurrentRemuxJobs', Default=2)
+            Result = self.RemuxService.Run(MaxConcurrentJobs=MaxJobs)
+            if Result.get("Success", False):
+                LoggingService.LogInfo(f"Remux capability started ({MaxJobs} concurrent jobs)", "WorkerService", "_StartRemuxCapability")
+            else:
+                LoggingService.LogError(f"Failed to start remux: {Result.get('ErrorMessage', 'Unknown')}", "WorkerService", "_StartRemuxCapability")
+        except Exception as e:
+            LoggingService.LogException("Error starting remux capability", e, "WorkerService", "_StartRemuxCapability")
+
+    def _StopRemuxCapability(self):
+        """Stop the remux processing capability gracefully."""
+        if self.RemuxService is None:
+            return
+        try:
+            LoggingService.LogInfo("Stopping remux capability...", "WorkerService", "_StopRemuxCapability")
+            self.RemuxService.StopRequested = True
+            if self.RemuxService.ProcessingThread and self.RemuxService.ProcessingThread.is_alive():
+                self.RemuxService.ProcessingThread.join(timeout=300)
+            self.RemuxService.IsProcessing = False
+            self.RemuxService.ActiveJobs.clear()
+            self.RemuxService = None
+            LoggingService.LogInfo("Remux capability stopped", "WorkerService", "_StopRemuxCapability")
+        except Exception as e:
+            LoggingService.LogException("Error stopping remux capability", e, "WorkerService", "_StopRemuxCapability")
 
     def _StartScanCapability(self):
         """Initialize and start the continuous scanning capability."""
@@ -438,6 +497,12 @@ class WorkerServiceApp:
             self._StartQualityTestCapability()
         elif not self.QualityTestEnabled and self.QualityTestService is not None:
             threading.Thread(target=self._StopQualityTestCapability, daemon=True, name="StopQualityTest").start()
+
+        # Remux
+        if self.RemuxEnabled and self.RemuxService is None:
+            self._StartRemuxCapability()
+        elif not self.RemuxEnabled and self.RemuxService is not None:
+            threading.Thread(target=self._StopRemuxCapability, daemon=True, name="StopRemux").start()
 
         # Scan
         if self.ScanEnabled and self.ContinuousScanService is None:

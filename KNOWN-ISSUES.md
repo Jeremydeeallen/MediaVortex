@@ -2,6 +2,32 @@
 
 ## Open
 
+### [BUG] MaxConcurrentJobs from Workers table is ignored -- workers always run 1 concurrent job
+**Date:** 2026-05-13
+
+**What breaks:** `WorkerService/Main.py` loads `MaxConcurrentJobs` from the Workers table into `self.WorkerConfig` at startup, but `_StartTranscodeCapability()` (line 207) and `_StartQualityTestCapability()` (line 245) both hardcode `Run(MaxConcurrentJobs=1)`. Setting `Workers.MaxConcurrentJobs=2` in the DB has no effect -- the worker still processes one queue item at a time.
+
+**Violates:** `WorkerService/WorkerService.feature.md` criterion 16 (added with this entry).
+
+**Look first:** `WorkerService/Main.py` lines 207 and 245 -- change the hardcoded `1` to read from `self.WorkerConfig.get('MaxConcurrentJobs') or self.WorkerConfig.get('maxconcurrentjobs') or 1`.
+
+**Fix with:** `/t`.
+
+---
+
+### [BUG] Status page "Possibly Corrupt" count has no drill-down to see which files are affected
+**Date:** 2026-05-13
+
+**What breaks:** The `/Status` page shows "Possibly Corrupt: N" (files with `FFProbeFailureCount >= 3`) as a static number with no click-through. The operator sees there ARE corrupt files but cannot see WHICH ones without navigating to `/Scanning` and opening the Corrupt Files modal. The API endpoint (`GET /api/FileScanning/MediaFiles/Corrupt`) and the detail modal (`Templates/FileScanning.html#CorruptFilesModal`) already exist -- the Status page just doesn't use them.
+
+**Violates:** `Features/FileScanning/FileScanning.feature.md` criterion 19 (added with this entry).
+
+**Look first:** `Templates/Status.html` line 55-61 (the `#LibCorrupt` card -- make it clickable). Reuse the existing `/api/FileScanning/MediaFiles/Corrupt` endpoint. Either inline a modal on the Status page or link to `/Scanning?openCorrupt=true` with auto-open logic.
+
+**Fix with:** `/t`.
+
+---
+
 ### [BUG] Worker deploy scp copies the entire repo (venv, .git, Tests, etc.) instead of just build inputs
 **Date:** 2026-05-12
 
@@ -10,6 +36,19 @@
 **Violates:** `deploy/worker-deploy.feature.md` criterion 19 (added with this entry).
 
 **Look first:** `deploy/worker-deploy.flow.md` step 1 (the scp command). Check whether `.dockerignore` already enumerates exclusions the copy step could mirror; consider switching to `rsync -a --exclude-from=.dockerignore` (or an explicit `--exclude` list) so the copy and the Docker context agree on what's in scope.
+
+**Fix with:** `/t`.
+
+---
+
+### [BUG] Linux worker deploy flow doc incomplete -- no post-deploy verification, FFmpeg path troubleshooting, or automation parity with Windows
+**Date:** 2026-05-13
+
+**What breaks:** `deploy/worker-deploy.flow.md` ends at `docker compose up -d` with only an optional SVT-AV1 encoder check and a Workers table query. Does not document: post-deploy health checks confirming FFmpeg/FFprobe paths resolve inside the container, the full container-started-to-operational sequence, troubleshooting when FFmpeg path resolution fails, or what additional operator actions differ between first deploy vs code-only redeploy. An operator following this doc alone would not know how to diagnose "worker registered but can't find FFmpeg" without reading source code. The Windows deploy path (`deploy/windows-worker.flow.md` + `deploy-windows-worker.py`) has full post-deploy verification and single-command automation; Linux has neither.
+
+**Violates:** `deploy/worker-deploy.feature.md` criterion 20 (added with this entry).
+
+**Look first:** `deploy/worker-deploy.flow.md` -- compare post-deploy coverage to `deploy/windows-worker.flow.md`. The Runtime Pipeline table documents what happens inside the container (steps 8-17) but that knowledge is not surfaced as operator-actionable verification steps. Also consider whether a `deploy-linux-worker.py` (or shell script) should exist to match the Windows automation.
 
 **Fix with:** `/t`.
 

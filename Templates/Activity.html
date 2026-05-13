@@ -49,7 +49,17 @@
                         </tr>
                     </thead>
                     <tbody id="ActiveJobsBody"></tbody>
+                    <tfoot id="ActiveJobsFooter" class="table-light fw-bold d-none">
+                        <tr>
+                            <td class="ps-3" colspan="3">Total</td>
+                            <td id="FooterTotalSize">-</td>
+                            <td></td>
+                            <td id="FooterTotalFPS">-</td>
+                            <td colspan="3"></td>
+                        </tr>
+                    </tfoot>
                 </table>
+                <div id="MachineFpsSummary" class="px-3 py-2 small text-muted border-top d-none"></div>
             </div>
         </div>
     </div>
@@ -240,10 +250,58 @@ var ActivityPage = (function() {
             NoJob.classList.add('d-none');
             JobsTable.classList.remove('d-none');
             JobsBody.innerHTML = CombinedHtml;
+            RenderJobFooter(ActiveJobs);
         } else {
             NoJob.classList.remove('d-none');
             JobsTable.classList.add('d-none');
             JobsBody.innerHTML = '';
+            document.getElementById('ActiveJobsFooter').classList.add('d-none');
+            document.getElementById('MachineFpsSummary').classList.add('d-none');
+        }
+    }
+
+    function RenderJobFooter(ActiveJobs) {
+        var Footer = document.getElementById('ActiveJobsFooter');
+        var MachineSummary = document.getElementById('MachineFpsSummary');
+
+        if (!ActiveJobs || ActiveJobs.length === 0) {
+            Footer.classList.add('d-none');
+            MachineSummary.classList.add('d-none');
+            return;
+        }
+
+        // Compute totals
+        var TotalFPS = 0;
+        var TotalSizeMB = 0;
+        var MachineFPS = {};  // WorkerName -> sum of FPS
+
+        ActiveJobs.forEach(function(Job) {
+            var Fps = parseFloat(Job.CurrentFPS) || 0;
+            TotalFPS += Fps;
+            TotalSizeMB += parseFloat(Job.SizeMB) || 0;
+
+            var Worker = Job.ClaimedBy || 'Unknown';
+            // Group by machine: strip the container suffix (larry-worker-1 -> larry)
+            var Machine = Worker.replace(/-worker-\d+$/, '') || Worker;
+            if (!MachineFPS[Machine]) MachineFPS[Machine] = 0;
+            MachineFPS[Machine] += Fps;
+        });
+
+        // Render footer row
+        document.getElementById('FooterTotalSize').textContent = TotalSizeMB > 0 ? FormatSizeMB(TotalSizeMB) : '-';
+        document.getElementById('FooterTotalFPS').textContent = TotalFPS > 0 ? TotalFPS.toFixed(1) : '-';
+        Footer.classList.remove('d-none');
+
+        // Render per-machine FPS summary
+        var MachineNames = Object.keys(MachineFPS).sort();
+        if (MachineNames.length > 1) {
+            var Parts = MachineNames.map(function(M) {
+                return '<strong>' + EscapeHtml(M) + '</strong>: ' + MachineFPS[M].toFixed(1) + ' fps';
+            });
+            MachineSummary.innerHTML = '<i class="fas fa-tachometer-alt me-1"></i>FPS by machine: ' + Parts.join(' &nbsp;|&nbsp; ');
+            MachineSummary.classList.remove('d-none');
+        } else {
+            MachineSummary.classList.add('d-none');
         }
     }
 

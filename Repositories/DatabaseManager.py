@@ -1659,7 +1659,8 @@ class DatabaseManager:
     def ClaimNextPendingTranscodeJob(self, WorkerName: str, AcceptsInterlaced: bool = True) -> Optional[TranscodeQueueModel]:
         """Atomically claim the next pending job using SELECT FOR UPDATE SKIP LOCKED.
         Prevents race conditions when multiple workers compete for jobs.
-        AcceptsInterlaced=False skips interlaced files (leaves them for capable workers)."""
+        AcceptsInterlaced=False skips interlaced files (leaves them for capable workers).
+        Excludes Remux jobs -- those are claimed by ProcessRemuxQueueService."""
         try:
             import psycopg2.extras
             connection = self.DatabaseService.GetConnection()
@@ -1667,13 +1668,14 @@ class DatabaseManager:
                 cursor = connection.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
                 if AcceptsInterlaced:
-                    # Accept all files
+                    # Accept all files except remux
                     query = """
                         UPDATE TranscodeQueue
                         SET Status = 'Running', ClaimedBy = %s, ClaimedAt = NOW(), DateStarted = NOW()
                         WHERE Id = (
                             SELECT Id FROM TranscodeQueue
                             WHERE Status = 'Pending'
+                              AND (ProcessingMode IS NULL OR ProcessingMode != 'Remux')
                             ORDER BY Priority DESC, DateAdded ASC
                             LIMIT 1
                             FOR UPDATE SKIP LOCKED
@@ -1690,6 +1692,7 @@ class DatabaseManager:
                             SELECT tq.Id FROM TranscodeQueue tq
                             JOIN MediaFiles mf ON tq.MediaFileId = mf.Id
                             WHERE tq.Status = 'Pending'
+                              AND (tq.ProcessingMode IS NULL OR tq.ProcessingMode != 'Remux')
                               AND (mf.IsInterlaced IS NULL OR mf.IsInterlaced = '0')
                             ORDER BY tq.Priority DESC, tq.DateAdded ASC
                             LIMIT 1
@@ -1725,6 +1728,58 @@ class DatabaseManager:
                 self.DatabaseService.CloseConnection(connection)
         except Exception as e:
             LoggingService.LogException("Exception in ClaimNextPendingTranscodeJob", e, "DatabaseManager", "ClaimNextPendingTranscodeJob")
+            return None
+
+    def ClaimNextPendingRemuxJob(self, WorkerName: str) -> Optional[TranscodeQueueModel]:
+        """Atomically claim the next pending remux job using SELECT FOR UPDATE SKIP LOCKED.
+        Only claims jobs with ProcessingMode = 'Remux'."""
+        try:
+            import psycopg2.extras
+            connection = self.DatabaseService.GetConnection()
+            try:
+                cursor = connection.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+                query = """
+                    UPDATE TranscodeQueue
+                    SET Status = 'Running', ClaimedBy = %s, ClaimedAt = NOW(), DateStarted = NOW()
+                    WHERE Id = (
+                        SELECT Id FROM TranscodeQueue
+                        WHERE Status = 'Pending'
+                          AND ProcessingMode = 'Remux'
+                        ORDER BY Priority DESC, DateAdded ASC
+                        LIMIT 1
+                        FOR UPDATE SKIP LOCKED
+                    )
+                    RETURNING Id, StorageRootId, RelativePath, FilePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted, ProcessingMode, MediaFileId, TestVariantSetId
+                """
+                cursor.execute(query, (WorkerName,))
+
+                row = cursor.fetchone()
+                connection.commit()
+
+                if row:
+                    return TranscodeQueueModel(
+                        Id=row['id'],
+                        StorageRootId=row.get('storagerootid'),
+                        RelativePath=row.get('relativepath') or '',
+                        FilePath=row['filepath'],
+                        FileName=row['filename'],
+                        Directory=row['directory'],
+                        SizeBytes=row['sizebytes'],
+                        SizeMB=row['sizemb'],
+                        Priority=row['priority'],
+                        Status=row['status'],
+                        DateAdded=row['dateadded'],
+                        DateStarted=row['datestarted'],
+                        ProcessingMode=row.get('processingmode') or 'Remux',
+                        MediaFileId=row.get('mediafileid'),
+                        TestVariantSetId=row.get('testvariantsetid'),
+                    )
+                return None
+            finally:
+                self.DatabaseService.CloseConnection(connection)
+        except Exception as e:
+            LoggingService.LogException("Exception in ClaimNextPendingRemuxJob", e, "DatabaseManager", "ClaimNextPendingRemuxJob")
             return None
 
     def GetTestVariantSet(self, VariantSetId: int) -> Optional[Dict[str, Any]]:
@@ -1801,7 +1856,9 @@ class DatabaseManager:
             query = """
                 SELECT WorkerName, Platform, FFmpegPath, FFprobePath, StagingDirectory,
                        ShareMountPrefix, ShareCanonicalPrefix, MaxConcurrentJobs, Status,
-                       MaxCpuThreads, AcceptsInterlaced, QualityTestEnabled
+                       MaxCpuThreads, AcceptsInterlaced, QualityTestEnabled,
+                       MaxConcurrentTranscodeJobs, MaxConcurrentQualityTestJobs,
+                       MaxConcurrentRemuxJobs, RemuxEnabled
                 FROM Workers WHERE WorkerName = %s
             """
             rows = self.DatabaseService.ExecuteQuery(query, (WorkerName,))
@@ -1855,6 +1912,71 @@ class DatabaseManager:
             return True
         except Exception as e:
             LoggingService.LogException("Exception in RegisterWorkerShareMappings", e, "DatabaseManager", "RegisterWorkerShareMappings")
+            return False
+
+    def RegisterStorageRootResolutions(self, WorkerName: str, Platform: str, Mappings: dict) -> bool:
+        """UPSERT StorageRootResolutions rows derived from share mappings.
+
+        For each drive letter in Mappings, looks up StorageRoots.CanonicalPrefix
+        matching that letter (e.g. 'T:\\') and UPSERTs the resolution row.
+        Mappings: dict of {DriveLetter: AbsolutePath}
+        e.g. {'T': '/mnt/media_tv/', 'M': '/mnt/movies/', 'Z': '/mnt/xxx/'}
+        """
+        try:
+            for DriveLetter, AbsolutePath in Mappings.items():
+                CanonicalPrefix = f"{DriveLetter.upper()}:\\"
+                Rows = self.DatabaseService.ExecuteQuery(
+                    "SELECT Id FROM StorageRoots WHERE CanonicalPrefix = %s LIMIT 1",
+                    (CanonicalPrefix,)
+                )
+                if not Rows:
+                    LoggingService.LogInfo(
+                        f"No StorageRoots row with CanonicalPrefix='{CanonicalPrefix}' -- skipping",
+                        "DatabaseManager", "RegisterStorageRootResolutions"
+                    )
+                    continue
+                StorageRootId = Rows[0]['id']
+                self.DatabaseService.ExecuteNonQuery(
+                    """INSERT INTO StorageRootResolutions (StorageRootId, WorkerName, Platform, AbsolutePath, IsActive)
+                    VALUES (%s, %s, %s, %s, TRUE)
+                    ON CONFLICT (StorageRootId, WorkerName) DO UPDATE SET
+                        Platform = EXCLUDED.Platform,
+                        AbsolutePath = EXCLUDED.AbsolutePath,
+                        IsActive = TRUE""",
+                    (StorageRootId, WorkerName, Platform, AbsolutePath)
+                )
+            return True
+        except Exception as e:
+            LoggingService.LogException("Exception in RegisterStorageRootResolutions", e, "DatabaseManager", "RegisterStorageRootResolutions")
+            return False
+
+    def RegisterStorageRootResolutionsFromCanonical(self, WorkerName: str, Platform: str) -> bool:
+        """UPSERT StorageRootResolutions for workers where the local path IS the canonical prefix.
+
+        Used by Windows workers where drive letters (T:\\, M:\\, Z:\\) are the actual local paths.
+        Reads all StorageRoots and registers a resolution for each using CanonicalPrefix as AbsolutePath.
+        """
+        try:
+            Roots = self.DatabaseService.ExecuteQuery("SELECT Id, CanonicalPrefix FROM StorageRoots")
+            for Root in Roots:
+                StorageRootId = Root['id']
+                AbsolutePath = Root['canonicalprefix']
+                self.DatabaseService.ExecuteNonQuery(
+                    """INSERT INTO StorageRootResolutions (StorageRootId, WorkerName, Platform, AbsolutePath, IsActive)
+                    VALUES (%s, %s, %s, %s, TRUE)
+                    ON CONFLICT (StorageRootId, WorkerName) DO UPDATE SET
+                        Platform = EXCLUDED.Platform,
+                        AbsolutePath = EXCLUDED.AbsolutePath,
+                        IsActive = TRUE""",
+                    (StorageRootId, WorkerName, Platform, AbsolutePath)
+                )
+            LoggingService.LogInfo(
+                f"Worker '{WorkerName}' registered {len(Roots)} StorageRootResolutions from canonical prefixes",
+                "DatabaseManager", "RegisterStorageRootResolutionsFromCanonical"
+            )
+            return True
+        except Exception as e:
+            LoggingService.LogException("Exception in RegisterStorageRootResolutionsFromCanonical", e, "DatabaseManager", "RegisterStorageRootResolutionsFromCanonical")
             return False
 
     def UpdateWorkerStatus(self, WorkerName: str, Status: str) -> bool:
