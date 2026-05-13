@@ -76,6 +76,11 @@ class WorkerServiceApp:
         self.ScanEnabled = False
         self.WorkerStatus = "Offline"
 
+        # Per-capability concurrency (data-driven, updated by capability poller)
+        self.CurrentTranscodeConcurrency = 1
+        self.CurrentQualityTestConcurrency = 2
+        self.CurrentRemuxConcurrency = 2
+
         # Threads
         self.HealthCheckThread = None
         self.StatusPollingThread = None
@@ -168,10 +173,11 @@ class WorkerServiceApp:
         return ""
 
     def _LoadCapabilitiesFromDB(self):
-        """Load capability flags and status from Workers table."""
+        """Load capability flags, concurrency settings, and status from Workers table."""
         try:
             Query = """
-                SELECT TranscodeEnabled, QualityTestEnabled, ScanEnabled, RemuxEnabled, Status
+                SELECT TranscodeEnabled, QualityTestEnabled, ScanEnabled, RemuxEnabled, Status,
+                       MaxConcurrentTranscodeJobs, MaxConcurrentQualityTestJobs, MaxConcurrentRemuxJobs
                 FROM Workers
                 WHERE WorkerName = %s
             """
@@ -183,6 +189,13 @@ class WorkerServiceApp:
                 self.RemuxEnabled = bool(Row.get('RemuxEnabled', True))
                 self.ScanEnabled = bool(Row.get('ScanEnabled', False))
                 self.WorkerStatus = Row.get('Status', 'Online') or 'Online'
+                # Per-capability concurrency (clamped 1-5)
+                RawTranscode = Row.get('MaxConcurrentTranscodeJobs')
+                RawQualityTest = Row.get('MaxConcurrentQualityTestJobs')
+                RawRemux = Row.get('MaxConcurrentRemuxJobs')
+                self.CurrentTranscodeConcurrency = max(1, min(5, int(RawTranscode))) if RawTranscode else 1
+                self.CurrentQualityTestConcurrency = max(1, min(5, int(RawQualityTest))) if RawQualityTest else 2
+                self.CurrentRemuxConcurrency = max(1, min(5, int(RawRemux))) if RawRemux else 2
             else:
                 LoggingService.LogWarning(f"No Workers row found for '{self.WorkerName}', using defaults", "WorkerService", "_LoadCapabilitiesFromDB")
                 self.TranscodeEnabled = True
@@ -190,6 +203,9 @@ class WorkerServiceApp:
                 self.RemuxEnabled = True
                 self.ScanEnabled = False
                 self.WorkerStatus = "Online"
+                self.CurrentTranscodeConcurrency = 1
+                self.CurrentQualityTestConcurrency = 2
+                self.CurrentRemuxConcurrency = 2
         except Exception as e:
             LoggingService.LogException("Error loading capabilities from DB", e, "WorkerService", "_LoadCapabilitiesFromDB")
 
@@ -220,7 +236,7 @@ class WorkerServiceApp:
             )
             self.TranscodeCurrentStatus = "Running"
             self.TranscodeManuallyStopped = False
-            MaxJobs = self._GetPerCapabilityConcurrency('MaxConcurrentTranscodeJobs', Default=1)
+            MaxJobs = self.CurrentTranscodeConcurrency
             Result = self.TranscodeService.Run(MaxConcurrentJobs=MaxJobs)
             if Result.get("Success", False):
                 LoggingService.LogInfo(f"Transcode capability started ({MaxJobs} concurrent jobs)", "WorkerService", "_StartTranscodeCapability")
@@ -259,7 +275,7 @@ class WorkerServiceApp:
             self.QualityTestService = ProcessQualityTestQueueService(
                 DatabaseManagerInstance=self.DatabaseManager
             )
-            MaxJobs = self._GetPerCapabilityConcurrency('MaxConcurrentQualityTestJobs', Default=2)
+            MaxJobs = self.CurrentQualityTestConcurrency
             Result = self.QualityTestService.Run(MaxConcurrentJobs=MaxJobs)
             if Result.get("Success", False):
                 LoggingService.LogInfo(f"Quality test capability started ({MaxJobs} concurrent jobs)", "WorkerService", "_StartQualityTestCapability")
@@ -292,7 +308,7 @@ class WorkerServiceApp:
                 WorkerName=self.WorkerName,
                 WorkerConfig=self.WorkerConfig
             )
-            MaxJobs = self._GetPerCapabilityConcurrency('MaxConcurrentRemuxJobs', Default=2)
+            MaxJobs = self.CurrentRemuxConcurrency
             Result = self.RemuxService.Run(MaxConcurrentJobs=MaxJobs)
             if Result.get("Success", False):
                 LoggingService.LogInfo(f"Remux capability started ({MaxJobs} concurrent jobs)", "WorkerService", "_StartRemuxCapability")
@@ -699,7 +715,7 @@ class WorkerServiceApp:
             LoggingService.LogException("Error starting capability polling", e, "WorkerService", "_StartCapabilityPolling")
 
     def _CapabilityPollingLoop(self):
-        """Poll Workers table every 60 seconds for capability flag changes."""
+        """Poll Workers table every 60 seconds for capability flag and concurrency changes."""
         while not self.ShutdownEvent.is_set():
             try:
                 self.ShutdownEvent.wait(60)
@@ -713,23 +729,57 @@ class WorkerServiceApp:
                 OldTranscode = self.TranscodeEnabled
                 OldQualityTest = self.QualityTestEnabled
                 OldScan = self.ScanEnabled
+                OldRemux = self.RemuxEnabled
+                OldTranscodeConcurrency = self.CurrentTranscodeConcurrency
+                OldQualityTestConcurrency = self.CurrentQualityTestConcurrency
+                OldRemuxConcurrency = self.CurrentRemuxConcurrency
 
                 self._LoadCapabilitiesFromDB()
 
                 if (OldTranscode != self.TranscodeEnabled or
                         OldQualityTest != self.QualityTestEnabled or
+                        OldRemux != self.RemuxEnabled or
                         OldScan != self.ScanEnabled):
                     LoggingService.LogInfo(
                         f"Capabilities changed: Transcode={OldTranscode}->{self.TranscodeEnabled}, "
                         f"QualityTest={OldQualityTest}->{self.QualityTestEnabled}, "
+                        f"Remux={OldRemux}->{self.RemuxEnabled}, "
                         f"Scan={OldScan}->{self.ScanEnabled}",
                         "WorkerService", "_CapabilityPollingLoop"
                     )
                     self._ApplyCapabilities()
 
+                # Apply concurrency changes to running services (no restart needed)
+                self._ApplyConcurrencyChanges(
+                    OldTranscodeConcurrency, OldQualityTestConcurrency, OldRemuxConcurrency
+                )
+
             except Exception as e:
                 LoggingService.LogException("Error in capability polling loop", e, "WorkerService", "_CapabilityPollingLoop")
                 self.ShutdownEvent.wait(30)
+
+    def _ApplyConcurrencyChanges(self, OldTranscode: int, OldQualityTest: int, OldRemux: int):
+        """Update MaxConcurrentJobs on running service instances when DB values change."""
+        if self.CurrentTranscodeConcurrency != OldTranscode and self.TranscodeService is not None:
+            self.TranscodeService.MaxConcurrentJobs = self.CurrentTranscodeConcurrency
+            LoggingService.LogInfo(
+                f"Transcode concurrency changed: {OldTranscode} -> {self.CurrentTranscodeConcurrency}",
+                "WorkerService", "_ApplyConcurrencyChanges"
+            )
+
+        if self.CurrentQualityTestConcurrency != OldQualityTest and self.QualityTestService is not None:
+            self.QualityTestService.MaxConcurrentJobs = self.CurrentQualityTestConcurrency
+            LoggingService.LogInfo(
+                f"Quality test concurrency changed: {OldQualityTest} -> {self.CurrentQualityTestConcurrency}",
+                "WorkerService", "_ApplyConcurrencyChanges"
+            )
+
+        if self.CurrentRemuxConcurrency != OldRemux and self.RemuxService is not None:
+            self.RemuxService.MaxConcurrentJobs = self.CurrentRemuxConcurrency
+            LoggingService.LogInfo(
+                f"Remux concurrency changed: {OldRemux} -> {self.CurrentRemuxConcurrency}",
+                "WorkerService", "_ApplyConcurrencyChanges"
+            )
 
     # --- Main loop and shutdown ---
 

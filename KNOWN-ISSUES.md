@@ -2,16 +2,25 @@
 
 ## Open
 
-### [BUG] MaxConcurrentJobs from Workers table is ignored -- workers always run 1 concurrent job
+### [BUG] Per-capability concurrency is not data-driven -- requires worker restart to take effect
 **Date:** 2026-05-13
+
+**What breaks:** Changing `MaxConcurrentTranscodeJobs`, `MaxConcurrentQualityTestJobs`, or `MaxConcurrentRemuxJobs` in the Workers table does not take effect until the worker process is restarted. The concurrency value is read once during `_StartXxxCapability()` and passed to `Run(MaxConcurrentJobs=N)`. The capability polling loop (60s) checks enabled/disabled flags but never re-reads the concurrency columns. This violates the "data-driven" contract: if the max is raised from 1 to 2, the worker should spin up an additional thread on its next poll without restart.
+
+**Violates:** `WorkerService/WorkerService.feature.md` criterion 18 (added with this entry).
+
+**Look first:** `WorkerService/Main.py` `_CapabilityPollingLoop` and `_GetPerCapabilityConcurrency()`. The queue service `Run()` method needs to support dynamic thread-pool resizing, or the capability must be stopped and restarted with the new concurrency value.
+
+---
+
+### [BUG - FIXED 2026-05-13] MaxConcurrentJobs from Workers table is ignored -- workers always run 1 concurrent job
+**Date:** 2026-05-13 | **Fixed:** 2026-05-13
 
 **What breaks:** `WorkerService/Main.py` loads `MaxConcurrentJobs` from the Workers table into `self.WorkerConfig` at startup, but `_StartTranscodeCapability()` (line 207) and `_StartQualityTestCapability()` (line 245) both hardcode `Run(MaxConcurrentJobs=1)`. Setting `Workers.MaxConcurrentJobs=2` in the DB has no effect -- the worker still processes one queue item at a time.
 
-**Violates:** `WorkerService/WorkerService.feature.md` criterion 16 (added with this entry).
+**Violates:** `WorkerService/WorkerService.feature.md` criterion 16.
 
-**Look first:** `WorkerService/Main.py` lines 207 and 245 -- change the hardcoded `1` to read from `self.WorkerConfig.get('MaxConcurrentJobs') or self.WorkerConfig.get('maxconcurrentjobs') or 1`.
-
-**Fix with:** `/t`.
+**Fix:** Replaced the single `MaxConcurrentJobs` column with per-capability columns: `MaxConcurrentTranscodeJobs` (default 1, CPU-bound), `MaxConcurrentQualityTestJobs` (default 2, I/O-bound), `MaxConcurrentRemuxJobs` (default 2, I/O-bound). Each capability now reads its own column via `_GetPerCapabilityConcurrency()`. Additionally, remux is now a separate capability (`ProcessRemuxQueueService`) with its own queue loop and claim query, so remux concurrency is independent of transcode. Schema migration: `Scripts/SQLScripts/AddPerCapabilityConcurrency.py`.
 
 ---
 

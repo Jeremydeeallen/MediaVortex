@@ -132,6 +132,26 @@
             </div>
         </div>
 
+        <!-- Worker Concurrency Section -->
+        <div class="card mt-4">
+            <div class="card-header bg-light" data-bs-toggle="collapse" data-bs-target="#WorkerConcurrencySection" style="cursor: pointer;">
+                <div class="d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">
+                        <i class="fas fa-server"></i> Worker Concurrency
+                    </h5>
+                    <i class="fas fa-chevron-down"></i>
+                </div>
+            </div>
+            <div class="collapse" id="WorkerConcurrencySection">
+                <div class="card-body">
+                    <p class="text-muted small mb-3">Set per-capability concurrent job limits for each worker. Changes take effect on next worker restart.</p>
+                    <div id="WorkerConcurrencyTable">
+                        <div class="text-center text-muted py-2">Loading...</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- Profile Management Section -->
         <div class="card mt-4">
             <div class="card-header bg-light" data-bs-toggle="collapse" data-bs-target="#ProfileManagementSection" style="cursor: pointer;">
@@ -1084,6 +1104,72 @@ function UpdateBitrateFieldsState(resolution) {
     });
 }
 
+// --- Worker Concurrency ---
+function LoadWorkerConcurrency() {
+    fetch('/api/TeamStatus/Workers')
+        .then(function(R) { return R.json(); })
+        .then(function(Result) {
+            if (!Result.Success) return;
+            RenderWorkerConcurrencyTable(Result.Data);
+        })
+        .catch(function(E) { console.error('Worker concurrency load error:', E); });
+}
+
+function RenderWorkerConcurrencyTable(Workers) {
+    var Container = document.getElementById('WorkerConcurrencyTable');
+    if (!Workers || Workers.length === 0) {
+        Container.innerHTML = '<div class="text-muted">No workers registered</div>';
+        return;
+    }
+    var Html = '<table class="table table-sm table-hover mb-0">' +
+        '<thead class="table-light"><tr>' +
+            '<th>Worker</th>' +
+            '<th style="width:130px;">Transcode</th>' +
+            '<th style="width:130px;">VMAF</th>' +
+            '<th style="width:130px;">Remux</th>' +
+            '<th style="width:80px;"></th>' +
+        '</tr></thead><tbody>';
+    Workers.forEach(function(W) {
+        var Name = W.WorkerName;
+        var NameEsc = Name.replace(/"/g, '&quot;');
+        Html += '<tr data-worker="' + NameEsc + '">' +
+            '<td class="align-middle fw-bold">' + Name + '</td>' +
+            '<td><input type="number" class="form-control form-control-sm" min="1" max="5" ' +
+                'value="' + (W.MaxConcurrentTranscodeJobs || 1) + '" data-field="MaxConcurrentTranscodeJobs"></td>' +
+            '<td><input type="number" class="form-control form-control-sm" min="1" max="5" ' +
+                'value="' + (W.MaxConcurrentQualityTestJobs || 2) + '" data-field="MaxConcurrentQualityTestJobs"></td>' +
+            '<td><input type="number" class="form-control form-control-sm" min="1" max="5" ' +
+                'value="' + (W.MaxConcurrentRemuxJobs || 2) + '" data-field="MaxConcurrentRemuxJobs"></td>' +
+            '<td><button class="btn btn-sm btn-outline-primary" onclick="SaveWorkerConcurrency(\'' + Name.replace(/'/g, "\\'") + '\')"><i class="fas fa-save"></i></button></td>' +
+        '</tr>';
+    });
+    Html += '</tbody></table>';
+    Container.innerHTML = Html;
+}
+
+function SaveWorkerConcurrency(WorkerName) {
+    var Row = document.querySelector('tr[data-worker="' + WorkerName.replace(/"/g, '\\"') + '"]');
+    if (!Row) return;
+    var Body = {};
+    Row.querySelectorAll('input[data-field]').forEach(function(Input) {
+        Body[Input.dataset.field] = parseInt(Input.value, 10);
+    });
+    fetch('/api/TeamStatus/Workers/' + encodeURIComponent(WorkerName) + '/Concurrency', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(Body)
+    })
+        .then(function(R) { return R.json(); })
+        .then(function(Result) {
+            if (Result.Success) {
+                showToastAlert(WorkerName + ' concurrency saved. Restart worker to apply.', 'success');
+            } else {
+                showToastAlert(Result.Message || Result.ErrorMessage || 'Failed to save.', 'danger');
+            }
+        })
+        .catch(function() { showToastAlert('Failed to contact server.', 'danger'); });
+}
+
 // Add event listeners for Quality fields
 $(document).ready(function() {
     LoadProfiles();
@@ -1092,6 +1178,7 @@ $(document).ready(function() {
     LoadExcludedDirectories();
     LoadContinuousScanStatus();
     LoadDefaultProfile();
+    LoadWorkerConcurrency();
 
     // Auto-refresh scan status every 15 seconds
     setInterval(LoadContinuousScanStatus, 15000);

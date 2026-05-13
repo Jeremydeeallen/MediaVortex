@@ -396,7 +396,6 @@ var ActivityPage = (function() {
                     '<div class="small text-muted mb-2">' +
                         '<div class="d-flex justify-content-between"><span>Platform:</span><span>' + EscapeHtml(W.Platform || '-') + '</span></div>' +
                         '<div class="d-flex justify-content-between"><span>Heartbeat:</span><span>' + HeartbeatText + '</span></div>' +
-                        '<div class="d-flex justify-content-between"><span>Max Jobs:</span><span>' + (W.MaxConcurrentJobs || 0) + '</span></div>' +
                         '<div class="d-flex justify-content-between"><span>CPU Threads:</span><span>' + (W.MaxCpuThreads || 'Auto') + '</span></div>' +
                         '<div class="d-flex justify-content-between"><span>Interlaced:</span><span>' + (W.AcceptsInterlaced ? 'Yes' : 'No') + '</span></div>' +
                     '</div>' +
@@ -406,13 +405,16 @@ var ActivityPage = (function() {
                         '<button class="btn ' + (DisplayStatus === 'Offline' ? 'btn-danger' : 'btn-outline-danger') + '" onclick="ActivityPage.SetWorkerStatus(\'' + WorkerNameEsc.replace(/'/g, "\\'") + '\', \'Offline\')">Offline</button>' +
                     '</div>' +
                     '<div class="small text-muted mb-1">Capabilities</div>' +
-                    '<div class="btn-group btn-group-sm w-100" role="group" aria-label="Worker capabilities">' +
+                    '<div class="btn-group btn-group-sm w-100 mb-1" role="group" aria-label="Worker capabilities">' +
                         '<button class="btn ' + (W.TranscodeEnabled ? 'btn-primary' : 'btn-outline-primary') + '" title="Transcode" ' +
                           'onclick="ActivityPage.ToggleWorkerCapability(\'' + WorkerNameEsc.replace(/'/g, "\\'") + '\', \'TranscodeEnabled\', ' + (W.TranscodeEnabled ? 'true' : 'false') + ')">' +
-                          '<i class="fas fa-film me-1"></i>Transcode</button>' +
+                          '<i class="fas fa-film me-1"></i>Transcode (' + (W.MaxConcurrentTranscodeJobs || 1) + ')</button>' +
                         '<button class="btn ' + (W.QualityTestEnabled ? 'btn-info' : 'btn-outline-info') + '" title="VMAF quality test" ' +
                           'onclick="ActivityPage.ToggleWorkerCapability(\'' + WorkerNameEsc.replace(/'/g, "\\'") + '\', \'QualityTestEnabled\', ' + (W.QualityTestEnabled ? 'true' : 'false') + ')">' +
-                          '<i class="fas fa-chart-line me-1"></i>VMAF</button>' +
+                          '<i class="fas fa-chart-line me-1"></i>VMAF (' + (W.MaxConcurrentQualityTestJobs || 2) + ')</button>' +
+                        '<button class="btn ' + (W.RemuxEnabled ? 'btn-success' : 'btn-outline-success') + '" title="Remux (container copy)" ' +
+                          'onclick="ActivityPage.ToggleWorkerCapability(\'' + WorkerNameEsc.replace(/'/g, "\\'") + '\', \'RemuxEnabled\', ' + (W.RemuxEnabled ? 'true' : 'false') + ')">' +
+                          '<i class="fas fa-copy me-1"></i>Remux (' + (W.MaxConcurrentRemuxJobs || 2) + ')</button>' +
                         '<button class="btn ' + (W.ScanEnabled ? 'btn-secondary' : 'btn-outline-secondary') + '" title="Continuous file scanning" ' +
                           'onclick="ActivityPage.ToggleWorkerCapability(\'' + WorkerNameEsc.replace(/'/g, "\\'") + '\', \'ScanEnabled\', ' + (W.ScanEnabled ? 'true' : 'false') + ')">' +
                           '<i class="fas fa-search me-1"></i>Scan</button>' +

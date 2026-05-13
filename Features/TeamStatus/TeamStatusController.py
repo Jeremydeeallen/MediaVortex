@@ -290,7 +290,8 @@ def GetWorkers():
         Query = """
             SELECT WorkerName, Platform, Status, LastHeartbeat,
                    MaxConcurrentJobs, MaxCpuThreads, AcceptsInterlaced,
-                   TranscodeEnabled, QualityTestEnabled, ScanEnabled,
+                   TranscodeEnabled, QualityTestEnabled, ScanEnabled, RemuxEnabled,
+                   MaxConcurrentTranscodeJobs, MaxConcurrentQualityTestJobs, MaxConcurrentRemuxJobs,
                    EXTRACT(EPOCH FROM (NOW() - LastHeartbeat)) AS HeartbeatAgeSec
             FROM Workers
             ORDER BY WorkerName
@@ -312,7 +313,11 @@ def GetWorkers():
                 "AcceptsInterlaced": bool(Row.get('AcceptsInterlaced', True)),
                 "TranscodeEnabled": bool(Row.get('TranscodeEnabled', True)),
                 "QualityTestEnabled": bool(Row.get('QualityTestEnabled', False)),
-                "ScanEnabled": bool(Row.get('ScanEnabled', False))
+                "ScanEnabled": bool(Row.get('ScanEnabled', False)),
+                "RemuxEnabled": bool(Row.get('RemuxEnabled', True)),
+                "MaxConcurrentTranscodeJobs": Row.get('MaxConcurrentTranscodeJobs') or 1,
+                "MaxConcurrentQualityTestJobs": Row.get('MaxConcurrentQualityTestJobs') or 2,
+                "MaxConcurrentRemuxJobs": Row.get('MaxConcurrentRemuxJobs') or 2
             })
 
         return jsonify({"Success": True, "Data": Workers})
@@ -390,7 +395,7 @@ def SetWorkerCapability(WorkerName):
         LoggingService.LogFunctionEntry("SetWorkerCapability", "TeamStatusController")
 
         Data = request.get_json() or {}
-        AllowedColumns = {'TranscodeEnabled', 'QualityTestEnabled', 'ScanEnabled'}
+        AllowedColumns = {'TranscodeEnabled', 'QualityTestEnabled', 'ScanEnabled', 'RemuxEnabled'}
         UpdateColumns = {k: v for k, v in Data.items() if k in AllowedColumns}
         if not UpdateColumns:
             return jsonify({"Success": False, "Message": f"Provide at least one of: {', '.join(sorted(AllowedColumns))}"}), 400
@@ -418,7 +423,7 @@ def SetWorkerCapability(WorkerName):
         # Return the updated row so the UI can reflect the new state immediately
         # without re-fetching the whole worker list.
         FreshRows = DbManager.DatabaseService.ExecuteQuery(
-            "SELECT WorkerName, TranscodeEnabled, QualityTestEnabled, ScanEnabled FROM Workers WHERE WorkerName = %s",
+            "SELECT WorkerName, TranscodeEnabled, QualityTestEnabled, ScanEnabled, RemuxEnabled FROM Workers WHERE WorkerName = %s",
             (WorkerName,)
         )
         Fresh = FreshRows[0] if FreshRows else {}
@@ -431,12 +436,63 @@ def SetWorkerCapability(WorkerName):
                 "TranscodeEnabled": bool(Fresh.get('TranscodeEnabled')) if Fresh.get('TranscodeEnabled') is not None else None,
                 "QualityTestEnabled": bool(Fresh.get('QualityTestEnabled')) if Fresh.get('QualityTestEnabled') is not None else None,
                 "ScanEnabled": bool(Fresh.get('ScanEnabled')) if Fresh.get('ScanEnabled') is not None else None,
+                "RemuxEnabled": bool(Fresh.get('RemuxEnabled')) if Fresh.get('RemuxEnabled') is not None else None,
             }
         })
 
     except Exception as e:
         ErrorMsg = f"Exception in SetWorkerCapability: {str(e)}"
         LoggingService.LogException(ErrorMsg, e, "TeamStatusController", "SetWorkerCapability")
+        return jsonify({"Success": False, "ErrorMessage": ErrorMsg}), 500
+
+
+@TeamStatusBlueprint.route('/Workers/<WorkerName>/Concurrency', methods=['POST'])
+def SetWorkerConcurrency(WorkerName):
+    """Set per-capability concurrency limits for a worker.
+
+    Body: {"MaxConcurrentTranscodeJobs": 1, "MaxConcurrentQualityTestJobs": 3, ...}
+    Any subset of the three keys is accepted; unspecified columns are left untouched.
+    Values must be integers 1-5.
+    Takes effect on next worker restart (concurrency is read at capability start).
+    """
+    try:
+        LoggingService.LogFunctionEntry("SetWorkerConcurrency", "TeamStatusController")
+
+        Data = request.get_json() or {}
+        AllowedColumns = {'MaxConcurrentTranscodeJobs', 'MaxConcurrentQualityTestJobs', 'MaxConcurrentRemuxJobs'}
+        UpdateColumns = {k: v for k, v in Data.items() if k in AllowedColumns}
+        if not UpdateColumns:
+            return jsonify({"Success": False, "Message": f"Provide at least one of: {', '.join(sorted(AllowedColumns))}"}), 400
+
+        # Validate value types and range
+        for Key, Val in UpdateColumns.items():
+            if not isinstance(Val, int) or Val < 1 or Val > 5:
+                return jsonify({"Success": False, "Message": f"{Key} must be an integer between 1 and 5"}), 400
+
+        DbManager = DatabaseManager()
+        CheckRows = DbManager.DatabaseService.ExecuteQuery("SELECT 1 FROM Workers WHERE WorkerName = %s", (WorkerName,))
+        if not CheckRows:
+            return jsonify({"Success": False, "Message": f"Worker '{WorkerName}' not found"}), 404
+
+        SetClauses = ", ".join(f"{Col} = %s" for Col in UpdateColumns.keys())
+        Params = tuple(UpdateColumns.values()) + (WorkerName,)
+        UpdateQuery = f"UPDATE Workers SET {SetClauses} WHERE WorkerName = %s"
+        DbManager.DatabaseService.ExecuteNonQuery(UpdateQuery, Params)
+
+        LoggingService.LogInfo(
+            f"Worker '{WorkerName}' concurrency updated: {UpdateColumns}",
+            "TeamStatusController", "SetWorkerConcurrency"
+        )
+
+        return jsonify({
+            "Success": True,
+            "Message": f"Worker '{WorkerName}' concurrency updated. Restart worker to apply.",
+            "Updated": UpdateColumns
+        })
+
+    except Exception as e:
+        ErrorMsg = f"Exception in SetWorkerConcurrency: {str(e)}"
+        LoggingService.LogException(ErrorMsg, e, "TeamStatusController", "SetWorkerConcurrency")
         return jsonify({"Success": False, "ErrorMessage": ErrorMsg}), 500
 
 

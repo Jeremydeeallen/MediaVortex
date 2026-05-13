@@ -5,7 +5,7 @@
 | Host | IP | Workers | CPU | Compose Location |
 |------|-----|---------|-----|------------------|
 | Larry (LXC on Proxmox) | 10.0.0.42 | larry-worker-1 through 8 | 2x Xeon (64 threads), cpuset pinned | `/opt/mediavortex/docker-compose.yml` |
-| Wakko (client-b450m-01) | 10.0.0.230 | client-b450m-01 | Ryzen 7 3700X (8C/16T) | `/opt/mediavortex/docker-compose.yml` |
+| Wakko (client-b450m-01) | 10.0.0.230 | client-b450m-01 through 04 | Ryzen 7 3700X (8C/16T), 4 threads/worker | `/opt/mediavortex/docker-compose.yml` |
 
 Deploy commands target a host by IP. When adding a new host, add it here and follow the Build and Deploy Pipeline below.
 

@@ -21,7 +21,7 @@ Replaces the former `TranscodeService/Main.py` + `QualityTestService/Main.py` du
 | 8. Mark Online | `DatabaseManager.UpdateWorkerStatus()` | Sets Workers.Status = 'Online' |
 | 9. Start health monitor | `_StartHealthMonitoring()` | Thread: updates Workers.LastHeartbeat every 30s |
 | 10. Start status polling | `_StartStatusPolling()` | Thread: reads Workers.Status every 5s, calls `_HandleStatusChange()` on transitions |
-| 11. Start capability polling | `_StartCapabilityPolling()` | Thread: reads capability flags every 60s, calls `_ApplyCapabilities()` on changes |
+| 11. Start capability polling | `_StartCapabilityPolling()` | Thread: reads capability flags and concurrency columns every 60s, calls `_ApplyCapabilities()` on flag changes, `_ApplyConcurrencyChanges()` on concurrency changes |
 | 12. Apply capabilities | `_ApplyCapabilities()` | Starts/stops TranscodeService, QualityTestService, ContinuousScanService based on flags |
 | 13. Main loop | `_MainLoop()` | Blocks on ShutdownEvent, checking every 10s |
 
@@ -47,13 +47,30 @@ Status is set via:
 
 ## Capability Lifecycle
 
-Each capability (Transcode, QualityTest, Scan) has Start/Stop methods:
+Each capability (Transcode, QualityTest, Remux, Scan) has Start/Stop methods:
 
 | Capability | Start | Stop | Service Class |
 |------------|-------|------|---------------|
 | Transcode | `_StartTranscodeCapability()` | `_StopTranscodeCapability()` | `ProcessTranscodeQueueService` |
 | QualityTest | `_StartQualityTestCapability()` | `_StopQualityTestCapability()` | `ProcessQualityTestQueueService` |
+| Remux | `_StartRemuxCapability()` | `_StopRemuxCapability()` | `ProcessRemuxQueueService` |
 | Scan | `_StartScanCapability()` | `_StopScanCapability()` | `ContinuousScanService` |
+
+### Per-Capability Concurrency
+
+Each capability reads its own concurrency column from the Workers table at start time, and the capability polling loop updates it dynamically every 60 seconds:
+
+| Capability | Column | Default | Rationale |
+|------------|--------|---------|-----------|
+| Transcode | `MaxConcurrentTranscodeJobs` | 1 | CPU-bound (FFmpeg saturates cores) |
+| QualityTest | `MaxConcurrentQualityTestJobs` | 2 | I/O-bound (VMAF reads two files) |
+| Remux | `MaxConcurrentRemuxJobs` | 2 | I/O-bound (container copy, no re-encode) |
+
+`_LoadCapabilitiesFromDB()` reads all three columns alongside the enabled flags. `_ApplyConcurrencyChanges()` compares old vs new values and directly updates `service.MaxConcurrentJobs` on running service instances. The queue loop checks `len(ActiveJobs) < MaxConcurrentJobs` on every iteration, so the new value takes effect immediately without stopping the service. Range-clamped to 1-5.
+
+### Remux Queue Separation
+
+`ProcessRemuxQueueService` claims only `ProcessingMode='Remux'` rows via `ClaimNextPendingRemuxJob`. `ProcessTranscodeQueueService.ClaimNextPendingTranscodeJob` excludes remux rows (`ProcessingMode IS NULL OR ProcessingMode != 'Remux'`). This allows remux to run at higher concurrency without competing for transcode slots.
 
 Capabilities are created lazily -- only initialized when enabled for the first time. Stop methods wait for the current job to finish (transcode: up to 2 hour timeout).
 
