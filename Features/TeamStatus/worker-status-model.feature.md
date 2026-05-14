@@ -45,7 +45,7 @@ References: KNOWN-ISSUES.md line 393 "[TECH DEBT] Activity page conflates worker
 
 ## Status
 
-IN PROGRESS
+COMPLETE (2026-05-14)
 
 ### Progress
 - [x] Feature doc drafted
@@ -55,5 +55,5 @@ IN PROGRESS
 - [x] StuckJobDetectionService updated (Offline -> Paused check)
 - [x] Activity.html UI (Online/Pause buttons, heartbeat dot, badge map)
 - [x] Flow doc updated
-- [ ] Deploy to larry + wakko
-- [ ] Verify on Activity page
+- [x] Deploy to larry + wakko (2026-05-14, commit 76a9810)
+- [x] Verify on Activity page (2026-05-14, all workers showing correct status)
