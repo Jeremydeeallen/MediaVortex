@@ -287,15 +287,18 @@ def GetWorkers():
 
         DbManager = DatabaseManager()
 
+        IncludeDisabled = request.args.get('IncludeDisabled', 'false').lower() == 'true'
         Query = """
             SELECT WorkerName, Platform, Status, LastHeartbeat,
                    MaxConcurrentJobs, MaxCpuThreads, AcceptsInterlaced,
                    TranscodeEnabled, QualityTestEnabled, ScanEnabled, RemuxEnabled,
                    MaxConcurrentTranscodeJobs, MaxConcurrentQualityTestJobs, MaxConcurrentRemuxJobs,
+                   Enabled,
                    EXTRACT(EPOCH FROM (NOW() - LastHeartbeat)) AS HeartbeatAgeSec
             FROM Workers
+            {where}
             ORDER BY WorkerName
-        """
+        """.format(where='' if IncludeDisabled else 'WHERE Enabled = TRUE')
         Rows = DbManager.DatabaseService.ExecuteQuery(Query)
 
         Workers = []
@@ -318,7 +321,8 @@ def GetWorkers():
                 "RemuxEnabled": bool(Row.get('RemuxEnabled', True)),
                 "MaxConcurrentTranscodeJobs": Row.get('MaxConcurrentTranscodeJobs') or 1,
                 "MaxConcurrentQualityTestJobs": Row.get('MaxConcurrentQualityTestJobs') or 2,
-                "MaxConcurrentRemuxJobs": Row.get('MaxConcurrentRemuxJobs') or 2
+                "MaxConcurrentRemuxJobs": Row.get('MaxConcurrentRemuxJobs') or 2,
+                "Enabled": bool(Row.get('Enabled', True))
             })
 
         return jsonify({"Success": True, "Data": Workers})
@@ -328,6 +332,42 @@ def GetWorkers():
         LoggingService.LogException(ErrorMsg, e, "TeamStatusController", "GetWorkers")
         return jsonify({"Success": False, "ErrorMessage": ErrorMsg}), 500
 
+@TeamStatusBlueprint.route('/Workers/<WorkerName>/Enable', methods=['POST'])
+def EnableWorker(WorkerName):
+    """Re-enable a disabled worker so it appears in the UI again."""
+    try:
+        LoggingService.LogFunctionEntry("EnableWorker", "TeamStatusController")
+        DbManager = DatabaseManager()
+        Rows = DbManager.DatabaseService.ExecuteQuery("SELECT 1 FROM Workers WHERE WorkerName = %s", (WorkerName,))
+        if not Rows:
+            return jsonify({"Success": False, "Message": f"Worker '{WorkerName}' not found"}), 404
+        DbManager.DatabaseService.ExecuteNonQuery("UPDATE Workers SET Enabled = TRUE WHERE WorkerName = %s", (WorkerName,))
+        LoggingService.LogInfo(f"Worker '{WorkerName}' enabled", "TeamStatusController", "EnableWorker")
+        return jsonify({"Success": True, "Message": f"Worker '{WorkerName}' enabled"})
+    except Exception as e:
+        ErrorMsg = f"Exception in EnableWorker: {str(e)}"
+        LoggingService.LogException(ErrorMsg, e, "TeamStatusController", "EnableWorker")
+        return jsonify({"Success": False, "ErrorMessage": ErrorMsg}), 500
+
+
+@TeamStatusBlueprint.route('/Workers/<WorkerName>/Disable', methods=['POST'])
+def DisableWorker(WorkerName):
+    """Disable a worker -- hides it from the UI and sets status to Paused."""
+    try:
+        LoggingService.LogFunctionEntry("DisableWorker", "TeamStatusController")
+        DbManager = DatabaseManager()
+        Rows = DbManager.DatabaseService.ExecuteQuery("SELECT 1 FROM Workers WHERE WorkerName = %s", (WorkerName,))
+        if not Rows:
+            return jsonify({"Success": False, "Message": f"Worker '{WorkerName}' not found"}), 404
+        DbManager.DatabaseService.ExecuteNonQuery(
+            "UPDATE Workers SET Enabled = FALSE, Status = 'Paused' WHERE WorkerName = %s", (WorkerName,)
+        )
+        LoggingService.LogInfo(f"Worker '{WorkerName}' disabled", "TeamStatusController", "DisableWorker")
+        return jsonify({"Success": True, "Message": f"Worker '{WorkerName}' disabled"})
+    except Exception as e:
+        ErrorMsg = f"Exception in DisableWorker: {str(e)}"
+        LoggingService.LogException(ErrorMsg, e, "TeamStatusController", "DisableWorker")
+        return jsonify({"Success": False, "ErrorMessage": ErrorMsg}), 500
 
 @TeamStatusBlueprint.route('/ResetStuckJob', methods=['POST'])
 def ResetStuckJob():

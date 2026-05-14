@@ -68,13 +68,19 @@
     <div class="card mb-4">
         <div class="card-header py-2 d-flex justify-content-between align-items-center">
             <h6 class="mb-0"><i class="fas fa-server me-2"></i>Workers</h6>
-            <div class="btn-group btn-group-sm" role="group">
-                <button class="btn btn-outline-success" onclick="ActivityPage.SetAllWorkersStatus('Online')" title="Set All Online">
-                    <i class="fas fa-play"></i> All Online
-                </button>
-                <button class="btn btn-outline-secondary" onclick="ActivityPage.SetAllWorkersStatus('Paused')" title="Pause All">
-                    <i class="fas fa-pause"></i> Pause All
-                </button>
+            <div class="d-flex align-items-center gap-2">
+                <div class="form-check form-switch mb-0">
+                    <input class="form-check-input" type="checkbox" id="ShowDisabledToggle">
+                    <label class="form-check-label small" for="ShowDisabledToggle">Show Disabled</label>
+                </div>
+                <div class="btn-group btn-group-sm" role="group">
+                    <button class="btn btn-outline-success" onclick="ActivityPage.SetAllWorkersStatus('Online')" title="Set All Online">
+                        <i class="fas fa-play"></i> All Online
+                    </button>
+                    <button class="btn btn-outline-secondary" onclick="ActivityPage.SetAllWorkersStatus('Paused')" title="Pause All">
+                        <i class="fas fa-pause"></i> Pause All
+                    </button>
+                </div>
             </div>
         </div>
         <div class="card-body">
@@ -372,7 +378,9 @@ var ActivityPage = (function() {
 
     // -- Workers --
     function LoadWorkers() {
-        fetch('/api/TeamStatus/Workers')
+        var ShowDisabled = document.getElementById('ShowDisabledToggle').checked;
+        var Url = '/api/TeamStatus/Workers' + (ShowDisabled ? '?IncludeDisabled=true' : '');
+        fetch(Url)
             .then(function(R) { return R.json(); })
             .then(function(Data) {
                 if (Data.Success && Data.Data) {
@@ -392,9 +400,10 @@ var ActivityPage = (function() {
         }
         WorkerList.forEach(function(W) {
             var HeartbeatAge = W.HeartbeatAgeSec;
-            var DisplayStatus = W.Status || 'Paused';
-            var BadgeCls = GetWorkerStatusBadge(DisplayStatus);
-            var CardCls = GetWorkerCardClass(DisplayStatus);
+            var IsDisabled = W.Enabled === false;
+            var DisplayStatus = IsDisabled ? 'Disabled' : (W.Status || 'Paused');
+            var BadgeCls = IsDisabled ? 'bg-dark' : GetWorkerStatusBadge(DisplayStatus);
+            var CardCls = IsDisabled ? 'card border-secondary opacity-50' : GetWorkerCardClass(DisplayStatus);
             var HeartbeatText = FormatHeartbeatAge(HeartbeatAge);
             var HeartbeatDot = GetHeartbeatDotClass(HeartbeatAge);
             var WorkerNameEsc = EscapeHtml(W.WorkerName);
@@ -433,6 +442,12 @@ var ActivityPage = (function() {
                           '<i class="fas fa-search me-1"></i>Scan</button>' +
                     '</div>' +
                     '<div class="form-text small mt-1">Capability changes apply within 60s (no restart).</div>' +
+                    '<div class="mt-2">' +
+                        (IsDisabled
+                            ? '<button class="btn btn-outline-success btn-sm w-100" onclick="ActivityPage.EnableWorker(\'' + WorkerNameEsc.replace(/'/g, "\\'") + '\')"><i class="fas fa-plug me-1"></i>Enable Worker</button>'
+                            : '<button class="btn btn-outline-danger btn-sm w-100" onclick="ActivityPage.DisableWorker(\'' + WorkerNameEsc.replace(/'/g, "\\'") + '\')"><i class="fas fa-power-off me-1"></i>Disable Worker</button>'
+                        ) +
+                    '</div>' +
                 '</div>' +
             '</div>';
             Container.appendChild(Col);
@@ -488,6 +503,41 @@ var ActivityPage = (function() {
             .catch(function() { showToastAlert('Failed to contact server.', 'danger'); });
     }
 
+    function DisableWorker(WorkerName) {
+        if (!confirm('Disable worker "' + WorkerName + '"? It will be hidden from this page.')) return;
+        fetch('/api/TeamStatus/Workers/' + encodeURIComponent(WorkerName) + '/Disable', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        })
+            .then(function(R) { return R.json(); })
+            .then(function(Result) {
+                if (Result.Success) {
+                    showToastAlert(WorkerName + ' disabled', 'success');
+                    LoadWorkers();
+                } else {
+                    showToastAlert(Result.Message || 'Failed to disable worker.', 'danger');
+                }
+            })
+            .catch(function() { showToastAlert('Failed to contact server.', 'danger'); });
+    }
+
+    function EnableWorker(WorkerName) {
+        fetch('/api/TeamStatus/Workers/' + encodeURIComponent(WorkerName) + '/Enable', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        })
+            .then(function(R) { return R.json(); })
+            .then(function(Result) {
+                if (Result.Success) {
+                    showToastAlert(WorkerName + ' enabled', 'success');
+                    LoadWorkers();
+                } else {
+                    showToastAlert(Result.Message || 'Failed to enable worker.', 'danger');
+                }
+            })
+            .catch(function() { showToastAlert('Failed to contact server.', 'danger'); });
+    }
+
     // VMAF rows are now rendered inline by RenderActiveJobs (combined-pass).
     // The previous LoadActiveVmaf/AppendActiveVmafRow helpers are removed --
     // see LoadOverview's Promise.all pattern.
@@ -528,6 +578,7 @@ var ActivityPage = (function() {
     function Init() {
         document.getElementById('RefreshBtn').addEventListener('click', RefreshAll);
         document.getElementById('AutoRefreshBtn').addEventListener('click', ToggleAutoRefresh);
+        document.getElementById('ShowDisabledToggle').addEventListener('change', LoadWorkers);
         // RefreshQualityTestingBtn moved to /Queue page.
 
         RefreshAll();
@@ -542,7 +593,9 @@ var ActivityPage = (function() {
         ResetStuckJob: ResetStuckJob,
         SetWorkerStatus: SetWorkerStatus,
         SetAllWorkersStatus: SetAllWorkersStatus,
-        ToggleWorkerCapability: ToggleWorkerCapability
+        ToggleWorkerCapability: ToggleWorkerCapability,
+        DisableWorker: DisableWorker,
+        EnableWorker: EnableWorker
         // RetryQualityTest moved to /Queue page.
     };
 })();
