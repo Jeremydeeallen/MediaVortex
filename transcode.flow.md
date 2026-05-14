@@ -39,20 +39,24 @@ Stages 1-4 require user action. Stages 5-7 are automatic once WorkerService is r
 
 ## Stage 2: PROBE -- FFprobe Metadata Extraction
 
-**Trigger:** User calls `POST /api/MediaProbe/ProbeAll` or `/api/MediaProbe/Probe/{id}`
+**Trigger:** Two paths:
+1. **Automatic after scan** -- `FileScanningBusinessService.PerformScan()` Step 7 calls `MediaProbeService.ProbeFilesNeedingMetadata(RootFolderId)` at the end of every scan. This is the primary path -- every scanned file is probed in the same operation.
+2. **Manual** -- `POST /api/MediaProbe/ProbeAll` or `/api/MediaProbe/Probe/{id}`.
 
 **Code path:**
 - `Features/MediaProbe/MediaProbeController.py` -> `MediaProbeBusinessService.ProbeFile()` -> `_ExecuteProbe()`
 - Runs `ffprobe` on each file
 - Extracts: Resolution, Codec, VideoBitrateKbps, AudioBitrateKbps, DurationMinutes, FrameRate, AudioLanguages, HasExplicitEnglishAudio, SubtitleFormats, ContainerFormat, etc.
+- After successful probe: calls `RecomputeForFiles([MediaFileId])` which populates `PriorityScore`, `AssignedProfile`, `IsCompliant`, and `RecommendedMode` in a single pass (see Stage 3.5).
 
-**Tables written:** MediaFiles (all metadata columns, FFProbeFailureCount)
+**Tables written:** MediaFiles (all metadata columns, FFProbeFailureCount, plus PriorityScore/AssignedProfile/IsCompliant/RecommendedMode via the recompute hook)
 
 **Safety guards:**
 - FFprobe failure limit: files with 3+ failures are permanently skipped (resettable via ResetFailures endpoint)
 - Sets `HasExplicitEnglishAudio`: NULL (not probed), true (English found), false (confirmed non-English)
+- Recompute failure does NOT roll back the probe -- metadata is always saved.
 
-**Output:** MediaFiles rows with full metadata. `HasExplicitEnglishAudio` is the critical field for queue safety.
+**Output:** MediaFiles rows with full metadata and computed routing fields. `HasExplicitEnglishAudio` is the critical field for queue safety. `RecommendedMode` determines whether the file enters the Transcode or Remux pipeline.
 
 ---
 
@@ -71,30 +75,56 @@ Stages 1-4 require user action. Stages 5-7 are automatic once WorkerService is r
 
 ---
 
-## Stage 3.5: PRIORITY -- Score Materialization
+## Stage 3.5: RECOMPUTE -- Priority, Compliance, and Routing Materialization
 
-**Trigger:** Three event sources keep `MediaFiles.PriorityScore` current:
+**What it computes:** A single function (`RecomputeForFiles`) updates four cached columns on `MediaFiles` in one pass per row:
 
-1. **Probe completion** -- `MediaProbeBusinessService.ProbeFile` invokes `QueueManagementBusinessService.ComputePriorityScore(MediaFileId)` immediately after writing the probe result.
-2. **AssignedProfile change** -- `Features/Profiles/ProfilesController.AssignProfileToRootFolder`, `Features/ShowSettings/ShowSettingsController.Save`, and `BulkUpdate` invoke `ComputePriorityScoresForFiles` for the affected MediaFileIds after the AssignedProfile UPDATE commits. Single-file paths (`AddSuggestionsToQueue`, `QueueByFolder`) call the single-file variant.
-3. **ProfileThresholds change** -- explicit operator action via `POST /api/PriorityMaterialization/Recompute` (no automatic recompute; thresholds change rarely and a sweep can be expensive).
+| Column | Values | Purpose |
+|--------|--------|---------|
+| `AssignedProfile` | profile name string or NULL | Resolved via cascade: ShowSettings per-show override -> SystemSettings.DefaultProfileName |
+| `PriorityScore` | integer 1-194 | Impact-based score (bytes-saved estimate). Workers claim highest first. |
+| `IsCompliant` | true / false / NULL | Whether the file already meets all codec/container/audio requirements. NULL = undecidable (no profile, no English audio, not probed). |
+| `RecommendedMode` | 'Transcode' / 'Remux' / NULL | Which pipeline should handle this file. NULL = already compliant. |
 
-**Code path (recompute):**
+**RecommendedMode decision** (from `_EvaluateCompliance`, see `transcode-vs-remux-routing.feature.md` criterion 11):
+
+1. Hard blocks (return NULL/NULL): no English audio, no effective profile, no resolution category, no profile thresholds.
+2. `Transcode` -- video codec not in `CodecCompatibility.VideoCodec` acceptable set, OR resolution downscale needed, OR estimated savings >= `QueueAdmissionConfig.MinTranscodeSavingsMB`.
+3. `Remux` -- container not in acceptable set (e.g. matroska), OR audio codec not acceptable for MP4, OR audio not yet normalized.
+4. Compliant (true, NULL) -- passes all checks.
+
+The cascade is ordered: Transcode wins over Remux (if a file needs both a codec change and a container change, Transcode handles it since re-encoding produces an MP4 output anyway).
+
+**Trigger:** Four event sources keep these columns current:
+
+1. **Probe completion** -- `MediaProbeBusinessService._ExecuteProbe` calls `RecomputeForFiles([MediaFileId])` after writing probe metadata. Since probe runs automatically at the end of every scan (Stage 2), this is the initial population path for newly discovered files.
+2. **File replacement completion** -- `FileReplacementBusinessService._ProcessCompleteFileReplacement` calls `RecomputeForFiles([MediaFileId])` after updating the MediaFiles row with new metadata. This is what clears `RecommendedMode` after a successful remux or transcode.
+3. **AssignedProfile change** -- profile assignment endpoints invoke `ComputePriorityScoresForFiles` (alias for `RecomputeForFiles`) for affected MediaFileIds.
+4. **Admin recompute** -- `POST /api/PriorityMaterialization/Recompute` (explicit operator action, optional `ProfileName` / `Drive` / `ShowFolder` filters).
+
+**Code path:**
 - `Features/TranscodeQueue/QueueManagementBusinessService.py`:
-  - `ComputePriorityScore(MediaFileId)` -- loads MediaFile + AssignedProfile + ProfileThresholds, calls `CalculatePriority`, writes `MediaFiles.PriorityScore`.
-  - `ComputePriorityScoresForFiles(MediaFileIds)` -- bulk variant; caches ProfileThresholds lookups across rows.
-- `Features/PriorityMaterialization/PriorityMaterializationController.py` -- `POST /api/PriorityMaterialization/Recompute` admin endpoint accepting optional `ProfileName` / `Drive` filters.
+  - `RecomputeForFiles(MediaFileIds)` -- loads all caches once (profiles, thresholds, show overrides, audio normalization set, codec compatibility sets, queue admission config), then evaluates each row. Single bulk UPDATE writes all four columns.
+  - `ComputePriorityScoresForFiles(MediaFileIds)` -- backwards-compat alias, calls `RecomputeForFiles`.
+- `Features/PriorityMaterialization/PriorityMaterializationController.py` -- admin endpoint.
 
-**Tables written:** MediaFiles (PriorityScore column).
+**Tables read:** MediaFiles, Profiles, ProfileThresholds, ShowSettings, SystemSettings, CodecCompatibility, QueueAdmissionConfig, AudioNormalizationLog.
+
+**Tables written:** MediaFiles (AssignedProfile, PriorityScore, IsCompliant, RecommendedMode).
 
 **Failure semantics:**
-- The recompute hook never blocks the triggering operation. If recompute fails (DB error, missing inputs), the trigger (probe / assign) still returns Success=True.
-- A failed recompute leaves the prior PriorityScore value untouched -- never silently zeroed or nulled.
+- The recompute hook never blocks the triggering operation. If recompute fails (DB error, missing inputs), the trigger (probe / replace / assign) still returns Success=True.
+- A failed recompute leaves prior values untouched -- never silently zeroed or nulled.
+- Per-row failures in the bulk loop are logged and skipped; remaining rows still update.
 - A `LogWarning` row is emitted naming the MediaFileId and reason whenever the fallback path runs (NULL AssignedProfile, no ProfileThresholds row). Per the loud-failure rule, silent fallbacks are forbidden.
 
-**Output:** every untranscoded MediaFiles row carries an up-to-date `PriorityScore` (or NULL if never probed). Consumers (`SmartPopulate`, future automation, ad-hoc operator queries) read the column; none of them recompute.
+**Output:** Every MediaFiles row carries up-to-date routing fields. Consumers:
+- `SmartPopulateQueue(Mode='Remux')` reads `RecommendedMode` to show remux candidates.
+- `SmartPopulateQueue(Mode='Transcode')` reads `RecommendedMode` to show transcode candidates.
+- Activity page compliance widget reads `IsCompliant` for library-wide stats.
+- No consumer recomputes -- all read the materialized columns.
 
-See `Features/TranscodeQueue/priority-materialization.feature.md` for criteria.
+See `Features/TranscodeQueue/priority-materialization.feature.md` and `Features/TranscodeQueue/transcode-vs-remux-routing.feature.md` for criteria.
 
 ---
 
@@ -334,7 +364,8 @@ ORDER BY DispositionDecidedAt DESC;
   4. **Atomic rename-and-replace**: rename `original.ext -> original.ext.orig` as a backup, then move the staged file to `<originalbasename>-mv.<output-ext>` in the same directory. Verify target non-zero. On any filesystem-level failure, rollback restores the `.orig` and returns Success=false. The `-mv` suffix is the canonical MediaVortex on-disk marker -- structurally distinct from the source filename, defending against same-name collision regressions and giving operators a glance-readable "this was transcoded" signal. See `Features/FileReplacement/transcoded-output-placement.feature.md`.
   5. Re-probe new file via FFprobe (worker's FFprobe path)
   6. Update MediaFiles with new metadata, set TranscodedByMediaVortex=true. `MediaFiles.FilePath` now ends in `-mv.<ext>`.
-  7. Settle `.orig` per `ProfileThresholds.KeepSource` (delete or rename to `<originalbasename>.old.<orig-ext>`). FileScanning skips `.old.<ext>` artifacts.
+  7. **Recompute compliance**: calls `RecomputeForFiles([MediaFileId])` to update `IsCompliant`, `RecommendedMode`, `PriorityScore`, `AssignedProfile`. This is what clears `RecommendedMode='Remux'` after a successful remux (container is now MP4, audio is normalized) so the file is not re-queued. If the file still needs work (e.g. remuxed but codec is h264), `RecommendedMode` flips to `'Transcode'`. See `transcode-vs-remux-routing.feature.md` criterion 17. Failure does NOT roll back -- file is on disk correctly.
+  8. Settle `.orig` per `ProfileThresholds.KeepSource` (delete or rename to `<originalbasename>.old.<orig-ext>`). FileScanning skips `.old.<ext>` artifacts.
 
 **Discard path:**
 - Delete staged transcoded file from worker's `StagingDirectory`
@@ -369,7 +400,10 @@ ORDER BY DispositionDecidedAt DESC;
 MediaFiles.FilePath          -- created at SCAN, used everywhere
 MediaFiles.Resolution        -- set at PROBE, checked at QUEUE
 MediaFiles.HasExplicitEnglishAudio -- set at PROBE, checked at QUEUE
-MediaFiles.AssignedProfile   -- set at ASSIGN, read at TRANSCODE
+MediaFiles.AssignedProfile   -- set at RECOMPUTE (cascade from ShowSettings/SystemSettings), read at TRANSCODE
+MediaFiles.PriorityScore     -- set at RECOMPUTE, used by worker claim ORDER BY
+MediaFiles.IsCompliant       -- set at RECOMPUTE, checked at QUEUE (compliant files blocked)
+MediaFiles.RecommendedMode   -- set at RECOMPUTE, read by SmartPopulate to route Transcode vs Remux
 MediaFiles.TranscodedByMediaVortex -- set at REPLACE, checked at QUEUE
 
 TranscodeQueue.Status        -- Pending -> Running -> Completed/Failed

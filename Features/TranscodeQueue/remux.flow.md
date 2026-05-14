@@ -74,7 +74,7 @@ The 2026-05-09 incident (FFmpeg truncated source via output==input collision) ca
 | 1 | Claim | `DatabaseManager.ClaimNextPendingTranscodeJob` (atomic SELECT FOR UPDATE SKIP LOCKED) | `TranscodeQueue.Status='Running'`, `ClaimedBy=<worker>`, `ClaimedAt=NOW()` | Two workers can't claim same row (atomic claim) |
 | 2 | Dispatch | `ProcessJob` line 351 -> `if Job.IsRemux: ProcessRemuxJob` | (none) | If `ProcessingMode` is malformed or unknown, falls through to standard transcode path -- defensive but not ideal |
 | 3 | ActiveJob create | `CreateActiveJob(JobType='Remux', WorkerName, ProcessId, ThreadId)` | `ActiveJobs` row inserted | Failure aborts the job and resets the queue row to Pending |
-| 4 | Source pre-flight | `os.path.exists()` after PathTranslation | -- | Missing source: `MediaFiles.FFprobeFailureCount` incremented, queue row deleted, no TranscodeAttempt created (`worker-deploy.feature.md` criterion 13) |
+| 4 | Source pre-flight | `os.path.exists()` after `PathResolve(StorageRootId, RelativePath)` | -- | Missing source: `MediaFiles.FFprobeFailureCount` incremented, queue row deleted, ActiveJob deleted, no TranscodeAttempt created (`TranscodeJob.feature.md` criteria 17-18) |
 | 5 | TranscodeAttempt create | `CreateTranscodeAttempt(Job, ...)` | `TranscodeAttempts` row inserted with `Success=NULL` | Failure aborts; row marked failed |
 | 6 | File staging | `SetupFilePreparation` (InPlace / LocalStaging / CopyLocal) | `TemporaryFilePaths` may be written | LocalStaging falls back to InPlace if `Workers.StagingDirectory` is NULL (logged warning) |
 | 7 | Command build | `CommandBuilder.BuildRemuxCommand(Job, MediaFile, InputPath, TranscodingSettings)` | -- | Missing `FFmpegPath` raises `ValueError` -- aborts |
@@ -127,6 +127,7 @@ MediaFilesArchive    -- snapshot of original metadata (taken by FileReplacement)
 | Failure | Symptom | Resolution |
 |---|---|---|
 | Worker can't reach source via PathTranslation | Pre-flight `os.path.exists()` returns False | `MediaFiles.FFprobeFailureCount += 1`, queue row deleted, no TranscodeAttempt created. Existing scan-time guard skips the file on next populate. |
+| Source has no audio stream (video-only file) | `BuildRemuxCommand` detects `HasAudio=False` via FFprobe analysis | Command is built with video-only mapping (`-map 0:v:0`, no `-map 0:a:*`, no audio codec/filter args). The file is remuxed to MP4 container with video copy only. No error -- this is a supported path. |
 | FFmpeg fails (codec quirks, audio decode error) | TranscodeAttempt marked failed | Queue row reset to Pending; will be retried next claim cycle. Persistent failures: investigate via `TranscodeAttempts.ErrorMessage`. |
 | LocalStaging copy-back fails | Output sits on local disk; queue row reset | Local files cleaned up. Likely cause: NFS share unavailable or full. |
 | File replacement fails | Original kept, new file orphaned in StagingDirectory | `TranscodeAttempts.FileReplaced=false`. Investigate; may need manual cleanup or `Scripts/FixStuckPostReplacementFiles.py`. |

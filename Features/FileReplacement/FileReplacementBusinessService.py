@@ -480,15 +480,34 @@ class FileReplacementBusinessService:
             TargetExt = os.path.splitext(LocalTranscodedPath)[1] or ".mp4"
             TargetPath = os.path.join(OriginalDir, OriginalBasename + "-mv" + TargetExt)
 
-            # Step 1: rename original to .orig (atomic backup). Two paths:
+            # Step 1: rename original to .orig (atomic backup). Three paths:
             # - "Self-managed" (legacy / transcode): we do the rename here
             # - "Pre-renamed" (rename-before-encode flow used by remux): the
             #   worker called PrepareReplacement before FFmpeg, so the
             #   original is already at .orig. We detect that and just track
             #   the backup path for the settle step.
+            # - "Same-ext pre-renamed" (mp4-to-mp4 remux): PrepareReplacement
+            #   renamed source.mp4 to source.mp4.orig, FFmpeg wrote output to
+            #   source.mp4. LocalOriginalPath exists (it's the OUTPUT) and
+            #   .orig exists (it's the original). This is NOT an inconsistent
+            #   state -- it's the pre-renamed flow where the extension didn't
+            #   change.
             OrigBackupPath = None
             CandidateBackup = LocalOriginalPath + ".orig"
-            if os.path.exists(LocalOriginalPath):
+            SamePathPreRenamed = (
+                os.path.exists(CandidateBackup)
+                and os.path.normpath(LocalOriginalPath) == os.path.normpath(LocalTranscodedPath)
+            )
+            if SamePathPreRenamed:
+                # Same-ext pre-renamed flow: the file at LocalOriginalPath is
+                # the FFmpeg output, not the original. The original is at .orig.
+                OrigBackupPath = CandidateBackup
+                StepsCompleted.append(f"Found pre-renamed backup at {OrigBackupPath} (same-ext remux)")
+                LoggingService.LogInfo(
+                    f"Same-ext pre-renamed flow: tracking existing .orig at {OrigBackupPath}",
+                    "FileReplacementBusinessService", "_ProcessCompleteFileReplacement"
+                )
+            elif os.path.exists(LocalOriginalPath):
                 # Original is at its source path -- self-managed flow. Rename now.
                 if os.path.exists(CandidateBackup):
                     ErrorMsg = (
@@ -612,6 +631,19 @@ class FileReplacementBusinessService:
                 StepsCompleted.append("Updated MediaFiles table")
                 LoggingService.LogInfo("Successfully updated MediaFiles table",
                                      "FileReplacementBusinessService", "_ProcessCompleteFileReplacement")
+                # Recompute IsCompliant + RecommendedMode now that the file's
+                # metadata has been updated (transcode-vs-remux-routing criterion 17).
+                RecomputeMediaFileId = UpdateResult.get('MediaFileId')
+                if RecomputeMediaFileId:
+                    try:
+                        from Features.TranscodeQueue.QueueManagementBusinessService import QueueManagementBusinessService
+                        Updated = QueueManagementBusinessService().RecomputeForFiles([RecomputeMediaFileId])
+                        StepsCompleted.append(f"Recomputed compliance (updated {Updated} row)")
+                    except Exception as RecomputeEx:
+                        LoggingService.LogException(
+                            f"RecomputeForFiles failed for MediaFileId={RecomputeMediaFileId} after replacement",
+                            RecomputeEx, "FileReplacementBusinessService", "_ProcessCompleteFileReplacement"
+                        )
             else:
                 LoggingService.LogWarning(
                     f"MediaFiles update skipped after successful replacement -- transcoded file is on disk "
@@ -793,7 +825,8 @@ class FileReplacementBusinessService:
 
             return {
                 'Success': True,
-                'Message': 'MediaFiles table updated successfully'
+                'Message': 'MediaFiles table updated successfully',
+                'MediaFileId': media_file.Id,
             }
 
         except Exception as e:

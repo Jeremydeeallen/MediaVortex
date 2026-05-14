@@ -263,14 +263,19 @@ class CommandBuilderService:
             Analysis = AnalysisService.AnalyzeMediaFile(SourcePath)
             AudioCodec = Analysis.AudioCodec if Analysis and Analysis.AudioCodec else ''
             AudioStreamIndex = Analysis.AudioStreamIndex if Analysis and Analysis.AudioStreamIndex is not None else 0
+            # When AudioCodec is empty AND the analysis found no audio stream,
+            # the file is video-only. Signal this so the command builder skips
+            # all audio mapping and encoding args.
+            HasAudio = bool(AudioCodec)
 
-            LoggingService.LogInfo(f"Source audio codec for remux: {AudioCodec}, selected audio stream index: {AudioStreamIndex}", "CommandBuilderService", "BuildRemuxCommand")
+            LoggingService.LogInfo(f"Source audio codec for remux: {AudioCodec}, selected audio stream index: {AudioStreamIndex}, HasAudio: {HasAudio}", "CommandBuilderService", "BuildRemuxCommand")
 
             CommandData = {
                 'Job': Job,
                 'MediaFile': MediaFile,
                 'AudioCodec': AudioCodec,
                 'AudioStreamIndex': AudioStreamIndex,
+                'HasAudio': HasAudio,
                 'InputPath': SourcePath,
                 'FFmpegPath': TranscodingSettings.get('FFmpegPath') if TranscodingSettings else None,
                 'OutputDirectory': TranscodingSettings.get('OutputDirectory') if TranscodingSettings else None,

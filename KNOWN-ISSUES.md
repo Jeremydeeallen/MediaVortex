@@ -39,6 +39,44 @@
 
 ---
 
+### [BUG] Stale .orig files from remux re-queue loop -- 205 files affected, 14 at risk of data loss
+**Date:** 2026-05-14
+
+**Root cause:** `RecomputeForFiles` was never called from `FileReplacementBusinessService._ProcessCompleteFileReplacement`. After a successful remux, `RecommendedMode` stayed `'Remux'` and `IsCompliant` stayed `False` because the cached compliance columns were never refreshed. Queue population re-queued these already-remuxed MP4 files. Each re-queue cycle called `PrepareReplacement` (renaming `.mp4` to `.mp4.orig`), ran FFmpeg to write a new `.mp4`, and may or may not have completed. The `.orig` from the first re-queue was never cleaned up, so every subsequent attempt hit the safety guard: "Pre-existing .orig backup -- refusing to overwrite."
+
+**What breaks:**
+
+1. **593 wasted TranscodeAttempts** across all workers from `.orig` collision errors alone.
+2. **11,068 MP4 files** still have stale `RecommendedMode = 'Remux'` in MediaFiles. Any future queue populate will re-queue them all again.
+3. **137 files** have both the `.mp4` and `.mp4.orig` on disk. Of these, **123 had a prior successful remux** -- the `.mp4` is the good file and the `.orig` is safe to delete. **14 never had a successful remux** -- the first attempt's FFmpeg died mid-write, so the `.mp4` at the DB path is partial/corrupt and the `.orig` is the only intact copy.
+4. **61 files** have only the `.mp4` on disk (`.orig` already cleaned up or never created). These just need `RecomputeForFiles`.
+5. **7 files** have neither the `.mp4` nor `.orig` on disk -- DB points to a missing file.
+6. Every file with a stale `.orig` blocks the worker indefinitely on that queue item (claims it, fails instantly, releases, re-claims on next cycle).
+
+**Damage assessment by category:**
+
+| Category | Count | Risk | Recovery action |
+|----------|-------|------|-----------------|
+| Both exist, had successful remux | 123 | Low -- `.mp4` is valid | Delete `.orig`, run `RecomputeForFiles` |
+| Both exist, NEVER succeeded | 14 | **DATA LOSS** -- `.mp4` is partial | Restore `.orig` to original path, delete corrupt `.mp4`, run `RecomputeForFiles` |
+| MP4 only, no `.orig` | 61 | None -- already clean | Run `RecomputeForFiles` only |
+| Neither file exists | 7 | Orphan DB row | Flag for manual investigation |
+
+**Fix (code -- already applied, not yet committed):** Wired `RecomputeForFiles([MediaFileId])` into `_ProcessCompleteFileReplacement` after the DB update succeeds. Verified: 4 files remuxed after the fix show `RecommendedMode = None`, `IsCompliant = True`. Fix prevents future re-queue loops.
+
+**Recovery (data -- requires cleanup script):**
+1. Pause all workers to stop churn.
+2. For the 14 never-succeeded files: rename `.orig` back to its pre-remux path, delete the corrupt `.mp4`.
+3. For the 123 safe files: delete the `.orig`.
+4. Run `RecomputeForFiles` on all 11,068 stale MP4 files to clear `RecommendedMode = 'Remux'`.
+5. Delete all remux queue items whose MediaFile is already MP4 and compliant after recompute.
+6. Investigate the 7 neither-exists files separately.
+7. Unpause workers.
+
+**Look first:** `Scripts/OrigDamageAssessment.py` (assessment script already written), `Features/FileReplacement/FileReplacementBusinessService.py` (the code fix), `Features/TranscodeQueue/QueueManagementBusinessService.py` (`RecomputeForFiles`).
+
+---
+
 ### [BUG] Linux worker deploy flow doc incomplete -- no post-deploy verification, FFmpeg path troubleshooting, or automation parity with Windows
 **Date:** 2026-05-13
 
@@ -452,6 +490,17 @@ Full Windows paths (e.g., `T:\Shows\file.mkv`) are stored as natural keys in at 
 
 ## Resolved
 
+### [BUG - FIXED 2026-05-14] Remux jobs instantly fail with opaque "Failed to setup file preparation" -- 482 wasted attempts
+**Date:** 2026-05-14 | **Fixed:** 2026-05-14
+
+**What broke:** Workers claimed remux queue items, created a TranscodeAttempt row, then immediately failed at `SetupFilePreparation` with the generic message "Failed to setup file preparation for remux". 482 failed TranscodeAttempts across 6 larry workers. Source files didn't exist on disk (queue populated from stale MediaFiles rows). Error message was opaque -- actual exception logged to Logs table but not propagated to TranscodeAttempts.ErrorMessage.
+
+**Fix:** (1) Added source-file existence pre-flight check to `ProcessRemuxJob`, mirroring the existing check in `ProcessJob`. Missing source: marks `MediaFiles.FFprobeFailureCount++`, deletes queue item and ActiveJob, no TranscodeAttempt row created. (2) Added `_LastSetupError` propagation from `SetupFilePreparation` to all callers so TranscodeAttempts.ErrorMessage includes the actual exception detail.
+
+**Violates:** `Features/TranscodeJob/TranscodeJob.feature.md` criteria 17-18.
+
+---
+
 ### [FEATURE - DONE 2026-05-14] Disable/enable workers -- hide retired workers from UI
 
 **Problem:** Retired workers (e.g. Remington) remain visible in the Activity page worker cards forever. No way to hide them without deleting the row (which loses historical config).
@@ -536,127 +585,6 @@ Sister Wives S04E05 was queued under `AV1 P4 FG6 >720p` (1080p source, profile s
 - Profile.TranscodeDownTo is now the sole source of default target behavior; ShowSettings carries explicit per-show overrides only.
 
 **Violates / closed:** `ShowSettings.feature.md` Success Criterion 1.
-
----
-
-### [BUG - FIXED 2026-05-09] File scanner runs on whichever worker has ScanEnabled, not the one with fastest storage access
-**Date:** 2026-05-09 | **Fixed:** 2026-05-09 (host-affinity column + per-rootfolder claim guard + cap as SystemSetting)
-**Affects:** `Features/FileScanning/FileScanningBusinessService.py` (`DetectMovedFiles`, `CleanupMissingFiles`, `ProcessMediaFilesWithMetadata`), `Features/FileScanning/ContinuousScanService.py`, `FileScanning.feature.md` criteria 11 and 12, `FileScanning.flow.md` "Continuous Mode Specifics"
-
-Two related deficiencies surfaced together:
-
-1. **No host-affinity for scan work.** `ContinuousScanService` runs on every worker with `Workers.ScanEnabled=true` and iterates every `RootFolders` row independently. There is no claim/lease coordination, so two ScanEnabled workers can both walk the same rootfolder at the same time. Worse, the worker with the slowest storage path (e.g. WebService over SMB to brain) wins by default if it ticks first, while a backplane-attached worker like larry-worker-1 sits idle. Operator already flipped `larry-worker-1.ScanEnabled=true` for a fast-path TV scan but cannot guarantee the work lands there.
-
-2. **Move detection silently disabled for libraries >10k files.** `DetectMovedFiles` skips at `MaxFiles=10000` (`FileScanningBusinessService.py:1488`). Library has 48,035 rows -> always skipped. The next-step `CleanupMissingFiles` walks the same row set with the same `os.path.exists` checks and is not capped, so the supposed "save" is zero. Net effect: file moves/renames outside MediaVortex become delete+create, dropping AssignedProfile / IsCompliant / RecommendedMode / TranscodedByMediaVortex / probe metadata.
-
-**Violates:** `FileScanning.feature.md` criteria 11 and 12 (added with this bug).
-
-**Look first:**
-- `Features/FileScanning/ContinuousScanService.py` -- the per-worker tick that needs claim/lease semantics.
-- `Features/FileScanning/FileScanningBusinessService.py:1487-1497` -- the 10k cap.
-- `Features/FileScanning/FileScanningBusinessService.py:1374-1410` -- `CleanupMissingFiles` (uncapped, walks same rows).
-- `RootFolders` schema -- candidate for a `PreferredWorkerName` column for affinity, or move to a separate `ScanAffinity` table.
-- `ScanJobs` -- already exists; could carry a claim semantic similar to `TranscodeQueue.ClaimedBy`.
-
-**Flow doc gap:** `FileScanning.flow.md` lines 46-51 ("Continuous Mode Specifics") describes the unscoped per-worker iteration as the current behavior. It is not yet updated for distributed claim semantics; `/t` should rewrite that section before the fix.
-
-**Fix:** `Scripts/SQLScripts/AddScanAffinityColumns.py` adds `RootFolders.PreferredWorkerName`, `ScanJobs.WorkerName`, and seeds `SystemSettings('MoveDetectionMaxFiles', '100000')`. `RootFolderModel`/`FileScanningRepository` carry the new column. `FileScanningBusinessService.IsScanRunningForRootFolder` is the per-rootfolder duplicate-scan guard called from `StartScanning` before the global cap. `_GetMoveDetectionMaxFiles` reads the cap fresh per call (no cache, per memory rule). `ContinuousScanService._ExecuteScan` resolves WorkerName from `WorkerContext.Current()`, drops rootfolders pinned to other workers, and passes its name through to `StartScanning`.
-
-**Operator usage:**
-- Pin a rootfolder to the backplane-attached worker: `UPDATE RootFolders SET PreferredWorkerName='larry-worker-1' WHERE RootFolder='T:\';`
-- Raise the move-detection cap: `UPDATE SystemSettings SET SettingValue='200000' WHERE SettingKey='MoveDetectionMaxFiles';`
-
-**Deploy:** WorkerService and WebService both need to load the new code. SQL migration is already applied (587 RootFolders, all `PreferredWorkerName=NULL`). Scans continue to work pre-deploy because the Python signature change is backward-compatible (`WorkerName` defaults to `None`); only the affinity skip is dormant until the new code lands.
-
----
-
-### [BUG - FIXED 2026-05-09] BuildRemuxCommand path-collision destroyed source file
-**Date:** 2026-05-09 | **Fixed:** 2026-05-09 (atomic rename-and-replace in FileReplacement)
-**Affects:** `Models/CommandBuilder.py` (`BuildRemuxCommand`, `BuildSubtitleFixCommand`), `Features/FileReplacement/FileReplacementBusinessService.py:_ProcessCompleteFileReplacement`. **One file lost: T:\IT - Welcome to Derry\Season 1\IT - Welcome to Derry - S01E04 - The Great Swirling Apparatus of Our Planet's Function WEBDL-480p.42.mp4** (MediaFileId 61707).
-
-Pre-2026-05-09 `BuildRemuxCommand` computed `OutputPath = OriginalDir + os.path.splitext(MediaFile.FileName)[0] + ".mp4"`. For an .mp4 source in InPlace mode that resolved to OutputPath == InputPath. FFmpeg invoked with `-y` truncates the output before validating that input != output (return code -22 EINVAL), so the source got zeroed and FFmpeg cleaned up the empty output. The original file was destroyed.
-
-The bug existed for the lifetime of `BuildRemuxCommand` but never triggered because the only Mode='Remux' producer (`PopulateQueueForRemux`) only fed .mkv sources where output extension `.mp4` differs from source. The cascade in `transcode-vs-remux-routing.feature.md` is the first thing that routes .mp4 sources to remux; the smoke test that surfaced the bug used a real production file.
-
-**Two-layer fix:**
-1. `Models/CommandBuilder.py`: `BuildRemuxCommand` and `BuildSubtitleFixCommand` ALWAYS use side-by-side suffix (`_remuxed.mp4` / `_subfix.mp4`) regardless of source extension. Defense-in-depth check refuses to build a command if OutputPath == InputPath would somehow occur.
-2. `Features/FileReplacement/FileReplacementBusinessService.py`: `_ProcessCompleteFileReplacement` rewritten to a rename-then-replace pattern with rollback. Original is renamed to `.orig` BEFORE the staged file is moved; on any filesystem-level failure the rollback restores the `.orig` and reports failure. Original is never deleted until after the new file is verified non-zero on disk. See `transcode.flow.md` Stage 7 and `Features/TranscodeQueue/remux.flow.md` "Safety contract."
-
-**Prior single-copy at risk:** the destroyed file was a 480p MediaVortex output from a 2026-03-26 transcode of an original 4K hevc source (snapshot in MediaFilesArchive, no file content). Operator should re-acquire via Sonarr or backup if available.
-
-**Look first if a similar shape ever recurs:** `Models/CommandBuilder.py` `BuildRemuxCommand` line 412-466 (suffix is unconditional now), `Features/FileReplacement/FileReplacementBusinessService.py:447` (`_ProcessCompleteFileReplacement` rollback path).
-
-**Lessons recorded:**
-- Smoke tests against real production files should require an explicit `--sandbox` opt-in or operate on a known-disposable copy.
-- Worker process restarts must be verified with a code-loaded check, not assumed.
-- Any file-replacement flow that doesn't preserve the original until after explicit verification is one bad command away from a destructive bug.
-
----
-
-### [BUG - FIXED 2026-05-10] Stuck-scan detection missing + scanner is overengineered (rewrite together)
-**Date:** 2026-05-09 (stuck-scan) | **Expanded:** 2026-05-10 (overengineering rolled in) | **Fixed:** 2026-05-10
-**Affects:** ScanJobs table, Features/ServiceControl/StuckJobDetectionService.py, WorkerService/Main.py, Features/FileScanning/FileScanningBusinessService.py, Features/FileScanning/FileScanningRepository.py, Features/FileScanning/FileScanningController.py, Features/FileScanning/ContinuousScanService.py
-
-**Fix:**
-- Stuck-scan side: `StuckJobDetectionService.DetectAndCleanStuckScanJobs` added (matches the existing `DetectAndCleanStuckTranscodeJobs` shape -- two-tier detection on owning worker's heartbeat + `ScanJobs.LastUpdated` staleness). Wired into `WorkerService._DetectAndCleanStuckJobs` (startup) and `_StuckJobDetectionLoop` (recurring 120s cycle, configurable via `StuckJobDetectionIntervalSec`). Threshold read fresh from `SystemSettings.StuckScanThresholdMin` (default 15min, no caching per memory rule).
-- 18a: `FindTranscodedFileMatch` + `IsValidTranscodeResolutionChange` deleted (post-`FileReplacement` `_transcoded/` subdir doesn't exist; zero external callers).
-- 18b: 8 is-running methods consolidated to one `Repository.GetRunningScans(RootFolderPath=None)`. `__init__`'s self-state lookup, `StartScanning`'s claim guard, and the public `GetScanStatus` API all derive from this single query.
-- 18c: `MaxConcurrentScans=2` and `CanStartNewScan` deleted (contradicted criterion 11's per-rootfolder claim semantics).
-- 18d: `ScanDirectories` CRUD duplicates deleted from `FileScanningRepository`. Business-service wrappers route through `SystemSettingsRepository`. `FileScanningController.EnableContinuousScanning`/`DisableContinuousScanning` were misusing `AddOrUpdateScanDirectory` to write `ContinuousScanEnabled`/`IntervalMinutes` -- now use `SystemSettingsRepository.AddOrUpdateSystemSetting` correctly.
-
-**Net LOC**: `FileScanningBusinessService.py` 1815 -> 1546 (-15%); `FileScanningRepository.py` -38 (ScanDir CRUD); `ContinuousScanService.py` -12 (CanStartNewScan delegate); `StuckJobDetectionService.py` +120 (additive); `WorkerService/Main.py` +14 (wiring).
-
-**18e dropped from scope (intentional):** folding `ContinuousScanService` and `DuplicateDetectionService` into `FileScanningBusinessService` was reconsidered. `ContinuousScanService` has independent threading state (LastScanTime, ScanCount, ScanThread, StopEvent) and `DuplicateDetectionService` is only used by `Scripts/FindDuplicates.py` -- the live duplicate handling at `FileScanningBusinessService.py:310` already calls `Repository.CleanupDuplicateMediaFiles` directly. Neither merge would shrink real LOC, just relocate it. Original entry was overzealous on this point.
-
-**Verify:**
-- `py -c "import ast; ast.parse(open('Features/FileScanning/FileScanningBusinessService.py').read())"` syntax-clean.
-- Scripts/SQLScripts/QueryDatabase.py sql "UPDATE ScanJobs SET LastUpdated=NOW()-INTERVAL '20 minutes', Status='Running' WHERE Id=<some completed row>" then wait one StuckJobDetectionIntervalSec cycle -> row should flip to Status='Failed' with ErrorMessage explaining the cleanup.
-- `grep -rn "FindTranscodedFileMatch\|IsValidTranscodeResolutionChange\|CanStartNewScan\|MaxConcurrentScans" Features/ Scripts/` returns no hits in code (KNOWN-ISSUES.md mentions excluded).
-
----
-
-### [HISTORICAL] Stuck-scan + overengineering bug (pre-fix context)
-**Affects:** ScanJobs table, ContinuousScanService, DuplicateDetectionService, Features/FileScanning/ (entire feature -- 5,020 LOC across 7 files)
-
-**Part 1: stuck-scan detection.** A worker that crashes mid-scan leaves its `ScanJobs` row in `Status='Running'` indefinitely. There is no equivalent of `StuckJobDetectionService` for scans -- nothing watches `LastUpdated` staleness, nothing resets stale rows, nothing kicks the next scheduled scan past the orphaned row. `scanning-on-activity-page.feature.md` criterion G15 surfaces the staleness as an amber UI indicator but does not auto-clean.
-
-**Part 2: scanner is overengineered.** Audit on 2026-05-10 against the 17 success criteria in `FileScanning.feature.md` (after criteria 13-17 were added) found ~30-35% of the LOC has no contract backing. Rolling this into the stuck-scan rewrite because the structural cuts touch the same files the stuck-detection wiring will modify -- doing them separately means the second pass redoes most of the first.
-
-Concrete cuts identified:
-1. **`FindTranscodedFileMatch` + `IsValidTranscodeResolutionChange`** (~110 LOC, `FileScanningBusinessService.py:802-930`): predates `FileReplacement`. The current data flow writes transcoded output to the original path atomically -- there is no `_transcoded/` subdirectory anymore. Genuinely dead.
-2. **Eight "is a scan running?" methods** in `FileScanningBusinessService.py`: `CheckForExistingRunningScan`, `IsScanRunning`, `IsScanRunningForRootFolder`, `GetRunningScanCount`, `CanStartNewScan`, `GetScanJobStatus`, `GetCurrentScanStatus`, `GetAllRunningScans`. Should collapse to one repository query backed by criteria 5, 8, 11.
-3. **`MaxConcurrentScans=2` lever** (`CanStartNewScan`): contradicts criterion 11 (one scan per rootfolder cluster-wide). Dead concept post-host-affinity fix.
-4. **`ScanDirectories` table/concept** (`GetScanDirectories`, `AddOrUpdateScanDirectory`, `DeleteScanDirectory`): criteria 9 and 10 use `RootFolders` exclusively. The `ScanDirectories` path has no criterion -- looks like an abandoned alternative. Pick one.
-5. **`ContinuousScanService` (369 LOC) and `DuplicateDetectionService` (218 LOC) as separate classes**: criterion 5 is a timer + a call into `StartScanning`; criterion 4 is a repository query. Neither needs its own class with its own lifecycle. Fold back into `FileScanningBusinessService` -- the host-affinity claim guard from `FileScanning.feature.md` criterion 11 lives there too.
-
-Net: ~1,500-1,800 LOC cuttable, all in cosmetic class boundaries and the dead `_transcoded/` reconciliation path.
-
-**Look first:**
-- `Features/ServiceControl/StuckJobDetectionService.py` -- natural extension point for stuck-scan; existing `_IsJobFrozen` shape (LastFrameAdvance / LastProgressUpdate threshold) translates to `ScanJobs.LastUpdated` directly.
-- `Features/FileScanning/FileScanningBusinessService.py:802-930` -- dead `_transcoded/` reconciliation.
-- `Features/FileScanning/FileScanningBusinessService.py:36-456` -- the eight is-running methods.
-- `Features/FileScanning/ContinuousScanService.py`, `DuplicateDetectionService.py` -- merge candidates.
-
-**Violates:** `FileScanning.feature.md` criterion 18 (added with this expansion). The stuck-scan side also violates `scanning-on-activity-page.feature.md` G15 indirectly (G15 surfaces but doesn't auto-clean).
-
-**Flow doc gap:** `FileScanning.flow.md` exists. It documents the current per-worker tick model (which the host-affinity fix already targets to rewrite). The simplification pass should rewrite the "Continuous Mode Specifics" section in the same `/t` to keep flow + feature + code in sync.
-
-**Fix with:** `/t` (single rewrite covering stuck-scan detection + simplification; estimate 4-6 hours since both touch the same files)
-
----
-
-### [BUG - FIXED 2026-05-09] Worker claim path orders by SizeMB, ignoring Priority entirely
-**Date:** 2026-05-09
-**Affects:** `Repositories/DatabaseManager.py:1596,1638,1655`, `Features/TranscodeQueue/TranscodeQueueRepository.py:143,163`
-**Fix:** all four claim/peek queries changed to `ORDER BY Priority DESC, DateAdded ASC`. `transcode.flow.md` Stage 2.2 updated to match. Verify post-WebService restart that the highest-priority pending job is the one a worker claims next.
-
-The atomic claim path used by every worker (`ProcessTranscodeQueueService.py:346 -> DatabaseManager.ClaimNextPendingTranscodeJob`) orders pending rows by `SizeMB DESC, DateAdded ASC`. The `Priority` column is selected and returned but **never appears in any ORDER BY**. This means the entire `queue-priority.feature.md` work (impact-based scoring, manual override window 195-200) is computed at populate time and immediately ignored at claim time -- workers are still picking the largest file regardless of priority. Discovered after operator noticed the Queue UI default sort matched worker behavior, both ordering by SizeMB.
-
-**Violates:** `queue-priority.feature.md` Success Criterion 11 ("The first item a worker would claim from a fresh queue per `ORDER BY Priority DESC, DateAdded ASC LIMIT 1` is a high-impact file").
-
-**Fix:** change all four claim/peek queries to `ORDER BY Priority DESC, DateAdded ASC`. Update `transcode.flow.md:403` Stage 2.2 to match. The duplicate vertical-slice copy in `Features/TranscodeQueue/TranscodeQueueRepository.py` is dead code (legacy `DatabaseManager.py` is the live path) but should be fixed for consistency.
-
-**Look first:** `Repositories/DatabaseManager.py` lines 1590-1686.
 
 ---
 

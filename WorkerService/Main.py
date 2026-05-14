@@ -39,7 +39,7 @@ class WorkerServiceApp:
         self.DatabaseManager = DatabaseManager()
 
         # Worker identity
-        self.WorkerName = socket.gethostname()
+        self.WorkerName = self._ResolveWorkerName()
         self.WorkerPlatform = platform_mod.system().lower()
         LoggingService.LogInfo(f"Worker identity: {self.WorkerName} ({self.WorkerPlatform})", "WorkerService", "__init__")
 
@@ -94,6 +94,79 @@ class WorkerServiceApp:
         self.TranscodeManuallyStopped = False
 
         LoggingService.LogInfo(f"WorkerServiceApp __init__ completed. PID: {CurrentPid}", "WorkerService", "__init__")
+
+    def _ResolveWorkerName(self) -> str:
+        """Determine this worker's name.
+
+        Priority:
+        1. MEDIAVORTEX_WORKER_NAME env var (exact name override)
+        2. MEDIAVORTEX_WORKER_PREFIX env var -> claims {prefix}-N via DB
+        3. socket.gethostname() (fallback -- container ID or machine hostname)
+        """
+        ExactName = os.environ.get('MEDIAVORTEX_WORKER_NAME')
+        if ExactName:
+            return ExactName.strip()
+
+        Prefix = os.environ.get('MEDIAVORTEX_WORKER_PREFIX')
+        if Prefix:
+            return self._ClaimPrefixedWorkerName(Prefix.strip())
+
+        return socket.gethostname()
+
+    def _ClaimPrefixedWorkerName(self, Prefix: str) -> str:
+        """Claim the lowest available {Prefix}-N name using a DB advisory lock.
+
+        A slot is 'available' if no Workers row exists for it, or the existing
+        row has a heartbeat older than 2 minutes (stale/dead worker).
+        """
+        LockId = hash(Prefix) & 0x7FFFFFFF  # positive 32-bit advisory lock key
+        try:
+            # Use a raw connection to hold the advisory lock across queries
+            import psycopg2
+            Conn = self.DatabaseManager.DatabaseService._GetConnection()
+            Conn.autocommit = False
+            Cur = Conn.cursor()
+            try:
+                # Acquire session-level advisory lock to serialize claiming
+                Cur.execute("SELECT pg_advisory_lock(%s)", (LockId,))
+
+                # Find all existing workers with this prefix
+                Cur.execute(
+                    "SELECT WorkerName, LastHeartbeat FROM Workers "
+                    "WHERE WorkerName LIKE %s ORDER BY WorkerName",
+                    (Prefix + '-%',)
+                )
+                Existing = {Row[0]: Row[1] for Row in Cur.fetchall()}
+
+                # Find the lowest available slot
+                from datetime import timedelta
+                StaleThreshold = datetime.now() - timedelta(minutes=2)
+                Slot = 1
+                while True:
+                    CandidateName = f"{Prefix}-{Slot}"
+                    if CandidateName not in Existing:
+                        break  # unclaimed slot
+                    Heartbeat = Existing[CandidateName]
+                    if Heartbeat is None or Heartbeat < StaleThreshold:
+                        break  # stale slot, safe to reclaim
+                    Slot += 1
+
+                ClaimedName = f"{Prefix}-{Slot}"
+                LoggingService.LogInfo(
+                    f"Claimed worker name '{ClaimedName}' (prefix={Prefix}, slot={Slot})",
+                    "WorkerService", "_ClaimPrefixedWorkerName"
+                )
+                return ClaimedName
+            finally:
+                Cur.execute("SELECT pg_advisory_unlock(%s)", (LockId,))
+                Conn.commit()
+                Cur.close()
+        except Exception as E:
+            LoggingService.LogException(
+                f"Failed to claim prefixed name for '{Prefix}', falling back to hostname",
+                E, "WorkerService", "_ClaimPrefixedWorkerName"
+            )
+            return socket.gethostname()
 
     def _RegisterAndLoadWorkerConfig(self) -> dict:
         """Register this worker in the Workers table and load its configuration."""

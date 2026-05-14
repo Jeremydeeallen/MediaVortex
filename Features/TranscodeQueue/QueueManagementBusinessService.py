@@ -1286,6 +1286,14 @@ class QueueManagementBusinessService:
         if Row.get('HasExplicitEnglishAudio') is False:
             return (None, None)
 
+        # a2. Hard block: probed file with no audio stream at all.
+        # HasExplicitEnglishAudio IS NOT NULL means the audio probe ran.
+        # AudioCodec still NULL after probe = zero audio streams = likely
+        # corrupt (a TV episode with no audio). Block from queue; flag as
+        # ProblemFile in the caller (RecomputeForFiles).
+        if Row.get('HasExplicitEnglishAudio') is not None and not Row.get('AudioCodec') and Row.get('Resolution'):
+            return (None, None)
+
         # b. Effective profile cannot be resolved
         if not EffectiveProfile:
             return (None, None)
@@ -1599,6 +1607,7 @@ class QueueManagementBusinessService:
             )
 
             updates = []  # list[(id, profile_or_none, score, is_compliant_or_none, recommended_or_none)]
+            NoAudioFiles = []  # list of (FilePath, MediaFileId) for ProblemFile flagging
             for r in rows:
                 try:
                     EffectiveProfile = self._GetEffectiveProfileFromCache(
@@ -1650,12 +1659,32 @@ class QueueManagementBusinessService:
                         IsCompliant,
                         RecommendedMode,
                     ))
+
+                    # Detect probed files with no audio stream (possibly corrupt).
+                    # HasExplicitEnglishAudio != None means audio probe ran.
+                    if r.get('HasExplicitEnglishAudio') is not None and not r.get('AudioCodec') and r.get('Resolution'):
+                        NoAudioFiles.append((r.get('FilePath', ''), int(r['Id'])))
+
                 except Exception as RowEx:
                     LoggingService.LogException(
                         f"Per-row recompute failed for MediaFileId={r.get('Id')}",
                         RowEx, "QueueManagementBusinessService", "RecomputeForFiles"
                     )
                     continue
+
+            # Flag no-audio files as ProblemFiles (likely corrupt).
+            if NoAudioFiles:
+                from Repositories.DatabaseManager import DatabaseManager
+                DM = DatabaseManager()
+                for FP, MfId in NoAudioFiles:
+                    try:
+                        DM.AddProblemFile(
+                            FP,
+                            'No_Audio_Stream',
+                            f'Probed file has no audio stream (video-only). Possibly corrupt. MediaFileId={MfId}'
+                        )
+                    except Exception:
+                        pass  # Best-effort; don't block the recompute batch
 
             if not updates:
                 return 0

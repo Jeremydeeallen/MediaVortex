@@ -555,9 +555,12 @@ class CommandBuilder:
             CommandParts = [FFmpegPath]
             CommandParts.extend(['-i', f'"{InputPath}"'])
 
-            # Explicit stream mapping: select preferred audio stream (English when available)
-            AudioStreamIndex = CommandData.get('AudioStreamIndex', 0)
-            CommandParts.extend(['-map', '0:v:0', '-map', f'0:a:{AudioStreamIndex}'])
+            # Stream mapping: always map video; only map audio if the source has an audio stream.
+            HasAudio = CommandData.get('HasAudio', True)
+            CommandParts.extend(['-map', '0:v:0'])
+            if HasAudio:
+                AudioStreamIndex = CommandData.get('AudioStreamIndex', 0)
+                CommandParts.extend(['-map', f'0:a:{AudioStreamIndex}'])
 
             # Video: always copy (no re-encode)
             CommandParts.extend(['-c:v', 'copy'])
@@ -578,10 +581,12 @@ class CommandBuilder:
             # for lossless inputs). Re-encode is mandatory because the
             # loudnorm filter chain needs decoded audio. Remux has no
             # ProfileSettings -- always use source-matching policy.
-            CommandParts.extend(self.BuildAudioCodecArgs(MediaFile, ProfileBitrate=0))
-            AudioFilter = self.BuildAudioFilters({})
-            if AudioFilter:
-                CommandParts.extend(['-af', f'"{AudioFilter}"'])
+            # Skipped entirely for video-only files (no audio stream).
+            if HasAudio:
+                CommandParts.extend(self.BuildAudioCodecArgs(MediaFile, ProfileBitrate=0))
+                AudioFilter = self.BuildAudioFilters({})
+                if AudioFilter:
+                    CommandParts.extend(['-af', f'"{AudioFilter}"'])
 
             # MP4 container flags
             CommandParts.extend(['-movflags', '+faststart'])

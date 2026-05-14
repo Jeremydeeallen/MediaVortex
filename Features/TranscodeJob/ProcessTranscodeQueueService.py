@@ -110,6 +110,7 @@ class ProcessTranscodeQueueService:
         self.ActiveJobs = []
         self.ProcessingThread = None
         self.StopRequested = False
+        self._LastSetupError = None
 
         # Stuck job monitoring
         self.StuckJobMonitoringThread = None
@@ -447,9 +448,11 @@ class ProcessTranscodeQueueService:
             self.UpdateTranscodeProgress(TranscodeAttemptId, "Preparing Files", 0.0, "Preparing files for transcoding...")
 
             # Step b: Setup directories and optionally copy file
+            self._LastSetupError = None
             EffectiveInputPath = self.SetupFilePreparation(Job, MediaFile, TranscodeAttemptId)
             if not EffectiveInputPath:
-                self.HandleJobFailure(Job, "Failed to setup file preparation", TranscodeAttemptId, ActiveJobId)
+                Detail = self._LastSetupError or "unknown"
+                self.HandleJobFailure(Job, f"Failed to setup file preparation: {Detail}", TranscodeAttemptId, ActiveJobId)
                 return
             if IsLocalStaging:
                 LocalStagingSourcePath = EffectiveInputPath
@@ -679,10 +682,12 @@ class ProcessTranscodeQueueService:
             TranscodingSettings['TranscodeOutputMode'] = 'Staging'
 
         self.UpdateTranscodeProgress(TranscodeAttemptId, "Preparing Files", 0.0, f"Variant {VariantName}: preparing")
+        self._LastSetupError = None
         EffectiveInputPath = self.SetupFilePreparation(Job, MediaFile, TranscodeAttemptId)
         if not EffectiveInputPath:
+            Detail = self._LastSetupError or "unknown"
             self.DatabaseManager.UpdateTranscodeAttempt(TranscodeAttemptId, {
-                'Success': False, 'ErrorMessage': 'Failed to setup file preparation',
+                'Success': False, 'ErrorMessage': f'Failed to setup file preparation: {Detail}',
             })
             return None
         if IsLocalStaging:
@@ -831,19 +836,40 @@ class ProcessTranscodeQueueService:
             # Update queue status to Running
             self.DatabaseManager.UpdateTranscodeQueueStatus(Job.Id, "Running")
 
-            # Create transcode attempt record
+            # Get MediaFile data BEFORE creating TranscodeAttempt so we can
+            # pre-flight the source path without polluting attempt history.
+            MediaFile = self.GetMediaFileData(Job)
+            if not MediaFile:
+                self.HandleJobFailure(Job, "Failed to get media file data for remux", None, ActiveJobId)
+                return
+
+            # Pre-flight: source file existence check (TranscodeJob.feature.md criterion 17/18).
+            # Mirrors the same guard in ProcessJob. When the source is missing, mark MediaFile
+            # so future queue passes skip it, delete the queue item, and return -- no TranscodeAttempt.
+            from Core.PathStorage import Resolve as PathResolve
+            LocalSourcePath = PathResolve(Job.StorageRootId, Job.RelativePath, self.WorkerName, self.DatabaseManager.DatabaseService)
+            if not os.path.exists(LocalSourcePath):
+                ErrMsg = f"Source file missing on disk: {LocalSourcePath}"
+                LoggingService.LogWarning(ErrMsg, "ProcessTranscodeQueueService", "ProcessRemuxJob")
+                self._MarkMediaFileSourceMissing(MediaFile.Id, ErrMsg)
+                try:
+                    self.DatabaseManager.DeleteTranscodeQueueItem(Job.Id)
+                except Exception as DelEx:
+                    LoggingService.LogException("Failed to delete queue item for missing source", DelEx, "ProcessTranscodeQueueService", "ProcessRemuxJob")
+                if ActiveJobId:
+                    try:
+                        self.DatabaseManager.DeleteActiveJob(ActiveJobId)
+                    except Exception as DelEx:
+                        LoggingService.LogException("Failed to delete active job for missing source", DelEx, "ProcessTranscodeQueueService", "ProcessRemuxJob")
+                return
+
+            # Source exists -- create the attempt record now.
             TranscodeAttemptId = self.CreateTranscodeAttempt(Job, None, None, None)
             if not TranscodeAttemptId:
                 self.HandleJobFailure(Job, "Failed to create transcode attempt record for remux", None, ActiveJobId)
                 return
 
             self.UpdateTranscodeProgress(TranscodeAttemptId, "Initializing", 0.0, "Starting remux (container change)...")
-
-            # Get MediaFile data
-            MediaFile = self.GetMediaFileData(Job)
-            if not MediaFile:
-                self.HandleJobFailure(Job, "Failed to get media file data for remux", TranscodeAttemptId, ActiveJobId)
-                return
 
             # Local staging: override output directory to local disk
             IsLocalStaging = self.GetTranscodeFileMode() == 'LocalStaging'
@@ -854,9 +880,11 @@ class ProcessTranscodeQueueService:
 
             # Setup file preparation first (copy or in-place based on setting)
             self.UpdateTranscodeProgress(TranscodeAttemptId, "Preparing Files", 0.0, "Preparing source file...")
+            self._LastSetupError = None
             EffectiveInputPath = self.SetupFilePreparation(Job, MediaFile, TranscodeAttemptId)
             if not EffectiveInputPath:
-                self.HandleJobFailure(Job, "Failed to setup file preparation for remux", TranscodeAttemptId, ActiveJobId)
+                Detail = self._LastSetupError or "unknown"
+                self.HandleJobFailure(Job, f"Failed to setup file preparation for remux: {Detail}", TranscodeAttemptId, ActiveJobId)
                 return
             if IsLocalStaging:
                 LocalStagingSourcePath = EffectiveInputPath
@@ -1039,9 +1067,11 @@ class ProcessTranscodeQueueService:
 
             # Setup file preparation first (copy or in-place based on setting)
             self.UpdateTranscodeProgress(TranscodeAttemptId, "Preparing Files", 0.0, "Preparing source file...")
+            self._LastSetupError = None
             EffectiveInputPath = self.SetupFilePreparation(Job, MediaFile, TranscodeAttemptId)
             if not EffectiveInputPath:
-                self.HandleJobFailure(Job, "Failed to setup file preparation for subtitle fix", TranscodeAttemptId, ActiveJobId)
+                Detail = self._LastSetupError or "unknown"
+                self.HandleJobFailure(Job, f"Failed to setup file preparation for subtitle fix: {Detail}", TranscodeAttemptId, ActiveJobId)
                 return
             if IsLocalStaging:
                 LocalStagingSourcePath = EffectiveInputPath
@@ -1278,6 +1308,7 @@ class ProcessTranscodeQueueService:
         try:
             # Setup output directory (always needed, uses worker's configured staging dir if set)
             if not self.FileManager.SetupTranscodingDirectories(OutputDirectory=self.OutputDirectory):
+                self._LastSetupError = "SetupTranscodingDirectories failed"
                 return None
 
             FileMode = self.GetTranscodeFileMode()
@@ -1292,7 +1323,7 @@ class ProcessTranscodeQueueService:
             SourcePath = PathResolve(Job.StorageRootId, Job.RelativePath, self.WorkerName, self.DatabaseManager.DatabaseService)
 
             if FileMode == 'LocalStaging':
-                # Copy source to local staging disk (skip if already exists — crash recovery)
+                # Copy source to local staging disk (skip if already exists -- crash recovery)
                 LocalStagingDir = self.GetLocalStagingDir()
                 os.makedirs(LocalStagingDir, exist_ok=True)
                 DestinationPath = os.path.join(LocalStagingDir, MediaFile.FileName)
@@ -1301,6 +1332,7 @@ class ProcessTranscodeQueueService:
                 else:
                     CopyResult = self.FileManager.CopyFile(SourcePath, DestinationPath)
                     if not CopyResult:
+                        self._LastSetupError = f"CopyFile failed: {SourcePath} -> {DestinationPath}"
                         return None
                     LoggingService.LogInfo(f"LocalStaging mode: copied {SourcePath} to {DestinationPath}", "ProcessTranscodeQueueService", "SetupFilePreparation")
                 return DestinationPath
@@ -1309,6 +1341,7 @@ class ProcessTranscodeQueueService:
                 DestinationPath = f"C:\\MediaVortex\\Source\\{MediaFile.FileName}"
                 CopyResult = self.FileManager.CopyFile(SourcePath, DestinationPath)
                 if not CopyResult:
+                    self._LastSetupError = f"CopyFile failed: {SourcePath} -> {DestinationPath}"
                     return None
                 LoggingService.LogInfo(f"CopyLocal mode: copied {SourcePath} to {DestinationPath}", "ProcessTranscodeQueueService", "SetupFilePreparation")
                 return DestinationPath
@@ -1319,6 +1352,7 @@ class ProcessTranscodeQueueService:
 
         except Exception as e:
             LoggingService.LogException("Exception in file preparation", e, "ProcessTranscodeQueueService", "SetupFilePreparation")
+            self._LastSetupError = str(e)
             self.PrivateHandleFilePreparationFailure(TranscodeAttemptId, str(e))
             return None
 

@@ -182,11 +182,12 @@ IN PROGRESS -- operator approved 2026-05-09 (cheap-loudnorm-detection validated;
 - [x] Pivot to compliance-driven model (this rewrite, 2026-05-09)
 - [x] Renamed file: `no-benefit-handling.feature.md` -> `transcode-vs-remux-routing.feature.md` (criterion 25)
 - [ ] Operator approves criteria 1-25
-- [ ] Migrations: `AddIsCompliantColumn.py`, `AddRecommendedModeColumn.py`, `AddShowSettingsAssignedProfile.py`, `SeedDefaultProfileSetting.py`, `DropCompliantFilesTable.py`
-- [ ] `_GetEffectiveProfile` helper (criterion 3)
-- [ ] `_EvaluateCompliance` helper (criterion 11)
-- [ ] `RecomputeForFiles` -- replaces `ComputePriorityScoresForFiles`, single-pass updater (criterion 8)
-- [ ] Recompute hooks: extend probe / ShowSettings.AssignedProfile change / SystemSettings DefaultProfileName change / FileReplacement post-flight
+- [x] Migrations: `AddIsCompliantColumn.py`, `AddRecommendedModeColumn.py`, `AddShowSettingsAssignedProfile.py`, `SeedDefaultProfileSetting.py`, `DropCompliantFilesTable.py`
+- [x] `_GetEffectiveProfile` helper (criterion 3)
+- [x] `_EvaluateCompliance` helper (criterion 11)
+- [x] `RecomputeForFiles` -- replaces `ComputePriorityScoresForFiles`, single-pass updater (criterion 8)
+- [x] Recompute hook: probe-completion calls `RecomputeForFiles` (MediaProbeBusinessService.py)
+- [ ] Recompute hook: FileReplacement post-flight calls `RecomputeForFiles` (criterion 17 -- wired, needs live verify)
 - [x] /settings GUI: Default Profile dropdown + API endpoint (criterion 4) -- live-verified 2026-05-09. Card visible at top of /settings page after Setup -> Settings tab rename + lift out of collapsed Profile Management section.
 - [x] /ShowSettings Card 3 GUI: per-row Profile dropdown + API endpoint (criterion 5) -- live-verified 2026-05-09 (per-show overrides save and persist via /api/ShowSettings/SetSeriesProfile).
 - [ ] Wipe `MediaFiles.AssignedProfile` to NULL, run admin recompute to repopulate from cascade (criterion 9)

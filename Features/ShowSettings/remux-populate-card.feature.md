@@ -81,7 +81,7 @@ parallel to `smart-populate.feature.md`.
 
 13. Both cards respect the existing exclusions: `IsCompliant IS NOT TRUE`, `TranscodedByMediaVortex IS NOT TRUE`, `m.Id NOT IN (SELECT MediaFileId FROM TranscodeQueue WHERE MediaFileId IS NOT NULL)`, `SizeMB > 0`. The `Mode` filter is added on top, never replaces. Verifiable: a MediaFile with `IsCompliant=true AND RecommendedMode='Remux'` does NOT appear on Card 1.5 -- compliance trumps the Mode filter.
 
-13b. [BUG] Files with zero audio streams never appear as candidates in either card. A file with `AudioCodec IS NULL` and no `AudioLanguages` that has been probed (has `Resolution` set) is excluded from SmartPopulate results regardless of `HasExplicitEnglishAudio` value. Verifiable: a MediaFile with `AudioCodec IS NULL AND Resolution IS NOT NULL` returns zero rows from SmartPopulate for both Mode='Transcode' and Mode='Remux'.
+13b. Files with zero audio streams are valid remux candidates. When queued, the remux command builder detects `HasAudio=False` via FFprobe analysis and builds a video-only command (no `-map 0:a:*`, no audio codec/filter args). The file is remuxed to MP4 with video copy only. Verifiable: queue a video-only file for remux; it completes successfully with `TranscodeAttempts.Success=true` and `MediaFiles.ContainerFormat` updates to MP4.
 
 ### F. Performance and pagination
 
