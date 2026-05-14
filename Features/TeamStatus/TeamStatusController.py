@@ -467,8 +467,8 @@ def SetWorkerConcurrency(WorkerName):
 
         # Validate value types and range
         for Key, Val in UpdateColumns.items():
-            if not isinstance(Val, int) or Val < 1 or Val > 5:
-                return jsonify({"Success": False, "Message": f"{Key} must be an integer between 1 and 5"}), 400
+            if not isinstance(Val, int) or Val < 1:
+                return jsonify({"Success": False, "Message": f"{Key} must be a positive integer"}), 400
 
         DbManager = DatabaseManager()
         CheckRows = DbManager.DatabaseService.ExecuteQuery("SELECT 1 FROM Workers WHERE WorkerName = %s", (WorkerName,))

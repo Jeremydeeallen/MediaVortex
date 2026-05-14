@@ -273,6 +273,10 @@ class ContinuousScanService:
                 import socket
                 ThisWorkerName = socket.gethostname()
 
+            # Runtime share-mapping refresh (criterion 21): reload MountMap from DB
+            # so new WorkerShareMappings rows take effect without worker restart.
+            self._RefreshShareMappings(ThisWorkerName)
+
             # Apply per-rootfolder host affinity. RootFolders.PreferredWorkerName=NULL means
             # any ScanEnabled worker may pick it up; a non-null value pins the rootfolder to
             # the named worker (e.g. larry-worker-1 has the fast backplane to brain).
@@ -317,7 +321,10 @@ class ContinuousScanService:
                     LocalRootPath = (_Ctx.PathTranslation.ToLocalPath(RootFolder.RootFolder)
                                      if (_Ctx and _Ctx.PathTranslation) else RootFolder.RootFolder)
                     if not os.path.exists(LocalRootPath):
-                        LoggingService.LogWarning(f"Root folder does not exist, skipping: {RootFolder.RootFolder} (local: {LocalRootPath})", 'ContinuousScanService', '_ExecuteScan')
+                        # Criterion 20: record path-resolution failure as a Failed ScanJobs row
+                        ErrorMsg = f"Path not accessible: {RootFolder.RootFolder} -> {LocalRootPath}"
+                        LoggingService.LogWarning(f"Pre-scan validation failed, recording ScanJobs failure: {ErrorMsg}", 'ContinuousScanService', '_ExecuteScan')
+                        self._RecordPathValidationFailure(RootFolder.RootFolder, ThisWorkerName, ErrorMsg)
                         continue
 
                     # Import FileScanningBusinessService to trigger scan
@@ -361,4 +368,56 @@ class ContinuousScanService:
 
         except Exception as e:
             LoggingService.LogException("Error executing scan", e, 'ContinuousScanService', '_ExecuteScan')
+
+    def _RefreshShareMappings(self, WorkerName: str):
+        """Reload WorkerShareMappings from DB into WorkerContext.PathTranslation.MountMap.
+
+        Criterion 21: new share mappings added at runtime take effect on the next
+        continuous-scan tick without requiring a worker restart.
+        """
+        try:
+            from Core.WorkerContext import WorkerContext
+            Ctx = WorkerContext.Current()
+            if not Ctx or not Ctx.PathTranslation:
+                return
+
+            from Repositories.DatabaseManager import DatabaseManager
+            DbMgr = DatabaseManager()
+            FreshMappings = DbMgr.GetWorkerShareMappings(WorkerName)
+
+            if not FreshMappings:
+                return
+
+            # Compare to current -- only log if changed
+            CurrentMap = Ctx.PathTranslation.MountMap
+            if FreshMappings != CurrentMap:
+                Ctx.PathTranslation.MountMap = {k.upper(): v for k, v in FreshMappings.items()}
+                Ctx.ShareMappings = FreshMappings
+                LoggingService.LogInfo(
+                    f"Share mappings refreshed for {WorkerName}: {FreshMappings}",
+                    'ContinuousScanService', '_RefreshShareMappings'
+                )
+        except Exception as e:
+            LoggingService.LogException("Error refreshing share mappings", e, 'ContinuousScanService', '_RefreshShareMappings')
+
+    def _RecordPathValidationFailure(self, RootFolderPath: str, WorkerName: str, ErrorMessage: str):
+        """Write a ScanJobs row with Status='Failed' for a path that failed pre-scan validation.
+
+        Criterion 20: makes path-resolution failures visible in the /Scanning page's
+        scan history and the /Activity page's recent-scans panel.
+        """
+        try:
+            import uuid
+            from Core.Database.DatabaseService import DatabaseService
+            Db = DatabaseService()
+            Now = datetime.now(timezone.utc)
+            JobId = str(uuid.uuid4())
+            Query = """
+                INSERT INTO ScanJobs (JobId, RootFolderPath, Recursive, Status, StartTime, EndTime,
+                                      LastUpdated, ScanType, WorkerName, ErrorMessage)
+                VALUES (%s, %s, TRUE, 'Failed', %s, %s, %s, 'File', %s, %s)
+            """
+            Db.ExecuteNonQuery(Query, (JobId, RootFolderPath, Now, Now, Now, WorkerName, ErrorMessage))
+        except Exception as e:
+            LoggingService.LogException("Error recording path validation failure", e, 'ContinuousScanService', '_RecordPathValidationFailure')
 

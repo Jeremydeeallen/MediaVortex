@@ -45,10 +45,10 @@ class ProcessQualityTestQueueService:
                 }
 
             # Validate parameters
-            if not isinstance(MaxConcurrentJobs, int) or MaxConcurrentJobs < 1 or MaxConcurrentJobs > 5:
+            if not isinstance(MaxConcurrentJobs, int) or MaxConcurrentJobs < 1:
                 return {
                     "Success": False,
-                    "ErrorMessage": "MaxConcurrentJobs must be an integer between 1 and 5"
+                    "ErrorMessage": "MaxConcurrentJobs must be a positive integer"
                 }
 
             self.MaxConcurrentJobs = MaxConcurrentJobs

@@ -61,6 +61,31 @@ The legacy global concurrency cap (max 2 scans across all rootfolders) was retir
 
 `ScanJobs.WorkerName` records the worker that performed each scan, so the operator can confirm work landed on the intended host (e.g. larry-worker-1 for a backplane-attached TV scan vs an SMB-routed WebService).
 
+### Pre-scan path validation (criterion 20)
+
+Before calling `StartScanning` for each rootfolder, `ContinuousScanService._ExecuteScan` validates:
+1. `_ToLocalPath(RootFolder.RootFolder)` produces a path (translation succeeds)
+2. `os.path.exists(LocalRootPath)` confirms the resolved path is accessible
+
+If validation fails, the worker:
+- Logs a WARNING with both canonical and resolved paths
+- Writes a `ScanJobs` row with `Status='Failed'`, `ErrorMessage='Path not accessible: <canonical> -> <resolved>'`
+- Skips to the next rootfolder (no scan attempt)
+
+This makes path-resolution failures visible in the /Scanning page's scan history.
+
+### Runtime share-mapping refresh (criterion 21)
+
+At the start of each scan iteration, `_RefreshShareMappings(WorkerName)` reloads `WorkerShareMappings` from the database into `WorkerContext.PathTranslation.MountMap`. New drive mappings added via the Settings page or direct DB update take effect on the next continuous-scan tick without requiring a worker restart.
+
+### Adding a root folder
+
+`POST /api/RootFolders` registers a new root folder:
+- Body: `{"RootFolderPath": "Z:\\NewShare", "PreferredWorkerName": "larry-worker-1"}` (worker optional)
+- Validates: non-empty, no duplicate (case-insensitive), normalizes drive-root trailing backslash
+- Does NOT require path accessibility from WebService -- the worker validates at scan time
+- UI: /Scanning page "Add Root Folder" section
+
 ### Pinning a rootfolder to a specific worker
 
 ```sql

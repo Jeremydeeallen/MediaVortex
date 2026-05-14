@@ -906,6 +906,43 @@ class FileScanningBusinessService:
             LoggingService.LogException("Error getting media files", e)
             return []
 
+    def AddRootFolder(self, RootFolderPath: str, PreferredWorkerName: str = None) -> Dict[str, Any]:
+        """Add a new root folder for scanning.
+
+        Validates the path format, checks for duplicates, and inserts into RootFolders.
+        Does NOT require the path to be accessible from the WebService host -- the
+        worker that scans it validates accessibility at scan time (criterion 20).
+        """
+        try:
+            if not RootFolderPath or not RootFolderPath.strip():
+                return {'Success': False, 'Message': 'Root folder path is required'}
+
+            RootFolderPath = RootFolderPath.strip()
+            # Ensure trailing backslash for drive roots (e.g. T:\ not T:)
+            if len(RootFolderPath) == 2 and RootFolderPath[1] == ':':
+                RootFolderPath += '\\'
+
+            # Check for duplicates (case-insensitive)
+            Existing = self.Repository.GetAllRootFolders()
+            for Folder in Existing:
+                if Folder.RootFolder.lower().rstrip('\\') == RootFolderPath.lower().rstrip('\\'):
+                    return {'Success': False, 'Message': f'Root folder already exists: {Folder.RootFolder}'}
+
+            NewFolder = RootFolderModel(
+                Id=None,
+                RootFolder=RootFolderPath,
+                LastScannedDate=None,
+                TotalSizeGB=0.0,
+                PreferredWorkerName=PreferredWorkerName,
+            )
+            NewId = self.Repository.SaveRootFolder(NewFolder)
+            LoggingService.LogInfo(f"Added root folder: {RootFolderPath} (Id={NewId}, PreferredWorker={PreferredWorkerName})", 'FileScanningBusinessService', 'AddRootFolder')
+            return {'Success': True, 'Message': 'Root folder added successfully', 'Data': {'Id': NewId, 'RootFolder': RootFolderPath}}
+
+        except Exception as e:
+            LoggingService.LogException("Error adding root folder", e, 'FileScanningBusinessService', 'AddRootFolder')
+            return {'Success': False, 'Message': f'Error adding root folder: {str(e)}'}
+
     def DeleteRootFolder(self, RootFolderId: int) -> bool:
         """Delete a root folder and its associated media files."""
         try:

@@ -192,13 +192,13 @@ class WorkerServiceApp:
                 self.RemuxEnabled = bool(Row.get('RemuxEnabled', True))
                 self.ScanEnabled = bool(Row.get('ScanEnabled', False))
                 self.WorkerStatus = Row.get('Status', 'Online') or 'Online'
-                # Per-capability concurrency (clamped 1-5)
+                # Per-capability concurrency (floor of 1, no ceiling -- operator sets what fits their hardware)
                 RawTranscode = Row.get('MaxConcurrentTranscodeJobs')
                 RawQualityTest = Row.get('MaxConcurrentQualityTestJobs')
                 RawRemux = Row.get('MaxConcurrentRemuxJobs')
-                self.CurrentTranscodeConcurrency = max(1, min(5, int(RawTranscode))) if RawTranscode else 1
-                self.CurrentQualityTestConcurrency = max(1, min(5, int(RawQualityTest))) if RawQualityTest else 2
-                self.CurrentRemuxConcurrency = max(1, min(5, int(RawRemux))) if RawRemux else 2
+                self.CurrentTranscodeConcurrency = max(1, int(RawTranscode)) if RawTranscode else 1
+                self.CurrentQualityTestConcurrency = max(1, int(RawQualityTest)) if RawQualityTest else 2
+                self.CurrentRemuxConcurrency = max(1, int(RawRemux)) if RawRemux else 2
             else:
                 LoggingService.LogWarning(f"No Workers row found for '{self.WorkerName}', using defaults", "WorkerService", "_LoadCapabilitiesFromDB")
                 self.TranscodeEnabled = True

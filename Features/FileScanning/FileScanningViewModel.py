@@ -168,6 +168,25 @@ class FileScanningViewModel:
             self.ErrorMessage = f"Error loading media files: {str(e)}"
             return []
 
+    def AddRootFolder(self, RootFolderPath: str, PreferredWorkerName: str = None) -> Dict[str, Any]:
+        """Add a new root folder."""
+        try:
+            result = self.BusinessService.AddRootFolder(RootFolderPath, PreferredWorkerName)
+            if result.get('Success'):
+                self.ScanStatusMessage = "Root folder added successfully"
+                self.IsError = False
+                self.ErrorMessage = ""
+            else:
+                self.IsError = True
+                self.ErrorMessage = result.get('Message', 'Failed to add root folder')
+                self.ScanStatusMessage = self.ErrorMessage
+            return result
+        except Exception as e:
+            LoggingService.LogException("Error adding root folder", e, "AddRootFolder", "FileScanningViewModel")
+            self.IsError = True
+            self.ErrorMessage = f"Error adding root folder: {str(e)}"
+            return {'Success': False, 'Message': self.ErrorMessage}
+
     def DeleteRootFolder(self, RootFolderId: int) -> bool:
         """Delete a root folder and update UI state."""
         try:

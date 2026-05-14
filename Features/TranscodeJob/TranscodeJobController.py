@@ -25,8 +25,8 @@ def StartTranscoding():
         maxConcurrentJobs = data.get('MaxConcurrentJobs', 1)
 
         # Validate parameters
-        if not isinstance(maxConcurrentJobs, int) or maxConcurrentJobs < 1 or maxConcurrentJobs > 5:
-            errorMsg = "MaxConcurrentJobs must be an integer between 1 and 5"
+        if not isinstance(maxConcurrentJobs, int) or maxConcurrentJobs < 1:
+            errorMsg = "MaxConcurrentJobs must be a positive integer"
             LoggingService.LogError(errorMsg, "TranscodeJobController", "StartTranscoding")
             return jsonify({"Success": False, "ErrorMessage": errorMsg}), 400
 

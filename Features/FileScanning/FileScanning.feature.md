@@ -31,9 +31,11 @@ Discovers media files in configured root directories, extracts metadata via FFpr
 
 21. [BUG] **The operator can register and scan multiple drives/shares from any worker.** Today RootFolders are seeded under specific drive prefixes (T:\, M:\, Z:\) and a worker can only scan drives it has `WorkerShareMappings` rows for. Adding a new drive to scan requires: (a) manually inserting RootFolders rows with the correct canonical prefix, (b) adding `WorkerShareMappings` rows for every worker that can reach the new drive, and (c) restarting workers to pick up the new mappings. Fixed means: the `/settings` or `/Scanning` page lets the operator add a new RootFolder under any drive/share prefix, the system prompts for or auto-discovers which workers can access it, and `WorkerShareMappings` (or its `StorageRootResolutions` successor per `path-storage.feature.md`) is updated without requiring a worker restart. A worker whose share mappings are updated picks up the new drive on its next continuous-scan tick.
 
+22. [BUG] **End-to-end smoke test: a single-file scan via the API on a real worker is non-destructive and non-duplicative.** Verifiable: pick one known file already in MediaFiles (record its `Id`, `FilePath`, `SizeMB`, `AssignedProfile`, `TranscodedByMediaVortex`). Trigger `POST /api/FileScanning/Scan/Start` with the file's parent RootFolder on a worker with `ScanEnabled=true`. After the scan completes: (a) `SELECT COUNT(*) FROM MediaFiles WHERE FilePath = <path>` returns exactly 1 (no duplicate created), (b) the row's `Id` is unchanged (not delete+reinsert), (c) `AssignedProfile`, `TranscodedByMediaVortex`, `IsCompliant`, `RecommendedMode` are unchanged (metadata preserved), (d) `ScanJobs` row shows `Status='Completed'` with `NewFiles=0` and `DeletedFiles=0` for this path, (e) no new orphaned `TranscodeAttempts` or `MediaFilesArchive` rows referencing a different `MediaFileId` for the same path. This test must pass on both a Windows worker (I9-2024) and a Linux worker (any larry-worker) to confirm path translation does not corrupt existing data.
+
 ## Status
 
-COMPLETE (criteria 1-10, 18) / [BUG] criteria 11, 12, 16, 19, 20, 21 open / criteria 13-15, 17 to verify against current implementation
+COMPLETE (criteria 1-10, 18) / [BUG] criteria 11, 12, 16, 19, 20, 21, 22 open / criteria 13-15, 17 to verify against current implementation
 
 ## Scope
 

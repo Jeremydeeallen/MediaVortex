@@ -158,6 +158,32 @@ class FileScanningController:
                     'Error': 'GetRootFoldersError'
                 }), 500
 
+        @self.Blueprint.route('/RootFolders', methods=['POST'])
+        def AddRootFolder():
+            """Add a new root folder for scanning."""
+            try:
+                data = request.get_json()
+                if not data:
+                    return jsonify({'Success': False, 'Message': 'Request body is required'}), 400
+
+                RootFolderPath = data.get('RootFolderPath', '').strip()
+                PreferredWorkerName = data.get('PreferredWorkerName', None)
+
+                if not RootFolderPath:
+                    return jsonify({'Success': False, 'Message': 'RootFolderPath is required'}), 400
+
+                result = self.ViewModel.AddRootFolder(RootFolderPath, PreferredWorkerName)
+                StatusCode = 201 if result.get('Success') else 400
+                return jsonify(result), StatusCode
+
+            except Exception as e:
+                LoggingService.LogException("Error in AddRootFolder endpoint", e, "FileScanningController", "AddRootFolder")
+                return jsonify({
+                    'Success': False,
+                    'Message': f'Error adding root folder: {str(e)}',
+                    'Error': 'AddRootFolderError'
+                }), 500
+
         @self.Blueprint.route('/RootFolders/<int:RootFolderId>/Subfolders', methods=['GET'])
         def GetRootFolderSubfolders(RootFolderId):
             """Get subfolders for a root folder with pagination and filtering."""
