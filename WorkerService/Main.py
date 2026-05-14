@@ -708,11 +708,29 @@ class WorkerServiceApp:
             LoggingService.LogException("Error during drain", e, "WorkerService", "_DrainAndStop")
 
     def _StopAllCapabilities(self):
-        """Immediately stop all running capabilities."""
+        """Immediately stop all running capabilities.
+        Sets StopRequested synchronously on every processing loop BEFORE
+        spawning cleanup threads, so no loop can claim a new job in the gap."""
+        # Signal loops to stop IMMEDIATELY -- this prevents the race where
+        # the background cleanup thread hasn't started yet but the processing
+        # loop claims another job in the meantime.
+        if self.TranscodeService is not None:
+            self.TranscodeService.StopRequested = True
+        if self.RemuxService is not None:
+            self.RemuxService.StopRequested = True
+        if self.QualityTestService is not None:
+            try:
+                self.QualityTestService.Stop()
+            except Exception:
+                pass
+
+        # Now spawn background threads for graceful cleanup (thread joins, etc.)
         if self.TranscodeService is not None:
             threading.Thread(target=self._StopTranscodeCapability, daemon=True, name="StopTranscode").start()
         if self.QualityTestService is not None:
             threading.Thread(target=self._StopQualityTestCapability, daemon=True, name="StopQualityTest").start()
+        if self.RemuxService is not None:
+            threading.Thread(target=self._StopRemuxCapability, daemon=True, name="StopRemux").start()
         if self.ContinuousScanService is not None:
             self._StopScanCapability()
 
