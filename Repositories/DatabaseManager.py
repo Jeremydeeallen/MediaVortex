@@ -1828,7 +1828,6 @@ class DatabaseManager:
                     ShareMountPrefix = COALESCE(EXCLUDED.ShareMountPrefix, Workers.ShareMountPrefix),
                     MaxConcurrentJobs = EXCLUDED.MaxConcurrentJobs,
                     MaxCpuThreads = COALESCE(EXCLUDED.MaxCpuThreads, Workers.MaxCpuThreads),
-                    Status = 'Online',
                     LastHeartbeat = NOW()
             """
             self.DatabaseService.ExecuteNonQuery(query, (
@@ -1980,7 +1979,7 @@ class DatabaseManager:
             return False
 
     def UpdateWorkerStatus(self, WorkerName: str, Status: str) -> bool:
-        """Update worker status (Online, Offline, Draining)."""
+        """Update worker status (Online, Paused, Draining)."""
         try:
             query = "UPDATE Workers SET Status = %s, LastHeartbeat = NOW() WHERE WorkerName = %s"
             self.DatabaseService.ExecuteNonQuery(query, (Status, WorkerName))

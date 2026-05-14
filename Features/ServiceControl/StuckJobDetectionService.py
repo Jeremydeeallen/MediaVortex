@@ -229,9 +229,9 @@ class StuckJobDetectionService:
             LastHeartbeat = WorkerConfig.get('LastHeartbeat') or WorkerConfig.get('lastheartbeat')
             WorkerStatus = WorkerConfig.get('Status') or WorkerConfig.get('status')
 
-            # If worker explicitly marked Offline, it's offline
-            if WorkerStatus and WorkerStatus.lower() == 'offline':
-                return True, "Worker status is Offline"
+            # If worker explicitly marked Paused, it won't pick up new jobs
+            if WorkerStatus and WorkerStatus.lower() == 'paused':
+                return True, "Worker status is Paused"
 
             if not LastHeartbeat:
                 return False, "No heartbeat recorded yet"

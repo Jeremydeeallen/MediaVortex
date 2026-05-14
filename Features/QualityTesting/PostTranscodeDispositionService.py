@@ -211,13 +211,17 @@ class PostTranscodeDispositionService:
         if not Success:
             return ('Discard', 'TranscodeFailed')
 
-        # Row 2: transcode succeeded but produced no savings.
-        if NewSize and OldSize and NewSize >= OldSize:
-            return ('Discard', 'NoSavings')
-
-        # Row 3: quality testing not required -> bypass-replace by design.
+        # Row 2: quality testing not required -> bypass-replace by design.
+        # This MUST precede the NoSavings gate because remux jobs set
+        # QualityTestRequired=false and are not aimed at disk savings --
+        # audio re-encode may produce a marginally larger output (see
+        # transcode-vs-remux-routing.feature.md criterion 16).
         if not QualityTestRequired:
             return ('BypassReplace', 'QualityTestNotRequired')
+
+        # Row 3: transcode succeeded but produced no savings.
+        if NewSize and OldSize and NewSize >= OldSize:
+            return ('Discard', 'NoSavings')
 
         # Row 4: VMAF required, no score yet, capable worker online -> wait for VMAF.
         if VmafScore is None and VmafCapableWorkerOnline:

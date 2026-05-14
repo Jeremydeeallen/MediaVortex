@@ -51,12 +51,15 @@ Exit codes:
 
 import argparse
 import base64
+import fnmatch
 import importlib.util
 import json
 import os
+import shutil
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 from typing import Optional
@@ -198,8 +201,35 @@ def StepPreflight(Target: str) -> tuple[bool, dict]:
     return (len(Missing) == 0), Data
 
 
+def _LoadDeployIgnorePatterns() -> list:
+    """Load exclusion patterns from .deployignore."""
+    IgnoreFile = MediaVortexRoot / ".deployignore"
+    if not IgnoreFile.exists():
+        return []
+    Patterns = []
+    for Line in IgnoreFile.read_text(encoding="utf-8").splitlines():
+        Stripped = Line.strip()
+        if Stripped and not Stripped.startswith("#"):
+            Patterns.append(Stripped)
+    return Patterns
+
+
+def _CopytreeIgnoreFactory(Patterns: list):
+    """Return a callable for shutil.copytree(ignore=...) that applies .deployignore."""
+    def _Ignore(Directory, Contents):
+        return {
+            C for C in Contents
+            if any(fnmatch.fnmatch(C, P) for P in Patterns)
+        }
+    return _Ignore
+
+
 def StepScpRepo(Target: str, RootDir: Path) -> bool:
-    """scp -r the MediaVortex repo to the remote host. Pre-creates C:\\Code."""
+    """Filtered scp of the MediaVortex repo to the remote host.
+
+    Creates a temp directory with only the files allowed by .deployignore,
+    then scp's that filtered tree. Pre-creates C:\\Code on the target.
+    """
     Mkdir = (
         'if (-not (Test-Path "C:\\Code")) { '
         'New-Item -ItemType Directory -Path "C:\\Code" -Force | Out-Null }'
@@ -209,15 +239,25 @@ def StepScpRepo(Target: str, RootDir: Path) -> bool:
         print(f"    mkdir C:\\Code failed: {R.stderr.strip()[:200]}")
         return False
 
-    # scp the whole tree. -r is required; -q reduces noise.
-    R = subprocess.run(
-        ["scp", "-r", "-o", "ConnectTimeout=5",
-         str(RootDir), f"{Target}:C:/Code/"],
-        capture_output=True, text=True, timeout=900,
-    )
-    if R.returncode != 0:
-        print(f"    scp failed: {(R.stderr or R.stdout).strip()[:300]}")
-        return False
+    Patterns = _LoadDeployIgnorePatterns()
+    if Patterns:
+        print(f"    filtering with {len(Patterns)} .deployignore patterns")
+
+    with tempfile.TemporaryDirectory() as TmpDir:
+        FilteredDir = os.path.join(TmpDir, "MediaVortex")
+        shutil.copytree(
+            str(RootDir), FilteredDir,
+            ignore=_CopytreeIgnoreFactory(Patterns) if Patterns else None,
+        )
+
+        R = subprocess.run(
+            ["scp", "-r", "-o", "ConnectTimeout=5",
+             FilteredDir, f"{Target}:C:/Code/"],
+            capture_output=True, text=True, timeout=900,
+        )
+        if R.returncode != 0:
+            print(f"    scp failed: {(R.stderr or R.stdout).strip()[:300]}")
+            return False
     return True
 
 

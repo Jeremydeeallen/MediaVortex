@@ -35,10 +35,9 @@ If any check fails, resolve before proceeding. The compose file is deployed by T
 Run from the dev workstation (Git Bash). All commands use SSH to the worker-pool LXC at `10.0.0.42`. Use this for first-time deploys or when the Dockerfile/requirements.txt changes.
 
 ```bash
-# 1. Create target dir and copy repo source to the LXC
-ssh root@10.0.0.42 'rm -rf /tmp/mediavortex-build && mkdir -p /tmp/mediavortex-build'
-scp -r c:/Code/MediaVortex/* root@10.0.0.42:/tmp/mediavortex-build/
-cls
+# 1. Sync source to the LXC (filtered by .deployignore -- excludes .git, venv, Tests, etc.)
+py deploy/SyncSource.py root@10.0.0.42 /tmp/mediavortex-build
+
 # 2. Build the Docker image on the LXC
 ssh root@10.0.0.42 'docker build -t mediavortex-worker:latest -f /tmp/mediavortex-build/deploy/Dockerfile /tmp/mediavortex-build/'
 
@@ -59,8 +58,8 @@ py Scripts/SQLScripts/QueryDatabase.py sql "SELECT WorkerName, Status, LastHeart
 ```
 
 **Notes:**
+- `deploy/SyncSource.py` reads `.deployignore` for exclusion patterns (additive: new files are included by default). Uses tar-over-ssh for transport. Run `py deploy/SyncSource.py root@10.0.0.42 /tmp/mediavortex-build --dry-run` to preview what will be synced.
 - The LXC's `/opt/mediavortex/docker-compose.yml` is deployed by Terraform (`terraform/mediavortex-workers/setup.sh`), not by this pipeline. It contains DB credentials and volume mounts.
-- `scp` requires the target directory to exist first -- the `mkdir -p` in step 1 handles this.
 - For code-only updates, repeat all 4 steps. The FFmpeg binary is cached in the Docker build layer and only re-downloads if the Dockerfile changes.
 - Workers that are mid-transcode will be stopped by `docker compose up -d` (sends SIGTERM). The SignalHandler resets their queue items to Pending for retry. Wait for workers to finish or gracefully stop them before deploying if you want to avoid re-transcoding.
 
@@ -71,8 +70,7 @@ When you have shipped a code change and only need to update the Python code (no 
 ```bash
 # Same 4 steps as above -- the Docker build layer cache makes this fast.
 # FFmpeg download layer is cached; only the COPY . /app layer rebuilds.
-ssh root@10.0.0.42 'rm -rf /tmp/mediavortex-build && mkdir -p /tmp/mediavortex-build'
-scp -r c:/Code/MediaVortex/* root@10.0.0.42:/tmp/mediavortex-build/
+py deploy/SyncSource.py root@10.0.0.42 /tmp/mediavortex-build
 ssh root@10.0.0.42 'docker build -t mediavortex-worker:latest -f /tmp/mediavortex-build/deploy/Dockerfile /tmp/mediavortex-build/'
 ssh root@10.0.0.42 'cd /opt/mediavortex && docker compose up -d'
 ssh root@10.0.0.42 'rm -rf /tmp/mediavortex-build'

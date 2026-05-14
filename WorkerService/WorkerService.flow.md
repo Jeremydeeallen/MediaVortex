@@ -21,7 +21,7 @@ Replaces the former `TranscodeService/Main.py` + `QualityTestService/Main.py` du
 | 8. Mark Online | `DatabaseManager.UpdateWorkerStatus()` | Sets Workers.Status = 'Online' |
 | 9. Start health monitor | `_StartHealthMonitoring()` | Thread: updates Workers.LastHeartbeat every 30s |
 | 10. Start status polling | `_StartStatusPolling()` | Thread: reads Workers.Status every 5s, calls `_HandleStatusChange()` on transitions |
-| 11. Start capability polling | `_StartCapabilityPolling()` | Thread: reads capability flags and concurrency columns every 60s, calls `_ApplyCapabilities()` on flag changes, `_ApplyConcurrencyChanges()` on concurrency changes |
+| 11. Start capability polling | `_StartCapabilityPolling()` | Thread: reads capability flags and concurrency columns every N seconds (default 15, configurable via `SystemSettings.CapabilityPollingIntervalSec`), calls `_ApplyCapabilities()` on flag changes, `_ApplyConcurrencyChanges()` on concurrency changes |
 | 12. Apply capabilities | `_ApplyCapabilities()` | Starts/stops TranscodeService, QualityTestService, ContinuousScanService based on flags |
 | 13. Main loop | `_MainLoop()` | Blocks on ShutdownEvent, checking every 10s |
 
@@ -32,18 +32,27 @@ Workers poll their own `Workers.Status` column every 5 seconds:
 | Status | Behavior |
 |--------|----------|
 | Online | All enabled capabilities are running, accepting new jobs |
-| Draining | Finish current job, do not claim new work. Stops scan/quality test immediately. Waits for transcode to complete, then cleans up. |
-| Offline | All capabilities stopped. Worker still sends heartbeats. |
+| Draining | Finish current job, do not claim new work. Stops scan/quality test immediately. Waits for transcode to complete, then auto-transitions to Paused. |
+| Paused | All capabilities stopped. Worker still sends heartbeats. |
+
+Liveness (container running vs dead) is derived from heartbeat freshness, not from `Workers.Status`:
+- Heartbeat < 60s: alive (green dot)
+- Heartbeat 60s-300s: stale (amber dot)
+- Heartbeat > 300s or NULL: dead (red dot)
 
 Status changes are applied in `_HandleStatusChange()`:
 - Online -> Draining: sets `StopRequested=True` on transcode, spawns drain waiter thread
-- Online -> Offline: stops all capabilities immediately
-- Draining -> Offline: no-op (already stopping)
-- Offline -> Online or Draining -> Online: re-applies capabilities
+- Online -> Paused: stops all capabilities immediately
+- Draining -> Paused: no-op (drain waiter will auto-transition when job finishes)
+- Paused -> Online or Draining -> Online: re-applies capabilities
+
+The UI exposes two buttons per worker: Online and Pause. Clicking Pause on an idle worker writes `Paused` directly. Draining is a transient state the badge shows while current work finishes.
 
 Status is set via:
-- `POST /api/TeamStatus/Workers/<name>/Status` (Activity page UI)
-- Direct DB update: `UPDATE Workers SET Status = 'Draining' WHERE WorkerName = 'larry-worker-1'`
+- `POST /api/TeamStatus/Workers/<name>/Status` (Activity page UI, accepts Online or Paused)
+- Direct DB update: `UPDATE Workers SET Status = 'Paused' WHERE WorkerName = 'larry-worker-1'`
+
+On shutdown, `Workers.Status` is NOT changed -- the heartbeat going stale tells the UI the process died. This preserves operator intent across restarts.
 
 ## Capability Lifecycle
 
@@ -74,13 +83,13 @@ Each capability reads its own concurrency column from the Workers table at start
 
 Capabilities are created lazily -- only initialized when enabled for the first time. Stop methods wait for the current job to finish (transcode: up to 2 hour timeout).
 
-Capability changes are detected by `_CapabilityPollingLoop()` (60s interval). When a flag changes in the DB, `_ApplyCapabilities()` starts newly-enabled capabilities and stops newly-disabled ones.
+Capability changes are detected by `_CapabilityPollingLoop()` (interval configurable via `SystemSettings.CapabilityPollingIntervalSec`, default 15s). When a flag changes in the DB, `_ApplyCapabilities()` starts newly-enabled capabilities and stops newly-disabled ones.
 
 Capability flags are set via:
 - `POST /api/TeamStatus/Workers/<name>/Capability` -- Activity page UI per-worker toggle controls (added 2026-05-08 alongside the existing Status endpoint). Body: `{"TranscodeEnabled": true}` -- one or more keys per request, mirrors the Status endpoint shape so the operator does not need to think about partial writes.
 - Direct DB update: `UPDATE Workers SET ScanEnabled = TRUE WHERE WorkerName = 'I9-2024'` (still works; the API endpoint is just a convenience).
 
-The endpoint validates the column name against the allowlist `{TranscodeEnabled, QualityTestEnabled, ScanEnabled}` (rejecting arbitrary writes), accepts boolean values (true/false/null where null means "use global default" -- only meaningful for QualityTestEnabled), and returns the new row state. The worker's capability poller reads the change within 60s without restart.
+The endpoint validates the column name against the allowlist `{TranscodeEnabled, QualityTestEnabled, ScanEnabled}` (rejecting arbitrary writes), accepts boolean values (true/false/null where null means "use global default" -- only meaningful for QualityTestEnabled), and returns the new row state. The worker's capability poller reads the change within one polling interval (default 15s) without restart.
 
 ## Shutdown (SIGTERM/SIGINT)
 

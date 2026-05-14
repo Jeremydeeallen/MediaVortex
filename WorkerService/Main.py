@@ -4,7 +4,7 @@ WorkerService Entry Point
 Unified worker microservice for MediaVortex.
 Replaces separate TranscodeService + QualityTestService processes.
 Reads per-worker capabilities (TranscodeEnabled, QualityTestEnabled, ScanEnabled)
-and status (Online, Draining, Offline) from the Workers table.
+and status (Online, Draining, Paused) from the Workers table.
 """
 
 import sys
@@ -74,12 +74,15 @@ class WorkerServiceApp:
         self.QualityTestEnabled = False
         self.RemuxEnabled = False
         self.ScanEnabled = False
-        self.WorkerStatus = "Offline"
+        self.WorkerStatus = "Paused"
 
         # Per-capability concurrency (data-driven, updated by capability poller)
         self.CurrentTranscodeConcurrency = 1
         self.CurrentQualityTestConcurrency = 2
         self.CurrentRemuxConcurrency = 2
+
+        # Polling intervals (data-driven from SystemSettings)
+        self.CapabilityPollingIntervalSec = self._LoadCapabilityPollingInterval()
 
         # Threads
         self.HealthCheckThread = None
@@ -394,8 +397,16 @@ class WorkerServiceApp:
                 "WorkerService", "Run"
             )
 
-            # Mark worker as Online
-            self.DatabaseManager.UpdateWorkerStatus(self.WorkerName, "Online")
+            # Respect the DB status -- if operator set Paused before restart,
+            # stay Paused.  Only default to Online when the DB row has no
+            # explicit status (first-ever start).
+            if self.WorkerStatus == "Online":
+                self.DatabaseManager.UpdateWorkerStatus(self.WorkerName, "Online")
+            else:
+                LoggingService.LogInfo(
+                    f"Worker DB status is '{self.WorkerStatus}', respecting it (not forcing Online)",
+                    "WorkerService", "Run"
+                )
 
             # Start health monitoring
             self._StartHealthMonitoring()
@@ -403,7 +414,7 @@ class WorkerServiceApp:
             # Start status polling (5s interval for status changes)
             self._StartStatusPolling()
 
-            # Start capability polling (60s interval for capability changes)
+            # Start capability polling (configurable interval, default 15s)
             self._StartCapabilityPolling()
 
             # Start recurring stuck-job detection (default 120s interval).
@@ -670,9 +681,9 @@ class WorkerServiceApp:
                 # Wait for transcode to finish current job in background
                 threading.Thread(target=self._DrainAndStop, daemon=True, name="DrainWaiter").start()
 
-            elif NewStatus == "Offline":
+            elif NewStatus == "Paused":
                 # Stop everything
-                LoggingService.LogInfo("Worker is Offline, stopping all capabilities", "WorkerService", "_HandleStatusChange")
+                LoggingService.LogInfo("Worker is Paused, stopping all capabilities", "WorkerService", "_HandleStatusChange")
                 self._StopAllCapabilities()
 
         except Exception as e:
@@ -688,7 +699,11 @@ class WorkerServiceApp:
                 self.TranscodeService.ActiveJobs.clear()
                 self.TranscodeService = None
             self.QualityTestService = None
-            LoggingService.LogInfo("Drain complete, all capabilities stopped", "WorkerService", "_DrainAndStop")
+
+            # Auto-transition: Draining -> Paused
+            self.WorkerStatus = "Paused"
+            self.DatabaseManager.UpdateWorkerStatus(self.WorkerName, "Paused")
+            LoggingService.LogInfo("Drain complete, status set to Paused", "WorkerService", "_DrainAndStop")
         except Exception as e:
             LoggingService.LogException("Error during drain", e, "WorkerService", "_DrainAndStop")
 
@@ -701,8 +716,19 @@ class WorkerServiceApp:
         if self.ContinuousScanService is not None:
             self._StopScanCapability()
 
+    def _LoadCapabilityPollingInterval(self) -> int:
+        """Read CapabilityPollingIntervalSec from SystemSettings. Default 15."""
+        try:
+            Value = self.DatabaseManager.GetSystemSetting('CapabilityPollingIntervalSec')
+            if Value:
+                Parsed = int(Value)
+                return max(5, min(120, Parsed))
+        except Exception:
+            pass
+        return 15
+
     def _StartCapabilityPolling(self):
-        """Start capability polling thread (60s interval)."""
+        """Start capability polling thread."""
         try:
             self.CapabilityPollingThread = threading.Thread(
                 target=self._CapabilityPollingLoop,
@@ -710,15 +736,15 @@ class WorkerServiceApp:
                 name="CapabilityPoller"
             )
             self.CapabilityPollingThread.start()
-            LoggingService.LogInfo("Capability polling started (60s interval)", "WorkerService", "_StartCapabilityPolling")
+            LoggingService.LogInfo(f"Capability polling started ({self.CapabilityPollingIntervalSec}s interval)", "WorkerService", "_StartCapabilityPolling")
         except Exception as e:
             LoggingService.LogException("Error starting capability polling", e, "WorkerService", "_StartCapabilityPolling")
 
     def _CapabilityPollingLoop(self):
-        """Poll Workers table every 60 seconds for capability flag and concurrency changes."""
+        """Poll Workers table for capability flag and concurrency changes."""
         while not self.ShutdownEvent.is_set():
             try:
-                self.ShutdownEvent.wait(60)
+                self.ShutdownEvent.wait(self.CapabilityPollingIntervalSec)
                 if self.ShutdownEvent.is_set():
                     break
 
@@ -797,8 +823,9 @@ class WorkerServiceApp:
         try:
             LoggingService.LogInfo("Shutting down WorkerService...", "WorkerService", "Shutdown")
 
-            # Mark worker as Offline
-            self.DatabaseManager.UpdateWorkerStatus(self.WorkerName, "Offline")
+            # Do not change Workers.Status on shutdown -- heartbeat staleness
+            # tells the UI the process is dead.  Preserving Status lets the
+            # operator see "was Online but died" vs "was Paused and stopped".
 
             # Update service status
             self.DatabaseManager.UpdateServiceStatus("WorkerService", {
@@ -858,8 +885,8 @@ def SignalHandler(signum, frame):
                 print(f"EXCEPTION (logger unavailable): killing FFmpeg processes: {e}")
 
     # Step 2: do potentially-slow DB cleanup in a background thread with a hard
-    # budget. Worker-Offline / pool-close are best-effort; if the DB hangs the
-    # heartbeat-staleness check will eventually flip the row to Offline anyway.
+    # budget. Status is left untouched -- heartbeat staleness tells the UI
+    # the process died; preserving the last operational state is intentional.
     def _DeferredCleanup():
         try:
             if hasattr(Main, 'app') and Main.app:
@@ -872,15 +899,14 @@ def SignalHandler(signum, frame):
                         'IsProcessing': False,
                         'ActiveJobsCount': 0
                     })
-                    Db.UpdateWorkerStatus(App.WorkerName, "Offline")
                 except Exception as e:
                     try:
                         LoggingService.LogException(
-                            f"Error marking worker {App.WorkerName!r} Offline during SignalHandler",
+                            f"Error updating ServiceStatus during SignalHandler",
                             e, "SignalHandler", "WorkerService"
                         )
                     except Exception:
-                        print(f"EXCEPTION (logger unavailable): marking worker offline: {e}")
+                        print(f"EXCEPTION (logger unavailable): updating ServiceStatus: {e}")
         finally:
             try:
                 from Core.Database.DatabaseService import DatabaseService

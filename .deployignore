@@ -1,0 +1,42 @@
+# .deployignore -- exclusion patterns for deploy/SyncSource.py
+#
+# Matched against each path component (directory name or filename) using
+# fnmatch glob syntax.  New source files are included by default (additive).
+# Only add entries here for artifacts, caches, and tooling that have no
+# place on a build host.
+
+# Version control and project metadata
+.git
+.claude
+.specify
+.github
+
+# Python build artifacts
+venv
+__pycache__
+*.pyc
+*.pyo
+*.egg-info
+.pytest_cache
+.env
+
+# Test suites (not needed at runtime)
+Tests
+specs
+
+# FFmpeg Windows binaries (Docker image downloads its own)
+FFmpegMaster
+
+# Local-only caches and scratch dirs
+cache
+memory
+test_remux_sandbox
+node_modules
+
+# Archived / retired service code
+archive_*
+
+# Ad-hoc test artifacts
+vmaf_*.xml
+*.log
+*.dump

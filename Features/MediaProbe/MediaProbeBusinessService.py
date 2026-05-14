@@ -109,6 +109,25 @@ class MediaProbeBusinessService:
 
                 self.Repository.UpdateMetadata(MediaFile)
 
+                # Flag files with no audio stream as possibly corrupt
+                if not MetadataResult.get('AudioCodec'):
+                    try:
+                        from Repositories.DatabaseManager import DatabaseManager
+                        DatabaseManager().AddProblemFile(
+                            FilePath,
+                            'No_Audio_Stream',
+                            f'File has no audio stream -- possibly corrupt: {FilePath}'
+                        )
+                        LoggingService.LogWarning(
+                            f"No audio stream detected (possibly corrupt): {FilePath}",
+                            "MediaProbeBusinessService", "_ExecuteProbe"
+                        )
+                    except Exception as ProblemEx:
+                        LoggingService.LogException(
+                            f"Failed to flag no-audio file as problem: {FilePath}",
+                            ProblemEx, "MediaProbeBusinessService", "_ExecuteProbe"
+                        )
+
                 # Materialize PriorityScore + AssignedProfile + IsCompliant + RecommendedMode
                 # via the unified updater. RecomputeForFiles applies the ShowSettings ->
                 # SystemSettings.DefaultProfileName cascade so newly-discovered files get

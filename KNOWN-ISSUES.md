@@ -2,6 +2,17 @@
 
 ## Open
 
+### [BUG - FIXED 2026-05-13] Remux files discarded as "NoSavings" -- disposition gate ordering bug
+**Date:** 2026-05-13 | **Fixed:** 2026-05-13
+
+**What broke:** `PostTranscodeDispositionService._DecideFromInputs` checked `NewSize >= OldSize -> Discard/NoSavings` (Row 2) before `QualityTestRequired=false -> BypassReplace` (Row 3). Remux jobs set `QualityTestRequired=false` but often produce slightly larger outputs (audio re-encode). Result: 679 successful remux attempts got `Disposition='Discard'`, FileReplacement never ran. Disk state: original at `.orig`, good remuxed `.mp4` at source path, DB still pointing to old `.mkv`/`.mp4` path.
+
+**Violates:** `Features/FileReplacement/FileReplacement.feature.md` criterion 10, `transcode-vs-remux-routing.feature.md` criterion 16.
+
+**Fix:** Swapped Row 2 and Row 3 in `_DecideFromInputs` so `QualityTestNotRequired` fires before `NoSavings`. Remux attempts bypass the savings gate entirely. Remediation script `Scripts/SQLScripts/RemediateDiscardedRemuxFiles.py` flipped dispositions and ran `ProcessFileReplacement` for affected rows. ~380 remediated on i9; 113 blocked by stale `.orig` needing manual cleanup; 188 need script run from larry after redeploy.
+
+---
+
 ### [BUG] Per-capability concurrency is not data-driven -- requires worker restart to take effect
 **Date:** 2026-05-13
 
@@ -37,14 +48,25 @@
 
 ---
 
-### [BUG] Worker deploy scp copies the entire repo (venv, .git, Tests, etc.) instead of just build inputs
-**Date:** 2026-05-12
+### [BUG - FIXED 2026-05-13] Worker deploy scp copies the entire repo (venv, .git, Tests, etc.) instead of just build inputs
+**Date:** 2026-05-12 | **Fixed:** 2026-05-13
 
-**What breaks:** Step 1 of `deploy/worker-deploy.flow.md` runs `scp -r /c/Code/MediaVortex/* root@10.0.0.42:/tmp/mediavortex-build/` -- a blind recursive copy that drags `venv/`, `.git/`, `__pycache__/`, `Tests/`, smoke-test artifacts, screenshots, ad-hoc dumps, and anything else sitting in the working directory across the wire. Wastes bandwidth and time on every deploy and bloats the Docker build context for no payoff.
+**What broke:** Step 1 of `deploy/worker-deploy.flow.md` ran `scp -r /c/Code/MediaVortex/* root@10.0.0.42:/tmp/mediavortex-build/` -- a blind recursive copy that dragged `venv/`, `.git/`, `__pycache__/`, `Tests/`, smoke-test artifacts, screenshots, ad-hoc dumps, and anything else sitting in the working directory across the wire. Wasted bandwidth and time on every deploy and bloated the Docker build context for no payoff.
 
-**Violates:** `deploy/worker-deploy.feature.md` criterion 19 (added with this entry).
+**Fix:** Created `.deployignore` (exclusion patterns for deploy sync -- additive by default, new files included automatically). Linux deploy: `deploy/SyncSource.py` reads `.deployignore` and uses tar-over-ssh to stream only needed files. Windows deploy: `deploy-windows-worker.py` `StepScpRepo()` now uses `shutil.copytree` with the same `.deployignore` patterns into a temp directory before scp. Flow doc step 1 updated.
 
-**Look first:** `deploy/worker-deploy.flow.md` step 1 (the scp command). Check whether `.dockerignore` already enumerates exclusions the copy step could mirror; consider switching to `rsync -a --exclude-from=.dockerignore` (or an explicit `--exclude` list) so the copy and the Docker context agree on what's in scope.
+**Violates:** `deploy/worker-deploy.feature.md` criterion 19.
+
+---
+
+### [BUG] Next Remux Batch table shows files with no audio stream that silently fail when queued
+**Date:** 2026-05-14
+
+**What breaks:** The "Next Remux Batch" card on the ShowSettings page calls `/api/ShowSettings/SmartPopulate` with `Mode='Remux'`. The SmartPopulate query filters by `HasExplicitEnglishAudio IS NULL OR HasExplicitEnglishAudio = true`, but files that have never been probed with audio-aware code have `HasExplicitEnglishAudio = NULL` -- which passes the filter. These video-only files (e.g. Survivor S43E01, S45E02) get displayed as candidates, queued by the user, then fail with "Transcoding failed with return code 4294967274" because the remux command maps `0:a:0` which doesn't exist.
+
+**Violates:** SmartPopulate should exclude files that are known to have zero audio streams (possibly corrupt). No feature doc exists yet for this card's population logic end-to-end.
+
+**Look first:** `Features/TranscodeQueue/QueueManagementBusinessService.py` `SmartPopulateQueue()` WHERE clause; `Features/ShowSettings/remux-populate-card.feature.md`; the `RecommendedMode` materialization in `_EvaluateCompliance()`.
 
 **Fix with:** `/t`.
 
@@ -579,6 +601,32 @@ Full Windows paths (e.g., `T:\Shows\file.mkv`) are stored as natural keys in at 
 - [x] Deploy verification -- workers Online and heartbeating (root cause: CrashRecoveryService killed itself because Python is PID 1 in Docker and the recorded ProcessId from a prior crash matched the new container's own PID; also bumped postgres max_connections 30->200 and added pool closeall() before os._exit() to stop connection-leak death spiral)
 - [ ] Run RenameFilePathColumns.py to soft-rename columns (Phase 3b Step 4)
 - [ ] Drop FilePath_Deprecated columns (Phase 4 -- point of no return)
+
+---
+
+### [BUG] Workers in broken canonical state silently fail scanning; no multi-drive scanning workflow
+**Date:** 2026-05-13
+
+**What breaks:** Two related gaps in the scanning pipeline:
+
+(1) **Unknown worker state.** A worker with `ScanEnabled=true` but broken path resolution (missing `WorkerShareMappings` rows, unmapped drives, `PathTranslationService` returning untranslated Windows paths on Linux) silently begins a scan pass. `ContinuousScanService` calls `StartScanning` for each RootFolder without validating that `_ToLocalPath(RootFolderPath)` resolves to an accessible local directory. The result is `os.walk` errors, wrong paths inserted into MediaFiles, or scans that appear to complete with 0 files found. No pre-scan health check, no operator-visible signal that a worker's path state is broken.
+
+(2) **Multi-drive scanning.** RootFolders are seeded under specific drive prefixes (T:\\, M:\\, Z:\\). Adding a new drive to scan requires: manually inserting RootFolders rows, adding `WorkerShareMappings` rows for every worker that can reach the new drive, and restarting workers. There is no UI workflow to register a new drive/share, associate it with workers, and begin scanning. The operator cannot scan from all workers across all drives without manual SQL and restarts.
+
+**Violates:** `Features/FileScanning/FileScanning.feature.md` criteria 20, 21 (added with this entry). `WorkerService/WorkerService.feature.md` criterion 19 (added with this entry).
+
+**Look first:** `Features/FileScanning/ContinuousScanService.py` `_ExecuteScan` -- where pre-scan path validation should fire. `Features/FileScanning/FileScanningBusinessService.py` `_ToLocalPath` -- the translation call that should be validated. `Services/PathTranslationService.py` -- the translation layer. `Templates/Settings.html` or `Templates/FileScanning.html` -- where a "add drive" UI would live. `Repositories/DatabaseManager.py:RegisterWorkerShareMappings` -- the current seeding path for share mappings. Related: `KNOWN-ISSUES.md` canonical path storage entry (the root cause); `path-storage.feature.md` (the long-term fix).
+
+---
+
+### [BUG] QueryDatabase.py truncates long text columns at 60 chars -- error messages unreadable
+**Date:** 2026-05-13
+
+**What breaks:** `Scripts/SQLScripts/QueryDatabase.py` hardcodes `max_col_width=60` in `print_table()` with no CLI override. Long values -- `errormessage`, `ffpmpegcommand`, `filepath` -- are silently cut to 57 chars + `...`. The operator cannot read error messages from `TranscodeAttempts` without dropping into raw Python to query the DB directly. Discovered when diagnosing a remux failure: the `PrepareReplacement failed: Pre-existing .orig backup at /...` message was truncated, hiding the actual file path needed to resolve it.
+
+**Violates:** `Features/SQLQueries/SQLQueries.feature.md` criterion 6 (added with this entry).
+
+**Look first:** `Scripts/SQLScripts/QueryDatabase.py` lines 47-74 (`print_table` and `truncate`). Add a `--width N` CLI flag (default unlimited or large); pass through to `max_col_width`.
 
 ---
 

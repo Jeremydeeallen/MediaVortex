@@ -301,11 +301,12 @@ def GetWorkers():
         Workers = []
         for Row in (Rows or []):
             HeartbeatAge = Row.get('HeartbeatAgeSec')
-            IsOnline = HeartbeatAge is not None and HeartbeatAge < 300
+            IsAlive = HeartbeatAge is not None and HeartbeatAge < 300
             Workers.append({
                 "WorkerName": Row.get('WorkerName', ''),
                 "Platform": Row.get('Platform', ''),
-                "Status": 'Online' if IsOnline else 'Offline',
+                "Status": Row.get('Status', 'Paused'),
+                "IsAlive": IsAlive,
                 "LastHeartbeat": str(Row.get('LastHeartbeat', '')) if Row.get('LastHeartbeat') else '',
                 "HeartbeatAgeSec": HeartbeatAge,
                 "MaxConcurrentJobs": Row.get('MaxConcurrentJobs', 0),
@@ -507,7 +508,7 @@ def SetWorkerStatus(WorkerName):
             return jsonify({"Success": False, "Message": "Status is required"}), 400
 
         NewStatus = Data['Status']
-        ValidStatuses = ('Online', 'Draining', 'Offline')
+        ValidStatuses = ('Online', 'Paused')
         if NewStatus not in ValidStatuses:
             return jsonify({"Success": False, "Message": f"Status must be one of: {', '.join(ValidStatuses)}"}), 400
 

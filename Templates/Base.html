@@ -33,10 +33,12 @@
                         <span class="badge rounded-pill bg-primary d-none" id="NavQueueCount"
                               style="position: absolute; top: 2px; right: -6px; font-size: 0.65em; padding: 3px 6px; pointer-events: none;"></span>
                     </li>
-                    <li class="nav-item">
+                    <li class="nav-item" style="position: relative;">
                         <a class="nav-link {% if request.endpoint == 'activity' %}active{% endif %}" href="/Activity">
                             <i class="fas fa-heartbeat"></i> Activity
                         </a>
+                        <span class="badge rounded-pill bg-success d-none" id="NavActiveJobsCount"
+                              style="position: absolute; top: 2px; right: -6px; font-size: 0.65em; padding: 3px 6px; pointer-events: none;"></span>
                     </li>
                     <li class="nav-item">
                         <a class="nav-link {% if request.endpoint in ['status', 'sql_queries', 'optimization', 'settings'] %}active{% endif %}" href="/settings">
@@ -174,6 +176,24 @@
     }
     updateNavQueueCount();
     setInterval(updateNavQueueCount, 30000);
+    // Fetch active jobs count for nav badge
+    function updateNavActiveJobsCount() {
+        fetch('/api/SQLQueries/GetActiveJobs')
+            .then(r => r.json())
+            .then(data => {
+                const badge = document.getElementById('NavActiveJobsCount');
+                const count = data.Count || 0;
+                if (count > 0) {
+                    badge.textContent = count;
+                    badge.classList.remove('d-none');
+                } else {
+                    badge.classList.add('d-none');
+                }
+            })
+            .catch(() => {});
+    }
+    updateNavActiveJobsCount();
+    setInterval(updateNavActiveJobsCount, 10000);
     // Global client-side error reporting
     (function() {
         var ErrorQueue = [];

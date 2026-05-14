@@ -11,6 +11,7 @@ Provides an ad-hoc database query interface for troubleshooting. Offers quick-qu
 3. Query results are displayed in a formatted table.
 4. Recent failures are shown with a force-complete option for stuck jobs.
 5. The /SQLQueries page is accessible from the navigation bar.
+6. [BUG] The CLI query tool (`Scripts/SQLScripts/QueryDatabase.py`) does not truncate text columns unless the operator opts in. Long values (error messages, file paths, FFmpeg commands) are shown in full by default, with an optional `--width N` flag to truncate for readability.
 
 ## Status
 

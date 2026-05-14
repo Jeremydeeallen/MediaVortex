@@ -268,6 +268,7 @@ class QueueManagementBusinessService:
                 WHERE m.TranscodedByMediaVortex IS NOT TRUE
                   AND m.Id NOT IN (SELECT MediaFileId FROM TranscodeQueue WHERE MediaFileId IS NOT NULL)
                   AND m.SizeMB > 0
+                  AND (m.HasExplicitEnglishAudio IS NULL OR m.HasExplicitEnglishAudio = true)
             """
 
             # Mode filter (remux-populate-card.feature.md criterion 4). When supplied,
@@ -1281,7 +1282,7 @@ class QueueManagementBusinessService:
         pre-loaded sets / threshold to avoid per-row DB round-trips. When
         omitted, this method loads them fresh per call.
         """
-        # a. Hard block: no English audio
+        # a. Hard block: no English audio (includes files with zero audio streams)
         if Row.get('HasExplicitEnglishAudio') is False:
             return (None, None)
 

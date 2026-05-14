@@ -376,12 +376,16 @@ class CommandBuilder:
                 # Get compression parameters from system settings with defaults
                 Threshold = int(DatabaseManagerInstance.GetSystemSetting('CompressionThreshold') or -15)
                 Ratio = int(DatabaseManagerInstance.GetSystemSetting('CompressionRatio') or 3)
-                Attack = int(DatabaseManagerInstance.GetSystemSetting('CompressionAttack') or 10)
-                Release = int(DatabaseManagerInstance.GetSystemSetting('CompressionRelease') or 100)
+                AttackMs = int(DatabaseManagerInstance.GetSystemSetting('CompressionAttack') or 10)
+                ReleaseMs = int(DatabaseManagerInstance.GetSystemSetting('CompressionRelease') or 100)
                 Makeup = int(DatabaseManagerInstance.GetSystemSetting('CompressionMakeup') or 3)
                 
+                # Convert ms to seconds -- FFmpeg acompressor expects seconds
+                AttackSec = AttackMs / 1000.0
+                ReleaseSec = ReleaseMs / 1000.0
+                
                 # Build acompressor filter for dynamic range reduction
-                CompressorFilter = f"acompressor=threshold={Threshold}dB:ratio={Ratio}:attack={Attack}:release={Release}:makeup={Makeup}dB"
+                CompressorFilter = f"acompressor=threshold={Threshold}dB:ratio={Ratio}:attack={AttackSec}:release={ReleaseSec}:makeup={Makeup}dB"
                 Filters.append(CompressorFilter)
             
             # Check if audio normalization is enabled system-wide

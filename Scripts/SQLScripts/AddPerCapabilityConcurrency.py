@@ -86,6 +86,20 @@ def RunMigration():
         else:
             print("[SKIP] Workers.RemuxEnabled already exists")
 
+        # 5. Add CapabilityPollingIntervalSec system setting (default 15s)
+        Cursor.execute("SELECT 1 FROM SystemSettings WHERE SettingKey = 'CapabilityPollingIntervalSec'")
+        if not Cursor.fetchone():
+            Cursor.execute("""
+                INSERT INTO SystemSettings (SettingKey, SettingValue, Description, DataType)
+                VALUES ('CapabilityPollingIntervalSec', '15',
+                        'How often (seconds) workers poll for capability and concurrency changes. Range 5-120.',
+                        'integer')
+            """)
+            Connection.commit()
+            print("[OK] Added SystemSettings.CapabilityPollingIntervalSec (default: 15)")
+        else:
+            print("[SKIP] SystemSettings.CapabilityPollingIntervalSec already exists")
+
         print("\nPer-capability concurrency migration completed successfully.")
 
     except Exception as e:

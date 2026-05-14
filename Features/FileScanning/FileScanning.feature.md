@@ -27,9 +27,13 @@ Discovers media files in configured root directories, extracts metadata via FFpr
 
 19. [BUG] The "Possibly Corrupt" count on the /Status page is clickable and navigates the operator to a view of the affected files (file path, size, failure count, last error). Today the count is a static number with no drill-down; the operator must know to visit /Scanning and open the Corrupt Files modal to see which files are flagged. Fixed means: clicking the count on /Status either opens a modal with the file list (reusing the existing `/api/FileScanning/MediaFiles/Corrupt` endpoint) or navigates to /Scanning with the modal auto-opened.
 
+20. [BUG] **A worker whose canonical path state is broken (share mappings missing, drives unmapped, `PathTranslation` failing) is detected and reported before it attempts scanning.** Today a worker with `ScanEnabled=true` but broken path resolution (e.g. `WorkerShareMappings` rows missing, drives not mounted, `_ToLocalPath` returning an untranslated Windows path on Linux) silently starts scanning, produces `os.walk` errors or inserts wrong paths into MediaFiles, and the operator has no signal until they notice garbage in the DB. Fixed means: before `ContinuousScanService` begins a scan pass, the worker validates that every `RootFolders` path it intends to scan resolves to an accessible local directory via `_ToLocalPath` + `os.path.isdir`. RootFolders that fail resolution are skipped with a WARNING log and a `ScanJobs` row recording `Status='Failed', ErrorMessage='Path not accessible: <canonical> -> <resolved>'`. The `/Activity` or `/Scanning` page surfaces which workers have path-resolution failures. Related: `KNOWN-ISSUES.md` canonical path storage entry.
+
+21. [BUG] **The operator can register and scan multiple drives/shares from any worker.** Today RootFolders are seeded under specific drive prefixes (T:\, M:\, Z:\) and a worker can only scan drives it has `WorkerShareMappings` rows for. Adding a new drive to scan requires: (a) manually inserting RootFolders rows with the correct canonical prefix, (b) adding `WorkerShareMappings` rows for every worker that can reach the new drive, and (c) restarting workers to pick up the new mappings. Fixed means: the `/settings` or `/Scanning` page lets the operator add a new RootFolder under any drive/share prefix, the system prompts for or auto-discovers which workers can access it, and `WorkerShareMappings` (or its `StorageRootResolutions` successor per `path-storage.feature.md`) is updated without requiring a worker restart. A worker whose share mappings are updated picks up the new drive on its next continuous-scan tick.
+
 ## Status
 
-COMPLETE (criteria 1-10, 18) / [BUG] criteria 11, 12, 16, 19 open / criteria 13-15, 17 to verify against current implementation
+COMPLETE (criteria 1-10, 18) / [BUG] criteria 11, 12, 16, 19, 20, 21 open / criteria 13-15, 17 to verify against current implementation
 
 ## Scope
 

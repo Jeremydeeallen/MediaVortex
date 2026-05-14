@@ -152,23 +152,20 @@ class FFmpegService:
             if Arguments is None:
                 Arguments = ['-v', 'error', '-print_format', 'json', '-show_format', '-show_streams']
             
-            # Use the project-bundled FFprobe path with proper quoting for special characters
-            CommandString = f'"{self.FFprobePath}"'
-            for Arg in Arguments:
-                CommandString += f' {Arg}'
-            # Ensure file path is properly quoted and normalized
+            # Build argument list -- no shell=True, so $, %, _ etc. in paths
+            # are passed verbatim without shell interpretation.
             NormalizedPath = os.path.normpath(FilePath)
-            CommandString += f' "{NormalizedPath}"'
-            
+            CommandList = [self.FFprobePath] + Arguments + [NormalizedPath]
+            # Keep a display string for logging / error messages
+            CommandString = ' '.join(f'"{A}"' if ' ' in A or '$' in A else A for A in CommandList)
             
             Result = subprocess.run(
-                CommandString,
+                CommandList,
                 capture_output=True,
                 text=True,
                 timeout=30,
                 encoding='utf-8',
                 errors='replace',
-                shell=True  # Use shell=True with properly quoted command
             )
             
             ResultDict = {

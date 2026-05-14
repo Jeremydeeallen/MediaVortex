@@ -79,6 +79,7 @@ Stage 7 (commit):
 - **Slow query (>2s)**: spinner stays in card header; no implicit timeout. Operator sees a sluggish refresh and can investigate via DB Logs.
 - **Stale display vs newly-queued**: when another worker/UI session adds a file to the queue between two SmartPopulate calls, the next call's `NOT IN TranscodeQueue` excludes it. No duplicate-suggestion bug.
 - **Stale PriorityScore vs current AssignedProfile**: priority materialization recomputes on probe and on AssignedProfile change. Between those events, PriorityScore is the score for the file at the time of the last recompute. A file with NULL PriorityScore (never probed, or probed before this feature shipped) sorts last (NULLS LAST). The operator can trigger a backfill via the materialization admin endpoint.
+- **No-audio files appearing as candidates**: Files with `HasExplicitEnglishAudio = false` are excluded by the SmartPopulate WHERE clause. Additionally, `_EvaluateCompliance` hard-blocks them so `RecommendedMode = NULL` (materialized). If a file's `HasExplicitEnglishAudio` is updated manually, `RecomputeForFiles([id])` must be called to clear `RecommendedMode`. Files with `HasExplicitEnglishAudio = NULL` (old probes) pass through -- they need a fresh probe to be properly classified.
 
 ## Out of Scope (intentional)
 

@@ -72,11 +72,8 @@
                 <button class="btn btn-outline-success" onclick="ActivityPage.SetAllWorkersStatus('Online')" title="Set All Online">
                     <i class="fas fa-play"></i> All Online
                 </button>
-                <button class="btn btn-outline-warning" onclick="ActivityPage.SetAllWorkersStatus('Draining')" title="Drain All">
-                    <i class="fas fa-hourglass-half"></i> Drain All
-                </button>
-                <button class="btn btn-outline-danger" onclick="ActivityPage.SetAllWorkersStatus('Offline')" title="Set All Offline">
-                    <i class="fas fa-power-off"></i> All Offline
+                <button class="btn btn-outline-secondary" onclick="ActivityPage.SetAllWorkersStatus('Paused')" title="Pause All">
+                    <i class="fas fa-pause"></i> Pause All
                 </button>
             </div>
         </div>
@@ -132,9 +129,25 @@ var ActivityPage = (function() {
         var Map = {
             'Online': 'bg-success',
             'Draining': 'bg-warning text-dark',
-            'Offline': 'bg-danger'
+            'Paused': 'bg-secondary'
         };
         return Map[Status] || 'bg-secondary';
+    }
+
+    function GetWorkerCardClass(Status) {
+        var Map = {
+            'Online': 'card h-100',
+            'Draining': 'card h-100 border-warning',
+            'Paused': 'card h-100 bg-light text-muted'
+        };
+        return Map[Status] || 'card h-100';
+    }
+
+    function GetHeartbeatDotClass(AgeSec) {
+        if (AgeSec === null || AgeSec === undefined) return 'text-danger';
+        if (AgeSec < 60) return 'text-success';
+        if (AgeSec < 300) return 'text-warning';
+        return 'text-danger';
     }
 
     // GetQTStatusBadgeClass / GetPriorityBadgeClass moved to /Queue (the QT
@@ -379,18 +392,19 @@ var ActivityPage = (function() {
         }
         WorkerList.forEach(function(W) {
             var HeartbeatAge = W.HeartbeatAgeSec;
-            var IsOnline = HeartbeatAge !== null && HeartbeatAge !== undefined && HeartbeatAge < 300;
-            var DisplayStatus = IsOnline ? (W.Status || 'Online') : 'Offline';
+            var DisplayStatus = W.Status || 'Paused';
             var BadgeCls = GetWorkerStatusBadge(DisplayStatus);
+            var CardCls = GetWorkerCardClass(DisplayStatus);
             var HeartbeatText = FormatHeartbeatAge(HeartbeatAge);
+            var HeartbeatDot = GetHeartbeatDotClass(HeartbeatAge);
             var WorkerNameEsc = EscapeHtml(W.WorkerName);
 
             var Col = document.createElement('div');
             Col.className = 'col-6 col-lg-4 col-xl-3';
-            Col.innerHTML = '<div class="card h-100">' +
+            Col.innerHTML = '<div class="' + CardCls + '">' +
                 '<div class="card-body py-3">' +
                     '<h6 class="card-title mb-2 d-flex justify-content-between align-items-center">' +
-                        '<span><i class="fas fa-desktop me-1"></i>' + WorkerNameEsc + '</span>' +
+                        '<span><i class="fas fa-circle me-1 small ' + HeartbeatDot + '" title="Last heartbeat: ' + HeartbeatText + '"></i>' + WorkerNameEsc + '</span>' +
                         '<span class="badge ' + BadgeCls + '">' + DisplayStatus + '</span>' +
                     '</h6>' +
                     '<div class="small text-muted mb-2">' +
@@ -401,8 +415,7 @@ var ActivityPage = (function() {
                     '</div>' +
                     '<div class="btn-group btn-group-sm w-100 mb-2" role="group">' +
                         '<button class="btn ' + (DisplayStatus === 'Online' ? 'btn-success' : 'btn-outline-success') + '" onclick="ActivityPage.SetWorkerStatus(\'' + WorkerNameEsc.replace(/'/g, "\\'") + '\', \'Online\')">Online</button>' +
-                        '<button class="btn ' + (DisplayStatus === 'Draining' ? 'btn-warning' : 'btn-outline-warning') + '" onclick="ActivityPage.SetWorkerStatus(\'' + WorkerNameEsc.replace(/'/g, "\\'") + '\', \'Draining\')">Drain</button>' +
-                        '<button class="btn ' + (DisplayStatus === 'Offline' ? 'btn-danger' : 'btn-outline-danger') + '" onclick="ActivityPage.SetWorkerStatus(\'' + WorkerNameEsc.replace(/'/g, "\\'") + '\', \'Offline\')">Offline</button>' +
+                        '<button class="btn ' + (DisplayStatus === 'Paused' || DisplayStatus === 'Draining' ? 'btn-secondary' : 'btn-outline-secondary') + '" onclick="ActivityPage.SetWorkerStatus(\'' + WorkerNameEsc.replace(/'/g, "\\'") + '\', \'Paused\')">Pause</button>' +
                     '</div>' +
                     '<div class="small text-muted mb-1">Capabilities</div>' +
                     '<div class="btn-group btn-group-sm w-100 mb-1" role="group" aria-label="Worker capabilities">' +
