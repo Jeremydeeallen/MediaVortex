@@ -15,8 +15,12 @@ Do NOT investigate, fix, or expand scope. Capture context only -- these steps pr
 
 4. Add a [BUG] tagged criterion to the relevant feature doc(s). The criterion should be testable: describe what "fixed" looks like, not just what is broken.
 
-5. Check whether a flow doc covers the affected pipeline. If none exists, flag the gap.
+5. Check whether a flow doc covers the affected pipeline. If none exists, flag the gap -- /t will create the flow doc before fixing.
 
-6. Write a 2-3 line entry in KNOWN-ISSUES.md: what breaks, which feature criterion it violates, and what file/function to look at first.
+6. Write an entry in the **Open** section of KNOWN-ISSUES.md using this format: `### [BUG] <description>` with date, what breaks, which feature criterion it violates, and what file/function to look at first.
 
-7. Report back: done, action taken.
+7. If the **Resolved** section of KNOWN-ISSUES.md has more than 10 entries, move the oldest resolved entries to `memory/KNOWN-ISSUES-ARCHIVE.md` (create the archive file if it does not exist).
+
+8. Report: use /t to investigate and fix in a dedicated session.
+
+Report back to the user: done <action taken>
