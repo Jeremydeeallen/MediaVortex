@@ -2,6 +2,22 @@
 
 ## Open
 
+### [FEATURE - DONE 2026-05-14] Disable/enable workers -- hide retired workers from UI
+
+**Problem:** Retired workers (e.g. Remington) remain visible in the Activity page worker cards forever. No way to hide them without deleting the row (which loses historical config).
+
+**Solution:** Added `Workers.Enabled` column (BOOLEAN, default TRUE). The `/api/TeamStatus/Workers` endpoint filters to `Enabled=TRUE` by default. A `?IncludeDisabled=true` query param shows all. Activity page has a "Show Disabled" toggle and Disable/Enable buttons on each worker card. Disabled workers render dimmed with a dark "Disabled" badge.
+
+**Files:** `TeamStatusController.py` (endpoints), `Activity.html` (UI), `AddWorkerEnabledColumn.py` (migration).
+
+### [FEATURE - DONE 2026-05-14] Remove hardcoded concurrency ceiling -- let DB drive limits
+
+**Problem:** `MaxConcurrentJobs` was capped at 5 in 6 places (API validation, worker clamp). Operator had to redeploy to raise the limit. Not data-driven.
+
+**Solution:** Removed upper bound from all validation/clamp sites. Only floor of 1 enforced. The operator sets whatever value fits their hardware via the Workers table.
+
+**Files:** `TeamStatusController.py`, `ProcessRemuxQueueService.py`, `ProcessTranscodeQueueService.py`, `ProcessQualityTestQueueService.py`, `TranscodeJobController.py`, `WorkerService/Main.py`.
+
 ### [BUG - FIXED 2026-05-13] Remux files discarded as "NoSavings" -- disposition gate ordering bug
 **Date:** 2026-05-13 | **Fixed:** 2026-05-13
 
