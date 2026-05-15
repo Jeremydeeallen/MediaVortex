@@ -543,6 +543,23 @@ Full Windows paths (e.g., `T:\Shows\file.mkv`) are stored as natural keys in at 
 
 ## Resolved
 
+### [TECH DEBT - FIXED 2026-05-15] Card 1.5 Add Batch -- legacy bookkeeping, redundant payload, arbitrary size cap
+**Date:** 2026-05-15 | **Fixed:** 2026-05-15
+
+**What was wrong:** Card 1.5 "Add Batch" payload duplicated MediaFiles data (~52KB at 250 items, scaling linearly); server did three round-trips (existing-paths SELECT, MediaFiles SELECT, bulk INSERT); 1-500 size cap was arbitrary; no "queue all matching" affordance; size selector reset on every page load; dead code (per-row `Item.get('Mode')` fallback, dead `Priority` assignment in QueueByFolder, never-fired per-item-insert fallback).
+
+**Fix:**
+- `AddSuggestionsToQueue` now accepts `MediaFileIds` (slim) or legacy `Items`; rewritten as a single `INSERT INTO TranscodeQueue ... SELECT FROM MediaFiles WHERE Id = ANY(%s) AND NOT EXISTS (...)` with priority computed inline as `COALESCE(PriorityScore, size-based fallback)`. No Python per-item loop; no per-item DB lookup; bulk-insert-fallback removed (verified zero hits historically).
+- New `/api/ShowSettings/QueueAllMatching` endpoint + `QueueAllMatching` service method: one `INSERT...SELECT` against the cascade-filtered set with optional `Search`/`Drive` filters.
+- `Templates/ShowSettings.html`: both Add Batch buttons send `{Mode, ProfileId, MediaFileIds:[...]}` only; new "Queue All" button on Card 1.5; `localStorage`-backed sticky size for both selectors; `max="500"` → `max="1000"`; collapsed duplicate `PAGE_SIZE`/`REMUX_PAGE_SIZE` vars into the BATCH_SIZE values.
+- `SmartPopulateQueue` Limit ceiling 500 → 1000.
+- `QueueByFolder` slimmed to pass `MediaFileIds` only; dead `Priority` line dropped.
+- `smart-populate.flow.md` stages 7-8 updated to describe the single-statement INSERT path and the new "queue all matching" entry point.
+
+**Violates:** `Features/ShowSettings/remux-populate-card.feature.md` criterion 20.
+
+---
+
 ### [BUG - FIXED 2026-05-15] Next Remux Batch "Add Batch" button takes 3-10 seconds
 **Date:** 2026-05-15 | **Fixed:** 2026-05-15
 

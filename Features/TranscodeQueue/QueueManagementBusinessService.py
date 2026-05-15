@@ -261,9 +261,10 @@ class QueueManagementBusinessService:
 
             from Core.Database.DatabaseService import DatabaseService, EscapeLikePattern
 
-            # Validate Limit (criterion 11): coerce to [1, 500].
+            # Validate Limit: coerce to [1, 1000]. Display cap reflects DOM-render
+            # cost; bulk-drain use case goes through QueueAllMatching, not pagination.
             try:
-                Limit = max(1, min(500, int(Limit)))
+                Limit = max(1, min(1000, int(Limit)))
             except (TypeError, ValueError):
                 Limit = 100
             try:
@@ -365,150 +366,191 @@ class QueueManagementBusinessService:
             LoggingService.LogException(ErrorMsg, Ex, "QueueManagementBusinessService", "SmartPopulateQueue")
             return {"Success": False, "ErrorMessage": ErrorMsg, "Suggestions": []}
 
-    def AddSuggestionsToQueue(self, Items: List[Dict[str, Any]], ProfileId: int = None, Mode: str = None) -> Dict[str, Any]:
-        """Add approved suggestions to the transcode queue.
-        
-        Each item should have FilePath, TargetResolution, Mode, SizeMB, Priority.
-        If ProfileId is provided, assigns that profile to each media file before queuing.
-        Bulk-inserts all items in a single transaction for speed.
+    # PostgreSQL fragment: priority computed inline from MediaFiles.SizeMB
+    # using the SizeMB-based fallback formula (matches CalculatePriority's
+    # fallback path; verified bit-for-bit against the Python implementation).
+    # Used inside COALESCE so a materialized PriorityScore wins when present.
+    _SIZE_PRIORITY_SQL = (
+        "GREATEST(1, LEAST(194, ROUND(1 + LEAST(193, "
+        "LOG(10::numeric, GREATEST(m.SizeMB * 0.5, 0)::numeric + 1) / 5.0 * 193))::int))"
+    )
+
+    def AddSuggestionsToQueue(self,
+                              MediaFileIds: Optional[List[int]] = None,
+                              Items: Optional[List[Dict[str, Any]]] = None,
+                              ProfileId: int = None,
+                              Mode: str = None) -> Dict[str, Any]:
+        """Queue media files in a single round-trip INSERT...SELECT.
+
+        Accepts MediaFileIds (preferred) or a legacy Items list (only the
+        MediaFileId field is read; FilePath/SizeMB/etc come from MediaFiles).
+
+        For Mode='Transcode' with ProfileId: bulk-assigns the chosen profile
+        on MediaFiles. PriorityScore is left to the next RecomputeForFiles
+        cron (cascade-resolved priority is close enough for queue order;
+        the formula is log-scaled).
+
+        Priority on each new TranscodeQueue row is COALESCE(materialized
+        PriorityScore, SizeMB-based fallback). No per-item DB lookup.
         """
         try:
-            LoggingService.LogFunctionEntry("AddSuggestionsToQueue", "QueueManagementBusinessService", len(Items), ProfileId)
+            # Normalize input. Accept either MediaFileIds or legacy Items.
+            if MediaFileIds is None and Items:
+                MediaFileIds = [I.get('MediaFileId') for I in Items
+                                if I.get('MediaFileId') is not None]
+            try:
+                NormalizedIds = list(dict.fromkeys(int(x) for x in (MediaFileIds or [])))
+            except (TypeError, ValueError):
+                return {"Success": False, "ErrorMessage": "Invalid MediaFileIds", "ItemsAdded": 0}
+            if not NormalizedIds:
+                return {"Success": False, "ErrorMessage": "No MediaFileIds provided", "ItemsAdded": 0}
 
-            ExistingFilePaths = self.Repository.GetExistingQueueFilePaths()
+            if Mode not in ('Transcode', 'Remux'):
+                Mode = 'Transcode'
 
-            # Resolve profile name if ProfileId provided
+            # Resolve profile name. Transcode allows a profile choice; Remux
+            # has no profile by design (cascade pre-decided no-re-encode).
             ProfileName = None
-            if ProfileId is not None:
+            if Mode == 'Transcode' and ProfileId is not None:
                 Profile = self.DatabaseManager.GetProfileById(ProfileId)
-                if Profile:
-                    ProfileName = Profile.ProfileName
-                else:
+                if not Profile:
                     return {"Success": False, "ErrorMessage": f"Profile with ID {ProfileId} not found", "ItemsAdded": 0}
+                ProfileName = Profile.ProfileName
 
-            # Collect all MediaFileIds we need to look up (one bulk query instead of N)
-            AllMediaFileIds = [Item.get('MediaFileId') for Item in Items if Item.get('MediaFileId')]
-            MediaFileMap: Dict[int, Any] = {}
-            if AllMediaFileIds:
-                from Core.Database.DatabaseService import DatabaseService as _DbSvc
-                Rows = _DbSvc().ExecuteQuery(
-                    "SELECT Id, FilePath, FileName, SizeMB, DurationMinutes, "
-                    "AssignedProfile, Resolution "
-                    "FROM MediaFiles WHERE Id IN %s",
-                    (tuple(AllMediaFileIds),)
+            from Core.Database.DatabaseService import DatabaseService
+            Db = DatabaseService()
+
+            # Honor operator's profile choice by writing it to MediaFiles.
+            # Skip rows where it already matches to avoid unnecessary writes.
+            if ProfileName:
+                Db.ExecuteNonQuery(
+                    "UPDATE MediaFiles SET AssignedProfile = %s "
+                    "WHERE Id = ANY(%s) AND AssignedProfile IS DISTINCT FROM %s",
+                    (ProfileName, NormalizedIds, ProfileName)
                 )
-                for R in Rows:
-                    MfId = R.get('Id')
-                    MediaFileMap[MfId] = MediaFileModel(
-                        Id=MfId,
-                        FilePath=R.get('FilePath', ''),
-                        FileName=R.get('FileName', ''),
-                        SizeMB=R.get('SizeMB') or 0.0,
-                        DurationMinutes=R.get('DurationMinutes'),
-                        AssignedProfile=R.get('AssignedProfile'),
-                        Resolution=R.get('Resolution'),
-                    )
 
-            ItemsSkipped = 0
-            PendingInserts: List[TranscodeQueueModel] = []
+            InsertSql = r"""
+                INSERT INTO TranscodeQueue
+                    (StorageRootId, RelativePath, FilePath, FileName, Directory,
+                     SizeBytes, SizeMB, Priority, Status, DateAdded,
+                     ProcessingMode, MediaFileId)
+                SELECT m.StorageRootId,
+                       COALESCE(m.RelativePath, ''),
+                       m.FilePath,
+                       m.FileName,
+                       regexp_replace(replace(m.FilePath, E'\\', '/'), '/[^/]+$', ''),
+                       (m.SizeMB * 1024 * 1024)::bigint,
+                       m.SizeMB,
+                       COALESCE(m.PriorityScore, """ + self._SIZE_PRIORITY_SQL + r"""),
+                       'Pending',
+                       NOW() AT TIME ZONE 'UTC',
+                       %s,
+                       m.Id
+                FROM MediaFiles m
+                WHERE m.Id = ANY(%s)
+                  AND m.SizeMB > 0
+                  AND NOT EXISTS (SELECT 1 FROM TranscodeQueue tq WHERE tq.FilePath = m.FilePath)
+            """
 
-            for Item in Items:
-                FilePath = Item.get('FilePath', '')
-                if not FilePath or FilePath in ExistingFilePaths:
-                    ItemsSkipped += 1
-                    continue
+            Connection = Db.GetConnection()
+            try:
+                Cursor = Connection.cursor()
+                Cursor.execute(InsertSql, (Mode, NormalizedIds))
+                ItemsAdded = Cursor.rowcount
+                Connection.commit()
+            finally:
+                Db.CloseConnection(Connection)
 
-                MediaFileId = Item.get('MediaFileId')
-                MediaFile = MediaFileMap.get(MediaFileId) if MediaFileId else None
-
-                # Assign profile to the media file if specified, then refresh
-                # PriorityScore (priority-materialization.feature.md criterion 10).
-                if ProfileName and MediaFile:
-                    MediaFile.AssignedProfile = ProfileName
-                    self.DatabaseManager.SaveMediaFile(MediaFile)
-                    try:
-                        self.ComputePriorityScore(MediaFile.Id)
-                    except Exception as PriorityEx:
-                        LoggingService.LogException(
-                            f"PriorityScore refresh after AssignedProfile change failed for MediaFileId={MediaFile.Id}",
-                            PriorityEx, "QueueManagementBusinessService", "AddSuggestionsToQueue"
-                        )
-
-                PathParts = FilePath.replace("\\", "/").split("/")
-                Directory = "/".join(PathParts[:-1]) if len(PathParts) > 1 else ""
-                FileName = PathParts[-1] if PathParts else ""
-                SizeMB = float(Item.get('SizeMB', 0))
-                ItemMode = Mode if Mode in ('Transcode', 'Remux') else Item.get('Mode', 'Transcode')
-
-                ExplicitPriority = Item.get('Priority')
-                if isinstance(ExplicitPriority, int) and 1 <= ExplicitPriority <= 200:
-                    Priority = ExplicitPriority
-                elif MediaFile:
-                    TargetVideoKbps = None
-                    TargetAudioKbps = None
-                    # Remux has no video re-encode -- the profile-target bitrate
-                    # estimate is meaningless. Skip the per-item DB lookup and
-                    # let CalculatePriority use its SizeMB-based fallback.
-                    if ItemMode != 'Remux' and MediaFile.AssignedProfile and MediaFile.Resolution:
-                        try:
-                            Settings = self.DatabaseManager.GetProfileSettingsForTargetResolution(
-                                MediaFile.AssignedProfile, MediaFile.Resolution
-                            )
-                            if Settings:
-                                TargetVideoKbps = Settings.get('VideoBitrateKbps')
-                                TargetAudioKbps = Settings.get('AudioBitrateKbps')
-                        except Exception as Ex:
-                            LoggingService.LogException(
-                                f"Could not look up ProfileThresholds for priority calc on {FileName}",
-                                Ex, "QueueManagementBusinessService", "AddSuggestionsToQueue"
-                            )
-                    # Suppress the per-row fallback warning -- it floods the
-                    # Logs table with one INSERT per item (~9ms each on a
-                    # network DB = 2+ seconds for a 250-item batch). Remux
-                    # items have no profile by design; warning is expected.
-                    Priority = self.CalculatePriority(
-                        MediaFile,
-                        TargetVideoKbps=TargetVideoKbps,
-                        TargetAudioKbps=TargetAudioKbps,
-                        SuppressFallbackWarning=True,
-                    )
-                else:
-                    Priority = 1
-
-                QueueItem = TranscodeQueueModel(
-                    FilePath=FilePath,
-                    FileName=FileName,
-                    Directory=Directory,
-                    SizeBytes=int(SizeMB * 1024 * 1024),
-                    SizeMB=SizeMB,
-                    Priority=Priority,
-                    Status="Pending",
-                    ProcessingMode=ItemMode,
-                    DateAdded=datetime.now(timezone.utc)
-                )
-                PendingInserts.append(QueueItem)
-                ExistingFilePaths.add(FilePath)
-
-            # Bulk insert all items in one transaction
-            ItemsAdded = 0
-            if PendingInserts:
-                try:
-                    ItemsAdded = self.Repository.BulkInsertQueueItems(PendingInserts)
-                except Exception as BulkEx:
-                    LoggingService.LogException("Bulk insert failed, falling back to per-item insert", BulkEx, "QueueManagementBusinessService", "AddSuggestionsToQueue")
-                    for QueueItem in PendingInserts:
-                        try:
-                            self.Repository.SaveTranscodeQueueItem(QueueItem)
-                            ItemsAdded += 1
-                        except Exception as Ex:
-                            LoggingService.LogException(f"Error saving queue item for {QueueItem.FileName}", Ex, "QueueManagementBusinessService", "AddSuggestionsToQueue")
-
-            LoggingService.LogInfo(f"AddSuggestionsToQueue: {ItemsAdded} added, {ItemsSkipped} skipped, profile={ProfileName}", "QueueManagementBusinessService", "AddSuggestionsToQueue")
+            ItemsSkipped = len(NormalizedIds) - ItemsAdded
+            LoggingService.LogInfo(
+                f"AddSuggestionsToQueue: {ItemsAdded} added, {ItemsSkipped} skipped "
+                f"(mode={Mode}, profile={ProfileName})",
+                "QueueManagementBusinessService", "AddSuggestionsToQueue"
+            )
             return {"Success": True, "ItemsAdded": ItemsAdded, "ItemsSkipped": ItemsSkipped}
 
         except Exception as Ex:
             ErrorMsg = f"Exception in AddSuggestionsToQueue: {str(Ex)}"
             LoggingService.LogException(ErrorMsg, Ex, "QueueManagementBusinessService", "AddSuggestionsToQueue")
+            return {"Success": False, "ErrorMessage": ErrorMsg, "ItemsAdded": 0}
+
+    def QueueAllMatching(self, Mode: str, Search: str = '', Drive: str = '') -> Dict[str, Any]:
+        """Queue every cascade-classified candidate matching the optional filters,
+        in one INSERT...SELECT. No client-side ID enumeration. Mirrors the
+        SmartPopulateQueue WHERE clause but inserts instead of selecting.
+
+        Mode must be 'Transcode' or 'Remux' -- filters MediaFiles by
+        RecommendedMode. Files already in queue are excluded via NOT EXISTS.
+        Returns ItemsAdded.
+        """
+        try:
+            if Mode not in ('Transcode', 'Remux'):
+                return {"Success": False, "ErrorMessage": "Mode must be 'Transcode' or 'Remux'", "ItemsAdded": 0}
+
+            from Core.Database.DatabaseService import DatabaseService, EscapeLikePattern
+
+            Params: list = [Mode, Mode]  # ProcessingMode in SELECT, RecommendedMode in WHERE
+            WhereSql = """
+                WHERE m.TranscodedByMediaVortex IS NOT TRUE
+                  AND m.SizeMB > 0
+                  AND (m.HasExplicitEnglishAudio IS NULL OR m.HasExplicitEnglishAudio = true)
+                  AND m.RecommendedMode = %s
+                  AND NOT EXISTS (SELECT 1 FROM TranscodeQueue tq WHERE tq.FilePath = m.FilePath)
+            """
+
+            if Drive:
+                DrivePrefix = Drive.rstrip(':\\/') + ':'
+                WhereSql += " AND m.FilePath LIKE %s ESCAPE '!'"
+                Params.append(EscapeLikePattern(DrivePrefix) + '%')
+
+            if Search and Search.strip():
+                Term = '%' + EscapeLikePattern(Search.strip().lower()) + '%'
+                WhereSql += (
+                    " AND (LOWER(m.FileName) LIKE %s ESCAPE '!'"
+                    "      OR LOWER(SPLIT_PART(REPLACE(m.FilePath, '\\\\', '/'), '/', 2)) LIKE %s ESCAPE '!')"
+                )
+                Params.append(Term)
+                Params.append(Term)
+
+            InsertSql = r"""
+                INSERT INTO TranscodeQueue
+                    (StorageRootId, RelativePath, FilePath, FileName, Directory,
+                     SizeBytes, SizeMB, Priority, Status, DateAdded,
+                     ProcessingMode, MediaFileId)
+                SELECT m.StorageRootId,
+                       COALESCE(m.RelativePath, ''),
+                       m.FilePath,
+                       m.FileName,
+                       regexp_replace(replace(m.FilePath, E'\\', '/'), '/[^/]+$', ''),
+                       (m.SizeMB * 1024 * 1024)::bigint,
+                       m.SizeMB,
+                       COALESCE(m.PriorityScore, """ + self._SIZE_PRIORITY_SQL + r"""),
+                       'Pending',
+                       NOW() AT TIME ZONE 'UTC',
+                       %s,
+                       m.Id
+                FROM MediaFiles m
+            """ + WhereSql
+
+            Db = DatabaseService()
+            Connection = Db.GetConnection()
+            try:
+                Cursor = Connection.cursor()
+                Cursor.execute(InsertSql, tuple(Params))
+                ItemsAdded = Cursor.rowcount
+                Connection.commit()
+            finally:
+                Db.CloseConnection(Connection)
+
+            LoggingService.LogInfo(
+                f"QueueAllMatching: {ItemsAdded} added (mode={Mode}, search='{Search or ''}', drive='{Drive or ''}')",
+                "QueueManagementBusinessService", "QueueAllMatching"
+            )
+            return {"Success": True, "ItemsAdded": ItemsAdded}
+
+        except Exception as Ex:
+            ErrorMsg = f"Exception in QueueAllMatching: {str(Ex)}"
+            LoggingService.LogException(ErrorMsg, Ex, "QueueManagementBusinessService", "QueueAllMatching")
             return {"Success": False, "ErrorMessage": ErrorMsg, "ItemsAdded": 0}
 
     def GetMediaFilesWithProfilesOrderedBySize(self, RootFolderPath: str = None) -> List[MediaFileModel]:

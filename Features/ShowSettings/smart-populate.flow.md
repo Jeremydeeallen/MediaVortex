@@ -35,7 +35,8 @@ itself never computes priority; it only reads the column.
 | 4 | Re-Analyze | User clicks "Re-Analyze" button | Same as initial paint, using the current Search + Limit | Toast surfaces the error; previous data stays |
 | 5 | Auto-paginate | Client batch exhausted, `HasMore=true` | Next page fetched with same Search + Limit, incremented Offset; appended to displayed list | "No more candidates" message when offset exceeds total |
 | 6 | Per-row remove | User clicks "x" on a row | Row hides client-side only; not sent to server. State lost on next refetch | Idempotent (no server effect) |
-| 7 | Commit batch | User clicks "Add Batch" | Items POST to `AddSuggestionsToQueue` with the selected profile; queue grows; next batch auto-loads | Per-item failure surfaces in a toast; successful items still queued |
+| 7 | Commit batch | User clicks "Add Batch" | `{Mode, ProfileId, MediaFileIds}` POSTs to `AddToQueue`; server runs one `INSERT...SELECT FROM MediaFiles` with NOT EXISTS dedup; queue grows; next batch auto-loads | Whole-batch failure surfaces in a toast (atomic insert; no partial success) |
+| 8 | Queue all matching | User clicks "Queue All" on Card 1.5 | `{Mode:'Remux', Search, Drive}` POSTs to `QueueAllMatching`; server runs one `INSERT...SELECT` against the full cascade-filtered set; card refreshes | Whole-statement failure surfaces in a toast; confirm prompt before sending |
 
 ## Data Flow per Stage
 
@@ -65,11 +66,25 @@ Stage 5 (paginate):
   Service         -> same recipe with new offset; HasMore = (Offset+len(rows)) < TotalCandidates
 
 Stage 7 (commit):
-  JS              -> POST /api/ShowSettings/AddToQueue {MediaFileIds:[...], ProfileId}
-  Controller      -> QueueManagementBusinessService.AddSuggestionsToQueue(...)
-  Service         -> for each MediaFile, recompute Priority authoritatively against the chosen profile;
-                     INSERT into TranscodeQueue with that Priority value.
-  -- The SmartPopulate response's PriorityScore is informational; it is not trusted at commit time.
+  JS              -> POST /api/ShowSettings/AddToQueue {Mode, ProfileId, MediaFileIds:[...]}
+  Controller      -> QueueManagementBusinessService.AddSuggestionsToQueue(MediaFileIds=...)
+  Service         -> (Transcode + ProfileId) bulk-UPDATE MediaFiles.AssignedProfile;
+                     INSERT INTO TranscodeQueue (...) SELECT ... FROM MediaFiles WHERE Id = ANY(%s)
+                     AND NOT EXISTS (SELECT 1 FROM TranscodeQueue tq WHERE tq.FilePath = m.FilePath);
+                     Priority is COALESCE(materialized PriorityScore, SizeMB-based fallback computed inline).
+  -- Slim payload: server reads FilePath/SizeMB/Priority etc. from MediaFiles, not the request body.
+  -- One INSERT statement, no per-item Python loop, no per-item DB lookup.
+
+Stage 8 (queue all matching):
+  JS              -> POST /api/ShowSettings/QueueAllMatching {Mode:'Remux', Search, Drive}
+  Controller      -> QueueManagementBusinessService.QueueAllMatching(...)
+  Service         -> INSERT INTO TranscodeQueue (...) SELECT ... FROM MediaFiles m
+                     WHERE m.RecommendedMode = %s AND m.TranscodedByMediaVortex IS NOT TRUE
+                       AND m.SizeMB > 0 AND m.HasExplicitEnglishAudio IS NULL OR true
+                       AND NOT EXISTS (already-queued)
+                       AND optional Search / Drive filters;
+                     Priority via COALESCE(PriorityScore, size-based fallback).
+  -- No client-side ID enumeration. Scales to the full candidate pool in one round-trip.
 ```
 
 ## Failure Modes

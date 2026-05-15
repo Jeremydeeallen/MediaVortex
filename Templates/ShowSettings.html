@@ -19,7 +19,7 @@
                 <div class="d-flex align-items-center gap-2 flex-wrap">
                     <input id="BatchSearch" type="search" class="form-control form-control-sm" placeholder="Search title or file..." style="width: 200px;" maxlength="100">
                     <label class="mb-0 text-white text-nowrap small">Size:</label>
-                    <input id="BatchSizeSelect" type="number" min="1" max="500" step="1" value="100" class="form-control form-control-sm" style="width: 80px;" list="BatchSizeChoices">
+                    <input id="BatchSizeSelect" type="number" min="1" max="1000" step="1" value="100" class="form-control form-control-sm" style="width: 80px;" list="BatchSizeChoices">
                     <datalist id="BatchSizeChoices">
                         <option value="1"></option>
                         <option value="25"></option>
@@ -83,9 +83,10 @@
                 <div class="d-flex align-items-center gap-2 flex-wrap">
                     <input id="RemuxSearch" type="search" class="form-control form-control-sm" placeholder="Search title or file..." style="width: 200px;" maxlength="100">
                     <label class="mb-0 text-white text-nowrap small">Size:</label>
-                    <input id="RemuxSizeSelect" type="number" min="1" max="500" step="1" value="250" class="form-control form-control-sm" style="width: 80px;" list="BatchSizeChoices">
+                    <input id="RemuxSizeSelect" type="number" min="1" max="1000" step="1" value="250" class="form-control form-control-sm" style="width: 80px;" list="BatchSizeChoices">
                     <small class="text-white text-nowrap fst-italic opacity-75 mx-2">no profile needed</small>
                     <button class="btn btn-light btn-sm" onclick="AddRemuxBatchToQueue()" id="AddRemuxBatchBtn">Add Batch</button>
+                    <button class="btn btn-warning btn-sm" onclick="QueueAllRemuxMatching()" id="QueueAllRemuxBtn" title="Queue every remux candidate matching the current search">Queue All</button>
                     <button class="btn btn-outline-light btn-sm" onclick="SmartPopulateRemux()" id="RemuxAnalyzeBtn">Re-Analyze</button>
                 </div>
             </div>
@@ -220,33 +221,48 @@ let LibrarySort = { Column: 'TotalGB', Direction: 'desc' };
 let AllSuggestions = [];
 let BatchItems = [];
 let AllProfiles = [];
-// BATCH_SIZE / PAGE_SIZE are operator-controlled via the size input in
-// Card 1 (smart-populate.feature.md criterion 9). Default 100.
+// Operator-controlled batch size (smart-populate.feature.md criterion 9).
+// Initial value is overwritten by localStorage on init if present.
 let BATCH_SIZE = 100;
-let PAGE_SIZE = 100;
 let CurrentSearch = '';
 let SearchDebounceTimer = null;
 let CurrentOffset = 0;
 let TotalCandidates = 0;
 let HasMore = false;
 
-// Card 1.5 (Remux) batch state -- INDEPENDENT of Card 1 per
-// remux-populate-card.feature.md criterion 7. Each card has its own
-// search, batch size, offset, debounce timer.
+// Card 1.5 (Remux) batch state -- INDEPENDENT of Card 1
+// (remux-populate-card.feature.md criterion 7).
 let RemuxAllSuggestions = [];
 let RemuxBatchItems = [];
-let REMUX_BATCH_SIZE = 250;  // Card 1.5 default is higher (criterion 8)
-let REMUX_PAGE_SIZE = 250;
+let REMUX_BATCH_SIZE = 250;
 let RemuxCurrentSearch = '';
 let RemuxSearchDebounceTimer = null;
 let RemuxCurrentOffset = 0;
 let RemuxTotalCandidates = 0;
 let RemuxHasMore = false;
 
+function _ReadStickySize(Key, Default, Max) {
+    try {
+        const Raw = parseInt(localStorage.getItem(Key), 10);
+        if (Number.isFinite(Raw) && Raw >= 1 && Raw <= Max) return Raw;
+    } catch (e) { /* localStorage unavailable -- fall through */ }
+    return Default;
+}
+
+function _WriteStickySize(Key, Val) {
+    try { localStorage.setItem(Key, String(Val)); } catch (e) { /* ignore */ }
+}
+
 
 $(document).ready(function() {
     LoadShows();
     LoadProfiles();
+
+    // Hydrate sticky batch sizes from localStorage (criterion 20).
+    BATCH_SIZE = _ReadStickySize('ShowSettings.BatchSize', 100, 1000);
+    REMUX_BATCH_SIZE = _ReadStickySize('ShowSettings.RemuxBatchSize', 250, 1000);
+    $('#BatchSizeSelect').val(BATCH_SIZE);
+    $('#RemuxSizeSelect').val(REMUX_BATCH_SIZE);
 
     // Search box: debounce 300ms (criterion 5).
     $('#BatchSearch').on('input', function() {
@@ -258,18 +274,16 @@ $(document).ready(function() {
         }, 300);
     });
 
-    // Batch-size input (criteria 9-10). Now an <input type="number">; fires
-    // on `change` (commit) which covers blur, Enter, and arrow-key step.
     $('#BatchSizeSelect').on('change', function() {
         const NewSize = parseInt($(this).val(), 10);
-        if (Number.isFinite(NewSize) && NewSize >= 1 && NewSize <= 500) {
+        if (Number.isFinite(NewSize) && NewSize >= 1 && NewSize <= 1000) {
             BATCH_SIZE = NewSize;
-            PAGE_SIZE = NewSize;
+            _WriteStickySize('ShowSettings.BatchSize', NewSize);
             SmartPopulate();
         }
     });
 
-    // ── Card 1.5 (Remux) handlers -- parallel to Card 1, independent state ──
+    // ── Card 1.5 (Remux) handlers ──
     $('#RemuxSearch').on('input', function() {
         const Val = $(this).val() || '';
         clearTimeout(RemuxSearchDebounceTimer);
@@ -281,9 +295,9 @@ $(document).ready(function() {
 
     $('#RemuxSizeSelect').on('change', function() {
         const NewSize = parseInt($(this).val(), 10);
-        if (Number.isFinite(NewSize) && NewSize >= 1 && NewSize <= 500) {
+        if (Number.isFinite(NewSize) && NewSize >= 1 && NewSize <= 1000) {
             REMUX_BATCH_SIZE = NewSize;
-            REMUX_PAGE_SIZE = NewSize;
+            _WriteStickySize('ShowSettings.RemuxBatchSize', NewSize);
             SmartPopulateRemux();
         }
     });
@@ -597,7 +611,7 @@ function SmartPopulate(IsNextPage) {
 
     const Payload = {
         Drive: 'T:',
-        Limit: PAGE_SIZE,
+        Limit: BATCH_SIZE,
         Offset: CurrentOffset,
         Search: CurrentSearch || '',
         Mode: 'Transcode'
@@ -655,7 +669,7 @@ function SmartPopulateRemux(IsNextPage) {
 
     const Payload = {
         Drive: 'T:',
-        Limit: REMUX_PAGE_SIZE,
+        Limit: REMUX_BATCH_SIZE,
         Offset: RemuxCurrentOffset,
         Search: RemuxCurrentSearch || '',
         Mode: 'Remux'
@@ -747,16 +761,9 @@ function AddRemuxBatchToQueue() {
         return;
     }
 
-    // Remux requires NO profile -- the cascade has already decided. Server
-    // accepts ProfileId=null when Mode='Remux'.
-    const Items = RemuxBatchItems.map(function(S) {
-        return {
-            FilePath: S.FilePath,
-            MediaFileId: S.MediaFileId,
-            SizeMB: S.SizeMB,
-            Mode: 'Remux'
-        };
-    });
+    // Slim payload: Remux needs no profile; server reads metadata from MediaFiles by Id.
+    const MediaFileIds = RemuxBatchItems.map(function(S) { return S.MediaFileId; });
+    const SentCount = MediaFileIds.length;
 
     const Btn = $('#AddRemuxBatchBtn');
     const OrigText = Btn.html();
@@ -766,12 +773,12 @@ function AddRemuxBatchToQueue() {
         url: '/api/ShowSettings/AddToQueue',
         method: 'POST',
         contentType: 'application/json',
-        data: JSON.stringify({ Items: Items, Mode: 'Remux', ProfileId: null }),
+        data: JSON.stringify({ Mode: 'Remux', ProfileId: null, MediaFileIds: MediaFileIds }),
         timeout: 30000,
         success: function(Response) {
             Btn.prop('disabled', false).html(OrigText);
             if (Response.Success) {
-                const Added = Response.ItemsAdded || Items.length;
+                const Added = Response.ItemsAdded || SentCount;
                 ShowNotification('Queued ' + Added + ' remux job(s)', 'success');
                 RemuxBatchItems = [];
                 if (RemuxAllSuggestions.length > 0) {
@@ -782,6 +789,47 @@ function AddRemuxBatchToQueue() {
                 } else {
                     RenderRemuxBatch();
                 }
+            } else {
+                ShowNotification('Failed: ' + (Response.Message || Response.ErrorMessage || 'Unknown error'), 'danger');
+            }
+        },
+        error: function(XHR) {
+            Btn.prop('disabled', false).html(OrigText);
+            const Msg = (XHR.responseJSON && (XHR.responseJSON.Message || XHR.responseJSON.ErrorMessage)) || 'Request failed';
+            ShowNotification('Failed: ' + Msg, 'danger');
+        }
+    });
+}
+
+// Card 1.5: Queue every remux candidate matching the current search, in one
+// server-side INSERT...SELECT. No client-side ID enumeration -- scales to
+// the full candidate pool without batching.
+function QueueAllRemuxMatching() {
+    const Total = RemuxTotalCandidates || 0;
+    const FilterText = RemuxCurrentSearch ? ' matching "' + RemuxCurrentSearch + '"' : '';
+    if (Total === 0) {
+        ShowNotification('No remux candidates' + FilterText, 'warning');
+        return;
+    }
+    if (!confirm('Queue all ' + Total.toLocaleString() + ' remux candidate(s)' + FilterText + '?')) return;
+
+    const Btn = $('#QueueAllRemuxBtn');
+    const OrigText = Btn.html();
+    Btn.prop('disabled', true).text('Queueing...');
+
+    $.ajax({
+        url: '/api/ShowSettings/QueueAllMatching',
+        method: 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify({ Mode: 'Remux', Search: RemuxCurrentSearch || '', Drive: 'T:' }),
+        timeout: 60000,
+        success: function(Response) {
+            Btn.prop('disabled', false).html(OrigText);
+            if (Response.Success) {
+                ShowNotification('Queued ' + (Response.ItemsAdded || 0).toLocaleString() + ' remux job(s)', 'success');
+                RemuxBatchItems = [];
+                RemuxAllSuggestions = [];
+                SmartPopulateRemux();
             } else {
                 ShowNotification('Failed: ' + (Response.Message || Response.ErrorMessage || 'Unknown error'), 'danger');
             }
@@ -850,17 +898,8 @@ function AddBatchToQueue() {
         return;
     }
 
-    const Items = BatchItems.map(function(S) {
-        // Priority is intentionally NOT sent here -- the server's
-        // AddSuggestionsToQueue computes the impact-based priority once the
-        // user has selected a profile (see queue-priority.feature.md).
-        return {
-            FilePath: S.FilePath,
-            MediaFileId: S.MediaFileId,
-            SizeMB: S.SizeMB,
-            Mode: 'Transcode',
-        };
-    });
+    // Slim payload: server reads everything from MediaFiles by Id.
+    const MediaFileIds = BatchItems.map(function(S) { return S.MediaFileId; });
 
     const Btn = $('#AddBatchBtn');
     const OrigText = Btn.html();
@@ -870,7 +909,7 @@ function AddBatchToQueue() {
         url: '/api/ShowSettings/AddToQueue',
         method: 'POST',
         contentType: 'application/json',
-        data: JSON.stringify({ Items: Items, ProfileId: parseInt(ProfileId) }),
+        data: JSON.stringify({ Mode: 'Transcode', ProfileId: parseInt(ProfileId), MediaFileIds: MediaFileIds }),
         success: function(Response) {
             Btn.prop('disabled', false).html(OrigText);
             if (Response.Success) {

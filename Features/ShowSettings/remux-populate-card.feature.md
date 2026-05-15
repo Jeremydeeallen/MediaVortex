@@ -103,6 +103,18 @@ parallel to `smart-populate.feature.md`.
 
 19. Clicking Card 1.5's "Add Batch" button completes in under 1 second on the live DB (250-item default batch). The Mode='Remux' path in `AddSuggestionsToQueue` must not issue per-item DB lookups for profile-target bitrates (those are meaningless for a no-re-encode operation). Verifiable: time the "Add Batch" click on Card 1.5 -- under 1s for a 250-item batch.
 
+20. Card 1.5's Add Batch is data-driven end-to-end with minimal client bookkeeping. All of the following hold simultaneously:
+
+    - **Slimmed payload.** `/api/ShowSettings/AddToQueue` accepts `{Mode:'Remux', MediaFileIds:[...]}` (IDs only). The server reads FilePath/SizeMB/Resolution from MediaFiles, not from the client. Verifiable: DevTools network tab shows the request body contains only Mode + MediaFileIds; queueing 250 items produces a request under ~5KB (today ~52KB).
+    - **Single-statement insert.** The server-side commit is a single `INSERT INTO TranscodeQueue (...) SELECT ... FROM MediaFiles WHERE Id = ANY(%s) AND NOT EXISTS (SELECT 1 FROM TranscodeQueue tq WHERE tq.FilePath = m.FilePath)` (or equivalent). No Python per-item loop building `PendingInserts`. Verifiable: a 5000-item batch completes in one DB round-trip (EXPLAIN ANALYZE shows one INSERT plan); total wall time scales with row count linearly on the server, not with N round-trips.
+    - **Display cap separated from queue cap.** Card 1.5 has two distinct limits: a display cap (default 250, governs how many rows render in the table for preview/remove) and a queue cap (effectively unbounded, governs how many rows the Add Batch button commits). Verifiable: enter `5000` in the size selector -- the table still renders at most the display cap (table stays responsive), but clicking Add Batch queues 5000 rows.
+    - **"Queue all matching" affordance.** A separate button on Card 1.5 commits every candidate currently matching the cascade filter (and search, if active) in one server-side INSERT...SELECT -- no client-side ID enumeration. Verifiable: clicking the button with 17,200 candidates queues all 17,200 in a single request without the browser allocating an Items array.
+    - **Sticky size selector.** The `#RemuxSizeSelect` value persists across page reloads via localStorage. Verifiable: set size to 100, reload, value is still 100.
+    - **Legacy removed.** The per-row `Item.get('Mode')` fallback in `AddSuggestionsToQueue` (Mode is a top-level param now), the dead `'Priority': int(float(...))` assignment in `QueueByFolder`, the per-item-insert fallback after bulk-insert failure (verify it has never fired in Logs; if it has not, delete it), and the suspicious `Drive: 'T:'` hardcoding in the SmartPopulate payload are all removed. Verifiable: grep for each pattern returns no matches.
+    - **Simpler client state.** The `RemuxAllSuggestions` + `RemuxBatchItems` two-array bookkeeping and the splice/concat auto-pagination collapse to a simpler model now that the queue cap is independent of the display cap. Verifiable: Card 1.5 JS section has one source-of-truth array for the displayed rows; auto-pagination logic is gone or trivial.
+
+    Look first: `Templates/ShowSettings.html` Card 1.5 JS (`AddRemuxBatchToQueue`, `SmartPopulateRemux`, state vars), `Features/ShowSettings/ShowSettingsController.py` `/AddToQueue` route, `Features/TranscodeQueue/QueueManagementBusinessService.py` `AddSuggestionsToQueue`, `Features/TranscodeQueue/TranscodeQueueRepository.py` `BulkInsertQueueItems` (likely deletable after the INSERT...SELECT refactor).
+
 ## Status
 
 IN PROGRESS -- operator approved 2026-05-09; manual-entry tweak folded into criterion 8.

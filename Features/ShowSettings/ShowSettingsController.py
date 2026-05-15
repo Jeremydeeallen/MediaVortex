@@ -225,9 +225,7 @@ def QueueByFolder():
         FolderWhere = ' OR '.join(FolderConditions)
 
         Sql = f"""
-            SELECT m.Id, m.FilePath, m.FileName, m.SizeMB, m.VideoBitrateKbps,
-                   m.Codec, m.Resolution, m.ResolutionCategory,
-                   m.HasExplicitEnglishAudio, m.AudioLanguages
+            SELECT m.Id
             FROM MediaFiles m
             WHERE (m.TranscodedByMediaVortex IS NULL OR m.TranscodedByMediaVortex = false)
               AND m.Id NOT IN (SELECT MediaFileId FROM TranscodeQueue WHERE MediaFileId IS NOT NULL)
@@ -243,23 +241,45 @@ def QueueByFolder():
         if not Rows:
             return jsonify({'Success': True, 'Message': 'No eligible files found in the selected folders', 'ItemsAdded': 0, 'ItemsSkipped': 0})
 
-        Items = []
-        for Row in Rows:
-            Items.append({
-                'MediaFileId': Row.get('Id'),
-                'FilePath': Row.get('FilePath', ''),
-                'SizeMB': float(Row.get('SizeMB', 0) or 0),
-                'Mode': 'Transcode',
-                'Priority': int(float(Row.get('SizeMB', 0) or 0)),
-            })
+        MediaFileIds = [Row.get('Id') for Row in Rows if Row.get('Id') is not None]
 
         from Features.TranscodeQueue.QueueManagementBusinessService import QueueManagementBusinessService
         Service = QueueManagementBusinessService()
-        Result = Service.AddSuggestionsToQueue(Items, ProfileId=ProfileId)
+        Result = Service.AddSuggestionsToQueue(MediaFileIds=MediaFileIds, ProfileId=ProfileId, Mode='Transcode')
 
         return jsonify(Result)
     except Exception as Ex:
         LoggingService.LogException("Exception queuing by folder", Ex, "ShowSettingsController", "QueueByFolder")
+        return jsonify({'Success': False, 'Message': str(Ex)}), 500
+
+
+@ShowSettingsBlueprint.route('/QueueAllMatching', methods=['POST'])
+def QueueAllMatching():
+    """Queue every cascade-classified candidate matching optional Search/Drive
+    in a single INSERT...SELECT. For Card 1.5's "Queue All" affordance.
+
+    Body:
+      Mode    -- required: 'Transcode' or 'Remux'.
+      Search  -- optional substring; matches FileName or show-folder segment.
+      Drive   -- optional drive prefix, e.g. 'T:'.
+    """
+    try:
+        Data = request.get_json() or {}
+        Mode = Data.get('Mode')
+        if Mode not in ('Transcode', 'Remux'):
+            return jsonify({'Success': False, 'Message': f'Mode must be Transcode or Remux (got {Mode!r})'}), 400
+
+        Search = Data.get('Search', '') or ''
+        if isinstance(Search, str) and len(Search) > 100:
+            Search = Search[:100]
+        Drive = Data.get('Drive', '') or ''
+
+        from Features.TranscodeQueue.QueueManagementBusinessService import QueueManagementBusinessService
+        Service = QueueManagementBusinessService()
+        Result = Service.QueueAllMatching(Mode=Mode, Search=Search, Drive=Drive)
+        return jsonify(Result)
+    except Exception as Ex:
+        LoggingService.LogException("Exception in QueueAllMatching route", Ex, "ShowSettingsController", "QueueAllMatching")
         return jsonify({'Success': False, 'Message': str(Ex)}), 500
 
 
@@ -268,23 +288,25 @@ def AddSuggestionsToQueue():
     """Add user-approved suggestions to the queue.
 
     Body:
-      Items     -- list of {MediaFileId, FilePath, FileName, SizeMB, ...}
-      ProfileId -- (optional) integer Profiles.Id. Required when Mode='Transcode'.
-                   For Mode='Remux' must be null/missing -- the cascade has
-                   already decided "container/audio fix only" so no profile
-                   choice is needed. See remux-populate-card.feature.md
-                   criterion 5.
-      Mode      -- 'Transcode' (default) or 'Remux'. Validated against this
-                   tuple; other values return HTTP 400 (criterion 6).
+      MediaFileIds -- list of ints. Preferred payload shape (slim).
+      Items        -- legacy: list of dicts with MediaFileId. Only the
+                      MediaFileId field is read; all other fields are
+                      ignored (file metadata comes from MediaFiles).
+      ProfileId    -- integer Profiles.Id, required for Mode='Transcode'.
+                      Must be null/missing for Mode='Remux' -- the cascade
+                      has already decided "container/audio fix only" so no
+                      profile choice is needed.
+      Mode         -- 'Transcode' (default) or 'Remux'.
     """
     try:
         Data = request.get_json()
         if not Data:
             return jsonify({'Success': False, 'Message': 'No data provided'}), 400
 
-        Items = Data.get('Items', [])
-        if not Items:
-            return jsonify({'Success': False, 'Message': 'No items provided'}), 400
+        MediaFileIds = Data.get('MediaFileIds')
+        Items = Data.get('Items')
+        if not MediaFileIds and not Items:
+            return jsonify({'Success': False, 'Message': 'No MediaFileIds or Items provided'}), 400
 
         Mode = Data.get('Mode', 'Transcode') or 'Transcode'
         if Mode not in ('Transcode', 'Remux'):
@@ -299,7 +321,12 @@ def AddSuggestionsToQueue():
 
         from Features.TranscodeQueue.QueueManagementBusinessService import QueueManagementBusinessService
         Service = QueueManagementBusinessService()
-        Result = Service.AddSuggestionsToQueue(Items, ProfileId=ProfileId, Mode=Mode)
+        Result = Service.AddSuggestionsToQueue(
+            MediaFileIds=MediaFileIds,
+            Items=Items,
+            ProfileId=ProfileId,
+            Mode=Mode,
+        )
 
         return jsonify(Result)
     except Exception as Ex:
