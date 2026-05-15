@@ -99,6 +99,10 @@ parallel to `smart-populate.feature.md`.
 
 18. Card 1.5's header label clarifies what "remux" means in operator-facing terms. Title is "Next Remux Batch"; subtitle reads "Audio normalize + container fix (no video re-encode)" so an operator who hasn't read the docs can understand the difference from Card 1. Verifiable: visual inspection.
 
+### I. Responsiveness
+
+19. **[BUG]** Clicking Card 1.5's "Add Batch" button takes 3-10 seconds to complete. "Fixed" looks like: the click-to-completion time is consistently under 1 second on the live DB. Verifiable: time the "Add Batch" click on Card 1.5 -- under 1s. Look first: `Templates/ShowSettings.html` Card 1.5 handler for `#RemuxAddBatchBtn`; `Features/ShowSettings/ShowSettingsController.py` `/AddToQueue` route; `Features/TranscodeQueue/QueueManagementBusinessService.py` `AddSuggestionsToQueue` Mode='Remux' path.
+
 ## Status
 
 IN PROGRESS -- operator approved 2026-05-09; manual-entry tweak folded into criterion 8.

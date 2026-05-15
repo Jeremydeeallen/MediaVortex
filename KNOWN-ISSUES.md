@@ -2,6 +2,19 @@
 
 ## Open
 
+### [BUG] Next Remux Batch "Add Batch" button takes 3-10 seconds
+**Date:** 2026-05-15
+
+**What breaks:** On `/ShowSettings`, clicking the "Add Batch" button on the Next Remux Batch card (Card 1.5) takes 3-10 seconds.
+
+**Violates:** `Features/ShowSettings/remux-populate-card.feature.md` criterion 19 (added with this entry).
+
+**Look first:** `Templates/ShowSettings.html` -- `#RemuxAddBatchBtn` handler. `Features/ShowSettings/ShowSettingsController.py` -- `/AddToQueue` route. `Features/TranscodeQueue/QueueManagementBusinessService.py` -- `AddSuggestionsToQueue` Mode='Remux' path.
+
+**Fix with:** `/t`.
+
+---
+
 ### [BUG - CRITICAL] Worker with broken NFS mount silently destroys queue -- marks all files as source-missing
 **Date:** 2026-05-14
 

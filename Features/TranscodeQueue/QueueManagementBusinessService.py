@@ -446,7 +446,10 @@ class QueueManagementBusinessService:
                 elif MediaFile:
                     TargetVideoKbps = None
                     TargetAudioKbps = None
-                    if MediaFile.AssignedProfile and MediaFile.Resolution:
+                    # Remux has no video re-encode -- the profile-target bitrate
+                    # estimate is meaningless. Skip the per-item DB lookup and
+                    # let CalculatePriority use its SizeMB-based fallback.
+                    if ItemMode != 'Remux' and MediaFile.AssignedProfile and MediaFile.Resolution:
                         try:
                             Settings = self.DatabaseManager.GetProfileSettingsForTargetResolution(
                                 MediaFile.AssignedProfile, MediaFile.Resolution
