@@ -2,6 +2,57 @@
 
 ## Open
 
+### [BUG - CRITICAL] Worker with broken NFS mount silently destroys queue -- marks all files as source-missing
+**Date:** 2026-05-14
+
+**What breaks:** wakko-worker-1 was set to Online after a redeploy. Its `/mnt/media_tv` mount point exists but points at the local NVMe (908G) instead of the NAS NFS share. The worker claimed queue items, checked if the source file exists at `/mnt/media_tv/...`, found nothing (correct -- the NAS data isn't there), and for every file: bumped `FFprobeFailureCount`, marked it source-missing, and deleted the queue item. It chewed through queue items as fast as it could claim them, corrupting the MediaFiles state for each one. No TranscodeAttempt rows created (the pre-flight check fires before that), so there's no attempt-level audit trail -- just the Logs table entries.
+
+**Observed damage (wakko-worker-1, ~2 minutes of operation):** At least 6 MediaFiles had FFprobeFailureCount incremented and were marked source-missing. Queue items deleted. The files are fine on the NAS -- wakko just couldn't see them.
+
+**Root cause:** No mount validation at startup or before transitioning to Online. The worker trusts that its mount points are correct and jumps straight into claiming work. The per-file "source missing" check is correct behavior for genuinely missing files, but catastrophically wrong when the entire mount is broken -- it treats a mount failure as thousands of individual file failures.
+
+**What "fixed" looks like:** Before a worker transitions to Online, it validates every storage mount: (a) mount point exists, (b) mount is not the local filesystem showing through (check device, inode, or presence of expected marker data), (c) mount contains files (not empty). If validation fails, worker stays Paused and logs an ERROR with the mount path and what it found. Activity page shows the failure reason. A worker that fails mount validation claims zero jobs.
+
+**Immediate remediation needed:** Undo the FFprobeFailureCount bumps on the ~6 affected MediaFiles so they don't get skipped on future scans. Fix wakko's NFS mount on the host before restarting workers.
+
+**Violates:** `WorkerService/worker-lifecycle.feature.md` criteria 20, 21 (added with this entry).
+
+**Look first:** `WorkerService/Main.py` -- startup pipeline (add mount validation between crash recovery and capability start). `Features/TranscodeJob/ProcessRemuxQueueService.py` and `ProcessTranscodeQueueService.py` -- the per-file source-missing check that currently fires per-job (should be gated by a mount-healthy flag). `deploy/docker-compose.yml` -- the bind mount configuration for `/mnt/media_tv` and `/mnt/media_movies`.
+
+**Fix with:** `/t` -- user wants to fix this now.
+
+---
+
+### [BUG] Worker status model is overcomplicated -- Draining state is broken, invisible, and unnecessary
+**Date:** 2026-05-14
+
+**What breaks:** Three related problems in the worker status/capability system:
+
+**(1) Draining doesn't stop remux.** `_HandleStatusChange("Draining")` sets `StopRequested` on TranscodeService, stops QualityTestService, and stops ContinuousScanService -- but has no awareness of RemuxService (added later). Remux jobs keep being claimed during the entire drain window. The drain-to-Paused auto-transition eventually triggers `_StopAllCapabilities` which does know about remux, but that's a two-poll-cycle delay (~120s) during which the worker grabs new work it shouldn't.
+
+**(2) Draining is invisible to the operator.** The Activity page UI only exposes Online and Pause buttons. `Draining` is an internal-only transient state with its own code path (`_DrainAndStop`, drain waiter thread), but the operator cannot set it from the UI and has no reason to know it exists. The operator's intent is "stop gracefully" -- that should be what Pause does.
+
+**(3) Capability polling has unjustified constraints.** The `_ApplyConcurrencyChanges` loop still clamps concurrency to 1-5 (already removed from API validation and TeamStatus controller, but survives in the polling loop). The actual polling interval is 60s despite criterion 2 documenting "within one polling interval (default 15s)" and `SystemSettings.CapabilityPollingIntervalSec` supposedly controlling it. The 60s delay means any status or concurrency change takes up to a minute to take effect.
+
+**Root cause:** Draining was designed before RemuxService existed and was never updated. The three-state model (Online/Draining/Paused) adds complexity for no operator benefit -- Paused should have always meant "finish in-flight, don't claim new."
+
+**Design direction (discuss before implementing):**
+- Two states only: **Online** (accepting work) and **Paused** (finish in-flight, stop claiming)
+- Paused = set `StopRequested` on every capability via `_StopAllCapabilities`, let processing loops wind down naturally
+- Remove `_DrainAndStop`, remove the `Draining` branch from `_HandleStatusChange`, remove the drain waiter thread
+- Remove the 1-5 concurrency clamp (floor of 1, no ceiling)
+- Align polling interval to the documented 15s default, verify `SystemSettings.CapabilityPollingIntervalSec` is actually wired
+
+**Violates:** `WorkerService/WorkerService.feature.md` criteria 3, 20, 21.
+
+**Feature doc:** `WorkerService/worker-lifecycle.feature.md` -- full design decisions and success criteria for the fix.
+
+**Look first:** `WorkerService/Main.py` -- `_HandleStatusChange` (line ~741), `_DrainAndStop` (line ~766), `_StopAllCapabilities` (line ~783), `_ApplyConcurrencyChanges` (search for 1-5 clamp), `_CapabilityPollingLoop` (interval). `Features/FileReplacement/FileReplacementBusinessService.py` -- `PrepareReplacement` (the `.orig` rename to replace with `.inprogress` pattern). `WorkerService/WorkerService.flow.md` -- "Per-Worker Status Control" section (update to two states). `Templates/Activity.html` -- tile layout and per-machine pause.
+
+**Fix with:** `/t`
+
+---
+
 ### [BUG] Per-capability concurrency is not data-driven -- requires worker restart to take effect
 **Date:** 2026-05-13
 
@@ -73,7 +124,9 @@
 6. Investigate the 7 neither-exists files separately.
 7. Unpause workers.
 
-**Look first:** `Scripts/OrigDamageAssessment.py` (assessment script already written), `Features/FileReplacement/FileReplacementBusinessService.py` (the code fix), `Features/TranscodeQueue/QueueManagementBusinessService.py` (`RecomputeForFiles`).
+**Design decision (2026-05-14): stop renaming originals.** The `.orig` rename pattern is fundamentally wrong -- it mutates the source file before the new output is confirmed good. Every crash/kill during the transcode window leaves the original in an unrecoverable state. The correct approach: write the FFmpeg output to `<filename>.inprogress` (or similar suffix) at the destination. The original file is never touched. On success, delete the original and rename `.inprogress` to the final name. On failure or crash, the `.inprogress` file is just garbage to clean up -- the original is intact. Crash recovery becomes trivial: find and delete `.inprogress` files. This eliminates the entire class of `.orig` data loss bugs.
+
+**Look first:** `Scripts/OrigDamageAssessment.py` (assessment script already written), `Features/FileReplacement/FileReplacementBusinessService.py` (the code fix + the PrepareReplacement method that does the dangerous `.orig` rename), `Features/TranscodeQueue/QueueManagementBusinessService.py` (`RecomputeForFiles`).
 
 ---
 

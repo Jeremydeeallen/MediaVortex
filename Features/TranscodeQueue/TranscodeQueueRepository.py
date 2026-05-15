@@ -146,6 +146,79 @@ class TranscodeQueueRepository(BaseRepository):
             LoggingService.LogException("Exception in SaveTranscodeQueueItem", e, "TranscodeQueueRepository", "SaveTranscodeQueueItem")
             raise
 
+    def BulkInsertQueueItems(self, QueueItems: List[TranscodeQueueModel]) -> int:
+        """Insert multiple queue items in a single transaction.
+        Pre-resolves StorageRootId/RelativePath and MediaFileId in bulk
+        instead of per-row. Returns the count of inserted rows."""
+        if not QueueItems:
+            return 0
+        try:
+            from Core.PathStorage import LoadStorageRoots, Parse as PathParse
+            from psycopg2.extras import execute_values
+
+            StorageRoots = LoadStorageRoots(self.DatabaseService)
+
+            # Pre-resolve StorageRootId/RelativePath in Python (no DB round-trip per row)
+            for Item in QueueItems:
+                if Item.StorageRootId is None or not Item.RelativePath:
+                    try:
+                        SrId, Rel = PathParse(Item.FilePath, StorageRoots)
+                        if SrId is not None:
+                            Item.StorageRootId = SrId
+                            Item.RelativePath = Rel or ''
+                    except Exception:
+                        pass
+
+            Connection = self.DatabaseService.GetConnection()
+            try:
+                Cursor = Connection.cursor()
+
+                # Bulk-resolve MediaFileIds with a single query
+                AllPaths = [Item.FilePath for Item in QueueItems]
+                Cursor.execute(
+                    "SELECT Id, FilePath FROM MediaFiles WHERE FilePath IN %s",
+                    (tuple(AllPaths),)
+                )
+                PathToMediaFileId = {Row[1]: Row[0] for Row in Cursor.fetchall()}
+
+                # Build value tuples
+                Values = []
+                for Item in QueueItems:
+                    MediaFileId = PathToMediaFileId.get(Item.FilePath)
+                    Values.append((
+                        Item.StorageRootId, Item.RelativePath,
+                        Item.FilePath, Item.FileName, Item.Directory,
+                        Item.SizeBytes, Item.SizeMB, Item.Priority,
+                        Item.Status, Item.DateAdded, Item.DateStarted,
+                        Item.ProcessingMode, MediaFileId
+                    ))
+
+                execute_values(
+                    Cursor,
+                    """INSERT INTO TranscodeQueue
+                       (StorageRootId, RelativePath, FilePath, FileName, Directory,
+                        SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted,
+                        ProcessingMode, MediaFileId)
+                       VALUES %s""",
+                    Values,
+                    page_size=500
+                )
+                Inserted = Cursor.rowcount
+                Connection.commit()
+                LoggingService.LogInfo(f"Bulk-inserted {Inserted} queue items in one transaction", "TranscodeQueueRepository", "BulkInsertQueueItems")
+                return Inserted
+            finally:
+                self.DatabaseService.CloseConnection(Connection)
+        except Exception as Ex:
+            LoggingService.LogException("Exception in BulkInsertQueueItems", Ex, "TranscodeQueueRepository", "BulkInsertQueueItems")
+            raise
+
+    def GetExistingQueueFilePaths(self) -> set:
+        """Return a set of FilePaths currently in the queue. Much cheaper than
+        loading full TranscodeQueueModel objects for duplicate checking."""
+        Rows = self.ExecuteQuery("SELECT FilePath FROM TranscodeQueue")
+        return {Row.get('FilePath', '') for Row in Rows}
+
     def DeleteTranscodeQueueItem(self, ItemId: int) -> bool:
         """Delete a transcoding queue item."""
         affectedRows = self.ExecuteNonQuery("DELETE FROM TranscodeQueue WHERE Id = %s", (ItemId,))

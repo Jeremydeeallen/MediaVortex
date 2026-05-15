@@ -41,3 +41,15 @@ Resolved entries moved from KNOWN-ISSUES.md to keep the tracker manageable. Olde
 **Date:** 2026-05-08 | **Fixed:** 2026-05-08
 **Fix:** Removed `INNER JOIN TranscodeQueue` from progress queries. Progress now uses `TranscodeProgress + TranscodeAttempts WHERE Success IS NULL`.
 **Note:** Queue rows for concurrent jobs still disappear (cause unknown). Audit trigger `trg_transcodequeue_delete` is in place.
+
+### [BUG - FIXED 2026-05-09] Worker claim path orders by SizeMB, ignoring Priority entirely
+**Date:** 2026-05-09
+**Fix:** all four claim/peek queries changed to `ORDER BY Priority DESC, DateAdded ASC`. `transcode.flow.md` Stage 2.2 updated to match.
+
+### [BUG - FIXED 2026-05-09] BuildRemuxCommand path-collision destroyed source file
+**Date:** 2026-05-09 | **Fixed:** 2026-05-09
+**Fix:** `BuildRemuxCommand` ALWAYS uses side-by-side suffix (`_remuxed.mp4`). `_ProcessCompleteFileReplacement` rewritten to rename-then-replace pattern with rollback.
+
+### [BUG - FIXED 2026-05-09] File scanner runs on whichever worker has ScanEnabled, not the one with fastest storage access
+**Date:** 2026-05-09 | **Fixed:** 2026-05-09
+**Fix:** Added `RootFolders.PreferredWorkerName`, `ScanJobs.WorkerName`, and `SystemSettings('MoveDetectionMaxFiles')`. `ContinuousScanService._ExecuteScan` drops rootfolders pinned to other workers.

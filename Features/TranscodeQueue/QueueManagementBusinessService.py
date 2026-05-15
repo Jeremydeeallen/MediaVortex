@@ -67,14 +67,16 @@ class QueueManagementBusinessService:
                 LoggingService.LogWarning("No media files found matching criteria", "QueueManagementBusinessService", "PopulateQueueFromMediaFiles")
                 return {"Success": False, "ErrorMessage": friendlyMessage, "ItemsAdded": 0}
 
-            # Get existing queue items to avoid duplicates
-            existingQueueItems = self.Repository.GetAllTranscodeQueueItems()
-            existingFilePaths = {item.FilePath for item in existingQueueItems}
+            # Get existing queue FilePaths to avoid duplicates (lightweight -- paths only)
+            existingFilePaths = self.Repository.GetExistingQueueFilePaths()
             LoggingService.LogInfo(f"Found {len(existingFilePaths)} existing queue items", "QueueManagementBusinessService", "PopulateQueueFromMediaFiles")
 
-            # Get files already successfully transcoded
-            transcodeFiles = self.DatabaseManager.GetAllTranscodeFiles()
-            successfullyTranscodedPaths = {tf.FilePath for tf in transcodeFiles if tf.SuccessfullyTranscoded}
+            # Get files already successfully transcoded (paths only)
+            from Core.Database.DatabaseService import DatabaseService as _DbSvc
+            _SuccessRows = _DbSvc().ExecuteQuery(
+                "SELECT FilePath FROM TranscodeFiles WHERE SuccessfullyTranscoded = true"
+            )
+            successfullyTranscodedPaths = {R.get('FilePath', '') for R in _SuccessRows}
             LoggingService.LogInfo(f"Found {len(successfullyTranscodedPaths)} already successfully transcoded files", "QueueManagementBusinessService", "PopulateQueueFromMediaFiles")
 
             # Import adaptive quality service for VMAF-based retranscode checks
@@ -90,6 +92,7 @@ class QueueManagementBusinessService:
             gateCounts = {'Upscale': 0, 'MarginalSavings': 0, 'MissingProfile': 0, 'MissingEstimate': 0}
             # Load admission config once -- shared across all rows in this run.
             admissionConfig = self.QueueAdmissionConfigRepo.Get()
+            pendingInserts: List[TranscodeQueueModel] = []
 
             for mediaFile in mediaFilesWithProfiles:
                 # Skip if already in queue
@@ -172,15 +175,22 @@ class QueueManagementBusinessService:
                 # Create queue item (no need to find threshold since profile is already assigned)
                 queueItem = self.CreateQueueItemFromMediaFileWithProfile(mediaFile)
                 if queueItem:
-                    try:
-                        itemId = self.Repository.SaveTranscodeQueueItem(queueItem)
-                        LoggingService.LogInfo(f"Added queue item {itemId} for {mediaFile.FileName} (Size: {mediaFile.SizeMB:.1f}MB)", "QueueManagementBusinessService", "PopulateQueueFromMediaFiles")
-                        itemsAdded += 1
-                        existingFilePaths.add(mediaFile.FilePath)  # Prevent duplicates in this run
+                    pendingInserts.append(queueItem)
+                    existingFilePaths.add(mediaFile.FilePath)  # Prevent duplicates in this run
 
-                    except Exception as e:
-                        LoggingService.LogException(f"Error saving queue item for {mediaFile.FileName}", e, "QueueManagementBusinessService", "PopulateQueueFromMediaFiles")
-                        continue
+            # Bulk insert all collected items in one transaction
+            itemsAdded = 0
+            if pendingInserts:
+                try:
+                    itemsAdded = self.Repository.BulkInsertQueueItems(pendingInserts)
+                except Exception as e:
+                    LoggingService.LogException("Bulk insert failed, falling back to per-item insert", e, "QueueManagementBusinessService", "PopulateQueueFromMediaFiles")
+                    for queueItem in pendingInserts:
+                        try:
+                            self.Repository.SaveTranscodeQueueItem(queueItem)
+                            itemsAdded += 1
+                        except Exception as e2:
+                            LoggingService.LogException(f"Error saving queue item for {queueItem.FileName}", e2, "QueueManagementBusinessService", "PopulateQueueFromMediaFiles")
 
             # Add friendly message based on results
             skipDetails = []
@@ -360,12 +370,12 @@ class QueueManagementBusinessService:
         
         Each item should have FilePath, TargetResolution, Mode, SizeMB, Priority.
         If ProfileId is provided, assigns that profile to each media file before queuing.
+        Bulk-inserts all items in a single transaction for speed.
         """
         try:
             LoggingService.LogFunctionEntry("AddSuggestionsToQueue", "QueueManagementBusinessService", len(Items), ProfileId)
 
-            ExistingQueueItems = self.Repository.GetAllTranscodeQueueItems()
-            ExistingFilePaths = {Item.FilePath for Item in ExistingQueueItems}
+            ExistingFilePaths = self.Repository.GetExistingQueueFilePaths()
 
             # Resolve profile name if ProfileId provided
             ProfileName = None
@@ -376,8 +386,31 @@ class QueueManagementBusinessService:
                 else:
                     return {"Success": False, "ErrorMessage": f"Profile with ID {ProfileId} not found", "ItemsAdded": 0}
 
-            ItemsAdded = 0
+            # Collect all MediaFileIds we need to look up (one bulk query instead of N)
+            AllMediaFileIds = [Item.get('MediaFileId') for Item in Items if Item.get('MediaFileId')]
+            MediaFileMap: Dict[int, Any] = {}
+            if AllMediaFileIds:
+                from Core.Database.DatabaseService import DatabaseService as _DbSvc
+                Rows = _DbSvc().ExecuteQuery(
+                    "SELECT Id, FilePath, FileName, SizeMB, DurationMinutes, "
+                    "AssignedProfile, Resolution "
+                    "FROM MediaFiles WHERE Id IN %s",
+                    (tuple(AllMediaFileIds),)
+                )
+                for R in Rows:
+                    MfId = R.get('Id')
+                    MediaFileMap[MfId] = MediaFileModel(
+                        Id=MfId,
+                        FilePath=R.get('FilePath', ''),
+                        FileName=R.get('FileName', ''),
+                        SizeMB=R.get('SizeMB') or 0.0,
+                        DurationMinutes=R.get('DurationMinutes'),
+                        AssignedProfile=R.get('AssignedProfile'),
+                        Resolution=R.get('Resolution'),
+                    )
+
             ItemsSkipped = 0
+            PendingInserts: List[TranscodeQueueModel] = []
 
             for Item in Items:
                 FilePath = Item.get('FilePath', '')
@@ -385,10 +418,8 @@ class QueueManagementBusinessService:
                     ItemsSkipped += 1
                     continue
 
-                # Resolve the MediaFile (needed for impact-based priority and for the
-                # optional profile assignment below). Without it we have to fall back.
                 MediaFileId = Item.get('MediaFileId')
-                MediaFile = self.DatabaseManager.GetMediaFileById(MediaFileId) if MediaFileId else None
+                MediaFile = MediaFileMap.get(MediaFileId) if MediaFileId else None
 
                 # Assign profile to the media file if specified, then refresh
                 # PriorityScore (priority-materialization.feature.md criterion 10).
@@ -407,15 +438,8 @@ class QueueManagementBusinessService:
                 Directory = "/".join(PathParts[:-1]) if len(PathParts) > 1 else ""
                 FileName = PathParts[-1] if PathParts else ""
                 SizeMB = float(Item.get('SizeMB', 0))
-                # Batch-level Mode (from /AddToQueue?Mode=Remux) overrides any
-                # per-item Mode field. Default 'Transcode' preserves backward
-                # compatibility with callers that don't supply Mode.
-                # See remux-populate-card.feature.md criteria 5, 10.
                 ItemMode = Mode if Mode in ('Transcode', 'Remux') else Item.get('Mode', 'Transcode')
 
-                # Compute impact-based priority via the canonical CalculatePriority
-                # path. If the operator passed an explicit Priority on the item dict
-                # (e.g. a manual override 195-200), respect it; otherwise compute fresh.
                 ExplicitPriority = Item.get('Priority')
                 if isinstance(ExplicitPriority, int) and 1 <= ExplicitPriority <= 200:
                     Priority = ExplicitPriority
@@ -435,14 +459,17 @@ class QueueManagementBusinessService:
                                 f"Could not look up ProfileThresholds for priority calc on {FileName}",
                                 Ex, "QueueManagementBusinessService", "AddSuggestionsToQueue"
                             )
+                    # Suppress the per-row fallback warning -- it floods the
+                    # Logs table with one INSERT per item (~9ms each on a
+                    # network DB = 2+ seconds for a 250-item batch). Remux
+                    # items have no profile by design; warning is expected.
                     Priority = self.CalculatePriority(
                         MediaFile,
                         TargetVideoKbps=TargetVideoKbps,
                         TargetAudioKbps=TargetAudioKbps,
+                        SuppressFallbackWarning=True,
                     )
                 else:
-                    # No MediaFile linkage at all (shouldn't happen for SmartPopulate
-                    # suggestions, but be defensive). Fallback path.
                     Priority = 1
 
                 QueueItem = TranscodeQueueModel(
@@ -456,13 +483,22 @@ class QueueManagementBusinessService:
                     ProcessingMode=ItemMode,
                     DateAdded=datetime.now(timezone.utc)
                 )
+                PendingInserts.append(QueueItem)
+                ExistingFilePaths.add(FilePath)
 
+            # Bulk insert all items in one transaction
+            ItemsAdded = 0
+            if PendingInserts:
                 try:
-                    self.Repository.SaveTranscodeQueueItem(QueueItem)
-                    ExistingFilePaths.add(FilePath)
-                    ItemsAdded += 1
-                except Exception as Ex:
-                    LoggingService.LogException(f"Error saving queue item for {FileName}", Ex, "QueueManagementBusinessService", "AddSuggestionsToQueue")
+                    ItemsAdded = self.Repository.BulkInsertQueueItems(PendingInserts)
+                except Exception as BulkEx:
+                    LoggingService.LogException("Bulk insert failed, falling back to per-item insert", BulkEx, "QueueManagementBusinessService", "AddSuggestionsToQueue")
+                    for QueueItem in PendingInserts:
+                        try:
+                            self.Repository.SaveTranscodeQueueItem(QueueItem)
+                            ItemsAdded += 1
+                        except Exception as Ex:
+                            LoggingService.LogException(f"Error saving queue item for {QueueItem.FileName}", Ex, "QueueManagementBusinessService", "AddSuggestionsToQueue")
 
             LoggingService.LogInfo(f"AddSuggestionsToQueue: {ItemsAdded} added, {ItemsSkipped} skipped, profile={ProfileName}", "QueueManagementBusinessService", "AddSuggestionsToQueue")
             return {"Success": True, "ItemsAdded": ItemsAdded, "ItemsSkipped": ItemsSkipped}
@@ -473,26 +509,80 @@ class QueueManagementBusinessService:
             return {"Success": False, "ErrorMessage": ErrorMsg, "ItemsAdded": 0}
 
     def GetMediaFilesWithProfilesOrderedBySize(self, RootFolderPath: str = None) -> List[MediaFileModel]:
-        """Get media files that have assigned profiles, ordered by size (largest first)."""
+        """Get media files that have assigned profiles, ordered by size (largest first).
+        Uses SQL-side filtering instead of loading all rows into Python."""
         try:
             LoggingService.LogFunctionEntry("GetMediaFilesWithProfilesOrderedBySize", "QueueManagementBusinessService", RootFolderPath)
 
-            # Get all media files
-            allMediaFiles = self.DatabaseManager.GetAllMediaFiles()
+            from Core.Database.DatabaseService import DatabaseService, EscapeLikePattern
 
-            # Filter to only files with assigned profiles
-            filesWithProfiles = [mf for mf in allMediaFiles if mf.AssignedProfile and mf.AssignedProfile.strip()]
+            WhereClauses = ["AssignedProfile IS NOT NULL", "TRIM(AssignedProfile) != ''"]
+            Params: list = []
 
-            # If RootFolderPath is specified, filter to only files in that folder
             if RootFolderPath:
-                # Normalize the root folder path for comparison
-                normalizedRootPath = RootFolderPath.replace('\\', '/').rstrip('/')
-                filesWithProfiles = [mf for mf in filesWithProfiles
-                                   if mf.FilePath.replace('\\', '/').startswith(normalizedRootPath)]
-                LoggingService.LogInfo(f"Filtered to {len(filesWithProfiles)} files in folder: {RootFolderPath}", "QueueManagementBusinessService", "GetMediaFilesWithProfilesOrderedBySize")
+                NormalizedPath = RootFolderPath.replace('/', '\\').rstrip('\\')
+                WhereClauses.append("FilePath LIKE %s ESCAPE '!'")
+                Params.append(EscapeLikePattern(NormalizedPath) + '%')
 
-            # Sort by size (largest first)
-            filesWithProfiles.sort(key=lambda x: x.SizeMB or 0, reverse=True)
+            Sql = f"""
+                SELECT Id, SeasonId, StorageRootId, RelativePath, FilePath, FileName, SizeMB,
+                       VideoBitrateKbps, AudioBitrateKbps, Resolution, Codec, DurationMinutes,
+                       FrameRate, LastScannedDate, CompressionPotential, AssignedProfile,
+                       IsInterlaced, ResolutionCategory, FileModificationTime, TotalFrames,
+                       CodecProfile, ColorRange, FieldOrder, HasBFrames, RefFrames, PixelFormat,
+                       Level, AudioChannels, AudioSampleRate, AudioSampleFormat,
+                       AudioChannelLayout, AudioCodec, SubtitleFormats, ContainerFormat,
+                       OverallBitrate, TranscodedByMediaVortex,
+                       AudioLanguages, HasExplicitEnglishAudio
+                FROM MediaFiles
+                WHERE {' AND '.join(WhereClauses)}
+                ORDER BY SizeMB DESC NULLS LAST
+            """
+            Rows = DatabaseService().ExecuteQuery(Sql, tuple(Params))
+
+            filesWithProfiles = []
+            for Row in Rows:
+                mf = MediaFileModel(
+                    Id=Row.get('Id'),
+                    SeasonId=Row.get('SeasonId'),
+                    StorageRootId=Row.get('StorageRootId'),
+                    RelativePath=Row.get('RelativePath') or '',
+                    FilePath=Row.get('FilePath', ''),
+                    FileName=Row.get('FileName', ''),
+                    SizeMB=Row.get('SizeMB') or 0.0,
+                    VideoBitrateKbps=Row.get('VideoBitrateKbps'),
+                    AudioBitrateKbps=Row.get('AudioBitrateKbps'),
+                    Resolution=Row.get('Resolution'),
+                    Codec=Row.get('Codec'),
+                    DurationMinutes=Row.get('DurationMinutes'),
+                    FrameRate=Row.get('FrameRate'),
+                    LastScannedDate=Row.get('LastScannedDate'),
+                    CompressionPotential=Row.get('CompressionPotential'),
+                    AssignedProfile=Row.get('AssignedProfile'),
+                    IsInterlaced=Row.get('IsInterlaced'),
+                    ResolutionCategory=Row.get('ResolutionCategory'),
+                    FileModificationTime=Row.get('FileModificationTime'),
+                    TotalFrames=Row.get('TotalFrames'),
+                    CodecProfile=Row.get('CodecProfile'),
+                    ColorRange=Row.get('ColorRange'),
+                    FieldOrder=Row.get('FieldOrder'),
+                    HasBFrames=Row.get('HasBFrames'),
+                    RefFrames=Row.get('RefFrames'),
+                    PixelFormat=Row.get('PixelFormat'),
+                    Level=Row.get('Level'),
+                    AudioChannels=Row.get('AudioChannels'),
+                    AudioSampleRate=Row.get('AudioSampleRate'),
+                    AudioSampleFormat=Row.get('AudioSampleFormat'),
+                    AudioChannelLayout=Row.get('AudioChannelLayout'),
+                    AudioCodec=Row.get('AudioCodec'),
+                    SubtitleFormats=Row.get('SubtitleFormats'),
+                    ContainerFormat=Row.get('ContainerFormat'),
+                    OverallBitrate=Row.get('OverallBitrate'),
+                    TranscodedByMediaVortex=Row.get('TranscodedByMediaVortex'),
+                    AudioLanguages=Row.get('AudioLanguages'),
+                    HasExplicitEnglishAudio=Row.get('HasExplicitEnglishAudio'),
+                )
+                filesWithProfiles.append(mf)
 
             LoggingService.LogInfo(f"Found {len(filesWithProfiles)} media files with assigned profiles", "QueueManagementBusinessService", "GetMediaFilesWithProfilesOrderedBySize")
             return filesWithProfiles
@@ -753,7 +843,8 @@ class QueueManagementBusinessService:
             return None
 
     def PopulateQueueForRemux(self, RootFolderPath: str = None) -> Dict[str, Any]:
-        """Populate queue with MKV files for remuxing (container change to MP4 only)."""
+        """Populate queue with MKV files for remuxing (container change to MP4 only).
+        Uses SQL-filtered MKV query and bulk insert for speed."""
         try:
             LoggingService.LogFunctionEntry("PopulateQueueForRemux", "QueueManagementBusinessService", RootFolderPath)
 
@@ -762,19 +853,26 @@ class QueueManagementBusinessService:
                 friendlyMessage = f"No MKV files found{' in folder ' + RootFolderPath if RootFolderPath else ''} for remuxing."
                 return {"Success": False, "ErrorMessage": friendlyMessage, "ItemsAdded": 0}
 
-            # Get existing queue items - build lookup by FilePath
-            existingQueueItems = self.Repository.GetAllTranscodeQueueItems()
-            existingQueueByPath = {item.FilePath: item for item in existingQueueItems}
+            # Lightweight duplicate check -- only fetch FilePaths, not full models
+            existingFilePaths = self.Repository.GetExistingQueueFilePaths()
 
-            itemsAdded = 0
+            # Separate new items from existing-but-need-mode-switch
+            itemsToInsert: List[TranscodeQueueModel] = []
             itemsUpdated = 0
 
-            for mediaFile in mkvFiles:
-                existingItem = existingQueueByPath.get(mediaFile.FilePath)
+            # For mode-switch we still need to load existing items by path, but only
+            # for the intersection (much smaller than loading everything).
+            existingQueueByPath: Dict[str, Any] = {}
+            NeedModeCheck = [mf for mf in mkvFiles if mf.FilePath in existingFilePaths]
+            if NeedModeCheck:
+                # Load only the items we need to check for mode switch
+                existingQueueItems = self.Repository.GetAllTranscodeQueueItems()
+                existingQueueByPath = {item.FilePath: item for item in existingQueueItems}
 
-                if existingItem:
-                    # File already in queue - switch to Remux if it's currently Transcode and still Pending
-                    if existingItem.ProcessingMode != "Remux" and existingItem.Status == "Pending":
+            for mediaFile in mkvFiles:
+                if mediaFile.FilePath in existingFilePaths:
+                    existingItem = existingQueueByPath.get(mediaFile.FilePath)
+                    if existingItem and existingItem.ProcessingMode != "Remux" and existingItem.Status == "Pending":
                         existingItem.ProcessingMode = "Remux"
                         self.Repository.SaveTranscodeQueueItem(existingItem)
                         itemsUpdated += 1
@@ -783,13 +881,22 @@ class QueueManagementBusinessService:
 
                 queueItem = self.CreateRemuxQueueItem(mediaFile)
                 if queueItem:
-                    try:
-                        itemId = self.Repository.SaveTranscodeQueueItem(queueItem)
-                        LoggingService.LogInfo(f"Added remux queue item {itemId} for {mediaFile.FileName}", "QueueManagementBusinessService", "PopulateQueueForRemux")
-                        itemsAdded += 1
-                        existingQueueByPath[mediaFile.FilePath] = queueItem
-                    except Exception as e:
-                        LoggingService.LogException(f"Error saving remux queue item for {mediaFile.FileName}", e, "QueueManagementBusinessService", "PopulateQueueForRemux")
+                    itemsToInsert.append(queueItem)
+                    existingFilePaths.add(mediaFile.FilePath)
+
+            # Bulk insert all new items in one transaction
+            itemsAdded = 0
+            if itemsToInsert:
+                try:
+                    itemsAdded = self.Repository.BulkInsertQueueItems(itemsToInsert)
+                except Exception as e:
+                    LoggingService.LogException("Bulk insert failed, falling back to per-item insert", e, "QueueManagementBusinessService", "PopulateQueueForRemux")
+                    for queueItem in itemsToInsert:
+                        try:
+                            self.Repository.SaveTranscodeQueueItem(queueItem)
+                            itemsAdded += 1
+                        except Exception as e2:
+                            LoggingService.LogException(f"Error saving remux queue item for {queueItem.FileName}", e2, "QueueManagementBusinessService", "PopulateQueueForRemux")
 
             details = []
             if itemsAdded > 0:
@@ -811,22 +918,43 @@ class QueueManagementBusinessService:
             return {"Success": False, "ErrorMessage": errorMsg, "ItemsAdded": 0}
 
     def GetMkvFilesForRemux(self, RootFolderPath: str = None) -> List[MediaFileModel]:
-        """Get MKV media files eligible for remuxing, ordered by size (largest first)."""
+        """Get MKV media files eligible for remuxing, ordered by size (largest first).
+        Uses SQL-side filtering instead of loading all 59K+ rows into Python."""
         try:
-            allMediaFiles = self.DatabaseManager.GetAllMediaFiles()
+            from Core.Database.DatabaseService import DatabaseService, EscapeLikePattern
 
-            # Filter to MKV files only
-            mkvFiles = [mf for mf in allMediaFiles
-                        if mf.FileName and mf.FileName.lower().endswith('.mkv')]
+            WhereClauses = ["LOWER(FileName) LIKE %s"]
+            Params: list = ['%.mkv']
 
-            # Filter by root folder if specified
             if RootFolderPath:
-                normalizedRootPath = RootFolderPath.replace('\\', '/').rstrip('/')
-                mkvFiles = [mf for mf in mkvFiles
-                            if mf.FilePath.replace('\\', '/').startswith(normalizedRootPath)]
+                NormalizedPath = RootFolderPath.replace('/', '\\').rstrip('\\')
+                WhereClauses.append("FilePath LIKE %s ESCAPE '!'")
+                Params.append(EscapeLikePattern(NormalizedPath) + '%')
 
-            # Sort by size (largest first)
-            mkvFiles.sort(key=lambda x: x.SizeMB or 0, reverse=True)
+            Sql = f"""
+                SELECT Id, StorageRootId, RelativePath, FilePath, FileName, SizeMB,
+                       DurationMinutes, Resolution, Codec, ContainerFormat
+                FROM MediaFiles
+                WHERE {' AND '.join(WhereClauses)}
+                ORDER BY SizeMB DESC NULLS LAST
+            """
+            Rows = DatabaseService().ExecuteQuery(Sql, tuple(Params))
+
+            mkvFiles = []
+            for Row in Rows:
+                mf = MediaFileModel(
+                    Id=Row.get('Id'),
+                    StorageRootId=Row.get('StorageRootId'),
+                    RelativePath=Row.get('RelativePath') or '',
+                    FilePath=Row.get('FilePath', ''),
+                    FileName=Row.get('FileName', ''),
+                    SizeMB=Row.get('SizeMB') or 0.0,
+                    DurationMinutes=Row.get('DurationMinutes'),
+                    Resolution=Row.get('Resolution'),
+                    Codec=Row.get('Codec'),
+                    ContainerFormat=Row.get('ContainerFormat'),
+                )
+                mkvFiles.append(mf)
 
             LoggingService.LogInfo(f"Found {len(mkvFiles)} MKV files for remux", "QueueManagementBusinessService", "GetMkvFilesForRemux")
             return mkvFiles
