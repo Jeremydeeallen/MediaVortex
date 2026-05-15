@@ -2,19 +2,6 @@
 
 ## Open
 
-### [BUG] Next Remux Batch "Add Batch" button takes 3-10 seconds
-**Date:** 2026-05-15
-
-**What breaks:** On `/ShowSettings`, clicking the "Add Batch" button on the Next Remux Batch card (Card 1.5) takes 3-10 seconds.
-
-**Violates:** `Features/ShowSettings/remux-populate-card.feature.md` criterion 19 (added with this entry).
-
-**Look first:** `Templates/ShowSettings.html` -- `#RemuxAddBatchBtn` handler. `Features/ShowSettings/ShowSettingsController.py` -- `/AddToQueue` route. `Features/TranscodeQueue/QueueManagementBusinessService.py` -- `AddSuggestionsToQueue` Mode='Remux' path.
-
-**Fix with:** `/t`.
-
----
-
 ### [BUG - CRITICAL] Worker with broken NFS mount silently destroys queue -- marks all files as source-missing
 **Date:** 2026-05-14
 
@@ -555,6 +542,19 @@ Full Windows paths (e.g., `T:\Shows\file.mkv`) are stored as natural keys in at 
 ---
 
 ## Resolved
+
+### [BUG - FIXED 2026-05-15] Next Remux Batch "Add Batch" button takes 3-10 seconds
+**Date:** 2026-05-15 | **Fixed:** 2026-05-15
+
+**What broke:** On `/ShowSettings`, clicking the "Add Batch" button on the Next Remux Batch card (Card 1.5) took 3-10 seconds.
+
+**Root cause:** `AddSuggestionsToQueue` called `GetProfileSettingsForTargetResolution` per item to feed `CalculatePriority`. Each call did 2 SELECTs plus 2-3 synchronous `LogInfo` INSERTs (~45ms on the network DB). For a 250-item batch that serialized to ~11 seconds. The profile-target bitrate estimate is meaningless for Mode='Remux' (no video re-encode), so the call was both expensive and useless on this path.
+
+**Fix:** In `Features/TranscodeQueue/QueueManagementBusinessService.py`, gate the per-item `GetProfileSettingsForTargetResolution` call on `ItemMode != 'Remux'`. CalculatePriority's SizeMB-based fallback applies for Remux items. `SuppressFallbackWarning=True` was already set so no log spam.
+
+**Violates:** `Features/ShowSettings/remux-populate-card.feature.md` criterion 19.
+
+---
 
 ### [BUG - FIXED 2026-05-14] Remux jobs instantly fail with opaque "Failed to setup file preparation" -- 482 wasted attempts
 **Date:** 2026-05-14 | **Fixed:** 2026-05-14

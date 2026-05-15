@@ -101,7 +101,7 @@ parallel to `smart-populate.feature.md`.
 
 ### I. Responsiveness
 
-19. **[BUG]** Clicking Card 1.5's "Add Batch" button takes 3-10 seconds to complete. "Fixed" looks like: the click-to-completion time is consistently under 1 second on the live DB. Verifiable: time the "Add Batch" click on Card 1.5 -- under 1s. Look first: `Templates/ShowSettings.html` Card 1.5 handler for `#RemuxAddBatchBtn`; `Features/ShowSettings/ShowSettingsController.py` `/AddToQueue` route; `Features/TranscodeQueue/QueueManagementBusinessService.py` `AddSuggestionsToQueue` Mode='Remux' path.
+19. Clicking Card 1.5's "Add Batch" button completes in under 1 second on the live DB (250-item default batch). The Mode='Remux' path in `AddSuggestionsToQueue` must not issue per-item DB lookups for profile-target bitrates (those are meaningless for a no-re-encode operation). Verifiable: time the "Add Batch" click on Card 1.5 -- under 1s for a 250-item batch.
 
 ## Status
 
