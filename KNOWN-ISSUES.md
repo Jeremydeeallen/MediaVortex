@@ -2,6 +2,19 @@
 
 ## Open
 
+### [BUG] Optimization page Jellyfin sync form fails with "paramiko is not installed"
+**Date:** 2026-05-15
+
+**What breaks:** Submitting the Jellyfin sync form on http://10.0.0.7:5000/Optimization returns a "paramiko is not installed" error. `paramiko>=3.0.0` is declared in `requirements.txt` (line 21), so the host venv on 10.0.0.7 is missing the dependency or the import is guarded and falling through to a user-visible string. No flow doc exists for the Optimization/Jellyfin SSH sync pipeline.
+
+**Violates:** `Features/Optimization/Optimization.feature.md` criterion 8 (added with this entry). Related to criteria 1 and 6 (SSH connection / test).
+
+**Look first:** `Features/Optimization/OptimizationBusinessService.py` and `OptimizationController.py` for the `paramiko` import site and how the error is surfaced. Check the deployed WebService venv on 10.0.0.7 -- `pip list | grep paramiko`. If missing, `pip install -r requirements.txt` against that venv. If import is guarded and re-raised as a user message, decide whether to fail loud at startup vs. handle at request time with the standard `{Success: false, Message}` envelope. A flow doc for the Jellyfin SSH sync pipeline should be created before the fix (per /t doc-first order).
+
+**Fix with:** `/t`
+
+---
+
 ### [BUG - CRITICAL] Worker with broken NFS mount silently destroys queue -- marks all files as source-missing
 **Date:** 2026-05-14
 
@@ -450,7 +463,7 @@ Phase 2 of the architecture redesign unified both services into WorkerService. R
 ---
 
 ### [BUG] Second concurrent job shows first job's progress
-**Date:** 2025-05-05
+**Date:** 2026-05-05
 **Affects:** TranscodeJob feature -- concurrent job progress tracking
 **Criterion violated:** TranscodeJob.feature.md -- each running job must report independent progress
 
@@ -651,23 +664,6 @@ After a transcode completes, the decision "do we run VMAF, replace, requeue, or 
 - **Honest Requeue dispatch:** `Disposition='Requeue'` was a no-op (audit-only). `_HandleRequeueDisposition` now deletes the staged file and writes a ProblemFiles row. NOT auto-creating a new TranscodeQueue at adjusted CRF -- TranscodeQueue has no CRF column, so a new row would re-run the same profile at the same CRF. Real auto-requeue requires a schema change (tracked separately).
 
 **Fix with:** `/n` -- doc-first feature, shipped 2026-05-10. Two latent wiring bugs and one no-op branch caught and fixed before the larry redeploy.
-
----
-
-### [BUG - FIXED 2026-05-10] ShowSettings global-default `*` overrides explicit profile assignment (target resolution)
-**Date:** 2026-05-10 | **Fixed:** 2026-05-10 (cascade + global-default row entirely removed)
-**Affects:** `Features/ShowSettings/ShowSettingsRepository.py`, `Features/ShowSettings/ShowSettingsController.py`, `Features/TranscodeJob/ProcessTranscodeQueueService.py`, `Features/TranscodeQueue/QueueManagementBusinessService.py`, `ShowSettings.feature.md`.
-
-Sister Wives S04E05 was queued under `AV1 P4 FG6 >720p` (1080p source, profile says target=720p) but the FFmpeg command emitted `scale=852:480` because `ShowSettings.ShowFolder='*' / TargetResolution='480p'` clobbered the profile. `GetTargetResolutionForFile` cascaded specific match -> `*` default and the worker unconditionally overrode `ProfileSettings['TargetResolution']`.
-
-**Fix:** removed the cascade entirely.
-- `GetDefaultTargetResolution()` deleted from repository.
-- `GetTargetResolutionForFile()` now returns the per-show row only (or None); no fallback to `*`.
-- The `ShowFolder='*'` row was deleted from the live DB.
-- `GET /api/ShowSettings/Default` and `POST /api/ShowSettings/Default` endpoints deleted; `GET /Shows` no longer returns `DefaultTargetResolution`.
-- Profile.TranscodeDownTo is now the sole source of default target behavior; ShowSettings carries explicit per-show overrides only.
-
-**Violates / closed:** `ShowSettings.feature.md` Success Criterion 1.
 
 ---
 
