@@ -2,6 +2,93 @@
 
 ## Open
 
+### [BUG] FindFuzzyFileMatch is O(N x M) -- reloads + regex-parses all RootFolder rows per new file
+**Date:** 2026-05-15
+
+**What breaks:** Every NEW file the scanner discovers triggers `FindFuzzyFileMatch`, which:
+1. Calls `Repository.GetMediaFilesByRootFolderId(RootFolderId)` -- returns ALL MediaFiles rows for that RootFolder (for T:\, that is ~45,000 rows; multi-MB transfer through psycopg2).
+2. Calls `ExtractShowInfo` (regex parse) on every loaded row's `FileName`.
+3. For any candidate that passes the IsFuzzyMatch shape check, stats the candidate path over NFS.
+
+The 5-thread parallel pool in `ProcessMediaFiles` means every new-file slot does this independently and concurrently -- the same 45k rows get loaded 5 times in parallel.
+
+Confirmed against I9-2024 scan #64925 on 2026-05-15: ~22 new Graham Norton episodes were taking 3-5 seconds each. That is 22 x (45k DB load + 45k regex parses) = 990,000 ops where 22 dict lookups would suffice. For larger libraries the per-file cost grows linearly with library size -- O(N x M) where N is new files and M is RootFolder size.
+
+Same anti-pattern family as criterion 23 (per-file work that should be precomputed once per scan) but a distinct code path: `FindMovedFile` (covered by 23) vs `FindFuzzyFileMatch` (this entry).
+
+**Violates:** `Features/FileScanning/FileScanning.feature.md` criterion 25 (added with this entry).
+
+**What "fixed" looks like:**
+- In `PerformScan`, after `GetOrCreateRootFolder` succeeds, do a single `GetMediaFilesByRootFolderId(RootFolder.Id)` call.
+- Build a `{(ShowName, Season, Episode): [DbFile, ...]}` index from that result. Skip rows where `ExtractShowInfo` returns empty parts -- they cannot be fuzzy-matched anyway.
+- Pass the index through `ProcessMediaFiles -> ProcessSingleMediaFile -> FindFuzzyFileMatch` (or hold it on `self` for the duration of a single `PerformScan`).
+- `FindFuzzyFileMatch` looks up `Index[(ShowName, Season, Episode)]` -- O(1) -- and runs the existing `IsFuzzyMatch` size check + `os.path.exists` candidate validation on the small candidate list.
+- Index is read-only after build, safe for the parallel pool (same threading model as the filename index in `ReconcileWithDisk`).
+- Verifiable: trigger a scan that introduces N new files; observe per-new-file wall-clock under 100ms instead of 3-5 seconds.
+
+**Look first:** `Features/FileScanning/FileScanningBusinessService.py` -- `FindFuzzyFileMatch` (~line 685), called from `ProcessSingleMediaFile` new-file branch (~line 785). `PerformScan` (~line 313) is where the index should be built. The `ReconcileWithDisk` filename-index pattern (the criterion 23 fix in the same file) is the template.
+
+---
+
+### [BUG] ScanJobs NewFiles / UpdatedFiles / DeletedFiles counters stay at zero
+**Date:** 2026-05-15
+
+**What breaks:** A scan in progress writes `ScanJobs.NewFiles=0, UpdatedFiles=0, DeletedFiles=0` even when MediaFiles rows are being inserted, updated, or deleted. Confirmed mid-scan on 2026-05-15 against I9-2024 scan #64925: the heartbeat showed all three counters stuck at 0 while `SELECT * FROM MediaFiles WHERE LastScannedDate > NOW() - INTERVAL '3 minutes'` returned freshly-inserted rows (IDs 622023-622032 against `T:\The Graham Norton Show\Season 20`). The total-files counter (`ProcessedFiles`) climbs correctly thanks to the criterion 17 heartbeat fix, but the per-disposition breakdown the operator needs to answer "what changed?" is not produced.
+
+**Root cause:** `FileScanResultModel` defines only `TotalFilesFound / TotalFilesProcessed / TotalFilesSkipped / TotalFilesWithErrors`. No fields exist for new / updated / deleted. `ProcessSingleMediaFile` increments `TotalFilesProcessed` uniformly for inserts and updates. `ReconcileWithDisk` (the new code that owns deletes per criterion 23) does not surface its delete count to ScanResults. `UpdateJobStatus` only writes the New/Updated/Deleted columns when a ScanResults model is passed, and even then the model has nothing meaningful in those slots.
+
+**Violates:** `Features/FileScanning/FileScanning.feature.md` criterion 24 (added with this entry). Criterion 17 already names these columns in its contract; criterion 24 owns the per-disposition slice of that contract while criterion 17 owns the heartbeat-cadence dimension.
+
+**What "fixed" looks like:**
+- Add `NewFilesCount`, `UpdatedFilesCount`, `DeletedFilesCount` (or matching field names) to `FileScanResultModel`.
+- `ProcessSingleMediaFile` insert branch increments `NewFilesCount`; update branch increments `UpdatedFilesCount`. Both protected by the existing `ProgressLock`.
+- `ReconcileWithDisk` increments `DeletedFilesCount` per delete and `UpdatedFilesCount` per fuzzy-match reassignment.
+- `UpdateJobStatus` writes the three new fields when ScanResults is passed.
+- The heartbeat thread (criterion 17 fix) already passes ScanResults -- once the model has the fields, the heartbeat will surface them automatically with no further plumbing.
+- Verifiable: trigger a scan that creates N new files, updates M files, deletes K files; observe `SELECT NewFiles, UpdatedFiles, DeletedFiles FROM ScanJobs WHERE Id=<scan>` returns (N, M, K) matching reality.
+
+**Look first:** `Features/FileScanning/Models/FileScanResultModel.py` -- add fields. `Features/FileScanning/FileScanningBusinessService.py` -- `ProcessSingleMediaFile` (insert branch ~line 815, update branch ~line 773), `ReconcileWithDisk` (delete branch and fuzzy-match branch). The thread-safe lock pattern at `ProcessMediaFilesWithMetadata` line ~1503 is the template.
+
+---
+
+### [BUG] Scan triple-stats DB rows over NFS and runs the existence checks single-threaded
+**Date:** 2026-05-15
+
+**What breaks:** A continuous-scan iteration on a Windows or Linux worker does the following for every RootFolder:
+
+1. `FileManagerService.ScanDirectory` walks the filesystem (`os.walk`) -- fast (T:\ over NFS: 45,716 files in 10 seconds).
+2. `FileScanningBusinessService.DetectMovedFiles` iterates every `MediaFiles` row whose path is under this RootFolder and calls `os.path.exists(_ToLocalPath(DbFile.FilePath))` **serially, single-threaded**. For T:\ with 47,970 rows at ~25ms per NFS stat, this is ~20 minutes of wall-clock blocking before the parallel processor even starts.
+3. `CleanupMissingFiles` then runs and does **the same 47,970 `os.path.exists` calls again** -- already called out by criterion 12, still present.
+4. For files declared missing in step 2, `FindMovedFile` calls `os.walk` over **every one of 587 RootFolders** looking for a filename match -- exponential cost: O(missing_files x rootfolders x dir_count).
+5. `ProcessMediaFiles` (5-thread parallel) then stats each file a **third time** via `FileManager.GetFileSizeMB` / `os.path.getsize` / `os.path.exists` plus a DB lookup, mostly to discover the row hasn't changed.
+
+Worker process memory is fine (~279 MB). The bottleneck is wall-clock from sequential NFS round-trips. Observed T:\ scan #64923 on I9-2024 2026-05-15: 20+ minutes blocked in `DetectMovedFiles` with the heartbeat thread (criterion 17 fix) confirming the process is alive but the scan thread is stat-bound.
+
+**Violates:** `Features/FileScanning/FileScanning.feature.md` criterion 23 (added with this entry). Complements criterion 12 (which owns the cap behavior); this entry owns the throughput dimension of the same `DetectMovedFiles` / `CleanupMissingFiles` / `FindMovedFile` code path.
+
+**What "fixed" looks like:**
+- Existence-check work is parallelized with the same `ThreadPoolExecutor(max_workers=5)` pattern `ProcessMediaFiles` already uses, or merged into a single `os.scandir`-driven pass that builds a `{path: stat_result}` dict for the whole RootFolder once and reuses it.
+- `DetectMovedFiles` and `CleanupMissingFiles` collapse into one per-row decision so each file is stat'd at most once per scan.
+- `FindMovedFile` builds a single `{filename: [paths]}` index from the `os.walk` results once per scan and looks up missing files in O(1) instead of `os.walk`-per-missing-file.
+- Verifiable: re-run T:\ scan on a worker against a database whose rows match disk; observe wall-clock under 5 minutes for a no-change pass on ~50k rows.
+
+**Look first:** `Features/FileScanning/FileScanningBusinessService.py` -- `DetectMovedFiles` (~line 1363), `CleanupMissingFiles` (call site immediately after), `FindMovedFile` (~line 1297), and the inner `os.walk` in `FindMovedFile` (~line 1318). The `ProcessMediaFiles` `ThreadPoolExecutor` pattern (~line 1486) is the template to copy. `Services/FileManagerService.py` `ScanDirectory` already produces the `os.walk` result that could feed a `{filename: [paths]}` index.
+
+---
+
+### [BUG] Scan progress writer is silent -- ScanJobs counters and CurrentDirectory don't advance mid-walk
+**Date:** 2026-05-15
+
+**What breaks:** A scan triggered via `ContinuousScanService` (or manual `POST /api/FileScanning/Scan/Start`) walks the filesystem but does not update `ScanJobs.ProcessedFiles`, `CurrentDirectory`, or `LastUpdated` until the scan ends. Confirmed against I9-2024 on 2026-05-15: M:\ scan #64919 ran 75s and T:\ scan #64920 ran 4+ minutes, both over NFS (89ms/dir for M:\, 18ms/dir for T:\), and both reported `ProcessedFiles=0`, `CurrentDirectory=NULL`, `LastUpdated=StartTime` for the entire run. From the operator's view, a healthy running scan and a hung scan look identical -- the only safety net is `StuckJobDetectionService` at the 15-minute threshold, which is well past the point where a real hang is impacting throughput.
+
+**Violates:** `Features/FileScanning/FileScanning.feature.md` criterion 17 (promoted to [BUG] with this entry). The criterion text now covers two dimensions: cadence (this entry) AND phase visibility. The phase dimension was added on the same date after observing scan #64925's walk finish (`ProcessedFiles=45716`) while `Status` stayed `Running` for the entire metadata-extraction phase that followed -- `PerformScan` folds `ProbeFilesNeedingMetadata` inside its return, so the operator cannot tell "still walking files" from "files done, now FFprobing." Fix candidates: add a `ScanJobs.Phase` column, or split probe out of PerformScan so Status flips to Completed when the walk finishes and a separate row tracks probe.
+
+**What "fixed" looks like:** During an active scan, `ScanJobs.LastUpdated` advances at least every 5 seconds even if no files changed; `CurrentDirectory` reflects the directory currently being walked; `ProcessedFiles` increments per file visited (not just per file inserted/updated). Verifiable: poll `SELECT LastUpdated, CurrentDirectory, ProcessedFiles FROM ScanJobs WHERE Id=<running-id>` every 5s and observe values advance well before `EndTime` is set.
+
+**Look first:** `Features/FileScanning/FileScanningBusinessService.py` -- the scan-walk implementation called from `ContinuousScanService._ExecuteScan` via `StartScanning`. Find where `ProcessedFiles` increments live and confirm whether the path is taken when files are skipped vs only when files are inserted/updated. Likely fix: lift the increment to the `os.walk` yield (not the per-file work branches), and add a heartbeat write of `LastUpdated` + `CurrentDirectory` every N seconds independent of file count.
+
+---
+
 ### [BUG - CRITICAL] Worker with broken NFS mount silently destroys queue -- marks all files as source-missing
 **Date:** 2026-05-14
 

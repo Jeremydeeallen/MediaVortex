@@ -165,14 +165,21 @@ class FileScanningBusinessService:
 
             LoggingService.LogInfo(f"Starting direct scan for {RootFolderPath}", 'FileScanningBusinessService', 'StartScanning')
 
-            # Perform the scan directly
-            result = self.PerformScan(RootFolderPath, Recursive, SkipDuplicateCleanup=SkipDuplicateCleanup)
+            # Criterion 17 (progress writer): heartbeat the ScanJobs row every
+            # 5s while the walk runs so operators (and StuckJobDetectionService)
+            # can distinguish a live scan from a hung one. Stop the heartbeat
+            # BEFORE writing the terminal status so an in-flight beat cannot
+            # overwrite Completed/Failed back to Running.
+            self._StartProgressHeartbeat(JobId)
+            try:
+                result = self.PerformScan(RootFolderPath, Recursive, SkipDuplicateCleanup=SkipDuplicateCleanup)
+            finally:
+                self._StopProgressHeartbeat()
 
-            # Update job status based on result
             if result.get('Success', False):
-                self.UpdateJobStatus(JobId, 'Completed', Progress=100.0, EndTime=datetime.now(timezone.utc))
+                self.UpdateJobStatus(JobId, 'Completed', Progress=100.0, EndTime=datetime.now(timezone.utc), ScanResults=self.ScanResults)
             else:
-                self.UpdateJobStatus(JobId, 'Failed', ErrorMessage=result.get('Message', 'Unknown error'), EndTime=datetime.now(timezone.utc))
+                self.UpdateJobStatus(JobId, 'Failed', ErrorMessage=result.get('Message', 'Unknown error'), EndTime=datetime.now(timezone.utc), ScanResults=self.ScanResults)
 
             return result
 
@@ -295,6 +302,42 @@ class FileScanningBusinessService:
                 'Message': f'Error stopping scan: {str(e)}',
                 'Error': 'StopError'
             }
+
+    def _StartProgressHeartbeat(self, JobId: str, IntervalSec: int = 5):
+        """Owns FileScanning.feature.md criterion 17 (producer side).
+        Without this loop, ScanJobs only sees writes at start and end -- a
+        healthy walking scan and a hung scan are indistinguishable until
+        StuckJobDetectionService fires at the 15-minute threshold.
+        """
+        self._HeartbeatStopEvent = threading.Event()
+
+        def _Beat():
+            while not self._HeartbeatStopEvent.wait(timeout=IntervalSec):
+                try:
+                    self.UpdateJobStatus(
+                        JobId,
+                        Status='Running',
+                        Progress=float(self.ScanProgress) if self.ScanProgress is not None else None,
+                        CurrentDirectory=self.CurrentScanDirectory or None,
+                        ScanResults=self.ScanResults,
+                    )
+                except Exception as Ex:
+                    LoggingService.LogException("Heartbeat write failed", Ex, 'FileScanningBusinessService', '_StartProgressHeartbeat')
+
+        self._HeartbeatThread = threading.Thread(
+            target=_Beat, daemon=True, name=f"ScanHeartbeat-{JobId[:8]}"
+        )
+        self._HeartbeatThread.start()
+
+    def _StopProgressHeartbeat(self):
+        Ev = getattr(self, '_HeartbeatStopEvent', None)
+        if Ev is not None:
+            Ev.set()
+        Th = getattr(self, '_HeartbeatThread', None)
+        if Th is not None and Th.is_alive():
+            Th.join(timeout=2)
+        self._HeartbeatStopEvent = None
+        self._HeartbeatThread = None
 
     def CleanupCompletedJobs(self):
         """Clean up old completed scan jobs."""
@@ -1248,6 +1291,109 @@ class FileScanningBusinessService:
             MediaFile.LastFFprobeError = str(e)
             MediaFile.LastFFprobeAttemptDate = datetime.now(timezone.utc)
 
+    def ReconcileWithDisk(self, MediaFiles: List[str], RootFolderId: int) -> Dict[str, Any]:
+        """Single-pass merge of move-detection and missing-file cleanup against
+        the disk file list already produced by `FileManager.ScanDirectory`.
+        Owns FileScanning.feature.md criterion 23 (throughput dimension).
+
+        Replaces the previous serial `os.path.exists` loop in
+        `DetectMovedFiles` (~50k NFS round-trips per scan) and the duplicate
+        loop in `CleanupMissingFiles` (another ~50k). Net reduction:
+        ~100k NFS stats -> 0 stats for missing-file detection. The fuzzy
+        match path still calls `IsSameFile` (3 stats per candidate), but
+        only for DB rows that are actually missing from disk.
+
+        Per-row decision:
+          - DB FilePath in disk set (case-insensitive) -> skip; the per-file
+            processor handles it normally.
+          - Not in disk set, fuzzy match found by basename + IsSameFile ->
+            update DB row's FilePath / FileName / StorageRootId / RelativePath
+            in place (preserves Id and metadata).
+          - Not in disk set, no fuzzy match -> delete DB row.
+
+        Move-detection cap (criterion 12) is preserved: above the cap, the
+        fuzzy-match step is skipped and missing rows are deleted directly
+        rather than reassigned. The throughput win still applies; only the
+        rename-recovery semantics degrade.
+        """
+        try:
+            LoggingService.LogInfo(
+                f"=== RECONCILE WITH DISK STARTED ({len(MediaFiles)} disk files) ===",
+                'ReconcileWithDisk', 'FileScanningBusinessService'
+            )
+
+            DiskSetLower = {os.path.normpath(p).lower() for p in MediaFiles}
+            DiskByBasenameLower: Dict[str, List[str]] = {}
+            for CanonicalPath in MediaFiles:
+                Basename = os.path.basename(CanonicalPath).lower()
+                DiskByBasenameLower.setdefault(Basename, []).append(CanonicalPath)
+
+            RootFolder = self.Repository.GetRootFolderById(RootFolderId)
+            if not RootFolder:
+                LoggingService.LogError(f"Root folder not found for ID: {RootFolderId}", 'ReconcileWithDisk', 'FileScanningBusinessService')
+                return {'Success': False, 'ErrorMessage': 'Root folder not found'}
+            DatabaseFiles = self.Repository.GetMediaFilesByRootFolder(RootFolder.RootFolder)
+
+            MaxFiles = self._GetMoveDetectionMaxFiles()
+            MoveDetectionEnabled = len(DatabaseFiles) <= MaxFiles
+            if not MoveDetectionEnabled:
+                LoggingService.LogWarning(
+                    f"Move detection disabled: {len(DatabaseFiles)} DB rows exceed limit {MaxFiles}; missing files will be deleted, not reassigned",
+                    'ReconcileWithDisk', 'FileScanningBusinessService'
+                )
+
+            MovedCount = 0
+            DeletedCount = 0
+            for DbFile in DatabaseFiles:
+                if os.path.normpath(DbFile.FilePath).lower() in DiskSetLower:
+                    continue
+
+                ResolvedMove = None
+                if MoveDetectionEnabled and DbFile.FileName:
+                    Candidates = DiskByBasenameLower.get(DbFile.FileName.lower(), [])
+                    DbPathLower = os.path.normpath(DbFile.FilePath).lower()
+                    for CandidatePath in Candidates:
+                        if os.path.normpath(CandidatePath).lower() == DbPathLower:
+                            continue
+                        LocalCandidate = self._ToLocalPath(CandidatePath)
+                        if self.IsSameFile(DbFile, LocalCandidate):
+                            ResolvedMove = CandidatePath
+                            break
+
+                if ResolvedMove:
+                    LoggingService.LogInfo(
+                        f"Reassigning moved file: {DbFile.FilePath} -> {ResolvedMove}",
+                        'ReconcileWithDisk', 'FileScanningBusinessService'
+                    )
+                    DbFile.FilePath = ResolvedMove
+                    DbFile.FileName = ntpath.basename(ResolvedMove)
+                    DbFile.LastScannedDate = datetime.now(timezone.utc)
+                    try:
+                        from Core.PathStorage import LoadStorageRoots, Parse as PathParse
+                        NewStorageRootId, NewRelativePath = PathParse(ResolvedMove, LoadStorageRoots())
+                        DbFile.StorageRootId = NewStorageRootId
+                        DbFile.RelativePath = NewRelativePath or ''
+                    except Exception:
+                        pass
+                    self.Repository.SaveMediaFile(DbFile)
+                    MovedCount += 1
+                else:
+                    LoggingService.LogInfo(
+                        f"Deleting DB row for missing file: {DbFile.FilePath} (Id={DbFile.Id})",
+                        'ReconcileWithDisk', 'FileScanningBusinessService'
+                    )
+                    self.Repository.DeleteMediaFile(DbFile.Id)
+                    DeletedCount += 1
+
+            LoggingService.LogInfo(
+                f"=== RECONCILE WITH DISK COMPLETED === moved={MovedCount} deleted={DeletedCount}",
+                'ReconcileWithDisk', 'FileScanningBusinessService'
+            )
+            return {'Success': True, 'MovedFiles': MovedCount, 'DeletedFiles': DeletedCount}
+        except Exception as e:
+            LoggingService.LogException("Error in ReconcileWithDisk", e, 'ReconcileWithDisk', 'FileScanningBusinessService')
+            return {'Success': False, 'ErrorMessage': str(e)}
+
     def CleanupMissingFiles(self, RootFolderId: Optional[int] = None):
         """Remove database records for files that no longer exist on disk."""
         try:
@@ -1445,15 +1591,16 @@ class FileScanningBusinessService:
         try:
             LoggingService.LogFunctionEntry("ProcessMediaFilesWithMetadata", 'FileScanningBusinessService', f"Processing {len(MediaFiles)} files, ExtractMetadata: {ExtractMetadata}")
 
-            # Detect moved files first, then cleanup remaining missing files
+            # Reconcile DB rows against the disk file list in a single pass.
+            # Replaces the previous DetectMovedFiles + CleanupMissingFiles
+            # sequence which serially stat-checked every DB row twice over
+            # NFS (criterion 23 fix).
             if RootFolderId:
-                LoggingService.LogInfo("=== CALLING DETECT MOVED FILES ===", 'ProcessMediaFilesWithMetadata', 'FileScanningBusinessService')
-                MoveDetectionResult = self.DetectMovedFiles(RootFolderId)
-                LoggingService.LogInfo(f"=== DETECT MOVED FILES COMPLETED === Moved: {MoveDetectionResult.get('MovedFiles', 0)}, Deleted: {MoveDetectionResult.get('DeletedFiles', 0)}", 'ProcessMediaFilesWithMetadata', 'FileScanningBusinessService')
-
-                LoggingService.LogInfo("=== CALLING CLEANUP MISSING FILES ===", 'ProcessMediaFilesWithMetadata', 'FileScanningBusinessService')
-                self.CleanupMissingFiles(RootFolderId)
-                LoggingService.LogInfo("=== CLEANUP MISSING FILES CALL COMPLETED ===", 'ProcessMediaFilesWithMetadata', 'FileScanningBusinessService')
+                ReconcileResult = self.ReconcileWithDisk(MediaFiles, RootFolderId)
+                LoggingService.LogInfo(
+                    f"Reconcile result: moved={ReconcileResult.get('MovedFiles', 0)} deleted={ReconcileResult.get('DeletedFiles', 0)}",
+                    'ProcessMediaFilesWithMetadata', 'FileScanningBusinessService'
+                )
 
             TotalFiles = len(MediaFiles)
             ProcessedCount = 0
@@ -1467,11 +1614,15 @@ class FileScanningBusinessService:
                     # Process the file with metadata extraction
                     self.ProcessSingleMediaFile(FilePath, RootFolderId, RootFolderPath, ExtractMetadata)
 
-                    # Update progress thread-safely
+                    # Update progress thread-safely. Mirror to ScanResults so
+                    # the heartbeat thread (criterion 17) writes a real
+                    # ProcessedFiles count, not zero, mid-scan.
                     with ProgressLock:
                         ProcessedCount += 1
                         Progress = 30.0 + (60.0 * ProcessedCount / TotalFiles)
                         self.ScanProgress = Progress
+                        self.ScanResults.TotalFilesProcessed = ProcessedCount
+                        self.CurrentScanDirectory = os.path.dirname(FilePath)
 
                     return {'Success': True, 'FilePath': FilePath}
                 except Exception as e:

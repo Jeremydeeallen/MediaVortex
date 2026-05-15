@@ -13,7 +13,7 @@ Both paths land in `FileScanningBusinessService.StartScan(rootfolderpath, recurs
 | 1. Pick / start | `FileScanningBusinessService.StartScan` | UPSERTs ScanJobs row; if no other Running scan for this rootfolder, sets Status='Running', StartTime=NOW(), spawns a worker thread |
 | 2. Walk filesystem | `FileScanningBusinessService._WalkRootFolder` | `os.walk` (or platform-equivalent) over `rootfolderpath`; updates `ScanJobs.CurrentDirectory` per directory enter; counts each candidate via `TotalFiles += 1` |
 | 3. Per-file decision | same | For each file: `MediaFiles.Path = ?` lookup. If absent -> insert MediaFiles row (NewFiles += 1). If present and size/mtime changed -> update (UpdatedFiles += 1). If present and unchanged -> skip (SkippedFiles += 1). |
-| 4. Mark deleted | `FileScanningBusinessService._MarkDeletedFiles` | After the walk, MediaFiles rows whose Path lives under this rootfolder but were not seen this pass have `Deleted=true` set (DeletedFiles += 1) |
+| 4. Reconcile DB vs disk | `FileScanningBusinessService.ReconcileWithDisk` | Single pass over the disk file list returned by ScanDirectory. Builds a path set + filename->paths index, iterates DB rows for this rootfolder: row in disk set -> skip (handled by per-file processor); row missing but basename matches a disk path AND `IsSameFile` confirms (size/mtime within tolerance) -> reassign FilePath / FileName / StorageRootId / RelativePath in place; row missing with no fuzzy match -> delete. Replaces the prior `DetectMovedFiles` + `CleanupMissingFiles` sequence which serially stat-checked each DB row twice over NFS. Move-detection cap (criterion 12) preserved -- above the cap, fuzzy-match step is skipped. |
 | 5. Update RootFolders | `FileScanningBusinessService._UpdateRootFolderStats` | `RootFolders.LastScannedDate = NOW()`, `TotalSizeGB` recomputed from MediaFiles |
 | 6. Mark complete | same | ScanJobs row: Status='Completed', EndTime=NOW(), Progress=100.0 |
 
@@ -97,7 +97,7 @@ No worker restart required -- the affinity filter reads the column on each tick.
 
 ### Move-detection cap
 
-`DetectMovedFiles` skips its work when `MediaFiles` row count exceeds `SystemSettings('MoveDetectionMaxFiles')` (default `100000`). The cap is read fresh on every scan -- raise the value at runtime via:
+`ReconcileWithDisk` skips the fuzzy-match (move detection) step when `MediaFiles` row count exceeds `SystemSettings('MoveDetectionMaxFiles')` (default `100000`); above the cap, missing rows are deleted directly rather than reassigned. The cap is read fresh on every scan -- raise the value at runtime via:
 
 ```sql
 UPDATE SystemSettings SET SettingValue = '200000' WHERE SettingKey = 'MoveDetectionMaxFiles';

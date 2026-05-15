@@ -320,9 +320,22 @@ class ContinuousScanService:
                     _Ctx = WorkerContext.Current()
                     LocalRootPath = (_Ctx.PathTranslation.ToLocalPath(RootFolder.RootFolder)
                                      if (_Ctx and _Ctx.PathTranslation) else RootFolder.RootFolder)
-                    if not os.path.exists(LocalRootPath):
-                        # Criterion 20: record path-resolution failure as a Failed ScanJobs row
-                        ErrorMsg = f"Path not accessible: {RootFolder.RootFolder} -> {LocalRootPath}"
+                    # Criterion 20 gate. Three states fail validation:
+                    #   - resolved path is not a directory (missing / file)
+                    #   - directory unreadable
+                    #   - directory is empty (local FS showing through where a
+                    #     mounted share should be -- the wakko 2026-05-14 bug)
+                    ValidationError = None
+                    if not os.path.isdir(LocalRootPath):
+                        ValidationError = "not a directory"
+                    else:
+                        try:
+                            if not any(True for _ in os.scandir(LocalRootPath)):
+                                ValidationError = "empty (mount point but no contents -- broken share?)"
+                        except OSError as ListErr:
+                            ValidationError = f"unreadable: {ListErr}"
+                    if ValidationError:
+                        ErrorMsg = f"Path not accessible: {RootFolder.RootFolder} -> {LocalRootPath} ({ValidationError})"
                         LoggingService.LogWarning(f"Pre-scan validation failed, recording ScanJobs failure: {ErrorMsg}", 'ContinuousScanService', '_ExecuteScan')
                         self._RecordPathValidationFailure(RootFolder.RootFolder, ThisWorkerName, ErrorMsg)
                         continue

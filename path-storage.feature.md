@@ -152,7 +152,11 @@ The orphan list is the operator's signal: add a new RootFolders entry covering t
 
 ## Status
 
-**NOT STARTED** — design pass complete. Awaiting operator approval of criteria before any code lands.
+**PHASE 3 IN PROGRESS** — verified 2026-05-15. Phases 1 (schema + seed) and 2
+(backfill) shipped to production; Phase 3 (dual-write) confirmed in the
+FileScanning vertical, remaining writer verticals require an audit. Phase 4
+(read switch) and Phase 5 (cleanup) not started. Doc Status was "NOT STARTED"
+through 2026-05-15 despite migration running months earlier — fixed inline.
 
 ### Progress
 
@@ -160,18 +164,23 @@ The orphan list is the operator's signal: add a new RootFolders entry covering t
 - [x] 2. Record critical bug + workaround in KNOWN-ISSUES.md
 - [x] 3. Create stub with [BUG] criterion (criterion 1)
 - [x] 4. Point existing related docs at the source of truth
-- [x] 5. `/n` design pass: RootFolderResolutions schema, 5-phase migration, code touch list, backfill strategy, validation criteria — THIS DOC
-- [ ] 6. **Operator approval of criteria** (REQUIRED before code)
-- [ ] 7. **Phase 1 — Schema additive**:
-  - `Scripts/SQLScripts/AddPathStorageColumns.py` — adds `RootId`+`RelativePath` (nullable, no CHECK yet) to MediaFiles, TranscodeQueue, TranscodeAttempts, TemporaryFilePaths, ShowSettings, MediaFilesArchive
-  - Creates `RootFolderResolutions` table
-  - Idempotent migration, runs cleanly on fresh + existing DB
-- [ ] 8. **Phase 1 — RootFolderResolutions seed**:
-  - `Scripts/SQLScripts/SeedRootFolderResolutions.py` — translates current `WorkerShareMappings` rows into `RootFolderResolutions`; also reads `Workers.ShareCanonicalPrefix` for default Windows mappings
-- [ ] 9. **Phase 2 — Backfill**:
-  - `Scripts/SQLScripts/BackfillPathStorage.py` — per the strategy above
-  - Validation report: matched/orphan counts per table; operator reviews orphans
-- [ ] 10. **Phase 3 — Dual-write**: enumerated writer touch list above. One PR per feature vertical (FileScanning, TranscodeQueue admission, ProcessTranscodeQueueService, etc.). Each writes both old `FilePath` and new `(RootId, RelativePath)`; logs WARNING on drift.
+- [x] 5. `/n` design pass: StorageRootResolutions schema, 5-phase migration, code touch list, backfill strategy, validation criteria — THIS DOC
+- [x] 6. **Operator approval of criteria** (implicit — Phases 1-3 ran in production; doc was never updated to reflect approval timing)
+- [x] 7. **Phase 1 — Schema additive** (verified 2026-05-15):
+  - MediaFiles has `StorageRootId BIGINT` + `RelativePath TEXT` columns present
+  - `StorageRoots` table exists (3 rows: media_tv→T:\, movies→M:\, xxx→Z:\)
+  - Other path-bearing tables (TranscodeQueue, TranscodeAttempts, TemporaryFilePaths, ShowSettings, MediaFilesArchive) — column presence not re-verified in this audit; check before any Phase 4 work
+- [x] 8. **Phase 1 — StorageRootResolutions seed** (verified 2026-05-15):
+  - `StorageRootResolutions` table exists, 54 rows (per-worker per-root mappings)
+  - `WorkerShareMappings` (48 rows) coexists for backward compatibility
+- [x] 9. **Phase 2 — Backfill** (verified 2026-05-15):
+  - 59,128 of 59,130 MediaFiles rows have `StorageRootId` (~99.997%); 2 orphans remain — review and either add a covering StorageRoot or accept as archival before Phase 5
+  - All 59,130 rows have `RelativePath`
+  - Backfill on other path-bearing tables not re-verified; run a fresh report before Phase 4 advances
+- [ ] 10. **Phase 3 — Dual-write** (PARTIAL, 2026-05-15):
+  - **VERIFIED** FileScanning vertical: `FileScanningRepository.SaveMediaFile` (lines 410 INSERT + 418 UPDATE) writes both `FilePath` AND `StorageRootId, RelativePath`. `FileScanningBusinessService` line 788 computes the new columns via `PathParse(FilePath, LoadStorageRoots())`.
+  - **UNVERIFIED** writer verticals: TranscodeQueue admission, ProcessTranscodeQueueService, FileReplacement post-flight writers, MediaProbe, MediaFilesArchive, TemporaryFilePaths producers. Each needs a grep + code-walk to confirm dual-write before Phase 3 burn-in can be declared green.
+  - **DRIFT WARNING NOT CONFIRMED** — the criterion-9 contract requires a logged WARNING when `FilePath` and `(StorageRootId, RelativePath)` resolve to different paths. Need to verify the WARNING is wired in and observe the Logs table for accumulation patterns.
 - [ ] 11. **Phase 3 burn-in**: run for a fleet-week. Validate that no drift WARNINGs accumulate. Validate that all new rows have `(RootId, RelativePath)` populated. If passing, advance.
 - [ ] 12. **Phase 4 — Read switch**: enumerated reader touch list above. One PR per consumer. Each reads `(RootId, RelativePath)` via Resolve; activates CHECK constraints; legacy `FilePath` stops being read.
 - [ ] 13. **Phase 4 burn-in**: run for a fleet-week. Validate paths resolve correctly for all I/O. Tail logs for any "file not found" regressions.
