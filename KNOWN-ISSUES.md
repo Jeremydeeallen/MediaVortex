@@ -2,19 +2,6 @@
 
 ## Open
 
-### [BUG] Optimization page Jellyfin sync form fails with "paramiko is not installed"
-**Date:** 2026-05-15
-
-**What breaks:** Submitting the Jellyfin sync form on http://10.0.0.7:5000/Optimization returns a "paramiko is not installed" error. `paramiko>=3.0.0` is declared in `requirements.txt` (line 21), so the host venv on 10.0.0.7 is missing the dependency or the import is guarded and falling through to a user-visible string. No flow doc exists for the Optimization/Jellyfin SSH sync pipeline.
-
-**Violates:** `Features/Optimization/Optimization.feature.md` criterion 8 (added with this entry). Related to criteria 1 and 6 (SSH connection / test).
-
-**Look first:** `Features/Optimization/OptimizationBusinessService.py` and `OptimizationController.py` for the `paramiko` import site and how the error is surfaced. Check the deployed WebService venv on 10.0.0.7 -- `pip list | grep paramiko`. If missing, `pip install -r requirements.txt` against that venv. If import is guarded and re-raised as a user message, decide whether to fail loud at startup vs. handle at request time with the standard `{Success: false, Message}` envelope. A flow doc for the Jellyfin SSH sync pipeline should be created before the fix (per /t doc-first order).
-
-**Fix with:** `/t`
-
----
-
 ### [BUG - CRITICAL] Worker with broken NFS mount silently destroys queue -- marks all files as source-missing
 **Date:** 2026-05-14
 
@@ -555,6 +542,21 @@ Full Windows paths (e.g., `T:\Shows\file.mkv`) are stored as natural keys in at 
 ---
 
 ## Resolved
+
+### [BUG - FIXED 2026-05-15] Optimization page Jellyfin sync form fails with "paramiko is not installed"
+**Date:** 2026-05-15 | **Fixed:** 2026-05-15 | resolved: 2026-05-15
+
+**What broke:** Submitting the Jellyfin sync form on http://10.0.0.7:5000/Optimization returned `{"Success": false, "ErrorMessage": "paramiko is not installed"}`. `paramiko>=3.0.0` was declared in `requirements.txt` line 21, so the dependency was meant to be present.
+
+**Root cause:** The running WebService process launches from `C:\Code\MediaVortex\WebService\venv\` (a service-local venv) rather than the root `venv/` that `CLAUDE.md` documents. `WebService/venv/` was missing paramiko despite the declaration. `JellyfinService.py` wraps `import paramiko` in try/except and falls through to a hard-coded error string at line 39, which surfaced as the user-visible message.
+
+**Fix:** Ran `pip install -r requirements.txt` into `WebService/venv/`. paramiko-5.0.0 installed. No code changes -- the envelope behavior at `Features/Optimization/JellyfinService.py:6-10` was already correct.
+
+**Closes:** `Features/Optimization/Optimization.feature.md` criterion 8. New flow doc: `Features/Optimization/Optimization.flow.md` covers the Jellyfin SSH sync pipeline and explicitly lists the "paramiko not installed in runtime venv" failure mode and the two-venv gotcha.
+
+**Action remaining for operator:** restart WebService -- the running process imported paramiko at startup and cached `PARAMIKO_AVAILABLE = False`.
+
+---
 
 ### [TECH DEBT - FIXED 2026-05-15] Card 1.5 Add Batch -- legacy bookkeeping, redundant payload, arbitrary size cap
 **Date:** 2026-05-15 | **Fixed:** 2026-05-15

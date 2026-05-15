@@ -13,7 +13,7 @@ Analyzes Jellyfin FFmpeg logs to identify playback optimization opportunities. S
 5. The /Optimization page displays operation statistics and per-device breakdowns.
 6. SSH connection can be tested from the UI before importing logs.
 7. Recommendations identify files that should be pre-transcoded to eliminate server-side transcoding.
-8. [BUG] The Jellyfin sync form on /Optimization completes a sync round-trip without surfacing a "paramiko is not installed" error. The WebService runtime (including deployed hosts such as 10.0.0.7) has `paramiko` available, and any missing-dependency condition is reported through the standard `{Success: false, Message}` envelope rather than raising a raw ImportError into the user-visible response.
+8. The Jellyfin sync form on /Optimization completes a sync round-trip without surfacing a "paramiko is not installed" error. The WebService runtime has `paramiko` available, and any missing-dependency condition is reported through the standard `{Success: false, Message}` envelope rather than raising a raw ImportError into the user-visible response.
 
 ## Status
 
