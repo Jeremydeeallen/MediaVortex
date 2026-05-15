@@ -10,7 +10,7 @@ Replaces the former `TranscodeService/Main.py` + `QualityTestService/Main.py` du
 
 | Step | Function | What It Does |
 |------|----------|--------------|
-| 0. Path verification (Windows-only) | `_VerifyRequiredPaths()` | Reads distinct drive-letter prefixes from MediaFiles, verifies each is accessible via `os.path.exists()`. Hard-fails before any DB writes if a required drive isn't mounted. Linux containers skip this step (bind mounts are validated by container orchestration). |
+| 0. Path verification (Windows-only) | `_VerifyRequiredPaths()` | Reads distinct drive-letter prefixes from MediaFiles, verifies each is accessible via `os.path.exists()`. Hard-fails before any DB writes if a required drive isn't mounted. Linux containers skip this step (per-worker mount validation in step 7a handles them). |
 | 1. Identity | `WorkerServiceApp.__init__()` | `WorkerName = socket.gethostname()`, `WorkerPlatform = platform.system().lower()` |
 | 2. Register worker | `_RegisterAndLoadWorkerConfig()` | Resolves FFmpeg/FFprobe via `_ResolveBundledOrPathBinary()` (project-bundled `FFmpegMaster/bin/<binary>{.exe?}` first, then `shutil.which`). Raises `RuntimeError` if neither resolves -- previously this silently registered NULL on Windows hosts where FFmpeg isn't on PATH. UPSERTs Workers row (WorkerName, Platform, FFmpegPath, FFprobePath, Status=Online). Parses `MEDIAVORTEX_SHARE_MAPPINGS` env var and UPSERTs into WorkerShareMappings. Loads config (StagingDirectory, MaxConcurrentJobs, share mappings). |
 | 3. WorkerContext | `WorkerContext.Initialize()` | Singleton stores FFmpegPath, FFprobePath, StagingDirectory, ShareMappings. All services in the process resolve tool paths from WorkerContext. |
@@ -18,7 +18,8 @@ Replaces the former `TranscodeService/Main.py` + `QualityTestService/Main.py` du
 | 5. Crash recovery | `_RecoverFromCrash()` | CrashRecoveryService resets orphaned Running/Processing jobs for this worker |
 | 6. Stuck job cleanup | `_DetectAndCleanStuckJobs()` | StuckJobDetectionService cleans stuck transcode and quality test jobs |
 | 7. Load capabilities | `_LoadCapabilitiesFromDB()` | Reads TranscodeEnabled, QualityTestEnabled, ScanEnabled, Status from Workers row |
-| 8. Mark Online | `DatabaseManager.UpdateWorkerStatus()` | Sets Workers.Status = 'Online' |
+| 7a. Mount validation | `_ValidateStorageMounts()` + `_ApplyMountValidationResult()` | Cross-platform. For each `StorageRootResolutions` row for this worker, checks the `AbsolutePath` is a directory, readable, and non-empty. Empty = local filesystem showing through where a share should be mounted. On failure: writes a single-line summary to `Workers.MountValidationError`, forces `Workers.Status='Paused'`, logs ERROR per mount, and capabilities never start. On success: clears `MountValidationError`. Re-runs on every Paused → Online transition in `_HandleStatusChange()`. |
+| 8. Mark Online | `DatabaseManager.UpdateWorkerStatus()` | Sets Workers.Status = 'Online' only if mount validation passed |
 | 9. Start health monitor | `_StartHealthMonitoring()` | Thread: updates Workers.LastHeartbeat every 30s |
 | 10. Start status polling | `_StartStatusPolling()` | Thread: reads Workers.Status every 5s, calls `_HandleStatusChange()` on transitions |
 | 11. Start capability polling | `_StartCapabilityPolling()` | Thread: reads capability flags and concurrency columns every N seconds (default 15, configurable via `SystemSettings.CapabilityPollingIntervalSec`), calls `_ApplyCapabilities()` on flag changes, `_ApplyConcurrencyChanges()` on concurrency changes |
@@ -136,3 +137,5 @@ if process_id and process_id == own_pid:
 | Capability start fails | Exception logged, capability stays None | Check service dependencies (e.g. ProcessTranscodeQueueService import) |
 | Drain timeout (>2 hours) | Thread join times out, transcode service object orphaned | Worker will clean up on next startup via crash recovery |
 | Multiple workers claim same job | Prevented by `SELECT FOR UPDATE SKIP LOCKED` in ClaimNextPendingTranscodeJob |
+| Storage mount missing / empty / unreadable | Worker stays Paused; `Workers.MountValidationError` set; capabilities never start; zero jobs claimed | Fix the host mount (e.g. NFS share remount), then resume the worker via Activity page or `UPDATE Workers SET Status='Online'`. The Paused → Online transition re-runs validation. |
+| No `StorageRootResolutions` rows for this worker | Treated as broken mount; worker stays Paused | Re-register via `MEDIAVORTEX_SHARE_MAPPINGS` env var (Linux) or `RegisterStorageRootResolutionsFromCanonical` (Windows) and restart |

@@ -61,9 +61,16 @@ Simplify worker status model from three states (Online/Draining/Paused) to two (
 
 ## Status
 
-NOT STARTED
+IN PROGRESS -- mount-validation slice (criteria 20, 21) shipped 2026-05-15; remaining status-model and `.inprogress` rewrites still NOT STARTED.
 
 ### Progress
 
-- [ ] Design complete (this document)
-- [ ] Flow doc written or updated
+- [x] Design complete (this document)
+- [x] Flow doc updated (step 7a + Failure Modes row, 2026-05-15)
+- [x] Criteria 20, 21: cross-platform `_ValidateStorageMounts()` + `_ApplyMountValidationResult()` gate startup and Paused-to-Online transitions; `Workers.MountValidationError` column added; on failure worker stays Paused and claims zero jobs.
+- [ ] Criteria 1-5: collapse Online/Draining/Paused to Online/Paused; remove `_DrainAndStop` and the drain waiter thread.
+- [ ] Criteria 6-9: `.inprogress` output pattern replacing the destructive `.orig` rename.
+- [ ] Criteria 10-13: unified crash/kill recovery on the new pattern.
+- [ ] Criteria 14-17: Activity tile redesign + per-machine pause + settings modal.
+- [ ] Criterion 19: polling interval verified against the documented 15s default.
+- [ ] Surface MountValidationError on Activity tiles (operator-facing display, criterion 20 second sentence).

@@ -446,6 +446,72 @@ class WorkerServiceApp:
         except Exception as e:
             LoggingService.LogException("Error stopping scan capability", e, "WorkerService", "_StopScanCapability")
 
+    # --- Mount validation ---
+
+    def _ValidateStorageMounts(self):
+        """Verify every storage mount this worker depends on is present, readable,
+        and contains data. Owns worker-lifecycle.feature.md criteria 20, 21.
+
+        An empty mount point indicates the local filesystem showing through where
+        an NFS / SMB share should be mounted -- the failure mode that destroyed
+        wakko-worker-1's queue on 2026-05-14. Treat empty as broken.
+
+        Returns list of (AbsolutePath, Reason) failures. Empty list = all mounts good.
+        """
+        Failures = []
+        try:
+            Rows = self.DatabaseManager.DatabaseService.ExecuteQuery(
+                "SELECT AbsolutePath FROM StorageRootResolutions "
+                "WHERE WorkerName = %s AND IsActive = TRUE",
+                (self.WorkerName,)
+            )
+        except Exception as e:
+            LoggingService.LogException(
+                "Could not read StorageRootResolutions for mount validation",
+                e, "WorkerService", "_ValidateStorageMounts"
+            )
+            return [("<unknown>", f"Could not query StorageRootResolutions: {e}")]
+
+        if not Rows:
+            return [("<none>", f"No active StorageRootResolutions rows for worker '{self.WorkerName}'")]
+
+        for Row in Rows:
+            Path = Row.get('AbsolutePath') or Row.get('absolutepath')
+            if not Path:
+                continue
+            if not os.path.isdir(Path):
+                Failures.append((Path, "mount point does not exist or is not a directory"))
+                continue
+            try:
+                Entries = os.listdir(Path)
+            except Exception as e:
+                Failures.append((Path, f"mount point not readable: {e}"))
+                continue
+            if not Entries:
+                Failures.append((Path, "mount point is empty (local filesystem showing through instead of mounted share)"))
+        return Failures
+
+    def _ApplyMountValidationResult(self, Failures) -> bool:
+        """Persist mount-validation outcome to the Workers row and log loudly.
+        Returns True if validation passed (Failures empty), False otherwise.
+        On failure: forces Workers.Status='Paused' and writes a single-line
+        summary into Workers.MountValidationError for UI surfacing.
+        """
+        if not Failures:
+            self.DatabaseManager.SetWorkerMountValidationError(self.WorkerName, None)
+            return True
+
+        Reason = "; ".join(f"{P}: {R}" for P, R in Failures)
+        for Path, Detail in Failures:
+            LoggingService.LogError(
+                f"Mount validation FAILED for worker '{self.WorkerName}': {Path} -- {Detail}",
+                "WorkerService", "_ValidateStorageMounts"
+            )
+        self.DatabaseManager.SetWorkerMountValidationError(self.WorkerName, Reason)
+        self.DatabaseManager.UpdateWorkerStatus(self.WorkerName, "Paused")
+        self.WorkerStatus = "Paused"
+        return False
+
     # --- Service lifecycle ---
 
     def Run(self):
@@ -470,11 +536,21 @@ class WorkerServiceApp:
                 "WorkerService", "Run"
             )
 
+            # Gate Online transition on storage-mount validation. A broken or
+            # empty mount on a single worker can destroy queue state for every
+            # file it claims, so this MUST fire before any capability starts.
+            MountsOk = self._ApplyMountValidationResult(self._ValidateStorageMounts())
+
             # Respect the DB status -- if operator set Paused before restart,
             # stay Paused.  Only default to Online when the DB row has no
             # explicit status (first-ever start).
-            if self.WorkerStatus == "Online":
+            if self.WorkerStatus == "Online" and MountsOk:
                 self.DatabaseManager.UpdateWorkerStatus(self.WorkerName, "Online")
+            elif not MountsOk:
+                LoggingService.LogError(
+                    f"Worker forced to Paused due to mount validation failure -- no jobs will be claimed until mounts are fixed",
+                    "WorkerService", "Run"
+                )
             else:
                 LoggingService.LogInfo(
                     f"Worker DB status is '{self.WorkerStatus}', respecting it (not forcing Online)",
@@ -734,6 +810,14 @@ class WorkerServiceApp:
         """Handle worker status transitions."""
         try:
             if NewStatus == "Online":
+                # Re-validate mounts before resuming. Operator may have fixed
+                # the host mount; we still cannot trust it without a check.
+                if not self._ApplyMountValidationResult(self._ValidateStorageMounts()):
+                    LoggingService.LogError(
+                        f"Resume to Online blocked: mount validation failed. Worker remains Paused.",
+                        "WorkerService", "_HandleStatusChange"
+                    )
+                    return
                 # Came back online - start enabled capabilities
                 LoggingService.LogInfo("Worker is Online, starting enabled capabilities", "WorkerService", "_HandleStatusChange")
                 self._ApplyCapabilities()

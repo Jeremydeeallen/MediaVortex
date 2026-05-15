@@ -1987,6 +1987,18 @@ class DatabaseManager:
         except Exception as e:
             LoggingService.LogException("Exception in UpdateWorkerStatus", e, "DatabaseManager", "UpdateWorkerStatus")
             return False
+
+    def SetWorkerMountValidationError(self, WorkerName: str, Reason) -> bool:
+        """Persist the last mount-validation failure reason (or clear it with None)."""
+        try:
+            self.DatabaseService.ExecuteNonQuery(
+                "UPDATE Workers SET MountValidationError = %s WHERE WorkerName = %s",
+                (Reason, WorkerName)
+            )
+            return True
+        except Exception as e:
+            LoggingService.LogException("Exception in SetWorkerMountValidationError", e, "DatabaseManager", "SetWorkerMountValidationError")
+            return False
     
     def ClearAllTranscodeQueueItems(self) -> int:
         """Clear pending items from the transcoding queue, preserving in-progress jobs."""
