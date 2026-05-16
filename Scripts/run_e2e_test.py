@@ -280,24 +280,37 @@ def Main():
     if not TxAttempt['Success']:
         print('  FAIL: transcode did not succeed')
         sys.exit(4)
-    # VMAF may be a separate attempt or the same row updated. Wait for either VMAF != NULL
-    # or QualityTestCompleted.
+    # VMAF may be a separate attempt or the same row updated. Wait for a
+    # TERMINAL disposition (anything except None/Pending) or a non-NULL VMAF
+    # score or QualityTestCompleted. Previous version exited on
+    # Disposition='Pending' (AwaitingVmaf) because the truthy check matched --
+    # bug observed in run 2.
     print('  Waiting for VMAF on the transcode attempt...')
+    TerminalDispositions = ('Replace', 'BypassReplace', 'NoReplace', 'Requeue', 'Discard')
     Start = time.time()
+    LastReport = 0
+    Done = False
     while time.time() - Start < TIMEOUT_VMAF_SEC:
         Rows = Db.ExecuteQuery(
-            "SELECT VMAF, QualityTestCompleted, Disposition, DispositionReason "
+            "SELECT VMAF, QualityTestCompleted, Disposition, DispositionReason, FileReplaced "
             "FROM TranscodeAttempts WHERE Id=%s",
             (TxAttempt['Id'],)
         )
         R = Rows[0]
-        if R['VMAF'] is not None or R['QualityTestCompleted'] or R['Disposition']:
+        TerminalReached = R['Disposition'] in TerminalDispositions
+        if R['VMAF'] is not None or TerminalReached:
             print(f'  VMAF result: vmaf={R["VMAF"]} qt_completed={R["QualityTestCompleted"]} '
-                  f'disp={R["Disposition"]!r} reason={R["DispositionReason"]!r}')
+                  f'disp={R["Disposition"]!r} reason={R["DispositionReason"]!r} '
+                  f'replaced={R["FileReplaced"]}')
+            Done = True
             break
+        Now = int(time.time() - Start)
+        if Now - LastReport >= 60:
+            print(f'  ...{Now}s elapsed, still waiting on VMAF (disp={R["Disposition"]!r})')
+            LastReport = Now
         time.sleep(POLL_INTERVAL_SEC)
-    else:
-        print('  FAIL: VMAF did not complete within timeout')
+    if not Done:
+        print('  FAIL: VMAF did not reach a terminal disposition within timeout')
         sys.exit(4)
 
     Section('Verify scan would SKIP touched files (no spurious UpdatedFiles)')
