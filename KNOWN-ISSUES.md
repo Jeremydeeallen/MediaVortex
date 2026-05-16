@@ -2,31 +2,6 @@
 
 ## Open
 
-### [BUG] MediaFiles has 45,290 duplicate `(StorageRootId, RelativePath)` rows -- backslash-escape variants slipped past the FilePath unique index
-**Date:** 2026-05-16
-
-**What breaks:** Same physical file has multiple `MediaFiles` rows because `FilePath` strings differ in escaping (e.g. `T:\8 Minute Ab workout.mkv` vs `T:\\8 Minute Ab workout.mkv`). Confirmed via `SELECT COUNT(*) FROM (SELECT StorageRootId, LOWER(RelativePath), COUNT(*) FROM MediaFiles GROUP BY StorageRootId, LOWER(RelativePath) HAVING COUNT(*) > 1) sq` -> 45,290 duplicate sets out of ~60k MediaFiles total. Sample: Ids 617935 + 667339 both point to `T:\13 Reasons Why\Season 1\13 Reasons Why - S01E02 - Tape 1, ...`.
-
-The existing `idx_mediafiles_filepath_unique` index keys on raw `FilePath` (case-insensitive via expression but string-exact otherwise) so single-vs-double-backslash variants slip through as distinct paths. There is no unique index on `(StorageRootId, RelativePath)`.
-
-**Why it didn't break today's tests:** `ReconcileWithDisk` (Phase 4) keys on `(StorageRootId, RelativePath.lower())` which is IDENTICAL for both rows of every dup pair, so the reconcile correctly resolves either row to the same disk file. The two-row state is invisible to anything that consumes via the Phase 4 read pattern.
-
-**Why it WILL break:** consumers that still iterate MediaFiles (UI tables, ad-hoc SQL, reporting, queue producers that don't dedupe upstream) double-count these rows. Foreign key references from `TranscodeAttempts.MediaFileId`, `TranscodeQueue.MediaFileId`, `MediaFilesArchive`, etc. are split across the dup IDs unpredictably -- some attempts point at the "old" Id, some at the "new" Id, depending on which version of `FilePath` was canonical when each was written.
-
-**Likely root cause:** the FileName/FilePath escaping bug fixed earlier this morning (commit 706f2bc -- Linux `os.path.basename` returning the whole canonical path for Windows-shaped strings). Writers running pre-fix produced inconsistently-escaped FilePath strings, and the unique index treated them as different paths.
-
-**Violates:** `Features/FileScanning/FileScanning.feature.md` criterion 27 (added with this entry).
-
-**What "fixed" looks like:**
-- Backfill script picks one canonical row per `(StorageRootId, LOWER(RelativePath))` set (prefer the highest Id with the cleanest FilePath -- no doubled backslashes). Migrates FK references on TranscodeAttempts, TranscodeQueue, MediaFilesArchive, ProblemFiles, TranscodeFiles from the loser rows to the keeper. Deletes the losers.
-- Add `UNIQUE (StorageRootId, RelativePath)` constraint (case-insensitive via expression index) so future inserts cannot recreate the duplication.
-- Optionally drop the now-redundant `idx_mediafiles_filepath_unique` once the new key enforces uniqueness.
-- Verifiable: `SELECT COUNT(*) FROM (SELECT StorageRootId, LOWER(RelativePath), COUNT(*) FROM MediaFiles GROUP BY ... HAVING COUNT(*) > 1) sq` returns 0; the new UNIQUE constraint exists; attempting a duplicate INSERT raises `IntegrityError`.
-
-**Look first:** `Features/FileScanning/DuplicateDetectionService.py` -- existing dedupe service is filename-based and doesn't operate on `(StorageRootId, RelativePath)`. `Features/FileScanning/FileScanningRepository.py::SaveMediaFile` lines 400-420 -- the case-insensitive `FilePath` check that creates the variant rows (different escape -> different string -> bypass). `Scripts/SQLScripts/` for the migration pattern to follow.
-
----
-
 ### [BUG] TranscodeAttempts failure rows lack ProfileName -- operator cannot tell what KIND of job failed from the row alone
 **Date:** 2026-05-16
 
@@ -721,6 +696,27 @@ Done manually for dot on 2026-05-16 -- worked in ~5 minutes -- but the manual st
 
 ## Resolved
 
+### [BUG - FIXED 2026-05-16] MediaFiles had 45,420 duplicate `(StorageRootId, RelativePath)` rows from backslash-escape variants
+**Date:** 2026-05-16 | **Fixed:** 2026-05-16 | resolved: 2026-05-16
+
+**What broke:** Same physical file had multiple `MediaFiles` rows because `FilePath` strings differed in escaping (`T:\Show\f.mkv` vs `T:\\Show\f.mkv`). The existing `idx_mediafiles_filepath_unique` keyed on raw `LOWER(FilePath)` so string-distinct variants coexisted; no unique index on `(StorageRootId, RelativePath)`. 45,420 duplicate groups (90,840 rows out of ~102k) -- exactly two rows per group with the high-Id row carrying a doubled leading backslash. ~9k loser rows had FK refs split across `TranscodeAttempts`, `TranscodeFiles`, `MediaFilesArchive`, and `ProblemFiles`.
+
+**Root cause:** the historical FileName/FilePath escaping bug (commit `706f2bc`, Linux `os.path.basename` returning the whole canonical path) produced variant-escaped FilePath strings; `SaveMediaFile`'s existence check used `LOWER(FilePath) = LOWER(%s)` -- string-exact, so variants passed as "new file" and were inserted. The unique index used the same key, so it didn't catch them either. The `(StorageRootId, RelativePath)` tuple is identical between variants (RelativePath uses forward slashes) but had no unique constraint, so coexistence was permitted at every layer.
+
+**Violates:** `Features/FileScanning/FileScanning.feature.md` criterion 27.
+
+**Fix:**
+- `Scripts/SQLScripts/DedupeMediaFilesByRelativePath.py`: per-group keeper selection (cleanest FilePath -- fewest doubled backslashes -- tiebreaker highest Id), FK migration on `TranscodeAttempts.MediaFileId`, `TranscodeQueue.MediaFileId`, `TranscodeFiles.MediaFileId`, `ProblemFiles.MediaFileId`, and `MediaFilesArchive.Id` correlation, then DELETE losers. Per-group transactions for resumability. Idempotent + `--dry-run`. Ran clean against prod: 45,420 groups committed, 0 remaining.
+- `Scripts/SQLScripts/AddMediaFilesStorageRootRelativePathUnique.py`: creates `idx_mediafiles_storageroot_relpath_unique ON MediaFiles (StorageRootId, LOWER(RelativePath)) WHERE StorageRootId IS NOT NULL AND RelativePath IS NOT NULL`. Pre-checks dup count is zero.
+- `Features/FileScanning/FileScanningRepository.py::SaveMediaFile`: existence check now keys on `(StorageRootId, LOWER(RelativePath))` when both are set; falls back to `LOWER(FilePath)` for legacy rows lacking storage-root data so the path-storage transition stays smooth.
+- `idx_mediafiles_filepath_unique` left in place (still a useful guard against FilePath-only inserts during transition).
+
+**Backend verification:** dup-group count 45,351 -> 0 confirmed against prod. UNIQUE constraint rejects test duplicate insert with `psycopg2.errors.UniqueViolation` as expected. MediaFiles row count 102,576 -> 56,698 (matches losers removed + earlier overlapping FilePath dedup).
+
+**Files:** see `Scripts/SQLScripts/DedupeMediaFilesByRelativePath.py`, `Scripts/SQLScripts/AddMediaFilesStorageRootRelativePathUnique.py`, `Features/FileScanning/FileScanningRepository.py::SaveMediaFile`, `Features/FileScanning/FileScanning.feature.md` criterion 27.
+
+---
+
 ### [BUG - FIXED 2026-05-16] Card 1.5 sort parity + header parity with Card 1
 **Date:** 2026-05-16 | **Fixed:** 2026-05-16
 
@@ -839,17 +835,6 @@ Done manually for dot on 2026-05-16 -- worked in ~5 minutes -- but the manual st
 **Violates:** `Features/FileReplacement/FileReplacement.feature.md` criterion 10, `transcode-vs-remux-routing.feature.md` criterion 16.
 
 **Fix:** Swapped Row 2 and Row 3 in `_DecideFromInputs` so `QualityTestNotRequired` fires before `NoSavings`. Remux attempts bypass the savings gate entirely. Remediation script `Scripts/SQLScripts/RemediateDiscardedRemuxFiles.py` flipped dispositions and ran `ProcessFileReplacement` for affected rows. ~380 remediated on i9; 113 blocked by stale `.orig` needing manual cleanup; 188 need script run from larry after redeploy.
-
----
-
-### [BUG - FIXED 2026-05-13] MaxConcurrentJobs from Workers table is ignored -- workers always run 1 concurrent job
-**Date:** 2026-05-13 | **Fixed:** 2026-05-13
-
-**What breaks:** `WorkerService/Main.py` loads `MaxConcurrentJobs` from the Workers table into `self.WorkerConfig` at startup, but `_StartTranscodeCapability()` (line 207) and `_StartQualityTestCapability()` (line 245) both hardcode `Run(MaxConcurrentJobs=1)`. Setting `Workers.MaxConcurrentJobs=2` in the DB has no effect -- the worker still processes one queue item at a time.
-
-**Violates:** `WorkerService/WorkerService.feature.md` criterion 16.
-
-**Fix:** Replaced the single `MaxConcurrentJobs` column with per-capability columns: `MaxConcurrentTranscodeJobs` (default 1, CPU-bound), `MaxConcurrentQualityTestJobs` (default 2, I/O-bound), `MaxConcurrentRemuxJobs` (default 2, I/O-bound). Each capability now reads its own column via `_GetPerCapabilityConcurrency()`. Additionally, remux is now a separate capability (`ProcessRemuxQueueService`) with its own queue loop and claim query, so remux concurrency is independent of transcode. Schema migration: `Scripts/SQLScripts/AddPerCapabilityConcurrency.py`.
 
 ---
 

@@ -397,8 +397,12 @@ class FileScanningRepository(BaseRepository):
             try:
                 cursor = connection.cursor()
                 if MediaFile.Id is None:
-                    checkQuery = "SELECT Id FROM MediaFiles WHERE LOWER(FilePath) = LOWER(%s)"
-                    cursor.execute(checkQuery, (MediaFile.FilePath,))
+                    if MediaFile.StorageRootId is not None and MediaFile.RelativePath is not None:
+                        checkQuery = "SELECT Id FROM MediaFiles WHERE StorageRootId = %s AND LOWER(RelativePath) = LOWER(%s)"
+                        cursor.execute(checkQuery, (MediaFile.StorageRootId, MediaFile.RelativePath))
+                    else:
+                        checkQuery = "SELECT Id FROM MediaFiles WHERE LOWER(FilePath) = LOWER(%s)"
+                        cursor.execute(checkQuery, (MediaFile.FilePath,))
                     existingRow = cursor.fetchone()
                     if existingRow:
                         MediaFile.Id = existingRow['Id']
