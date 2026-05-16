@@ -35,9 +35,15 @@ failure modes. Criteria below are numbered to map to flow stages.
    DevTools, hard-refresh, observe exactly one request.
 
 2. The response `Suggestions` array is ordered by
-   `PriorityScore DESC NULLS LAST, SizeMB DESC`. Verifiable: compare row
-   order to a direct SQL query using the same ORDER BY clause -- they
-   match byte-for-byte.
+   `SizeMB DESC NULLS LAST, PriorityScore DESC NULLS LAST`. Verifiable:
+   compare row order to a direct SQL query using the same ORDER BY
+   clause -- they match byte-for-byte. Size leads so the biggest-impact
+   work surfaces first symmetrically across `Mode='Transcode'` and
+   `Mode='Remux'` (the priority score for a remux candidate models
+   transcode savings and is uninformative for the remux pool, so size
+   carries the meaningful ranking; for the transcode pool size and
+   priority correlate so the displayed order changes minimally).
+   Updated 2026-05-16 per `remux-populate-card.feature.md` criterion 21.
 
 3. Each suggestion carries an integer `PriorityScore` field (or `null`
    when the row has not yet been scored). Verifiable: response JSON

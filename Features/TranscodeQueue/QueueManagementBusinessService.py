@@ -321,7 +321,7 @@ class QueueManagementBusinessService:
                        m.PriorityScore
                 FROM MediaFiles m
                 {WhereSql}
-                ORDER BY m.PriorityScore DESC NULLS LAST, m.SizeMB DESC
+                ORDER BY m.SizeMB DESC NULLS LAST, m.PriorityScore DESC NULLS LAST
                 LIMIT {int(Limit)} OFFSET {int(Offset)}
             """
             Rows = DatabaseService().ExecuteQuery(Sql, ParamsTuple)

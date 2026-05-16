@@ -78,13 +78,11 @@
                 <div>
                     <h5 class="mb-0 d-inline">Next Remux Batch</h5>
                     <span id="RemuxCount" class="badge bg-light text-info ms-2">0</span>
-                    <small class="fw-normal ms-2 opacity-75" style="font-size: 0.75rem;">Audio normalize + container fix (no video re-encode)</small>
                 </div>
                 <div class="d-flex align-items-center gap-2 flex-wrap">
                     <input id="RemuxSearch" type="search" class="form-control form-control-sm" placeholder="Search title or file..." style="width: 200px;" maxlength="100">
                     <label class="mb-0 text-white text-nowrap small">Size:</label>
                     <input id="RemuxSizeSelect" type="number" min="1" max="1000" step="1" value="250" class="form-control form-control-sm" style="width: 80px;" list="BatchSizeChoices">
-                    <small class="text-white text-nowrap fst-italic opacity-75 mx-2">no profile needed</small>
                     <button class="btn btn-light btn-sm" onclick="AddRemuxBatchToQueue()" id="AddRemuxBatchBtn">Add Batch</button>
                     <button class="btn btn-warning btn-sm" onclick="QueueAllRemuxMatching()" id="QueueAllRemuxBtn" title="Queue every remux candidate matching the current search">Queue All</button>
                     <button class="btn btn-outline-light btn-sm" onclick="SmartPopulateRemux()" id="RemuxAnalyzeBtn">Re-Analyze</button>
@@ -641,7 +639,6 @@ function SmartPopulate(IsNextPage) {
                     ? ' matching "' + EscapeHtml(CurrentSearch) + '"'
                     : '';
                 $('#BatchInfo').html('<small><strong>' + TotalCandidates.toLocaleString() + '</strong> candidates' + FilterText + '. Showing top ' + BATCH_SIZE + ' by priority.</small>');
-                $('#BatchCount').text(TotalCandidates);
                 RenderBatch();
             } else {
                 ShowNotification('Batch error: ' + (Response.Message || Response.ErrorMessage || 'Unknown error'), 'danger');
@@ -699,7 +696,6 @@ function SmartPopulateRemux(IsNextPage) {
                     ? ' matching "' + EscapeHtml(RemuxCurrentSearch) + '"'
                     : '';
                 $('#RemuxBatchInfo').html('<small><strong>' + RemuxTotalCandidates.toLocaleString() + '</strong> remux candidates' + FilterText + '. Showing top ' + REMUX_BATCH_SIZE + '.</small>');
-                $('#RemuxCount').text(RemuxTotalCandidates);
                 RenderRemuxBatch();
             } else {
                 ShowNotification('Remux batch error: ' + (Response.Message || Response.ErrorMessage || 'Unknown error'), 'danger');
@@ -714,6 +710,7 @@ function SmartPopulateRemux(IsNextPage) {
 
 function RenderRemuxBatch() {
     const Tbody = $('#RemuxTableBody');
+    $('#RemuxCount').text(RemuxBatchItems.length + '/' + (RemuxTotalCandidates || 0).toLocaleString());
 
     if (RemuxBatchItems.length === 0) {
         const EmptyMsg = RemuxCurrentSearch
@@ -844,7 +841,7 @@ function QueueAllRemuxMatching() {
 
 function RenderBatch() {
     const Tbody = $('#BatchTableBody');
-    $('#BatchCount').text(BatchItems.length);
+    $('#BatchCount').text(BatchItems.length + '/' + (TotalCandidates || 0).toLocaleString());
 
     if (BatchItems.length === 0) {
         const EmptyMsg = CurrentSearch

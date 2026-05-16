@@ -2,6 +2,31 @@
 
 ## Open
 
+### [BUG] MediaFiles has 45,290 duplicate `(StorageRootId, RelativePath)` rows -- backslash-escape variants slipped past the FilePath unique index
+**Date:** 2026-05-16
+
+**What breaks:** Same physical file has multiple `MediaFiles` rows because `FilePath` strings differ in escaping (e.g. `T:\8 Minute Ab workout.mkv` vs `T:\\8 Minute Ab workout.mkv`). Confirmed via `SELECT COUNT(*) FROM (SELECT StorageRootId, LOWER(RelativePath), COUNT(*) FROM MediaFiles GROUP BY StorageRootId, LOWER(RelativePath) HAVING COUNT(*) > 1) sq` -> 45,290 duplicate sets out of ~60k MediaFiles total. Sample: Ids 617935 + 667339 both point to `T:\13 Reasons Why\Season 1\13 Reasons Why - S01E02 - Tape 1, ...`.
+
+The existing `idx_mediafiles_filepath_unique` index keys on raw `FilePath` (case-insensitive via expression but string-exact otherwise) so single-vs-double-backslash variants slip through as distinct paths. There is no unique index on `(StorageRootId, RelativePath)`.
+
+**Why it didn't break today's tests:** `ReconcileWithDisk` (Phase 4) keys on `(StorageRootId, RelativePath.lower())` which is IDENTICAL for both rows of every dup pair, so the reconcile correctly resolves either row to the same disk file. The two-row state is invisible to anything that consumes via the Phase 4 read pattern.
+
+**Why it WILL break:** consumers that still iterate MediaFiles (UI tables, ad-hoc SQL, reporting, queue producers that don't dedupe upstream) double-count these rows. Foreign key references from `TranscodeAttempts.MediaFileId`, `TranscodeQueue.MediaFileId`, `MediaFilesArchive`, etc. are split across the dup IDs unpredictably -- some attempts point at the "old" Id, some at the "new" Id, depending on which version of `FilePath` was canonical when each was written.
+
+**Likely root cause:** the FileName/FilePath escaping bug fixed earlier this morning (commit 706f2bc -- Linux `os.path.basename` returning the whole canonical path for Windows-shaped strings). Writers running pre-fix produced inconsistently-escaped FilePath strings, and the unique index treated them as different paths.
+
+**Violates:** `Features/FileScanning/FileScanning.feature.md` criterion 27 (added with this entry).
+
+**What "fixed" looks like:**
+- Backfill script picks one canonical row per `(StorageRootId, LOWER(RelativePath))` set (prefer the highest Id with the cleanest FilePath -- no doubled backslashes). Migrates FK references on TranscodeAttempts, TranscodeQueue, MediaFilesArchive, ProblemFiles, TranscodeFiles from the loser rows to the keeper. Deletes the losers.
+- Add `UNIQUE (StorageRootId, RelativePath)` constraint (case-insensitive via expression index) so future inserts cannot recreate the duplication.
+- Optionally drop the now-redundant `idx_mediafiles_filepath_unique` once the new key enforces uniqueness.
+- Verifiable: `SELECT COUNT(*) FROM (SELECT StorageRootId, LOWER(RelativePath), COUNT(*) FROM MediaFiles GROUP BY ... HAVING COUNT(*) > 1) sq` returns 0; the new UNIQUE constraint exists; attempting a duplicate INSERT raises `IntegrityError`.
+
+**Look first:** `Features/FileScanning/DuplicateDetectionService.py` -- existing dedupe service is filename-based and doesn't operate on `(StorageRootId, RelativePath)`. `Features/FileScanning/FileScanningRepository.py::SaveMediaFile` lines 400-420 -- the case-insensitive `FilePath` check that creates the variant rows (different escape -> different string -> bypass). `Scripts/SQLScripts/` for the migration pattern to follow.
+
+---
+
 ### [BUG] TranscodeAttempts failure rows lack ProfileName -- operator cannot tell what KIND of job failed from the row alone
 **Date:** 2026-05-16
 
@@ -664,6 +689,25 @@ Done manually for dot on 2026-05-16 -- worked in ~5 minutes -- but the manual st
 
 ## Resolved
 
+### [BUG - FIXED 2026-05-16] Card 1.5 sort parity + header parity with Card 1
+**Date:** 2026-05-16 | **Fixed:** 2026-05-16
+
+**What broke:**
+1. **Count-badge format diverged.** Card 1 ("Next Batch") rendered `BatchItems.length` (next-batch size). Card 1.5 ("Next Remux Batch") rendered `RemuxTotalCandidates` (total pool remaining). Operator could not eyeball "what gets queued vs what's left" from the badges.
+2. **Sort did not consider size meaningfully on Card 1.5.** Both cards used `ORDER BY PriorityScore DESC NULLS LAST, SizeMB DESC`. PriorityScore is materialized for 100% of rows in both modes (verified live DB), but for a `RecommendedMode='Remux'` row the score models *transcode savings* -- meaningless for a remux operation that does not re-encode video. Card 1.5's top row was a 217 MB MP4 at PriorityScore 85, while a 1,956 MB Ghostbusters MKV (a genuinely larger remux candidate) sat at row 2.
+3. **Card 1.5 header had two extraneous captions.** "Audio normalize + container fix (no video re-encode)" subtitle and "no profile needed" italic caption — operator wanted them gone; the title alone is sufficient.
+
+**Violates:** `Features/ShowSettings/remux-populate-card.feature.md` criterion 21.
+
+**Fix:**
+- `Features/TranscodeQueue/QueueManagementBusinessService.py::SmartPopulateQueue` ORDER BY changed to `SizeMB DESC NULLS LAST, PriorityScore DESC NULLS LAST` for both modes. Size is the meaningful primary key; priority is the tiebreaker. Card 1 ordering changes minimally (size correlates with priority for transcode); Card 1.5 leads with the largest remux candidates (verified: 2,666 MB JFK MKV at top vs prior 217 MB MP4).
+- `Templates/ShowSettings.html`: both count badges render `<batch>/<total>` (e.g. `100/17,045` and `250/7,439`); badge text now set inside `RenderBatch` / `RenderRemuxBatch` so it always reflects the displayed batch length and total candidates together. Removed Card 1.5 subtitle and "no profile needed" caption.
+- `Features/ShowSettings/smart-populate.feature.md` criterion 2 and `Features/ShowSettings/smart-populate.flow.md` updated to document the new sort key.
+
+**Performance note:** new ORDER BY EXPLAIN ANALYZE is top-N heapsort on Seq Scan at 97 ms -- well under the 250 ms p95 threshold per `smart-populate.feature.md` criterion 19. The existing partial index `idx_mediafiles_smartpopulate` is now keyed for the prior sort and unused by SmartPopulate; can be replaced with `(SizeMB DESC NULLS LAST, PriorityScore DESC NULLS LAST)` in a follow-up if p95 ever trends up.
+
+---
+
 ### [BUG - FIXED 2026-05-16] HasFileChanged returns True for every file when a different worker scans them
 **Date:** 2026-05-16 | **Fixed:** 2026-05-16 | resolved: 2026-05-16
 
@@ -774,17 +818,6 @@ Done manually for dot on 2026-05-16 -- worked in ~5 minutes -- but the manual st
 **Violates:** `WorkerService/WorkerService.feature.md` criterion 16.
 
 **Fix:** Replaced the single `MaxConcurrentJobs` column with per-capability columns: `MaxConcurrentTranscodeJobs` (default 1, CPU-bound), `MaxConcurrentQualityTestJobs` (default 2, I/O-bound), `MaxConcurrentRemuxJobs` (default 2, I/O-bound). Each capability now reads its own column via `_GetPerCapabilityConcurrency()`. Additionally, remux is now a separate capability (`ProcessRemuxQueueService`) with its own queue loop and claim query, so remux concurrency is independent of transcode. Schema migration: `Scripts/SQLScripts/AddPerCapabilityConcurrency.py`.
-
----
-
-### [BUG - FIXED 2026-05-13] Worker deploy scp copies the entire repo (venv, .git, Tests, etc.) instead of just build inputs
-**Date:** 2026-05-12 | **Fixed:** 2026-05-13
-
-**What broke:** Step 1 of `deploy/worker-deploy.flow.md` ran `scp -r /c/Code/MediaVortex/* root@10.0.0.42:/tmp/mediavortex-build/` -- a blind recursive copy that dragged `venv/`, `.git/`, `__pycache__/`, `Tests/`, smoke-test artifacts, screenshots, ad-hoc dumps, and anything else sitting in the working directory across the wire. Wasted bandwidth and time on every deploy and bloated the Docker build context for no payoff.
-
-**Fix:** Created `.deployignore` (exclusion patterns for deploy sync -- additive by default, new files included automatically). Linux deploy: `deploy/SyncSource.py` reads `.deployignore` and uses tar-over-ssh to stream only needed files. Windows deploy: `deploy-windows-worker.py` `StepScpRepo()` now uses `shutil.copytree` with the same `.deployignore` patterns into a temp directory before scp. Flow doc step 1 updated.
-
-**Violates:** `deploy/worker-deploy.feature.md` criterion 19.
 
 ---
 

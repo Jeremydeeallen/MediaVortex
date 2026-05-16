@@ -99,6 +99,16 @@ parallel to `smart-populate.feature.md`.
 
 18. Card 1.5's header label clarifies what "remux" means in operator-facing terms. Title is "Next Remux Batch"; subtitle reads "Audio normalize + container fix (no video re-encode)" so an operator who hasn't read the docs can understand the difference from Card 1. Verifiable: visual inspection.
 
+### J. Sort parity and header parity with transcode queue [BUG]
+
+21. **[BUG 2026-05-16]** Card 1 ("Next Batch") and Card 1.5 ("Next Remux Batch") must use the same sort key and the same count-badge format -- the only operator-visible differences should be (a) the per-card search input (independent state) and (b) the filter criterion (`Mode='Transcode'` vs `Mode='Remux'`, mapped by the cascade's `RecommendedMode` partition: resolution-threshold mismatch vs non-matching container + audio mismatch). Two specific defects today:
+
+    **21a. Count-badge format diverges.** Card 1's badge renders `BatchItems.length` (next-batch size). Card 1.5's badge renders `RemuxTotalCandidates` (total pool remaining). Operator cannot eyeball "what gets queued vs what's left" from the badges. Fixed = both cards' badges render `<next batch>/<total>` (e.g. `100/17045`, `250/7439`). Verifiable: hard-refresh `/ShowSettings`, both badges show two numbers separated by `/`; the first equals the current `BatchItems`/`RemuxBatchItems` length, the second equals the API's `TotalCandidates`.
+
+    **21b. Sort does not consider size meaningfully on Card 1.5.** Today both cards `ORDER BY PriorityScore DESC NULLS LAST, SizeMB DESC` and PriorityScore is materialized for 100% of rows. But PriorityScore for a `RecommendedMode='Remux'` row models *transcode savings* (the formula assumes re-encode to the profile target bitrate) -- meaningless for a remux operation that does not re-encode video. Result: Card 1.5's top row is a 217 MB MP4 at PriorityScore 85, while a 1,956 MB Ghostbusters MKV (genuinely the largest-impact remux) sits at row 2 with PriorityScore 84. Operator expects "the biggest impactful work first" symmetrically across both cards. Fixed = `SmartPopulateQueue` sorts by `SizeMB DESC NULLS LAST, PriorityScore DESC NULLS LAST` for both modes -- size becomes the primary key, PriorityScore the tiebreaker. Card 1 ordering changes minimally because size correlates with priority for transcode candidates; Card 1.5 ordering flips so the largest remux candidates lead. Verifiable: query `SELECT Id, SizeMB, PriorityScore FROM MediaFiles WHERE IsCompliant IS NOT TRUE AND TranscodedByMediaVortex IS NOT TRUE AND SizeMB > 0 AND RecommendedMode = 'Remux' ORDER BY SizeMB DESC NULLS LAST, PriorityScore DESC NULLS LAST LIMIT 10` and confirm the first 10 ids match the Card 1.5 display top 10 after refresh.
+
+    Look first: `Features/TranscodeQueue/QueueManagementBusinessService.py::SmartPopulateQueue` ORDER BY clause (~line 324) -- update the SQL. `Templates/ShowSettings.html` -- count-badge rendering in `SmartPopulate` (~line 644) and `SmartPopulateRemux` (~line 702); `RenderBatch` (~line 847) also writes BatchCount on every render and needs to use the new format. The `idx_mediafiles_smartpopulate` partial index in `Scripts/SQLScripts/AddSmartPopulateIndex.py` is keyed on `(PriorityScore DESC NULLS LAST, SizeMB DESC)` -- after this change, EXPLAIN ANALYZE on the new ORDER BY may need a new index keyed on `(SizeMB DESC NULLS LAST, PriorityScore DESC NULLS LAST)` to avoid a Seq Scan.
+
 ### I. Responsiveness
 
 19. Clicking Card 1.5's "Add Batch" button completes in under 1 second on the live DB (250-item default batch). The Mode='Remux' path in `AddSuggestionsToQueue` must not issue per-item DB lookups for profile-target bitrates (those are meaningless for a no-re-encode operation). Verifiable: time the "Add Batch" click on Card 1.5 -- under 1s for a 250-item batch.
@@ -121,6 +131,11 @@ IN PROGRESS -- operator approved 2026-05-09; manual-entry tweak folded into crit
 
 ### Progress
 
+- [x] Criterion 21 (2026-05-16): sort parity + header parity with Card 1
+  - Backend: `SmartPopulateQueue` ORDER BY changed to `SizeMB DESC NULLS LAST, PriorityScore DESC NULLS LAST` (was `PriorityScore DESC NULLS LAST, SizeMB DESC`). Both modes use the same key; size is now the meaningful primary because remux priority models transcode savings and is uninformative for the remux pool. Transcode display unchanged in practice (size/priority correlate); remux display now leads with the largest candidates (verified: 2,666 MB JFK MKV at top vs prior 217 MB MP4).
+  - Frontend: Card 1 and Card 1.5 count badges both render `<batch>/<total>` (e.g. `100/17,045` and `250/7,439`). `BatchCount` set inside `RenderBatch`; `RemuxCount` set inside `RenderRemuxBatch` -- removes the prior SmartPopulate-side set that showed only the total. Card 1.5's "Audio normalize + container fix (no video re-encode)" subtitle and "no profile needed" italic caption removed per operator request.
+  - Docs: `smart-populate.feature.md` criterion 2 and `smart-populate.flow.md` Stage 1 + Data Flow updated to the new sort key.
+  - EXPLAIN ANALYZE shows 97 ms top-N heapsort on Seq Scan (was Index Scan on the old order); well under the 250 ms p95 threshold per `smart-populate.feature.md` criterion 19. Index `idx_mediafiles_smartpopulate` is now keyed for the prior sort; can be replaced or supplemented in a follow-up if p95 trends up.
 - [x] UX-reviewer guidance obtained 2026-05-09: option B (sibling card)
 - [x] Flow doc extended (`smart-populate.flow.md` Entry Point updated to mention both cards)
 - [x] Feature doc drafted (this file)

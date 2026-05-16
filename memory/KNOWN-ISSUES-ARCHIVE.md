@@ -4,6 +4,17 @@ Resolved entries moved from KNOWN-ISSUES.md to keep the tracker manageable. Olde
 
 ---
 
+### [BUG - FIXED 2026-05-13] Worker deploy scp copies the entire repo (venv, .git, Tests, etc.) instead of just build inputs
+**Date:** 2026-05-12 | **Fixed:** 2026-05-13
+
+**What broke:** Step 1 of `deploy/worker-deploy.flow.md` ran `scp -r /c/Code/MediaVortex/* root@10.0.0.42:/tmp/mediavortex-build/` -- a blind recursive copy that dragged `venv/`, `.git/`, `__pycache__/`, `Tests/`, smoke-test artifacts, screenshots, ad-hoc dumps, and anything else sitting in the working directory across the wire. Wasted bandwidth and time on every deploy and bloated the Docker build context for no payoff.
+
+**Fix:** Created `.deployignore` (exclusion patterns for deploy sync -- additive by default, new files included automatically). Linux deploy: `deploy/SyncSource.py` reads `.deployignore` and uses tar-over-ssh to stream only needed files. Windows deploy: `deploy-windows-worker.py` `StepScpRepo()` now uses `shutil.copytree` with the same `.deployignore` patterns into a temp directory before scp. Flow doc step 1 updated.
+
+**Violates:** `deploy/worker-deploy.feature.md` criterion 19.
+
+---
+
 ### [FIXED] QueryDatabase.py sql command silently rolls back writes
 **Date:** 2026-05-05 | **Fixed:** 2026-05-05
 **Fix:** Added `--commit` flag. Default unchanged (rollback for safety).

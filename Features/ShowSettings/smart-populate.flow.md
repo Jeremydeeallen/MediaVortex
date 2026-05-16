@@ -29,7 +29,7 @@ itself never computes priority; it only reads the column.
 
 | # | Stage | Trigger | What user sees | Failure mode |
 |---|-------|---------|----------------|--------------|
-| 1 | Initial paint | Page load (`$(document).ready`) | "Next Batch" card with the first page of suggestions sorted by `PriorityScore DESC NULLS LAST, SizeMB DESC` | Empty card with error toast if API fails |
+| 1 | Initial paint | Page load (`$(document).ready`) | "Next Batch" card with the first page of suggestions sorted by `SizeMB DESC NULLS LAST, PriorityScore DESC NULLS LAST` | Empty card with error toast if API fails |
 | 2 | Search filter | User types in the search box (debounced ~300ms) | Suggestions refetch filtered to rows whose FileName or show-folder name matches; `TotalCandidates` count updates | Empty list with "No matches" message; clearing the search restores the full set |
 | 3 | Batch-size change | User picks a value in the size selector (25/50/100/250/500) | Next refetch returns up to the new Limit; pagination resumes from offset 0 | Default selector to 100 if the request fails |
 | 4 | Re-Analyze | User clicks "Re-Analyze" button | Same as initial paint, using the current Search + Limit | Toast surfaces the error; previous data stays |
@@ -47,7 +47,7 @@ Stage 1 (initial paint):
   Service         -> SQL: WHERE TranscodedByMediaVortex IS NOT TRUE
                           AND m.Id NOT IN (SELECT MediaFileId FROM TranscodeQueue WHERE MediaFileId IS NOT NULL)
                           AND m.SizeMB > 0
-                          ORDER BY PriorityScore DESC NULLS LAST, SizeMB DESC
+                          ORDER BY SizeMB DESC NULLS LAST, PriorityScore DESC NULLS LAST
                           LIMIT 100 OFFSET 0
   Service         -> rows -> Suggestions (each row carries PriorityScore from MediaFiles)
   JS              -> render rows with Priority badge
