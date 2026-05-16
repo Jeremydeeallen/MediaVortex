@@ -93,9 +93,107 @@ Operator dogfood, 2026-05-10. Sister Wives S04E05 transcode succeeded but VMAF n
 
 17. Endpoints under existing `/api/SystemSettings/` namespace: `GET /api/SystemSettings/PostTranscodeGateConfig`, `PUT /api/SystemSettings/PostTranscodeGateConfig`. No separate controller -- consistent with the QueueTuning pattern.
 
+### H. Content-aware gate (amendment 2026-05-16)
+
+18. **[BUG 2026-05-16]** The single-threshold gate (`VmafAutoReplaceMinThreshold >= 88` against `TranscodeAttempts.VMAF`, the filtered Mean) systematically false-rejects visually-clean encodes of held-frame content. Cross-checked against production-DB attempts (`KNOWN-ISSUES.md` "VMAF distribution becomes bimodal on held-frame content"): Minnie's filtered Mean=84 but filtered P25=94 (75% of unique frames score 94+) -- the encode is visually identical to source per PNG comparison, but the gate fires `VmafBelowMin` and Requeues forever. Same pattern on Pokémon (anime, Mean=71.5), Steven Universe (2D animation, 76.8), Real Housewives (reality TV, 76.6), Bunk'd (sitcom, 78.3), The Bear (drama, 79.4). Modern CGI (Garfield, 97.7) and continuous-motion live action (Outlander, 96.7) gate cleanly. Root cause documented in `QualityTesting.feature.md` criterion 2b: VMAF model 0.6.1 mis-scores byte-identical reference frames; motion filter in `ParseVMAFMetrics` improves but doesn't fully correct the metric on this content class. "Fixed" means the gate distinguishes content type via the `MotionZeroFraction` signal already produced by `ParseVMAFMetrics` and applies appropriate floors per type, with a feedback loop (criterion 22) that lets us tune the thresholds from data instead of guesswork.
+
+19. **Content-aware decision logic.** The disposition function reads `QualityTestResults.MotionZeroFraction` for the attempt and branches:
+    - **Held-frame** (`MotionZeroFraction > VmafHeldFrameDetectionThreshold`, default 0.15): pass requires `VMAFP25 >= VmafHeldFrameP25MinThreshold` **AND** `VMAF (filtered Mean) >= VmafHeldFrameMeanMinThreshold`. Twin floor: P25 catches "most unique frames must be very-good," Mean catches "encoder did not catastrophically fail." Either failing → `Requeue`.
+    - **Live action** (or NULL MotionZeroFraction on legacy attempts): pass requires `VMAFP10 >= VmafLiveActionP10MinThreshold`. Stricter — "90% of frames must be very-good-or-better" — because the metric is reliable here and the operator wants good quality throughout.
+    - The legacy `VmafAutoReplaceMinThreshold` is **retired** in this amendment (was a single-path gate; the two-path gate above subsumes it). `VmafAutoReplaceMaxThreshold` remains in force on both paths (a too-high VMAF still signals a suspicious encode regardless of content type).
+    Verifiable: integration tests in `Tests/Contract/TestPostTranscodeDisposition.py` add held-frame and live-action rows to the conformance set; the test asserts each path's pass/fail decision against synthetic inputs at both sides of every threshold.
+
+20. **Extended `PostTranscodeGateConfig` schema.** The single-row config table gains four columns:
+    ```
+    VmafLiveActionP10MinThreshold    NUMERIC NOT NULL DEFAULT 85
+    VmafHeldFrameP25MinThreshold     NUMERIC NOT NULL DEFAULT 88
+    VmafHeldFrameMeanMinThreshold    NUMERIC NOT NULL DEFAULT 80
+    VmafHeldFrameDetectionThreshold  NUMERIC NOT NULL DEFAULT 0.15
+        CHECK (VmafHeldFrameDetectionThreshold > 0 AND VmafHeldFrameDetectionThreshold < 1)
+    ```
+    Idempotent ADD COLUMN IF NOT EXISTS migration; defaults pre-seed the threshold values derived from the production-DB analysis (live-action P10=85 ≈ 90% of frames at "very good," held-frame P25=88 ≈ 75% of unique frames at "very good," held-frame Mean=80 ≈ "encoder did not collapse"). Existing `VmafAutoReplaceMinThreshold` column may stay for one release as a no-op (avoid breaking out-of-fleet clients reading the column) and is dropped in a follow-up migration once nothing reads it. Verifiable: `\d PostTranscodeGateConfig` shows the four new columns; migration runs twice cleanly; defaults match.
+
+21. **`QualityTestResults.MotionZeroFraction` column.** Persists the detection signal the gate needs:
+    ```
+    MotionZeroFraction DOUBLE PRECISION NULL
+        CHECK (MotionZeroFraction IS NULL OR (MotionZeroFraction >= 0 AND MotionZeroFraction <= 1))
+    ```
+    Written by `UpdateQualityTestResultsWithScore` from the existing `Metrics` dict (the value `ParseVMAFMetrics` already computes post-fix). NULL on legacy/historical rows -- the gate treats NULL as "unknown, default to live-action path" which is the conservative choice (stricter threshold). Verifiable: a fresh VMAF run populates the column; the value matches the fraction computed by reparsing the same XML.
+
+22. **Gate-outcome telemetry, data-driven threshold tuning.** The audit trail already records per-decision outcomes (`Disposition`, `DispositionReason`); this criterion exposes the aggregate so operators can decide whether to tune the four thresholds from criterion 20 without guesswork.
+
+    - A SQL view `GateDecisionRates` summarizes, over a rolling window:
+      ```sql
+      CREATE OR REPLACE VIEW GateDecisionRates AS
+      SELECT
+        CASE WHEN qtr.MotionZeroFraction > gc.VmafHeldFrameDetectionThreshold
+             THEN 'HeldFrame' ELSE 'LiveAction' END AS Path,
+        ta.DispositionReason,
+        COUNT(*) AS Decisions,
+        COUNT(*) FILTER (WHERE ta.Disposition IN ('Replace','BypassReplace')) AS Passes,
+        COUNT(*) FILTER (WHERE ta.Disposition IN ('Requeue','NoReplace','Discard')) AS Fails,
+        ROUND(100.0 * COUNT(*) FILTER (WHERE ta.Disposition IN ('Replace','BypassReplace'))
+              / NULLIF(COUNT(*), 0), 1) AS PassRatePct
+      FROM TranscodeAttempts ta
+      LEFT JOIN QualityTestResults qtr ON qtr.TranscodeAttemptId = ta.Id
+      CROSS JOIN PostTranscodeGateConfig gc
+      WHERE ta.DispositionDecidedAt > NOW() - (gc.GateMonitoringWindowDays || ' days')::INTERVAL
+      GROUP BY 1, 2;
+      ```
+    - Two new columns on `PostTranscodeGateConfig` configure the telemetry (DB-driven per the user-instruction memory note):
+      ```
+      GateMonitoringWindowDays                NUMERIC NOT NULL DEFAULT 30
+          CHECK (GateMonitoringWindowDays > 0 AND GateMonitoringWindowDays <= 365)
+      GateMonitoringAlertFailRateThreshold    NUMERIC NOT NULL DEFAULT 0.50
+          CHECK (GateMonitoringAlertFailRateThreshold >= 0 AND GateMonitoringAlertFailRateThreshold <= 1)
+      ```
+    - The disposition function emits a **one-per-hour-per-path** WARN log line when either path's rolling fail rate exceeds `GateMonitoringAlertFailRateThreshold`:
+      `Gate fail rate elevated: path=<HeldFrame|LiveAction> failRate=<X.YZ> threshold=<X.YZ> window=<N>d topReason=<reason> -- consider tuning <threshold-name>`
+      Rate-limit by storing a `LastAlertedAt` per-path in memory (the disposition function is a hot path; we do not want a Logs flood). Verifiable: induce >50% fail rate on the held-frame path via test fixtures; observe exactly one WARN entry per hour per path; observe the JSON payload names the highest-frequency reason so the operator knows which threshold to relax.
+
+    - The view is operator-readable from the SQL Queries page and underpins the GUI display in criterion 23. Verifiable: `SELECT * FROM GateDecisionRates ORDER BY Path, Decisions DESC` returns per-path per-reason rates; sums reconcile with `SELECT COUNT(*) FROM TranscodeAttempts WHERE DispositionDecidedAt > NOW() - INTERVAL '30 days'`.
+
+23. **`/settings` "Post-Transcode" card extension.** The existing card (criterion 16) adds:
+    - Editable controls for the four new thresholds: `VmafLiveActionP10MinThreshold`, `VmafHeldFrameP25MinThreshold`, `VmafHeldFrameMeanMinThreshold`, `VmafHeldFrameDetectionThreshold`.
+    - Editable controls for the two telemetry settings: `GateMonitoringWindowDays`, `GateMonitoringAlertFailRateThreshold`.
+    - A read-only "Gate Performance" panel under the editor that renders the current `GateDecisionRates` view as a small table (Path × top-3 reasons × pass-rate). Refreshes on page load. Lets the operator see "the live-action path is passing 92% of decisions; the held-frame path is passing 41% with top reason VmafHeldFrameP25BelowMin -- I should consider lowering VmafHeldFrameP25MinThreshold."
+    - Existing legacy control for `VmafAutoReplaceMinThreshold` is removed from the GUI (the column may persist in the DB for one release per criterion 20 but the operator no longer sees / edits it).
+    Verifiable: change `VmafHeldFrameP25MinThreshold` from 88 to 80 via the editor; the next disposition call applies the new value; the "Gate Performance" panel reflects the new pass rate within the rolling window. The legacy control no longer appears.
+
+24. **Extended reason vocabulary** (closed list, additive to criterion 10). New values:
+    `VmafLiveActionPassed`, `VmafLiveActionP10BelowMin`,
+    `VmafHeldFramePassed`, `VmafHeldFrameP25BelowMin`, `VmafHeldFrameMeanBelowMin`.
+    Existing `VmafBelowMin` and `VmafPassed` reasons are deprecated for new attempts (the new vocabulary is more precise about which floor failed and which path the attempt took). The closed-list check (criterion 10) is updated; `SELECT DISTINCT DispositionReason` still returns only the union of allowed values. Verifiable: integration test asserts each new reason fires on synthetic inputs at the relevant threshold boundary.
+
+25. **Flow-doc and integration-test conformance.** Per criterion 4, the decision table in `transcode.flow.md` Stage 6 is amended with the two new rows (held-frame and live-action branches) and the legacy "VMAF Mean vs MinThreshold" row is removed. `Tests/Contract/TestPostTranscodeDisposition.py` adds at least one assertion per new row (held-frame pass, held-frame Mean-floor fail, held-frame P25-floor fail, live-action pass, live-action P10-floor fail), run twice each per the determinism rule (criterion 5). Verifiable: the test count rises from 14 to >=19; CI is green.
+
 ## Status
 
-**IMPLEMENTED** -- shipped 2026-05-10. All 16 Progress steps complete. Live-verified against TranscodeAttempt 4392 (the originating Sister Wives S04E05 failure): the disposition function returned `(NoReplace, VmafServicePaused)`, persisted the audit columns, and the operator audit query surfaces the stuck row with an enumerable reason. Decision-table conformance test (`Tests/Contract/TestPostTranscodeDisposition.py`) is green at 14/14.
+**Core (criteria 1-17): IMPLEMENTED** -- shipped 2026-05-10. All 16 Progress steps complete. Live-verified against TranscodeAttempt 4392 (the originating Sister Wives S04E05 failure): the disposition function returned `(NoReplace, VmafServicePaused)`, persisted the audit columns, and the operator audit query surfaces the stuck row with an enumerable reason. Decision-table conformance test (`Tests/Contract/TestPostTranscodeDisposition.py`) is green at 14/14.
+
+**Amendment (criteria 18-25, content-aware gate): IN PROGRESS** -- approved 2026-05-16. Builds on the motion-filter fix in `QualityTesting.feature.md` criterion 2b (also 2026-05-16). The legacy single-threshold gate is retired by criterion 19 and replaced with the content-aware twin-floor / strict-P10 logic. Telemetry view + DB-driven monitoring config (criterion 22) lets the operator tune thresholds from data instead of guesswork. The existing 14 conformance assertions remain valid for the function-shape criteria (1-3, 5, 9-13); the gate-logic assertions for criteria 4, 14-15 require update per criterion 25.
+
+### Amendment Progress
+
+- [x] Operator articulation of goal ("good quality throughout the video") and threshold trade-offs reviewed 2026-05-16
+- [x] Production-DB cross-check that the single-threshold gate fails on held-frame content (Pokémon, Steven Universe, Real Housewives, Bunk'd, The Bear) and modern CGI is the outlier that passes (Garfield)
+- [x] Feature-doc amendment drafted (this section -- criteria 18-25)
+- [ ] Operator approval of criteria 18-25
+- [ ] SQL migration `Scripts/SQLScripts/AddContentAwareGate.py`: 4 threshold columns + 2 monitoring columns on `PostTranscodeGateConfig` (criterion 20); `MotionZeroFraction` column on `QualityTestResults` (criterion 21); `GateDecisionRates` view (criterion 22).
+- [ ] `UpdateQualityTestResultsWithScore` writes `MotionZeroFraction` from the existing Metrics dict (criterion 21).
+- [ ] `PostTranscodeGateConfigModel` + `PostTranscodeGateConfigRepository` extended with the six new columns (criteria 20, 22).
+- [ ] `PostTranscodeDispositionService._DecideFromInputs` reads `MotionZeroFraction` (via JOIN to QualityTestResults) and branches per criterion 19. Retire the `VmafScore < VmafAutoReplaceMinThreshold` branch.
+- [ ] Reason vocabulary extension (criterion 24) -- update the closed-list check.
+- [ ] Telemetry alert (criterion 22 second half) -- one-per-hour-per-path WARN line with in-memory rate limit.
+- [ ] `transcode.flow.md` Stage 6 decision-table rewrite per criterion 25 -- same PR.
+- [ ] `Tests/Contract/TestPostTranscodeDisposition.py` extended to 19+ assertions covering the new rows (criterion 25).
+- [ ] `/settings` "Post-Transcode" card editor + read-only "Gate Performance" panel (criterion 23). Remove the legacy `VmafAutoReplaceMinThreshold` control.
+- [ ] Live verify on Minnie's post-WebService restart: same encode that previously Requeued now `Replace` with reason `VmafHeldFramePassed`.
+- [ ] Live verify on Outlander: still gates cleanly via the live-action path (P10 path, no behavior change).
+- [ ] Re-VMAF Pokémon / Steven Universe / Real Housewives via smoke harness or live transcode and confirm filtered-pool numbers + correct path classification + correct disposition.
+- [ ] Tune defaults from `GateDecisionRates` after one rolling window of production data (criterion 22 feedback loop).
+
+NEXT: operator approval of the 8 new criteria. Then start with the migration (criterion 20+21+22) because everything downstream reads the new columns.
 
 ### Progress
 
