@@ -454,24 +454,45 @@ class QualityTestingBusinessService:
             return (1920, 1080)  # Default fallback
 
     def ParseVMAFMetrics(self, XmlPath: str = 'vmaf_output.xml') -> dict:
-        """Parse full VMAF metrics from the libvmaf XML log.
+        """Parse full VMAF metrics from the libvmaf XML log, with animation-aware
+        motion filtering.
 
-        Returns a dict with mean (the score we already track), plus the
-        richer metrics libvmaf produces but that we previously discarded:
-        min, max, harmonic_mean, stddev (computed from per-frame), and
-        percentiles 1/5/10/25 (which capture "the worst N% of frames" --
-        much more informative than the mean for "where did this run
-        actually struggle?"). See QualityTesting.feature.md criterion 7b.
+        Returns a dict with mean (the score we use for the auto-replace gate),
+        plus min, max, harmonic_mean, stddev (computed from per-frame), and
+        percentiles 1/5/10/25 -- distribution shape useful for "where did this
+        run actually struggle?" queries.
+
+        **Animation-aware filtering (KNOWN-ISSUES.md "VMAF distribution becomes
+        bimodal on MKV-source transcodes"):** libvmaf's `motion` elementary
+        feature is the temporal absolute difference between consecutive
+        reference frames. When the source uses held-frame animation
+        (animated-on-2s/3s -- standard CG and anime technique where each
+        drawing is displayed for 2-3 video frames), 30-50% of source frames
+        have motion=0. VMAF model 0.6.1 was trained on continuous-motion
+        content and produces near-zero VMAF on these duplicate frames even
+        when the encoded picture is visually identical to the source.
+        Verified 2026-05-16: extracted source-vs-encoded PNG stills at one
+        of the VMAF=0 frames on Minnie's S04E07 -- frames are visually
+        indistinguishable; libvmaf is the one mis-scoring.
+
+        When motion=0 frames are more than 15% of the source, we treat the
+        file as held-frame animation and pool only the motion>=0.5 frames.
+        Live action and continuously-moving content have ~0% motion=0
+        frames, so the filter is a no-op for them. The 15% threshold was
+        chosen because typical live action sits well under 5% even on
+        static dialogue scenes, while animation-on-2s yields ~50%.
 
         Returns None values when the XML can't be parsed or pooled
-        metrics are missing -- the caller should treat None as "unknown"
-        and not fail. Mean falls back to 0.0 to preserve the legacy
-        ParseVMAFScore behavior.
+        metrics are missing -- the caller should treat None as "unknown".
+        Mean falls back to 0.0 to preserve the legacy ParseVMAFScore
+        behavior. `MotionZeroFraction` and `MotionFilterApplied` are
+        always included for observability.
         """
         Result = {
             'Mean': 0.0,
             'Min': None, 'Max': None, 'HarmonicMean': None, 'StdDev': None,
             'P1': None, 'P5': None, 'P10': None, 'P25': None,
+            'MotionZeroFraction': None, 'MotionFilterApplied': False,
         }
         try:
             import xml.etree.ElementTree as ET
@@ -482,39 +503,103 @@ class QualityTestingBusinessService:
             Tree = ET.parse(XmlPath)
             Root = Tree.getroot()
 
-            # Pooled metrics (the easy ones libvmaf already computed).
+            # Pooled metrics from libvmaf -- these reflect the full frame set
+            # (no motion filtering). We keep Min and Max from the pool; Mean
+            # may get overwritten below if the motion filter fires.
             Pooled = Root.find('.//pooled_metrics/metric[@name="vmaf"]')
             if Pooled is None:
                 Pooled = Root.find('.//metric[@name="vmaf"]')
+            RawMean = None
+            RawHMean = None
             if Pooled is not None:
-                for Key, Attr in (('Mean', 'mean'), ('Min', 'min'),
-                                  ('Max', 'max'), ('HarmonicMean', 'harmonic_mean')):
+                for Key, Attr in (('Min', 'min'), ('Max', 'max')):
                     Val = Pooled.get(Attr)
                     if Val is not None:
                         try:
                             Result[Key] = float(Val)
                         except (TypeError, ValueError):
                             pass
+                MeanStr = Pooled.get('mean')
+                HMeanStr = Pooled.get('harmonic_mean')
+                if MeanStr is not None:
+                    try: RawMean = float(MeanStr)
+                    except (TypeError, ValueError): pass
+                if HMeanStr is not None:
+                    try: RawHMean = float(HMeanStr)
+                    except (TypeError, ValueError): pass
 
-            # Per-frame -> stddev + percentiles. libvmaf doesn't compute
-            # these directly; we derive from the per-frame scores.
-            PerFrame = []
+            # Per-frame extraction. Pull vmaf AND integer_motion so we can
+            # detect held-frame animation and pool accordingly.
+            PerFrame = []         # (vmaf, motion) tuples for every frame
+            MotionZeroCount = 0
             for F in Root.findall('.//frame'):
-                Vmaf = F.get('vmaf')
-                if Vmaf is not None:
-                    try:
-                        PerFrame.append(float(Vmaf))
-                    except (TypeError, ValueError):
-                        pass
-            if PerFrame:
-                Sorted_ = sorted(PerFrame)
-                N = len(Sorted_)
-                Mean = sum(PerFrame) / N
-                Variance = sum((X - Mean) ** 2 for X in PerFrame) / N
-                Result['StdDev'] = Variance ** 0.5
-                for Key, Pct in (('P1', 0.01), ('P5', 0.05), ('P10', 0.10), ('P25', 0.25)):
-                    Idx = max(0, min(N - 1, int(Pct * N)))
-                    Result[Key] = Sorted_[Idx]
+                VmafStr = F.get('vmaf')
+                if VmafStr is None:
+                    continue
+                try:
+                    V = float(VmafStr)
+                except (TypeError, ValueError):
+                    continue
+                MStr = F.get('integer_motion')
+                M = 0.0
+                if MStr is not None:
+                    try: M = float(MStr)
+                    except (TypeError, ValueError): pass
+                PerFrame.append((V, M))
+                if M < 0.5:
+                    MotionZeroCount += 1
+
+            N = len(PerFrame)
+            if N == 0:
+                # No per-frame data -- fall back to whatever the pooled tags
+                # gave us. Mean stays 0.0 unless RawMean is non-None.
+                if RawMean is not None:
+                    Result['Mean'] = RawMean
+                if RawHMean is not None:
+                    Result['HarmonicMean'] = RawHMean
+                return Result
+
+            MotionZeroFraction = MotionZeroCount / N
+            Result['MotionZeroFraction'] = MotionZeroFraction
+
+            # Apply the motion filter when more than 15% of source frames have
+            # motion ~= 0. Keep the filtered pool only if it still has a
+            # reasonable size (>=50 frames) -- protect against pathological
+            # all-static inputs where filtering would leave nothing.
+            Filtered = [V for (V, M) in PerFrame if M >= 0.5]
+            if MotionZeroFraction > 0.15 and len(Filtered) >= 50:
+                Result['MotionFilterApplied'] = True
+                Pool = Filtered
+                LoggingService.LogInfo(
+                    f"VMAF motion filter applied: {MotionZeroCount}/{N} frames "
+                    f"({100*MotionZeroFraction:.1f}%) had motion=0 (held-frame animation). "
+                    f"Pooling {len(Filtered)} non-duplicate frames for Mean/StdDev/percentiles.",
+                    "QualityTestingBusinessService", "ParseVMAFMetrics"
+                )
+            else:
+                Pool = [V for (V, _) in PerFrame]
+
+            Sorted_ = sorted(Pool)
+            PoolN = len(Sorted_)
+            MeanV = sum(Pool) / PoolN
+            Variance = sum((X - MeanV) ** 2 for X in Pool) / PoolN
+            # Harmonic mean with a 1.0-clip in the denominator. The raw
+            # formula (N / sum(1/x)) explodes whenever a frame scored 0 --
+            # one zero alone would drive the result to ~0 regardless of all
+            # other frames. Clipping below-1 VMAF values to 1 in the
+            # reciprocal keeps the metric stable and still down-weights the
+            # bad tail (the way harmonic mean is supposed to). Matches the
+            # order-of-magnitude of libvmaf's pooled harmonic_mean tag on the
+            # same data.
+            HMeanV = PoolN / sum(1.0 / max(1.0, X) for X in Pool)
+
+            Result['Mean'] = MeanV
+            Result['HarmonicMean'] = HMeanV
+            Result['StdDev'] = Variance ** 0.5
+            for Key, Pct in (('P1', 0.01), ('P5', 0.05), ('P10', 0.10), ('P25', 0.25)):
+                Idx = max(0, min(PoolN - 1, int(Pct * PoolN)))
+                Result[Key] = Sorted_[Idx]
+
         except Exception as Ex:
             LoggingService.LogException("Error parsing VMAF metrics", Ex,
                                         "QualityTestingBusinessService", "ParseVMAFMetrics")

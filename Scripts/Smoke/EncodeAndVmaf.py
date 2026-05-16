@@ -179,8 +179,18 @@ def Vmaf(Source, V, CompareScale="1280:720"):
 
 
 def ParseMetricsFromXml(XmlPath):
+    """Parse pooled VMAF metrics with animation-aware motion filtering.
+
+    Mirrors Features/QualityTesting/QualityTestingBusinessService.ParseVMAFMetrics:
+    when more than 15% of source frames have integer_motion ~= 0 (held-frame
+    animation), Mean/StdDev/percentiles are pooled over only the motion>=0.5
+    frames so the metrics aren't poisoned by VMAF's mis-scoring of duplicate
+    reference frames. Live action sits well under the threshold so the filter
+    is a no-op for it.
+    """
     Result = {'Mean': 0.0, 'Min': None, 'Max': None, 'HarmonicMean': None,
-              'StdDev': None, 'P1': None, 'P5': None, 'P10': None, 'P25': None}
+              'StdDev': None, 'P1': None, 'P5': None, 'P10': None, 'P25': None,
+              'MotionZeroFraction': None, 'MotionFilterApplied': False}
     if not os.path.exists(XmlPath):
         return Result
     try:
@@ -189,25 +199,45 @@ def ParseMetricsFromXml(XmlPath):
         if Pooled is None:
             Pooled = Root.find('.//metric[@name="vmaf"]')
         if Pooled is not None:
-            for K, A in (('Mean','mean'), ('Min','min'), ('Max','max'), ('HarmonicMean','harmonic_mean')):
+            for K, A in (('Min','min'), ('Max','max')):
                 Val = Pooled.get(A)
                 if Val is not None:
                     try: Result[K] = float(Val)
                     except: pass
-        PerFrame = []
+        PerFrame = []  # (vmaf, motion) tuples
+        MZero = 0
         for F in Root.findall('.//frame'):
             Val = F.get('vmaf')
-            if Val is not None:
-                try: PerFrame.append(float(Val))
+            if Val is None: continue
+            try: V = float(Val)
+            except: continue
+            MStr = F.get('integer_motion')
+            M = 0.0
+            if MStr is not None:
+                try: M = float(MStr)
                 except: pass
-        if PerFrame:
-            Sorted_ = sorted(PerFrame)
-            N = len(Sorted_)
-            M = sum(PerFrame) / N
-            Result['StdDev'] = math.sqrt(sum((X-M)**2 for X in PerFrame) / N)
-            for K, Pct in (('P1', 0.01), ('P5', 0.05), ('P10', 0.10), ('P25', 0.25)):
-                Idx = max(0, min(N-1, int(Pct * N)))
-                Result[K] = Sorted_[Idx]
+            PerFrame.append((V, M))
+            if M < 0.5: MZero += 1
+        N = len(PerFrame)
+        if N == 0:
+            return Result
+        MZF = MZero / N
+        Result['MotionZeroFraction'] = MZF
+        Filtered = [V for (V, M) in PerFrame if M >= 0.5]
+        if MZF > 0.15 and len(Filtered) >= 50:
+            Result['MotionFilterApplied'] = True
+            Pool = Filtered
+        else:
+            Pool = [V for (V, _) in PerFrame]
+        Sorted_ = sorted(Pool)
+        PoolN = len(Sorted_)
+        Mn = sum(Pool) / PoolN
+        Result['Mean'] = Mn
+        Result['StdDev'] = math.sqrt(sum((X-Mn)**2 for X in Pool) / PoolN)
+        Result['HarmonicMean'] = PoolN / sum(1.0 / max(1.0, X) for X in Pool)
+        for K, Pct in (('P1', 0.01), ('P5', 0.05), ('P10', 0.10), ('P25', 0.25)):
+            Idx = max(0, min(PoolN-1, int(Pct * PoolN)))
+            Result[K] = Sorted_[Idx]
     except Exception as Ex:
         Log(f"  XML parse failed for {XmlPath}: {Ex}")
     return Result

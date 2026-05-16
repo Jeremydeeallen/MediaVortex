@@ -79,3 +79,7 @@ vmaf_vb_*.xml
 vmaf_debug_*.xml
 vmaf_CuteSheer*.xml
 vmaf_*-1080p-*.xml
+vmaf_exp_*.xml
+# Smoke-test large binary artifacts (regeneratable on demand)
+Scripts/Smoke/*.mp4
+Scripts/Smoke/*.png

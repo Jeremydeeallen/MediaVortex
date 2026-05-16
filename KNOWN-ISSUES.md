@@ -285,28 +285,48 @@ Worker process memory is fine (~279 MB). The bottleneck is wall-clock from seque
 
 ---
 
-### [BUG - CRITICAL] VMAF distribution becomes bimodal on MKV-source transcodes -- mean/HMean/P5 unreliable for trending
-**Date:** 2026-05-10
+### [BUG - PARTIAL FIX 2026-05-16] VMAF distribution becomes bimodal on held-frame animation -- mean/HMean/P5 unreliable until motion-filter applied
+**Date:** 2026-05-10 | **Investigated + partial fix:** 2026-05-16
 
-**What breaks:** Same encoder recipe (libsvtav1 preset 4, FG 0, CRF sweep, lanczos scale, compare at 1280:720) produces wildly different VMAF distribution shapes depending on source container. Reference data point from the FourK test: 4K MP4 source -> Mean 95.77, HMean 95.75, StdDev 1.18, P5 94.30 across 1080p/720p/480p output variants. Unimodal, tight, exactly what we expect from a clean source. The three MKV sources tested today (Minnie's Bow-Toons S04E07 8.6 Mbps WEBDL-1080p, Black Butler S02 Extras 13 Mbps 10-bit anime, The Office S00E05 7.1 Mbps WEBDL-1080p) all returned bimodal distributions: roughly 56% of frames score VMAF 90+, but ~7% score near zero with a continuous bad-frame gradient in between. Concrete numbers for Minnie's 1080p CRF32 variant: Mean 74.60, HMean 11.20, StdDev 32.58, P5 0.00, P10 14.06, P25 54.12.
+**Re-classified 2026-05-16:** the original framing pinned this on MKV containers, but a controlled experiment ruled the container out. The real cause is libvmaf mis-scoring held-frame animation (animation-on-2s/3s). The fix is motion-filtered pooling, not a filter-chain change.
 
-**The metric is wrong, not the encoder:** extracted source-vs-encoded PNG stills at one of the "VMAF=0" frames (Minnie's frame 150 at 0:06.26). The images are visually indistinguishable. So the encoder is producing the correct picture; libvmaf is assigning a near-zero score to a frame that looks identical to the reference. The user-visible slider remains useful (it shows you the actual frames); the per-attempt numeric VMAF score does not currently reflect perceptual quality on MKV-source transcodes.
+**Investigation summary (2026-05-16):** ran the smoke reproducer with the existing Minnie's Bow-Toons variants and five candidate fixes against the same encoded MP4s (no re-encoding -- isolates the VMAF measurement). Results in `Scripts/Smoke/VmafFilterExperiment.py`:
 
-**Ruled out:** frame desync (`ffprobe -count_frames` returned 2181 frames on source and on each of the three Minnie's encoded variants -- identical counts, identical r_frame_rate 24000/1001, identical duration 90.97s). VMAF subsampling drift (re-ran with `n_subsample=10` removed entirely; distribution stayed bimodal, P5 went from 0.29 to 0.00, StdDev got slightly worse). FPS mismatch (rates match across variants).
+| Recipe | Mean | StdDev | P5 | Verdict |
+|---|---|---|---|---|
+| baseline (current production filter) | 74.60 | 32.58 | 0.00 | reproduces bug |
+| bit10 (compare both at 10-bit, no downcast) | 74.66 | 32.60 | 0.00 | no effect |
+| setparams (force range=tv:colorspace=bt709 metadata on both) | 74.60 | 32.58 | 0.00 | no effect |
+| scale_range (active in_range=auto:out_range=tv conversion) | 74.60 | 32.58 | 0.00 | no effect |
+| baseline against remuxed MP4 source (no re-encode) | 74.60 | 32.58 | 0.00 | **container ruled out** |
+| neg_model (vmaf_v0.6.1neg) | 72.79 | 32.81 | 0.00 | marginal regression |
+| mpdecimate (drop duplicate frames symmetrically before VMAF) | 73.47 | 33.01 | 0.00 | no effect (only dropped 209/4321 frames; libvmaf's motion is stricter than mpdecimate's "is duplicate" detection) |
 
-**Most likely cause:** color metadata mismatch confusing libvmaf's per-frame scoring on dark or transitional frames. ffprobe on Minnie's source reports `pix_fmt=yuv420p` 8-bit `color_range=tv color_space=bt709`; encoded reports `pix_fmt=yuv420p10le` 10-bit `color_range=tv color_space=unknown`. Black Butler source: `pix_fmt=yuv420p10le` `color_range=unknown color_space=unknown`; encoded: `pix_fmt=yuv420p10le color_range=tv color_space=unknown`. The `format=yuv420p` step in our VMAF filter chain downconverts the encoded stream to 8-bit but does NOT enforce a matching color_range -- so for "unknown"-tagged source frames libvmaf may interpret pixel values in one range while the encoded stream is interpreted in another, producing huge synthetic differences on dark pixels (where the limited-vs-full range gap is largest).
+Every filter-chain mitigation produced byte-identical or near-identical results. ffprobe confirmed Minnie's source MKV and encoded MP4 have IDENTICAL color metadata (`color_range=tv`, `color_space=bt709`, `color_transfer=bt709`, `color_primaries=bt709`); only pix_fmt differs (8-bit source, 10-bit encoded). The bug doc's color-metadata-mismatch hypothesis applies to Black Butler's `color_range=unknown` case but is NOT the cause on Minnie's, yet Minnie's bimodal'd just as hard.
 
-**Why critical:** tier-threshold calibration (the entire point of the source-quality work) cannot proceed while Mean/HMean/P5 from MKV-source attempts are not comparable to MP4-source numbers. The auto-replace gate (`VmafAutoReplaceMinThreshold=88` in `PostTranscodeGateConfig`) is currently making decisions on a metric that measures different things depending on source container. The 80/78-VMAF "ceiling" we have been attributing to source bitrate may be partly a measurement artifact when source is MKV. Operator-facing implication: do not trust per-attempt VMAF numbers for MKV-source transcodes until this is resolved; visual slider inspection remains valid.
+**Actual cause:** libvmaf's `integer_motion` elementary feature is the temporal absolute difference between consecutive reference frames. Cross-tabulating motion vs VMAF on Minnie's: 41.3% of source frames have motion=0 (1783 of 4321), and 281 of those score VMAF<10. Animation-on-2s/3s is the standard CG / anime production technique where each drawing is held for 2-3 video frames -- so a large fraction of consecutive source frames are exact duplicates by design. VMAF model 0.6.1 was trained on continuous-motion live-action and produces wildly wrong scores on motion=0 frames even when the encoded picture is visually identical to the source. PNG stills extracted at the VMAF=0 frames confirm: encoder is fine, libvmaf is mis-measuring.
 
-**Violates:** `Features/QualityTesting/QualityTesting.feature.md` criterion 2 ("VMAF scoring compares the transcoded file against the original and produces a numeric score (0-100)") -- the score is being produced but does not correspond to perceptual quality on MKV inputs. [BUG] criterion 2b added with this entry.
+The Office S00E05 result in the original report (live action that also bimodal'd) is consistent: it's an "S00" special/extras episode, likely with lots of static title cards and photo montages that produce motion=0 frames just as animation does.
 
-**Candidate mitigation suggested by operator:** remux MKV sources to MP4 before transcoding. Remux is bytewise-identical to the source video stream (no quality loss) and would normalize container-level timing and pixel-format metadata. Risk: pre-transcode remux adds a stage to the pipeline (storage, time, failure mode); the metadata change may not be the actual cause and the fix won't work. Validate the hypothesis on ONE source first: remux Minnie's to MP4, re-run the same harness, compare VMAF distribution shape. If clean unimodal scores result, remux-before-transcode is the answer; if still bimodal, color metadata is not the cause and the investigation goes deeper.
+A secondary contributor: even among motion>0 frames, ~114 frames score VMAF<10 due to low VIF/ADM values on low-spatial-information regions (flat color areas common in animation). VMAF's features fall outside their training distribution on stylized content. This residual can't be cleanly filtered without false positives, so even after motion filtering the metric remains less reliable on animation than on live action.
 
-**Other candidate mitigations to try in order of cost:** (a) add `setparams=range=tv:colorspace=bt709` to both filter streams (metadata-only, no pixel conversion -- might tell libvmaf to interpret both consistently); (b) add explicit `scale=...:in_range=auto:out_range=tv` to source stream (active range conversion); (c) use `zscale` filter for color management if available in the FFmpeg build; (d) compare both as 10-bit (`format=yuv420p10le` for both) to keep encoded native; (e) remux source MKV->MP4 before VMAF only (not before transcode), see if the VMAF measurement alone normalizes; (f) the operator's mitigation: remux before transcode entirely.
+**Fix shipped (partial):** `Features/QualityTesting/QualityTestingBusinessService.py::ParseVMAFMetrics` now parses `integer_motion` per frame in addition to the VMAF score. When more than 15% of source frames have motion<0.5 (held-frame animation detected), Mean/StdDev/HarmonicMean/percentiles are pooled over only the motion>=0.5 frames -- the duplicate frames are excluded from the metric. Live action sits at <2% motion=0 so the filter is a no-op. Two new fields surface for observability: `MotionZeroFraction` and `MotionFilterApplied`. Smoke harness `Scripts/Smoke/EncodeAndVmaf.py::ParseMetricsFromXml` mirrors the same logic so harness reports stay consistent with production.
 
-**Look first:** `Features/QualityTesting/QualityTestingBusinessService.py:BuildVMAFCommand` for the production VMAF filter chain. `Scripts/Smoke/EncodeAndVmaf.py:Vmaf` for the smoke-test harness filter chain (identical shape). The relevant FFmpeg subprocess invocation and lavfi string are the only surface for this bug. Reproducer: run `py Scripts/Smoke/EncodeAndVmaf.py --vmaf-only Scripts/Smoke/MinnieBowToons-S04E07-Animation8Mbps.results.json` and observe Mean ~74 / P5 0.
+Minnie's metrics with the fix:
 
-**Fix with:** `/t`. Try mitigation (a) first; iterate down the list. Track which fix changed the distribution shape so we know which metadata mismatch was actually responsible.
+| Metric | Raw (broken) | Motion-filtered | Clean 4K MP4 reference |
+|---|---|---|---|
+| Mean | 74.60 | **84.43** | 95.77 |
+| HarmonicMean | 11.20 | **24.64** | 95.75 |
+| StdDev | 32.58 | **26.75** | 1.18 |
+| P5 | 0.00 | **12.08** | 94.30 |
+| P25 | 54.12 | **94.39** | -- |
+
+**Residual limitation:** filtered Mean=84 is still below `VmafAutoReplaceMinThreshold=88` even though the encode is visually clean -- so the auto-replace gate will still Requeue this attempt today. P25 of 94 over the filtered pool tells the real story (75% of unique frames score 94+), but the gate doesn't look at P25. Possible follow-ups (not in this fix): (a) lower the threshold when `MotionFilterApplied=True`, (b) gate on filtered P25 instead of filtered Mean for animation, (c) skip the VMAF gate entirely for animation and rely on visual slider review. These are operator-policy decisions, separate from the measurement fix.
+
+**Violates:** `Features/QualityTesting/QualityTesting.feature.md` criterion 2b (re-scoped 2026-05-16 to reflect the actual cause).
+
+**Investigation artifacts:** `Scripts/Smoke/VmafFilterExperiment.py` (committed -- per-recipe harness for re-running the experiment matrix) and `Scripts/Smoke/MinnieBowToons-S04E07-Animation8Mbps.results.json` (committed -- known-bimodal reference, baseline numbers in the file). The remuxed-source MP4 and per-frame PNG extracts are gitignored (regeneratable: `ffmpeg -i <mkv> -map 0:v:0 -map 0:a:0? -c copy <mp4>` to remux; `ffmpeg -i <file> -vf "select=eq(n\,61)" -vframes 1 <png>` to extract frame 61).
 
 ---
 
