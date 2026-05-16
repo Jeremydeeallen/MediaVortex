@@ -123,6 +123,29 @@ Triggering context (2026-05-15):
       rows. Deployment pending: I9-2024 + Larry + Wakko WorkerService
       restarts/redeploys for code pickup.
 
+- [x] 3.6. **Criteria 24 + 25 fixed (2026-05-15).**
+      24: Added `NewFilesCount`, `UpdatedFilesCount`, `DeletedFilesCount` to
+      `FileScanResultModel`. Increment sites: `ProcessSingleMediaFile`
+      insert branch (NewFiles), update branch (UpdatedFiles), fuzzy-match
+      branch (UpdatedFiles); `ReconcileWithDisk` reassign branch
+      (UpdatedFiles), delete branch (DeletedFiles). `UpdateJobStatus`
+      extended to write the three columns when ScanResults is passed --
+      heartbeat picks them up automatically with no further plumbing.
+      Fixed the pre-existing carryover bug for free by resetting
+      `self.ScanResults = FileScanResultModel()` at the top of `PerformScan`.
+      25: New `_BuildShowEpisodeIndex(RootFolderId)` builds a
+      `{(showname.lower(), Season, Episode): [DbFile, ...]}` dict via a
+      single `GetMediaFilesByRootFolderId` call. `PerformScan` sets
+      `self._ShowEpisodeIndex` before `ProcessMediaFiles` and clears it in
+      a finally. `FindFuzzyFileMatch` uses the index when present (O(1)
+      lookup + tight size check) and falls back to the legacy O(N) scan
+      when called out-of-band. Index is read-only after build, safe for
+      the parallel pool. Verifiable: per-new-file wall-clock drops from
+      3-5 seconds to <100ms; ScanJobs.NewFiles/UpdatedFiles/DeletedFiles
+      reflect actual disposition counts. Deployment pending: I9-2024
+      WorkerService restart for code pickup; Linux workers also need
+      redeploy when next used.
+
 - [ ] 4. Criterion 21 (multi-drive registration without restart): add UI on
       `/settings` or `/Scanning` to register new RootFolder + associate with
       workers. Update `WorkerShareMappings` (or `StorageRootResolutions` per

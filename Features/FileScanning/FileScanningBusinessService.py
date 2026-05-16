@@ -246,13 +246,19 @@ class FileScanningBusinessService:
                     "TotalFiles = %s",
                     "ProcessedFiles = %s",
                     "SkippedFiles = %s",
-                    "EncodingErrors = %s"
+                    "EncodingErrors = %s",
+                    "NewFiles = %s",
+                    "UpdatedFiles = %s",
+                    "DeletedFiles = %s"
                 ])
                 UpdateValues.extend([
                     ScanResults.TotalFilesFound,
                     ScanResults.TotalFilesProcessed,
                     ScanResults.TotalFilesSkipped,
-                    ScanResults.TotalFilesWithErrors
+                    ScanResults.TotalFilesWithErrors,
+                    ScanResults.NewFilesCount,
+                    ScanResults.UpdatedFilesCount,
+                    ScanResults.DeletedFilesCount
                 ])
 
             # Always update LastUpdated
@@ -363,6 +369,11 @@ class FileScanningBusinessService:
         try:
             LoggingService.LogInfo("Starting scan of directory: {}", RootFolderPath)
 
+            # Reset per-scan counters (was carrying over between consecutive scans on
+            # the same FileScanningBusinessService instance, polluting heartbeats with
+            # stale numbers from the previous rootfolder).
+            self.ScanResults = FileScanResultModel()
+
             LocalRootPath = self._ToLocalPath(RootFolderPath)
 
             # Step 0: Clean up any existing duplicate records before scanning
@@ -396,8 +407,15 @@ class FileScanningBusinessService:
             self.ScanResults.TotalFilesFound = len(MediaFiles)
             self.ScanResults.RootFolderId = RootFolder.Id
 
-            # Step 4: Process each media file (without metadata extraction for speed)
-            self.ProcessMediaFiles(MediaFiles, RootFolder.Id, RootFolderPath, ExtractMetadata=False)
+            # Build per-scan show/episode index ONCE (criterion 25). Without
+            # this, FindFuzzyFileMatch reloads + regex-parses all RootFolder
+            # rows for every new file -- O(N x M) wall clock.
+            self._ShowEpisodeIndex = self._BuildShowEpisodeIndex(RootFolder.Id)
+            try:
+                # Step 4: Process each media file (without metadata extraction for speed)
+                self.ProcessMediaFiles(MediaFiles, RootFolder.Id, RootFolderPath, ExtractMetadata=False)
+            finally:
+                self._ShowEpisodeIndex = None
 
             # Step 5: Update scan results
             self.ScanProgress = 90.0
@@ -682,30 +700,62 @@ class FileScanningBusinessService:
             LoggingService.LogException("Error in fuzzy match logic", e)
             return False
 
-    def FindFuzzyFileMatch(self, FilePath: str, FileName: str, FileSizeMB: float, RootFolderId: int) -> Optional[MediaFileModel]:
-        """Find a fuzzy match for a file in the database."""
+    def _BuildShowEpisodeIndex(self, RootFolderId: int) -> Dict[tuple, List[MediaFileModel]]:
+        """Owns FileScanning.feature.md criterion 25 (per-scan precompute).
+        Single GetMediaFilesByRootFolderId call + one ExtractShowInfo per row;
+        FindFuzzyFileMatch then looks up candidates in O(1) instead of
+        re-loading and re-parsing all RootFolder rows for every new file.
+        Read-only after build, safe for the parallel processor pool.
+        """
+        Index: Dict[tuple, List[MediaFileModel]] = {}
         try:
-            # Get all files for this root folder
             DatabaseFiles = self.Repository.GetMediaFilesByRootFolderId(RootFolderId)
+            for DbFile in DatabaseFiles:
+                if not DbFile.FileName:
+                    continue
+                Info = self.ExtractShowInfo(DbFile.FileName)
+                if not (Info.get('ShowName') and Info.get('Season') and Info.get('Episode')):
+                    continue
+                Key = (Info['ShowName'].lower(), Info['Season'], Info['Episode'])
+                Index.setdefault(Key, []).append(DbFile)
+            LoggingService.LogInfo(
+                f"Built show/episode index: {len(DatabaseFiles)} rows -> {len(Index)} (show, season, episode) keys",
+                'FileScanningBusinessService', '_BuildShowEpisodeIndex'
+            )
+        except Exception as e:
+            LoggingService.LogException("Error building show/episode index", e, 'FileScanningBusinessService', '_BuildShowEpisodeIndex')
+        return Index
 
-            # Extract show/season/episode info from filename
+    def FindFuzzyFileMatch(self, FilePath: str, FileName: str, FileSizeMB: float, RootFolderId: int) -> Optional[MediaFileModel]:
+        """Find a fuzzy match for a file in the database. When a per-scan
+        show/episode index is set on `self._ShowEpisodeIndex` (criterion 25),
+        candidate lookup is O(1); otherwise falls back to the legacy O(N)
+        per-call scan for safety on out-of-band callers.
+        """
+        try:
             FileShowInfo = self.ExtractShowInfo(FileName)
-
-            # Skip fuzzy matching if we don't have show info
             if not FileShowInfo['ShowName'] or not FileShowInfo['Season'] or not FileShowInfo['Episode']:
                 return None
 
-            for DbFile in DatabaseFiles:
-                DbShowInfo = self.ExtractShowInfo(DbFile.FileName)
+            Index = getattr(self, '_ShowEpisodeIndex', None)
+            if Index is not None:
+                Candidates = Index.get((FileShowInfo['ShowName'].lower(), FileShowInfo['Season'], FileShowInfo['Episode']), [])
+            else:
+                Candidates = self.Repository.GetMediaFilesByRootFolderId(RootFolderId)
 
-                # Check for fuzzy match criteria
-                if self.IsFuzzyMatch(FileShowInfo, DbShowInfo, FileSizeMB, DbFile.SizeMB):
-                    # Only update if old file doesn't exist on filesystem
-                    # (translate canonical -> local for the fs check)
-                    if not os.path.exists(self._ToLocalPath(DbFile.FilePath)):
-                        return DbFile
-                    else:
-                        return None
+            for DbFile in Candidates:
+                if Index is None:
+                    DbShowInfo = self.ExtractShowInfo(DbFile.FileName)
+                    if not self.IsFuzzyMatch(FileShowInfo, DbShowInfo, FileSizeMB, DbFile.SizeMB):
+                        continue
+                else:
+                    if abs((FileSizeMB or 0) - (DbFile.SizeMB or 0)) >= 1.0:
+                        continue
+
+                if not os.path.exists(self._ToLocalPath(DbFile.FilePath)):
+                    return DbFile
+                else:
+                    return None
 
             return None
 
@@ -772,6 +822,7 @@ class FileScanningBusinessService:
 
                     self.Repository.SaveMediaFile(ExistingFile)
                     self.ScanResults.TotalFilesProcessed += 1
+                    self.ScanResults.UpdatedFilesCount += 1
                 else:
                     # FILE UNCHANGED - SKIP PROCESSING (HUGE PERFORMANCE WIN!)
                     # Only update LastScannedDate to mark it was checked
@@ -804,6 +855,7 @@ class FileScanningBusinessService:
 
                     self.Repository.SaveMediaFile(FuzzyMatch)
                     self.ScanResults.TotalFilesProcessed += 1
+                    self.ScanResults.UpdatedFilesCount += 1
                 else:
                     # No fuzzy match found - create new file record. The
                     # transcoded-file-match path was retired with criterion 18a
@@ -828,6 +880,7 @@ class FileScanningBusinessService:
 
                     self.Repository.SaveMediaFile(NewFile)
                     self.ScanResults.TotalFilesProcessed += 1
+                    self.ScanResults.NewFilesCount += 1
 
         except Exception as e:
             LoggingService.LogException("Error processing single media file", e)
@@ -1377,6 +1430,7 @@ class FileScanningBusinessService:
                         pass
                     self.Repository.SaveMediaFile(DbFile)
                     MovedCount += 1
+                    self.ScanResults.UpdatedFilesCount += 1
                 else:
                     LoggingService.LogInfo(
                         f"Deleting DB row for missing file: {DbFile.FilePath} (Id={DbFile.Id})",
@@ -1384,6 +1438,7 @@ class FileScanningBusinessService:
                     )
                     self.Repository.DeleteMediaFile(DbFile.Id)
                     DeletedCount += 1
+                    self.ScanResults.DeletedFilesCount += 1
 
             LoggingService.LogInfo(
                 f"=== RECONCILE WITH DISK COMPLETED === moved={MovedCount} deleted={DeletedCount}",

@@ -15,6 +15,9 @@ class FileScanResultModel:
     TotalFilesProcessed: int = 0
     TotalFilesSkipped: int = 0
     TotalFilesWithErrors: int = 0
+    NewFilesCount: int = 0
+    UpdatedFilesCount: int = 0
+    DeletedFilesCount: int = 0
     TotalSizeGB: float = 0.0
     ScanStatus: str = "Idle"  # Idle, Pending, InProgress, Completed, Failed, Cancelled
     ErrorMessage: Optional[str] = None
