@@ -1816,9 +1816,8 @@ class DatabaseManager:
                        MaxCpuThreads: int = None, Version: str = None,
                        BuildInfo: str = None) -> bool:
         """Register or update a worker in the Workers table (UPSERT).
-        Version + BuildInfo own worker-versioning.feature.md criterion 3.
-        Both are nullable; pre-versioning workers continue to register
-        cleanly with NULL values that the UI renders as "unknown"."""
+        Version + BuildInfo are nullable; workers without resolved versions
+        register cleanly with NULL values that the UI renders as "unknown"."""
         try:
             query = """
                 INSERT INTO Workers (WorkerName, Platform, FFmpegPath, FFprobePath, StagingDirectory,

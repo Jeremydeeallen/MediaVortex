@@ -338,8 +338,7 @@ def GetWorkers():
 @TeamStatusBlueprint.route('/Workers/VersionStatus', methods=['GET'])
 def GetWorkersVersionStatus():
     """Aggregate worker versions for fleet-wide mismatch detection.
-    Owns worker-versioning.feature.md criterion 9. Single round-trip so
-    the Activity page banner doesn't need client-side grouping.
+    Single round-trip so the Activity page banner doesn't need client-side grouping.
 
     Response shape:
         {"AllAgree": bool,

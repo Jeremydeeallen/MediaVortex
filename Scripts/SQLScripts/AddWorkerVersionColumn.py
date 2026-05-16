@@ -1,14 +1,11 @@
 """Add Version + BuildInfo columns to Workers table.
 
-Owns Features/TeamStatus/worker-versioning.feature.md criterion 3.
-
 `Version` (nullable VARCHAR(64)): the git commit SHA the worker process
-was built / started from. NULL for pre-feature workers that haven't
-registered since this column shipped -- shown as "unknown" in the UI.
+was built / started from. NULL renders as "unknown" in the UI.
 
 `BuildInfo` (nullable TEXT): the full /opt/mediavortex/BUILD_INFO file
 contents (commit, built_at, built_by lines) for Docker workers, or NULL
-for Windows / non-Docker workers without the file.
+for non-Docker workers without the file.
 
 Idempotent -- safe to run multiple times.
 """

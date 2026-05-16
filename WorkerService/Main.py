@@ -190,7 +190,6 @@ class WorkerServiceApp:
             MaxCpuThreadsEnv = os.environ.get('MEDIAVORTEX_MAX_CPU_THREADS')
             MaxCpuThreads = int(MaxCpuThreadsEnv) if MaxCpuThreadsEnv else None
 
-            # Resolve build version (worker-versioning.feature.md criterion 4)
             Version, BuildInfo = self._ResolveWorkerVersion()
 
             # Register worker (UPSERT - creates or updates)
@@ -254,12 +253,11 @@ class WorkerServiceApp:
         return ""
 
     def _ResolveWorkerVersion(self):
-        """Owns worker-versioning.feature.md criterion 4. Three-tier resolver:
+        """Three-tier resolver returning (version, build_info_or_none):
           1. /opt/mediavortex/VERSION (Docker workers, baked in via --build-arg COMMIT_SHA)
           2. `git rev-parse HEAD` in the project root (Windows / dev hosts running from a checkout)
           3. literal "unknown" (anything else)
-        BuildInfo is the contents of /opt/mediavortex/BUILD_INFO when tier 1 hits,
-        else None. Returns (version, build_info_or_none)."""
+        BuildInfo is the contents of /opt/mediavortex/BUILD_INFO when tier 1 hits, else None."""
         try:
             ProjectRoot = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
             VersionFile = os.path.join(ProjectRoot, "VERSION")
