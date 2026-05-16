@@ -105,7 +105,8 @@
       "Bash(ssh root@10.0.0.42 *docker exec * python3*)",
       "Bash(ssh root@10.0.0.230 *docker exec * python3*)",
       "PowerShell(scp *)",
-      "PowerShell(Remove-Item *)"
+      "PowerShell(Remove-Item *)",
+      "Read(C:\\Code\\claude-rails\\*)"
     ]
   }
 }

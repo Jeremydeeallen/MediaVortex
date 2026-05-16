@@ -108,8 +108,14 @@ class CrashRecoveryService:
             # power loss) where the signal handler never ran and ActiveJobs were
             # cleaned by a previous crash recovery pass without reaching all
             # associated TranscodeProgress rows.
+            InProgressFilesCleaned = 0
+            PartialReplacementsCompleted = 0
             if ServiceName == "TranscodeService":
                 OrphanedCleaned = self.CleanupOrphanedProgressRecords()
+                # Worker-lifecycle criteria 11, 12: clean .inprogress artifacts
+                # left on disk and complete partial replacements where the
+                # `-mv.<ext>` file is in place but the original was not deleted.
+                InProgressFilesCleaned, PartialReplacementsCompleted = self._RecoverInProgressArtifacts()
             else:
                 OrphanedCleaned = 0
 
@@ -139,11 +145,18 @@ class CrashRecoveryService:
 
             result = {
                 "Success": True,
-                "Message": f"Recovered {JobsRecovered} jobs, killed {OrphanedProcessesKilled} orphaned processes, cleaned {OrphanedCleaned} orphaned progress records",
+                "Message": (
+                    f"Recovered {JobsRecovered} jobs, killed {OrphanedProcessesKilled} orphaned processes, "
+                    f"cleaned {OrphanedCleaned} orphaned progress records, "
+                    f"deleted {InProgressFilesCleaned} .inprogress artifacts, "
+                    f"completed {PartialReplacementsCompleted} partial replacements"
+                ),
                 "JobsRecovered": JobsRecovered,
                 "OrphanedProcessesKilled": OrphanedProcessesKilled,
                 "ActiveJobsCleaned": DeletedActiveJobs,
                 "OrphanedProgressCleaned": OrphanedCleaned,
+                "InProgressFilesCleaned": InProgressFilesCleaned,
+                "PartialReplacementsCompleted": PartialReplacementsCompleted,
                 "RecoveryDetails": RecoveryDetails
             }
 
@@ -226,10 +239,12 @@ class CrashRecoveryService:
         """Clean up progress records for a specific job."""
         try:
             if JobType == "Transcode":
-                # Mark incomplete attempts as failed (prevents ghost rows in Overview query)
+                # Mark incomplete attempts as failed with the unified crash/kill
+                # reason (worker-lifecycle.feature.md criterion 13).
                 fail_query = """
                     UPDATE TranscodeAttempts
-                    SET Success = FALSE, CompletedDate = NOW()
+                    SET Success = FALSE, CompletedDate = NOW(),
+                        ErrorMessage = COALESCE(ErrorMessage, 'worker crashed/restarted')
                     WHERE Success IS NULL
                       AND MediaFileId = (SELECT MediaFileId FROM TranscodeQueue WHERE Id = %s)
                 """
@@ -273,9 +288,11 @@ class CrashRecoveryService:
         try:
             # First, mark incomplete attempts as failed so they don't masquerade as in-progress.
             # Exclude attempts with recently-updated progress (active transcodes).
+            # worker-lifecycle.feature.md criterion 13: unified crash/kill reason.
             mark_query = """
                 UPDATE TranscodeAttempts
-                SET Success = FALSE, CompletedDate = NOW()
+                SET Success = FALSE, CompletedDate = NOW(),
+                    ErrorMessage = COALESCE(ErrorMessage, 'worker crashed/restarted')
                 WHERE Success IS NULL
                   AND Id NOT IN (
                       SELECT TranscodeAttemptId FROM TranscodeProgress
@@ -343,6 +360,102 @@ class CrashRecoveryService:
         except Exception as e:
             LoggingService.LogException(f"Error resetting interrupted quality tests", e, "CrashRecoveryService", "ResetInterruptedQualityTests")
             return 0
+
+    def _RecoverInProgressArtifacts(self) -> tuple:
+        """Sweep disk artifacts left by a prior crash/restart for this worker.
+
+        For every TemporaryFilePaths row owned by this worker:
+          - If the final (`.inprogress` stripped) file exists AND the original
+            source still exists, finalize the partial replacement (rename was
+            done, original-delete was not). Criterion 12.
+          - Otherwise, delete any leftover `.inprogress` artifact. Criterion 11.
+
+        TemporaryFilePaths rows are deleted on successful FileReplacement, so
+        a surviving row implies the attempt did not complete cleanly. After
+        cleanup, the surviving TemporaryFilePaths row is left in place; the
+        associated TranscodeAttempt is already (or about to be) marked
+        Success=FALSE by the standard recovery flow, and a subsequent queue
+        re-pop will create a fresh attempt+TFP pair.
+
+        Returns (InProgressFilesDeleted, PartialReplacementsCompleted).
+        """
+        if not self.WorkerName:
+            return 0, 0
+        try:
+            Query = """
+                SELECT tfp.Id AS tfp_id,
+                       tfp.LocalSourcePath AS local_source,
+                       tfp.LocalOutputPath AS local_output,
+                       tfp.OriginalPath AS canonical_original
+                FROM TemporaryFilePaths tfp
+                JOIN TranscodeAttempts ta ON ta.Id = tfp.TranscodeAttemptId
+                WHERE ta.WorkerName = %s
+            """
+            Rows = self.DatabaseManager.DatabaseService.ExecuteQuery(Query, (self.WorkerName,))
+            if not Rows:
+                return 0, 0
+
+            InProgressDeleted = 0
+            PartialCompleted = 0
+
+            for Row in Rows:
+                LocalSource = Row.get('local_source') or ''
+                LocalOutput = Row.get('local_output') or ''
+                CanonicalOriginal = Row.get('canonical_original') or ''
+                if not LocalOutput:
+                    continue
+
+                if LocalOutput.endswith('.inprogress'):
+                    FinalPath = LocalOutput[:-len('.inprogress')]
+                else:
+                    FinalPath = LocalOutput
+
+                FinalExists = os.path.exists(FinalPath)
+                OriginalExists = LocalSource and os.path.exists(LocalSource)
+                InProgressExists = LocalOutput.endswith('.inprogress') and os.path.exists(LocalOutput)
+
+                if FinalExists and OriginalExists and CanonicalOriginal:
+                    try:
+                        from Features.FileReplacement.FileReplacementBusinessService import FileReplacementBusinessService
+                        Frb = FileReplacementBusinessService(self.DatabaseManager, WorkerName=self.WorkerName)
+                        FinalizeResult = Frb.FinalizePartialReplacement(
+                            OriginalLocalPath=LocalSource,
+                            FinalLocalPath=FinalPath,
+                            CanonicalOriginalPath=CanonicalOriginal,
+                        )
+                        if FinalizeResult.get('Success'):
+                            PartialCompleted += 1
+                            LoggingService.LogWarning(
+                                f"Crash recovery: completed partial replacement for {LocalSource} -> {FinalPath}",
+                                "CrashRecoveryService", "_RecoverInProgressArtifacts"
+                            )
+                    except Exception as FinalizeEx:
+                        LoggingService.LogException(
+                            f"Crash recovery: FinalizePartialReplacement failed for {FinalPath}",
+                            FinalizeEx, "CrashRecoveryService", "_RecoverInProgressArtifacts"
+                        )
+
+                if InProgressExists:
+                    try:
+                        os.remove(LocalOutput)
+                        InProgressDeleted += 1
+                        LoggingService.LogWarning(
+                            f"Crash recovery: deleted orphaned .inprogress file {LocalOutput}",
+                            "CrashRecoveryService", "_RecoverInProgressArtifacts"
+                        )
+                    except Exception as RmEx:
+                        LoggingService.LogException(
+                            f"Crash recovery: could not delete .inprogress {LocalOutput}",
+                            RmEx, "CrashRecoveryService", "_RecoverInProgressArtifacts"
+                        )
+
+            return InProgressDeleted, PartialCompleted
+        except Exception as e:
+            LoggingService.LogException(
+                "Error during _RecoverInProgressArtifacts",
+                e, "CrashRecoveryService", "_RecoverInProgressArtifacts"
+            )
+            return 0, 0
 
     def LogRecoverySummary(self, ServiceName: str, JobsRecovered: int, OrphanedProcessesKilled: int, RecoveryDetails: List[Dict]):
         """Log a summary of the recovery operation to the Logs table."""

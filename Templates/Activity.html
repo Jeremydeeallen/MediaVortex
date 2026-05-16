@@ -94,6 +94,29 @@
     <!-- Quality Testing Queue moved to /Queue page (post-transcode-disposition feature, 2026-05-10).
          Active VMAF jobs (in-flight, not pending) appear in the Active Jobs section above. -->
 </div>
+
+<!-- Worker Settings Modal -->
+<div class="modal fade" id="WorkerSettingsModal" tabindex="-1" aria-labelledby="WorkerSettingsModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="WorkerSettingsModalLabel">Worker Settings</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div id="WorkerSettingsBody">
+                    <div class="text-muted">Loading...</div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-danger me-auto" id="WorkerSettingsDisableBtn" onclick="ActivityPage.DisableFromModal()">
+                    <i class="fas fa-power-off me-1"></i>Disable Worker
+                </button>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
@@ -135,7 +158,6 @@ var ActivityPage = (function() {
     function GetWorkerStatusBadge(Status) {
         var Map = {
             'Online': 'bg-success',
-            'Draining': 'bg-warning text-dark',
             'Paused': 'bg-secondary'
         };
         return Map[Status] || 'bg-secondary';
@@ -144,7 +166,6 @@ var ActivityPage = (function() {
     function GetWorkerCardClass(Status) {
         var Map = {
             'Online': 'card h-100',
-            'Draining': 'card h-100 border-warning',
             'Paused': 'card h-100 bg-light text-muted'
         };
         return Map[Status] || 'card h-100';
@@ -423,6 +444,84 @@ var ActivityPage = (function() {
         Slot.innerHTML = '<div class="alert alert-warning py-2 mb-2">' + Msg + '</div>';
     }
 
+    function GetMachineGroup(WorkerName) {
+        // Workers spawned via MEDIAVORTEX_WORKER_PREFIX have names like "wakko-1",
+        // "wakko-2". The portion before the trailing "-N" is the physical machine.
+        var Match = (WorkerName || '').match(/^(.*)-(\d+)$/);
+        return Match ? Match[1] : (WorkerName || 'unknown');
+    }
+
+    function GroupWorkersByMachine(WorkerList) {
+        var Groups = {};
+        var Order = [];
+        WorkerList.forEach(function(W) {
+            var Key = GetMachineGroup(W.WorkerName);
+            if (!Groups[Key]) {
+                Groups[Key] = [];
+                Order.push(Key);
+            }
+            Groups[Key].push(W);
+        });
+        Order.sort();
+        return Order.map(function(K) { return { Name: K, Workers: Groups[K] }; });
+    }
+
+    function RenderWorkerTile(W) {
+        var HeartbeatAge = W.HeartbeatAgeSec;
+        var IsDisabled = W.Enabled === false;
+        var DisplayStatus = IsDisabled ? 'Disabled' : (W.Status || 'Paused');
+        var BadgeCls = IsDisabled ? 'bg-dark' : GetWorkerStatusBadge(DisplayStatus);
+        var CardCls = IsDisabled ? 'card border-secondary opacity-50' : GetWorkerCardClass(DisplayStatus);
+        var HeartbeatText = FormatHeartbeatAge(HeartbeatAge);
+        var HeartbeatDot = GetHeartbeatDotClass(HeartbeatAge);
+        var WorkerNameEsc = EscapeHtml(W.WorkerName);
+        var WorkerNameJs = WorkerNameEsc.replace(/'/g, "\\'");
+
+        var VersionShort, VersionTooltip, VersionCls;
+        if (W.Version && W.Version !== 'unknown') {
+            VersionShort = EscapeHtml(W.Version.substring(0, 7));
+            VersionTooltip = EscapeHtml(W.Version) + (W.BuildInfo ? '\n' + EscapeHtml(W.BuildInfo) : '');
+            VersionCls = 'text-muted';
+        } else {
+            VersionShort = '<em>unknown</em>';
+            VersionTooltip = 'Worker has not reported a build version.';
+            VersionCls = 'text-warning';
+        }
+        var VersionHtml = '<small class="' + VersionCls + ' ms-2" title="' + VersionTooltip + '" style="white-space:pre-line">v' + VersionShort + '</small>';
+
+        var MountErrorHtml = '';
+        if (W.MountValidationError) {
+            MountErrorHtml =
+                '<div class="alert alert-danger py-2 px-2 mb-2 small" role="alert">' +
+                    '<i class="fas fa-exclamation-triangle me-1"></i>' +
+                    '<strong>Mount validation failed -- no jobs claimed.</strong> ' +
+                    '<span class="d-block mt-1" style="word-break:break-all">' + EscapeHtml(W.MountValidationError) + '</span>' +
+                '</div>';
+        }
+
+        var IsOnline = DisplayStatus === 'Online';
+        var ToggleClass = IsOnline ? 'btn-success' : 'btn-outline-success';
+        var ToggleTarget = IsOnline ? 'Paused' : 'Online';
+        var ToggleIcon = IsOnline ? 'fa-pause' : 'fa-play';
+        var ToggleLabel = IsOnline ? 'Pause' : 'Online';
+
+        var Col = document.createElement('div');
+        Col.className = 'col-6 col-lg-4 col-xl-3';
+        Col.innerHTML = '<div class="' + CardCls + '" style="cursor:pointer" onclick="ActivityPage.OpenWorkerSettings(\'' + WorkerNameJs + '\')">' +
+            '<div class="card-body py-3">' +
+                '<h6 class="card-title mb-2 d-flex justify-content-between align-items-center">' +
+                    '<span><i class="fas fa-circle me-1 small ' + HeartbeatDot + '" title="Last heartbeat: ' + HeartbeatText + '"></i>' + WorkerNameEsc + VersionHtml + '</span>' +
+                    '<span class="badge ' + BadgeCls + '">' + DisplayStatus + '</span>' +
+                '</h6>' +
+                MountErrorHtml +
+                '<button class="btn btn-sm w-100 ' + ToggleClass + '" onclick="event.stopPropagation(); ActivityPage.SetWorkerStatus(\'' + WorkerNameJs + '\', \'' + ToggleTarget + '\')">' +
+                    '<i class="fas ' + ToggleIcon + ' me-1"></i>' + ToggleLabel +
+                '</button>' +
+            '</div>' +
+        '</div>';
+        return Col;
+    }
+
     function RenderWorkers(WorkerList) {
         var Container = document.getElementById('WorkersContainer');
         Container.innerHTML = '';
@@ -430,84 +529,131 @@ var ActivityPage = (function() {
             Container.innerHTML = '<div class="col-12 text-center text-muted py-2">No workers registered</div>';
             return;
         }
-        WorkerList.forEach(function(W) {
-            var HeartbeatAge = W.HeartbeatAgeSec;
-            var IsDisabled = W.Enabled === false;
-            var DisplayStatus = IsDisabled ? 'Disabled' : (W.Status || 'Paused');
-            var BadgeCls = IsDisabled ? 'bg-dark' : GetWorkerStatusBadge(DisplayStatus);
-            var CardCls = IsDisabled ? 'card border-secondary opacity-50' : GetWorkerCardClass(DisplayStatus);
-            var HeartbeatText = FormatHeartbeatAge(HeartbeatAge);
-            var HeartbeatDot = GetHeartbeatDotClass(HeartbeatAge);
-            var WorkerNameEsc = EscapeHtml(W.WorkerName);
-
-            // Version badge: short 7-char SHA next to the name; tooltip = full SHA + BuildInfo.
-            var VersionShort, VersionTooltip, VersionCls;
-            if (W.Version && W.Version !== 'unknown') {
-                VersionShort = EscapeHtml(W.Version.substring(0, 7));
-                VersionTooltip = EscapeHtml(W.Version) + (W.BuildInfo ? '\n' + EscapeHtml(W.BuildInfo) : '');
-                VersionCls = 'text-muted';
-            } else {
-                VersionShort = '<em>unknown</em>';
-                VersionTooltip = 'Worker has not reported a build version.';
-                VersionCls = 'text-warning';
-            }
-            var VersionHtml = '<small class="' + VersionCls + ' ms-2" title="' + VersionTooltip + '" style="white-space:pre-line">v' + VersionShort + '</small>';
-
-            var MountErrorHtml = '';
-            if (W.MountValidationError) {
-                MountErrorHtml =
-                    '<div class="alert alert-danger py-2 px-2 mb-2 small" role="alert">' +
-                        '<i class="fas fa-exclamation-triangle me-1"></i>' +
-                        '<strong>Mount validation failed -- no jobs claimed.</strong> ' +
-                        '<span class="d-block mt-1" style="word-break:break-all">' + EscapeHtml(W.MountValidationError) + '</span>' +
-                    '</div>';
-            }
-
-            var Col = document.createElement('div');
-            Col.className = 'col-6 col-lg-4 col-xl-3';
-            Col.innerHTML = '<div class="' + CardCls + '">' +
-                '<div class="card-body py-3">' +
-                    '<h6 class="card-title mb-2 d-flex justify-content-between align-items-center">' +
-                        '<span><i class="fas fa-circle me-1 small ' + HeartbeatDot + '" title="Last heartbeat: ' + HeartbeatText + '"></i>' + WorkerNameEsc + VersionHtml + '</span>' +
-                        '<span class="badge ' + BadgeCls + '">' + DisplayStatus + '</span>' +
-                    '</h6>' +
-                    MountErrorHtml +
-                    '<div class="small text-muted mb-2">' +
-                        '<div class="d-flex justify-content-between"><span>Platform:</span><span>' + EscapeHtml(W.Platform || '-') + '</span></div>' +
-                        '<div class="d-flex justify-content-between"><span>Heartbeat:</span><span>' + HeartbeatText + '</span></div>' +
-                        '<div class="d-flex justify-content-between"><span>CPU Threads:</span><span>' + (W.MaxCpuThreads || 'Auto') + '</span></div>' +
-                        '<div class="d-flex justify-content-between"><span>Interlaced:</span><span>' + (W.AcceptsInterlaced ? 'Yes' : 'No') + '</span></div>' +
+        var Groups = GroupWorkersByMachine(WorkerList);
+        Groups.forEach(function(G) {
+            var GroupNameEsc = EscapeHtml(G.Name);
+            var GroupJs = GroupNameEsc.replace(/'/g, "\\'");
+            var Header = document.createElement('div');
+            Header.className = 'col-12 mt-2';
+            Header.innerHTML =
+                '<div class="d-flex justify-content-between align-items-center border-bottom pb-1 mb-2">' +
+                    '<h6 class="mb-0"><i class="fas fa-server me-1 text-muted"></i>' + GroupNameEsc + ' <small class="text-muted">(' + G.Workers.length + ')</small></h6>' +
+                    '<div class="btn-group btn-group-sm" role="group">' +
+                        '<button class="btn btn-outline-success" onclick="ActivityPage.SetMachineStatus(\'' + GroupJs + '\', \'Online\')" title="Resume all workers on ' + GroupNameEsc + '"><i class="fas fa-play me-1"></i>Resume Machine</button>' +
+                        '<button class="btn btn-outline-secondary" onclick="ActivityPage.SetMachineStatus(\'' + GroupJs + '\', \'Paused\')" title="Pause all workers on ' + GroupNameEsc + '"><i class="fas fa-pause me-1"></i>Pause Machine</button>' +
                     '</div>' +
-                    '<div class="btn-group btn-group-sm w-100 mb-2" role="group">' +
-                        '<button class="btn ' + (DisplayStatus === 'Online' ? 'btn-success' : 'btn-outline-success') + '" onclick="ActivityPage.SetWorkerStatus(\'' + WorkerNameEsc.replace(/'/g, "\\'") + '\', \'Online\')">Online</button>' +
-                        '<button class="btn ' + (DisplayStatus === 'Paused' || DisplayStatus === 'Draining' ? 'btn-secondary' : 'btn-outline-secondary') + '" onclick="ActivityPage.SetWorkerStatus(\'' + WorkerNameEsc.replace(/'/g, "\\'") + '\', \'Paused\')">Pause</button>' +
-                    '</div>' +
-                    '<div class="small text-muted mb-1">Capabilities</div>' +
-                    '<div class="btn-group btn-group-sm w-100 mb-1" role="group" aria-label="Worker capabilities">' +
-                        '<button class="btn ' + (W.TranscodeEnabled ? 'btn-primary' : 'btn-outline-primary') + '" title="Transcode" ' +
-                          'onclick="ActivityPage.ToggleWorkerCapability(\'' + WorkerNameEsc.replace(/'/g, "\\'") + '\', \'TranscodeEnabled\', ' + (W.TranscodeEnabled ? 'true' : 'false') + ')">' +
-                          '<i class="fas fa-film me-1"></i>Transcode (' + (W.MaxConcurrentTranscodeJobs || 1) + ')</button>' +
-                        '<button class="btn ' + (W.QualityTestEnabled ? 'btn-info' : 'btn-outline-info') + '" title="VMAF quality test" ' +
-                          'onclick="ActivityPage.ToggleWorkerCapability(\'' + WorkerNameEsc.replace(/'/g, "\\'") + '\', \'QualityTestEnabled\', ' + (W.QualityTestEnabled ? 'true' : 'false') + ')">' +
-                          '<i class="fas fa-chart-line me-1"></i>VMAF (' + (W.MaxConcurrentQualityTestJobs || 2) + ')</button>' +
-                        '<button class="btn ' + (W.RemuxEnabled ? 'btn-success' : 'btn-outline-success') + '" title="Remux (container copy)" ' +
-                          'onclick="ActivityPage.ToggleWorkerCapability(\'' + WorkerNameEsc.replace(/'/g, "\\'") + '\', \'RemuxEnabled\', ' + (W.RemuxEnabled ? 'true' : 'false') + ')">' +
-                          '<i class="fas fa-copy me-1"></i>Remux (' + (W.MaxConcurrentRemuxJobs || 2) + ')</button>' +
-                        '<button class="btn ' + (W.ScanEnabled ? 'btn-secondary' : 'btn-outline-secondary') + '" title="Continuous file scanning" ' +
-                          'onclick="ActivityPage.ToggleWorkerCapability(\'' + WorkerNameEsc.replace(/'/g, "\\'") + '\', \'ScanEnabled\', ' + (W.ScanEnabled ? 'true' : 'false') + ')">' +
-                          '<i class="fas fa-search me-1"></i>Scan</button>' +
-                    '</div>' +
-                    '<div class="form-text small mt-1">Capability changes apply within 60s (no restart).</div>' +
-                    '<div class="mt-2">' +
-                        (IsDisabled
-                            ? '<button class="btn btn-outline-success btn-sm w-100" onclick="ActivityPage.EnableWorker(\'' + WorkerNameEsc.replace(/'/g, "\\'") + '\')"><i class="fas fa-plug me-1"></i>Enable Worker</button>'
-                            : '<button class="btn btn-outline-danger btn-sm w-100" onclick="ActivityPage.DisableWorker(\'' + WorkerNameEsc.replace(/'/g, "\\'") + '\')"><i class="fas fa-power-off me-1"></i>Disable Worker</button>'
-                        ) +
-                    '</div>' +
-                '</div>' +
-            '</div>';
-            Container.appendChild(Col);
+                '</div>';
+            Container.appendChild(Header);
+            G.Workers.forEach(function(W) {
+                Container.appendChild(RenderWorkerTile(W));
+            });
         });
+    }
+
+    var CurrentSettingsWorker = null;
+
+    function OpenWorkerSettings(WorkerName) {
+        var W = (Workers || []).filter(function(x) { return x.WorkerName === WorkerName; })[0];
+        if (!W) return;
+        CurrentSettingsWorker = WorkerName;
+        document.getElementById('WorkerSettingsModalLabel').textContent = 'Settings: ' + WorkerName;
+        var IsDisabled = W.Enabled === false;
+        var DisableBtn = document.getElementById('WorkerSettingsDisableBtn');
+        if (IsDisabled) {
+            DisableBtn.innerHTML = '<i class="fas fa-plug me-1"></i>Enable Worker';
+            DisableBtn.classList.remove('btn-outline-danger');
+            DisableBtn.classList.add('btn-outline-success');
+        } else {
+            DisableBtn.innerHTML = '<i class="fas fa-power-off me-1"></i>Disable Worker';
+            DisableBtn.classList.remove('btn-outline-success');
+            DisableBtn.classList.add('btn-outline-danger');
+        }
+        var WorkerNameJs = EscapeHtml(WorkerName).replace(/'/g, "\\'");
+        var Body = document.getElementById('WorkerSettingsBody');
+        Body.innerHTML =
+            '<div class="row small mb-3">' +
+                '<div class="col-6">Platform: <strong>' + EscapeHtml(W.Platform || '-') + '</strong></div>' +
+                '<div class="col-6">CPU Threads: <strong>' + (W.MaxCpuThreads || 'Auto') + '</strong></div>' +
+                '<div class="col-6">Interlaced: <strong>' + (W.AcceptsInterlaced ? 'Yes' : 'No') + '</strong></div>' +
+                '<div class="col-6">Version: <strong>' + EscapeHtml((W.Version || 'unknown').substring(0, 7)) + '</strong></div>' +
+            '</div>' +
+            '<div class="mb-3">' +
+                '<label class="form-label small fw-bold">Capabilities</label>' +
+                CapabilityRow('TranscodeEnabled', 'Transcode', W.TranscodeEnabled, 'MaxConcurrentTranscodeJobs', W.MaxConcurrentTranscodeJobs || 1, WorkerNameJs) +
+                CapabilityRow('QualityTestEnabled', 'VMAF', W.QualityTestEnabled, 'MaxConcurrentQualityTestJobs', W.MaxConcurrentQualityTestJobs || 2, WorkerNameJs) +
+                CapabilityRow('RemuxEnabled', 'Remux', W.RemuxEnabled, 'MaxConcurrentRemuxJobs', W.MaxConcurrentRemuxJobs || 2, WorkerNameJs) +
+                CapabilityRow('ScanEnabled', 'Scan', W.ScanEnabled, null, null, WorkerNameJs) +
+            '</div>' +
+            '<div class="form-text small">Capability and concurrency changes apply within one polling interval (no restart).</div>';
+
+        var Modal = bootstrap.Modal.getOrCreateInstance(document.getElementById('WorkerSettingsModal'));
+        Modal.show();
+    }
+
+    function CapabilityRow(FlagKey, Label, Enabled, ConcurrencyKey, ConcurrencyValue, WorkerNameJs) {
+        var BtnClass = Enabled ? 'btn-primary' : 'btn-outline-primary';
+        var Toggle =
+            '<button class="btn btn-sm ' + BtnClass + '" style="min-width: 100px" ' +
+              'onclick="ActivityPage.ToggleWorkerCapability(\'' + WorkerNameJs + '\', \'' + FlagKey + '\', ' + (Enabled ? 'true' : 'false') + ')">' +
+              Label + ': ' + (Enabled ? 'On' : 'Off') +
+            '</button>';
+        var Concurrency = '';
+        if (ConcurrencyKey) {
+            Concurrency =
+                '<div class="input-group input-group-sm" style="max-width:180px">' +
+                    '<span class="input-group-text">Concurrency</span>' +
+                    '<input type="number" min="1" step="1" class="form-control" value="' + ConcurrencyValue + '" ' +
+                        'onchange="ActivityPage.SetWorkerConcurrency(\'' + WorkerNameJs + '\', \'' + ConcurrencyKey + '\', this.value)">' +
+                '</div>';
+        }
+        return '<div class="d-flex justify-content-between align-items-center mb-2 gap-2">' + Toggle + Concurrency + '</div>';
+    }
+
+    function DisableFromModal() {
+        if (!CurrentSettingsWorker) return;
+        var W = (Workers || []).filter(function(x) { return x.WorkerName === CurrentSettingsWorker; })[0];
+        if (!W) return;
+        if (W.Enabled === false) {
+            EnableWorker(CurrentSettingsWorker);
+        } else {
+            DisableWorker(CurrentSettingsWorker);
+        }
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('WorkerSettingsModal')).hide();
+    }
+
+    function SetMachineStatus(MachineGroup, NewStatus) {
+        if (!confirm('Set all workers on "' + MachineGroup + '" to ' + NewStatus + '?')) return;
+        (Workers || []).forEach(function(W) {
+            if (GetMachineGroup(W.WorkerName) === MachineGroup) {
+                SetWorkerStatus(W.WorkerName, NewStatus);
+            }
+        });
+    }
+
+    function SetWorkerConcurrency(WorkerName, Column, RawValue) {
+        var Value = parseInt(RawValue, 10);
+        if (!Value || Value < 1) {
+            showToastAlert('Concurrency must be a positive integer.', 'danger');
+            LoadWorkers();
+            return;
+        }
+        var Body = {};
+        Body[Column] = Value;
+        fetch('/api/TeamStatus/Workers/' + encodeURIComponent(WorkerName) + '/Concurrency', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(Body)
+        })
+            .then(function(R) { return R.json(); })
+            .then(function(Result) {
+                if (Result.Success) {
+                    showToastAlert(WorkerName + ' ' + Column + ' set to ' + Value, 'success');
+                    LoadWorkers();
+                } else {
+                    showToastAlert(Result.Message || 'Failed to update concurrency.', 'danger');
+                }
+            })
+            .catch(function() { showToastAlert('Failed to contact server.', 'danger'); });
     }
 
     function SetWorkerStatus(WorkerName, NewStatus) {
@@ -649,7 +795,11 @@ var ActivityPage = (function() {
         ResetStuckJob: ResetStuckJob,
         SetWorkerStatus: SetWorkerStatus,
         SetAllWorkersStatus: SetAllWorkersStatus,
+        SetMachineStatus: SetMachineStatus,
         ToggleWorkerCapability: ToggleWorkerCapability,
+        SetWorkerConcurrency: SetWorkerConcurrency,
+        OpenWorkerSettings: OpenWorkerSettings,
+        DisableFromModal: DisableFromModal,
         DisableWorker: DisableWorker,
         EnableWorker: EnableWorker
         // RetryQualityTest moved to /Queue page.

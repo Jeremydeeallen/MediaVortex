@@ -1824,7 +1824,7 @@ class DatabaseManager:
                                      ShareMountPrefix, MaxConcurrentJobs, MaxCpuThreads,
                                      Version, BuildInfo,
                                      Status, LastHeartbeat, RegisteredAt)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'Online', NOW(), NOW())
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'Paused', NOW(), NOW())
                 ON CONFLICT (WorkerName) DO UPDATE SET
                     Platform = EXCLUDED.Platform,
                     FFmpegPath = COALESCE(EXCLUDED.FFmpegPath, Workers.FFmpegPath),
@@ -1987,7 +1987,7 @@ class DatabaseManager:
             return False
 
     def UpdateWorkerStatus(self, WorkerName: str, Status: str) -> bool:
-        """Update worker status (Online, Paused, Draining)."""
+        """Update worker status (Online or Paused)."""
         try:
             query = "UPDATE Workers SET Status = %s, LastHeartbeat = NOW() WHERE WorkerName = %s"
             self.DatabaseService.ExecuteNonQuery(query, (Status, WorkerName))

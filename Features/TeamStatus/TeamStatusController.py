@@ -539,8 +539,10 @@ def SetWorkerConcurrency(WorkerName):
 
     Body: {"MaxConcurrentTranscodeJobs": 1, "MaxConcurrentQualityTestJobs": 3, ...}
     Any subset of the three keys is accepted; unspecified columns are left untouched.
-    Values must be integers 1-5.
-    Takes effect on next worker restart (concurrency is read at capability start).
+    Values must be positive integers (floor of 1, no upper ceiling -- see
+    worker-lifecycle.feature.md criterion 18).
+    Takes effect within one CapabilityPollingIntervalSec on the running worker
+    (criterion 19) -- no restart required.
     """
     try:
         LoggingService.LogFunctionEntry("SetWorkerConcurrency", "TeamStatusController")
@@ -573,7 +575,7 @@ def SetWorkerConcurrency(WorkerName):
 
         return jsonify({
             "Success": True,
-            "Message": f"Worker '{WorkerName}' concurrency updated. Restart worker to apply.",
+            "Message": f"Worker '{WorkerName}' concurrency updated. Applies within one polling interval.",
             "Updated": UpdateColumns
         })
 
@@ -585,7 +587,7 @@ def SetWorkerConcurrency(WorkerName):
 
 @TeamStatusBlueprint.route('/Workers/<WorkerName>/Status', methods=['POST'])
 def SetWorkerStatus(WorkerName):
-    """Set per-worker status (Online, Draining, Offline)."""
+    """Set per-worker status (Online or Paused)."""
     try:
         LoggingService.LogFunctionEntry("SetWorkerStatus", "TeamStatusController")
 

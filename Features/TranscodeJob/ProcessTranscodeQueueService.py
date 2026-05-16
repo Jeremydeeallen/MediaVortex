@@ -514,7 +514,16 @@ class ProcessTranscodeQueueService:
             TranscodeResult = self.ExecuteTranscoding(Job, TranscodeCommand, TranscodeAttemptId, MediaFile, ActiveJobId)
             if not TranscodeResult.get("Success", False):
                 self.CleanupLocalStagingFiles(LocalStagingSourcePath, LocalStagingOutputPath)
+                self._DeleteInProgressFile(OutputPath)
                 self.HandleJobFailure(Job, f"Transcoding failed: {TranscodeResult.get('ErrorMessage', 'Unknown error')}", TranscodeAttemptId, ActiveJobId)
+                return
+
+            # Verify the .inprogress file is a valid media file before any
+            # further action (worker-lifecycle.feature.md criterion 7).
+            if not self._VerifyInProgressFile(OutputPath):
+                self.CleanupLocalStagingFiles(LocalStagingSourcePath, LocalStagingOutputPath)
+                self._DeleteInProgressFile(OutputPath)
+                self.HandleJobFailure(Job, f"Transcode output failed FFprobe verification: {OutputPath}", TranscodeAttemptId, ActiveJobId)
                 return
 
             # Local staging: copy output to NFS and clean up local files
@@ -767,6 +776,58 @@ class ProcessTranscodeQueueService:
         self.HandleTranscodingResult(Job, TranscodeResult, TranscodeAttemptId, ActiveJobId)
         return TranscodeAttemptId
 
+    def _VerifyInProgressFile(self, LocalInProgressPath: str) -> bool:
+        """FFprobe a freshly-written `.inprogress` file to confirm it is a valid
+        media file. Owns worker-lifecycle.feature.md criterion 7."""
+        try:
+            if not os.path.exists(LocalInProgressPath):
+                LoggingService.LogError(
+                    f"FFprobe verify failed: .inprogress file not found at {LocalInProgressPath}",
+                    "ProcessTranscodeQueueService", "_VerifyInProgressFile"
+                )
+                return False
+            from Services.FFmpegAnalysisService import FFmpegAnalysisService
+            Analysis = FFmpegAnalysisService(FFprobePath=self.FFprobePath).AnalyzeMediaFile(LocalInProgressPath)
+            if not Analysis:
+                LoggingService.LogError(
+                    f"FFprobe verify failed for {LocalInProgressPath}: no analysis result",
+                    "ProcessTranscodeQueueService", "_VerifyInProgressFile"
+                )
+                return False
+            return True
+        except Exception as e:
+            LoggingService.LogException(
+                f"Exception verifying .inprogress file {LocalInProgressPath}",
+                e, "ProcessTranscodeQueueService", "_VerifyInProgressFile"
+            )
+            return False
+
+    def _DeleteInProgressFile(self, LocalInProgressPath: str) -> None:
+        """Best-effort delete of a `.inprogress` artifact after FFmpeg or
+        FFprobe-verify failure. Owns worker-lifecycle.feature.md criterion 9.
+        Defensive: refuses to delete any path that does not end in `.inprogress`
+        so a bad caller can never destroy a source or finalized output."""
+        if not LocalInProgressPath:
+            return
+        if not LocalInProgressPath.endswith('.inprogress'):
+            LoggingService.LogWarning(
+                f"_DeleteInProgressFile refused to delete non-.inprogress path: {LocalInProgressPath}",
+                "ProcessTranscodeQueueService", "_DeleteInProgressFile"
+            )
+            return
+        try:
+            if os.path.exists(LocalInProgressPath):
+                os.remove(LocalInProgressPath)
+                LoggingService.LogInfo(
+                    f"Deleted .inprogress artifact: {LocalInProgressPath}",
+                    "ProcessTranscodeQueueService", "_DeleteInProgressFile"
+                )
+        except Exception as e:
+            LoggingService.LogWarning(
+                f"Could not delete .inprogress artifact at {LocalInProgressPath}: {str(e)}",
+                "ProcessTranscodeQueueService", "_DeleteInProgressFile"
+            )
+
     def _VariantizeOutputPath(self, OutputPath: str, VariantName: str) -> str:
         """Insert -test-<VariantName> before -mv. so test variants get distinct
         on-disk filenames and never overwrite each other or a production attempt."""
@@ -795,28 +856,24 @@ class ProcessTranscodeQueueService:
                 pass
 
     def ProcessRemuxJob(self, Job: TranscodeQueueModel):
-        """Process a remux job using the rename-before-encode pattern.
+        """Process a remux job using the `.inprogress` output pattern.
 
         Sequence:
           1. SetupFilePreparation -- handle InPlace / LocalStaging staging
-          2. PrepareReplacement -- rename source to .orig, freeing the source
-             path so FFmpeg can write directly to it (InPlace mode)
-          3. BuildRemuxCommand with InputPath=.orig, OutputPath=freed source
-          4. ExecuteTranscoding -- FFmpeg writes to the freed source path
-          5. On success: HandleRemuxResult -> FileReplacement (which detects
-             the pre-renamed .orig and skips the rename step, just verifies
-             and settles)
-          6. On any failure between steps 2-5: RollbackReplacement to
-             restore the original from .orig
+          2. BuildRemuxCommand with InputPath=original, OutputPath=<basename>-mv.mp4.inprogress
+          3. ExecuteTranscoding -- FFmpeg writes the .inprogress file
+          4. On success: FFprobe-verify the .inprogress file
+          5. HandleRemuxResult -> FileReplacement (renames .inprogress to drop
+             the suffix, updates MediaFiles, deletes original)
 
-        See remux.flow.md and the 2026-05-09 KNOWN-ISSUES entry for the
-        path-collision incident that motivated this design.
+        The original source is never renamed or moved during processing -- it
+        is only touched at the final delete step in FileReplacement. See
+        worker-lifecycle.feature.md criteria 6-9.
         """
         ActiveJobId = None
         TranscodeAttemptId = None
         LocalStagingSourcePath = None
         LocalStagingOutputPath = None
-        OrigBackupPath = None  # set after PrepareReplacement
         try:
             LoggingService.LogInfo(f"Starting remux job processing for job ID: {Job.Id}", "ProcessTranscodeQueueService", "ProcessRemuxJob")
 
@@ -889,43 +946,16 @@ class ProcessTranscodeQueueService:
             if IsLocalStaging:
                 LocalStagingSourcePath = EffectiveInputPath
 
-            # Rename source to .orig BEFORE FFmpeg runs. This frees the
-            # original path so FFmpeg can write directly to the final
-            # target name (no _remuxed suffix needed; no suffix-strip in
-            # FileReplacement). On InPlace the .orig sits next to where
-            # FFmpeg writes; on LocalStaging the .orig sits on NFS while
-            # FFmpeg works in /staging/. Either way the original file is
-            # untouched until Finalize confirms the new file is good.
-            from Features.FileReplacement.FileReplacementBusinessService import FileReplacementBusinessService
-            FrbService = FileReplacementBusinessService()
-            PrepResult = FrbService.PrepareReplacement(Job.FilePath)
-            if not PrepResult.get('Success'):
-                self.HandleJobFailure(
-                    Job,
-                    f"PrepareReplacement failed: {PrepResult.get('ErrorMessage', 'unknown')}",
-                    TranscodeAttemptId, ActiveJobId,
-                )
-                return
-            OrigBackupPath = PrepResult['OrigBackupPath']
-
-            # Compute the final target path. For InPlace: same dir as source,
-            # basename + .mp4. EffectiveInputPath is the local-mounted path
-            # SetupFilePreparation returned; for InPlace this equals the
-            # original source path (which has just been renamed to .orig).
-            # We strip the .orig suffix to recover the freed source path,
-            # then change the extension to .mp4.
+            # Compute the `.inprogress` output path. FFmpeg writes here; the
+            # original source remains untouched until FileReplacement.
             import os as _os
-            EffectiveInputForFfmpeg = OrigBackupPath  # FFmpeg reads from .orig
-            FreedSourceLocalPath = OrigBackupPath[:-len('.orig')] if OrigBackupPath.endswith('.orig') else OrigBackupPath
-            BaseName, _ = _os.path.splitext(_os.path.basename(FreedSourceLocalPath))
-            TargetLocalPath = _os.path.join(_os.path.dirname(FreedSourceLocalPath), BaseName + '.mp4')
+            BaseName, _ = _os.path.splitext(_os.path.basename(EffectiveInputPath))
+            TargetLocalPath = _os.path.join(_os.path.dirname(EffectiveInputPath), BaseName + '-mv.mp4.inprogress')
 
-            # Build remux command. Caller-supplied OutputPath overrides the
-            # builder's filename derivation (no _remuxed suffix needed).
             self.UpdateTranscodeProgress(TranscodeAttemptId, "Building Command", 0.0, "Building remux command...")
             CommandResult = self.CommandBuilder.BuildRemuxCommand(
                 Job, MediaFile,
-                InputPath=EffectiveInputForFfmpeg,
+                InputPath=EffectiveInputPath,
                 TranscodingSettings={
                     'FFmpegPath': self.FFmpegPath,
                     'OutputDirectory': EffectiveOutputDir,
@@ -933,8 +963,6 @@ class ProcessTranscodeQueueService:
                 },
             )
             if not CommandResult:
-                # Roll back the .orig rename before bailing.
-                FrbService.RollbackReplacement(Job.FilePath, OrigBackupPath, TargetLocalPath)
                 self.HandleJobFailure(Job, "Failed to build remux command", TranscodeAttemptId, ActiveJobId)
                 return
 
@@ -969,12 +997,16 @@ class ProcessTranscodeQueueService:
             TranscodeResult = self.ExecuteTranscoding(Job, RemuxCommand, TranscodeAttemptId, MediaFile, ActiveJobId)
             if not TranscodeResult.get("Success", False):
                 self.CleanupLocalStagingFiles(LocalStagingSourcePath, LocalStagingOutputPath)
-                # Roll back the .orig rename so the source file is restored
-                # to its original path. Without this, the operator would see
-                # an .orig file and no original on a failed remux.
-                if OrigBackupPath:
-                    FrbService.RollbackReplacement(Job.FilePath, OrigBackupPath, TargetLocalPath)
+                self._DeleteInProgressFile(TargetLocalPath)
                 self.HandleJobFailure(Job, f"Remux failed: {TranscodeResult.get('ErrorMessage', 'Unknown error')}", TranscodeAttemptId, ActiveJobId)
+                return
+
+            # Verify the .inprogress file is a valid media file before any
+            # further action (worker-lifecycle.feature.md criterion 7).
+            if not self._VerifyInProgressFile(TargetLocalPath):
+                self.CleanupLocalStagingFiles(LocalStagingSourcePath, LocalStagingOutputPath)
+                self._DeleteInProgressFile(TargetLocalPath)
+                self.HandleJobFailure(Job, f"Remux output failed FFprobe verification: {TargetLocalPath}", TranscodeAttemptId, ActiveJobId)
                 return
 
             # Local staging: copy output to NFS and clean up local files
@@ -983,8 +1015,6 @@ class ProcessTranscodeQueueService:
                 NfsCopyPath = self.CopyBackFromLocalStaging(LocalStagingOutputPath)
                 if not NfsCopyPath:
                     self.CleanupLocalStagingFiles(LocalStagingSourcePath, LocalStagingOutputPath)
-                    if OrigBackupPath:
-                        FrbService.RollbackReplacement(Job.FilePath, OrigBackupPath, TargetLocalPath)
                     self.HandleJobFailure(Job, "Failed to copy remux output from local staging to NFS storage", TranscodeAttemptId, ActiveJobId)
                     return
                 TranscodeResult['OutputFilePath'] = NfsCopyPath
@@ -1000,22 +1030,8 @@ class ProcessTranscodeQueueService:
 
         except Exception as e:
             self.CleanupLocalStagingFiles(LocalStagingSourcePath, LocalStagingOutputPath)
-            # If we got past PrepareReplacement before the exception, the
-            # source is sitting at .orig and needs to be restored before we
-            # mark the job failed -- otherwise the operator sees an .orig
-            # and no original.
-            if OrigBackupPath:
-                try:
-                    from Features.FileReplacement.FileReplacementBusinessService import FileReplacementBusinessService
-                    FileReplacementBusinessService().RollbackReplacement(
-                        Job.FilePath, OrigBackupPath,
-                        TargetLocalPath if 'TargetLocalPath' in dir() else None,
-                    )
-                except Exception as RbEx:
-                    LoggingService.LogException(
-                        f"Rollback during exception cleanup also failed for job {Job.Id}",
-                        RbEx, "ProcessTranscodeQueueService", "ProcessRemuxJob"
-                    )
+            if 'TargetLocalPath' in dir():
+                self._DeleteInProgressFile(TargetLocalPath)
             LoggingService.LogException(f"Exception processing remux job {Job.Id}", e, "ProcessTranscodeQueueService", "ProcessRemuxJob")
             self.HandleJobFailure(Job, f"Exception during remux: {str(e)}", TranscodeAttemptId, ActiveJobId)
 
@@ -1114,7 +1130,16 @@ class ProcessTranscodeQueueService:
             TranscodeResult = self.ExecuteTranscoding(Job, SubFixCommand, TranscodeAttemptId, MediaFile, ActiveJobId)
             if not TranscodeResult.get("Success", False):
                 self.CleanupLocalStagingFiles(LocalStagingSourcePath, LocalStagingOutputPath)
+                self._DeleteInProgressFile(OutputPath)
                 self.HandleJobFailure(Job, f"Subtitle fix failed: {TranscodeResult.get('ErrorMessage', 'Unknown error')}", TranscodeAttemptId, ActiveJobId)
+                return
+
+            # Verify the .inprogress file is a valid media file before any
+            # further action (worker-lifecycle.feature.md criterion 7).
+            if not self._VerifyInProgressFile(OutputPath):
+                self.CleanupLocalStagingFiles(LocalStagingSourcePath, LocalStagingOutputPath)
+                self._DeleteInProgressFile(OutputPath)
+                self.HandleJobFailure(Job, f"Subtitle fix output failed FFprobe verification: {OutputPath}", TranscodeAttemptId, ActiveJobId)
                 return
 
             # Local staging: copy output to NFS and clean up local files
@@ -1145,7 +1170,12 @@ class ProcessTranscodeQueueService:
         """Handle remux results - skip quality testing, go directly to file replacement."""
         try:
             NewSizeBytes = TranscodeResult.get("NewSizeBytes", 0)
-            OutputFilePath = TranscodeResult.get("OutputFilePath", OutputPath)
+            RawOutputFilePath = TranscodeResult.get("OutputFilePath", OutputPath)
+            # TranscodeFiles persists the final-state path. FFmpeg wrote to
+            # `.inprogress`; the suffix is dropped once FileReplacement runs.
+            # Strip it here so TranscodeFiles.FinalFilePath reflects the final
+            # on-disk name immediately, not the in-flight artifact name.
+            OutputFilePath = RawOutputFilePath[:-len('.inprogress')] if RawOutputFilePath.endswith('.inprogress') else RawOutputFilePath
             OldSizeBytes = Job.SizeBytes
 
             SizeReductionBytes = OldSizeBytes - NewSizeBytes if NewSizeBytes > 0 and OldSizeBytes > 0 else 0
@@ -1705,7 +1735,11 @@ class ProcessTranscodeQueueService:
             if TranscodeResult.get("Success", False):
                 # Use pre-calculated file size from ExecuteTranscoding (captured immediately after transcode)
                 NewSizeBytes = TranscodeResult.get("NewSizeBytes", 0)
-                OutputFilePath = TranscodeResult.get("OutputFilePath", "")
+                RawOutputFilePath = TranscodeResult.get("OutputFilePath", "")
+                # TranscodeFiles persists the final-state path. Strip the
+                # `.inprogress` suffix that FFmpeg wrote -- FileReplacement
+                # drops it after disposition decides Replace.
+                OutputFilePath = RawOutputFilePath[:-len('.inprogress')] if RawOutputFilePath.endswith('.inprogress') else RawOutputFilePath
 
                 # Calculate size reduction metrics
                 SizeReductionBytes = 0

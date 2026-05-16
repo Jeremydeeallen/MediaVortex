@@ -68,17 +68,20 @@ class FileManagerService:
         """Check if a file is a media file based on its extension.
 
         Skips MediaVortex artifacts:
-          - `.old.<ext>` -- the original kept aside after a Replace when
-            ProfileThresholds.KeepSource=True. Not a separate media file.
-          - `.orig` -- mid-replacement backup that should never be visible
-            to a scan, but we filter defensively.
+          - `.old.<ext>` -- legacy backup left by pre-2026-05-16 file
+            replacements (KeepSource=True). Not a separate media file.
+          - `.inprogress` -- in-flight FFmpeg output, not yet verified.
+            See worker-lifecycle.feature.md criterion 6.
+          - `.orig` -- legacy mid-replacement backup from the pre-`.inprogress`
+            pattern. Filtered defensively.
         See Features/FileReplacement/transcoded-output-placement.feature.md criterion 9.
         """
         try:
             FileNameLower = Path(filePath).name.lower()
-            # Strip `.<ext>` and check if remaining ends with `.old` -> artifact.
             Stem = Path(FileNameLower).stem
             if Stem.endswith(".old"):
+                return False
+            if FileNameLower.endswith(".inprogress"):
                 return False
             if FileNameLower.endswith(".orig"):
                 return False

@@ -255,18 +255,12 @@ class CommandBuilder:
             )
 
     def GenerateOutputFileName(self, OriginalFileName: str, SourceResolution: str, TargetResolution: str, ContainerType: str = 'mp4', CrfValue: int = None) -> str:
-        """Generate the staged output filename: <basename>[-resolution]-mv.<ext>.
+        """Generate the staged output filename: <basename>[-resolution]-mv.<ext>.inprogress.
 
-        The `-mv` suffix is appended unconditionally at the WRITE step (not just
-        at FileReplacement time, which is Phase 1 of transcoded-output-placement.
-        feature.md). This is defense-in-depth against the 2026-05-09 BuildRemux
-        Command bug pattern: when source codec/ext matches output codec/ext AND
-        no resolution downscale is requested, FFmpeg invoked with `-y` would
-        destroy the source by writing to the same path. The `-mv` suffix makes
-        the staged filename structurally distinct from any plausible source
-        filename, so the same-name collision class is impossible by construction.
-
-        See criterion 6 of `Features/FileReplacement/transcoded-output-placement.feature.md`.
+        The `-mv` suffix is the canonical "MediaVortex transcoded this" marker.
+        The `.inprogress` suffix marks a work-in-progress encode; FileReplacement
+        renames to drop the suffix once the file is verified. See
+        worker-lifecycle.feature.md criterion 6.
 
         CrfValue parameter is accepted for backwards compatibility but no longer
         embedded in filenames -- CRF is tracked in the TranscodeAttempts table.
@@ -276,28 +270,23 @@ class CommandBuilder:
             OriginalFileName = _ntpath.basename(_ntpath.basename(OriginalFileName or ''))
             BaseName = os.path.splitext(OriginalFileName)[0]
 
-            # If resolutions are the same, just change extension + -mv marker
             if SourceResolution == TargetResolution:
-                return f"{BaseName}-mv.{ContainerType}"
+                return f"{BaseName}-mv.{ContainerType}.inprogress"
 
-            # Extract resolution from filename (e.g., "1080p", "720p")
             SourceResolutionStr = self.ExtractResolutionFromFilename(OriginalFileName)
             if not SourceResolutionStr:
-                # If no resolution found in filename, add target resolution + -mv
                 TargetResolutionStr = self.FormatResolutionForFilename(TargetResolution)
-                return f"{BaseName}{TargetResolutionStr}-mv.{ContainerType}"
+                return f"{BaseName}{TargetResolutionStr}-mv.{ContainerType}.inprogress"
 
-            # Replace source resolution with target resolution + -mv
             TargetResolutionStr = self.FormatResolutionForFilename(TargetResolution)
             NewBaseName = OriginalFileName.replace(SourceResolutionStr, TargetResolutionStr)
-            NewBaseName = os.path.splitext(NewBaseName)[0]  # Remove old extension
+            NewBaseName = os.path.splitext(NewBaseName)[0]
 
-            return f"{NewBaseName}-mv.{ContainerType}"
+            return f"{NewBaseName}-mv.{ContainerType}.inprogress"
 
         except Exception:
-            # Fallback: original filename with -mv + container extension
             BaseName = os.path.splitext(OriginalFileName)[0]
-            return f"{BaseName}-mv.{ContainerType}"
+            return f"{BaseName}-mv.{ContainerType}.inprogress"
     
     def ExtractResolutionFromFilename(self, Filename: str) -> Optional[str]:
         """Extract resolution string from filename (e.g., '1080p', '720p')."""
@@ -492,22 +481,15 @@ class CommandBuilder:
 
     def BuildRemuxCommand(self, CommandData: Dict[str, Any]) -> Optional[Dict[str, str]]:
         """Build FFmpeg remux command: copy video, re-encode audio with
-        normalization, output MP4 directly to the final target path.
+        normalization, output MP4 to a `<basename>-mv.mp4.inprogress` path.
 
-        Contract: the caller (worker) MUST have called
-        FileReplacementBusinessService.PrepareReplacement BEFORE invoking
-        this. PrepareReplacement renames `original.ext` to
-        `original.ext.orig`, freeing the original's path so FFmpeg can write
-        directly into it. No side-by-side suffix or strip step is needed --
-        FFmpeg's input is the .orig backup, output is the final name.
-
-        InputPath in CommandData should point to the .orig backup.
-        OutputPath, when supplied, is used directly. Otherwise it is derived
-        from MediaFile.FileName + .mp4 in the OutputDirectory.
+        Contract: InputPath points at the original source (untouched until
+        replacement). OutputPath, when supplied by the caller, must end in
+        `.inprogress`. The original source is never renamed during processing
+        -- see worker-lifecycle.feature.md criterion 6.
 
         Defense in depth: if OutputPath would equal InputPath (collision),
-        refuse to build the command rather than risk a -y overwrite. This
-        guards against a caller that forgot to call PrepareReplacement.
+        refuse to build the command rather than risk a -y overwrite.
         """
         try:
             Job = CommandData.get('Job')
@@ -520,15 +502,11 @@ class CommandBuilder:
             InputPath = CommandData.get('InputPath', f"c:\\MediaVortex\\Source\\{MediaFile.FileName}")
             BaseName = os.path.splitext(MediaFile.FileName)[0]
 
-            # Output path: prefer explicit OutputPath in CommandData (caller
-            # passed in the freed source path). Fall back to deriving from
-            # MediaFile.FileName + .mp4 -- backward-compat for callers that
-            # haven't been refactored to use PrepareReplacement.
             ExplicitOutputPath = CommandData.get('OutputPath')
             if ExplicitOutputPath:
                 OutputPath = ExplicitOutputPath
             else:
-                OutputFileName = BaseName + ".mp4"
+                OutputFileName = BaseName + "-mv.mp4.inprogress"
                 OutputMode = CommandData.get('TranscodeOutputMode', 'InPlace')
                 if OutputMode == 'Staging':
                     OutputDirectory = CommandData.get('OutputDirectory') or 'c:\\MediaVortex'
@@ -536,15 +514,10 @@ class CommandBuilder:
                     OutputDirectory = os.path.dirname(InputPath.strip('"'))
                 OutputPath = os.path.join(OutputDirectory, OutputFileName)
 
-            # Critical safety guard: if OutputPath would equal InputPath, the
-            # caller forgot to call PrepareReplacement. Refuse to build the
-            # command rather than risk FFmpeg's `-y` truncating the source.
             if os.path.normcase(os.path.normpath(OutputPath)) == os.path.normcase(os.path.normpath(InputPath.strip('"'))):
                 LoggingService.LogError(
                     f"BuildRemuxCommand: OutputPath equals InputPath ({InputPath}). "
-                    f"The caller must call FileReplacementBusinessService.PrepareReplacement "
-                    f"before invoking this builder, so InputPath points to .orig and OutputPath "
-                    f"can use the freed original path.",
+                    f"OutputPath must be a `.inprogress` side-by-side file.",
                     "CommandBuilder", "BuildRemuxCommand"
                 )
                 return None
@@ -608,12 +581,12 @@ class CommandBuilder:
 
     def BuildSubtitleFixCommand(self, CommandData: Dict[str, Any]) -> Optional[Dict[str, str]]:
         """Build FFmpeg subtitle fix command: copy video, re-encode audio with
-        normalization, convert ASS/SSA subtitle to mov_text, output MP4
-        directly to the final target path.
+        normalization, convert ASS/SSA subtitle to mov_text, output MP4 to a
+        `<basename>-mv.mp4.inprogress` path.
 
-        Contract: caller MUST have called PrepareReplacement before invoking
-        this builder -- InputPath should point to .orig, OutputPath to the
-        freed source path. Same safety pattern as BuildRemuxCommand.
+        Contract: InputPath points at the original source (untouched until
+        replacement). Same `.inprogress` pattern as BuildRemuxCommand. See
+        worker-lifecycle.feature.md criterion 6.
         """
         try:
             Job = CommandData.get('Job')
@@ -632,7 +605,7 @@ class CommandBuilder:
             if ExplicitOutputPath:
                 OutputPath = ExplicitOutputPath
             else:
-                OutputFileName = BaseName + ".mp4"
+                OutputFileName = BaseName + "-mv.mp4.inprogress"
                 OutputMode = CommandData.get('TranscodeOutputMode', 'InPlace')
                 if OutputMode == 'Staging':
                     OutputDirectory = CommandData.get('OutputDirectory') or 'c:\\MediaVortex'
@@ -640,10 +613,10 @@ class CommandBuilder:
                     OutputDirectory = os.path.dirname(InputPath.strip('"'))
                 OutputPath = os.path.join(OutputDirectory, OutputFileName)
 
-            # Defense in depth: same as BuildRemuxCommand.
             if os.path.normcase(os.path.normpath(OutputPath)) == os.path.normcase(os.path.normpath(InputPath.strip('"'))):
                 LoggingService.LogError(
-                    f"BuildSubtitleFixCommand: OutputPath equals InputPath ({InputPath}). Caller must call PrepareReplacement first.",
+                    f"BuildSubtitleFixCommand: OutputPath equals InputPath ({InputPath}). "
+                    f"OutputPath must be a `.inprogress` side-by-side file.",
                     "CommandBuilder", "BuildSubtitleFixCommand"
                 )
                 return None

@@ -4,7 +4,7 @@ WorkerService Entry Point
 Unified worker microservice for MediaVortex.
 Replaces separate TranscodeService + QualityTestService processes.
 Reads per-worker capabilities (TranscodeEnabled, QualityTestEnabled, ScanEnabled)
-and status (Online, Draining, Paused) from the Workers table.
+and status (Online, Paused) from the Workers table.
 """
 
 import sys
@@ -308,7 +308,7 @@ class WorkerServiceApp:
                 self.QualityTestEnabled = bool(Row.get('QualityTestEnabled', False))
                 self.RemuxEnabled = bool(Row.get('RemuxEnabled', True))
                 self.ScanEnabled = bool(Row.get('ScanEnabled', False))
-                self.WorkerStatus = Row.get('Status', 'Online') or 'Online'
+                self.WorkerStatus = Row.get('Status', 'Paused') or 'Paused'
                 # Per-capability concurrency (floor of 1, no ceiling -- operator sets what fits their hardware)
                 RawTranscode = Row.get('MaxConcurrentTranscodeJobs')
                 RawQualityTest = Row.get('MaxConcurrentQualityTestJobs')
@@ -322,7 +322,7 @@ class WorkerServiceApp:
                 self.QualityTestEnabled = False
                 self.RemuxEnabled = True
                 self.ScanEnabled = False
-                self.WorkerStatus = "Online"
+                self.WorkerStatus = "Paused"
                 self.CurrentTranscodeConcurrency = 1
                 self.CurrentQualityTestConcurrency = 2
                 self.CurrentRemuxConcurrency = 2
@@ -838,7 +838,7 @@ class WorkerServiceApp:
                 Query = "SELECT Status FROM Workers WHERE WorkerName = %s"
                 Rows = self.DatabaseManager.DatabaseService.ExecuteQuery(Query, (self.WorkerName,))
                 if Rows:
-                    NewStatus = Rows[0].get('Status', 'Online') or 'Online'
+                    NewStatus = Rows[0].get('Status', 'Paused') or 'Paused'
                     if NewStatus != self.WorkerStatus:
                         LoggingService.LogInfo(f"Worker status changed: {self.WorkerStatus} -> {NewStatus}", "WorkerService", "_StatusPollingLoop")
                         OldStatus = self.WorkerStatus
@@ -866,47 +866,12 @@ class WorkerServiceApp:
                 LoggingService.LogInfo("Worker is Online, starting enabled capabilities", "WorkerService", "_HandleStatusChange")
                 self._ApplyCapabilities()
 
-            elif NewStatus == "Draining":
-                # Finish current jobs, do not pick up new ones
-                LoggingService.LogInfo("Worker is Draining, finishing current jobs then stopping", "WorkerService", "_HandleStatusChange")
-                if self.TranscodeService is not None:
-                    self.TranscodeService.StopRequested = True
-                if self.QualityTestService is not None:
-                    try:
-                        self.QualityTestService.Stop()
-                    except Exception:
-                        pass
-                if self.ContinuousScanService is not None:
-                    self._StopScanCapability()
-
-                # Wait for transcode to finish current job in background
-                threading.Thread(target=self._DrainAndStop, daemon=True, name="DrainWaiter").start()
-
             elif NewStatus == "Paused":
-                # Stop everything
-                LoggingService.LogInfo("Worker is Paused, stopping all capabilities", "WorkerService", "_HandleStatusChange")
+                LoggingService.LogInfo("Worker is Paused, signaling capabilities to stop claiming new work", "WorkerService", "_HandleStatusChange")
                 self._StopAllCapabilities()
 
         except Exception as e:
             LoggingService.LogException("Error handling status change", e, "WorkerService", "_HandleStatusChange")
-
-    def _DrainAndStop(self):
-        """Wait for current transcode job to finish, then clean up."""
-        try:
-            if self.TranscodeService is not None:
-                if self.TranscodeService.ProcessingThread and self.TranscodeService.ProcessingThread.is_alive():
-                    self.TranscodeService.ProcessingThread.join(timeout=7200)
-                self.TranscodeService.IsProcessing = False
-                self.TranscodeService.ActiveJobs.clear()
-                self.TranscodeService = None
-            self.QualityTestService = None
-
-            # Auto-transition: Draining -> Paused
-            self.WorkerStatus = "Paused"
-            self.DatabaseManager.UpdateWorkerStatus(self.WorkerName, "Paused")
-            LoggingService.LogInfo("Drain complete, status set to Paused", "WorkerService", "_DrainAndStop")
-        except Exception as e:
-            LoggingService.LogException("Error during drain", e, "WorkerService", "_DrainAndStop")
 
     def _StopAllCapabilities(self):
         """Immediately stop all running capabilities.

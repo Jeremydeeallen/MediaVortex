@@ -61,7 +61,7 @@ Simplify worker status model from three states (Online/Draining/Paused) to two (
 
 ## Status
 
-IN PROGRESS -- mount-validation slice (criteria 20, 21) shipped 2026-05-15; remaining status-model and `.inprogress` rewrites still NOT STARTED.
+COMPLETE 2026-05-16 -- all 21 criteria implemented. Mount-validation slice (20, 21) shipped 2026-05-15; status-model collapse, `.inprogress` rewrite, crash recovery, Activity tile redesign, and polling-interval verification shipped 2026-05-16.
 
 ### Progress
 
@@ -69,8 +69,13 @@ IN PROGRESS -- mount-validation slice (criteria 20, 21) shipped 2026-05-15; rema
 - [x] Flow doc updated (step 7a + Failure Modes row, 2026-05-15)
 - [x] Criteria 20, 21: cross-platform `_ValidateStorageMounts()` + `_ApplyMountValidationResult()` gate startup and Paused-to-Online transitions; `Workers.MountValidationError` column added; on failure worker stays Paused and claims zero jobs.
 - [x] Surface MountValidationError on Activity tiles (criterion 20 second sentence): `/api/TeamStatus/Workers` now returns `MountValidationError`; Activity tile renders a red alert above the metadata block when set. Verified live: all 17 enabled workers return `MountValidationError=NULL` (no false positives on healthy fleet).
-- [ ] Criteria 1-5: collapse Online/Draining/Paused to Online/Paused; remove `_DrainAndStop` and the drain waiter thread.
-- [ ] Criteria 6-9: `.inprogress` output pattern replacing the destructive `.orig` rename.
-- [ ] Criteria 10-13: unified crash/kill recovery on the new pattern.
-- [ ] Criteria 14-17: Activity tile redesign + per-machine pause + settings modal.
-- [ ] Criterion 19: polling interval verified against the documented 15s default.
+- [x] Criteria 1-5: collapsed Online/Draining/Paused to Online/Paused. Removed `_DrainAndStop` and the drain-waiter thread from `WorkerService/Main.py`; dropped `Draining` from TeamStatusController, Activity badge map, DatabaseManager docstrings. `RegisterWorker` now inserts new rows with `Status='Paused'` so operators must verify deploys before enabling.
+- [x] Criteria 6-9: `.inprogress` output pattern. FFmpeg writes to `<basename>-mv.<ext>.inprogress`; FFprobe verify post-encode; FileReplacement renames to drop the suffix, updates MediaFiles, then deletes the original. `PrepareReplacement`/`RollbackReplacement` and the `.orig` backup dance are gone. 9 legacy `.orig` scripts deleted.
+- [x] Criteria 10-13: crash recovery handles `.inprogress` cleanup (rule 1) and partial-replacement finalization (rule 2) via `_RecoverInProgressArtifacts` + `FileReplacementBusinessService.FinalizePartialReplacement`. TranscodeAttempts marked failed by recovery get `ErrorMessage='worker crashed/restarted'` (rule 3).
+- [x] Criteria 14-17: Activity tiles redesigned. Workers grouped by machine prefix with per-machine Resume/Pause buttons in the group header. Tile shows name, version, heartbeat, status badge, and a single Online/Pause toggle button. Settings (capability toggles, per-capability concurrency, enable/disable) moved into a click-to-open Bootstrap modal.
+- [x] Criterion 19: `_LoadCapabilityPollingInterval` reads `CapabilityPollingIntervalSec` from SystemSettings with a 15-second default; `_CapabilityPollingLoop` + `_ApplyConcurrencyChanges` apply both capability and concurrency edits to running services within one interval (no restart). SetWorkerConcurrency response message corrected to reflect no-restart semantics.
+
+### Post-deploy verification
+
+- [ ] **VMAF on `.inprogress` (criterion 6 integration)** -- VMAF now reads `TranscodedFilePath` from `TemporaryFilePaths.LocalOutputPath`, which after this PR ends in `.inprogress`. Verify a full transcode -> VMAF -> Replace cycle runs end-to-end and produces a valid VMAF score against the `.inprogress` file (FFmpeg/FFprobe should ignore the extension and read content). Pick one queued transcode after deploy, watch the `QualityTestResults` row land with `Success=True`, confirm `MediaFiles.FilePath` ends in `-mv.<ext>` (no `.inprogress` lingering).
+- [ ] **Activity UI in a browser (criteria 14-17)** -- open `/Activity`, confirm workers are grouped by machine prefix, click a tile to open the settings modal, toggle a capability, change a concurrency value, verify the changes apply within one polling interval. The JS was not browser-verified during implementation.
