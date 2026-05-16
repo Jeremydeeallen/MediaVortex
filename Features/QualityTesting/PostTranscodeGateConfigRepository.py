@@ -17,7 +17,7 @@ class PostTranscodeGateConfigRepository(BaseRepository):
             Rows = self.ExecuteQuery(
                 """
                 SELECT Id, VmafAutoReplaceMinThreshold, VmafAutoReplaceMaxThreshold,
-                       WhenVmafUnavailable, LastUpdated
+                       WhenVmafUnavailable, QualityTestEnabled, LastUpdated
                 FROM PostTranscodeGateConfig WHERE Id = 1
                 """
             )
@@ -34,6 +34,7 @@ class PostTranscodeGateConfigRepository(BaseRepository):
                 VmafAutoReplaceMinThreshold=float(R['VmafAutoReplaceMinThreshold']),
                 VmafAutoReplaceMaxThreshold=float(R['VmafAutoReplaceMaxThreshold']),
                 WhenVmafUnavailable=R['WhenVmafUnavailable'],
+                QualityTestEnabled=bool(R['QualityTestEnabled']),
                 LastUpdated=R.get('LastUpdated'),
             )
         except Exception as Ex:
@@ -44,7 +45,8 @@ class PostTranscodeGateConfigRepository(BaseRepository):
 
     def Update(self, VmafAutoReplaceMinThreshold: Optional[float] = None,
                VmafAutoReplaceMaxThreshold: Optional[float] = None,
-               WhenVmafUnavailable: Optional[str] = None) -> bool:
+               WhenVmafUnavailable: Optional[str] = None,
+               QualityTestEnabled: Optional[bool] = None) -> bool:
         try:
             Sets = []
             Values = []
@@ -64,6 +66,9 @@ class PostTranscodeGateConfigRepository(BaseRepository):
                     return False
                 Sets.append("WhenVmafUnavailable = %s")
                 Values.append(WhenVmafUnavailable)
+            if QualityTestEnabled is not None:
+                Sets.append("QualityTestEnabled = %s")
+                Values.append(bool(QualityTestEnabled))
             if not Sets:
                 return True
             Sets.append("LastUpdated = NOW()")

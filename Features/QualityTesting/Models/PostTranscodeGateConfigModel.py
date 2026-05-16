@@ -14,4 +14,5 @@ class PostTranscodeGateConfigModel:
     VmafAutoReplaceMinThreshold: float = 88.0
     VmafAutoReplaceMaxThreshold: float = 98.0
     WhenVmafUnavailable: str = "block"  # 'block' | 'bypass'
+    QualityTestEnabled: bool = True  # operator master switch; FALSE = bypass VMAF for every successful transcode
     LastUpdated: Optional[datetime] = None

@@ -90,6 +90,7 @@ def CreatePostTranscodeGateConfig(Cursor):
             VmafAutoReplaceMinThreshold NUMERIC NOT NULL DEFAULT 88,
             VmafAutoReplaceMaxThreshold NUMERIC NOT NULL DEFAULT 98,
             WhenVmafUnavailable TEXT NOT NULL DEFAULT 'block',
+            QualityTestEnabled BOOLEAN NOT NULL DEFAULT TRUE,
             LastUpdated TIMESTAMP DEFAULT NOW(),
             CONSTRAINT posttranscodegateconfig_singlerow CHECK (Id = 1),
             CONSTRAINT posttranscodegateconfig_min_le_max

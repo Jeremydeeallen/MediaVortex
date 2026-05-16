@@ -317,6 +317,7 @@ class SystemSettingsController:
                         'VmafAutoReplaceMinThreshold': float(Cfg.VmafAutoReplaceMinThreshold),
                         'VmafAutoReplaceMaxThreshold': float(Cfg.VmafAutoReplaceMaxThreshold),
                         'WhenVmafUnavailable': Cfg.WhenVmafUnavailable,
+                        'QualityTestEnabled': bool(Cfg.QualityTestEnabled),
                         'LastUpdated': Cfg.LastUpdated.isoformat() if Cfg.LastUpdated else None,
                     },
                 })
@@ -335,6 +336,7 @@ class SystemSettingsController:
                     VmafAutoReplaceMinThreshold=Data.get('VmafAutoReplaceMinThreshold'),
                     VmafAutoReplaceMaxThreshold=Data.get('VmafAutoReplaceMaxThreshold'),
                     WhenVmafUnavailable=Data.get('WhenVmafUnavailable'),
+                    QualityTestEnabled=Data.get('QualityTestEnabled'),
                 )
                 if not Ok:
                     return jsonify({'Success': False, 'Error': 'Update rejected (see logs)'}), 400

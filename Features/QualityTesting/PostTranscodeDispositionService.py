@@ -46,6 +46,7 @@ REASONS = (
     'VmafServicePaused',
     'VmafServicePausedBypassed',
     'VmafCapabilityNotConfigured',
+    'QualityTestingGloballyDisabled',
     'TestMode',
 )
 
@@ -159,6 +160,7 @@ class PostTranscodeDispositionService:
                 'VmafAutoReplaceMinThreshold': GateConfig.VmafAutoReplaceMinThreshold,
                 'VmafAutoReplaceMaxThreshold': GateConfig.VmafAutoReplaceMaxThreshold,
                 'WhenVmafUnavailable': GateConfig.WhenVmafUnavailable,
+                'QualityTestEnabled': bool(getattr(GateConfig, 'QualityTestEnabled', True)),
             }
 
             # Apply the decision table.
@@ -210,6 +212,15 @@ class PostTranscodeDispositionService:
         # Row 1: transcode failed -> always Discard.
         if not Success:
             return ('Discard', 'TranscodeFailed')
+
+        # Row 1.5: operator master switch is OFF -> bypass VMAF entirely.
+        # Owner: post-transcode-disposition.feature.md criterion 26.
+        # MUST precede the NoSavings gate for the same reason Row 2 does:
+        # when the operator has globally disabled VMAF, the disk-savings
+        # decision belongs to FileReplacement / archive policy, not here.
+        # Read fresh per call (no caching) so mid-flight toggle is safe.
+        if not getattr(GateConfig, 'QualityTestEnabled', True):
+            return ('BypassReplace', 'QualityTestingGloballyDisabled')
 
         # Row 2: quality testing not required -> bypass-replace by design.
         # This MUST precede the NoSavings gate because remux jobs set

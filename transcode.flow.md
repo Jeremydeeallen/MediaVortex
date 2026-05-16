@@ -287,6 +287,7 @@ The disposition decision is **the only post-transcode branch point**. It reads f
 | `PostTranscodeGateConfig.VmafAutoReplaceMinThreshold` | typed column, default 88 |
 | `PostTranscodeGateConfig.VmafAutoReplaceMaxThreshold` | typed column, default 98 |
 | `PostTranscodeGateConfig.WhenVmafUnavailable` | `'block'` (default, safe) or `'bypass'` (operator opt-in) |
+| `PostTranscodeGateConfig.QualityTestEnabled` | typed BOOLEAN, default TRUE. Operator master switch -- when FALSE, every successful transcode short-circuits to `BypassReplace` / `QualityTestingGloballyDisabled`. Editable on `/settings` Post-Transcode card. |
 | `ProfileThresholds.KeepSource` | per-profile, controls `.orig` cleanup post-replace |
 
 **Decision table** (canonical -- code MUST mirror this 1:1):
@@ -294,6 +295,7 @@ The disposition decision is **the only post-transcode branch point**. It reads f
 | Success | NewSize >= OldSize | QualityTestRequired | VMAF score | VmafCapableWorkerOnline | WhenVmafUnavailable | Disposition | Reason |
 |---|---|---|---|---|---|---|---|
 | false | n/a | n/a | n/a | any | any | `Discard` | `TranscodeFailed` |
+| true (and `QualityTestEnabled=FALSE` globally) | n/a | n/a | n/a | any | any | `BypassReplace` | `QualityTestingGloballyDisabled` |
 | true | true (no savings) | any | any | any | any | `Discard` | `NoSavings` |
 | true | false | false | n/a | any | any | `BypassReplace` | `QualityTestNotRequired` |
 | true | false | true | NULL | true | any | `Pending` | `AwaitingVmaf` |

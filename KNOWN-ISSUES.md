@@ -403,7 +403,15 @@ Pre-claude-rails (Cursor-written) patterns that the marginal-savings-gate featur
 
 ---
 
-### [BUG] QualityTestEnabled flip mid-run does not reach the transcode producer; in-flight job replaces file with no VMAF
+### [BUG - RESOLVED 2026-05-16] QualityTestEnabled flip mid-run does not reach the transcode producer; in-flight job replaces file with no VMAF
+**Date:** 2026-05-09 | **Resolved:** 2026-05-16
+**Affects:** WorkerService.feature.md (criterion 2, criterion 15), `Features/TranscodeJob/ProcessTranscodeQueueService.py:100-101, 885-900, 1329`, `Features/QualityTesting/ShouldQualityTestService.py:34-57`
+
+**Resolution:** The producer-side cache was already removed during the post-transcode disposition rewrite (see `ProcessTranscodeQueueService.py:101` comment "Per-worker QualityTestEnabled is no longer cached on this service instance"). The disposition function (`PostTranscodeDispositionService._DecideFromInputs`) now reads gate state fresh per call. The remaining operator pain -- no global UI lever to bypass VMAF for everything -- is addressed by `post-transcode-disposition.feature.md` criterion 26 (2026-05-16): new `PostTranscodeGateConfig.QualityTestEnabled` column + checkbox on `/settings` Post-Transcode card. When OFF, every successful transcode emits `Disposition='BypassReplace', DispositionReason='QualityTestingGloballyDisabled'` and goes straight to FileReplacement. Mid-flight toggle is safe (no caching).
+
+---
+
+### [BUG - HISTORICAL] QualityTestEnabled flip mid-run does not reach the transcode producer; in-flight job replaces file with no VMAF (original report)
 **Date:** 2026-05-09
 **Affects:** WorkerService.feature.md (criterion 2, criterion 15), `Features/TranscodeJob/ProcessTranscodeQueueService.py:100-101, 885-900, 1329`, `Features/QualityTesting/ShouldQualityTestService.py:34-57`
 

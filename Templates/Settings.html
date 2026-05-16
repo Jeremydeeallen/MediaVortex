@@ -6,596 +6,494 @@
 <div class="container-fluid px-4">
     {% include '_admin_subnav.html' %}
 </div>
-<div class="row">
+<style>
+    /* Flat settings layout -- replaces the old card stack. Headers keep `.card-header`
+       so the existing chevron-toggle JS (Settings.html ~line 1204) still works. */
+    .settings-page { max-width: 1400px; }
+    .settings-section { border-bottom: 1px solid #e5e7eb; }
+    .settings-section:first-of-type { border-top: 1px solid #e5e7eb; }
+    .settings-section .card-header {
+        cursor: pointer; padding: .65rem 1rem;
+        background: #f8f9fa; border: 0; border-radius: 0;
+        display: flex; justify-content: space-between; align-items: center;
+        font-weight: 600;
+    }
+    .settings-section .card-header:hover { background: #eef1f5; }
+    .settings-section .collapse, .settings-section .collapsing { background: #fff; }
+    .settings-table { margin-bottom: 0; }
+    .settings-table > tbody > tr > th {
+        width: 38%; font-weight: 500; vertical-align: middle;
+        background: #fbfbfc; padding: .55rem 1rem;
+    }
+    .settings-table > tbody > tr > th small { font-weight: 400; }
+    .settings-table > tbody > tr > td { vertical-align: middle; padding: .55rem 1rem; }
+    .settings-block { padding: 1rem; }
+</style>
+
+<div class="row settings-page mx-auto">
     <div class="col-12">
-        <h2><i class="fas fa-cog"></i> Settings</h2>
+        <h2 class="mb-1"><i class="fas fa-cog"></i> Settings</h2>
+        <p class="text-muted small mb-3">Click any section to expand. Settings are grouped by topic; the advanced section at the bottom shows every raw key.</p>
 
-        <!-- Library Default Profile (always visible, no collapse) -->
-        <div class="card mt-3 border-warning">
-            <div class="card-header bg-warning bg-opacity-25">
-                <h5 class="mb-0"><i class="fas fa-star text-warning me-2"></i> Library Default Profile</h5>
+        <!-- =============== SECTION: Library defaults =============== -->
+        <div class="settings-section">
+            <div class="card-header" data-bs-toggle="collapse" data-bs-target="#SecLibraryDefaults">
+                <span><i class="fas fa-star text-warning me-2"></i> Library defaults</span>
+                <i class="fas fa-chevron-down"></i>
             </div>
-            <div class="card-body">
-                <p class="text-muted small mb-2">
-                    All shows inherit this profile unless explicitly overridden on the
-                    <a href="/ShowSettings">Media page</a>. Drives compliance evaluation
-                    (<code>IsCompliant</code>, <code>RecommendedMode</code>, queue routing).
-                </p>
-                <div class="row g-2 align-items-center">
-                    <div class="col-md-8">
-                        <select id="DefaultProfileSelect" class="form-select">
-                            <option value="">-- Loading... --</option>
-                        </select>
-                    </div>
-                    <div class="col-md-4">
-                        <button class="btn btn-primary w-100" id="SaveDefaultProfileBtn" onclick="SaveDefaultProfile()" disabled>
-                            <i class="fas fa-save me-1"></i> Save Default
-                        </button>
-                    </div>
-                </div>
-                <small class="text-muted mt-2 d-block" id="DefaultProfileStatus"></small>
-            </div>
-        </div>
-
-
-        <!-- Scan Directory Management Section -->
-        <div class="card mt-4">
-            <div class="card-header bg-light" data-bs-toggle="collapse" data-bs-target="#ScanDirectorySection" style="cursor: pointer;">
-                <div class="d-flex justify-content-between align-items-center">
-                    <h5 class="mb-0">
-                        <i class="fas fa-folder-open"></i> Scan Directory Management
-                    </h5>
-                    <i class="fas fa-chevron-down"></i>
-                </div>
-            </div>
-            <div class="collapse" id="ScanDirectorySection">
-                <div class="card-body">
-                    <div class="d-flex justify-content-between align-items-center mb-3">
-                        <h6 class="mb-0">Scan Directories</h6>
-                        <button class="btn btn-primary" onclick="ShowAddScanDirectoryModal()">
-                            <i class="fas fa-plus"></i> Add Scan Directory
-                        </button>
-                    </div>
-
-                    <!-- Scan Directories List -->
-                    <div id="ScanDirectoriesList">
-                        <!-- Scan directories will be loaded here -->
-                    </div>
-
-                    <hr class="my-4">
-
-                    <!-- Excluded Directories -->
-                    <h6 class="fw-bold mb-3"><i class="fas fa-ban text-danger me-2"></i> Excluded Directories</h6>
-                    <p class="text-muted small mb-3">These directories will be skipped during scanning.</p>
-                    <div class="table-responsive mb-3" style="max-height: 300px; overflow-y: auto;">
-                        <table class="table table-hover table-sm mb-0">
-                            <thead class="table-light">
-                                <tr>
-                                    <th style="width: 80%;">Directory Path</th>
-                                    <th style="width: 20%;" class="text-center">Action</th>
-                                </tr>
-                            </thead>
-                            <tbody id="ExcludedDirectoriesTableBody">
-                                <tr><td colspan="2" class="text-center text-muted"><i class="fas fa-spinner fa-spin me-2"></i> Loading...</td></tr>
-                            </tbody>
-                        </table>
-                    </div>
-                    <div class="row g-2">
-                        <div class="col-md-9">
-                            <input type="text" class="form-control" id="NewExcludedDirectoryInput"
-                                   placeholder="Enter directory path to exclude (e.g., Z:\Videos\downloads)">
-                        </div>
-                        <div class="col-md-3">
-                            <button class="btn btn-success w-100" onclick="AddExcludedDirectory()">
-                                <i class="fas fa-plus me-1"></i> Add Exclusion
-                            </button>
-                        </div>
-                    </div>
-
-                    <hr class="my-4">
-
-                    <!-- Continuous Scanning Service -->
-                    <h6 class="fw-bold mb-3"><i class="fas fa-sync-alt text-primary me-2"></i> Continuous Scanning</h6>
-                    <div class="d-flex align-items-center gap-3 mb-2">
-                        <span class="badge bg-secondary" id="ContinuousScanStatusBadge" style="font-size: 0.8rem;">Not Running</span>
-                        <small class="text-muted" id="ContinuousScanActivity">Service disabled</small>
-                        <div class="ms-auto d-flex align-items-center gap-2">
-                            <input type="number" class="form-control form-control-sm" id="ScanIntervalInput" 
-                                   value="60" min="15" max="1440" style="width: 70px;" title="Scan interval in minutes">
-                            <small class="text-muted">min</small>
-                            <div class="btn-group" role="group">
-                                <button type="button" class="btn btn-success btn-sm" id="EnableContinuousScanBtn">
-                                    <i class="fas fa-play me-1"></i> Enable
-                                </button>
-                                <button type="button" class="btn btn-danger btn-sm" id="DisableContinuousScanBtn" disabled>
-                                    <i class="fas fa-stop me-1"></i> Stop
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                    <!-- Scan Stats (compact) -->
-                    <div class="row text-center g-2 mb-2" id="ScanStatsRow" style="display: none;">
-                        <div class="col">
-                            <small class="text-muted d-block">Scanned</small>
-                            <strong id="ContinuousScanScanned" class="small">0</strong>
-                        </div>
-                        <div class="col">
-                            <small class="text-muted d-block">Changed</small>
-                            <strong id="ContinuousScanChanged" class="small text-primary">0</strong>
-                        </div>
-                        <div class="col">
-                            <small class="text-muted d-block">Last Scan</small>
-                            <span id="ContinuousScanLastCompleted" class="small">Never</span>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Worker Concurrency Section -->
-        <div class="card mt-4">
-            <div class="card-header bg-light" data-bs-toggle="collapse" data-bs-target="#WorkerConcurrencySection" style="cursor: pointer;">
-                <div class="d-flex justify-content-between align-items-center">
-                    <h5 class="mb-0">
-                        <i class="fas fa-server"></i> Worker Concurrency
-                    </h5>
-                    <i class="fas fa-chevron-down"></i>
-                </div>
-            </div>
-            <div class="collapse" id="WorkerConcurrencySection">
-                <div class="card-body">
-                    <p class="text-muted small mb-3">Set per-capability concurrent job limits for each worker. Changes take effect on next worker restart.</p>
-                    <div id="WorkerConcurrencyTable">
-                        <div class="text-center text-muted py-2">Loading...</div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Profile Management Section -->
-        <div class="card mt-4">
-            <div class="card-header bg-light" data-bs-toggle="collapse" data-bs-target="#ProfileManagementSection" style="cursor: pointer;">
-                <div class="d-flex justify-content-between align-items-center">
-                    <h5 class="mb-0">
-                        <i class="fas fa-sliders-h"></i> Profile Management
-                    </h5>
-                    <i class="fas fa-chevron-down"></i>
-                </div>
-            </div>
-            <div class="collapse" id="ProfileManagementSection">
-                <div class="card-body">
-
-                    <div class="d-flex justify-content-between align-items-center mb-3">
-                        <h6 class="mb-0">Transcoding Profiles</h6>
-                        <button class="btn btn-primary" onclick="ShowCreateProfileModal()">
-                            <i class="fas fa-plus"></i> Add New Profile
-                        </button>
-                    </div>
-
-                    <!-- Profiles List -->
-                    <div id="ProfilesList">
-                        <!-- Profiles will be loaded here -->
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- FFmpeg/FFprobe Path Management Section -->
-        <div class="card mt-4">
-            <div class="card-header bg-light" data-bs-toggle="collapse" data-bs-target="#FFmpegPathSection" style="cursor: pointer;">
-                <div class="d-flex justify-content-between align-items-center">
-                    <h5 class="mb-0">
-                        <i class="fas fa-video"></i> FFmpeg/FFprobe Path Management
-                    </h5>
-                    <i class="fas fa-chevron-down"></i>
-                </div>
-            </div>
-            <div class="collapse" id="FFmpegPathSection">
-                <div class="card-body">
-                    <div class="row">
-                        <div class="col-md-6">
-                            <div class="mb-3">
-                                <label for="FFmpegPath" class="form-label">FFmpeg Path (Relative to Project Root)</label>
-                                <input type="text" class="form-control" id="FFmpegPath" placeholder="FFmpegMaster\bin\ffmpeg.exe">
-                                <div class="form-text">Relative path from the project root directory</div>
-                            </div>
-                        </div>
-                        <div class="col-md-6">
-                            <div class="mb-3">
-                                <label for="FFprobePath" class="form-label">FFprobe Path (Relative to Project Root)</label>
-                                <input type="text" class="form-control" id="FFprobePath" placeholder="FFmpegMaster\bin\ffprobe.exe">
-                                <div class="form-text">Relative path from the project root directory</div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="row">
-                        <div class="col-12">
-                            <button class="btn btn-primary" onclick="SaveFFmpegPaths()">
-                                <i class="fas fa-save"></i> Save FFmpeg Paths
-                            </button>
-                            <button class="btn btn-secondary ms-2" onclick="TestFFmpegPaths()">
-                                <i class="fas fa-play"></i> Test Paths
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- CPU/Performance Settings Section -->
-        <div class="card mt-4">
-            <div class="card-header bg-light" data-bs-toggle="collapse" data-bs-target="#CpuPerformanceSection" style="cursor: pointer;">
-                <div class="d-flex justify-content-between align-items-center">
-                    <h5 class="mb-0">
-                        <i class="fas fa-microchip"></i> CPU/Performance Settings
-                    </h5>
-                    <i class="fas fa-chevron-down"></i>
-                </div>
-            </div>
-            <div class="collapse" id="CpuPerformanceSection">
-                <div class="card-body">
-                    <div class="row">
-                        <div class="col-md-6">
-                            <div class="mb-3">
-                                <label for="MaxCpuThreads" class="form-label">Maximum CPU Threads for Transcoding</label>
-                                <input type="number" class="form-control" id="MaxCpuThreads" min="1" max="32" value="16">
-                                <div class="form-text">
-                                    Maximum number of CPU threads for FFmpeg transcoding. 
-                                    <br><strong>Recommended for i9-14900KF (32 cores): 16 threads</strong>
-                                    <br>This prevents system overload and crashes while maintaining good performance.
+            <div id="SecLibraryDefaults" class="collapse">
+                <table class="table settings-table">
+                    <tbody>
+                        <tr>
+                            <th>Default profile for all shows
+                                <br><small class="text-muted">Used when a show has no explicit profile (override on the <a href="/ShowSettings">Media page</a>)</small>
+                            </th>
+                            <td>
+                                <div class="d-flex gap-2 align-items-center flex-wrap">
+                                    <select id="DefaultProfileSelect" class="form-select form-select-sm" style="max-width: 340px;">
+                                        <option value="">-- Loading... --</option>
+                                    </select>
+                                    <button class="btn btn-sm btn-primary" id="SaveDefaultProfileBtn" onclick="SaveDefaultProfile()" disabled>Save</button>
+                                    <small class="text-muted" id="DefaultProfileStatus"></small>
                                 </div>
-                            </div>
-                        </div>
-                        <div class="col-md-6">
-                            <div class="mb-3">
-                                <label class="form-label">CPU Information</label>
-                                <div class="alert alert-info">
-                                    <i class="fas fa-info-circle"></i>
-                                    <strong>Your System:</strong> i9-14900KF with 32 cores
-                                    <br><strong>Current Setting:</strong> <span id="CurrentCpuThreads">16</span> threads
-                                    <br><strong>Usage:</strong> <span id="CpuUsagePercentage">50%</span> of available cores
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="row">
-                        <div class="col-12">
-                            <button class="btn btn-primary" onclick="SaveCpuSettings()">
-                                <i class="fas fa-save"></i> Save CPU Settings
-                            </button>
-                            <button class="btn btn-secondary ms-2" onclick="LoadCpuSettings()">
-                                <i class="fas fa-sync"></i> Reload Settings
-                            </button>
-                        </div>
-                    </div>
-                </div>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
             </div>
         </div>
 
-        <!-- CPU Affinity Settings Section -->
-        <div class="card mt-4">
-            <div class="card-header bg-light" data-bs-toggle="collapse" data-bs-target="#CpuAffinitySection" style="cursor: pointer;">
-                <div class="d-flex justify-content-between align-items-center">
-                    <h5 class="mb-0">
-                        <i class="fas fa-microchip"></i> CPU Affinity &amp; Game Mode
-                    </h5>
-                    <i class="fas fa-chevron-down"></i>
-                </div>
+
+        <!-- =============== SECTION: Scanning =============== -->
+        <div class="settings-section">
+            <div class="card-header" data-bs-toggle="collapse" data-bs-target="#ScanDirectorySection">
+                <span><i class="fas fa-folder-open me-2"></i> Scanning &mdash; folders, exclusions, schedule</span>
+                <i class="fas fa-chevron-down"></i>
             </div>
-            <div class="collapse" id="CpuAffinitySection">
-                <div class="card-body">
-                    <div class="row">
-                        <div class="col-md-6">
-                            <div class="mb-3">
-                                <div class="form-check form-switch mb-3">
-                                    <input class="form-check-input" type="checkbox" id="CpuAffinityEnabled" checked>
-                                    <label class="form-check-label" for="CpuAffinityEnabled">
-                                        <strong>Enable CPU Affinity</strong>
-                                    </label>
-                                    <div class="form-text">
-                                        When enabled, FFmpeg processes are pinned to specific core types based on topology detection. Transcode jobs use P-cores for maximum speed; quality tests use E-cores to avoid contention. Pausing moves running jobs to E-cores (Game Mode).
+            <div id="ScanDirectorySection" class="collapse">
+                <table class="table settings-table">
+                    <tbody>
+                        <tr>
+                            <th>Folders to scan
+                                <br><small class="text-muted">MediaVortex looks here for media files</small>
+                            </th>
+                            <td>
+                                <div class="d-flex gap-2 mb-2 align-items-center">
+                                    <button class="btn btn-sm btn-primary" onclick="ShowAddScanDirectoryModal()"><i class="fas fa-plus me-1"></i> Add folder</button>
+                                </div>
+                                <div id="ScanDirectoriesList"></div>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>Folders to skip
+                                <br><small class="text-muted">Anything matching these paths is ignored</small>
+                            </th>
+                            <td>
+                                <div class="table-responsive mb-2" style="max-height: 240px; overflow-y: auto;">
+                                    <table class="table table-sm table-hover mb-0">
+                                        <thead class="table-light"><tr><th>Path</th><th style="width: 90px;" class="text-center">Remove</th></tr></thead>
+                                        <tbody id="ExcludedDirectoriesTableBody">
+                                            <tr><td colspan="2" class="text-center text-muted small">Loading...</td></tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                                <div class="input-group input-group-sm">
+                                    <input type="text" class="form-control" id="NewExcludedDirectoryInput" placeholder="Path to exclude (e.g. Z:\Videos\downloads)">
+                                    <button class="btn btn-success" onclick="AddExcludedDirectory()">Add</button>
+                                </div>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>Automatic re-scan
+                                <br><small class="text-muted">Periodically re-walk scan folders for new/changed files</small>
+                            </th>
+                            <td>
+                                <div class="d-flex flex-wrap align-items-center gap-2">
+                                    <span class="badge bg-secondary" id="ContinuousScanStatusBadge">Not Running</span>
+                                    <small class="text-muted" id="ContinuousScanActivity">Service disabled</small>
+                                    <div class="ms-auto d-flex align-items-center gap-2">
+                                        <label class="small text-muted mb-0">Every</label>
+                                        <input type="number" class="form-control form-control-sm" id="ScanIntervalInput" value="60" min="15" max="1440" style="width: 80px;">
+                                        <small class="text-muted">min</small>
+                                        <button type="button" class="btn btn-sm btn-success" id="EnableContinuousScanBtn">Enable</button>
+                                        <button type="button" class="btn btn-sm btn-danger" id="DisableContinuousScanBtn" disabled>Stop</button>
                                     </div>
                                 </div>
-                            </div>
-                        </div>
-                        <div class="col-md-6">
-                            <div class="mb-3">
-                                <label class="form-label">Topology Information</label>
-                                <div class="alert alert-info">
-                                    <i class="fas fa-info-circle"></i>
-                                    <strong>Status:</strong> <span id="CpuAffinityStatus">Loading...</span>
-                                    <br><strong>Active Jobs:</strong> <span id="CpuAffinityActiveJobs">0</span>
+                                <div class="row text-center g-2 mt-2 small" id="ScanStatsRow" style="display: none;">
+                                    <div class="col"><span class="text-muted">Scanned: </span><strong id="ContinuousScanScanned">0</strong></div>
+                                    <div class="col"><span class="text-muted">Changed: </span><strong id="ContinuousScanChanged" class="text-primary">0</strong></div>
+                                    <div class="col"><span class="text-muted">Last: </span><span id="ContinuousScanLastCompleted">Never</span></div>
                                 </div>
-                            </div>
-                        </div>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- =============== SECTION: Workers =============== -->
+        <div class="settings-section">
+            <div class="card-header" data-bs-toggle="collapse" data-bs-target="#WorkerConcurrencySection">
+                <span><i class="fas fa-server me-2"></i> Workers &mdash; how many jobs each machine runs at once</span>
+                <i class="fas fa-chevron-down"></i>
+            </div>
+            <div id="WorkerConcurrencySection" class="collapse">
+                <table class="table settings-table">
+                    <tbody>
+                        <tr>
+                            <th>Per-worker concurrency
+                                <br><small class="text-muted">Changes apply on next worker restart</small>
+                            </th>
+                            <td>
+                                <div id="WorkerConcurrencyTable">
+                                    <div class="text-center text-muted small py-2">Loading...</div>
+                                </div>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- =============== SECTION: Transcoding profiles =============== -->
+        <div class="settings-section">
+            <div class="card-header" data-bs-toggle="collapse" data-bs-target="#ProfileManagementSection">
+                <span><i class="fas fa-sliders-h me-2"></i> Transcoding profiles &mdash; presets used to encode video</span>
+                <i class="fas fa-chevron-down"></i>
+            </div>
+            <div id="ProfileManagementSection" class="collapse">
+                <div class="settings-block">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <small class="text-muted">Each profile defines codec, preset, film grain, and per-resolution bitrate/CRF targets.</small>
+                        <button class="btn btn-sm btn-primary" onclick="ShowCreateProfileModal()"><i class="fas fa-plus me-1"></i> New profile</button>
                     </div>
-                    <div class="row">
-                        <div class="col-md-6">
-                            <div class="mb-3">
-                                <label for="TranscodeCoreTier" class="form-label">Transcode Core Tier</label>
-                                <select class="form-select" id="TranscodeCoreTier">
-                                    <option value="performance" selected>P-Cores (Performance) — Recommended</option>
-                                    <option value="efficiency">E-Cores (Efficiency)</option>
-                                    <option value="all">All Cores</option>
-                                </select>
-                                <div class="form-text">
-                                    Which cores to assign transcoding jobs to. P-cores encode faster due to higher clock speeds and wider execution pipelines.
-                                </div>
-                            </div>
-                        </div>
-                        <div class="col-md-6">
-                            <div class="mb-3">
-                                <label for="QualityTestCoreTier" class="form-label">Quality Test Core Tier</label>
-                                <select class="form-select" id="QualityTestCoreTier">
-                                    <option value="performance">P-Cores (Performance)</option>
-                                    <option value="efficiency" selected>E-Cores (Efficiency) — Recommended</option>
-                                    <option value="all">All Cores</option>
-                                </select>
-                                <div class="form-text">
-                                    Which cores to assign VMAF quality test jobs to. E-cores prevent quality tests from stealing performance from active transcodes.
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="row">
-                        <div class="col-md-12">
-                            <hr>
-                            <h6 class="mb-3">Thermal Gate (Pre-Start Safety)</h6>
-                        </div>
-                    </div>
-                    <div class="row">
-                        <div class="col-md-4">
-                            <div class="mb-3">
-                                <div class="form-check form-switch mb-3">
-                                    <input class="form-check-input" type="checkbox" id="ThermalGateEnabled" checked>
-                                    <label class="form-check-label" for="ThermalGateEnabled">
-                                        <strong>Enable Thermal Gate</strong>
-                                    </label>
-                                    <div class="form-text">
-                                        Block new jobs from starting when the system is too hot. Requires LibreHardwareMonitor running for temperature data.
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="col-md-4">
-                            <div class="mb-3">
-                                <label for="ThermalPauseCriticalTemp" class="form-label">Critical Temperature (°C)</label>
-                                <input type="number" class="form-control" id="ThermalPauseCriticalTemp" min="80" max="100" step="0.1" value="90.0">
-                                <div class="form-text">
-                                    Average CPU temperature that blocks all new job starts until the system cools down.
-                                </div>
-                            </div>
-                        </div>
-                        <div class="col-md-4">
-                            <div class="mb-3">
-                                <label for="ThermalGateMaxTemp" class="form-label">Cool Core Threshold (°C)</label>
-                                <input type="number" class="form-control" id="ThermalGateMaxTemp" min="60" max="95" step="0.1" value="80.0">
-                                <div class="form-text">
-                                    Per-core temp threshold. A core below this is counted as "cool". Need at least 8 cool cores to start new work.
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="row">
-                        <div class="col-12">
-                            <button class="btn btn-primary" onclick="SaveCpuAffinitySettings()">
-                                <i class="fas fa-save"></i> Save CPU Affinity Settings
-                            </button>
-                            <button class="btn btn-secondary ms-2" onclick="LoadCpuAffinitySettings()">
-                                <i class="fas fa-sync"></i> Reload Settings
-                            </button>
-                        </div>
-                    </div>
+                    <div id="ProfilesList"></div>
                 </div>
             </div>
         </div>
 
-        <!-- Display Timezone Section -->
-        <div class="card mt-4">
-            <div class="card-header bg-light" data-bs-toggle="collapse" data-bs-target="#DisplayTimezoneSection" style="cursor: pointer;">
-                <div class="d-flex justify-content-between align-items-center">
-                    <h4 class="mb-0">
-                        <i class="fas fa-globe-americas"></i> Display Timezone
-                    </h4>
-                    <i class="fas fa-chevron-down"></i>
-                </div>
+        <!-- =============== SECTION: FFmpeg paths =============== -->
+        <div class="settings-section">
+            <div class="card-header" data-bs-toggle="collapse" data-bs-target="#FFmpegPathSection">
+                <span><i class="fas fa-video me-2"></i> FFmpeg / FFprobe binaries</span>
+                <i class="fas fa-chevron-down"></i>
             </div>
-            <div id="DisplayTimezoneSection" class="collapse show">
-                <div class="card-body">
-                    <p class="text-muted small mb-2">
-                        Storage is always UTC. This setting only changes how timestamps are
-                        rendered in the web UI. WebService caches the value per-process &mdash;
-                        restart it after changing.
-                    </p>
-                    <div class="row g-2 align-items-end">
-                        <div class="col-md-6">
-                            <label class="form-label">IANA timezone name</label>
-                            <select id="DisplayTimezoneSelect" class="form-select">
-                                <option value="UTC">UTC</option>
-                                <option value="America/Chicago">America/Chicago (Central)</option>
-                                <option value="America/New_York">America/New_York (Eastern)</option>
-                                <option value="America/Denver">America/Denver (Mountain)</option>
-                                <option value="America/Los_Angeles">America/Los_Angeles (Pacific)</option>
-                                <option value="America/Phoenix">America/Phoenix (Arizona)</option>
-                                <option value="America/Anchorage">America/Anchorage (Alaska)</option>
-                                <option value="Pacific/Honolulu">Pacific/Honolulu (Hawaii)</option>
-                                <option value="Europe/London">Europe/London</option>
-                                <option value="Europe/Berlin">Europe/Berlin</option>
-                                <option value="Asia/Tokyo">Asia/Tokyo</option>
-                                <option value="Australia/Sydney">Australia/Sydney</option>
-                            </select>
-                        </div>
-                        <div class="col-md-4">
-                            <label class="form-label">Or enter custom IANA name</label>
-                            <input type="text" id="DisplayTimezoneCustom" class="form-control" placeholder="e.g. Europe/Paris" />
-                        </div>
-                        <div class="col-md-2">
-                            <button class="btn btn-primary w-100" onclick="SaveDisplayTimezone()">
-                                <i class="fas fa-save"></i> Save
-                            </button>
-                        </div>
-                    </div>
-                    <div class="mt-2">
-                        <small class="text-muted">
-                            Current value: <code id="DisplayTimezoneCurrent">(loading...)</code>
-                        </small>
-                    </div>
-                </div>
+            <div id="FFmpegPathSection" class="collapse">
+                <table class="table settings-table">
+                    <tbody>
+                        <tr>
+                            <th>FFmpeg executable
+                                <br><small class="text-muted">Path relative to the project root</small>
+                            </th>
+                            <td><input type="text" class="form-control form-control-sm" id="FFmpegPath" placeholder="FFmpegMaster\bin\ffmpeg.exe"></td>
+                        </tr>
+                        <tr>
+                            <th>FFprobe executable
+                                <br><small class="text-muted">Path relative to the project root</small>
+                            </th>
+                            <td><input type="text" class="form-control form-control-sm" id="FFprobePath" placeholder="FFmpegMaster\bin\ffprobe.exe"></td>
+                        </tr>
+                        <tr>
+                            <th></th>
+                            <td>
+                                <button class="btn btn-sm btn-primary" onclick="SaveFFmpegPaths()">Save paths</button>
+                                <button class="btn btn-sm btn-secondary ms-1" onclick="TestFFmpegPaths()">Test paths</button>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
             </div>
         </div>
 
-        <!-- Queue Tuning -- marginal-savings-gate.feature.md criteria 13-15 -->
-        <div class="card mt-4">
-            <div class="card-header bg-light" data-bs-toggle="collapse" data-bs-target="#QueueTuningSection" style="cursor: pointer;">
-                <div class="d-flex justify-content-between align-items-center">
-                    <h4 class="mb-0">
-                        <i class="fas fa-filter"></i> Queue Tuning
-                    </h4>
-                    <i class="fas fa-chevron-down"></i>
-                </div>
+        <!-- =============== SECTION: CPU limits =============== -->
+        <div class="settings-section">
+            <div class="card-header" data-bs-toggle="collapse" data-bs-target="#CpuPerformanceSection">
+                <span><i class="fas fa-microchip me-2"></i> CPU limits &mdash; how many threads FFmpeg may use</span>
+                <i class="fas fa-chevron-down"></i>
+            </div>
+            <div id="CpuPerformanceSection" class="collapse">
+                <table class="table settings-table">
+                    <tbody>
+                        <tr>
+                            <th>Maximum threads per transcode
+                                <br><small class="text-muted">Lower = less system load, slower encode. ~50% of cores is a safe default.</small>
+                            </th>
+                            <td>
+                                <div class="d-flex gap-2 align-items-center flex-wrap">
+                                    <input type="number" class="form-control form-control-sm" id="MaxCpuThreads" min="1" max="32" value="16" style="max-width: 120px;">
+                                    <small class="text-muted">Currently using <span id="CurrentCpuThreads">16</span> threads (<span id="CpuUsagePercentage">50%</span> of cores)</small>
+                                </div>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th></th>
+                            <td>
+                                <button class="btn btn-sm btn-primary" onclick="SaveCpuSettings()">Save</button>
+                                <button class="btn btn-sm btn-secondary ms-1" onclick="LoadCpuSettings()">Reload</button>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- =============== SECTION: CPU affinity & thermal =============== -->
+        <div class="settings-section">
+            <div class="card-header" data-bs-toggle="collapse" data-bs-target="#CpuAffinitySection">
+                <span><i class="fas fa-microchip me-2"></i> CPU affinity &amp; thermal safety &mdash; pin jobs to cores, stop on overheat</span>
+                <i class="fas fa-chevron-down"></i>
+            </div>
+            <div id="CpuAffinitySection" class="collapse">
+                <table class="table settings-table">
+                    <tbody>
+                        <tr>
+                            <th>Pin jobs to core types
+                                <br><small class="text-muted">Transcodes get P-cores; quality tests get E-cores. Pausing moves all jobs to E-cores ("Game Mode").</small>
+                            </th>
+                            <td>
+                                <div class="form-check form-switch">
+                                    <input class="form-check-input" type="checkbox" id="CpuAffinityEnabled" role="switch" checked>
+                                    <label class="form-check-label" for="CpuAffinityEnabled">CPU affinity enabled</label>
+                                </div>
+                                <small class="text-muted">Status: <span id="CpuAffinityStatus">Loading...</span> &middot; Active jobs: <span id="CpuAffinityActiveJobs">0</span></small>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>Cores for transcode jobs</th>
+                            <td>
+                                <select class="form-select form-select-sm" id="TranscodeCoreTier" style="max-width: 340px;">
+                                    <option value="performance" selected>P-cores (fastest) &mdash; recommended</option>
+                                    <option value="efficiency">E-cores (slower, low contention)</option>
+                                    <option value="all">All cores</option>
+                                </select>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>Cores for quality tests (VMAF)</th>
+                            <td>
+                                <select class="form-select form-select-sm" id="QualityTestCoreTier" style="max-width: 340px;">
+                                    <option value="performance">P-cores</option>
+                                    <option value="efficiency" selected>E-cores (recommended)</option>
+                                    <option value="all">All cores</option>
+                                </select>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>Block new jobs when CPU is hot
+                                <br><small class="text-muted">Needs LibreHardwareMonitor running for temperature data</small>
+                            </th>
+                            <td>
+                                <div class="form-check form-switch">
+                                    <input class="form-check-input" type="checkbox" id="ThermalGateEnabled" role="switch" checked>
+                                    <label class="form-check-label" for="ThermalGateEnabled">Thermal gate enabled</label>
+                                </div>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>Critical CPU temperature (&deg;C)
+                                <br><small class="text-muted">Average temp at which all new starts are blocked</small>
+                            </th>
+                            <td><input type="number" class="form-control form-control-sm" id="ThermalPauseCriticalTemp" min="80" max="100" step="0.1" value="90.0" style="max-width: 120px;"></td>
+                        </tr>
+                        <tr>
+                            <th>"Cool" core threshold (&deg;C)
+                                <br><small class="text-muted">A core below this counts as cool; need 8+ cool cores to start new work</small>
+                            </th>
+                            <td><input type="number" class="form-control form-control-sm" id="ThermalGateMaxTemp" min="60" max="95" step="0.1" value="80.0" style="max-width: 120px;"></td>
+                        </tr>
+                        <tr>
+                            <th></th>
+                            <td>
+                                <button class="btn btn-sm btn-primary" onclick="SaveCpuAffinitySettings()">Save</button>
+                                <button class="btn btn-sm btn-secondary ms-1" onclick="LoadCpuAffinitySettings()">Reload</button>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- =============== SECTION: Display timezone =============== -->
+        <div class="settings-section">
+            <div class="card-header" data-bs-toggle="collapse" data-bs-target="#DisplayTimezoneSection">
+                <span><i class="fas fa-globe-americas me-2"></i> Display timezone &mdash; how timestamps are shown</span>
+                <i class="fas fa-chevron-down"></i>
+            </div>
+            <div id="DisplayTimezoneSection" class="collapse">
+                <table class="table settings-table">
+                    <tbody>
+                        <tr>
+                            <th>Web UI timezone
+                                <br><small class="text-muted">Storage is always UTC; this only affects how times render. WebService caches the value &mdash; restart after changing.</small>
+                            </th>
+                            <td>
+                                <div class="d-flex gap-2 align-items-center flex-wrap">
+                                    <select id="DisplayTimezoneSelect" class="form-select form-select-sm" style="max-width: 300px;">
+                                        <option value="UTC">UTC</option>
+                                        <option value="America/Chicago">America/Chicago (Central)</option>
+                                        <option value="America/New_York">America/New_York (Eastern)</option>
+                                        <option value="America/Denver">America/Denver (Mountain)</option>
+                                        <option value="America/Los_Angeles">America/Los_Angeles (Pacific)</option>
+                                        <option value="America/Phoenix">America/Phoenix (Arizona)</option>
+                                        <option value="America/Anchorage">America/Anchorage (Alaska)</option>
+                                        <option value="Pacific/Honolulu">Pacific/Honolulu (Hawaii)</option>
+                                        <option value="Europe/London">Europe/London</option>
+                                        <option value="Europe/Berlin">Europe/Berlin</option>
+                                        <option value="Asia/Tokyo">Asia/Tokyo</option>
+                                        <option value="Australia/Sydney">Australia/Sydney</option>
+                                    </select>
+                                    <span class="text-muted small">or</span>
+                                    <input type="text" id="DisplayTimezoneCustom" class="form-control form-control-sm" placeholder="custom IANA name (e.g. Europe/Paris)" style="max-width: 280px;">
+                                    <button class="btn btn-sm btn-primary" onclick="SaveDisplayTimezone()">Save</button>
+                                </div>
+                                <small class="text-muted d-block mt-1">Current: <code id="DisplayTimezoneCurrent">(loading...)</code></small>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- =============== SECTION: Queue admission =============== -->
+        <div class="settings-section">
+            <div class="card-header" data-bs-toggle="collapse" data-bs-target="#QueueTuningSection">
+                <span><i class="fas fa-filter me-2"></i> Queue admission &mdash; what gets queued for transcode</span>
+                <i class="fas fa-chevron-down"></i>
             </div>
             <div id="QueueTuningSection" class="collapse">
-                <div class="card-body">
-                    <p class="text-muted small mb-3">
-                        Data-driven knobs for the transcode queue admission gate.
-                        Same-resolution + sufficient-savings is admitted; upscales and marginal-savings cases are blocked.
-                    </p>
-
-                    <h5 class="mt-2">Gate threshold</h5>
-                    <div class="row g-2 mb-3">
-                        <div class="col-md-4">
-                            <label class="form-label small">Minimum estimated savings (MB)</label>
-                            <input type="number" id="MinTranscodeSavingsMB" class="form-control form-control-sm" min="0">
-                        </div>
-                        <div class="col-md-4">
-                            <label class="form-label small">Missing-estimate policy</label>
-                            <select id="MissingEstimatePolicy" class="form-select form-select-sm">
-                                <option value="admit">admit (fail-open, log warning)</option>
-                                <option value="block">block (fail-closed)</option>
-                            </select>
-                        </div>
-                        <div class="col-md-4 d-flex align-items-end">
-                            <button class="btn btn-sm btn-primary" onclick="SaveQueueAdmissionConfig()">
-                                <i class="fas fa-save"></i> Save threshold
-                            </button>
-                        </div>
-                    </div>
-
-                    <h5 class="mt-4">CRF -> kbps estimates</h5>
-                    <p class="text-muted small mb-2">
-                        Used when a profile is CRF-only (VideoBitrateKbps=0). Seeded from observed transcode history; edit to override.
-                    </p>
-                    <div class="table-responsive">
-                        <table class="table table-sm table-striped" id="CrfEstimatesTable">
-                            <thead>
-                                <tr>
-                                    <th>Codec</th>
-                                    <th>Resolution</th>
-                                    <th>CRF</th>
-                                    <th>Estimated kbps</th>
-                                    <th>Source</th>
-                                    <th>Last updated</th>
-                                </tr>
-                            </thead>
-                            <tbody id="CrfEstimatesTableBody">
-                                <tr><td colspan="6" class="text-center text-muted">Loading...</td></tr>
-                            </tbody>
-                        </table>
-                    </div>
-
-                    <h5 class="mt-4">Codec compatibility</h5>
-                    <p class="text-muted small mb-2">
-                        Acceptable video codecs, MP4-compatible audio codecs, and acceptable containers. Toggle to disable a value (the gate will then route files using that codec/container differently).
-                    </p>
-                    <div class="row g-3">
-                        <div class="col-md-4">
-                            <h6 class="text-muted small">Containers</h6>
-                            <div id="CompatContainers" class="border rounded p-2"></div>
-                        </div>
-                        <div class="col-md-4">
-                            <h6 class="text-muted small">Video codecs</h6>
-                            <div id="CompatVideoCodecs" class="border rounded p-2"></div>
-                        </div>
-                        <div class="col-md-4">
-                            <h6 class="text-muted small">Audio codecs (MP4)</h6>
-                            <div id="CompatAudioCodecs" class="border rounded p-2"></div>
-                        </div>
-                    </div>
-                </div>
+                <table class="table settings-table">
+                    <tbody>
+                        <tr>
+                            <th>Minimum estimated savings (MB)
+                                <br><small class="text-muted">Files predicted to save less than this are blocked from the queue</small>
+                            </th>
+                            <td><input type="number" id="MinTranscodeSavingsMB" class="form-control form-control-sm" min="0" style="max-width: 140px;"></td>
+                        </tr>
+                        <tr>
+                            <th>When savings can't be estimated
+                                <br><small class="text-muted">No history/CRF data for this codec+resolution+CRF combo</small>
+                            </th>
+                            <td>
+                                <select id="MissingEstimatePolicy" class="form-select form-select-sm" style="max-width: 340px;">
+                                    <option value="admit">Admit anyway (fail-open, log warning)</option>
+                                    <option value="block">Block (fail-closed)</option>
+                                </select>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th></th>
+                            <td><button class="btn btn-sm btn-primary" onclick="SaveQueueAdmissionConfig()">Save threshold</button></td>
+                        </tr>
+                        <tr>
+                            <th>CRF &rarr; kbps lookup table
+                                <br><small class="text-muted">Used to estimate output size for CRF-only profiles. Seeded from observed history; editable.</small>
+                            </th>
+                            <td>
+                                <div class="table-responsive">
+                                    <table class="table table-sm table-striped" id="CrfEstimatesTable">
+                                        <thead>
+                                            <tr><th>Codec</th><th>Resolution</th><th>CRF</th><th>Est. kbps</th><th>Source</th><th>Updated</th></tr>
+                                        </thead>
+                                        <tbody id="CrfEstimatesTableBody">
+                                            <tr><td colspan="6" class="text-center text-muted small">Loading...</td></tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>Acceptable codecs and containers
+                                <br><small class="text-muted">Toggle to disable; the gate will then re-route files using disabled values</small>
+                            </th>
+                            <td>
+                                <div class="row g-2">
+                                    <div class="col-md-4">
+                                        <div class="small text-muted mb-1">Containers</div>
+                                        <div id="CompatContainers" class="border rounded p-2"></div>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <div class="small text-muted mb-1">Video codecs</div>
+                                        <div id="CompatVideoCodecs" class="border rounded p-2"></div>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <div class="small text-muted mb-1">Audio codecs (MP4)</div>
+                                        <div id="CompatAudioCodecs" class="border rounded p-2"></div>
+                                    </div>
+                                </div>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
             </div>
         </div>
 
-        <!-- Post-Transcode Disposition -->
-        <div class="card mt-4">
-            <div class="card-header bg-light" data-bs-toggle="collapse" data-bs-target="#PostTranscodeSection" style="cursor: pointer;">
-                <div class="d-flex justify-content-between align-items-center">
-                    <h4 class="mb-0">
-                        <i class="fas fa-balance-scale"></i> Post-Transcode Disposition
-                    </h4>
-                    <i class="fas fa-chevron-down"></i>
-                </div>
+        <!-- =============== SECTION: After transcode =============== -->
+        <div class="settings-section">
+            <div class="card-header" data-bs-toggle="collapse" data-bs-target="#PostTranscodeSection">
+                <span><i class="fas fa-balance-scale me-2"></i> After transcode &mdash; when to replace the original</span>
+                <i class="fas fa-chevron-down"></i>
             </div>
             <div id="PostTranscodeSection" class="collapse">
-                <div class="card-body">
-                    <p class="text-muted small mb-3">
-                        After a transcode finishes, the disposition gate decides Replace vs BypassReplace vs NoReplace based on VMAF and service status.
-                        VMAF below Min &rarr; NoReplace (re-encode candidate). Min &le; VMAF &le; Max &rarr; Replace. VMAF above Max &rarr; Replace (efficiency win, but flagged).
-                    </p>
-
-                    <div class="row g-2 mb-3">
-                        <div class="col-md-3">
-                            <label class="form-label small">Auto-replace VMAF minimum</label>
-                            <input type="number" step="0.1" id="VmafAutoReplaceMinThreshold" class="form-control form-control-sm" min="0" max="100">
-                            <div class="form-text small">VMAF &lt; this value &rarr; NoReplace</div>
-                        </div>
-                        <div class="col-md-3">
-                            <label class="form-label small">Auto-replace VMAF maximum</label>
-                            <input type="number" step="0.1" id="VmafAutoReplaceMaxThreshold" class="form-control form-control-sm" min="0" max="100">
-                            <div class="form-text small">VMAF &gt; this value &rarr; Replace (logged as above-max)</div>
-                        </div>
-                        <div class="col-md-3">
-                            <label class="form-label small">When VMAF unavailable</label>
-                            <select id="WhenVmafUnavailable" class="form-select form-select-sm">
-                                <option value="block">block (NoReplace, audit reason)</option>
-                                <option value="bypass">bypass (Replace without VMAF)</option>
-                            </select>
-                            <div class="form-text small">Applies when QualityTestService is paused or no capable worker</div>
-                        </div>
-                        <div class="col-md-3 d-flex align-items-end">
-                            <button class="btn btn-sm btn-primary" onclick="SavePostTranscodeGateConfig()">
-                                <i class="fas fa-save"></i> Save
-                            </button>
-                        </div>
-                    </div>
-
-                    <p class="text-muted small mb-0">
-                        <span id="PostTranscodeLastUpdated"></span>
-                    </p>
-                </div>
+                <table class="table settings-table">
+                    <tbody>
+                        <tr>
+                            <th>Run VMAF quality tests
+                                <br><small class="text-muted">Master switch. When OFF, every successful transcode replaces the original without quality testing. Audit reason: <code>QualityTestingGloballyDisabled</code>.</small>
+                            </th>
+                            <td>
+                                <div class="form-check form-switch">
+                                    <input class="form-check-input" type="checkbox" id="QualityTestEnabled" role="switch">
+                                    <label class="form-check-label" for="QualityTestEnabled">VMAF quality testing enabled</label>
+                                </div>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>Minimum acceptable VMAF
+                                <br><small class="text-muted">Below this score, the transcode is rejected as too low quality</small>
+                            </th>
+                            <td><input type="number" step="0.1" id="VmafAutoReplaceMinThreshold" class="form-control form-control-sm" min="0" max="100" style="max-width: 140px;"></td>
+                        </tr>
+                        <tr>
+                            <th>Suspicious-high VMAF
+                                <br><small class="text-muted">Above this, still replace but flag as suspiciously high (possible identical content)</small>
+                            </th>
+                            <td><input type="number" step="0.1" id="VmafAutoReplaceMaxThreshold" class="form-control form-control-sm" min="0" max="100" style="max-width: 140px;"></td>
+                        </tr>
+                        <tr>
+                            <th>If VMAF can't run
+                                <br><small class="text-muted">Applies when no quality-test-capable worker is available</small>
+                            </th>
+                            <td>
+                                <select id="WhenVmafUnavailable" class="form-select form-select-sm" style="max-width: 340px;">
+                                    <option value="block">Block replacement (safer)</option>
+                                    <option value="bypass">Replace anyway without VMAF</option>
+                                </select>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th></th>
+                            <td>
+                                <button class="btn btn-sm btn-primary" onclick="SavePostTranscodeGateConfig()">Save</button>
+                                <small class="text-muted ms-2" id="PostTranscodeLastUpdated"></small>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
             </div>
         </div>
 
-        <!-- All System Settings (advanced) -->
-        <div class="card mt-4">
-            <div class="card-header bg-light" data-bs-toggle="collapse" data-bs-target="#AllSettingsSection" style="cursor: pointer;">
-                <div class="d-flex justify-content-between align-items-center">
-                    <h4 class="mb-0">
-                        <i class="fas fa-database"></i> All System Settings (advanced)
-                    </h4>
-                    <i class="fas fa-chevron-down"></i>
-                </div>
+        <!-- =============== SECTION: Advanced (all raw settings) =============== -->
+        <div class="settings-section">
+            <div class="card-header" data-bs-toggle="collapse" data-bs-target="#AllSettingsSection">
+                <span><i class="fas fa-database me-2"></i> Advanced &mdash; every raw setting in the database</span>
+                <i class="fas fa-chevron-down"></i>
             </div>
             <div id="AllSettingsSection" class="collapse">
-                <div class="card-body">
-                    <p class="text-muted small mb-2">
-                        Every row in the SystemSettings table. Edit values inline; click outside to save.
-                        Settings managed via the cards above (paths, CPU affinity, scan directories) are also listed here.
-                    </p>
+                <div class="settings-block">
+                    <p class="text-muted small mb-2">Every row in the SystemSettings table. Edit values inline; click outside to save. Settings managed in the sections above also appear here.</p>
                     <div class="d-flex gap-2 mb-2">
                         <input type="text" id="AllSettingsFilter" class="form-control form-control-sm" placeholder="Filter by key..." style="max-width: 300px;" oninput="ApplyAllSettingsFilter()">
-                        <button class="btn btn-sm btn-secondary" onclick="LoadAllSystemSettings()">
-                            <i class="fas fa-sync"></i> Reload
-                        </button>
+                        <button class="btn btn-sm btn-secondary" onclick="LoadAllSystemSettings()"><i class="fas fa-sync me-1"></i> Reload</button>
                     </div>
                     <div class="table-responsive">
                         <table class="table table-sm table-striped" id="AllSettingsTable">
@@ -604,11 +502,11 @@
                                     <th style="width: 30%;">Key</th>
                                     <th style="width: 45%;">Value</th>
                                     <th style="width: 10%;">Type</th>
-                                    <th style="width: 15%;">Last Modified</th>
+                                    <th style="width: 15%;">Last modified</th>
                                 </tr>
                             </thead>
                             <tbody id="AllSettingsTableBody">
-                                <tr><td colspan="4" class="text-center text-muted">Click Reload to load all settings</td></tr>
+                                <tr><td colspan="4" class="text-center text-muted small">Click Reload to load all settings</td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -2636,6 +2534,7 @@ function LoadPostTranscodeGateConfig() {
         $('#VmafAutoReplaceMinThreshold').val(R.Config.VmafAutoReplaceMinThreshold);
         $('#VmafAutoReplaceMaxThreshold').val(R.Config.VmafAutoReplaceMaxThreshold);
         $('#WhenVmafUnavailable').val(R.Config.WhenVmafUnavailable);
+        $('#QualityTestEnabled').prop('checked', !!R.Config.QualityTestEnabled);
         if (R.Config.LastUpdated) {
             $('#PostTranscodeLastUpdated').text('Last updated: ' + R.Config.LastUpdated.substring(0, 19).replace('T', ' '));
         }
@@ -2652,7 +2551,8 @@ function SavePostTranscodeGateConfig() {
     var Body = {
         VmafAutoReplaceMinThreshold: Min,
         VmafAutoReplaceMaxThreshold: Max,
-        WhenVmafUnavailable: $('#WhenVmafUnavailable').val()
+        WhenVmafUnavailable: $('#WhenVmafUnavailable').val(),
+        QualityTestEnabled: $('#QualityTestEnabled').is(':checked')
     };
     $.ajax({
         url: '/api/SystemSettings/PostTranscodeGateConfig',
