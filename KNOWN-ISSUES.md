@@ -285,7 +285,7 @@ Worker process memory is fine (~279 MB). The bottleneck is wall-clock from seque
 
 ---
 
-### [BUG - PARTIAL FIX 2026-05-16] VMAF distribution becomes bimodal on held-frame animation -- mean/HMean/P5 unreliable until motion-filter applied
+### [BUG - PARTIAL FIX 2026-05-16] VMAF distribution becomes bimodal on held-frame content -- mean/HMean/P5 unreliable until motion-filter applied
 **Date:** 2026-05-10 | **Investigated + partial fix:** 2026-05-16
 
 **Re-classified 2026-05-16:** the original framing pinned this on MKV containers, but a controlled experiment ruled the container out. The real cause is libvmaf mis-scoring held-frame animation (animation-on-2s/3s). The fix is motion-filtered pooling, not a filter-chain change.
@@ -304,9 +304,21 @@ Worker process memory is fine (~279 MB). The bottleneck is wall-clock from seque
 
 Every filter-chain mitigation produced byte-identical or near-identical results. ffprobe confirmed Minnie's source MKV and encoded MP4 have IDENTICAL color metadata (`color_range=tv`, `color_space=bt709`, `color_transfer=bt709`, `color_primaries=bt709`); only pix_fmt differs (8-bit source, 10-bit encoded). The bug doc's color-metadata-mismatch hypothesis applies to Black Butler's `color_range=unknown` case but is NOT the cause on Minnie's, yet Minnie's bimodal'd just as hard.
 
-**Actual cause:** libvmaf's `integer_motion` elementary feature is the temporal absolute difference between consecutive reference frames. Cross-tabulating motion vs VMAF on Minnie's: 41.3% of source frames have motion=0 (1783 of 4321), and 281 of those score VMAF<10. Animation-on-2s/3s is the standard CG / anime production technique where each drawing is held for 2-3 video frames -- so a large fraction of consecutive source frames are exact duplicates by design. VMAF model 0.6.1 was trained on continuous-motion live-action and produces wildly wrong scores on motion=0 frames even when the encoded picture is visually identical to the source. PNG stills extracted at the VMAF=0 frames confirm: encoder is fine, libvmaf is mis-measuring.
+**Actual cause:** libvmaf's `integer_motion` elementary feature is the temporal absolute difference between consecutive reference frames. Cross-tabulating motion vs VMAF on Minnie's: 41.3% of source frames have motion=0 (1783 of 4321), and 281 of those score VMAF<10. VMAF model 0.6.1 was trained on continuous-motion live-action and produces wildly wrong scores on motion=0 frames even when the encoded picture is visually identical to the source. PNG stills extracted at the VMAF=0 frames confirm: encoder is fine, libvmaf is mis-measuring.
 
-The Office S00E05 result in the original report (live action that also bimodal'd) is consistent: it's an "S00" special/extras episode, likely with lots of static title cards and photo montages that produce motion=0 frames just as animation does.
+**The trigger is byte-identical consecutive frames, not "animation."** Production-DB cross-check 2026-05-16 against shows with VMAF data:
+
+| Show | Type | Mean | P5 | StdDev |
+|---|---|---|---|---|
+| Pokémon S20E10 | Hand-drawn anime | 71.5 | 0.0 | 35.1 |
+| Real Housewives S03E22 | Reality TV | 76.6 | 9.2 | 29.8 |
+| Steven Universe S05E14 | 2D Western animation | 76.8 | 18.9 | 22.7 |
+| Bunk'd S02E11 | Disney sitcom | 78.3 | 22.7 | 24.7 |
+| The Bear S03E10 | Live-action drama | 79.4 | 10.8 | 27.8 |
+| **Garfield Show S01E19** | **Modern CGI** | **97.7** | **95.7** | **1.5** |
+| Outlander | Live action | 96.7 | -- | 2.0 |
+
+Counter-intuitively, modern CGI is NOT a reliable predictor of the bug -- Garfield's render pipeline likely uses per-frame motion blur or sub-pixel dither that breaks byte-identity. The shows that DO bimodal are the ones with truly identical held frames: hand-drawn anime animated-on-2s, 2D Western animation with the same technique, reality TV with photo montages and title cards, sitcoms shot multicam on static stages, and dramas with title-card / chapter-card interludes. The Office S00E05 from the original report fits this pattern (S00 specials/extras with lots of static title content).
 
 A secondary contributor: even among motion>0 frames, ~114 frames score VMAF<10 due to low VIF/ADM values on low-spatial-information regions (flat color areas common in animation). VMAF's features fall outside their training distribution on stylized content. This residual can't be cleanly filtered without false positives, so even after motion filtering the metric remains less reliable on animation than on live action.
 
