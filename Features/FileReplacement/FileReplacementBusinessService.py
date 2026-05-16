@@ -813,6 +813,26 @@ class FileReplacementBusinessService:
             # Set TranscodedByMediaVortex to True
             media_file.TranscodedByMediaVortex = True
 
+            # Re-stamp filesystem timestamps from the NEW file on disk
+            # (FileScanning criterion 26: same naive-UTC pattern used by
+            # FileScanningBusinessService.GetFileModificationTime so cross-tz
+            # workers compute identical values). Without this, the next file
+            # scan reads disk mtime >> stored mtime and flips HasFileChanged
+            # True for every remux/transcode-replaced file -- wasteful
+            # rewrites and broken incremental-skip semantics.
+            try:
+                NewMtime = datetime.fromtimestamp(
+                    os.path.getmtime(LocalNewFilePath), tz=timezone.utc
+                ).replace(tzinfo=None)
+                media_file.FileModificationTime = NewMtime
+                media_file.LastModifiedDate = NewMtime
+                media_file.FileSize = os.path.getsize(LocalNewFilePath)
+            except Exception as e:
+                LoggingService.LogException(
+                    f"Failed to re-stamp filesystem timestamps from {LocalNewFilePath}",
+                    e, "FileReplacementBusinessService", "_UpdateMediaFilesAfterReplacement"
+                )
+
             # Update LastScannedDate to current time
             from datetime import datetime
             media_file.LastScannedDate = datetime.now(timezone.utc)

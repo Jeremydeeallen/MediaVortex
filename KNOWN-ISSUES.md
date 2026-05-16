@@ -2,6 +2,23 @@
 
 ## Open
 
+### [BUG] TranscodeAttempts failure rows lack ProfileName -- operator cannot tell what KIND of job failed from the row alone
+**Date:** 2026-05-16
+
+**What breaks:** When a remux or transcode job fails early (pre-flight, pre-FFmpeg), the resulting `TranscodeAttempts` row has `Success=False` and `ErrorMessage` populated (loud failure IS in the DB), but `ProfileName=NULL`. The queue row was DELETEd by the failure handler so its `ProcessingMode` context is gone. Operator looking at the row can see "this attempt failed with this error" but not "this was a Remux job" vs "this was an SVT-AV1 transcode." They must join `MediaFiles` via `MediaFileId` to recover even partial context.
+
+Confirmed against attempts 16240-16243 on 2026-05-16: 4 remux jobs failed with `"No active StorageRootResolutions row for (StorageRootId=None, WorkerName='...')"`. All 4 rows have `ProfileName=NULL`. The triggering test-setup script inserted queue rows without `StorageRootId`/`RelativePath` (script bug, not production bug), but the observability gap is real for ANY early failure in production too.
+
+**Note on FilePath=NULL:** That is BY DESIGN per the existing entry "FilePath used as denormalized natural key across 6+ tables" -- FilePath was removed from TranscodeAttempts INSERTs as part of the denormalization cleanup. Operators join via MediaFileId for path. ProfileName is NOT in that denormalization scope; it should be populated.
+
+**Violates:** `Features/TranscodeJob/TranscodeJob.feature.md` criterion 30 (added with this entry). Adjacent to criterion 29 (ErrorMessage content) -- this entry owns the ProfileName slice of the same "diagnose from attempts table alone" contract.
+
+**What "fixed" looks like:** Every `TranscodeAttempts` INSERT in the failure path sets `ProfileName` -- from the queue row's `ProcessingMode='Remux'` literal for remux jobs, from the resolved transcode profile name for transcode jobs -- regardless of how early in the pipeline the failure occurs. Verifiable: trigger a remux job that fails at the `Resolve()` call (e.g. insert a queue row with `StorageRootId=NULL`); query the resulting `TranscodeAttempts` row; observe `ProfileName='Remux'`.
+
+**Look first:** `Features/TranscodeJob/ProcessTranscodeQueueService.py` and `Features/TranscodeJob/ProcessRemuxQueueService.py` -- the failure path in `_ProcessJob` (or equivalent) that creates the TranscodeAttempt row when an exception is caught early. The fix is to populate `ProfileName` from the queue context BEFORE the work begins, not after.
+
+---
+
 ### [BUG] FindFuzzyFileMatch is O(N x M) -- reloads + regex-parses all RootFolder rows per new file
 **Date:** 2026-05-15
 
