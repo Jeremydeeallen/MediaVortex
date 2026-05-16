@@ -272,17 +272,25 @@ class FileManagerService:
         return totalSizeGB
     
     def GetFileNameFromPath(self, filePath: str) -> str:
-        """Extract filename from path with Unicode support."""
+        """Extract filename from a path. Handles both forward and backslash
+        separators regardless of the host OS, because MediaVortex stores
+        Windows-shaped canonical paths (`T:\\Show\\file.mkv`) and Linux
+        workers must extract the basename from those without `os.path.basename`
+        (which on POSIX treats `\\` as a literal character and returns the
+        whole string)."""
         try:
-            # Validate the path first
             isValid, validatedPath = self.ValidateUnicodePath(filePath)
-            
+
             if not isValid:
                 LoggingService.LogDebug(f"Unicode validation failed for path: {filePath}", 'GetFileNameFromPath', 'FileManagerService')
                 self.EncodingErrors.append(f"Unicode issue: {filePath}")
-            
-            return os.path.basename(filePath)
-            
+
+            # Last segment after any '/' or '\\' separator. Works for canonical
+            # Windows paths on Linux containers and for native local paths on
+            # either OS.
+            normalized = filePath.replace('\\', '/')
+            return normalized.rsplit('/', 1)[-1]
+
         except Exception as e:
             LoggingService.LogException("Error extracting filename", e, 'GetFileNameFromPath', 'FileManagerService')
             return "UnknownFile"
