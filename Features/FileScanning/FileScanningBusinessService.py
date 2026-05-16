@@ -1177,16 +1177,26 @@ class FileScanningBusinessService:
             return False
 
     def GetFileModificationTime(self, FilePath: str) -> datetime:
-        """Get the file modification time."""
+        """Return the file modification time as a NAIVE datetime in UTC.
+        Owns FileScanning.feature.md criterion 26 (cross-worker mtime
+        consistency). The DB column is `timestamp without time zone`; if
+        we let `fromtimestamp` interpret in the worker's local timezone,
+        two workers in different timezones produce different stored values
+        for the SAME physical file -- HasFileChanged then flips True for
+        every file every time a different worker scans, generating a
+        cross-worker write storm. Always interpreting the POSIX timestamp
+        in UTC and stripping the tz back to naive makes the stored value
+        worker-independent.
+        """
         try:
             ModificationTime = os.path.getmtime(FilePath)
             # Windows datetime.fromtimestamp() cannot handle negative timestamps (pre-1970 dates)
             if ModificationTime < 0:
                 ModificationTime = 0
-            return datetime.fromtimestamp(ModificationTime)
+            return datetime.fromtimestamp(ModificationTime, tz=timezone.utc).replace(tzinfo=None)
         except Exception as e:
             LoggingService.LogException(f"Error getting file modification time for {FilePath}", e, 'GetFileModificationTime', 'FileScanningBusinessService')
-            return datetime.now(timezone.utc)
+            return datetime.now(timezone.utc).replace(tzinfo=None)
 
     def HasFileChanged(self, MediaFile: MediaFileModel, CurrentSizeMB: float, CurrentFileName: str, CurrentModificationTime: datetime) -> bool:
         """Check if a file has changed by comparing size, name, and modification time."""
@@ -1228,9 +1238,10 @@ class FileScanningBusinessService:
             if not os.path.exists(FilePath):
                 return False
 
-            # Get current file information
+            # Get current file information. mtime in UTC (criterion 26) so the
+            # comparison against a stored mtime is timezone-independent.
             CurrentSize = os.path.getsize(FilePath) / (1024 * 1024)  # MB
-            CurrentModTime = datetime.fromtimestamp(os.path.getmtime(FilePath))
+            CurrentModTime = datetime.fromtimestamp(os.path.getmtime(FilePath), tz=timezone.utc).replace(tzinfo=None)
 
             # Allow 1MB size difference (to account for transcoding compression)
             SizeMatch = abs(CurrentSize - DbFile.SizeMB) < 1.0

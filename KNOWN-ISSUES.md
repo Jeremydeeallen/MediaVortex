@@ -2,6 +2,36 @@
 
 ## Open
 
+### [BUG - CRITICAL] HasFileChanged returns True for every file when a different worker scans them
+**Date:** 2026-05-16
+
+**What breaks:** Two workers scanning the same physical files produce different change-detection verdicts. I9-2024 scanned M:\ on 2026-05-15 and `HasFileChanged` returned False for all 3,291 files (clean incremental skip, UpdatedFiles=0). Larry-worker-1 then scanned the same M:\ on 2026-05-16 and `HasFileChanged` returned True for **every single file** -- UpdatedFiles=3,291. Same pattern observed on T:\ before the scan was aborted (UpdatedFiles=1,923 within 134 seconds, all of them spurious).
+
+The drift is the `FileModificationTime` column. The 1-second tolerance in `HasFileChanged` (`Features/FileScanning/FileScanningBusinessService.py::HasFileChanged`) is exceeded between what I9 originally stored and what Larry now reads from `os.path.getmtime` over its NFS mount. The underlying files are identical and unchanged on disk; only the per-worker stat values diverge.
+
+**Why this is critical:** Until fixed, **enabling scanning on more than one worker is unsafe**. Each ScanEnabled worker re-stamps every other worker's recent rows on every continuous-scan tick. For T:\ that is ~47k full UPDATE statements per tick per extra worker, with zero actual data change -- and DB connection storm + LastScannedDate churn that masks real drift. It also breaks the criterion 24 counter contract: every scan looks like every file changed, when nothing did.
+
+**Likely contributors (one or more):**
+1. Timezone interpretation against a `timestamp without time zone` column. If I9 stored a local-tz datetime and Larry computes a UTC-naive datetime, the offset is hours, not seconds.
+2. NFS-vs-SMB mtime resolution. Windows SMB rounds to 100ns FILETIME; NFSv3 is microsecond; NFSv4 is nanosecond. Cross-protocol round-tripping can drift by sub-second amounts that exceed 1s after multiple precision conversions.
+3. Container vs host time. The Larry container reads mtime through the bind mount; if the host clock is skewed against the brain NFS server, this could surface.
+
+**Violates:** `Features/FileScanning/FileScanning.feature.md` criterion 26 (added with this entry). Also makes criterion 14 (in-place modification re-probe) unverifiable on multi-worker setups.
+
+**What "fixed" looks like:** A scan on worker B for files originally probed by worker A produces `UpdatedFiles=0` when nothing has actually changed on disk. Verifiable: scan same rootfolder twice, one tick on each of two workers, no disk changes between. Second scan reports UpdatedFiles=0.
+
+**Fix candidates (NOT yet committed):**
+- (a) Drop mtime from the change-detection signal. Use SizeMB only -- size is OS-independent within rounding tolerance. Loses the "same size but content swapped" detection edge case.
+- (b) Keep mtime but normalize to UTC-with-timezone in storage AND in compare; widen tolerance to handle sub-second NFS rounding (e.g., 5s).
+- (c) Switch to a content fingerprint (e.g., size + first-block-hash) at the cost of an extra read per file.
+- (d) Compare `FileSize` (bytes) instead of `SizeMB` and use mtime only as a hint -- the column is already populated.
+
+The right fix depends on what observable change is meant to trigger a re-process. If "file content actually changed", (a) or (c) covers it. If "file modified outside MediaVortex", mtime is necessary -- then (b) is the path.
+
+**Look first:** `Features/FileScanning/FileScanningBusinessService.py::HasFileChanged` (line ~1191) for the change-detection logic. `ProcessSingleMediaFile` (line ~752) for the call site that decides update vs skip. The DB column `MediaFiles.FileModificationTime` is `timestamp without time zone` -- check whether writers store local-tz or UTC-naive.
+
+---
+
 ### [BUG] FindFuzzyFileMatch is O(N x M) -- reloads + regex-parses all RootFolder rows per new file
 **Date:** 2026-05-15
 
