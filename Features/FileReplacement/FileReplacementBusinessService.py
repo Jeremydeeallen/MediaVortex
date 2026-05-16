@@ -833,8 +833,7 @@ class FileReplacementBusinessService:
                     e, "FileReplacementBusinessService", "_UpdateMediaFilesAfterReplacement"
                 )
 
-            # Update LastScannedDate to current time
-            from datetime import datetime
+            # Update LastScannedDate to current time (datetime imported at module top)
             media_file.LastScannedDate = datetime.now(timezone.utc)
 
             # Save the updated MediaFile
