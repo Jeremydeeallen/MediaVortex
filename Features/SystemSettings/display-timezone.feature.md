@@ -64,7 +64,11 @@ display layer converts.
 
 ## Status
 
-IN PROGRESS
+COMPLETE -- foundation criteria 1-6 verified 2026-05-08. Step 7 (TIMESTAMPTZ
+schema migration) is deliberately deferred as a non-blocking quiet-window task,
+not a gating item. Gap-closing work (template-by-template verification, SQL
+bucketing, navbar clock) is tracked separately in
+`timezone-frontend-audit.feature.md`.
 
 ### Progress
 
@@ -82,12 +86,10 @@ IN PROGRESS
       `.py` files updated via mechanical replacement; `from datetime import
       timezone` added where missing. 10/10 sample-module import smoke test
       passes. Scripts/, Tests/, and *.md left as-is.
-- [ ] 7. Defer: TIMESTAMPTZ schema migration (per-column ALTER ... USING ... AT
-      TIME ZONE 'UTC'). Non-blocking; safe to run during a quiet window.
-
-NEXT: Step 7 is a quiet-window task. Feature is functionally complete. Restart
-WebService to clear the per-process timezone cache and pick up the new
-infrastructure on every page render.
+- [ ] 7. **Deferred (non-blocking).** TIMESTAMPTZ schema migration (per-column
+      ALTER ... USING ... AT TIME ZONE 'UTC'). Safe to run during a quiet
+      window. Not gating completion -- the JSON serializer already enforces
+      UTC at the boundary.
 
 ## Scope
 

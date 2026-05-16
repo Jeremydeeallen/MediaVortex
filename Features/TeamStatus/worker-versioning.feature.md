@@ -17,7 +17,7 @@ Just deployed (2026-05-09): rebuilt the worker image, recreated 4 LXC containers
 
 ### A. Build-time version stamp
 
-1. The `deploy/Dockerfile` writes the git commit SHA into `/opt/mediavortex/VERSION` during the image build. The SHA is sourced from `git rev-parse HEAD` at build time, captured by `deploy/worker-deploy.flow.md` step 2 (so the build context already has the commit available). The file contents are exactly the 40-char SHA followed by a newline. Verifiable: `docker run --rm --entrypoint cat mediavortex-worker:latest /opt/mediavortex/VERSION` returns the expected SHA.
+1. The `deploy/Dockerfile` writes the git commit SHA into `/opt/mediavortex/VERSION` during the image build. The SHA is sourced from `git rev-parse HEAD` at build time, captured by `deploy/worker-deploy-linux.flow.md` step 2 (so the build context already has the commit available). The file contents are exactly the 40-char SHA followed by a newline. Verifiable: `docker run --rm --entrypoint cat mediavortex-worker:latest /opt/mediavortex/VERSION` returns the expected SHA.
 
 2. The Dockerfile additionally writes a short build manifest to `/opt/mediavortex/BUILD_INFO` containing: `commit=<SHA>`, `built_at=<ISO-8601 UTC>`, `built_by=<hostname of build host>`. Three lines, each `key=value`. Verifiable: `cat /opt/mediavortex/BUILD_INFO` inside any worker container returns all three keys with non-empty values.
 
@@ -47,7 +47,7 @@ Just deployed (2026-05-09): rebuilt the worker image, recreated 4 LXC containers
 
 ### E. Documentation
 
-10. `deploy/worker-deploy.flow.md` "Build and Deploy Pipeline" section gains a one-line note that step 2's `docker build` runs from the source tree on the LXC, and the Dockerfile ARG / ENV mechanism captures `git rev-parse HEAD` from the build context. If the source tree on the LXC is not a git checkout (it isn't -- it's an scp'd snapshot), the deploy script must pass the commit SHA in via `--build-arg COMMIT_SHA=$(git -C /c/Code/MediaVortex rev-parse HEAD)` and the Dockerfile reads that ARG. Update the flow doc step 2 accordingly. Verifiable: doc shows the new `--build-arg` flag in the build command; the resulting image has the correct SHA in `/opt/mediavortex/VERSION`.
+10. `deploy/worker-deploy-linux.flow.md` "Build and Deploy Pipeline" section gains a one-line note that step 2's `docker build` runs from the source tree on the LXC, and the Dockerfile ARG / ENV mechanism captures `git rev-parse HEAD` from the build context. If the source tree on the LXC is not a git checkout (it isn't -- it's an scp'd snapshot), the deploy script must pass the commit SHA in via `--build-arg COMMIT_SHA=$(git -C /c/Code/MediaVortex rev-parse HEAD)` and the Dockerfile reads that ARG. Update the flow doc step 2 accordingly. Verifiable: doc shows the new `--build-arg` flag in the build command; the resulting image has the correct SHA in `/opt/mediavortex/VERSION`.
 
 11. `WorkerService.flow.md` "Per-Worker Status Control" section gains a brief "Version" subsection describing the resolver order and where the value is written.
 
@@ -58,14 +58,14 @@ DRAFTED -- awaiting operator approval.
 ### Progress
 
 - [x] Read prior issues (no related entry in `KNOWN-ISSUES.md`)
-- [x] Read existing deploy flow (`deploy/worker-deploy.flow.md`)
+- [x] Read existing deploy flow (`deploy/worker-deploy-linux.flow.md`)
 - [x] Drafted feature doc (this file)
 - [ ] Operator approval
 - [ ] Implement A1-A2 (Dockerfile writes VERSION + BUILD_INFO via `--build-arg COMMIT_SHA`)
 - [ ] Implement B3-B5 (Workers schema add Version + BuildInfo, RegisterWorker accepts them, WorkerService resolver)
 - [ ] Implement C6-C7 (Activity tile short SHA + tooltip, fleet-wide banner)
 - [ ] Implement D8-D9 (/api/TeamStatus/Workers payload, /VersionStatus endpoint)
-- [ ] Update `deploy/worker-deploy.flow.md` step 2 with `--build-arg`
+- [ ] Update `deploy/worker-deploy-linux.flow.md` step 2 with `--build-arg`
 - [ ] Smoke test: deploy, confirm all workers report the same SHA; manually downgrade one container's image; confirm banner appears with the mismatch
 
 NEXT: operator approval to start. Recommended implementation order: B (DB shape) -> A (build-time stamp) -> the resolver -> UI -> docs.
@@ -74,7 +74,7 @@ NEXT: operator approval to start. Recommended implementation order: B (DB shape)
 
 ```
 deploy/Dockerfile                                            -- ARG COMMIT_SHA, write VERSION + BUILD_INFO files
-deploy/worker-deploy.flow.md                                  -- step 2 build command updated with --build-arg
+deploy/worker-deploy-linux.flow.md                                  -- step 2 build command updated with --build-arg
 Repositories/DatabaseManager.py                               -- RegisterWorker accepts Version + BuildInfo
 WorkerService/Main.py                                         -- 3-tier version resolver at startup, passes to RegisterWorker
 Features/TeamStatus/TeamStatusController.py                   -- /Workers payload includes Version + BuildInfo; new /Workers/VersionStatus endpoint
@@ -88,7 +88,7 @@ WorkerService/WorkerService.flow.md                           -- Version subsect
 | File | Role |
 |------|------|
 | `deploy/Dockerfile` | `ARG COMMIT_SHA` declared near the top of stage 2; `RUN echo "$COMMIT_SHA" > /opt/mediavortex/VERSION` and write three-line BUILD_INFO with built_at/built_by from build-time `date -u` and `hostname` |
-| `deploy/worker-deploy.flow.md` | Step 2 updated to `docker build --build-arg COMMIT_SHA=$(git -C /c/Code/MediaVortex rev-parse HEAD) ...`. The git command runs on the dev workstation before the SSH so the SHA is baked even though the LXC source tree is a snapshot |
+| `deploy/worker-deploy-linux.flow.md` | Step 2 updated to `docker build --build-arg COMMIT_SHA=$(git -C /c/Code/MediaVortex rev-parse HEAD) ...`. The git command runs on the dev workstation before the SSH so the SHA is baked even though the LXC source tree is a snapshot |
 | `Repositories/DatabaseManager.py` | `RegisterWorker(WorkerName, Platform, FFmpegPath, FFprobePath, ..., Version=None, BuildInfo=None)` adds the two columns to the UPSERT |
 | `WorkerService/Main.py` | New `_ResolveWorkerVersion()` returns `(version, build_info_or_none)`. Tier 1 reads `/opt/mediavortex/VERSION` and `/opt/mediavortex/BUILD_INFO`; tier 2 runs `git rev-parse HEAD` with 2s timeout; tier 3 returns `("unknown", None)`. Called once during `_RegisterAndLoadWorkerConfig` |
 | `Features/TeamStatus/TeamStatusController.py` | `/Workers` SELECT includes Version + BuildInfo; new `/Workers/VersionStatus` endpoint groups workers by version and returns the AllAgree flag |

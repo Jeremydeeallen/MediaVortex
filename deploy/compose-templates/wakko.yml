@@ -1,0 +1,36 @@
+# Wakko (client-b450m-01, 10.0.0.230, bare-metal Linux Mint)
+# 4 workers on Ryzen 7 3700X (8C/16T). 4 threads per worker via cpuset.
+x-worker: &worker-base
+  image: mediavortex-worker:latest
+  restart: unless-stopped
+  environment:
+    PYTHONUNBUFFERED: "1"
+    MEDIAVORTEX_DB_HOST: "10.0.0.15"
+    MEDIAVORTEX_DB_PORT: "5432"
+    MEDIAVORTEX_DB_NAME: "mediavortex"
+    MEDIAVORTEX_DB_USER: "mediavortex"
+    MEDIAVORTEX_DB_PASSWORD: "mediavortex"
+    MEDIAVORTEX_SHARE_MAPPINGS: "T=/mnt/media_tv/,M=/mnt/movies/,Z=/mnt/xxx/"
+  volumes:
+    - /mnt/media_tv:/mnt/media_tv
+    - /mnt/movies:/mnt/movies
+    - /mnt/xxx:/mnt/xxx
+    - /staging:/staging
+
+services:
+  worker-1:
+    <<: *worker-base
+    hostname: wakko-worker-1
+    cpuset: "0,1,2,3"
+  worker-2:
+    <<: *worker-base
+    hostname: wakko-worker-2
+    cpuset: "4,5,6,7"
+  worker-3:
+    <<: *worker-base
+    hostname: wakko-worker-3
+    cpuset: "8,9,10,11"
+  worker-4:
+    <<: *worker-base
+    hostname: wakko-worker-4
+    cpuset: "12,13,14,15"

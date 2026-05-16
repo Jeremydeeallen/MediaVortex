@@ -1,0 +1,46 @@
+# Bring up a new MediaVortex worker
+
+Pick the OS family, check prerequisites, run one command, verify.
+
+## 1. Pick the OS family
+
+| The host runs... | Use |
+|---|---|
+| Linux (LXC or bare-metal) -- Docker available | `deploy-linux-worker.py` -- see `worker-deploy-linux.flow.md` |
+| Windows 10/11 -- native via Task Scheduler | `deploy-windows-worker.py` -- see `worker-deploy-windows.flow.md` |
+
+## 2. Prerequisites (one-time per host)
+
+**Linux** -- host in `infrastructure/terraform/inventory.toml`; compose template at `deploy/compose-templates/<friendly>.yml`; root SSH from dev workstation; Docker CE installed; NFS mounts `/mnt/{media_tv,movies,xxx}` non-empty; `/staging`; DB reachable on `10.0.0.15:5432`. For LXC use the Terraform module (`infrastructure/terraform/mediavortex-workers/`); for bare-metal the bootstrap is currently manual (KNOWN-ISSUES tracks codifying it).
+
+**Windows** -- host onboarded per `infrastructure/docs/features/windows-worker-deploy.md`; OpenSSH Server reachable; Python 3.12+ installed; SMB creds in Vaultwarden (`homelab/brain/cifs/media`, `homelab/synology/cifs/jallen11`).
+
+## 3. Run the deploy
+
+```bash
+# Dry-run the pre-flight before touching the host:
+py deploy/deploy-linux-worker.py <target> --check     # Linux
+py deploy/deploy-windows-worker.py <ip> --check       # Windows
+
+# Then deploy:
+py deploy/deploy-linux-worker.py <friendly-or-ip>
+py deploy/deploy-windows-worker.py <ip>
+```
+
+Both scripts are idempotent. Re-running updates source and recreates containers / restarts the scheduled task without duplicating Workers rows.
+
+## 4. Verify
+
+The script polls `Workers` for up to 90 seconds and exits non-zero on timeout. On success it reports each worker's `Status`, `FFmpegPath`, and `HeartbeatAge`. Expected: `Status IN ('Online', 'Paused')`, non-NULL FFmpegPath, heartbeat < 60s. Paused on redeploy is normal -- promote via Activity UI when ready.
+
+## 5. If it fails
+
+The script names the failing check and a one-line remediation hint. Don't retry blindly -- open the flow doc's Troubleshooting section keyed to the symptom.
+
+## References
+
+- Contract: `deploy/worker-deploy.feature.md`
+- Flows: `deploy/worker-deploy-{linux,windows}.flow.md`
+- Inventory: `infrastructure/terraform/inventory.toml`
+- Vault: `infrastructure/terraform/secrets.py`
+- Known issues: `KNOWN-ISSUES.md`

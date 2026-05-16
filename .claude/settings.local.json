@@ -83,7 +83,28 @@
       "PowerShell(Get-Process *)",
       "PowerShell(Stop-Process *)",
       "PowerShell($env:PGPASSWORD='mediavortex'; & 'C:\\\\Program Files\\\\PostgreSQL\\\\16\\\\bin\\\\psql.exe' -h 10.0.0.15 -U mediavortex -d mediavortex -At -c \"SELECT FilePath FROM MediaFiles WHERE Id = 52476\")",
-      "PowerShell(Get-ChildItem \"T:\\\\The Office \\(US\\)\\\\Specials\" | Select-Object Name, @{Name='SizeMB';Expression={[math]::Round\\($_.Length/1MB,0\\)}})"
+      "PowerShell(Get-ChildItem \"T:\\\\The Office \\(US\\)\\\\Specials\" | Select-Object Name, @{Name='SizeMB';Expression={[math]::Round\\($_.Length/1MB,0\\)}})",
+      "Bash(mkdir -p .claude/commands)",
+      "Bash(mv .claude/skills/mediavortex-deploy-worker.md .claude/commands/mediavortex-deploy-worker.md)",
+      "PowerShell(Get-CimInstance *)",
+      "PowerShell(& \"C:\\\\Code\\\\MediaVortex\\\\WebService\\\\venv\\\\Scripts\\\\python.exe\" -m pip install -r \"C:\\\\Code\\\\MediaVortex\\\\requirements.txt\" 2>&1 | Select-Object -Last 30)",
+      "PowerShell(& \"C:\\\\Code\\\\MediaVortex\\\\WebService\\\\venv\\\\Scripts\\\\python.exe\" -c \"import paramiko; print\\('paramiko OK:', paramiko.__version__\\)\")",
+      "PowerShell(py *)",
+      "PowerShell(Test-Connection *)",
+      "PowerShell(Test-Path *)",
+      "PowerShell(Get-SmbMapping *)",
+      "PowerShell($sw = [Diagnostics.Stopwatch]::StartNew\\(\\); $count = \\(Get-ChildItem M:\\\\ -Recurse -File -ErrorAction SilentlyContinue | Measure-Object\\).Count; $sw.Stop\\(\\); \"M:\\\\ recursive file count: $count in $\\($sw.Elapsed.TotalSeconds\\)s\")",
+      "PowerShell($mediaExt = @\\('.mkv','.mp4','.avi','.mov','.wmv','.flv','.m4v','.ts','.m2ts','.mpg','.mpeg','.webm'\\); $sw = [Diagnostics.Stopwatch]::StartNew\\(\\); $count = \\(Get-ChildItem T:\\\\ -Recurse -File -ErrorAction SilentlyContinue | Where-Object { $mediaExt -contains $_.Extension.ToLower\\(\\) } | Measure-Object\\).Count; $sw.Stop\\(\\); \"T:\\\\ media-file count on disk: $count in $\\([Math]::Round\\($sw.Elapsed.TotalSeconds,1\\)\\)s\")",
+      "PowerShell(scp $env:TEMP\\\\missing_probe.py root@10.0.0.42:/tmp/missing_probe.py)",
+      "PowerShell(if \\(Test-Path \"C:\\\\Program Files\\\\PostgreSQL\\\\16\\\\bin\\\\pg_dump.exe\"\\) { \"pg_dump OK\" } else { \"pg_dump NOT FOUND\" }; \"---\"; if \\(Test-Path \"T:\\\\MediaVortex\\\\backups\"\\) { \"T:\\\\MediaVortex\\\\backups exists\" } else { \"T:\\\\MediaVortex\\\\backups missing\" }; \"---\"; \"Free space C:\"; \\(Get-PSDrive C\\).Free / 1GB)",
+      "PowerShell(Get-Command *)",
+      "Bash(py:*)",
+      "PowerShell(py:*)",
+      "Bash(ssh root@10.0.0.42 *python3*)",
+      "Bash(ssh root@10.0.0.230 *python3*)",
+      "Bash(ssh root@10.0.0.42 *docker exec * python3*)",
+      "Bash(ssh root@10.0.0.230 *docker exec * python3*)",
+      "PowerShell(scp *)"
     ]
   }
 }

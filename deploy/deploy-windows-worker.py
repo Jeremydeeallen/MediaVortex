@@ -1,6 +1,6 @@
 """End-to-end deploy automation for a Windows-native MediaVortex worker.
 
-Wraps the 8-step sequence in deploy/windows-worker.flow.md "Deploy Sequence
+Wraps the 8-step sequence in deploy/worker-deploy-windows.flow.md "Deploy Sequence
 (Quick Reference)" into one idempotent invocation. Run from the dev
 workstation against any Windows host that has Python 3.12+ and OpenSSH
 Server installed.
@@ -8,7 +8,7 @@ Server installed.
 WHEN TO USE THIS SCRIPT vs the hot-swap flow:
   - Fresh host, host rebuild, env-vars or SMB creds changed: this script.
   - In-place code update on a running worker (most common case): use the
-    manual sequence in deploy/windows-worker.flow.md "Code-Only Update
+    manual sequence in deploy/worker-deploy-windows.flow.md "Code-Only Update
     (Hot-Swap)" -- this script assumes a fresh host and does NOT stop the
     running worker before scp, so the running Python process holds file
     locks and the scp will fail or partially overwrite.
@@ -79,7 +79,7 @@ DefaultVaultHelper = Path(r"C:\Code\infrastructure\terraform\secrets.py")
 VaultKeyBrain = "homelab/brain/cifs/media"
 VaultKeySynology = "homelab/synology/cifs/jallen11"
 
-# DB defaults (match deploy/windows-worker.flow.md "Environment Variables").
+# DB defaults (match deploy/worker-deploy-windows.flow.md "Environment Variables").
 DbDefaults = {
     "MEDIAVORTEX_DB_HOST": "10.0.0.15",
     "MEDIAVORTEX_DB_PORT": "5432",

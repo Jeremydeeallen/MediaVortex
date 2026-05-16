@@ -54,7 +54,7 @@ IN PROGRESS
 ```
 Features/TranscodeJob/ProcessTranscodeQueueService.py
 Features/TranscodeJob/TranscodingFileManagerService.py
-deploy/docker-compose.yml
+deploy/compose-templates/*.yml
 terraform/mediavortex-workers/docker-compose.yml
 terraform/mediavortex-workers/main.tf
 transcode.flow.md
@@ -65,7 +65,7 @@ Features/TranscodeJob/local-staging.feature.md
 
 - `Features/TranscodeJob/ProcessTranscodeQueueService.py` -- `SetupFilePreparation()` and `ProcessJob()`: add LocalStaging mode, copy-back, and cleanup
 - `Features/TranscodeJob/TranscodingFileManagerService.py` -- `CopyFile()`, new `CleanupLocalStaging()` method
-- `deploy/docker-compose.yml` -- Add local staging volume mount
+- `deploy/compose-templates/*.yml` -- Add local staging volume mount to each per-host template
 - `terraform/mediavortex-workers/docker-compose.yml` -- Add local staging volume mount (production)
 - `terraform/mediavortex-workers/main.tf` -- Ensure LXC has local disk mount point for staging
 - `transcode.flow.md` -- Update file staging section with LocalStaging mode

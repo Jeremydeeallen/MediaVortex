@@ -2,36 +2,6 @@
 
 ## Open
 
-### [BUG - CRITICAL] HasFileChanged returns True for every file when a different worker scans them
-**Date:** 2026-05-16
-
-**What breaks:** Two workers scanning the same physical files produce different change-detection verdicts. I9-2024 scanned M:\ on 2026-05-15 and `HasFileChanged` returned False for all 3,291 files (clean incremental skip, UpdatedFiles=0). Larry-worker-1 then scanned the same M:\ on 2026-05-16 and `HasFileChanged` returned True for **every single file** -- UpdatedFiles=3,291. Same pattern observed on T:\ before the scan was aborted (UpdatedFiles=1,923 within 134 seconds, all of them spurious).
-
-The drift is the `FileModificationTime` column. The 1-second tolerance in `HasFileChanged` (`Features/FileScanning/FileScanningBusinessService.py::HasFileChanged`) is exceeded between what I9 originally stored and what Larry now reads from `os.path.getmtime` over its NFS mount. The underlying files are identical and unchanged on disk; only the per-worker stat values diverge.
-
-**Why this is critical:** Until fixed, **enabling scanning on more than one worker is unsafe**. Each ScanEnabled worker re-stamps every other worker's recent rows on every continuous-scan tick. For T:\ that is ~47k full UPDATE statements per tick per extra worker, with zero actual data change -- and DB connection storm + LastScannedDate churn that masks real drift. It also breaks the criterion 24 counter contract: every scan looks like every file changed, when nothing did.
-
-**Likely contributors (one or more):**
-1. Timezone interpretation against a `timestamp without time zone` column. If I9 stored a local-tz datetime and Larry computes a UTC-naive datetime, the offset is hours, not seconds.
-2. NFS-vs-SMB mtime resolution. Windows SMB rounds to 100ns FILETIME; NFSv3 is microsecond; NFSv4 is nanosecond. Cross-protocol round-tripping can drift by sub-second amounts that exceed 1s after multiple precision conversions.
-3. Container vs host time. The Larry container reads mtime through the bind mount; if the host clock is skewed against the brain NFS server, this could surface.
-
-**Violates:** `Features/FileScanning/FileScanning.feature.md` criterion 26 (added with this entry). Also makes criterion 14 (in-place modification re-probe) unverifiable on multi-worker setups.
-
-**What "fixed" looks like:** A scan on worker B for files originally probed by worker A produces `UpdatedFiles=0` when nothing has actually changed on disk. Verifiable: scan same rootfolder twice, one tick on each of two workers, no disk changes between. Second scan reports UpdatedFiles=0.
-
-**Fix candidates (NOT yet committed):**
-- (a) Drop mtime from the change-detection signal. Use SizeMB only -- size is OS-independent within rounding tolerance. Loses the "same size but content swapped" detection edge case.
-- (b) Keep mtime but normalize to UTC-with-timezone in storage AND in compare; widen tolerance to handle sub-second NFS rounding (e.g., 5s).
-- (c) Switch to a content fingerprint (e.g., size + first-block-hash) at the cost of an extra read per file.
-- (d) Compare `FileSize` (bytes) instead of `SizeMB` and use mtime only as a hint -- the column is already populated.
-
-The right fix depends on what observable change is meant to trigger a re-process. If "file content actually changed", (a) or (c) covers it. If "file modified outside MediaVortex", mtime is necessary -- then (b) is the path.
-
-**Look first:** `Features/FileScanning/FileScanningBusinessService.py::HasFileChanged` (line ~1191) for the change-detection logic. `ProcessSingleMediaFile` (line ~752) for the call site that decides update vs skip. The DB column `MediaFiles.FileModificationTime` is `timestamp without time zone` -- check whether writers store local-tz or UTC-naive.
-
----
-
 ### [BUG] FindFuzzyFileMatch is O(N x M) -- reloads + regex-parses all RootFolder rows per new file
 **Date:** 2026-05-15
 
@@ -658,7 +628,41 @@ Full Windows paths (e.g., `T:\Shows\file.mkv`) are stored as natural keys in at 
 
 ---
 
+### [BUG] Bare-metal Linux host bootstrap not codified -- manual SSH steps required before deploy-linux-worker.py
+**Date:** 2026-05-16
+
+**What breaks:** Adding a new bare-metal Linux worker host today requires manual SSH steps before `deploy/deploy-linux-worker.py` will pass its pre-flight check: install Docker CE, install nfs-common, append three NFS entries to `/etc/fstab` (Brain media_tv, Synology movies, Synology xxx), `mount -a`, and `mkdir /staging /opt/mediavortex`. LXC has the equivalent codified at `infrastructure/terraform/mediavortex-workers/setup.sh`. Bare-metal has nothing.
+
+Done manually for dot on 2026-05-16 -- worked in ~5 minutes -- but the manual steps undermine the "one command from fresh" experience that the worker-deploy feature promises for already-provisioned hosts. The exact commands run on dot are visible in the conversation transcript and on dot itself via `/etc/fstab` + apt history.
+
+**Violates:** `infrastructure/docs/features/linux-worker-deploy.md` criterion 10 (added with this entry). Does NOT violate `deploy/worker-deploy.feature.md` -- that feature's scope explicitly excludes host provisioning; criterion 5 (fail-fast pre-flight) is satisfied today because the script correctly reports the missing prereqs.
+
+**What "fixed" looks like:** A script at `infrastructure/terraform/mediavortex-bare-metal-bootstrap.sh` (or similar) that takes a target hostname/IP from `inventory.toml`, idempotently installs Docker CE + nfs-common, configures fstab from a canonical mount template, runs `mount -a`, and creates the required directories. After it runs, `deploy/bringup.md` bare-metal prerequisites collapse from a checklist to "run the bootstrap script first." Verifiable: on a host with only base Ubuntu + SSH, running the bootstrap script followed by `deploy-linux-worker.py <friendly>` brings the host to `Workers.Status='Online'` with zero manual steps in between.
+
+**Look first:** `infrastructure/terraform/mediavortex-workers/setup.sh` (LXC equivalent, ~lines 1-100 -- the AppArmor purge is LXC-specific and should NOT carry over to bare-metal); `deploy/bringup.md` (current manual prereq section for bare-metal Linux); `infrastructure/terraform/inventory.toml` (canonical source for friendly name -> IP and ssh_user lookup); the NFS fstab entries that worked on dot 2026-05-16 are the same three lines used on Wakko (Brain `10.0.0.40:/mnt/pve/Media/_tv` nfs4, Synology `10.0.0.61:/volume1/_video` nfs vers=3, Synology `10.0.0.61:/volume2/XXX` nfs vers=3, all with `_netdev,nofail`).
+
+**Fix with:** `/t`.
+
+---
+
 ## Resolved
+
+### [BUG - FIXED 2026-05-16] HasFileChanged returns True for every file when a different worker scans them
+**Date:** 2026-05-16 | **Fixed:** 2026-05-16 | resolved: 2026-05-16
+
+**What broke:** Two workers in different system timezones produced different `FileModificationTime` values for the same physical file. I9-2024 (MST) wrote one value; larry-worker-1 (UTC container) computed a value 25,200 seconds (7 hours) different for the same POSIX mtime. `HasFileChanged`'s 1s tolerance was nowhere close to forgiving the gap, so every cross-worker scan flipped every file as "updated."
+
+**Root cause:** `GetFileModificationTime` called `datetime.fromtimestamp(ts)` without a `tz=` parameter, returning a naive datetime in the worker's local timezone. The DB column `MediaFiles.FileModificationTime` is `timestamp without time zone` so the offset was silently lost. Same anti-pattern at `IsSameFile`.
+
+**Fix (commit 5f1f6f8):** Both `GetFileModificationTime` and `IsSameFile` now compute mtime as naive UTC via `datetime.fromtimestamp(ts, tz=timezone.utc).replace(tzinfo=None)`. Worker-independent. DB column type unchanged. Verified locally: cross-tz delta drops from 25,200s to 0s.
+
+**Backend verification:** Larry post-fix M:\ scan #64932 produced `UpdatedFiles=0` (clean incremental skip). T:\ #64933 and Z:\ #64934 first post-fix passes performed the documented one-time correction storm successfully (T:\ corrected 15,458 / 45,716 rows that earlier-aborted #64931 hadn't reached; Z:\ corrected the full ~7,913 I9-MST-only population). After the storm, the column is uniform UTC and stable.
+
+**Pending verification (not blocking closure):** Cross-worker end-to-end proof with I9 still to come -- I9 WorkerService is currently down per operator's call. When restarted with the new code (5f1f6f8 is already in `C:\Code\MediaVortex` working tree), I9's first scan should report `UpdatedFiles=0` for files Larry just normalized to UTC. That confirms ping-pong is gone for good.
+
+**Files:** `Features/FileScanning/FileScanningBusinessService.py::GetFileModificationTime` (line ~1179), `IsSameFile` (line ~1225); `Features/FileScanning/FileScanning.feature.md` criterion 26; `Features/FileScanning/FileScanning.flow.md` Failure Modes table.
+
+---
 
 ### [BUG - FIXED 2026-05-15] Optimization page Jellyfin sync form fails with "paramiko is not installed"
 **Date:** 2026-05-15 | **Fixed:** 2026-05-15 | resolved: 2026-05-15
@@ -764,25 +768,6 @@ Full Windows paths (e.g., `T:\Shows\file.mkv`) are stored as natural keys in at 
 **Fix:** Created `.deployignore` (exclusion patterns for deploy sync -- additive by default, new files included automatically). Linux deploy: `deploy/SyncSource.py` reads `.deployignore` and uses tar-over-ssh to stream only needed files. Windows deploy: `deploy-windows-worker.py` `StepScpRepo()` now uses `shutil.copytree` with the same `.deployignore` patterns into a temp directory before scp. Flow doc step 1 updated.
 
 **Violates:** `deploy/worker-deploy.feature.md` criterion 19.
-
----
-
-### [BUG - FIXED 2026-05-10] Post-transcode pipeline had 5 split decision sites, 5+ scattered config sources, no audit trail
-**Date:** 2026-05-10
-**Affects:** `Features/QualityTesting/ShouldQualityTestService.py`, `Features/QualityTesting/QualityTestingBusinessService.py` (`UpdateQualityTestResults`, `CheckAndTriggerAutoReplace`), `Features/FileReplacement/FileReplacementBusinessService.py` (`ProcessFileReplacement`/`ProcessFileReplacementWithVMAF` with `BypassVMAFCheck` parameter), `Features/TranscodeJob/ProcessTranscodeQueueService.py` (`IsQualityTestEnabled`), `SystemSettings` rows for `VMAFAutoReplaceMinThreshold` / `MaxThreshold` / `QualityTestEnabled`.
-
-After a transcode completes, the decision "do we run VMAF, replace, requeue, or discard?" is split across five files. Inputs come from five different storage shapes (per-worker capability, global SystemSettings KV, ServiceStatus, per-attempt flag, ProfileThresholds). No place captures the final decision and the reason for it. Today (2026-05-10) Sister Wives S04E05 transcode succeeded but `ServiceStatus.QualityTestService='Paused'` silently routed to bypass-replace which then silently failed -- the 720p output was deleted by failure cleanup, no detail logs, no queryable reason for why it didn't replace. The opaque "Quality test processing failed for TranscodeAttempt X: File replaced automatically because Quality testing service is paused" log claims success while `FileReplaced=false`.
-
-**Violates:** `Features/QualityTesting/post-transcode-disposition.feature.md` (drafted 2026-05-10, all 17 criteria).
-
-**Fix:** unified `DecidePostTranscodeDisposition` function + `PostTranscodeGateConfig` typed-column table + `Disposition`/`DispositionReason`/`DispositionDecidedAt` columns on `TranscodeAttempts`. Legacy ShouldQualityTestService / BypassVMAFCheck / ProcessFileReplacementWithVMAF / CheckAndTriggerAutoReplace deleted.
-
-**Follow-up bugs caught during sight-test before redeploy (also fixed 2026-05-10):**
-- **Wrong dict key:** `QualityTestingBusinessService.py:271` read `JobDetails.get('transcode_attempt_id')` (snake_case) when the dict uses `'TranscodeAttemptId'` (PascalCase). Effect: `DecidePostTranscodeDisposition` was never re-called after VMAF score landed; `Disposition` stayed `Pending` forever; FileReplacement never triggered. The decision-table conformance test missed it (pure unit test, didn't exercise wiring).
-- **Fossilized gate input:** the disposition function read `ServiceStatus.QualityTestService.Status` as a live gate. Every live writer of that row is in `archive_QualityTestService/Main.py`; the new unified WorkerService never updates it. The row had been frozen at `Status='Paused', UpdatedAt='2026-01-26'` for 3.5 months. Effect: every transcode hit decision-table row 8 (`NoReplace, VmafServicePaused`) regardless of actual worker capability. **Fix:** replaced the gate with a computed query against `Workers` (`QualityTestEnabled=TRUE AND Status='Online' AND fresh heartbeat`). Reason names retained for audit-history compatibility.
-- **Honest Requeue dispatch:** `Disposition='Requeue'` was a no-op (audit-only). `_HandleRequeueDisposition` now deletes the staged file and writes a ProblemFiles row. NOT auto-creating a new TranscodeQueue at adjusted CRF -- TranscodeQueue has no CRF column, so a new row would re-run the same profile at the same CRF. Real auto-requeue requires a schema change (tracked separately).
-
-**Fix with:** `/n` -- doc-first feature, shipped 2026-05-10. Two latent wiring bugs and one no-op branch caught and fixed before the larry redeploy.
 
 ---
 

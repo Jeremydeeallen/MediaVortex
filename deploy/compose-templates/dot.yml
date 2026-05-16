@@ -1,0 +1,37 @@
+# dot (client-z490v-01, 10.0.0.193, bare-metal)
+# 4 workers on i9-10850K (10C/20T). 5 threads per worker via cpuset (HT pairs).
+# Starting point -- tune cpuset and worker count after first throughput measurement.
+x-worker: &worker-base
+  image: mediavortex-worker:latest
+  restart: unless-stopped
+  environment:
+    PYTHONUNBUFFERED: "1"
+    MEDIAVORTEX_DB_HOST: "10.0.0.15"
+    MEDIAVORTEX_DB_PORT: "5432"
+    MEDIAVORTEX_DB_NAME: "mediavortex"
+    MEDIAVORTEX_DB_USER: "mediavortex"
+    MEDIAVORTEX_DB_PASSWORD: "mediavortex"
+    MEDIAVORTEX_SHARE_MAPPINGS: "T=/mnt/media_tv/,M=/mnt/movies/,Z=/mnt/xxx/"
+  volumes:
+    - /mnt/media_tv:/mnt/media_tv
+    - /mnt/movies:/mnt/movies
+    - /mnt/xxx:/mnt/xxx
+    - /staging:/staging
+
+services:
+  worker-1:
+    <<: *worker-base
+    hostname: dot-worker-1
+    cpuset: "0,1,2,3,4"
+  worker-2:
+    <<: *worker-base
+    hostname: dot-worker-2
+    cpuset: "5,6,7,8,9"
+  worker-3:
+    <<: *worker-base
+    hostname: dot-worker-3
+    cpuset: "10,11,12,13,14"
+  worker-4:
+    <<: *worker-base
+    hostname: dot-worker-4
+    cpuset: "15,16,17,18,19"

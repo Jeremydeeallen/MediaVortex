@@ -1,0 +1,36 @@
+# Larry (mediavortex-workers LXC, CT 218 on Proxmox larry, 10.0.0.42)
+# 4 workers on 2x Xeon (64 threads total). 16 threads per worker via cpuset.
+x-worker: &worker-base
+  image: mediavortex-worker:latest
+  restart: unless-stopped
+  environment:
+    PYTHONUNBUFFERED: "1"
+    MEDIAVORTEX_DB_HOST: "10.0.0.15"
+    MEDIAVORTEX_DB_PORT: "5432"
+    MEDIAVORTEX_DB_NAME: "mediavortex"
+    MEDIAVORTEX_DB_USER: "mediavortex"
+    MEDIAVORTEX_DB_PASSWORD: "mediavortex"
+    MEDIAVORTEX_SHARE_MAPPINGS: "T=/mnt/media_tv/,M=/mnt/movies/,Z=/mnt/xxx/"
+  volumes:
+    - /mnt/media_tv:/mnt/media_tv
+    - /mnt/movies:/mnt/movies
+    - /mnt/xxx:/mnt/xxx
+    - /staging:/staging
+
+services:
+  worker-1:
+    <<: *worker-base
+    hostname: larry-worker-1
+    cpuset: "0,2,4,6,8,10,12,14,16,18,20,22,24,26,28,30"
+  worker-2:
+    <<: *worker-base
+    hostname: larry-worker-2
+    cpuset: "32,34,36,38,40,42,44,46,48,50,52,54,56,58,60,62"
+  worker-3:
+    <<: *worker-base
+    hostname: larry-worker-3
+    cpuset: "1,3,5,7,9,11,13,15,17,19,21,23,25,27,29,31"
+  worker-4:
+    <<: *worker-base
+    hostname: larry-worker-4
+    cpuset: "33,35,37,39,41,43,45,47,49,51,53,55,57,59,61,63"

@@ -1,6 +1,6 @@
 # Flow: Windows Worker Deploy
 
-Deploys a MediaVortex `WorkerService` instance natively on a Windows host (not Docker). Counterpart to `worker-deploy.flow.md` (Linux/Docker on the worker-pool LXC). Both deployment models coexist; this flow covers the Windows-native path used by I9-2024 and (as of 2026-05-09) REMINGTON.
+Deploys a MediaVortex `WorkerService` instance natively on a Windows host (not Docker). Counterpart to `worker-deploy-linux.flow.md` (Docker on Linux -- covers LXC and bare-metal). Both deployment models coexist; this flow covers the Windows-native path used by I9-2024 and (as of 2026-05-09) REMINGTON.
 
 ## Entry Point
 
@@ -10,8 +10,8 @@ Deploys a MediaVortex `WorkerService` instance natively on a Windows host (not D
 
 | Hostname | IP | SSH user | Repo path | Notes |
 |---|---|---|---|---|
-| `Remington` | `10.0.0.230` | `owner` | `C:\Code\MediaVortex` | OpenSSH Server enabled; `git` is NOT on PATH (use scp for updates, not `git pull` on remote) |
-| `I9-2024` | (dev workstation, varies) | (operator) | `C:\Code\MediaVortex` | Hosts both WebService + a co-located WorkerService process |
+| `I9-2024` | (dev workstation, varies) | (operator) | `C:\Code\MediaVortex` | Hosts both WebService + a co-located WorkerService process. Currently the only Online Windows worker. |
+| `Remington` | -- | -- | -- | **Retired.** Host hardware rebuilt to Linux Mint and now runs as Wakko (`client-b450m-01`, 10.0.0.230). The `Remington` Workers row lingers in DB with a stale heartbeat (6+ days) and can be deleted on the next cleanup pass per `worker-deploy.feature.md` criterion 12. |
 
 **SSH from dev workstation to a worker:**
 
@@ -116,7 +116,7 @@ This whole sequence takes about 30 seconds end-to-end and is idempotent. Use thi
 - Re-deploying after a host rebuild
 - Recovering from corrupted venv or stale env vars
 
-For Linux containerized workers (which scale via `docker compose`), use `worker-deploy.flow.md` instead.
+For Linux containerized workers (which scale via `docker compose`), use `worker-deploy-linux.flow.md` instead.
 
 ## Deploy Sequence (Quick Reference)
 
@@ -180,7 +180,7 @@ New-Item -ItemType Directory -Path 'S:\MediaVortex\Staging' -Force
 
 Set `Workers.StagingDirectory = 'S:\MediaVortex\Staging'` in the DB row for this worker. The default falls back to `C:\MediaVortex\` which mixes transcode I/O with the OS drive.
 
-## Build and Deploy Pipeline
+## Build and Deploy
 
 Run from the dev workstation (PowerShell or Git Bash). Targets the Windows worker host directly via SSH/SCP — no LXC intermediary.
 
@@ -295,7 +295,7 @@ Expected first-run sequence (visible in stdout / `Logs` table):
 4. `MainLoop` blocks on `ShutdownEvent`
 5. Within ~60 s the capability poller picks up `TranscodeEnabled=true` (default for new rows) and the transcode loop begins claiming jobs
 
-## Smoke Test
+## Post-Deploy Verification
 
 ```sql
 -- Verify registration from the dev workstation
@@ -381,7 +381,7 @@ Pick one (DPAPI cache is the recommended steady state):
 [Environment]::SetEnvironmentVariable('MEDIAVORTEX_SYNOLOGY_PASSWORD','<value>','User')
 ```
 
-## Failure Modes
+## Troubleshooting
 
 | Failure | Symptom | Resolution |
 |---|---|---|

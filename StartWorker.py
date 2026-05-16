@@ -10,7 +10,7 @@ What this does on every run:
   3. Launch WorkerService\\Main.py inline (this script blocks until it exits).
 
 Why re-mount every run: persistent SMB mappings do NOT reconnect for non-
-interactive sessions (Task Scheduler, NSSM, SSH). See windows-worker.flow.md.
+interactive sessions (Task Scheduler, NSSM, SSH). See worker-deploy-windows.flow.md.
 
 Credential resolution (priority order):
   1. Cached SMB cred in Windows Credential Manager. The launcher first tries
