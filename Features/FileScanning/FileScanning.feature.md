@@ -146,6 +146,22 @@ Triggering context (2026-05-15):
       WorkerService restart for code pickup; Linux workers also need
       redeploy when next used.
 
+- [x] 3.7. **ReconcileWithDisk moved to path-storage Phase 4 read pattern (2026-05-15).**
+      Set membership now keyed on `(StorageRootId, RelativePath.lower())`
+      tuples computed via `PathStorage.Parse`, not on OS-coupled `FilePath`
+      strings. Same comparison works identically on Windows and Linux
+      workers -- no `_ToCanonicalPath` round-trip in the comparison hot
+      path. DB rows with NULL StorageRootId (the ~2 rows that missed the
+      Phase 2 backfill) are preserved, never deleted. Unparseable disk
+      paths (no matching StorageRoot prefix) are excluded from the disk
+      set with a WARNING log. **Safety guard added:** if proposed delete
+      count exceeds 90% of DatabaseFiles, the reconcile aborts with an
+      ERROR log and zero mutations -- catches the catastrophic
+      translation-failure case where a misconfigured worker would
+      otherwise wipe an entire RootFolder. First consumer to use
+      `(StorageRootId, RelativePath)` as the canonical lookup key;
+      moves path-storage Phase 4 forward by one concrete code path.
+
 - [ ] 4. Criterion 21 (multi-drive registration without restart): add UI on
       `/settings` or `/Scanning` to register new RootFolder + associate with
       workers. Update `WorkerShareMappings` (or `StorageRootResolutions` per

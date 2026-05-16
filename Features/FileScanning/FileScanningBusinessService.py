@@ -1347,22 +1347,28 @@ class FileScanningBusinessService:
     def ReconcileWithDisk(self, MediaFiles: List[str], RootFolderId: int) -> Dict[str, Any]:
         """Single-pass merge of move-detection and missing-file cleanup against
         the disk file list already produced by `FileManager.ScanDirectory`.
-        Owns FileScanning.feature.md criterion 23 (throughput dimension).
-
-        Replaces the previous serial `os.path.exists` loop in
-        `DetectMovedFiles` (~50k NFS round-trips per scan) and the duplicate
-        loop in `CleanupMissingFiles` (another ~50k). Net reduction:
-        ~100k NFS stats -> 0 stats for missing-file detection. The fuzzy
-        match path still calls `IsSameFile` (3 stats per candidate), but
-        only for DB rows that are actually missing from disk.
+        Owns FileScanning.feature.md criterion 23 (throughput dimension) and
+        moves this code path to the path-storage Phase 4 read pattern: set
+        membership is computed on `(StorageRootId, RelativePath.lower())`
+        tuples, not on OS-coupled `FilePath` strings. Same comparison works
+        identically on Windows and Linux workers; no `_ToCanonicalPath`
+        round-trip in the comparison hot path.
 
         Per-row decision:
-          - DB FilePath in disk set (case-insensitive) -> skip; the per-file
-            processor handles it normally.
+          - DB row's `(StorageRootId, RelativePath.lower())` in disk set ->
+            skip; the per-file processor handles it normally.
+          - DB row has NULL StorageRootId (rows that missed the Phase 2
+            backfill, ~2 in production) -> preserve; never delete.
           - Not in disk set, fuzzy match found by basename + IsSameFile ->
-            update DB row's FilePath / FileName / StorageRootId / RelativePath
-            in place (preserves Id and metadata).
+            update DB row's FilePath / FileName / StorageRootId /
+            RelativePath in place (preserves Id and metadata).
           - Not in disk set, no fuzzy match -> delete DB row.
+
+        Safety guard: if proposed delete count exceeds 90% of DatabaseFiles,
+        abort the reconcile entirely and log an error. This catches the
+        catastrophic translation-failure case where every disk path falls
+        outside any registered StorageRoot (e.g. WorkerShareMappings missing
+        on a worker that shouldn't have been ScanEnabled).
 
         Move-detection cap (criterion 12) is preserved: above the cap, the
         fuzzy-match step is skipped and missing rows are deleted directly
@@ -1375,11 +1381,28 @@ class FileScanningBusinessService:
                 'ReconcileWithDisk', 'FileScanningBusinessService'
             )
 
-            DiskSetLower = {os.path.normpath(p).lower() for p in MediaFiles}
-            DiskByBasenameLower: Dict[str, List[str]] = {}
+            from Core.PathStorage import LoadStorageRoots, Parse as PathParse
+            StorageRoots = LoadStorageRoots()
+
+            # Build OS-independent disk set keyed on (StorageRootId, RelativePath.lower()).
+            # Disk paths that don't parse to any registered StorageRoot are skipped --
+            # that's the right behavior (we won't claim those files exist).
+            DiskSet: set = set()
+            DiskByBasenameLower: Dict[str, List[tuple]] = {}
+            UnparseableCount = 0
             for CanonicalPath in MediaFiles:
+                Sid, Rel = PathParse(CanonicalPath, StorageRoots)
+                if Sid is None or Rel is None:
+                    UnparseableCount += 1
+                    continue
+                DiskSet.add((Sid, Rel.lower()))
                 Basename = os.path.basename(CanonicalPath).lower()
-                DiskByBasenameLower.setdefault(Basename, []).append(CanonicalPath)
+                DiskByBasenameLower.setdefault(Basename, []).append((CanonicalPath, Sid, Rel))
+            if UnparseableCount > 0:
+                LoggingService.LogWarning(
+                    f"Reconcile: {UnparseableCount} disk paths did not match any registered StorageRoot prefix; skipped from disk set",
+                    'ReconcileWithDisk', 'FileScanningBusinessService'
+                )
 
             RootFolder = self.Repository.GetRootFolderById(RootFolderId)
             if not RootFolder:
@@ -1395,56 +1418,85 @@ class FileScanningBusinessService:
                     'ReconcileWithDisk', 'FileScanningBusinessService'
                 )
 
-            MovedCount = 0
-            DeletedCount = 0
+            # First pass: classify every DB row as keep / reassign / delete WITHOUT
+            # mutating the database. Lets the safety guard veto the whole reconcile
+            # before a single row is touched.
+            ToReassign: List[tuple] = []  # (DbFile, CandidateCanonical, CandidateSid, CandidateRel)
+            ToDelete: List = []  # DbFile rows to delete
+            PreservedNullStorageRoot = 0
             for DbFile in DatabaseFiles:
-                if os.path.normpath(DbFile.FilePath).lower() in DiskSetLower:
-                    continue
+                DbSid = getattr(DbFile, 'StorageRootId', None)
+                DbRel = getattr(DbFile, 'RelativePath', None) or ''
+                if DbSid is None:
+                    PreservedNullStorageRoot += 1
+                    continue  # row missed Phase 2 backfill; never delete here
+                if (DbSid, DbRel.lower()) in DiskSet:
+                    continue  # exists on disk
 
                 ResolvedMove = None
                 if MoveDetectionEnabled and DbFile.FileName:
                     Candidates = DiskByBasenameLower.get(DbFile.FileName.lower(), [])
-                    DbPathLower = os.path.normpath(DbFile.FilePath).lower()
-                    for CandidatePath in Candidates:
-                        if os.path.normpath(CandidatePath).lower() == DbPathLower:
-                            continue
-                        LocalCandidate = self._ToLocalPath(CandidatePath)
+                    for (CandidateCanonical, CandidateSid, CandidateRel) in Candidates:
+                        if (CandidateSid, CandidateRel.lower()) == (DbSid, DbRel.lower()):
+                            continue  # same logical path
+                        LocalCandidate = self._ToLocalPath(CandidateCanonical)
                         if self.IsSameFile(DbFile, LocalCandidate):
-                            ResolvedMove = CandidatePath
+                            ResolvedMove = (CandidateCanonical, CandidateSid, CandidateRel)
                             break
 
                 if ResolvedMove:
-                    LoggingService.LogInfo(
-                        f"Reassigning moved file: {DbFile.FilePath} -> {ResolvedMove}",
-                        'ReconcileWithDisk', 'FileScanningBusinessService'
-                    )
-                    DbFile.FilePath = ResolvedMove
-                    DbFile.FileName = ntpath.basename(ResolvedMove)
-                    DbFile.LastScannedDate = datetime.now(timezone.utc)
-                    try:
-                        from Core.PathStorage import LoadStorageRoots, Parse as PathParse
-                        NewStorageRootId, NewRelativePath = PathParse(ResolvedMove, LoadStorageRoots())
-                        DbFile.StorageRootId = NewStorageRootId
-                        DbFile.RelativePath = NewRelativePath or ''
-                    except Exception:
-                        pass
-                    self.Repository.SaveMediaFile(DbFile)
-                    MovedCount += 1
-                    self.ScanResults.UpdatedFilesCount += 1
+                    ToReassign.append((DbFile, *ResolvedMove))
                 else:
-                    LoggingService.LogInfo(
-                        f"Deleting DB row for missing file: {DbFile.FilePath} (Id={DbFile.Id})",
-                        'ReconcileWithDisk', 'FileScanningBusinessService'
-                    )
-                    self.Repository.DeleteMediaFile(DbFile.Id)
-                    DeletedCount += 1
-                    self.ScanResults.DeletedFilesCount += 1
+                    ToDelete.append(DbFile)
+
+            # Safety guard: refuse to delete >90% of DB rows in one reconcile pass.
+            # Catches the "translation broken on this worker, every row looks
+            # missing" failure mode that would otherwise wipe the rootfolder.
+            if DatabaseFiles and len(ToDelete) > 0.9 * len(DatabaseFiles):
+                LoggingService.LogError(
+                    f"Reconcile ABORTED: would delete {len(ToDelete)} of {len(DatabaseFiles)} rows "
+                    f"({100.0 * len(ToDelete) / len(DatabaseFiles):.1f}%). Likely translation failure -- "
+                    f"check StorageRootResolutions for this worker. Disk set has {len(DiskSet)} entries; "
+                    f"{UnparseableCount} disk paths were unparseable.",
+                    'ReconcileWithDisk', 'FileScanningBusinessService'
+                )
+                return {
+                    'Success': False,
+                    'ErrorMessage': 'Reconcile safety guard tripped (>90% delete proposal)',
+                    'ProposedDeletes': len(ToDelete),
+                    'DatabaseRows': len(DatabaseFiles),
+                }
+
+            # Second pass: execute the planned mutations.
+            MovedCount = 0
+            DeletedCount = 0
+            for (DbFile, CandidateCanonical, CandidateSid, CandidateRel) in ToReassign:
+                LoggingService.LogInfo(
+                    f"Reassigning moved file: {DbFile.FilePath} -> {CandidateCanonical}",
+                    'ReconcileWithDisk', 'FileScanningBusinessService'
+                )
+                DbFile.FilePath = CandidateCanonical
+                DbFile.FileName = ntpath.basename(CandidateCanonical)
+                DbFile.StorageRootId = CandidateSid
+                DbFile.RelativePath = CandidateRel
+                DbFile.LastScannedDate = datetime.now(timezone.utc)
+                self.Repository.SaveMediaFile(DbFile)
+                MovedCount += 1
+                self.ScanResults.UpdatedFilesCount += 1
+            for DbFile in ToDelete:
+                LoggingService.LogInfo(
+                    f"Deleting DB row for missing file: {DbFile.FilePath} (Id={DbFile.Id})",
+                    'ReconcileWithDisk', 'FileScanningBusinessService'
+                )
+                self.Repository.DeleteMediaFile(DbFile.Id)
+                DeletedCount += 1
+                self.ScanResults.DeletedFilesCount += 1
 
             LoggingService.LogInfo(
-                f"=== RECONCILE WITH DISK COMPLETED === moved={MovedCount} deleted={DeletedCount}",
+                f"=== RECONCILE WITH DISK COMPLETED === moved={MovedCount} deleted={DeletedCount} preserved_null_storageroot={PreservedNullStorageRoot}",
                 'ReconcileWithDisk', 'FileScanningBusinessService'
             )
-            return {'Success': True, 'MovedFiles': MovedCount, 'DeletedFiles': DeletedCount}
+            return {'Success': True, 'MovedFiles': MovedCount, 'DeletedFiles': DeletedCount, 'PreservedNullStorageRoot': PreservedNullStorageRoot}
         except Exception as e:
             LoggingService.LogException("Error in ReconcileWithDisk", e, 'ReconcileWithDisk', 'FileScanningBusinessService')
             return {'Success': False, 'ErrorMessage': str(e)}
