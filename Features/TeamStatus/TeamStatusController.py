@@ -295,6 +295,7 @@ def GetWorkers():
                    MaxConcurrentTranscodeJobs, MaxConcurrentQualityTestJobs, MaxConcurrentRemuxJobs,
                    Enabled,
                    Version, BuildInfo,
+                   MountValidationError,
                    EXTRACT(EPOCH FROM (NOW() - LastHeartbeat)) AS HeartbeatAgeSec
             FROM Workers
             {where}
@@ -326,6 +327,7 @@ def GetWorkers():
                 "Enabled": bool(Row.get('Enabled', True)),
                 "Version": Row.get('Version'),
                 "BuildInfo": Row.get('BuildInfo'),
+                "MountValidationError": Row.get('MountValidationError'),
             })
 
         return jsonify({"Success": True, "Data": Workers})

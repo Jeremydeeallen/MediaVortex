@@ -56,8 +56,8 @@ Simplify worker status model from three states (Online/Draining/Paused) to two (
 
 ### Mount Validation
 
-20. [BUG] Before a worker transitions to Online (at startup or on resume), it validates that every storage mount it needs is present, accessible, AND contains data. A mount point that exists but is empty (local filesystem showing through instead of NFS) fails validation. The worker stays Paused and logs an ERROR naming the mount path, what it expected, and what it found. The Activity page shows the failure reason on the worker tile so the operator can fix the mount without reading logs.
-21. [BUG] A worker that fails mount validation does not claim any jobs. Today a worker with a broken mount claims queue items, detects "source file missing" per-file, marks each MediaFile as source-missing (bumping FFprobeFailureCount), and deletes the queue item -- silently corrupting the state of every file it touches. Fixed means: the mount check fires once before any job loop starts, not per-file after claiming.
+20. Before a worker transitions to Online (at startup or on resume), it validates that every storage mount it needs is present, accessible, AND contains data. A mount point that exists but is empty (local filesystem showing through instead of NFS) fails validation. The worker stays Paused and logs an ERROR naming the mount path, what it expected, and what it found. The Activity page shows the failure reason on the worker tile so the operator can fix the mount without reading logs.
+21. A worker that fails mount validation does not claim any jobs. The mount check fires once before any job loop starts, not per-file after claiming -- so a broken-mount worker cannot bump FFprobeFailureCount on rows whose files exist and are simply unreachable through this worker.
 
 ## Status
 
@@ -68,9 +68,9 @@ IN PROGRESS -- mount-validation slice (criteria 20, 21) shipped 2026-05-15; rema
 - [x] Design complete (this document)
 - [x] Flow doc updated (step 7a + Failure Modes row, 2026-05-15)
 - [x] Criteria 20, 21: cross-platform `_ValidateStorageMounts()` + `_ApplyMountValidationResult()` gate startup and Paused-to-Online transitions; `Workers.MountValidationError` column added; on failure worker stays Paused and claims zero jobs.
+- [x] Surface MountValidationError on Activity tiles (criterion 20 second sentence): `/api/TeamStatus/Workers` now returns `MountValidationError`; Activity tile renders a red alert above the metadata block when set. Verified live: all 17 enabled workers return `MountValidationError=NULL` (no false positives on healthy fleet).
 - [ ] Criteria 1-5: collapse Online/Draining/Paused to Online/Paused; remove `_DrainAndStop` and the drain waiter thread.
 - [ ] Criteria 6-9: `.inprogress` output pattern replacing the destructive `.orig` rename.
 - [ ] Criteria 10-13: unified crash/kill recovery on the new pattern.
 - [ ] Criteria 14-17: Activity tile redesign + per-machine pause + settings modal.
 - [ ] Criterion 19: polling interval verified against the documented 15s default.
-- [ ] Surface MountValidationError on Activity tiles (operator-facing display, criterion 20 second sentence).

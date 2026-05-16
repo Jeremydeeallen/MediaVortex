@@ -106,27 +106,6 @@ Worker process memory is fine (~279 MB). The bottleneck is wall-clock from seque
 
 ---
 
-### [BUG - CRITICAL] Worker with broken NFS mount silently destroys queue -- marks all files as source-missing
-**Date:** 2026-05-14
-
-**What breaks:** wakko-worker-1 was set to Online after a redeploy. Its `/mnt/media_tv` mount point exists but points at the local NVMe (908G) instead of the NAS NFS share. The worker claimed queue items, checked if the source file exists at `/mnt/media_tv/...`, found nothing (correct -- the NAS data isn't there), and for every file: bumped `FFprobeFailureCount`, marked it source-missing, and deleted the queue item. It chewed through queue items as fast as it could claim them, corrupting the MediaFiles state for each one. No TranscodeAttempt rows created (the pre-flight check fires before that), so there's no attempt-level audit trail -- just the Logs table entries.
-
-**Observed damage (wakko-worker-1, ~2 minutes of operation):** At least 6 MediaFiles had FFprobeFailureCount incremented and were marked source-missing. Queue items deleted. The files are fine on the NAS -- wakko just couldn't see them.
-
-**Root cause:** No mount validation at startup or before transitioning to Online. The worker trusts that its mount points are correct and jumps straight into claiming work. The per-file "source missing" check is correct behavior for genuinely missing files, but catastrophically wrong when the entire mount is broken -- it treats a mount failure as thousands of individual file failures.
-
-**What "fixed" looks like:** Before a worker transitions to Online, it validates every storage mount: (a) mount point exists, (b) mount is not the local filesystem showing through (check device, inode, or presence of expected marker data), (c) mount contains files (not empty). If validation fails, worker stays Paused and logs an ERROR with the mount path and what it found. Activity page shows the failure reason. A worker that fails mount validation claims zero jobs.
-
-**Immediate remediation needed:** Undo the FFprobeFailureCount bumps on the ~6 affected MediaFiles so they don't get skipped on future scans. Fix wakko's NFS mount on the host before restarting workers.
-
-**Violates:** `WorkerService/worker-lifecycle.feature.md` criteria 20, 21 (added with this entry).
-
-**Look first:** `WorkerService/Main.py` -- startup pipeline (add mount validation between crash recovery and capability start). `Features/TranscodeJob/ProcessRemuxQueueService.py` and `ProcessTranscodeQueueService.py` -- the per-file source-missing check that currently fires per-job (should be gated by a mount-healthy flag). `deploy/docker-compose.yml` -- the bind mount configuration for `/mnt/media_tv` and `/mnt/media_movies`.
-
-**Fix with:** `/t` -- user wants to fix this now.
-
----
-
 ### [BUG] Worker status model is overcomplicated -- Draining state is broken, invisible, and unnecessary
 **Date:** 2026-05-14
 
@@ -695,6 +674,27 @@ Done manually for dot on 2026-05-16 -- worked in ~5 minutes -- but the manual st
 ---
 
 ## Resolved
+
+### [BUG - FIXED 2026-05-16 - CRITICAL] Worker with broken NFS mount silently destroys queue -- marks all files as source-missing
+**Date:** 2026-05-14 | **Fixed:** 2026-05-15 (validation gate) + 2026-05-16 (UI surfacing, data remediation) | resolved: 2026-05-16
+
+**What broke:** wakko-worker-1 was set to Online after a redeploy with `/mnt/media_tv` pointing at the local NVMe (908G) instead of the NAS NFS share. For ~4.5 hours it claimed queue items, found "source file missing" per-file (correct -- the share wasn't mounted), bumped `FFprobeFailureCount`, marked the row source-missing, and deleted the queue item. 154 MediaFiles were corrupted this way (the original "~6" estimate was the first 2 minutes only). Files were fine on the NAS -- wakko just couldn't see them.
+
+**Root cause:** No mount validation gated the Online transition. The per-file "source missing" check was correct behavior for genuinely missing files but catastrophically wrong when the entire mount was broken -- it treated a mount failure as thousands of individual file failures.
+
+**Fix (shipped 2026-05-15, surfaced 2026-05-16):**
+- `WorkerService/Main.py::_ValidateStorageMounts()` queries `StorageRootResolutions` for the worker and checks each `AbsolutePath` is a directory, readable, AND non-empty. Empty = local FS showing through where a share should be mounted.
+- `WorkerService/Main.py::_ApplyMountValidationResult()` writes `Workers.MountValidationError`, forces `Status='Paused'`, and gates capability startup. Re-runs on every Paused -> Online transition via `_HandleStatusChange()`.
+- `Scripts/SQLScripts/AddMountValidationErrorColumn.py` adds the new column.
+- `Features/TeamStatus/TeamStatusController.py::GetWorkers` returns `MountValidationError`; `Templates/Activity.html` renders a red alert on the worker tile when set, so the operator sees the failure reason without reading logs.
+
+**Data remediation:** `Scripts/ResetWakkoMountFailureCounts.py` -- one-shot, idempotent, dry-run-by-default. Found 154 false-positive flags from the wakko window (2026-05-14), confirmed each file exists on disk now, reset `FFprobeFailureCount=0` and cleared `LastFFprobeError`. Verified post-fix count in window = 0.
+
+**Verifies:** `WorkerService/worker-lifecycle.feature.md` criteria 20, 21. All 17 enabled workers return `MountValidationError=NULL` on live fleet (healthy baseline).
+
+**Files:** `WorkerService/Main.py:495 _ValidateStorageMounts`, `WorkerService/Main.py:538 _ApplyMountValidationResult`, `WorkerService/Main.py:586` (startup gate) + `:859` (resume gate), `Scripts/SQLScripts/AddMountValidationErrorColumn.py`, `Scripts/ResetWakkoMountFailureCounts.py`, `Features/TeamStatus/TeamStatusController.py:297-300, 329`, `Templates/Activity.html:455-463`, `WorkerService/WorkerService.flow.md` step 7a.
+
+---
 
 ### [BUG - FIXED 2026-05-16] MediaFiles had 45,420 duplicate `(StorageRootId, RelativePath)` rows from backslash-escape variants
 **Date:** 2026-05-16 | **Fixed:** 2026-05-16 | resolved: 2026-05-16

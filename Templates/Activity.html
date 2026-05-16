@@ -453,6 +453,16 @@ var ActivityPage = (function() {
             }
             var VersionHtml = '<small class="' + VersionCls + ' ms-2" title="' + VersionTooltip + '" style="white-space:pre-line">v' + VersionShort + '</small>';
 
+            var MountErrorHtml = '';
+            if (W.MountValidationError) {
+                MountErrorHtml =
+                    '<div class="alert alert-danger py-2 px-2 mb-2 small" role="alert">' +
+                        '<i class="fas fa-exclamation-triangle me-1"></i>' +
+                        '<strong>Mount validation failed -- no jobs claimed.</strong> ' +
+                        '<span class="d-block mt-1" style="word-break:break-all">' + EscapeHtml(W.MountValidationError) + '</span>' +
+                    '</div>';
+            }
+
             var Col = document.createElement('div');
             Col.className = 'col-6 col-lg-4 col-xl-3';
             Col.innerHTML = '<div class="' + CardCls + '">' +
@@ -461,6 +471,7 @@ var ActivityPage = (function() {
                         '<span><i class="fas fa-circle me-1 small ' + HeartbeatDot + '" title="Last heartbeat: ' + HeartbeatText + '"></i>' + WorkerNameEsc + VersionHtml + '</span>' +
                         '<span class="badge ' + BadgeCls + '">' + DisplayStatus + '</span>' +
                     '</h6>' +
+                    MountErrorHtml +
                     '<div class="small text-muted mb-2">' +
                         '<div class="d-flex justify-content-between"><span>Platform:</span><span>' + EscapeHtml(W.Platform || '-') + '</span></div>' +
                         '<div class="d-flex justify-content-between"><span>Heartbeat:</span><span>' + HeartbeatText + '</span></div>' +
