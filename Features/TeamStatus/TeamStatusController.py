@@ -294,6 +294,7 @@ def GetWorkers():
                    TranscodeEnabled, QualityTestEnabled, ScanEnabled, RemuxEnabled,
                    MaxConcurrentTranscodeJobs, MaxConcurrentQualityTestJobs, MaxConcurrentRemuxJobs,
                    Enabled,
+                   Version, BuildInfo,
                    EXTRACT(EPOCH FROM (NOW() - LastHeartbeat)) AS HeartbeatAgeSec
             FROM Workers
             {where}
@@ -322,7 +323,9 @@ def GetWorkers():
                 "MaxConcurrentTranscodeJobs": Row.get('MaxConcurrentTranscodeJobs') or 1,
                 "MaxConcurrentQualityTestJobs": Row.get('MaxConcurrentQualityTestJobs') or 2,
                 "MaxConcurrentRemuxJobs": Row.get('MaxConcurrentRemuxJobs') or 2,
-                "Enabled": bool(Row.get('Enabled', True))
+                "Enabled": bool(Row.get('Enabled', True)),
+                "Version": Row.get('Version'),
+                "BuildInfo": Row.get('BuildInfo'),
             })
 
         return jsonify({"Success": True, "Data": Workers})
@@ -331,6 +334,48 @@ def GetWorkers():
         ErrorMsg = f"Exception in GetWorkers: {str(e)}"
         LoggingService.LogException(ErrorMsg, e, "TeamStatusController", "GetWorkers")
         return jsonify({"Success": False, "ErrorMessage": ErrorMsg}), 500
+
+@TeamStatusBlueprint.route('/Workers/VersionStatus', methods=['GET'])
+def GetWorkersVersionStatus():
+    """Aggregate worker versions for fleet-wide mismatch detection.
+    Owns worker-versioning.feature.md criterion 9. Single round-trip so
+    the Activity page banner doesn't need client-side grouping.
+
+    Response shape:
+        {"AllAgree": bool,
+         "Versions": {"<sha-or-unknown>": ["<workerName>", ...]},
+         "MismatchCount": int}
+    AllAgree is True iff all enabled workers report the SAME non-"unknown"
+    version. Workers reporting "unknown" do not trigger the mismatch flag
+    (an unknown worker is its own problem, not evidence of a split fleet).
+    """
+    try:
+        DbManager = DatabaseManager()
+        Rows = DbManager.DatabaseService.ExecuteQuery(
+            "SELECT WorkerName, Version FROM Workers WHERE Enabled = TRUE ORDER BY WorkerName"
+        )
+        Versions = {}
+        for Row in (Rows or []):
+            Sha = Row.get('Version') or 'unknown'
+            Versions.setdefault(Sha, []).append(Row.get('WorkerName', ''))
+
+        KnownVersions = [V for V in Versions.keys() if V != 'unknown']
+        AllAgree = len(KnownVersions) <= 1
+        MismatchCount = max(0, len(KnownVersions) - 1)
+
+        return jsonify({
+            "Success": True,
+            "Data": {
+                "AllAgree": AllAgree,
+                "Versions": Versions,
+                "MismatchCount": MismatchCount,
+            },
+        })
+    except Exception as e:
+        ErrorMsg = f"Exception in GetWorkersVersionStatus: {str(e)}"
+        LoggingService.LogException(ErrorMsg, e, "TeamStatusController", "GetWorkersVersionStatus")
+        return jsonify({"Success": False, "ErrorMessage": ErrorMsg}), 500
+
 
 @TeamStatusBlueprint.route('/Workers/<WorkerName>/Enable', methods=['POST'])
 def EnableWorker(WorkerName):

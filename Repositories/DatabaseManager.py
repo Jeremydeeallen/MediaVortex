@@ -1813,13 +1813,19 @@ class DatabaseManager:
     def RegisterWorker(self, WorkerName: str, Platform: str = 'windows', FFmpegPath: str = None,
                        FFprobePath: str = None, StagingDirectory: str = None,
                        ShareMountPrefix: str = None, MaxConcurrentJobs: int = 1,
-                       MaxCpuThreads: int = None) -> bool:
-        """Register or update a worker in the Workers table (UPSERT)."""
+                       MaxCpuThreads: int = None, Version: str = None,
+                       BuildInfo: str = None) -> bool:
+        """Register or update a worker in the Workers table (UPSERT).
+        Version + BuildInfo own worker-versioning.feature.md criterion 3.
+        Both are nullable; pre-versioning workers continue to register
+        cleanly with NULL values that the UI renders as "unknown"."""
         try:
             query = """
                 INSERT INTO Workers (WorkerName, Platform, FFmpegPath, FFprobePath, StagingDirectory,
-                                     ShareMountPrefix, MaxConcurrentJobs, MaxCpuThreads, Status, LastHeartbeat, RegisteredAt)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'Online', NOW(), NOW())
+                                     ShareMountPrefix, MaxConcurrentJobs, MaxCpuThreads,
+                                     Version, BuildInfo,
+                                     Status, LastHeartbeat, RegisteredAt)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'Online', NOW(), NOW())
                 ON CONFLICT (WorkerName) DO UPDATE SET
                     Platform = EXCLUDED.Platform,
                     FFmpegPath = COALESCE(EXCLUDED.FFmpegPath, Workers.FFmpegPath),
@@ -1828,11 +1834,14 @@ class DatabaseManager:
                     ShareMountPrefix = COALESCE(EXCLUDED.ShareMountPrefix, Workers.ShareMountPrefix),
                     MaxConcurrentJobs = EXCLUDED.MaxConcurrentJobs,
                     MaxCpuThreads = COALESCE(EXCLUDED.MaxCpuThreads, Workers.MaxCpuThreads),
+                    Version = EXCLUDED.Version,
+                    BuildInfo = EXCLUDED.BuildInfo,
                     LastHeartbeat = NOW()
             """
             self.DatabaseService.ExecuteNonQuery(query, (
                 WorkerName, Platform, FFmpegPath, FFprobePath,
-                StagingDirectory, ShareMountPrefix, MaxConcurrentJobs, MaxCpuThreads
+                StagingDirectory, ShareMountPrefix, MaxConcurrentJobs, MaxCpuThreads,
+                Version, BuildInfo,
             ))
             return True
         except Exception as e:

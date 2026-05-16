@@ -34,4 +34,12 @@ COPY . .
 # Create staging directory mount point
 RUN mkdir -p /mnt/media_tv/MediaVortex/Staging
 
+# Build-time version stamp (worker-versioning.feature.md criteria 1, 2).
+# COMMIT_SHA is passed in via --build-arg from the deploy script (the source
+# tree on the build host is an scp'd snapshot, not a git checkout, so the SHA
+# can't be derived inside the image).
+ARG COMMIT_SHA=unknown
+RUN echo "$COMMIT_SHA" > /opt/mediavortex/VERSION \
+ && printf "commit=%s\nbuilt_at=%s\nbuilt_by=%s\n" "$COMMIT_SHA" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(hostname)" > /opt/mediavortex/BUILD_INFO
+
 ENTRYPOINT ["python3", "WorkerService/Main.py"]

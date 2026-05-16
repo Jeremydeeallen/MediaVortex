@@ -26,6 +26,16 @@ Replaces the former `TranscodeService/Main.py` + `QualityTestService/Main.py` du
 | 12. Apply capabilities | `_ApplyCapabilities()` | Starts/stops TranscodeService, QualityTestService, ContinuousScanService based on flags |
 | 13. Main loop | `_MainLoop()` | Blocks on ShutdownEvent, checking every 10s |
 
+## Version
+
+Each worker stamps `Workers.Version` (and `BuildInfo` when available) at registration so the operator can see what code each worker is running from the Activity page. Resolver order (`WorkerService/Main.py::_ResolveWorkerVersion`):
+
+1. **`/opt/mediavortex/VERSION`** -- baked into the Docker image at build time via `--build-arg COMMIT_SHA=<sha>` (see `deploy/worker-deploy-linux.flow.md` step 2). Also reads `/opt/mediavortex/BUILD_INFO` (commit + built_at + built_by) into the `BuildInfo` column.
+2. **`git rev-parse HEAD`** in the project root with a 2-second timeout -- for Windows / dev-host workers running from a git checkout.
+3. Literal **`"unknown"`** when neither resolves.
+
+The Activity page tile shows the short SHA next to the worker name; the tooltip shows the full SHA + BuildInfo. A fleet-wide mismatch banner (`/api/TeamStatus/Workers/VersionStatus`) appears when two or more enabled workers report different non-unknown versions. See `Features/TeamStatus/worker-versioning.feature.md`.
+
 ## Per-Worker Status Control
 
 Workers poll their own `Workers.Status` column every 5 seconds:

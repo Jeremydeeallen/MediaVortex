@@ -190,16 +190,21 @@ class WorkerServiceApp:
             MaxCpuThreadsEnv = os.environ.get('MEDIAVORTEX_MAX_CPU_THREADS')
             MaxCpuThreads = int(MaxCpuThreadsEnv) if MaxCpuThreadsEnv else None
 
+            # Resolve build version (worker-versioning.feature.md criterion 4)
+            Version, BuildInfo = self._ResolveWorkerVersion()
+
             # Register worker (UPSERT - creates or updates)
             self.DatabaseManager.RegisterWorker(
                 WorkerName=self.WorkerName,
                 Platform=self.WorkerPlatform,
                 FFmpegPath=FFmpegPath,
                 FFprobePath=FFprobePath,
-                MaxCpuThreads=MaxCpuThreads
+                MaxCpuThreads=MaxCpuThreads,
+                Version=Version,
+                BuildInfo=BuildInfo,
             )
             LoggingService.LogInfo(
-                f"Worker '{self.WorkerName}' registered (ffmpeg={FFmpegPath}, ffprobe={FFprobePath}, threads={MaxCpuThreads})",
+                f"Worker '{self.WorkerName}' registered (ffmpeg={FFmpegPath}, ffprobe={FFprobePath}, threads={MaxCpuThreads}, version={Version})",
                 "WorkerService", "_RegisterAndLoadWorkerConfig"
             )
 
@@ -247,6 +252,47 @@ class WorkerServiceApp:
         if FromPath:
             return FromPath
         return ""
+
+    def _ResolveWorkerVersion(self):
+        """Owns worker-versioning.feature.md criterion 4. Three-tier resolver:
+          1. /opt/mediavortex/VERSION (Docker workers, baked in via --build-arg COMMIT_SHA)
+          2. `git rev-parse HEAD` in the project root (Windows / dev hosts running from a checkout)
+          3. literal "unknown" (anything else)
+        BuildInfo is the contents of /opt/mediavortex/BUILD_INFO when tier 1 hits,
+        else None. Returns (version, build_info_or_none)."""
+        try:
+            ProjectRoot = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            VersionFile = os.path.join(ProjectRoot, "VERSION")
+            BuildInfoFile = os.path.join(ProjectRoot, "BUILD_INFO")
+            if os.path.exists(VersionFile):
+                with open(VersionFile, "r", encoding="utf-8") as Fh:
+                    Sha = Fh.read().strip()
+                if Sha:
+                    BuildInfo = None
+                    if os.path.exists(BuildInfoFile):
+                        with open(BuildInfoFile, "r", encoding="utf-8") as Fh:
+                            BuildInfo = Fh.read()
+                    return (Sha[:64], BuildInfo)
+        except Exception as Ex:
+            LoggingService.LogException("VERSION-file read failed; falling through", Ex, "WorkerService", "_ResolveWorkerVersion")
+
+        try:
+            import subprocess
+            Result = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=ProjectRoot,
+                capture_output=True,
+                text=True,
+                timeout=2,
+            )
+            if Result.returncode == 0:
+                Sha = (Result.stdout or "").strip()
+                if Sha:
+                    return (Sha[:64], None)
+        except Exception as Ex:
+            LoggingService.LogException("git rev-parse HEAD failed; falling through", Ex, "WorkerService", "_ResolveWorkerVersion")
+
+        return ("unknown", None)
 
     def _LoadCapabilitiesFromDB(self):
         """Load capability flags, concurrency settings, and status from Workers table."""

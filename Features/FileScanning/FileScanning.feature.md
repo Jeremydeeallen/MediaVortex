@@ -148,6 +148,31 @@ Triggering context (2026-05-15):
       WorkerService restart for code pickup; Linux workers also need
       redeploy when next used.
 
+- [x] 3.8. **Criterion 26 + FileName corruption shipped + verified (2026-05-16).**
+      Cross-worker mtime drift root-caused to `GetFileModificationTime`
+      returning local-tz naive datetimes; fix uses naive UTC via
+      `fromtimestamp(ts, tz=timezone.utc).replace(tzinfo=None)` (commit
+      5f1f6f8). Symptom investigation revealed a SECOND bug:
+      `GetFileNameFromPath` used `os.path.basename` which on Linux does
+      not recognize backslash, so canonical Windows paths stored the
+      whole FilePath as FileName -- 91,588 of 102,576 rows (89%)
+      corrupted. Fix uses OS-agnostic
+      `normalized = filePath.replace('\\\\', '/'); rsplit('/', 1)[-1]`
+      (commit 706f2bc). `Scripts/SQLScripts/BackfillFileNameCorruption.py`
+      repaired 84,510 rows. 3-way smoke test (I9-2024 Windows MST,
+      larry-worker-1 Linux UTC, wakko-worker-1 Linux UTC) produced
+      byte-identical canonical_filepath / size_bytes / filename / mtime
+      via `Scripts/smoke_cross_worker.py`. Larry + Wakko containers
+      redeployed with both fixes.
+      **PICKUP (when resuming FileScanning):** I9 WorkerService is
+      currently Paused, ScanEnabled=false; needs to be restarted by
+      operator so PID 19224 picks up the new FileManagerService code
+      from disk. After restart, flip ScanEnabled=true + Status='Online'
+      on I9-2024 and verify a fresh M:\ scan reports UpdatedFiles=0
+      (clean incremental skip end-to-end across both fixes). If passes,
+      multi-worker scanning is safe to enable (criterion 11 multi-worker
+      affinity work becomes unblocked).
+
 - [x] 3.7. **ReconcileWithDisk moved to path-storage Phase 4 read pattern (2026-05-15).**
       Set membership now keyed on `(StorageRootId, RelativePath.lower())`
       tuples computed via `PathStorage.Parse`, not on OS-coupled `FilePath`

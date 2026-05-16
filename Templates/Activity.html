@@ -84,6 +84,7 @@
             </div>
         </div>
         <div class="card-body">
+            <div id="VersionMismatchBanner"></div>
             <div class="row g-3" id="WorkersContainer">
                 <div class="col-12 text-center text-muted py-2">Loading...</div>
             </div>
@@ -389,6 +390,38 @@ var ActivityPage = (function() {
                 }
             })
             .catch(function(E) { console.error('Workers error:', E); });
+
+        // Parallel fetch for the fleet-wide version-mismatch banner
+        // (worker-versioning.feature.md criterion 7 + 9).
+        fetch('/api/TeamStatus/Workers/VersionStatus')
+            .then(function(R) { return R.json(); })
+            .then(function(Data) {
+                if (Data.Success && Data.Data) {
+                    RenderVersionBanner(Data.Data);
+                }
+            })
+            .catch(function(E) { console.error('VersionStatus error:', E); });
+    }
+
+    function RenderVersionBanner(VS) {
+        var Slot = document.getElementById('VersionMismatchBanner');
+        if (!Slot) return;
+        if (VS.AllAgree) {
+            Slot.innerHTML = '';
+            return;
+        }
+        var Parts = [];
+        Object.keys(VS.Versions || {}).forEach(function(Sha) {
+            if (Sha === 'unknown') return;
+            var Count = (VS.Versions[Sha] || []).length;
+            Parts.push(Count + ' on ' + Sha.substring(0, 7));
+        });
+        var UnknownCount = (VS.Versions['unknown'] || []).length;
+        var Msg = '<i class="fas fa-exclamation-triangle me-2"></i><strong>Workers running mixed versions:</strong> ' + Parts.join(', ');
+        if (UnknownCount > 0) {
+            Msg += ' <span class="text-muted">(plus ' + UnknownCount + ' on unknown)</span>';
+        }
+        Slot.innerHTML = '<div class="alert alert-warning py-2 mb-2">' + Msg + '</div>';
     }
 
     function RenderWorkers(WorkerList) {
@@ -408,12 +441,26 @@ var ActivityPage = (function() {
             var HeartbeatDot = GetHeartbeatDotClass(HeartbeatAge);
             var WorkerNameEsc = EscapeHtml(W.WorkerName);
 
+            // Version badge (worker-versioning.feature.md criterion 6).
+            // Short 7-char SHA next to the name; tooltip = full SHA + BuildInfo.
+            var VersionShort, VersionTooltip, VersionCls;
+            if (W.Version && W.Version !== 'unknown') {
+                VersionShort = EscapeHtml(W.Version.substring(0, 7));
+                VersionTooltip = EscapeHtml(W.Version) + (W.BuildInfo ? '\n' + EscapeHtml(W.BuildInfo) : '');
+                VersionCls = 'text-muted';
+            } else {
+                VersionShort = '<em>unknown</em>';
+                VersionTooltip = 'Worker has not reported a build version.';
+                VersionCls = 'text-warning';
+            }
+            var VersionHtml = '<small class="' + VersionCls + ' ms-2" title="' + VersionTooltip + '" style="white-space:pre-line">v' + VersionShort + '</small>';
+
             var Col = document.createElement('div');
             Col.className = 'col-6 col-lg-4 col-xl-3';
             Col.innerHTML = '<div class="' + CardCls + '">' +
                 '<div class="card-body py-3">' +
                     '<h6 class="card-title mb-2 d-flex justify-content-between align-items-center">' +
-                        '<span><i class="fas fa-circle me-1 small ' + HeartbeatDot + '" title="Last heartbeat: ' + HeartbeatText + '"></i>' + WorkerNameEsc + '</span>' +
+                        '<span><i class="fas fa-circle me-1 small ' + HeartbeatDot + '" title="Last heartbeat: ' + HeartbeatText + '"></i>' + WorkerNameEsc + VersionHtml + '</span>' +
                         '<span class="badge ' + BadgeCls + '">' + DisplayStatus + '</span>' +
                     '</h6>' +
                     '<div class="small text-muted mb-2">' +

@@ -53,22 +53,26 @@ Just deployed (2026-05-09): rebuilt the worker image, recreated 4 LXC containers
 
 ## Status
 
-DRAFTED -- awaiting operator approval.
+IMPLEMENTED 2026-05-16 -- full design (not MVP). Awaiting redeploy +
+in-fleet smoke test to verify all workers report the same SHA.
 
 ### Progress
 
 - [x] Read prior issues (no related entry in `KNOWN-ISSUES.md`)
 - [x] Read existing deploy flow (`deploy/worker-deploy-linux.flow.md`)
 - [x] Drafted feature doc (this file)
-- [ ] Operator approval
-- [ ] Implement A1-A2 (Dockerfile writes VERSION + BUILD_INFO via `--build-arg COMMIT_SHA`)
-- [ ] Implement B3-B5 (Workers schema add Version + BuildInfo, RegisterWorker accepts them, WorkerService resolver)
-- [ ] Implement C6-C7 (Activity tile short SHA + tooltip, fleet-wide banner)
-- [ ] Implement D8-D9 (/api/TeamStatus/Workers payload, /VersionStatus endpoint)
-- [ ] Update `deploy/worker-deploy-linux.flow.md` step 2 with `--build-arg`
-- [ ] Smoke test: deploy, confirm all workers report the same SHA; manually downgrade one container's image; confirm banner appears with the mismatch
+- [x] Operator approval (2026-05-16 "Let's add b right above our current work")
+- [x] A1-A2: Dockerfile `ARG COMMIT_SHA=unknown` + writes `/opt/mediavortex/VERSION` and three-line `/opt/mediavortex/BUILD_INFO` (commit / built_at / built_by).
+- [x] B3-B5: `Scripts/SQLScripts/AddWorkerVersionColumn.py` migration (Version VARCHAR(64), BuildInfo TEXT) applied. `DatabaseManager.RegisterWorker` accepts and UPSERTs both. `WorkerService/Main.py::_ResolveWorkerVersion` 3-tier resolver (VERSION file -> git rev-parse -> "unknown") wired into `_RegisterAndLoadWorkerConfig`.
+- [x] C6-C7: Activity tile shows `v<short-sha>` next to worker name with full SHA + BuildInfo tooltip; "unknown" workers render in italics/warning color. Fleet-wide mismatch banner appears above the worker grid when 2+ workers report different non-unknown versions.
+- [x] D8-D9: `/api/TeamStatus/Workers` payload includes `Version` + `BuildInfo`. New `GET /api/TeamStatus/Workers/VersionStatus` endpoint returns `{AllAgree, Versions, MismatchCount}`.
+- [x] `deploy/worker-deploy-linux.flow.md` step 2 already updated with `--build-arg COMMIT_SHA=$(git rev-parse HEAD)` by the operator's deploy refactor (verified pre-existing).
+- [x] `WorkerService/WorkerService.flow.md` new Version subsection describing the resolver order, the columns written, and the Activity page surface.
+- [ ] **PENDING**: redeploy Larry + Wakko with `--build-arg COMMIT_SHA=<sha>` so VERSION lands in the image (current containers have COMMIT_SHA=unknown because today's earlier deploys predated the Dockerfile change).
+- [ ] **PENDING**: operator restarts I9 WorkerService; tier-2 resolver (`git rev-parse HEAD`) should fire and write the SHA.
+- [ ] **PENDING**: smoke test -- query `Version` on every Workers row; AllAgree=true post-fleet-redeploy.
 
-NEXT: operator approval to start. Recommended implementation order: B (DB shape) -> A (build-time stamp) -> the resolver -> UI -> docs.
+NEXT: redeploy Larry + Wakko with --build-arg, then verify all enabled workers have matching Version. Restart I9 last; its tier-2 git resolver should produce the same SHA.
 
 ## Scope
 
