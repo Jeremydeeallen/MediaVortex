@@ -23,6 +23,14 @@ class AudioCompletionService:
     REASON_NO_AUDIO_STREAM = 'no_audio_stream'
     REASON_BELOW_BITRATE_FLOOR = 'below_bitrate_floor'
     REASON_INCOMPATIBLE_CODEC_UNSUPPORTED = 'incompatible_codec_unsupported'
+    REASON_ALREADY_AT_TARGET_LOUDNESS = 'already_at_target_loudness'
+
+    # Target loudness window. SourceIntegratedLufs within this band means the
+    # file already sits at broadcast loudness -- running the normalize chain
+    # would add artifacts without changing perceived volume. Mirrors EBU R128
+    # tolerance for "broadcast-grade" loudness compliance.
+    TARGET_LUFS = -23.0
+    TARGET_LUFS_TOLERANCE = 1.0
 
     @staticmethod
     def DetectNormalizationInCommand(FFmpegCommand: Optional[str]) -> bool:
@@ -93,13 +101,18 @@ class AudioCompletionService:
              -> (None, True, 'no_audio_stream') -- Suspect, hard block
           c. Loudnorm in historical successful attempt
              -> (True, False, None) -- already normalized, stream-copy forever
-          d. AudioBitrateKbps at or below channel-tier floor (and MP4-compat codec)
+          d. SourceIntegratedLufs within +/- TARGET_LUFS_TOLERANCE of TARGET_LUFS
+             AND MP4-compat codec
+             -> (True, False, 'already_at_target_loudness') -- broadcast loudness
+                already; normalize chain would add artifacts without changing
+                perceived volume
+          e. AudioBitrateKbps at or below channel-tier floor (and MP4-compat codec)
              -> (True, False, 'below_bitrate_floor') -- skip the pass permanently
-          e. Otherwise (probed file with decodable audio that needs normalization
+          f. Otherwise (probed file with decodable audio that needs normalization
              and/or codec conversion)
              -> (False, False, None) -- eligible for one-shot pass next encode
 
-        DTS / TrueHD / FLAC / PCM / Vorbis / Opus fall through to (e). The
+        DTS / TrueHD / FLAC / PCM / Vorbis / Opus fall through to (f). The
         one-shot pass converts them via BuildAudioCodecArgs (EAC3 fallback)
         in the same FFmpeg invocation that applies loudnorm.
         """
@@ -114,6 +127,13 @@ class AudioCompletionService:
 
         if HasLoudnormHistory:
             return (True, False, None)
+
+        # Target-loudness short-circuit (clause d): file already sits within
+        # +/- TARGET_LUFS_TOLERANCE of TARGET_LUFS. No normalize work to do.
+        SourceLufs = Row.get('SourceIntegratedLufs')
+        if SourceLufs is not None and AudioCodec in cls.MP4_COMPAT_AUDIO_CODECS:
+            if abs(float(SourceLufs) - cls.TARGET_LUFS) <= cls.TARGET_LUFS_TOLERANCE:
+                return (True, False, cls.REASON_ALREADY_AT_TARGET_LOUDNESS)
 
         AudioBitrate = Row.get('AudioBitrateKbps')
         Channels = Row.get('AudioChannels')

@@ -1,0 +1,256 @@
+# Media Tabs and Loudness Analysis
+
+## What It Does
+
+Three changes shipped together because they reinforce each other:
+
+1. **Loudness Analysis** (data layer): captures `SourceIntegratedLufs`, `SourceLoudnessRangeLU`, and `SourceTruePeakDbtp` per MediaFile via FFmpeg's `ebur128` filter. Measurements drive smarter `AudioComplete` decisions -- files already at -23 LUFS are marked complete without ever running through the normalize chain.
+2. **Reprobe lifecycle**: a one-time full-library reprobe (re-runs `ffprobe` *and* `ebur128` on every MediaFile) plus an on-demand per-folder / per-file rescan API. Today, probe metadata is captured once on scan and never refreshed unless a file replacement triggers it; this feature makes refresh first-class.
+3. **Media tabs UX**: `/TranscodeQueue` splits into three sub-tabs -- **Transcode**, **Remux**, **Audio Fix** -- each filtered to its `ProcessingMode`. The Audio Fix tab adds folder-level priority hints so the operator can say "do all of `Westworld` next." The cascade now distinguishes audio-only-fix from container-only-fix so the tabs route correctly.
+
+Together they answer two operator questions:
+- *"Which files in the library will play at noticeably different volume than the rest?"* -- via `SourceIntegratedLufs` distance from -23 LUFS.
+- *"Which files have wide dynamic range that the compressor will hit hard?"* -- via `SourceLoudnessRangeLU > 18`.
+- *"Now that I know, how do I tell MediaVortex to prioritize fixing them?"* -- via the Audio Fix tab with folder hints.
+
+## Concern
+
+Six operator concerns this feature resolves:
+
+1. **No loudness measurement today.** The cascade decides "needs normalize / doesn't need normalize" using bitrate proxies (channel-aware floor) and history (loudnorm-in-past-command). Neither tells us what the audio actually *sounds* like. Bitrate and codec do not predict perceived loudness.
+
+2. **No way to identify "remote-grab" files.** Two files both AAC stereo 192 kbps could be mastered at -23 LUFS or -14.5 LUFS and look identical in our DB. The 8.5 dB perceived difference between them is what makes the operator reach for the TV remote. We have no signal for this today.
+
+3. **No way to identify wide-dynamic-range files at risk of compressor damage.** Files with LRA > 18 LU (typical theatrical mixes) will be aggressively squashed by the current acompressor settings. We can't surface these for review without measurement.
+
+4. **Probe data goes stale.** A file scanned in 2024 with FFprobe results that haven't been refreshed -- if the file was replaced out-of-band, edited, or if FFprobe was upgraded -- still carries the old metadata. There's no mechanism to refresh.
+
+5. **Workers open files inefficiently.** When the cascade routes a file to Remux for container fix, and that same file also needs audio normalization, BuildRemuxCommand already does both. But the operator can't *see* this -- the queue shows a single "Remux" row with no indication that audio work is part of it. Conversely, when a file needs only audio work but the queue presents it as "Remux," the operator may wonder why a fine-looking MP4 is being remuxed.
+
+6. **Queue is presented as one undifferentiated list.** Transcode jobs (90 minutes) and Remux jobs (15 seconds) currently mix in the same view. The operator cannot easily say "let me kick off a batch of Remuxes while the Transcodes run overnight" without manually filtering. A tabbed view by job type makes the queue actionable.
+
+## Surface
+
+User-facing -- three GUI changes + one new admin endpoint:
+
+1. `/TranscodeQueue` page restructured: header gains a tab bar with three tabs (Transcode / Remux / Audio Fix) each showing a pending count. Each tab body is the existing queue list filtered to its mode.
+2. Audio Fix tab adds a "Prioritize folder" input + button (and a list of currently-pinned folders).
+3. SmartPopulate (Card 1 on `/Scanning` or wherever it lives) gets a "Mode" column showing the cascade's decision per row, so the operator sees which tab each suggestion will land on.
+4. `POST /api/MediaProbe/Reprobe` admin endpoint accepts scoped filters (`MediaFileIds[]`, `ShowFolder`, `Drive`) and runs a probe + loudness measurement pass over matching rows. No-body call returns 400 (no unbounded reprobes).
+
+See `Features/TranscodeQueue/media-tabs.flow.md` for the tab UX flow and
+the cascade -> tab mapping. See `Features/AudioCompletion/audio-completion.flow.md`
+for how `AudioComplete` is decided.
+
+## Success Criteria
+
+### A. Loudness Analysis -- schema
+
+1. `MediaFiles.SourceIntegratedLufs FLOAT` column exists, nullable. Represents EBU R128 integrated loudness of the source audio in LUFS. Migration `Scripts/SQLScripts/AddSourceLoudnessColumns.py` is idempotent. Verifiable: `\d MediaFiles` shows the column.
+
+2. `MediaFiles.SourceLoudnessRangeLU FLOAT` column exists, nullable. Represents EBU R128 loudness range in LU. Higher = wider dynamic range. Verifiable: same migration.
+
+3. `MediaFiles.SourceTruePeakDbtp FLOAT` column exists, nullable. Represents EBU R128 true-peak in dBTP. Anything > 0 will clip on some DACs. Verifiable: same migration.
+
+4. `MediaFiles.LoudnessMeasuredAt TIMESTAMP` column exists, nullable. Set to NOW() whenever the three measurements are written. Used to detect stale measurements (e.g. when a file was replaced post-measure). Verifiable: same migration.
+
+### B. Loudness Analysis -- service
+
+5. `Features/LoudnessAnalysis/LoudnessAnalysisService.py` exists with at least these methods:
+   - `MeasureLoudness(FilePath: str, AudioStreamIndex: int = 0) -> Optional[LoudnessResult]` -- runs `ffmpeg -af ebur128=peak=true` against the file's selected audio stream, parses the summary block from stderr, returns `(IntegratedLufs, LoudnessRangeLU, TruePeakDbtp)` or None on parse failure / FFmpeg error.
+   - `PersistLoudness(MediaFileId: int, Result: LoudnessResult) -> bool` -- writes the four columns in one UPDATE; sets `LoudnessMeasuredAt = NOW()`.
+   - `IsMeasurementStale(MediaFile) -> bool` -- returns true if `LoudnessMeasuredAt IS NULL` or earlier than the file's most-recent `TranscodeAttempts.FileReplacedDate`.
+6. `MeasureLoudness` is the only place that invokes FFmpeg for measurement (single seam). Caller passes a pre-resolved local path; PathTranslation happens upstream. Verifiable: grep confirms no other call site invokes `ebur128`.
+
+### C. Loudness Analysis -- integration
+
+7. MediaProbe pipeline (`Features/MediaProbe/MediaProbeBusinessService.py`) is extended: after a successful FFprobe, the service also invokes `LoudnessAnalysisService.MeasureLoudness` against the same file and persists. Failure of the loudness step does NOT roll back the probe -- loudness is best-effort; the columns stay NULL on failure and the next reprobe retries. Verifiable: insert a fresh MediaFile, run probe, observe both probe metadata and loudness columns populated.
+
+8. `Scripts/SQLScripts/BackfillSourceLoudness.py` measures every `MediaFiles` row where `SourceIntegratedLufs IS NULL`. Idempotent (resumable). Expected runtime: ~30k files at ~1.5 sec/file = ~12-14 hours single-threaded; can be parallelized across worker capability. Reports progress every 100 rows.
+
+### D. Loudness Analysis -- cascade integration
+
+9. `AudioCompletionService.EvaluateInitialAudioState` is extended: when `SourceIntegratedLufs IS NOT NULL` and within ±1 LU of -23 LUFS (so [-24, -22]), the file is marked `AudioComplete=true` regardless of other signals. Reason: `'already_at_target_loudness'`. The reasoning: there's no useful work for loudnorm to do; running the chain would only introduce artifacts. Verifiable: insert a row with `SourceIntegratedLufs = -23.2`, run `EvaluateInitialAudioState`, observe AudioComplete=true.
+
+10. `BackfillAudioComplete.py` (existing script) gains a Pass 5: after the existing four passes, files where `SourceIntegratedLufs` is in [-24, -22] are flipped to `AudioComplete=true, AudioCorruptReason='already_at_target_loudness'`. Run after `BackfillSourceLoudness.py` completes. Idempotent.
+
+### E. Reprobe lifecycle
+
+11. `Features/MediaProbe/MediaProbeController.py` exposes `POST /api/MediaProbe/Reprobe` with JSON body accepting `MediaFileIds: List[int]`, `ShowFolder: str`, or `Drive: str`. At least one filter required (refuses unbounded calls). Returns `{Success, Queued}` where `Queued` is the number of files added to the reprobe queue.
+
+12. Reprobe queue mechanism: rather than blocking on FFmpeg synchronously, the endpoint inserts rows into a new `ReprobeQueue` table (or extends an existing scan/probe queue) with `Status='Pending'`, `Priority`, `MediaFileId`. The MediaProbe worker capability claims these in `Priority DESC` order. Verifiable: POST with one MediaFileId, observe `ReprobeQueue` row inserted with Status=Pending.
+
+13. One-time full-library reprobe migration: `Scripts/SQLScripts/QueueFullLibraryReprobe.py` inserts every `MediaFiles.Id` into `ReprobeQueue` at low priority. Designed to run once after this feature lands so existing files get loudness measurements + fresh FFprobe data. Idempotent (skips rows already pending or in-progress). Reports total queued.
+
+14. After successful reprobe of a file, the MediaProbe worker calls `LoudnessAnalysisService.MeasureLoudness` in the same pass (criterion 7) and then `RecomputeForFiles([MediaFileId])` so the cascade picks up fresh state. Verifiable: queue a reprobe for a file with stale loudness, observe LoudnessMeasuredAt updated post-run.
+
+### F. ProcessingMode trichotomy
+
+15. The cascade in `_EvaluateCompliance` returns `RecommendedMode IN ('Transcode', 'Remux', 'AudioFix', None)`. The new `'AudioFix'` is returned when **all** of the following hold:
+    - Audio needs work (`AudioComplete=false`)
+    - Container is already MP4-family acceptable
+    - Video codec is in the acceptable set
+    - Resolution doesn't exceed the profile's TranscodeDownTo
+    - Estimated savings below threshold
+   In other words: only the audio needs fixing. Verifiable: insert an MP4 H264 AAC stereo file at 192 kbps with `AudioComplete=false`, recompute, observe `RecommendedMode='AudioFix'`.
+
+16. When audio needs work AND container also needs fixing (MKV source, etc.), cascade returns `RecommendedMode='Remux'` (not 'AudioFix'). The Remux pass handles both in one FFmpeg call. Verifiable: MKV H264 AAC 192k AudioComplete=false -> `'Remux'`.
+
+17. `BuildRemuxCommand` accepts both 'Remux' and 'AudioFix' rows. The worker-side execution is identical; the distinction is operator-facing only. Verifiable: a queue row with `ProcessingMode='AudioFix'` produces the same FFmpeg command as the equivalent `ProcessingMode='Remux'` row when `AudioComplete=false`.
+
+### G. Media tabs UI
+
+18. `/TranscodeQueue` template renders a tab bar with three tabs: Transcode, Remux, Audio Fix. Each tab shows the count of `TranscodeQueue` rows with the matching `ProcessingMode`. Active tab persists across navigations (query string `?mode=` or local-storage). Verifiable: insert one row of each mode, observe all three tab counts = 1.
+
+19. Each tab body is the existing queue list filtered to its mode. Existing actions (cancel, requeue, etc.) work identically across tabs. Verifiable: action a row from each tab, observe the correct backend behavior.
+
+20. SmartPopulate (current Card 1 on `/Scanning`) gains a `Mode` column per row showing the cascade's `RecommendedMode`. The "Add to queue" button uses that value -- the operator sees which tab a row will land on. Verifiable: SmartPopulate response shape includes `RecommendedMode`; UI renders a badge with the value.
+
+21. The Audio Fix tab gains a "Prioritize folder" control: input box accepting a folder name (autocomplete from `ShowFolders`), plus a list of currently-pinned folders with remove buttons. Pinning persists to a new `AudioFixPriorityHints` table (or extends `ShowSettings`). Verifiable: pin `Westworld`, observe `AudioFixPriorityHints` row inserted; Audio Fix tab list re-orders so Westworld files surface at the top.
+
+22. When the cascade routes a file to 'AudioFix' (criterion 15) and a folder pin matches its show folder, the `TranscodeQueue.Priority` is set higher (or a "BoostedPriority" column reflects the pin). Verifiable: pin a folder, run RecomputeForFiles, observe pinned-folder rows have higher Priority than unpinned ones of the same mode.
+
+### H. Operator visibility
+
+23. The Activity page's Library Compliance panel (deferred from `transcode-vs-remux-routing.feature.md` criterion 21) is added in this feature. It shows counts by:
+    - Compliance: total / IsCompliant=true / IsCompliant=false / IsCompliant=NULL
+    - Recommended mode breakdown (Transcode / Remux / AudioFix / None)
+    - Audio sub-section: AudioComplete=true / false / NULL / AudioCorruptSuspect=true (by reason)
+    - **NEW** Loudness sub-section: distribution by integrated LUFS band (on target ±1, close ±3, off 3-6 LU, way off 6+ LU), unmeasured count, LRA > 18 count
+   Verifiable: visual inspection plus SQL reconciliation against MediaFiles GROUP BY.
+
+24. `/api/MediaProbe/ReprobeQueueStatus` endpoint returns `{Pending: N, Running: M, CompletedLast24h: K}` for the reprobe queue. Used by the Reprobe button in /ShowSettings to show in-flight status. Verifiable: queue 100 reprobes, observe Pending=100 in the response.
+
+## Status
+
+PHASE 1 IN PROGRESS (2026-05-17) -- schema + standalone backfill kicked off to populate loudness data while remaining Phase 2 work proceeds in parallel.
+
+## Phase 1 -- Surgical data capture (kick off while we build the rest)
+
+The full feature is large. To parallelize, Phase 1 ships only the schema + a standalone backfill script that an operator runs manually on any paused worker. The measurement pass runs unattended for ~20 hours; Phase 2 work proceeds during that window.
+
+**Phase 1 surface (criteria 1-4 + change-detection + index + backfill):**
+- 6 columns added to MediaFiles: `SourceIntegratedLufs`, `SourceLoudnessRangeLU`, `SourceTruePeakDbtp`, `LoudnessMeasuredAt`, `LastProbedFileSize`, `LastProbedFileMtime`
+- 1 partial index: `idx_mediafiles_loudness_unmeasured`
+- 1 idempotent migration: `Scripts/SQLScripts/AddSourceLoudnessAndChangeDetection.py`
+- 1 standalone backfill script: `Scripts/SQLScripts/BackfillProbeAndLoudness.py`
+  - `--worker-name <name>` arg: resolves `Workers.FFmpegPath` + `WorkerShareMappings` MountMap from DB
+  - Reads `MediaFiles WHERE SourceIntegratedLufs IS NULL AND AudioCorruptSuspect = FALSE ORDER BY PriorityScore DESC NULLS LAST`
+  - For each: `os.stat()` → check mtime+size short-circuit → `ffmpeg -af ebur128=peak=true` → parse stderr summary → persist
+  - Resumable, idempotent, progress every 100 rows
+  - Failures: stamp `LoudnessMeasuredAt=NOW()` with NULL measurements (so we don't retry forever; criterion 8 semantics)
+  - Runs on any paused worker; no daemon involvement; no claim of TranscodeQueue rows
+- Smoke test: `--limit 5` on the operator's chosen worker to confirm parsing + path translation work before full run
+- Coordination: operator launches the script in their preferred terminal; can interrupt + resume freely
+
+**Phase 1 NOT in scope** (Phase 2 covers):
+- `Features/LoudnessAnalysis/LoudnessAnalysisService.py` (the proper Python module -- Phase 1 backfill is throwaway code that gets superseded)
+- MediaProbe loudness integration (criterion 7)
+- Reprobe endpoint + queue (E11-E14)
+- Cascade `AudioComplete` bump on target-loudness files (D9-D10)
+- ProcessingMode trichotomy + `AudioFix` mode (F15-F17)
+- Media tabs UI (G18-G22)
+- Activity panel + visibility queries (H23-H24)
+- Cross-feature doc updates
+
+### Progress
+
+- [x] Flow doc `media-tabs.flow.md` drafted
+- [x] Feature doc (this file) drafted
+- [ ] Operator approves criteria 1-24 + runbook order below
+- [ ] Decide: ONE feature or split (loudness-analysis / reprobe-lifecycle / media-tabs as siblings)
+- [ ] Decide: AudioFixPriorityHints standalone table vs ShowSettings extension
+- [ ] Decide: ReprobeQueue standalone table vs FileScanQueue extension
+- [ ] Step 1: Loudness schema (A1-A4)
+- [ ] Step 2: LoudnessAnalysisService (B5-B6)
+- [ ] Step 3: BackfillSourceLoudness.py + live run (C8) -- ~12h
+- [ ] Step 4: MediaProbe loudness integration (C7)
+- [ ] Step 5: Cascade integration -- AudioComplete bumps on target-loudness files (D9-D10)
+- [ ] Step 6: ProcessingMode trichotomy in cascade (F15-F17)
+- [ ] Step 7: Reprobe queue + endpoint (E11-E14)
+- [ ] Step 8: One-time full-library reprobe (E13)
+- [ ] Step 9: Media tabs UI (G18-G20)
+- [ ] Step 10: Audio Fix folder pins (G21-G22)
+- [ ] Step 11: Activity panel (H23-H24)
+- [ ] Step 12: Cross-feature doc updates (transcode-vs-remux-routing, audio-completion, transcode.flow.md)
+- [ ] Step 13: Live operator smoke test
+
+## Open design questions
+
+The criteria above bake in specific designs. Items below are intentionally
+called out where I made a judgment call -- speak up if you'd rather take a
+different route:
+
+1. **Reprobe queue separate table vs reuse FileScanQueue?** I sketched a new `ReprobeQueue` for clarity but extending the existing scan queue with a `Kind='Reprobe'` discriminator is cheaper. I lean toward the new table because reprobe priorities, retry semantics, and triggers diverge from scan over time.
+2. **Folder pins separate table vs ShowSettings column?** I sketched `AudioFixPriorityHints` but a `ShowSettings.AudioFixBoost INTEGER` column would also work and reuse the existing per-show settings UI. I lean toward the new table because pins are operator-actionable transient state, not durable per-show config -- they get cleared as the work completes.
+3. **"AudioFix" name or something better?** The user prompted "(or a better name)". Alternatives: "Audio Pass", "Loudness Fix", "Sound Fix". I went with `'AudioFix'` because it's the verbiage the cascade already uses internally; happy to rename.
+4. **Loudness measurement runs on file open or batched?** I chose: at MediaProbe time + a reprobe pass. Alternative: measure-on-demand during cascade evaluation (lazy). I rejected lazy because it would block the cascade for ~1.5 sec/file and the cascade is called in tight loops (RecomputeForFiles).
+5. **Should the existing "Remux" tab be renamed to "Container Fix"?** The user's mental model is "1-Transcode 2-Remux 3-Audio fix". "Remux" is technically accurate but operator-mysterious. "Container Fix" is more honest about what it does. Worth a rename? I left it as Remux for now to minimize disruption to existing operator habits.
+
+## Scope
+
+```
+Features/TranscodeQueue/media-tabs-and-loudness.feature.md  -- (THIS FILE)
+Features/TranscodeQueue/media-tabs.flow.md                  -- (NEW)
+Features/LoudnessAnalysis/LoudnessAnalysisService.py        -- (NEW) ebur128 invoker + parser + persister
+Features/LoudnessAnalysis/__init__.py                       -- (NEW)
+Features/MediaProbe/MediaProbeBusinessService.py            -- chain loudness measurement after probe
+Features/MediaProbe/MediaProbeController.py                 -- POST /api/MediaProbe/Reprobe endpoint
+Features/MediaProbe/MediaProbeWorker.py (or equivalent)     -- claim ReprobeQueue rows + measure + recompute
+Features/AudioCompletion/AudioCompletionService.py          -- extend EvaluateInitialAudioState with loudness clause
+Features/TranscodeQueue/QueueManagementBusinessService.py   -- cascade emits 'AudioFix' as discrete RecommendedMode
+Features/TranscodeQueue/TranscodeQueueController.py         -- tab filtering, mode counts, folder-pin endpoint
+Features/TranscodeQueue/TranscodeQueueViewModel.py          -- mode counts, audio-fix-pin queries
+Features/Activity/...                                        -- Library Compliance panel + loudness sub-section
+Templates/TranscodeQueue.html                                -- tab bar + per-tab body + folder-pin controls
+Templates/SmartPopulate (Card 1)                             -- Mode column
+Scripts/SQLScripts/AddSourceLoudnessColumns.py              -- (NEW)
+Scripts/SQLScripts/AddReprobeQueue.py                       -- (NEW) or extend FileScanQueue
+Scripts/SQLScripts/AddAudioFixPriorityHints.py              -- (NEW) or extend ShowSettings
+Scripts/SQLScripts/BackfillSourceLoudness.py                -- (NEW) one-time measurement pass
+Scripts/SQLScripts/QueueFullLibraryReprobe.py               -- (NEW) one-time reprobe seed
+Scripts/SQLScripts/BackfillAudioComplete.py                 -- extend with Pass 5 (target-loudness)
+Features/TranscodeQueue/transcode-vs-remux-routing.feature.md -- amend criterion 11 (cascade emits AudioFix); add cross-link
+Features/AudioCompletion/audio-completion.feature.md          -- amend C9 (cascade reads SourceIntegratedLufs)
+transcode.flow.md                                              -- Stage 4 (queue) tab structure noted
+```
+
+## Files
+
+| File | Role |
+|------|------|
+| Feature doc (this file) | Contract |
+| `media-tabs.flow.md` | User-facing flow for the new tab UI |
+| `Scripts/SQLScripts/AddSourceLoudnessColumns.py` | Idempotent ADD COLUMN SourceIntegratedLufs / SourceLoudnessRangeLU / SourceTruePeakDbtp / LoudnessMeasuredAt |
+| `Scripts/SQLScripts/AddReprobeQueue.py` | NEW table or FileScanQueue extension (TBD) |
+| `Scripts/SQLScripts/AddAudioFixPriorityHints.py` | NEW table or ShowSettings extension (TBD) |
+| `Scripts/SQLScripts/BackfillSourceLoudness.py` | One-time measurement pass over the ~30k AudioComplete=false library |
+| `Scripts/SQLScripts/QueueFullLibraryReprobe.py` | One-time reprobe seed for all 56,698 MediaFiles rows |
+| `Features/LoudnessAnalysis/LoudnessAnalysisService.py` | MeasureLoudness (ebur128 invoke + parse), PersistLoudness, IsMeasurementStale |
+| `Features/MediaProbe/MediaProbeBusinessService.py` | Chain LoudnessAnalysisService after FFprobe; expose reprobe |
+| `Features/MediaProbe/MediaProbeController.py` | POST /api/MediaProbe/Reprobe + GET /api/MediaProbe/ReprobeQueueStatus |
+| `Features/AudioCompletion/AudioCompletionService.py` | EvaluateInitialAudioState gets a target-loudness clause |
+| `Features/TranscodeQueue/QueueManagementBusinessService.py` | Cascade emits 'AudioFix' as a discrete RecommendedMode |
+| `Features/TranscodeQueue/TranscodeQueueController.py` | Tab counts endpoint; folder-pin POST endpoint |
+| `Features/TranscodeQueue/TranscodeQueueViewModel.py` | Per-mode count queries; AudioFixPriorityHints query |
+| `Templates/TranscodeQueue.html` | Tab bar + per-tab body + folder-pin controls |
+| `Templates/SmartPopulate row template` | `Mode` badge column |
+| `Features/Activity/...` | Library Compliance panel (deferred from prior feature) + Loudness sub-section |
+
+## Deviation from conventions
+
+**Multi-concern feature.** This feature spans loudness analysis (data), reprobe lifecycle (probe pipeline), and queue UX (UI). Each is large enough to be its own feature, and traditional convention is one-concern-per-feature. Bundling is intentional: the three concerns reinforce each other -- loudness data is what makes the cascade able to route to `AudioFix`, which is what justifies the third tab. Shipping them piecemeal would leave each in a half-useful state.
+
+Implementation may still split into sibling features for clean code review (e.g. `loudness-analysis.feature.md` covering criteria A-D, `reprobe-lifecycle.feature.md` covering E, `media-tabs.feature.md` covering F-G-H). The decision is deferred to the operator at review time. The runbook order above keeps them in dependency order regardless of doc split.
+
+**`AudioFix` reuses `BuildRemuxCommand`.** A new `ProcessingMode` enum value usually implies a new worker code path. Here, `'Remux'` and `'AudioFix'` rows execute the identical FFmpeg command -- the only difference is operator-facing classification. The split exists to give the operator three queue surfaces, not three implementations. This intentionally couples two ProcessingMode values to one command builder for efficiency.
+
+## Interrupts
+
+This feature was filed as a `/n` PIVOT while the parent `audio-completion` work was awaiting operator smoke test. `audio-completion` is **code complete and committed** (commit `48555ba`, 2026-05-17) -- it is not paused, just awaiting the FFmpeg byte-identical hash verification once workers come up. This feature builds on top of it: the loudness data added here will refine the `AudioComplete` decisions audio-completion already makes.
+
+Stack order at filing time:
+```
+worker-versioning            (parent, unmodified)
+media-tabs-and-loudness      (this feature)
+```

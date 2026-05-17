@@ -77,8 +77,14 @@ class TranscodeQueueModel:
 
     @property
     def IsRemux(self) -> bool:
-        """Check if this is a remux (compatibility-only) job."""
-        return self.ProcessingMode == "Remux"
+        """Check if this is a remux-class job.
+
+        Both 'Remux' (container fix, bundled audio fix if needed) and
+        'AudioFix' (audio-only fix) route through BuildRemuxCommand. The
+        distinction is operator-facing only -- the worker pipeline is
+        identical. See media-tabs-and-loudness.feature.md C17.
+        """
+        return self.ProcessingMode in ("Remux", "AudioFix")
 
     @property
     def IsSubtitleFix(self) -> bool:

@@ -141,6 +141,37 @@ def UpdateEligibleNormalize(Cur):
     print(f"  updated {Cur.rowcount} rows")
 
 
+def UpgradeFromLoudness(Cur):
+    """Pass 5: upgrade AudioComplete=false rows whose measured LUFS is on target.
+
+    Unlike passes 1-4 which SEED initial state (and skip already-set rows),
+    this pass UPGRADES existing eligible-normalize rows to complete when fresh
+    LoudnessAnalysisService data shows they're already at broadcast loudness.
+
+    Runs against AudioComplete=false (not NULL) rows so it cannot regress
+    Suspect rows or rows already on the loudnorm-history path.
+
+    Re-runnable: only affects rows whose AudioCorruptReason != 'already_at_target_loudness'
+    so subsequent runs after more loudness measurements arrive are no-ops on
+    already-upgraded rows.
+    """
+    Header('Pass 5: already_at_target_loudness (upgrade from fresh LUFS data)')
+    Cur.execute(
+        """
+        UPDATE MediaFiles
+        SET AudioComplete = TRUE,
+            AudioCompletedAt = NOW(),
+            AudioCorruptReason = 'already_at_target_loudness'
+        WHERE AudioComplete = FALSE
+          AND AudioCorruptSuspect = FALSE
+          AND SourceIntegratedLufs IS NOT NULL
+          AND SourceIntegratedLufs BETWEEN -24.0 AND -22.0
+          AND LOWER(COALESCE(AudioCodec, '')) IN ('aac', 'ac3', 'eac3', 'mp3')
+        """
+    )
+    print(f"  updated {Cur.rowcount} rows")
+
+
 def Summary(Cur):
     Header('Summary')
     Cur.execute(
@@ -186,6 +217,8 @@ def RunBackfill():
         UpdateBelowBitrateFloor(Cur)
         Conn.commit()
         UpdateEligibleNormalize(Cur)
+        Conn.commit()
+        UpgradeFromLoudness(Cur)
         Conn.commit()
         Summary(Cur)
     finally:

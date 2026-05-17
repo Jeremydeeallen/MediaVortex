@@ -1,11 +1,141 @@
+from typing import List, Optional, Tuple
+
 from flask import Blueprint, request, jsonify
 from Features.MediaProbe.MediaProbeViewModel import MediaProbeViewModel
+from Core.Database.DatabaseService import DatabaseService, EscapeLikePattern
 from Core.Logging.LoggingService import LoggingService
 
 
 MediaProbeBlueprint = Blueprint('MediaProbe', __name__, url_prefix='/api/MediaProbe')
 
 _ViewModel = MediaProbeViewModel()
+
+
+def _BuildReprobeWhere(Data: dict) -> Tuple[Optional[str], list, Optional[str]]:
+    """Translate the request body into a WHERE clause for the MediaFiles UPDATE.
+
+    Accepts at least one of MediaFileIds, ShowFolder, Drive. Refuses unbounded
+    calls (no filters). Returns (WhereSql, Params, ErrorMessage). On error,
+    WhereSql is None.
+    """
+    if not Data:
+        return None, [], 'Request body required (JSON)'
+    RawIds = Data.get('MediaFileIds') or []
+    ShowFolder = (Data.get('ShowFolder') or '').strip()
+    Drive = (Data.get('Drive') or '').strip()
+    if not RawIds and not ShowFolder and not Drive:
+        return None, [], 'At least one of MediaFileIds, ShowFolder, or Drive is required'
+
+    Clauses, Params = [], []
+    if RawIds:
+        try:
+            Ids = [int(x) for x in RawIds]
+        except (TypeError, ValueError):
+            return None, [], 'MediaFileIds must be integers'
+        Clauses.append('Id = ANY(%s)')
+        Params.append(Ids)
+    if ShowFolder:
+        Clauses.append("FilePath LIKE %s ESCAPE '!'")
+        Params.append(f"%{EscapeLikePattern(ShowFolder)}%")
+    if Drive:
+        Clauses.append("FilePath LIKE %s ESCAPE '!'")
+        Params.append(f"{EscapeLikePattern(Drive)}%")
+    return ' AND '.join(Clauses), Params, None
+
+
+@MediaProbeBlueprint.route('/Reprobe', methods=['POST'])
+def QueueReprobe():
+    """Flag matching MediaFiles for reprobe. Body: MediaFileIds[] / ShowFolder / Drive.
+
+    At least one filter required. Sets NeedsReprobe=TRUE; the existing batch
+    probe loop picks these up regardless of whether other metadata columns
+    are populated.
+    """
+    Data = request.get_json(silent=True) or {}
+    Where, Params, Err = _BuildReprobeWhere(Data)
+    if Err:
+        return jsonify({'Success': False, 'Message': Err}), 400
+    try:
+        Db = DatabaseService()
+        Conn = Db.GetConnection()
+        try:
+            Cur = Conn.cursor()
+            Cur.execute(
+                f"UPDATE MediaFiles SET NeedsReprobe = TRUE WHERE {Where} AND NeedsReprobe = FALSE",
+                tuple(Params),
+            )
+            Queued = Cur.rowcount
+            Conn.commit()
+        finally:
+            Db.CloseConnection(Conn)
+        LoggingService.LogInfo(
+            f"QueueReprobe: {Queued} rows flagged (filters: {list(Data.keys())})",
+            "MediaProbeController", "QueueReprobe",
+        )
+        return jsonify({'Success': True, 'Queued': Queued})
+    except Exception as Ex:
+        LoggingService.LogException(
+            "QueueReprobe failed", Ex, "MediaProbeController", "QueueReprobe",
+        )
+        return jsonify({'Success': False, 'Message': str(Ex)}), 500
+
+
+@MediaProbeBlueprint.route('/Reprobe', methods=['DELETE'])
+def CancelReprobe():
+    """Clear the NeedsReprobe flag for matching MediaFiles (cancellation).
+
+    Same body shape as POST. Files already in flight (claimed by the probe
+    loop) finish naturally -- this just stops *new* claims for the scope.
+    """
+    Data = request.get_json(silent=True) or {}
+    Where, Params, Err = _BuildReprobeWhere(Data)
+    if Err:
+        return jsonify({'Success': False, 'Message': Err}), 400
+    try:
+        Db = DatabaseService()
+        Conn = Db.GetConnection()
+        try:
+            Cur = Conn.cursor()
+            Cur.execute(
+                f"UPDATE MediaFiles SET NeedsReprobe = FALSE WHERE {Where} AND NeedsReprobe = TRUE",
+                tuple(Params),
+            )
+            Cancelled = Cur.rowcount
+            Conn.commit()
+        finally:
+            Db.CloseConnection(Conn)
+        LoggingService.LogInfo(
+            f"CancelReprobe: {Cancelled} rows cleared (filters: {list(Data.keys())})",
+            "MediaProbeController", "CancelReprobe",
+        )
+        return jsonify({'Success': True, 'Cancelled': Cancelled})
+    except Exception as Ex:
+        LoggingService.LogException(
+            "CancelReprobe failed", Ex, "MediaProbeController", "CancelReprobe",
+        )
+        return jsonify({'Success': False, 'Message': str(Ex)}), 500
+
+
+@MediaProbeBlueprint.route('/ReprobeQueueStatus', methods=['GET'])
+def ReprobeQueueStatus():
+    """Counts: pending reprobes, files that have measured loudness, etc."""
+    try:
+        Rows = DatabaseService().ExecuteQuery(
+            """
+            SELECT
+              SUM(CASE WHEN NeedsReprobe = TRUE THEN 1 ELSE 0 END) AS Pending,
+              SUM(CASE WHEN LoudnessMeasuredAt IS NOT NULL THEN 1 ELSE 0 END) AS LoudnessMeasured,
+              SUM(CASE WHEN LoudnessMeasuredAt IS NOT NULL AND SourceIntegratedLufs IS NULL THEN 1 ELSE 0 END) AS LoudnessFailed,
+              COUNT(*) AS Total
+            FROM MediaFiles
+            """
+        )
+        return jsonify({'Success': True, 'Data': dict(Rows[0]) if Rows else {}})
+    except Exception as Ex:
+        LoggingService.LogException(
+            "ReprobeQueueStatus failed", Ex, "MediaProbeController", "ReprobeQueueStatus",
+        )
+        return jsonify({'Success': False, 'Message': str(Ex)}), 500
 
 
 @MediaProbeBlueprint.route('/Probe/<int:MediaFileId>', methods=['POST'])

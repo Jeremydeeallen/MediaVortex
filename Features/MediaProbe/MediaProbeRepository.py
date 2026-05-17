@@ -62,7 +62,8 @@ class MediaProbeRepository(BaseRepository):
         """
         try:
             Conditions = [
-                "(Resolution IS NULL OR TotalFrames IS NULL OR AudioCodec IS NULL)",
+                # NeedsReprobe=TRUE (operator-triggered) OR any required metadata missing
+                "(NeedsReprobe = TRUE OR Resolution IS NULL OR TotalFrames IS NULL OR AudioCodec IS NULL)",
                 f"COALESCE(FFprobeFailureCount, 0) < %s"
             ]
             Params = [MaxFailures]
@@ -150,7 +151,8 @@ class MediaProbeRepository(BaseRepository):
                         OverallBitrate = %s, AudioLanguages = %s, HasExplicitEnglishAudio = %s,
                         ResolutionCategory = %s,
                         FFprobeFailureCount = %s,
-                        LastFFprobeError = %s, LastFFprobeAttemptDate = %s
+                        LastFFprobeError = %s, LastFFprobeAttemptDate = %s,
+                        NeedsReprobe = COALESCE(%s, FALSE)
                        WHERE Id = %s"""
             Params = (
                 MediaFile.VideoBitrateKbps, MediaFile.AudioBitrateKbps, MediaFile.Resolution,
@@ -164,6 +166,7 @@ class MediaProbeRepository(BaseRepository):
                 MediaFile.ResolutionCategory,
                 MediaFile.FFprobeFailureCount,
                 MediaFile.LastFFprobeError, MediaFile.LastFFprobeAttemptDate,
+                getattr(MediaFile, 'NeedsReprobe', False),
                 MediaFile.Id
             )
             self.ExecuteNonQuery(Query, Params)
