@@ -33,6 +33,17 @@ Both (code fix + deploy-anywhere infrastructure)
 8. When a transcode fails, the partial output file (if any) is deleted from disk using path translation. No orphaned partial files accumulate in media directories.
 9. When a transcode fails, the TemporaryFilePaths row for that TranscodeAttemptId is deleted. No orphaned path records accumulate for attempts that will never reach replacement or VMAF.
 
+### Terminal-state cleanup (all dispositions, all queue tables)
+15. TemporaryFilePaths rows are deleted at *every* TranscodeAttempt terminal state, not just successful Replace/BypassReplace. A row exists iff the attempt is still in flight (`TranscodeAttempts.Success IS NULL AND CompletedDate IS NULL`). Terminal states that must trigger TFP deletion: FFmpeg failure, FFprobe-verify failure, VMAF failure, every Disposition value (`Replace`, `BypassReplace`, `Discard`, `NoReplace`, `Requeue`), and crash-recovery transitions. Verifiable: with all workers Paused, `SELECT COUNT(*) FROM TemporaryFilePaths tfp JOIN TranscodeAttempts ta ON ta.Id = tfp.TranscodeAttemptId WHERE ta.Success IS NOT NULL` returns 0. Implementation: service-layer chokepoint at `PostTranscodeDispositionService._CommitDisposition` (one DELETE next to the existing Disposition UPDATE -- covers every non-Pending disposition including TranscodeFailed/Discard) plus VMAF-failure path in `QualityTestingBusinessService`. `HandleJobFailure` in `ProcessTranscodeQueueService` already cleans TFP for FFmpeg/FFprobe-verify failures (verified by code grep). Crash-recovery transitions are caught by the recurring orphan sweep as a safety net.
+
+16. ActiveJobs rows cannot survive their parent queue row's deletion in steady state. `ActiveJobs.QueueId` is a polymorphic reference (TranscodeQueue OR QualityTestingQueue, discriminated by `ServiceName`), so a direct FK is not viable -- a DB trigger would hide the leaking caller. Instead: (a) the root-cause queue-delete caller that leaves ActiveJobs behind is identified and fixed at the source so the normal path is correct, and (b) the recurring orphan sweep (see `Features/ServiceControl/orphan-cleanup.flow.md`) catches any future regression and emits one WARN log per removal naming the gone parent. Verifiable: `SELECT COUNT(*) FROM ActiveJobs aj LEFT JOIN TranscodeQueue tq ON tq.Id = aj.QueueId AND aj.ServiceName='TranscodeService' LEFT JOIN QualityTestingQueue qtq ON qtq.Id = aj.QueueId AND aj.ServiceName='QualityTestingService' WHERE (aj.ServiceName='TranscodeService' AND tq.Id IS NULL) OR (aj.ServiceName='QualityTestingService' AND qtq.Id IS NULL)` returns 0 in steady state; any non-zero rate produces WARN entries naming the orphaned row's `ServiceName`/`QueueId` so the leaking caller can be tracked.
+
+17. QualityTestingQueue rows pointing at TranscodeAttempts already finished elsewhere (`Success IS NOT NULL` and `QualityTestCompleted=True`) get deleted by the same recurring orphan sweep that handles ActiveJobs orphans (see `Features/ServiceControl/orphan-cleanup.flow.md`). Prevents the operator-visible "in flight" QT job that has actually been done for hours. Verifiable: with a fresh `Success=True` attempt and a stale QualityTestingQueue row pointing at it, one sweep cycle leaves QualityTestingQueue empty.
+
+18. TranscodeProgress duplicates are prevented at the schema level: `UNIQUE (TranscodeAttemptId)`. Existing duplicates are deduped in the migration before the constraint is added. The `CleanupOrphanedProgressRecords` sweep runs on a recurring timer in `WorkerService` (folded into the same orphan-cleanup loop as criteria 16 and 17, not a separate thread), not only at worker startup. Verifiable: schema check shows the unique index; `SELECT COUNT(*) FROM Logs WHERE FunctionName LIKE '%OrphanCleanup%' AND TimeStamp > NOW() - INTERVAL '1 hour'` returns >= 1 from each running worker.
+
+19. **[BUG-0002]** Media files whose on-disk file has zero audio streams must not exist in the DB. A cleanup script identifies every `MediaFiles` row where `ffprobe` on the actual file returns no audio stream, then deletes the row and every dependent record (`TranscodeAttempts`, `TranscodeFiles`, `MediaFilesArchive`, `QualityTestResults`, `QualityTestProgress`, `TranscodeQueue`, `QualityTestingQueue`, `ActiveJobs`, `TemporaryFilePaths`, `ScanJobs` if linked, `ProblemFiles` if linked) in a single transaction per file. Before deletion the script writes every removed file's `RelativePath` (or full `FilePath` when relative path is missing) to a timestamped `.md` report at the repo root (e.g. `deleted-silent-files-2026-05-16.md`) grouped by show, so the operator can re-acquire if desired. Going forward, the post-replacement re-probe in `_UpdateMediaFilesAfterReplacement` must fail loud when the new file has no audio stream — disposition becomes `Discard`, the on-disk silent file is removed, and the original (`.orig` / `.inprogress`) is restored if still present. Verifiable: (a) after the cleanup script runs, `SELECT COUNT(*) FROM mediafiles m WHERE NOT EXISTS (SELECT 1 FROM <ffprobe stream check>)` returns 0 for the set the script processed; (b) `deleted-silent-files-<date>.md` exists and lists every removed path; (c) a newly-transcoded file that comes out silent does NOT replace its source and produces a `Discard` disposition log entry.
+
 ### Deploy-anywhere
 10. A Linux worker (e.g., Larry) running WorkerService with QualityTestEnabled=OFF completes the full pipeline: transcode, delete original, update DB. No other service needs to be running.
 11. A Windows worker running WorkerService with QualityTestEnabled=OFF completes the same pipeline identically.
@@ -43,9 +54,20 @@ Both (code fix + deploy-anywhere infrastructure)
 
 ## Status
 
-COMPLETE
+COMPLETE 2026-05-17 -- all 18 criteria implemented and live-verified.
 
-### Progress
+### Progress (stuck-item cleanup, criteria 15-18)
+
+- [x] Create flow doc `Features/ServiceControl/orphan-cleanup.flow.md` documenting the recurring orphan sweep (entry point, per-cycle steps, failure modes)
+- [x] Migration `Scripts/SQLScripts/AddOrphanCleanupAndUniqueProgress.py` -- dedupe existing `TranscodeProgress` duplicates, add `UNIQUE (TranscodeAttemptId)`, idempotent. Applied to dev DB 2026-05-16 (no duplicates found; constraint added).
+- [x] Add explicit `ActiveJobs` cleanup to `QueueManagementBusinessService.RemoveJobFromQueue` so the highest-volume user path no longer relies on the sweep (criterion 16 -- known leaking caller fixed at source; sweep remains the safety net)
+- [x] Add TFP DELETE to `PostTranscodeDispositionService._CommitDisposition` for terminal dispositions `Discard`/`NoReplace`/`Requeue` (criterion 15). `Replace`/`BypassReplace` defer to FileReplacement's existing success-branch cleanup since the canonical paths are still needed.
+- [x] Add TFP DELETE to the VMAF-failure path in `QualityTestingBusinessService` via `_CleanupTemporaryFilePathsForVmafFailure` helper (criterion 15)
+- [x] New `OrphanCleanupService` + recurring `_OrphanCleanupLoop` in `WorkerService/Main.py`, sibling to `_StuckJobDetectionLoop`, same interval (criteria 16, 17, 18)
+- [x] Verify on I9 (2026-05-16 manual sweep): 550 TFP orphans removed in one cycle; other categories already 0 from operator cleanup. WARN log fired naming the leak count.
+- [x] Verify on I9 (2026-05-17 live worker): two `OrphanCleanup swept: TFP=0 ActiveJobs(Transcode)=0 ActiveJobs(QualityTest)=0 QTQueue=0 Progress=0` log lines 120s apart from the running WorkerService process. Steady-state holds.
+
+### Progress (original feature, criteria 1-14)
 
 - [x] Update ShouldQualityTestService.ProcessTranscodedFile() to read QualityTestRequired from TranscodeAttempt
 - [x] When QualityTestRequired=False, call FileReplacement with BypassVMAFCheck=True (same as current "Paused" path). Removed dead ShouldTestFile() method. Extracted _ReplaceFileDirectly() helper.

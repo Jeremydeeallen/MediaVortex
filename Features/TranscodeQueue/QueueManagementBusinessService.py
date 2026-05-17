@@ -286,7 +286,7 @@ class QueueManagementBusinessService:
             # scopes by RecommendedMode -- the cascade-decided pipeline. Card 1
             # passes Mode='Transcode'; Card 1.5 passes Mode='Remux'. Invalid /
             # missing Mode = no scoping (backward-compat with pre-Card-1.5 callers).
-            if Mode in ('Transcode', 'Remux'):
+            if Mode in ('Transcode', 'Remux', 'AudioFix'):
                 WhereSql += " AND m.RecommendedMode = %s"
                 Params.append(Mode)
 
@@ -345,7 +345,7 @@ class QueueManagementBusinessService:
                     'BitrateKbps': int(Row.get('VideoBitrateKbps', 0) or 0),
                     'ContainerFormat': Row.get('ContainerFormat', '') or '',
                     'PriorityScore': Row.get('PriorityScore'),
-                    'Mode': Mode if Mode in ('Transcode', 'Remux') else 'Transcode',
+                    'Mode': Mode if Mode in ('Transcode', 'Remux', 'AudioFix') else 'Transcode',
                 })
 
             Result = {
@@ -355,7 +355,7 @@ class QueueManagementBusinessService:
                 "Offset": Offset,
                 "Limit": Limit,
                 "Search": Search or '',
-                "Mode": Mode if Mode in ('Transcode', 'Remux') else None,
+                "Mode": Mode if Mode in ('Transcode', 'Remux', 'AudioFix') else None,
                 "HasMore": (Offset + len(Suggestions)) < TotalCandidates,
             }
             LoggingService.LogInfo(f"SmartPopulate: fetched {len(Rows)} of {TotalCandidates} candidates (offset={Offset}, search='{Search or ''}')", "QueueManagementBusinessService", "SmartPopulateQueue")
@@ -405,7 +405,7 @@ class QueueManagementBusinessService:
             if not NormalizedIds:
                 return {"Success": False, "ErrorMessage": "No MediaFileIds provided", "ItemsAdded": 0}
 
-            if Mode not in ('Transcode', 'Remux'):
+            if Mode not in ('Transcode', 'Remux', 'AudioFix'):
                 Mode = 'Transcode'
 
             # Resolve profile name. Transcode allows a profile choice; Remux
@@ -484,8 +484,8 @@ class QueueManagementBusinessService:
         Returns ItemsAdded.
         """
         try:
-            if Mode not in ('Transcode', 'Remux'):
-                return {"Success": False, "ErrorMessage": "Mode must be 'Transcode' or 'Remux'", "ItemsAdded": 0}
+            if Mode not in ('Transcode', 'Remux', 'AudioFix'):
+                return {"Success": False, "ErrorMessage": "Mode must be 'Transcode', 'Remux', or 'AudioFix'", "ItemsAdded": 0}
 
             from Core.Database.DatabaseService import DatabaseService, EscapeLikePattern
 
@@ -1513,10 +1513,16 @@ class QueueManagementBusinessService:
                 if not BelowAudioFloor:
                     return (False, 'Transcode')
 
-        # d. Remux is enough -- container, audio codec, audio normalization.
+        # d. Remux OR AudioFix -- depends on what's broken.
         # ContainerFormat from FFprobe is a comma-separated list of equivalent
         # format names (e.g. 'mov,mp4,m4a,3gp,3g2,mj2' for the MP4 family,
         # 'matroska,webm' for MKV). Compatible if ANY part matches.
+        #
+        # Routing rule (media-tabs-and-loudness.feature.md C15-C17):
+        #   container bad           -> Remux (handles container + bundled audio fix in one pass)
+        #   audio codec bad         -> Remux (codec convert via one-shot pass, may also fix container)
+        #   only audio not normalized
+        #                           -> AudioFix (operator-facing label; same BuildRemuxCommand path)
         ContainerRaw = (Row.get('ContainerFormat') or '').lower()
         ContainerParts = {p.strip() for p in ContainerRaw.split(',') if p.strip()}
         AudioCodec = (Row.get('AudioCodec') or '').lower()
@@ -1527,7 +1533,7 @@ class QueueManagementBusinessService:
         if AudioCodec and AudioCodec not in AcceptableAudioCodecsMp4:
             return (False, 'Remux')
         if not IsNormalized:
-            return (False, 'Remux')
+            return (False, 'AudioFix')
 
         # e. Already compliant
         return (True, None)

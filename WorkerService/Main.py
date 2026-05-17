@@ -614,6 +614,10 @@ class WorkerServiceApp:
             # See stuck-job-detection.feature.md criterion 1.
             self._StartStuckJobDetection()
 
+            # Start recurring orphan cleanup sweep (BUG-0001 criteria 16-18).
+            # See Features/ServiceControl/orphan-cleanup.flow.md.
+            self._StartOrphanCleanup()
+
             # Start enabled capabilities if worker is Online
             if self.WorkerStatus == "Online":
                 self._ApplyCapabilities()
@@ -790,6 +794,47 @@ class WorkerServiceApp:
                     LoggingService.LogException("Error in stuck scan detection cycle", scanEx, "WorkerService", "_StuckJobDetectionLoop")
             except Exception as e:
                 LoggingService.LogException("Error in stuck job detection cycle", e, "WorkerService", "_StuckJobDetectionLoop")
+            self.ShutdownEvent.wait(_ReadInterval())
+
+    def _StartOrphanCleanup(self):
+        """Start recurring orphan-cleanup sweep thread.
+
+        Sibling to _StuckJobDetectionLoop, shares its interval setting
+        (StuckJobDetectionIntervalSec, default 120). Owns the recurring
+        half of BUG-0001 criteria 16, 17, 18.
+        """
+        try:
+            self.OrphanCleanupThread = threading.Thread(
+                target=self._OrphanCleanupLoop,
+                daemon=True,
+                name="OrphanCleanup",
+            )
+            self.OrphanCleanupThread.start()
+            LoggingService.LogInfo("Orphan cleanup loop started", "WorkerService", "_StartOrphanCleanup")
+        except Exception as e:
+            LoggingService.LogException("Error starting orphan cleanup loop", e, "WorkerService", "_StartOrphanCleanup")
+
+    def _OrphanCleanupLoop(self):
+        from Features.SystemSettings.SystemSettingsRepository import SystemSettingsRepository
+        from Features.ServiceControl.OrphanCleanupService import OrphanCleanupService
+        SettingsRepo = SystemSettingsRepository()
+
+        def _ReadInterval():
+            try:
+                v = SettingsRepo.GetSystemSetting('StuckJobDetectionIntervalSec')
+                return max(30, int(v)) if v is not None else 120
+            except Exception:
+                return 120
+
+        # Initial wait so the first sweep doesn't race startup-time recovery.
+        self.ShutdownEvent.wait(_ReadInterval())
+
+        while not self.ShutdownEvent.is_set():
+            try:
+                Service = OrphanCleanupService(self.DatabaseManager.DatabaseService)
+                Service.SweepOrphans()
+            except Exception as e:
+                LoggingService.LogException("Error in orphan cleanup cycle", e, "WorkerService", "_OrphanCleanupLoop")
             self.ShutdownEvent.wait(_ReadInterval())
 
     def _StartHealthMonitoring(self):

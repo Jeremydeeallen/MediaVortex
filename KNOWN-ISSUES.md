@@ -70,41 +70,6 @@ Each has a video stream (HEVC) but no audio stream at all. The 16-file NULL-code
 
 ---
 
-### [BUG-0001] Stuck-item cleanup gaps -- operational rows leak past their job's terminal state
-**Date:** 2026-05-16
-
-**What breaks:** Four distinct code paths let DB rows linger after the underlying job is done. Result: the operator-facing "Active Jobs" list, the QT queue, and the TFP tracking table all drift away from disk reality over time. Observed today on I9-2024 with all 17 workers Paused (so steady-state, not in-flight):
-
-- 9 stale `ActiveJobs` rows whose `QueueId` no longer exists in either `TranscodeQueue` or `QualityTestingQueue`.
-- 1 `QualityTestingQueue` row (id 955) pointing at `TranscodeAttempt 16465` -- the attempt had `Success=True` for 5+ hours but the QT queue row was never removed. The job appeared "in flight" indefinitely on the UI.
-- 18 `TranscodeProgress` orphan rows linked to attempts that already had `Success=True` or `Success=False`, plus duplicate progress rows for the same attempt where only one of the duplicates got swept (no UNIQUE constraint on `TranscodeAttemptId`).
-- **551 `TemporaryFilePaths` rows** for attempts that already finished. `_CleanupTemporaryFilePaths` only runs inside the success branch of `ProcessFileReplacement` -- every other terminal state (Discard, NoReplace, Requeue, FFmpeg failure, FFprobe-verify failure, VMAF failure) leaks a TFP row.
-
-Operationally this means: an operator looking at "active jobs" cannot trust the count, the Activity dashboard shows phantom QT work, and crash recovery sweeps (worker-lifecycle slice 3) have more rows to scan than they should -- with the slight risk that a leaked TFP referencing a stale path triggers a false criterion 12 "complete partial replacement" if disk state happens to match (low probability but not zero).
-
-I cleared the first three categories (29 rows) in this session. The 551 TFP rows remain -- they are the canary for the structural fix.
-
-**Four distinct holes:**
-
-1. `Features/FileReplacement/FileReplacementBusinessService.py` -- `_CleanupTemporaryFilePaths` is only called inside the success branch of `ProcessFileReplacement`. Every non-Replace disposition (`Discard`, `NoReplace`, `Requeue`, `Pending -> later failure`) leaves the TFP row behind. Failed FFmpeg or FFprobe-verify in `ProcessTranscodeQueueService` writes a TFP row at job-prep time and never cleans it up.
-
-2. Queue-delete sites (search `DeleteTranscodeQueueItem`) -- somewhere a `TranscodeQueue` row gets deleted without first deleting its `ActiveJobs` row. Preferred fix: declarative FK `ActiveJobs.QueueId REFERENCES TranscodeQueue(Id) ON DELETE CASCADE` (and matching for `QualityTestingQueue`). Audit-every-caller hygiene is fragile; the schema constraint makes the leak impossible.
-
-3. `Services/QualityTestQueueService.py` / `Features/QualityTesting/QualityTestingBusinessService.py` -- when a `TranscodeAttempt` is marked `Success=True` and `QualityTestCompleted=True` outside the QT worker's own flow (e.g. crash recovery, post-transcode-disposition re-evaluation), the matching `QualityTestingQueue` row is not deleted. The QT worker reading the queue then loops on a row whose work is already done.
-
-4. `Features/ServiceControl/CrashRecoveryService.py` -- `CleanupOrphanedProgressRecords` runs only on worker startup; if a worker stays running and progress rows leak under it (the 5-minute "recent-progress" exclusion can race, or duplicate progress rows exist), they sit forever. Run it on a timer (similar to `StuckJobDetectionLoop`) and add a UNIQUE constraint on `TranscodeProgress.TranscodeAttemptId` so duplicates are impossible at the schema level.
-
-**Violates:** `Features/FileReplacement/post-transcode-pipeline.feature.md` criteria 15, 16, 17, 18 (added with this entry; criterion 9 already covers the failure-cleanup slice and is being violated for the non-FFmpeg-failure terminal states).
-
-**What "fixed" looks like:**
-- TFP rows are deleted at every terminal state, not just successful Replace -- single chokepoint preferred (PostTranscodeDispositionService once disposition is decided, OR a trigger on `TranscodeAttempts.CompletedDate` transitioning from NULL).
-- `ActiveJobs` cannot survive its parent queue row's deletion (FK CASCADE).
-- `QualityTestingQueue` rows pointing at already-finished attempts get cleaned by the same recurring sweep that handles `ActiveJobs` orphans.
-- `TranscodeProgress` duplicates prevented by a UNIQUE constraint; sweep runs on a timer.
-- Verifiable: run a transcode through every disposition (Replace, BypassReplace, Discard, NoReplace, Requeue, FFmpeg failure, FFprobe-verify failure, VMAF failure) and confirm `SELECT COUNT(*) FROM TemporaryFilePaths` returns 0 after each terminal state.
-
-**Look first:** Grep for `DeleteTranscodeQueueItem` (queue delete sites) and `_CleanupTemporaryFilePaths` (only caller today). Cross-reference the disposition terminal states in `Features/QualityTesting/PostTranscodeDispositionService.py` to decide the chokepoint. Existing related pattern: `Features/ServiceControl/CrashRecoveryService.py:_RecoverInProgressArtifacts` (worker-lifecycle slice 3) sweeps similar leaked state at startup; that approach can be lifted into a recurring timer for runtime cleanup.
-
 ---
 
 ### [BUG] TranscodeAttempts failure rows lack ProfileName -- operator cannot tell what KIND of job failed from the row alone
@@ -771,6 +736,27 @@ Done manually for dot on 2026-05-16 -- worked in ~5 minutes -- but the manual st
 
 ## Resolved
 
+### [BUG-0001 - FIXED 2026-05-17] Stuck-item cleanup gaps -- operational rows leak past their job's terminal state
+**Date:** 2026-05-16 | **Fixed:** 2026-05-17 | resolved: 2026-05-17
+
+**What broke:** Four distinct paths let operational rows linger past terminal state. Observed on I9-2024 with 17 workers Paused: 9 stale `ActiveJobs` (no parent queue row), 1 `QualityTestingQueue` row in flight 5+ hours after its attempt succeeded, 18 `TranscodeProgress` orphans + duplicates (no UNIQUE), **551 `TemporaryFilePaths` rows** for finished attempts (`_CleanupTemporaryFilePaths` only ran inside `ProcessFileReplacement`'s success branch -- every other terminal state leaked).
+
+**Fix (shipped 2026-05-17):** Four-part bundle, verified live.
+
+1. **TFP chokepoint at disposition (criterion 15).** `Features/QualityTesting/PostTranscodeDispositionService._CommitDisposition` now deletes the TFP row inline when `Disposition IN ('Discard','NoReplace','Requeue')` (`Replace`/`BypassReplace` defer to FileReplacement's existing success-branch cleanup because they still need the canonical paths). `Features/QualityTesting/QualityTestingBusinessService._CleanupTemporaryFilePathsForVmafFailure` covers the VMAF-failure path. FFmpeg/FFprobe-verify failures were already covered by `HandleJobFailure` in `ProcessTranscodeQueueService`.
+
+2. **ActiveJobs root-cause + sweep (criterion 16).** A direct FK on the polymorphic `ActiveJobs.QueueId` is impossible (it references either `TranscodeQueue` or `QualityTestingQueue` depending on `ServiceName`), and a DB trigger would hide the leaking caller. Root-cause fix: `QueueManagementBusinessService.RemoveJobFromQueue` now deletes the matching `ActiveJobs` row even on the non-Running path (previously only `_CancelRunningJob` cleaned it for Running rows). Safety net: the new orphan sweep emits one WARN log per removal naming the gone `ServiceName`/`QueueId`/`WorkerName`, so any future regression surfaces immediately.
+
+3. **Recurring orphan sweep (criteria 16, 17, 18).** New `Features/ServiceControl/OrphanCleanupService.SweepOrphans` runs every `StuckJobDetectionIntervalSec` (default 120s) as a sibling daemon to `_StuckJobDetectionLoop`. Five sweep steps: TFP orphans, ActiveJobs(TranscodeService), ActiveJobs(QualityTestingService), stale QualityTestingQueue, orphaned TranscodeProgress. One INFO summary per cycle; WARN per removal. Flow doc: `Features/ServiceControl/orphan-cleanup.flow.md`.
+
+4. **TranscodeProgress UNIQUE (criterion 18).** `Scripts/SQLScripts/AddOrphanCleanupAndUniqueProgress.py` -- idempotent migration that dedupes existing rows (keep latest per `TranscodeAttemptId`) then adds `UNIQUE (TranscodeAttemptId)`.
+
+**Verified:** 2026-05-16 manual sweep cleared the 550 TFP backlog in one cycle (WARN log fired). 2026-05-17 live worker logged two consecutive `OrphanCleanup swept: TFP=0 ActiveJobs(Transcode)=0 ActiveJobs(QualityTest)=0 QTQueue=0 Progress=0` lines 120s apart -- steady state holds. All 18 feature criteria pass.
+
+**Files:** `Features/QualityTesting/PostTranscodeDispositionService.py:263`, `Features/QualityTesting/QualityTestingBusinessService.py:26-41` (new helper), `Features/TranscodeQueue/QueueManagementBusinessService.py:2077` (ActiveJobs cleanup), `Features/ServiceControl/OrphanCleanupService.py` (new), `Features/ServiceControl/orphan-cleanup.flow.md` (new), `Scripts/SQLScripts/AddOrphanCleanupAndUniqueProgress.py` (new migration), `WorkerService/Main.py:617` (loop startup) + `:801-846` (loop body), `Features/FileReplacement/post-transcode-pipeline.feature.md` criteria 15-18, `transcode.flow.md` Stage 6 tables-written.
+
+---
+
 ### [BUG - FIXED 2026-05-16 - CRITICAL] Worker with broken NFS mount silently destroys queue -- marks all files as source-missing
 **Date:** 2026-05-14 | **Fixed:** 2026-05-15 (validation gate) + 2026-05-16 (UI surfacing, data remediation) | resolved: 2026-05-16
 
@@ -914,13 +900,5 @@ Done manually for dot on 2026-05-16 -- worked in ~5 minutes -- but the manual st
 **Files:** `TeamStatusController.py` (endpoints), `Activity.html` (UI), `AddWorkerEnabledColumn.py` (migration).
 
 ---
-
-### [FEATURE - DONE 2026-05-14] Remove hardcoded concurrency ceiling -- let DB drive limits
-
-**Problem:** `MaxConcurrentJobs` was capped at 5 in 6 places (API validation, worker clamp). Operator had to redeploy to raise the limit. Not data-driven.
-
-**Solution:** Removed upper bound from all validation/clamp sites. Only floor of 1 enforced. The operator sets whatever value fits their hardware via the Workers table.
-
-**Files:** `TeamStatusController.py`, `ProcessRemuxQueueService.py`, `ProcessTranscodeQueueService.py`, `ProcessQualityTestQueueService.py`, `TranscodeJobController.py`, `WorkerService/Main.py`.
 
 *Older resolved entries archived to `memory/KNOWN-ISSUES-ARCHIVE.md`.*
