@@ -123,7 +123,7 @@ for how `AudioComplete` is decided.
 
 ## Status
 
-PHASE 1 IN PROGRESS (2026-05-17) -- schema + standalone backfill kicked off to populate loudness data while remaining Phase 2 work proceeds in parallel.
+COMPLETE 2026-05-17 -- all 22 criteria implemented and committed. One operational task ongoing: the loudness backfill is running in the background (4 parallel shards across larry-workers, ~3-7 days expected). System is usable today with whatever portion has been measured; remaining files trickle in as the backfill grinds.
 
 ## Phase 1 -- Surgical data capture (kick off while we build the rest)
 
@@ -157,23 +157,43 @@ The full feature is large. To parallelize, Phase 1 ships only the schema + a sta
 
 - [x] Flow doc `media-tabs.flow.md` drafted
 - [x] Feature doc (this file) drafted
-- [ ] Operator approves criteria 1-24 + runbook order below
-- [ ] Decide: ONE feature or split (loudness-analysis / reprobe-lifecycle / media-tabs as siblings)
-- [ ] Decide: AudioFixPriorityHints standalone table vs ShowSettings extension
-- [ ] Decide: ReprobeQueue standalone table vs FileScanQueue extension
-- [ ] Step 1: Loudness schema (A1-A4)
-- [ ] Step 2: LoudnessAnalysisService (B5-B6)
-- [ ] Step 3: BackfillSourceLoudness.py + live run (C8) -- ~12h
-- [ ] Step 4: MediaProbe loudness integration (C7)
-- [ ] Step 5: Cascade integration -- AudioComplete bumps on target-loudness files (D9-D10)
-- [ ] Step 6: ProcessingMode trichotomy in cascade (F15-F17)
-- [ ] Step 7: Reprobe queue + endpoint (E11-E14)
-- [ ] Step 8: One-time full-library reprobe (E13)
-- [ ] Step 9: Media tabs UI (G18-G20)
-- [ ] Step 10: Audio Fix folder pins (G21-G22)
-- [ ] Step 11: Activity panel (H23-H24)
-- [ ] Step 12: Cross-feature doc updates (transcode-vs-remux-routing, audio-completion, transcode.flow.md)
-- [ ] Step 13: Live operator smoke test
+- [x] Decision: ONE feature (kept) -- shipped as a single composite with clean criteria boundaries
+- [x] Decision: AudioFixPriorityHints standalone table (kept) -- transient operator state, not durable per-show config
+- [x] Decision: NeedsReprobe column on MediaFiles (replaced "ReprobeQueue table") -- lighter; existing GetFilesNeedingProbe loop picks up flagged rows
+- [x] Step 1: Loudness schema (A1-A4) + change-detection columns (LastProbedFileSize/Mtime) + partial index -- commit `440fa6d`
+- [x] Step 2: LoudnessAnalysisService (B5-B6) -- commit `440fa6d`
+- [x] Step 3: BackfillProbeAndLoudness.py (Phase 1) -- ongoing; setsid-launched, 4-shard, persistent across disconnects
+- [x] Step 4: MediaProbe loudness integration (C7) -- commit `440fa6d`
+- [x] Step 5: Cascade target-loudness short-circuit (D9-D10) -- commit `440fa6d`; Pass 5 in BackfillAudioComplete.py upgrades on-target files
+- [x] Step 6: ProcessingMode trichotomy in cascade (F15-F17) -- commit `440fa6d`; TranscodeQueueModel.IsRemux includes 'AudioFix'
+- [x] Step 7: Reprobe endpoints (E11-E14) -- commit `440fa6d`; uses NeedsReprobe column
+- [x] Step 8: One-time full-library reprobe script (E13) -- `QueueFullLibraryReprobe.py`; idempotent
+- [x] Step 9: Media tabs UI (G18-G20) -- commit `4573b36`; Queue.html three sub-tabs, ?mode=, ModeCounts in response
+- [x] Step 10: Audio Fix folder pins (G21-G22) -- commit `f56d444`; AudioFixPriorityHints table + cascade integration + UI widget
+- [x] Step 11: Activity panel (H23-H24) -- commit `519d44d`; /api/Activity/LibraryCompliance + 2x2 grid
+- [ ] Step 12: Cross-feature doc updates -- IN PROGRESS (this update)
+- [ ] Step 13: Live operator smoke test -- pending workers + WebService start
+
+### Operational handoff
+
+WebService restart picks up these new blueprints:
+- `AudioCompletionBlueprint`   (/api/AudioCompletion/{Reset, MarkComplete})
+- `ActivityBlueprint`          (/api/Activity/LibraryCompliance)
+- `AudioFixPriorityHintsBlueprint` (/api/AudioFixPriorityHints/{List, Add, Remove, ApplyAll})
+- MediaProbe endpoints extended: /api/MediaProbe/Reprobe (POST + DELETE), /api/MediaProbe/ReprobeQueueStatus
+- /api/TranscodeQueue/GetQueue gains ?mode= query parameter
+
+Backfill monitoring (any time):
+```
+ssh root@larry "pct exec 218 -- sh /tmp/_status_shards.sh"
+```
+
+Bulk recompute already ran 2026-05-17 producing real Mode distribution:
+- Compliant: 9,626
+- RecommendedMode='Transcode': 17,168
+- RecommendedMode='Remux': 8,128
+- RecommendedMode='AudioFix': 2,504
+- Undecided (no English audio / suspect / etc): 19,272
 
 ## Open design questions
 

@@ -155,12 +155,12 @@ User-facing -- two GUI surfaces, two columns visible in any operator query, one 
 
 ### I. Operator visibility
 
-21. The Activity page renders a "Library Compliance" panel at the **bottom of the page** (below the existing panels) showing a one-glance summary:
-    - Total MediaFiles count
-    - Compliant count + percent
-    - Non-compliant by RecommendedMode (Transcode N, Remux N)
-    - Undecided count (IsCompliant IS NULL) split by reason (no profile / no English audio / not yet probed)
-    Source: cheap GROUP BY query on MediaFiles; no per-poll recompute. Verifiable: visual inspection plus a manual `SELECT IsCompliant, RecommendedMode, COUNT(*) FROM MediaFiles GROUP BY 1, 2` reconciles with the displayed numbers.
+21. **Implemented by `media-tabs-and-loudness.feature.md` criteria 23-24** (shipped 2026-05-17, commit `519d44d`). The Activity page now renders a "Library Compliance" card with four sub-tables:
+    - Compliance state (true / false / NULL counts)
+    - RecommendedMode breakdown (Transcode / Remux / **AudioFix** / NoMode)
+    - Audio sub-section (AudioComplete true/false/NULL + Suspect by reason)
+    - Loudness sub-section (Measured / Unmeasured / On target ±1 LU / Off target >3 LU / Wide LRA >18)
+    Source: `/api/Activity/LibraryCompliance` -- one endpoint, five cheap GROUP BY queries on MediaFiles. Verifiable: visual inspection plus a manual `SELECT IsCompliant, RecommendedMode, COUNT(*) FROM MediaFiles GROUP BY 1, 2` reconciles with the displayed numbers.
 
 22. SmartPopulate response per-row includes `IsCompliant` and `RecommendedMode` fields. Card 1 row template renders a small badge showing the recommended mode (Transcode / Remux), so the operator can see at a glance which pipeline a queued item will hit.
 
