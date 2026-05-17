@@ -66,11 +66,32 @@
 
             <!-- Queue Table -->
             <div class="card">
-                <div class="card-header d-flex justify-content-between align-items-center">
-                    <div class="d-flex align-items-center gap-2">
-                        <h5 class="mb-0">Transcode Queue</h5>
-                    </div>
-                    <div class="d-flex align-items-center gap-3">
+                <div class="card-header">
+                    <ul class="nav nav-tabs card-header-tabs" id="QueueModeTabs">
+                        <li class="nav-item">
+                            <a class="nav-link active" href="#" data-mode="">
+                                All <span class="badge bg-secondary ms-1" id="TabCountAll">0</span>
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="#" data-mode="Transcode">
+                                <i class="fas fa-film me-1"></i>Transcode <span class="badge bg-primary ms-1" id="TabCountTranscode">0</span>
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="#" data-mode="Remux">
+                                <i class="fas fa-cube me-1"></i>Remux <span class="badge bg-info ms-1" id="TabCountRemux">0</span>
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="#" data-mode="AudioFix">
+                                <i class="fas fa-volume-up me-1"></i>Audio Fix <span class="badge bg-warning text-dark ms-1" id="TabCountAudioFix">0</span>
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
                         <div class="d-flex align-items-center gap-2">
                             <label for="PageSizeSelect" class="form-label mb-0">Show:</label>
                             <select class="form-select form-select-sm" id="PageSizeSelect" style="width: auto;">
@@ -82,8 +103,6 @@
                         </div>
                         <span class="badge bg-secondary" id="QueueItemCount">0 items</span>
                     </div>
-                </div>
-                <div class="card-body">
                     <div class="table-responsive">
                         <table class="table table-striped table-hover" id="QueueTable">
                             <thead>
@@ -236,8 +255,12 @@ class TranscodeQueueManager {
         this.sortOrder = 'DESC';
         this.totalPages = 1;
         this.totalItems = 0;
+        // Persist tab selection across reloads
+        const params = new URLSearchParams(window.location.search);
+        this.modeFilter = params.get('mode') || '';  // '' = All
 
         this.initializeEventListeners();
+        this.syncTabUI();
         this.loadQueueData();
         this.startAutoRefresh();
     }
@@ -303,6 +326,31 @@ class TranscodeQueueManager {
                 this.loadQueueData();
             });
         });
+
+        // Mode tab clicks (Transcode / Remux / AudioFix / All)
+        document.querySelectorAll('#QueueModeTabs .nav-link').forEach(tab => {
+            tab.addEventListener('click', (e) => {
+                e.preventDefault();
+                this.modeFilter = tab.dataset.mode || '';
+                this.currentPage = 1;
+                // Reflect in URL so reload + share keep the tab selection
+                const url = new URL(window.location);
+                if (this.modeFilter) {
+                    url.searchParams.set('mode', this.modeFilter);
+                } else {
+                    url.searchParams.delete('mode');
+                }
+                window.history.replaceState({}, '', url);
+                this.syncTabUI();
+                this.loadQueueData();
+            });
+        });
+    }
+
+    syncTabUI() {
+        document.querySelectorAll('#QueueModeTabs .nav-link').forEach(t => {
+            t.classList.toggle('active', (t.dataset.mode || '') === this.modeFilter);
+        });
     }
 
     async loadQueueData() {
@@ -313,6 +361,7 @@ class TranscodeQueueManager {
                 sortBy: this.sortBy,
                 sortOrder: this.sortOrder
             });
+            if (this.modeFilter) params.set('mode', this.modeFilter);
 
             const response = await fetch(`/api/TranscodeQueue/GetQueue?${params}`);
             const data = await response.json();
@@ -321,12 +370,27 @@ class TranscodeQueueManager {
                 this.updateQueueTable(data.QueueItems);
                 this.updatePagination(data);
                 this.updateSortIndicators();
+                this.updateModeCounts(data.ModeCounts || {});
             } else {
                 this.showAlert('Error loading queue data: ' + data.ErrorMessage, 'danger');
             }
         } catch (error) {
             this.showAlert('Error loading queue data: ' + error.message, 'danger');
         }
+    }
+
+    updateModeCounts(modeCounts) {
+        const t = modeCounts.Transcode || 0;
+        const r = modeCounts.Remux || 0;
+        const a = modeCounts.AudioFix || 0;
+        const elT = document.getElementById('TabCountTranscode');
+        const elR = document.getElementById('TabCountRemux');
+        const elA = document.getElementById('TabCountAudioFix');
+        const elAll = document.getElementById('TabCountAll');
+        if (elT) elT.textContent = t;
+        if (elR) elR.textContent = r;
+        if (elA) elA.textContent = a;
+        if (elAll) elAll.textContent = t + r + a;
     }
 
     updateQueueTable(queueItems) {
@@ -346,7 +410,9 @@ class TranscodeQueueManager {
         } else {
             queueItems.forEach(item => {
                 const mode = item.ProcessingMode || 'Transcode';
-                const modeBadgeClass = mode === 'Remux' ? 'bg-info' : 'bg-primary';
+                let modeBadgeClass = 'bg-primary';
+                if (mode === 'Remux') modeBadgeClass = 'bg-info';
+                else if (mode === 'AudioFix') modeBadgeClass = 'bg-warning text-dark';
                 const row = document.createElement('tr');
                 row.dataset.itemId = item.Id;
                 row.dataset.status = item.Status;

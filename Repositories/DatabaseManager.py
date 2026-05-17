@@ -1420,8 +1420,8 @@ class DatabaseManager:
 
         return queueItems
 
-    def GetTranscodeQueueItemsPaginated(self, Page: int = 1, PageSize: int = 25, SortBy: str = "Priority", SortOrder: str = "DESC"):
-        """Get paginated transcoding queue items with SQL-level sorting and pagination."""
+    def GetTranscodeQueueItemsPaginated(self, Page: int = 1, PageSize: int = 25, SortBy: str = "Priority", SortOrder: str = "DESC", Mode: str = None):
+        """Get paginated transcoding queue items with SQL-level sorting, pagination, optional ProcessingMode filter."""
         # Whitelist sort columns to prevent SQL injection
         sort_columns = {
             'SizeMB': 'SizeMB',
@@ -1432,8 +1432,14 @@ class DatabaseManager:
         sort_col = sort_columns.get(SortBy, 'Priority')
         order = 'DESC' if SortOrder == 'DESC' else 'ASC'
 
-        # Get total count
-        count_rows = self.DatabaseService.ExecuteQuery("SELECT COUNT(*) as Count FROM TranscodeQueue")
+        # Whitelist Mode filter
+        ModeFilter = Mode if Mode in ('Transcode', 'Remux', 'AudioFix') else None
+        WhereClause = "WHERE ProcessingMode = %s" if ModeFilter else ""
+        FilterParams = (ModeFilter,) if ModeFilter else ()
+
+        # Get total count (filtered if Mode supplied)
+        count_query = f"SELECT COUNT(*) as Count FROM TranscodeQueue {WhereClause}"
+        count_rows = self.DatabaseService.ExecuteQuery(count_query, FilterParams if ModeFilter else None)
         total_items = count_rows[0]['Count'] if count_rows else 0
 
         # Get paginated items
@@ -1441,10 +1447,11 @@ class DatabaseManager:
         query = f"""
             SELECT Id, FilePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted, ProcessingMode, ClaimedBy, MediaFileId
             FROM TranscodeQueue
+            {WhereClause}
             ORDER BY {sort_col} {order}, DateAdded ASC
             LIMIT %s OFFSET %s
         """
-        rows = self.DatabaseService.ExecuteQuery(query, (PageSize, offset))
+        rows = self.DatabaseService.ExecuteQuery(query, FilterParams + (PageSize, offset))
 
         queue_items = []
         for row in rows:

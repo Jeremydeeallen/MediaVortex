@@ -20,19 +20,33 @@ class TranscodeQueueViewModel:
         self.ErrorMessage = ""
         self.SuccessMessage = ""
 
-    def LoadQueueItems(self, Page: int = 1, PageSize: int = 25, SortBy: str = "Priority", SortOrder: str = "DESC") -> Dict[str, Any]:
-        """Load transcoding queue items with database-level pagination and sorting."""
+    def LoadQueueItems(self, Page: int = 1, PageSize: int = 25, SortBy: str = "Priority", SortOrder: str = "DESC", Mode: str = None) -> Dict[str, Any]:
+        """Load transcoding queue items with database-level pagination, sorting, optional ProcessingMode filter."""
         try:
-            LoggingService.LogFunctionEntry("LoadQueueItems", "TranscodeQueueViewModel", Page, PageSize, SortBy, SortOrder)
+            LoggingService.LogFunctionEntry("LoadQueueItems", "TranscodeQueueViewModel", Page, PageSize, SortBy, SortOrder, Mode)
 
             self.IsLoading = True
             self.ErrorMessage = ""
 
             # Use database-level pagination
             from Repositories.DatabaseManager import DatabaseManager
+            from Core.Database.DatabaseService import DatabaseService
             db = DatabaseManager()
-            pageItems, totalItems = db.GetTranscodeQueueItemsPaginated(Page, PageSize, SortBy, SortOrder)
+            pageItems, totalItems = db.GetTranscodeQueueItemsPaginated(Page, PageSize, SortBy, SortOrder, Mode)
             self.QueueItems = pageItems
+
+            # Per-mode counts -- one cheap GROUP BY, drives the tab badges
+            ModeCounts = {'Transcode': 0, 'Remux': 0, 'AudioFix': 0}
+            try:
+                Rows = DatabaseService().ExecuteQuery(
+                    "SELECT COALESCE(ProcessingMode, 'Transcode') AS Mode, COUNT(*) AS N FROM TranscodeQueue GROUP BY 1"
+                )
+                for Row in Rows:
+                    Key = Row.get('Mode') or 'Transcode'
+                    if Key in ModeCounts:
+                        ModeCounts[Key] = Row.get('N', 0)
+            except Exception:
+                pass
 
             totalPages = (totalItems + PageSize - 1) // PageSize
 
@@ -47,7 +61,9 @@ class TranscodeQueueViewModel:
                 "CurrentPage": Page,
                 "PageSize": PageSize,
                 "SortBy": SortBy,
-                "SortOrder": SortOrder
+                "SortOrder": SortOrder,
+                "Mode": Mode,
+                "ModeCounts": ModeCounts
             }
 
             return result
