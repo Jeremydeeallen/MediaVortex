@@ -3,6 +3,7 @@ from typing import Dict, Any, Optional
 from Core.Logging.LoggingService import LoggingService
 from Models.TranscodeQueueModel import TranscodeQueueModel
 from Models.MediaFileModel import MediaFileModel
+from Features.AudioCompletion.AudioCompletionService import AudioCompletionService
 
 
 class CommandBuilder:
@@ -89,21 +90,23 @@ class CommandBuilder:
             # Add parameters using CodecParameters database values
             self.AddCodecParameters(CommandParts, CodecParameters, ProfileSettings)
             
-            # Audio: source-preserving policy (codec + channel count + bitrate
-            # match source for MP4-compatible codecs; EAC3 fallback for lossless).
-            # Profile.AudioBitrateKbps is the operator override -- when 0/NULL,
-            # the policy reads source bitrate via MediaFile.AudioBitrateKbps.
-            ProfileAudioBitrate = ProfileSettings.get('AudioBitrateKbps')
-            try:
-                ProfileAudioBitrate = int(ProfileAudioBitrate) if ProfileAudioBitrate not in (None, '', 'None') else 0
-            except (TypeError, ValueError):
-                ProfileAudioBitrate = 0
-            CommandParts.extend(self.BuildAudioCodecArgs(MediaFile, ProfileAudioBitrate))
-            
-            # Add audio filters (normalization)
-            AudioFilter = self.BuildAudioFilters(ProfileSettings)
-            if AudioFilter:
-                CommandParts.extend(['-af', f'"{AudioFilter}"'])
+            # Audio: branch on AudioComplete. If the file's audio has already
+            # been through the one-shot normalize pass (or is suspect), copy
+            # bytes through unchanged. Otherwise apply source-preserving
+            # re-encode + loudnorm/acompressor -- the first and last time we
+            # touch this file's audio.
+            if AudioCompletionService.ShouldStreamCopyAudio(MediaFile):
+                CommandParts.extend(['-c:a', 'copy'])
+            else:
+                ProfileAudioBitrate = ProfileSettings.get('AudioBitrateKbps')
+                try:
+                    ProfileAudioBitrate = int(ProfileAudioBitrate) if ProfileAudioBitrate not in (None, '', 'None') else 0
+                except (TypeError, ValueError):
+                    ProfileAudioBitrate = 0
+                CommandParts.extend(self.BuildAudioCodecArgs(MediaFile, ProfileAudioBitrate))
+                AudioFilter = self.BuildAudioFilters(ProfileSettings)
+                if AudioFilter:
+                    CommandParts.extend(['-af', f'"{AudioFilter}"'])
             
             # Add video filters (deinterlacing only for interlaced sources, plus scaling)
             RawInterlaced = getattr(MediaFile, 'IsInterlaced', None) if MediaFile else None
@@ -549,17 +552,36 @@ class CommandBuilder:
             if VideoCodec in ('hevc', 'h265', 'x265'):
                 CommandParts.extend(['-tag:v', 'hvc1'])
 
-            # Audio: source-preserving re-encode (codec + channel count +
-            # bitrate match source for MP4-compatible codecs; EAC3 fallback
-            # for lossless inputs). Re-encode is mandatory because the
-            # loudnorm filter chain needs decoded audio. Remux has no
-            # ProfileSettings -- always use source-matching policy.
-            # Skipped entirely for video-only files (no audio stream).
+            # Audio: branch on AudioComplete.
+            #   AudioComplete=true (or Suspect=true) -> -c:a copy (byte-identical)
+            #   AudioComplete=false                  -> one-shot codec convert
+            #                                           + loudnorm/acompressor
+            #   AudioComplete=true with non-MP4-compat codec is a logic error:
+            #   the row claims stream-copy-eligible but the codec cannot be
+            #   stream-copied into MP4. Flag suspect and refuse the command.
             if HasAudio:
-                CommandParts.extend(self.BuildAudioCodecArgs(MediaFile, ProfileBitrate=0))
-                AudioFilter = self.BuildAudioFilters({})
-                if AudioFilter:
-                    CommandParts.extend(['-af', f'"{AudioFilter}"'])
+                if AudioCompletionService.ShouldStreamCopyAudio(MediaFile):
+                    SourceCodec = (getattr(MediaFile, 'AudioCodec', '') or '').lower()
+                    if SourceCodec and SourceCodec not in AudioCompletionService.MP4_COMPAT_AUDIO_CODECS:
+                        MediaFileId = getattr(MediaFile, 'Id', None)
+                        LoggingService.LogError(
+                            f"BuildRemuxCommand: AudioComplete=true but AudioCodec={SourceCodec!r} "
+                            f"is not MP4-stream-copy-compatible (MediaFileId={MediaFileId}). "
+                            f"Flagging AudioCorruptSuspect=true and refusing the command.",
+                            "CommandBuilder", "BuildRemuxCommand"
+                        )
+                        if MediaFileId is not None:
+                            AudioCompletionService.MarkAudioCorruptSuspect(
+                                MediaFileId,
+                                AudioCompletionService.REASON_INCOMPATIBLE_CODEC_UNSUPPORTED,
+                            )
+                        return None
+                    CommandParts.extend(['-c:a', 'copy'])
+                else:
+                    CommandParts.extend(self.BuildAudioCodecArgs(MediaFile, ProfileBitrate=0))
+                    AudioFilter = self.BuildAudioFilters({})
+                    if AudioFilter:
+                        CommandParts.extend(['-af', f'"{AudioFilter}"'])
 
             # MP4 container flags
             CommandParts.extend(['-movflags', '+faststart'])
@@ -639,12 +661,15 @@ class CommandBuilder:
             if VideoCodec in ('hevc', 'h265', 'x265'):
                 CommandParts.extend(['-tag:v', 'hvc1'])
 
-            # Audio: source-preserving re-encode (same policy as BuildRemuxCommand).
-            # See Docs/AudioStrategy.md.
-            CommandParts.extend(self.BuildAudioCodecArgs(MediaFile, ProfileBitrate=0))
-            AudioFilter = self.BuildAudioFilters({})
-            if AudioFilter:
-                CommandParts.extend(['-af', f'"{AudioFilter}"'])
+            # Audio: branch on AudioComplete (same policy as BuildRemuxCommand).
+            # See Features/AudioCompletion/audio-completion.flow.md.
+            if AudioCompletionService.ShouldStreamCopyAudio(MediaFile):
+                CommandParts.extend(['-c:a', 'copy'])
+            else:
+                CommandParts.extend(self.BuildAudioCodecArgs(MediaFile, ProfileBitrate=0))
+                AudioFilter = self.BuildAudioFilters({})
+                if AudioFilter:
+                    CommandParts.extend(['-af', f'"{AudioFilter}"'])
 
             # Subtitle: convert to mov_text (MP4-native text format)
             CommandParts.extend(['-c:s', 'mov_text'])

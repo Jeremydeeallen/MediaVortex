@@ -2,6 +2,111 @@
 
 ## Open
 
+### [BUG-0003] Remux profile re-encodes audio and applies dynamics processing -- PENDING OPERATOR VERIFICATION
+**Date:** 2026-05-16 (filed) / 2026-05-17 (implementation landed)
+
+**What broke:** The `Remux` profile built an FFmpeg command that re-encoded audio to AAC and applied `acompressor=threshold=-15dB:ratio=3:attack=0.01:release=0.1:makeup=3dB` followed by `loudnorm=I=-23:LRA=7:TP=-2` on every pass. The same chain ran against 10,270 historical Remux attempts -- compounding generational loss and audibly damaging sources at the AAC quality floor (≤96 kbps WEBRip/SDTV).
+
+**Fix landed in `Features/AudioCompletion/`** -- a per-file `MediaFiles.AudioComplete` flag drives a one-shot pass model:
+- One-shot normalization on first encode (when `AudioComplete=false`); post-flight flips the flag to true.
+- `-c:a copy` on every subsequent encode (when `AudioComplete=true`).
+- Files at or below the channel-aware bitrate floor (`QueueAdmissionConfig.MinAudioBitrateKbps{Mono,Stereo,Surround}` = 64/96/128) are marked complete during backfill so they never run through the loudnorm chain.
+- Suspect-only-on-no-audio-stream model: DTS/TrueHD/FLAC/PCM/Vorbis/Opus take the one-shot codec-convert path (BuildAudioCodecArgs lands on EAC3), not the suspect bucket.
+
+**Implementation evidence (verified 2026-05-17):**
+- Backfill: 17,973 rows AudioComplete=true / 32,999 AudioComplete=false / 2,097 Suspect (no_audio_stream) / 5,726 unprobed -- idempotent re-run reports 0 row changes.
+- Command-shape live verify on row 124 (30 Rock S06E19 Bluray-480p, MP4/HEVC/AAC 124 kbps stereo):
+  - AudioComplete=true -> remux command emits `-c:a copy`, no `loudnorm`.
+  - After Reset (AudioComplete=false) -> remux emits `loudnorm` + `acompressor`, no `-c:a copy`.
+  - After MarkComplete (AudioComplete=true) -> back to `-c:a copy`, cascade returns IsCompliant=true, RecommendedMode=NULL.
+- Cascade live verify on representative rows: Suspect -> IsCompliant=NULL; sub-floor stereo -> IsCompliant=true (Transcode short-circuited by floor guard); Opus 84 kbps -> Remux (one-shot codec convert path); MKV AAC AudioComplete=true -> Remux for container fix.
+- `_LoadAudioNormalizedSet` removed -- compliance cascade reads `AudioComplete` column directly.
+
+**Pending operator smoke test (workers required, currently paused):**
+1. Start workers.
+2. Re-queue file Id=124 (or any AudioComplete=true MP4 file) as Remux. Watch `TranscodeAttempts.FFpmpegCommand` -- must contain `-c:a copy` and must NOT contain `loudnorm`.
+3. After successful Remux, compute `ffmpeg -i <source.orig> -map 0:a -c copy -f data - | sha256sum` and the same against the remuxed output. **Hashes must match** -- the criterion-26 byte-identical contract.
+4. Re-queue any AudioComplete=false file as Remux. Watch the command contains `loudnorm`. Post-flight, query the row -- `AudioComplete` must be flipped to `true`, `AudioCompletedAt` set.
+
+**Files:** `Features/AudioCompletion/`, `Models/CommandBuilder.py`, `Features/FileReplacement/FileReplacementBusinessService.py`, `Features/TranscodeQueue/QueueManagementBusinessService.py`, `Scripts/SQLScripts/{AddAudioCompletionColumns,AddAudioBitrateFloorConfig,BackfillAudioComplete}.py`. Once the operator smoke test passes, move this entry to `memory/KNOWN-ISSUES-ARCHIVE.md`.
+
+---
+
+### [BUG-0002] Media files with zero audio streams persist in DB after silent-output Remux -- must be purged with full FK history
+**Date:** 2026-05-16
+
+**What breaks:** Multiple `MediaFiles` rows have a non-NULL `AudioBitrateKbps` value but the actual on-disk file has zero audio streams. The Remux pipeline successfully ran, replaced the source, and updated the DB without catching that the output was silent. The post-replacement re-probe in `_UpdateMediaFilesAfterReplacement` failed to clear or flag the missing audio — instead the pre-Remux `AudioBitrateKbps` was kept and `AudioCodec` ended up NULL. So the DB now contains "ghost audio" rows pointing at silent files.
+
+**Confirmed silent on disk via ffprobe** (sample of 4 of the 16 NULL-codec candidates):
+- `T:\Doctor Who (2005)\Specials\Doctor Who (2005) - S00E72 - Doctor Who in America SDTV-720p-mv.mp4`
+- `T:\Monk\Season 7\Monk - S07E08-E09 - Mr. Monk Gets Hypnotized + Mr. Monk and the Miracle WEBDL-480p-mv.mp4`
+- `T:\Shameless\Season 1\Shameless - S01E06 - Monica Comes Home (1) SDTV-720p-mv.mp4`
+- `T:\Xena - Warrior Princess\Season 1\Xena - Warrior Princess - S01E05 - The Path Not Taken DVD-720p-mv.mp4`
+
+Each has a video stream (HEVC) but no audio stream at all. The 16-file NULL-codec set is a lower bound — files where the pre-probe captured a codec name will not be caught by `AudioCodec IS NULL` alone, so the actual silent population is likely larger. Definitive identification requires `ffprobe` against every transcoded file.
+
+**Why the DB can't be trusted as the source of truth:** `AudioBitrateKbps` was kept from the pre-Remux source instead of being NULL'd. `AudioCodec` ended up NULL only by accident on a subset of files. Any silent file whose re-probe happened to keep both fields populated is undetectable from the DB. Conclusion: the re-probe in `_UpdateMediaFilesAfterReplacement` must overwrite every audio column based strictly on what the post-replacement file actually contains — present audio populates them, absent audio NULLs them and triggers Discard. No partial updates, no defaulting to source values.
+
+**What the user wants:** purge these rows from the DB entirely (along with the on-disk silent file) and record every removed path so they can be re-acquired from source.
+
+**Cleanup behavior (per criterion 19 on `post-transcode-pipeline.feature.md`):**
+1. ffprobe every `MediaFiles` row (or every `TranscodedByMediaVortex = true` row as a faster first pass) to identify rows whose file has zero audio streams.
+2. For each silent file: delete the row and every dependent record in `TranscodeAttempts`, `TranscodeFiles`, `MediaFilesArchive`, `QualityTestResults`, `QualityTestProgress`, `TranscodeQueue`, `QualityTestingQueue`, `ActiveJobs`, `TemporaryFilePaths`, `ScanJobs` (if linked), `ProblemFiles` (if linked). One transaction per file.
+3. Before the row is deleted, append its `RelativePath` (fallback `FilePath`) to a timestamped report at the repo root: `deleted-silent-files-YYYY-MM-DD.md`, grouped by show, so the operator can re-acquire.
+4. Delete the silent file from disk.
+5. Going forward, harden `_UpdateMediaFilesAfterReplacement` to fail loud when the re-probe finds no audio — `Discard` disposition, on-disk silent output removed, source restored if `.orig`/`.inprogress` is still recoverable.
+
+**Violates:** `Features/FileReplacement/post-transcode-pipeline.feature.md` criterion 19 (added with this bug). Indirectly: the missing MediaProbe feature doc (no `Features/MediaProbe/*.feature.md` exists) means the re-probe contract has no owner — flag the gap, /t should create one when fixing.
+
+**Related (not duplicate):** `### [BUG] Next Remux Batch table shows files with no audio stream that silently fail when queued` (2026-05-14, line 200) covers the *upstream* problem of queueing video-only files that error out with code 4294967274. BUG-0002 is the *downstream* problem of files that successfully completed Remux but came out silent and now sit in the DB with stale audio metadata. Different failure mode (success-with-no-audio vs explicit failure), different cleanup need (purge + report vs exclude from queue).
+
+**Look first:**
+- `Features/FileReplacement/FileReplacementBusinessService.py` — `_UpdateMediaFilesAfterReplacement` (no-audio detection gap, criterion 19 second half).
+- `Features/MediaProbe/MediaProbeBusinessService.py` — the probe call that ought to surface zero-audio explicitly.
+- DB foreign-key map: `TranscodeAttempts.MediaFileId`, `TranscodeFiles.MediaFileId`, `MediaFilesArchive.Id` (shared PK), `QualityTestResults.TranscodeAttemptId`, `QualityTestProgress.TranscodeAttemptId`, `TemporaryFilePaths.TranscodeAttemptId`, `ActiveJobs.QueueId` (polymorphic — see BUG-0001 criterion 16).
+- Sample file paths above for `ffprobe` verification before/after.
+
+**Fix with:** `/t BUG-0002`.
+
+---
+
+### [BUG-0001] Stuck-item cleanup gaps -- operational rows leak past their job's terminal state
+**Date:** 2026-05-16
+
+**What breaks:** Four distinct code paths let DB rows linger after the underlying job is done. Result: the operator-facing "Active Jobs" list, the QT queue, and the TFP tracking table all drift away from disk reality over time. Observed today on I9-2024 with all 17 workers Paused (so steady-state, not in-flight):
+
+- 9 stale `ActiveJobs` rows whose `QueueId` no longer exists in either `TranscodeQueue` or `QualityTestingQueue`.
+- 1 `QualityTestingQueue` row (id 955) pointing at `TranscodeAttempt 16465` -- the attempt had `Success=True` for 5+ hours but the QT queue row was never removed. The job appeared "in flight" indefinitely on the UI.
+- 18 `TranscodeProgress` orphan rows linked to attempts that already had `Success=True` or `Success=False`, plus duplicate progress rows for the same attempt where only one of the duplicates got swept (no UNIQUE constraint on `TranscodeAttemptId`).
+- **551 `TemporaryFilePaths` rows** for attempts that already finished. `_CleanupTemporaryFilePaths` only runs inside the success branch of `ProcessFileReplacement` -- every other terminal state (Discard, NoReplace, Requeue, FFmpeg failure, FFprobe-verify failure, VMAF failure) leaks a TFP row.
+
+Operationally this means: an operator looking at "active jobs" cannot trust the count, the Activity dashboard shows phantom QT work, and crash recovery sweeps (worker-lifecycle slice 3) have more rows to scan than they should -- with the slight risk that a leaked TFP referencing a stale path triggers a false criterion 12 "complete partial replacement" if disk state happens to match (low probability but not zero).
+
+I cleared the first three categories (29 rows) in this session. The 551 TFP rows remain -- they are the canary for the structural fix.
+
+**Four distinct holes:**
+
+1. `Features/FileReplacement/FileReplacementBusinessService.py` -- `_CleanupTemporaryFilePaths` is only called inside the success branch of `ProcessFileReplacement`. Every non-Replace disposition (`Discard`, `NoReplace`, `Requeue`, `Pending -> later failure`) leaves the TFP row behind. Failed FFmpeg or FFprobe-verify in `ProcessTranscodeQueueService` writes a TFP row at job-prep time and never cleans it up.
+
+2. Queue-delete sites (search `DeleteTranscodeQueueItem`) -- somewhere a `TranscodeQueue` row gets deleted without first deleting its `ActiveJobs` row. Preferred fix: declarative FK `ActiveJobs.QueueId REFERENCES TranscodeQueue(Id) ON DELETE CASCADE` (and matching for `QualityTestingQueue`). Audit-every-caller hygiene is fragile; the schema constraint makes the leak impossible.
+
+3. `Services/QualityTestQueueService.py` / `Features/QualityTesting/QualityTestingBusinessService.py` -- when a `TranscodeAttempt` is marked `Success=True` and `QualityTestCompleted=True` outside the QT worker's own flow (e.g. crash recovery, post-transcode-disposition re-evaluation), the matching `QualityTestingQueue` row is not deleted. The QT worker reading the queue then loops on a row whose work is already done.
+
+4. `Features/ServiceControl/CrashRecoveryService.py` -- `CleanupOrphanedProgressRecords` runs only on worker startup; if a worker stays running and progress rows leak under it (the 5-minute "recent-progress" exclusion can race, or duplicate progress rows exist), they sit forever. Run it on a timer (similar to `StuckJobDetectionLoop`) and add a UNIQUE constraint on `TranscodeProgress.TranscodeAttemptId` so duplicates are impossible at the schema level.
+
+**Violates:** `Features/FileReplacement/post-transcode-pipeline.feature.md` criteria 15, 16, 17, 18 (added with this entry; criterion 9 already covers the failure-cleanup slice and is being violated for the non-FFmpeg-failure terminal states).
+
+**What "fixed" looks like:**
+- TFP rows are deleted at every terminal state, not just successful Replace -- single chokepoint preferred (PostTranscodeDispositionService once disposition is decided, OR a trigger on `TranscodeAttempts.CompletedDate` transitioning from NULL).
+- `ActiveJobs` cannot survive its parent queue row's deletion (FK CASCADE).
+- `QualityTestingQueue` rows pointing at already-finished attempts get cleaned by the same recurring sweep that handles `ActiveJobs` orphans.
+- `TranscodeProgress` duplicates prevented by a UNIQUE constraint; sweep runs on a timer.
+- Verifiable: run a transcode through every disposition (Replace, BypassReplace, Discard, NoReplace, Requeue, FFmpeg failure, FFprobe-verify failure, VMAF failure) and confirm `SELECT COUNT(*) FROM TemporaryFilePaths` returns 0 after each terminal state.
+
+**Look first:** Grep for `DeleteTranscodeQueueItem` (queue delete sites) and `_CleanupTemporaryFilePaths` (only caller today). Cross-reference the disposition terminal states in `Features/QualityTesting/PostTranscodeDispositionService.py` to decide the chokepoint. Existing related pattern: `Features/ServiceControl/CrashRecoveryService.py:_RecoverInProgressArtifacts` (worker-lifecycle slice 3) sweeps similar leaked state at startup; that approach can be lifted into a recurring timer for runtime cleanup.
+
+---
+
 ### [BUG] TranscodeAttempts failure rows lack ProfileName -- operator cannot tell what KIND of job failed from the row alone
 **Date:** 2026-05-16
 
@@ -543,23 +648,6 @@ Observed: Bachelor in Paradise S10E01 was successfully transcoded earlier today,
 
 ---
 
-### [TECH DEBT] Remove legacy archive_TranscodeService/ and archive_QualityTestService/ directories
-**Date:** 2026-05-08 | **Renamed (partial):** 2026-05-08
-**Affects:** archive_TranscodeService/, archive_QualityTestService/, Scripts/StopAllTranscodeServices.py, Scripts/StopAllPythonServices.py, CLAUDE.md "Two Microservices" section, transcode.flow.md
-
-Phase 2 of the architecture redesign unified both services into WorkerService. Renamed today to make the deprecation visible in the directory listing. The string identifiers "TranscodeService" / "QualityTestService" remain valid as logical job-type tags in ActiveJobs.ServiceName, ServiceStatus.ServiceName, and CrashRecoveryService — those must NOT be removed.
-
-**Remaining cleanup:**
-- `Scripts/StopAllTranscodeServices.py` and `Scripts/StopAllPythonServices.py` still reference the old names; harmless (process-name match returns no results) but should be deleted or repointed at WorkerService.
-- CLAUDE.md "Two Microservices" section still describes the old split — needs to be rewritten to describe the unified WorkerService + capability flags.
-- Once nothing reads from them for ~1 month, the `archive_*` directories can be deleted entirely.
-
-**Look first:** `TranscodeService/` and `QualityTestService/` directory contents, `Features/ServiceControl/ServiceLifecycleManager.py:29-40` (drop the two SERVICES dict entries), `Scripts/StopAllTranscodeServices.py` (delete or repoint), CLAUDE.md "Two Microservices" section.
-
-**Fix with:** `/n` (cleanup migration -- estimated 30 min: delete two dirs, prune SERVICES dict, sweep docs, leave string literals alone)
-
----
-
 ### [TECH DEBT] LocalStaging fallback decision duplicated across four sites
 **Date:** 2026-05-08
 **Affects:** Features/TranscodeJob/ProcessTranscodeQueueService.py
@@ -834,16 +922,5 @@ Done manually for dot on 2026-05-16 -- worked in ~5 minutes -- but the manual st
 **Solution:** Removed upper bound from all validation/clamp sites. Only floor of 1 enforced. The operator sets whatever value fits their hardware via the Workers table.
 
 **Files:** `TeamStatusController.py`, `ProcessRemuxQueueService.py`, `ProcessTranscodeQueueService.py`, `ProcessQualityTestQueueService.py`, `TranscodeJobController.py`, `WorkerService/Main.py`.
-
-### [BUG - FIXED 2026-05-13] Remux files discarded as "NoSavings" -- disposition gate ordering bug
-**Date:** 2026-05-13 | **Fixed:** 2026-05-13
-
-**What broke:** `PostTranscodeDispositionService._DecideFromInputs` checked `NewSize >= OldSize -> Discard/NoSavings` (Row 2) before `QualityTestRequired=false -> BypassReplace` (Row 3). Remux jobs set `QualityTestRequired=false` but often produce slightly larger outputs (audio re-encode). Result: 679 successful remux attempts got `Disposition='Discard'`, FileReplacement never ran. Disk state: original at `.orig`, good remuxed `.mp4` at source path, DB still pointing to old `.mkv`/`.mp4` path.
-
-**Violates:** `Features/FileReplacement/FileReplacement.feature.md` criterion 10, `transcode-vs-remux-routing.feature.md` criterion 16.
-
-**Fix:** Swapped Row 2 and Row 3 in `_DecideFromInputs` so `QualityTestNotRequired` fires before `NoSavings`. Remux attempts bypass the savings gate entirely. Remediation script `Scripts/SQLScripts/RemediateDiscardedRemuxFiles.py` flipped dispositions and ran `ProcessFileReplacement` for affected rows. ~380 remediated on i9; 113 blocked by stale `.orig` needing manual cleanup; 188 need script run from larry after redeploy.
-
----
 
 *Older resolved entries archived to `memory/KNOWN-ISSUES-ARCHIVE.md`.*

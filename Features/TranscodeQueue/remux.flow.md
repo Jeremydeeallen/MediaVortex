@@ -18,13 +18,16 @@ the file needs only audio + container fixes.
 
 A remux job:
 1. Copies the video stream byte-for-byte (`-c:v copy`) -- no quality loss, no encoder time.
-2. Re-encodes audio to AAC 128k with `loudnorm` (and `acompressor` if `AudioCompressionEnabled`) so the output joins the rest of the library at -23 LUFS.
+2. Audio handling is **AudioComplete-aware** (see `Features/AudioCompletion/audio-completion.flow.md`):
+   - `AudioComplete = true` -> `-c:a copy` (byte-identical to source, criterion 26)
+   - `AudioComplete = false` -> one-shot pass: codec convert if needed (`BuildAudioCodecArgs` handles DTS/TrueHD/FLAC/PCM/Vorbis/Opus -> EAC3) + loudnorm + acompressor. Post-flight `FileReplacementBusinessService` flips `AudioComplete` to true so this never runs against the file again.
+   - `AudioCorruptSuspect = true` -> the Remux is refused (logic error + flag).
 3. **Renames the source to `.orig` BEFORE FFmpeg runs** so FFmpeg can write directly to the freed source path -- no intermediate filename, no suffix-strip step.
 4. On FFmpeg success: FileReplacement verifies + settles the `.orig` per `KeepSource`. On any failure between rename and final verify: rollback restores the original from `.orig`.
-5. Re-probes the new file and updates `MediaFiles` (Resolution, Codec, AudioCodec, ContainerFormat, IsCompliant via the recompute hook).
+5. Re-probes the new file and updates `MediaFiles` (Resolution, Codec, AudioCodec, ContainerFormat, IsCompliant via the recompute hook). When the just-completed FFmpeg command contained `loudnorm`, the post-flight hook also flips `AudioComplete=true, AudioCompletedAt=NOW()`.
 6. Skips VMAF entirely -- video is bit-identical, no quality test makes sense.
 
-Worker time per file: typically 5-30 seconds for a 1-hour episode (audio re-encode is the only CPU work; everything else is I/O).
+Worker time per file: typically 5-30 seconds for a 1-hour episode when audio re-encodes (one-shot pass); near-instantaneous when `AudioComplete=true` (stream-copy both video and audio -- pure I/O).
 
 ## Safety contract -- rename-before-encode
 
@@ -94,18 +97,49 @@ replacement moves it to the original file's location with the new
 `.mp4` extension. The original `.mkv` (or whatever the source extension
 was) is replaced atomically.
 
-## Audio Filter Chain Applied During Remux
+## Audio Handling During Remux (AudioComplete-aware)
 
-From `BuildRemuxCommand`:
+`BuildRemuxCommand` branches on `MediaFile.AudioComplete` (set by
+`Features.AudioCompletion.AudioCompletionService`; see
+`Features/AudioCompletion/audio-completion.flow.md`):
+
+### Branch A -- AudioComplete = true (or AudioCorruptSuspect = true)
 
 ```
--c:v copy                                     # video stream copy, no re-encode
--c:a aac -b:a 128k                            # audio re-encode to AAC at 128 kbps
--af loudnorm=I=-23:LRA=7:TP=-2                # if AudioNormalizationEnabled (default ON)
-   ,acompressor=threshold=-15dB:ratio=3:...  # if AudioCompressionEnabled (default ON)
--tag:v hvc1                                   # HEVC tag for Apple/Android compatibility
--movflags +faststart                          # web-streaming-friendly MP4
+-c:v copy
+-c:a copy
+-tag:v hvc1           # only for HEVC sources
+-movflags +faststart
 ```
+
+Audio bytes pass through unchanged. Sub-second per file. Satisfies
+criterion 26 (byte-identical audio) of
+`transcode-vs-remux-routing.feature.md`.
+
+**Refusal case:** if `AudioComplete = true` but `AudioCodec` is not in
+the MP4-compat set (`aac`, `ac3`, `eac3`, `mp3`), `BuildRemuxCommand`
+flips `AudioCorruptSuspect = true,
+AudioCorruptReason = 'incompatible_codec_unsupported'` and returns
+None. This is a logic-error guard -- it shouldn't reach here, but if a
+data inconsistency does push it through, we refuse rather than fail at
+the muxer.
+
+### Branch B -- AudioComplete = false (one-shot pass)
+
+```
+-c:v copy
+-c:a aac -b:a 128k                            # or eac3 for incompat sources -- see BuildAudioCodecArgs
+-af loudnorm=I=-23:LRA=7:TP=-2,acompressor=...
+-tag:v hvc1                                   # HEVC only
+-movflags +faststart
+```
+
+The loudnorm + acompressor chain runs exactly once per file in its
+lifetime. Post-flight `MarkAudioComplete` flips the column to true so
+this branch is never re-entered for this file. For DTS/TrueHD/FLAC/PCM
+sources, `BuildAudioCodecArgs` selects EAC3 with channel-aware bitrate,
+so the same one-shot pass handles codec conversion in addition to
+normalization.
 
 Filters are reused from `BuildAudioFilters` -- same chain that fires on
 the transcode path, so loudness consistency is uniform across pipelines.

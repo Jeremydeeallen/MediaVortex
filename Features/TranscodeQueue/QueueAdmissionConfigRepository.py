@@ -20,7 +20,9 @@ class QueueAdmissionConfigRepository(BaseRepository):
         try:
             Rows = self.ExecuteQuery(
                 """
-                SELECT Id, MinTranscodeSavingsMB, MissingEstimatePolicy, LastUpdated
+                SELECT Id, MinTranscodeSavingsMB, MissingEstimatePolicy,
+                       MinAudioBitrateKbpsMono, MinAudioBitrateKbpsStereo,
+                       MinAudioBitrateKbpsSurround, LastUpdated
                 FROM QueueAdmissionConfig WHERE Id = 1
                 """
             )
@@ -36,6 +38,9 @@ class QueueAdmissionConfigRepository(BaseRepository):
                 Id=R['Id'],
                 MinTranscodeSavingsMB=R['MinTranscodeSavingsMB'],
                 MissingEstimatePolicy=R['MissingEstimatePolicy'],
+                MinAudioBitrateKbpsMono=R['MinAudioBitrateKbpsMono'],
+                MinAudioBitrateKbpsStereo=R['MinAudioBitrateKbpsStereo'],
+                MinAudioBitrateKbpsSurround=R['MinAudioBitrateKbpsSurround'],
                 LastUpdated=R.get('LastUpdated'),
             )
         except Exception as Ex:

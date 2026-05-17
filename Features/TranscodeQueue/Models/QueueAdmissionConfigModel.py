@@ -13,4 +13,7 @@ class QueueAdmissionConfigModel:
     Id: int = 1
     MinTranscodeSavingsMB: int = 150
     MissingEstimatePolicy: str = "admit"
+    MinAudioBitrateKbpsMono: int = 64
+    MinAudioBitrateKbpsStereo: int = 96
+    MinAudioBitrateKbpsSurround: int = 128
     LastUpdated: Optional[datetime] = None

@@ -1322,39 +1322,6 @@ class QueueManagementBusinessService:
             )
             return {}
 
-    def _LoadAudioNormalizedSet(self, MediaFileIds: List[int]) -> set:
-        """Return the subset of MediaFileIds whose most-recent successful TranscodeAttempt
-        had `loudnorm` in its FFpmpegCommand.
-
-        Files with no successful attempts do NOT appear in the returned set -- they
-        are treated as un-normalized by compliance evaluation (criterion 13). The
-        column name `FFpmpegCommand` carries a known double-`p` typo (see CLAUDE.md).
-        """
-        if not MediaFileIds:
-            return set()
-        from Core.Database.DatabaseService import DatabaseService
-        try:
-            placeholders = ','.join(['%s'] * len(MediaFileIds))
-            rows = DatabaseService().ExecuteQuery(
-                f"""
-                SELECT DISTINCT ON (a.MediaFileId) a.MediaFileId,
-                       (a.FFpmpegCommand ILIKE '%%loudnorm%%') AS HasLoudnorm
-                FROM TranscodeAttempts a
-                WHERE a.MediaFileId IN ({placeholders})
-                  AND a.Success = true
-                  AND a.FFpmpegCommand IS NOT NULL
-                ORDER BY a.MediaFileId, a.AttemptDate DESC
-                """,
-                tuple(MediaFileIds)
-            )
-            return {int(r['MediaFileId']) for r in rows if r.get('HasLoudnorm')}
-        except Exception as Ex:
-            LoggingService.LogException(
-                f"Failed to load audio-normalized set for {len(MediaFileIds)} ids; treating all as un-normalized",
-                Ex, "QueueManagementBusinessService", "_LoadAudioNormalizedSet"
-            )
-            return set()
-
     @staticmethod
     def _ResolutionCategoryFromPixels(Resolution: Optional[str]) -> Optional[str]:
         """Derive '480p' / '720p' / '1080p' / '2160p' from a 'WIDTHxHEIGHT' string.
@@ -1437,33 +1404,41 @@ class QueueManagementBusinessService:
         Row: Dict[str, Any],
         EffectiveProfile: Optional[str],
         Lookup: Dict[tuple, tuple],
-        NormalizedIds: set,
         AcceptableVideoCodecs: Optional[set] = None,
         AcceptableContainers: Optional[set] = None,
         AcceptableAudioCodecsMp4: Optional[set] = None,
         MinSavingsMB: Optional[int] = None,
+        FloorCfg: Optional[Any] = None,
     ) -> tuple:
         """Pure compliance cascade. Returns (IsCompliant, RecommendedMode).
 
-        Mirrors transcode-vs-remux-routing.feature.md criterion 11. None for
-        IsCompliant means "undecidable" (hard-block or missing inputs);
-        otherwise true/false. RecommendedMode is 'Transcode', 'Remux', or None.
+        Mirrors transcode-vs-remux-routing.feature.md criterion 11 plus the
+        audio-completion.feature.md criteria 13-15.
 
-        Codec / container / audio acceptability and the savings threshold are
-        loaded from the data-driven tables (`CodecCompatibility`,
-        `QueueAdmissionConfig`). Callers in tight loops should pass the
-        pre-loaded sets / threshold to avoid per-row DB round-trips. When
-        omitted, this method loads them fresh per call.
+        None for IsCompliant means "undecidable" (hard-block or missing
+        inputs); otherwise true/false. RecommendedMode is 'Transcode',
+        'Remux', or None.
+
+        Codec / container / audio acceptability, savings threshold, and
+        audio bitrate floor are loaded from the data-driven tables
+        (`CodecCompatibility`, `QueueAdmissionConfig`). Callers in tight
+        loops should pass the pre-loaded sets / config to avoid per-row
+        DB round-trips. When omitted, this method loads them fresh per call.
         """
         # a. Hard block: no English audio (includes files with zero audio streams)
         if Row.get('HasExplicitEnglishAudio') is False:
             return (None, None)
 
-        # a2. Hard block: probed file with no audio stream at all.
-        # HasExplicitEnglishAudio IS NOT NULL means the audio probe ran.
-        # AudioCodec still NULL after probe = zero audio streams = likely
-        # corrupt (a TV episode with no audio). Block from queue; flag as
-        # ProblemFile in the caller (RecomputeForFiles).
+        # a2. Hard block: AudioCompletionService flagged this row as suspect
+        # (no_audio_stream / incompatible_codec_unsupported). The audio cannot
+        # be safely re-encoded or stream-copied; surface for operator review.
+        if Row.get('AudioCorruptSuspect') is True:
+            return (None, None)
+
+        # a3. Hard block: probed file with no audio stream at all.
+        # Belt-and-suspenders with a2 -- backfill marks these Suspect, but
+        # newly-probed rows without a recompute pass yet still need the
+        # in-cascade check.
         if Row.get('HasExplicitEnglishAudio') is not None and not Row.get('AudioCodec') and Row.get('Resolution'):
             return (None, None)
 
@@ -1478,8 +1453,12 @@ class QueueManagementBusinessService:
             AcceptableContainers = self.CodecCompatibilityRepo.GetAcceptableSet('Container')
         if AcceptableAudioCodecsMp4 is None:
             AcceptableAudioCodecsMp4 = self.CodecCompatibilityRepo.GetAcceptableSet('AudioCodecMp4')
-        if MinSavingsMB is None:
-            MinSavingsMB = self.QueueAdmissionConfigRepo.Get().MinTranscodeSavingsMB
+        if MinSavingsMB is None or FloorCfg is None:
+            Cfg = self.QueueAdmissionConfigRepo.Get()
+            if MinSavingsMB is None:
+                MinSavingsMB = Cfg.MinTranscodeSavingsMB
+            if FloorCfg is None:
+                FloorCfg = Cfg
 
         # Need a resolution category for the lookup key. Prefer the cached
         # ResolutionCategory column; fall back to deriving from raw Resolution
@@ -1498,16 +1477,31 @@ class QueueManagementBusinessService:
         if TargetVideoKbps is None or TargetAudioKbps is None:
             return (None, None)
 
+        # Audio bitrate floor guard: a sub-floor source must never go through
+        # the Transcode path (audio re-encode would damage already-low-bitrate
+        # audio). Force Remux/compliant evaluation for these files regardless
+        # of the would-be Transcode signals below. See audio-completion.feature.md C15.
+        from Features.AudioCompletion.AudioCompletionService import AudioCompletionService
+        AudioBitrate = Row.get('AudioBitrateKbps')
+        AudioChannels = Row.get('AudioChannels')
+        BelowAudioFloor = (
+            AudioBitrate is not None
+            and AudioChannels is not None
+            and int(AudioBitrate) <= AudioCompletionService.FloorForChannels(AudioChannels, FloorCfg)
+        )
+
         # c. Transcode wins -- video codec acceptability, downscale-needed, savings threshold
         VideoCodec = (Row.get('Codec') or '').lower()
         if VideoCodec and VideoCodec not in AcceptableVideoCodecs:
-            return (False, 'Transcode')
+            if not BelowAudioFloor:
+                return (False, 'Transcode')
 
         # Resolution downscale needed?
         SrcRank = self.RESOLUTION_RANK.get(ResKey, -1)
         TgtRank = self.RESOLUTION_RANK.get(TargetResCat, -1)
         if SrcRank > 0 and TgtRank >= 0 and SrcRank > TgtRank:
-            return (False, 'Transcode')
+            if not BelowAudioFloor:
+                return (False, 'Transcode')
 
         # Estimated savings >= threshold?
         SizeMB = Row.get('SizeMB') or 0
@@ -1516,7 +1510,8 @@ class QueueManagementBusinessService:
             TargetSizeMB = ((TargetVideoKbps + (TargetAudioKbps or 0)) * DurationMin * 60.0) / (8 * 1024)
             EstSavingsMB = SizeMB - TargetSizeMB
             if EstSavingsMB >= MinSavingsMB:
-                return (False, 'Transcode')
+                if not BelowAudioFloor:
+                    return (False, 'Transcode')
 
         # d. Remux is enough -- container, audio codec, audio normalization.
         # ContainerFormat from FFprobe is a comma-separated list of equivalent
@@ -1525,7 +1520,7 @@ class QueueManagementBusinessService:
         ContainerRaw = (Row.get('ContainerFormat') or '').lower()
         ContainerParts = {p.strip() for p in ContainerRaw.split(',') if p.strip()}
         AudioCodec = (Row.get('AudioCodec') or '').lower()
-        IsNormalized = int(Row.get('Id') or 0) in NormalizedIds
+        IsNormalized = Row.get('AudioComplete') is True
 
         if ContainerParts and not (ContainerParts & AcceptableContainers):
             return (False, 'Remux')
@@ -1761,19 +1756,20 @@ class QueueManagementBusinessService:
             Lookup = self._LoadPriorityLookupTable()
             DefaultProfile = self._LoadDefaultProfileName()
             ShowOverrides = self._LoadShowProfileOverrides()
-            NormalizedIds = self._LoadAudioNormalizedSet(MediaFileIds)
             # Gate config -- load once, pass through to _EvaluateCompliance per row.
             AcceptableVideoCodecs = self.CodecCompatibilityRepo.GetAcceptableSet('VideoCodec')
             AcceptableContainers = self.CodecCompatibilityRepo.GetAcceptableSet('Container')
             AcceptableAudioCodecsMp4 = self.CodecCompatibilityRepo.GetAcceptableSet('AudioCodecMp4')
-            MinSavingsMB = self.QueueAdmissionConfigRepo.Get().MinTranscodeSavingsMB
+            FloorCfg = self.QueueAdmissionConfigRepo.Get()
+            MinSavingsMB = FloorCfg.MinTranscodeSavingsMB
 
             placeholders = ','.join(['%s'] * len(MediaFileIds))
             rows = db.ExecuteQuery(
                 f"""
                 SELECT Id, FilePath, FileName, SizeMB, DurationMinutes, AssignedProfile,
                        ResolutionCategory, Resolution, Codec, ContainerFormat,
-                       AudioCodec, HasExplicitEnglishAudio
+                       AudioCodec, HasExplicitEnglishAudio,
+                       AudioComplete, AudioCorruptSuspect, AudioBitrateKbps, AudioChannels
                 FROM MediaFiles WHERE Id IN ({placeholders})
                 """,
                 tuple(MediaFileIds)
@@ -1818,11 +1814,12 @@ class QueueManagementBusinessService:
                     # Compliance evaluation -- pre-loaded gate config keeps
                     # this loop's DB round-trips bounded.
                     IsCompliant, RecommendedMode = self._EvaluateCompliance(
-                        r, EffectiveProfile, Lookup, NormalizedIds,
+                        r, EffectiveProfile, Lookup,
                         AcceptableVideoCodecs=AcceptableVideoCodecs,
                         AcceptableContainers=AcceptableContainers,
                         AcceptableAudioCodecsMp4=AcceptableAudioCodecsMp4,
                         MinSavingsMB=MinSavingsMB,
+                        FloorCfg=FloorCfg,
                     )
 
                     updates.append((
@@ -2073,6 +2070,21 @@ class QueueManagementBusinessService:
 
             # Delete from database
             success = self.Repository.DeleteTranscodeQueueItem(ItemId)
+
+            # BUG-0001 criterion 16: any ActiveJobs row still pointing at this
+            # QueueId must go with it. _CancelRunningJob covers the Running
+            # path; this catches the non-Running residue (e.g. crashed worker
+            # left ActiveJobs behind, queue row sat in Failed, user removed it).
+            try:
+                self.Repository.DatabaseService.ExecuteNonQuery(
+                    "DELETE FROM ActiveJobs WHERE ServiceName = %s AND QueueId = %s",
+                    ('TranscodeService', ItemId),
+                )
+            except Exception as e:
+                LoggingService.LogException(
+                    f"Failed to clean ActiveJobs for removed queue item {ItemId}",
+                    e, "QueueManagementBusinessService", "RemoveJobFromQueue",
+                )
 
             if success:
                 result = {

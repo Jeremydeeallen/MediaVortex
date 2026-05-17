@@ -115,11 +115,12 @@ User-facing -- two GUI surfaces, two columns visible in any operator query, one 
     - 720p MKV h264 935 kbps with normalized audio: IsCompliant=false, RecommendedMode='Remux' (container-only fix).
     - 720p MP4 h264 935 kbps with un-normalized audio: IsCompliant=false, RecommendedMode='Remux' (audio-only fix).
 
-13. Audio normalization detection (criterion 11d):
-    - For files MediaVortex transcoded (`TranscodeAttempts.FileReplaced=true` for that MediaFileId): a file is considered normalized if and only if the most-recent successful attempt's `FFpmpegCommand` (note: column name has a known double-`p` typo, see `CLAUDE.md`) contains `loudnorm` substring (case-insensitive). Approach validated 2026-05-09 against live data: 2,385 normalized attempts vs 230 un-normalized cleanly partitioned, the 230 clustered on a single day (2026-02-17) when normalization was off.
-    - For files NOT in TranscodeAttempts (natively imported): default to NOT normalized. Operator can re-evaluate via the admin endpoint after the file is processed once.
-    - No `ebur128` measurement in this feature -- deferred. Cheap-and-correct-enough for MediaVortex outputs is the priority here.
-    - Verifiable: insert a test TranscodeAttempts row with `FFpmpegCommand='ffmpeg ... -af loudnorm=I=-23 ...'`, recompute -- file marks as normalized. Replace command without loudnorm, recompute -- marks as un-normalized.
+13. Audio normalization detection has moved to the **Audio Completion** feature -- this criterion now defers to `audio-completion.feature.md`. The compliance cascade reads `MediaFiles.AudioComplete` (BOOLEAN column, materialized) instead of grepping `TranscodeAttempts.FFpmpegCommand` per evaluation:
+    - `AudioComplete = true` -> treated as normalized (criterion 11d "audio normalized" leg).
+    - `AudioComplete = false` -> treated as un-normalized; the next encode pass (Remux or Transcode) runs the one-shot loudnorm + acompressor chain and post-flight flips the flag to true.
+    - `AudioComplete IS NULL` (not yet evaluated) -> treated as undecidable; the compliance cascade returns `(None, None)` and the file is held out of the queue until the next admin recompute or probe-complete hook resolves the state.
+    - The legacy `_LoadAudioNormalizedSet` per-row grep is removed; `DetectNormalizationInCommand` is retained as the **post-flight** signal that flips the materialized column, and as the input to `BackfillAudioComplete.py`.
+    - Verifiable: `grep -r '_LoadAudioNormalizedSet'` returns no callers; `SELECT AudioComplete FROM MediaFiles WHERE Id=<id>` is the operator's source of truth for "is audio done."
 
 ### E. Pre-flight gate at queue creation
 
@@ -170,6 +171,16 @@ User-facing -- two GUI surfaces, two columns visible in any operator query, one 
 24. The `TranscodeQueue.ProcessingMode='Remux'` worker path remains the existing `ProcessRemuxJob` -- no behavior change in the worker, only how items get routed to it.
 
 25. The original `no-benefit-handling.feature.md` filename is renamed via `git mv` to this filename. Doc cross-references in other feature docs / flow docs are updated. Verifiable: `grep -r 'no-benefit-handling'` returns only historical commit messages.
+
+### K. Remux audio integrity
+
+Implementation of criteria 26-28 is owned by `Features/AudioCompletion/audio-completion.feature.md`. The criteria below are the routing-feature-side contracts; the audio-completion feature is the mechanism.
+
+26. **[BUG-0003]** A Remux output's audio is byte-identical to source **when `MediaFile.AudioComplete = true` at queue-creation time**. When `AudioComplete = false`, the Remux performs a one-shot pass (codec convert if needed, plus loudnorm + acompressor) and post-flight flips `AudioComplete` to true; from that point forward, all future encodes for that file stream-copy the audio. When `AudioCorruptSuspect = true`, the Remux is refused. Verifiable: for an `AudioComplete = true` Remux output, `ffmpeg -i <orig> -map 0:a -c copy -f data - | sha256sum` matches `ffmpeg -i <remuxed> -map 0:a -c copy -f data - | sha256sum`.
+
+27. **[BUG-0003]** A Remux output file has **at least one** audio stream when its source had >= 1 audio stream. (Reframed 2026-05-16 from the original "same number of audio streams" wording: multi-track preservation is out of scope -- see the deferral in `audio-completion.feature.md` "Deviation from conventions". The intent of this criterion has always been the silent-output negative guard against BUG-0002.) Verifiable: `ffprobe -select_streams a -show_entries stream=index -of csv=p=0 <output> | wc -l` is >= 1 when source had >= 1.
+
+28. **[BUG-0003]** No file is queued for any re-encoding profile (`ProcessingMode = 'Transcode'`) when its source audio bitrate is at or below the channel-aware floor defined in `QueueAdmissionConfig.MinAudioBitrateKbps{Mono,Stereo,Surround}` (defaults: 64 / 96 / 128). The cascade in `_EvaluateCompliance` short-circuits the Transcode return for sub-floor sources and falls through to the Remux/compliant evaluation. Verifiable: a file with 53 kbps stereo source audio assigned to an SVT-AV1 profile produces `RecommendedMode` of `'Remux'` or `IsCompliant = true`, never `'Transcode'`.
 
 ## Status
 
