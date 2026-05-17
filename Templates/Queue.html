@@ -91,6 +91,25 @@
                     </ul>
                 </div>
                 <div class="card-body">
+                    <!-- AudioFix folder pin controls -- only visible on Audio Fix tab -->
+                    <div id="AudioFixPinControls" class="alert alert-light border mb-3 d-none">
+                        <div class="d-flex justify-content-between align-items-start mb-2">
+                            <strong class="text-warning"><i class="fas fa-thumbtack me-1"></i>Pinned folders (Audio Fix priority boost)</strong>
+                            <small class="text-muted">Files in these folders get queue priority 195+ on Audio Fix.</small>
+                        </div>
+                        <div class="d-flex gap-2 align-items-center mb-2">
+                            <input type="text" id="PinFolderInput" class="form-control form-control-sm" style="max-width: 320px;" placeholder="folder name or path substring (e.g. Westworld)">
+                            <button type="button" id="PinFolderAddBtn" class="btn btn-sm btn-warning text-dark">
+                                <i class="fas fa-plus me-1"></i>Pin folder
+                            </button>
+                            <button type="button" id="PinFolderApplyAllBtn" class="btn btn-sm btn-outline-secondary" title="Re-apply boost to existing queue rows">
+                                <i class="fas fa-sync-alt me-1"></i>Apply to existing queue
+                            </button>
+                        </div>
+                        <div id="PinFolderList" class="d-flex flex-wrap gap-2">
+                            <span class="text-muted small">No folders pinned.</span>
+                        </div>
+                    </div>
                     <div class="d-flex justify-content-between align-items-center mb-3">
                         <div class="d-flex align-items-center gap-2">
                             <label for="PageSizeSelect" class="form-label mb-0">Show:</label>
@@ -327,6 +346,22 @@ class TranscodeQueueManager {
             });
         });
 
+        // AudioFix folder-pin controls
+        const pinAddBtn = document.getElementById('PinFolderAddBtn');
+        if (pinAddBtn) {
+            pinAddBtn.addEventListener('click', () => this.addAudioFixPin());
+        }
+        const pinInput = document.getElementById('PinFolderInput');
+        if (pinInput) {
+            pinInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') this.addAudioFixPin();
+            });
+        }
+        const pinApplyBtn = document.getElementById('PinFolderApplyAllBtn');
+        if (pinApplyBtn) {
+            pinApplyBtn.addEventListener('click', () => this.applyAudioFixPins());
+        }
+
         // Mode tab clicks (Transcode / Remux / AudioFix / All)
         document.querySelectorAll('#QueueModeTabs .nav-link').forEach(tab => {
             tab.addEventListener('click', (e) => {
@@ -351,6 +386,89 @@ class TranscodeQueueManager {
         document.querySelectorAll('#QueueModeTabs .nav-link').forEach(t => {
             t.classList.toggle('active', (t.dataset.mode || '') === this.modeFilter);
         });
+        // AudioFix pin controls visible only on Audio Fix tab
+        const pinEl = document.getElementById('AudioFixPinControls');
+        if (pinEl) {
+            pinEl.classList.toggle('d-none', this.modeFilter !== 'AudioFix');
+            if (this.modeFilter === 'AudioFix') {
+                this.loadAudioFixPins();
+            }
+        }
+    }
+
+    async loadAudioFixPins() {
+        try {
+            const r = await fetch('/api/AudioFixPriorityHints/List');
+            const data = await r.json();
+            if (!data.Success) return;
+            const container = document.getElementById('PinFolderList');
+            if (!container) return;
+            if (!data.Data || data.Data.length === 0) {
+                container.innerHTML = '<span class="text-muted small">No folders pinned.</span>';
+                return;
+            }
+            container.innerHTML = '';
+            data.Data.forEach(pin => {
+                const chip = document.createElement('span');
+                chip.className = 'badge bg-warning text-dark d-flex align-items-center gap-1';
+                chip.style.padding = '0.5em 0.75em';
+                chip.innerHTML =
+                    `<i class="fas fa-thumbtack"></i><span>${this.escapeHtml(pin.FolderPattern)}</span>` +
+                    `<small class="text-muted">(${pin.BoostedPriority})</small>` +
+                    `<button class="btn btn-sm btn-link p-0 text-dark" onclick="queueManager.removeAudioFixPin(${pin.Id})" title="Remove pin">` +
+                    `<i class="fas fa-times"></i></button>`;
+                container.appendChild(chip);
+            });
+        } catch (e) {
+            // swallow -- non-critical
+        }
+    }
+
+    async addAudioFixPin() {
+        const input = document.getElementById('PinFolderInput');
+        const pattern = (input.value || '').trim();
+        if (!pattern) return;
+        try {
+            const r = await fetch('/api/AudioFixPriorityHints/Add', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({FolderPattern: pattern})
+            });
+            const data = await r.json();
+            if (data.Success) {
+                input.value = '';
+                this.loadAudioFixPins();
+                this.applyAudioFixPins();  // re-apply boost to existing rows
+            } else {
+                this.showAlert('Pin failed: ' + (data.Message || 'unknown'), 'warning');
+            }
+        } catch (e) {
+            this.showAlert('Pin failed: ' + e.message, 'danger');
+        }
+    }
+
+    async removeAudioFixPin(id) {
+        try {
+            const r = await fetch(`/api/AudioFixPriorityHints/Remove/${id}`, {method: 'DELETE'});
+            const data = await r.json();
+            if (data.Success) {
+                this.loadAudioFixPins();
+            }
+        } catch (e) {
+            // swallow
+        }
+    }
+
+    async applyAudioFixPins() {
+        try {
+            const r = await fetch('/api/AudioFixPriorityHints/ApplyAll', {method: 'POST'});
+            const data = await r.json();
+            if (data.Success) {
+                this.loadQueueData();  // refresh the queue ordering
+            }
+        } catch (e) {
+            // swallow
+        }
     }
 
     async loadQueueData() {

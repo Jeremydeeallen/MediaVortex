@@ -339,11 +339,13 @@ class WebServiceApp:
         from Features.ShowSettings.ShowSettingsController import ShowSettingsBlueprint
         from Features.AudioCompletion.AudioCompletionController import AudioCompletionBlueprint
         from Features.Activity.ActivityController import ActivityBlueprint
+        from Features.TranscodeQueue.AudioFixPriorityHintsController import AudioFixPriorityHintsBlueprint
 
         # Register all blueprints
         self.App.register_blueprint(ShowSettingsBlueprint)
         self.App.register_blueprint(AudioCompletionBlueprint)
         self.App.register_blueprint(ActivityBlueprint)
+        self.App.register_blueprint(AudioFixPriorityHintsBlueprint)
         self.App.register_blueprint(ServiceControlBlueprint)
         self.App.register_blueprint(QueueResetBlueprint)
         self.App.register_blueprint(SQLQueriesBlueprint, url_prefix='/api/SQLQueries')

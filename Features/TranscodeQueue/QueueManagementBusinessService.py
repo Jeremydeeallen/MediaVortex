@@ -1769,6 +1769,20 @@ class QueueManagementBusinessService:
             FloorCfg = self.QueueAdmissionConfigRepo.Get()
             MinSavingsMB = FloorCfg.MinTranscodeSavingsMB
 
+            # AudioFix folder pins (media-tabs-and-loudness.feature.md C22).
+            # Load once per call; apply per-row to PriorityScore when the file
+            # would route to RecommendedMode='AudioFix' and its FilePath matches.
+            AudioFixPins = []
+            try:
+                AudioFixPins = [
+                    (P['FolderPattern'].lower(), int(P['BoostedPriority']))
+                    for P in db.ExecuteQuery(
+                        "SELECT FolderPattern, BoostedPriority FROM AudioFixPriorityHints"
+                    )
+                ]
+            except Exception:
+                pass  # table may not exist on older DBs; no-op
+
             placeholders = ','.join(['%s'] * len(MediaFileIds))
             rows = db.ExecuteQuery(
                 f"""
@@ -1828,10 +1842,24 @@ class QueueManagementBusinessService:
                         FloorCfg=FloorCfg,
                     )
 
+                    # AudioFix folder-pin boost: when the cascade routes a
+                    # file to 'AudioFix' AND its FilePath matches a pinned
+                    # folder pattern, override PriorityScore with the max of
+                    # (computed score, BoostedPriority). All downstream queue
+                    # inserts read m.PriorityScore so the boost propagates.
+                    FinalScore = int(Score)
+                    if RecommendedMode == 'AudioFix' and AudioFixPins:
+                        FilePathLower = (r.get('FilePath') or '').lower()
+                        for Pattern, Boost in AudioFixPins:
+                            if Pattern and Pattern in FilePathLower:
+                                if Boost > FinalScore:
+                                    FinalScore = Boost
+                                break  # first matching pin wins
+
                     updates.append((
                         int(r['Id']),
                         EffectiveProfile,
-                        int(Score),
+                        FinalScore,
                         IsCompliant,
                         RecommendedMode,
                     ))
