@@ -1533,6 +1533,14 @@ class QueueManagementBusinessService:
         if AudioCodec and AudioCodec not in AcceptableAudioCodecsMp4:
             return (False, 'Remux')
         if not IsNormalized:
+            # AudioFix routing REQUIRES measured loudness. Without LUFS data
+            # we can't confirm the file actually needs work (Pass 5 of the
+            # backfill would have upgraded it to AudioComplete=true if it
+            # were already on-target). Files awaiting measurement stay
+            # undecided so they don't pollute the Audio Fix queue with
+            # presumed-bad-but-unverified candidates.
+            if Row.get('SourceIntegratedLufs') is None:
+                return (None, None)
             return (False, 'AudioFix')
 
         # e. Already compliant
@@ -1789,7 +1797,8 @@ class QueueManagementBusinessService:
                 SELECT Id, FilePath, FileName, SizeMB, DurationMinutes, AssignedProfile,
                        ResolutionCategory, Resolution, Codec, ContainerFormat,
                        AudioCodec, HasExplicitEnglishAudio,
-                       AudioComplete, AudioCorruptSuspect, AudioBitrateKbps, AudioChannels
+                       AudioComplete, AudioCorruptSuspect, AudioBitrateKbps, AudioChannels,
+                       SourceIntegratedLufs
                 FROM MediaFiles WHERE Id IN ({placeholders})
                 """,
                 tuple(MediaFileIds)
