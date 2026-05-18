@@ -79,12 +79,12 @@ class TranscodeQueueModel:
     def IsRemux(self) -> bool:
         """Check if this is a remux-class job.
 
-        Both 'Remux' (container fix, bundled audio fix if needed) and
-        'AudioFix' (audio-only fix) route through BuildRemuxCommand. The
-        distinction is operator-facing only -- the worker pipeline is
-        identical. See media-tabs-and-loudness.feature.md C17.
+        The post-2026-05-17 routing model collapses Remux + AudioFix into a
+        single 'Quick' mode (see media-tabs-and-loudness.feature.md C15-C17,
+        revised). Legacy 'Remux' and 'AudioFix' rows still dispatch through
+        the same code path for in-flight backward compatibility.
         """
-        return self.ProcessingMode in ("Remux", "AudioFix")
+        return self.ProcessingMode in ("Quick", "Remux", "AudioFix")
 
     @property
     def IsSubtitleFix(self) -> bool:

@@ -84,25 +84,34 @@ for how `AudioComplete` is decided.
 
 14. After successful reprobe of a file, the MediaProbe worker calls `LoudnessAnalysisService.MeasureLoudness` in the same pass (criterion 7) and then `RecomputeForFiles([MediaFileId])` so the cascade picks up fresh state. Verifiable: queue a reprobe for a file with stale loudness, observe LoudnessMeasuredAt updated post-run.
 
-### F. ProcessingMode trichotomy
+### F. Quick + Transcode duo (replaces trichotomy 2026-05-17)
 
-15. The cascade in `_EvaluateCompliance` returns `RecommendedMode IN ('Transcode', 'Remux', 'AudioFix', None)`. The new `'AudioFix'` is returned when **all** of the following hold:
-    - Audio needs work (`AudioComplete=false`)
-    - Container is already MP4-family acceptable
-    - Video codec is in the acceptable set
-    - Resolution doesn't exceed the profile's TranscodeDownTo
-    - Estimated savings below threshold
-   In other words: only the audio needs fixing. Verifiable: insert an MP4 H264 AAC stereo file at 192 kbps with `AudioComplete=false`, recompute, observe `RecommendedMode='AudioFix'`.
+**Design pivot:** Remux and AudioFix were identical operations with different labels -- both use `BuildRemuxCommand` which handles container fix AND/OR audio normalize in one FFmpeg pass. Collapsing them into a single `'Quick'` mode (a) eliminates the artificial mode-exclusivity that hid eligible files from tabs and (b) lets the operator drain the cheap "fix audio + container" backlog independently of the expensive Transcode backlog. Same file can be eligible for both Quick and Transcode -- Quick runs first, file falls out of Quick tab, Transcode later does pure video work because container + audio are already done.
 
-16. When audio needs work AND container also needs fixing (MKV source, etc.), cascade returns `RecommendedMode='Remux'` (not 'AudioFix'). The Remux pass handles both in one FFmpeg call. Verifiable: MKV H264 AAC 192k AudioComplete=false -> `'Remux'`.
+15. The cascade in `_EvaluateCompliance` evaluates two independent eligibility predicates per file:
+    - **`NeedsQuick`**: true when `AudioComplete = false` OR container is not MP4-family. Either condition makes the file a candidate for the Quick Fix pass (`BuildRemuxCommand`).
+    - **`NeedsTranscode`**: true when video codec is not in the acceptable set, OR resolution exceeds the profile's TranscodeDownTo, OR estimated savings >= MinSavingsMB threshold (subject to bitrate-floor short-circuit).
+    A file can be eligible for both. `RecommendedMode` retains a single value for display/badging purposes -- set to `'Transcode'` when `NeedsTranscode` is true, else `'Quick'` when `NeedsQuick` is true, else NULL when compliant. Verifiable: an MP4 H264 AAC stereo file at 192 kbps with `AudioComplete = false` and no transcode-needed signals → `NeedsQuick=true, NeedsTranscode=false, RecommendedMode='Quick'`. The same file with resolution exceeding profile → `NeedsQuick=true, NeedsTranscode=true, RecommendedMode='Transcode'`.
 
-17. `BuildRemuxCommand` accepts both 'Remux' and 'AudioFix' rows. The worker-side execution is identical; the distinction is operator-facing only. Verifiable: a queue row with `ProcessingMode='AudioFix'` produces the same FFmpeg command as the equivalent `ProcessingMode='Remux'` row when `AudioComplete=false`.
+16. Tab eligibility queries read the flags directly, NOT `RecommendedMode`:
+    - **Quick Fix tab** lists every file where `NeedsQuick = true`. Includes files that ALSO need Transcode (so the operator can do the cheap audio/container fix first regardless of whether heavy video work is also pending).
+    - **Transcode tab** lists every file where `NeedsTranscode = true`. Includes files that ALSO need Quick.
+    Verifiable: a file with both flags appears in both tabs. After a successful Quick pass, `NeedsQuick` is recomputed false; file drops from Quick tab; Transcode tab still has it.
+
+17. `BuildRemuxCommand` handles every Quick pass:
+    - `AudioComplete = false` and container not MP4 → audio normalize + container fix in one pass.
+    - `AudioComplete = false` and container MP4 → audio normalize, container unchanged.
+    - `AudioComplete = true` and container not MP4 → `-c:a copy` + container fix.
+    - `AudioComplete = true` and container MP4 → wouldn't be eligible (not in Quick).
+    `TranscodeQueueModel.IsRemux` returns true for `ProcessingMode IN ('Quick', 'Remux', 'AudioFix')` -- new rows use 'Quick'; legacy 'Remux'/'AudioFix' rows continue to dispatch correctly. Verifiable: insert a TranscodeQueue row with `ProcessingMode='Quick'`, observe worker dispatch routes to `BuildRemuxCommand`.
+
+17a. **Quick Fix tab Focus control:** the Quick Fix card has a "Focus" dropdown (Audio first / Container first / Mixed). It changes the ORDER of SmartPopulate results so the operator can prioritize audio-needed vs container-needed files at the top of the suggestion list. Focus does NOT affect eligibility or what the worker does -- a row queued with Focus=Audio still gets container fix if its container is wrong, because BuildRemuxCommand handles both. Verifiable: switch Focus, observe row order changes; queue any row, observe worker performs all applicable fixes.
 
 ### G. Media tabs UI
 
-18. `/TranscodeQueue` template renders a tab bar with three tabs: Transcode, Remux, Audio Fix. Each tab shows the count of `TranscodeQueue` rows with the matching `ProcessingMode`. Active tab persists across navigations (query string `?mode=` or local-storage). Verifiable: insert one row of each mode, observe all three tab counts = 1.
+18. **Top-of-page nav on `/ShowSettings`** has three pills (in `_media_subnav.html`): **Transcode | Quick Fix | Clip Builder**. Each pill activates the matching in-page section pane (Transcode card, Quick Fix card, or navigates to `/ClipBuilder`). Hash routing (`#transcode`, `#quickfix`) persists the active section across reloads. Verifiable: click each pill, observe URL hash changes, observe the matching pane visible while the other is hidden.
 
-19. Each tab body is the existing queue list filtered to its mode. Existing actions (cancel, requeue, etc.) work identically across tabs. Verifiable: action a row from each tab, observe the correct backend behavior.
+19. Quick Fix card (replaces the prior Remux and AudioFix cards) shows files where `NeedsQuick=true`. Transcode card shows files where `NeedsTranscode=true`. A file with both flags appears in both cards. Existing actions (Add Batch / Queue All / Re-Analyze) work identically. Verifiable: a file with `NeedsQuick=true AND NeedsTranscode=true` appears in both cards' SmartPopulate.
 
 20. SmartPopulate (current Card 1 on `/Scanning`) gains a `Mode` column per row showing the cascade's `RecommendedMode`. The "Add to queue" button uses that value -- the operator sees which tab a row will land on. Verifiable: SmartPopulate response shape includes `RecommendedMode`; UI renders a badge with the value.
 

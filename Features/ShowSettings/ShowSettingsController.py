@@ -178,12 +178,13 @@ def SmartPopulateQueue():
         Drive = Data.get('Drive', '')
         Search = Data.get('Search', '') or ''
         Mode = Data.get('Mode')
+        Focus = Data.get('Focus')  # 'Audio' | 'Container' | 'Mixed' (Quick Fix tab)
         if isinstance(Search, str) and len(Search) > 100:
             Search = Search[:100]
 
         from Features.TranscodeQueue.QueueManagementBusinessService import QueueManagementBusinessService
         Service = QueueManagementBusinessService()
-        Result = Service.SmartPopulateQueue(Limit=Limit, Offset=Offset, Drive=Drive, Search=Search, Mode=Mode)
+        Result = Service.SmartPopulateQueue(Limit=Limit, Offset=Offset, Drive=Drive, Search=Search, Mode=Mode, Focus=Focus)
 
         return jsonify(Result)
     except Exception as Ex:

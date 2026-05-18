@@ -78,80 +78,29 @@
 
     </div><!-- /tab-transcode -->
 
-    <!-- ── Remux pane ── -->
-    <div class="media-pane" id="tab-remux" style="display:none;">
+    <!-- ── Quick Fix pane (renamed from Audio Fix; subsumes the old Remux card) ── -->
+    <div class="media-pane" id="tab-quickfix" style="display:none;">
 
-    <!-- Card 1.5: Next Remux Batch (sibling of Card 1, scoped to RecommendedMode='Remux') -->
-    <div class="card border-info mb-3" id="RemuxCard">
-        <div class="card-header bg-info text-white py-2">
-            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
-                <div>
-                    <h5 class="mb-0 d-inline">Next Remux Batch</h5>
-                    <span id="RemuxCount" class="badge bg-light text-info ms-2">0</span>
-                </div>
-                <div class="d-flex align-items-center gap-2 flex-wrap">
-                    <input id="RemuxSearch" type="search" class="form-control form-control-sm" placeholder="Search title or file..." style="width: 200px;" maxlength="100">
-                    <label class="mb-0 text-white text-nowrap small">Size:</label>
-                    <input id="RemuxSizeSelect" type="number" min="1" max="1000" step="1" value="250" class="form-control form-control-sm" style="width: 80px;" list="BatchSizeChoices">
-                    <button class="btn btn-light btn-sm" onclick="AddRemuxBatchToQueue()" id="AddRemuxBatchBtn">Add Batch</button>
-                    <button class="btn btn-warning btn-sm" onclick="QueueAllRemuxMatching()" id="QueueAllRemuxBtn" title="Queue every remux candidate matching the current search">Queue All</button>
-                    <button class="btn btn-outline-light btn-sm" onclick="SmartPopulateRemux()" id="RemuxAnalyzeBtn">Re-Analyze</button>
-                </div>
-            </div>
-        </div>
-        <div class="card-body p-0">
-            <div id="RemuxBatchInfo" class="px-3 py-2 border-bottom bg-light">
-                <small class="text-muted">Loading remux candidates...</small>
-            </div>
-            <div class="table-responsive">
-                <table class="table table-hover table-sm mb-0">
-                    <thead class="table-light">
-                        <tr>
-                            <th style="width: 30px;"></th>
-                            <th style="width: 70px;" class="text-center">Priority</th>
-                            <th>Title</th>
-                            <th>File</th>
-                            <th style="width: 90px;" class="text-end">Size</th>
-                            <th style="width: 80px;">Codec</th>
-                            <th style="width: 100px;" class="text-end">Bitrate</th>
-                            <th style="width: 100px;">Resolution</th>
-                        </tr>
-                    </thead>
-                    <tbody id="RemuxTableBody">
-                        <tr><td colspan="8" class="text-center py-3 text-muted">Analyzing...</td></tr>
-                    </tbody>
-                    <tfoot class="table-light">
-                        <tr class="fw-bold">
-                            <td colspan="2"></td>
-                            <td colspan="2">Batch Total</td>
-                            <td id="RemuxTotalSize" class="text-end"></td>
-                            <td colspan="3"></td>
-                        </tr>
-                    </tfoot>
-                </table>
-            </div>
-        </div>
-    </div>
-
-    </div><!-- /tab-remux -->
-
-    <!-- ── Audio pane ── -->
-    <div class="media-pane" id="tab-audio" style="display:none;">
-
-    <!-- Card 1.7: Next Audio Fix Batch (sibling of Cards 1 and 1.5, scoped to RecommendedMode='AudioFix') -->
+    <!-- Card 1.7: Next Quick Fix Batch (combines container fix + audio normalize) -->
     <div class="card border-warning mb-3" id="AudioFixCard">
         <div class="card-header bg-warning text-dark py-2">
             <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
                 <div>
-                    <h5 class="mb-0 d-inline"><i class="fas fa-volume-up me-1"></i>Next Audio Fix Batch</h5>
+                    <h5 class="mb-0 d-inline"><i class="fas fa-bolt me-1"></i>Next Quick Fix Batch</h5>
                     <span id="AudioFixCount" class="badge bg-light text-dark ms-2">0</span>
                 </div>
                 <div class="d-flex align-items-center gap-2 flex-wrap">
+                    <label class="mb-0 text-dark text-nowrap small">Focus:</label>
+                    <select id="QuickFixFocus" class="form-select form-select-sm" style="width: auto;">
+                        <option value="Audio" selected>Audio first</option>
+                        <option value="Container">Container first</option>
+                        <option value="Mixed">Mixed (priority order)</option>
+                    </select>
                     <input id="AudioFixSearch" type="search" class="form-control form-control-sm" placeholder="Search title or file..." style="width: 200px;" maxlength="100">
                     <label class="mb-0 text-dark text-nowrap small">Size:</label>
                     <input id="AudioFixSizeSelect" type="number" min="1" max="1000" step="1" value="100" class="form-control form-control-sm" style="width: 80px;" list="BatchSizeChoices">
                     <button class="btn btn-light btn-sm" onclick="AddAudioFixBatchToQueue()" id="AddAudioFixBatchBtn">Add Batch</button>
-                    <button class="btn btn-outline-dark btn-sm" onclick="QueueAllAudioFixMatching()" id="QueueAllAudioFixBtn" title="Queue every audio-fix candidate matching the current search">Queue All</button>
+                    <button class="btn btn-outline-dark btn-sm" onclick="QueueAllAudioFixMatching()" id="QueueAllAudioFixBtn" title="Queue every quick-fix candidate matching the current search">Queue All</button>
                     <button class="btn btn-outline-dark btn-sm" onclick="SmartPopulateAudioFix()" id="AudioFixAnalyzeBtn">Re-Analyze</button>
                 </div>
             </div>
@@ -209,7 +158,7 @@
         </div>
     </div>
 
-    </div><!-- /tab-audio -->
+    </div><!-- /tab-quickfix -->
 
     </div><!-- /MediaTabsContent -->
 
@@ -385,26 +334,7 @@ $(document).ready(function() {
         }
     });
 
-    // ── Card 1.5 (Remux) handlers ──
-    $('#RemuxSearch').on('input', function() {
-        const Val = $(this).val() || '';
-        clearTimeout(RemuxSearchDebounceTimer);
-        RemuxSearchDebounceTimer = setTimeout(function() {
-            RemuxCurrentSearch = Val;
-            SmartPopulateRemux();
-        }, 300);
-    });
-
-    $('#RemuxSizeSelect').on('change', function() {
-        const NewSize = parseInt($(this).val(), 10);
-        if (Number.isFinite(NewSize) && NewSize >= 1 && NewSize <= 1000) {
-            REMUX_BATCH_SIZE = NewSize;
-            _WriteStickySize('ShowSettings.RemuxBatchSize', NewSize);
-            SmartPopulateRemux();
-        }
-    });
-
-    // ── Card 1.7 (AudioFix) handlers ──
+    // ── Card 1.7 (Quick Fix) handlers ──
     AUDIOFIX_BATCH_SIZE = _ReadStickySize('ShowSettings.AudioFixBatchSize', 100, 1000);
     $('#AudioFixSizeSelect').val(AUDIOFIX_BATCH_SIZE);
 
@@ -432,8 +362,17 @@ $(document).ready(function() {
     });
     $('#PinFolderApplyAllBtn').on('click', ApplyAudioFixPins);
 
+    // Focus dropdown (Quick Fix tab)
+    $('#QuickFixFocus').on('change', function() {
+        try { localStorage.setItem('ShowSettings.QuickFixFocus', $(this).val()); } catch (e) {}
+        SmartPopulateAudioFix();
+    });
+    try {
+        const SavedFocus = localStorage.getItem('ShowSettings.QuickFixFocus');
+        if (SavedFocus) $('#QuickFixFocus').val(SavedFocus);
+    } catch (e) {}
+
     SmartPopulate();
-    SmartPopulateRemux();
     SmartPopulateAudioFix();
     LoadAudioFixPins();
 
@@ -442,8 +381,7 @@ $(document).ready(function() {
     // We show/hide the matching pane and mark the matching pill 'active'.
     const SectionMap = {
         '#transcode': 'tab-transcode',
-        '#remux': 'tab-remux',
-        '#audio': 'tab-audio'
+        '#quickfix': 'tab-quickfix'
     };
     function ShowSection(Hash) {
         if (!SectionMap[Hash]) Hash = '#transcode';
@@ -1016,7 +954,8 @@ function SmartPopulateAudioFix(IsNextPage) {
         Limit: AUDIOFIX_BATCH_SIZE,
         Offset: AudioFixCurrentOffset,
         Search: AudioFixCurrentSearch || '',
-        Mode: 'AudioFix'
+        Mode: 'Quick',
+        Focus: $('#QuickFixFocus').val() || 'Audio'
     };
     $.ajax({
         url: '/api/ShowSettings/SmartPopulate',
@@ -1108,7 +1047,7 @@ function AddAudioFixBatchToQueue() {
         url: '/api/ShowSettings/AddToQueue',
         method: 'POST',
         contentType: 'application/json',
-        data: JSON.stringify({ Mode: 'AudioFix', ProfileId: null, MediaFileIds: MediaFileIds }),
+        data: JSON.stringify({ Mode: 'Quick', ProfileId: null, MediaFileIds: MediaFileIds }),
         timeout: 30000,
         success: function(Response) {
             Btn.prop('disabled', false).html(OrigText);
@@ -1144,7 +1083,7 @@ function QueueAllAudioFixMatching() {
         url: '/api/ShowSettings/QueueAllMatching',
         method: 'POST',
         contentType: 'application/json',
-        data: JSON.stringify({ Mode: 'AudioFix', Search: AudioFixCurrentSearch || '', Drive: 'T:' }),
+        data: JSON.stringify({ Mode: 'Quick', Search: AudioFixCurrentSearch || '', Drive: 'T:' }),
         timeout: 60000,
         success: function(Response) {
             Btn.prop('disabled', false).html(OrigText);

@@ -243,7 +243,8 @@ class QueueManagementBusinessService:
             return {"Success": False, "ErrorMessage": errorMsg, "ItemsAdded": 0}
 
     def SmartPopulateQueue(self, Limit: int = 100, Offset: int = 0, Drive: str = '',
-                            Search: Optional[str] = None, Mode: Optional[str] = None) -> Dict[str, Any]:
+                            Search: Optional[str] = None, Mode: Optional[str] = None,
+                            Focus: Optional[str] = None) -> Dict[str, Any]:
         """Get untranscoded MediaFiles ranked by materialized PriorityScore.
 
         Reads MediaFiles.PriorityScore (maintained by the priority-materialization
@@ -282,11 +283,19 @@ class QueueManagementBusinessService:
                   AND (m.HasExplicitEnglishAudio IS NULL OR m.HasExplicitEnglishAudio = true)
             """
 
-            # Mode filter (remux-populate-card.feature.md criterion 4). When supplied,
-            # scopes by RecommendedMode -- the cascade-decided pipeline. Card 1
-            # passes Mode='Transcode'; Card 1.5 passes Mode='Remux'. Invalid /
-            # missing Mode = no scoping (backward-compat with pre-Card-1.5 callers).
-            if Mode in ('Transcode', 'Remux', 'AudioFix'):
+            # Mode filter. Post-2026-05-17 the cascade tracks two independent
+            # flags (NeedsQuick, NeedsTranscode) so a file can appear in BOTH
+            # tabs when both apply. We filter on the flags directly, not the
+            # singular RecommendedMode -- that lets a file needing Transcode +
+            # Audio surface in the Quick Fix tab too, so the operator can do
+            # the cheap audio pass first regardless of whether heavy video
+            # work is also pending.
+            if Mode == 'Quick':
+                WhereSql += " AND m.NeedsQuick = TRUE"
+            elif Mode == 'Transcode':
+                WhereSql += " AND m.NeedsTranscode = TRUE"
+            elif Mode in ('Remux', 'AudioFix'):
+                # Legacy modes -- preserve old semantics for backward compat
                 WhereSql += " AND m.RecommendedMode = %s"
                 Params.append(Mode)
 
@@ -315,13 +324,25 @@ class QueueManagementBusinessService:
             CountRows = DatabaseService().ExecuteQuery(CountSql, ParamsTuple)
             TotalCandidates = int(CountRows[0].get('TotalCount', 0)) if CountRows else 0
 
+            # Focus controls ORDER BY when Mode='Quick' (media-tabs-and-loudness.feature.md C17a):
+            #   'Audio'     -> files needing audio normalize first (AudioComplete=false)
+            #   'Container' -> files needing container fix first (container not MP4)
+            #   'Mixed' / anything else -> straight priority order
+            FocusSql = ""
+            if Mode == 'Quick':
+                if Focus == 'Audio':
+                    FocusSql = "(CASE WHEN m.AudioComplete IS FALSE THEN 0 ELSE 1 END), "
+                elif Focus == 'Container':
+                    FocusSql = "(CASE WHEN LOWER(COALESCE(m.ContainerFormat,'')) NOT LIKE '%mp4%' THEN 0 ELSE 1 END), "
+
             Sql = f"""
                 SELECT m.Id, m.FilePath, m.FileName, m.SizeMB, m.VideoBitrateKbps,
                        m.Codec, m.Resolution, m.ResolutionCategory, m.ContainerFormat,
-                       m.PriorityScore
+                       m.PriorityScore, m.AudioCodec, m.AudioComplete,
+                       m.SourceIntegratedLufs, m.SourceLoudnessRangeLU
                 FROM MediaFiles m
                 {WhereSql}
-                ORDER BY m.SizeMB DESC NULLS LAST, m.PriorityScore DESC NULLS LAST
+                ORDER BY {FocusSql}m.PriorityScore DESC NULLS LAST, m.SizeMB DESC NULLS LAST
                 LIMIT {int(Limit)} OFFSET {int(Offset)}
             """
             Rows = DatabaseService().ExecuteQuery(Sql, ParamsTuple)
@@ -345,7 +366,12 @@ class QueueManagementBusinessService:
                     'BitrateKbps': int(Row.get('VideoBitrateKbps', 0) or 0),
                     'ContainerFormat': Row.get('ContainerFormat', '') or '',
                     'PriorityScore': Row.get('PriorityScore'),
-                    'Mode': Mode if Mode in ('Transcode', 'Remux', 'AudioFix') else 'Transcode',
+                    'Mode': Mode if Mode in ('Transcode', 'Remux', 'AudioFix', 'Quick') else 'Transcode',
+                    # Audio metadata for the Quick Fix tab columns
+                    'AudioCodec': Row.get('AudioCodec'),
+                    'AudioComplete': Row.get('AudioComplete'),
+                    'SourceIntegratedLufs': Row.get('SourceIntegratedLufs'),
+                    'SourceLoudnessRangeLU': Row.get('SourceLoudnessRangeLU'),
                 })
 
             Result = {
@@ -355,7 +381,7 @@ class QueueManagementBusinessService:
                 "Offset": Offset,
                 "Limit": Limit,
                 "Search": Search or '',
-                "Mode": Mode if Mode in ('Transcode', 'Remux', 'AudioFix') else None,
+                "Mode": Mode if Mode in ('Transcode', 'Remux', 'AudioFix', 'Quick') else None,
                 "HasMore": (Offset + len(Suggestions)) < TotalCandidates,
             }
             LoggingService.LogInfo(f"SmartPopulate: fetched {len(Rows)} of {TotalCandidates} candidates (offset={Offset}, search='{Search or ''}')", "QueueManagementBusinessService", "SmartPopulateQueue")
@@ -405,7 +431,7 @@ class QueueManagementBusinessService:
             if not NormalizedIds:
                 return {"Success": False, "ErrorMessage": "No MediaFileIds provided", "ItemsAdded": 0}
 
-            if Mode not in ('Transcode', 'Remux', 'AudioFix'):
+            if Mode not in ('Transcode', 'Remux', 'AudioFix', 'Quick'):
                 Mode = 'Transcode'
 
             # Resolve profile name. Transcode allows a profile choice; Remux
@@ -484,8 +510,8 @@ class QueueManagementBusinessService:
         Returns ItemsAdded.
         """
         try:
-            if Mode not in ('Transcode', 'Remux', 'AudioFix'):
-                return {"Success": False, "ErrorMessage": "Mode must be 'Transcode', 'Remux', or 'AudioFix'", "ItemsAdded": 0}
+            if Mode not in ('Transcode', 'Remux', 'AudioFix', 'Quick'):
+                return {"Success": False, "ErrorMessage": "Mode must be 'Transcode', 'Quick', 'Remux' (legacy), or 'AudioFix' (legacy)", "ItemsAdded": 0}
 
             from Core.Database.DatabaseService import DatabaseService, EscapeLikePattern
 
@@ -1479,8 +1505,7 @@ class QueueManagementBusinessService:
 
         # Audio bitrate floor guard: a sub-floor source must never go through
         # the Transcode path (audio re-encode would damage already-low-bitrate
-        # audio). Force Remux/compliant evaluation for these files regardless
-        # of the would-be Transcode signals below. See audio-completion.feature.md C15.
+        # audio). See audio-completion.feature.md C15.
         from Features.AudioCompletion.AudioCompletionService import AudioCompletionService
         AudioBitrate = Row.get('AudioBitrateKbps')
         AudioChannels = Row.get('AudioChannels')
@@ -1490,60 +1515,52 @@ class QueueManagementBusinessService:
             and int(AudioBitrate) <= AudioCompletionService.FloorForChannels(AudioChannels, FloorCfg)
         )
 
-        # c. Transcode wins -- video codec acceptability, downscale-needed, savings threshold
-        VideoCodec = (Row.get('Codec') or '').lower()
-        if VideoCodec and VideoCodec not in AcceptableVideoCodecs:
-            if not BelowAudioFloor:
-                return (False, 'Transcode')
-
-        # Resolution downscale needed?
-        SrcRank = self.RESOLUTION_RANK.get(ResKey, -1)
-        TgtRank = self.RESOLUTION_RANK.get(TargetResCat, -1)
-        if SrcRank > 0 and TgtRank >= 0 and SrcRank > TgtRank:
-            if not BelowAudioFloor:
-                return (False, 'Transcode')
-
-        # Estimated savings >= threshold?
-        SizeMB = Row.get('SizeMB') or 0
-        DurationMin = Row.get('DurationMinutes') or 0
-        if SizeMB > 0 and DurationMin > 0 and (TargetVideoKbps or 0) > 0:
-            TargetSizeMB = ((TargetVideoKbps + (TargetAudioKbps or 0)) * DurationMin * 60.0) / (8 * 1024)
-            EstSavingsMB = SizeMB - TargetSizeMB
-            if EstSavingsMB >= MinSavingsMB:
-                if not BelowAudioFloor:
-                    return (False, 'Transcode')
-
-        # d. Remux OR AudioFix -- depends on what's broken.
-        # ContainerFormat from FFprobe is a comma-separated list of equivalent
-        # format names (e.g. 'mov,mp4,m4a,3gp,3g2,mj2' for the MP4 family,
-        # 'matroska,webm' for MKV). Compatible if ANY part matches.
-        #
-        # Routing rule (media-tabs-and-loudness.feature.md C15-C17):
-        #   container bad           -> Remux (handles container + bundled audio fix in one pass)
-        #   audio codec bad         -> Remux (codec convert via one-shot pass, may also fix container)
-        #   only audio not normalized
-        #                           -> AudioFix (operator-facing label; same BuildRemuxCommand path)
+        # Compute the two independent eligibility flags
+        # (media-tabs-and-loudness.feature.md C15-C17, revised 2026-05-17).
         ContainerRaw = (Row.get('ContainerFormat') or '').lower()
         ContainerParts = {p.strip() for p in ContainerRaw.split(',') if p.strip()}
         AudioCodec = (Row.get('AudioCodec') or '').lower()
         IsNormalized = Row.get('AudioComplete') is True
 
-        if ContainerParts and not (ContainerParts & AcceptableContainers):
-            return (False, 'Remux')
-        if AudioCodec and AudioCodec not in AcceptableAudioCodecsMp4:
-            return (False, 'Remux')
-        if not IsNormalized:
-            # AudioFix routing REQUIRES measured loudness. Without LUFS data
-            # we can't confirm the file actually needs work (Pass 5 of the
-            # backfill would have upgraded it to AudioComplete=true if it
-            # were already on-target). Files awaiting measurement stay
-            # undecided so they don't pollute the Audio Fix queue with
-            # presumed-bad-but-unverified candidates.
-            if Row.get('SourceIntegratedLufs') is None:
-                return (None, None)
-            return (False, 'AudioFix')
+        # NeedsQuick: any of these makes the file a Quick Fix candidate
+        # (BuildRemuxCommand handles them all in one I/O-bound pass).
+        ContainerWrong = bool(ContainerParts and not (ContainerParts & AcceptableContainers))
+        AudioCodecWrong = bool(AudioCodec and AudioCodec not in AcceptableAudioCodecsMp4)
+        NeedsQuick = ContainerWrong or AudioCodecWrong or (not IsNormalized)
 
-        # e. Already compliant
+        # NeedsTranscode: any of these makes the file a Transcode candidate.
+        # The bitrate-floor guard prevents thrashing audio quality via
+        # generational re-encode; if floor is hit, suppress Transcode signals.
+        VideoCodec = (Row.get('Codec') or '').lower()
+        VideoCodecWrong = bool(VideoCodec and VideoCodec not in AcceptableVideoCodecs)
+
+        SrcRank = self.RESOLUTION_RANK.get(ResKey, -1)
+        TgtRank = self.RESOLUTION_RANK.get(TargetResCat, -1)
+        DownscaleNeeded = SrcRank > 0 and TgtRank >= 0 and SrcRank > TgtRank
+
+        SizeMB = Row.get('SizeMB') or 0
+        DurationMin = Row.get('DurationMinutes') or 0
+        SavingsExceedsThreshold = False
+        if SizeMB > 0 and DurationMin > 0 and (TargetVideoKbps or 0) > 0:
+            TargetSizeMB = ((TargetVideoKbps + (TargetAudioKbps or 0)) * DurationMin * 60.0) / (8 * 1024)
+            SavingsExceedsThreshold = (SizeMB - TargetSizeMB) >= MinSavingsMB
+
+        NeedsTranscode = (VideoCodecWrong or DownscaleNeeded or SavingsExceedsThreshold) and not BelowAudioFloor
+
+        # Persist the flags via Row mutation so RecomputeForFiles can pick
+        # them up in the same UPDATE pass without re-evaluating.
+        Row['_NeedsQuick'] = NeedsQuick
+        Row['_NeedsTranscode'] = NeedsTranscode
+
+        # RecommendedMode is the single "primary" mode for display/badging --
+        # Transcode wins for badge purposes when both flags fire (heaviest
+        # operation is the most informative summary). Tabs read the flags
+        # directly, not RecommendedMode, so a file with both is still
+        # offered in the Quick Fix tab.
+        if NeedsTranscode:
+            return (False, 'Transcode')
+        if NeedsQuick:
+            return (False, 'Quick')
         return (True, None)
 
     # ─── Marginal-savings gate (data-driven queue admission) ──────────────
@@ -1871,6 +1888,8 @@ class QueueManagementBusinessService:
                         FinalScore,
                         IsCompliant,
                         RecommendedMode,
+                        bool(r.get('_NeedsQuick', False)),
+                        bool(r.get('_NeedsTranscode', False)),
                     ))
 
                     # Detect probed files with no audio stream (possibly corrupt).
@@ -1918,16 +1937,18 @@ class QueueManagementBusinessService:
                 return 'true' if b else 'false'
 
             values_clause = ','.join(
-                f"({i},{_SqlText(p)},{s},{_SqlBool(ic)},{_SqlText(rm)})"
-                for i, p, s, ic, rm in updates
+                f"({i},{_SqlText(p)},{s},{_SqlBool(ic)},{_SqlText(rm)},{_SqlBool(nq)},{_SqlBool(nt)})"
+                for i, p, s, ic, rm, nq, nt in updates
             )
             db.ExecuteNonQuery(f"""
                 UPDATE MediaFiles
                 SET AssignedProfile = v.profile,
                     PriorityScore = v.score,
                     IsCompliant = v.compliant::boolean,
-                    RecommendedMode = v.mode
-                FROM (VALUES {values_clause}) AS v(id, profile, score, compliant, mode)
+                    RecommendedMode = v.mode,
+                    NeedsQuick = v.needs_quick::boolean,
+                    NeedsTranscode = v.needs_transcode::boolean
+                FROM (VALUES {values_clause}) AS v(id, profile, score, compliant, mode, needs_quick, needs_transcode)
                 WHERE MediaFiles.Id = v.id
             """)
             return len(updates)
