@@ -123,6 +123,77 @@
         </div>
     </div>
 
+    <!-- Card 1.7: Next Audio Fix Batch (sibling of Cards 1 and 1.5, scoped to RecommendedMode='AudioFix') -->
+    <div class="card border-warning mb-3" id="AudioFixCard">
+        <div class="card-header bg-warning text-dark py-2">
+            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <div>
+                    <h5 class="mb-0 d-inline"><i class="fas fa-volume-up me-1"></i>Next Audio Fix Batch</h5>
+                    <span id="AudioFixCount" class="badge bg-light text-dark ms-2">0</span>
+                </div>
+                <div class="d-flex align-items-center gap-2 flex-wrap">
+                    <input id="AudioFixSearch" type="search" class="form-control form-control-sm" placeholder="Search title or file..." style="width: 200px;" maxlength="100">
+                    <label class="mb-0 text-dark text-nowrap small">Size:</label>
+                    <input id="AudioFixSizeSelect" type="number" min="1" max="1000" step="1" value="100" class="form-control form-control-sm" style="width: 80px;" list="BatchSizeChoices">
+                    <button class="btn btn-light btn-sm" onclick="AddAudioFixBatchToQueue()" id="AddAudioFixBatchBtn">Add Batch</button>
+                    <button class="btn btn-outline-dark btn-sm" onclick="QueueAllAudioFixMatching()" id="QueueAllAudioFixBtn" title="Queue every audio-fix candidate matching the current search">Queue All</button>
+                    <button class="btn btn-outline-dark btn-sm" onclick="SmartPopulateAudioFix()" id="AudioFixAnalyzeBtn">Re-Analyze</button>
+                </div>
+            </div>
+        </div>
+        <div class="card-body p-0">
+            <!-- Folder-pin widget: chips of pinned folders + add input -->
+            <div id="AudioFixPinWidget" class="px-3 py-2 border-bottom bg-light">
+                <div class="d-flex justify-content-between align-items-start mb-1">
+                    <strong class="small text-dark"><i class="fas fa-thumbtack me-1"></i>Pinned folders (priority boost)</strong>
+                    <small class="text-muted">Matching files get Priority 195+ on Audio Fix.</small>
+                </div>
+                <div class="d-flex gap-2 align-items-center mb-2 flex-wrap">
+                    <input type="text" id="PinFolderInput" class="form-control form-control-sm" style="max-width: 320px;" placeholder="folder name or path substring (e.g. Westworld)">
+                    <button type="button" id="PinFolderAddBtn" class="btn btn-sm btn-warning text-dark">
+                        <i class="fas fa-plus me-1"></i>Pin folder
+                    </button>
+                    <button type="button" id="PinFolderApplyAllBtn" class="btn btn-sm btn-outline-secondary" title="Re-apply boost to existing queue rows">
+                        <i class="fas fa-sync-alt me-1"></i>Apply to queue
+                    </button>
+                </div>
+                <div id="PinFolderList" class="d-flex flex-wrap gap-2">
+                    <span class="text-muted small">No folders pinned.</span>
+                </div>
+            </div>
+            <div id="AudioFixBatchInfo" class="px-3 py-2 border-bottom bg-light">
+                <small class="text-muted">Loading audio-fix candidates...</small>
+            </div>
+            <div class="table-responsive">
+                <table class="table table-hover table-sm mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th style="width: 30px;"></th>
+                            <th style="width: 70px;" class="text-center">Priority</th>
+                            <th>Title</th>
+                            <th>File</th>
+                            <th style="width: 90px;" class="text-end">Size</th>
+                            <th style="width: 80px;">Audio</th>
+                            <th style="width: 100px;" class="text-end">LUFS</th>
+                            <th style="width: 80px;" class="text-end">LRA</th>
+                        </tr>
+                    </thead>
+                    <tbody id="AudioFixTableBody">
+                        <tr><td colspan="8" class="text-center py-3 text-muted">Analyzing...</td></tr>
+                    </tbody>
+                    <tfoot class="table-light">
+                        <tr class="fw-bold">
+                            <td colspan="2"></td>
+                            <td colspan="2">Batch Total</td>
+                            <td id="AudioFixTotalSize" class="text-end"></td>
+                            <td colspan="3"></td>
+                        </tr>
+                    </tfoot>
+                </table>
+            </div>
+        </div>
+    </div>
+
     <!-- Card 2: Title Search -->
     <div class="card border-success mb-3" id="SearchCard">
         <div class="card-header bg-success text-white py-2">
@@ -239,6 +310,17 @@ let RemuxCurrentOffset = 0;
 let RemuxTotalCandidates = 0;
 let RemuxHasMore = false;
 
+// Card 1.7 (AudioFix) batch state -- INDEPENDENT of Cards 1 and 1.5
+// (media-tabs-and-loudness.feature.md criteria 15-22).
+let AudioFixAllSuggestions = [];
+let AudioFixBatchItems = [];
+let AUDIOFIX_BATCH_SIZE = 100;
+let AudioFixCurrentSearch = '';
+let AudioFixSearchDebounceTimer = null;
+let AudioFixCurrentOffset = 0;
+let AudioFixTotalCandidates = 0;
+let AudioFixHasMore = false;
+
 function _ReadStickySize(Key, Default, Max) {
     try {
         const Raw = parseInt(localStorage.getItem(Key), 10);
@@ -300,8 +382,38 @@ $(document).ready(function() {
         }
     });
 
+    // ── Card 1.7 (AudioFix) handlers ──
+    AUDIOFIX_BATCH_SIZE = _ReadStickySize('ShowSettings.AudioFixBatchSize', 100, 1000);
+    $('#AudioFixSizeSelect').val(AUDIOFIX_BATCH_SIZE);
+
+    $('#AudioFixSearch').on('input', function() {
+        const Val = $(this).val() || '';
+        clearTimeout(AudioFixSearchDebounceTimer);
+        AudioFixSearchDebounceTimer = setTimeout(function() {
+            AudioFixCurrentSearch = Val;
+            SmartPopulateAudioFix();
+        }, 300);
+    });
+    $('#AudioFixSizeSelect').on('change', function() {
+        const NewSize = parseInt($(this).val(), 10);
+        if (Number.isFinite(NewSize) && NewSize >= 1 && NewSize <= 1000) {
+            AUDIOFIX_BATCH_SIZE = NewSize;
+            _WriteStickySize('ShowSettings.AudioFixBatchSize', NewSize);
+            SmartPopulateAudioFix();
+        }
+    });
+
+    // Folder-pin widget handlers
+    $('#PinFolderAddBtn').on('click', AddAudioFixPin);
+    $('#PinFolderInput').on('keydown', function(e) {
+        if (e.key === 'Enter') AddAudioFixPin();
+    });
+    $('#PinFolderApplyAllBtn').on('click', ApplyAudioFixPins);
+
     SmartPopulate();
     SmartPopulateRemux();
+    SmartPopulateAudioFix();
+    LoadAudioFixPins();
 });
 
 // ── Data Loading ──
@@ -835,6 +947,238 @@ function QueueAllRemuxMatching() {
             Btn.prop('disabled', false).html(OrigText);
             const Msg = (XHR.responseJSON && (XHR.responseJSON.Message || XHR.responseJSON.ErrorMessage)) || 'Request failed';
             ShowNotification('Failed: ' + Msg, 'danger');
+        }
+    });
+}
+
+// ── Card 1.7 (AudioFix) ──
+function SmartPopulateAudioFix(IsNextPage) {
+    const Btn = $('#AudioFixAnalyzeBtn');
+    const OrigText = Btn.html();
+    if (!IsNextPage) {
+        AudioFixCurrentOffset = 0;
+        AudioFixAllSuggestions = [];
+        AudioFixBatchItems = [];
+        Btn.prop('disabled', true).text('Analyzing...');
+    }
+    const Payload = {
+        Drive: 'T:',
+        Limit: AUDIOFIX_BATCH_SIZE,
+        Offset: AudioFixCurrentOffset,
+        Search: AudioFixCurrentSearch || '',
+        Mode: 'AudioFix'
+    };
+    $.ajax({
+        url: '/api/ShowSettings/SmartPopulate',
+        method: 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify(Payload),
+        timeout: 30000,
+        success: function(Response) {
+            Btn.prop('disabled', false).html(OrigText);
+            if (Response.Success) {
+                const NewItems = Response.Suggestions || [];
+                AudioFixTotalCandidates = Response.TotalCandidates || 0;
+                AudioFixHasMore = Response.HasMore || false;
+                AudioFixCurrentOffset += NewItems.length;
+                AudioFixAllSuggestions = AudioFixAllSuggestions.concat(NewItems);
+                if (AudioFixBatchItems.length === 0) {
+                    AudioFixBatchItems = AudioFixAllSuggestions.splice(0, AUDIOFIX_BATCH_SIZE);
+                }
+                const FilterText = AudioFixCurrentSearch
+                    ? ' matching "' + EscapeHtml(AudioFixCurrentSearch) + '"'
+                    : '';
+                $('#AudioFixBatchInfo').html('<small><strong>' + AudioFixTotalCandidates.toLocaleString() + '</strong> audio-fix candidates' + FilterText + '. Showing top ' + AUDIOFIX_BATCH_SIZE + '.</small>');
+                RenderAudioFixBatch();
+            } else {
+                ShowNotification('AudioFix batch error: ' + (Response.Message || Response.ErrorMessage || 'Unknown error'), 'danger');
+            }
+        },
+        error: function() {
+            Btn.prop('disabled', false).html(OrigText);
+            ShowNotification('Failed to run audio-fix batch analysis', 'danger');
+        }
+    });
+}
+
+function RenderAudioFixBatch() {
+    const Tbody = $('#AudioFixTableBody');
+    $('#AudioFixCount').text(AudioFixBatchItems.length + '/' + (AudioFixTotalCandidates || 0).toLocaleString());
+    if (AudioFixBatchItems.length === 0) {
+        const EmptyMsg = AudioFixCurrentSearch
+            ? 'No audio-fix matches for "' + EscapeHtml(AudioFixCurrentSearch) + '"'
+            : (AudioFixTotalCandidates === 0
+                ? 'No audio-fix candidates -- library audio is on target'
+                : 'AudioFix batch is empty');
+        Tbody.html('<tr><td colspan="8" class="text-center py-3 text-muted">' + EmptyMsg + '</td></tr>');
+        $('#AudioFixTotalSize').text('');
+        return;
+    }
+    let Html = '';
+    let TotalSize = 0;
+    AudioFixBatchItems.forEach(function(S, Idx) {
+        TotalSize += S.SizeMB;
+        const PriorityCell = (S.PriorityScore != null)
+            ? '<span class="badge ' + GetPriorityBadgeClass(S.PriorityScore) + '">' + S.PriorityScore + '</span>'
+            : '<span class="text-muted small">-</span>';
+        // SmartPopulate may not include loudness fields yet -- render '-' when missing.
+        const Lufs = (S.SourceIntegratedLufs != null) ? S.SourceIntegratedLufs.toFixed(1) : '-';
+        const Lra = (S.SourceLoudnessRangeLU != null) ? S.SourceLoudnessRangeLU.toFixed(1) : '-';
+        Html += '<tr>'
+            + '<td><button class="btn btn-sm btn-outline-danger py-0 px-1" onclick="RemoveFromAudioFixBatch(' + Idx + ')" title="Remove">x</button></td>'
+            + '<td class="text-center">' + PriorityCell + '</td>'
+            + '<td>' + EscapeHtml(S.ShowName) + '</td>'
+            + '<td title="' + EscapeAttr(S.FilePath) + '">' + EscapeHtml(S.FileName) + '</td>'
+            + '<td class="text-end">' + FormatSize(S.SizeMB) + '</td>'
+            + '<td><span class="badge bg-secondary">' + EscapeHtml(S.AudioCodec || '-') + '</span></td>'
+            + '<td class="text-end">' + Lufs + '</td>'
+            + '<td class="text-end">' + Lra + '</td>'
+            + '</tr>';
+    });
+    Tbody.html(Html);
+    $('#AudioFixTotalSize').text(FormatSize(TotalSize));
+}
+
+function RemoveFromAudioFixBatch(Idx) {
+    AudioFixBatchItems.splice(Idx, 1);
+    RenderAudioFixBatch();
+}
+
+function AddAudioFixBatchToQueue() {
+    if (AudioFixBatchItems.length === 0) {
+        ShowNotification('AudioFix batch is empty', 'danger');
+        return;
+    }
+    const MediaFileIds = AudioFixBatchItems.map(function(S) { return S.MediaFileId; });
+    const SentCount = MediaFileIds.length;
+    const Btn = $('#AddAudioFixBatchBtn');
+    const OrigText = Btn.html();
+    Btn.prop('disabled', true).text('Adding...');
+    $.ajax({
+        url: '/api/ShowSettings/AddToQueue',
+        method: 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify({ Mode: 'AudioFix', ProfileId: null, MediaFileIds: MediaFileIds }),
+        timeout: 30000,
+        success: function(Response) {
+            Btn.prop('disabled', false).html(OrigText);
+            if (Response.Success) {
+                ShowNotification('Queued ' + (Response.ItemsAdded || 0).toLocaleString() + ' / ' + SentCount + ' audio-fix job(s)', 'success');
+                AudioFixBatchItems = [];
+                AudioFixAllSuggestions = [];
+                SmartPopulateAudioFix();
+            } else {
+                ShowNotification('Failed: ' + (Response.Message || Response.ErrorMessage || 'Unknown error'), 'danger');
+            }
+        },
+        error: function(XHR) {
+            Btn.prop('disabled', false).html(OrigText);
+            const Msg = (XHR.responseJSON && (XHR.responseJSON.Message || XHR.responseJSON.ErrorMessage)) || 'Request failed';
+            ShowNotification('Failed: ' + Msg, 'danger');
+        }
+    });
+}
+
+function QueueAllAudioFixMatching() {
+    const Total = AudioFixTotalCandidates || 0;
+    const FilterText = AudioFixCurrentSearch ? ' matching "' + AudioFixCurrentSearch + '"' : '';
+    if (Total === 0) {
+        ShowNotification('No audio-fix candidates' + FilterText, 'warning');
+        return;
+    }
+    if (!confirm('Queue all ' + Total.toLocaleString() + ' audio-fix candidate(s)' + FilterText + '?')) return;
+    const Btn = $('#QueueAllAudioFixBtn');
+    const OrigText = Btn.html();
+    Btn.prop('disabled', true).text('Queueing...');
+    $.ajax({
+        url: '/api/ShowSettings/QueueAllMatching',
+        method: 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify({ Mode: 'AudioFix', Search: AudioFixCurrentSearch || '', Drive: 'T:' }),
+        timeout: 60000,
+        success: function(Response) {
+            Btn.prop('disabled', false).html(OrigText);
+            if (Response.Success) {
+                ShowNotification('Queued ' + (Response.ItemsAdded || 0).toLocaleString() + ' audio-fix job(s)', 'success');
+                AudioFixBatchItems = [];
+                AudioFixAllSuggestions = [];
+                SmartPopulateAudioFix();
+            } else {
+                ShowNotification('Failed: ' + (Response.Message || Response.ErrorMessage || 'Unknown error'), 'danger');
+            }
+        },
+        error: function(XHR) {
+            Btn.prop('disabled', false).html(OrigText);
+            const Msg = (XHR.responseJSON && (XHR.responseJSON.Message || XHR.responseJSON.ErrorMessage)) || 'Request failed';
+            ShowNotification('Failed: ' + Msg, 'danger');
+        }
+    });
+}
+
+// ── AudioFix folder-pin widget ──
+function LoadAudioFixPins() {
+    $.get('/api/AudioFixPriorityHints/List', function(Response) {
+        if (!Response.Success) return;
+        const Container = $('#PinFolderList');
+        if ((Response.Data || []).length === 0) {
+            Container.html('<span class="text-muted small">No folders pinned.</span>');
+            return;
+        }
+        let Html = '';
+        Response.Data.forEach(function(P) {
+            Html += '<span class="badge bg-warning text-dark d-flex align-items-center gap-1" style="padding:0.5em 0.75em;">'
+                + '<i class="fas fa-thumbtack"></i><span>' + EscapeHtml(P.FolderPattern) + '</span>'
+                + '<small class="text-muted">(' + P.BoostedPriority + ')</small>'
+                + '<button class="btn btn-sm btn-link p-0 text-dark" onclick="RemoveAudioFixPin(' + P.Id + ')" title="Remove pin">'
+                + '<i class="fas fa-times"></i></button></span>';
+        });
+        Container.html(Html);
+    });
+}
+
+function AddAudioFixPin() {
+    const Pattern = ($('#PinFolderInput').val() || '').trim();
+    if (!Pattern) return;
+    $.ajax({
+        url: '/api/AudioFixPriorityHints/Add',
+        method: 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify({ FolderPattern: Pattern }),
+        success: function(R) {
+            if (R.Success) {
+                $('#PinFolderInput').val('');
+                LoadAudioFixPins();
+                ApplyAudioFixPins();
+            } else {
+                ShowNotification('Pin failed: ' + (R.Message || 'unknown'), 'warning');
+            }
+        },
+        error: function(XHR) {
+            const Msg = (XHR.responseJSON && (XHR.responseJSON.Message || XHR.responseJSON.ErrorMessage)) || 'Request failed';
+            ShowNotification('Pin failed: ' + Msg, 'danger');
+        }
+    });
+}
+
+function RemoveAudioFixPin(Id) {
+    $.ajax({
+        url: '/api/AudioFixPriorityHints/Remove/' + Id,
+        method: 'DELETE',
+        success: function(R) {
+            if (R.Success) LoadAudioFixPins();
+        }
+    });
+}
+
+function ApplyAudioFixPins() {
+    $.ajax({
+        url: '/api/AudioFixPriorityHints/ApplyAll',
+        method: 'POST',
+        success: function(R) {
+            if (R.Success) {
+                ShowNotification('Re-applied boost to ' + (R.Boosted || 0) + ' existing queue row(s)', 'success');
+                SmartPopulateAudioFix();
+            }
         }
     });
 }

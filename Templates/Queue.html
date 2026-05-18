@@ -66,51 +66,11 @@
 
             <!-- Queue Table -->
             <div class="card">
-                <div class="card-header">
-                    <ul class="nav nav-tabs card-header-tabs" id="QueueModeTabs">
-                        <li class="nav-item">
-                            <a class="nav-link active" href="#" data-mode="">
-                                All <span class="badge bg-secondary ms-1" id="TabCountAll">0</span>
-                            </a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link" href="#" data-mode="Transcode">
-                                <i class="fas fa-film me-1"></i>Transcode <span class="badge bg-primary ms-1" id="TabCountTranscode">0</span>
-                            </a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link" href="#" data-mode="Remux">
-                                <i class="fas fa-cube me-1"></i>Remux <span class="badge bg-info ms-1" id="TabCountRemux">0</span>
-                            </a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link" href="#" data-mode="AudioFix">
-                                <i class="fas fa-volume-up me-1"></i>Audio Fix <span class="badge bg-warning text-dark ms-1" id="TabCountAudioFix">0</span>
-                            </a>
-                        </li>
-                    </ul>
-                </div>
-                <div class="card-body">
-                    <!-- AudioFix folder pin controls -- only visible on Audio Fix tab -->
-                    <div id="AudioFixPinControls" class="alert alert-light border mb-3 d-none">
-                        <div class="d-flex justify-content-between align-items-start mb-2">
-                            <strong class="text-warning"><i class="fas fa-thumbtack me-1"></i>Pinned folders (Audio Fix priority boost)</strong>
-                            <small class="text-muted">Files in these folders get queue priority 195+ on Audio Fix.</small>
-                        </div>
-                        <div class="d-flex gap-2 align-items-center mb-2">
-                            <input type="text" id="PinFolderInput" class="form-control form-control-sm" style="max-width: 320px;" placeholder="folder name or path substring (e.g. Westworld)">
-                            <button type="button" id="PinFolderAddBtn" class="btn btn-sm btn-warning text-dark">
-                                <i class="fas fa-plus me-1"></i>Pin folder
-                            </button>
-                            <button type="button" id="PinFolderApplyAllBtn" class="btn btn-sm btn-outline-secondary" title="Re-apply boost to existing queue rows">
-                                <i class="fas fa-sync-alt me-1"></i>Apply to existing queue
-                            </button>
-                        </div>
-                        <div id="PinFolderList" class="d-flex flex-wrap gap-2">
-                            <span class="text-muted small">No folders pinned.</span>
-                        </div>
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <div class="d-flex align-items-center gap-2">
+                        <h5 class="mb-0">Transcode Queue</h5>
                     </div>
-                    <div class="d-flex justify-content-between align-items-center mb-3">
+                    <div class="d-flex align-items-center gap-3">
                         <div class="d-flex align-items-center gap-2">
                             <label for="PageSizeSelect" class="form-label mb-0">Show:</label>
                             <select class="form-select form-select-sm" id="PageSizeSelect" style="width: auto;">
@@ -122,6 +82,8 @@
                         </div>
                         <span class="badge bg-secondary" id="QueueItemCount">0 items</span>
                     </div>
+                </div>
+                <div class="card-body">
                     <div class="table-responsive">
                         <table class="table table-striped table-hover" id="QueueTable">
                             <thead>
@@ -274,12 +236,8 @@ class TranscodeQueueManager {
         this.sortOrder = 'DESC';
         this.totalPages = 1;
         this.totalItems = 0;
-        // Persist tab selection across reloads
-        const params = new URLSearchParams(window.location.search);
-        this.modeFilter = params.get('mode') || '';  // '' = All
 
         this.initializeEventListeners();
-        this.syncTabUI();
         this.loadQueueData();
         this.startAutoRefresh();
     }
@@ -346,129 +304,6 @@ class TranscodeQueueManager {
             });
         });
 
-        // AudioFix folder-pin controls
-        const pinAddBtn = document.getElementById('PinFolderAddBtn');
-        if (pinAddBtn) {
-            pinAddBtn.addEventListener('click', () => this.addAudioFixPin());
-        }
-        const pinInput = document.getElementById('PinFolderInput');
-        if (pinInput) {
-            pinInput.addEventListener('keydown', (e) => {
-                if (e.key === 'Enter') this.addAudioFixPin();
-            });
-        }
-        const pinApplyBtn = document.getElementById('PinFolderApplyAllBtn');
-        if (pinApplyBtn) {
-            pinApplyBtn.addEventListener('click', () => this.applyAudioFixPins());
-        }
-
-        // Mode tab clicks (Transcode / Remux / AudioFix / All)
-        document.querySelectorAll('#QueueModeTabs .nav-link').forEach(tab => {
-            tab.addEventListener('click', (e) => {
-                e.preventDefault();
-                this.modeFilter = tab.dataset.mode || '';
-                this.currentPage = 1;
-                // Reflect in URL so reload + share keep the tab selection
-                const url = new URL(window.location);
-                if (this.modeFilter) {
-                    url.searchParams.set('mode', this.modeFilter);
-                } else {
-                    url.searchParams.delete('mode');
-                }
-                window.history.replaceState({}, '', url);
-                this.syncTabUI();
-                this.loadQueueData();
-            });
-        });
-    }
-
-    syncTabUI() {
-        document.querySelectorAll('#QueueModeTabs .nav-link').forEach(t => {
-            t.classList.toggle('active', (t.dataset.mode || '') === this.modeFilter);
-        });
-        // AudioFix pin controls visible only on Audio Fix tab
-        const pinEl = document.getElementById('AudioFixPinControls');
-        if (pinEl) {
-            pinEl.classList.toggle('d-none', this.modeFilter !== 'AudioFix');
-            if (this.modeFilter === 'AudioFix') {
-                this.loadAudioFixPins();
-            }
-        }
-    }
-
-    async loadAudioFixPins() {
-        try {
-            const r = await fetch('/api/AudioFixPriorityHints/List');
-            const data = await r.json();
-            if (!data.Success) return;
-            const container = document.getElementById('PinFolderList');
-            if (!container) return;
-            if (!data.Data || data.Data.length === 0) {
-                container.innerHTML = '<span class="text-muted small">No folders pinned.</span>';
-                return;
-            }
-            container.innerHTML = '';
-            data.Data.forEach(pin => {
-                const chip = document.createElement('span');
-                chip.className = 'badge bg-warning text-dark d-flex align-items-center gap-1';
-                chip.style.padding = '0.5em 0.75em';
-                chip.innerHTML =
-                    `<i class="fas fa-thumbtack"></i><span>${this.escapeHtml(pin.FolderPattern)}</span>` +
-                    `<small class="text-muted">(${pin.BoostedPriority})</small>` +
-                    `<button class="btn btn-sm btn-link p-0 text-dark" onclick="queueManager.removeAudioFixPin(${pin.Id})" title="Remove pin">` +
-                    `<i class="fas fa-times"></i></button>`;
-                container.appendChild(chip);
-            });
-        } catch (e) {
-            // swallow -- non-critical
-        }
-    }
-
-    async addAudioFixPin() {
-        const input = document.getElementById('PinFolderInput');
-        const pattern = (input.value || '').trim();
-        if (!pattern) return;
-        try {
-            const r = await fetch('/api/AudioFixPriorityHints/Add', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({FolderPattern: pattern})
-            });
-            const data = await r.json();
-            if (data.Success) {
-                input.value = '';
-                this.loadAudioFixPins();
-                this.applyAudioFixPins();  // re-apply boost to existing rows
-            } else {
-                this.showAlert('Pin failed: ' + (data.Message || 'unknown'), 'warning');
-            }
-        } catch (e) {
-            this.showAlert('Pin failed: ' + e.message, 'danger');
-        }
-    }
-
-    async removeAudioFixPin(id) {
-        try {
-            const r = await fetch(`/api/AudioFixPriorityHints/Remove/${id}`, {method: 'DELETE'});
-            const data = await r.json();
-            if (data.Success) {
-                this.loadAudioFixPins();
-            }
-        } catch (e) {
-            // swallow
-        }
-    }
-
-    async applyAudioFixPins() {
-        try {
-            const r = await fetch('/api/AudioFixPriorityHints/ApplyAll', {method: 'POST'});
-            const data = await r.json();
-            if (data.Success) {
-                this.loadQueueData();  // refresh the queue ordering
-            }
-        } catch (e) {
-            // swallow
-        }
     }
 
     async loadQueueData() {
@@ -479,7 +314,6 @@ class TranscodeQueueManager {
                 sortBy: this.sortBy,
                 sortOrder: this.sortOrder
             });
-            if (this.modeFilter) params.set('mode', this.modeFilter);
 
             const response = await fetch(`/api/TranscodeQueue/GetQueue?${params}`);
             const data = await response.json();
@@ -488,27 +322,12 @@ class TranscodeQueueManager {
                 this.updateQueueTable(data.QueueItems);
                 this.updatePagination(data);
                 this.updateSortIndicators();
-                this.updateModeCounts(data.ModeCounts || {});
             } else {
                 this.showAlert('Error loading queue data: ' + data.ErrorMessage, 'danger');
             }
         } catch (error) {
             this.showAlert('Error loading queue data: ' + error.message, 'danger');
         }
-    }
-
-    updateModeCounts(modeCounts) {
-        const t = modeCounts.Transcode || 0;
-        const r = modeCounts.Remux || 0;
-        const a = modeCounts.AudioFix || 0;
-        const elT = document.getElementById('TabCountTranscode');
-        const elR = document.getElementById('TabCountRemux');
-        const elA = document.getElementById('TabCountAudioFix');
-        const elAll = document.getElementById('TabCountAll');
-        if (elT) elT.textContent = t;
-        if (elR) elR.textContent = r;
-        if (elA) elA.textContent = a;
-        if (elAll) elAll.textContent = t + r + a;
     }
 
     updateQueueTable(queueItems) {
