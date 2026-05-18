@@ -36,7 +36,7 @@ class TranscodeQueueViewModel:
             self.QueueItems = pageItems
 
             # Per-mode counts -- one cheap GROUP BY, drives the tab badges
-            ModeCounts = {'Transcode': 0, 'Remux': 0, 'AudioFix': 0}
+            ModeCounts = {'Transcode': 0, 'Quick': 0, 'Remux': 0, 'AudioFix': 0}
             try:
                 Rows = DatabaseService().ExecuteQuery(
                     "SELECT COALESCE(ProcessingMode, 'Transcode') AS Mode, COUNT(*) AS N FROM TranscodeQueue GROUP BY 1"

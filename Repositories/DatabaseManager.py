@@ -1433,7 +1433,7 @@ class DatabaseManager:
         order = 'DESC' if SortOrder == 'DESC' else 'ASC'
 
         # Whitelist Mode filter
-        ModeFilter = Mode if Mode in ('Transcode', 'Remux', 'AudioFix') else None
+        ModeFilter = Mode if Mode in ('Transcode', 'Quick', 'Remux', 'AudioFix') else None
         WhereClause = "WHERE ProcessingMode = %s" if ModeFilter else ""
         FilterParams = (ModeFilter,) if ModeFilter else ()
 

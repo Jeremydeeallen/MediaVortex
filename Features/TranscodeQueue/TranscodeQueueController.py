@@ -33,7 +33,7 @@ def GetQueue():
             sortBy = 'Priority'
         if sortOrder not in ['ASC', 'DESC']:
             sortOrder = 'DESC'
-        if mode is not None and mode not in ('Transcode', 'Remux', 'AudioFix'):
+        if mode is not None and mode not in ('Transcode', 'Quick', 'Remux', 'AudioFix'):
             mode = None  # ignore unknown values
 
         # Create ViewModel instance
