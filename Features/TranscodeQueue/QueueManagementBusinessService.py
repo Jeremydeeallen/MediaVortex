@@ -1543,9 +1543,21 @@ class QueueManagementBusinessService:
 
         # NeedsQuick: any of these makes the file a Quick Fix candidate
         # (BuildRemuxCommand handles them all in one I/O-bound pass).
+        # Audio is only a "needs work" signal when LUFS is measured AND
+        # off-target. Without LUFS we don't claim audio needs work --
+        # avoids polluting the Quick Fix tab with unconfirmed candidates
+        # whose normalize pass might be a no-op (feature criterion 15,
+        # revised 2026-05-17 per operator data-driven feedback).
         ContainerWrong = bool(ContainerParts and not (ContainerParts & AcceptableContainers))
         AudioCodecWrong = bool(AudioCodec and AudioCodec not in AcceptableAudioCodecsMp4)
-        NeedsQuick = ContainerWrong or AudioCodecWrong or (not IsNormalized)
+        SourceLufs = Row.get('SourceIntegratedLufs')
+        AudioConfirmedOffTarget = (
+            (not IsNormalized)
+            and SourceLufs is not None
+            and (SourceLufs < AudioCompletionService.TARGET_LUFS - AudioCompletionService.TARGET_LUFS_TOLERANCE
+                 or SourceLufs > AudioCompletionService.TARGET_LUFS + AudioCompletionService.TARGET_LUFS_TOLERANCE)
+        )
+        NeedsQuick = ContainerWrong or AudioCodecWrong or AudioConfirmedOffTarget
 
         # NeedsTranscode: any of these makes the file a Transcode candidate.
         # The bitrate-floor guard prevents thrashing audio quality via
