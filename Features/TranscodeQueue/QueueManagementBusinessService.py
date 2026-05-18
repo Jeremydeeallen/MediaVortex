@@ -324,16 +324,32 @@ class QueueManagementBusinessService:
             CountRows = DatabaseService().ExecuteQuery(CountSql, ParamsTuple)
             TotalCandidates = int(CountRows[0].get('TotalCount', 0)) if CountRows else 0
 
-            # Focus controls ORDER BY when Mode='Quick' (media-tabs-and-loudness.feature.md C17a):
-            #   'Audio'     -> files needing audio normalize first (AudioComplete=false)
-            #   'Container' -> files needing container fix first (container not MP4)
-            #   'Mixed' / anything else -> straight priority order
+            # Focus controls ORDER BY when Mode='Quick' (media-tabs-and-loudness.feature.md C17a).
+            # Audio focus rank:
+            #   0 = LUFS measured AND off-target (outside [-24, -22]) -- CONFIRMED needs work
+            #   1 = LUFS NULL AND AudioComplete=false                 -- unknown, might need work
+            #   2 = on-target measured OR AudioComplete=true          -- audio fine; here only for container
+            # Container focus rank:
+            #   0 = container is not MP4-family                       -- CONFIRMED container fix
+            #   1 = container is MP4 (here only because audio not done)
             FocusSql = ""
             if Mode == 'Quick':
                 if Focus == 'Audio':
-                    FocusSql = "(CASE WHEN m.AudioComplete IS FALSE THEN 0 ELSE 1 END), "
+                    FocusSql = (
+                        "(CASE "
+                        "  WHEN m.SourceIntegratedLufs IS NOT NULL "
+                        "       AND (m.SourceIntegratedLufs < -24 OR m.SourceIntegratedLufs > -22) THEN 0 "
+                        "  WHEN m.SourceIntegratedLufs IS NULL AND m.AudioComplete IS FALSE THEN 1 "
+                        "  ELSE 2 "
+                        "END), "
+                    )
                 elif Focus == 'Container':
-                    FocusSql = "(CASE WHEN LOWER(COALESCE(m.ContainerFormat,'')) NOT LIKE '%mp4%' THEN 0 ELSE 1 END), "
+                    FocusSql = (
+                        "(CASE "
+                        "  WHEN LOWER(COALESCE(m.ContainerFormat,'')) NOT LIKE '%mp4%' THEN 0 "
+                        "  ELSE 1 "
+                        "END), "
+                    )
 
             Sql = f"""
                 SELECT m.Id, m.FilePath, m.FileName, m.SizeMB, m.VideoBitrateKbps,
