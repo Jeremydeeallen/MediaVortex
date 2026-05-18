@@ -8,7 +8,8 @@ from Core.Logging.LoggingService import LoggingService
 class MediaProbeRepository(BaseRepository):
     """Repository for MediaProbe-related database operations."""
 
-    _MEDIA_FILE_SELECT_COLS = """Id, SeasonId, FilePath, FileName, SizeMB, VideoBitrateKbps, AudioBitrateKbps,
+    _MEDIA_FILE_SELECT_COLS = """Id, SeasonId, StorageRootId, RelativePath, FilePath, FileName,
+                   SizeMB, VideoBitrateKbps, AudioBitrateKbps,
                    Resolution, Codec, DurationMinutes, FrameRate, LastScannedDate,
                    CompressionPotential, AssignedProfile, IsInterlaced, ResolutionCategory,
                    FileModificationTime, TotalFrames, CodecProfile, ColorRange, FieldOrder,
@@ -20,7 +21,10 @@ class MediaProbeRepository(BaseRepository):
     def _MapRowToMediaFile(self, Row) -> MediaFileModel:
         """Map a database row to a MediaFileModel instance."""
         return MediaFileModel(
-            Id=Row['Id'], SeasonId=Row['SeasonId'], FilePath=Row['FilePath'],
+            Id=Row['Id'], SeasonId=Row['SeasonId'],
+            StorageRootId=Row.get('StorageRootId'),
+            RelativePath=Row.get('RelativePath') or '',
+            FilePath=Row['FilePath'],
             FileName=Row['FileName'], SizeMB=Row['SizeMB'],
             VideoBitrateKbps=Row['VideoBitrateKbps'], AudioBitrateKbps=Row['AudioBitrateKbps'],
             Resolution=Row['Resolution'], Codec=Row['Codec'],
