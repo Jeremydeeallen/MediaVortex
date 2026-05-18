@@ -8,7 +8,25 @@ from Features.AudioCompletion.AudioCompletionService import AudioCompletionServi
 
 class CommandBuilder:
     """Pure data transformation model for building FFmpeg transcoding commands."""
-    
+
+    @staticmethod
+    def _NormalizeFfmpegPath(Path: Optional[str]) -> str:
+        """Collapse mixed separators to the platform-native form.
+
+        Required because PathStorage.Resolve composes a backslash drive prefix
+        with a forward-slash relative portion (cross-platform-safe internal
+        representation), and downstream os.path.join then adds another OS-native
+        separator before the basename. On Windows FFmpeg some builds reject the
+        resulting `T:\\Show/Season\\file.mkv` shape with AVERROR(EINVAL) = -22.
+
+        os.path.normpath also strips trailing slashes and surrounding whitespace
+        once we strip the optional quotes the caller may have wrapped earlier.
+        Pure transformation -- no filesystem touch.
+        """
+        if not Path:
+            return Path
+        return os.path.normpath(Path.strip().strip('"'))
+
     def BuildCommand(self, CommandData: Dict[str, Any]) -> Optional[Dict[str, str]]:
         """Build complete FFmpeg transcoding command from provided data.
         
@@ -35,7 +53,9 @@ class CommandBuilder:
                 return None
             
             # Build command components
-            InputPath = CommandData.get('InputPath', f"c:\\MediaVortex\\Source\\{MediaFile.FileName}")
+            InputPath = self._NormalizeFfmpegPath(
+                CommandData.get('InputPath', f"c:\\MediaVortex\\Source\\{MediaFile.FileName}")
+            )
 
             # Generate output filename with target resolution and container type
             CrfValue = ProfileSettings.get('Quality')
@@ -47,8 +67,8 @@ class CommandBuilder:
                 OutputDirectory = CommandData.get('OutputDirectory') or 'c:\\MediaVortex'
             else:
                 # InPlace: put output next to the source file
-                OutputDirectory = os.path.dirname(InputPath.strip('"'))
-            OutputPath = os.path.join(OutputDirectory, OutputFileName)
+                OutputDirectory = os.path.dirname(InputPath)
+            OutputPath = self._NormalizeFfmpegPath(os.path.join(OutputDirectory, OutputFileName))
 
             # Start building command - FFmpeg command structure: ffmpeg -i input [options] output -y
             # Use full path to FFmpeg executable (configurable per worker for distributed transcoding)
@@ -502,22 +522,24 @@ class CommandBuilder:
             if not Job or not MediaFile:
                 return None
 
-            InputPath = CommandData.get('InputPath', f"c:\\MediaVortex\\Source\\{MediaFile.FileName}")
+            InputPath = self._NormalizeFfmpegPath(
+                CommandData.get('InputPath', f"c:\\MediaVortex\\Source\\{MediaFile.FileName}")
+            )
             BaseName = os.path.splitext(MediaFile.FileName)[0]
 
             ExplicitOutputPath = CommandData.get('OutputPath')
             if ExplicitOutputPath:
-                OutputPath = ExplicitOutputPath
+                OutputPath = self._NormalizeFfmpegPath(ExplicitOutputPath)
             else:
                 OutputFileName = BaseName + "-mv.mp4.inprogress"
                 OutputMode = CommandData.get('TranscodeOutputMode', 'InPlace')
                 if OutputMode == 'Staging':
                     OutputDirectory = CommandData.get('OutputDirectory') or 'c:\\MediaVortex'
                 else:
-                    OutputDirectory = os.path.dirname(InputPath.strip('"'))
-                OutputPath = os.path.join(OutputDirectory, OutputFileName)
+                    OutputDirectory = os.path.dirname(InputPath)
+                OutputPath = self._NormalizeFfmpegPath(os.path.join(OutputDirectory, OutputFileName))
 
-            if os.path.normcase(os.path.normpath(OutputPath)) == os.path.normcase(os.path.normpath(InputPath.strip('"'))):
+            if os.path.normcase(OutputPath) == os.path.normcase(InputPath):
                 LoggingService.LogError(
                     f"BuildRemuxCommand: OutputPath equals InputPath ({InputPath}). "
                     f"OutputPath must be a `.inprogress` side-by-side file.",
@@ -620,22 +642,24 @@ class CommandBuilder:
             if not Job or not MediaFile:
                 return None
 
-            InputPath = CommandData.get('InputPath', f"c:\\MediaVortex\\Source\\{MediaFile.FileName}")
+            InputPath = self._NormalizeFfmpegPath(
+                CommandData.get('InputPath', f"c:\\MediaVortex\\Source\\{MediaFile.FileName}")
+            )
             BaseName = os.path.splitext(MediaFile.FileName)[0]
 
             ExplicitOutputPath = CommandData.get('OutputPath')
             if ExplicitOutputPath:
-                OutputPath = ExplicitOutputPath
+                OutputPath = self._NormalizeFfmpegPath(ExplicitOutputPath)
             else:
                 OutputFileName = BaseName + "-mv.mp4.inprogress"
                 OutputMode = CommandData.get('TranscodeOutputMode', 'InPlace')
                 if OutputMode == 'Staging':
                     OutputDirectory = CommandData.get('OutputDirectory') or 'c:\\MediaVortex'
                 else:
-                    OutputDirectory = os.path.dirname(InputPath.strip('"'))
-                OutputPath = os.path.join(OutputDirectory, OutputFileName)
+                    OutputDirectory = os.path.dirname(InputPath)
+                OutputPath = self._NormalizeFfmpegPath(os.path.join(OutputDirectory, OutputFileName))
 
-            if os.path.normcase(os.path.normpath(OutputPath)) == os.path.normcase(os.path.normpath(InputPath.strip('"'))):
+            if os.path.normcase(OutputPath) == os.path.normcase(InputPath):
                 LoggingService.LogError(
                     f"BuildSubtitleFixCommand: OutputPath equals InputPath ({InputPath}). "
                     f"OutputPath must be a `.inprogress` side-by-side file.",
