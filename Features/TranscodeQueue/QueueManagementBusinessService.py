@@ -344,9 +344,12 @@ class QueueManagementBusinessService:
                         "END), "
                     )
                 elif Focus == 'Container':
+                    # Literal % must be doubled because the f-string is passed to
+                    # psycopg2's parameter substitution layer -- a bare % triggers
+                    # an IndexError when no matching param exists.
                     FocusSql = (
                         "(CASE "
-                        "  WHEN LOWER(COALESCE(m.ContainerFormat,'')) NOT LIKE '%mp4%' THEN 0 "
+                        "  WHEN LOWER(COALESCE(m.ContainerFormat,'')) NOT LIKE '%%mp4%%' THEN 0 "
                         "  ELSE 1 "
                         "END), "
                     )
