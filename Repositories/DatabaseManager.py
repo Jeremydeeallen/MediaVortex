@@ -577,8 +577,10 @@ class DatabaseManager:
                    FileModificationTime, TotalFrames, CodecProfile, ColorRange, FieldOrder,
                    HasBFrames, RefFrames, PixelFormat, Level, AudioChannels, AudioSampleRate,
                    AudioSampleFormat, AudioChannelLayout, AudioCodec, SubtitleFormats,
-                   ContainerFormat, OverallBitrate, TranscodedByMediaVortex
-            FROM MediaFiles 
+                   ContainerFormat, OverallBitrate, TranscodedByMediaVortex,
+                   AudioComplete, AudioCorruptSuspect, AudioCorruptReason,
+                   SourceIntegratedLufs, SourceLoudnessRangeLU, SourceTruePeakDbtp
+            FROM MediaFiles
             WHERE Id = %s
         """
         rows = self.DatabaseService.ExecuteQuery(query, (MediaFileId,))
@@ -623,9 +625,15 @@ class DatabaseManager:
             SubtitleFormats=row['SubtitleFormats'],
             ContainerFormat=row['ContainerFormat'],
             OverallBitrate=row['OverallBitrate'],
-            TranscodedByMediaVortex=row['TranscodedByMediaVortex']
+            TranscodedByMediaVortex=row['TranscodedByMediaVortex'],
+            AudioComplete=row.get('AudioComplete'),
+            AudioCorruptSuspect=row.get('AudioCorruptSuspect'),
+            AudioCorruptReason=row.get('AudioCorruptReason'),
+            SourceIntegratedLufs=row.get('SourceIntegratedLufs'),
+            SourceLoudnessRangeLU=row.get('SourceLoudnessRangeLU'),
+            SourceTruePeakDbtp=row.get('SourceTruePeakDbtp'),
         )
-    
+
     def SaveMediaFile(self, MediaFile: MediaFileModel) -> int:
         """Save a media file (insert or update) and return the media file ID."""
         try:
@@ -1125,8 +1133,10 @@ class DatabaseManager:
                    FileModificationTime, TotalFrames, CodecProfile, ColorRange, FieldOrder,
                    HasBFrames, RefFrames, PixelFormat, Level, AudioChannels, AudioSampleRate,
                    AudioSampleFormat, AudioChannelLayout, AudioCodec, SubtitleFormats,
-                   ContainerFormat, OverallBitrate, TranscodedByMediaVortex
-            FROM MediaFiles 
+                   ContainerFormat, OverallBitrate, TranscodedByMediaVortex,
+                   AudioComplete, AudioCorruptSuspect, AudioCorruptReason,
+                   SourceIntegratedLufs, SourceLoudnessRangeLU, SourceTruePeakDbtp
+            FROM MediaFiles
             WHERE LOWER(FilePath) = LOWER(%s)
         """
         rows = self.DatabaseService.ExecuteQuery(query, (FilePath,))
@@ -1171,10 +1181,16 @@ class DatabaseManager:
             SubtitleFormats=row['SubtitleFormats'],
             ContainerFormat=row['ContainerFormat'],
             OverallBitrate=row['OverallBitrate'],
-            TranscodedByMediaVortex=row['TranscodedByMediaVortex']
+            TranscodedByMediaVortex=row['TranscodedByMediaVortex'],
+            AudioComplete=row.get('AudioComplete'),
+            AudioCorruptSuspect=row.get('AudioCorruptSuspect'),
+            AudioCorruptReason=row.get('AudioCorruptReason'),
+            SourceIntegratedLufs=row.get('SourceIntegratedLufs'),
+            SourceLoudnessRangeLU=row.get('SourceLoudnessRangeLU'),
+            SourceTruePeakDbtp=row.get('SourceTruePeakDbtp'),
         )
-    
-    
+
+
     def DeleteMediaFileByPath(self, FilePath: str) -> bool:
         """Delete a media file by path (case-insensitive)."""
         affectedRows = self.DatabaseService.ExecuteNonQuery("DELETE FROM MediaFiles WHERE LOWER(FilePath) = LOWER(%s)", (FilePath,))

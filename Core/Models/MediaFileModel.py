@@ -52,6 +52,14 @@ class MediaFileModel:
     AudioLanguages: Optional[str] = None
     HasExplicitEnglishAudio: Optional[bool] = None
 
+    # Audio completion state (audio-completion.feature.md + media-tabs-and-loudness)
+    AudioComplete: Optional[bool] = None
+    AudioCorruptSuspect: Optional[bool] = None
+    AudioCorruptReason: Optional[str] = None
+    SourceIntegratedLufs: Optional[float] = None
+    SourceLoudnessRangeLU: Optional[float] = None
+    SourceTruePeakDbtp: Optional[float] = None
+
     # FFprobe failure tracking
     FFprobeFailureCount: Optional[int] = 0
     LastFFprobeError: Optional[str] = None
