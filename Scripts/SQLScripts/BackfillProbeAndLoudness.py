@@ -16,13 +16,24 @@ Designed to run UNATTENDED on a paused worker for ~hours. Resumable, idempotent.
 Does NOT need WorkerService daemon up; does NOT claim queue rows.
 
 Usage:
-    python BackfillProbeAndLoudness.py --worker-name <name> [--limit N]
+    python BackfillProbeAndLoudness.py --worker-name <name> [...]
 
-  --worker-name   Worker whose FFmpegPath and WorkerShareMappings drive
-                  binary resolution and path translation. Required.
-  --limit N       Cap rows processed (default: no cap). Use for smoke tests.
-  --batch-size N  Commit every N rows (default: 25). Lower = more frequent
-                  commits at slight perf cost.
+  --worker-name        Worker whose FFmpegPath and WorkerShareMappings drive
+                       binary resolution and path translation. Required.
+  --limit N            Cap rows processed (default: no cap).
+  --batch-size N       Commit every N rows (default: 25).
+  --shard-id N         Partition: this instance handles Ids where
+                       Id % total-shards == shard-id (0-indexed).
+  --total-shards N     Total parallel instances. Default 1 (no partitioning).
+  --drive LETTER       Restrict to a single drive (e.g. 'T:'). Default: all drives.
+
+Parallel deployment example (8-way fan-out across larry-worker-{1..8}):
+    for i in 1 2 3 4 5 6 7 8; do
+      nohup python3 BackfillProbeAndLoudness.py \
+        --worker-name larry-worker-${i} \
+        --shard-id $((i-1)) --total-shards 8 \
+        > /tmp/loudness-shard-${i}.log 2>&1 &
+    done
 
 Examples:
     # Smoke test on 5 rows before unleashing on the library
@@ -212,7 +223,7 @@ def _OnSignal(_Signum, _Frame):
     print('\n[interrupt] finishing current row and committing; press Ctrl+C again to abort hard.\n')
 
 
-def RunBackfill(WorkerName, Limit, BatchSize):
+def RunBackfill(WorkerName, Limit, BatchSize, ShardId, TotalShards, Drive=None):
     signal.signal(signal.SIGINT, _OnSignal)
     if hasattr(signal, 'SIGTERM'):
         signal.signal(signal.SIGTERM, _OnSignal)
@@ -245,10 +256,26 @@ def RunBackfill(WorkerName, Limit, BatchSize):
     print(f"Platform:     {'linux-style' if IsLinux else 'windows-style'} paths")
     print(f"Limit:        {Limit if Limit else '(no cap)'}")
     print(f"BatchSize:    {BatchSize}")
+    print(f"Shard:        {ShardId}/{TotalShards} (Id % {TotalShards} == {ShardId})")
+    print(f"Drive:        {Drive if Drive else '(all)'}")
     print()
 
-    # Select work
+    # Select work. Optional partition by Id mod TotalShards so multiple
+    # instances on different workers process disjoint subsets concurrently.
+    # Optional drive filter restricts to one drive letter prefix (e.g. T:).
     LimitClause = f"LIMIT {int(Limit)}" if Limit else ""
+    # Use %% for modulo so psycopg2 doesn't interpret % as a parameter
+    # placeholder once Cur.execute() is called with a params tuple.
+    ShardClause = (
+        f"AND (Id %% {int(TotalShards)}) = {int(ShardId)}"
+        if TotalShards > 1 else ""
+    )
+    DriveClause = ""
+    QueryParams = ()
+    if Drive:
+        DrivePrefix = Drive.rstrip(':\\/') + ':'
+        DriveClause = "AND FilePath LIKE %s"
+        QueryParams = (f'{DrivePrefix}%',)
     Cur.execute(
         f"""
         SELECT Id, FilePath, AudioBitrateKbps, AudioChannels
@@ -256,9 +283,12 @@ def RunBackfill(WorkerName, Limit, BatchSize):
         WHERE LoudnessMeasuredAt IS NULL
           AND AudioCorruptSuspect = FALSE
           AND FilePath IS NOT NULL
+          {ShardClause}
+          {DriveClause}
         ORDER BY PriorityScore DESC NULLS LAST, Id
         {LimitClause}
-        """
+        """,
+        QueryParams,
     )
     Rows = Cur.fetchall()
     Total = len(Rows)
@@ -355,8 +385,19 @@ def Main():
     Parser.add_argument('--worker-name', required=True, help='Worker for FFmpegPath + MountMap')
     Parser.add_argument('--limit', type=int, default=None, help='Cap rows processed')
     Parser.add_argument('--batch-size', type=int, default=25, help='Commit every N rows')
+    Parser.add_argument('--shard-id', type=int, default=0,
+                        help='0-indexed shard for parallel runs (default 0)')
+    Parser.add_argument('--total-shards', type=int, default=1,
+                        help='Total parallel shards (default 1 = no partitioning)')
+    Parser.add_argument('--drive', default=None,
+                        help="Restrict to one drive letter (e.g. 'T:'). Default all drives.")
     Args = Parser.parse_args()
-    RunBackfill(Args.worker_name, Args.limit, Args.batch_size)
+    if Args.total_shards < 1 or Args.shard_id < 0 or Args.shard_id >= Args.total_shards:
+        Parser.error(
+            f"--shard-id ({Args.shard_id}) must be in [0, {Args.total_shards - 1}]"
+        )
+    RunBackfill(Args.worker_name, Args.limit, Args.batch_size,
+                Args.shard_id, Args.total_shards, Args.drive)
 
 
 if __name__ == '__main__':
