@@ -141,9 +141,12 @@ class CommandBuilder:
             # Add pixel format parameter for 10-bit encoding
             self.AddPixelFormatParameter(CommandParts, CodecParameters, ProfileSettings)
             
-            # Add container-specific flags
+            # Add container-specific flags. -f mp4 is REQUIRED because the
+            # output filename ends `.mp4.inprogress` (worker-lifecycle C6) --
+            # FFmpeg's extension-based muxer detection fails on `.inprogress`
+            # and exits with AVERROR(EINVAL). See BUG-0005.
             if ContainerType.lower() == 'mp4':
-                CommandParts.extend(['-movflags', '+faststart'])
+                CommandParts.extend(['-f', 'mp4', '-movflags', '+faststart'])
             
             # Tag file so we can verify it was transcoded by MediaVortex
             CommandParts.extend(['-metadata', '"comment=Transcoded by MediaVortex"'])
@@ -605,8 +608,11 @@ class CommandBuilder:
                     if AudioFilter:
                         CommandParts.extend(['-af', f'"{AudioFilter}"'])
 
-            # MP4 container flags
-            CommandParts.extend(['-movflags', '+faststart'])
+            # MP4 container flags. -f mp4 is REQUIRED because the output
+            # filename ends `.mp4.inprogress` -- FFmpeg's auto-detection reads
+            # only the last extension, can't find a muxer for `.inprogress`,
+            # and exits with AVERROR(EINVAL) = -22 (BUG-0005, 2026-05-18).
+            CommandParts.extend(['-f', 'mp4', '-movflags', '+faststart'])
             CommandParts.append('-y')
             CommandParts.append(f'"{OutputPath}"')
 
@@ -698,8 +704,11 @@ class CommandBuilder:
             # Subtitle: convert to mov_text (MP4-native text format)
             CommandParts.extend(['-c:s', 'mov_text'])
 
-            # MP4 container flags
-            CommandParts.extend(['-movflags', '+faststart'])
+            # MP4 container flags. -f mp4 is REQUIRED because the output
+            # filename ends `.mp4.inprogress` -- FFmpeg's auto-detection reads
+            # only the last extension, can't find a muxer for `.inprogress`,
+            # and exits with AVERROR(EINVAL) = -22 (BUG-0005, 2026-05-18).
+            CommandParts.extend(['-f', 'mp4', '-movflags', '+faststart'])
             CommandParts.append('-y')
             CommandParts.append(f'"{OutputPath}"')
 

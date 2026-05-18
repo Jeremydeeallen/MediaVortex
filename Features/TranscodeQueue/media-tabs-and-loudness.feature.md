@@ -105,6 +105,10 @@ for how `AudioComplete` is decided.
     - `AudioComplete = true` and container MP4 → wouldn't be eligible (not in Quick).
     `TranscodeQueueModel.IsRemux` returns true for `ProcessingMode IN ('Quick', 'Remux', 'AudioFix')` -- new rows use 'Quick'; legacy 'Remux'/'AudioFix' rows continue to dispatch correctly. Verifiable: insert a TranscodeQueue row with `ProcessingMode='Quick'`, observe worker dispatch routes to `BuildRemuxCommand`.
 
+17b. **[BUG-0005]** Every command builder writing to a `.inprogress` output filename MUST include the FFmpeg `-f mp4` flag (or the appropriate muxer name when not MP4). FFmpeg's auto-detection reads only the LAST filename extension, sees `.inprogress`, fails to find a muxer, and exits with `AVERROR(EINVAL) = -22`. Verifiable: build a Remux command for any MediaFile, observe `-f mp4` appears between the codec args and the output path; running the command end-to-end completes without the "Unable to choose an output format" error.
+
+17c. **[BUG-0006]** Quick-class queue rows (`ProcessingMode IN ('Quick','Remux','AudioFix')`) are claimed by the Remux capability poller (gated on `Workers.RemuxEnabled`), NOT the Transcode poller (gated on `TranscodeEnabled`). Verifiable: with `Workers.RemuxEnabled=true, TranscodeEnabled=false` on a worker, queue a row with `ProcessingMode='Quick'`; observe the worker claims it within the capability-poll interval. Symmetric: with `RemuxEnabled=false, TranscodeEnabled=true`, that same row is NOT claimed by that worker -- only the Remux side claims Quick-class.
+
 17a. **Quick Fix tab Focus control:** the Quick Fix card has a "Focus" dropdown (Audio first / Container first / Mixed). It changes the ORDER of SmartPopulate results so the operator can prioritize audio-needed vs container-needed files at the top of the suggestion list. Focus does NOT affect eligibility or what the worker does -- a row queued with Focus=Audio still gets container fix if its container is wrong, because BuildRemuxCommand handles both. Verifiable: switch Focus, observe row order changes; queue any row, observe worker performs all applicable fixes.
 
 ### G. Media tabs UI

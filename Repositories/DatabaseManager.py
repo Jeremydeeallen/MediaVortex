@@ -1690,15 +1690,18 @@ class DatabaseManager:
             try:
                 cursor = connection.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
+                # Transcode capability claims only TRUE transcode work --
+                # ProcessingMode IN (NULL, 'Transcode'). Remux-class modes
+                # (Remux/Quick/AudioFix) and SubtitleFix go to their own
+                # capability pollers (BUG-0006, 2026-05-18).
                 if AcceptsInterlaced:
-                    # Accept all files except remux
                     query = """
                         UPDATE TranscodeQueue
                         SET Status = 'Running', ClaimedBy = %s, ClaimedAt = NOW(), DateStarted = NOW()
                         WHERE Id = (
                             SELECT Id FROM TranscodeQueue
                             WHERE Status = 'Pending'
-                              AND (ProcessingMode IS NULL OR ProcessingMode != 'Remux')
+                              AND (ProcessingMode IS NULL OR ProcessingMode = 'Transcode')
                             ORDER BY Priority DESC, DateAdded ASC
                             LIMIT 1
                             FOR UPDATE SKIP LOCKED
@@ -1715,7 +1718,7 @@ class DatabaseManager:
                             SELECT tq.Id FROM TranscodeQueue tq
                             JOIN MediaFiles mf ON tq.MediaFileId = mf.Id
                             WHERE tq.Status = 'Pending'
-                              AND (tq.ProcessingMode IS NULL OR tq.ProcessingMode != 'Remux')
+                              AND (tq.ProcessingMode IS NULL OR tq.ProcessingMode = 'Transcode')
                               AND (mf.IsInterlaced IS NULL OR mf.IsInterlaced = '0')
                             ORDER BY tq.Priority DESC, tq.DateAdded ASC
                             LIMIT 1
@@ -1754,8 +1757,12 @@ class DatabaseManager:
             return None
 
     def ClaimNextPendingRemuxJob(self, WorkerName: str) -> Optional[TranscodeQueueModel]:
-        """Atomically claim the next pending remux job using SELECT FOR UPDATE SKIP LOCKED.
-        Only claims jobs with ProcessingMode = 'Remux'."""
+        """Atomically claim the next pending Remux-class job using SELECT FOR UPDATE SKIP LOCKED.
+
+        Claims ProcessingMode IN ('Remux', 'Quick', 'AudioFix') -- all three
+        dispatch to BuildRemuxCommand and live on the I/O-bound side of the
+        capability split (BUG-0006 fix, 2026-05-18).
+        """
         try:
             import psycopg2.extras
             connection = self.DatabaseService.GetConnection()
@@ -1768,7 +1775,7 @@ class DatabaseManager:
                     WHERE Id = (
                         SELECT Id FROM TranscodeQueue
                         WHERE Status = 'Pending'
-                          AND ProcessingMode = 'Remux'
+                          AND ProcessingMode IN ('Remux', 'Quick', 'AudioFix')
                         ORDER BY Priority DESC, DateAdded ASC
                         LIMIT 1
                         FOR UPDATE SKIP LOCKED

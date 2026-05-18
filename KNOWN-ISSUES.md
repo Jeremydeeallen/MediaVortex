@@ -2,6 +2,51 @@
 
 ## Open
 
+### [BUG-0006] Quick / AudioFix ProcessingMode rows routed to Transcode capability poller
+**Date:** 2026-05-18
+
+**What breaks:** `Repositories/DatabaseManager.ClaimNextPendingTranscodeJob` filters `(ProcessingMode IS NULL OR ProcessingMode != 'Remux')`. Anything that isn't literally `'Remux'` -- including the new `'Quick'` mode (post-2026-05-17 Remux+AudioFix collapse), the legacy `'AudioFix'`, and `'SubtitleFix'` -- gets claimed by the Transcode-side poller, which is gated on `Workers.TranscodeEnabled`. `ClaimNextPendingRemuxJob` filters `ProcessingMode = 'Remux'` (literal) and never claims any of them. Result: a Quick Fix queue row CANNOT be claimed by a worker that has `RemuxEnabled=true, TranscodeEnabled=false`. The operator must turn on TranscodeEnabled to drain the Quick queue, defeating the whole point of separating Quick from Transcode.
+
+Operator confirmed 2026-05-18: enabled TranscodeEnabled on I9 to get a Quick row processed; until then RemuxEnabled=true alone left it sitting in Pending.
+
+**Violates:** `Features/TranscodeQueue/media-tabs-and-loudness.feature.md` criterion 19 (Quick Fix card is claim-eligible via RemuxEnabled), and the implicit contract behind separating Quick from Transcode.
+
+**Look first:** `Repositories/DatabaseManager.py:1682` `ClaimNextPendingTranscodeJob` filters at lines 1701 and 1718. `ClaimNextPendingRemuxJob` at 1756 (filter at line 1771). Both queries need their ProcessingMode predicate updated to keep Quick-class jobs on the Remux capability side. `TranscodeQueueModel.IsRemux` already returns True for `'Quick'/'Remux'/'AudioFix'` (commit f56d444, then 6c30c60). The DB-level claim filter is the missing piece.
+
+**Fix with:** `/t BUG-0006`.
+
+---
+
+### [BUG-0005] FFmpeg muxer auto-detect fails on `.mp4.inprogress` output filename
+**Date:** 2026-05-18
+
+**What breaks:** `BuildRemuxCommand` (and `BuildSubtitleFixCommand`, and the transcode path) write to a `<basename>-mv.mp4.inprogress` filename per `worker-lifecycle.feature.md` criterion 6. FFmpeg reads the LAST extension (`.inprogress`) to pick a muxer, can't find one, exits with `AVERROR(EINVAL) = -22` and the stderr message `"Unable to choose an output format for '...'; use a standard extension for the filename or specify the format manually."`. The intermediate `.mp4` is ignored by FFmpeg's extension-based muxer detection. Confirmed 2026-05-18 against TranscodeAttempts 16550, 16551, 16552 -- three consecutive failures even after AudioComplete-aware command and clean Windows separators.
+
+Verification: running the exact failing command with `-f mp4` added produces a successful 3.3 GB transcode in 2:43 (16.2x realtime), zero errors. Without `-f mp4`, same command fails at muxer init.
+
+**Violates:** `Features/TranscodeQueue/remux.flow.md` Stage 7 (Command build promises a valid command that runs to completion when inputs are healthy). Also blocks `media-tabs-and-loudness.feature.md` criterion 17 verifiability.
+
+**Look first:** `Models/CommandBuilder.py` `BuildRemuxCommand` (line 485), `BuildSubtitleFixCommand` (line 626), and `BuildCommand` (line 28 onwards for the transcode path). Each needs `'-f', 'mp4'` appended to CommandParts before the output filename. Already has `-movflags +faststart` for MP4, but `-movflags` doesn't imply muxer selection.
+
+**Fix with:** `/t BUG-0005`.
+
+---
+
+### [BUG-0004] Workers.Status='Paused' does not gate capability claiming
+**Date:** 2026-05-18
+
+**What breaks:** Setting `Workers.Status='Paused'` via the Activity page UI Pause button is purely cosmetic. The worker daemon continues to claim and process jobs as long as the individual capability flags (`TranscodeEnabled`, `RemuxEnabled`, `QualityTestEnabled`, `ScanEnabled`) are TRUE. Confirmed 2026-05-18: larry-worker-8 with `Status='Paused'`, `RemuxEnabled=false`, `TranscodeEnabled=true` claimed and ran a Transcode job (`TranscodeAttempts.Id=16549`, Real Housewives S01E15 downscale to 480p). Operator had clicked Pause on the worker tile and expected NO claiming; the worker ran anyway because TranscodeEnabled stayed true.
+
+**Violates:** `Features/TeamStatus/worker-status-model.feature.md` criterion 9 (added with this bug).
+
+**Look first:** `WorkerService/Main.py:711` `_ApplyCapabilities` -- only checks `self.TranscodeEnabled / self.RemuxEnabled / self.QualityTestEnabled / self.ScanEnabled`; `self.WorkerStatus` is loaded from DB (line 311) but never consulted. The fix is to wrap or extend `_ApplyCapabilities` so any non-Online status short-circuits to "stop all capabilities" regardless of the individual flags. Draining state has its own rules (cf. worker-status-model.feature.md criterion 3) -- finish in-flight jobs but don't claim new ones; Paused stops immediately.
+
+**Flow doc:** `Features/TeamStatus/worker-status-model.feature.md` describes the state model but no separate flow doc exists for capability-vs-status interplay; `/t` should either extend the existing feature doc's narrative or add a small flow doc.
+
+**Fix with:** `/t BUG-0004`.
+
+---
+
 ### [BUG-0003] Remux profile re-encodes audio and applies dynamics processing -- PENDING OPERATOR VERIFICATION
 **Date:** 2026-05-16 (filed) / 2026-05-17 (implementation landed)
 
