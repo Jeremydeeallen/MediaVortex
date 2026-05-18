@@ -1,7 +1,17 @@
 <ul class="nav nav-pills mb-3">
     <li class="nav-item">
-        <a class="nav-link {% if request.endpoint == 'show_settings' %}active{% endif %}" href="/ShowSettings">
-            <i class="fas fa-film"></i> Transcode
+        <a class="nav-link {% if request.endpoint == 'show_settings' %}active{% endif %}" href="/ShowSettings#transcode">
+            <i class="fas fa-film text-primary"></i> Transcode
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link" href="/ShowSettings#remux">
+            <i class="fas fa-cube text-info"></i> Remux
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link" href="/ShowSettings#audio">
+            <i class="fas fa-volume-up text-warning"></i> Audio
         </a>
     </li>
     <li class="nav-item">

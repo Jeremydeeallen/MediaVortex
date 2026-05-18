@@ -5,35 +5,12 @@
 {% block content %}
 <div class="container-fluid px-4">
     {% include '_media_subnav.html' %}
-    <h2 class="mb-3">Media</h2>
 
-    <!-- Top-level tabs: Transcode / Remux / Audio / Clip Builder -->
-    <ul class="nav nav-tabs mb-3" id="MediaTabs" role="tablist">
-        <li class="nav-item" role="presentation">
-            <button class="nav-link active" id="tab-btn-transcode" data-bs-toggle="tab" data-bs-target="#tab-transcode" type="button" role="tab">
-                <i class="fas fa-film me-1 text-primary"></i>Transcode
-            </button>
-        </li>
-        <li class="nav-item" role="presentation">
-            <button class="nav-link" id="tab-btn-remux" data-bs-toggle="tab" data-bs-target="#tab-remux" type="button" role="tab">
-                <i class="fas fa-cube me-1 text-info"></i>Remux
-            </button>
-        </li>
-        <li class="nav-item" role="presentation">
-            <button class="nav-link" id="tab-btn-audio" data-bs-toggle="tab" data-bs-target="#tab-audio" type="button" role="tab">
-                <i class="fas fa-volume-up me-1 text-warning"></i>Audio
-            </button>
-        </li>
-        <li class="nav-item" role="presentation">
-            <button class="nav-link" id="tab-btn-clipbuilder" data-bs-toggle="tab" data-bs-target="#tab-clipbuilder" type="button" role="tab">
-                <i class="fas fa-scissors me-1"></i>Clip Builder
-            </button>
-        </li>
-    </ul>
-
-    <div class="tab-content" id="MediaTabsContent">
-    <!-- ── Transcode tab pane ── -->
-    <div class="tab-pane fade show active" id="tab-transcode" role="tabpanel">
+    <!-- Three section panes -- toggled by the subnav above via hash routing.
+         Only one is visible at a time; default to #transcode on no hash. -->
+    <div id="MediaTabsContent">
+    <!-- ── Transcode pane ── -->
+    <div class="media-pane" id="tab-transcode">
 
     <!-- Card 1: Next Batch -->
     <div class="card border-primary mb-3" id="BatchCard">
@@ -101,8 +78,8 @@
 
     </div><!-- /tab-transcode -->
 
-    <!-- ── Remux tab pane ── -->
-    <div class="tab-pane fade" id="tab-remux" role="tabpanel">
+    <!-- ── Remux pane ── -->
+    <div class="media-pane" id="tab-remux" style="display:none;">
 
     <!-- Card 1.5: Next Remux Batch (sibling of Card 1, scoped to RecommendedMode='Remux') -->
     <div class="card border-info mb-3" id="RemuxCard">
@@ -158,8 +135,8 @@
 
     </div><!-- /tab-remux -->
 
-    <!-- ── Audio tab pane ── -->
-    <div class="tab-pane fade" id="tab-audio" role="tabpanel">
+    <!-- ── Audio pane ── -->
+    <div class="media-pane" id="tab-audio" style="display:none;">
 
     <!-- Card 1.7: Next Audio Fix Batch (sibling of Cards 1 and 1.5, scoped to RecommendedMode='AudioFix') -->
     <div class="card border-warning mb-3" id="AudioFixCard">
@@ -234,19 +211,10 @@
 
     </div><!-- /tab-audio -->
 
-    <!-- ── Clip Builder tab pane ── -->
-    <div class="tab-pane fade" id="tab-clipbuilder" role="tabpanel">
-        <iframe id="ClipBuilderFrame"
-                src=""
-                title="Clip Builder"
-                style="width: 100%; height: calc(100vh - 220px); border: 1px solid #dee2e6; border-radius: 4px;"
-                loading="lazy"></iframe>
-    </div>
+    </div><!-- /MediaTabsContent -->
 
-    </div><!-- /tab-content -->
-
-    <!-- Title Search + Media Library remain outside the tabs -- they're
-         cross-cutting per-show tools, not mode-specific. -->
+    <!-- Title Search + Media Library are cross-cutting per-show tools,
+         not mode-specific -- always visible below the active section. -->
 
     <!-- Card 2: Title Search -->
     <div class="card border-success mb-3" id="SearchCard">
@@ -469,37 +437,32 @@ $(document).ready(function() {
     SmartPopulateAudioFix();
     LoadAudioFixPins();
 
-    // ── Top-level tabs (Transcode / Remux / Audio / Clip Builder) ──
-    // Persist active tab in URL hash so reload + share keep the selection.
-    // Lazy-load the ClipBuilder iframe so its JS doesn't run on tab inactive.
-    const ValidTabs = {
-        '#transcode': 'tab-btn-transcode',
-        '#remux': 'tab-btn-remux',
-        '#audio': 'tab-btn-audio',
-        '#clipbuilder': 'tab-btn-clipbuilder'
+    // ── Section pane switching driven by URL hash (set by the subnav links) ──
+    // Pills in _media_subnav.html link to /ShowSettings#transcode | #remux | #audio.
+    // We show/hide the matching pane and mark the matching pill 'active'.
+    const SectionMap = {
+        '#transcode': 'tab-transcode',
+        '#remux': 'tab-remux',
+        '#audio': 'tab-audio'
     };
-    const initialHash = window.location.hash;
-    if (initialHash && ValidTabs[initialHash]) {
-        const Btn = document.getElementById(ValidTabs[initialHash]);
-        if (Btn && window.bootstrap && window.bootstrap.Tab) {
-            new window.bootstrap.Tab(Btn).show();
-        }
-    }
-    // Push hash on tab switch + lazy-load ClipBuilder iframe.
-    document.querySelectorAll('#MediaTabs button.nav-link').forEach(function(btn) {
-        btn.addEventListener('shown.bs.tab', function(e) {
-            const Target = e.target.getAttribute('data-bs-target');
-            const Hash = (Target || '').replace('#tab-', '#');
-            if (Hash && window.history && window.history.replaceState) {
-                window.history.replaceState(null, '', window.location.pathname + Hash);
-            }
-            if (Target === '#tab-clipbuilder') {
-                const Frame = document.getElementById('ClipBuilderFrame');
-                if (Frame && !Frame.src) {
-                    Frame.src = '/ClipBuilder';
-                }
-            }
+    function ShowSection(Hash) {
+        if (!SectionMap[Hash]) Hash = '#transcode';
+        Object.values(SectionMap).forEach(function(paneId) {
+            const Pane = document.getElementById(paneId);
+            if (Pane) Pane.style.display = 'none';
         });
+        const Active = document.getElementById(SectionMap[Hash]);
+        if (Active) Active.style.display = '';
+        // Highlight the matching subnav pill
+        document.querySelectorAll('.nav-pills .nav-link').forEach(function(link) {
+            const Href = link.getAttribute('href') || '';
+            const LinkHash = Href.indexOf('#') >= 0 ? Href.substring(Href.indexOf('#')) : '';
+            link.classList.toggle('active', LinkHash === Hash && Href.indexOf('/ShowSettings') >= 0);
+        });
+    }
+    ShowSection(window.location.hash || '#transcode');
+    window.addEventListener('hashchange', function() {
+        ShowSection(window.location.hash || '#transcode');
     });
 });
 
