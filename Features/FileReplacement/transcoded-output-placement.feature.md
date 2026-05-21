@@ -8,7 +8,7 @@ Standardizes where MediaVortex writes transcoded output and what it names the fi
 2. **Final naming.** After successful FileReplacement the output file is named `<basename>-mv.<ext>` (e.g. `Show.mkv` source -> `Show-mv.mp4` final). The `-mv` suffix is permanent and survives.
 
 Together these fix three problems with one change:
-- **Cross-worker hand-off.** Today `larry-worker-1.StagingDirectory='/staging/larry-worker-1'` is container-local; any other worker that claims the VMAF row gets "file not found". Workers 2/3/4 use the shared NFS path. Side-by-side eliminates the inconsistency.
+- **Cross-worker hand-off.** Per-worker scratch dirs were container-local; any other worker that claimed the VMAF row got "file not found". Side-by-side eliminates the inconsistency by writing next to the source on the shared NFS mount.
 - **Same-name collision.** The 2026-05-09 `BuildRemuxCommand` bug (KNOWN-ISSUES.md:104) destroyed source files when input ext == output ext and OutputPath == InputPath. A permanent `-mv` suffix on the final filename means source and output are structurally distinct on disk regardless of any future code regression.
 - **On-disk audit gap.** Today only `MediaFiles.TranscodedByMediaVortex` knows which files MediaVortex produced. With `-mv` the filesystem itself is self-describing -- an operator browsing the share in Explorer / `ls` can tell at a glance.
 
