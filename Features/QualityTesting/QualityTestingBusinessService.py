@@ -23,6 +23,22 @@ class QualityTestingBusinessService:
         self.ActiveFFmpegThread = None
 
 
+    def _CleanupTemporaryFilePathsForVmafFailure(self, TranscodeAttemptId: int) -> None:
+        # BUG-0001 criterion 15: VMAF failure is a terminal state for TFP rows.
+        # The disposition stays 'Pending' (a new score might still land via
+        # crash-recovery requeue), but the staged file is no longer reachable
+        # from the worker that failed, so the TFP row is dead weight.
+        try:
+            self.DatabaseManager.DatabaseService.ExecuteNonQuery(
+                "DELETE FROM TemporaryFilePaths WHERE TranscodeAttemptId = %s",
+                (TranscodeAttemptId,),
+            )
+        except Exception as Ex:
+            LoggingService.LogException(
+                f"TFP cleanup after VMAF failure failed for attempt {TranscodeAttemptId}",
+                Ex, "QualityTestingBusinessService", "_CleanupTemporaryFilePathsForVmafFailure",
+            )
+
     def ProcessQualityTestQueue(self) -> dict:
         """Process the quality testing queue."""
         try:
@@ -144,6 +160,7 @@ class QualityTestingBusinessService:
                     )
                     self.UpdateProgressRecord(progress_id, "Failed", 0, result.get("Error", "Unknown error"))
                     self.DatabaseManager.CompleteActiveJob(active_job_id, False, result.get("Error", "Unknown error"))
+                    self._CleanupTemporaryFilePathsForVmafFailure(job_details['TranscodeAttemptId'])
                     return {"Success": False, "Message": result.get("Error", "Unknown error")}
 
             except Exception as e:
@@ -156,6 +173,7 @@ class QualityTestingBusinessService:
                 if 'progress_id' in locals():
                     self.UpdateProgressRecord(progress_id, "Failed", 0, str(e))
                 self.DatabaseManager.CompleteActiveJob(active_job_id, False, str(e))
+                self._CleanupTemporaryFilePathsForVmafFailure(job_details['TranscodeAttemptId'])
                 raise
 
         except Exception as e:

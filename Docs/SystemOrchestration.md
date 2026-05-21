@@ -177,15 +177,11 @@ export MEDIAVORTEX_MAX_SERVICE_RESTARTS=3
 
 ## Best Practices
 
-### Development
-- Use `StartAllServices.py` for development
-- Start services individually for debugging
-- Use `--verbose` flag for detailed logging
-
-### Production
-- Use `StartMediaVortex.py` for production
-- Monitor logs regularly
-- Set up proper process monitoring
+### Development & Production
+- Use `StartMediaVortex.py` for dev/dual-role hosts (launches both WebService and WorkerService)
+- Use `StartWorker.py` for worker-only hosts (handles SMB mount preamble on Windows)
+- Use `StopMediaVortex.py` for graceful shutdown
+- Monitor logs regularly; set up proper process monitoring in production
 
 ### Maintenance
 - Stop all services before updates

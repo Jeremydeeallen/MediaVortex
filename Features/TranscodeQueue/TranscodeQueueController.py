@@ -22,6 +22,7 @@ def GetQueue():
         pageSize = int(request.args.get('pageSize', 25))
         sortBy = request.args.get('sortBy', 'Priority')
         sortOrder = request.args.get('sortOrder', 'DESC')
+        mode = request.args.get('mode', '').strip() or None
 
         # Validate parameters
         if page < 1:
@@ -32,12 +33,14 @@ def GetQueue():
             sortBy = 'Priority'
         if sortOrder not in ['ASC', 'DESC']:
             sortOrder = 'DESC'
+        if mode is not None and mode not in ('Transcode', 'Quick', 'Remux', 'AudioFix'):
+            mode = None  # ignore unknown values
 
         # Create ViewModel instance
         viewModel = TranscodeQueueViewModel()
 
-        # Load queue items with pagination
-        result = viewModel.LoadQueueItems(page, pageSize, sortBy, sortOrder)
+        # Load queue items with pagination + optional ProcessingMode filter
+        result = viewModel.LoadQueueItems(page, pageSize, sortBy, sortOrder, mode)
 
         if result.get("Success", False):
             # Reduced logging verbosity for routine queue retrieval

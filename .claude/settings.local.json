@@ -106,7 +106,10 @@
       "Bash(ssh root@10.0.0.230 *docker exec * python3*)",
       "PowerShell(scp *)",
       "PowerShell(Remove-Item *)",
-      "Read(C:\\Code\\claude-rails\\*)"
+      "Read(C:\\Code\\claude-rails\\*)",
+      "Skill(update-config)",
+      "Write(.claude/commands/**)",
+      "Edit(.claude/commands/**)"
     ]
   }
 }

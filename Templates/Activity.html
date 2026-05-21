@@ -93,6 +93,66 @@
 
     <!-- Quality Testing Queue moved to /Queue page (post-transcode-disposition feature, 2026-05-10).
          Active VMAF jobs (in-flight, not pending) appear in the Active Jobs section above. -->
+
+    <!-- Library Compliance -->
+    <div class="card mb-4">
+        <div class="card-header py-2">
+            <h6 class="mb-0"><i class="fas fa-clipboard-check me-2"></i>Library Compliance</h6>
+        </div>
+        <div class="card-body">
+            <div class="row g-3" id="ComplianceContainer">
+                <!-- Compliance row -->
+                <div class="col-md-6">
+                    <h6 class="text-muted small text-uppercase mb-2">Compliance state</h6>
+                    <table class="table table-sm mb-0">
+                        <tbody>
+                            <tr><td>Total MediaFiles</td><td class="text-end" id="ComplianceTotal">-</td></tr>
+                            <tr><td><span class="badge bg-success">Compliant</span></td><td class="text-end" id="ComplianceTrue">-</td></tr>
+                            <tr><td><span class="badge bg-warning text-dark">Non-compliant</span></td><td class="text-end" id="ComplianceFalse">-</td></tr>
+                            <tr><td><span class="badge bg-secondary">Undecided</span></td><td class="text-end" id="ComplianceNull">-</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <!-- RecommendedMode row -->
+                <div class="col-md-6">
+                    <h6 class="text-muted small text-uppercase mb-2">Recommended mode (non-compliant)</h6>
+                    <table class="table table-sm mb-0">
+                        <tbody>
+                            <tr><td><span class="badge bg-primary">Transcode</span></td><td class="text-end" id="ModeTranscode">-</td></tr>
+                            <tr><td><span class="badge bg-info">Remux</span></td><td class="text-end" id="ModeRemux">-</td></tr>
+                            <tr><td><span class="badge bg-warning text-dark">Audio Fix</span></td><td class="text-end" id="ModeAudioFix">-</td></tr>
+                            <tr><td><em>(no mode)</em></td><td class="text-end" id="ModeNone">-</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <!-- Audio sub-section -->
+                <div class="col-md-6">
+                    <h6 class="text-muted small text-uppercase mb-2">Audio</h6>
+                    <table class="table table-sm mb-0">
+                        <tbody>
+                            <tr><td>AudioComplete = true</td><td class="text-end" id="AudioCompleteTrue">-</td></tr>
+                            <tr><td>AudioComplete = false (one-shot pending)</td><td class="text-end" id="AudioCompleteFalse">-</td></tr>
+                            <tr><td>AudioComplete IS NULL (unprobed)</td><td class="text-end" id="AudioCompleteNull">-</td></tr>
+                            <tr><td><span class="badge bg-danger">Suspect</span> by reason</td><td class="text-end" id="AudioSuspectByReason">-</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <!-- Loudness sub-section -->
+                <div class="col-md-6">
+                    <h6 class="text-muted small text-uppercase mb-2">Loudness (EBU R128)</h6>
+                    <table class="table table-sm mb-0">
+                        <tbody>
+                            <tr><td>Measured</td><td class="text-end" id="LoudnessMeasured">-</td></tr>
+                            <tr><td>Unmeasured</td><td class="text-end" id="LoudnessUnmeasured">-</td></tr>
+                            <tr><td><span class="badge bg-success">On target</span> ±1 LU of -23 LUFS</td><td class="text-end" id="LoudnessOnTarget">-</td></tr>
+                            <tr><td><span class="badge bg-warning text-dark">Off target</span> &gt; 3 LU</td><td class="text-end" id="LoudnessOffTarget">-</td></tr>
+                            <tr><td>Wide dynamic range (LRA &gt; 18)</td><td class="text-end" id="LoudnessWideLRA">-</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
 </div>
 
 <!-- Worker Settings Modal -->
@@ -581,7 +641,7 @@ var ActivityPage = (function() {
                 '<label class="form-label small fw-bold">Capabilities</label>' +
                 CapabilityRow('TranscodeEnabled', 'Transcode', W.TranscodeEnabled, 'MaxConcurrentTranscodeJobs', W.MaxConcurrentTranscodeJobs || 1, WorkerNameJs) +
                 CapabilityRow('QualityTestEnabled', 'VMAF', W.QualityTestEnabled, 'MaxConcurrentQualityTestJobs', W.MaxConcurrentQualityTestJobs || 2, WorkerNameJs) +
-                CapabilityRow('RemuxEnabled', 'Remux', W.RemuxEnabled, 'MaxConcurrentRemuxJobs', W.MaxConcurrentRemuxJobs || 2, WorkerNameJs) +
+                CapabilityRow('RemuxEnabled', 'Quick (audio + remux)', W.RemuxEnabled, 'MaxConcurrentRemuxJobs', W.MaxConcurrentRemuxJobs || 2, WorkerNameJs) +
                 CapabilityRow('ScanEnabled', 'Scan', W.ScanEnabled, null, null, WorkerNameJs) +
             '</div>' +
             '<div class="form-text small">Capability and concurrency changes apply within one polling interval (no restart).</div>';
@@ -748,6 +808,7 @@ var ActivityPage = (function() {
     function RefreshAll() {
         LoadOverview();
         LoadWorkers();
+        LoadLibraryCompliance();
     }
 
     function StartPolling() {
@@ -776,6 +837,58 @@ var ActivityPage = (function() {
         }
     }
 
+    // -- Library Compliance panel --
+    function RenderLibraryCompliance(D) {
+        function Set(id, val) {
+            var el = document.getElementById(id);
+            if (el) el.textContent = (val !== null && val !== undefined) ? val : 0;
+        }
+        var C = D.Compliance || {};
+        Set('ComplianceTotal', C.Total);
+        Set('ComplianceTrue', C.CompliantTrue);
+        Set('ComplianceFalse', C.CompliantFalse);
+        Set('ComplianceNull', C.CompliantNull);
+
+        var M = D.Mode || {};
+        Set('ModeTranscode', M.Transcode);
+        Set('ModeRemux', M.Remux);
+        Set('ModeAudioFix', M.AudioFix);
+        Set('ModeNone', M.NoMode);
+
+        var A = D.Audio || {};
+        Set('AudioCompleteTrue', A.AudioTrue);
+        Set('AudioCompleteFalse', A.AudioFalse);
+        Set('AudioCompleteNull', A.AudioNull);
+
+        // Suspect by reason: render as comma-separated "reason=count"
+        var SR = D.SuspectByReason || {};
+        var reasons = Object.keys(SR);
+        var rEl = document.getElementById('AudioSuspectByReason');
+        if (rEl) {
+            if (reasons.length === 0) {
+                rEl.textContent = '0';
+            } else {
+                rEl.textContent = reasons.map(function(k) { return k + '=' + SR[k]; }).join(', ');
+            }
+        }
+
+        var L = D.Loudness || {};
+        Set('LoudnessMeasured', L.Measured);
+        Set('LoudnessUnmeasured', L.Unmeasured);
+        Set('LoudnessOnTarget', L.OnTarget);
+        Set('LoudnessOffTarget', L.OffTarget);
+        Set('LoudnessWideLRA', L.WideLRA);
+    }
+
+    function LoadLibraryCompliance() {
+        fetch('/api/Activity/LibraryCompliance')
+            .then(function(r) { return r.json(); })
+            .then(function(d) {
+                if (d.Success) RenderLibraryCompliance(d);
+            })
+            .catch(function() { /* swallow -- panel is best-effort */ });
+    }
+
     // -- Init --
     function Init() {
         document.getElementById('RefreshBtn').addEventListener('click', RefreshAll);
@@ -784,6 +897,7 @@ var ActivityPage = (function() {
         // RefreshQualityTestingBtn moved to /Queue page.
 
         RefreshAll();
+        LoadLibraryCompliance();
         StartPolling();
     }
 

@@ -290,3 +290,20 @@ class PostTranscodeDispositionService:
                 f"_CommitDisposition failed for attempt {TranscodeAttemptId}",
                 Ex, "PostTranscodeDispositionService", "_CommitDisposition",
             )
+            return
+
+        # TFP cleanup at the disposition chokepoint (BUG-0001 criterion 15).
+        # Replace/BypassReplace still need the canonical paths for the
+        # downstream ProcessFileReplacement call, which owns its own TFP cleanup
+        # on success. Discard/NoReplace/Requeue are terminal here -- delete now.
+        if Disposition in ('Discard', 'NoReplace', 'Requeue'):
+            try:
+                DatabaseService().ExecuteNonQuery(
+                    "DELETE FROM TemporaryFilePaths WHERE TranscodeAttemptId = %s",
+                    (TranscodeAttemptId,),
+                )
+            except Exception as Ex:
+                LoggingService.LogException(
+                    f"_CommitDisposition TFP cleanup failed for attempt {TranscodeAttemptId}",
+                    Ex, "PostTranscodeDispositionService", "_CommitDisposition",
+                )

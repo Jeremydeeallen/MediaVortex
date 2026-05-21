@@ -8,19 +8,24 @@ from Core.Logging.LoggingService import LoggingService
 class MediaProbeRepository(BaseRepository):
     """Repository for MediaProbe-related database operations."""
 
-    _MEDIA_FILE_SELECT_COLS = """Id, SeasonId, FilePath, FileName, SizeMB, VideoBitrateKbps, AudioBitrateKbps,
+    _MEDIA_FILE_SELECT_COLS = """Id, SeasonId, StorageRootId, RelativePath, FilePath, FileName,
+                   SizeMB, VideoBitrateKbps, AudioBitrateKbps,
                    Resolution, Codec, DurationMinutes, FrameRate, LastScannedDate,
                    CompressionPotential, AssignedProfile, IsInterlaced, ResolutionCategory,
                    FileModificationTime, TotalFrames, CodecProfile, ColorRange, FieldOrder,
                    HasBFrames, RefFrames, PixelFormat, Level, AudioChannels, AudioSampleRate,
                    AudioSampleFormat, AudioChannelLayout, AudioCodec, SubtitleFormats,
                    ContainerFormat, OverallBitrate, TranscodedByMediaVortex,
-                   FFprobeFailureCount, LastFFprobeError, LastFFprobeAttemptDate"""
+                   FFprobeFailureCount, LastFFprobeError, LastFFprobeAttemptDate,
+                   NeedsQuick, NeedsTranscode"""
 
     def _MapRowToMediaFile(self, Row) -> MediaFileModel:
         """Map a database row to a MediaFileModel instance."""
         return MediaFileModel(
-            Id=Row['Id'], SeasonId=Row['SeasonId'], FilePath=Row['FilePath'],
+            Id=Row['Id'], SeasonId=Row['SeasonId'],
+            StorageRootId=Row.get('StorageRootId'),
+            RelativePath=Row.get('RelativePath') or '',
+            FilePath=Row['FilePath'],
             FileName=Row['FileName'], SizeMB=Row['SizeMB'],
             VideoBitrateKbps=Row['VideoBitrateKbps'], AudioBitrateKbps=Row['AudioBitrateKbps'],
             Resolution=Row['Resolution'], Codec=Row['Codec'],
@@ -39,7 +44,9 @@ class MediaProbeRepository(BaseRepository):
             TranscodedByMediaVortex=Row['TranscodedByMediaVortex'],
             FFprobeFailureCount=Row.get('FFprobeFailureCount', 0),
             LastFFprobeError=Row.get('LastFFprobeError'),
-            LastFFprobeAttemptDate=Row.get('LastFFprobeAttemptDate')
+            LastFFprobeAttemptDate=Row.get('LastFFprobeAttemptDate'),
+            NeedsQuick=Row.get('NeedsQuick'),
+            NeedsTranscode=Row.get('NeedsTranscode'),
         )
 
     # ─── Query Methods ─────────────────────────────────────────────────
@@ -62,7 +69,8 @@ class MediaProbeRepository(BaseRepository):
         """
         try:
             Conditions = [
-                "(Resolution IS NULL OR TotalFrames IS NULL OR AudioCodec IS NULL)",
+                # NeedsReprobe=TRUE (operator-triggered) OR any required metadata missing
+                "(NeedsReprobe = TRUE OR Resolution IS NULL OR TotalFrames IS NULL OR AudioCodec IS NULL)",
                 f"COALESCE(FFprobeFailureCount, 0) < %s"
             ]
             Params = [MaxFailures]
@@ -150,7 +158,8 @@ class MediaProbeRepository(BaseRepository):
                         OverallBitrate = %s, AudioLanguages = %s, HasExplicitEnglishAudio = %s,
                         ResolutionCategory = %s,
                         FFprobeFailureCount = %s,
-                        LastFFprobeError = %s, LastFFprobeAttemptDate = %s
+                        LastFFprobeError = %s, LastFFprobeAttemptDate = %s,
+                        NeedsReprobe = COALESCE(%s, FALSE)
                        WHERE Id = %s"""
             Params = (
                 MediaFile.VideoBitrateKbps, MediaFile.AudioBitrateKbps, MediaFile.Resolution,
@@ -164,6 +173,7 @@ class MediaProbeRepository(BaseRepository):
                 MediaFile.ResolutionCategory,
                 MediaFile.FFprobeFailureCount,
                 MediaFile.LastFFprobeError, MediaFile.LastFFprobeAttemptDate,
+                getattr(MediaFile, 'NeedsReprobe', False),
                 MediaFile.Id
             )
             self.ExecuteNonQuery(Query, Params)

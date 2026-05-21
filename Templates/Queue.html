@@ -303,6 +303,7 @@ class TranscodeQueueManager {
                 this.loadQueueData();
             });
         });
+
     }
 
     async loadQueueData() {
@@ -346,7 +347,9 @@ class TranscodeQueueManager {
         } else {
             queueItems.forEach(item => {
                 const mode = item.ProcessingMode || 'Transcode';
-                const modeBadgeClass = mode === 'Remux' ? 'bg-info' : 'bg-primary';
+                let modeBadgeClass = 'bg-primary';
+                if (mode === 'Remux') modeBadgeClass = 'bg-info';
+                else if (mode === 'AudioFix') modeBadgeClass = 'bg-warning text-dark';
                 const row = document.createElement('tr');
                 row.dataset.itemId = item.Id;
                 row.dataset.status = item.Status;

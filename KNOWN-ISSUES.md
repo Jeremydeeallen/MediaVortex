@@ -2,6 +2,121 @@
 
 ## Open
 
+### [BUG-0006] Quick / AudioFix ProcessingMode rows routed to Transcode capability poller
+**Date:** 2026-05-18
+
+**What breaks:** `Repositories/DatabaseManager.ClaimNextPendingTranscodeJob` filters `(ProcessingMode IS NULL OR ProcessingMode != 'Remux')`. Anything that isn't literally `'Remux'` -- including the new `'Quick'` mode (post-2026-05-17 Remux+AudioFix collapse), the legacy `'AudioFix'`, and `'SubtitleFix'` -- gets claimed by the Transcode-side poller, which is gated on `Workers.TranscodeEnabled`. `ClaimNextPendingRemuxJob` filters `ProcessingMode = 'Remux'` (literal) and never claims any of them. Result: a Quick Fix queue row CANNOT be claimed by a worker that has `RemuxEnabled=true, TranscodeEnabled=false`. The operator must turn on TranscodeEnabled to drain the Quick queue, defeating the whole point of separating Quick from Transcode.
+
+Operator confirmed 2026-05-18: enabled TranscodeEnabled on I9 to get a Quick row processed; until then RemuxEnabled=true alone left it sitting in Pending.
+
+**Violates:** `Features/TranscodeQueue/media-tabs-and-loudness.feature.md` criterion 19 (Quick Fix card is claim-eligible via RemuxEnabled), and the implicit contract behind separating Quick from Transcode.
+
+**Look first:** `Repositories/DatabaseManager.py:1682` `ClaimNextPendingTranscodeJob` filters at lines 1701 and 1718. `ClaimNextPendingRemuxJob` at 1756 (filter at line 1771). Both queries need their ProcessingMode predicate updated to keep Quick-class jobs on the Remux capability side. `TranscodeQueueModel.IsRemux` already returns True for `'Quick'/'Remux'/'AudioFix'` (commit f56d444, then 6c30c60). The DB-level claim filter is the missing piece.
+
+**Fix with:** `/t BUG-0006`.
+
+---
+
+### [BUG-0005] FFmpeg muxer auto-detect fails on `.mp4.inprogress` output filename
+**Date:** 2026-05-18
+
+**What breaks:** `BuildRemuxCommand` (and `BuildSubtitleFixCommand`, and the transcode path) write to a `<basename>-mv.mp4.inprogress` filename per `worker-lifecycle.feature.md` criterion 6. FFmpeg reads the LAST extension (`.inprogress`) to pick a muxer, can't find one, exits with `AVERROR(EINVAL) = -22` and the stderr message `"Unable to choose an output format for '...'; use a standard extension for the filename or specify the format manually."`. The intermediate `.mp4` is ignored by FFmpeg's extension-based muxer detection. Confirmed 2026-05-18 against TranscodeAttempts 16550, 16551, 16552 -- three consecutive failures even after AudioComplete-aware command and clean Windows separators.
+
+Verification: running the exact failing command with `-f mp4` added produces a successful 3.3 GB transcode in 2:43 (16.2x realtime), zero errors. Without `-f mp4`, same command fails at muxer init.
+
+**Violates:** `Features/TranscodeQueue/remux.flow.md` Stage 7 (Command build promises a valid command that runs to completion when inputs are healthy). Also blocks `media-tabs-and-loudness.feature.md` criterion 17 verifiability.
+
+**Look first:** `Models/CommandBuilder.py` `BuildRemuxCommand` (line 485), `BuildSubtitleFixCommand` (line 626), and `BuildCommand` (line 28 onwards for the transcode path). Each needs `'-f', 'mp4'` appended to CommandParts before the output filename. Already has `-movflags +faststart` for MP4, but `-movflags` doesn't imply muxer selection.
+
+**Fix with:** `/t BUG-0005`.
+
+---
+
+### [BUG-0004] Workers.Status='Paused' does not gate capability claiming
+**Date:** 2026-05-18
+
+**What breaks:** Setting `Workers.Status='Paused'` via the Activity page UI Pause button is purely cosmetic. The worker daemon continues to claim and process jobs as long as the individual capability flags (`TranscodeEnabled`, `RemuxEnabled`, `QualityTestEnabled`, `ScanEnabled`) are TRUE. Confirmed 2026-05-18: larry-worker-8 with `Status='Paused'`, `RemuxEnabled=false`, `TranscodeEnabled=true` claimed and ran a Transcode job (`TranscodeAttempts.Id=16549`, Real Housewives S01E15 downscale to 480p). Operator had clicked Pause on the worker tile and expected NO claiming; the worker ran anyway because TranscodeEnabled stayed true.
+
+**Violates:** `Features/TeamStatus/worker-status-model.feature.md` criterion 9 (added with this bug); also `Features/ServiceControl/capability-control-plane.feature.md` criterion 8 (Status='Online' must be a hard precondition for every capability, added 2026-05-18 amendment).
+
+**Look first:** `WorkerService/Main.py:711` `_ApplyCapabilities` -- only checks `self.TranscodeEnabled / self.RemuxEnabled / self.QualityTestEnabled / self.ScanEnabled`; `self.WorkerStatus` is loaded from DB (line 311) but never consulted. The fix is to wrap or extend `_ApplyCapabilities` so any non-Online status short-circuits to "stop all capabilities" regardless of the individual flags. Draining state has its own rules (cf. worker-status-model.feature.md criterion 3) -- finish in-flight jobs but don't claim new ones; Paused stops immediately.
+
+**Flow doc:** `Features/TeamStatus/worker-status-model.feature.md` describes the state model but no separate flow doc exists for capability-vs-status interplay; `/t` should either extend the existing feature doc's narrative or add a small flow doc.
+
+**Fix with:** `/t BUG-0004`.
+
+---
+
+### [BUG-0003] Remux profile re-encodes audio and applies dynamics processing -- PENDING OPERATOR VERIFICATION
+**Date:** 2026-05-16 (filed) / 2026-05-17 (implementation landed)
+
+**What broke:** The `Remux` profile built an FFmpeg command that re-encoded audio to AAC and applied `acompressor=threshold=-15dB:ratio=3:attack=0.01:release=0.1:makeup=3dB` followed by `loudnorm=I=-23:LRA=7:TP=-2` on every pass. The same chain ran against 10,270 historical Remux attempts -- compounding generational loss and audibly damaging sources at the AAC quality floor (≤96 kbps WEBRip/SDTV).
+
+**Fix landed in `Features/AudioCompletion/`** -- a per-file `MediaFiles.AudioComplete` flag drives a one-shot pass model:
+- One-shot normalization on first encode (when `AudioComplete=false`); post-flight flips the flag to true.
+- `-c:a copy` on every subsequent encode (when `AudioComplete=true`).
+- Files at or below the channel-aware bitrate floor (`QueueAdmissionConfig.MinAudioBitrateKbps{Mono,Stereo,Surround}` = 64/96/128) are marked complete during backfill so they never run through the loudnorm chain.
+- Suspect-only-on-no-audio-stream model: DTS/TrueHD/FLAC/PCM/Vorbis/Opus take the one-shot codec-convert path (BuildAudioCodecArgs lands on EAC3), not the suspect bucket.
+
+**Implementation evidence (verified 2026-05-17):**
+- Backfill: 17,973 rows AudioComplete=true / 32,999 AudioComplete=false / 2,097 Suspect (no_audio_stream) / 5,726 unprobed -- idempotent re-run reports 0 row changes.
+- Command-shape live verify on row 124 (30 Rock S06E19 Bluray-480p, MP4/HEVC/AAC 124 kbps stereo):
+  - AudioComplete=true -> remux command emits `-c:a copy`, no `loudnorm`.
+  - After Reset (AudioComplete=false) -> remux emits `loudnorm` + `acompressor`, no `-c:a copy`.
+  - After MarkComplete (AudioComplete=true) -> back to `-c:a copy`, cascade returns IsCompliant=true, RecommendedMode=NULL.
+- Cascade live verify on representative rows: Suspect -> IsCompliant=NULL; sub-floor stereo -> IsCompliant=true (Transcode short-circuited by floor guard); Opus 84 kbps -> Remux (one-shot codec convert path); MKV AAC AudioComplete=true -> Remux for container fix.
+- `_LoadAudioNormalizedSet` removed -- compliance cascade reads `AudioComplete` column directly.
+
+**Pending operator smoke test (workers required, currently paused):**
+1. Start workers.
+2. Re-queue file Id=124 (or any AudioComplete=true MP4 file) as Remux. Watch `TranscodeAttempts.FFpmpegCommand` -- must contain `-c:a copy` and must NOT contain `loudnorm`.
+3. After successful Remux, compute `ffmpeg -i <source.orig> -map 0:a -c copy -f data - | sha256sum` and the same against the remuxed output. **Hashes must match** -- the criterion-26 byte-identical contract.
+4. Re-queue any AudioComplete=false file as Remux. Watch the command contains `loudnorm`. Post-flight, query the row -- `AudioComplete` must be flipped to `true`, `AudioCompletedAt` set.
+
+**Files:** `Features/AudioCompletion/`, `Models/CommandBuilder.py`, `Features/FileReplacement/FileReplacementBusinessService.py`, `Features/TranscodeQueue/QueueManagementBusinessService.py`, `Scripts/SQLScripts/{AddAudioCompletionColumns,AddAudioBitrateFloorConfig,BackfillAudioComplete}.py`. Once the operator smoke test passes, move this entry to `memory/KNOWN-ISSUES-ARCHIVE.md`.
+
+---
+
+### [BUG-0002] Media files with zero audio streams persist in DB after silent-output Remux -- must be purged with full FK history
+**Date:** 2026-05-16
+
+**What breaks:** Multiple `MediaFiles` rows have a non-NULL `AudioBitrateKbps` value but the actual on-disk file has zero audio streams. The Remux pipeline successfully ran, replaced the source, and updated the DB without catching that the output was silent. The post-replacement re-probe in `_UpdateMediaFilesAfterReplacement` failed to clear or flag the missing audio — instead the pre-Remux `AudioBitrateKbps` was kept and `AudioCodec` ended up NULL. So the DB now contains "ghost audio" rows pointing at silent files.
+
+**Confirmed silent on disk via ffprobe** (sample of 4 of the 16 NULL-codec candidates):
+- `T:\Doctor Who (2005)\Specials\Doctor Who (2005) - S00E72 - Doctor Who in America SDTV-720p-mv.mp4`
+- `T:\Monk\Season 7\Monk - S07E08-E09 - Mr. Monk Gets Hypnotized + Mr. Monk and the Miracle WEBDL-480p-mv.mp4`
+- `T:\Shameless\Season 1\Shameless - S01E06 - Monica Comes Home (1) SDTV-720p-mv.mp4`
+- `T:\Xena - Warrior Princess\Season 1\Xena - Warrior Princess - S01E05 - The Path Not Taken DVD-720p-mv.mp4`
+
+Each has a video stream (HEVC) but no audio stream at all. The 16-file NULL-codec set is a lower bound — files where the pre-probe captured a codec name will not be caught by `AudioCodec IS NULL` alone, so the actual silent population is likely larger. Definitive identification requires `ffprobe` against every transcoded file.
+
+**Why the DB can't be trusted as the source of truth:** `AudioBitrateKbps` was kept from the pre-Remux source instead of being NULL'd. `AudioCodec` ended up NULL only by accident on a subset of files. Any silent file whose re-probe happened to keep both fields populated is undetectable from the DB. Conclusion: the re-probe in `_UpdateMediaFilesAfterReplacement` must overwrite every audio column based strictly on what the post-replacement file actually contains — present audio populates them, absent audio NULLs them and triggers Discard. No partial updates, no defaulting to source values.
+
+**What the user wants:** purge these rows from the DB entirely (along with the on-disk silent file) and record every removed path so they can be re-acquired from source.
+
+**Cleanup behavior (per criterion 19 on `post-transcode-pipeline.feature.md`):**
+1. ffprobe every `MediaFiles` row (or every `TranscodedByMediaVortex = true` row as a faster first pass) to identify rows whose file has zero audio streams.
+2. For each silent file: delete the row and every dependent record in `TranscodeAttempts`, `TranscodeFiles`, `MediaFilesArchive`, `QualityTestResults`, `QualityTestProgress`, `TranscodeQueue`, `QualityTestingQueue`, `ActiveJobs`, `TemporaryFilePaths`, `ScanJobs` (if linked), `ProblemFiles` (if linked). One transaction per file.
+3. Before the row is deleted, append its `RelativePath` (fallback `FilePath`) to a timestamped report at the repo root: `deleted-silent-files-YYYY-MM-DD.md`, grouped by show, so the operator can re-acquire.
+4. Delete the silent file from disk.
+5. Going forward, harden `_UpdateMediaFilesAfterReplacement` to fail loud when the re-probe finds no audio — `Discard` disposition, on-disk silent output removed, source restored if `.orig`/`.inprogress` is still recoverable.
+
+**Violates:** `Features/FileReplacement/post-transcode-pipeline.feature.md` criterion 19 (added with this bug). Indirectly: the missing MediaProbe feature doc (no `Features/MediaProbe/*.feature.md` exists) means the re-probe contract has no owner — flag the gap, /t should create one when fixing.
+
+**Related (not duplicate):** `### [BUG] Next Remux Batch table shows files with no audio stream that silently fail when queued` (2026-05-14, line 200) covers the *upstream* problem of queueing video-only files that error out with code 4294967274. BUG-0002 is the *downstream* problem of files that successfully completed Remux but came out silent and now sit in the DB with stale audio metadata. Different failure mode (success-with-no-audio vs explicit failure), different cleanup need (purge + report vs exclude from queue).
+
+**Look first:**
+- `Features/FileReplacement/FileReplacementBusinessService.py` — `_UpdateMediaFilesAfterReplacement` (no-audio detection gap, criterion 19 second half).
+- `Features/MediaProbe/MediaProbeBusinessService.py` — the probe call that ought to surface zero-audio explicitly.
+- DB foreign-key map: `TranscodeAttempts.MediaFileId`, `TranscodeFiles.MediaFileId`, `MediaFilesArchive.Id` (shared PK), `QualityTestResults.TranscodeAttemptId`, `QualityTestProgress.TranscodeAttemptId`, `TemporaryFilePaths.TranscodeAttemptId`, `ActiveJobs.QueueId` (polymorphic — see BUG-0001 criterion 16).
+- Sample file paths above for `ffprobe` verification before/after.
+
+**Fix with:** `/t BUG-0002`.
+
+---
+
+---
+
 ### [BUG] TranscodeAttempts failure rows lack ProfileName -- operator cannot tell what KIND of job failed from the row alone
 **Date:** 2026-05-16
 
@@ -543,23 +658,6 @@ Observed: Bachelor in Paradise S10E01 was successfully transcoded earlier today,
 
 ---
 
-### [TECH DEBT] Remove legacy archive_TranscodeService/ and archive_QualityTestService/ directories
-**Date:** 2026-05-08 | **Renamed (partial):** 2026-05-08
-**Affects:** archive_TranscodeService/, archive_QualityTestService/, Scripts/StopAllTranscodeServices.py, Scripts/StopAllPythonServices.py, CLAUDE.md "Two Microservices" section, transcode.flow.md
-
-Phase 2 of the architecture redesign unified both services into WorkerService. Renamed today to make the deprecation visible in the directory listing. The string identifiers "TranscodeService" / "QualityTestService" remain valid as logical job-type tags in ActiveJobs.ServiceName, ServiceStatus.ServiceName, and CrashRecoveryService — those must NOT be removed.
-
-**Remaining cleanup:**
-- `Scripts/StopAllTranscodeServices.py` and `Scripts/StopAllPythonServices.py` still reference the old names; harmless (process-name match returns no results) but should be deleted or repointed at WorkerService.
-- CLAUDE.md "Two Microservices" section still describes the old split — needs to be rewritten to describe the unified WorkerService + capability flags.
-- Once nothing reads from them for ~1 month, the `archive_*` directories can be deleted entirely.
-
-**Look first:** `TranscodeService/` and `QualityTestService/` directory contents, `Features/ServiceControl/ServiceLifecycleManager.py:29-40` (drop the two SERVICES dict entries), `Scripts/StopAllTranscodeServices.py` (delete or repoint), CLAUDE.md "Two Microservices" section.
-
-**Fix with:** `/n` (cleanup migration -- estimated 30 min: delete two dirs, prune SERVICES dict, sweep docs, leave string literals alone)
-
----
-
 ### [TECH DEBT] LocalStaging fallback decision duplicated across four sites
 **Date:** 2026-05-08
 **Affects:** Features/TranscodeJob/ProcessTranscodeQueueService.py
@@ -664,8 +762,10 @@ Full Windows paths (e.g., `T:\Shows\file.mkv`) are stored as natural keys in at 
 
 ---
 
-### [BUG] Bare-metal Linux host bootstrap not codified -- manual SSH steps required before deploy-linux-worker.py
-**Date:** 2026-05-16
+### [BUG - FIXED 2026-05-21] Bare-metal Linux host bootstrap not codified -- manual SSH steps required before deploy-linux-worker.py
+**Date:** 2026-05-16 (opened); 2026-05-21 (closed)
+
+**Resolution:** `infrastructure/terraform/mediavortex-bare-metal-bootstrap.py` lands the canonical bootstrap. Reads `fstab_mounts` from `infrastructure/terraform/inventory.toml` (new field on `vm_type = "bare-metal"` entries), idempotently installs `nfs-common` + Docker CE, applies a managed block in `/etc/fstab`, creates `/staging` + `/opt/mediavortex` + every mountpoint, runs `mount -a`. New bare-metal bringup: `py infrastructure/terraform/mediavortex-bare-metal-bootstrap.py --host <friendly>` then `py deploy/deploy-linux-worker.py <friendly>`. Verifiable: re-running the bootstrap on a clean host is a no-op (managed-block sed delete + re-append yields identical fstab; package + dir checks short-circuit). See `infrastructure/docs/features/linux-worker-deploy.md` criterion 10 (also marked resolved 2026-05-21) for the host-side acceptance test. This entry should be moved to the Resolved section with a `BUG-NNNN` ID on the next housekeeping pass.
 
 **What breaks:** Adding a new bare-metal Linux worker host today requires manual SSH steps before `deploy/deploy-linux-worker.py` will pass its pre-flight check: install Docker CE, install nfs-common, append three NFS entries to `/etc/fstab` (Brain media_tv, Synology movies, Synology xxx), `mount -a`, and `mkdir /staging /opt/mediavortex`. LXC has the equivalent codified at `infrastructure/terraform/mediavortex-workers/setup.sh`. Bare-metal has nothing.
 
@@ -682,6 +782,27 @@ Done manually for dot on 2026-05-16 -- worked in ~5 minutes -- but the manual st
 ---
 
 ## Resolved
+
+### [BUG-0001 - FIXED 2026-05-17] Stuck-item cleanup gaps -- operational rows leak past their job's terminal state
+**Date:** 2026-05-16 | **Fixed:** 2026-05-17 | resolved: 2026-05-17
+
+**What broke:** Four distinct paths let operational rows linger past terminal state. Observed on I9-2024 with 17 workers Paused: 9 stale `ActiveJobs` (no parent queue row), 1 `QualityTestingQueue` row in flight 5+ hours after its attempt succeeded, 18 `TranscodeProgress` orphans + duplicates (no UNIQUE), **551 `TemporaryFilePaths` rows** for finished attempts (`_CleanupTemporaryFilePaths` only ran inside `ProcessFileReplacement`'s success branch -- every other terminal state leaked).
+
+**Fix (shipped 2026-05-17):** Four-part bundle, verified live.
+
+1. **TFP chokepoint at disposition (criterion 15).** `Features/QualityTesting/PostTranscodeDispositionService._CommitDisposition` now deletes the TFP row inline when `Disposition IN ('Discard','NoReplace','Requeue')` (`Replace`/`BypassReplace` defer to FileReplacement's existing success-branch cleanup because they still need the canonical paths). `Features/QualityTesting/QualityTestingBusinessService._CleanupTemporaryFilePathsForVmafFailure` covers the VMAF-failure path. FFmpeg/FFprobe-verify failures were already covered by `HandleJobFailure` in `ProcessTranscodeQueueService`.
+
+2. **ActiveJobs root-cause + sweep (criterion 16).** A direct FK on the polymorphic `ActiveJobs.QueueId` is impossible (it references either `TranscodeQueue` or `QualityTestingQueue` depending on `ServiceName`), and a DB trigger would hide the leaking caller. Root-cause fix: `QueueManagementBusinessService.RemoveJobFromQueue` now deletes the matching `ActiveJobs` row even on the non-Running path (previously only `_CancelRunningJob` cleaned it for Running rows). Safety net: the new orphan sweep emits one WARN log per removal naming the gone `ServiceName`/`QueueId`/`WorkerName`, so any future regression surfaces immediately.
+
+3. **Recurring orphan sweep (criteria 16, 17, 18).** New `Features/ServiceControl/OrphanCleanupService.SweepOrphans` runs every `StuckJobDetectionIntervalSec` (default 120s) as a sibling daemon to `_StuckJobDetectionLoop`. Five sweep steps: TFP orphans, ActiveJobs(TranscodeService), ActiveJobs(QualityTestingService), stale QualityTestingQueue, orphaned TranscodeProgress. One INFO summary per cycle; WARN per removal. Flow doc: `Features/ServiceControl/orphan-cleanup.flow.md`.
+
+4. **TranscodeProgress UNIQUE (criterion 18).** `Scripts/SQLScripts/AddOrphanCleanupAndUniqueProgress.py` -- idempotent migration that dedupes existing rows (keep latest per `TranscodeAttemptId`) then adds `UNIQUE (TranscodeAttemptId)`.
+
+**Verified:** 2026-05-16 manual sweep cleared the 550 TFP backlog in one cycle (WARN log fired). 2026-05-17 live worker logged two consecutive `OrphanCleanup swept: TFP=0 ActiveJobs(Transcode)=0 ActiveJobs(QualityTest)=0 QTQueue=0 Progress=0` lines 120s apart -- steady state holds. All 18 feature criteria pass.
+
+**Files:** `Features/QualityTesting/PostTranscodeDispositionService.py:263`, `Features/QualityTesting/QualityTestingBusinessService.py:26-41` (new helper), `Features/TranscodeQueue/QueueManagementBusinessService.py:2077` (ActiveJobs cleanup), `Features/ServiceControl/OrphanCleanupService.py` (new), `Features/ServiceControl/orphan-cleanup.flow.md` (new), `Scripts/SQLScripts/AddOrphanCleanupAndUniqueProgress.py` (new migration), `WorkerService/Main.py:617` (loop startup) + `:801-846` (loop body), `Features/FileReplacement/post-transcode-pipeline.feature.md` criteria 15-18, `transcode.flow.md` Stage 6 tables-written.
+
+---
 
 ### [BUG - FIXED 2026-05-16 - CRITICAL] Worker with broken NFS mount silently destroys queue -- marks all files as source-missing
 **Date:** 2026-05-14 | **Fixed:** 2026-05-15 (validation gate) + 2026-05-16 (UI surfacing, data remediation) | resolved: 2026-05-16
@@ -824,25 +945,6 @@ Done manually for dot on 2026-05-16 -- worked in ~5 minutes -- but the manual st
 **Solution:** Added `Workers.Enabled` column (BOOLEAN, default TRUE). The `/api/TeamStatus/Workers` endpoint filters to `Enabled=TRUE` by default. A `?IncludeDisabled=true` query param shows all. Activity page has a "Show Disabled" toggle and Disable/Enable buttons on each worker card. Disabled workers render dimmed with a dark "Disabled" badge.
 
 **Files:** `TeamStatusController.py` (endpoints), `Activity.html` (UI), `AddWorkerEnabledColumn.py` (migration).
-
----
-
-### [FEATURE - DONE 2026-05-14] Remove hardcoded concurrency ceiling -- let DB drive limits
-
-**Problem:** `MaxConcurrentJobs` was capped at 5 in 6 places (API validation, worker clamp). Operator had to redeploy to raise the limit. Not data-driven.
-
-**Solution:** Removed upper bound from all validation/clamp sites. Only floor of 1 enforced. The operator sets whatever value fits their hardware via the Workers table.
-
-**Files:** `TeamStatusController.py`, `ProcessRemuxQueueService.py`, `ProcessTranscodeQueueService.py`, `ProcessQualityTestQueueService.py`, `TranscodeJobController.py`, `WorkerService/Main.py`.
-
-### [BUG - FIXED 2026-05-13] Remux files discarded as "NoSavings" -- disposition gate ordering bug
-**Date:** 2026-05-13 | **Fixed:** 2026-05-13
-
-**What broke:** `PostTranscodeDispositionService._DecideFromInputs` checked `NewSize >= OldSize -> Discard/NoSavings` (Row 2) before `QualityTestRequired=false -> BypassReplace` (Row 3). Remux jobs set `QualityTestRequired=false` but often produce slightly larger outputs (audio re-encode). Result: 679 successful remux attempts got `Disposition='Discard'`, FileReplacement never ran. Disk state: original at `.orig`, good remuxed `.mp4` at source path, DB still pointing to old `.mkv`/`.mp4` path.
-
-**Violates:** `Features/FileReplacement/FileReplacement.feature.md` criterion 10, `transcode-vs-remux-routing.feature.md` criterion 16.
-
-**Fix:** Swapped Row 2 and Row 3 in `_DecideFromInputs` so `QualityTestNotRequired` fires before `NoSavings`. Remux attempts bypass the savings gate entirely. Remediation script `Scripts/SQLScripts/RemediateDiscardedRemuxFiles.py` flipped dispositions and ran `ProcessFileReplacement` for affected rows. ~380 remediated on i9; 113 blocked by stale `.orig` needing manual cleanup; 188 need script run from larry after redeploy.
 
 ---
 

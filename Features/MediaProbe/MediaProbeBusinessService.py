@@ -106,8 +106,27 @@ class MediaProbeBusinessService:
                 MediaFile.FFprobeFailureCount = 0
                 MediaFile.LastFFprobeError = None
                 MediaFile.LastFFprobeAttemptDate = datetime.now(timezone.utc)
+                # Clear operator-triggered reprobe flag on success
+                MediaFile.NeedsReprobe = False
 
                 self.Repository.UpdateMetadata(MediaFile)
+
+                # Loudness measurement (best-effort -- failure does NOT roll
+                # back the probe). See Features/LoudnessAnalysis/.
+                try:
+                    from Features.LoudnessAnalysis.LoudnessAnalysisService import LoudnessAnalysisService
+                    LoudnessSvc = LoudnessAnalysisService()
+                    Ok, FailureReason = LoudnessSvc.MeasureAndPersist(MediaFile.Id, LocalPath)
+                    if not Ok and FailureReason:
+                        LoggingService.LogWarning(
+                            f"Loudness measurement skipped for MediaFileId={MediaFile.Id}: {FailureReason}",
+                            "MediaProbeBusinessService", "_ExecuteProbe"
+                        )
+                except Exception as LoudnessEx:
+                    LoggingService.LogException(
+                        f"Loudness measurement failed for MediaFileId={MediaFile.Id} -- probe data is saved",
+                        LoudnessEx, "MediaProbeBusinessService", "_ExecuteProbe"
+                    )
 
                 # Flag files with no audio stream as possibly corrupt
                 if not MetadataResult.get('AudioCodec'):

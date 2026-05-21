@@ -32,11 +32,7 @@ This document provides an overview of all utility scripts in the `Scripts/` fold
 
 ### Service Management
 
-#### `StopAllPythonServices.py` ✅ **CURRENT**
-- **Purpose**: Stops all MediaVortex Python services and logs results
-- **Features**: Process detection, graceful shutdown, logging
-- **Usage**: `py Scripts\StopAllPythonServices.py`
-- **Status**: **ACTIVE** - Essential for service management
+Use the top-level `StopMediaVortex.py` (stops WebService + WorkerService); start with `StartMediaVortex.py` (dev / dual-role hosts) or `StartWorker.py` (worker-only hosts, handles SMB mount preamble).
 
 ### Data Analysis
 
@@ -106,7 +102,6 @@ This document provides an overview of all utility scripts in the `Scripts/` fold
 ### ✅ **Safe to Use Regularly**
 - `AddLastTranscodeAttemptToQualityQueue.py`
 - `LogReader.py`
-- `StopAllPythonServices.py`
 - `FindDuplicates.py`
 - `CleanupStuckScans.py`
 

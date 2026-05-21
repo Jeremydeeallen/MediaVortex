@@ -178,12 +178,13 @@ def SmartPopulateQueue():
         Drive = Data.get('Drive', '')
         Search = Data.get('Search', '') or ''
         Mode = Data.get('Mode')
+        Focus = Data.get('Focus')  # 'Audio' | 'Container' | 'Mixed' (Quick Fix tab)
         if isinstance(Search, str) and len(Search) > 100:
             Search = Search[:100]
 
         from Features.TranscodeQueue.QueueManagementBusinessService import QueueManagementBusinessService
         Service = QueueManagementBusinessService()
-        Result = Service.SmartPopulateQueue(Limit=Limit, Offset=Offset, Drive=Drive, Search=Search, Mode=Mode)
+        Result = Service.SmartPopulateQueue(Limit=Limit, Offset=Offset, Drive=Drive, Search=Search, Mode=Mode, Focus=Focus)
 
         return jsonify(Result)
     except Exception as Ex:
@@ -259,15 +260,16 @@ def QueueAllMatching():
     in a single INSERT...SELECT. For Card 1.5's "Queue All" affordance.
 
     Body:
-      Mode    -- required: 'Transcode' or 'Remux'.
+      Mode    -- required: 'Transcode' | 'Quick' | 'Remux'/'AudioFix' (legacy aliases).
       Search  -- optional substring; matches FileName or show-folder segment.
       Drive   -- optional drive prefix, e.g. 'T:'.
     """
     try:
         Data = request.get_json() or {}
         Mode = Data.get('Mode')
-        if Mode not in ('Transcode', 'Remux'):
-            return jsonify({'Success': False, 'Message': f'Mode must be Transcode or Remux (got {Mode!r})'}), 400
+        _VALID_MODES = ('Transcode', 'Quick', 'Remux', 'AudioFix')
+        if Mode not in _VALID_MODES:
+            return jsonify({'Success': False, 'Message': f'Mode must be one of {_VALID_MODES} (got {Mode!r})'}), 400
 
         Search = Data.get('Search', '') or ''
         if isinstance(Search, str) and len(Search) > 100:
@@ -293,10 +295,12 @@ def AddSuggestionsToQueue():
                       MediaFileId field is read; all other fields are
                       ignored (file metadata comes from MediaFiles).
       ProfileId    -- integer Profiles.Id, required for Mode='Transcode'.
-                      Must be null/missing for Mode='Remux' -- the cascade
-                      has already decided "container/audio fix only" so no
-                      profile choice is needed.
-      Mode         -- 'Transcode' (default) or 'Remux'.
+                      Must be null/missing for Mode='Quick'/'Remux'/'AudioFix' --
+                      the cascade has already decided "container/audio fix only"
+                      so no profile choice is needed.
+      Mode         -- 'Transcode' (default) | 'Quick' (post-2026-05-17 Remux+AudioFix
+                      collapse) | 'Remux' / 'AudioFix' (legacy aliases, still
+                      accepted for in-flight backward compat).
     """
     try:
         Data = request.get_json()
@@ -309,8 +313,9 @@ def AddSuggestionsToQueue():
             return jsonify({'Success': False, 'Message': 'No MediaFileIds or Items provided'}), 400
 
         Mode = Data.get('Mode', 'Transcode') or 'Transcode'
-        if Mode not in ('Transcode', 'Remux'):
-            return jsonify({'Success': False, 'Message': f'Invalid Mode: {Mode!r}. Must be "Transcode" or "Remux".'}), 400
+        _VALID_MODES = ('Transcode', 'Quick', 'Remux', 'AudioFix')
+        if Mode not in _VALID_MODES:
+            return jsonify({'Success': False, 'Message': f'Invalid Mode: {Mode!r}. Must be one of {_VALID_MODES}.'}), 400
 
         ProfileId = Data.get('ProfileId')
         if ProfileId is not None:

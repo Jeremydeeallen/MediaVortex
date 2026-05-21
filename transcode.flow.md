@@ -221,7 +221,7 @@ Rationale: ordering by raw size (the legacy behavior) put already-efficient AV1 
   5. Create TranscodeAttempt record (only if source confirmed present)
   6. Load profile thresholds (CRF, bitrate, codec settings)
   7. File preparation (see File Staging below)
-  8. Build FFmpeg command (libsvtav1, preset, CRF, film grain, bitrates)
+  8. Build FFmpeg command (libsvtav1, preset, CRF, film grain, bitrates). **Audio args are AudioComplete-aware:** when `MediaFile.AudioComplete = true` the command emits `-c:a copy` (no audio re-encode, no `-af` filter chain); when false, the standard `BuildAudioCodecArgs` + `BuildAudioFilters` (loudnorm + acompressor) one-shot pass runs, and the post-flight FileReplacement hook flips `AudioComplete` to true. See `Features/AudioCompletion/audio-completion.flow.md`.
   9. Execute FFmpeg via `VideoTranscodingService.TranscodeVideo()`
   10. Monitor progress (frames / total_frames), update TranscodeProgress
   11. On completion: record TranscodeAttempt with size reduction, duration, command
@@ -334,7 +334,7 @@ WHERE Success=true AND FileReplaced=false AND Disposition <> 'Pending'
 ORDER BY DispositionDecidedAt DESC;
 ```
 
-**Tables written:** TranscodeAttempts (Disposition, DispositionReason, DispositionDecidedAt), QualityTestQueue (when disposition='Pending' and not yet queued), MediaFiles (LastTranscodeOutcome on Discard/NoSavings), ProblemFiles (when Requeue with adjusted CRF below floor).
+**Tables written:** TranscodeAttempts (Disposition, DispositionReason, DispositionDecidedAt), QualityTestQueue (when disposition='Pending' and not yet queued), MediaFiles (LastTranscodeOutcome on Discard/NoSavings), ProblemFiles (when Requeue with adjusted CRF below floor), TemporaryFilePaths (DELETE at the chokepoint for `Discard`/`NoReplace`/`Requeue` -- BUG-0001 criterion 15; `Replace`/`BypassReplace` defer TFP cleanup to FileReplacement's success branch since the canonical paths are still needed).
 
 ---
 

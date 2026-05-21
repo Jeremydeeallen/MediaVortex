@@ -577,15 +577,18 @@ class DatabaseManager:
                    FileModificationTime, TotalFrames, CodecProfile, ColorRange, FieldOrder,
                    HasBFrames, RefFrames, PixelFormat, Level, AudioChannels, AudioSampleRate,
                    AudioSampleFormat, AudioChannelLayout, AudioCodec, SubtitleFormats,
-                   ContainerFormat, OverallBitrate, TranscodedByMediaVortex
-            FROM MediaFiles 
+                   ContainerFormat, OverallBitrate, TranscodedByMediaVortex,
+                   AudioComplete, AudioCorruptSuspect, AudioCorruptReason,
+                   SourceIntegratedLufs, SourceLoudnessRangeLU, SourceTruePeakDbtp,
+                   NeedsQuick, NeedsTranscode
+            FROM MediaFiles
             WHERE Id = %s
         """
         rows = self.DatabaseService.ExecuteQuery(query, (MediaFileId,))
-        
+
         if not rows:
             return None
-        
+
         row = rows[0]
         return MediaFileModel(
             Id=row['Id'],
@@ -623,9 +626,17 @@ class DatabaseManager:
             SubtitleFormats=row['SubtitleFormats'],
             ContainerFormat=row['ContainerFormat'],
             OverallBitrate=row['OverallBitrate'],
-            TranscodedByMediaVortex=row['TranscodedByMediaVortex']
+            TranscodedByMediaVortex=row['TranscodedByMediaVortex'],
+            AudioComplete=row.get('AudioComplete'),
+            AudioCorruptSuspect=row.get('AudioCorruptSuspect'),
+            AudioCorruptReason=row.get('AudioCorruptReason'),
+            SourceIntegratedLufs=row.get('SourceIntegratedLufs'),
+            SourceLoudnessRangeLU=row.get('SourceLoudnessRangeLU'),
+            SourceTruePeakDbtp=row.get('SourceTruePeakDbtp'),
+            NeedsQuick=row.get('NeedsQuick'),
+            NeedsTranscode=row.get('NeedsTranscode'),
         )
-    
+
     def SaveMediaFile(self, MediaFile: MediaFileModel) -> int:
         """Save a media file (insert or update) and return the media file ID."""
         try:
@@ -1125,15 +1136,18 @@ class DatabaseManager:
                    FileModificationTime, TotalFrames, CodecProfile, ColorRange, FieldOrder,
                    HasBFrames, RefFrames, PixelFormat, Level, AudioChannels, AudioSampleRate,
                    AudioSampleFormat, AudioChannelLayout, AudioCodec, SubtitleFormats,
-                   ContainerFormat, OverallBitrate, TranscodedByMediaVortex
-            FROM MediaFiles 
+                   ContainerFormat, OverallBitrate, TranscodedByMediaVortex,
+                   AudioComplete, AudioCorruptSuspect, AudioCorruptReason,
+                   SourceIntegratedLufs, SourceLoudnessRangeLU, SourceTruePeakDbtp,
+                   NeedsQuick, NeedsTranscode
+            FROM MediaFiles
             WHERE LOWER(FilePath) = LOWER(%s)
         """
         rows = self.DatabaseService.ExecuteQuery(query, (FilePath,))
-        
+
         if not rows:
             return None
-        
+
         row = rows[0]
         return MediaFileModel(
             Id=row['Id'],
@@ -1171,10 +1185,18 @@ class DatabaseManager:
             SubtitleFormats=row['SubtitleFormats'],
             ContainerFormat=row['ContainerFormat'],
             OverallBitrate=row['OverallBitrate'],
-            TranscodedByMediaVortex=row['TranscodedByMediaVortex']
+            TranscodedByMediaVortex=row['TranscodedByMediaVortex'],
+            AudioComplete=row.get('AudioComplete'),
+            AudioCorruptSuspect=row.get('AudioCorruptSuspect'),
+            AudioCorruptReason=row.get('AudioCorruptReason'),
+            SourceIntegratedLufs=row.get('SourceIntegratedLufs'),
+            SourceLoudnessRangeLU=row.get('SourceLoudnessRangeLU'),
+            SourceTruePeakDbtp=row.get('SourceTruePeakDbtp'),
+            NeedsQuick=row.get('NeedsQuick'),
+            NeedsTranscode=row.get('NeedsTranscode'),
         )
-    
-    
+
+
     def DeleteMediaFileByPath(self, FilePath: str) -> bool:
         """Delete a media file by path (case-insensitive)."""
         affectedRows = self.DatabaseService.ExecuteNonQuery("DELETE FROM MediaFiles WHERE LOWER(FilePath) = LOWER(%s)", (FilePath,))
@@ -1420,8 +1442,8 @@ class DatabaseManager:
 
         return queueItems
 
-    def GetTranscodeQueueItemsPaginated(self, Page: int = 1, PageSize: int = 25, SortBy: str = "Priority", SortOrder: str = "DESC"):
-        """Get paginated transcoding queue items with SQL-level sorting and pagination."""
+    def GetTranscodeQueueItemsPaginated(self, Page: int = 1, PageSize: int = 25, SortBy: str = "Priority", SortOrder: str = "DESC", Mode: str = None):
+        """Get paginated transcoding queue items with SQL-level sorting, pagination, optional ProcessingMode filter."""
         # Whitelist sort columns to prevent SQL injection
         sort_columns = {
             'SizeMB': 'SizeMB',
@@ -1432,8 +1454,14 @@ class DatabaseManager:
         sort_col = sort_columns.get(SortBy, 'Priority')
         order = 'DESC' if SortOrder == 'DESC' else 'ASC'
 
-        # Get total count
-        count_rows = self.DatabaseService.ExecuteQuery("SELECT COUNT(*) as Count FROM TranscodeQueue")
+        # Whitelist Mode filter
+        ModeFilter = Mode if Mode in ('Transcode', 'Quick', 'Remux', 'AudioFix') else None
+        WhereClause = "WHERE ProcessingMode = %s" if ModeFilter else ""
+        FilterParams = (ModeFilter,) if ModeFilter else ()
+
+        # Get total count (filtered if Mode supplied)
+        count_query = f"SELECT COUNT(*) as Count FROM TranscodeQueue {WhereClause}"
+        count_rows = self.DatabaseService.ExecuteQuery(count_query, FilterParams if ModeFilter else None)
         total_items = count_rows[0]['Count'] if count_rows else 0
 
         # Get paginated items
@@ -1441,10 +1469,11 @@ class DatabaseManager:
         query = f"""
             SELECT Id, FilePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted, ProcessingMode, ClaimedBy, MediaFileId
             FROM TranscodeQueue
+            {WhereClause}
             ORDER BY {sort_col} {order}, DateAdded ASC
             LIMIT %s OFFSET %s
         """
-        rows = self.DatabaseService.ExecuteQuery(query, (PageSize, offset))
+        rows = self.DatabaseService.ExecuteQuery(query, FilterParams + (PageSize, offset))
 
         queue_items = []
         for row in rows:
@@ -1667,15 +1696,18 @@ class DatabaseManager:
             try:
                 cursor = connection.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
+                # Transcode capability claims only TRUE transcode work --
+                # ProcessingMode IN (NULL, 'Transcode'). Remux-class modes
+                # (Remux/Quick/AudioFix) and SubtitleFix go to their own
+                # capability pollers (BUG-0006, 2026-05-18).
                 if AcceptsInterlaced:
-                    # Accept all files except remux
                     query = """
                         UPDATE TranscodeQueue
                         SET Status = 'Running', ClaimedBy = %s, ClaimedAt = NOW(), DateStarted = NOW()
                         WHERE Id = (
                             SELECT Id FROM TranscodeQueue
                             WHERE Status = 'Pending'
-                              AND (ProcessingMode IS NULL OR ProcessingMode != 'Remux')
+                              AND (ProcessingMode IS NULL OR ProcessingMode = 'Transcode')
                             ORDER BY Priority DESC, DateAdded ASC
                             LIMIT 1
                             FOR UPDATE SKIP LOCKED
@@ -1692,7 +1724,7 @@ class DatabaseManager:
                             SELECT tq.Id FROM TranscodeQueue tq
                             JOIN MediaFiles mf ON tq.MediaFileId = mf.Id
                             WHERE tq.Status = 'Pending'
-                              AND (tq.ProcessingMode IS NULL OR tq.ProcessingMode != 'Remux')
+                              AND (tq.ProcessingMode IS NULL OR tq.ProcessingMode = 'Transcode')
                               AND (mf.IsInterlaced IS NULL OR mf.IsInterlaced = '0')
                             ORDER BY tq.Priority DESC, tq.DateAdded ASC
                             LIMIT 1
@@ -1731,8 +1763,12 @@ class DatabaseManager:
             return None
 
     def ClaimNextPendingRemuxJob(self, WorkerName: str) -> Optional[TranscodeQueueModel]:
-        """Atomically claim the next pending remux job using SELECT FOR UPDATE SKIP LOCKED.
-        Only claims jobs with ProcessingMode = 'Remux'."""
+        """Atomically claim the next pending Remux-class job using SELECT FOR UPDATE SKIP LOCKED.
+
+        Claims ProcessingMode IN ('Remux', 'Quick', 'AudioFix') -- all three
+        dispatch to BuildRemuxCommand and live on the I/O-bound side of the
+        capability split (BUG-0006 fix, 2026-05-18).
+        """
         try:
             import psycopg2.extras
             connection = self.DatabaseService.GetConnection()
@@ -1745,7 +1781,7 @@ class DatabaseManager:
                     WHERE Id = (
                         SELECT Id FROM TranscodeQueue
                         WHERE Status = 'Pending'
-                          AND ProcessingMode = 'Remux'
+                          AND ProcessingMode IN ('Remux', 'Quick', 'AudioFix')
                         ORDER BY Priority DESC, DateAdded ASC
                         LIMIT 1
                         FOR UPDATE SKIP LOCKED

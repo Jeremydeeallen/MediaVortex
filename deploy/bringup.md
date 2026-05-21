@@ -11,7 +11,14 @@ Pick the OS family, check prerequisites, run one command, verify.
 
 ## 2. Prerequisites (one-time per host)
 
-**Linux** -- host in `infrastructure/terraform/inventory.toml`; compose template at `deploy/compose-templates/<friendly>.yml`; root SSH from dev workstation; Docker CE installed; NFS mounts `/mnt/{media_tv,movies,xxx}` non-empty; `/staging`; DB reachable on `10.0.0.15:5432`. For LXC use the Terraform module (`infrastructure/terraform/mediavortex-workers/`); for bare-metal the bootstrap is currently manual (KNOWN-ISSUES tracks codifying it).
+The `infrastructure` repo (`https://github.com/TheAdroitDBA/infrastructure`) is the **single source of truth** for host inventory, mount specifications, and bootstrap automation. Edit `infrastructure/terraform/inventory.toml` first; the steps below consume it.
+
+**Linux** -- host in `infrastructure/terraform/inventory.toml`; compose template at `deploy/compose-templates/<friendly>.yml`; root SSH from dev workstation; DB reachable on `10.0.0.15:5432`. Bringup splits by host shape:
+
+- **LXC (Larry CT 218)**: provisioned by `infrastructure/terraform/mediavortex-workers/`, which reads `bind_mounts` from `inventory.toml` via `infrastructure/terraform/inventory-query.py`. `terraform apply` installs everything (rootfs, mounts, Docker, NFS).
+- **Bare-metal (wakko, dot)**: run `py infrastructure/terraform/mediavortex-bare-metal-bootstrap.py --host <friendly>` first. The bootstrap reads `fstab_mounts` from `inventory.toml` and idempotently installs `nfs-common` + Docker CE, applies the managed-block in `/etc/fstab`, creates `/staging` + `/opt/mediavortex` + every mountpoint, and runs `mount -a`. Re-running is a no-op.
+
+After the host-shape step, `/mnt/{media_tv,movies,xxx}` are mounted, Docker is installed, `/staging` exists, and `deploy-linux-worker.py` will pass pre-flight.
 
 **Windows** -- host onboarded per `infrastructure/docs/features/windows-worker-deploy.md`; OpenSSH Server reachable; Python 3.12+ installed; SMB creds in Vaultwarden (`homelab/brain/cifs/media`, `homelab/synology/cifs/jallen11`).
 

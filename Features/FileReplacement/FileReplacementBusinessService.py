@@ -211,6 +211,7 @@ class FileReplacementBusinessService:
 
             replacement_result = self._ProcessCompleteFileReplacement(
                 OriginalPath, TranscodedPath, OriginalPath,
+                FFmpegCommand=getattr(transcode_attempt, 'FFpmpegCommand', None),
             )
 
             if replacement_result.get('Success', False):
@@ -354,7 +355,7 @@ class FileReplacementBusinessService:
             )
             return {'Success': False, 'ErrorMessage': str(e)}
 
-    def _ProcessCompleteFileReplacement(self, OriginalFilePath: str, TranscodedFilePath: str, NetworkOriginalPath: str = None) -> Dict[str, Any]:
+    def _ProcessCompleteFileReplacement(self, OriginalFilePath: str, TranscodedFilePath: str, NetworkOriginalPath: str = None, FFmpegCommand: Optional[str] = None) -> Dict[str, Any]:
         """Finalize a transcode by renaming the `.inprogress` staged file to its
         final name, updating MediaFiles, and deleting the original source.
 
@@ -454,6 +455,22 @@ class FileReplacementBusinessService:
                 StepsCompleted.append("Updated MediaFiles table")
                 RecomputeMediaFileId = UpdateResult.get('MediaFileId')
                 if RecomputeMediaFileId:
+                    # Mark audio complete BEFORE recompute so the cascade sees
+                    # fresh state. The just-finished FFmpeg command containing
+                    # `loudnorm` is the signal that this file just went through
+                    # its one-shot normalize pass; subsequent encodes must
+                    # stream-copy audio. See audio-completion.feature.md C12.
+                    try:
+                        from Features.AudioCompletion.AudioCompletionService import AudioCompletionService
+                        if AudioCompletionService.DetectNormalizationInCommand(FFmpegCommand):
+                            if AudioCompletionService.MarkAudioComplete(RecomputeMediaFileId):
+                                StepsCompleted.append("Marked AudioComplete=true (post-normalize)")
+                    except Exception as AudioEx:
+                        LoggingService.LogException(
+                            f"MarkAudioComplete failed for MediaFileId={RecomputeMediaFileId} -- "
+                            f"replacement still succeeded; next admin recompute will reconcile",
+                            AudioEx, "FileReplacementBusinessService", "_ProcessCompleteFileReplacement"
+                        )
                     try:
                         from Features.TranscodeQueue.QueueManagementBusinessService import QueueManagementBusinessService
                         Updated = QueueManagementBusinessService().RecomputeForFiles([RecomputeMediaFileId])
