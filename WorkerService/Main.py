@@ -53,7 +53,6 @@ class WorkerServiceApp:
             Platform=self.WorkerPlatform,
             FFmpegPath=self.WorkerConfig.get('FFmpegPath') or self.WorkerConfig.get('ffmpegpath'),
             FFprobePath=self.WorkerConfig.get('FFprobePath') or self.WorkerConfig.get('ffprobepath'),
-            StagingDirectory=self.WorkerConfig.get('StagingDirectory') or self.WorkerConfig.get('stagingdirectory'),
             ShareMappings=self.WorkerConfig.get('ShareMappings') or {}
         )
         LoggingService.LogInfo(f"WorkerContext initialized for {self.WorkerName}", "WorkerService", "__init__")
@@ -229,8 +228,7 @@ class WorkerServiceApp:
             Config = self.DatabaseManager.GetWorkerConfig(self.WorkerName)
             if Config:
                 LoggingService.LogInfo(
-                    f"Worker config loaded: FFmpegPath={Config.get('FFmpegPath') or Config.get('ffmpegpath') or '(default)'}, "
-                    f"StagingDirectory={Config.get('StagingDirectory') or Config.get('stagingdirectory') or '(default)'}",
+                    f"Worker config loaded: FFmpegPath={Config.get('FFmpegPath') or Config.get('ffmpegpath') or '(default)'}",
                     "WorkerService", "_RegisterAndLoadWorkerConfig"
                 )
                 return Config

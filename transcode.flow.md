@@ -226,28 +226,22 @@ Rationale: ordering by raw size (the legacy behavior) put already-efficient AV1 
   10. Monitor progress (frames / total_frames), update TranscodeProgress
   11. On completion: record TranscodeAttempt with size reduction, duration, command
 
-**File staging (controlled by `TranscodeFileMode` SystemSetting):**
-- **InPlace** (default): FFmpeg reads directly from the network path. On the primary machine this is the raw DB path (e.g. `T:\ShowName\file.mkv`). On remote workers, `PathTranslationService.ToLocalPath()` converts to the local mount (e.g. `/mnt/media/ShowName/file.mkv`).
-- **CopyLocal**: copies source to `C:\MediaVortex\Source\{FileName}` before transcoding (legacy behavior). Useful if network is unreliable or for local-only files.
-- **LocalStaging**: copies source from NFS to the worker's local disk (`/staging/{WorkerName}/`), FFmpeg reads and writes entirely on local storage, then copies the output back to NFS `StagingDirectory` and deletes local files. Eliminates NFS I/O bottleneck for CPU-bound transcodes. Crash recovery skips the source copy if the local file already exists. `TemporaryFilePaths` stores canonical NFS paths so downstream stages (VMAF, FileReplacement) are unaware of local staging.
-- Output writes to the worker's configured `StagingDirectory` (from Workers table). Defaults to `C:\MediaVortex\` if not configured. In LocalStaging mode, output goes to local disk first, then is copied to StagingDirectory.
-- Setting is read per-job via `GetTranscodeFileMode()` -> `SystemSettingsRepository.GetSystemSetting('TranscodeFileMode')`.
-- To change: `POST /api/SystemSettings/TranscodeFileMode` with `{"Value": "LocalStaging"}`, `"CopyLocal"`, or `"InPlace"`.
+**File staging (in-place, no copy step):**
+- FFmpeg reads directly from the network mount. On the primary machine this is the raw DB path (e.g. `T:\ShowName\file.mkv`). On remote workers, `PathTranslationService.ToLocalPath()` converts to the local mount (e.g. `/mnt/media_tv/ShowName/file.mkv`).
+- FFmpeg writes the encoded output as `<basename>-mv.mp4.inprogress` **next to the source**. `FileReplacement` is the only stage that mutates the source location: it renames `-mv.mp4.inprogress` → `-mv.mp4` and deletes the original.
+- No worker-local scratch dir, no `StagingDirectory` column, no copy-back step. See `Features/FileReplacement/transcoded-output-placement.feature.md` for the contract.
 
 **Path handling for distributed workers:**
 - DB stores all paths in canonical (Windows) format: `T:\ShowName\file.mkv`
-- `PathTranslationService` converts canonical <-> local using `ShareMountPrefix` and `ShareCanonicalPrefix` from Workers table
+- `PathTranslationService` converts canonical <-> local using `ShareMountPrefix` / `ShareCanonicalPrefix` from Workers + WorkerShareMappings rows
 - Input paths: translated FROM canonical TO local before FFmpeg reads them
 - Output paths: translated FROM local BACK TO canonical before storing in `TemporaryFilePaths`
-- This ensures VMAF and FileReplacement (running on the primary machine) can always find files via the canonical `T:\` path
-- `StagingDirectory` MUST be on the network share so all machines can access output files
+- This ensures VMAF and FileReplacement on any worker can always find files via the canonical `T:\` path
 
 **Key files for file staging:**
-- `Features/TranscodeJob/ProcessTranscodeQueueService.py` -- `SetupFilePreparation()` reads setting, translates paths, returns effective input path
-- `Features/TranscodeJob/TranscodingFileManagerService.py` -- `CopyFile()` uses `shutil.copy2()`, `SetupTranscodingDirectories(OutputDirectory)` creates directories
-- `Services/CommandBuilderService.py` -- receives `InputPath`, `FFmpegPath`, `OutputDirectory` from TranscodingSettings, passes to `CommandBuilder`
-- `Models/CommandBuilder.py` -- uses `CommandData['InputPath']` for FFmpeg `-i`, `CommandData['FFmpegPath']` for executable, `CommandData['OutputDirectory']` for output location
-- `Core/Services/PathTranslationService.py` -- `ToLocalPath()` and `ToCanonicalPath()` for cross-platform translation
+- `Features/TranscodeJob/ProcessTranscodeQueueService.py` -- `SetupFilePreparation()` resolves the worker-local source path
+- `Models/CommandBuilder.py` -- `BuildFFmpegCommand` places the `.inprogress` output next to the source
+- `Core/Services/PathTranslationService.py` -- `ToLocalPath()` / `ToCanonicalPath()` for cross-platform translation
 
 **FFmpeg command structure:**
 - Executable: from `Workers.FFmpegPath` (falls back to `FFmpegMaster\bin\ffmpeg.exe`)
@@ -255,7 +249,7 @@ Rationale: ordering by raw size (the legacy behavior) put already-efficient AV1 
 - Preset: 6-8 (from profile)
 - Quality: CRF from ProfileThresholds.Quality (adaptive if retranscode)
 - Film grain: from profile
-- Output: `{StagingDirectory}\{filename}_{resolution}.mp4`
+- Output: `<source_dir>/<basename>-mv.mp4.inprogress` (renamed to drop `.inprogress` by FileReplacement)
 
 **Tables written:** TranscodeAttempt (new), TranscodeFiles (aggregated), TranscodeProgress (real-time), ActiveJobs (with WorkerName), MediaFilesArchive, TranscodeQueue (status -> Running, ClaimedBy -> WorkerName), TemporaryFilePaths (canonical paths)
 
@@ -311,7 +305,7 @@ The disposition decision is **the only post-transcode branch point**. It reads f
 |---|---|
 | `Replace` | FileReplacement proceeds: archive original, atomic rename, re-probe, update MediaFiles, settle `.orig` per `KeepSource`. |
 | `BypassReplace` | Same as `Replace` mechanically -- the only difference is the audit reason. The file IS replaced; operator can query why VMAF was skipped. |
-| `NoReplace` | Both files left in place. Staged transcoded output retained on the worker's `StagingDirectory` for operator inspection / manual replay. The TranscodeAttempt is final (no requeue). |
+| `NoReplace` | Both files left in place. The `.inprogress` output sits next to the source for operator inspection / manual replay. The TranscodeAttempt is final (no requeue). |
 | `Requeue` | Staged file deleted. ProblemFiles row created with `ErrorType='VmafBelowMin'` and the VMAF score / min-threshold in the message. Operator action required: choose a profile with a lower CRF or accept the result. **Not auto-creating a new TranscodeQueue row** -- TranscodeQueue has no CRF column, so a new row would re-run at the same CRF and reproduce the low VMAF. Real auto-requeue requires a schema change (a `QualityOverride` column or a stricter sibling profile) -- tracked separately. |
 | `Discard` | Staged file deleted. `MediaFiles.LastTranscodeOutcome='NoSavings'` set when reason is NoSavings; queue's no-savings filter prevents re-queueing. |
 | `Pending` | No action yet. The TranscodeAttempt's disposition is re-evaluated when the VMAF result lands. The worker's VMAF processing loop calls `DecidePostTranscodeDisposition` again after writing the score. |
@@ -370,17 +364,17 @@ ORDER BY DispositionDecidedAt DESC;
   8. Settle `.orig` per `ProfileThresholds.KeepSource` (delete or rename to `<originalbasename>.old.<orig-ext>`). FileScanning skips `.old.<ext>` artifacts.
 
 **Discard path:**
-- Delete staged transcoded file from worker's `StagingDirectory`
+- Delete the `.inprogress` output next to the source
 - When reason is `NoSavings`: `MediaFiles.LastTranscodeOutcome='NoSavings'`
 
 **Requeue path:**
-- Delete staged transcoded file
+- Delete the `.inprogress` output
 - `AdaptiveQualityService.CalculateAdjustedCRF(previous_crf, vmaf_score)` -> new CRF
 - If adjusted CRF >= 15 floor: insert new TranscodeQueue row with the lower CRF
 - Else: log to ProblemFiles (file cannot be improved further)
 
 **NoReplace path:**
-- No filesystem changes. Staged file remains in `StagingDirectory` until operator manually clears or `Scripts/SQLScripts/CleanStagingOlderThan.py` runs.
+- No filesystem changes. The `.inprogress` output sits next to the source until an operator clears it manually.
 
 **Tables written:** MediaFiles (new metadata on Replace/BypassReplace), MediaFilesArchive (snapshot before replace), TranscodeAttempts (FileReplaced, FileReplacedDate), TranscodeQueue (new row on Requeue), ProblemFiles (CRF floor breach), QualityTestQueue (cleared on disposition commit).
 
@@ -438,7 +432,6 @@ Runtime-configurable key-value store in PostgreSQL. Used for transcode file mode
 - `DELETE /api/SystemSettings/<Key>` -- remove a setting
 
 **Transcode-relevant settings:**
-- `TranscodeFileMode` -- `InPlace` (default) or `CopyLocal`. Controls whether source files are copied locally before transcoding.
 - `FFmpegPath`, `FFprobePath` -- tool locations
 - `ExcludedDirectories` -- comma-separated list of directories to skip during scanning
 
@@ -523,7 +516,7 @@ Each service registers in `ServiceStatus` table with ProcessId, enabling cross-s
 In distributed mode, each WorkerService instance:
 1. Calls `RegisterWorker(WorkerName)` on startup (UPSERT into Workers table)
 2. Updates `Workers.LastHeartbeat` every 30 seconds via HealthCheckLoop
-3. Loads its config (FFmpegPath, StagingDirectory, ShareMountPrefix, MaxConcurrentJobs) from Workers row
+3. Loads its config (FFmpegPath, ShareMountPrefix, MaxConcurrentJobs) from Workers row
 4. Uses `ClaimNextPendingTranscodeJob(WorkerName)` for atomic job claiming with `SKIP LOCKED`
 
 ---
@@ -588,7 +581,7 @@ End-to-end trace from worker installation through finished product. Every functi
 | 4.1 | Launch FFmpeg | `ExecuteTranscoding()` -> `VideoTranscodingService.StartTranscoding()` | -- | FFmpeg subprocess spawned |
 | 4.2 | Track progress | `VideoTranscodingService` parses stderr | `INSERT/UPDATE TranscodeProgress (TranscodeAttemptId, CurrentFrame, TotalFrames, Percent, Speed, FPS, ...)` | Progress updated in real-time |
 | 4.3 | Heartbeat continues | `HealthCheckLoop()` (background thread) | `UPDATE Workers SET LastHeartbeat = NOW()` | Proves worker is alive to other workers |
-| 4.4 | FFmpeg completes | `VideoTranscodingService` returns result | -- | Output file exists in StagingDirectory |
+| 4.4 | FFmpeg completes | `VideoTranscodingService` returns result | -- | `.inprogress` output file exists next to source |
 
 ### Phase 5: Post-Transcode Handling
 

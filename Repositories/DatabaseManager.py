@@ -1847,7 +1847,7 @@ class DatabaseManager:
             return None
 
     def RegisterWorker(self, WorkerName: str, Platform: str = 'windows', FFmpegPath: str = None,
-                       FFprobePath: str = None, StagingDirectory: str = None,
+                       FFprobePath: str = None,
                        ShareMountPrefix: str = None, MaxConcurrentJobs: int = 1,
                        MaxCpuThreads: int = None, Version: str = None,
                        BuildInfo: str = None) -> bool:
@@ -1856,16 +1856,15 @@ class DatabaseManager:
         register cleanly with NULL values that the UI renders as "unknown"."""
         try:
             query = """
-                INSERT INTO Workers (WorkerName, Platform, FFmpegPath, FFprobePath, StagingDirectory,
+                INSERT INTO Workers (WorkerName, Platform, FFmpegPath, FFprobePath,
                                      ShareMountPrefix, MaxConcurrentJobs, MaxCpuThreads,
                                      Version, BuildInfo,
                                      Status, LastHeartbeat, RegisteredAt)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'Paused', NOW(), NOW())
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'Paused', NOW(), NOW())
                 ON CONFLICT (WorkerName) DO UPDATE SET
                     Platform = EXCLUDED.Platform,
                     FFmpegPath = COALESCE(EXCLUDED.FFmpegPath, Workers.FFmpegPath),
                     FFprobePath = COALESCE(EXCLUDED.FFprobePath, Workers.FFprobePath),
-                    StagingDirectory = COALESCE(EXCLUDED.StagingDirectory, Workers.StagingDirectory),
                     ShareMountPrefix = COALESCE(EXCLUDED.ShareMountPrefix, Workers.ShareMountPrefix),
                     MaxConcurrentJobs = EXCLUDED.MaxConcurrentJobs,
                     MaxCpuThreads = COALESCE(EXCLUDED.MaxCpuThreads, Workers.MaxCpuThreads),
@@ -1875,7 +1874,7 @@ class DatabaseManager:
             """
             self.DatabaseService.ExecuteNonQuery(query, (
                 WorkerName, Platform, FFmpegPath, FFprobePath,
-                StagingDirectory, ShareMountPrefix, MaxConcurrentJobs, MaxCpuThreads,
+                ShareMountPrefix, MaxConcurrentJobs, MaxCpuThreads,
                 Version, BuildInfo,
             ))
             return True
@@ -1897,7 +1896,7 @@ class DatabaseManager:
         """Get worker configuration from the Workers table, including share mappings."""
         try:
             query = """
-                SELECT WorkerName, Platform, FFmpegPath, FFprobePath, StagingDirectory,
+                SELECT WorkerName, Platform, FFmpegPath, FFprobePath,
                        ShareMountPrefix, ShareCanonicalPrefix, MaxConcurrentJobs, Status,
                        MaxCpuThreads, AcceptsInterlaced, QualityTestEnabled,
                        MaxConcurrentTranscodeJobs, MaxConcurrentQualityTestJobs,

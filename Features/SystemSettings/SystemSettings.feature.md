@@ -12,7 +12,7 @@ Global configuration management for the application. Stores key-value settings t
 4. Continuous scan interval is configurable (controls how often background scanning runs).
 5. Excluded directories can be added and removed (directories to skip during scanning).
 6. Jellyfin connection settings (host, SSH port, user, key path, API port, API key) are configurable.
-7. TranscodeOutputMode (InPlace or Staging) controls where transcoded files are written.
+7. **[SUPERSEDED 2026-05-21]** The legacy `TranscodeOutputMode` / `TranscodeFileMode` settings were deleted with the LocalStaging retirement (`Scripts/SQLScripts/drop_local_staging_2026_05_21.py`). In-place output (next to source) is the only supported mode; see `Features/FileReplacement/transcoded-output-placement.feature.md`.
 8. **[SUPERSEDED 2026-05-16]** The legacy `SystemSettings.QualityTestEnabled` global row was deleted by the post-transcode disposition migration (`Scripts/SQLScripts/AddPostTranscodeDisposition.py`); the equivalent operator control now lives on `PostTranscodeGateConfig.QualityTestEnabled` and is owned by `post-transcode-disposition.feature.md` criterion 26. This criterion remains here only as a redirect.
 9. All settings persist to the SystemSettings table as key-value pairs.
 10. The /settings page provides the UI for all configuration.

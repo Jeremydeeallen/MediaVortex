@@ -374,8 +374,8 @@ class QualityTestingBusinessService:
                         # separately, not in scope for this fix.
                         self._HandleRequeueDisposition(ta_id, DispositionResult.AuditPayload)
                     # Disposition='NoReplace' / 'Discard' -- the audit row is
-                    # already persisted; staged file remains in StagingDirectory
-                    # for operator inspection.
+                    # already persisted; the .inprogress file remains next to
+                    # the source for operator inspection.
 
                 return {"Success": True, "VMAFScore": vmaf_score, "FFmpegCommand": FFmpegCommandString, "AutoReplaceTriggered": AutoReplaceTriggered}
             else:

@@ -16,7 +16,6 @@ x-worker: &worker-base
     - /mnt/media_tv:/mnt/media_tv
     - /mnt/movies:/mnt/movies
     - /mnt/xxx:/mnt/xxx
-    - /staging:/staging
 
 services:
   worker-1:

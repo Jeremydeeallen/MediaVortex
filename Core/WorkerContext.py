@@ -1,6 +1,6 @@
 """Process-level singleton for per-worker configuration.
 
-Set once at process startup (TranscodeService, QualityTestService, WebService).
+Set once at process startup (WorkerService, WebService).
 Read anywhere via WorkerContext.Current(). Returns None if not initialized,
 allowing callers to fall back to SystemSettings gracefully.
 """
@@ -12,20 +12,17 @@ class WorkerContext:
     _Instance = None
 
     def __init__(self, WorkerName: str, Platform: str, FFmpegPath: str,
-                 FFprobePath: str, StagingDirectory: str, ShareMappings: dict,
-                 PathTranslation):
+                 FFprobePath: str, ShareMappings: dict, PathTranslation):
         self.WorkerName = WorkerName
         self.Platform = Platform
         self.FFmpegPath = FFmpegPath
         self.FFprobePath = FFprobePath
-        self.StagingDirectory = StagingDirectory
         self.ShareMappings = ShareMappings
         self.PathTranslation = PathTranslation
 
     @classmethod
     def Initialize(cls, WorkerName: str, Platform: str, FFmpegPath: str = None,
-                   FFprobePath: str = None, StagingDirectory: str = None,
-                   ShareMappings: dict = None):
+                   FFprobePath: str = None, ShareMappings: dict = None):
         """Set once at process startup. Raises if called twice."""
         if cls._Instance is not None:
             raise RuntimeError("WorkerContext already initialized")
@@ -34,7 +31,7 @@ class WorkerContext:
             from Core.Services.PathTranslationService import PathTranslationService
             Translation = PathTranslationService(MountMap=ShareMappings)
         cls._Instance = cls(WorkerName, Platform, FFmpegPath, FFprobePath,
-                            StagingDirectory, ShareMappings or {}, Translation)
+                            ShareMappings or {}, Translation)
         return cls._Instance
 
     @classmethod

@@ -19,8 +19,7 @@ Executes FFmpeg transcode jobs from the queue, tracks progress, and handles resu
 - Worker isolation: all destructive operations (shutdown cleanup, crash recovery, stuck detection, stop) are scoped to the calling worker via ClaimedBy/WorkerName. No worker may reset, kill, or interfere with another worker's jobs.
 - Interlaced routing: workers with AcceptsInterlaced=FALSE skip interlaced files in the claim query. Interlaced files remain Pending until a capable worker claims them.
 - Conditional deinterlacing: yadif is applied by CommandBuilder only when MediaFile.IsInterlaced=TRUE, not based on profile settings. Progressive files never get yadif regardless of profile.
-- True in-place output: transcoded file is written to the same directory as the source file (not a staging directory). Output filename includes target resolution (e.g. 480p) so it coexists with the original until replacement.
-- Output location mode: SystemSettings.TranscodeOutputMode controls output placement. "InPlace" = same directory as source (default). "Staging" = worker's StagingDirectory or SystemSettings.StagingDirectory.
+- True in-place output: transcoded file is written to the same directory as the source file. Output filename ends in `-mv.mp4.inprogress` so it coexists with the original until FileReplacement renames it and swaps the source out. There is no staging directory and no `TranscodeOutputMode` setting; in-place is the only mode.
 - VMAF quality test toggle: SystemSettings.QualityTestEnabled (global on/off, default OFF). Workers.QualityTestEnabled (per-worker override, NULL = use global). TranscodeAttempts.QualityTestRequired is set from these at job creation time, not hardcoded.
 - Per-worker FFprobe: Workers.FFprobePath flows through ProcessTranscodeQueueService -> CommandBuilderService -> FFmpegAnalysisService -> FFmpegService. Audio stream selection (English preferred) uses the worker's local FFprobe, not the global SystemSettings path.
 - [FIXED] Progress display must not depend on TranscodeQueue: any job with an active TranscodeProgress record and TranscodeAttempts.Success IS NULL must appear in the progress UI, regardless of whether a TranscodeQueue row exists.
@@ -37,8 +36,7 @@ Executes FFmpeg transcode jobs from the queue, tracks progress, and handles resu
 - [x] Fix: worker isolation -- SignalHandler, CrashRecovery, StuckJobDetector, QueueManagement scoped by WorkerName
 - [x] Interlaced routing: AcceptsInterlaced flag on Workers, claim query filters by IsInterlaced
 - [x] Conditional deinterlacing: CommandBuilder applies yadif based on MediaFile.IsInterlaced, not profile
-- [x] True in-place output: CommandBuilder uses source file directory instead of OutputDirectory
-- [x] Output location mode: add TranscodeOutputMode setting, respect InPlace vs Staging
+- [x] True in-place output: CommandBuilder writes the `.inprogress` output next to the source. The legacy `TranscodeOutputMode` / `TranscodeFileMode` settings + `Workers.StagingDirectory` column were removed 2026-05-21 once LocalStaging was retired.
 - [x] VMAF toggle: add QualityTestEnabled global setting (default OFF) and per-worker column
 - [x] Per-worker FFprobe: WorkerContext singleton provides FFprobePath to FFmpegService automatically, no explicit threading needed
 - [ ] Fix: concurrent job progress isolation (see KNOWN-ISSUES.md)

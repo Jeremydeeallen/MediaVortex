@@ -80,8 +80,8 @@ single-Remux-pass keeps the worker's file-open count to one.
 
 ## Output Location
 
-Same as today: `Workers.StagingDirectory` (or local staging if active),
-then FileReplacement swaps. No new output paths.
+In-place: the `.inprogress` file lands next to the source, then
+FileReplacement renames it and swaps the original out. No new output paths.
 
 ## State Tables Touched
 

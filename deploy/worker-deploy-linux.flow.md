@@ -24,7 +24,7 @@ When adding a new Linux worker host:
 3. Add a row to the table above.
 4. Provision the host:
    - **LXC**: `terraform -chdir=infrastructure/terraform/mediavortex-workers apply` (reads `bind_mounts` via `inventory-query.py`).
-   - **Bare-metal**: `py infrastructure/terraform/mediavortex-bare-metal-bootstrap.py --host <friendly>` (idempotent: installs `nfs-common` + Docker CE, reconciles `/etc/fstab` managed block from `fstab_mounts`, creates `/staging` + `/opt/mediavortex` + mountpoints, runs `mount -a`).
+   - **Bare-metal**: `py infrastructure/terraform/mediavortex-bare-metal-bootstrap.py --host <friendly>` (idempotent: installs `nfs-common` + Docker CE, reconciles `/etc/fstab` managed block from `fstab_mounts`, creates `/opt/mediavortex` + mountpoints, runs `mount -a`).
 5. Run `py deploy/deploy-linux-worker.py <friendly>`.
 
 ## Pre-Flight Checks

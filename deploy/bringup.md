@@ -16,9 +16,9 @@ The `infrastructure` repo (`https://github.com/TheAdroitDBA/infrastructure`) is 
 **Linux** -- host in `infrastructure/terraform/inventory.toml`; compose template at `deploy/compose-templates/<friendly>.yml`; root SSH from dev workstation; DB reachable on `10.0.0.15:5432`. Bringup splits by host shape:
 
 - **LXC (Larry CT 218)**: provisioned by `infrastructure/terraform/mediavortex-workers/`, which reads `bind_mounts` from `inventory.toml` via `infrastructure/terraform/inventory-query.py`. `terraform apply` installs everything (rootfs, mounts, Docker, NFS).
-- **Bare-metal (wakko, dot)**: run `py infrastructure/terraform/mediavortex-bare-metal-bootstrap.py --host <friendly>` first. The bootstrap reads `fstab_mounts` from `inventory.toml` and idempotently installs `nfs-common` + Docker CE, applies the managed-block in `/etc/fstab`, creates `/staging` + `/opt/mediavortex` + every mountpoint, and runs `mount -a`. Re-running is a no-op.
+- **Bare-metal (wakko, dot)**: run `py infrastructure/terraform/mediavortex-bare-metal-bootstrap.py --host <friendly>` first. The bootstrap reads `fstab_mounts` from `inventory.toml` and idempotently installs `nfs-common` + Docker CE, applies the managed-block in `/etc/fstab`, creates `/opt/mediavortex` + every mountpoint, and runs `mount -a`. Re-running is a no-op.
 
-After the host-shape step, `/mnt/{media_tv,movies,xxx}` are mounted, Docker is installed, `/staging` exists, and `deploy-linux-worker.py` will pass pre-flight.
+After the host-shape step, `/mnt/{media_tv,movies,xxx}` are mounted, Docker is installed, and `deploy-linux-worker.py` will pass pre-flight.
 
 **Windows** -- host onboarded per `infrastructure/docs/features/windows-worker-deploy.md`; OpenSSH Server reachable; Python 3.12+ installed; SMB creds in Vaultwarden (`homelab/brain/cifs/media`, `homelab/synology/cifs/jallen11`).
 
