@@ -83,7 +83,7 @@ inspection) becomes a single page operators can bookmark.
   - Resolve source + transcoded canonical paths from `TemporaryFilePaths` (if attempt is unfinished/Pending), else from `TranscodeAttempts` (if final), else from `MediaFiles` (after replacement)
   - Apply `WorkerContext.PathTranslation` to get local paths
   - Generate two stills via FFmpeg at the timestamp (the same recipe I've been using tonight: `-ss <ts> -i <file> -frames:v 1 -y <out.png>`)
-  - Cache stills by content hash + timestamp in a known dir (e.g., `WorkerContext.StagingDirectory/vmaf-compare-cache/` or just a system temp); return URLs
+  - Cache stills by content hash + timestamp in a system temp dir; return URLs
   - Errors -> structured JSON `{Success: false, ErrorMessage: '...'}` (matches existing API shape)
 - [ ] 6. **Backend route** `GET /VmafCompare` (~30 LOC Jinja2 template + Flask handler):
   - Reads `attempt` + `ts` from query string

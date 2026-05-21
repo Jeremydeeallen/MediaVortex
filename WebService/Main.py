@@ -93,7 +93,6 @@ class WebServiceApp:
                 Platform=WorkerPlatform,
                 FFmpegPath=WorkerConfig.get('FFmpegPath') or WorkerConfig.get('ffmpegpath'),
                 FFprobePath=WorkerConfig.get('FFprobePath') or WorkerConfig.get('ffprobepath'),
-                StagingDirectory=WorkerConfig.get('StagingDirectory') or WorkerConfig.get('stagingdirectory'),
                 ShareMappings=WorkerConfig.get('ShareMappings') or {}
             )
             LoggingService.LogInfo(f"WorkerContext initialized for {WorkerName}", "WebService", "__init__")

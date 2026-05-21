@@ -9,7 +9,6 @@ from Core.Models.MediaFileModel import MediaFileModel
 from Core.Models.TranscodeAttemptModel import TranscodeAttemptModel
 from Core.Models.TranscodeFileModel import TranscodeFileModel
 from Repositories.DatabaseManager import DatabaseManager
-from Features.TranscodeJob.TranscodingFileManagerService import TranscodingFileManagerService
 from Models.CommandBuilder import CommandBuilder
 from Features.TranscodeJob.VideoTranscodingService import VideoTranscodingService
 from Services.QueueManagementService import QueueManagementService
@@ -22,7 +21,6 @@ class ProcessTranscodeQueueService:
     """Orchestrates the complete transcoding queue processing workflow using MVVM architecture."""
 
     def __init__(self, DatabaseManagerInstance: DatabaseManager = None,
-                 FileManagerInstance: TranscodingFileManagerService = None,
                  CommandBuilderInstance: CommandBuilder = None,
                  VideoTranscodingInstance: VideoTranscodingService = None,
                  QueueManagementInstance: QueueManagementService = None,
@@ -30,7 +28,6 @@ class ProcessTranscodeQueueService:
                  WorkerName: str = None,
                  WorkerConfig: dict = None):
         self.DatabaseManager = DatabaseManagerInstance or DatabaseManager()
-        self.FileManager = FileManagerInstance or TranscodingFileManagerService()
         self.CommandBuilder = CommandBuilderInstance or CommandBuilder()
         self.VideoTranscoding = VideoTranscodingInstance or VideoTranscodingService()
         self.QueueManagement = QueueManagementInstance or QueueManagementService(DatabaseManagerInstance=self.DatabaseManager)
@@ -49,12 +46,10 @@ class ProcessTranscodeQueueService:
         if Ctx:
             self.FFmpegPath = Ctx.FFmpegPath
             self.FFprobePath = Ctx.FFprobePath
-            self.OutputDirectory = Ctx.StagingDirectory
             self.PathTranslation = Ctx.PathTranslation
         else:
             self.FFmpegPath = self.WorkerConfig.get('FFmpegPath') or self.WorkerConfig.get('ffmpegpath')
             self.FFprobePath = self.WorkerConfig.get('FFprobePath') or self.WorkerConfig.get('ffprobepath')
-            self.OutputDirectory = self.WorkerConfig.get('StagingDirectory') or self.WorkerConfig.get('stagingdirectory')
             self.PathTranslation = None
             MountMap = self.WorkerConfig.get('ShareMappings') or {}
             if MountMap:
@@ -358,8 +353,6 @@ class ProcessTranscodeQueueService:
             return
 
         ActiveJobId = None  # Initialize for error handling
-        LocalStagingSourcePath = None
-        LocalStagingOutputPath = None
         try:
             LoggingService.LogInfo(f"Starting job processing for job ID: {Job.Id}", "ProcessTranscodeQueueService", "ProcessJob")
 
@@ -435,27 +428,16 @@ class ProcessTranscodeQueueService:
                 self.HandleJobFailure(Job, "Failed to get transcoding settings", TranscodeAttemptId, ActiveJobId)
                 return
 
-            # Local staging: override output directory to local disk
-            IsLocalStaging = self.GetTranscodeFileMode() == 'LocalStaging'
-            if IsLocalStaging and not self.OutputDirectory:
-                LoggingService.LogWarning("LocalStaging mode requires StagingDirectory in Workers table. Falling back to InPlace.", "ProcessTranscodeQueueService", "ProcessJob")
-                IsLocalStaging = False
-            if IsLocalStaging:
-                TranscodingSettings['OutputDirectory'] = self.GetLocalStagingDir()
-                TranscodingSettings['TranscodeOutputMode'] = 'Staging'
-
             # Phase 4: Preparing Files (must happen before command building — FFprobe needs the staged file)
             self.UpdateTranscodeProgress(TranscodeAttemptId, "Preparing Files", 0.0, "Preparing files for transcoding...")
 
-            # Step b: Setup directories and optionally copy file
+            # Step b: Setup directories and resolve the source path
             self._LastSetupError = None
             EffectiveInputPath = self.SetupFilePreparation(Job, MediaFile, TranscodeAttemptId)
             if not EffectiveInputPath:
                 Detail = self._LastSetupError or "unknown"
                 self.HandleJobFailure(Job, f"Failed to setup file preparation: {Detail}", TranscodeAttemptId, ActiveJobId)
                 return
-            if IsLocalStaging:
-                LocalStagingSourcePath = EffectiveInputPath
 
             # Phase 5: Building Command
             self.UpdateTranscodeProgress(TranscodeAttemptId, "Building Command", 0.0, "Building FFmpeg command...")
@@ -470,15 +452,11 @@ class ProcessTranscodeQueueService:
             # Extract command and output path from result
             TranscodeCommand = CommandResult['Command']
             OutputPath = CommandResult['OutputPath']
-            if IsLocalStaging:
-                LocalStagingOutputPath = OutputPath
 
             # Create TemporaryFilePaths record with CANONICAL paths (so VMAF/FileReplacement on any machine can find files)
-            # OriginalPath is already canonical (from Job.FilePath in DB)
-            # For local staging, map output to NFS staging dir so downstream stages find the file after copy-back
             CanonicalSourcePath = Job.FilePath  # Already canonical
-            CanonicalOutputPath = self.ComputeCanonicalOutputPath(OutputPath, IsLocalStaging)
-            SrcId, SrcRel, OutId, OutRel = self._ResolveTfpPathParts(Job, OutputPath, IsLocalStaging)
+            CanonicalOutputPath = self.ComputeCanonicalOutputPath(OutputPath)
+            SrcId, SrcRel, OutId, OutRel = self._ResolveTfpPathParts(Job, OutputPath)
             TemporaryFilePathId = self.PrivateCreateTemporaryFilePathRecord(
                 TranscodeAttemptId, Job.FilePath, CanonicalSourcePath, CanonicalOutputPath,
                 SourceStorageRootId=SrcId, SourceRelativePath=SrcRel,
@@ -513,7 +491,6 @@ class ProcessTranscodeQueueService:
             # Step f: Execute transcoding
             TranscodeResult = self.ExecuteTranscoding(Job, TranscodeCommand, TranscodeAttemptId, MediaFile, ActiveJobId)
             if not TranscodeResult.get("Success", False):
-                self.CleanupLocalStagingFiles(LocalStagingSourcePath, LocalStagingOutputPath)
                 self._DeleteInProgressFile(OutputPath)
                 self.HandleJobFailure(Job, f"Transcoding failed: {TranscodeResult.get('ErrorMessage', 'Unknown error')}", TranscodeAttemptId, ActiveJobId)
                 return
@@ -521,21 +498,9 @@ class ProcessTranscodeQueueService:
             # Verify the .inprogress file is a valid media file before any
             # further action (worker-lifecycle.feature.md criterion 7).
             if not self._VerifyInProgressFile(OutputPath):
-                self.CleanupLocalStagingFiles(LocalStagingSourcePath, LocalStagingOutputPath)
                 self._DeleteInProgressFile(OutputPath)
                 self.HandleJobFailure(Job, f"Transcode output failed FFprobe verification: {OutputPath}", TranscodeAttemptId, ActiveJobId)
                 return
-
-            # Local staging: copy output to NFS and clean up local files
-            if IsLocalStaging:
-                self.UpdateTranscodeProgress(TranscodeAttemptId, "Copying Back", 0.0, "Copying output to storage...")
-                NfsCopyPath = self.CopyBackFromLocalStaging(LocalStagingOutputPath)
-                if not NfsCopyPath:
-                    self.CleanupLocalStagingFiles(LocalStagingSourcePath, LocalStagingOutputPath)
-                    self.HandleJobFailure(Job, "Failed to copy output from local staging to NFS storage", TranscodeAttemptId, ActiveJobId)
-                    return
-                TranscodeResult['OutputFilePath'] = NfsCopyPath
-                self.CleanupLocalStagingFiles(LocalStagingSourcePath, LocalStagingOutputPath)
 
             # Phase 7: Finalizing
             self.UpdateTranscodeProgress(TranscodeAttemptId, "Finalizing", 0.0, "Processing results and cleanup...")
@@ -549,7 +514,6 @@ class ProcessTranscodeQueueService:
             LoggingService.LogInfo(f"Completed job processing for job ID: {Job.Id}", "ProcessTranscodeQueueService", "ProcessJob")
 
         except Exception as e:
-            self.CleanupLocalStagingFiles(LocalStagingSourcePath, LocalStagingOutputPath)
             LoggingService.LogException(f"Exception processing job {Job.Id}", e, "ProcessTranscodeQueueService", "ProcessJob")
             self.HandleJobFailure(Job, f"Exception during processing: {str(e)}")
 
@@ -647,8 +611,6 @@ class ProcessTranscodeQueueService:
         Returns the attempt id on encoder success, None on failure. Failures in
         one variant do not block other variants in the same queue row."""
         VariantName = Variant.get('Name', '?')
-        LocalStagingSourcePath = None
-        LocalStagingOutputPath = None
 
         TranscodeAttemptId = self.CreateTranscodeAttempt(Job, None, None, None)
         if not TranscodeAttemptId:
@@ -683,13 +645,6 @@ class ProcessTranscodeQueueService:
         if Variant.get('FilmGrain') is not None:
             Ps['FilmGrain'] = Variant['FilmGrain']
 
-        IsLocalStaging = self.GetTranscodeFileMode() == 'LocalStaging'
-        if IsLocalStaging and not self.OutputDirectory:
-            IsLocalStaging = False
-        if IsLocalStaging:
-            TranscodingSettings['OutputDirectory'] = self.GetLocalStagingDir()
-            TranscodingSettings['TranscodeOutputMode'] = 'Staging'
-
         self.UpdateTranscodeProgress(TranscodeAttemptId, "Preparing Files", 0.0, f"Variant {VariantName}: preparing")
         self._LastSetupError = None
         EffectiveInputPath = self.SetupFilePreparation(Job, MediaFile, TranscodeAttemptId)
@@ -699,8 +654,6 @@ class ProcessTranscodeQueueService:
                 'Success': False, 'ErrorMessage': f'Failed to setup file preparation: {Detail}',
             })
             return None
-        if IsLocalStaging:
-            LocalStagingSourcePath = EffectiveInputPath
 
         self.UpdateTranscodeProgress(TranscodeAttemptId, "Building Command", 0.0, f"Variant {VariantName}: building command")
         TranscodingSettings['InputPath'] = EffectiveInputPath
@@ -718,12 +671,10 @@ class ProcessTranscodeQueueService:
             CommandResult['Command'] = CommandResult['Command'].replace(OriginalOutputPath, VariantOutputPath)
         TranscodeCommand = CommandResult['Command']
         OutputPath = CommandResult['OutputPath']
-        if IsLocalStaging:
-            LocalStagingOutputPath = OutputPath
 
         CanonicalSourcePath = Job.FilePath
-        CanonicalOutputPath = self.ComputeCanonicalOutputPath(OutputPath, IsLocalStaging)
-        SrcId, SrcRel, OutId, OutRel = self._ResolveTfpPathParts(Job, OutputPath, IsLocalStaging)
+        CanonicalOutputPath = self.ComputeCanonicalOutputPath(OutputPath)
+        SrcId, SrcRel, OutId, OutRel = self._ResolveTfpPathParts(Job, OutputPath)
         self.PrivateCreateTemporaryFilePathRecord(
             TranscodeAttemptId, Job.FilePath, CanonicalSourcePath, CanonicalOutputPath,
             SourceStorageRootId=SrcId, SourceRelativePath=SrcRel,
@@ -752,25 +703,11 @@ class ProcessTranscodeQueueService:
         self.UpdateTranscodeProgress(TranscodeAttemptId, "Starting Transcode", 0.0, f"Variant {VariantName}: encoding")
         TranscodeResult = self.ExecuteTranscoding(Job, TranscodeCommand, TranscodeAttemptId, MediaFile, ActiveJobId)
         if not TranscodeResult.get("Success", False):
-            if IsLocalStaging:
-                self.CleanupLocalStagingFiles(LocalStagingSourcePath, LocalStagingOutputPath)
             self.DatabaseManager.UpdateTranscodeAttempt(TranscodeAttemptId, {
                 'Success': False,
                 'ErrorMessage': TranscodeResult.get('ErrorMessage', 'Encode failed'),
             })
             return None
-
-        if IsLocalStaging:
-            self.UpdateTranscodeProgress(TranscodeAttemptId, "Copying Back", 0.0, f"Variant {VariantName}: copy-back")
-            NfsCopyPath = self.CopyBackFromLocalStaging(LocalStagingOutputPath)
-            if not NfsCopyPath:
-                self.CleanupLocalStagingFiles(LocalStagingSourcePath, LocalStagingOutputPath)
-                self.DatabaseManager.UpdateTranscodeAttempt(TranscodeAttemptId, {
-                    'Success': False, 'ErrorMessage': 'Copy-back from staging failed',
-                })
-                return None
-            TranscodeResult['OutputFilePath'] = NfsCopyPath
-            self.CleanupLocalStagingFiles(LocalStagingSourcePath, LocalStagingOutputPath)
 
         self.UpdateTranscodeProgress(TranscodeAttemptId, "Finalizing", 0.0, f"Variant {VariantName}: queuing VMAF")
         self.HandleTranscodingResult(Job, TranscodeResult, TranscodeAttemptId, ActiveJobId)
@@ -859,7 +796,7 @@ class ProcessTranscodeQueueService:
         """Process a remux job using the `.inprogress` output pattern.
 
         Sequence:
-          1. SetupFilePreparation -- handle InPlace / LocalStaging staging
+          1. SetupFilePreparation -- resolve source path for this worker
           2. BuildRemuxCommand with InputPath=original, OutputPath=<basename>-mv.mp4.inprogress
           3. ExecuteTranscoding -- FFmpeg writes the .inprogress file
           4. On success: FFprobe-verify the .inprogress file
@@ -872,8 +809,6 @@ class ProcessTranscodeQueueService:
         """
         ActiveJobId = None
         TranscodeAttemptId = None
-        LocalStagingSourcePath = None
-        LocalStagingOutputPath = None
         try:
             LoggingService.LogInfo(f"Starting remux job processing for job ID: {Job.Id}", "ProcessTranscodeQueueService", "ProcessRemuxJob")
 
@@ -928,14 +863,7 @@ class ProcessTranscodeQueueService:
 
             self.UpdateTranscodeProgress(TranscodeAttemptId, "Initializing", 0.0, "Starting remux (container change)...")
 
-            # Local staging: override output directory to local disk
-            IsLocalStaging = self.GetTranscodeFileMode() == 'LocalStaging'
-            if IsLocalStaging and not self.OutputDirectory:
-                LoggingService.LogWarning("LocalStaging mode requires StagingDirectory in Workers table. Falling back to InPlace.", "ProcessTranscodeQueueService", "ProcessRemuxJob")
-                IsLocalStaging = False
-            EffectiveOutputDir = self.GetLocalStagingDir() if IsLocalStaging else self.OutputDirectory
-
-            # Setup file preparation first (copy or in-place based on setting)
+            # Resolve source path for this worker
             self.UpdateTranscodeProgress(TranscodeAttemptId, "Preparing Files", 0.0, "Preparing source file...")
             self._LastSetupError = None
             EffectiveInputPath = self.SetupFilePreparation(Job, MediaFile, TranscodeAttemptId)
@@ -943,11 +871,9 @@ class ProcessTranscodeQueueService:
                 Detail = self._LastSetupError or "unknown"
                 self.HandleJobFailure(Job, f"Failed to setup file preparation for remux: {Detail}", TranscodeAttemptId, ActiveJobId)
                 return
-            if IsLocalStaging:
-                LocalStagingSourcePath = EffectiveInputPath
 
-            # Compute the `.inprogress` output path. FFmpeg writes here; the
-            # original source remains untouched until FileReplacement.
+            # Compute the `.inprogress` output path next to the source. The
+            # original is untouched until FileReplacement.
             import os as _os
             BaseName, _ = _os.path.splitext(_os.path.basename(EffectiveInputPath))
             TargetLocalPath = _os.path.join(_os.path.dirname(EffectiveInputPath), BaseName + '-mv.mp4.inprogress')
@@ -960,7 +886,7 @@ class ProcessTranscodeQueueService:
                     'OutputPath': TargetLocalPath,
                     'FFmpegPath': self.FFmpegPath,
                     'FFprobePath': self.FFprobePath,
-                    'OutputDirectory': EffectiveOutputDir,
+                    'OutputDirectory': _os.path.dirname(EffectiveInputPath),
                 },
             )
             if not CommandResult:
@@ -969,12 +895,10 @@ class ProcessTranscodeQueueService:
 
             RemuxCommand = CommandResult['Command']
             OutputPath = CommandResult['OutputPath']
-            if IsLocalStaging:
-                LocalStagingOutputPath = OutputPath
 
             # Create TemporaryFilePaths record with canonical paths
-            CanonicalOutputPath = self.ComputeCanonicalOutputPath(OutputPath, IsLocalStaging)
-            SrcId, SrcRel, OutId, OutRel = self._ResolveTfpPathParts(Job, OutputPath, IsLocalStaging)
+            CanonicalOutputPath = self.ComputeCanonicalOutputPath(OutputPath)
+            SrcId, SrcRel, OutId, OutRel = self._ResolveTfpPathParts(Job, OutputPath)
             TemporaryFilePathId = self.PrivateCreateTemporaryFilePathRecord(
                 TranscodeAttemptId, Job.FilePath, Job.FilePath, CanonicalOutputPath,
                 SourceStorageRootId=SrcId, SourceRelativePath=SrcRel,
@@ -997,7 +921,6 @@ class ProcessTranscodeQueueService:
             self.UpdateTranscodeProgress(TranscodeAttemptId, "Remuxing", 0.0, "Remuxing to MP4...")
             TranscodeResult = self.ExecuteTranscoding(Job, RemuxCommand, TranscodeAttemptId, MediaFile, ActiveJobId)
             if not TranscodeResult.get("Success", False):
-                self.CleanupLocalStagingFiles(LocalStagingSourcePath, LocalStagingOutputPath)
                 self._DeleteInProgressFile(TargetLocalPath)
                 self.HandleJobFailure(Job, f"Remux failed: {TranscodeResult.get('ErrorMessage', 'Unknown error')}", TranscodeAttemptId, ActiveJobId)
                 return
@@ -1005,22 +928,9 @@ class ProcessTranscodeQueueService:
             # Verify the .inprogress file is a valid media file before any
             # further action (worker-lifecycle.feature.md criterion 7).
             if not self._VerifyInProgressFile(TargetLocalPath):
-                self.CleanupLocalStagingFiles(LocalStagingSourcePath, LocalStagingOutputPath)
                 self._DeleteInProgressFile(TargetLocalPath)
                 self.HandleJobFailure(Job, f"Remux output failed FFprobe verification: {TargetLocalPath}", TranscodeAttemptId, ActiveJobId)
                 return
-
-            # Local staging: copy output to NFS and clean up local files
-            if IsLocalStaging:
-                self.UpdateTranscodeProgress(TranscodeAttemptId, "Copying Back", 0.0, "Copying output to storage...")
-                NfsCopyPath = self.CopyBackFromLocalStaging(LocalStagingOutputPath)
-                if not NfsCopyPath:
-                    self.CleanupLocalStagingFiles(LocalStagingSourcePath, LocalStagingOutputPath)
-                    self.HandleJobFailure(Job, "Failed to copy remux output from local staging to NFS storage", TranscodeAttemptId, ActiveJobId)
-                    return
-                TranscodeResult['OutputFilePath'] = NfsCopyPath
-                OutputPath = NfsCopyPath
-                self.CleanupLocalStagingFiles(LocalStagingSourcePath, LocalStagingOutputPath)
 
             # Handle result - skip quality testing for remux
             self.UpdateTranscodeProgress(TranscodeAttemptId, "Finalizing", 0.0, "Finalizing remux...")
@@ -1030,7 +940,6 @@ class ProcessTranscodeQueueService:
             LoggingService.LogInfo(f"Completed remux job processing for job ID: {Job.Id}", "ProcessTranscodeQueueService", "ProcessRemuxJob")
 
         except Exception as e:
-            self.CleanupLocalStagingFiles(LocalStagingSourcePath, LocalStagingOutputPath)
             if 'TargetLocalPath' in dir():
                 self._DeleteInProgressFile(TargetLocalPath)
             LoggingService.LogException(f"Exception processing remux job {Job.Id}", e, "ProcessTranscodeQueueService", "ProcessRemuxJob")
@@ -1040,8 +949,6 @@ class ProcessTranscodeQueueService:
         """Process a subtitle fix job: copy video+audio, convert ASS/SSA subtitle to mov_text, output MP4."""
         ActiveJobId = None
         TranscodeAttemptId = None
-        LocalStagingSourcePath = None
-        LocalStagingOutputPath = None
         try:
             LoggingService.LogInfo(f"Starting subtitle fix job processing for job ID: {Job.Id}", "ProcessTranscodeQueueService", "ProcessSubtitleFixJob")
 
@@ -1075,14 +982,7 @@ class ProcessTranscodeQueueService:
                 self.HandleJobFailure(Job, "Failed to get media file data for subtitle fix", TranscodeAttemptId, ActiveJobId)
                 return
 
-            # Local staging: override output directory to local disk
-            IsLocalStaging = self.GetTranscodeFileMode() == 'LocalStaging'
-            if IsLocalStaging and not self.OutputDirectory:
-                LoggingService.LogWarning("LocalStaging mode requires StagingDirectory in Workers table. Falling back to InPlace.", "ProcessTranscodeQueueService", "ProcessSubtitleFixJob")
-                IsLocalStaging = False
-            EffectiveOutputDir = self.GetLocalStagingDir() if IsLocalStaging else self.OutputDirectory
-
-            # Setup file preparation first (copy or in-place based on setting)
+            # Resolve source path for this worker
             self.UpdateTranscodeProgress(TranscodeAttemptId, "Preparing Files", 0.0, "Preparing source file...")
             self._LastSetupError = None
             EffectiveInputPath = self.SetupFilePreparation(Job, MediaFile, TranscodeAttemptId)
@@ -1090,18 +990,17 @@ class ProcessTranscodeQueueService:
                 Detail = self._LastSetupError or "unknown"
                 self.HandleJobFailure(Job, f"Failed to setup file preparation for subtitle fix: {Detail}", TranscodeAttemptId, ActiveJobId)
                 return
-            if IsLocalStaging:
-                LocalStagingSourcePath = EffectiveInputPath
 
             # Build subtitle fix command (pass effective input path)
             self.UpdateTranscodeProgress(TranscodeAttemptId, "Building Command", 0.0, "Building subtitle fix command...")
+            import os as _os
             CommandResult = self.CommandBuilder.BuildFFmpegCommand(
                 MediaFile, Job,
                 Context={
                     'InputPath': EffectiveInputPath,
                     'FFmpegPath': self.FFmpegPath,
                     'FFprobePath': self.FFprobePath,
-                    'OutputDirectory': EffectiveOutputDir,
+                    'OutputDirectory': _os.path.dirname(EffectiveInputPath),
                 },
             )
             if not CommandResult:
@@ -1110,12 +1009,10 @@ class ProcessTranscodeQueueService:
 
             SubFixCommand = CommandResult['Command']
             OutputPath = CommandResult['OutputPath']
-            if IsLocalStaging:
-                LocalStagingOutputPath = OutputPath
 
             # Create TemporaryFilePaths record with canonical paths
-            CanonicalOutputPath = self.ComputeCanonicalOutputPath(OutputPath, IsLocalStaging)
-            SrcId, SrcRel, OutId, OutRel = self._ResolveTfpPathParts(Job, OutputPath, IsLocalStaging)
+            CanonicalOutputPath = self.ComputeCanonicalOutputPath(OutputPath)
+            SrcId, SrcRel, OutId, OutRel = self._ResolveTfpPathParts(Job, OutputPath)
             TemporaryFilePathId = self.PrivateCreateTemporaryFilePathRecord(
                 TranscodeAttemptId, Job.FilePath, Job.FilePath, CanonicalOutputPath,
                 SourceStorageRootId=SrcId, SourceRelativePath=SrcRel,
@@ -1138,7 +1035,6 @@ class ProcessTranscodeQueueService:
             self.UpdateTranscodeProgress(TranscodeAttemptId, "Fixing Subtitles", 0.0, "Converting subtitles to mov_text...")
             TranscodeResult = self.ExecuteTranscoding(Job, SubFixCommand, TranscodeAttemptId, MediaFile, ActiveJobId)
             if not TranscodeResult.get("Success", False):
-                self.CleanupLocalStagingFiles(LocalStagingSourcePath, LocalStagingOutputPath)
                 self._DeleteInProgressFile(OutputPath)
                 self.HandleJobFailure(Job, f"Subtitle fix failed: {TranscodeResult.get('ErrorMessage', 'Unknown error')}", TranscodeAttemptId, ActiveJobId)
                 return
@@ -1146,22 +1042,9 @@ class ProcessTranscodeQueueService:
             # Verify the .inprogress file is a valid media file before any
             # further action (worker-lifecycle.feature.md criterion 7).
             if not self._VerifyInProgressFile(OutputPath):
-                self.CleanupLocalStagingFiles(LocalStagingSourcePath, LocalStagingOutputPath)
                 self._DeleteInProgressFile(OutputPath)
                 self.HandleJobFailure(Job, f"Subtitle fix output failed FFprobe verification: {OutputPath}", TranscodeAttemptId, ActiveJobId)
                 return
-
-            # Local staging: copy output to NFS and clean up local files
-            if IsLocalStaging:
-                self.UpdateTranscodeProgress(TranscodeAttemptId, "Copying Back", 0.0, "Copying output to storage...")
-                NfsCopyPath = self.CopyBackFromLocalStaging(LocalStagingOutputPath)
-                if not NfsCopyPath:
-                    self.CleanupLocalStagingFiles(LocalStagingSourcePath, LocalStagingOutputPath)
-                    self.HandleJobFailure(Job, "Failed to copy subtitle fix output from local staging to NFS storage", TranscodeAttemptId, ActiveJobId)
-                    return
-                TranscodeResult['OutputFilePath'] = NfsCopyPath
-                OutputPath = NfsCopyPath
-                self.CleanupLocalStagingFiles(LocalStagingSourcePath, LocalStagingOutputPath)
 
             # Handle result - skip quality testing (same as remux)
             self.UpdateTranscodeProgress(TranscodeAttemptId, "Finalizing", 0.0, "Finalizing subtitle fix...")
@@ -1171,7 +1054,6 @@ class ProcessTranscodeQueueService:
             LoggingService.LogInfo(f"Completed subtitle fix job processing for job ID: {Job.Id}", "ProcessTranscodeQueueService", "ProcessSubtitleFixJob")
 
         except Exception as e:
-            self.CleanupLocalStagingFiles(LocalStagingSourcePath, LocalStagingOutputPath)
             LoggingService.LogException(f"Exception processing subtitle fix job {Job.Id}", e, "ProcessTranscodeQueueService", "ProcessSubtitleFixJob")
             self.HandleJobFailure(Job, f"Exception during subtitle fix: {str(e)}", TranscodeAttemptId, ActiveJobId)
 
@@ -1240,9 +1122,10 @@ class ProcessTranscodeQueueService:
           Replace / BypassReplace -> hand off to FileReplacementBusinessService
           Pending (AwaitingVmaf)   -> enqueue to QualityTestQueue
           Discard / NoReplace / Requeue -> audit row already committed by the
-            disposition function; staged file remains in StagingDirectory for
-            operator inspection. (Action paths for these are deferred -- the
-            disposition + audit trail give the operator visibility today.)
+            disposition function; the .inprogress file remains next to the
+            source for operator inspection. (Action paths for these are
+            deferred -- the disposition + audit trail give the operator
+            visibility today.)
 
         Replaces the legacy `ShouldQualityTestService.ProcessTranscodedFile`
         call. See Features/QualityTesting/post-transcode-disposition.feature.md.
@@ -1269,8 +1152,8 @@ class ProcessTranscodeQueueService:
             else:
                 # Discard / NoReplace / Requeue: audit row is already committed.
                 # The action layer for these dispositions is intentionally minimal
-                # in this iteration -- staged file persists in StagingDirectory,
-                # operator can query
+                # in this iteration -- the .inprogress file remains next to the
+                # source. Operator can query
                 #   SELECT FilePath, Disposition, DispositionReason
                 #   FROM TranscodeAttempts WHERE Disposition='<value>'
                 # and decide manually. Future iterations can wire automatic
@@ -1309,85 +1192,15 @@ class ProcessTranscodeQueueService:
                 "ProcessTranscodeQueueService", "_MarkMediaFileSourceMissing"
             )
 
-    def GetTranscodeFileMode(self) -> str:
-        """Get the transcode file mode from SystemSettings. Returns 'InPlace' (default), 'CopyLocal', or 'LocalStaging'."""
-        try:
-            from Features.SystemSettings.SystemSettingsRepository import SystemSettingsRepository
-            Repo = SystemSettingsRepository()
-            Mode = Repo.GetSystemSetting('TranscodeFileMode')
-            if Mode:
-                ModeNorm = Mode.strip().lower()
-                if ModeNorm == 'copylocal':
-                    return 'CopyLocal'
-                if ModeNorm == 'localstaging':
-                    return 'LocalStaging'
-            return 'InPlace'
-        except Exception as Ex:
-            LoggingService.LogException("Exception reading TranscodeFileMode, defaulting to InPlace", Ex, "ProcessTranscodeQueueService", "GetTranscodeFileMode")
-            return 'InPlace'
-
-    def GetTranscodeOutputMode(self) -> str:
-        """Get output placement mode. Returns 'InPlace' (default) or 'Staging'."""
-        try:
-            from Features.SystemSettings.SystemSettingsRepository import SystemSettingsRepository
-            Repo = SystemSettingsRepository()
-            Mode = Repo.GetSystemSetting('TranscodeOutputMode')
-            if Mode and Mode.strip().lower() == 'staging':
-                return 'Staging'
-            return 'InPlace'
-        except Exception as Ex:
-            LoggingService.LogException("Exception reading TranscodeOutputMode, defaulting to InPlace", Ex, "ProcessTranscodeQueueService", "GetTranscodeOutputMode")
-            return 'InPlace'
-
     def SetupFilePreparation(self, Job: TranscodeQueueModel, MediaFile: MediaFileModel, TranscodeAttemptId: int) -> Optional[str]:
-        """Setup transcoding directories and optionally copy source file.
-        Returns the effective input path for FFmpeg, or None on failure.
-        When TranscodeFileMode is 'InPlace', skips the copy and returns the network path (translated for this worker's platform).
-        When 'CopyLocal', copies to C:\\MediaVortex\\Source\\ and returns the local path."""
+        """Resolve the worker-local path for the job's source file. Workers read
+        the source directly from the NFS/SMB mount; no copy step.
+        Returns the effective input path, or None on failure."""
         try:
-            # Setup output directory (always needed, uses worker's configured staging dir if set)
-            if not self.FileManager.SetupTranscodingDirectories(OutputDirectory=self.OutputDirectory):
-                self._LastSetupError = "SetupTranscodingDirectories failed"
-                return None
-
-            FileMode = self.GetTranscodeFileMode()
-
-            # Workers without a configured StagingDirectory cannot use LocalStaging.
-            # Match the fallback decision made in ProcessJob/ProcessRemuxJob/ProcessSubtitleFixJob
-            # so this method does not silently keep building staging paths.
-            if FileMode == 'LocalStaging' and not self.OutputDirectory:
-                FileMode = 'InPlace'
-
             from Core.PathStorage import Resolve as PathResolve
             SourcePath = PathResolve(Job.StorageRootId, Job.RelativePath, self.WorkerName, self.DatabaseManager.DatabaseService)
-
-            if FileMode == 'LocalStaging':
-                # Copy source to local staging disk (skip if already exists -- crash recovery)
-                LocalStagingDir = self.GetLocalStagingDir()
-                os.makedirs(LocalStagingDir, exist_ok=True)
-                DestinationPath = os.path.join(LocalStagingDir, MediaFile.FileName)
-                if os.path.exists(DestinationPath):
-                    LoggingService.LogInfo(f"LocalStaging mode: source already staged, skipping copy: {DestinationPath}", "ProcessTranscodeQueueService", "SetupFilePreparation")
-                else:
-                    CopyResult = self.FileManager.CopyFile(SourcePath, DestinationPath)
-                    if not CopyResult:
-                        self._LastSetupError = f"CopyFile failed: {SourcePath} -> {DestinationPath}"
-                        return None
-                    LoggingService.LogInfo(f"LocalStaging mode: copied {SourcePath} to {DestinationPath}", "ProcessTranscodeQueueService", "SetupFilePreparation")
-                return DestinationPath
-            elif FileMode == 'CopyLocal':
-                # Copy file to local source directory
-                DestinationPath = f"C:\\MediaVortex\\Source\\{MediaFile.FileName}"
-                CopyResult = self.FileManager.CopyFile(SourcePath, DestinationPath)
-                if not CopyResult:
-                    self._LastSetupError = f"CopyFile failed: {SourcePath} -> {DestinationPath}"
-                    return None
-                LoggingService.LogInfo(f"CopyLocal mode: copied {SourcePath} to {DestinationPath}", "ProcessTranscodeQueueService", "SetupFilePreparation")
-                return DestinationPath
-            else:
-                # InPlace mode: SourcePath is already the worker-local path from Resolve()
-                LoggingService.LogInfo(f"InPlace mode: using path: {SourcePath}", "ProcessTranscodeQueueService", "SetupFilePreparation")
-                return SourcePath
+            LoggingService.LogInfo(f"Resolved source path: {SourcePath}", "ProcessTranscodeQueueService", "SetupFilePreparation")
+            return SourcePath
 
         except Exception as e:
             LoggingService.LogException("Exception in file preparation", e, "ProcessTranscodeQueueService", "SetupFilePreparation")
@@ -1395,51 +1208,8 @@ class ProcessTranscodeQueueService:
             self.PrivateHandleFilePreparationFailure(TranscodeAttemptId, str(e))
             return None
 
-    def GetLocalStagingDir(self) -> str:
-        """Get the local staging directory path for this worker."""
-        BaseDir = os.environ.get('MEDIAVORTEX_LOCAL_STAGING_DIR', '/staging')
-        return os.path.join(BaseDir, self.WorkerName)
-
-    def CopyBackFromLocalStaging(self, LocalOutputPath: str) -> Optional[str]:
-        """Copy transcoded output from local staging to NFS staging directory.
-        Returns the NFS output path, or None on failure."""
-        try:
-            OutputFileName = os.path.basename(LocalOutputPath)
-            NfsOutputDir = self.OutputDirectory  # Workers.StagingDirectory (NFS)
-            if not NfsOutputDir:
-                LoggingService.LogError("No StagingDirectory configured — cannot copy output from local staging to NFS", "ProcessTranscodeQueueService", "CopyBackFromLocalStaging")
-                return None
-            NfsOutputPath = os.path.join(NfsOutputDir, OutputFileName)
-            CopyResult = self.FileManager.CopyFile(LocalOutputPath, NfsOutputPath)
-            if not CopyResult:
-                return None
-            LoggingService.LogInfo(f"LocalStaging: copied output to NFS: {LocalOutputPath} -> {NfsOutputPath}", "ProcessTranscodeQueueService", "CopyBackFromLocalStaging")
-            return NfsOutputPath
-        except Exception as e:
-            LoggingService.LogException("Exception copying output from local staging to NFS", e, "ProcessTranscodeQueueService", "CopyBackFromLocalStaging")
-            return None
-
-    def CleanupLocalStagingFiles(self, *Paths: str):
-        """Delete local staging files. Logs but does not raise on failure."""
-        for FilePath in Paths:
-            if FilePath and os.path.exists(FilePath):
-                try:
-                    os.remove(FilePath)
-                    LoggingService.LogInfo(f"LocalStaging: deleted {FilePath}", "ProcessTranscodeQueueService", "CleanupLocalStagingFiles")
-                except Exception as e:
-                    LoggingService.LogWarning(f"LocalStaging: failed to delete {FilePath}: {e}", "ProcessTranscodeQueueService", "CleanupLocalStagingFiles")
-
-    def ComputeCanonicalOutputPath(self, OutputPath: str, IsLocalStaging: bool) -> str:
-        """Compute the canonical output path for TemporaryFilePaths.
-        For local staging, maps to NFS staging directory so downstream stages can find the file."""
-        if IsLocalStaging:
-            if not self.OutputDirectory:
-                LoggingService.LogWarning("ComputeCanonicalOutputPath called with LocalStaging but no OutputDirectory set", "ProcessTranscodeQueueService", "ComputeCanonicalOutputPath")
-                return OutputPath
-            NfsOutputPath = os.path.join(self.OutputDirectory, os.path.basename(OutputPath))
-            if self.PathTranslation:
-                return self.PathTranslation.ToCanonicalPath(NfsOutputPath)
-            return NfsOutputPath
+    def ComputeCanonicalOutputPath(self, OutputPath: str) -> str:
+        """Translate a worker-local output path to canonical form for TemporaryFilePaths."""
         if self.PathTranslation:
             return self.PathTranslation.ToCanonicalPath(OutputPath)
         return OutputPath
@@ -1585,8 +1355,6 @@ class ProcessTranscodeQueueService:
                 'StartTime': StartTime,
                 'FFmpegPath': self.FFmpegPath,
                 'FFprobePath': self.FFprobePath,
-                'OutputDirectory': self.OutputDirectory,
-                'TranscodeOutputMode': self.GetTranscodeOutputMode(),
                 'MaxCpuThreads': self.MaxCpuThreads
             }
 
@@ -2216,29 +1984,25 @@ class ProcessTranscodeQueueService:
             LoggingService.LogException("Exception updating transcoding progress", e,
                                       "ProcessTranscodeQueueService", "UpdateTranscodeProgress")
 
-    def _ResolveTfpPathParts(self, Job, OutputPath: str, IsLocalStaging: bool):
+    def _ResolveTfpPathParts(self, Job, OutputPath: str):
         """Compute (SrcId, SrcRel, OutId, OutRel) for TemporaryFilePaths writes.
 
         Output side is derived from Job.RelativePath (canonical, always '/'-separated)
-        and the basename of the worker-local OutputPath. Parsing the worker-local
-        OutputPath against StorageRoots was fragile (Linux os.path.basename on a
-        Windows-shaped canonical string returned the whole string, polluting the
-        stored relative path with 'T:/' fragments). The two layouts:
-          - LocalStaging: MediaVortex/Staging/<WorkerName>/<output_basename>
-          - InPlace:      <dirname(Job.RelativePath)>/<output_basename>
-        OutputStorageRootId is always the source's StorageRootId -- the staging
-        area lives inside the same physical StorageRoot as the source media."""
+        and the basename of the worker-local OutputPath. The .inprogress file
+        always lands next to the source, so OutputStorageRootId == source
+        StorageRootId and OutRel == <dirname(Job.RelativePath)>/<output_basename>.
+        Parsing the worker-local OutputPath against StorageRoots was fragile
+        (Linux os.path.basename on a Windows-shaped canonical string returned
+        the whole string, polluting the stored relative path with 'T:/'
+        fragments)."""
         import os as _os
         SrcId = getattr(Job, 'StorageRootId', None)
         SrcRel = getattr(Job, 'RelativePath', None) or None
         OutBase = _os.path.basename(OutputPath) if OutputPath else ''
         OutId = SrcId
-        if IsLocalStaging:
-            OutRel = f"MediaVortex/Staging/{self.WorkerName}/{OutBase}" if OutBase else None
-        else:
-            SrcDirRel = SrcRel.rsplit('/', 1)[0] if (SrcRel and '/' in SrcRel) else ''
-            OutRel = f"{SrcDirRel}/{OutBase}" if SrcDirRel else OutBase
-            OutRel = OutRel or None
+        SrcDirRel = SrcRel.rsplit('/', 1)[0] if (SrcRel and '/' in SrcRel) else ''
+        OutRel = f"{SrcDirRel}/{OutBase}" if SrcDirRel else OutBase
+        OutRel = OutRel or None
         return SrcId, SrcRel, OutId, OutRel
 
     def PrivateCreateTemporaryFilePathRecord(self, TranscodeAttemptId: int, OriginalPath: str, LocalSourcePath: str, LocalOutputPath: str = None,

@@ -41,7 +41,7 @@ class CommandBuilder:
             Job: queue row whose ProcessingMode selects dispatch
             Context: operational data the model doesn't know about. Required keys:
                 FFmpegPath. Optional: FFprobePath, InputPath, OutputPath,
-                OutputDirectory, TranscodeOutputMode, MaxCpuThreads, AudioStreamIndex,
+                OutputDirectory, MaxCpuThreads, AudioStreamIndex,
                 ProfileSettings, CodecFlags, CodecParameters, SourceResolution,
                 StartTime. The shape methods pull what they need.
 
@@ -192,13 +192,8 @@ class CommandBuilder:
             CrfValue = ProfileSettings.get('Quality')
             OutputFileName = self.GenerateOutputFileName(MediaFile.FileName, SourceResolution, TargetResolution, ContainerType, CrfValue)
 
-            # Output location: use source file's directory (true in-place) unless Staging mode
-            OutputMode = CommandData.get('TranscodeOutputMode', 'InPlace')
-            if OutputMode == 'Staging':
-                OutputDirectory = CommandData.get('OutputDirectory') or 'c:\\MediaVortex'
-            else:
-                # InPlace: put output next to the source file
-                OutputDirectory = os.path.dirname(InputPath)
+            # In-place output: put encoded file next to the source.
+            OutputDirectory = os.path.dirname(InputPath)
             OutputPath = self._NormalizeFfmpegPath(os.path.join(OutputDirectory, OutputFileName))
 
             # Start building command - FFmpeg command structure: ffmpeg -i input [options] output -y
@@ -635,11 +630,7 @@ class CommandBuilder:
                 OutputPath = self._NormalizeFfmpegPath(ExplicitOutputPath)
             else:
                 OutputFileName = BaseName + "-mv.mp4.inprogress"
-                OutputMode = CommandData.get('TranscodeOutputMode', 'InPlace')
-                if OutputMode == 'Staging':
-                    OutputDirectory = CommandData.get('OutputDirectory') or 'c:\\MediaVortex'
-                else:
-                    OutputDirectory = os.path.dirname(InputPath)
+                OutputDirectory = os.path.dirname(InputPath)
                 OutputPath = self._NormalizeFfmpegPath(os.path.join(OutputDirectory, OutputFileName))
 
             if os.path.normcase(OutputPath) == os.path.normcase(InputPath):
@@ -760,11 +751,7 @@ class CommandBuilder:
                 OutputPath = self._NormalizeFfmpegPath(ExplicitOutputPath)
             else:
                 OutputFileName = BaseName + "-mv.mp4.inprogress"
-                OutputMode = CommandData.get('TranscodeOutputMode', 'InPlace')
-                if OutputMode == 'Staging':
-                    OutputDirectory = CommandData.get('OutputDirectory') or 'c:\\MediaVortex'
-                else:
-                    OutputDirectory = os.path.dirname(InputPath)
+                OutputDirectory = os.path.dirname(InputPath)
                 OutputPath = self._NormalizeFfmpegPath(os.path.join(OutputDirectory, OutputFileName))
 
             if os.path.normcase(OutputPath) == os.path.normcase(InputPath):

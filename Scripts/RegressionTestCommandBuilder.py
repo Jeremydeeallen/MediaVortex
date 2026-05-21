@@ -100,7 +100,6 @@ def run():
             "FFprobePath": MOCK_FFPROBE,
             "InputPath": mf.FilePath,
             "OutputDirectory": r"C:\tmp",
-            "TranscodeOutputMode": "InPlace",
             "AudioStreamIndex": 0,
             "HasAudio": True,
         }

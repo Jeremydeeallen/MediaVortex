@@ -128,10 +128,9 @@ Run `deploy/deploy-windows-worker.py <target-ip>` from the dev workstation for t
 | 2 | scp the repo to `C:\Code\MediaVortex` | Dev workstation -> Worker | `scp -r ...` |
 | 3 | Recreate venv (the source venv's `pyvenv.cfg` paths don't translate) | Worker host | `py -m venv venv && pip install -r requirements.txt` |
 | 4 | Set `MEDIAVORTEX_DB_*` and `MEDIAVORTEX_*_PASSWORD` env vars at User scope | Worker host (creds piped via SSH stdin from dev-workstation vault) | `[Environment]::SetEnvironmentVariable(..., 'User')` |
-| 5 | (Optional) Initialize a dedicated scratch volume as `S:`; set `Workers.StagingDirectory` post-registration | Worker host | Disk Management UI + DB UPDATE |
-| 6 | Register the `MediaVortex Worker` Task Scheduler entry | Worker host | `deploy\Register-WorkerTask.ps1` |
-| 7 | Trigger the task once to validate; future runs fire on user logon | Worker host | `Start-ScheduledTask -TaskName 'MediaVortex Worker'` |
-| 8 | Verify the `Workers` row is Online with a recent heartbeat | Dev workstation (DB query) | `QueryDatabase.py sql ...` |
+| 5 | Register the `MediaVortex Worker` Task Scheduler entry | Worker host | `deploy\Register-WorkerTask.ps1` |
+| 6 | Trigger the task once to validate; future runs fire on user logon | Worker host | `Start-ScheduledTask -TaskName 'MediaVortex Worker'` |
+| 7 | Verify the `Workers` row is Online with a recent heartbeat | Dev workstation (DB query) | `QueryDatabase.py sql ...` |
 
 Expected timing on a host with a built venv and reachable network: full sequence completes in **~2-4 minutes**. Worker registration appears in the DB within **~10s** of triggering the task; first job claim within **~60s** of registration if the queue is non-empty.
 
@@ -166,19 +165,6 @@ Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0
 Start-Service sshd; Set-Service sshd -StartupType Automatic
 New-NetFirewallRule -Name sshd -DisplayName 'OpenSSH Server' -Enabled True -Direction Inbound -Protocol TCP -Action Allow -LocalPort 22 -Profile Any
 ```
-
-## Optional: Dedicated Scratch Volume
-
-If the host has an unmounted disk, dedicate it as `S:` for transcode staging so I/O does not contend with the OS drive. Initialize via Disk Management UI (or `diskpart`) when PowerShell `Get-Disk` cannot see the disk (a common quirk for raw SSDs reported by `Get-PhysicalDisk` but not surfaced in `Get-Disk`):
-
-```powershell
-# After Disk Management has initialized the disk to GPT and PowerShell can see it:
-New-Partition -DiskNumber 0 -UseMaximumSize -DriveLetter S
-Format-Volume -DriveLetter S -FileSystem NTFS -NewFileSystemLabel 'Scratch' -Confirm:$false
-New-Item -ItemType Directory -Path 'S:\MediaVortex\Staging' -Force
-```
-
-Set `Workers.StagingDirectory = 'S:\MediaVortex\Staging'` in the DB row for this worker. The default falls back to `C:\MediaVortex\` which mixes transcode I/O with the OS drive.
 
 ## Build and Deploy
 

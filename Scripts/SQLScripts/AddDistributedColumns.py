@@ -51,7 +51,6 @@ def RunMigration():
                     Platform TEXT DEFAULT 'windows',
                     FFmpegPath TEXT,
                     FFprobePath TEXT,
-                    StagingDirectory TEXT,
                     ShareMountPrefix TEXT,
                     ShareCanonicalPrefix TEXT DEFAULT 'T:\\',
                     MaxConcurrentJobs INT DEFAULT 1,
@@ -158,18 +157,6 @@ def RunMigration():
             print("[OK] Added QualityTestEnabled system setting (default: false)")
         else:
             print("[SKIP] QualityTestEnabled system setting already exists")
-
-        # 10. Add TranscodeOutputMode global setting (default InPlace)
-        cursor.execute("SELECT 1 FROM SystemSettings WHERE SettingKey = 'TranscodeOutputMode' LIMIT 1")
-        if not cursor.fetchone():
-            cursor.execute("""
-                INSERT INTO SystemSettings (SettingKey, SettingValue, Description, DataType)
-                VALUES ('TranscodeOutputMode', 'InPlace', 'Output placement: InPlace (next to source) or Staging (worker staging dir)', 'string')
-            """)
-            connection.commit()
-            print("[OK] Added TranscodeOutputMode system setting (default: InPlace)")
-        else:
-            print("[SKIP] TranscodeOutputMode system setting already exists")
 
         print("\nMigration completed successfully.")
 

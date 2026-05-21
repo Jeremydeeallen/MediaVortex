@@ -95,7 +95,6 @@ def run_case(dm, case):
         "FFprobePath": I9_FFPROBE,
         "InputPath": mf.FilePath,
         "OutputDirectory": os.path.dirname(mf.FilePath),
-        "TranscodeOutputMode": "InPlace",
     }
     if case["mode"] == "Transcode":
         Context["ProfileSettings"] = {

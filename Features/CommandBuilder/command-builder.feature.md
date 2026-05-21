@@ -30,7 +30,7 @@ context this contract serves.
 
 ### A. Single entry point + decision tree
 
-1. **One callable.** A single `CommandBuilder.BuildFFmpegCommand(MediaFile, Job, Context)` method is the only public way to obtain an FFmpeg command from inside a worker. `Context` carries the per-job operational data the builder needs but the model and job don't (FFmpegPath, OutputDirectory, InputPath after PathStorage resolution, IsLocalStaging, etc.). Verifiable: `grep -rE "def Build(Command|RemuxCommand|SubtitleFixCommand|TranscodeCommand)" Models/ Services/` returns exactly one match, the consolidated method (private helpers may exist; public methods do not).
+1. **One callable.** A single `CommandBuilder.BuildFFmpegCommand(MediaFile, Job, Context)` method is the only public way to obtain an FFmpeg command from inside a worker. `Context` carries the per-job operational data the builder needs but the model and job don't (FFmpegPath, FFprobePath, OutputDirectory, InputPath after PathStorage resolution, etc.). Verifiable: `grep -rE "def Build(Command|RemuxCommand|SubtitleFixCommand|TranscodeCommand)" Models/ Services/` returns exactly one match, the consolidated method (private helpers may exist; public methods do not).
 
 2. **Decision tree is explicit and ordered.** Inside `BuildFFmpegCommand`, the routing is a single readable cascade:
     ```

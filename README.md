@@ -85,7 +85,6 @@ Full guide: [TranscodeService/WorkerSetup.md](TranscodeService/WorkerSetup.md)
 | WorkerName | Machine hostname | `DESKTOP-ABC` | `transcode-vm` |
 | Platform | OS type | `windows` | `linux` |
 | FFmpegPath | FFmpeg binary | `C:\ffmpeg\bin\ffmpeg.exe` | `/usr/bin/ffmpeg` |
-| StagingDirectory | Output location | `T:\MediaVortex\Staging\` | `/mnt/media/MediaVortex/Staging/` |
 | ShareMountPrefix | Local mount path | `T:\` | `/mnt/media/` |
 | ShareCanonicalPrefix | DB path format | `T:\` | `T:\` |
 | MaxConcurrentJobs | Parallel jobs (1-5) | `1` | `2` |

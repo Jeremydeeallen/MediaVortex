@@ -189,9 +189,8 @@ class StuckJobDetectionService:
             # Tier 3: FFmpeg-PID liveness (local jobs only).
             # The "no FFmpeg processes on system" heuristic was REMOVED in
             # stuck-job-detection.feature.md criterion D1: it false-positived
-            # during the gap between job claim and FFmpeg spawn (especially
-            # when LocalStaging falls back to InPlace), self-killing the
-            # worker on 2026-05-09 (Incident 2 in the feature doc).
+            # during the gap between job claim and FFmpeg spawn, self-killing
+            # the worker on 2026-05-09 (Incident 2 in the feature doc).
             LocalHostname = socket.gethostname()
             IsLocalJob = (not JobWorkerName) or (JobWorkerName == LocalHostname)
 

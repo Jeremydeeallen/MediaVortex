@@ -79,23 +79,18 @@ The 2026-05-09 incident (FFmpeg truncated source via output==input collision) ca
 | 3 | ActiveJob create | `CreateActiveJob(JobType='Remux', WorkerName, ProcessId, ThreadId)` | `ActiveJobs` row inserted | Failure aborts the job and resets the queue row to Pending |
 | 4 | Source pre-flight | `os.path.exists()` after `PathResolve(StorageRootId, RelativePath)` | -- | Missing source: `MediaFiles.FFprobeFailureCount` incremented, queue row deleted, ActiveJob deleted, no TranscodeAttempt created (`TranscodeJob.feature.md` criteria 17-18) |
 | 5 | TranscodeAttempt create | `CreateTranscodeAttempt(Job, ...)` | `TranscodeAttempts` row inserted with `Success=NULL` | Failure aborts; row marked failed |
-| 6 | File staging | `SetupFilePreparation` (InPlace / LocalStaging / CopyLocal) | `TemporaryFilePaths` may be written | LocalStaging falls back to InPlace if `Workers.StagingDirectory` is NULL (logged warning) |
-| 7 | Command build | `CommandBuilder.BuildRemuxCommand(Job, MediaFile, InputPath, TranscodingSettings)` | -- | Missing `FFmpegPath` raises `ValueError` -- aborts |
+| 6 | File staging | `SetupFilePreparation` resolves the worker-local source path | -- | In-place; no copy step |
+| 7 | Command build | `CommandBuilder.BuildFFmpegCommand` (remux shape) | -- | Missing `FFmpegPath` raises `ValueError` -- aborts |
 | 8 | Execute | `ExecuteTranscoding(Job, RemuxCommand, ...)` -- spawns `ffmpeg` via `VideoTranscodingService.TranscodeVideo` | `ActiveJobs.FFmpegPid` recorded after `Popen`; `TranscodeProgress` rows update during the run | FFmpeg non-zero exit: `HandleJobFailure` marks the attempt failed; queue row reset to Pending for retry |
-| 9 | Result handling | `HandleRemuxResult` (line 775) | `TranscodeAttempts.Success=true`, `QualityTestRequired=false`, `NewSizeBytes`, etc. | Continues even on size growth -- by design, remux is not aimed at disk savings |
-| 10 | LocalStaging copy-back | `CopyBackFromLocalStaging` (only when LocalStaging mode active) | -- | Failure cleans up local files and aborts |
-| 11 | Quality test bypass | `ShouldQualityTest.ProcessTranscodedFile(TranscodeAttemptId, ...)` reads `QualityTestRequired=false` and routes directly to FileReplacement | -- | -- |
-| 12 | File replacement | `FileReplacementBusinessService.ProcessFileReplacementWithVMAF` -- archive original, delete, move new file in, re-probe, update `MediaFiles` | `MediaFiles` (re-probed metadata, `TranscodedByMediaVortex=true`), `MediaFilesArchive`, `TranscodeAttempts.FileReplaced` | If `transcode-vs-remux-routing.feature.md` criterion 16 ships: post-flight gate is **skipped** for `Mode='Remux'` (audio re-encode may bump size by KB without semantic regression) |
-| 13 | Compliance recompute | `priority-materialization.feature.md` post-flight hook calls `RecomputeForFiles([MediaFileId])` | `MediaFiles.IsCompliant`, `RecommendedMode`, `PriorityScore`, `AssignedProfile` updated -- expected to flip to `IsCompliant=true` | Recompute failure logged but doesn't roll back replacement (file is already swapped) |
-| 14 | Cleanup | `DeleteTranscodeQueueItem(Job.Id)`, `DeleteTranscodeProgress`, `CompleteActiveJob` | TranscodeQueue row deleted, ActiveJobs marked Success=true | -- |
+| 9 | Result handling | `HandleRemuxResult` | `TranscodeAttempts.Success=true`, `QualityTestRequired=false`, `NewSizeBytes`, etc. | Continues even on size growth -- by design, remux is not aimed at disk savings |
+| 10 | Quality test bypass | Disposition routes directly to FileReplacement (no VMAF) | -- | -- |
+| 11 | File replacement | `FileReplacementBusinessService.ProcessFileReplacementWithVMAF` -- archive original, delete, move new file in, re-probe, update `MediaFiles` | `MediaFiles` (re-probed metadata, `TranscodedByMediaVortex=true`), `MediaFilesArchive`, `TranscodeAttempts.FileReplaced` | If `transcode-vs-remux-routing.feature.md` criterion 16 ships: post-flight gate is **skipped** for `Mode='Remux'` (audio re-encode may bump size by KB without semantic regression) |
+| 12 | Compliance recompute | `priority-materialization.feature.md` post-flight hook calls `RecomputeForFiles([MediaFileId])` | `MediaFiles.IsCompliant`, `RecommendedMode`, `PriorityScore`, `AssignedProfile` updated -- expected to flip to `IsCompliant=true` | Recompute failure logged but doesn't roll back replacement (file is already swapped) |
+| 13 | Cleanup | `DeleteTranscodeQueueItem(Job.Id)`, `DeleteTranscodeProgress`, `CompleteActiveJob` | TranscodeQueue row deleted, ActiveJobs marked Success=true | -- |
 
 ## Output Location
 
-Same as transcode: writes to `Workers.StagingDirectory` (or
-`/staging/<worker>/` if LocalStaging mode is active), then file
-replacement moves it to the original file's location with the new
-`.mp4` extension. The original `.mkv` (or whatever the source extension
-was) is replaced atomically.
+The `-mv.mp4.inprogress` file is written **next to the source**. FileReplacement renames it to drop `.inprogress`, archives the original metadata, and deletes the original source atomically. No worker-local scratch, no NFS-side staging directory.
 
 ## Audio Handling During Remux (AudioComplete-aware)
 
@@ -163,8 +158,7 @@ MediaFilesArchive    -- snapshot of original metadata (taken by FileReplacement)
 | Worker can't reach source via PathTranslation | Pre-flight `os.path.exists()` returns False | `MediaFiles.FFprobeFailureCount += 1`, queue row deleted, no TranscodeAttempt created. Existing scan-time guard skips the file on next populate. |
 | Source has no audio stream (video-only file) | `BuildRemuxCommand` detects `HasAudio=False` via FFprobe analysis | Command is built with video-only mapping (`-map 0:v:0`, no `-map 0:a:*`, no audio codec/filter args). The file is remuxed to MP4 container with video copy only. No error -- this is a supported path. |
 | FFmpeg fails (codec quirks, audio decode error) | TranscodeAttempt marked failed | Queue row reset to Pending; will be retried next claim cycle. Persistent failures: investigate via `TranscodeAttempts.ErrorMessage`. |
-| LocalStaging copy-back fails | Output sits on local disk; queue row reset | Local files cleaned up. Likely cause: NFS share unavailable or full. |
-| File replacement fails | Original kept, new file orphaned in StagingDirectory | `TranscodeAttempts.FileReplaced=false`. Investigate; may need manual cleanup or `Scripts/FixStuckPostReplacementFiles.py`. |
+| File replacement fails | Original kept, `.inprogress` orphaned next to source | `TranscodeAttempts.FileReplaced=false`. Investigate; may need manual cleanup or `Scripts/FixStuckPostReplacementFiles.py`. |
 | Re-probe reports `IsCompliant=false` after replacement | RecomputeForFiles flags the file again | Operator-visible warning. Indicates the remux didn't fully fix the file -- e.g. audio normalization filter didn't apply correctly. Inspect `TranscodeAttempts.FFpmpegCommand` for the actual command. |
 | Recompute hook fails (DB unreachable) | `MediaFiles.IsCompliant` not flipped | Replacement still succeeded; rerun the admin recompute endpoint or wait for the next probe to fire the hook. Loud warning logged. |
 

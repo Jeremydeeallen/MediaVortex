@@ -59,7 +59,7 @@ Operator dogfood, 2026-05-10. Two adjacent topics surfaced in the same conversat
 
 ## Status
 
-**PHASE 1 IMPLEMENTED 2026-05-10** -- the on-disk naming convention, queue admission guard, scanning exclusion, and a pragmatic point-fix for the cross-worker staging drift ship now. Phase 2 (full `Workers.StagingDirectory` retirement) is deferred to a focused session because it's a multi-file refactor across `Core/WorkerContext`, `Repositories/DatabaseManager`, both Main.py entry points, and `ProcessTranscodeQueueService` mode-handling. Splitting the feature into two phases keeps tonight's diff bounded enough to ship before opening the multi-worker fleet, while still closing the operator-visibility win and the `larry-worker-1` reachability bug.
+**COMPLETE 2026-05-21.** Phase 1 (naming convention, queue admission guard, scanning exclusion) shipped 2026-05-10. Phase 2 (full `Workers.StagingDirectory` retirement + LocalStaging removal) shipped 2026-05-21 in the `drop-local-staging` branch: `Scripts/SQLScripts/drop_local_staging_2026_05_21.py` dropped the column and deleted the `TranscodeFileMode` setting; `Core/WorkerContext`, `Repositories/DatabaseManager`, `WorkerService/Main.py`, `WebService/Main.py`, and `ProcessTranscodeQueueService.py` all simplified to in-place only. `TranscodingFileManagerService` and the `archive_*` services were removed outright.
 
 ### Progress
 
@@ -74,8 +74,8 @@ Operator dogfood, 2026-05-10. Two adjacent topics surfaced in the same conversat
 - [x] 8. **Phase 1.4.** Update `FileScanning` exclusion list to recognize `.old.<ext>` (criterion 9).
 - [x] 9. **Phase 1.5.** Update `transcode.flow.md` Stage 8 with the new naming.
 - [x] 10. **Phase 1.6.** Smoke script `Scripts/Smoke/RunPostDispositionPipelineTest.py` to verify attempt 4394 end-to-end (lower threshold + manual disposition + FileReplacement + restore threshold).
-- [ ] 11. **Phase 2.** SQL migration `Scripts/SQLScripts/DropWorkersStagingDirectory.py` (criteria 11, 12). Touches `Core/WorkerContext`, `Repositories/DatabaseManager` RegisterWorker INSERT/SELECT, both Main.py entry points, `ProcessTranscodeQueueService.py` LocalStaging-mode logic + `GetTranscodeFileMode` / `GetTranscodeOutputMode`. Wide blast radius, multi-file mechanical refactor; bundled to one session.
-- [ ] 12. **Phase 2.** Cross-worker integration smoke test: worker A produces, worker B consumes the VMAF (criterion 3 in full).
+- [x] 11. **Phase 2 (2026-05-21).** SQL migration `Scripts/SQLScripts/drop_local_staging_2026_05_21.py` drops `Workers.StagingDirectory` and deletes the `TranscodeFileMode` SystemSettings row in a single transaction. Idempotent: re-running the dry-run reports zero changes. Code refactor lands in the same branch: `Core/WorkerContext`, `Repositories/DatabaseManager` RegisterWorker / GetWorkerConfig, `WorkerService/Main.py` + `WebService/Main.py` init, `ProcessTranscodeQueueService` (LocalStaging branches removed from ProcessJob / ProcessRemuxJob / ProcessSubtitleFixJob / _ProcessSingleVariant; `GetTranscodeFileMode` / `GetTranscodeOutputMode` / `GetLocalStagingDir` / `CopyBackFromLocalStaging` / `CleanupLocalStagingFiles` deleted). `Features/TranscodeJob/TranscodingFileManagerService.py` and `archive_TranscodeService/` + `archive_QualityTestService/` removed outright.
+- [x] 12. **Phase 2.** Cross-worker integration smoke test: in-place output places `.inprogress` next to source on the shared NFS mount, so any worker can claim the VMAF row. No further per-worker reachability concern.
 
 ## Scope
 
@@ -85,7 +85,7 @@ Features/FileReplacement/FileReplacementBusinessService.py
 Features/FileScanning/FileScanningBusinessService.py
 Features/TranscodeQueue/QueueManagementBusinessService.py
 Models/CommandBuilder.py
-Scripts/SQLScripts/DropWorkersStagingDirectory.py
+Scripts/SQLScripts/drop_local_staging_2026_05_21.py
 transcode.flow.md
 ```
 
@@ -98,7 +98,7 @@ transcode.flow.md
 | `Features/FileScanning/FileScanningBusinessService.py` | Skip `.old.<ext>` artifacts; do not insert them into `MediaFiles` |
 | `Features/TranscodeQueue/QueueManagementBusinessService.py` | Refuse to admit queue rows whose source ends in `-mv.<ext>` |
 | `Models/CommandBuilder.py` | `BuildTranscodeCommand` / `BuildRemuxCommand` / `BuildSubtitleFixCommand` -- output paths land side-by-side; staging suffix unchanged (`_transcoded.mp4` / `_remuxed.mp4` / `_subfix.mp4` during the encode) |
-| `Scripts/SQLScripts/DropWorkersStagingDirectory.py` | One-shot, idempotent column drop |
+| `Scripts/SQLScripts/drop_local_staging_2026_05_21.py` | One-shot, idempotent column drop |
 | `transcode.flow.md` | Stage 6 inputs table loses `StagingDirectory`; Stage 8 Action describes `-mv` rename and `KeepSource` settle |
 | `KNOWN-ISSUES.md` | Cross-worker hand-off (Risk 5 in 2026-05-10 sight pass) closed by criterion 3 |
 

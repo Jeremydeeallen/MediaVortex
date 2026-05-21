@@ -658,18 +658,6 @@ Observed: Bachelor in Paradise S10E01 was successfully transcoded earlier today,
 
 ---
 
-### [TECH DEBT] LocalStaging fallback decision duplicated across four sites
-**Date:** 2026-05-08
-**Affects:** Features/TranscodeJob/ProcessTranscodeQueueService.py
-
-`ProcessJob`, `ProcessRemuxJob`, `ProcessSubtitleFixJob`, and `SetupFilePreparation` each independently decide whether LocalStaging mode falls back to InPlace when the worker has no StagingDirectory configured. The first three fix used a local variable that didn't propagate; the fourth re-read the system setting and silently kept building staging paths. Today's fix added the same guard to `SetupFilePreparation` so the four sites agree, but a future change to the fallback logic still has to be made in four places.
-
-**Look first:** `Features/TranscodeJob/ProcessTranscodeQueueService.py:384-390, 526-530, 642-646, 828-836` -- four places computing `IsLocalStaging`. Extract `_GetEffectiveFileMode()` returning the resolved mode after applying the fallback.
-
-**Fix with:** `/t` (single-file refactor)
-
----
-
 ### [BUG] Second concurrent job shows first job's progress
 **Date:** 2026-05-05
 **Affects:** TranscodeJob feature -- concurrent job progress tracking
