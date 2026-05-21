@@ -100,11 +100,21 @@ def _RunSsh(Target: str, RemoteCmd: str, *, Timeout: int = 30,
 def _ResolveTarget(TargetArg: str, InventoryToml: Path, UserOverride: Optional[str]) -> tuple[str, str, str]:
     """Return (Friendly, Ip, SshUser).
 
-    TargetArg may be either a friendly name (e.g. 'wakko') or an IP literal.
-    For an IP, the script attempts a reverse-lookup in inventory.toml so it
-    can pick the matching compose-template; if no entry matches, it falls
-    back to the IP as the friendly name (and refuses to proceed without
-    --user and an explicit compose template).
+    TargetArg may be:
+      - A friendly compose-template basename (e.g. 'larry', 'wakko') -- mapped
+        first against the optional `compose_template` field, then against `name`.
+        The returned Friendly is always TargetArg so the caller picks
+        `compose-templates/<TargetArg>.yml` deterministically.
+      - An inventory entry `name` (e.g. 'mediavortex-workers'). Friendly is
+        that name unless the entry declares `compose_template`, in which case
+        Friendly becomes the compose_template value.
+      - An IPv4 literal. The script reverse-looks-up the inventory by primary
+        IP. If no entry matches, Friendly = the IP (caller still needs a
+        matching compose template).
+
+    The script honors the inventory schema's backward-compat clause: if an
+    entry has no `nics` array, the top-level `ip` field is used as the
+    primary IP (see infrastructure/terraform/inventory-schema.md line 186).
     """
     UseIp = bool(IpRegex.match(TargetArg))
 
@@ -122,14 +132,18 @@ def _ResolveTarget(TargetArg: str, InventoryToml: Path, UserOverride: Optional[s
     Services = Data.get("services", [])
 
     def _PrimaryIp(Entry: dict) -> Optional[str]:
+        """Honor schema backward-compat: prefer `nics[role=primary].ip`,
+        fall back to top-level `ip`."""
         Nics = Entry.get("nics", [])
-        if not Nics:
-            return None
-        Primary = next(
-            (N for N in Nics if N.get("role") == "primary"),
-            Nics[0],
-        )
-        return Primary.get("ip")
+        if Nics:
+            Primary = next(
+                (N for N in Nics if N.get("role") == "primary"),
+                Nics[0],
+            )
+            Ip = Primary.get("ip")
+            if Ip:
+                return Ip
+        return Entry.get("ip") or None
 
     if UseIp:
         Match = next(
@@ -138,25 +152,38 @@ def _ResolveTarget(TargetArg: str, InventoryToml: Path, UserOverride: Optional[s
         )
         if Match:
             return (
-                Match["name"],
+                Match.get("compose_template") or Match["name"],
                 TargetArg,
                 UserOverride or Match.get("ssh_user", "root"),
             )
         return TargetArg, TargetArg, (UserOverride or "root")
 
+    # Friendly-name lookup. Prefer `compose_template` match (lets a CT named
+    # `mediavortex-workers` answer to `larry` because its compose template is
+    # `compose-templates/larry.yml`), then fall back to `name` match.
     Match = next(
-        (S for S in Services if S.get("name") == TargetArg),
+        (S for S in Services if S.get("compose_template") == TargetArg),
         None,
     )
+    if Match is None:
+        Match = next(
+            (S for S in Services if S.get("name") == TargetArg),
+            None,
+        )
     if not Match:
         raise ValueError(
-            f"No inventory.toml entry with name={TargetArg!r}. "
-            f"Pass an IP literal or add the host to inventory.toml."
+            f"No inventory.toml entry with name={TargetArg!r} or "
+            f"compose_template={TargetArg!r}. Pass an IP literal or add the "
+            f"host to inventory.toml."
         )
     Ip = _PrimaryIp(Match)
     if not Ip:
-        raise ValueError(f"Inventory entry {TargetArg!r} has no NIC with an IP.")
-    return TargetArg, Ip, (UserOverride or Match.get("ssh_user", "root"))
+        raise ValueError(
+            f"Inventory entry {Match['name']!r} has no primary IP "
+            f"(checked `nics[role=primary].ip` and top-level `ip`)."
+        )
+    Friendly = Match.get("compose_template") or TargetArg
+    return Friendly, Ip, (UserOverride or Match.get("ssh_user", "root"))
 
 
 def StepPreflight(Friendly: str, Target: str) -> tuple[bool, dict]:
