@@ -579,15 +579,16 @@ class DatabaseManager:
                    AudioSampleFormat, AudioChannelLayout, AudioCodec, SubtitleFormats,
                    ContainerFormat, OverallBitrate, TranscodedByMediaVortex,
                    AudioComplete, AudioCorruptSuspect, AudioCorruptReason,
-                   SourceIntegratedLufs, SourceLoudnessRangeLU, SourceTruePeakDbtp
+                   SourceIntegratedLufs, SourceLoudnessRangeLU, SourceTruePeakDbtp,
+                   NeedsQuick, NeedsTranscode
             FROM MediaFiles
             WHERE Id = %s
         """
         rows = self.DatabaseService.ExecuteQuery(query, (MediaFileId,))
-        
+
         if not rows:
             return None
-        
+
         row = rows[0]
         return MediaFileModel(
             Id=row['Id'],
@@ -632,6 +633,8 @@ class DatabaseManager:
             SourceIntegratedLufs=row.get('SourceIntegratedLufs'),
             SourceLoudnessRangeLU=row.get('SourceLoudnessRangeLU'),
             SourceTruePeakDbtp=row.get('SourceTruePeakDbtp'),
+            NeedsQuick=row.get('NeedsQuick'),
+            NeedsTranscode=row.get('NeedsTranscode'),
         )
 
     def SaveMediaFile(self, MediaFile: MediaFileModel) -> int:
@@ -1135,15 +1138,16 @@ class DatabaseManager:
                    AudioSampleFormat, AudioChannelLayout, AudioCodec, SubtitleFormats,
                    ContainerFormat, OverallBitrate, TranscodedByMediaVortex,
                    AudioComplete, AudioCorruptSuspect, AudioCorruptReason,
-                   SourceIntegratedLufs, SourceLoudnessRangeLU, SourceTruePeakDbtp
+                   SourceIntegratedLufs, SourceLoudnessRangeLU, SourceTruePeakDbtp,
+                   NeedsQuick, NeedsTranscode
             FROM MediaFiles
             WHERE LOWER(FilePath) = LOWER(%s)
         """
         rows = self.DatabaseService.ExecuteQuery(query, (FilePath,))
-        
+
         if not rows:
             return None
-        
+
         row = rows[0]
         return MediaFileModel(
             Id=row['Id'],
@@ -1188,6 +1192,8 @@ class DatabaseManager:
             SourceIntegratedLufs=row.get('SourceIntegratedLufs'),
             SourceLoudnessRangeLU=row.get('SourceLoudnessRangeLU'),
             SourceTruePeakDbtp=row.get('SourceTruePeakDbtp'),
+            NeedsQuick=row.get('NeedsQuick'),
+            NeedsTranscode=row.get('NeedsTranscode'),
         )
 
 

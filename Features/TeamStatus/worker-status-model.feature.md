@@ -43,6 +43,8 @@ References: KNOWN-ISSUES.md line 393 "[TECH DEBT] Activity page conflates worker
 
 8. The bulk "All Online" and "Pause All" buttons in the Workers card header use the same two-value model (Online, Paused).
 
+9. **[BUG-0004]** `Workers.Status` gates capability claiming, not just display. A worker whose `Status` is `Paused` MUST NOT claim ANY queue rows regardless of the individual capability flags (`TranscodeEnabled`, `RemuxEnabled`, `QualityTestEnabled`, `ScanEnabled`). A worker whose `Status` is `Draining` MUST NOT claim NEW queue rows but MUST finish any already-claimed in-flight work. A worker whose `Status` is `Online` claims according to its capability flags (current behavior). Verifiable: set `Workers.Status='Paused'` and `Workers.TranscodeEnabled=true` for a worker with the daemon running; queue a Transcode row; observe the row stays `Pending` and is NOT claimed by that worker within the capability-poll interval; logs show "capability stopped" / "Paused -- not claiming" for that worker. Then flip `Status='Online'`; observe the row claimed within the next poll cycle without any capability-flag change.
+
 ## Status
 
 COMPLETE (2026-05-14)

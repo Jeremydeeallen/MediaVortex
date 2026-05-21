@@ -709,7 +709,29 @@ class WorkerServiceApp:
             LoggingService.LogException("Error updating service status", e, "WorkerService", "_UpdateServiceStatus")
 
     def _ApplyCapabilities(self):
-        """Start or stop capabilities based on current DB flags."""
+        """Start or stop capabilities based on current DB flags.
+
+        Master precondition (BUG-0004, capability-control-plane criterion 8):
+        a non-Online Workers.Status blocks every capability uniformly. No
+        capability may run while Status != 'Online' regardless of the
+        per-capability *Enabled flag. Any running capability is signaled to
+        stop; nothing is started.
+        """
+        if self.WorkerStatus != "Online":
+            AnyRunning = (
+                self.TranscodeService is not None
+                or self.RemuxService is not None
+                or self.QualityTestService is not None
+                or self.ContinuousScanService is not None
+            )
+            if AnyRunning:
+                LoggingService.LogInfo(
+                    f"_ApplyCapabilities: Status={self.WorkerStatus} (not Online) -- stopping all capabilities",
+                    "WorkerService", "_ApplyCapabilities"
+                )
+                self._StopAllCapabilities()
+            return
+
         # Transcode
         if self.TranscodeEnabled and self.TranscodeService is None:
             self._StartTranscodeCapability()

@@ -10,7 +10,7 @@ from Core.Models.TranscodeAttemptModel import TranscodeAttemptModel
 from Core.Models.TranscodeFileModel import TranscodeFileModel
 from Repositories.DatabaseManager import DatabaseManager
 from Features.TranscodeJob.TranscodingFileManagerService import TranscodingFileManagerService
-from Services.CommandBuilderService import CommandBuilderService
+from Models.CommandBuilder import CommandBuilder
 from Features.TranscodeJob.VideoTranscodingService import VideoTranscodingService
 from Services.QueueManagementService import QueueManagementService
 from Features.QualityTesting.PostTranscodeDispositionService import PostTranscodeDispositionService
@@ -23,7 +23,7 @@ class ProcessTranscodeQueueService:
 
     def __init__(self, DatabaseManagerInstance: DatabaseManager = None,
                  FileManagerInstance: TranscodingFileManagerService = None,
-                 CommandBuilderInstance: CommandBuilderService = None,
+                 CommandBuilderInstance: CommandBuilder = None,
                  VideoTranscodingInstance: VideoTranscodingService = None,
                  QueueManagementInstance: QueueManagementService = None,
                  DispositionInstance: PostTranscodeDispositionService = None,
@@ -31,7 +31,7 @@ class ProcessTranscodeQueueService:
                  WorkerConfig: dict = None):
         self.DatabaseManager = DatabaseManagerInstance or DatabaseManager()
         self.FileManager = FileManagerInstance or TranscodingFileManagerService()
-        self.CommandBuilder = CommandBuilderInstance or CommandBuilderService()
+        self.CommandBuilder = CommandBuilderInstance or CommandBuilder()
         self.VideoTranscoding = VideoTranscodingInstance or VideoTranscodingService()
         self.QueueManagement = QueueManagementInstance or QueueManagementService(DatabaseManagerInstance=self.DatabaseManager)
         # Unified post-transcode disposition (replaces ShouldQualityTestService).
@@ -953,13 +953,14 @@ class ProcessTranscodeQueueService:
             TargetLocalPath = _os.path.join(_os.path.dirname(EffectiveInputPath), BaseName + '-mv.mp4.inprogress')
 
             self.UpdateTranscodeProgress(TranscodeAttemptId, "Building Command", 0.0, "Building remux command...")
-            CommandResult = self.CommandBuilder.BuildRemuxCommand(
-                Job, MediaFile,
-                InputPath=EffectiveInputPath,
-                TranscodingSettings={
-                    'FFmpegPath': self.FFmpegPath,
-                    'OutputDirectory': EffectiveOutputDir,
+            CommandResult = self.CommandBuilder.BuildFFmpegCommand(
+                MediaFile, Job,
+                Context={
+                    'InputPath': EffectiveInputPath,
                     'OutputPath': TargetLocalPath,
+                    'FFmpegPath': self.FFmpegPath,
+                    'FFprobePath': self.FFprobePath,
+                    'OutputDirectory': EffectiveOutputDir,
                 },
             )
             if not CommandResult:
@@ -1094,7 +1095,15 @@ class ProcessTranscodeQueueService:
 
             # Build subtitle fix command (pass effective input path)
             self.UpdateTranscodeProgress(TranscodeAttemptId, "Building Command", 0.0, "Building subtitle fix command...")
-            CommandResult = self.CommandBuilder.BuildSubtitleFixCommand(Job, MediaFile, InputPath=EffectiveInputPath, TranscodingSettings={'FFmpegPath': self.FFmpegPath, 'OutputDirectory': EffectiveOutputDir})
+            CommandResult = self.CommandBuilder.BuildFFmpegCommand(
+                MediaFile, Job,
+                Context={
+                    'InputPath': EffectiveInputPath,
+                    'FFmpegPath': self.FFmpegPath,
+                    'FFprobePath': self.FFprobePath,
+                    'OutputDirectory': EffectiveOutputDir,
+                },
+            )
             if not CommandResult:
                 self.HandleJobFailure(Job, "Failed to build subtitle fix command", TranscodeAttemptId, ActiveJobId)
                 return
@@ -1589,7 +1598,7 @@ class ProcessTranscodeQueueService:
                               TranscodingSettings: Dict[str, Any]) -> Optional[Dict[str, str]]:
         """Build the complete transcoding command."""
         try:
-            return self.CommandBuilder.BuildCommand(Job, MediaFile, TranscodingSettings)
+            return self.CommandBuilder.BuildFFmpegCommand(MediaFile, Job, Context=TranscodingSettings)
         except Exception as e:
             LoggingService.LogException("Exception building transcode command", e, "ProcessTranscodeQueueService", "BuildTranscodeCommand")
             return None

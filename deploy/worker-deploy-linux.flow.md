@@ -19,10 +19,13 @@ py deploy/deploy-linux-worker.py <target>
 | dot | client-z490v-01 | 10.0.0.193 | bare-metal | i9-10850K, 10C/20T | `dot-worker-1..4` (5 threads each) | `compose-templates/dot.yml` |
 
 When adding a new Linux worker host:
-1. Add the host to `infrastructure/terraform/inventory.toml` (friendly name, hostname, primary IP, ssh_user).
+1. Add the host to `infrastructure/terraform/inventory.toml` (friendly name, hostname, primary IP, ssh_user). Mount specifications live in the same entry: `bind_mounts` for LXC, `fstab_mounts` for bare-metal. **`inventory.toml` is the single source of truth -- never hardcode mount paths in compose templates or scripts.**
 2. Create `deploy/compose-templates/<friendly>.yml` -- copy a similar host's template, adjust hostnames (`<friendly>-worker-N`) and cpuset.
 3. Add a row to the table above.
-4. Run `py deploy/deploy-linux-worker.py <friendly>`.
+4. Provision the host:
+   - **LXC**: `terraform -chdir=infrastructure/terraform/mediavortex-workers apply` (reads `bind_mounts` via `inventory-query.py`).
+   - **Bare-metal**: `py infrastructure/terraform/mediavortex-bare-metal-bootstrap.py --host <friendly>` (idempotent: installs `nfs-common` + Docker CE, reconciles `/etc/fstab` managed block from `fstab_mounts`, creates `/staging` + `/opt/mediavortex` + mountpoints, runs `mount -a`).
+5. Run `py deploy/deploy-linux-worker.py <friendly>`.
 
 ## Pre-Flight Checks
 
@@ -32,9 +35,9 @@ The script runs these in order and exits non-zero on the first failure. Each che
 |---|---|---|---|
 | Target resolvable | `inventory.toml` lookup or IP literal | A friendly name or routable IP | Add the host to `inventory.toml`. |
 | SSH reachable | `ssh -o ConnectTimeout=5 root@<ip> hostname` | Hostname matches inventory | Check `_netdev`, firewall, host is up. |
-| Docker installed | `ssh ... 'docker --version'` | Version string | Provision the host (Terraform for LXC, manual or `bootstrap-host` for bare-metal). |
+| Docker installed | `ssh ... 'docker --version'` | Version string | LXC: `terraform apply` in `infrastructure/terraform/mediavortex-workers/`. Bare-metal: `py infrastructure/terraform/mediavortex-bare-metal-bootstrap.py --host <friendly>`. |
 | DB reachable from target | `ssh ... 'nc -zw2 10.0.0.15 5432 && echo OK'` | `OK` | Verify postgres on `10.0.0.15`; check pg_hba.conf allows the target IP. |
-| Required mounts non-empty | `ssh ... 'ls /mnt/media_tv \| head -1 && ls /mnt/movies \| head -1 && ls /mnt/xxx \| head -1'` | Each returns at least one filename | Fix NFS mounts on host. Per `KNOWN-ISSUES.md` mount-validation entry: an empty mount is treated as a failure to avoid silent corruption. |
+| Required mounts non-empty | `ssh ... 'ls /mnt/media_tv \| head -1 && ls /mnt/movies \| head -1 && ls /mnt/xxx \| head -1'` | Each returns at least one filename | LXC: `terraform apply` re-renders the `pct set --mp<N>` lines from `inventory.toml`. Bare-metal: re-run `mediavortex-bare-metal-bootstrap.py --host <friendly>`. If `inventory.toml` is correct but the host hasn't picked it up, that's the script to run. Per `KNOWN-ISSUES.md` mount-validation entry: an empty mount is treated as a failure to avoid silent corruption. |
 | Compose template exists | `ls deploy/compose-templates/<friendly>.yml` | File present | Create the template from a sibling. |
 
 ## Build and Deploy

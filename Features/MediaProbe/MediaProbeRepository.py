@@ -16,7 +16,8 @@ class MediaProbeRepository(BaseRepository):
                    HasBFrames, RefFrames, PixelFormat, Level, AudioChannels, AudioSampleRate,
                    AudioSampleFormat, AudioChannelLayout, AudioCodec, SubtitleFormats,
                    ContainerFormat, OverallBitrate, TranscodedByMediaVortex,
-                   FFprobeFailureCount, LastFFprobeError, LastFFprobeAttemptDate"""
+                   FFprobeFailureCount, LastFFprobeError, LastFFprobeAttemptDate,
+                   NeedsQuick, NeedsTranscode"""
 
     def _MapRowToMediaFile(self, Row) -> MediaFileModel:
         """Map a database row to a MediaFileModel instance."""
@@ -43,7 +44,9 @@ class MediaProbeRepository(BaseRepository):
             TranscodedByMediaVortex=Row['TranscodedByMediaVortex'],
             FFprobeFailureCount=Row.get('FFprobeFailureCount', 0),
             LastFFprobeError=Row.get('LastFFprobeError'),
-            LastFFprobeAttemptDate=Row.get('LastFFprobeAttemptDate')
+            LastFFprobeAttemptDate=Row.get('LastFFprobeAttemptDate'),
+            NeedsQuick=Row.get('NeedsQuick'),
+            NeedsTranscode=Row.get('NeedsTranscode'),
         )
 
     # ─── Query Methods ─────────────────────────────────────────────────

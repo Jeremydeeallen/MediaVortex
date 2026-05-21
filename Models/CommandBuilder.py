@@ -27,35 +27,166 @@ class CommandBuilder:
             return Path
         return os.path.normpath(Path.strip().strip('"'))
 
-    def BuildCommand(self, CommandData: Dict[str, Any]) -> Optional[Dict[str, str]]:
-        """Build complete FFmpeg transcoding command from provided data.
-        
+    @classmethod
+    def BuildFFmpegCommand(cls, MediaFile, Job, Context: Dict[str, Any]) -> Optional[Dict[str, str]]:
+        """Single public entry point. Decides command shape from Job state.
+
+        Cascade (Features/CommandBuilder/command-builder.feature.md criterion 2):
+          Job.IsSubtitleFix  -> subtitle-fix shape (subtitle convert + remux + audio)
+          Job.IsRemux        -> remux shape (-c:v copy + remux + audio)
+          else (Transcode)   -> transcode shape (video re-encode + remux + audio)
+
         Args:
-            CommandData: Dictionary containing all necessary data for command building
-            
-        Returns:
-            Dictionary with 'Command' and 'OutputPath' keys, or None if building fails
+            MediaFile: source state (AudioComplete, AudioCodec, Resolution, etc.)
+            Job: queue row whose ProcessingMode selects dispatch
+            Context: operational data the model doesn't know about. Required keys:
+                FFmpegPath. Optional: FFprobePath, InputPath, OutputPath,
+                OutputDirectory, TranscodeOutputMode, MaxCpuThreads, AudioStreamIndex,
+                ProfileSettings, CodecFlags, CodecParameters, SourceResolution,
+                StartTime. The shape methods pull what they need.
+
+        Returns {Command, OutputPath} dict or None on failure.
+        """
+        if not MediaFile or not Job:
+            return None
+        Builder = cls()
+        try:
+            if getattr(Job, 'IsSubtitleFix', False):
+                return Builder._BuildSubtitleFixShape(MediaFile, Job, Context)
+            if getattr(Job, 'IsRemux', False):
+                return Builder._BuildRemuxShape(MediaFile, Job, Context)
+            return Builder._BuildTranscodeShape(MediaFile, Job, Context)
+        except Exception as e:
+            LoggingService.LogException(
+                f"CommandBuilder.BuildFFmpegCommand failed (JobId={getattr(Job, 'Id', None)})",
+                e, "BuildFFmpegCommand", "CommandBuilder"
+            )
+            return None
+
+    def _RunFFprobeAnalysis(self, InputPath: str, FFprobePath: Optional[str]):
+        """Pre-flight FFprobe for stream selection. Returns analysis object or None.
+
+        Used by remux/subtitle-fix shapes to detect AudioStreamIndex, AudioCodec,
+        SubtitleStreamIndex without re-probing logic in callers. Cheap because
+        FFprobe only reads headers.
         """
         try:
-            # Extract data
-            Job = CommandData.get('Job')
-            MediaFile = CommandData.get('MediaFile')
+            from Services.FFmpegAnalysisService import FFmpegAnalysisService
+            AnalysisService = FFmpegAnalysisService(FFprobePath=FFprobePath)
+            return AnalysisService.AnalyzeMediaFile(InputPath)
+        except Exception as e:
+            LoggingService.LogException(
+                f"CommandBuilder._RunFFprobeAnalysis failed (InputPath={InputPath})",
+                e, "_RunFFprobeAnalysis", "CommandBuilder"
+            )
+            return None
+
+    def _CalculateTargetResolution(self, ProfileSettings: Dict[str, Any], SourceResolution: str) -> str:
+        Target = ProfileSettings.get('TargetResolution')
+        return Target if Target else SourceResolution
+
+    def _CalculateScaleFilter(self, SourceResolution: str, TargetResolution: str, MediaFile) -> Optional[str]:
+        """Compute -vf scale filter when down-scaling; None when no scaling needed."""
+        try:
+            if SourceResolution == TargetResolution:
+                return None
+            from Services.ResolutionService import ResolutionService
+            ResolutionServiceInstance = ResolutionService()
+            StandardizedTarget = ResolutionServiceInstance.StandardizeResolution(TargetResolution)
+            TargetHeight = self._ExtractHeightFromResolution(StandardizedTarget)
+            StandardTargetHeight = ResolutionServiceInstance.GetStandardHeight(TargetHeight)
+            SourceWidth, SourceHeight = self._GetSourceDimensions(MediaFile)
+            if SourceHeight <= 0:
+                return None
+            SourceAspectRatio = SourceWidth / SourceHeight
+            TargetWidth = self._CalculateWidthFromHeight(StandardTargetHeight, SourceAspectRatio)
+            return f"scale={TargetWidth}:{StandardTargetHeight}"
+        except Exception as e:
+            LoggingService.LogException(
+                "Exception calculating scale filter", e, "_CalculateScaleFilter", "CommandBuilder"
+            )
+            return None
+
+    def _ExtractHeightFromResolution(self, Resolution: str) -> int:
+        try:
+            if Resolution.endswith('p'):
+                return int(Resolution[:-1])
+            if 'x' in Resolution:
+                return int(Resolution.split('x')[1])
+            return int(Resolution)
+        except (ValueError, IndexError):
+            return 720
+
+    def _GetSourceDimensions(self, MediaFile) -> tuple:
+        try:
+            if not MediaFile or not getattr(MediaFile, 'Resolution', None):
+                return (1920, 1080)
+            Resolution = MediaFile.Resolution
+            if 'x' in Resolution:
+                try:
+                    Width, Height = Resolution.split('x')
+                    return (int(Width), int(Height))
+                except (ValueError, IndexError):
+                    pass
+            if Resolution in ('2160p', '4K'):
+                return (3840, 2160)
+            if Resolution == '1080p':
+                return (1920, 1080)
+            if Resolution == '720p':
+                return (1280, 720)
+            if Resolution == '480p':
+                return (854, 480)
+            Height = self._ExtractHeightFromResolution(Resolution)
+            return (self._CalculateWidthFromHeight(Height), Height)
+        except Exception:
+            return (1920, 1080)
+
+    def _CalculateWidthFromHeight(self, Height: int, AspectRatio: Optional[float] = None) -> int:
+        try:
+            if AspectRatio:
+                Width = int(Height * AspectRatio)
+                return Width - (Width % 2)
+            if Height == 2160:
+                return 3840
+            if Height == 1080:
+                return 1920
+            if Height == 720:
+                return 1280
+            if Height == 480:
+                return 854
+            return int(Height * 16 / 9)
+        except Exception:
+            return 1280
+
+    def _BuildTranscodeShape(self, MediaFile, Job, Context: Dict[str, Any]) -> Optional[Dict[str, str]]:
+        """Transcode shape: video re-encode + audio (branch on AudioComplete) + container.
+
+        Heaviest path. Subsumes remux + audio fix as side-effects of the
+        single FFmpeg pass.
+        """
+        try:
+            CommandData = Context  # legacy alias; existing code paths read from it
             ProfileSettings = CommandData.get('ProfileSettings', {})
             CodecFlags = CommandData.get('CodecFlags', {})
             CodecParameters = CommandData.get('CodecParameters', [])
-            SourceResolution = CommandData.get('SourceResolution', '')
-            TargetResolution = CommandData.get('TargetResolution', '')
+            SourceResolution = CommandData.get('SourceResolution') or getattr(MediaFile, 'Resolution', '') or ''
+            TargetResolution = CommandData.get('TargetResolution') or self._CalculateTargetResolution(ProfileSettings, SourceResolution)
             ScaleFilter = CommandData.get('ScaleFilter')
+            if ScaleFilter is None and TargetResolution and SourceResolution and TargetResolution != SourceResolution:
+                ScaleFilter = self._CalculateScaleFilter(SourceResolution, TargetResolution, MediaFile)
             StartTime = CommandData.get('StartTime')
-            ContainerType = ProfileSettings.get('ContainerType', 'mp4')  # Default to MP4
-            
-            if not Job or not MediaFile:
-                return None
-            
+            ContainerType = ProfileSettings.get('ContainerType', 'mp4')
+
             # Build command components
             InputPath = self._NormalizeFfmpegPath(
                 CommandData.get('InputPath', f"c:\\MediaVortex\\Source\\{MediaFile.FileName}")
             )
+
+            # Resolve preferred audio stream via FFprobe if caller didn't supply one
+            if 'AudioStreamIndex' not in CommandData:
+                Analysis = self._RunFFprobeAnalysis(InputPath, CommandData.get('FFprobePath'))
+                if Analysis and Analysis.AudioStreamIndex is not None:
+                    CommandData['AudioStreamIndex'] = Analysis.AudioStreamIndex
 
             # Generate output filename with target resolution and container type
             CrfValue = ProfileSettings.get('Quality')
@@ -166,34 +297,14 @@ class CommandBuilder:
             }
             
         except Exception as e:
-            # Log loudly so the failure surfaces in the database with full traceback.
-            # The previous silent return-None hid today's FFmpegPath=None ValueError
-            # behind a generic "Failed to build command" message with no context.
-            JobId = None
-            FilePath = None
-            try:
-                JobObj = CommandData.get('Job') if isinstance(CommandData, dict) else None
-                if JobObj is not None:
-                    JobId = getattr(JobObj, 'Id', None)
-                    FilePath = getattr(JobObj, 'FilePath', None)
-            except Exception:
-                pass
+            JobId = getattr(Job, 'Id', None)
+            FilePath = getattr(Job, 'FilePath', None)
             LoggingService.LogException(
-                f"CommandBuilder.BuildCommand failed (JobId={JobId}, FilePath={FilePath})",
-                e, "BuildCommand", "CommandBuilder"
+                f"CommandBuilder._BuildTranscodeShape failed (JobId={JobId}, FilePath={FilePath})",
+                e, "_BuildTranscodeShape", "CommandBuilder"
             )
             return None
-    
-    def ValidateCommandData(self, CommandData: Dict[str, Any]) -> bool:
-        """Validate that all required data is present for command building."""
-        RequiredKeys = ['Job', 'MediaFile', 'ProfileSettings']
-        
-        for key in RequiredKeys:
-            if key not in CommandData or CommandData[key] is None:
-                return False
-        
-        return True
-    
+
     def AddCodecParameters(self, CommandParts: list, CodecParameters: list, ProfileSettings: Dict[str, Any]) -> None:
         """Add codec parameters from database to command parts."""
         try:
@@ -362,20 +473,6 @@ class CommandBuilder:
         except Exception:
             return Resolution
     
-    def BuildVideoCodecParameters(self, CodecParameters: list) -> list:
-        """Build video codec parameter list from codec parameters data."""
-        Parameters = []
-        
-        for param in CodecParameters:
-            if param.get('IsEnabled', False):
-                ParameterName = param.get('Parameter', '')
-                ParameterValue = param.get('Value', '')
-                
-                if ParameterName and ParameterValue is not None:
-                    Parameters.extend([ParameterName, str(ParameterValue)])
-        
-        return Parameters
-    
     def BuildAudioFilters(self, ProfileSettings: Dict[str, Any]) -> Optional[str]:
         """Build audio filter string from system settings."""
         Filters = []
@@ -505,29 +602,32 @@ class CommandBuilder:
         Bitrate = ProfileBitrate if OperatorOverride else self._DefaultAudioBitrateForChannels(SourceChannels)
         return ['-c:a', 'eac3', '-b:a', f'{Bitrate}k']
 
-    def BuildRemuxCommand(self, CommandData: Dict[str, Any]) -> Optional[Dict[str, str]]:
-        """Build FFmpeg remux command: copy video, re-encode audio with
-        normalization, output MP4 to a `<basename>-mv.mp4.inprogress` path.
+    def _BuildRemuxShape(self, MediaFile, Job, Context: Dict[str, Any]) -> Optional[Dict[str, str]]:
+        """Remux shape: -c:v copy + audio (branch on AudioComplete) + container.
 
-        Contract: InputPath points at the original source (untouched until
-        replacement). OutputPath, when supplied by the caller, must end in
-        `.inprogress`. The original source is never renamed during processing
-        -- see worker-lifecycle.feature.md criterion 6.
+        Quick path. Handles container fix and/or audio normalize in one pass.
+        OutputPath, when supplied by the caller, must end in `.inprogress`.
+        The original source is never renamed during processing -- see
+        worker-lifecycle.feature.md criterion 6.
 
         Defense in depth: if OutputPath would equal InputPath (collision),
         refuse to build the command rather than risk a -y overwrite.
         """
         try:
-            Job = CommandData.get('Job')
-            MediaFile = CommandData.get('MediaFile')
-            AudioCodec = CommandData.get('AudioCodec', '')
-
-            if not Job or not MediaFile:
-                return None
-
+            CommandData = Context
             InputPath = self._NormalizeFfmpegPath(
                 CommandData.get('InputPath', f"c:\\MediaVortex\\Source\\{MediaFile.FileName}")
             )
+
+            # Pre-flight FFprobe to detect audio stream / codec / presence
+            if 'AudioStreamIndex' not in CommandData or 'HasAudio' not in CommandData:
+                Analysis = self._RunFFprobeAnalysis(InputPath, CommandData.get('FFprobePath'))
+                DetectedAudioCodec = Analysis.AudioCodec if Analysis and Analysis.AudioCodec else ''
+                if 'AudioStreamIndex' not in CommandData and Analysis and Analysis.AudioStreamIndex is not None:
+                    CommandData['AudioStreamIndex'] = Analysis.AudioStreamIndex
+                if 'HasAudio' not in CommandData:
+                    CommandData['HasAudio'] = bool(DetectedAudioCodec)
+            AudioCodec = CommandData.get('AudioCodec', '')
             BaseName = os.path.splitext(MediaFile.FileName)[0]
 
             ExplicitOutputPath = CommandData.get('OutputPath')
@@ -544,9 +644,9 @@ class CommandBuilder:
 
             if os.path.normcase(OutputPath) == os.path.normcase(InputPath):
                 LoggingService.LogError(
-                    f"BuildRemuxCommand: OutputPath equals InputPath ({InputPath}). "
+                    f"_BuildRemuxShape: OutputPath equals InputPath ({InputPath}). "
                     f"OutputPath must be a `.inprogress` side-by-side file.",
-                    "CommandBuilder", "BuildRemuxCommand"
+                    "CommandBuilder", "_BuildRemuxShape"
                 )
                 return None
 
@@ -590,10 +690,10 @@ class CommandBuilder:
                     if SourceCodec and SourceCodec not in AudioCompletionService.MP4_COMPAT_AUDIO_CODECS:
                         MediaFileId = getattr(MediaFile, 'Id', None)
                         LoggingService.LogError(
-                            f"BuildRemuxCommand: AudioComplete=true but AudioCodec={SourceCodec!r} "
+                            f"_BuildRemuxShape: AudioComplete=true but AudioCodec={SourceCodec!r} "
                             f"is not MP4-stream-copy-compatible (MediaFileId={MediaFileId}). "
                             f"Flagging AudioCorruptSuspect=true and refusing the command.",
-                            "CommandBuilder", "BuildRemuxCommand"
+                            "CommandBuilder", "_BuildRemuxShape"
                         )
                         if MediaFileId is not None:
                             AudioCompletionService.MarkAudioCorruptSuspect(
@@ -622,35 +722,37 @@ class CommandBuilder:
             }
 
         except Exception as e:
-            JobId = getattr(CommandData.get('Job'), 'Id', None) if isinstance(CommandData, dict) else None
             LoggingService.LogException(
-                f"CommandBuilder.BuildRemuxCommand failed (JobId={JobId})",
-                e, "BuildRemuxCommand", "CommandBuilder"
+                f"CommandBuilder._BuildRemuxShape failed (JobId={getattr(Job, 'Id', None)})",
+                e, "_BuildRemuxShape", "CommandBuilder"
             )
             return None
 
-    def BuildSubtitleFixCommand(self, CommandData: Dict[str, Any]) -> Optional[Dict[str, str]]:
-        """Build FFmpeg subtitle fix command: copy video, re-encode audio with
-        normalization, convert ASS/SSA subtitle to mov_text, output MP4 to a
-        `<basename>-mv.mp4.inprogress` path.
+    def _BuildSubtitleFixShape(self, MediaFile, Job, Context: Dict[str, Any]) -> Optional[Dict[str, str]]:
+        """Subtitle-fix shape: -c:v copy + audio (branch on AudioComplete) + subtitle
+        convert (ASS/SSA -> mov_text) + container.
 
-        Contract: InputPath points at the original source (untouched until
-        replacement). Same `.inprogress` pattern as BuildRemuxCommand. See
-        worker-lifecycle.feature.md criterion 6.
+        Specialized variant of the remux shape. OutputPath ends in
+        `<basename>-mv.mp4.inprogress` (worker-lifecycle.feature.md criterion 6).
         """
         try:
-            Job = CommandData.get('Job')
-            MediaFile = CommandData.get('MediaFile')
-            AudioCodec = CommandData.get('AudioCodec', '')
-            AudioStreamIndex = CommandData.get('AudioStreamIndex', 0)
-            SubtitleStreamIndex = CommandData.get('SubtitleStreamIndex', 0)
-
-            if not Job or not MediaFile:
-                return None
-
+            CommandData = Context
             InputPath = self._NormalizeFfmpegPath(
                 CommandData.get('InputPath', f"c:\\MediaVortex\\Source\\{MediaFile.FileName}")
             )
+
+            # Pre-flight FFprobe to detect audio + subtitle streams
+            if 'AudioStreamIndex' not in CommandData or 'SubtitleStreamIndex' not in CommandData:
+                Analysis = self._RunFFprobeAnalysis(InputPath, CommandData.get('FFprobePath'))
+                if 'AudioStreamIndex' not in CommandData and Analysis and Analysis.AudioStreamIndex is not None:
+                    CommandData['AudioStreamIndex'] = Analysis.AudioStreamIndex
+                if 'SubtitleStreamIndex' not in CommandData and Analysis and Analysis.SubtitleStreamIndex is not None:
+                    CommandData['SubtitleStreamIndex'] = Analysis.SubtitleStreamIndex
+                if Analysis and Analysis.AudioCodec and 'AudioCodec' not in CommandData:
+                    CommandData['AudioCodec'] = Analysis.AudioCodec
+            AudioCodec = CommandData.get('AudioCodec', '')
+            AudioStreamIndex = CommandData.get('AudioStreamIndex', 0)
+            SubtitleStreamIndex = CommandData.get('SubtitleStreamIndex', 0)
             BaseName = os.path.splitext(MediaFile.FileName)[0]
 
             ExplicitOutputPath = CommandData.get('OutputPath')
@@ -667,9 +769,9 @@ class CommandBuilder:
 
             if os.path.normcase(OutputPath) == os.path.normcase(InputPath):
                 LoggingService.LogError(
-                    f"BuildSubtitleFixCommand: OutputPath equals InputPath ({InputPath}). "
+                    f"_BuildSubtitleFixShape: OutputPath equals InputPath ({InputPath}). "
                     f"OutputPath must be a `.inprogress` side-by-side file.",
-                    "CommandBuilder", "BuildSubtitleFixCommand"
+                    "CommandBuilder", "_BuildSubtitleFixShape"
                 )
                 return None
 
@@ -718,10 +820,9 @@ class CommandBuilder:
             }
 
         except Exception as e:
-            JobId = getattr(CommandData.get('Job'), 'Id', None) if isinstance(CommandData, dict) else None
             LoggingService.LogException(
-                f"CommandBuilder.BuildSubtitleFixCommand failed (JobId={JobId})",
-                e, "BuildSubtitleFixCommand", "CommandBuilder"
+                f"CommandBuilder._BuildSubtitleFixShape failed (JobId={getattr(Job, 'Id', None)})",
+                e, "_BuildSubtitleFixShape", "CommandBuilder"
             )
             return None
 

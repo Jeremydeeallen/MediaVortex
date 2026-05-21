@@ -60,6 +60,11 @@ class MediaFileModel:
     SourceLoudnessRangeLU: Optional[float] = None
     SourceTruePeakDbtp: Optional[float] = None
 
+    # Cascade-materialized work-needed flags (media-tabs-and-loudness.feature.md).
+    # Read-only on the model; written by the cascade recompute, not by workers.
+    NeedsQuick: Optional[bool] = None
+    NeedsTranscode: Optional[bool] = None
+
     # FFprobe failure tracking
     FFprobeFailureCount: Optional[int] = 0
     LastFFprobeError: Optional[str] = None

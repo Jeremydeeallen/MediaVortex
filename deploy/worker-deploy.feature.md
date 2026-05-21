@@ -15,7 +15,9 @@ Operator-facing CLI on the dev workstation, plus two colocated flow docs and a t
 - `deploy/bringup.md` -- one-page runbook that picks the OS family and points at the right command.
 - `deploy/worker-deploy-{linux,windows}.flow.md` -- per-OS-family flow docs with parity sections.
 
-LXC provisioning (Proxmox `pct create`, NFS mount points, Docker install, AppArmor purge) is a host-onboarding concern owned by `infrastructure/terraform/mediavortex-workers/`. The worker-deploy script treats an LXC the same as any other Linux host: SSH in, sync source, `docker compose up -d`, verify the Workers row.
+LXC provisioning (Proxmox `pct create`, NFS mount points, Docker install, AppArmor purge) is a host-onboarding concern owned by `infrastructure/terraform/mediavortex-workers/`. Bare-metal host bootstrap (`nfs-common` + Docker CE install, `/etc/fstab` managed block, mountpoint + `/staging` + `/opt/mediavortex` directories) is owned by `infrastructure/terraform/mediavortex-bare-metal-bootstrap.py`, which reads `fstab_mounts` from `infrastructure/terraform/inventory.toml`. The worker-deploy script treats an LXC or a bootstrapped bare-metal host the same as any other Linux host: SSH in, sync source, `docker compose up -d`, verify the Workers row.
+
+The `infrastructure` repo is the **single source of truth** for host inventory and mount specifications. Editing `infrastructure/terraform/inventory.toml` is the only place to change a worker's mounts -- the LXC Terraform module and the bare-metal bootstrap script both render from it.
 
 ## Success Criteria
 
@@ -75,7 +77,7 @@ COMPLETE -- 2026-05-16. All 12 criteria satisfied (7 and 10 reconciled per QA pa
 
 - [x] 12. Closure pass (2026-05-16): wakko renamed in-place (workers + share mappings + storage resolutions + 893 transcodeattempts history); wakko redeployed with new compose template; stale Remington row deleted; QA + UX agents reported; criterion 7 reconciled (allow Windows single-worker pattern); criterion 10 reconciled (allow extra sections); ## Deviation from conventions added for criterion 8 (homelab DB password literal); bringup.md trimmed to 46 lines; deploy-linux-worker.py fixed for `{friendly}` placeholder interpolation in Paused success message and now points at flow doc Troubleshooting on verify failure.
 
-DONE. Follow-ups tracked elsewhere: bare-metal host bootstrap codification (KNOWN-ISSUES 2026-05-16 entry); the deferred remediation of the i9-2024 / Remington-style naming if the project later decides on `<host>-worker-1` for single-worker hosts.
+DONE. Follow-ups tracked elsewhere: bare-metal host bootstrap codification CLOSED 2026-05-21 by `infrastructure/terraform/mediavortex-bare-metal-bootstrap.py` (see `infrastructure/docs/features/linux-worker-deploy.md` criterion 10); the deferred remediation of the i9-2024 / Remington-style naming if the project later decides on `<host>-worker-1` for single-worker hosts.
 
 ## Scope
 
@@ -115,9 +117,14 @@ deploy/.deployignore
 
 ## References
 
+The `infrastructure` repo (`https://github.com/TheAdroitDBA/infrastructure`) is authoritative for host inventory, mounts, and bootstrap.
+
 - `WorkerService/worker-lifecycle.feature.md` -- runtime invariants the deploy verifies but does not own
 - `infrastructure/docs/features/linux-worker-deploy.md` -- host-side enrollment criteria (Linux); supplementary to this feature
 - `infrastructure/docs/features/windows-worker-deploy.md` -- host-side enrollment criteria (Windows); supplementary to this feature
-- `infrastructure/terraform/inventory.toml` -- friendly-host -> IP mapping consumed by every deploy script
+- `infrastructure/terraform/inventory.toml` -- friendly-host -> IP, `bind_mounts` (LXC), `fstab_mounts` (bare-metal); consumed by every deploy and bootstrap script
+- `infrastructure/terraform/inventory-query.py` -- emits a service's `bind_mounts` as JSON for the LXC Terraform module's `data "external"`
+- `infrastructure/terraform/mediavortex-workers/` -- LXC provisioning for Larry CT 218 (reads `bind_mounts` from `inventory.toml`)
+- `infrastructure/terraform/mediavortex-bare-metal-bootstrap.py` -- bare-metal prereq script (nfs-common + Docker CE + fstab managed block); reads `fstab_mounts` from `inventory.toml`
 - `infrastructure/terraform/secrets.py` -- Vaultwarden access for SMB/NFS/DB credentials
 - `KNOWN-ISSUES.md` -- search for "Linux worker deploy flow doc incomplete" (criterion 11 closes this) and "OS-coupled path storage" (orthogonal but relevant to share mappings)

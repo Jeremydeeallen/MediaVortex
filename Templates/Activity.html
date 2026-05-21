@@ -641,7 +641,7 @@ var ActivityPage = (function() {
                 '<label class="form-label small fw-bold">Capabilities</label>' +
                 CapabilityRow('TranscodeEnabled', 'Transcode', W.TranscodeEnabled, 'MaxConcurrentTranscodeJobs', W.MaxConcurrentTranscodeJobs || 1, WorkerNameJs) +
                 CapabilityRow('QualityTestEnabled', 'VMAF', W.QualityTestEnabled, 'MaxConcurrentQualityTestJobs', W.MaxConcurrentQualityTestJobs || 2, WorkerNameJs) +
-                CapabilityRow('RemuxEnabled', 'Remux', W.RemuxEnabled, 'MaxConcurrentRemuxJobs', W.MaxConcurrentRemuxJobs || 2, WorkerNameJs) +
+                CapabilityRow('RemuxEnabled', 'Quick (audio + remux)', W.RemuxEnabled, 'MaxConcurrentRemuxJobs', W.MaxConcurrentRemuxJobs || 2, WorkerNameJs) +
                 CapabilityRow('ScanEnabled', 'Scan', W.ScanEnabled, null, null, WorkerNameJs) +
             '</div>' +
             '<div class="form-text small">Capability and concurrency changes apply within one polling interval (no restart).</div>';

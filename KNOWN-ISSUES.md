@@ -37,7 +37,7 @@ Verification: running the exact failing command with `-f mp4` added produces a s
 
 **What breaks:** Setting `Workers.Status='Paused'` via the Activity page UI Pause button is purely cosmetic. The worker daemon continues to claim and process jobs as long as the individual capability flags (`TranscodeEnabled`, `RemuxEnabled`, `QualityTestEnabled`, `ScanEnabled`) are TRUE. Confirmed 2026-05-18: larry-worker-8 with `Status='Paused'`, `RemuxEnabled=false`, `TranscodeEnabled=true` claimed and ran a Transcode job (`TranscodeAttempts.Id=16549`, Real Housewives S01E15 downscale to 480p). Operator had clicked Pause on the worker tile and expected NO claiming; the worker ran anyway because TranscodeEnabled stayed true.
 
-**Violates:** `Features/TeamStatus/worker-status-model.feature.md` criterion 9 (added with this bug).
+**Violates:** `Features/TeamStatus/worker-status-model.feature.md` criterion 9 (added with this bug); also `Features/ServiceControl/capability-control-plane.feature.md` criterion 8 (Status='Online' must be a hard precondition for every capability, added 2026-05-18 amendment).
 
 **Look first:** `WorkerService/Main.py:711` `_ApplyCapabilities` -- only checks `self.TranscodeEnabled / self.RemuxEnabled / self.QualityTestEnabled / self.ScanEnabled`; `self.WorkerStatus` is loaded from DB (line 311) but never consulted. The fix is to wrap or extend `_ApplyCapabilities` so any non-Online status short-circuits to "stop all capabilities" regardless of the individual flags. Draining state has its own rules (cf. worker-status-model.feature.md criterion 3) -- finish in-flight jobs but don't claim new ones; Paused stops immediately.
 
@@ -762,8 +762,10 @@ Full Windows paths (e.g., `T:\Shows\file.mkv`) are stored as natural keys in at 
 
 ---
 
-### [BUG] Bare-metal Linux host bootstrap not codified -- manual SSH steps required before deploy-linux-worker.py
-**Date:** 2026-05-16
+### [BUG - FIXED 2026-05-21] Bare-metal Linux host bootstrap not codified -- manual SSH steps required before deploy-linux-worker.py
+**Date:** 2026-05-16 (opened); 2026-05-21 (closed)
+
+**Resolution:** `infrastructure/terraform/mediavortex-bare-metal-bootstrap.py` lands the canonical bootstrap. Reads `fstab_mounts` from `infrastructure/terraform/inventory.toml` (new field on `vm_type = "bare-metal"` entries), idempotently installs `nfs-common` + Docker CE, applies a managed block in `/etc/fstab`, creates `/staging` + `/opt/mediavortex` + every mountpoint, runs `mount -a`. New bare-metal bringup: `py infrastructure/terraform/mediavortex-bare-metal-bootstrap.py --host <friendly>` then `py deploy/deploy-linux-worker.py <friendly>`. Verifiable: re-running the bootstrap on a clean host is a no-op (managed-block sed delete + re-append yields identical fstab; package + dir checks short-circuit). See `infrastructure/docs/features/linux-worker-deploy.md` criterion 10 (also marked resolved 2026-05-21) for the host-side acceptance test. This entry should be moved to the Resolved section with a `BUG-NNNN` ID on the next housekeeping pass.
 
 **What breaks:** Adding a new bare-metal Linux worker host today requires manual SSH steps before `deploy/deploy-linux-worker.py` will pass its pre-flight check: install Docker CE, install nfs-common, append three NFS entries to `/etc/fstab` (Brain media_tv, Synology movies, Synology xxx), `mount -a`, and `mkdir /staging /opt/mediavortex`. LXC has the equivalent codified at `infrastructure/terraform/mediavortex-workers/setup.sh`. Bare-metal has nothing.
 
