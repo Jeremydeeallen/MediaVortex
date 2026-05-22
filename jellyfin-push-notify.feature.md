@@ -33,13 +33,18 @@ actually mutate files tell Jellyfin what changed. MediaVortex is one of two
 such systems (the other is the arr-stack; arr already supports Jellyfin
 Connect natively).
 
-## Concern
+## Out of scope
 
-After this feature ships AND the arr-stack Connect notify is also enabled,
-the infrastructure side will disable the Jellyfin "Scan Media Library"
-interval trigger (or reduce it to a once-daily safety net for libraries
-neither system mutates — XXX, Workout, custom downloads). Until BOTH push
-paths are live, do NOT disable polling.
+The Jellyfin "Scan Media Library" 2h interval trigger stays ON. It is
+the safety net for everything this feature does NOT cover -- arr-stack
+mutations (Sonarr/Radarr imports, deletes, renames) and any other
+source that touches the libraries. Disabling polling requires the arr
+stack to also push to Jellyfin, which is a separate configuration
+task in the infrastructure repo and is NOT this feature's concern.
+
+This feature's completion criterion is "MediaVortex mutations push to
+Jellyfin." It does not depend on, and does not block, the polling-off
+decision.
 
 ## Success Criteria
 
@@ -201,18 +206,15 @@ referencing the old `.mkv`. Documented as expected behavior; not a bug.
 
 ## Status
 
-**VERIFIED LIVE 2026-05-22.** Service implemented, wired into
-FileReplacement + DuplicateDetection, unit tests green (13 passing).
+**COMPLETE -- verified live 2026-05-22.** Service implemented, wired
+into FileReplacement + DuplicateDetection, unit tests green (13 passing).
 Config in `SystemSettings`; reuses existing `JellyfinHost`/`JellyfinApiPort`/
 `JellyfinApiKey` rows shared with `Features/Optimization`. Push-notify
 row `JellyfinNotifyDryRun=false` (live). Confirmed end-to-end against
 Jellyfin on `10.0.0.179`: notifies POST with status=204, Jellyfin
 refreshes the parent folder ~60s later, new files become playable.
 
-Only remaining item is the infrastructure-side flip to disable
-Jellyfin's `Scan Media Library` interval trigger (item 11) -- that
-happens in the infrastructure repo, not here, and depends on the arr
-stack also notifying.
+The Jellyfin 2h interval scan stays on -- see Out of scope.
 
 ### Progress
 
@@ -244,11 +246,6 @@ stack also notifying.
       S01E07) -- Jellyfin processed notifies correctly, refreshed
       parent season folder ~60s after 204 ACK, swept stale entries for
       other episodes in the same folder (free bonus cleanup).
-- [ ] 11. Coordinate with infrastructure side: once arr-stack Connect is
-      also live and notifying, disable the Jellyfin Scan Media Library
-      interval trigger (or reduce to once-daily safety net). That flip
-      happens in the infrastructure repo, not here, but this feature is
-      a prerequisite.
 
 ### Audit: file-mutation choke points
 
