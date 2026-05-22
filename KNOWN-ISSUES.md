@@ -2,41 +2,6 @@
 
 ## Open
 
-### [BUG-0008] I9 intermittent write failures to NFS mount -- ffmpeg output-open returns EINVAL
-**Date:** 2026-05-22 | **Area:** windows-worker
-
-**READ FIRST:** `deploy/BUG-0008-i9-nfs-einval.troubleshooting.md` -- per-bug investigation log with operator-confirmed facts (failures only on I9; NOT concurrency; two-NIC hypothesis open), ruled-out hypotheses, and active hypotheses with concrete diagnostic commands. Do NOT propose theories that contradict the Confirmed Facts section. Append findings to the Investigation log there, not here.
-
-**What breaks:** On I9-2024, ffmpeg jobs (both true transcodes and Quick/Remux) fail intermittently with exit code 4294967274 (= -22 = `EINVAL`) at the output-file `open()` step, before any encode work. FFmpeg successfully reads the input from the same NFS mount and prints full stream metadata, then dies on the output `open()` with `[out#0/mp4 @ ...] Error opening output T:\...mp4.inprogress: Invalid argument`. Failures hit both audio-reencode AND stream-copy commands. Running the same ffmpeg command manually from an interactive shell works flawlessly. Linux containers (larry, dot) writing to the same porky NFS export have zero failures. Last-hour stats: I9-2024 50/76 (66%) audio-reencode + 68/136 (50%) stream-copy succeeded; all 123 failures across the 6-hour window were on I9.
-
-**Repro:** Queue a batch of Remux or Transcode jobs against I9-2024 with `RemuxEnabled=true` (or `TranscodeEnabled=true`). Watch `SELECT Id, Success, ErrorMessage, TranscodeDurationSeconds FROM TranscodeAttempts WHERE ClaimedBy='I9-2024' OR FfpmpegCommand LIKE 'C:\\%' ORDER BY Id DESC` -- expect ~50% to return `Transcoding failed with return code 4294967274` with `TranscodeDurationSeconds=0`.
-
-**Evidence:** Captured FFmpeg stdout tail consistently shows full input-stream metadata followed by `[out#0/mp4 @ 0x...] Error opening output T:\...\...-mv.mp4.inprogress: Invalid argument` / `Error opening output file ...` / `Error opening output files: Invalid argument`. Duration ~0.0s. libsvtav1 never invoked. Same command shape, same paths -- some attempts succeed, some fail. Initial diagnosis (2026-05-22): the I9 NFS mount defaulted to `mount=soft, timeout=0.8s, retry=1` via `net use`, which returns EINVAL on transient slowness. Attempted fix: remount T:/M:/Z: via `mount.exe -o mtype=hard -o timeout=30` (verified mount table now shows `mount=hard, timeout=30.0`). User reports failures persist despite the hard mount -- the soft-mount hypothesis was wrong or incomplete.
-
-**Root cause (2026-05-22 follow-up):** Two `WorkerService\venv\Scripts\python.exe Main.py` processes were running simultaneously on I9 (PIDs 29264 + 39996, both started 2026-05-21 21:29:24 -- same second, classic zombie pair from `Stop-ScheduledTask` not killing children, same failure mode the windows flow doc warns about). Combined with `Workers.MaxConcurrentRemuxJobs=12`, the host issued up to 24 concurrent ffmpeg CREATE() calls against the porky NFS export. Failures cluster sub-second in `TranscodeAttempts` (e.g. 4 attempts at `14:16:20.{185,492,723}` + `14:16:21.425`; 5 attempts at `14:16:26.{556,556,776,776,985}`) with a deterministic mix of success/failure -- the signature of a concurrent-CREATE race in the Microsoft NFS client, not a soft-mount EINVAL. The "cut to 1" the operator tried set `MaxConcurrentJobs` (transcode), not `MaxConcurrentRemuxJobs` (the active load with `TranscodeEnabled=false, RemuxEnabled=true`). Mount is healthy (`mount=hard, rsize=1048576, wsize=1048576, timeout=10` on T:; 131072 on M:/Z:). The `rsize=1024/wsize=1024` mount options in `StartWorker.py:62-68` and `Scripts/Powershell/ConfigureMappedDriveVisibilityAndRemapZ.ps1:4` are dead writes -- `_MountDrive` short-circuits when the drive already exists, so those values never reach `mount.exe`.
-
-**Remediation applied:** Killed PIDs 29264 + 39996; one process gone, mount left untouched. DB UPDATE to `Workers.MaxConcurrentRemuxJobs=1` blocked by the live-worker write guard -- operator must run `UPDATE Workers SET MaxConcurrentRemuxJobs=1 WHERE WorkerName='I9-2024'` and restart `StartWorker.py`. Once stable, raise to 2 then 4 to find the Windows NFS client's safe ceiling for this host. Linux workers against the same export run at higher concurrency with 0 failures, so the ceiling is a property of the Microsoft NFS client, not of porky.
-
-**Violates:** `deploy/worker-deploy.feature.md` criterion 13 (added with this bug).
-
-**Look first:**
-1. Capture a fresh failure's full FFmpeg stdout post-hard-mount (`SELECT Message FROM Logs WHERE FunctionName='VideoTranscodingService' AND Message LIKE 'FFmpeg stdout:%' ORDER BY Id DESC LIMIT 1`). The ffmpeg error line beneath the stream metadata is the ground truth.
-2. `mount.exe` output on I9 -- confirm `mount=hard` actually stuck (we saw it stick during the fix session; verify it survived any reboot or `net use` collision).
-3. Concurrency: the `Workers.MaxConcurrentRemuxJobs` setting (currently 4 on I9) -- repro with concurrency=1 to isolate concurrent-create races on the Windows NFS client.
-4. UID/GID mapping: `mount.exe` showed `UID=0, GID=0` -- check porky's NFS export options (`/etc/exports` on 10.0.0.43) for `anonuid`/`anongid`/`no_root_squash`/`all_squash` to confirm the operator's effective UID has write permission on the target subtree.
-5. `subprocess.Popen(..., shell=True)` quoting via cmd.exe -- inspect the actually-executed command line via `Process Monitor` filter on `ffmpeg.exe` to confirm cmd.exe didn't drop a quote that the literal string in our Logs row pretends is intact.
-6. Compare a failed file's parent directory mtime/size against a successful one to spot any "directory locked by stale handle" pattern.
-
-**Related work this session (already committed, not the cure):**
-- `chore(deploy): retire SMB...` (79a02f3) -- SMB->NFS migration cleanup; correctly identified mount path drift but not the EINVAL root cause.
-- Uncommitted on the working tree: `StartMediaVortex.py`, `StartWorker.py`, `Scripts/Powershell/ConfigureMappedDriveVisibilityAndRemapZ.ps1`, `deploy/worker-deploy-windows.flow.md` -- switched mount path from `net use` to `mount.exe -o mtype=hard`. Keep or revert at the operator's call when the real fix lands.
-
-**Flow doc:** `deploy/worker-deploy-windows.flow.md` covers the Windows pipeline but its troubleshooting section does NOT yet document the EINVAL output-open pattern. `/t` should extend the Troubleshooting table with a row keyed on the symptom (`Error opening output ... Invalid argument` -> diagnosis steps above) before fixing.
-
-**Fix with:** `/t BUG-0008`.
-
----
-
 ### [BUG-0007] Worker capability toggle does not refresh UI until modal is closed and reopened
 **Date:** 2026-05-22 | **Area:** activity-page
 
@@ -822,6 +787,37 @@ Done manually for dot on 2026-05-16 -- worked in ~5 minutes -- but the manual st
 ---
 
 ## Resolved
+
+### [BUG-0008 - FIXED 2026-05-22] I9 intermittent write failures to NFS mount -- ffmpeg output-open returns EINVAL
+**Date:** 2026-05-22 | **Fixed:** 2026-05-22 | resolved: 2026-05-22
+
+**What broke:** On I9-2024, ffmpeg jobs (transcode + Quick/Remux) failed intermittently with exit code 4294967274 (= -22 = `EINVAL`) at the output-file `open()` step, before any encode work. Hit both audio-reencode and stream-copy commands. Linux containers (larry, wakko, dot) writing to the SAME porky NFS export had zero failures across the same load. Defect was host-local to I9.
+
+**Investigation log:** `deploy/BUG-0008-i9-nfs-einval.troubleshooting.md` -- captures every ruled-out hypothesis with evidence (soft-mount, concurrency, multi-NIC routing, drive-letter session unbinding, AV filter drivers, shell=True wrapper, NFSv4 negotiation). All client-side workarounds failed; UNC paths failed the same way as drive-letter paths, proving the Microsoft NFS client itself was the unstable layer.
+
+**Root cause:** The Microsoft NFS client (Windows 11 built-in) returns intermittent `ERROR_INVALID_PARAMETER` on `CreateFile()` against a Linux kernel nfsd. The bug is in the client implementation; Linux NFS clients against the same exports are stable. The infrastructure repo's `brain-porky-media-migration.md` originally planned for Windows workers to remain on SMB (SMB-to-brain -> SMB-to-porky), but the SMB-on-porky setup was never stood up and I9 was inadvertently moved to NFS. This was the first time the MS-NFS-client + Linux-nfsd combination had been exercised in this homelab; the fragility was latent until then.
+
+**Fix (shipped 2026-05-22, commit b02a34b):** Cutover Windows access from NFS to SMB. Stood up Samba on porky for the TV share with a `mediavortex` user; used Synology native SMB for Movies + XXX (the cleaner option since Synology's SMB stack is its primary protocol). Updated `StorageRootResolutions` for I9-2024 to SMB UNCs. The worker bypasses the Microsoft NFS client entirely. Linux workers stayed on NFS unchanged.
+
+**Architecture changes alongside the cutover:**
+- Worker became a strict reader on `StorageRootResolutions` / `WorkerShareMappings`. `RegisterStorageRootResolutionsFromCanonical` and the `MEDIAVORTEX_SHARE_MAPPINGS` env-var branch deleted; missing SRR rows hard-fail with a remediation pointer.
+- Atomic claim queries (`ClaimNextPendingTranscodeJob`, `ClaimNextPendingRemuxJob`) gate on `Workers.Status='Online' AND <Cap>Enabled=TRUE` via an EXISTS subquery -- Pause and capability flips take effect on the very next claim attempt, no polling-cache lag.
+- `PrivateNormalizePathToFilesystemCase` translates canonical -> local via `PathTranslationService` before filesystem probes, eliminating the "Path does not exist, cannot normalize: T:\..." warnings.
+- `_VerifyRequiredPaths` reads `StorageRootResolutions.AbsolutePath` (works uniformly for POSIX, drive letter, or UNC) instead of `LEFT(FilePath,2)` drive-letter scan.
+- `QueryDatabase.py` print_table no longer truncates output.
+
+**Verified:** 329-for-329 success on I9-2024 since cutover, zero `4294967274` EINVAL failures. The original verification criterion (100 consecutive without EINVAL) was overshot by 3.3x.
+
+**New artifacts:**
+- `Scripts/SQLScripts/SetWindowsWorkerUncPaths.py` -- sole writer for SRR / WSM; `UNC_PREFIXES` dict is the only place share literals live in code.
+- `WorkerService/windows-unc-path-translation.feature.md` -- feature spec for the cutover.
+- `deploy/BUG-0008-i9-nfs-einval.troubleshooting.md` -- full investigation log.
+
+**Vault entries created:** `homelab/porky/cifs/mediavortex`, `homelab/synology/cifs/jallen11` (per `skills/infra-vault/SKILL.md` naming convention).
+
+**Files:** `Repositories/DatabaseManager.py`, `WorkerService/Main.py`, `Core/Services/PathTranslationService.py`, `StartWorker.py`, `Scripts/SQLScripts/SetWindowsWorkerUncPaths.py`, `Scripts/SQLScripts/QueryDatabase.py`, `WorkerService/windows-unc-path-translation.feature.md`, `deploy/BUG-0008-i9-nfs-einval.troubleshooting.md`, `deploy/worker-deploy.feature.md` criterion 13, `deploy/worker-deploy-windows.flow.md`. Commit b02a34b.
+
+---
 
 ### [BUG-0001 - FIXED 2026-05-17] Stuck-item cleanup gaps -- operational rows leak past their job's terminal state
 **Date:** 2026-05-16 | **Fixed:** 2026-05-17 | resolved: 2026-05-17
