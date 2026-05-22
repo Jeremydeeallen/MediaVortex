@@ -89,7 +89,6 @@ deploy/bringup.md
 deploy/deploy-linux-worker.py
 deploy/deploy-windows-worker.py
 deploy/Register-WorkerTask.ps1
-deploy/Bootstrap-WorkerCreds.ps1
 deploy/Dockerfile
 deploy/compose-templates/larry.yml
 deploy/compose-templates/wakko.yml
@@ -105,11 +104,10 @@ deploy/.deployignore
 - `deploy/worker-deploy.feature.md` -- this doc (operator-experience criteria)
 - `deploy/bringup.md` -- one-page runbook covering both OS families (criterion 9)
 - `deploy/worker-deploy-linux.flow.md` -- Docker on Linux flow, covers LXC and bare-metal (Larry, Wakko, dot)
-- `deploy/worker-deploy-windows.flow.md` -- Task Scheduler + SMB flow (Remington, I9-2024)
+- `deploy/worker-deploy-windows.flow.md` -- Task Scheduler + NFS flow (Remington, I9-2024)
 - `deploy/deploy-linux-worker.py` -- Linux entry script (works against LXC or bare-metal)
 - `deploy/deploy-windows-worker.py` -- Windows entry script (already exists)
 - `deploy/Register-WorkerTask.ps1` -- Windows Task Scheduler registration
-- `deploy/Bootstrap-WorkerCreds.ps1` -- Windows DPAPI / Credential Manager hardening
 - `deploy/Dockerfile` -- worker container image (used by all Linux deployments)
 - `deploy/compose-templates/<friendly>.yml` -- per-host compose file; `deploy-linux-worker.py` scp's the matching one to `/opt/mediavortex/docker-compose.yml` on the target. Friendly name comes from `inventory.toml`. Hostnames inside each file follow `<friendly>-worker-N` lowercase per criterion 7.
 - `deploy/SyncSource.py` -- tar-over-ssh source sync with `.deployignore` filtering

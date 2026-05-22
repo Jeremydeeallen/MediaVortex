@@ -5,27 +5,15 @@ transcode worker (no WebService) -- e.g. REMINGTON, I9-2024, future bare-metal
 workers.
 
 What this does on every run:
-  1. Mount required SMB drives (T:, M:, Z:) in *this* process's session.
+  1. Mount required NFS drives (T:, M:, Z:) in *this* process's session.
   2. Verify each drive is accessible.
   3. Launch WorkerService\\Main.py inline (this script blocks until it exits).
 
-Why re-mount every run: persistent SMB mappings do NOT reconnect for non-
+Why re-mount every run: persistent mappings do NOT reconnect for non-
 interactive sessions (Task Scheduler, NSSM, SSH). See worker-deploy-windows.flow.md.
 
-Credential resolution (priority order):
-  1. Cached SMB cred in Windows Credential Manager. The launcher first tries
-     `New-SmbMapping` with NO `-UserName`/`-Password`; Windows resolves the
-     credential from the per-user store keyed by the SMB server. Stash via
-     `deploy\\Bootstrap-WorkerCreds.ps1` from an interactive session (RDP or
-     physical -- cmdkey refuses from Network-logon sessions like SSH).
-  2. Env vars MEDIAVORTEX_BRAIN_PASSWORD / MEDIAVORTEX_SYNOLOGY_PASSWORD.
-     Set at User scope so they survive logoff.
-  3. Vault helper at MEDIAVORTEX_VAULT_HELPER (default
-     C:\\Code\\infrastructure\\terraform\\secrets.py). Calls
-     `<python> <helper> get <key>` and uses stdout. Requires the worker
-     host to have the infrastructure repo, the bw CLI, and a DPAPI session
-     cache stashed via tools\\bw-cache-session.ps1.
-  4. If a required drive cannot be mounted by any of the above, exit 2.
+The mounts are NFS via the Windows NFS client (AUTH_SYS, no credentials).
+Porky exports the TV share; Synology exports Movies + XXX.
 
 Designed for unattended use:
   - No Windows Terminal tabs (wt.exe is unavailable in service contexts).
@@ -48,83 +36,16 @@ RootDirectory = Path(__file__).resolve().parent
 
 WorkerEntry = RootDirectory / "WorkerService" / "Main.py"
 DefaultVenvPython = RootDirectory / "venv" / "Scripts" / "python.exe"
-DefaultVaultHelper = Path(r"C:\Code\infrastructure\terraform\secrets.py")
 
 NetworkDrives = [
-    {
-        "Letter": "T",
-        "UncPath": r"\\10.0.0.40\Media_tv",
-        "User": "media",
-        "VaultKey": "homelab/brain/cifs/media",
-        "EnvVar": "MEDIAVORTEX_BRAIN_PASSWORD",
-        "Required": True,
-    },
-    {
-        "Letter": "M",
-        "UncPath": r"\\10.0.0.61\_video\Adults\Movies",
-        "User": "jallen11",
-        "VaultKey": "homelab/synology/cifs/jallen11",
-        "EnvVar": "MEDIAVORTEX_SYNOLOGY_PASSWORD",
-        "Required": True,
-    },
-    {
-        "Letter": "Z",
-        "UncPath": r"\\10.0.0.61\xxx",
-        "User": "jallen11",
-        "VaultKey": "homelab/synology/cifs/jallen11",
-        "EnvVar": "MEDIAVORTEX_SYNOLOGY_PASSWORD",
-        "Required": True,
-    },
+    {"Letter": "T", "UncPath": r"\\10.0.0.43\srv\nfs-media-_tv", "Required": True},
+    {"Letter": "M", "UncPath": r"\\10.0.0.61\volume1\_video\Adults\Movies", "Required": True},
+    {"Letter": "Z", "UncPath": r"\\10.0.0.61\volume2\XXX", "Required": True},
 ]
 
 
-def _ResolveVaultHelper():
-    HelperPath = os.environ.get("MEDIAVORTEX_VAULT_HELPER", str(DefaultVaultHelper))
-    return HelperPath if os.path.exists(HelperPath) else None
-
-
-def _ResolvePassword(Drive):
-    EnvValue = os.environ.get(Drive["EnvVar"])
-    if EnvValue:
-        return EnvValue
-
-    Helper = _ResolveVaultHelper()
-    if not Helper:
-        return None
-
-    PythonExe = sys.executable or "py"
-    try:
-        Result = subprocess.run(
-            [PythonExe, Helper, "get", Drive["VaultKey"]],
-            capture_output=True,
-            text=True,
-            timeout=15,
-        )
-    except (FileNotFoundError, subprocess.TimeoutExpired) as Exc:
-        print(f"  [WARN] vault helper failed for {Drive['VaultKey']}: {Exc}")
-        return None
-
-    if Result.returncode != 0:
-        print(
-            f"  [WARN] vault helper exit {Result.returncode} for "
-            f"{Drive['VaultKey']}: {Result.stderr.strip()[:200]}"
-        )
-        return None
-    return Result.stdout.strip()
-
-
-def _RunPowerShell(Script, Env=None):
-    return subprocess.run(
-        ["powershell", "-NoProfile", "-NonInteractive", "-Command", Script],
-        capture_output=True,
-        text=True,
-        timeout=30,
-        env=Env,
-    )
-
-
 def _MountDrive(Drive):
-    """Mount one SMB drive. Try cached creds first, then explicit creds."""
+    """Mount one NFS drive via net use /persistent:yes. NFS uses AUTH_SYS -- no credentials."""
     Letter = Drive["Letter"]
     UncPath = Drive["UncPath"]
 
@@ -132,45 +53,11 @@ def _MountDrive(Drive):
         print(f"  [OK]   {Letter}:\\ already mounted")
         return True
 
-    # 1. Cached-credential path: New-SmbMapping with no user/pass uses the
-    #    per-user Credential Manager entry keyed by the SMB server.
-    CachedScript = (
-        f"$ErrorActionPreference='Stop'; "
-        f"New-SmbMapping -LocalPath {Letter}: -RemotePath '{UncPath}' | Out-Null"
-    )
+    Cmd = ["net", "use", f"{Letter}:", UncPath, "/persistent:yes"]
     try:
-        Result = _RunPowerShell(CachedScript)
-        if Result.returncode == 0 and os.path.exists(f"{Letter}:\\"):
-            print(f"  [OK]   {Letter}:\\ mounted via cached creds ({UncPath})")
-            return True
+        Result = subprocess.run(Cmd, capture_output=True, text=True, timeout=30)
     except subprocess.TimeoutExpired:
-        print(f"  [WARN] {Letter}:\\ cached-cred mount timed out; trying explicit")
-
-    # 2. Explicit-credential path: pull password from env var or vault helper,
-    #    pass via env var to avoid PowerShell argument-quoting hazards.
-    Password = _ResolvePassword(Drive)
-    if not Password:
-        Tag = "[FAIL]" if Drive.get("Required") else "[WARN]"
-        print(
-            f"  {Tag} {Letter}:\\ -- cached cred missing AND no password "
-            f"source available (set ${Drive['EnvVar']} or stash "
-            f"{Drive['VaultKey']} in vault, or run "
-            f"deploy\\Bootstrap-WorkerCreds.ps1 from an interactive session)"
-        )
-        return False
-
-    ExplicitScript = (
-        f"$ErrorActionPreference='Stop'; "
-        f"New-SmbMapping -LocalPath {Letter}: -RemotePath '{UncPath}' "
-        f"-UserName '{Drive['User']}' -Password $env:_MV_PWD | Out-Null"
-    )
-    Env = os.environ.copy()
-    Env["_MV_PWD"] = Password
-
-    try:
-        Result = _RunPowerShell(ExplicitScript, Env=Env)
-    except subprocess.TimeoutExpired:
-        print(f"  [FAIL] {Letter}:\\ explicit-cred mount timed out")
+        print(f"  [FAIL] {Letter}:\\ mount timed out")
         return False
 
     if Result.returncode == 0 and os.path.exists(f"{Letter}:\\"):
@@ -179,12 +66,13 @@ def _MountDrive(Drive):
 
     Combined = (Result.stdout + Result.stderr).strip()
     FirstLine = Combined.splitlines()[0] if Combined else f"exit {Result.returncode}"
-    print(f"  [FAIL] {Letter}:\\: {FirstLine}")
+    Tag = "[FAIL]" if Drive.get("Required") else "[WARN]"
+    print(f"  {Tag} {Letter}:\\: {FirstLine}")
     return False
 
 
 def _MountAllDrives():
-    print("Mounting SMB drives...")
+    print("Mounting NFS drives...")
     Failed = []
     for Drive in NetworkDrives:
         if not _MountDrive(Drive) and Drive.get("Required"):
@@ -238,7 +126,7 @@ def main():
     Parser.add_argument(
         "--no-mount",
         action="store_true",
-        help="Skip SMB mount step (drives already mounted).",
+        help="Skip NFS mount step (drives already mounted).",
     )
     Parser.add_argument(
         "--dry-run",

@@ -6,8 +6,7 @@
   Creates a Scheduled Task named "MediaVortex Worker" that:
     - Triggers when the current user logs on
     - Runs `<MediaVortex>\venv\Scripts\python.exe StartWorker.py`
-    - Runs in the user's interactive context (so it inherits Vaultwarden DPAPI
-      access and Credential Manager state)
+    - Runs in the user's interactive context
     - Restarts on failure (3 attempts, 1 minute apart)
     - Stops if the user logs off (so the kids gaming on REMINGTON aren't
       sharing CPU with a transcode that won't yield)
@@ -41,12 +40,9 @@
   Prerequisites on the worker host:
     1. C:\Code\MediaVortex with a built venv (`py -m venv venv` then
        `venv\Scripts\python.exe -m pip install -r requirements.txt`).
-    2. SMB credential source available -- one of:
-       - User env vars MEDIAVORTEX_BRAIN_PASSWORD and MEDIAVORTEX_SYNOLOGY_PASSWORD
-         set via [Environment]::SetEnvironmentVariable(..., 'User')
-       - Infrastructure repo at C:\Code\infrastructure WITH the bw CLI
-         installed AND a DPAPI session cache stashed via
-         tools\bw-cache-session.ps1 (recommended; no plaintext passwords on disk)
+    2. Windows NFS Client feature installed (`Enable-WindowsOptionalFeature
+       -Online -FeatureName ServicesForNFS-ClientOnly,ClientForNFS-Infrastructure`).
+       NFS uses AUTH_SYS -- no credentials are required.
     3. WorkerService env vars set (MEDIAVORTEX_DB_HOST, etc.) at User scope.
 
   Verify after registration:
@@ -113,10 +109,9 @@ $SettingsParams = @{
 $Settings = New-ScheduledTaskSettingsSet @SettingsParams
 
 # 5. Principal: run as the current user, in their interactive logon session.
-#    This is the key reason Task Scheduler is preferred over NSSM here --
-#    SMB credentials cached in Windows Credential Manager are scoped to the
-#    user's interactive session, and the worker needs to mount user-scoped
-#    SMB shares.
+#    Interactive logon is preferred over a SYSTEM-account task because the
+#    NFS client maps drive letters per-user; running as the same user that
+#    set up the persistent mounts keeps the drive letters consistent.
 $Principal = New-ScheduledTaskPrincipal `
     -UserId $CurrentUser `
     -LogonType Interactive `

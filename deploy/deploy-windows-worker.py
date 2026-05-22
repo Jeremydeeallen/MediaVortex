@@ -6,7 +6,7 @@ workstation against any Windows host that has Python 3.12+ and OpenSSH
 Server installed.
 
 WHEN TO USE THIS SCRIPT vs the hot-swap flow:
-  - Fresh host, host rebuild, env-vars or SMB creds changed: this script.
+  - Fresh host, host rebuild, env-vars changed: this script.
   - In-place code update on a running worker (most common case): use the
     manual sequence in deploy/worker-deploy-windows.flow.md "Code-Only Update
     (Hot-Swap)" -- this script assumes a fresh host and does NOT stop the
@@ -14,10 +14,11 @@ WHEN TO USE THIS SCRIPT vs the hot-swap flow:
     locks and the scp will fail or partially overwrite.
 
 Steps:
-  1. Pre-flight checks (Python, sshd, NetworkCategory, port reachability)
+  1. Pre-flight checks (Python, sshd, NetworkCategory, port reachability,
+     NFS client feature installed)
   2. scp the MediaVortex repo to C:\\Code\\MediaVortex
   3. Recreate the venv (the source venv's pyvenv.cfg paths don't translate)
-  4. Push DB env vars + SMB share creds via SSH stdin -> -EncodedCommand
+  4. Push DB env vars via SSH stdin -> -EncodedCommand
   5. Set the WorkerService's MEDIAVORTEX_MAX_CPU_THREADS hint (optional)
   6. Register the `MediaVortex Worker` Task Scheduler entry
   7. Trigger the task once to validate
@@ -26,14 +27,12 @@ Steps:
 Each step prints a one-line status. Idempotent: re-running on a
 partially-deployed host completes only the missing steps.
 
-Credential handling:
-- SMB passwords resolved from Vaultwarden via the infrastructure repo's
-  terraform/secrets.py (env override: --vault-helper).
-- Push to remote is via SSH stdin into PowerShell -EncodedCommand, so
-  values never appear on a process command line, in the operator's
-  transcript, or on disk in plaintext.
-- DB password is read from MEDIAVORTEX_DB_PASSWORD env var on the dev
-  workstation, falling back to the project default `mediavortex` if unset.
+NFS mounts use AUTH_SYS -- no credentials are required. The Windows NFS
+client must be installed (Enable-WindowsOptionalFeature -Online -FeatureName
+ClientForNFS-Infrastructure,ServicesForNFS-ClientOnly) and persistent drive
+mappings established by the operator before this script runs. DB password
+is read from MEDIAVORTEX_DB_PASSWORD env var on the dev workstation,
+falling back to the project default `mediavortex` if unset.
 
 Usage:
   py deploy/deploy-windows-worker.py 10.0.0.230
@@ -52,11 +51,9 @@ Exit codes:
 import argparse
 import base64
 import fnmatch
-import importlib.util
 import json
 import os
 import shutil
-import socket
 import subprocess
 import sys
 import tempfile
@@ -71,13 +68,6 @@ from typing import Optional
 MediaVortexRoot = Path(__file__).resolve().parent.parent
 DeployDir = MediaVortexRoot / "deploy"
 RemoteRoot = r"C:\Code\MediaVortex"
-
-# Default infrastructure repo path on the dev workstation. Overridable.
-DefaultVaultHelper = Path(r"C:\Code\infrastructure\terraform\secrets.py")
-
-# Vault keys for SMB share creds.
-VaultKeyBrain = "homelab/brain/cifs/media"
-VaultKeySynology = "homelab/synology/cifs/jallen11"
 
 # DB defaults (match deploy/worker-deploy-windows.flow.md "Environment Variables").
 DbDefaults = {
@@ -99,20 +89,6 @@ HeartbeatStaleThresholdSec = 60
 # ---------------------------------------------------------------------------
 # Local + remote command helpers
 # ---------------------------------------------------------------------------
-
-def _LoadVaultHelper(HelperPath: Path):
-    """Load infrastructure/terraform/secrets.py as a module."""
-    if not HelperPath.exists():
-        raise FileNotFoundError(
-            f"Vault helper not found at {HelperPath}. "
-            f"Set --vault-helper or clone the infrastructure repo to "
-            f"C:\\Code\\infrastructure."
-        )
-    Spec = importlib.util.spec_from_file_location("_vault", str(HelperPath))
-    Module = importlib.util.module_from_spec(Spec)
-    Spec.loader.exec_module(Module)
-    return Module
-
 
 def _SshTarget(User: str, Ip: str) -> str:
     return f"{User}@{Ip}"
@@ -171,8 +147,9 @@ def StepPreflight(Target: str) -> tuple[bool, dict]:
         '$prof = Get-NetConnectionProfile -EA 0 | Where-Object { $_.IPv4Connectivity -eq "Internet" } | Select-Object -First 1;\n'
         '$out["network_private"] = ($prof -ne $null) -and ($prof.NetworkCategory -eq "Private");\n'
         '$out["db_reachable"] = (Test-NetConnection 10.0.0.15 -Port 5432 -InformationLevel Quiet -WarningAction SilentlyContinue);\n'
-        '$out["brain_reachable"] = (Test-NetConnection 10.0.0.40 -Port 445 -InformationLevel Quiet -WarningAction SilentlyContinue);\n'
-        '$out["synology_reachable"] = (Test-NetConnection 10.0.0.61 -Port 445 -InformationLevel Quiet -WarningAction SilentlyContinue);\n'
+        '$out["porky_reachable"] = (Test-NetConnection 10.0.0.43 -Port 2049 -InformationLevel Quiet -WarningAction SilentlyContinue);\n'
+        '$out["synology_reachable"] = (Test-NetConnection 10.0.0.61 -Port 2049 -InformationLevel Quiet -WarningAction SilentlyContinue);\n'
+        '$out["nfs_client_installed"] = (Get-WindowsOptionalFeature -Online -FeatureName ClientForNFS-Infrastructure -EA 0).State -eq "Enabled";\n'
         '$out["computer_name"] = $env:COMPUTERNAME;\n'
         '$out["mv_dir_exists"] = Test-Path "C:\\Code\\MediaVortex";\n'
         '$out["venv_exists"] = Test-Path "C:\\Code\\MediaVortex\\venv\\Scripts\\python.exe";\n'
@@ -196,7 +173,7 @@ def StepPreflight(Target: str) -> tuple[bool, dict]:
         return False, {"_error": f"bad JSON: {Exc}: {JsonLine[:200]}"}
 
     Required = ["py", "sshd", "network_private", "db_reachable",
-                "brain_reachable", "synology_reachable"]
+                "porky_reachable", "synology_reachable", "nfs_client_installed"]
     Missing = [k for k in Required if not Data.get(k)]
     return (len(Missing) == 0), Data
 
@@ -405,15 +382,12 @@ def StepVerifyWorkerOnline(WorkerName: str) -> bool:
 # Orchestration
 # ---------------------------------------------------------------------------
 
-def BuildEnvVarPayload(VaultModule, *, Brain: str, Synology: str) -> dict[str, str]:
+def BuildEnvVarPayload() -> dict[str, str]:
     """Compose the env-var bundle pushed to the worker host."""
     Payload = dict(DbDefaults)
-    # Allow operator to override DB password from local environment.
     LocalPwd = os.environ.get("MEDIAVORTEX_DB_PASSWORD")
     if LocalPwd:
         Payload["MEDIAVORTEX_DB_PASSWORD"] = LocalPwd
-    Payload["MEDIAVORTEX_BRAIN_PASSWORD"] = Brain
-    Payload["MEDIAVORTEX_SYNOLOGY_PASSWORD"] = Synology
     Payload["MEDIAVORTEX_MAX_CPU_THREADS"] = os.environ.get(
         "MEDIAVORTEX_MAX_CPU_THREADS", "12"
     )
@@ -429,9 +403,6 @@ def main() -> int:
     Parser.add_argument("target_ip", help="IP of the Windows worker host.")
     Parser.add_argument("--user", default="owner",
                         help="SSH user (default: owner).")
-    Parser.add_argument("--vault-helper", type=Path,
-                        default=DefaultVaultHelper,
-                        help="Path to infrastructure/terraform/secrets.py.")
     Parser.add_argument("--check", action="store_true",
                         help="Run pre-flight only; do not change remote state.")
     Parser.add_argument("--skip-scp", action="store_true",
@@ -475,13 +446,6 @@ def main() -> int:
         print("\n[--check] pre-flight passed; no further actions taken.")
         return 0
 
-    # Load vault helper (we'll need it for SMB creds in step 4).
-    try:
-        Vault = _LoadVaultHelper(Args.vault_helper)
-    except FileNotFoundError as Exc:
-        print(f"\nFATAL: {Exc}")
-        return 2
-
     # Step 2: scp.
     if Args.skip_scp:
         _Status(2, Total, "scp repo", "SKIPPED", Detail="--skip-scp")
@@ -503,26 +467,17 @@ def main() -> int:
             return 2
         _Status(3, Total, "Recreate venv", "OK")
 
-    # Step 4: push env vars (DB + SMB creds).
+    # Step 4: push env vars (DB).
     if Args.skip_creds:
-        _Status(4, Total, "Push env vars (DB + SMB)", "SKIPPED",
+        _Status(4, Total, "Push env vars (DB)", "SKIPPED",
                 Detail="--skip-creds")
     else:
-        _Status(4, Total, "Push env vars (DB + SMB)", "...")
-        try:
-            Payload = BuildEnvVarPayload(
-                Vault,
-                Brain=Vault.get(VaultKeyBrain),
-                Synology=Vault.get(VaultKeySynology),
-            )
-        except Exception as Exc:
-            _Status(4, Total, "Push env vars (DB + SMB)", "FAILED",
-                    Detail=f"vault read: {Exc}")
-            return 2
+        _Status(4, Total, "Push env vars (DB)", "...")
+        Payload = BuildEnvVarPayload()
         if not StepPushEnvVars(Target, Payload):
-            _Status(4, Total, "Push env vars (DB + SMB)", "FAILED")
+            _Status(4, Total, "Push env vars (DB)", "FAILED")
             return 2
-        _Status(4, Total, "Push env vars (DB + SMB)", "OK",
+        _Status(4, Total, "Push env vars (DB)", "OK",
                 Detail=f"{len(Payload)} vars set at User scope")
 
     # Step 5: scratch volume hint. Not handled automatically -- requires

@@ -279,7 +279,7 @@ class ContinuousScanService:
 
             # Apply per-rootfolder host affinity. RootFolders.PreferredWorkerName=NULL means
             # any ScanEnabled worker may pick it up; a non-null value pins the rootfolder to
-            # the named worker (e.g. larry-worker-1 has the fast backplane to brain).
+            # the named worker (e.g. larry-worker-1 has the fast backplane to porky).
             EligibleFolders = []
             SkippedAffinity = 0
             for Folder in TopLevelFolders:

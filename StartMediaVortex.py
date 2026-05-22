@@ -2,9 +2,9 @@
 StartMediaVortex - Service orchestrator
 Opens each service in its own Windows Terminal tab using their own venv Python.
 
-Network drives use SMB (net use). Brain shares (F:, T:) use Samba with user auth.
-Allen/Synology shares (Z:) use native Synology SMB. All are mapped with
-/persistent:yes so they survive reboots via Windows Credential Manager.
+Network drives use NFS via the Windows NFS client. Porky exports the TV share;
+Synology exports Movies + XXX. None of the mounts require credentials.
+Mapped with /persistent:yes so they survive reboots.
 """
 
 import os
@@ -14,9 +14,9 @@ import subprocess
 RootDirectory = os.path.dirname(os.path.abspath(__file__))
 
 NetworkDrives = [
-    {"Letter": "F", "UncPath": r"\\10.0.0.40\Media", "User": "media", "Password": "media", "Required": True},
-    {"Letter": "T", "UncPath": r"\\10.0.0.40\Media_tv", "User": "media", "Password": "media", "Required": True},
-    {"Letter": "Z", "UncPath": r"\\10.0.0.61\xxx", "Required": False},
+    {"Letter": "T", "UncPath": r"\\10.0.0.43\srv\nfs-media-_tv", "Required": True},
+    {"Letter": "M", "UncPath": r"\\10.0.0.61\volume1\_video\Adults\Movies", "Required": True},
+    {"Letter": "Z", "UncPath": r"\\10.0.0.61\volume2\XXX", "Required": False},
 ]
 
 Services = [
@@ -37,14 +37,12 @@ def GetPythonExe(ServiceDirectory):
     return os.path.join(ServiceDirectory, "venv", "Scripts", "python.exe")
 
 
-def _MountSmbDrives(Drives):
-    """Mount SMB drives via net use with /persistent:yes."""
+def _MountNfsDrives(Drives):
+    """Mount NFS drives via net use with /persistent:yes. No credentials -- NFS uses AUTH_SYS."""
     for Drive in Drives:
         Letter = Drive["Letter"]
         UncPath = Drive["UncPath"]
         Cmd = ["net", "use", f"{Letter}:", UncPath, "/persistent:yes"]
-        if "User" in Drive:
-            Cmd.extend([f"/user:{Drive['User']}", Drive["Password"]])
         Result = subprocess.run(Cmd, capture_output=True, text=True)
         if Result.returncode == 0:
             print(f"  [OK]   {Letter}:\\ mounted")
@@ -69,7 +67,7 @@ def main():
             DrivesNeeded.append(Drive)
 
     if DrivesNeeded:
-        _MountSmbDrives(DrivesNeeded)
+        _MountNfsDrives(DrivesNeeded)
         time.sleep(2)
 
     # Verify required drives are accessible

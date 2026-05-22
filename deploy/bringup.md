@@ -20,7 +20,7 @@ The `infrastructure` repo (`https://github.com/TheAdroitDBA/infrastructure`) is 
 
 After the host-shape step, `/mnt/{media_tv,movies,xxx}` are mounted, Docker is installed, and `deploy-linux-worker.py` will pass pre-flight.
 
-**Windows** -- host onboarded per `infrastructure/docs/features/windows-worker-deploy.md`; OpenSSH Server reachable; Python 3.12+ installed; SMB creds in Vaultwarden (`homelab/brain/cifs/media`, `homelab/synology/cifs/jallen11`).
+**Windows** -- host onboarded per `infrastructure/docs/features/windows-worker-deploy.md`; OpenSSH Server reachable; Python 3.12+ installed; Windows NFS client feature installed; T:/M:/Z: NFS drive mappings established (`net use ... /persistent:yes`).
 
 ## 3. Run the deploy
 

@@ -165,10 +165,11 @@ Change only one variable and re-measure:
 
 After remediation, re-run the Stage 1 baseline query and compare to pre-change numbers.
 
-## Current Fleet Reference (2026-05-14)
+## Current Fleet Reference (2026-05-21)
 
 | Worker | Hardware | NIC | Storage Path | Known Constraints |
 |--------|----------|-----|-------------|-------------------|
-| I9-2024 | i9, 32 threads | Intel X540-T2 2x1Gbps (SMB Multichannel) | \\10.0.0.40\media_tv (HDD NAS) | Network I/O -- 2Gbps aggregate, shared read+write |
-| larry-worker-1..8 | Docker on 10.0.0.42 | Host NIC (1Gbps presumed) | NAS mount via Docker volume | Network I/O -- 8 containers share 1 NIC |
-| client-b450m-1..4 | Docker on 10.0.0.230 (wakko) | Host NIC | NAS mount via Docker volume | TBD -- not yet profiled |
+| I9-2024 | i9, 32 threads | Intel X540-T2 2x1Gbps | \\10.0.0.43\srv\nfs-media-_tv (porky NFS) | Network I/O -- 2Gbps aggregate, shared read+write |
+| larry-worker-1..4 | Docker on 10.0.0.42 (LXC 218) | Host NIC (1Gbps presumed) | NFS mount via Docker volume | Network I/O -- 4 containers share 1 NIC |
+| wakko-worker-1..4 | Docker on 10.0.0.230 (bare-metal) | Host NIC | NFS mount via Docker volume | TBD -- not yet profiled |
+| dot-worker-1..4 | Docker on 10.0.0.193 (bare-metal) | Host NIC | NFS mount via Docker volume | TBD -- not yet profiled |

@@ -1,5 +1,5 @@
 ---
-description: Deploy a MediaVortex WorkerService. Two scripts -- one for Linux (LXC or bare-metal Docker) and one for Windows (Task Scheduler + SMB). See deploy/bringup.md for shape selection.
+description: Deploy a MediaVortex WorkerService. Two scripts -- one for Linux (LXC or bare-metal Docker) and one for Windows (Task Scheduler + NFS). See deploy/bringup.md for shape selection.
 argument-hint: <linux|windows> <target-host-or-ip>
 ---
 
@@ -21,7 +21,7 @@ Deploy a MediaVortex worker. Do NOT improvise -- the deploy steps live in the fl
      - Flow doc: `deploy/worker-deploy-windows.flow.md`
      - Entry script: `deploy/deploy-windows-worker.py <target>` (idempotent)
      - Targets today: I9-2024, Remington
-     - `Bootstrap-WorkerCreds.ps1` must run from RDP/console, NOT SSH (`cmdkey` refuses).
+     - NFS drive mappings (T:/M:/Z:) must be established interactively on the host via `net use ... /persistent:yes` -- per-user mappings cannot be created from an SSH session.
 
 4. If the user did not specify a shape, ask before doing anything.
 
