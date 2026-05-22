@@ -1,11 +1,5 @@
 # Feature: Jellyfin Push Notifications on File Mutations
 
-> **Status flag for pickup:** READY FOR DESIGN/IMPLEMENTATION. Created by the
-> infrastructure repo's jellyfin-efficiency work (see
-> `infrastructure/docs/features/jellyfin-efficiency.md`, 2026-05-17 PM Decisions
-> entry). MediaVortex side has NOT been touched yet — `/n` step 14 explicitly
-> blocks code until criteria are reviewed and approved by the operator.
-
 ## What It Does
 
 When MediaVortex moves, renames, replaces, or deletes a media file under any
@@ -247,6 +241,20 @@ The Jellyfin 2h interval scan stays on -- see Out of scope.
       parent season folder ~60s after 204 ACK, swept stale entries for
       other episodes in the same folder (free bonus cleanup).
 
+### Verification (qa-tester, 2026-05-22)
+
+- **Criteria 1-6, 8, 9**: IMPLEMENTED with concrete code/test/DB evidence
+  (full report from qa-tester agent attached to commit message of the
+  closing commit).
+- **Criterion 7 (idempotent under retry)**: asserts Jellyfin server-side
+  behavior, not MediaVortex behavior. Our side is stateless: we don't
+  dedup, we don't track Jellyfin item IDs. Jellyfin's ~60s coalescing
+  window naturally absorbs duplicate notifies for the same path -- and
+  this was observed in the live 2026-05-22 burst test (7 notifies for
+  the same Season 1 folder coalesced into a single season refresh).
+  Live evidence is in this session's Jellyfin scan log, not in the
+  repo.
+
 ### Audit: file-mutation choke points
 
 Per criterion 1, grep of `shutil.move|os.replace|os.rename|os.unlink|os.remove`
@@ -255,7 +263,7 @@ under `Features/` and `Services/` (2026-05-22):
 | Site | Disposition |
 |---|---|
 | `Features/FileReplacement/FileReplacementBusinessService.py` (rename + delete) | NOTIFY -- via `_NotifyJellyfinOfReplacement` after `ProcessFileReplacement` / `FinalizePartialReplacement` success |
-| `Features/FileScanning/DuplicateDetectionService.py:95` (duplicate delete) | NOTIFY -- batched `Deleted` updates after each group; only effective on Windows worker where disk paths are canonical (`T:\...`); Linux disk paths fail translation and skip with WARNING |
+| `Features/FileScanning/DuplicateDetectionService.py:96` (duplicate delete) | NOTIFY -- batched `Deleted` updates after each group; only effective on Windows worker where disk paths are canonical (`T:\...`); Linux disk paths fail translation and skip with WARNING |
 | `Features/TranscodeJob/ProcessTranscodeQueueService.py:757,1666` | SKIP -- `.inprogress` artifact and partial output cleanup; Jellyfin does not index these filenames |
 | `Features/QualityTesting/QualityTestingBusinessService.py:1534` | SKIP -- staged `.inprogress` requeue cleanup |
 | `Features/ServiceControl/CrashRecoveryService.py:440` | SKIP -- orphaned `.inprogress` cleanup |
@@ -279,9 +287,23 @@ under `Features/` and `Services/` (2026-05-22):
 
 ## Files
 
-- `Services/JellyfinNotifyService.py` (new)
-- `Features/FileReplacement/FileReplacementBusinessService.py`
+- `Services/JellyfinNotifyService.py` (new) -- the notifier
+- `Features/FileReplacement/FileReplacementBusinessService.py` --
+  primary choke point (`_NotifyJellyfinOfReplacement` helper)
+- `Features/FileScanning/DuplicateDetectionService.py` -- secondary
+  choke point for duplicate deletions
+- `Scripts/SQLScripts/SeedJellyfinResolutions.py` (new) -- idempotent
+  seeder for `__jellyfin__` resolutions and `JellyfinNotifyDryRun`
+- `Scripts/DryRunJellyfinNotify.py` (new) -- operator-run one-shot
+  validator; renders translated paths without POSTing
+- `Tests/Contract/TestJellyfinNotify.py` (new) -- 13 unit tests
 - `jellyfin-push-notify.feature.md` (this doc)
+- `CLAUDE.md` -- one-line pointer to the SystemSettings keys
+
+### Commits
+
+- `151c3e5` feat(jellyfin-notify): push library updates on file mutations
+- `3530360` docs(jellyfin-notify): scope out the polling-off decision
 
 ## Cross-Repo References
 
