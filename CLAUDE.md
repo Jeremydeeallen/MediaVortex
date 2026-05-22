@@ -103,6 +103,7 @@ Separate processes coordinated via database records:
 - `CaseInsensitiveDict` maps lowercase PostgreSQL keys to PascalCase for JSON responses
 - **Known typo**: column `transcodeattempts.ffpmpegcommand` (double 'p') — code must match this
 - **LIKE queries use `ESCAPE '!'`** — any path value used in LIKE must be escaped with `EscapeLikePattern()` from `Core.Database.DatabaseService` to handle `!`, `%`, `_` in folder names
+- Jellyfin push-notify reads its config fresh from `SystemSettings` on every call. Reuses the existing `JellyfinHost`/`JellyfinApiPort`/`JellyfinApiKey` rows (shared with `Features/Optimization`); push-notify-specific row is `JellyfinNotifyDryRun`. See `jellyfin-push-notify.feature.md`.
 
 ### Key Tables
 | Table | Purpose |

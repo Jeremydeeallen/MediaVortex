@@ -230,6 +230,11 @@ class FileReplacementBusinessService:
                     "FileReplacementBusinessService", "ProcessFileReplacement",
                 )
 
+                self._NotifyJellyfinOfReplacement(
+                    replacement_result.get('CanonicalOriginalPath') or OriginalPath,
+                    replacement_result.get('CanonicalNewPath'),
+                )
+
                 return {
                     'Success': True,
                     'Message': 'File replacement completed successfully',
@@ -346,6 +351,8 @@ class FileReplacementBusinessService:
                     )
             else:
                 StepsCompleted.append("Original already absent")
+
+            self._NotifyJellyfinOfReplacement(CanonicalOriginalPath, CanonicalNewPath)
 
             return {'Success': True, 'StepsCompleted': StepsCompleted}
         except Exception as e:
@@ -512,7 +519,9 @@ class FileReplacementBusinessService:
             return {
                 'Success': True,
                 'StepsCompleted': StepsCompleted,
-                'Message': f'File replacement completed successfully. Steps: {", ".join(StepsCompleted)}'
+                'Message': f'File replacement completed successfully. Steps: {", ".join(StepsCompleted)}',
+                'CanonicalOriginalPath': CanonicalOriginal,
+                'CanonicalNewPath': CanonicalNewPath,
             }
 
         except Exception as e:
@@ -683,6 +692,31 @@ class FileReplacementBusinessService:
                 'Success': False,
                 'ErrorMessage': f'Exception updating MediaFiles: {str(e)}'
             }
+
+    def _NotifyJellyfinOfReplacement(self, CanonicalOriginalPath: str, CanonicalNewPath: str) -> None:
+        """Fire-and-forget Jellyfin notify after a successful file replacement.
+
+        Owns jellyfin-push-notify.feature.md criterion 1 (FileReplacement
+        choke point). Same path = one Modified; different path (extension
+        changed) = Deleted+Created batched into one POST."""
+        try:
+            from Services.JellyfinNotifyService import NotifyJellyfin
+            if not CanonicalNewPath:
+                return
+            if (CanonicalOriginalPath and os.path.normcase(CanonicalOriginalPath)
+                    != os.path.normcase(CanonicalNewPath)):
+                Updates = [
+                    {'Path': CanonicalOriginalPath, 'UpdateType': 'Deleted'},
+                    {'Path': CanonicalNewPath, 'UpdateType': 'Created'},
+                ]
+            else:
+                Updates = [{'Path': CanonicalNewPath, 'UpdateType': 'Modified'}]
+            NotifyJellyfin(Updates, self.DatabaseManager.DatabaseService)
+        except Exception as Ex:
+            LoggingService.LogException(
+                "Jellyfin notify swallowed at FileReplacement boundary",
+                Ex, "FileReplacementBusinessService", "_NotifyJellyfinOfReplacement",
+            )
 
     def _CleanupTemporaryFilePaths(self, TranscodeAttemptId: int):
         """Delete the TemporaryFilePaths row after successful replacement."""

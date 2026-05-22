@@ -82,25 +82,32 @@ paths are live, do NOT disable polling.
    carrying 10 `Updates` entries.
 
 4. **Failure is non-fatal.** Network errors, 5xx responses, timeouts, or
-   missing config (`JELLYFIN_URL` or `JELLYFIN_API_TOKEN` unset) log a
-   WARNING via `LoggingService.LogWarning(...)` and return without
-   raising. MediaVortex business logic continues regardless of Jellyfin's
-   state. Verifiable: stop Jellyfin, run a replace, observe the WARNING
-   in the Logs table, confirm MediaVortex did not error out, confirm the
-   replace itself committed normally. Restart Jellyfin and confirm the
-   next mutation notifies successfully.
+   missing config (`SystemSettings.JellyfinHost` or `.JellyfinApiKey`
+   unset) log a WARNING via `LoggingService.LogWarning(...)` and return
+   without raising. MediaVortex business logic continues regardless of
+   Jellyfin's state. Verifiable: stop Jellyfin, run a replace, observe
+   the WARNING in the Logs table, confirm MediaVortex did not error
+   out, confirm the replace itself committed normally. Restart Jellyfin
+   and confirm the next mutation notifies successfully.
 
 5. **Timeout cap.** The HTTP call uses a hard `timeout=5` seconds (connect
    + read). Verifiable: simulate a hung Jellyfin (firewall-drop the
-   response port; or point `JELLYFIN_URL` at a sink that accepts
-   connections but never responds); confirm the notify returns within
-   ~5s with a WARNING, not after default-socket-timeout minutes.
+   response port; or point `SystemSettings.JellyfinHost` at a sink that
+   accepts connections but never responds); confirm the notify returns
+   within ~5s with a WARNING, not after default-socket-timeout minutes.
 
-6. **Secrets via env vars only.** `JELLYFIN_URL` and `JELLYFIN_API_TOKEN`
-   are read from environment (or whatever config mechanism MediaVortex
-   uses today for similar external creds) and never committed to git.
-   Verifiable: grep the repo for the token value `8958caee...` returns
-   zero hits; `.env.example` (or equivalent) documents both variables.
+6. **Config in `SystemSettings`, read fresh.** Reuses the
+   `JellyfinHost`/`JellyfinApiPort`/`JellyfinApiKey` rows already managed
+   by `Features/Optimization/JellyfinService` (operator sets creds in one
+   place, both consumers see them). Push-notify-specific row is
+   `JellyfinNotifyDryRun`. All four are read fresh on every
+   `NotifyJellyfin` call (no module-scope caching, per the
+   "don't cache DB-backed settings" rule). The API key never appears in
+   env vars, compose files, or any committed file. Verifiable: grep the
+   repo for the key value returns zero hits; the dry-run row exists
+   (seeded by `Scripts/SQLScripts/SeedJellyfinResolutions.py`);
+   `JellyfinNotifyService._ReadSetting` calls
+   `SystemSettingsRepository().GetSystemSetting(...)` (no cache layer).
 
 7. **Idempotent under retry.** If a mutation results in two NotifyJellyfin
    calls for the same path (e.g. caller retries), Jellyfin's behaviour is
@@ -109,18 +116,54 @@ paths are live, do NOT disable polling.
    a row; both return 204, the second is observably a no-op in the
    Jellyfin scan log (item not re-imported, just re-checked).
 
-8. **Optional dry-run mode.** Setting `JELLYFIN_NOTIFY_DRY_RUN=1` logs
-   the would-be payload at INFO level instead of POSTing. Lets the
-   operator validate the choke-point coverage before going live.
-   Verifiable: set the env var, run a replace, confirm a log line of
-   shape `[DRY-RUN] Would notify Jellyfin: {Updates:[...]}` and zero
-   outbound HTTP.
+8. **Optional dry-run mode.** Setting
+   `SystemSettings.JellyfinNotifyDryRun = 'true'` logs the would-be
+   payload at INFO level instead of POSTing. Lets the operator validate
+   the choke-point coverage before going live. Verifiable: set the row,
+   run a replace, confirm a log line of shape
+   `[DRY-RUN] Would notify Jellyfin: {Updates:[...]}` and zero outbound
+   HTTP.
 
 9. **Observability.** Every notify (real or dry-run) records to the Logs
    table at INFO level with the count of updates and the HTTP status
    code. Failures are WARNING. A `/metrics`-compatible counter is NOT
    required for v1, but the log shape MUST be greppable for later
    metric extraction (e.g. consistent prefix `JellyfinNotify:`).
+
+## Decision: `/Library/Media/Updated` (parent-folder refresh)
+
+Jellyfin exposes three endpoints that can trigger a re-scan; we picked
+the middle one. Verified live 2026-05-22.
+
+| Endpoint | Scope | Inputs needed | Notes |
+|---|---|---|---|
+| `POST /Library/Refresh` | Full library scan | API key | What Sonarr/Radarr's "Jellyfin Connect" notifications historically use. Broad; relies on Jellyfin's internal coalescing to not blow up under burst. |
+| `POST /Library/Media/Updated` (**chosen**) | Parent folder of the path | API key + path | We tell Jellyfin "this folder changed"; it re-stats every file in that folder and re-probes only the ones whose mtime moved. Coalesces ~60s; multiple updates to the same parent dedupe into one refresh task. |
+| `POST /Items/{itemId}/Refresh` | Single item | API key + Jellyfin item GUID | Tightest scope, but the GUID doesn't exist yet for a just-created file. Requires a `Items?Path=...` lookup first → two roundtrips per notify, plus failure modes if Jellyfin hasn't imported the item yet. |
+
+**Why the middle endpoint:**
+- Strictly more targeted than what arr-stack does -- arr says "refresh
+  everything," we say "refresh this season." Side benefit observed in
+  testing: Jellyfin refreshing a season folder cleans up stale entries
+  for *other* episodes in that folder that we never explicitly notified
+  about (S01E06 got auto-cleaned when we notified for S01E07).
+- Per-item refresh would require us to either (a) track the Jellyfin
+  GUID in MediaVortex (cross-system state, brittle) or (b) make an
+  extra lookup roundtrip per notify (more network failure surface).
+  Neither is worth it for a marginal refresh-scope win.
+- Jellyfin's ~60s coalescing window applies to ALL three endpoints; we
+  wouldn't get faster updates by choosing a different scope.
+
+**Observed timing in production (2026-05-22):**
+- POST → 204 ACK: <200ms
+- 204 ACK → library actually refreshed: ~60s (Jellyfin's
+  coalescing window for `/Library/Media/Updated`)
+- Library refreshed → new file fully indexed (intro/credits analysis,
+  thumbnails, metadata): another ~30-90s depending on file size
+
+The 60s delay is the only meaningful UX cost. If an operator clicks
+play within that window they get a "Could not find file" error
+referencing the old `.mkv`. Documented as expected behavior; not a bug.
 
 ## Implementation Sketch (non-binding)
 
@@ -134,9 +177,12 @@ paths are live, do NOT disable polling.
   synthetic `__jellyfin__` worker via `Core.PathStorage.Resolve`. If no
   resolution exists for a given root, log WARNING and skip that entry
   (don't fail the whole batch).
-- HTTP: `requests.post(JELLYFIN_URL + "/Library/Media/Updated",
-  headers={"X-Emby-Token": JELLYFIN_API_TOKEN},
+- HTTP: `requests.post(f"http://{JellyfinHost}:{JellyfinApiPort}/Library/Media/Updated",
+  headers={"X-Emby-Token": JellyfinApiKey},
   json={"Updates": Updates}, timeout=5)`.
+  Host / port / key / dry-run come from `SystemSettings` via
+  `SystemSettingsRepository.GetSystemSetting(...)`, read fresh on every
+  `NotifyJellyfin` call (no module-scope caching).
 - Wire into `FileReplacementBusinessService` first (highest-value site),
   then audit other mutation points per criterion 1.
 
@@ -155,30 +201,69 @@ paths are live, do NOT disable polling.
 
 ## Status
 
-**NOT STARTED.** Doc drafted by the infrastructure repo's
-jellyfin-efficiency session on 2026-05-17. MediaVortex code has NOT been
-touched. Criteria pending operator review per `/n` step 14.
+**VERIFIED LIVE 2026-05-22.** Service implemented, wired into
+FileReplacement + DuplicateDetection, unit tests green (13 passing).
+Config in `SystemSettings`; reuses existing `JellyfinHost`/`JellyfinApiPort`/
+`JellyfinApiKey` rows shared with `Features/Optimization`. Push-notify
+row `JellyfinNotifyDryRun=false` (live). Confirmed end-to-end against
+Jellyfin on `10.0.0.179`: notifies POST with status=204, Jellyfin
+refreshes the parent folder ~60s later, new files become playable.
+
+Only remaining item is the infrastructure-side flip to disable
+Jellyfin's `Scan Media Library` interval trigger (item 11) -- that
+happens in the infrastructure repo, not here, and depends on the arr
+stack also notifying.
 
 ### Progress
 
 - [x] 1. Document the upstream Jellyfin scanner regression on the
       infrastructure side (`infrastructure/docs/features/jellyfin-efficiency.md`)
 - [x] 2. Draft this feature doc with criteria + implementation sketch
-- [ ] 3. **Operator review + approval of criteria** (gate — no code before this)
-- [ ] 4. Seed `__jellyfin__` rows into `StorageRootResolutions` (one per
-      Jellyfin-indexed StorageRoot)
-- [ ] 5. Implement `Services/JellyfinNotifyService.py` with dry-run support
-- [ ] 6. Unit tests per criterion 4, 5, 6, 8
-- [ ] 7. Wire into `FileReplacementBusinessService` (highest-value site)
-- [ ] 8. Run dry-run for a fleet-day, audit logs for choke-point coverage
-- [ ] 9. Flip dry-run off; manual integration tests per Test Plan
-- [ ] 10. Audit remaining mutation points (FileScanning reconcile, future
-      sites), wire notify in or document why skipped (criterion 1 grep)
+- [x] 3. Operator review + approval of criteria (approved 2026-05-22)
+- [x] 4. Seed `__jellyfin__` rows into `StorageRootResolutions` and the
+      push-notify-specific `JellyfinNotifyDryRun` row in `SystemSettings`
+      (`Scripts/SQLScripts/SeedJellyfinResolutions.py`, idempotent).
+      Reuses existing `JellyfinHost`/`JellyfinApiPort`/`JellyfinApiKey`
+      rows -- not seeded here, managed by `Features/Optimization`.
+- [x] 5. Implement `Services/JellyfinNotifyService.py` with dry-run support;
+      config read fresh from `SystemSettings` on every call (criterion 6)
+- [x] 6. Unit tests per criterion 3, 4, 5, 6, 8, 9
+      (`Tests/Contract/TestJellyfinNotify.py`, 13 tests including
+      fresh-read-per-call and default-port guards)
+- [x] 7. Wire into `FileReplacementBusinessService` (`ProcessFileReplacement`
+      and `FinalizePartialReplacement` choke points)
+- [x] 10. Audit remaining mutation points (see Audit below). Wired
+      DuplicateDetectionService; other hits are non-Jellyfin-visible
+      (`.inprogress` artifacts, TempDir clips).
+- [x] 8. Dry-run validation complete (2026-05-22). Found and fixed XXX
+      path mismatch (`/mnt/SynologyXXX/` -> `/mnt/XXX/`); BrainTv and
+      SynologyMovies seeds verified correct against Jellyfin's actual
+      mounts.
+- [x] 9. Live integration verified (2026-05-22). `JellyfinNotifyDryRun=false`.
+      Tested with real remuxes ("I Got a Cheat Skill" S01E02, Wednesday
+      S01E07) -- Jellyfin processed notifies correctly, refreshed
+      parent season folder ~60s after 204 ACK, swept stale entries for
+      other episodes in the same folder (free bonus cleanup).
 - [ ] 11. Coordinate with infrastructure side: once arr-stack Connect is
       also live and notifying, disable the Jellyfin Scan Media Library
       interval trigger (or reduce to once-daily safety net). That flip
       happens in the infrastructure repo, not here, but this feature is
       a prerequisite.
+
+### Audit: file-mutation choke points
+
+Per criterion 1, grep of `shutil.move|os.replace|os.rename|os.unlink|os.remove`
+under `Features/` and `Services/` (2026-05-22):
+
+| Site | Disposition |
+|---|---|
+| `Features/FileReplacement/FileReplacementBusinessService.py` (rename + delete) | NOTIFY -- via `_NotifyJellyfinOfReplacement` after `ProcessFileReplacement` / `FinalizePartialReplacement` success |
+| `Features/FileScanning/DuplicateDetectionService.py:95` (duplicate delete) | NOTIFY -- batched `Deleted` updates after each group; only effective on Windows worker where disk paths are canonical (`T:\...`); Linux disk paths fail translation and skip with WARNING |
+| `Features/TranscodeJob/ProcessTranscodeQueueService.py:757,1666` | SKIP -- `.inprogress` artifact and partial output cleanup; Jellyfin does not index these filenames |
+| `Features/QualityTesting/QualityTestingBusinessService.py:1534` | SKIP -- staged `.inprogress` requeue cleanup |
+| `Features/ServiceControl/CrashRecoveryService.py:440` | SKIP -- orphaned `.inprogress` cleanup |
+| `Features/ClipBuilder/ClipBuilderBusinessService.py:100,111,116` | SKIP -- VMAF analysis clips in `TempDir` |
+| `Services/FileManagerService.py:789` (`ReplaceFile`) | DEAD CODE -- no callers; left alone, out of scope to delete |
 
 ## Scope
 
@@ -190,8 +275,10 @@ touched. Criteria pending operator review per `/n` step 14.
 - `Core/PathStorage.py` — read-only consumer; no changes expected
 - `StorageRootResolutions` table — one new logical "worker" added (data,
   not schema)
-- `.env.example` (or current equivalent) — document `JELLYFIN_URL`,
-  `JELLYFIN_API_TOKEN`, `JELLYFIN_NOTIFY_DRY_RUN`
+- `SystemSettings` table — one new row (`JellyfinNotifyDryRun`); seeded
+  by `Scripts/SQLScripts/SeedJellyfinResolutions.py`. Reuses the
+  existing `JellyfinHost`, `JellyfinApiPort`, `JellyfinApiKey` rows
+  managed by `Features/Optimization`.
 
 ## Files
 
@@ -219,5 +306,7 @@ None expected. The feature follows:
   no new persistent state in MediaVortex.
 - Web-facing observability: N/A — this is an outbound notifier, not an
   HTTP-serving feature.
-- Secrets via env vars: criterion 6 honors this explicitly.
+- Secrets storage: data-driven via `SystemSettings`, not env vars. The
+  repo is uniformly data-driven (CLAUDE.md "Key Patterns"); env vars are
+  reserved for bootstrap-only values like DB host. Criterion 6 enforces.
 - Graceful named exceptions: criterion 4 is the failure contract.

@@ -89,6 +89,7 @@ class DuplicateDetectionService:
                 LoggingService.LogInfo("Keeping file: {}", BestFile)
 
                 # Delete duplicate files
+                JellyfinDeletes: List[Dict[str, str]] = []
                 for FileToDelete in FilesToDelete:
                     try:
                         if os.path.exists(FileToDelete):
@@ -98,10 +99,21 @@ class DuplicateDetectionService:
 
                             # Also remove from database if it exists
                             self.Repository.DeleteMediaFileByPath(FileToDelete)
+                            JellyfinDeletes.append({'Path': FileToDelete, 'UpdateType': 'Deleted'})
                         else:
                             LoggingService.LogWarning("Duplicate file no longer exists: {}", FileToDelete)
                     except Exception as DeleteError:
                         LoggingService.LogException("Failed to delete duplicate file: {}", DeleteError, FileToDelete)
+
+                if JellyfinDeletes:
+                    try:
+                        from Services.JellyfinNotifyService import NotifyJellyfin
+                        NotifyJellyfin(JellyfinDeletes)
+                    except Exception as NotifyEx:
+                        LoggingService.LogException(
+                            "Jellyfin notify swallowed at DuplicateDetection boundary",
+                            NotifyEx, "DuplicateDetectionService", "CleanupDuplicateMediaFiles",
+                        )
 
                 ProcessedGroups += 1
 
