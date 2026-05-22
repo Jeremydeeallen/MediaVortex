@@ -1700,6 +1700,10 @@ class DatabaseManager:
                 # ProcessingMode IN (NULL, 'Transcode'). Remux-class modes
                 # (Remux/Quick/AudioFix) and SubtitleFix go to their own
                 # capability pollers (BUG-0006, 2026-05-18).
+                # Gate the claim on the worker's live Status + TranscodeEnabled. An
+                # EXISTS subquery keeps the check atomic with the claim itself, so
+                # flipping Pause or disabling Transcode takes effect on the very next
+                # claim attempt -- no polling lag, no cached-snapshot drift.
                 if AcceptsInterlaced:
                     query = """
                         UPDATE TranscodeQueue
@@ -1708,13 +1712,19 @@ class DatabaseManager:
                             SELECT Id FROM TranscodeQueue
                             WHERE Status = 'Pending'
                               AND (ProcessingMode IS NULL OR ProcessingMode = 'Transcode')
+                              AND EXISTS (
+                                SELECT 1 FROM Workers w
+                                WHERE w.WorkerName = %s
+                                  AND w.Status = 'Online'
+                                  AND w.TranscodeEnabled = TRUE
+                              )
                             ORDER BY Priority DESC, DateAdded ASC
                             LIMIT 1
                             FOR UPDATE SKIP LOCKED
                         )
                         RETURNING Id, StorageRootId, RelativePath, FilePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted, ProcessingMode, MediaFileId, TestVariantSetId
                     """
-                    cursor.execute(query, (WorkerName,))
+                    cursor.execute(query, (WorkerName, WorkerName))
                 else:
                     # Skip interlaced files (join MediaFiles to check IsInterlaced TEXT column)
                     query = """
@@ -1726,13 +1736,19 @@ class DatabaseManager:
                             WHERE tq.Status = 'Pending'
                               AND (tq.ProcessingMode IS NULL OR tq.ProcessingMode = 'Transcode')
                               AND (mf.IsInterlaced IS NULL OR mf.IsInterlaced = '0')
+                              AND EXISTS (
+                                SELECT 1 FROM Workers w
+                                WHERE w.WorkerName = %s
+                                  AND w.Status = 'Online'
+                                  AND w.TranscodeEnabled = TRUE
+                              )
                             ORDER BY tq.Priority DESC, tq.DateAdded ASC
                             LIMIT 1
                             FOR UPDATE SKIP LOCKED
                         )
                         RETURNING Id, StorageRootId, RelativePath, FilePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted, ProcessingMode, MediaFileId, TestVariantSetId
                     """
-                    cursor.execute(query, (WorkerName,))
+                    cursor.execute(query, (WorkerName, WorkerName))
 
                 row = cursor.fetchone()
                 connection.commit()
@@ -1775,6 +1791,9 @@ class DatabaseManager:
             try:
                 cursor = connection.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
+                # Gate on the worker's live Status + RemuxEnabled. EXISTS keeps the
+                # check atomic with the claim, so Pause / RemuxEnabled=False take
+                # effect on the very next claim attempt -- no polling lag.
                 query = """
                     UPDATE TranscodeQueue
                     SET Status = 'Running', ClaimedBy = %s, ClaimedAt = NOW(), DateStarted = NOW()
@@ -1782,13 +1801,19 @@ class DatabaseManager:
                         SELECT Id FROM TranscodeQueue
                         WHERE Status = 'Pending'
                           AND ProcessingMode IN ('Remux', 'Quick', 'AudioFix')
+                          AND EXISTS (
+                            SELECT 1 FROM Workers w
+                            WHERE w.WorkerName = %s
+                              AND w.Status = 'Online'
+                              AND w.RemuxEnabled = TRUE
+                          )
                         ORDER BY Priority DESC, DateAdded ASC
                         LIMIT 1
                         FOR UPDATE SKIP LOCKED
                     )
                     RETURNING Id, StorageRootId, RelativePath, FilePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted, ProcessingMode, MediaFileId, TestVariantSetId
                 """
-                cursor.execute(query, (WorkerName,))
+                cursor.execute(query, (WorkerName, WorkerName))
 
                 row = cursor.fetchone()
                 connection.commit()
@@ -1990,35 +2015,6 @@ class DatabaseManager:
             return True
         except Exception as e:
             LoggingService.LogException("Exception in RegisterStorageRootResolutions", e, "DatabaseManager", "RegisterStorageRootResolutions")
-            return False
-
-    def RegisterStorageRootResolutionsFromCanonical(self, WorkerName: str, Platform: str) -> bool:
-        """UPSERT StorageRootResolutions for workers where the local path IS the canonical prefix.
-
-        Used by Windows workers where drive letters (T:\\, M:\\, Z:\\) are the actual local paths.
-        Reads all StorageRoots and registers a resolution for each using CanonicalPrefix as AbsolutePath.
-        """
-        try:
-            Roots = self.DatabaseService.ExecuteQuery("SELECT Id, CanonicalPrefix FROM StorageRoots")
-            for Root in Roots:
-                StorageRootId = Root['id']
-                AbsolutePath = Root['canonicalprefix']
-                self.DatabaseService.ExecuteNonQuery(
-                    """INSERT INTO StorageRootResolutions (StorageRootId, WorkerName, Platform, AbsolutePath, IsActive)
-                    VALUES (%s, %s, %s, %s, TRUE)
-                    ON CONFLICT (StorageRootId, WorkerName) DO UPDATE SET
-                        Platform = EXCLUDED.Platform,
-                        AbsolutePath = EXCLUDED.AbsolutePath,
-                        IsActive = TRUE""",
-                    (StorageRootId, WorkerName, Platform, AbsolutePath)
-                )
-            LoggingService.LogInfo(
-                f"Worker '{WorkerName}' registered {len(Roots)} StorageRootResolutions from canonical prefixes",
-                "DatabaseManager", "RegisterStorageRootResolutionsFromCanonical"
-            )
-            return True
-        except Exception as e:
-            LoggingService.LogException("Exception in RegisterStorageRootResolutionsFromCanonical", e, "DatabaseManager", "RegisterStorageRootResolutionsFromCanonical")
             return False
 
     def UpdateWorkerStatus(self, WorkerName: str, Status: str) -> bool:
@@ -4770,34 +4766,58 @@ class DatabaseManager:
             return FilePath
     
     def PrivateNormalizePathToFilesystemCase(self, Path: str) -> str:
-        """Private method to normalize path to match filesystem case."""
+        """Normalize a canonical (DB) path to match real filesystem case.
+
+        DB paths use canonical form (`T:\\...`); the filesystem the worker
+        actually sees may be UNC (`\\\\10.0.0.43\\TV\\...`) or POSIX
+        (`/mnt/media_tv/...`). Translate canonical -> local for the filesystem
+        walk, then translate local -> canonical on the way out so the caller
+        gets the same shape it passed in (case-corrected).
+        """
         try:
             if not Path:
                 return Path
-            
+
             import os
-            normalized_path = os.path.normpath(Path)
-            
-            # Check if path exists
+            from Core.WorkerContext import WorkerContext
+
+            Ctx = WorkerContext.Current()
+            Translator = Ctx.PathTranslation if (Ctx and Ctx.PathTranslation) else None
+
+            # Translate canonical -> local so os.path operations target a path
+            # the worker can actually see. Without this, T:\ lookups fail on any
+            # worker where T: is not a real drive (Linux containers; Windows
+            # workers post-BUG-0008 SMB cutover that no longer mount T:).
+            LocalProbePath = Translator.ToLocalPath(Path) if Translator else Path
+            normalized_path = os.path.normpath(LocalProbePath)
+
             if not os.path.exists(normalized_path):
                 LoggingService.LogWarning(f"Path does not exist, cannot normalize: {Path}",
                                          "DatabaseManager", "PrivateNormalizePathToFilesystemCase")
-                return normalized_path
-            
+                # Return canonical form unchanged -- caller stores it as-is.
+                return os.path.normpath(Path)
+
             # Build the path component by component to get actual case
             # This works for both local and network drives
-            # Handle Windows drive letter paths properly (e.g., "Z:\Videos")
+            # Handle Windows drive letter, UNC, and POSIX paths uniformly.
             if len(normalized_path) >= 2 and normalized_path[1] == ':':
-                # Windows drive letter path - split at the drive letter
-                drive = normalized_path[0:2]  # e.g., "Z:"
-                remainder = normalized_path[2:].lstrip(os.sep)  # e.g., "Videos" (without leading \)
-                result_path = drive + os.sep  # e.g., "Z:\" - ensure we have the backslash
-                if remainder:
-                    parts = remainder.split(os.sep)
+                # Windows drive letter path
+                drive = normalized_path[0:2]
+                remainder = normalized_path[2:].lstrip(os.sep)
+                result_path = drive + os.sep
+                parts = remainder.split(os.sep) if remainder else []
+            elif normalized_path.startswith('\\\\') or normalized_path.startswith('//'):
+                # UNC path -- preserve the \\server\share root as the first walkable unit
+                sep = '\\' if normalized_path.startswith('\\\\') else '/'
+                stripped = normalized_path[2:]
+                segments = stripped.split(sep)
+                if len(segments) >= 2:
+                    result_path = sep + sep + segments[0] + sep + segments[1]
+                    parts = segments[2:]
                 else:
-                    parts = []
+                    return normalized_path
             else:
-                # Unix-style path or UNC path
+                # POSIX path
                 parts = normalized_path.split(os.sep)
                 result_path = parts[0] if parts else ''
                 parts = parts[1:] if parts else []
@@ -4833,12 +4853,18 @@ class DatabaseManager:
                                              "DatabaseManager", "PrivateNormalizePathToFilesystemCase")
                     current_path = os.path.join(current_path, part)
             
-            # Log if case changed
-            if current_path != normalized_path:
-                LoggingService.LogInfo(f"Normalized path case: '{normalized_path}' -> '{current_path}'",
+            # Translate the local-form, case-corrected path back to canonical
+            # (T:\... shape) so the caller stores the same form they passed in.
+            if Translator:
+                FinalPath = Translator.ToCanonicalPath(current_path)
+            else:
+                FinalPath = current_path
+
+            if FinalPath != os.path.normpath(Path):
+                LoggingService.LogInfo(f"Normalized path case: '{Path}' -> '{FinalPath}'",
                                      "DatabaseManager", "PrivateNormalizePathToFilesystemCase")
-            
-            return current_path
+
+            return FinalPath
                 
         except Exception as e:
             LoggingService.LogException("Error normalizing path to filesystem case", e,

@@ -228,15 +228,17 @@ All mounts are NFS via the Windows NFS client. No credentials are required. Inst
 Enable-WindowsOptionalFeature -Online -FeatureName ServicesForNFS-ClientOnly,ClientForNFS-Infrastructure -All
 ```
 
-Establish persistent drive mappings (run interactively on the worker host so the operator's SID owns the mappings):
+Establish drive mappings via `mount.exe` (run interactively on the worker host so the operator's SID owns the mappings). **Always use `mtype=hard`** -- plain `net use` defaults to `mtype=soft, timeout=0.8s, retry=1`, which produces intermittent FFmpeg `Error opening output file: Invalid argument` (EINVAL) failures when the NFS server is briefly slow:
 
 ```powershell
-net use T: \\10.0.0.43\srv\nfs-media-_tv /persistent:yes
-net use M: \\10.0.0.61\volume1\_video\Adults\Movies /persistent:yes
-net use Z: \\10.0.0.61\volume2\XXX /persistent:yes
+mount.exe -o mtype=hard -o timeout=30 -o rsize=1024 -o wsize=1024 -o anon \\10.0.0.43\srv\nfs-media-_tv T:
+mount.exe -o mtype=hard -o timeout=30 -o rsize=1024 -o wsize=1024 -o anon \\10.0.0.61\volume1\_video\Adults\Movies M:
+mount.exe -o mtype=hard -o timeout=30 -o rsize=1024 -o wsize=1024 -o anon \\10.0.0.61\volume2\XXX Z:
 ```
 
-`StartWorker.py` re-runs these `net use` commands in its own process at every launch -- persistent mappings reconnect at interactive logon, but SSH sessions and Task Scheduler runs do NOT inherit them.
+Verify: `mount.exe` output must show `mount=hard` on each row. `mount=soft` is the failure mode.
+
+`StartWorker.py` re-runs these `mount.exe` commands in its own process at every launch -- mappings reconnect at interactive logon, but SSH sessions and Task Scheduler runs do NOT inherit them. `mount.exe` does not accept `retry=` together with `mtype=hard` (hard mounts retry forever by definition).
 
 ## Environment Variables
 
@@ -353,4 +355,5 @@ Unregister-ScheduledTask -TaskName "MediaVortex Worker" -Confirm:$false
 | FFmpeg pegs all logical cores despite `MEDIAVORTEX_MAX_CPU_THREADS=12` | `Get-Counter '\Processor(*)\% Processor Time'` shows every core at 100% | The env var sets FFmpeg `-threads` but SVT-AV1's internal worker pool ignores it. Use `-svtav1-params lp=12` if real thread limiting is required (would need a profile-level change). For the kids-PC use case, prefer reducing `MaxConcurrentJobs` or scheduling to off-hours instead. |
 | psql fails because `psql` not installed on dev workstation | `psql: command not found` | Use the project's QueryDatabase.py: `cd C:\Code\MediaVortex && .\venv\Scripts\python.exe Scripts\SQLScripts\QueryDatabase.py sql "..."` |
 | `Register-ScheduledTask` exits with `HRESULT 0x80070534` ("No mapping between account names and security IDs was done") | Workgroup-only Windows host: `$env:USERDOMAIN` returns the literal string `WORKGROUP`, which is not a real SID-resolvable principal | Register-WorkerTask.ps1 uses `$env:COMPUTERNAME\$env:USERNAME` as the task UserId; if that ever changes, restore that pattern. Do NOT use `$env:USERDOMAIN` -- on domain-joined hosts it works, on workgroup hosts it does not, and worker hosts are typically workgroup. |
+| FFmpeg output `open()` returns EINVAL intermittently (`Error opening output ... .mp4.inprogress: Invalid argument`, return code 4294967274 / `TranscodeDurationSeconds=0`) | Two failure modes look identical from the FFmpeg log; check both in order. **(1)** Multiple WorkerService processes running concurrently against the same host -- `Stop-ScheduledTask` does not kill the spawned `python.exe`, so each restart cycle can leave a zombie. With two processes each honoring `Workers.MaxConcurrentRemuxJobs=N`, you get 2N concurrent CREATE() calls on the NFS export. The Microsoft NFS client returns EINVAL on a percentage of concurrent CREATEs (Linux clients against the same porky export show 0 failures). **(2)** `mtype=soft` mount with sub-second timeout returning EINVAL on transient slowness. | Verify only one `WorkerService\\venv\\Scripts\\python.exe Main.py` process exists (`Get-Process python*` + `Win32_Process.CommandLine -like "*MediaVortex*"`). If duplicates: `Stop-Process` all, then re-launch. Verify mount with `mount.exe` shows `mount=hard, rsize>=131072, wsize>=131072`. Drop `Workers.MaxConcurrentRemuxJobs` to 1-2 on Windows hosts -- the Microsoft NFS client cannot sustain the parallel-CREATE rate the Linux client manages. `MaxConcurrentJobs` controls transcode only; remux concurrency is the separate `MaxConcurrentRemuxJobs` column. |
 | Inline PowerShell `-Command "..."` over SSH drops or merges quotes (`length : The term 'length' is not recognized as a cmdlet`) | The Bash/cmd/PS quote layers each strip a level of quoting; what the local shell sees is not what PS receives | Use `-EncodedCommand <base64>` with UTF-16-LE-encoded script bytes -- this carries the script through all three layers untouched. The deploy automation always uses this form for any inline PowerShell over SSH. Reserve `-File` for scripts that are already on the remote host. |

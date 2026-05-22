@@ -45,7 +45,13 @@ NetworkDrives = [
 
 
 def _MountDrive(Drive):
-    """Mount one NFS drive via net use /persistent:yes. NFS uses AUTH_SYS -- no credentials."""
+    """Mount one NFS drive via mount.exe with mtype=hard. NFS uses AUTH_SYS -- no credentials.
+
+    Hard mounts retry RPCs forever instead of returning EINVAL when the server is briefly
+    slow. net use without explicit options defaults to mtype=soft + timeout=0.8s + retry=1,
+    which caused intermittent FFmpeg 'Error opening output file: Invalid argument' failures
+    on output writes against a brief-stall NFS server.
+    """
     Letter = Drive["Letter"]
     UncPath = Drive["UncPath"]
 
@@ -53,7 +59,13 @@ def _MountDrive(Drive):
         print(f"  [OK]   {Letter}:\\ already mounted")
         return True
 
-    Cmd = ["net", "use", f"{Letter}:", UncPath, "/persistent:yes"]
+    Cmd = ["mount.exe",
+           "-o", "mtype=hard",
+           "-o", "timeout=30",
+           "-o", "rsize=1024",
+           "-o", "wsize=1024",
+           "-o", "anon",
+           UncPath, f"{Letter}:"]
     try:
         Result = subprocess.run(Cmd, capture_output=True, text=True, timeout=30)
     except subprocess.TimeoutExpired:
@@ -105,6 +117,29 @@ def _ResolveWorkerPython():
     return sys.executable
 
 
+def _SetUncResolutions():
+    """Run SetWindowsWorkerUncPaths.py to ensure StorageRootResolutions + WorkerShareMappings
+    for this host store UNC strings, not drive letters. Idempotent; safe to run every boot.
+    Fix for BUG-0008: drive-letter session unbinding on the Microsoft NFS client surfaced
+    EINVAL on ffmpeg output-open. UNC paths route through MUP + NFS redirector and survive
+    drive-letter flapping. See WorkerService/windows-unc-path-translation.feature.md."""
+    Script = RootDirectory / "Scripts" / "SQLScripts" / "SetWindowsWorkerUncPaths.py"
+    if not Script.exists():
+        print(f"  [WARN] UNC-path script not found at {Script}; skipping (legacy drive-letter mode)")
+        return True
+    PythonExe = _ResolveWorkerPython()
+    print("Applying UNC path resolutions for this worker...")
+    try:
+        Result = subprocess.run([PythonExe, str(Script)], cwd=str(RootDirectory), timeout=30)
+    except subprocess.TimeoutExpired:
+        print("  [FAIL] UNC-path script timed out")
+        return False
+    if Result.returncode != 0:
+        print(f"  [FAIL] UNC-path script exited {Result.returncode}")
+        return False
+    return True
+
+
 def _LaunchWorker():
     if not WorkerEntry.exists():
         print(f"[FAIL] WorkerService entry not found at {WorkerEntry}")
@@ -149,6 +184,10 @@ def main():
     Missing = _VerifyDrives()
     if Missing:
         print(f"\n[FAIL] required drives missing: {', '.join(Missing)}")
+        return 2
+
+    if not _SetUncResolutions():
+        print("\n[FAIL] could not apply UNC path resolutions")
         return 2
 
     if Args.dry_run:

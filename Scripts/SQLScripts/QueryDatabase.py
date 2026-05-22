@@ -44,15 +44,13 @@ def get_connection():
     return psycopg2.connect(**DB_CONFIG)
 
 
-def print_table(headers, rows, max_col_width=60):
-    """Print results as a formatted table."""
+def print_table(headers, rows):
+    """Print results as a formatted table. Values are printed in full, never truncated."""
     if not rows:
         print("(no rows)")
         return
 
-    str_rows = []
-    for row in rows:
-        str_rows.append([truncate(str(v), max_col_width) for v in row])
+    str_rows = [[str(v) for v in row] for row in rows]
 
     col_widths = [len(h) for h in headers]
     for row in str_rows:
@@ -66,12 +64,6 @@ def print_table(headers, rows, max_col_width=60):
     print(separator)
     for row in str_rows:
         print(" | ".join(row[i].ljust(col_widths[i]) for i in range(len(headers))))
-
-
-def truncate(s, max_len):
-    if len(s) > max_len:
-        return s[:max_len - 3] + "..."
-    return s
 
 
 def list_tables(conn):

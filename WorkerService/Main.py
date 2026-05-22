@@ -206,23 +206,29 @@ class WorkerServiceApp:
                 "WorkerService", "_RegisterAndLoadWorkerConfig"
             )
 
-            # Register share mappings from env var
-            ShareMappingsEnv = os.environ.get('MEDIAVORTEX_SHARE_MAPPINGS', '')
-            if ShareMappingsEnv:
-                Mappings = {}
-                for Entry in ShareMappingsEnv.split(','):
-                    Entry = Entry.strip()
-                    if '=' in Entry:
-                        DriveLetter, MountPath = Entry.split('=', 1)
-                        Mappings[DriveLetter.strip()] = MountPath.strip()
-                if Mappings:
-                    self.DatabaseManager.RegisterWorkerShareMappings(self.WorkerName, Mappings)
-                    self.DatabaseManager.RegisterStorageRootResolutions(self.WorkerName, self.WorkerPlatform, Mappings)
-                    LoggingService.LogInfo(f"Worker '{self.WorkerName}' registered share mappings: {Mappings}", "WorkerService", "_RegisterAndLoadWorkerConfig")
-            else:
-                # Windows workers: no share mappings env var, register StorageRootResolutions
-                # using canonical prefixes as the local paths (drive letters ARE the paths)
-                self.DatabaseManager.RegisterStorageRootResolutionsFromCanonical(self.WorkerName, self.WorkerPlatform)
+            # StorageRootResolutions is operator-managed. The worker reads; it never writes.
+            # Populate via Scripts/SQLScripts/SetWindowsWorkerUncPaths.py (Windows) or the
+            # equivalent Linux deploy step. Missing rows for this worker is a hard error.
+            ExistingSrrRows = self.DatabaseManager.DatabaseService.ExecuteQuery(
+                "SELECT s.Name FROM StorageRootResolutions r "
+                "JOIN StorageRoots s ON r.StorageRootId = s.Id "
+                "WHERE r.WorkerName = %s AND r.IsActive = TRUE",
+                (self.WorkerName,)
+            )
+            if not ExistingSrrRows:
+                Msg = (
+                    f"No StorageRootResolutions rows for worker '{self.WorkerName}'. "
+                    f"Populate via Scripts/SQLScripts/SetWindowsWorkerUncPaths.py "
+                    f"(or the equivalent Linux deploy step) before starting the worker."
+                )
+                LoggingService.LogError(Msg, "WorkerService", "_RegisterAndLoadWorkerConfig")
+                print(f"\n[FATAL] {Msg}\n", flush=True)
+                sys.exit(1)
+            ShareNames = sorted({(r.get('Name') or r.get('name')) for r in ExistingSrrRows})
+            LoggingService.LogInfo(
+                f"Worker '{self.WorkerName}' resolved shares: {', '.join(ShareNames)}",
+                "WorkerService", "_RegisterAndLoadWorkerConfig"
+            )
 
             # Load worker config from DB
             Config = self.DatabaseManager.GetWorkerConfig(self.WorkerName)
@@ -1180,17 +1186,67 @@ def SignalHandler(signum, frame):
 
 def _VerifyRequiredPaths():
     """Hard-fail at startup if media share paths the queue references are not accessible.
-    On Windows, scans MediaFiles for distinct drive-letter prefixes and checks each via
-    os.path.exists. Mirrors the StartMediaVortex.py mount logic so a worker launched
-    standalone (without StartMediaVortex.py) does not silently claim and fail every job
-    when net use mounts are missing. On non-Windows platforms, bind mounts are the
-    responsibility of the container orchestration layer and this check is skipped."""
+
+    On Windows, prefers this worker's StorageRootResolutions rows (the per-worker
+    AbsolutePath for each share) over the drive-letter prefix from MediaFiles.FilePath.
+    When AbsolutePath is a UNC string (`\\\\host\\share\\...`), the check is reachability
+    via os.path.exists on the UNC root -- the share is accessible regardless of whether
+    any drive letter happens to be bound in this session. This decouples the worker from
+    drive-letter session-binding flakiness on the Microsoft NFS client (BUG-0008).
+
+    Legacy fallback: if no StorageRootResolutions rows exist for this worker (pre-fix
+    state), falls back to the original drive-letter prefix scan of MediaFiles.
+
+    On non-Windows platforms, bind mounts are the responsibility of the container
+    orchestration layer and this check is skipped."""
     if platform_mod.system().lower() != 'windows':
         return
+
+    WorkerName = (os.environ.get('MEDIAVORTEX_WORKER_NAME') or socket.gethostname()).strip()
 
     try:
         from Core.Database.DatabaseService import DatabaseService
         Db = DatabaseService()
+    except Exception as Ex:
+        print(f"[FATAL] Could not connect to DB to verify required paths: {Ex}", flush=True)
+        sys.exit(1)
+
+    try:
+        ResolutionRows = Db.ExecuteQuery(
+            "SELECT s.Name AS ShareName, r.AbsolutePath FROM StorageRootResolutions r "
+            "JOIN StorageRoots s ON r.StorageRootId = s.Id "
+            "WHERE r.WorkerName = %s AND r.IsActive = TRUE",
+            (WorkerName,)
+        )
+    except Exception as Ex:
+        print(f"[FATAL] Could not read StorageRootResolutions for {WorkerName}: {Ex}", flush=True)
+        sys.exit(1)
+
+    if ResolutionRows:
+        Missing = []
+        for Row in ResolutionRows:
+            Path = Row.get('AbsolutePath') or Row.get('absolutepath')
+            Name = Row.get('ShareName') or Row.get('sharename')
+            if not Path:
+                continue
+            if not os.path.exists(Path):
+                Missing.append(f"{Name} ({Path})")
+
+        if Missing:
+            Msg = (f"Required shares not accessible for {WorkerName}: {', '.join(sorted(Missing))}. "
+                   f"Check NFS server reachability and the StorageRootResolutions rows.")
+            print(f"\n[FATAL] {Msg}\n", flush=True)
+            try:
+                LoggingService.LogError(Msg, "WorkerService", "_VerifyRequiredPaths")
+            except Exception:
+                pass
+            sys.exit(1)
+        return
+
+    # Legacy fallback: no StorageRootResolutions rows for this worker. Use the
+    # original drive-letter prefix scan of MediaFiles. Keeps a pre-BUG-0008-fix
+    # I9 startup working until the data migration is applied.
+    try:
         Rows = Db.ExecuteQuery(
             "SELECT DISTINCT UPPER(LEFT(FilePath, 2)) AS DriveLetter "
             "FROM MediaFiles WHERE FilePath ~ '^[A-Za-z]:'"

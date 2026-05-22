@@ -38,11 +38,20 @@ def GetPythonExe(ServiceDirectory):
 
 
 def _MountNfsDrives(Drives):
-    """Mount NFS drives via net use with /persistent:yes. No credentials -- NFS uses AUTH_SYS."""
+    """Mount NFS drives via mount.exe with mtype=hard. Hard mounts retry RPCs forever instead
+    of returning EINVAL when the server is briefly slow -- net use without explicit options
+    defaults to mtype=soft + timeout=0.8s + retry=1, which caused intermittent FFmpeg
+    'Error opening output file: Invalid argument' failures on worker output writes."""
     for Drive in Drives:
         Letter = Drive["Letter"]
         UncPath = Drive["UncPath"]
-        Cmd = ["net", "use", f"{Letter}:", UncPath, "/persistent:yes"]
+        Cmd = ["mount.exe",
+               "-o", "mtype=hard",
+               "-o", "timeout=30",
+               "-o", "rsize=1024",
+               "-o", "wsize=1024",
+               "-o", "anon",
+               UncPath, f"{Letter}:"]
         Result = subprocess.run(Cmd, capture_output=True, text=True)
         if Result.returncode == 0:
             print(f"  [OK]   {Letter}:\\ mounted")
