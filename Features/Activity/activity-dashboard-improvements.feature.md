@@ -76,6 +76,8 @@ Operator reported (2026-05-09) that "Stop After This Job" did nothing -- it wrot
 
 17. `KNOWN-ISSUES.md` `[TECH DEBT] Activity page conflates worker liveness and operational state` entry is annotated with `[MERGED INTO Features/Activity/activity-dashboard-improvements.feature.md 2026-05-09]` and moved to the Resolved section once this feature ships.
 
+18. **[BUG-0007] Toggling a worker capability on the Activity page updates the rendered state immediately, without requiring the operator to close and reopen the modal.** Today after clicking a capability switch (TranscodeEnabled / QualityTestEnabled / ScanEnabled / RemuxEnabled), the `POST /api/TeamStatus/Workers/<name>/<Capability>` request succeeds and the DB row updates, but the on-screen toggle and any derived UI (status badge, capability row, action-button enable state) keep showing the pre-click value until the operator closes the worker modal and reopens it (or reloads the page). Fixed means: after the API call returns Success, the worker's tile / modal re-renders from the fresh server payload so the operator sees the new state without navigating. Verifiable: click TranscodeEnabled from on to off on a worker; without closing the modal, observe the toggle is now off and the capability-row indicator reflects the new value within one poll tick (or immediately if the handler refetches inline).
+
 ## Status
 
 DRAFTED -- awaiting operator approval.

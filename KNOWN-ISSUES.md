@@ -2,6 +2,23 @@
 
 ## Open
 
+### [BUG-0007] Worker capability toggle does not refresh UI until modal is closed and reopened
+**Date:** 2026-05-22 | **Area:** activity-page
+
+**What breaks:** Clicking a capability switch on a worker tile / modal on the `/Activity` page (TranscodeEnabled / QualityTestEnabled / ScanEnabled / RemuxEnabled) hits `POST /api/TeamStatus/Workers/<name>/<Capability>` and the DB row updates correctly, but the on-screen toggle stays in its pre-click position until the operator closes the modal and reopens it (or reloads the page). The handler appears to fire-and-forget without re-rendering from the fresh server payload.
+
+**Repro:** Open `/Activity`. Click a worker to open its modal (or expand its tile). Toggle any capability switch. Without closing the modal, observe the switch position. Query `SELECT TranscodeEnabled FROM Workers WHERE WorkerName=<name>` -- the DB value has flipped, but the UI still shows the old value. Close the modal and reopen it; UI now matches the DB.
+
+**Evidence:** The capability poller is doing its job (`Features/ServiceControl/capability-control-plane.feature.md` criteria 2-4 still hold -- the backend loop starts/stops within 60-90s of the flip). The bug is strictly UI: the post-toggle handler does not call the same render function that initial-load uses, so the modal's component state drifts from server state until next open.
+
+**Violates:** `Features/Activity/activity-dashboard-improvements.feature.md` criterion 18 (added with this bug).
+
+**Look first:** `Templates/Activity.html` -- `ActivityPage.ToggleWorkerCapability` (around the `/api/TeamStatus/Workers/<name>/<Capability>` fetch call). The success branch returns without re-fetching `/api/TeamStatus/Workers` or re-rendering the modal contents. Compare with how the modal is initially populated and pull the same render path into the success handler. Related: `CapabilityRow(...)` builder used in worker tile rendering.
+
+**Fix with:** `/t BUG-0007`.
+
+---
+
 ### [BUG-0006] Quick / AudioFix ProcessingMode rows routed to Transcode capability poller
 **Date:** 2026-05-18
 
