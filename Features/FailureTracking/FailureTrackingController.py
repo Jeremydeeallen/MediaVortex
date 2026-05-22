@@ -52,7 +52,7 @@ def GetRecentFailures():
                     "ServiceType": row['ServiceType'],
                     "FailureId": row['FailureId'],
                     "FileName": row['FileName'],
-                    "FailureDate": str(row['FailureDate']) if row['FailureDate'] else None,
+                    "FailureDate": row['FailureDate'],
                     "FailureReason": row['FailureReason'],
                     "ServiceName": row['ServiceName'],
                     "FailureType": row['FailureType'],
@@ -85,16 +85,16 @@ def GetRecentFailures():
                     "ServiceType": row['ServiceType'],
                     "FailureId": row['FailureId'],
                     "FileName": row['FileName'],
-                    "FailureDate": str(row['FailureDate']) if row['FailureDate'] else None,
+                    "FailureDate": row['FailureDate'],
                     "FailureReason": row['FailureReason'],
                     "ServiceName": row['ServiceName'],
                     "FailureType": row['FailureType'],
                     "Duration": row['Duration']
                 })
 
-        # Combine and sort all failures
+        # Combine and sort all failures (FailureDate is a datetime; sort by epoch with NULLs last)
         AllFailures = TranscodeFailures + QualityFailures
-        AllFailures.sort(key=lambda x: x['FailureDate'] or '', reverse=True)
+        AllFailures.sort(key=lambda x: x['FailureDate'].timestamp() if x['FailureDate'] else 0, reverse=True)
 
         # Limit combined results
         AllFailures = AllFailures[:Limit]
@@ -221,7 +221,7 @@ def GetServiceFailures(service_name: str):
                 Failures.append({
                     "FailureId": row['FailureId'],
                     "FileName": row['FileName'],
-                    "FailureDate": str(row['FailureDate']) if row['FailureDate'] else None,
+                    "FailureDate": row['FailureDate'],
                     "FailureReason": row['FailureReason'],
                     "ServiceName": row['ServiceName'],
                     "Duration": row['Duration']
@@ -248,7 +248,7 @@ def GetServiceFailures(service_name: str):
                 Failures.append({
                     "FailureId": row['FailureId'],
                     "FileName": row['FileName'],
-                    "FailureDate": str(row['FailureDate']) if row['FailureDate'] else None,
+                    "FailureDate": row['FailureDate'],
                     "FailureReason": row['FailureReason'],
                     "ServiceName": row['ServiceName'],
                     "Duration": row['Duration']
