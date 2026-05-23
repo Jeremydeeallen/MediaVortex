@@ -391,6 +391,8 @@ class FileScanningRepository(BaseRepository):
 
     def SaveMediaFile(self, MediaFile: MediaFileModel) -> int:
         try:
+            from Core.PathNormalize import NormalizeCanonical
+            MediaFile.FilePath = NormalizeCanonical(MediaFile.FilePath)
             MediaFile.FilePath = self.NormalizePathToFilesystemCase(MediaFile.FilePath)
             LoggingService.LogFunctionEntry("SaveMediaFile", 'FileScanningRepository', f"File: {MediaFile.FileName}, Path: {MediaFile.FilePath}")
             connection = self.DatabaseService.GetConnection()

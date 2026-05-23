@@ -1,5 +1,7 @@
 import platform
 
+from Core.PathNormalize import NormalizeCanonical
+
 
 class PathTranslationService:
     """Translates file paths between canonical (DB) format and local worker format.
@@ -77,11 +79,11 @@ class PathTranslationService:
             '/mnt/media_tv/Shows/Breaking Bad/S01E01.mkv' -> 'T:\\Shows\\Breaking Bad\\S01E01.mkv'
         """
         if not LocalPath or not self.MountMap:
-            return LocalPath
+            return NormalizeCanonical(LocalPath) if LocalPath else LocalPath
 
         for DriveLetter, MountPrefix in self.MountMap.items():
             if LocalPath.startswith(MountPrefix):
                 CanonicalPath = DriveLetter + ':\\' + LocalPath[len(MountPrefix):]
-                return CanonicalPath.replace('/', '\\')
+                return NormalizeCanonical(CanonicalPath)
 
-        return LocalPath.replace('/', '\\')
+        return NormalizeCanonical(LocalPath)

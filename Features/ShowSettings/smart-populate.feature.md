@@ -155,6 +155,18 @@ failure modes. Criteria below are numbered to map to flow stages.
     under 400ms for the Search path. Verifiable: time 100 sequential
     requests of each shape, take the 95th percentile.
 
+20. [BUG-0012] **`ShowName` is derived from `FilePath` in a separator-
+    safe way that works for both drive-letter and UNC source paths.**
+    Today `QueueManagementBusinessService.SmartPopulateQueue` builds
+    `ShowName` via `Parts = FilePath.replace('\\','/').split('/'); ShowName = Parts[1]`.
+    That returns the show folder correctly for `T:\Show\file.mp4` but
+    returns `''` for a UNC path like `\\10.0.0.43\nfs-media-_tv\Show\file.mp4`
+    (the leading `\\` becomes `//` after replace, putting empty strings
+    in `Parts[0]` and `Parts[1]`). Verifiable: insert a MediaFiles row
+    with a UNC FilePath, call `SmartPopulate` Mode=Quick, confirm the
+    Suggestions entry has a non-empty `ShowName` matching the share's
+    show-folder segment -- not the empty string or the host IP.
+
 ## Status
 
 COMPLETE -- all criteria verified 2026-05-09 (pivoted from request-time to materialized column during this work).

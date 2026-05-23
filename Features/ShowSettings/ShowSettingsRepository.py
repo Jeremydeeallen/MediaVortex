@@ -150,8 +150,8 @@ class ShowSettingsRepository(BaseRepository):
 
             query = f"""
                 SELECT
-                    split_part(replace(mf.FilePath, '\\', '/'), '/', 2) as ShowName,
-                    MIN(split_part(mf.FilePath, '\\', 1) || '\\' || split_part(replace(mf.FilePath, '\\', '/'), '/', 2)) as ShowFolder,
+                    split_part(regexp_replace(replace(mf.FilePath, '\\', '/'), '/+', '/', 'g'), '/', 2) as ShowName,
+                    MIN(split_part(mf.FilePath, '\\', 1) || '\\' || split_part(regexp_replace(replace(mf.FilePath, '\\', '/'), '/+', '/', 'g'), '/', 2)) as ShowFolder,
                     COUNT(*) as FileCount,
                     ROUND(SUM(mf.SizeMB)::numeric / 1024, 1) as TotalGB,
                     MODE() WITHIN GROUP (ORDER BY mf.ResolutionCategory) as CommonResolution,
@@ -160,7 +160,7 @@ class ShowSettingsRepository(BaseRepository):
                     ss.AssignedProfile as AssignedProfile,
                     SUM(CASE WHEN mf.TranscodedByMediaVortex = true THEN 1 ELSE 0 END) as TranscodedCount
                 FROM MediaFiles mf
-                LEFT JOIN ShowSettings ss ON ss.ShowFolder = split_part(mf.FilePath, '\\', 1) || '\\' || split_part(replace(mf.FilePath, '\\', '/'), '/', 2)
+                LEFT JOIN ShowSettings ss ON ss.ShowFolder = split_part(mf.FilePath, '\\', 1) || '\\' || split_part(regexp_replace(replace(mf.FilePath, '\\', '/'), '/+', '/', 'g'), '/', 2)
                 {DriveFilter}
                 GROUP BY ShowName, ss.TargetResolution, ss.AssignedProfile
                 HAVING COUNT(*) > 0
@@ -176,12 +176,15 @@ class ShowSettingsRepository(BaseRepository):
         try:
             if not FilePath:
                 return None
-            # Normalize to forward slashes for splitting
-            Parts = FilePath.replace('\\', '/').split('/')
-            if len(Parts) >= 2:
-                # Reconstruct with backslashes (matching DB format): "T:\House"
-                return Parts[0] + '\\' + Parts[1]
-            return None
+            from Core.PathNormalize import NormalizeCanonical, ExtractShowFolder as ExtractShow
+            Normalized = NormalizeCanonical(FilePath)
+            Show = ExtractShow(Normalized)
+            if Show == 'Unknown':
+                return None
+            Root = Normalized.split('\\', 1)[0]
+            if not Root:
+                return None
+            return Root + '\\' + Show
         except Exception:
             return None
 

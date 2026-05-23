@@ -10,6 +10,7 @@ from Features.TranscodeQueue.CrfBitrateEstimateRepository import CrfBitrateEstim
 from Features.TranscodeQueue.QueueAdmissionConfigRepository import QueueAdmissionConfigRepository
 from Features.TranscodeQueue.CodecCompatibilityRepository import CodecCompatibilityRepository
 from Core.Logging.LoggingService import LoggingService
+from Core.PathNormalize import ExtractShowFolder
 from Services.FileManagerService import FileManagerService
 from Repositories.DatabaseManager import DatabaseManager
 
@@ -370,8 +371,7 @@ class QueueManagementBusinessService:
             for Row in Rows:
                 FilePath = Row.get('FilePath', '')
                 FileName = Row.get('FileName', '')
-                Parts = FilePath.replace('\\', '/').split('/')
-                ShowName = Parts[1] if len(Parts) >= 2 else 'Unknown'
+                ShowName = ExtractShowFolder(FilePath)
 
                 Suggestions.append({
                     'MediaFileId': Row.get('Id'),
@@ -1420,10 +1420,15 @@ class QueueManagementBusinessService:
         as ShowSettings.ShowFolder so a dict lookup matches without normalization."""
         if not FilePath:
             return None
-        Parts = FilePath.replace('\\', '/').split('/')
-        if len(Parts) >= 2 and Parts[0] and Parts[1]:
-            return Parts[0] + '\\' + Parts[1]
-        return None
+        from Core.PathNormalize import NormalizeCanonical, ExtractShowFolder
+        Normalized = NormalizeCanonical(FilePath)
+        Show = ExtractShowFolder(Normalized)
+        if Show == 'Unknown':
+            return None
+        Parts = Normalized.split('\\', 1)
+        if not Parts or not Parts[0]:
+            return None
+        return Parts[0] + '\\' + Show
 
     def _GetEffectiveProfileFromCache(
         self,
