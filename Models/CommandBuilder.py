@@ -250,7 +250,7 @@ class CommandBuilder:
                 except (TypeError, ValueError):
                     ProfileAudioBitrate = 0
                 CommandParts.extend(self.BuildAudioCodecArgs(MediaFile, ProfileAudioBitrate))
-                AudioFilter = self.BuildAudioFilters(ProfileSettings)
+                AudioFilter = self.BuildAudioFilters(MediaFile)
                 if AudioFilter:
                     CommandParts.extend(['-af', f'"{AudioFilter}"'])
             
@@ -468,53 +468,105 @@ class CommandBuilder:
         except Exception:
             return Resolution
     
-    def BuildAudioFilters(self, ProfileSettings: Dict[str, Any]) -> Optional[str]:
-        """Build audio filter string from system settings."""
-        Filters = []
-        
-        # Get system settings for audio compression
-        try:
-            from Repositories.DatabaseManager import DatabaseManager
-            DatabaseManagerInstance = DatabaseManager()
-            
-            # Check if audio compression is enabled system-wide
-            AudioCompressionEnabled = DatabaseManagerInstance.GetSystemSetting('AudioCompressionEnabled')
-            if AudioCompressionEnabled and AudioCompressionEnabled.lower() in ['1', 'true', 'yes']:
-                # Get compression parameters from system settings with defaults
-                Threshold = int(DatabaseManagerInstance.GetSystemSetting('CompressionThreshold') or -15)
-                Ratio = int(DatabaseManagerInstance.GetSystemSetting('CompressionRatio') or 3)
-                AttackMs = int(DatabaseManagerInstance.GetSystemSetting('CompressionAttack') or 10)
-                ReleaseMs = int(DatabaseManagerInstance.GetSystemSetting('CompressionRelease') or 100)
-                Makeup = int(DatabaseManagerInstance.GetSystemSetting('CompressionMakeup') or 3)
-                
-                # Convert ms to seconds -- FFmpeg acompressor expects seconds
-                AttackSec = AttackMs / 1000.0
-                ReleaseSec = ReleaseMs / 1000.0
-                
-                # Build acompressor filter for dynamic range reduction
-                CompressorFilter = f"acompressor=threshold={Threshold}dB:ratio={Ratio}:attack={AttackSec}:release={ReleaseSec}:makeup={Makeup}dB"
-                Filters.append(CompressorFilter)
-            
-            # Check if audio normalization is enabled system-wide
-            AudioNormalizationEnabled = DatabaseManagerInstance.GetSystemSetting('AudioNormalizationEnabled')
-            if AudioNormalizationEnabled and AudioNormalizationEnabled.lower() in ['1', 'true', 'yes']:
-                # Get normalization parameters from system settings with defaults
-                TargetLoudness = int(DatabaseManagerInstance.GetSystemSetting('TargetLoudness') or -23)
-                LoudnessRange = int(DatabaseManagerInstance.GetSystemSetting('LoudnessRange') or 7)
-                TruePeak = int(DatabaseManagerInstance.GetSystemSetting('TruePeak') or -2)
-                
-                # Build loudnorm filter
-                LoudnormFilter = f"loudnorm=I={TargetLoudness}:LRA={LoudnessRange}:TP={TruePeak}"
-                Filters.append(LoudnormFilter)
+    def BuildAudioFilters(self, MediaFile) -> Optional[str]:
+        """Build the linear-loudnorm audio filter for the encode pass.
 
-        except Exception as e:
-            LoggingService.LogException(
-                "Error reading audio filter settings from DB -- transcode will run without acompressor/loudnorm",
-                e, "BuildAudioFilters", "CommandBuilder"
+        Implements the contract defined in
+        `Features/LoudnessAnalysis/linear-loudnorm.feature.md` -- one
+        filter, linear-mode when fixed gain fits under the TP ceiling,
+        dynamic-mode when it does not. No fallback, no `acompressor`,
+        no silent degradation.
+
+        Returns:
+          - The loudnorm filter string when audio normalization is enabled
+            and all four measurements are present.
+          - None when `AudioNormalizationEnabled` is off (operator kill
+            switch) -- the audio re-encodes via `BuildAudioCodecArgs` with
+            no filter.
+
+        Raises:
+          - RuntimeError when the file is missing any of the four ebur128
+            measurements. This is defense-in-depth -- the queue admission
+            gate in `QueueManagementBusinessService._EvaluateCompliance`
+            (linear-loudnorm.feature.md C9) should have held the file
+            out. Raising here makes the bug loud instead of silently
+            degrading to a guessed command.
+        """
+        from Repositories.DatabaseManager import DatabaseManager
+        Db = DatabaseManager()
+
+        AudioNormalizationEnabled = Db.GetSystemSetting('AudioNormalizationEnabled')
+        if not (AudioNormalizationEnabled
+                and AudioNormalizationEnabled.lower() in ('1', 'true', 'yes')):
+            return None  # operator kill switch
+
+        # Measurements -- all four required for linear or dynamic mode.
+        # Defense-in-depth: admission gate should have prevented this.
+        I_Lufs = getattr(MediaFile, 'SourceIntegratedLufs', None)
+        L_Lu = getattr(MediaFile, 'SourceLoudnessRangeLU', None)
+        P_Dbtp = getattr(MediaFile, 'SourceTruePeakDbtp', None)
+        T_Lufs = getattr(MediaFile, 'SourceIntegratedThresholdLufs', None)
+
+        Missing = [
+            Name for Name, Val in (
+                ('SourceIntegratedLufs', I_Lufs),
+                ('SourceLoudnessRangeLU', L_Lu),
+                ('SourceTruePeakDbtp', P_Dbtp),
+                ('SourceIntegratedThresholdLufs', T_Lufs),
+            ) if Val is None
+        ]
+        if Missing:
+            MfId = getattr(MediaFile, 'Id', None)
+            raise RuntimeError(
+                f"BuildAudioFilters: loudnorm requested for MediaFileId={MfId} "
+                f"but measurements missing: {', '.join(Missing)}. The admission "
+                f"gate in QueueManagementBusinessService should have deferred "
+                f"this file with AdmissionDeferReason="
+                f"'awaiting_loudness_measurement' or 'loudness_measurement_failed'."
             )
-        
-        # Return combined filters or None if no filters
-        return ','.join(Filters) if Filters else None
+
+        TargetI = int(Db.GetSystemSetting('TargetLoudness') or -23)
+        TargetTp = int(Db.GetSystemSetting('TruePeak') or -2)
+        Floor = int(Db.GetSystemSetting('MinimumLoudnessRangeLU') or 11)
+        TargetLra = max(float(L_Lu), float(Floor))
+
+        # Predicted peak after fixed gain. If it exceeds the TP ceiling,
+        # linear mode is impossible -- switch to dynamic mode (loudnorm
+        # compresses the range to honor the peak target).
+        Gain = float(TargetI) - float(I_Lufs)
+        PredictedPeak = float(P_Dbtp) + Gain
+        LinearOk = PredictedPeak <= float(TargetTp)
+
+        MeasuredArgs = (
+            f"measured_I={float(I_Lufs):.2f}"
+            f":measured_LRA={float(L_Lu):.2f}"
+            f":measured_TP={float(P_Dbtp):.2f}"
+            f":measured_thresh={float(T_Lufs):.2f}"
+        )
+        Common = (
+            f"loudnorm=I={TargetI}:LRA={TargetLra:.2f}:TP={TargetTp}"
+            f":{MeasuredArgs}"
+        )
+
+        if LinearOk:
+            Filter = f"{Common}:linear=true"
+            LoggingService.LogInfo(
+                f"linear loudnorm: gain={Gain:+.2f} dB, "
+                f"target_LRA={TargetLra:.2f} (source {float(L_Lu):.2f}), "
+                f"MediaFileId={getattr(MediaFile, 'Id', None)}",
+                "CommandBuilder", "BuildAudioFilters",
+            )
+        else:
+            Filter = Common
+            LoggingService.LogInfo(
+                f"dynamic loudnorm: ungainable peak (would clip at "
+                f"{PredictedPeak:+.2f} dBTP), target_LRA={TargetLra:.2f} "
+                f"(source {float(L_Lu):.2f}), "
+                f"MediaFileId={getattr(MediaFile, 'Id', None)}",
+                "CommandBuilder", "BuildAudioFilters",
+            )
+
+        return Filter
 
     def BuildVideoFilters(self, ProfileSettings: Dict[str, Any], ScaleFilter: Optional[str], IsInterlaced: bool = False) -> Optional[str]:
         """Build video filter string. Yadif applied only when source is interlaced."""
@@ -695,7 +747,7 @@ class CommandBuilder:
                     CommandParts.extend(['-c:a', 'copy'])
                 else:
                     CommandParts.extend(self.BuildAudioCodecArgs(MediaFile, ProfileBitrate=0))
-                    AudioFilter = self.BuildAudioFilters({})
+                    AudioFilter = self.BuildAudioFilters(MediaFile)
                     if AudioFilter:
                         CommandParts.extend(['-af', f'"{AudioFilter}"'])
 

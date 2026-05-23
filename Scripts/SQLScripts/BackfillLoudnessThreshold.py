@@ -34,7 +34,15 @@ import argparse
 import os
 import signal
 import sys
+from pathlib import Path
 from typing import Optional
+
+# Make MediaVortex modules importable when the script is invoked as
+# `py Scripts/SQLScripts/...`. Mirrors the bootstrap pattern used in
+# BackfillPathStorage.py and other Features-importing scripts.
+ROOT = Path(__file__).resolve().parent.parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 import psycopg2
 
@@ -67,7 +75,7 @@ def LoadMountMap(Cursor, WorkerName):
 
 def LoadFFmpegPath(Cursor, WorkerName) -> Optional[str]:
     Cursor.execute(
-        "SELECT FFmpegPath FROM Workers WHERE Name = %s",
+        "SELECT FFmpegPath FROM Workers WHERE WorkerName = %s",
         (WorkerName,),
     )
     Row = Cursor.fetchone()
