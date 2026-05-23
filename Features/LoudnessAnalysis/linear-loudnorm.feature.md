@@ -388,7 +388,7 @@ DRAFT -- criteria pending operator approval. No code until approved.
 - [x] Flow doc `linear-loudnorm.flow.md` drafted
 - [x] Feature doc (this file) drafted
 - [ ] Operator review + criteria approval (BLOCKING)
-- [ ] Step 1: Schema migrations -- Threshold column, AdmissionDeferReason, LoudnessMeasurementFailureReason, AudioNormalizationMode, MinimumLoudnessRangeLU SystemSettings row (default 11), drop compressor settings
+- [x] Step 1: Schema migrations -- 4 new MediaFiles cols (Threshold, AdmissionDeferReason, LoudnessMeasurementFailureReason, AudioNormalizationMode), MinimumLoudnessRangeLU=11 SystemSettings row, dropped 7 obsolete compressor + LoudnessRange settings. 5,041 rows need threshold backfill. Idempotent re-run verified.
 - [ ] Step 2: Extend ebur128 parser to capture Threshold; extend PersistLoudness to write all four loudness cols + failure reason atomically
 - [ ] Step 3: BackfillLoudnessThreshold script -- re-measure rows missing Threshold
 - [ ] Step 4: Probe co-trigger -- wire LoudnessAnalysis into MediaProbe completion path; invoke EvaluateInitialAudioState in same transaction so at-target files mark complete immediately (criterion 28)
