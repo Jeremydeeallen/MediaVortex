@@ -11,21 +11,21 @@ identical to the source.
 
 Three policies fall out of one flag:
 
-1. **One-shot normalize.** Audio that needs normalization (loudness leveling, dynamics) gets the `loudnorm` + `acompressor` chain exactly once. After the file's first successful encode, `AudioComplete` flips to true and the chain never runs again.
+1. **One-shot normalize.** Audio that needs normalization (loudness leveling) gets the `loudnorm` chain exactly once. After the file's first successful encode, `AudioComplete` flips to true and the chain never runs again. See `Features/LoudnessAnalysis/linear-loudnorm.feature.md` for the loudnorm parameter contract.
 2. **No damage to low-bitrate sources.** Files at or below 96 kbps stereo / 64 kbps mono are marked `AudioComplete=true` up front so no re-encode pass ever runs against them. They already sit at the AAC quality floor; a second generation would be audible.
 3. **No mojibake muxing.** Files whose audio codec MP4 cannot carry (DTS/TrueHD/FLAC/PCM/Vorbis) are flagged `AudioCorruptSuspect=true` and held out of the queue. They are surfaced via the existing Activity panel for operator review.
 
 This feature is the response to BUG-0003: the Remux profile was
-re-encoding audio on every pass with a `loudnorm` + `acompressor` chain,
-producing audible damage on ≤ 96 kbps WEBRip/SDTV sources. The fix is
-not "turn the chain off" -- the chain is wanted on the first encode --
+re-encoding audio on every pass with the loudnorm chain, producing
+audible damage on <= 96 kbps WEBRip/SDTV sources. The fix is not
+"turn the chain off" -- the chain is wanted on the first encode --
 but "remember that we already did it and never do it again."
 
 ## Concern
 
 Three operator concerns this feature resolves:
 
-1. **Audible damage on remux.** Loudnorm + acompressor applied repeatedly to ≤ 96 kbps sources flattens dialog and squashes music. Today every Remux pass runs the chain; this feature makes the chain a one-time event.
+1. **Audible damage on remux.** The loudnorm chain applied repeatedly to <= 96 kbps sources flattens dialog and squashes music. Today every Remux pass runs the chain; this feature makes the chain a one-time event.
 2. **Compounding generational loss.** Today a file can be transcoded, re-transcoded for CRF adjustment, and remuxed -- each pass re-encodes audio. Stream-copy on subsequent passes eliminates the loss.
 3. **No signal for "audio is done."** Today the only way to know if a file's audio has been normalized is to grep `TranscodeAttempts.FFpmpegCommand` for `loudnorm`. Materializing `AudioComplete` makes the signal a column read.
 
@@ -74,7 +74,7 @@ See `audio-completion.flow.md` for state lifecycle. See
    - Refuses (returns None, logs error, flips `MediaFiles.AudioCorruptSuspect=true, AudioCorruptReason='incompatible_codec'`) **only when** `AudioComplete=true AND AudioCodec NOT IN MP4-compat set`. That state is a logic error -- a file marked stream-copy-eligible must have an MP4-compat codec.
    - Verifiable per branch: build for `AudioComplete=true`, assert command contains `-c:a copy` and no `loudnorm`. Build for `AudioComplete=false` and `AudioCodec='aac'`, assert `-c:a aac` and `loudnorm`. Build for `AudioComplete=false` and `AudioCodec='dts'`, assert `-c:a eac3` and `loudnorm` (one-shot codec convert + normalize). Build for `AudioComplete=true` and `AudioCodec='dts'`, assert None returned and row flagged suspect.
 
-9. `Models/CommandBuilder.BuildCommand` (transcode path) follows the same audio-branch logic at lines 101-106 that today unconditionally call `BuildAudioCodecArgs` + `BuildAudioFilters`. When `ShouldStreamCopyAudio` is true: `-c:a copy`, no `-af` (video filters like yadif/scale still run). Verifiable: build a transcode command for a file with `AudioComplete=true`, assert no `loudnorm` and no `acompressor` in the resulting command string.
+9. `Models/CommandBuilder.BuildCommand` (transcode path) follows the same audio-branch logic at lines 101-106 that today unconditionally call `BuildAudioCodecArgs` + `BuildAudioFilters`. When `ShouldStreamCopyAudio` is true: `-c:a copy`, no `-af` (video filters like yadif/scale still run). Verifiable: build a transcode command for a file with `AudioComplete=true`, assert no `loudnorm` in the resulting command string.
 
 10. Stream mapping is unchanged in both `BuildCommand` and `BuildRemuxCommand` -- `-map 0:v:0 -map 0:a:{AudioStreamIndex}`. The English-track-selection semantic is preserved.
 
@@ -161,7 +161,7 @@ IMPLEMENTED 2026-05-17 -- pending operator FFmpeg-byte-identical smoke test (wor
 
 **2026-05-17 -- Command-shape live verify on row 124 (30 Rock S06E19 MP4/HEVC/AAC 124k stereo):**
 - Baseline (AudioComplete=true from backfill loudnorm-history): `ffmpeg ... -map 0:a:0 -c:v copy -tag:v hvc1 -c:a copy -movflags +faststart`
-- After Reset (AudioComplete=false): command contains `loudnorm=I=-23:LRA=7:TP=-2` and `acompressor=...`, does NOT contain `-c:a copy`
+- After Reset (AudioComplete=false): command contains a loudnorm filter (parameters owned by linear-loudnorm.feature.md), does NOT contain `-c:a copy`
 - After MarkComplete (AudioComplete=true): command contains `-c:a copy`, does NOT contain `loudnorm`. Cascade IsCompliant=true, RecommendedMode=NULL.
 
 **2026-05-17 -- Cascade live verify on representative rows:**
@@ -185,7 +185,7 @@ Files: `Scripts/SQLScripts/AddAudioCompletionColumns.py`, `Scripts/SQLScripts/Ad
 File: `Features/AudioCompletion/AudioCompletionService.py`. Also extend `Features/TranscodeQueue/Models/QueueAdmissionConfigModel.py` and `Features/TranscodeQueue/QueueAdmissionConfigRepository.py` to read the three new floor columns.
 1. Implement `DetectNormalizationInCommand`, `ShouldStreamCopyAudio`, `EvaluateInitialAudioState`, `MarkAudioComplete`, `ResetAudioComplete` per criteria 6-7.
 2. Add `MinAudioBitrateKbpsMono/Stereo/Surround: int` to the dataclass and the SELECT/Update in the repository.
-3. **Exit**: `py -c "from Features.AudioCompletion.AudioCompletionService import AudioCompletionService; s=AudioCompletionService(); print(s.DetectNormalizationInCommand('ffmpeg -af loudnorm=I=-23 ...'))"` prints `True`.
+3. **Exit**: `py -c "from Features.AudioCompletion.AudioCompletionService import AudioCompletionService; s=AudioCompletionService(); print(s.DetectNormalizationInCommand('ffmpeg -af loudnorm=... ...'))"` prints `True`.
 
 ### Step 3 -- Backfill
 File: `Scripts/SQLScripts/BackfillAudioComplete.py`.

@@ -59,9 +59,9 @@ context this contract serves.
 
 ### C. Audio policy (BUG-0003 contract)
 
-9. **Audio is always `-c:a copy` when `MediaFile.AudioComplete=true`** -- byte-identical pass-through, no decode, no loudnorm. Identical behavior in Transcode and Remux branches. Verifiable: build a command for a file with `AudioComplete=true`; resulting command contains `-c:a copy` and does NOT contain `loudnorm` or `acompressor`.
+9. **Audio is always `-c:a copy` when `MediaFile.AudioComplete=true`** -- byte-identical pass-through, no decode, no loudnorm. Identical behavior in Transcode and Remux branches. Verifiable: build a command for a file with `AudioComplete=true`; resulting command contains `-c:a copy` and does NOT contain `loudnorm`.
 
-10. **Audio runs through `BuildAudioCodecArgs + BuildAudioFilters` (the one-shot normalize chain) when `MediaFile.AudioComplete=false`.** Codec is selected by `BuildAudioCodecArgs` from the MP4-compat table (DTS/TrueHD/FLAC/PCM → EAC3 with channel-aware bitrate). Filters apply `acompressor + loudnorm` per the system-setting defaults. Identical behavior in Transcode and Remux branches. Verifiable: build a command for `AudioComplete=false`; command contains `loudnorm=I=-23` and a non-`copy` `-c:a` selection.
+10. **Audio runs through `BuildAudioCodecArgs + BuildAudioFilters` (the one-shot normalize chain) when `MediaFile.AudioComplete=false`.** Codec is selected by `BuildAudioCodecArgs` from the MP4-compat table (DTS/TrueHD/FLAC/PCM -> EAC3 with channel-aware bitrate). `BuildAudioFilters` implements the contract defined in `Features/LoudnessAnalysis/linear-loudnorm.feature.md`. Identical behavior in Transcode and Remux branches. Verifiable: build a command for `AudioComplete=false`; command contains a `loudnorm=...` filter and a non-`copy` `-c:a` selection.
 
 11. **Suspect short-circuit refusal.** If `MediaFile.AudioCorruptSuspect=true`, OR if `AudioComplete=true` AND `AudioCodec` is not in the MP4-compat set (logic-error state), `BuildFFmpegCommand` returns `None` and logs an error. The audio-suspect path also marks the row in `MediaFiles.AudioCorruptReason` for operator visibility. Verifiable: build a command for a synthetic suspect row; result is `None`; row gains `AudioCorruptReason`.
 

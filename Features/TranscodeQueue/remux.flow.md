@@ -20,7 +20,7 @@ A remux job:
 1. Copies the video stream byte-for-byte (`-c:v copy`) -- no quality loss, no encoder time.
 2. Audio handling is **AudioComplete-aware** (see `Features/AudioCompletion/audio-completion.flow.md`):
    - `AudioComplete = true` -> `-c:a copy` (byte-identical to source, criterion 26)
-   - `AudioComplete = false` -> one-shot pass: codec convert if needed (`BuildAudioCodecArgs` handles DTS/TrueHD/FLAC/PCM/Vorbis/Opus -> EAC3) + loudnorm + acompressor. Post-flight `FileReplacementBusinessService` flips `AudioComplete` to true so this never runs against the file again.
+   - `AudioComplete = false` -> one-shot pass: codec convert if needed (`BuildAudioCodecArgs` handles DTS/TrueHD/FLAC/PCM/Vorbis/Opus -> EAC3) + the loudnorm filter chain (parameter contract owned by `Features/LoudnessAnalysis/linear-loudnorm.feature.md`). Post-flight `FileReplacementBusinessService` flips `AudioComplete` to true so this never runs against the file again.
    - `AudioCorruptSuspect = true` -> the Remux is refused (logic error + flag).
 3. **Renames the source to `.orig` BEFORE FFmpeg runs** so FFmpeg can write directly to the freed source path -- no intermediate filename, no suffix-strip step.
 4. On FFmpeg success: FileReplacement verifies + settles the `.orig` per `KeepSource`. On any failure between rename and final verify: rollback restores the original from `.orig`.
@@ -124,17 +124,19 @@ the muxer.
 ```
 -c:v copy
 -c:a aac -b:a 128k                            # or eac3 for incompat sources -- see BuildAudioCodecArgs
--af loudnorm=I=-23:LRA=7:TP=-2,acompressor=...
+-af loudnorm=...                              # parameters owned by linear-loudnorm.feature.md
 -tag:v hvc1                                   # HEVC only
 -movflags +faststart
 ```
 
-The loudnorm + acompressor chain runs exactly once per file in its
-lifetime. Post-flight `MarkAudioComplete` flips the column to true so
-this branch is never re-entered for this file. For DTS/TrueHD/FLAC/PCM
-sources, `BuildAudioCodecArgs` selects EAC3 with channel-aware bitrate,
-so the same one-shot pass handles codec conversion in addition to
-normalization.
+The loudnorm filter runs exactly once per file in its lifetime.
+Post-flight `MarkAudioComplete` flips the column to true so this branch
+is never re-entered for this file. For DTS/TrueHD/FLAC/PCM sources,
+`BuildAudioCodecArgs` selects EAC3 with channel-aware bitrate, so the
+same one-shot pass handles codec conversion in addition to
+normalization. See `Features/LoudnessAnalysis/linear-loudnorm.feature.md`
+for the loudnorm parameter contract (linear-or-dynamic mode selection,
+target loudness, LRA floor, measurement requirements).
 
 Filters are reused from `BuildAudioFilters` -- same chain that fires on
 the transcode path, so loudness consistency is uniform across pipelines.

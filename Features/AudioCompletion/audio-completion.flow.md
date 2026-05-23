@@ -62,7 +62,8 @@ For any `MediaFile`:
                               transcode OR remux
                               runs BuildAudioCodecArgs
                               (codec convert if needed)
-                              + loudnorm + acompressor.
+                              + loudnorm filter (per
+                              linear-loudnorm.feature.md).
                               On successful replace,
                               MarkAudioComplete sets
                               AudioComplete=true,

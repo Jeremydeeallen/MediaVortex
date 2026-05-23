@@ -21,7 +21,7 @@ Six operator concerns this feature resolves:
 
 2. **No way to identify "remote-grab" files.** Two files both AAC stereo 192 kbps could be mastered at -23 LUFS or -14.5 LUFS and look identical in our DB. The 8.5 dB perceived difference between them is what makes the operator reach for the TV remote. We have no signal for this today.
 
-3. **No way to identify wide-dynamic-range files at risk of compressor damage.** Files with LRA > 18 LU (typical theatrical mixes) will be aggressively squashed by the current acompressor settings. We can't surface these for review without measurement.
+3. **No way to identify wide-dynamic-range files at risk of audio damage.** Files with LRA > 18 LU (typical theatrical mixes) need to be flagged for the operator so the right loudnorm behavior gets applied (see `Features/LoudnessAnalysis/linear-loudnorm.feature.md` for the linear-vs-dynamic mode selection driven by these measurements). We can't surface these for review without measurement.
 
 4. **Probe data goes stale.** A file scanned in 2024 with FFprobe results that haven't been refreshed -- if the file was replaced out-of-band, edited, or if FFprobe was upgraded -- still carries the old metadata. There's no mechanism to refresh.
 

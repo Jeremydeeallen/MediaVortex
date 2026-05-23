@@ -14,27 +14,15 @@ When a file contains multiple audio streams, the English track is selected autom
 **Implementation:** `FFmpegAnalysisService.SelectPreferredAudioStream()` runs at analysis time and sets `FFmpegAnalysisModel.AudioStreamIndex`. Both `CommandBuilder.BuildCommand()` (transcode) and `CommandBuilder.BuildRemuxCommand()` (remux) use this index in their `-map 0:a:{index}` flag.
 
 ### 2. Normalization: Industry-Standard Loudness
-Audio is normalized so volume is consistent across the library.
 
-| Parameter | Default | FFmpeg Flag |
-|-----------|---------|-------------|
-| Target Loudness (LUFS) | -23 | `loudnorm=I=-23` |
-| Loudness Range (LRA) | 7 | `LRA=7` |
-| True Peak (dBTP) | -2 | `TP=-2` |
+Audio is normalized so volume is consistent across the library. The
+parameter contract, mode selection (linear vs dynamic), measurement
+requirements, and operator-tunable knobs are owned by
+`Features/LoudnessAnalysis/linear-loudnorm.feature.md`. See that
+document for current values and the why behind them.
 
-Dynamic range compression is also available (configurable via system settings):
-
-| Parameter | Default | FFmpeg Flag |
-|-----------|---------|-------------|
-| Threshold | -15 dB | `acompressor=threshold=-15dB` |
-| Ratio | 3:1 | `ratio=3` |
-| Attack | 10 ms | `attack=10` |
-| Release | 100 ms | `release=100` |
-| Makeup Gain | 3 dB | `makeup=3dB` |
-
-Both filters are toggled independently via `AudioNormalizationEnabled` and `AudioCompressionEnabled` system settings.
-
-**Applies to:** Transcode, Remux, and SubtitleFix paths. All three re-encode audio to AAC, so the same `loudnorm` + optional `acompressor` chain is applied uniformly. The library-wide loudness consistency promise is upheld regardless of which pipeline produced the file.
+**Applies to:** Transcode, Remux, and SubtitleFix paths -- the same
+loudnorm filter chain runs on each, governed by the contract above.
 
 ### 3. Codec: Source-Preserving with MP4 Fallback (revised 2026-05-10)
 Output audio matches the source codec, channel count, and bitrate whenever the source is MP4-compatible. The previous "always AAC stereo 128k" policy was retired because audio is a small fraction of total bitrate (~10% on a 720p AV1 file) and forcing stereo AAC threw away surround sound for very little space saved.
@@ -57,7 +45,7 @@ Output audio matches the source codec, channel count, and bitrate whenever the s
 
 **Operator override:** `ProfileThresholds.AudioBitrateKbps` is the override knob. **Zero (0) means "use source policy"**; any non-zero value forces that bitrate regardless of source. As of 2026-05-10 every existing row was reset to 0 to make source-matching the default everywhere. To pin a profile to a specific bitrate, edit the `ProfileThresholds` row for that profile + resolution.
 
-**Why re-encode at all?** The loudness-normalization filter chain requires decoded audio. Stream-copy is incompatible with `loudnorm` / `acompressor`, so audio passes through a decode → filter → re-encode cycle even when the codec is unchanged. Cost: ~5-20 seconds per hour of content.
+**Why re-encode at all?** The loudness-normalization filter chain requires decoded audio. Stream-copy is incompatible with `loudnorm`, so audio passes through a decode → filter → re-encode cycle even when the codec is unchanged. Cost: ~5-20 seconds per hour of content.
 
 ## Decision Matrix
 

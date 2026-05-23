@@ -221,7 +221,7 @@ Rationale: ordering by raw size (the legacy behavior) put already-efficient AV1 
   5. Create TranscodeAttempt record (only if source confirmed present)
   6. Load profile thresholds (CRF, bitrate, codec settings)
   7. File preparation (see File Staging below)
-  8. Build FFmpeg command (libsvtav1, preset, CRF, film grain, bitrates). **Audio args are AudioComplete-aware:** when `MediaFile.AudioComplete = true` the command emits `-c:a copy` (no audio re-encode, no `-af` filter chain); when false, the standard `BuildAudioCodecArgs` + `BuildAudioFilters` (loudnorm + acompressor) one-shot pass runs, and the post-flight FileReplacement hook flips `AudioComplete` to true. See `Features/AudioCompletion/audio-completion.flow.md`.
+  8. Build FFmpeg command (libsvtav1, preset, CRF, film grain, bitrates). **Audio args are AudioComplete-aware:** when `MediaFile.AudioComplete = true` the command emits `-c:a copy` (no audio re-encode, no `-af` filter chain); when false, the standard `BuildAudioCodecArgs` + `BuildAudioFilters` one-shot pass runs, and the post-flight FileReplacement hook flips `AudioComplete` to true. Loudnorm parameter contract owned by `Features/LoudnessAnalysis/linear-loudnorm.feature.md`. See `Features/AudioCompletion/audio-completion.flow.md` for the state machine.
   9. Execute FFmpeg via `VideoTranscodingService.TranscodeVideo()`
   10. Monitor progress (frames / total_frames), update TranscodeProgress
   11. On completion: record TranscodeAttempt with size reduction, duration, command
