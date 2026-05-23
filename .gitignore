@@ -5,12 +5,14 @@
 # Log files
 *.log
 *.log.cutree
+*.err
 ffmpeg2pass-*.log
 x265_2pass.log*
 vmaf_results.json
 vmaf_output.xml
 vmaf_test_*.xml
 Scripts/Smoke/*.results.json
+backfill-shard-*
 # Python
 __pycache__/
 *.py[cod]
