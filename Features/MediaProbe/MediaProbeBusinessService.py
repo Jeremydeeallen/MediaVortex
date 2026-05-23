@@ -122,6 +122,13 @@ class MediaProbeBusinessService:
                             f"Loudness measurement skipped for MediaFileId={MediaFile.Id}: {FailureReason}",
                             "MediaProbeBusinessService", "_ExecuteProbe"
                         )
+                    elif Ok and FailureReason is None:
+                        # Measurement succeeded. If the file is already at the
+                        # broadcast loudness target, mark it AudioComplete=true
+                        # immediately so it never enters the encode path -- a
+                        # zero-gain loudnorm pass is wasted work.
+                        # See linear-loudnorm.feature.md criterion 28.
+                        self._MaybeAutoMarkAudioCompleteAtTarget(MediaFile.Id)
                 except Exception as LoudnessEx:
                     LoggingService.LogException(
                         f"Loudness measurement failed for MediaFileId={MediaFile.Id} -- probe data is saved",
@@ -226,6 +233,63 @@ class MediaProbeBusinessService:
             return "480p"
         except Exception:
             return None
+
+    def _MaybeAutoMarkAudioCompleteAtTarget(self, MediaFileId: int) -> None:
+        """If newly-measured file is at -23 LUFS (+/- 1) AND has an MP4-compat
+        audio codec, mark it AudioComplete=true with
+        AudioCorruptReason='already_at_target_loudness' so it never enters
+        the encode path. See linear-loudnorm.feature.md criterion 28 and
+        AudioCompletionService.EvaluateInitialAudioState clause (d).
+
+        Best-effort -- exceptions are logged but never propagated. The
+        worst case is a wasted zero-gain encode on a file that should have
+        short-circuited; next admin recompute will reconcile.
+        """
+        try:
+            from Core.Database.DatabaseService import DatabaseService
+            from Features.AudioCompletion.AudioCompletionService import AudioCompletionService
+            Db = DatabaseService()
+            Rows = Db.ExecuteQuery(
+                """
+                SELECT SourceIntegratedLufs, AudioCodec, AudioComplete,
+                       AudioCorruptSuspect, HasExplicitEnglishAudio, Resolution,
+                       AudioBitrateKbps, AudioChannels
+                FROM MediaFiles WHERE Id = %s
+                """,
+                (MediaFileId,),
+            )
+            if not Rows:
+                return
+            Row = Rows[0]
+            if Row.get('AudioComplete') is True or Row.get('AudioCorruptSuspect') is True:
+                return  # already settled
+            # Reuse the canonical state derivation -- HasLoudnormHistory=False
+            # is correct here since we are evaluating fresh measurements, not
+            # historical attempts. The backfill is the path that consults
+            # history; the probe co-trigger is the steady-state path.
+            from Features.TranscodeQueue.QueueAdmissionConfigRepository import QueueAdmissionConfigRepository
+            FloorCfg = QueueAdmissionConfigRepository().Get()
+            Complete, Suspect, Reason = AudioCompletionService.EvaluateInitialAudioState(
+                Row, FloorCfg, HasLoudnormHistory=False,
+            )
+            if Complete is True and Reason == AudioCompletionService.REASON_ALREADY_AT_TARGET_LOUDNESS:
+                if AudioCompletionService.MarkAudioComplete(MediaFileId):
+                    # Also stamp the reason -- MarkAudioComplete only sets the
+                    # flag + timestamp; the reason needs a separate write.
+                    Db.ExecuteNonQuery(
+                        "UPDATE MediaFiles SET AudioCorruptReason = %s WHERE Id = %s",
+                        (AudioCompletionService.REASON_ALREADY_AT_TARGET_LOUDNESS, MediaFileId),
+                    )
+                    LoggingService.LogInfo(
+                        f"Auto-marked AudioComplete=true (already_at_target_loudness) "
+                        f"for MediaFileId={MediaFileId}",
+                        "MediaProbeBusinessService", "_MaybeAutoMarkAudioCompleteAtTarget"
+                    )
+        except Exception as Ex:
+            LoggingService.LogException(
+                f"_MaybeAutoMarkAudioCompleteAtTarget failed for MediaFileId={MediaFileId}",
+                Ex, "MediaProbeBusinessService", "_MaybeAutoMarkAudioCompleteAtTarget"
+            )
 
     # ─── Batch Operations ──────────────────────────────────────────────
 

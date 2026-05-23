@@ -389,9 +389,9 @@ DRAFT -- criteria pending operator approval. No code until approved.
 - [x] Feature doc (this file) drafted
 - [ ] Operator review + criteria approval (BLOCKING)
 - [x] Step 1: Schema migrations -- 4 new MediaFiles cols (Threshold, AdmissionDeferReason, LoudnessMeasurementFailureReason, AudioNormalizationMode), MinimumLoudnessRangeLU=11 SystemSettings row, dropped 7 obsolete compressor + LoudnessRange settings. 5,041 rows need threshold backfill. Idempotent re-run verified.
-- [ ] Step 2: Extend ebur128 parser to capture Threshold; extend PersistLoudness to write all four loudness cols + failure reason atomically
+- [x] Step 2: Parser captures Integrated-Threshold; LoudnessResult adds field; PersistLoudness writes 4 cols + LoudnessMeasurementFailureReason atomically; MeasureAndPersist threads failure reason through. Smoke test: parser passes against realistic ebur128 stderr; clause-(d) at-target detection passes against synthetic rows.
 - [ ] Step 3: BackfillLoudnessThreshold script -- re-measure rows missing Threshold
-- [ ] Step 4: Probe co-trigger -- wire LoudnessAnalysis into MediaProbe completion path; invoke EvaluateInitialAudioState in same transaction so at-target files mark complete immediately (criterion 28)
+- [x] Step 4: Probe co-trigger already existed (MediaProbeBusinessService:119); extended with criterion 28 auto-mark hook (`_MaybeAutoMarkAudioCompleteAtTarget`) that flips AudioComplete=true with reason 'already_at_target_loudness' for newly-measured at-target MP4-compat files.
 - [ ] Step 5: Admission gate -- add measurement-present check to `_EvaluateCompliance` with the two-reason split (awaiting vs failed)
 - [ ] Step 6: BuildAudioFilters rewrite -- linear-or-dynamic per predicted-peak math; raise on missing data; write AudioNormalizationMode post-flight
 - [ ] Step 7: Remove acompressor code path and SystemSettings handling

@@ -1,15 +1,19 @@
 """LoudnessAnalysisService -- owns ebur128 measurement and persistence.
 
-Captures three EBU R128 values per audio stream:
+Captures four EBU R128 values per audio stream:
   - Integrated loudness (LUFS) -- "how loud is this file overall"
   - Loudness range (LU)        -- "how much do volumes vary inside this file"
   - True peak (dBTP)           -- "will peaks clip on cheap DACs"
+  - Integrated gating threshold (LUFS) -- relative-gate threshold from the
+    EBU R128 measurement; required by loudnorm's linear-mode math
+    (`measured_thresh`). See linear-loudnorm.feature.md.
 
 Plus the on-disk fingerprint (size + mtime) so a future reprobe can short-circuit
 unchanged files.
 
 See:
-- Features/TranscodeQueue/media-tabs-and-loudness.feature.md (criteria 5-6)
+- Features/LoudnessAnalysis/linear-loudnorm.feature.md (criteria 5-7)
+- Features/TranscodeQueue/media-tabs-and-loudness.feature.md (capture mechanism)
 - Scripts/SQLScripts/BackfillProbeAndLoudness.py (Phase 1 throwaway script that
   this module supersedes for the steady-state probe pipeline)
 """
@@ -34,6 +38,7 @@ class LoudnessResult:
     IntegratedLufs: float
     LoudnessRangeLU: float
     TruePeakDbtp: float
+    IntegratedThresholdLufs: float
 
 
 # ---------- Parser ----------
@@ -47,13 +52,26 @@ _RE_INTEGRATED = re.compile(r'I:\s+(-?\d+(?:\.\d+)?)\s+LUFS')
 _RE_LRA = re.compile(r'LRA:\s+(-?\d+(?:\.\d+)?)\s+LU')
 _RE_PEAK = re.compile(r'Peak:\s+(-?\d+(?:\.\d+)?)\s+dBFS')
 
+# The Summary block contains TWO `Threshold:` lines -- one nested under
+# `Integrated loudness:`, one under `Loudness range:`. Loudnorm's
+# `measured_thresh` needs the first (the gating threshold for integrated
+# loudness). Match "Integrated loudness:" header then non-greedy through
+# to the first Threshold.
+_RE_INTEGRATED_THRESHOLD = re.compile(
+    r'Integrated loudness:[\s\S]*?Threshold:\s+(-?\d+(?:\.\d+)?)\s+LUFS'
+)
+
 
 def ParseSummary(Stderr: str) -> Optional[LoudnessResult]:
-    """Extract (Integrated, LRA, TruePeak) from ebur128 stderr output.
+    """Extract (Integrated, LRA, TruePeak, Threshold) from ebur128 stderr output.
 
     Returns None when any field is missing. Anchors to the summary block at the
     tail of stderr; falls back to the LAST occurrence in the full text if the
     summary marker isn't present.
+
+    The Threshold value is the relative gating threshold for integrated
+    loudness (the one nested under the `Integrated loudness:` sub-header,
+    not the one under `Loudness range:`).
     """
     Marker = 'Summary:'
     Idx = Stderr.rfind(Marker)
@@ -62,16 +80,25 @@ def ParseSummary(Stderr: str) -> Optional[LoudnessResult]:
     I = _RE_INTEGRATED.search(Tail) if Idx >= 0 else None
     L = _RE_LRA.search(Tail) if Idx >= 0 else None
     P = _RE_PEAK.search(Tail)
+    T = _RE_INTEGRATED_THRESHOLD.search(Tail) if Idx >= 0 else None
 
-    if not (I and L and P):
+    if not (I and L and P and T):
+        # Fallback: try the whole stderr if Summary block isn't well-formed.
+        # _RE_INTEGRATED_THRESHOLD is context-anchored to "Integrated loudness:"
+        # so it remains safe to search outside the Summary block.
         I_All = _RE_INTEGRATED.findall(Stderr)
         L_All = _RE_LRA.findall(Stderr)
         P_All = _RE_PEAK.findall(Stderr)
-        if not (I_All and L_All and P_All):
+        T_All = _RE_INTEGRATED_THRESHOLD.findall(Stderr)
+        if not (I_All and L_All and P_All and T_All):
             return None
-        return LoudnessResult(float(I_All[-1]), float(L_All[-1]), float(P_All[-1]))
+        return LoudnessResult(
+            float(I_All[-1]), float(L_All[-1]), float(P_All[-1]), float(T_All[-1])
+        )
 
-    return LoudnessResult(float(I.group(1)), float(L.group(1)), float(P.group(1)))
+    return LoudnessResult(
+        float(I.group(1)), float(L.group(1)), float(P.group(1)), float(T.group(1))
+    )
 
 
 # ---------- Service ----------
@@ -164,12 +191,19 @@ class LoudnessAnalysisService:
         Loudness: Optional[LoudnessResult],
         FileSize: Optional[int] = None,
         FileMtime: Optional[datetime] = None,
+        FailureReason: Optional[str] = None,
     ) -> bool:
-        """Write the four loudness columns + the two change-detection columns.
+        """Write the four loudness columns + failure reason + change-detection.
 
-        When `Loudness` is None (measurement failed) we still stamp
-        LoudnessMeasuredAt=NOW() so the row drops out of the unmeasured set and
-        we don't retry forever. The Phase 1 backfill uses the same semantic.
+        On success (Loudness is non-None): writes all four measurement columns
+        + LoudnessMeasuredAt=NOW(), clears LoudnessMeasurementFailureReason.
+
+        On failure (Loudness is None): writes LoudnessMeasuredAt=NOW(),
+        LoudnessMeasurementFailureReason=<reason>, NULLs the four measurement
+        columns. The row is distinguishable from "not yet attempted"
+        (LoudnessMeasuredAt IS NULL) so the admission gate can surface it
+        for operator review.
+
         FileSize/FileMtime: pass when caller stat'd the file (so the row is
         valid for future change-detection); leave None to preserve existing
         values.
@@ -178,33 +212,40 @@ class LoudnessAnalysisService:
             I = Loudness.IntegratedLufs if Loudness else None
             L = Loudness.LoudnessRangeLU if Loudness else None
             P = Loudness.TruePeakDbtp if Loudness else None
+            T = Loudness.IntegratedThresholdLufs if Loudness else None
+            # Clear the failure reason on success; record it on failure.
+            FR = None if Loudness else FailureReason
             # Update size/mtime only when caller supplied them (don't NULL
             # existing values on a measurement-only refresh).
             if FileSize is not None and FileMtime is not None:
                 DatabaseService().ExecuteNonQuery(
                     """
                     UPDATE MediaFiles
-                    SET SourceIntegratedLufs  = %s,
-                        SourceLoudnessRangeLU = %s,
-                        SourceTruePeakDbtp    = %s,
-                        LoudnessMeasuredAt    = NOW(),
-                        LastProbedFileSize    = %s,
-                        LastProbedFileMtime   = %s
+                    SET SourceIntegratedLufs           = %s,
+                        SourceLoudnessRangeLU          = %s,
+                        SourceTruePeakDbtp             = %s,
+                        SourceIntegratedThresholdLufs  = %s,
+                        LoudnessMeasurementFailureReason = %s,
+                        LoudnessMeasuredAt             = NOW(),
+                        LastProbedFileSize             = %s,
+                        LastProbedFileMtime            = %s
                     WHERE Id = %s
                     """,
-                    (I, L, P, FileSize, FileMtime, MediaFileId),
+                    (I, L, P, T, FR, FileSize, FileMtime, MediaFileId),
                 )
             else:
                 DatabaseService().ExecuteNonQuery(
                     """
                     UPDATE MediaFiles
-                    SET SourceIntegratedLufs  = %s,
-                        SourceLoudnessRangeLU = %s,
-                        SourceTruePeakDbtp    = %s,
-                        LoudnessMeasuredAt    = NOW()
+                    SET SourceIntegratedLufs           = %s,
+                        SourceLoudnessRangeLU          = %s,
+                        SourceTruePeakDbtp             = %s,
+                        SourceIntegratedThresholdLufs  = %s,
+                        LoudnessMeasurementFailureReason = %s,
+                        LoudnessMeasuredAt             = NOW()
                     WHERE Id = %s
                     """,
-                    (I, L, P, MediaFileId),
+                    (I, L, P, T, FR, MediaFileId),
                 )
             return True
         except Exception as Ex:
@@ -264,5 +305,7 @@ class LoudnessAnalysisService:
         FileMtime = datetime.fromtimestamp(Stat.st_mtime)
 
         Loudness, Reason = self.MeasureLoudness(LocalFilePath, AudioStreamIndex)
-        Ok = self.PersistLoudness(MediaFileId, Loudness, FileSize, FileMtime)
+        Ok = self.PersistLoudness(
+            MediaFileId, Loudness, FileSize, FileMtime, FailureReason=Reason
+        )
         return Ok, Reason
