@@ -211,7 +211,7 @@ class FileReplacementBusinessService:
 
             replacement_result = self._ProcessCompleteFileReplacement(
                 OriginalPath, TranscodedPath, OriginalPath,
-                FFmpegCommand=getattr(transcode_attempt, 'FFpmpegCommand', None),
+                FFmpegCommand=getattr(transcode_attempt, 'FfpmpegCommand', None),
             )
 
             if replacement_result.get('Success', False):

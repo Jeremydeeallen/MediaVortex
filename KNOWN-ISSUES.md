@@ -2,6 +2,37 @@
 
 ## Open
 
+### [BUG-0013] AudioComplete not flipped to true after successful loudnorm pass -- files re-queue forever
+**Date:** 2026-05-23 | **Area:** audio-completion
+
+**What breaks:** `FileReplacementBusinessService._ProcessCompleteFileReplacement` is designed (per `audio-completion.feature.md` criterion 12) to call `AudioCompletionService.MarkAudioComplete(MediaFileId)` after a successful replacement whose FFmpeg command contained `loudnorm`, flipping `MediaFiles.AudioComplete` to true so the cascade guard at `QueueManagementBusinessService.py:1565` (`AudioConfirmedOffTarget = (not IsNormalized) AND SourceLufs off-target`) suppresses re-queueing the file for another Quick/Remux. In practice the flag is almost never set on post-remux outputs: of 2,234 `-mv.mp4` MediaFile rows that have measured loudness, only **9 have AudioComplete=true**, 683 are explicitly false, and 1,542 are NULL. Of 256 `-mv-mv.mp4` rows, only 6 have AudioComplete=true. Because the guard never fires, files with off-target LUFS get pulled back into the queue, get another loudnorm pass, and the cycle persists indefinitely (output filenames stack `-mv-mv-mv...`). This was the bleed shut down 2026-05-23 03:50 by flipping `Workers.remuxenabled=false` on all 13 workers; cannot resume safely until the flag-flip is reliable.
+
+This is not the same as the legacy backfill case (241 of the 256 `-mv-mv` files came from a prior pass that had NO loudnorm in the command -- those are legitimate first-time audio fixes on pre-feature transcodes, not a bug). The bug is the residual ~5% that DID get loudnorm in the prior pass and should never have been re-evaluated.
+
+**Repro:**
+1. Pick any MediaFile with `audiocomplete IS NOT TRUE` that has a successful TranscodeAttempt whose FFpmpegCommand contains `loudnorm` and `filereplaced=true`. E.g. `SELECT m.id FROM MediaFiles m JOIN TranscodeAttempts a ON a.mediafileid=m.id WHERE a.success=true AND a.filereplaced=true AND a.ffpmpegcommand ILIKE '%loudnorm%' AND m.audiocomplete IS NOT TRUE LIMIT 5`.
+2. Confirm the row is in the cascade re-queue set: `SELECT needsquick FROM MediaFiles WHERE id=<id>` -- expect true when LUFS is off-target.
+3. Re-queue and watch a new FFmpeg command with `loudnorm` get built and run, producing yet another generation file.
+
+**Evidence:**
+- Live DB counts (2026-05-23 03:55): 2,234 `-mv.mp4` rows with `loudnessmeasuredat IS NOT NULL`. AudioComplete=true: 9. AudioComplete=false: 683. AudioComplete=NULL: 1,542. Of those, 1,362 have `needsquick=true`.
+- 256 `-mv-mv.mp4` rows exist on disk (proof the re-queue ran). Only 6 of those have AudioComplete=true.
+- 13 of the 256 had a prior-generation attempt that already contained loudnorm -- those are the unambiguous "MarkAudioComplete failed to fire" cases.
+- Code path: `FileReplacementBusinessService.py:472-480` wraps the `MarkAudioComplete` call in `try/except`. On exception it logs and continues; the file replacement still reports Success=true. There's no follow-up reconciliation in `RecomputeForFiles`. The flow doc (`audio-completion.flow.md` line 89) acknowledges this exact failure mode: "Post-flight MarkAudioComplete raises ... DB still says AudioComplete=false. Loud warning. Next admin recompute will re-evaluate from the most-recent TranscodeAttempts.FFpmpegCommand substring match and flip the bit." -- but `RecomputeForFiles` does NOT actually run that backfill check (verified by code inspection of `Features/TranscodeQueue/QueueManagementBusinessService.py` -- the `_EvaluateCompliance` path reads AudioComplete but does not write it).
+
+**Violates:** `Features/AudioCompletion/audio-completion.feature.md` criterion 25 (added with this bug) -- restates criterion 12 in observable post-condition form.
+
+**Look first:** Three places to instrument before fixing:
+1. `Features/FileReplacement/FileReplacementBusinessService.py:472-480` -- the try/except around `MarkAudioComplete`. Check operator log for any historical exceptions named "MarkAudioComplete failed". If silent, the call may not even be reaching this branch (verify `UpdateResult.get('MediaFileId')` is non-None for the failing cases -- `_UpdateMediaFilesAfterReplacement` may DELETE-and-INSERT a new row, returning a different id, or returning Success=true with no id).
+2. `Features/AudioCompletion/AudioCompletionService.py:148-175` (`MarkAudioComplete`) -- the UPDATE runs on `MediaFiles.Id = %s`. If the post-replacement row id has changed (DELETE+INSERT semantics in `_UpdateMediaFilesAfterReplacement`), the UPDATE silently affects 0 rows but `ExecuteNonQuery` doesn't surface the rowcount, so `MarkAudioComplete` returns true. Add a rowcount check.
+3. `Features/TranscodeQueue/QueueManagementBusinessService.RecomputeForFiles` -- the doc's "next admin recompute will reconcile" promise is not implemented. Either implement the fallback backfill there (substring-match the most-recent TranscodeAttempts.FFpmpegCommand) or remove the promise from `audio-completion.flow.md:89`.
+
+Recovery for the existing 2,200+ already-broken rows is a separate problem (operator's call). The fix here is forward-only: stop the leak before re-enabling `remuxenabled`.
+
+**Fix with:** `/t BUG-0013`.
+
+---
+
 ### [BUG-0012] Quick Fix batch rows have blank Title for files whose FilePath is a UNC path
 **Date:** 2026-05-22 | **Area:** show-settings
 

@@ -127,6 +127,8 @@ See `audio-completion.flow.md` for state lifecycle. See
 
 24. `transcode.flow.md` Stage 5 (TRANSCODE) command-build note is updated to describe AudioComplete-aware audio args.
 
+25. [BUG-0013] After a successful Remux or Transcode whose FFmpeg command contains `loudnorm`, the resulting MediaFile row must have `AudioComplete=true` and `AudioCompletedAt` set within the same post-flight transaction as the file replacement. Verifiable on live data: `SELECT COUNT(*) FROM MediaFiles m WHERE m.filename ~ '-mv(-mv)*\.mp4$' AND m.audiocomplete IS NOT TRUE AND EXISTS (SELECT 1 FROM TranscodeAttempts a WHERE a.mediafileid = m.id AND a.success = true AND a.filereplaced = true AND a.ffpmpegcommand ILIKE '%loudnorm%')` returns 0. Today this query returns ~2200.
+
 ## Status
 
 IMPLEMENTED 2026-05-17 -- pending operator FFmpeg-byte-identical smoke test (workers required, currently paused).
