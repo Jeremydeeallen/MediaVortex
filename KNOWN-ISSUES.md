@@ -2,6 +2,85 @@
 
 ## Open
 
+### [BUG-0012] Quick Fix batch rows have blank Title for files whose FilePath is a UNC path
+**Date:** 2026-05-22 | **Area:** show-settings
+
+**What breaks:** On `/ShowSettings#quickfix` (the Next Quick Fix Batch card), several rows render with no value in the Title column. The Title is populated from `Suggestion.ShowName`. `ShowName` is built in `Features/TranscodeQueue/QueueManagementBusinessService.py:372-374` as `Parts = FilePath.replace('\\', '/').split('/'); ShowName = Parts[1] if len(Parts) >= 2 else 'Unknown'`. For drive-letter FilePaths (`T:\Show\file.mp4`) Parts[1] is the show folder. For UNC FilePaths (`\\10.0.0.43\nfs-media-_tv\Show\file.mp4`) the leading double backslash becomes `//` after replace, so `split('/')` puts empty strings in Parts[0] and Parts[1] -- the show folder lands at Parts[4], not Parts[1].
+
+This regression is downstream of the post-BUG-0008 SMB cutover and the windows-unc-path-translation work that started storing UNC paths in `MediaFiles.FilePath` for Windows-worker-claimed rows.
+
+**Repro:** Open `http://10.0.0.7:5000/ShowSettings#quickfix`. Observe the Next Quick Fix Batch table. Several rows show blank Title. Cross-check via SQL: `SELECT FilePath FROM MediaFiles WHERE FilePath LIKE '\\\\%' LIMIT 5` -- rows whose FilePath starts with `\\` are the affected ones.
+
+**Evidence:** Direct code inspection -- the parse takes Parts[1] unconditionally. No UNC-aware branch.
+
+**Violates:** `Features/ShowSettings/smart-populate.feature.md` criterion 20 (added with this bug).
+
+**Look first:** `Features/TranscodeQueue/QueueManagementBusinessService.py:372-374`. Fix options: (a) detect UNC prefix (`FilePath.startswith('\\\\')`) and skip the empty-leading segments, taking Parts[4] instead of Parts[1]; (b) better, use a normalize step that returns the show folder for any path shape -- both UNC and drive-letter paths have the show folder two segments below the share/drive root. The same parsing pattern may exist in other SmartPopulate consumers and the show-grouping query at `Features/ShowSettings/ShowSettingsRepository.py:153` which uses `split_part(replace(mf.FilePath, '\\', '/'), '/', 2)` -- check whether the show-list itself also drops UNC titles.
+
+**Fix with:** `/t BUG-0012`.
+
+---
+
+### [BUG-0011] JellyfinNotify gets HTTP 500 from Jellyfin, WARNING does not log the offending payload
+**Date:** 2026-05-22 | **Area:** jellyfin-notify
+
+**What breaks:** `WARNING: JellyfinNotify: non-2xx status=500 for 2 update(s); body='Error processing request.'` fires from `Services/JellyfinNotifyService.py:169-173`. Jellyfin's 500 body is a generic ASP.NET error string -- no path, no library name, no plugin trace. The WARNING logs only count + body slice, so neither MediaVortex nor the operator can tell which translated path Jellyfin choked on. Likely causes (per the `reference_jellyfin_notify_api` memory and prior post-mortems): a path that doesn't resolve to any configured Jellyfin library root, a separator/case mismatch between MediaVortex-translated and Jellyfin-configured library paths, or a plugin-side bug that wraps a downstream exception as 500 instead of 4xx.
+
+**Repro:** Run any file-mutation choke point (file replace, scan-detected new file, etc.) and wait for the WARNING to fire. There is no way today to map the warning back to a path without code change.
+
+**Evidence:** Live worker log 2026-05-22 -- "non-2xx status=500 for 2 update(s); body='Error processing request.'". Same notification path produces 204 for the vast majority of mutations, so this isn't a global config failure -- it's path-specific.
+
+**Violates:** `jellyfin-push-notify.feature.md` criterion 10 (added with this bug).
+
+**Look first:** `Services/JellyfinNotifyService.py:154-180`. Add `Translated` (or at minimum the first entry's `Path` + `UpdateType`) to the non-2xx WARNING. While debugging the eventual fix, also check Jellyfin's own log (`/var/log/jellyfin/` on the Jellyfin host) at the timestamps -- ASP.NET 500 usually corresponds to a stack trace in the server log that names the offending library/plugin.
+
+**Fix with:** `/t BUG-0011`.
+
+---
+
+### [BUG-0010] TemporaryFilePaths cleanup runs only on FileReplacement success, leaks on all other return paths
+**Date:** 2026-05-22 | **Area:** file-replacement
+
+**What breaks:** `FileReplacementBusinessService.ProcessFileReplacement` only calls `_CleanupTemporaryFilePaths` inside the `if replacement_result.get('Success', False):` branch at line 217-225. Every other terminal return -- transcode_attempt None (165-166), transcoded file missing on disk (185-189), defense-in-depth size guard (196-208), archive failure (210), and the `else` branch where `_ProcessCompleteFileReplacement` returns Success=false -- exits without removing the TFP row. Because `TranscodeAttempts.Success` is already set by then, the OrphanCleanup safety-net sweep removes them ~every 2 minutes and emits a WARNING.
+
+This is the structural sibling of BUG-0009. BUG-0009 is "why are replacements failing in the first place"; BUG-0010 is "even if replacements never failed, future failure modes will leak again until cleanup is moved off the success-only branch."
+
+**Repro:** Force any non-success branch (e.g. delete the transcoded file from `LocalOutputPath` between transcode-finish and replacement-start) and observe the TFP row remains until the next OrphanCleanup sweep.
+
+**Evidence:** Code inspection at `FileReplacementBusinessService.py:160-232`. The chokepoint comment in `PostTranscodeDispositionService._CommitDisposition` (line 295-298) explicitly states FileReplacement owns its own TFP cleanup on success; nothing claims it on failure.
+
+**Violates:** `Features/FileReplacement/FileReplacement.feature.md` criterion 12 (added with this bug).
+
+**Look first:** Two viable fixes -- (a) put `_CleanupTemporaryFilePaths` in a `finally` block scoped to the function so every terminal return cleans up, OR (b) route any failure return through `PostTranscodeDispositionService._CommitDisposition` with a non-success Disposition (Requeue/Discard) so the existing chokepoint owns cleanup for both success and failure paths. (b) is cleaner architecturally because it keeps cleanup centralized in `_CommitDisposition`, but (a) is a smaller surgical change.
+
+**Fix with:** `/t BUG-0010`.
+
+---
+
+### [BUG-0009] FileReplacement returns Success=false for some attempts, leaving orphaned TemporaryFilePaths rows
+**Date:** 2026-05-22 | **Area:** file-replacement
+
+**What breaks:** `OrphanCleanup` logs `OrphanCleanup removed N TemporaryFilePaths rows for finished TranscodeAttempts -- a terminal-state cleanup path is leaking, investigate.` at small but recurring counts (1-3 per sweep, ~every 2 minutes). The trigger is `TranscodeAttempts.Success=true` (transcode succeeded) AND a `TemporaryFilePaths` row still exists for that attempt -- which means `FileReplacementBusinessService.ProcessFileReplacement` reached the attempt but bailed out of the success branch at `FileReplacementBusinessService.py:217`. The actual failure reason is not visible in the OrphanCleanup warning -- only the count.
+
+**Repro:** Watch WorkerService logs over a 10-minute window. The OrphanCleanup TFP-orphan WARN fires repeatedly with non-zero counts. Cross-reference TranscodeAttempts where `Success=true AND Disposition IN ('Replace','BypassReplace')` and look for ones with no corresponding `FileReplaced=true`.
+
+**Evidence:** Confirmed 2026-05-22 from live worker logs -- four consecutive OrphanCleanup sweeps removed 2, 2, 3, 1 TFP rows respectively. OrphanCleanupService.\_SweepTemporaryFilePaths is doing its safety-net job; the upstream `FileReplacement` chokepoint is the actual leak source.
+
+**Violates:** `Features/FileReplacement/FileReplacement.feature.md` criterion 11 (added with this bug).
+
+**Look first:** `Features/FileReplacement/FileReplacementBusinessService.py:160-225`. Every return path that does NOT reach `_CleanupTemporaryFilePaths` (line 225) is a candidate:
+- line 165-166: `GetTranscodeAttemptById` returned None
+- line 185-189: `ValidateFileExists(LocalTranscodedPath)` false (transcoded output missing on local mount)
+- line 196-208: defense-in-depth size guard (`NewSize >= OldSize` for non-Remux)
+- line 217 `else`: `_ProcessCompleteFileReplacement` returned Success=false
+- archive failure inside `_ArchiveOriginalFileDetails` (line 210)
+
+To diagnose: grep WorkerService log for `FileReplacementBusinessService` ERROR/WARNING lines immediately preceding each OrphanCleanup TFP warning. The function already logs its specific error -- pull those lines into a count by reason. Most likely candidates given recent operational state: missing-output-file (post-2026-05-22 SMB cutover staging path drift) or size-guard (non-Remux profiles producing larger output on certain content).
+
+**Fix with:** `/t BUG-0009`.
+
+---
+
 ### [BUG-0007] Worker capability toggle does not refresh UI until modal is closed and reopened
 **Date:** 2026-05-22 | **Area:** activity-page
 

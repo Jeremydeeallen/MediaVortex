@@ -129,6 +129,19 @@ decision.
    required for v1, but the log shape MUST be greppable for later
    metric extraction (e.g. consistent prefix `JellyfinNotify:`).
 
+10. [BUG-0011] **Failure WARNINGs include enough context to diagnose
+    server-side 5xx responses.** Today the non-2xx WARNING at
+    `Services/JellyfinNotifyService.py:169-173` logs only the status code,
+    update count, and a 200-char body slice -- not the translated paths
+    that were sent. Jellyfin's `Error processing request.` 500 body is
+    opaque and the actual cause (path not mapped to any library, separator
+    mismatch, plugin error, etc.) is unrecoverable from MediaVortex logs
+    alone. Add the `Translated` payload (or at minimum the first path and
+    UpdateType) to the WARNING so the next 500 is debuggable without
+    needing to attach to a live process or trawl Jellyfin's own log.
+    Verifiable: induce a 500 (e.g. send an UpdateType for a path Jellyfin
+    has no library root for), grep the log line, confirm the path appears.
+
 ## Decision: `/Library/Media/Updated` (parent-folder refresh)
 
 Jellyfin exposes three endpoints that can trigger a re-scan; we picked
