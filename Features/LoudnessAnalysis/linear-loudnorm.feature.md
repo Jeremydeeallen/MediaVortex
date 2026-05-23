@@ -396,8 +396,8 @@ DRAFT -- criteria pending operator approval. No code until approved.
 - [x] Step 6: BuildAudioFilters rewritten -- signature now takes MediaFile (not ProfileSettings). Linear-or-dynamic mode picked from predicted_peak math; emits single filter with all four measured_* params and dynamic LRA = max(source, MinimumLoudnessRangeLU). Raises RuntimeError on missing measurements. AudioNormalizationEnabled kept as kill switch. All three call sites (BuildCommand, BuildRemuxCommand, BuildSubtitleFixCommand) updated to pass MediaFile. Smoke-tested: loud broadcast -> linear, quiet film -> dynamic, missing measurement -> raise.
 - [x] Step 7: acompressor code removed in Step 6 rewrite (no longer reads CompressionThreshold/Ratio/Attack/Release/Makeup/AudioCompressionEnabled/LoudnessRange). SystemSettings rows already dropped in Step 1.
 - [x] Step 8: Doc consolidation done. Parameter tables removed from Docs/AudioStrategy.md, audio-completion.feature.md, audio-completion.flow.md, remux.flow.md, transcode.flow.md, media-tabs-and-loudness.feature.md, command-builder.feature.md, transcode-vs-remux-routing.feature.md. Grep audit clean -- only allowed files (this feature's docs, KNOWN-ISSUES, mediavortex-analyze-transcode) contain the forbidden tokens.
-- [ ] Step 9: Operator visibility -- four counts on Activity panel (or documented SQL fallback)
-- [ ] Step 10: Live verify on a real cinematic file per criteria 25-27
+- [x] Step 9: Operator visibility -- SQL one-liner in Runbook produces all four counts (awaiting / failed / linear / dynamic). Activity panel sub-section will be added when the parent Library Compliance panel ships (per audio-completion.feature.md criterion 18 DEFERRED note). Criterion 23 satisfied via documented SQL fallback.
+- [ ] Step 10: Live verify on a real cinematic file per criteria 25-27. BLOCKED on worker resume (workers paused per BUG-0013 since 2026-05-23 03:50). Also requires the threshold backfill to complete so cinematic-LRA files have measurements.
 
 ## Runbook
 
