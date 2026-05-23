@@ -1475,6 +1475,9 @@ class QueueManagementBusinessService:
         loops should pass the pre-loaded sets / config to avoid per-row
         DB round-trips. When omitted, this method loads them fresh per call.
         """
+        # Reset transient row flags so stale values from a prior call don't leak.
+        Row['_DeferReason'] = None
+
         # a. Hard block: no English audio (includes files with zero audio streams)
         if Row.get('HasExplicitEnglishAudio') is False:
             return (None, None)
@@ -1491,6 +1494,31 @@ class QueueManagementBusinessService:
         # in-cascade check.
         if Row.get('HasExplicitEnglishAudio') is not None and not Row.get('AudioCodec') and Row.get('Resolution'):
             return (None, None)
+
+        # a4. Measurement gate (linear-loudnorm.feature.md C9): any file that
+        # might run a loudnorm pass (AudioComplete is not True) requires all
+        # four ebur128 measurements present. Three sub-states:
+        #   LoudnessMeasuredAt IS NULL              -> never attempted; the
+        #     probe co-trigger will catch it. AdmissionDeferReason=
+        #     'awaiting_loudness_measurement'.
+        #   FailureReason IS NOT NULL               -> ebur128 ran and produced
+        #     no usable numbers (timeout, decode error, etc.). Needs operator
+        #     intervention. AdmissionDeferReason=
+        #     'loudness_measurement_failed'.
+        #   Measured but Threshold IS NULL          -> pre-threshold-capture
+        #     legacy data. The Step 3 backfill (BackfillLoudnessThreshold.py)
+        #     will catch up. Treat as 'awaiting' so it surfaces in the same
+        #     bucket as never-measured rows.
+        if Row.get('AudioComplete') is not True:
+            if (Row.get('SourceIntegratedLufs') is None
+                    or Row.get('SourceLoudnessRangeLU') is None
+                    or Row.get('SourceTruePeakDbtp') is None
+                    or Row.get('SourceIntegratedThresholdLufs') is None):
+                if Row.get('LoudnessMeasurementFailureReason') is not None:
+                    Row['_DeferReason'] = 'loudness_measurement_failed'
+                else:
+                    Row['_DeferReason'] = 'awaiting_loudness_measurement'
+                return (None, None)
 
         # b. Effective profile cannot be resolved
         if not EffectiveProfile:
@@ -1851,7 +1879,9 @@ class QueueManagementBusinessService:
                        ResolutionCategory, Resolution, Codec, ContainerFormat,
                        AudioCodec, HasExplicitEnglishAudio,
                        AudioComplete, AudioCorruptSuspect, AudioBitrateKbps, AudioChannels,
-                       SourceIntegratedLufs
+                       SourceIntegratedLufs, SourceLoudnessRangeLU, SourceTruePeakDbtp,
+                       SourceIntegratedThresholdLufs, LoudnessMeasuredAt,
+                       LoudnessMeasurementFailureReason
                 FROM MediaFiles WHERE Id IN ({placeholders})
                 """,
                 tuple(MediaFileIds)
@@ -1926,6 +1956,7 @@ class QueueManagementBusinessService:
                         RecommendedMode,
                         bool(r.get('_NeedsQuick', False)),
                         bool(r.get('_NeedsTranscode', False)),
+                        r.get('_DeferReason'),
                     ))
 
                     # Detect probed files with no audio stream (possibly corrupt).
@@ -1973,8 +2004,8 @@ class QueueManagementBusinessService:
                 return 'true' if b else 'false'
 
             values_clause = ','.join(
-                f"({i},{_SqlText(p)},{s},{_SqlBool(ic)},{_SqlText(rm)},{_SqlBool(nq)},{_SqlBool(nt)})"
-                for i, p, s, ic, rm, nq, nt in updates
+                f"({i},{_SqlText(p)},{s},{_SqlBool(ic)},{_SqlText(rm)},{_SqlBool(nq)},{_SqlBool(nt)},{_SqlText(dr)})"
+                for i, p, s, ic, rm, nq, nt, dr in updates
             )
             db.ExecuteNonQuery(f"""
                 UPDATE MediaFiles
@@ -1983,8 +2014,9 @@ class QueueManagementBusinessService:
                     IsCompliant = v.compliant::boolean,
                     RecommendedMode = v.mode,
                     NeedsQuick = v.needs_quick::boolean,
-                    NeedsTranscode = v.needs_transcode::boolean
-                FROM (VALUES {values_clause}) AS v(id, profile, score, compliant, mode, needs_quick, needs_transcode)
+                    NeedsTranscode = v.needs_transcode::boolean,
+                    AdmissionDeferReason = v.defer_reason
+                FROM (VALUES {values_clause}) AS v(id, profile, score, compliant, mode, needs_quick, needs_transcode, defer_reason)
                 WHERE MediaFiles.Id = v.id
             """)
             return len(updates)
