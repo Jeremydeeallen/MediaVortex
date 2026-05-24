@@ -119,13 +119,26 @@ def InstallSignalHandler():
 
 
 def BuildEligibleQuery(ShardId, TotalShards, Drive):
-    """Rows with I/LRA/TP populated and Threshold NULL."""
+    """Rows that need a fresh 4-column loudness measurement.
+
+    Covers two states:
+      - Never measured at all (LoudnessMeasuredAt IS NULL, all 4 cols NULL)
+      - Measured by pre-threshold-capture code (I/LRA/TP set, Threshold NULL)
+
+    Excludes:
+      - Files that haven't been probed yet (HasExplicitEnglishAudio IS NULL)
+        -- without a probe we don't know which audio stream to measure.
+      - Suspect files (AudioCorruptSuspect = TRUE) -- audio is known-broken.
+      - Files with no audio codec -- nothing to measure.
+      - Previously-failed measurements -- need operator review, not auto-retry.
+    """
     Predicates = [
-        "SourceIntegratedLufs IS NOT NULL",
-        "SourceLoudnessRangeLU IS NOT NULL",
-        "SourceTruePeakDbtp IS NOT NULL",
         "SourceIntegratedThresholdLufs IS NULL",
-        # Skip rows that already had a measurement failure -- re-running won't help.
+        # Probed and has a decodable audio stream
+        "HasExplicitEnglishAudio IS NOT NULL",
+        "AudioCodec IS NOT NULL",
+        # Skip already-flagged-as-bad files
+        "(AudioCorruptSuspect IS NOT TRUE)",
         "LoudnessMeasurementFailureReason IS NULL",
     ]
     Params = []
