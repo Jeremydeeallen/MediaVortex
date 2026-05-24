@@ -13,6 +13,12 @@ vmaf_output.xml
 vmaf_test_*.xml
 Scripts/Smoke/*.results.json
 backfill-shard-*
+
+# Pipeline test harness mutable spool (real file backups + Jellyfin capture)
+Tests/Pipeline/_backup/*
+!Tests/Pipeline/_backup/.gitkeep
+Tests/Pipeline/_jellyfin_capture/*
+!Tests/Pipeline/_jellyfin_capture/.gitkeep
 # Python
 __pycache__/
 *.py[cod]
