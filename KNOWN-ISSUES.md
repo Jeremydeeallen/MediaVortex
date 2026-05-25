@@ -2,34 +2,96 @@
 
 ## Open
 
-### [BUG-0013] AudioComplete not flipped to true after successful loudnorm pass -- files re-queue forever
-**Date:** 2026-05-23 | **Area:** audio-completion
+### [BUG-0017] MediaFiles.FileSize NULL on most rows despite recent transcodes that should populate it
+**Date:** 2026-05-24 | **Area:** file-replacement
 
-**What breaks:** `FileReplacementBusinessService._ProcessCompleteFileReplacement` is designed (per `audio-completion.feature.md` criterion 12) to call `AudioCompletionService.MarkAudioComplete(MediaFileId)` after a successful replacement whose FFmpeg command contained `loudnorm`, flipping `MediaFiles.AudioComplete` to true so the cascade guard at `QueueManagementBusinessService.py:1565` (`AudioConfirmedOffTarget = (not IsNormalized) AND SourceLufs off-target`) suppresses re-queueing the file for another Quick/Remux. In practice the flag is almost never set on post-remux outputs: of 2,234 `-mv.mp4` MediaFile rows that have measured loudness, only **9 have AudioComplete=true**, 683 are explicitly false, and 1,542 are NULL. Of 256 `-mv-mv.mp4` rows, only 6 have AudioComplete=true. Because the guard never fires, files with off-target LUFS get pulled back into the queue, get another loudnorm pass, and the cycle persists indefinitely (output filenames stack `-mv-mv-mv...`). This was the bleed shut down 2026-05-23 03:50 by flipping `Workers.remuxenabled=false` on all 13 workers; cannot resume safely until the flag-flip is reliable.
-
-This is not the same as the legacy backfill case (241 of the 256 `-mv-mv` files came from a prior pass that had NO loudnorm in the command -- those are legitimate first-time audio fixes on pre-feature transcodes, not a bug). The bug is the residual ~5% that DID get loudnorm in the prior pass and should never have been re-evaluated.
+**What breaks:** `FileReplacementBusinessService._UpdateMediaFilesAfterReplacement` sets `media_file.FileSize = os.path.getsize(LocalNewFilePath)` and then calls `SaveMediaFile`. Per `Repositories/DatabaseManager.SaveMediaFile`, the column SHOULD be persisted. In practice many MediaFiles rows have `FileSize IS NULL` even when their corresponding TranscodeAttempts shows a successful post-flight replacement. The downstream impact: queue inserts that read `MediaFiles.FileSize` and propagate it to `TranscodeQueue.SizeBytes` and then `TranscodeAttempts.OldSizeBytes` end up with 0 -- the post-transcode defense-in-depth check at `FileReplacementBusinessService.py:196-208` then refuses with `NewSize >= OldSize=0`, even though a successful encode just happened.
 
 **Repro:**
-1. Pick any MediaFile with `audiocomplete IS NOT TRUE` that has a successful TranscodeAttempt whose FFpmpegCommand contains `loudnorm` and `filereplaced=true`. E.g. `SELECT m.id FROM MediaFiles m JOIN TranscodeAttempts a ON a.mediafileid=m.id WHERE a.success=true AND a.filereplaced=true AND a.ffpmpegcommand ILIKE '%loudnorm%' AND m.audiocomplete IS NOT TRUE LIMIT 5`.
-2. Confirm the row is in the cascade re-queue set: `SELECT needsquick FROM MediaFiles WHERE id=<id>` -- expect true when LUFS is off-target.
-3. Re-queue and watch a new FFmpeg command with `loudnorm` get built and run, producing yet another generation file.
+1. `SELECT Id, FilePath, FileSize, SizeMB FROM MediaFiles WHERE Id = 26621` -- observe `FileSize=None` despite SizeMB being populated and a successful TranscodeAttempts row existing for this file with recent FileReplacedDate.
+2. Broader: `SELECT COUNT(*) FROM MediaFiles WHERE FileSize IS NULL` -- expect a large fraction of the library.
 
 **Evidence:**
-- Live DB counts (2026-05-23 03:55): 2,234 `-mv.mp4` rows with `loudnessmeasuredat IS NOT NULL`. AudioComplete=true: 9. AudioComplete=false: 683. AudioComplete=NULL: 1,542. Of those, 1,362 have `needsquick=true`.
-- 256 `-mv-mv.mp4` rows exist on disk (proof the re-queue ran). Only 6 of those have AudioComplete=true.
-- 13 of the 256 had a prior-generation attempt that already contained loudnorm -- those are the unambiguous "MarkAudioComplete failed to fire" cases.
-- Code path: `FileReplacementBusinessService.py:472-480` wraps the `MarkAudioComplete` call in `try/except`. On exception it logs and continues; the file replacement still reports Success=true. There's no follow-up reconciliation in `RecomputeForFiles`. The flow doc (`audio-completion.flow.md` line 89) acknowledges this exact failure mode: "Post-flight MarkAudioComplete raises ... DB still says AudioComplete=false. Loud warning. Next admin recompute will re-evaluate from the most-recent TranscodeAttempts.FFpmpegCommand substring match and flip the bit." -- but `RecomputeForFiles` does NOT actually run that backfill check (verified by code inspection of `Features/TranscodeQueue/QueueManagementBusinessService.py` -- the `_EvaluateCompliance` path reads AudioComplete but does not write it).
+- Direct observation via pipeline-test-harness step 10 against MediaFile 26621: SaveMediaFile called with FileSize set, post-call DB row still shows NULL.
+- Triggered the defense-in-depth refusal in the second harness test case, blocking the Transcode step.
 
-**Violates:** `Features/AudioCompletion/audio-completion.feature.md` criterion 25 (added with this bug) -- restates criterion 12 in observable post-condition form.
+**Look first:** `Repositories/DatabaseManager.SaveMediaFile` UPDATE SET clause -- is `FileSize` actually in the column list, or is it being silently dropped? Compare to the INSERT path. If the column is in both paths, check whether some caller is overwriting with None on a later UPDATE.
 
-**Look first:** Three places to instrument before fixing:
-1. `Features/FileReplacement/FileReplacementBusinessService.py:472-480` -- the try/except around `MarkAudioComplete`. Check operator log for any historical exceptions named "MarkAudioComplete failed". If silent, the call may not even be reaching this branch (verify `UpdateResult.get('MediaFileId')` is non-None for the failing cases -- `_UpdateMediaFilesAfterReplacement` may DELETE-and-INSERT a new row, returning a different id, or returning Success=true with no id).
-2. `Features/AudioCompletion/AudioCompletionService.py:148-175` (`MarkAudioComplete`) -- the UPDATE runs on `MediaFiles.Id = %s`. If the post-replacement row id has changed (DELETE+INSERT semantics in `_UpdateMediaFilesAfterReplacement`), the UPDATE silently affects 0 rows but `ExecuteNonQuery` doesn't surface the rowcount, so `MarkAudioComplete` returns true. Add a rowcount check.
-3. `Features/TranscodeQueue/QueueManagementBusinessService.RecomputeForFiles` -- the doc's "next admin recompute will reconcile" promise is not implemented. Either implement the fallback backfill there (substring-match the most-recent TranscodeAttempts.FFpmpegCommand) or remove the promise from `audio-completion.flow.md:89`.
+**Fix with:** `/t BUG-0017`.
 
-Recovery for the existing 2,200+ already-broken rows is a separate problem (operator's call). The fix here is forward-only: stop the leak before re-enabling `remuxenabled`.
+---
 
-**Fix with:** `/t BUG-0013`.
+### [BUG-0016] Orphan MediaFiles rows for `-mv.mp4` paths cause idx_mediafiles_filepath_unique violations on subsequent encodes
+**Date:** 2026-05-24 | **Area:** file-replacement
+
+**What breaks:** Some MediaFiles rows reference paths like `T:\Show\ep-mv.mp4` while a separate MediaFiles row for the original `T:\Show\ep.mkv` also exists. When the pipeline runs a Quick Fix on the `.mkv` row, FileReplacement produces `ep-mv.mp4` and calls `SaveMediaFile` with the new path -- which violates `idx_mediafiles_filepath_unique` because the orphan row already claims that path. Result: rename succeeded on disk, DB update failed, the file is in an inconsistent state.
+
+**Repro:**
+```sql
+SELECT m1.Id AS source_id, m1.FilePath AS source_path,
+       m2.Id AS orphan_id, m2.FilePath AS orphan_path
+FROM MediaFiles m1
+JOIN MediaFiles m2 ON LOWER(m2.FilePath) = LOWER(REPLACE(m1.FilePath, '.mkv', '-mv.mp4'))
+WHERE m1.FilePath ILIKE '%.mkv' LIMIT 10;
+```
+Returns matched pairs. Pipeline runs on any source_id will hit the constraint.
+
+**Evidence:**
+- Pipeline-test-harness step 10 against MediaFile 18045 (Ren & Stimpy S03E03): orphan row 683391 pointed at the `-mv.mp4` path, FileReplacement failed with `UniqueViolation: duplicate key value violates unique constraint "idx_mediafiles_filepath_unique"`.
+
+**Look first:** Where does the orphan get created? Suspect either (a) a manual Quick Fix that succeeded enough to create a new MediaFiles row but didn't archive/delete the original, or (b) the SmartPopulate / Scan path discovering both files as separate MediaFiles. Run the repro SQL to count -- if large, a cleanup migration is the first move.
+
+**Fix with:** `/t BUG-0016`.
+
+---
+
+### [BUG-0015] Orphan `-mv.mp4` files on disk without corresponding MediaFiles row
+**Date:** 2026-05-24 | **Area:** file-replacement
+
+**What breaks:** Filesystem directories accumulate `-mv.mp4` (and `-mv.mp4.inprogress`) files with no DB row pointing at them. When the pipeline runs a Quick Fix on a sibling source, `_ProcessCompleteFileReplacement` at line 425 refuses with `"Refusing to overwrite existing file at target"`. Encode aborts before any state change.
+
+**Repro:**
+1. Pick any directory with a recently-attempted Quick Fix.
+2. `ls *-mv*` -- common to see one or more `.mp4` files that match no MediaFiles row.
+3. Run Quick Fix again on the source `.mkv` -- pipeline refuses.
+
+**Evidence:**
+- Bluey Minisodes S01E09 dir had `-mv.mp4`, `-mv-mv.mp4`, `-mv-mv-thumb.jpg`, `-mv.mp4.inprogress` siblings of the original `.mkv` source, none referenced by any MediaFiles row -- left behind by interrupted Quick Fix runs (likely the BUG-0013 generational-stacking cycle plus crashed attempts).
+- Ren & Stimpy S03E03 dir same pattern.
+- Pipeline-test-harness step 10 surfaced both via the "Refusing to overwrite" path.
+
+**Look first:** Crash-recovery in `FileReplacementBusinessService`. The `.inprogress` rename is the worker-lifecycle.feature.md atomic pattern, but on worker crash mid-encode the orphan survives until the next OrphanCleanup sweep. For `-mv.mp4` finals: probably from FileReplacement's "rename succeeded but DB update failed" path (e.g. BUG-0016) which logs a warning, returns Success=True, but leaves the file at the target name without the corresponding DB transition.
+
+**Fix with:** `/t BUG-0015`.
+
+---
+
+### [BUG-0014] Linear-loudnorm overshoots TargetTruePeak in dynamic-mode fallback
+**Date:** 2026-05-24 | **Area:** linear-loudnorm
+
+**What breaks:** Per `linear-loudnorm.feature.md` criterion 12 the loudnorm filter is supposed to honor `TargetTruePeak` (default -2 dBTP) in both linear and dynamic modes. In practice, dynamic-mode fallback (triggered when predicted_peak > TP at gate time -- criterion 10) produces output that exceeds the TP target by 1-3 dBTP. FFmpeg loudnorm's internal limiter is not enforcing TP=-2 reliably; output peak can ride well above 0 dBTP, causing audible clipping on downstream playback.
+
+**Repro:**
+1. Pick a source file with `SourceTruePeakDbtp >= -3` AND `SourceIntegratedLufs <= -28` (hot peaks + quiet integrated -- forces dynamic mode at the gate per criterion 10).
+2. Run Quick Fix via the pipeline-test-harness or by re-queueing.
+3. `ffmpeg -i <output> -af ebur128=peak=true -f null -` -- inspect the Summary `Peak:` line. Expected: <= -2 dBTP. Actual: ~+1 to +2 dBTP.
+
+**Evidence:**
+- Pipeline-test-harness step 10 against MediaFile 683333 (HIMYM S06E08, source was a `-mv.mp4` with hot peaks): post-Quick-Fix output measured **+1.70 dBTP**, far above the -2 dBTP ceiling.
+
+**Look first:**
+1. The `loudnorm` command emitted by `Models/CommandBuilder.BuildAudioFilters` for the dynamic-mode branch -- does it omit `linear=true` correctly? Capture from a recent TranscodeAttempts.FFpmpegCommand.
+2. FFmpeg/libavfilter version behavior -- loudnorm's dynamic-mode limiter has had bugs in older builds. Verify `ffmpeg -version` matches a known-good build.
+3. The `TP` parameter passed to loudnorm: confirm it's `-2` (not `-2.0` rejected) and that nothing later in the filter chain (no `acompressor` post-removal, but check) is raising the level.
+
+**Possible fix paths:**
+- Append a downstream true-peak limiter (`alimiter=limit=-2dB`) when dynamic mode fires
+- Tighten the gate predicate to refuse the encode rather than fall back to dynamic when overshoot is likely > N dBTP
+- Use a lower `TargetLoudness` for ungainable files (compute the max integrated that keeps peak <= -2)
+
+**Violates:** `Features/LoudnessAnalysis/linear-loudnorm.feature.md` criterion 26 (output TP at or below TargetTruePeak).
+
+**Fix with:** `/t BUG-0014`.
 
 ---
 
@@ -897,6 +959,23 @@ Done manually for dot on 2026-05-16 -- worked in ~5 minutes -- but the manual st
 ---
 
 ## Resolved
+
+### [BUG-0013 - FIXED 2026-05-23] AudioComplete not flipped to true after successful loudnorm pass -- files re-queue forever
+**Date:** 2026-05-23 | **Fixed:** 2026-05-23 | resolved: 2026-05-23
+
+**What broke:** `FileReplacementBusinessService._ProcessCompleteFileReplacement` is supposed to call `AudioCompletionService.MarkAudioComplete(MediaFileId)` after a successful replacement whose FFmpeg command contained `loudnorm`. The call was wrapped in try/except + a `DetectNormalizationInCommand(FFmpegCommand)` guard. In practice MarkAudioComplete almost never fired: of 2,234 post-Quick `-mv.mp4` rows with measured loudness, only 9 had AudioComplete=true. Files with off-target LUFS got pulled back into the queue, ran another loudnorm pass, stacked `-mv-mv-mv...` suffixes.
+
+**Root cause:** Typo on `FileReplacementBusinessService.py:214`. The dataclass attribute on `TranscodeAttemptModel` is `FfpmpegCommand` (lowercase `f` second character -- mirrors the misspelled `transcodeattempts.ffpmpegcommand` DB column). The post-flight call used `getattr(transcode_attempt, 'FFpmpegCommand', None)` (uppercase second `F`). `getattr` returned the default `None`, `DetectNormalizationInCommand(None)` returned `False`, and `MarkAudioComplete` was never invoked. The other two "Look first" hypotheses (DELETE+INSERT changing Id; UPDATE rowcount=0) were ruled out by reading the code.
+
+**Fix (shipped 2026-05-23, commit 2560fe9 + pre-rebase rework in commits dac42ba and beyond):** Single-character correction: `'FFpmpegCommand'` -> `'FfpmpegCommand'`. Live-verified via direct `getattr` on a synthetic `TranscodeAttemptModel` -- correct attribute returns the command string, wrong attribute returns None. After the fix, every new post-loudnorm replacement triggers `MarkAudioComplete` and flips the column.
+
+**Recovery for historical broken rows:** Forward-only. The ~2,200 already-broken rows remain `AudioComplete IS NOT TRUE`; operator decision whether to backfill via `AudioCompletionService.MarkAudioComplete` keyed off a query for files with loudnorm history and successful FileReplaced. Tracked via the criterion 25 query that should return 0 for new replacements.
+
+**Verifiable:** `Features/AudioCompletion/audio-completion.feature.md` criterion 25 -- for any successful Remux/Transcode whose FFmpeg command contains `loudnorm` AND was successfully replaced AFTER 2026-05-23, `MediaFiles.AudioComplete=true`.
+
+**Files:** `Features/FileReplacement/FileReplacementBusinessService.py:214`. Commit 2560fe9 (and follow-ups in the same session).
+
+---
 
 ### [BUG-0008 - FIXED 2026-05-22] I9 intermittent write failures to NFS mount -- ffmpeg output-open returns EINVAL
 **Date:** 2026-05-22 | **Fixed:** 2026-05-22 | resolved: 2026-05-22

@@ -64,30 +64,46 @@ def QuickFixCandidate(MinSizeMB: int = 80, MaxSizeMB: int = 500, Limit: int = 25
       - File reachable from this worker's filesystem
     """
     Db = DatabaseService()
+    # Exclude candidates that already have a sibling MediaFile pointing at
+    # their post-encode artifact path (e.g. an orphan row for foo-mv.mp4).
+    # Such candidates fail FileReplacement with idx_mediafiles_filepath_unique
+    # when the pipeline tries to update FilePath to the same target. The
+    # SUBSTRING(... -- length('.ext')) trick strips the source extension to
+    # get the stem; the orphan check tests for a sibling row whose path
+    # starts with '<stem>-mv'.
     Rows = Db.ExecuteQuery(
         """
-        SELECT Id, FilePath FROM MediaFiles
-        WHERE RecommendedMode IN ('Quick', 'Remux')
-          AND (AudioComplete IS NULL OR AudioComplete = FALSE)
-          AND (AudioCorruptSuspect IS NULL OR AudioCorruptSuspect = FALSE)
-          AND SizeMB BETWEEN %s AND %s
-          AND HasExplicitEnglishAudio = TRUE
-          AND SourceIntegratedLufs IS NOT NULL
-          AND SourceLoudnessRangeLU IS NOT NULL
-          AND SourceTruePeakDbtp IS NOT NULL
-          AND SourceIntegratedThresholdLufs IS NOT NULL
-          AND AssignedProfile IS NOT NULL
-        ORDER BY SizeMB ASC
+        SELECT m.Id, m.FilePath FROM MediaFiles m
+        WHERE m.RecommendedMode IN ('Quick', 'Remux')
+          AND (m.AudioComplete IS NULL OR m.AudioComplete = FALSE)
+          AND (m.AudioCorruptSuspect IS NULL OR m.AudioCorruptSuspect = FALSE)
+          AND m.SizeMB BETWEEN %s AND %s
+          AND m.HasExplicitEnglishAudio = TRUE
+          AND m.SourceIntegratedLufs IS NOT NULL
+          AND m.SourceLoudnessRangeLU IS NOT NULL
+          AND m.SourceTruePeakDbtp IS NOT NULL
+          AND m.SourceIntegratedThresholdLufs IS NOT NULL
+          AND m.AssignedProfile IS NOT NULL
+          AND NOT EXISTS (
+              SELECT 1 FROM MediaFiles m2
+              WHERE m2.Id <> m.Id
+                AND POSITION(
+                    LOWER(SUBSTRING(m.FilePath FROM 1 FOR LENGTH(m.FilePath) - LENGTH(
+                        SUBSTRING(m.FilePath FROM E'\\.[^.\\\\/]+$')
+                    )) || '-mv') IN LOWER(m2.FilePath)
+                ) = 1
+          )
+        ORDER BY m.SizeMB ASC
         LIMIT %s
         """,
         (MinSizeMB, MaxSizeMB, Limit),
     )
-    Candidates = [(int(R['id']), R['filepath']) for R in Rows]
+    Candidates = [(int(R['Id']), R['FilePath']) for R in Rows]
     Picked = _PickReachable(Candidates)
     if Picked is None:
         raise NoCandidatesError(
-            f"No reachable QuickFix candidate with SizeMB <= {MaxSizeMB} "
-            f"(checked {len(Candidates)} rows)"
+            f"No reachable QuickFix candidate with {MinSizeMB} <= SizeMB <= {MaxSizeMB} "
+            f"and no -mv* sibling row (checked {len(Candidates)} rows)"
         )
     LoggingService.LogInfo(
         f"QuickFixCandidate selected: Id={Picked}",
@@ -104,28 +120,37 @@ def TranscodeCandidate(MinSizeMB: int = 80, MaxSizeMB: int = 500, Limit: int = 2
     Db = DatabaseService()
     Rows = Db.ExecuteQuery(
         """
-        SELECT Id, FilePath FROM MediaFiles
-        WHERE RecommendedMode = 'Transcode'
-          AND (AudioComplete IS NULL OR AudioComplete = FALSE)
-          AND (AudioCorruptSuspect IS NULL OR AudioCorruptSuspect = FALSE)
-          AND SizeMB BETWEEN %s AND %s
-          AND HasExplicitEnglishAudio = TRUE
-          AND SourceIntegratedLufs IS NOT NULL
-          AND SourceLoudnessRangeLU IS NOT NULL
-          AND SourceTruePeakDbtp IS NOT NULL
-          AND SourceIntegratedThresholdLufs IS NOT NULL
-          AND AssignedProfile IS NOT NULL
-        ORDER BY SizeMB ASC
+        SELECT m.Id, m.FilePath FROM MediaFiles m
+        WHERE m.RecommendedMode = 'Transcode'
+          AND (m.AudioComplete IS NULL OR m.AudioComplete = FALSE)
+          AND (m.AudioCorruptSuspect IS NULL OR m.AudioCorruptSuspect = FALSE)
+          AND m.SizeMB BETWEEN %s AND %s
+          AND m.HasExplicitEnglishAudio = TRUE
+          AND m.SourceIntegratedLufs IS NOT NULL
+          AND m.SourceLoudnessRangeLU IS NOT NULL
+          AND m.SourceTruePeakDbtp IS NOT NULL
+          AND m.SourceIntegratedThresholdLufs IS NOT NULL
+          AND m.AssignedProfile IS NOT NULL
+          AND NOT EXISTS (
+              SELECT 1 FROM MediaFiles m2
+              WHERE m2.Id <> m.Id
+                AND POSITION(
+                    LOWER(SUBSTRING(m.FilePath FROM 1 FOR LENGTH(m.FilePath) - LENGTH(
+                        SUBSTRING(m.FilePath FROM E'\\.[^.\\\\/]+$')
+                    )) || '-mv') IN LOWER(m2.FilePath)
+                ) = 1
+          )
+        ORDER BY m.SizeMB ASC
         LIMIT %s
         """,
         (MinSizeMB, MaxSizeMB, Limit),
     )
-    Candidates = [(int(R['id']), R['filepath']) for R in Rows]
+    Candidates = [(int(R['Id']), R['FilePath']) for R in Rows]
     Picked = _PickReachable(Candidates)
     if Picked is None:
         raise NoCandidatesError(
-            f"No reachable Transcode candidate with SizeMB <= {MaxSizeMB} "
-            f"(checked {len(Candidates)} rows)"
+            f"No reachable Transcode candidate with {MinSizeMB} <= SizeMB <= {MaxSizeMB} "
+            f"and no -mv* sibling row (checked {len(Candidates)} rows)"
         )
     LoggingService.LogInfo(
         f"TranscodeCandidate selected: Id={Picked}",

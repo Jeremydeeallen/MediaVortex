@@ -130,6 +130,15 @@ def BackupMediaFile(MediaFileId: int) -> BackupHandle:
         f"Backing up MediaFile {MediaFileId}: {LocalPath} -> {BackupFile}",
         "Backup", "BackupMediaFile",
     )
+    # Sweep orphans BEFORE the test runs too -- old -mv.mp4 / .inprogress
+    # files from prior runs (test or production) block the pipeline's
+    # "refuse to overwrite existing target" check.
+    Swept = _SweepPostTestArtifacts(LocalPath)
+    if Swept > 0:
+        LoggingService.LogInfo(
+            f"Pre-backup sweep removed {Swept} stale artifact(s) for {LocalPath}",
+            "Backup", "BackupMediaFile",
+        )
     shutil.copy2(LocalPath, BackupFile)
     Sha = _Sha256OfFile(str(BackupFile))
     Size = os.path.getsize(BackupFile)
