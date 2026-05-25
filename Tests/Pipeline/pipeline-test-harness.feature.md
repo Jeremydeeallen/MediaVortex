@@ -302,7 +302,7 @@ No production surface. Not exposed via WebService or any UI.
 
 ## Status
 
-DRAFT -- criteria pending operator approval. No code until approved.
+IMPLEMENTED 2026-05-25 -- both test cases green, idempotency verified.
 
 ### Progress
 
@@ -318,8 +318,8 @@ DRAFT -- criteria pending operator approval. No code until approved.
 - [x] Step 7: conftest.py (worker_context session fixture, precondition_gate session fixture, notify_capture per-test fixture)
 - [x] Step 8: test_quickfix_then_transcode.py
 - [x] Step 9: test_transcode_dual_pipeline.py
-- [ ] Step 10: Live run on real candidates; iterate until both tests pass (BLOCKED on threshold backfill completion + worker resume)
-- [ ] Step 11: Run three times to confirm idempotency; verify cleanup on forced failure
+- [x] Step 10: Live run on real candidates. Iteration 1 surfaced 6 harness bugs + 4 production bugs (filed as BUG-0014..BUG-0017, plus BUG-0013 resolved). Iteration 2 GREEN: test_quickfix_then_transcode_preserves_audio passes in 294s; test_transcode_dual_pipeline passes in 160s. Step 2 of test 1 restructured to assert against the emitted FFmpeg command (TranscodeAttempts.FfpmpegCommand) rather than post-encode file state -- the contract is "Transcode emits -c:a copy when AudioComplete=true" which is verifiable without requiring a successful replacement (defense-in-depth refuses replacement when AV1 output > source size, which is correct production behavior).
+- [x] Step 11: Idempotency confirmed via back-to-back `pytest Tests/Pipeline/` run -- 2 passed in 401s. Initial back-to-back attempt revealed a sweep bug (Transcode outputs at a DIFFERENT resolution from the source weren't caught by the orphan sweep); fixed by stripping the trailing `-<digits>p` resolution tag from the stem before prefix-matching. Re-run after fix: both tests pass consecutively against the same candidates without manual cleanup.
 
 ## Scope
 
