@@ -4829,10 +4829,20 @@ class DatabaseManager:
                 else:
                     return normalized_path
             else:
-                # POSIX path
-                parts = normalized_path.split(os.sep)
-                result_path = parts[0] if parts else ''
-                parts = parts[1:] if parts else []
+                # POSIX path. Preserve leading '/' so absolute paths stay
+                # absolute -- splitting '/mnt/media_tv/...' on '/' yields
+                # ['', 'mnt', 'media_tv', ...] and previously the empty
+                # first element was used as result_path, losing the root
+                # marker and turning '/mnt/...' into 'mnt/...'. That
+                # corrupted FilePath values on every Linux-worker write.
+                if normalized_path.startswith(os.sep):
+                    result_path = os.sep
+                    remainder = normalized_path[1:]
+                    parts = remainder.split(os.sep) if remainder else []
+                else:
+                    parts = normalized_path.split(os.sep)
+                    result_path = parts[0] if parts else ''
+                    parts = parts[1:] if parts else []
             
             # Resolve each component by listing parent directory
             current_path = result_path
