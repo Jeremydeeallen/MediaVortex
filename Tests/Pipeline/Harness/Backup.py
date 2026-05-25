@@ -272,14 +272,59 @@ def _ParseTimestamps(Row: Dict[str, Any]) -> Dict[str, Any]:
     return Out
 
 
+def _SweepPostTestArtifacts(OriginalLocalPath: str) -> int:
+    """Delete files in the same dir that match post-pipeline naming.
+
+    After a Quick Fix the source `foo.mkv` becomes `foo-mv.mp4` (+ a
+    `.inprogress` while encoding). Repeated runs can compound to
+    `foo-mv-mv.mp4` etc. Leftover `.inprogress` files block the next
+    encode with "Refusing to overwrite existing file at target".
+
+    This sweep deletes any sibling that starts with the original
+    basename (stem-only) and has `-mv` somewhere in its trailing
+    segment, OR ends in `.inprogress`. Does NOT touch the original
+    file or its sidecars (.nfo, -thumb.jpg).
+    """
+    Dir = os.path.dirname(OriginalLocalPath)
+    OriginalBase = os.path.basename(OriginalLocalPath)
+    Stem, OriginalExt = os.path.splitext(OriginalBase)
+    if not os.path.isdir(Dir):
+        return 0
+    Removed = 0
+    for Entry in os.listdir(Dir):
+        if Entry == OriginalBase:
+            continue  # never touch the original itself
+        if not Entry.startswith(Stem):
+            continue
+        Tail = Entry[len(Stem):]
+        # `-mv*.mp4`, `-mv*.mp4.inprogress`, etc.
+        if '-mv' in Tail or Tail.endswith('.inprogress'):
+            Full = os.path.join(Dir, Entry)
+            try:
+                os.remove(Full)
+                Removed += 1
+                LoggingService.LogInfo(
+                    f"Swept post-test artifact: {Full}",
+                    "Backup", "_SweepPostTestArtifacts",
+                )
+            except OSError as Ex:
+                LoggingService.LogWarning(
+                    f"Could not sweep {Full}: {Ex}",
+                    "Backup", "_SweepPostTestArtifacts",
+                )
+    return Removed
+
+
 def RestoreMediaFile(Handle: BackupHandle) -> None:
     """Replay the backup: file content + DB rows back to captured state.
 
     Steps:
-      1. Restore the file on disk (overwrite if it was renamed/replaced).
-      2. Wipe any rows the test created for this MediaFile.
-      3. UPDATE the MediaFiles row column-by-column to its captured values.
-      4. Re-INSERT every captured related row.
+      1. Sweep post-test artifacts (the test may have produced -mv.mp4
+         outputs that no longer correspond to any row).
+      2. Restore the file on disk (overwrite if it was renamed/replaced).
+      3. Wipe any rows the test created for this MediaFile.
+      4. UPDATE the MediaFiles row column-by-column to its captured values.
+      5. Re-INSERT every captured related row.
 
     Safe to call after a partial test run -- everything is idempotent.
     Raises only if the backup files are missing or DB writes fail.
@@ -295,9 +340,10 @@ def RestoreMediaFile(Handle: BackupHandle) -> None:
         "Backup", "RestoreMediaFile",
     )
 
-    # 1. Restore the file. The current file at OriginalLocalPath may have
-    # been renamed (e.g. transcoded to -mv.mp4) -- delete any sibling
-    # files that share the basename-without-suffix to avoid orphan dupes.
+    # 1. Sweep any -mv* / .inprogress siblings the test produced.
+    _SweepPostTestArtifacts(Handle.OriginalLocalPath)
+
+    # 2. Restore the file at the canonical original path.
     os.makedirs(os.path.dirname(Handle.OriginalLocalPath), exist_ok=True)
     shutil.copy2(Handle.LocalBackupFilePath, Handle.OriginalLocalPath)
     PostSha = _Sha256OfFile(Handle.OriginalLocalPath)

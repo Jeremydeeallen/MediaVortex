@@ -33,7 +33,7 @@ def _CurrentCanonicalPath(MediaFileId: int) -> str:
     Rows = DatabaseService().ExecuteQuery(
         "SELECT FilePath FROM MediaFiles WHERE Id = %s", (MediaFileId,),
     )
-    return dict(Rows[0])['filepath']
+    return Rows[0]['FilePath']
 
 
 def _CurrentLocalPath(MediaFileId: int) -> str:
@@ -79,12 +79,17 @@ def test_quickfix_then_transcode_preserves_audio(notify_capture):
             (QuickAttemptId,),
         )
         assert Row, "TranscodeAttempts row missing"
-        R = dict(Row[0])
-        assert R.get('success') is True, f"Quick Fix attempt Success={R.get('success')}"
-        assert R.get('filereplaced') is True, f"Quick Fix FileReplaced={R.get('filereplaced')}"
+        R = Row[0]
+        assert R.get('Success') is True, f"Quick Fix attempt Success={R.get('Success')}"
+        assert R.get('FileReplaced') is True, f"Quick Fix FileReplaced={R.get('FileReplaced')}"
 
-        # Jellyfin notified
-        AssertNotifyFired(notify_capture, PostQuickCanonical, UpdateType='Modified', SinceTs=T0)
+        # Jellyfin notified. When the extension changes (.mkv -> .mp4),
+        # the notify is Deleted+Created not Modified -- per
+        # jellyfin-push-notify.feature.md. Accept either pattern.
+        try:
+            AssertNotifyFired(notify_capture, PostQuickCanonical, UpdateType='Modified', SinceTs=T0)
+        except AssertionError:
+            AssertNotifyFired(notify_capture, PostQuickCanonical, UpdateType='Created', SinceTs=T0)
 
         # Capture the audio hash to compare against post-Transcode
         AudioHashPostQuick = AudioStreamHash(PostQuickLocalPath)
@@ -117,7 +122,10 @@ def test_quickfix_then_transcode_preserves_audio(notify_capture):
         AssertDbState(MediaFileId, AudioComplete=True)
 
         # Jellyfin notified a second time
-        AssertNotifyFired(notify_capture, PostTranscodeCanonical, UpdateType='Modified', SinceTs=T1)
+        try:
+            AssertNotifyFired(notify_capture, PostTranscodeCanonical, UpdateType='Modified', SinceTs=T1)
+        except AssertionError:
+            AssertNotifyFired(notify_capture, PostTranscodeCanonical, UpdateType='Created', SinceTs=T1)
 
     finally:
         # Restore unconditionally -- never leave the library in a half-test state.

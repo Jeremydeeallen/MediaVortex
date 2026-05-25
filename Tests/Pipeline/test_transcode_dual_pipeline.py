@@ -35,7 +35,7 @@ def _CurrentCanonicalPath(MediaFileId: int) -> str:
     Rows = DatabaseService().ExecuteQuery(
         "SELECT FilePath FROM MediaFiles WHERE Id = %s", (MediaFileId,),
     )
-    return dict(Rows[0])['filepath']
+    return Rows[0]['FilePath']
 
 
 def _CurrentLocalPath(MediaFileId: int) -> str:
@@ -85,12 +85,17 @@ def test_transcode_dual_pipeline(notify_capture):
             (AttemptId,),
         )
         assert Row, "TranscodeAttempts row missing"
-        R = dict(Row[0])
-        assert R.get('success') is True, f"Transcode attempt Success={R.get('success')}"
-        assert R.get('filereplaced') is True, f"FileReplaced={R.get('filereplaced')}"
+        R = Row[0]
+        assert R.get('Success') is True, f"Transcode attempt Success={R.get('Success')}"
+        assert R.get('FileReplaced') is True, f"FileReplaced={R.get('FileReplaced')}"
 
-        # Jellyfin notified
-        AssertNotifyFired(notify_capture, PostCanonical, UpdateType='Modified', SinceTs=T0)
+        # Jellyfin notified -- extension may change (.mkv -> -mv.mp4),
+        # in which case the notify is Created (paired with a Deleted for
+        # the old path) instead of Modified. Accept either.
+        try:
+            AssertNotifyFired(notify_capture, PostCanonical, UpdateType='Modified', SinceTs=T0)
+        except AssertionError:
+            AssertNotifyFired(notify_capture, PostCanonical, UpdateType='Created', SinceTs=T0)
 
         # Regression check: recompute does NOT re-flag the file
         from Features.TranscodeQueue.QueueManagementBusinessService import QueueManagementBusinessService

@@ -180,12 +180,10 @@ def AssertDbState(MediaFileId: int, **Expected: Any) -> None:
     )
     if not Rows:
         raise AssertionError(f"MediaFile {MediaFileId} not found for DB assert")
-    Row = dict(Rows[0])
-    # CaseInsensitiveDict from MediaVortex would map keys; defensive lowercase.
+    Row = Rows[0]  # CaseInsensitiveDict -- direct case-insensitive access
     Mismatches = []
     for Key, Want in Expected.items():
-        # The query columns come back lowercase from psycopg2
-        Got = Row.get(Key.lower(), Row.get(Key))
+        Got = Row.get(Key)
         if Got != Want:
             Mismatches.append(f"  {Key}: expected={Want!r} actual={Got!r}")
     if Mismatches:
@@ -214,10 +212,10 @@ def AssertNoQueueRows(MediaFileId: int) -> None:
     )
     if not Flags:
         raise AssertionError(f"MediaFile {MediaFileId} not found")
-    F = dict(Flags[0])
-    Nq = F.get('needsquick')
-    Nt = F.get('needstranscode')
-    Rm = F.get('recommendedmode')
+    F = Flags[0]
+    Nq = F.get('NeedsQuick')
+    Nt = F.get('NeedsTranscode')
+    Rm = F.get('RecommendedMode')
     Issues = []
     if Nq:
         Issues.append(f"NeedsQuick=True (expected False)")
@@ -243,13 +241,13 @@ def AssertVideoCodecMatchesProfile(MediaFileId: int) -> None:
     )
     if not Rows:
         raise AssertionError(f"MediaFile {MediaFileId} not found")
-    R = dict(Rows[0])
-    CurrentCodec = (R.get('currentcodec') or '').lower().strip()
-    ProfileCodec = (R.get('profilecodec') or '').lower().strip()
+    R = Rows[0]
+    CurrentCodec = (R.get('CurrentCodec') or '').lower().strip()
+    ProfileCodec = (R.get('ProfileCodec') or '').lower().strip()
     if not ProfileCodec:
         raise AssertionError(
             f"MediaFile {MediaFileId} has no resolvable AssignedProfile codec "
-            f"(AssignedProfile={R.get('assignedprofile')!r})"
+            f"(AssignedProfile={R.get('AssignedProfile')!r})"
         )
     # libsvtav1 in Profiles -> av1 in MediaFiles after ffprobe re-parses
     # the encoded output. Normalize the known aliasing.
@@ -262,5 +260,5 @@ def AssertVideoCodecMatchesProfile(MediaFileId: int) -> None:
         raise AssertionError(
             f"MediaFile {MediaFileId} video codec mismatch: "
             f"current={CurrentCodec!r}, profile={ProfileCodec!r} "
-            f"(normalized to {Normalized!r}), file={R.get('filepath')!r}"
+            f"(normalized to {Normalized!r}), file={R.get('FilePath')!r}"
         )

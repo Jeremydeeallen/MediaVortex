@@ -89,7 +89,7 @@ def _ReadDryRunSetting() -> Optional[str]:
     )
     if not Rows:
         return None
-    return str(dict(Rows[0]).get('settingvalue', '')) or None
+    return str(Rows[0].get('SettingValue', '')) or None
 
 
 def _SetDryRun(Value: str) -> None:

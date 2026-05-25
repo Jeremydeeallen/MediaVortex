@@ -580,6 +580,8 @@ class DatabaseManager:
                    ContainerFormat, OverallBitrate, TranscodedByMediaVortex,
                    AudioComplete, AudioCorruptSuspect, AudioCorruptReason,
                    SourceIntegratedLufs, SourceLoudnessRangeLU, SourceTruePeakDbtp,
+                   SourceIntegratedThresholdLufs, AdmissionDeferReason,
+                   LoudnessMeasurementFailureReason, AudioNormalizationMode,
                    NeedsQuick, NeedsTranscode
             FROM MediaFiles
             WHERE Id = %s
@@ -633,6 +635,10 @@ class DatabaseManager:
             SourceIntegratedLufs=row.get('SourceIntegratedLufs'),
             SourceLoudnessRangeLU=row.get('SourceLoudnessRangeLU'),
             SourceTruePeakDbtp=row.get('SourceTruePeakDbtp'),
+            SourceIntegratedThresholdLufs=row.get('SourceIntegratedThresholdLufs'),
+            AdmissionDeferReason=row.get('AdmissionDeferReason'),
+            LoudnessMeasurementFailureReason=row.get('LoudnessMeasurementFailureReason'),
+            AudioNormalizationMode=row.get('AudioNormalizationMode'),
             NeedsQuick=row.get('NeedsQuick'),
             NeedsTranscode=row.get('NeedsTranscode'),
         )
@@ -1139,6 +1145,8 @@ class DatabaseManager:
                    ContainerFormat, OverallBitrate, TranscodedByMediaVortex,
                    AudioComplete, AudioCorruptSuspect, AudioCorruptReason,
                    SourceIntegratedLufs, SourceLoudnessRangeLU, SourceTruePeakDbtp,
+                   SourceIntegratedThresholdLufs, AdmissionDeferReason,
+                   LoudnessMeasurementFailureReason, AudioNormalizationMode,
                    NeedsQuick, NeedsTranscode
             FROM MediaFiles
             WHERE LOWER(FilePath) = LOWER(%s)
@@ -1192,6 +1200,10 @@ class DatabaseManager:
             SourceIntegratedLufs=row.get('SourceIntegratedLufs'),
             SourceLoudnessRangeLU=row.get('SourceLoudnessRangeLU'),
             SourceTruePeakDbtp=row.get('SourceTruePeakDbtp'),
+            SourceIntegratedThresholdLufs=row.get('SourceIntegratedThresholdLufs'),
+            AdmissionDeferReason=row.get('AdmissionDeferReason'),
+            LoudnessMeasurementFailureReason=row.get('LoudnessMeasurementFailureReason'),
+            AudioNormalizationMode=row.get('AudioNormalizationMode'),
             NeedsQuick=row.get('NeedsQuick'),
             NeedsTranscode=row.get('NeedsTranscode'),
         )

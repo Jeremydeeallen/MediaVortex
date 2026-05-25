@@ -59,6 +59,10 @@ class MediaFileModel:
     SourceIntegratedLufs: Optional[float] = None
     SourceLoudnessRangeLU: Optional[float] = None
     SourceTruePeakDbtp: Optional[float] = None
+    SourceIntegratedThresholdLufs: Optional[float] = None  # linear-loudnorm: measured_thresh
+    AdmissionDeferReason: Optional[str] = None
+    LoudnessMeasurementFailureReason: Optional[str] = None
+    AudioNormalizationMode: Optional[str] = None
 
     # Cascade-materialized work-needed flags (media-tabs-and-loudness.feature.md).
     # Read-only on the model; written by the cascade recompute, not by workers.

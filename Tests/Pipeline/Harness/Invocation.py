@@ -47,7 +47,7 @@ def _EnsureWorkerContext(WorkerName: str = "I9-2024") -> None:
             f"Worker {WorkerName!r} not registered in Workers table; "
             f"cannot initialize WorkerContext for the harness"
         )
-    R = dict(Rows[0])
+    R = Rows[0]
     MountRows = Db.ExecuteQuery(
         "SELECT DriveLetter, LocalMountPrefix FROM WorkerShareMappings WHERE WorkerName = %s",
         (WorkerName,),
@@ -55,14 +55,14 @@ def _EnsureWorkerContext(WorkerName: str = "I9-2024") -> None:
     MountMap = {M['DriveLetter']: M['LocalMountPrefix'] for M in MountRows}
     WorkerContext.Initialize(
         WorkerName=WorkerName,
-        Platform=R.get('platform') or 'windows',
-        FFmpegPath=R.get('ffmpegpath'),
-        FFprobePath=R.get('ffprobepath'),
+        Platform=R.get('Platform') or 'windows',
+        FFmpegPath=R.get('FFmpegPath'),
+        FFprobePath=R.get('FFprobePath'),
         ShareMappings=MountMap,
     )
     LoggingService.LogInfo(
         f"Harness initialized WorkerContext for {WorkerName}: "
-        f"FFmpegPath={R.get('ffmpegpath')!r}, "
+        f"FFmpegPath={R.get('FFmpegPath')!r}, "
         f"ShareMappings={len(MountMap)} drives",
         "Invocation", "_EnsureWorkerContext",
     )
@@ -79,8 +79,8 @@ def _AssertNoActiveWork(MediaFileId: int) -> None:
     )
     if Conflicts:
         Detail = ", ".join(
-            f"QueueId={C.get('queueid')} ActiveJobId={C.get('activejobid')} "
-            f"Worker={C.get('workername')!r}"
+            f"QueueId={C.get('QueueId')} ActiveJobId={C.get('ActiveJobId')} "
+            f"Worker={C.get('WorkerName')!r}"
             for C in Conflicts
         )
         raise PipelineBusyError(
@@ -97,41 +97,62 @@ def _InsertQueueRow(MediaFileId: int, ProcessingMode: str) -> int:
     """
     Db = DatabaseService()
     Rows = Db.ExecuteQuery(
-        "SELECT StorageRootId, RelativePath, FilePath, FileName, SizeBytes, "
+        "SELECT StorageRootId, RelativePath, FilePath, FileName, FileSize AS SizeBytes, "
         "SizeMB, AssignedProfile, PriorityScore "
         "FROM MediaFiles WHERE Id = %s",
         (MediaFileId,),
     )
     if not Rows:
         raise ValueError(f"MediaFile {MediaFileId} not found")
-    M = dict(Rows[0])
+    M = Rows[0]  # CaseInsensitiveDict -- access via M['Anything'] is case-insensitive
+
+    # MediaFiles.FileSize is often NULL on rows the probe never populated.
+    # ProcessJob propagates Job.SizeBytes to TranscodeAttempts.OldSizeBytes,
+    # which then drives the post-transcode defense-in-depth size check. A 0
+    # there causes "refusing to replace because new >= 0". Stat the local
+    # file to get a real value.
+    SizeBytes = int(M.get('SizeBytes') or 0)
+    if SizeBytes <= 0:
+        try:
+            from Core.PathStorage import LoadStorageRoots, Parse as PathParse, Resolve as PathResolve
+            from Core.WorkerContext import WorkerContext
+            SrId, Rel = PathParse(M.get('FilePath') or '', LoadStorageRoots(Db))
+            Ctx = WorkerContext.Current()
+            LocalP = PathResolve(SrId, Rel, Ctx.WorkerName, Db) if Ctx else None
+            if LocalP and os.path.exists(LocalP):
+                SizeBytes = os.path.getsize(LocalP)
+        except Exception:
+            pass
+    SizeMB = float(M.get('SizeMB') or 0.0) or (SizeBytes / 1024.0 / 1024.0)
+
     Now = datetime.now(timezone.utc)
-    InsertResult = Db.ExecuteQuery(
+    # Use ExecuteNonQuery so the INSERT commits; ExecuteQuery does not commit
+    # and the RETURNING row would be rolled back on connection close.
+    Db.ExecuteNonQuery(
         """
         INSERT INTO TranscodeQueue
           (StorageRootId, RelativePath, FilePath, FileName, Directory,
            SizeBytes, SizeMB, Priority, Status, DateAdded,
-           ProcessingMode, MediaFileId, AssignedProfile)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+           ProcessingMode, MediaFileId)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         RETURNING Id
         """,
         (
-            M.get('storagerootid'),
-            M.get('relativepath') or '',
-            M.get('filepath'),
-            M.get('filename'),
-            os.path.dirname(M.get('filepath') or ''),
-            M.get('sizebytes') or 0,
-            M.get('sizemb') or 0.0,
-            int(M.get('priorityscore') or 0),
+            M.get('StorageRootId'),
+            M.get('RelativePath') or '',
+            M.get('FilePath'),
+            M.get('FileName'),
+            os.path.dirname(M.get('FilePath') or ''),
+            SizeBytes,
+            SizeMB,
+            int(M.get('PriorityScore') or 0),
             'Pending',
             Now,
             ProcessingMode,
             MediaFileId,
-            M.get('assignedprofile') or '',
         ),
     )
-    QueueId = int(dict(InsertResult[0])['id'])
+    QueueId = int(Db.LastInsertId)
     LoggingService.LogInfo(
         f"Harness enqueued MediaFile {MediaFileId} as {ProcessingMode} "
         f"(QueueId={QueueId})",
@@ -145,31 +166,32 @@ def _LoadQueueModel(QueueId: int):
     from Features.TranscodeQueue.Models.TranscodeQueueModel import TranscodeQueueModel
     Db = DatabaseService()
     Rows = Db.ExecuteQuery(
-        "SELECT Id, StorageRootId, RelativePath, FilePath, FileName, Directory, "
-        "SizeBytes, SizeMB, Priority, Status, AssignedProfile, ProcessingMode, "
-        "MediaFileId, DateAdded, DateStarted "
-        "FROM TranscodeQueue WHERE Id = %s",
+        "SELECT q.Id, q.StorageRootId, q.RelativePath, q.FilePath, q.FileName, q.Directory, "
+        "q.SizeBytes, q.SizeMB, q.Priority, q.Status, m.AssignedProfile, q.ProcessingMode, "
+        "q.MediaFileId, q.DateAdded, q.DateStarted "
+        "FROM TranscodeQueue q LEFT JOIN MediaFiles m ON m.Id = q.MediaFileId "
+        "WHERE q.Id = %s",
         (QueueId,),
     )
     if not Rows:
         raise RuntimeError(f"Queue row {QueueId} disappeared after insert")
-    R = dict(Rows[0])
+    R = Rows[0]  # CaseInsensitiveDict
     return TranscodeQueueModel(
-        Id=R.get('id'),
-        StorageRootId=R.get('storagerootid'),
-        RelativePath=R.get('relativepath') or '',
-        FilePath=R.get('filepath') or '',
-        FileName=R.get('filename') or '',
-        Directory=R.get('directory') or '',
-        SizeBytes=R.get('sizebytes') or 0,
-        SizeMB=R.get('sizemb') or 0.0,
-        Priority=R.get('priority') or 0,
-        Status=R.get('status') or 'Pending',
-        AssignedProfile=R.get('assignedprofile') or '',
-        ProcessingMode=R.get('processingmode') or 'Transcode',
-        MediaFileId=R.get('mediafileid'),
-        DateAdded=R.get('dateadded'),
-        DateStarted=R.get('datestarted'),
+        Id=R.get('Id'),
+        StorageRootId=R.get('StorageRootId'),
+        RelativePath=R.get('RelativePath') or '',
+        FilePath=R.get('FilePath') or '',
+        FileName=R.get('FileName') or '',
+        Directory=R.get('Directory') or '',
+        SizeBytes=R.get('SizeBytes') or 0,
+        SizeMB=R.get('SizeMB') or 0.0,
+        Priority=R.get('Priority') or 0,
+        Status=R.get('Status') or 'Pending',
+        AssignedProfile=R.get('AssignedProfile') or '',
+        ProcessingMode=R.get('ProcessingMode') or 'Transcode',
+        MediaFileId=R.get('MediaFileId'),
+        DateAdded=R.get('DateAdded'),
+        DateStarted=R.get('DateStarted'),
     )
 
 
@@ -184,7 +206,7 @@ def _FindLatestAttemptId(MediaFileId: int, SinceTs: float) -> Optional[int]:
     )
     if not Rows:
         return None
-    return int(dict(Rows[0])['id'])
+    return int(Rows[0]['Id'])
 
 
 def _Invoke(MediaFileId: int, ProcessingMode: str) -> int:

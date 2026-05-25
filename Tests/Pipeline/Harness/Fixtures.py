@@ -49,14 +49,16 @@ class NoCandidatesError(RuntimeError):
     """No DB rows match the requested fixture criteria + reachability."""
 
 
-def QuickFixCandidate(MaxSizeMB: int = 500, Limit: int = 25) -> int:
+def QuickFixCandidate(MinSizeMB: int = 80, MaxSizeMB: int = 500, Limit: int = 25) -> int:
     """Return a MediaFileId that needs Quick Fix (Remux / audio normalize).
 
     Eligible row criteria:
       - RecommendedMode IN ('Quick', 'Remux')  -- routing flagged it
       - AudioComplete is not True              -- audio still needs work
       - AudioCorruptSuspect is not True        -- safe to encode
-      - SizeMB <= MaxSizeMB                    -- keeps test runs fast
+      - MinSizeMB <= SizeMB <= MaxSizeMB       -- big enough that subsequent
+                                                  Transcode produces savings,
+                                                  small enough that tests stay fast
       - HasExplicitEnglishAudio = True         -- audio stream selectable
       - All four loudness measurements populated -- linear-loudnorm gate passes
       - File reachable from this worker's filesystem
@@ -68,7 +70,7 @@ def QuickFixCandidate(MaxSizeMB: int = 500, Limit: int = 25) -> int:
         WHERE RecommendedMode IN ('Quick', 'Remux')
           AND (AudioComplete IS NULL OR AudioComplete = FALSE)
           AND (AudioCorruptSuspect IS NULL OR AudioCorruptSuspect = FALSE)
-          AND SizeMB <= %s
+          AND SizeMB BETWEEN %s AND %s
           AND HasExplicitEnglishAudio = TRUE
           AND SourceIntegratedLufs IS NOT NULL
           AND SourceLoudnessRangeLU IS NOT NULL
@@ -78,7 +80,7 @@ def QuickFixCandidate(MaxSizeMB: int = 500, Limit: int = 25) -> int:
         ORDER BY SizeMB ASC
         LIMIT %s
         """,
-        (MaxSizeMB, Limit),
+        (MinSizeMB, MaxSizeMB, Limit),
     )
     Candidates = [(int(R['id']), R['filepath']) for R in Rows]
     Picked = _PickReachable(Candidates)
@@ -94,7 +96,7 @@ def QuickFixCandidate(MaxSizeMB: int = 500, Limit: int = 25) -> int:
     return Picked
 
 
-def TranscodeCandidate(MaxSizeMB: int = 500, Limit: int = 25) -> int:
+def TranscodeCandidate(MinSizeMB: int = 80, MaxSizeMB: int = 500, Limit: int = 25) -> int:
     """Return a MediaFileId that needs both Transcode AND audio fix.
 
     Eligible row criteria mirror QuickFixCandidate but with RecommendedMode='Transcode'.
@@ -106,7 +108,7 @@ def TranscodeCandidate(MaxSizeMB: int = 500, Limit: int = 25) -> int:
         WHERE RecommendedMode = 'Transcode'
           AND (AudioComplete IS NULL OR AudioComplete = FALSE)
           AND (AudioCorruptSuspect IS NULL OR AudioCorruptSuspect = FALSE)
-          AND SizeMB <= %s
+          AND SizeMB BETWEEN %s AND %s
           AND HasExplicitEnglishAudio = TRUE
           AND SourceIntegratedLufs IS NOT NULL
           AND SourceLoudnessRangeLU IS NOT NULL
@@ -116,7 +118,7 @@ def TranscodeCandidate(MaxSizeMB: int = 500, Limit: int = 25) -> int:
         ORDER BY SizeMB ASC
         LIMIT %s
         """,
-        (MaxSizeMB, Limit),
+        (MinSizeMB, MaxSizeMB, Limit),
     )
     Candidates = [(int(R['id']), R['filepath']) for R in Rows]
     Picked = _PickReachable(Candidates)
