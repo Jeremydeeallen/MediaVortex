@@ -165,10 +165,18 @@ class FileReplacementBusinessService:
             if not transcode_attempt:
                 return {'Success': False, 'ErrorMessage': f'Transcode attempt {TranscodeAttemptId} not found'}
 
-            # File paths
+            # Resolve paths dynamically from (StorageRootId, RelativePath) --
+            # NOT from the legacy text-string columns. The text columns drift
+            # across worker platforms (Linux POSIX paths vs Windows UNC/drive-
+            # letter) and led to BUG-? where a Linux worker's lookup against
+            # MediaFiles.FilePath failed because the stored canonical was
+            # corrupted by the legacy normalization path.
             file_paths_result = self.DatabaseManager.DatabaseService.ExecuteQuery(
                 """
-                SELECT OriginalPath, LocalSourcePath, LocalOutputPath FROM TemporaryFilePaths
+                SELECT SourceStorageRootId, SourceRelativePath,
+                       OutputStorageRootId, OutputRelativePath,
+                       LocalOutputPath
+                FROM TemporaryFilePaths
                 WHERE TranscodeAttemptId = %s
                 """,
                 (TranscodeAttemptId,),
@@ -178,11 +186,34 @@ class FileReplacementBusinessService:
                     'Success': False,
                     'ErrorMessage': f'No temporary file path found for transcode attempt {TranscodeAttemptId}',
                 }
-            OriginalPath = file_paths_result[0]['OriginalPath']
-            TranscodedPath = file_paths_result[0]['LocalOutputPath']
-            LocalTranscodedPath = self._ToLocalPath(TranscodedPath)
+            FP = file_paths_result[0]
+            SourceSrId = FP.get('SourceStorageRootId')
+            SourceRel = FP.get('SourceRelativePath')
+            OutputSrId = FP.get('OutputStorageRootId')
+            OutputRel = FP.get('OutputRelativePath')
+            LocalOutputPathStr = FP.get('LocalOutputPath')
 
-            if not self.FileManager.ValidateFileExists(LocalTranscodedPath):
+            # Build canonical paths dynamically -- no text-string drift possible.
+            from Core.PathStorage import CanonicalFor
+            if SourceSrId is None or SourceRel is None:
+                return {
+                    'Success': False,
+                    'ErrorMessage': (
+                        f'TemporaryFilePaths for attempt {TranscodeAttemptId} is '
+                        f'missing SourceStorageRootId / SourceRelativePath (legacy row?). '
+                        f'Cannot resolve canonical source path.'
+                    ),
+                }
+            OriginalPath = CanonicalFor(SourceSrId, SourceRel)
+            if OutputSrId is not None and OutputRel is not None:
+                CanonicalNewPath = CanonicalFor(OutputSrId, OutputRel)
+            else:
+                CanonicalNewPath = None  # _ProcessCompleteFileReplacement derives if absent
+
+            TranscodedPath = LocalOutputPathStr
+            LocalTranscodedPath = self._ToLocalPath(TranscodedPath) if TranscodedPath else None
+
+            if not LocalTranscodedPath or not self.FileManager.ValidateFileExists(LocalTranscodedPath):
                 return {
                     'Success': False,
                     'ErrorMessage': f'Transcoded file not found at: {LocalTranscodedPath}',
