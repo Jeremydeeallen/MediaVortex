@@ -13,6 +13,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
@@ -281,32 +282,50 @@ def _ParseTimestamps(Row: Dict[str, Any]) -> Dict[str, Any]:
     return Out
 
 
+_RES_TAG_RE = re.compile(r'-\d+p$', re.IGNORECASE)
+
+
 def _SweepPostTestArtifacts(OriginalLocalPath: str) -> int:
     """Delete files in the same dir that match post-pipeline naming.
 
-    After a Quick Fix the source `foo.mkv` becomes `foo-mv.mp4` (+ a
-    `.inprogress` while encoding). Repeated runs can compound to
-    `foo-mv-mv.mp4` etc. Leftover `.inprogress` files block the next
-    encode with "Refusing to overwrite existing file at target".
+    After a Quick Fix `foo-720p.mkv` becomes `foo-720p-mv.mp4`. After a
+    Transcode that downscales to 480p, the output is `foo-480p-mv.mp4`
+    -- the resolution tag in the basename changes. So we cannot just
+    match against the full source stem; we strip any trailing `-<N>p`
+    resolution token first and match on the resolution-free prefix.
 
-    This sweep deletes any sibling that starts with the original
-    basename (stem-only) and has `-mv` somewhere in its trailing
-    segment, OR ends in `.inprogress`. Does NOT touch the original
-    file or its sidecars (.nfo, -thumb.jpg).
+    Files swept:
+      - <prefix>-<any-res>-mv*.mp4  (Quick Fix / Transcode outputs)
+      - <prefix>-<any-res>-mv*.mp4.inprogress (crashed encodes)
+      - <prefix>-<any-res>-mv-thumb.jpg, etc. (Jellyfin sidecars from
+        the orphan)
+
+    Preserves:
+      - The original source file (never deleted)
+      - Sidecars of the original (<stem>.nfo, <stem>-thumb.jpg without
+        any `-mv` segment)
     """
     Dir = os.path.dirname(OriginalLocalPath)
     OriginalBase = os.path.basename(OriginalLocalPath)
-    Stem, OriginalExt = os.path.splitext(OriginalBase)
+    Stem, _OriginalExt = os.path.splitext(OriginalBase)
+    # Strip the resolution tag from the stem so 'foo-720p' becomes 'foo'
+    # and matches both the source AND any '-480p-mv' transcode output.
+    ResolutionFreeStem = _RES_TAG_RE.sub('', Stem)
     if not os.path.isdir(Dir):
         return 0
     Removed = 0
     for Entry in os.listdir(Dir):
         if Entry == OriginalBase:
             continue  # never touch the original itself
-        if not Entry.startswith(Stem):
+        EntryStem, _EntryExt = os.path.splitext(Entry)
+        # Match prefix is resolution-free; both the source and any
+        # alternate-resolution -mv output share this prefix.
+        if not EntryStem.startswith(ResolutionFreeStem):
             continue
-        Tail = Entry[len(Stem):]
-        # `-mv*.mp4`, `-mv*.mp4.inprogress`, etc.
+        # Only delete if the entry has `-mv` in its suffix (post-pipeline)
+        # OR is an `.inprogress` artifact. This protects unrelated
+        # sidecars like the original's `.nfo` and `-thumb.jpg`.
+        Tail = Entry[len(ResolutionFreeStem):]
         if '-mv' in Tail or Tail.endswith('.inprogress'):
             Full = os.path.join(Dir, Entry)
             try:
