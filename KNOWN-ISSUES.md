@@ -21,7 +21,14 @@
 
 ---
 
-### [BUG-0016] Orphan MediaFiles rows for `-mv.mp4` paths cause idx_mediafiles_filepath_unique violations on subsequent encodes
+### [BUG-0016 - MOSTLY RESOLVED 2026-05-25] Orphan MediaFiles rows for `-mv.mp4` paths cause idx_mediafiles_filepath_unique violations on subsequent encodes
+
+**Resolution 2026-05-25:** `Scripts/SQLScripts/CleanupOrphanMvPairs.py` resolved 1,425 of 1,506 detected coexistence pairs. The audit gate (TranscodeAttempts with Success=true AND FileReplaced=true AND command references the -mv.mp4 output) classified 1,423 as RETIRE-eligible. RETIRE preserves the audit trail by re-parenting `TranscodeAttempts` (and downstream `MediaFilesArchive` + `TemporaryFilePaths`) from the source row to the surviving -mv.mp4 row before deleting the source MediaFiles row. **No disk files were deleted** -- spot-checks revealed many -mv.mp4 outputs from BUG-0013-era runs have wrong audio (Pokemon S04E20 at -18.2 LUFS + clipping; Office S07E05 at -32.5 LUFS), so the .mkv source remains as the safe master pending a future LUFS-verified retire script. The remaining 81 KEEP_BOTH pairs (no audit trail proving the -mv.mp4 came from a clean pipeline run) were parked with `AdmissionDeferReason='manual_review_pair_conflict'`, `RecommendedMode=NULL`, `NeedsQuick/NeedsTranscode=FALSE` to keep them out of the queue until operator triage. Find them via `SELECT Id, FilePath FROM MediaFiles WHERE AdmissionDeferReason='manual_review_pair_conflict'`.
+
+**Below:** original entry preserved for context.
+
+---
+
 **Date:** 2026-05-24 | **Area:** file-replacement
 
 **What breaks:** Some MediaFiles rows reference paths like `T:\Show\ep-mv.mp4` while a separate MediaFiles row for the original `T:\Show\ep.mkv` also exists. When the pipeline runs a Quick Fix on the `.mkv` row, FileReplacement produces `ep-mv.mp4` and calls `SaveMediaFile` with the new path -- which violates `idx_mediafiles_filepath_unique` because the orphan row already claims that path. Result: rename succeeded on disk, DB update failed, the file is in an inconsistent state.
