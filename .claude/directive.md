@@ -61,7 +61,7 @@ COMPLETE 2026-05-27 — verified live on I9 against MediaFile 6486 (Steven Unive
 1. `IsCompliant=true, RecommendedMode=NULL` ✓
 2. Probe-populated columns match re-probe, including the new `AudioNormalizationMode='linear'` (BUG-0019 closed live) and IsInterlaced derived from FieldOrder ✓
 3. `FilePath` ends in `-mv.mp4`, original `.mkv` gone, no `.inprogress`/`.replacing.bak` artifacts ✓
-4. Jellyfin POST returned 204 — live-verified on canary 3 (MediaFile 6490, Steven Universe S01E37). Log line: `JellyfinNotify: sent 2 update(s), status=204`. `JellyfinNotifyDryRun` was flipped 1→0 for the verification and restored to 1 on completion ✓
+4. Jellyfin POST returned 204 — live-verified on canary 3 (MediaFile 6490, Steven Universe S01E37). Log line: `JellyfinNotify: sent 2 update(s), status=204`. The `JellyfinNotifyDryRun` runtime gate was removed 2026-05-27 — downstream-of-state-change notifications must not be silenceable. Operator preview is now in `Scripts/DryRunJellyfinNotify.py` (off-pipeline). ✓
 5. `TranscodeAttempts.Success=true, FileReplaced=true, Disposition='BypassReplace', FileReplacedDate IS NOT NULL`; `ActiveJobs`/`TranscodeQueue`/`TemporaryFilePaths` rows cleared ✓
 6. Worker stayed Online and continued polling (heartbeat fresh, queue empty after the canary) ✓
 7. No ERROR/CRITICAL log lines tied to `TranscodeAttemptId=26080` or `QueueId=126100` ✓

@@ -98,13 +98,11 @@ decision.
 6. **Config in `SystemSettings`, read fresh.** Reuses the
    `JellyfinHost`/`JellyfinApiPort`/`JellyfinApiKey` rows already managed
    by `Features/Optimization/JellyfinService` (operator sets creds in one
-   place, both consumers see them). Push-notify-specific row is
-   `JellyfinNotifyDryRun`. All four are read fresh on every
+   place, both consumers see them). All three are read fresh on every
    `NotifyJellyfin` call (no module-scope caching, per the
    "don't cache DB-backed settings" rule). The API key never appears in
    env vars, compose files, or any committed file. Verifiable: grep the
-   repo for the key value returns zero hits; the dry-run row exists
-   (seeded by `Scripts/SQLScripts/SeedJellyfinResolutions.py`);
+   repo for the key value returns zero hits;
    `JellyfinNotifyService._ReadSetting` calls
    `SystemSettingsRepository().GetSystemSetting(...)` (no cache layer).
 
@@ -115,19 +113,22 @@ decision.
    a row; both return 204, the second is observably a no-op in the
    Jellyfin scan log (item not re-imported, just re-checked).
 
-8. **Optional dry-run mode.** Setting
-   `SystemSettings.JellyfinNotifyDryRun = 'true'` logs the would-be
-   payload at INFO level instead of POSTing. Lets the operator validate
-   the choke-point coverage before going live. Verifiable: set the row,
-   run a replace, confirm a log line of shape
-   `[DRY-RUN] Would notify Jellyfin: {Updates:[...]}` and zero outbound
-   HTTP.
+8. **No suppression toggle.** `NotifyJellyfin` is unconditional once the
+   caller invokes it: if FileReplacement (or any other caller) moved a
+   file, Jellyfin learns about it. There is no `JellyfinNotifyDryRun`
+   gate -- a downstream-of-state-change signal must not be silenceable,
+   or real changes drift out of sync with Jellyfin. (Operator preview of
+   would-be notifies is provided by the off-pipeline
+   `Scripts/DryRunJellyfinNotify.py`, not by a runtime toggle.)
+   Verifiable: grep the service file for `DryRun` returns zero hits;
+   any successful FileReplacement produces a `JellyfinNotify: sent N
+   update(s), status=...` log line.
 
-9. **Observability.** Every notify (real or dry-run) records to the Logs
-   table at INFO level with the count of updates and the HTTP status
-   code. Failures are WARNING. A `/metrics`-compatible counter is NOT
-   required for v1, but the log shape MUST be greppable for later
-   metric extraction (e.g. consistent prefix `JellyfinNotify:`).
+9. **Observability.** Every notify records to the Logs table at INFO
+   level with the count of updates and the HTTP status code. Failures
+   are WARNING. A `/metrics`-compatible counter is NOT required for v1,
+   but the log shape MUST be greppable for later metric extraction
+   (e.g. consistent prefix `JellyfinNotify:`).
 
 10. [BUG-0011] **Failure WARNINGs include enough context to diagnose
     server-side 5xx responses.** Today the non-2xx WARNING at
@@ -213,13 +214,16 @@ referencing the old `.mkv`. Documented as expected behavior; not a bug.
 
 ## Status
 
-**COMPLETE -- verified live 2026-05-22.** Service implemented, wired
-into FileReplacement + DuplicateDetection, unit tests green (13 passing).
-Config in `SystemSettings`; reuses existing `JellyfinHost`/`JellyfinApiPort`/
-`JellyfinApiKey` rows shared with `Features/Optimization`. Push-notify
-row `JellyfinNotifyDryRun=false` (live). Confirmed end-to-end against
-Jellyfin on `10.0.0.179`: notifies POST with status=204, Jellyfin
-refreshes the parent folder ~60s later, new files become playable.
+**COMPLETE -- verified live 2026-05-22; runtime dry-run gate removed 2026-05-27.**
+Service implemented, wired into FileReplacement + DuplicateDetection,
+unit tests green. Config in `SystemSettings`; reuses existing
+`JellyfinHost`/`JellyfinApiPort`/`JellyfinApiKey` rows shared with
+`Features/Optimization`. No runtime suppression toggle -- `NotifyJellyfin`
+fires unconditionally once invoked (criterion 8 revised 2026-05-27 after
+the toggle silently muted a real transcode). Confirmed end-to-end
+against Jellyfin on `10.0.0.179`: notifies POST with status=204,
+Jellyfin refreshes the parent folder ~60s later, new files become
+playable.
 
 The Jellyfin 2h interval scan stays on -- see Out of scope.
 
@@ -229,13 +233,14 @@ The Jellyfin 2h interval scan stays on -- see Out of scope.
       infrastructure side (`infrastructure/docs/features/jellyfin-efficiency.md`)
 - [x] 2. Draft this feature doc with criteria + implementation sketch
 - [x] 3. Operator review + approval of criteria (approved 2026-05-22)
-- [x] 4. Seed `__jellyfin__` rows into `StorageRootResolutions` and the
-      push-notify-specific `JellyfinNotifyDryRun` row in `SystemSettings`
+- [x] 4. Seed `__jellyfin__` rows into `StorageRootResolutions`
       (`Scripts/SQLScripts/SeedJellyfinResolutions.py`, idempotent).
       Reuses existing `JellyfinHost`/`JellyfinApiPort`/`JellyfinApiKey`
       rows -- not seeded here, managed by `Features/Optimization`.
-- [x] 5. Implement `Services/JellyfinNotifyService.py` with dry-run support;
-      config read fresh from `SystemSettings` on every call (criterion 6)
+- [x] 5. Implement `Services/JellyfinNotifyService.py`; config read
+      fresh from `SystemSettings` on every call (criterion 6). The
+      original implementation had a `JellyfinNotifyDryRun` gate; the
+      gate was removed 2026-05-27 (see Status).
 - [x] 6. Unit tests per criterion 3, 4, 5, 6, 8, 9
       (`Tests/Contract/TestJellyfinNotify.py`, 13 tests including
       fresh-read-per-call and default-port guards)
@@ -248,11 +253,12 @@ The Jellyfin 2h interval scan stays on -- see Out of scope.
       path mismatch (`/mnt/SynologyXXX/` -> `/mnt/XXX/`); BrainTv and
       SynologyMovies seeds verified correct against Jellyfin's actual
       mounts.
-- [x] 9. Live integration verified (2026-05-22). `JellyfinNotifyDryRun=false`.
-      Tested with real remuxes ("I Got a Cheat Skill" S01E02, Wednesday
-      S01E07) -- Jellyfin processed notifies correctly, refreshed
-      parent season folder ~60s after 204 ACK, swept stale entries for
-      other episodes in the same folder (free bonus cleanup).
+- [x] 9. Live integration verified (2026-05-22). Tested with real
+      remuxes ("I Got a Cheat Skill" S01E02, Wednesday S01E07) --
+      Jellyfin processed notifies correctly, refreshed parent season
+      folder ~60s after 204 ACK, swept stale entries for other episodes
+      in the same folder (free bonus cleanup). Re-verified 2026-05-27
+      after dry-run removal on Steven Universe S01E37 (status=204).
 
 ### Verification (qa-tester, 2026-05-22)
 
@@ -293,10 +299,11 @@ under `Features/` and `Services/` (2026-05-22):
 - `Core/PathStorage.py` — read-only consumer; no changes expected
 - `StorageRootResolutions` table — one new logical "worker" added (data,
   not schema)
-- `SystemSettings` table — one new row (`JellyfinNotifyDryRun`); seeded
-  by `Scripts/SQLScripts/SeedJellyfinResolutions.py`. Reuses the
-  existing `JellyfinHost`, `JellyfinApiPort`, `JellyfinApiKey` rows
-  managed by `Features/Optimization`.
+- `SystemSettings` table — reuses the existing `JellyfinHost`,
+  `JellyfinApiPort`, `JellyfinApiKey` rows managed by
+  `Features/Optimization`. No push-notify-specific rows (the
+  `JellyfinNotifyDryRun` row from the original implementation was
+  removed 2026-05-27).
 
 ## Files
 
@@ -306,7 +313,7 @@ under `Features/` and `Services/` (2026-05-22):
 - `Features/FileScanning/DuplicateDetectionService.py` -- secondary
   choke point for duplicate deletions
 - `Scripts/SQLScripts/SeedJellyfinResolutions.py` (new) -- idempotent
-  seeder for `__jellyfin__` resolutions and `JellyfinNotifyDryRun`
+  seeder for `__jellyfin__` resolutions
 - `Scripts/DryRunJellyfinNotify.py` (new) -- operator-run one-shot
   validator; renders translated paths without POSTing
 - `Tests/Contract/TestJellyfinNotify.py` (new) -- 13 unit tests

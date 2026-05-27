@@ -21,9 +21,6 @@ Jellyfin creds, not two):
     JellyfinHost             hostname or IP (e.g. 10.0.0.179)
     JellyfinApiPort          HTTP API port (e.g. 8096, default if blank)
     JellyfinApiKey           X-Emby-Token value
-    JellyfinNotifyDryRun     "true"/"1" => log payload, do NOT POST
-                             (push-notify-specific; the optimization
-                             feature does not consume this row)
 
 Settings are read fresh from the DB on every NotifyJellyfin call. Cached
 snapshots are not used -- per the "don't cache DB-backed settings" rule,
@@ -46,7 +43,6 @@ UPDATE_TYPES = ("Created", "Modified", "Deleted")
 SETTING_HOST = "JellyfinHost"
 SETTING_API_PORT = "JellyfinApiPort"
 SETTING_API_KEY = "JellyfinApiKey"
-SETTING_DRY_RUN = "JellyfinNotifyDryRun"
 
 
 def _ReadSetting(SettingKey: str) -> str:
@@ -62,10 +58,6 @@ def _ReadSetting(SettingKey: str) -> str:
             Ex, _COMPONENT, "_ReadSetting",
         )
         return ''
-
-
-def _DryRunEnabled() -> bool:
-    return _ReadSetting(SETTING_DRY_RUN).lower() in ('1', 'true', 'yes', 'on')
 
 
 def TranslateForJellyfin(CanonicalPath: str, Db=None) -> Optional[str]:
@@ -129,14 +121,6 @@ def NotifyJellyfin(Updates: List[Dict[str, str]], Db=None) -> None:
         )
 
     if not Translated:
-        return
-
-    if _DryRunEnabled():
-        LoggingService.LogInfo(
-            f"{_LOG_PREFIX} [DRY-RUN] Would notify Jellyfin ({len(Translated)} update(s)): "
-            f"{{'Updates': {Translated!r}}}",
-            _COMPONENT, "NotifyJellyfin",
-        )
         return
 
     Host = _ReadSetting(SETTING_HOST)

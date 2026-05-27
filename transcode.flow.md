@@ -617,7 +617,7 @@ End-to-end trace from worker installation through finished product. Every functi
 | 7.6 | Update MediaFiles | `_UpdateMediaFilesAfterReplacement()` re-probes transcoded file | `UPDATE MediaFiles SET FilePath=..., Resolution=..., Codec=..., SizeMB=..., TranscodedByMediaVortex=True, LastScannedDate=NOW()` | MediaFiles reflects new file |
 | 7.7 | Mark attempt replaced | | `UPDATE TranscodeAttempts SET FileReplaced=True, FileReplacedDate=NOW()` | -- |
 | 7.8 | Cleanup temp paths | `_CleanupTemporaryFilePaths()` | `DELETE FROM TemporaryFilePaths WHERE TranscodeAttemptId = %s` | No orphaned rows |
-| 7.9 | Notify Jellyfin (fire-and-forget) | `_NotifyJellyfinOfReplacement()` -> `Services/JellyfinNotifyService.NotifyJellyfin([{Path, UpdateType}])` | -- | POSTs `/Library/Media/Updated` so Jellyfin re-validates the parent folder ~60s later. Failure is non-fatal (WARNING + continue). Gated by `SystemSettings.JellyfinNotifyDryRun`. See `jellyfin-push-notify.feature.md`. |
+| 7.9 | Notify Jellyfin (fire-and-forget) | `_NotifyJellyfinOfReplacement()` -> `Services/JellyfinNotifyService.NotifyJellyfin([{Path, UpdateType}])` | -- | POSTs `/Library/Media/Updated` so Jellyfin re-validates the parent folder ~60s later. Failure is non-fatal (WARNING + continue). Unconditional -- if FileReplacement moved the file, the notify fires. See `jellyfin-push-notify.feature.md`. |
 
 ### Phase 8: Shutdown (scoped to this worker only)
 

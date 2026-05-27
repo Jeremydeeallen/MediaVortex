@@ -29,6 +29,21 @@ If `.claude/directive.md` is empty, fall back to task-delegation mode (scope-dis
 - The "done" judgment — when to stop, when to ship
 - Per-task scope discipline (scope-discipline.md applies; Claude scopes its own tasks from the plan it built)
 
+## Documents first (read, plan, then update)
+
+Token cost compounds. Future sessions reading a stale feature/flow doc waste tokens chasing the truth in code. To prevent that:
+
+1. **Before any code.** Identify the feature and flow doc that cover the area being touched. Read them. If a doc that should exist does not, create it with the canonical sections (`## What It Does`, `## Scope`, `## Success Criteria`, `## Status`, `## Files`) using the current code as the source of truth.
+2. **Annotate change targets.** Note inline (in the plan / task contract, not in the doc) which sections of which docs will need updating when the work lands. Keeps the closing pass cheap.
+3. **At delivery, close the loop.** Update every doc whose described behavior changed. Stale doc = future cost. Specifically:
+   - Feature docs: criteria text, Status, Progress checklist, Files table
+   - Flow docs: stage details, side-effect tables, code-pointer file:line references
+   - `CLAUDE.md`: the one-line summaries
+   - `KNOWN-ISSUES.md`: any BUG entry whose root cause / repro / fix is now different
+4. **Spell out what the new state ISN'T.** When removing a previously-documented capability (a config flag, a code path, a command), say so explicitly in the doc Status block with the date and reason. Readers see "removed 2026-05-27 because X" rather than wondering whether the missing capability was an oversight.
+
+Docs are the cheapest path-to-truth for everyone who comes after, including Claude in the next session. The work isn't done until they match reality.
+
 ## Success criteria as contract (first-class)
 
 The directive's acceptance criteria are the contract. They are not advisory.

@@ -1,67 +1,30 @@
 """One-shot dry-run of JellyfinNotifyService against real DB paths.
 
-Forces `JellyfinNotifyDryRun=true` for the duration of this script (via a
-patch of `_ReadSetting`) so the rendered payload is visible without
-flipping the SystemSettings row or producing any outbound HTTP. No
-DB state is mutated.
+Renders what NotifyJellyfin WOULD send for a set of sample paths, without
+firing any HTTP. Uses `TranslateForJellyfin` directly so the only thing
+exercised is the per-StorageRoot mapping -- no requests.post call is made.
 
 Owns jellyfin-push-notify.feature.md criterion 2 verification step:
 confirm the notify payload for a replaced file matches the absolute path
 on the Jellyfin host.
+
+This is the supported "preview" path -- the runtime `JellyfinNotifyDryRun`
+SystemSettings gate was removed 2026-05-27 because a downstream-of-state-
+change notification must not be silenceable. Operator preview belongs in
+an off-pipeline script (this file), not in production code.
 """
 
 import sys
 from pathlib import Path
+from typing import Dict, List
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from Core.Logging.LoggingService import LoggingService
-from Services import JellyfinNotifyService
-from Services.JellyfinNotifyService import NotifyJellyfin, TranslateForJellyfin
+from Services.JellyfinNotifyService import TranslateForJellyfin, UPDATE_TYPES
 
 
-# Force DryRun=true regardless of what SystemSettings currently says, so
-# this script can never POST. URL/Token are irrelevant in dry-run path.
-def _ForcedSettingRead(SettingKey: str) -> str:
-    if SettingKey == JellyfinNotifyService.SETTING_DRY_RUN:
-        return 'true'
-    return ''
-
-
-JellyfinNotifyService._ReadSetting = _ForcedSettingRead
-
-
-# Echo log calls to stdout so we can see the rendered payload.
-_OrigInfo = LoggingService.LogInfo
-_OrigWarn = LoggingService.LogWarning
-
-
-def _EchoInfo(cls_or_msg, *Args, **Kwargs):
-    if isinstance(cls_or_msg, type):
-        Msg = Args[0] if Args else ''
-    else:
-        Msg = cls_or_msg
-    print(f"[INFO ] {Msg}")
-    return _OrigInfo(cls_or_msg, *Args, **Kwargs)
-
-
-def _EchoWarn(cls_or_msg, *Args, **Kwargs):
-    if isinstance(cls_or_msg, type):
-        Msg = Args[0] if Args else ''
-    else:
-        Msg = cls_or_msg
-    print(f"[WARN ] {Msg}")
-    return _OrigWarn(cls_or_msg, *Args, **Kwargs)
-
-
-LoggingService.LogInfo = classmethod(lambda cls, Msg, *a, **kw: (print(f"[INFO ] {Msg}"), _OrigInfo(Msg, *a, **kw))[1])
-LoggingService.LogWarning = classmethod(lambda cls, Msg, *a, **kw: (print(f"[WARN ] {Msg}"), _OrigWarn(Msg, *a, **kw))[1])
-
-
-# --- Test set: one real path per StorageRoot, plus deliberate edge cases. ---
 SAMPLES = [
-    # (Description, Updates)
     (
         "1. Single Modified, media_tv (T:)",
         [{
@@ -112,6 +75,31 @@ SAMPLES = [
 ]
 
 
+def _RenderWouldBeBatch(Updates: List[Dict[str, str]]) -> None:
+    """Show what NotifyJellyfin would send, without sending it."""
+    if not Updates:
+        print("  (no updates)")
+        return
+    Translated, Dropped = [], []
+    for Entry in Updates:
+        Path = Entry.get('Path') or ''
+        UpdateType = Entry.get('UpdateType') or ''
+        if UpdateType not in UPDATE_TYPES:
+            Dropped.append((Path, UpdateType, 'invalid UpdateType'))
+            continue
+        JellyfinPath = TranslateForJellyfin(Path)
+        if JellyfinPath is None:
+            Dropped.append((Path, UpdateType, 'no __jellyfin__ resolution'))
+            continue
+        Translated.append({'Path': JellyfinPath, 'UpdateType': UpdateType})
+    for Path, UpdateType, Reason in Dropped:
+        print(f"  DROP  {Path!r} (UpdateType={UpdateType!r}): {Reason}")
+    if Translated:
+        print(f"  WOULD POST {len(Translated)} update(s): {{'Updates': {Translated!r}}}")
+    else:
+        print("  (no translatable updates -- would skip POST entirely)")
+
+
 def _Header(Text):
     print()
     print("=" * 80)
@@ -131,7 +119,7 @@ def Main():
 
     for Description, Updates in SAMPLES:
         _Header(Description)
-        NotifyJellyfin(Updates)
+        _RenderWouldBeBatch(Updates)
 
 
 if __name__ == '__main__':

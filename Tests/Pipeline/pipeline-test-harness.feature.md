@@ -349,7 +349,7 @@ Tests/Pipeline/_jellyfin_capture/.gitkeep               -- (NEW) Capture-file di
 | `Tests/Pipeline/Harness/Backup.py` | File + DB row backup/restore; `BackupHandle` dataclass |
 | `Tests/Pipeline/Harness/Invocation.py` | Synchronous Quick Fix and Transcode invocations |
 | `Tests/Pipeline/Harness/Assertions.py` | Reusable assertion helpers for DB, file, and audio state |
-| `Tests/Pipeline/Harness/JellyfinVerify.py` | Notify-capture via dry-run mode |
+| `Tests/Pipeline/Harness/JellyfinVerify.py` | Notify-capture: monkey-patches `JellyfinNotifyService.NotifyJellyfin` so tests record payloads without POSTing |
 | `Tests/Pipeline/Harness/Fixtures.py` | Test file registry |
 | `Tests/Pipeline/test_quickfix_then_transcode.py` | Test case 1 (criterion 17) |
 | `Tests/Pipeline/test_transcode_dual_pipeline.py` | Test case 2 (criterion 18) |

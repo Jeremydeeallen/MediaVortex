@@ -1,11 +1,10 @@
 """Capture Jellyfin notify payloads in tests without firing real notifications.
 
-Wraps the JellyfinNotifyService.NotifyJellyfin function with an
-intercepting proxy that records every Updates payload to an in-memory
-list AND mirrors it to a file under Tests/Pipeline/_jellyfin_capture/.
-The original function is still called -- but with the operator's
-configured dry-run state respected via the existing service (so by
-default no HTTP request goes out during tests).
+Wraps `JellyfinNotifyService.NotifyJellyfin` with an intercepting proxy
+that records every Updates payload to an in-memory list AND mirrors it
+to a file under `Tests/Pipeline/_jellyfin_capture/`. The original
+function is NOT called -- the intercept replaces the POST entirely so
+tests never reach the live Jellyfin host.
 
 The intercept is installed at `CaptureNotifyEvents()` and removed by
 `NotifyCapture.Stop()`. Use as a context manager or stop explicitly.
@@ -42,27 +41,12 @@ class NotifyCapture:
     StartedAt: float = field(default_factory=time.time)
     CaptureFilePath: str = ""
     _OriginalNotify: Optional[Any] = None
-    _PriorDryRunSetting: Optional[str] = None
 
     def Stop(self) -> None:
-        """Restore the original NotifyJellyfin function + SystemSetting."""
+        """Restore the original NotifyJellyfin function."""
         if self._OriginalNotify is not None:
             JellyfinNotifyService.NotifyJellyfin = self._OriginalNotify
             self._OriginalNotify = None
-        if self._PriorDryRunSetting is not None:
-            try:
-                Db = DatabaseService()
-                Db.ExecuteNonQuery(
-                    "UPDATE SystemSettings SET SettingValue = %s "
-                    "WHERE SettingKey = 'JellyfinNotifyDryRun'",
-                    (self._PriorDryRunSetting,),
-                )
-            except Exception as Ex:
-                LoggingService.LogException(
-                    "Failed to restore JellyfinNotifyDryRun setting",
-                    Ex, "JellyfinVerify", "Stop",
-                )
-            self._PriorDryRunSetting = None
         # Persist final state to file
         if self.CaptureFilePath:
             try:
@@ -82,58 +66,25 @@ class NotifyCapture:
         return False
 
 
-def _ReadDryRunSetting() -> Optional[str]:
-    Db = DatabaseService()
-    Rows = Db.ExecuteQuery(
-        "SELECT SettingValue FROM SystemSettings WHERE SettingKey = 'JellyfinNotifyDryRun'",
-    )
-    if not Rows:
-        return None
-    return str(Rows[0].get('SettingValue', '')) or None
-
-
-def _SetDryRun(Value: str) -> None:
-    Db = DatabaseService()
-    # Insert if absent, update otherwise -- mirrors how other settings are seeded.
-    Existing = _ReadDryRunSetting()
-    if Existing is None:
-        Now = datetime.now(timezone.utc)
-        Db.ExecuteNonQuery(
-            "INSERT INTO SystemSettings (SettingKey, SettingValue, DataType, Description, LastModified) "
-            "VALUES ('JellyfinNotifyDryRun', %s, 'boolean', "
-            "'When true, log notify payloads instead of POSTing to Jellyfin', %s)",
-            (Value, Now),
-        )
-    else:
-        Db.ExecuteNonQuery(
-            "UPDATE SystemSettings SET SettingValue = %s "
-            "WHERE SettingKey = 'JellyfinNotifyDryRun'",
-            (Value,),
-        )
-
-
 def CaptureNotifyEvents() -> NotifyCapture:
-    """Start a capture: enable dry-run, intercept NotifyJellyfin calls.
+    """Start a capture: intercept NotifyJellyfin calls.
 
-    Returns a NotifyCapture handle. Call `.Stop()` (or use as a context
-    manager) to restore state. The capture's `.Events` list accumulates
-    every Updates payload passed to NotifyJellyfin between Start and Stop.
+    The intercept replaces `JellyfinNotifyService.NotifyJellyfin` with
+    a recorder that captures the Updates payload and does NOT call the
+    original function -- so no HTTP request reaches Jellyfin during the
+    test. Returns a `NotifyCapture` handle. Call `.Stop()` (or use as a
+    context manager) to restore the original function.
     """
     Capture = NotifyCapture()
-    Capture._PriorDryRunSetting = _ReadDryRunSetting()
-    _SetDryRun('1')
 
     CAPTURE_ROOT.mkdir(parents=True, exist_ok=True)
     Stamp = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S_%fZ')
     Capture.CaptureFilePath = str(CAPTURE_ROOT / f"capture-{Stamp}.json")
 
     Capture._OriginalNotify = JellyfinNotifyService.NotifyJellyfin
-
-    OriginalNotify = Capture._OriginalNotify
     EventsRef = Capture.Events
 
     def Intercept(Updates: List[Dict[str, str]], Db: Optional[DatabaseService] = None) -> None:
-        # Record first, then let the real function handle dry-run logging.
         try:
             EventsRef.append({
                 'Updates': [dict(U) for U in (Updates or [])],
@@ -141,7 +92,6 @@ def CaptureNotifyEvents() -> NotifyCapture:
             })
         except Exception:
             pass
-        OriginalNotify(Updates, Db)
 
     JellyfinNotifyService.NotifyJellyfin = Intercept
     LoggingService.LogInfo(
@@ -175,7 +125,6 @@ def AssertNotifyFired(
             if UPath == Normalized and UType == UpdateType:
                 Matches.append(U)
     if not Matches:
-        # Build a helpful error showing what WAS captured
         AllPaths = sorted({
             (U.get('Path') or '', U.get('UpdateType') or '')
             for E in Capture.Events for U in E.get('Updates', [])

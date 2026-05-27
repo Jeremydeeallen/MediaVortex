@@ -20,7 +20,7 @@ class _FakeResponse:
         self.text = Body
 
 
-def _MockSettings(Host='jellyfin.test', Port='8096', ApiKey='test-token', DryRun=''):
+def _MockSettings(Host='jellyfin.test', Port='8096', ApiKey='test-token'):
     """Patch JellyfinNotifyService._ReadSetting to return the given values."""
     def Fake(SettingKey: str) -> str:
         if SettingKey == JellyfinNotifyService.SETTING_HOST:
@@ -29,8 +29,6 @@ def _MockSettings(Host='jellyfin.test', Port='8096', ApiKey='test-token', DryRun
             return Port
         if SettingKey == JellyfinNotifyService.SETTING_API_KEY:
             return ApiKey
-        if SettingKey == JellyfinNotifyService.SETTING_DRY_RUN:
-            return DryRun
         return ''
     return patch.object(JellyfinNotifyService, '_ReadSetting', side_effect=Fake)
 
@@ -112,21 +110,6 @@ class TestNotifyJellyfin(unittest.TestCase):
                 [{'Path': 'T:\\a.mkv', 'UpdateType': 'Modified'}]
             )
         self.assertIn(':8096/', MockPost.call_args.args[0])
-
-    def test_dry_run_logs_but_does_not_post(self):
-        """Criterion 8: dry-run mode logs INFO, no HTTP call."""
-        with _MockSettings(DryRun='true'), \
-             _PatchTranslate('/mnt/x/a.mkv'), \
-             patch('requests.post') as MockPost, \
-             patch.object(JellyfinNotifyService.LoggingService, 'LogInfo') as MockInfo:
-            JellyfinNotifyService.NotifyJellyfin(
-                [{'Path': 'T:\\a.mkv', 'UpdateType': 'Modified'}]
-            )
-        MockPost.assert_not_called()
-        MockInfo.assert_called_once()
-        Args, _ = MockInfo.call_args
-        self.assertIn('[DRY-RUN]', Args[0])
-        self.assertIn('JellyfinNotify:', Args[0])
 
     def test_empty_updates_is_noop(self):
         with patch('requests.post') as MockPost:
