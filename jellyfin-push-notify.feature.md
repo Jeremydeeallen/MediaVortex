@@ -214,16 +214,31 @@ referencing the old `.mkv`. Documented as expected behavior; not a bug.
 
 ## Status
 
-**COMPLETE -- verified live 2026-05-22; runtime dry-run gate removed 2026-05-27.**
+**COMPLETE -- verified live 2026-05-22; runtime dry-run gate removed 2026-05-27;
+notify shape corrected 2026-05-27.**
 Service implemented, wired into FileReplacement + DuplicateDetection,
 unit tests green. Config in `SystemSettings`; reuses existing
 `JellyfinHost`/`JellyfinApiPort`/`JellyfinApiKey` rows shared with
 `Features/Optimization`. No runtime suppression toggle -- `NotifyJellyfin`
-fires unconditionally once invoked (criterion 8 revised 2026-05-27 after
-the toggle silently muted a real transcode). Confirmed end-to-end
-against Jellyfin on `10.0.0.179`: notifies POST with status=204,
-Jellyfin refreshes the parent folder ~60s later, new files become
-playable.
+fires unconditionally once invoked. Confirmed end-to-end against
+Jellyfin on `10.0.0.179`: notifies POST with status=204, Jellyfin
+refreshes the parent folder ~60s later, new files become playable with
+correct series/episode metadata.
+
+**Notify shape change 2026-05-27 (root-cause fix for an orphan-import bug):**
+`FileReplacementBusinessService._NotifyJellyfinOfReplacement` previously
+sent `Deleted(old) + Created(new)` in a single POST whenever the source
+path differed from the new path. That shape caused Jellyfin to orphan
+the new item (`Series=null`, `IndexNumber=null`) when source and target
+shared the same extension (typical re-transcode of a `-mv.mp4`):
+S02E10 and S03E16 of 30 Rock both orphaned this session. The canary
+that worked (Steven Universe S01E37) had `.mkv -> .mp4` -- different
+extensions -- which Jellyfin processed cleanly. Fix: always send a
+single `Modified(new)`. Jellyfin's directory-coalescing scan
+(`/Library/Media/Updated` is folder-scoped, ~60s window) naturally
+sweeps stale entries for the old filename, observed in the 2026-05-22
+live verify ("swept stale entries for other episodes in the same
+folder"). One notify per replacement, no orphans.
 
 The Jellyfin 2h interval scan stays on -- see Out of scope.
 

@@ -1078,20 +1078,23 @@ class FileReplacementBusinessService:
         """Fire-and-forget Jellyfin notify after a successful file replacement.
 
         Owns jellyfin-push-notify.feature.md criterion 1 (FileReplacement
-        choke point). Same path = one Modified; different path (extension
-        changed) = Deleted+Created batched into one POST."""
+        choke point). Always sends a single `Modified` for the new path.
+        `/Library/Media/Updated` is a directory-coalescing endpoint -- the
+        ~60s same-folder scan naturally sweeps stale entries for the old
+        filename without us needing to send a `Deleted` event.
+
+        The prior shape (`Deleted(old)` + `Created(new)` batched in one
+        POST when the path changed) caused Jellyfin to orphan the new
+        item -- it lost the series/episode association when source and
+        target shared the same extension (e.g. re-transcode of an
+        existing `-mv.mp4`). Modified-only avoids that race; the
+        coalescing sweep handles the stale-entry cleanup.
+        """
         try:
             from Services.JellyfinNotifyService import NotifyJellyfin
             if not CanonicalNewPath:
                 return
-            if (CanonicalOriginalPath and os.path.normcase(CanonicalOriginalPath)
-                    != os.path.normcase(CanonicalNewPath)):
-                Updates = [
-                    {'Path': CanonicalOriginalPath, 'UpdateType': 'Deleted'},
-                    {'Path': CanonicalNewPath, 'UpdateType': 'Created'},
-                ]
-            else:
-                Updates = [{'Path': CanonicalNewPath, 'UpdateType': 'Modified'}]
+            Updates = [{'Path': CanonicalNewPath, 'UpdateType': 'Modified'}]
             NotifyJellyfin(Updates, self.DatabaseManager.DatabaseService)
         except Exception as Ex:
             LoggingService.LogException(
