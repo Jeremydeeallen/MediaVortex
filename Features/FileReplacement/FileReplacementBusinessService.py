@@ -790,7 +790,8 @@ class FileReplacementBusinessService:
 
             CanonicalOriginal = NetworkOriginalPath or OriginalFilePath
             CanonicalNewPath = ntpath.join(ntpath.dirname(CanonicalOriginal), os.path.basename(TargetPath))
-            UpdateResult = self._UpdateMediaFilesAfterReplacement(CanonicalOriginal, CanonicalNewPath)
+            UpdateResult = self._UpdateMediaFilesAfterReplacement(CanonicalOriginal, CanonicalNewPath,
+                                                                   FFmpegCommand=FFmpegCommand)
             if UpdateResult.get('Success', False):
                 StepsCompleted.append("Updated MediaFiles table")
                 RecomputeMediaFileId = UpdateResult.get('MediaFileId')
@@ -865,8 +866,14 @@ class FileReplacementBusinessService:
                 'ErrorMessage': f'Exception during file replacement: {str(e)}'
             }
 
-    def _UpdateMediaFilesAfterReplacement(self, OriginalFilePath: str, NewFilePath: str) -> Dict[str, Any]:
-        """Update MediaFiles table with new file information after successful replacement."""
+    def _UpdateMediaFilesAfterReplacement(self, OriginalFilePath: str, NewFilePath: str,
+                                          FFmpegCommand: Optional[str] = None) -> Dict[str, Any]:
+        """Update MediaFiles table with new file information after successful replacement.
+
+        FFmpegCommand (optional): the command that just produced the new file.
+        When supplied, AudioNormalizationMode is derived from it
+        (linear-loudnorm.feature.md C14 / BUG-0019).
+        """
         try:
             LoggingService.LogFunctionEntry("_UpdateMediaFilesAfterReplacement", "FileReplacementBusinessService",
                                           OriginalFilePath, NewFilePath)
@@ -982,6 +989,30 @@ class FileReplacementBusinessService:
 
             # Set TranscodedByMediaVortex to True
             media_file.TranscodedByMediaVortex = True
+
+            # Derive IsInterlaced from FieldOrder on the re-probe. FFprobe's
+            # field_order is 'progressive' for progressive content and one of
+            # 'tt'/'bb'/'tb'/'bt'/'tff'/'bff' for interlaced. Stored as text
+            # '0'/'1' to match the existing column convention.
+            NewFieldOrder = (metadata.get('FieldOrder') or '').strip().lower()
+            if NewFieldOrder:
+                media_file.IsInterlaced = '0' if NewFieldOrder == 'progressive' else '1'
+
+            # Derive AudioNormalizationMode from the just-run FFmpeg command
+            # (linear-loudnorm.feature.md C14, BUG-0019). When the command is
+            # not supplied (FinalizePartialReplacement crash recovery path),
+            # leave the column untouched -- we don't know which mode ran.
+            if FFmpegCommand:
+                try:
+                    from Features.AudioCompletion.AudioCompletionService import AudioCompletionService
+                    DerivedMode = AudioCompletionService.DetectNormalizationMode(FFmpegCommand)
+                    if DerivedMode is not None:
+                        media_file.AudioNormalizationMode = DerivedMode
+                except Exception as ModeEx:
+                    LoggingService.LogException(
+                        f"Failed to derive AudioNormalizationMode from command",
+                        ModeEx, "FileReplacementBusinessService", "_UpdateMediaFilesAfterReplacement",
+                    )
 
             # Re-stamp filesystem timestamps from the NEW file on disk
             # (FileScanning criterion 26: same naive-UTC pattern used by

@@ -2,10 +2,20 @@
 
 ## Open
 
-### [BUG-0021] SaveMediaFile UPDATE silently drops Codec, AudioCodec, AudioComplete after FileReplacement re-probe
+### [BUG-0021] Codec/AudioCodec/AudioComplete stale on MediaFiles row after seemingly successful replacement
 **Date:** 2026-05-27 | **Area:** file-replacement / mediafile-persistence
 
-**What breaks:** `Features/FileReplacement/FileReplacementBusinessService._UpdateMediaFilesAfterReplacement` assigns `Codec`, `AudioCodec`, and `AudioComplete` on the MediaFile model from the post-replacement FFprobe pass and calls `SaveMediaFile`. `Repositories/DatabaseManager.SaveMediaFile` does NOT include these three columns in its UPDATE statement, so they are silently dropped. The DB row keeps its pre-replacement values even though the file on disk has been fully transcoded. Operator-visible Library Compliance tallies (e.g. AudioFix routing decisions, codec-distribution counts) misreport the affected files as still being the source codec until the next probe pass refreshes them.
+**Update 2026-05-27:** Re-classified from "SaveMediaFile silently drops columns" to "re-probe pathway is fragile and FFprobe-fail-but-replace-success leaves metadata stale." Confirmed via code audit:
+
+- `Codec` and `AudioCodec` ARE in `Repositories/DatabaseManager.SaveMediaFile`'s by-Id UPDATE (lines 779) and the duplicate-path UPDATE (line 693). They are not being dropped at the persistence layer.
+- `AudioComplete` is set by a separate UPDATE in `AudioCompletionService.MarkAudioComplete`, gated by `RecomputeMediaFileId` being truthy in `_ProcessCompleteFileReplacement` -- which only happens when `_UpdateMediaFilesAfterReplacement` returned `Success=true`.
+- The actual silent-drop bug in the same canary window (`AudioNormalizationMode`) is RESOLVED above (2026-05-27).
+
+The remaining BUG-0021 failure mode is: when the post-replacement FFprobe re-probe fails (e.g. transient path-translation issue, FFprobe miss on the freshly-renamed file), `_UpdateMediaFilesAfterReplacement` returns `Success=false`, but `_ProcessCompleteFileReplacement` only logs a WARNING and still returns `Success=True` for the rename step. ProcessFileReplacement then commits `FileReplaced=true` while the MediaFiles row keeps its pre-replacement `Codec`, `AudioCodec`, and `AudioComplete=NULL` (because `MarkAudioComplete` and `RecomputeForFiles` are skipped on Update failure).
+
+Next investigation step: capture the canary 3 worker log for the post-replacement FFprobe attempt. If it shows `Re-probe failed for transcoded file at '...'` (the error logged at FileReplacementBusinessService.py:892), that confirms the FFprobe-miss path. If not, look for other write paths to MediaFiles that ran between rename and the SELECT.
+
+**What breaks (original report):** `Features/FileReplacement/FileReplacementBusinessService._UpdateMediaFilesAfterReplacement` assigns `Codec`, `AudioCodec`, and `AudioComplete` on the MediaFile model from the post-replacement FFprobe pass and calls `SaveMediaFile`. `Repositories/DatabaseManager.SaveMediaFile` does NOT include these three columns in its UPDATE statement, so they are silently dropped. The DB row keeps its pre-replacement values even though the file on disk has been fully transcoded. Operator-visible Library Compliance tallies (e.g. AudioFix routing decisions, codec-distribution counts) misreport the affected files as still being the source codec until the next probe pass refreshes them.
 
 **Same shape as BUG-0017** (resolved 2026-05-25 by adding 6 columns: FileSize, LastModifiedDate, ResolutionCategory, IsInterlaced, AudioLanguages, HasExplicitEnglishAudio). The pattern is: hand-maintained UPDATE column list in SaveMediaFile drifts out of sync with model attributes assigned by callers; any column not in the list is silently dropped. The BUG-0017 fix patched 6 columns but did not address the architectural cause -- so the next column class (Codec/AudioCodec/AudioComplete) repeats the failure.
 
@@ -56,8 +66,16 @@ Codec returns the pre-replacement value (e.g. `'hevc'` for an AV1 file on disk);
 
 ---
 
-### [BUG-0019] MediaFiles.AudioNormalizationMode stays NULL after encode that ran loudnorm
+### [BUG-0019 - RESOLVED 2026-05-27] MediaFiles.AudioNormalizationMode stays NULL after encode that ran loudnorm
 **Date:** 2026-05-25 | **Area:** linear-loudnorm / file-replacement
+
+**Resolution 2026-05-27:** Two-gap fix.
+1. `Repositories/DatabaseManager.SaveMediaFile` did not list `AudioNormalizationMode` in either UPDATE statement (duplicate-path or by-Id) or in the INSERT. Added in all three with COALESCE protection on the UPDATEs so partial-load callers cannot blank an existing mode.
+2. `Features/FileReplacement/FileReplacementBusinessService._UpdateMediaFilesAfterReplacement` did not derive the mode from the just-run FFmpeg command. Now accepts an optional `FFmpegCommand` parameter and calls `AudioCompletionService.DetectNormalizationMode` (new helper) to set `media_file.AudioNormalizationMode` before `SaveMediaFile`. `'linear'` if the command contains `linear=true`, `'dynamic'` if it contains `loudnorm` without `linear=true`, `None` otherwise. `_ProcessCompleteFileReplacement` passes its own `FFmpegCommand` through. `FinalizePartialReplacement` (crash-recovery path) leaves `FFmpegCommand=None`; the column stays untouched since crash-recovery doesn't know which mode ran.
+
+Round-trip and COALESCE protection verified via `Tests/Contract/TestMediaFilePersistence.py` (covers directive `.claude/directive.md` criterion 2). Next live transcode populates the column.
+
+**Original report below.**
 
 **What breaks:** Per `linear-loudnorm.feature.md` criterion 14 the column should record `'linear' | 'dynamic' | NULL` based on the mode that BuildAudioFilters selected. Doctor Who S06E04 canary v5 ran with predicted_peak=+2.8 dBTP (forcing dynamic mode) and the emitted ffmpeg command confirms the dynamic-mode loudnorm+alimiter chain ran. Post-replacement `MediaFiles.AudioNormalizationMode = NULL`. Pipeline impact: none -- the column is only read by the Library Compliance tally SQL (linear/dynamic counts) for operator visibility. Files transcode, replace, and serve correctly.
 

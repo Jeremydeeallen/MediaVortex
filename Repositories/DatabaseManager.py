@@ -701,7 +701,8 @@ class DatabaseManager:
                                 AudioLanguages = COALESCE(%s, AudioLanguages),
                                 HasExplicitEnglishAudio = COALESCE(%s, HasExplicitEnglishAudio),
                                 SubtitleFormats = %s,
-                                ContainerFormat = %s, OverallBitrate = %s, TranscodedByMediaVortex = %s
+                                ContainerFormat = %s, OverallBitrate = %s, TranscodedByMediaVortex = %s,
+                                AudioNormalizationMode = COALESCE(%s, AudioNormalizationMode)
                             WHERE Id = %s
                         """
                         parameters = (
@@ -718,7 +719,8 @@ class DatabaseManager:
                             MediaFile.AudioSampleFormat, MediaFile.AudioChannelLayout, MediaFile.AudioCodec,
                             MediaFile.AudioLanguages, MediaFile.HasExplicitEnglishAudio,
                             MediaFile.SubtitleFormats, MediaFile.ContainerFormat,
-                            MediaFile.OverallBitrate, MediaFile.TranscodedByMediaVortex, MediaFile.Id
+                            MediaFile.OverallBitrate, MediaFile.TranscodedByMediaVortex,
+                            MediaFile.AudioNormalizationMode, MediaFile.Id
                         )
                         cursor.execute(query, parameters)
                         connection.commit()
@@ -737,8 +739,9 @@ class DatabaseManager:
                          PixelFormat, Level, AudioChannels, AudioSampleRate, AudioSampleFormat,
                          AudioChannelLayout, AudioCodec, AudioLanguages, HasExplicitEnglishAudio,
                          SubtitleFormats,
-                         ContainerFormat, OverallBitrate, TranscodedByMediaVortex)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                         ContainerFormat, OverallBitrate, TranscodedByMediaVortex,
+                         AudioNormalizationMode)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         RETURNING Id
                     """
                     parameters = (
@@ -755,7 +758,8 @@ class DatabaseManager:
                         MediaFile.AudioSampleFormat, MediaFile.AudioChannelLayout, MediaFile.AudioCodec,
                         MediaFile.AudioLanguages, MediaFile.HasExplicitEnglishAudio,
                         MediaFile.SubtitleFormats, MediaFile.ContainerFormat,
-                        MediaFile.OverallBitrate, MediaFile.TranscodedByMediaVortex
+                        MediaFile.OverallBitrate, MediaFile.TranscodedByMediaVortex,
+                        MediaFile.AudioNormalizationMode
                     )
                     LoggingService.LogInfo(f"Insert media file parameters: {parameters}", "DatabaseManager", "SaveMediaFile")
                     cursor.execute(query, parameters)
@@ -787,7 +791,8 @@ class DatabaseManager:
                             AudioLanguages = COALESCE(%s, AudioLanguages),
                             HasExplicitEnglishAudio = COALESCE(%s, HasExplicitEnglishAudio),
                             SubtitleFormats = %s,
-                            ContainerFormat = %s, OverallBitrate = %s, TranscodedByMediaVortex = %s
+                            ContainerFormat = %s, OverallBitrate = %s, TranscodedByMediaVortex = %s,
+                            AudioNormalizationMode = COALESCE(%s, AudioNormalizationMode)
                         WHERE Id = %s
                     """
                     parameters = (
@@ -804,7 +809,8 @@ class DatabaseManager:
                         MediaFile.AudioSampleFormat, MediaFile.AudioChannelLayout, MediaFile.AudioCodec,
                         MediaFile.AudioLanguages, MediaFile.HasExplicitEnglishAudio,
                         MediaFile.SubtitleFormats, MediaFile.ContainerFormat,
-                        MediaFile.OverallBitrate, MediaFile.TranscodedByMediaVortex, MediaFile.Id
+                        MediaFile.OverallBitrate, MediaFile.TranscodedByMediaVortex,
+                        MediaFile.AudioNormalizationMode, MediaFile.Id
                     )
                     LoggingService.LogInfo(f"Update media file parameters: {parameters}", "DatabaseManager", "SaveMediaFile")
                     cursor.execute(query, parameters)

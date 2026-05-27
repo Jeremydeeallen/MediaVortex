@@ -46,6 +46,26 @@ class AudioCompletionService:
         return 'loudnorm' in FFmpegCommand.lower()
 
     @staticmethod
+    def DetectNormalizationMode(FFmpegCommand: Optional[str]) -> Optional[str]:
+        """Return 'linear' | 'dynamic' | None for the loudnorm mode that
+        actually ran in this command (BUG-0019 / linear-loudnorm C14).
+
+        - 'linear'  -> loudnorm filter present with `linear=true`
+        - 'dynamic' -> loudnorm present without `linear=true`
+                       (BuildAudioFilters appends an alimiter chain in this
+                       branch, but the absence of `linear=true` is the
+                       canonical mode signal)
+        - None      -> no loudnorm in the command (stream-copy or no audio
+                       re-encode)
+        """
+        if not FFmpegCommand:
+            return None
+        Lower = FFmpegCommand.lower()
+        if 'loudnorm' not in Lower:
+            return None
+        return 'linear' if 'linear=true' in Lower else 'dynamic'
+
+    @staticmethod
     def ShouldStreamCopyAudio(MediaFile: Any) -> bool:
         """True when the next encode must emit -c:a copy (no audio re-encode).
 
