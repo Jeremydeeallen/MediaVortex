@@ -1,77 +1,59 @@
 # Current Directive
 
-<!--
-This file is auto-loaded into Claude's context every session.
-When this file contains a non-empty directive, CEO mode is active
-(see .claude/rules/ceo-mode.md). When empty, task-delegation mode applies.
-
-Replace everything below this comment block with your directive when ready.
-A good directive has the following sections.
--->
+**Set:** 2026-05-27
+**Status:** Active
 
 ## Outcome
 
-<!-- One paragraph. What does production look like when this directive is satisfied?
-     Describe behavior, not implementation. Example:
-
-     "The pipeline runs unattended for 30 days without generating new
-     -mv-mv files, without orphan disk artifacts, and without stale-metadata
-     drift in MediaFiles. An operator can answer 'why didn't this file
-     transcode' with a single SQL query against TranscodeAttempts.Disposition
-     and DispositionReason." -->
-
-(none — directive not yet set)
+The transcode pipeline executes a MediaFile from queue claim through final state without manual intervention. After a successful transcode, every `MediaFiles` column derived from the new file matches a fresh FFprobe of that file, the row is marked compliant, Jellyfin has been notified to refresh, and the worker is free to claim its next pending job. The end state of any successful transcode is fully verifiable in SQL: file is compliant, metadata is fresh, audit trail is intact.
 
 ## Acceptance Criteria
 
-<!-- Each criterion must pass the 5 litmus tests from .claude/rules/feature-criteria.md:
-     rename / outsider / rewrite / negation / stability.
+1. After a successful transcode-replace cycle, `SELECT IsCompliant, RecommendedMode FROM MediaFiles WHERE Id=<id>` returns `(true, NULL)`.
 
-     Each criterion is verifiable from the outside (SQL query, file check, observable
-     behavior, log assertion). Avoid implementation references ("must use X library").
-     Number them so they can be cited.
+2. After a successful transcode-replace cycle, every `MediaFiles` column that FFprobe populates matches an independent re-probe of the new file on disk: `Codec, AudioCodec, Resolution, ResolutionCategory, VideoBitrateKbps, AudioBitrateKbps, DurationMinutes, FrameRate, AudioChannels, AudioSampleRate, AudioSampleFormat, AudioChannelLayout, ContainerFormat, OverallBitrate, SubtitleFormats, AudioLanguages, HasExplicitEnglishAudio, FileSize, ColorRange, FieldOrder, HasBFrames, RefFrames, PixelFormat, Level, CodecProfile, TotalFrames, IsInterlaced, AudioComplete, AudioNormalizationMode (when loudnorm ran), LastModifiedDate, LastScannedDate`.
 
-     Tight criteria = autonomous delivery. Loose criteria = escalation churn. -->
+3. After a successful transcode-replace cycle, `MediaFiles.FilePath` points at the new file on disk; the old file is gone (or replaced in place for `-mv` sources); no `.inprogress` or `.replacing.bak` artifact left in the directory.
 
-(none)
+4. After a successful transcode-replace cycle, Jellyfin's `/Library/Media/Updated` endpoint received a POST for the new file's parent folder and returned 204 (the in-our-control success signal; downstream Jellyfin refresh latency is not part of this criterion).
+
+5. After a successful transcode-replace cycle, `TranscodeAttempts` shows `Success=true, FileReplaced=true, Disposition IN ('Replace','BypassReplace'), FileReplacedDate IS NOT NULL`; `ActiveJobs` row cleared; `TranscodeQueue` row deleted; `TemporaryFilePaths` row deleted.
+
+6. After a successful transcode-replace cycle, the worker claims its next pending job within one polling interval without operator intervention.
+
+7. The happy path runs end-to-end without writing ERROR-level log lines tied to the attempt's `TranscodeAttemptId`. Pre-existing ERRORs on unrelated files don't count.
 
 ## Out of Scope
 
-<!-- What this directive explicitly does NOT cover. Anti-scope statements
-     help Claude resist the temptation to expand. Example:
-
-     - v2 architecture decisions (separate directive)
-     - Other tables' persistence drift (track separately)
-     - UI / Activity page redesign -->
-
-(none)
+- Failure paths (transcode fails, compliance gate refuses, VMAF below min, no savings) — separate directive
+- VMAF testing internals — handled by existing disposition logic
+- Existing dirty-state cleanup (the library-wide reprobe is parallel operator work)
+- v2 rewrite decisions
+- Other tables' persistence drift (TranscodeAttempts, Workers, etc.)
+- UI / Activity page changes
+- Cross-worker race conditions
 
 ## Constraints
 
-<!-- Non-negotiable conditions. Things like:
-
-     - "Cutover must not exceed 30 min worker downtime"
-     - "No destructive schema changes without explicit confirm"
-     - "No production deploy on Fridays"
-     - "Preserve existing operator queries against TranscodeAttempts" -->
-
-(none)
+- No destructive schema changes without explicit confirm
+- Preserve existing operator queries against `TranscodeAttempts.Disposition / DispositionReason / FileReplaced`
+- Worker restarts are the user's call (per existing memory — Claude never starts services on I9)
+- Scope-discipline.md applies per-task
 
 ## Escalation Defaults
 
-<!-- Optional. Pre-resolved answers for predictable ambiguities, so Claude
-     doesn't have to escalate them. Example:
+- Tradeoff between code complexity and operator visibility → operator visibility
+- Tradeoff between rollout speed and data safety → data safety
+- Risk tolerance: low. Stage changes through canary first when feasible.
+- When a criterion is ambiguous against real-world data, pick one interpretation, proceed, surface the choice in the delivery report.
 
-     - "When a tradeoff is between code complexity and operator visibility,
-        pick operator visibility."
-     - "When a tradeoff is between rollout speed and data safety,
-        pick data safety."
-     - "Default risk tolerance: low. Stage changes through canary first." -->
+## Engineering Calls Already Made
 
-(none)
+- Same-slot `-mv` re-transcode is included in the happy path (compliance-gated-rename Slice 1 shipped covers this)
+- Quick Fix / Remux / Transcode all share these criteria (same worker → replace → notify cycle)
+- Jellyfin success = 204 returned, not downstream refresh visibility
+- ERROR scoping is per-attempt-id, not per-window
 
 ## Status
 
-<!-- Set by Claude as work progresses. Operator reads this for status. -->
-
-NOT STARTED
+ACTIVE — work in progress. Status will be updated by Claude as work progresses.
