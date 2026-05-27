@@ -1477,15 +1477,18 @@ class QueueManagementBusinessService:
         """
         # Reset transient row flags so stale values from a prior call don't leak.
         Row['_DeferReason'] = None
+        Row['_RefusalReason'] = None
 
         # a. Hard block: no English audio (includes files with zero audio streams)
         if Row.get('HasExplicitEnglishAudio') is False:
+            Row['_RefusalReason'] = 'no_english_audio'
             return (None, None)
 
         # a2. Hard block: AudioCompletionService flagged this row as suspect
         # (no_audio_stream / incompatible_codec_unsupported). The audio cannot
         # be safely re-encoded or stream-copied; surface for operator review.
         if Row.get('AudioCorruptSuspect') is True:
+            Row['_RefusalReason'] = 'audio_corrupt_suspect'
             return (None, None)
 
         # a3. Hard block: probed file with no audio stream at all.
@@ -1493,6 +1496,7 @@ class QueueManagementBusinessService:
         # newly-probed rows without a recompute pass yet still need the
         # in-cascade check.
         if Row.get('HasExplicitEnglishAudio') is not None and not Row.get('AudioCodec') and Row.get('Resolution'):
+            Row['_RefusalReason'] = 'no_audio_stream'
             return (None, None)
 
         # a4. Measurement gate (linear-loudnorm.feature.md C9): any file that
@@ -1516,12 +1520,15 @@ class QueueManagementBusinessService:
                     or Row.get('SourceIntegratedThresholdLufs') is None):
                 if Row.get('LoudnessMeasurementFailureReason') is not None:
                     Row['_DeferReason'] = 'loudness_measurement_failed'
+                    Row['_RefusalReason'] = 'loudness_measurement_failed'
                 else:
                     Row['_DeferReason'] = 'awaiting_loudness_measurement'
+                    Row['_RefusalReason'] = 'awaiting_loudness_measurement'
                 return (None, None)
 
         # b. Effective profile cannot be resolved
         if not EffectiveProfile:
+            Row['_RefusalReason'] = 'no_effective_profile'
             return (None, None)
 
         # Lazy-load gate config when caller didn't provide pre-loaded sets.
@@ -1545,14 +1552,17 @@ class QueueManagementBusinessService:
         if not ResKey:
             ResKey = self._ResolutionCategoryFromPixels(Row.get('Resolution'))
         if not ResKey:
+            Row['_RefusalReason'] = 'no_resolution_category'
             return (None, None)
 
         Settings = Lookup.get((EffectiveProfile, ResKey))
         if not Settings:
+            Row['_RefusalReason'] = 'no_profile_thresholds'
             return (None, None)
 
         TargetVideoKbps, TargetAudioKbps, TargetResCat = Settings
         if TargetVideoKbps is None or TargetAudioKbps is None:
+            Row['_RefusalReason'] = 'no_profile_thresholds'
             return (None, None)
 
         # Audio bitrate floor guard: a sub-floor source must never go through
@@ -1622,10 +1632,66 @@ class QueueManagementBusinessService:
         # directly, not RecommendedMode, so a file with both is still
         # offered in the Quick Fix tab.
         if NeedsTranscode:
+            if VideoCodecWrong:
+                Row['_RefusalReason'] = 'video_codec_not_acceptable'
+            elif DownscaleNeeded:
+                Row['_RefusalReason'] = 'downscale_needed'
+            elif SavingsExceedsThreshold:
+                Row['_RefusalReason'] = 'savings_exceeds_threshold'
+            else:
+                Row['_RefusalReason'] = 'needs_transcode'
             return (False, 'Transcode')
         if NeedsQuick:
+            if ContainerWrong:
+                Row['_RefusalReason'] = 'container_not_acceptable'
+            elif AudioCodecWrong:
+                Row['_RefusalReason'] = 'audio_codec_not_acceptable'
+            elif AudioConfirmedOffTarget:
+                Row['_RefusalReason'] = 'audio_not_normalized'
+            else:
+                Row['_RefusalReason'] = 'needs_quick'
             return (False, 'Quick')
         return (True, None)
+
+    def EvaluateCandidateCompliance(
+        self,
+        CandidateRow: Dict[str, Any],
+        EffectiveProfile: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Public wrapper over `_EvaluateCompliance` for callers that want to
+        ask "would this MediaFile-shaped row admit through the cascade?"
+        without joining the bulk RecomputeForFiles loop.
+
+        Owns `compliance-gated-rename.feature.md` criterion 1 (the predicate
+        used by FileReplacement's pre-rename gate). Returns a dict for clarity:
+            {
+              'IsCompliant':     True | False | None,
+              'RecommendedMode': 'Transcode' | 'Quick' | None,
+              'RefusalReason':   <stable_snake_case_string> | None,
+            }
+        RefusalReason is None only when IsCompliant is True. For every other
+        outcome it carries the specific cascade reason (e.g. 'video_codec_not_acceptable',
+        'audio_not_normalized', 'awaiting_loudness_measurement'). Stable enough
+        to use as the disposition audit payload.
+
+        EffectiveProfile is resolved via the same cascade RecomputeForFiles uses
+        (ShowSettings -> SystemSettings.DefaultProfileName) when not supplied.
+        """
+        Lookup = self._LoadPriorityLookupTable()
+        if EffectiveProfile is None:
+            DefaultProfile = self._LoadDefaultProfileName()
+            ShowOverrides = self._LoadShowProfileOverrides()
+            EffectiveProfile = self._GetEffectiveProfileFromCache(
+                CandidateRow.get('FilePath'), ShowOverrides, DefaultProfile
+            )
+        IsCompliant, RecommendedMode = self._EvaluateCompliance(
+            CandidateRow, EffectiveProfile, Lookup,
+        )
+        return {
+            'IsCompliant': IsCompliant,
+            'RecommendedMode': RecommendedMode,
+            'RefusalReason': CandidateRow.get('_RefusalReason'),
+        }
 
     # ─── Marginal-savings gate (data-driven queue admission) ──────────────
     # Owns marginal-savings-gate.feature.md criteria 1-7. Two collaborators:

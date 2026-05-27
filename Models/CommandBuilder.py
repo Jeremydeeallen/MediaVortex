@@ -10,6 +10,20 @@ class CommandBuilder:
     """Pure data transformation model for building FFmpeg transcoding commands."""
 
     @staticmethod
+    def _CollapseMvSuffix(BaseName: str) -> str:
+        """Strip a trailing `-mv` from `BaseName` so re-transcoding a
+        `<name>-mv.<ext>` source produces `<name>-mv.<output-ext>` instead
+        of `<name>-mv-mv.<output-ext>`. Owned by `compliance-gated-rename.feature.md`
+        criterion 7 (BUG-0020 Slice 1). The same-path collision created by
+        this stripping is handled in
+        `FileReplacementBusinessService._ProcessCompleteFileReplacement`'s
+        same-slot-replacement branch.
+        """
+        if BaseName and BaseName.lower().endswith('-mv'):
+            return BaseName[:-3]
+        return BaseName
+
+    @staticmethod
     def _NormalizeFfmpegPath(Path: Optional[str]) -> str:
         """Collapse mixed separators to the platform-native form.
 
@@ -401,6 +415,7 @@ class CommandBuilder:
             import ntpath as _ntpath
             OriginalFileName = _ntpath.basename(_ntpath.basename(OriginalFileName or ''))
             BaseName = os.path.splitext(OriginalFileName)[0]
+            BaseName = self._CollapseMvSuffix(BaseName)
 
             if SourceResolution == TargetResolution:
                 return f"{BaseName}-mv.{ContainerType}.inprogress"
@@ -413,11 +428,13 @@ class CommandBuilder:
             TargetResolutionStr = self.FormatResolutionForFilename(TargetResolution)
             NewBaseName = OriginalFileName.replace(SourceResolutionStr, TargetResolutionStr)
             NewBaseName = os.path.splitext(NewBaseName)[0]
+            NewBaseName = self._CollapseMvSuffix(NewBaseName)
 
             return f"{NewBaseName}-mv.{ContainerType}.inprogress"
 
         except Exception:
             BaseName = os.path.splitext(OriginalFileName)[0]
+            BaseName = self._CollapseMvSuffix(BaseName)
             return f"{BaseName}-mv.{ContainerType}.inprogress"
     
     def ExtractResolutionFromFilename(self, Filename: str) -> Optional[str]:
@@ -691,6 +708,7 @@ class CommandBuilder:
                     CommandData['HasAudio'] = bool(DetectedAudioCodec)
             AudioCodec = CommandData.get('AudioCodec', '')
             BaseName = os.path.splitext(MediaFile.FileName)[0]
+            BaseName = self._CollapseMvSuffix(BaseName)
 
             ExplicitOutputPath = CommandData.get('OutputPath')
             if ExplicitOutputPath:
@@ -812,6 +830,7 @@ class CommandBuilder:
             AudioStreamIndex = CommandData.get('AudioStreamIndex', 0)
             SubtitleStreamIndex = CommandData.get('SubtitleStreamIndex', 0)
             BaseName = os.path.splitext(MediaFile.FileName)[0]
+            BaseName = self._CollapseMvSuffix(BaseName)
 
             ExplicitOutputPath = CommandData.get('OutputPath')
             if ExplicitOutputPath:

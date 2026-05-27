@@ -48,6 +48,11 @@ REASONS = (
     'VmafCapabilityNotConfigured',
     'QualityTestingGloballyDisabled',
     'TestMode',
+    # compliance-gated-rename.feature.md criterion 2 (BUG-0020 Slice 1).
+    # Reached when FileReplacement's pre-rename compliance gate refuses
+    # a Replace/BypassReplace disposition. Cascade reason lives in
+    # TranscodeAttempts.ErrorMessage (cascade vocabulary, not free text).
+    'ComplianceGateFailed',
 )
 
 
@@ -307,3 +312,46 @@ class PostTranscodeDispositionService:
                     f"_CommitDisposition TFP cleanup failed for attempt {TranscodeAttemptId}",
                     Ex, "PostTranscodeDispositionService", "_CommitDisposition",
                 )
+
+    def RecordComplianceGateFailure(self, TranscodeAttemptId: int, CascadeReason: str) -> None:
+        """Override a previously-committed Replace / BypassReplace disposition
+        with `NoReplace` / `ComplianceGateFailed`, writing the specific cascade
+        reason to `TranscodeAttempts.ErrorMessage` as the audit payload.
+
+        Owns `compliance-gated-rename.feature.md` criterion 2. The idempotency
+        guard in `DecidePostTranscodeDisposition` would normally block a
+        re-decide, but the compliance gate is a post-decision check that runs
+        at FileReplacement time -- the disposition WAS valid when first
+        decided (VMAF passed); the rename refused for a separate reason.
+        This method bypasses the guard intentionally and flips the disposition.
+
+        Side effects:
+          - UPDATE TranscodeAttempts SET Disposition='NoReplace',
+            DispositionReason='ComplianceGateFailed',
+            DispositionDecidedAt=NOW(),
+            ErrorMessage='ComplianceGateFailed: <CascadeReason>'.
+          - DELETE FROM TemporaryFilePaths WHERE TranscodeAttemptId=%s
+            (NoReplace is in the cleanup set in _CommitDisposition; this is
+            the criterion 3 TFP-cleanup path).
+        """
+        try:
+            DatabaseService().ExecuteNonQuery(
+                """
+                UPDATE TranscodeAttempts
+                SET ErrorMessage = %s
+                WHERE Id = %s
+                """,
+                (f'ComplianceGateFailed: {CascadeReason}', TranscodeAttemptId),
+            )
+        except Exception as Ex:
+            LoggingService.LogException(
+                f"RecordComplianceGateFailure: failed to write ErrorMessage for attempt {TranscodeAttemptId}",
+                Ex, "PostTranscodeDispositionService", "RecordComplianceGateFailure",
+            )
+        # _CommitDisposition handles the audit columns + TFP cleanup.
+        self._CommitDisposition(TranscodeAttemptId, 'NoReplace', 'ComplianceGateFailed')
+        LoggingService.LogInfo(
+            f"Disposition overridden for TranscodeAttempt {TranscodeAttemptId}: "
+            f"NoReplace (Reason=ComplianceGateFailed, CascadeReason={CascadeReason})",
+            "PostTranscodeDispositionService", "RecordComplianceGateFailure",
+        )

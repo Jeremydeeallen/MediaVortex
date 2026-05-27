@@ -210,6 +210,23 @@ class FileReplacementBusinessService:
             else:
                 CanonicalNewPath = None  # _ProcessCompleteFileReplacement derives if absent
 
+            # Look up source MediaFile.Id for the compliance gate's carry-forward.
+            # Keyed on (StorageRootId, RelativePath) -- matches BUG-0014 path-storage
+            # fix (commit e0244d3); no legacy text-path lookup.
+            SourceMediaFileId = None
+            try:
+                MfRows = self.DatabaseManager.DatabaseService.ExecuteQuery(
+                    "SELECT Id FROM MediaFiles WHERE StorageRootId = %s AND RelativePath = %s LIMIT 1",
+                    (SourceSrId, SourceRel),
+                )
+                if MfRows:
+                    SourceMediaFileId = MfRows[0].get('Id')
+            except Exception as MfLookupEx:
+                LoggingService.LogException(
+                    f"MediaFile lookup by (StorageRootId={SourceSrId}, RelativePath={SourceRel}) failed",
+                    MfLookupEx, "FileReplacementBusinessService", "ProcessFileReplacement",
+                )
+
             TranscodedPath = LocalOutputPathStr
             LocalTranscodedPath = self._ToLocalPath(TranscodedPath) if TranscodedPath else None
 
@@ -243,6 +260,7 @@ class FileReplacementBusinessService:
             replacement_result = self._ProcessCompleteFileReplacement(
                 OriginalPath, TranscodedPath, OriginalPath,
                 FFmpegCommand=getattr(transcode_attempt, 'FfpmpegCommand', None),
+                SourceMediaFileId=SourceMediaFileId,
             )
 
             if replacement_result.get('Success', False):
@@ -278,6 +296,30 @@ class FileReplacementBusinessService:
                 }
 
             error_message = replacement_result.get('ErrorMessage', 'Unknown error during file replacement')
+
+            # Compliance gate refused -- record the disposition override
+            # (compliance-gated-rename.feature.md criterion 2). The TFP cleanup
+            # for the NoReplace disposition is handled by _CommitDisposition.
+            if replacement_result.get('ComplianceGateRefused'):
+                CascadeReason = replacement_result.get('CascadeReason') or 'unknown'
+                try:
+                    from Features.QualityTesting.PostTranscodeDispositionService import PostTranscodeDispositionService
+                    PostTranscodeDispositionService().RecordComplianceGateFailure(
+                        TranscodeAttemptId, CascadeReason
+                    )
+                except Exception as DispEx:
+                    LoggingService.LogException(
+                        f"Failed to record ComplianceGateFailed disposition for attempt {TranscodeAttemptId}",
+                        DispEx, "FileReplacementBusinessService", "ProcessFileReplacement",
+                    )
+                LoggingService.LogWarning(
+                    f"Compliance gate refused replace for attempt {TranscodeAttemptId}: {CascadeReason}. "
+                    f"Disposition flipped to NoReplace/ComplianceGateFailed.",
+                    "FileReplacementBusinessService", "ProcessFileReplacement",
+                )
+                return {'Success': False, 'ErrorMessage': error_message,
+                        'ComplianceGateRefused': True, 'CascadeReason': CascadeReason}
+
             LoggingService.LogError(
                 f"File replacement failed for attempt {TranscodeAttemptId}: {error_message}",
                 "FileReplacementBusinessService", "ProcessFileReplacement",
@@ -393,7 +435,150 @@ class FileReplacementBusinessService:
             )
             return {'Success': False, 'ErrorMessage': str(e)}
 
-    def _ProcessCompleteFileReplacement(self, OriginalFilePath: str, TranscodedFilePath: str, NetworkOriginalPath: str = None, FFmpegCommand: Optional[str] = None) -> Dict[str, Any]:
+    def _RunComplianceGate(self, LocalStagedPath: str, SourceMediaFileId: int,
+                           FFmpegCommand: Optional[str] = None) -> Dict[str, Any]:
+        """Pre-rename compliance gate. Owns `compliance-gated-rename.feature.md`
+        criteria 1, 4 (BUG-0020 Slice 1).
+
+        Probes the staged `.inprogress` file, synthesizes a candidate
+        MediaFile-shaped row by combining the probe output with carry-forward
+        fields from the source MediaFiles row (audio language, loudness
+        measurements, AudioComplete, AssignedProfile, AudioCorruptSuspect),
+        and calls `QueueManagementBusinessService.EvaluateCandidateCompliance`.
+
+        Returns:
+            {'Compliant': True,  'RefusalReason': None}                   on pass
+            {'Compliant': False, 'RefusalReason': '<cascade_reason>'}     on refuse
+            {'Compliant': False, 'RefusalReason': 'source_row_missing'}   when the
+                  source MediaFile cannot be located (criterion 4 edge case).
+            {'Compliant': False, 'RefusalReason': 'gate_evaluation_error'} on
+                  exception -- safe-failure: refuse rather than promote on error.
+
+        The gate FAILS CLOSED on error: any internal exception returns Compliant=False
+        so the rename refuses. False negatives (refused encodes that are actually
+        compliant) surface as canary failures and prompt investigation; false
+        positives (promoted encodes that are non-compliant) reintroduce -mv-mv.
+        """
+        try:
+            from Features.TranscodeQueue.QueueManagementBusinessService import QueueManagementBusinessService
+
+            if not os.path.exists(LocalStagedPath):
+                return {'Compliant': False, 'RefusalReason': 'staged_file_missing'}
+
+            # FFprobe pass on the .inprogress.
+            ProbeResult = self.FileManager.ExtractMediaMetadata(LocalStagedPath)
+            if not ProbeResult.get('Success', False):
+                return {'Compliant': False, 'RefusalReason': 'probe_failed'}
+
+            # Source-row carry-forward. Keyed on MediaFiles.Id (passed in by
+            # the caller, derived from TFP (SourceStorageRootId, SourceRelativePath)).
+            SourceRows = self.DatabaseManager.DatabaseService.ExecuteQuery(
+                """
+                SELECT Id, FilePath, AssignedProfile,
+                       HasExplicitEnglishAudio, AudioLanguages,
+                       SourceIntegratedLufs, SourceLoudnessRangeLU,
+                       SourceTruePeakDbtp, SourceIntegratedThresholdLufs,
+                       LoudnessMeasuredAt, LoudnessMeasurementFailureReason,
+                       AudioComplete, AudioCorruptSuspect
+                FROM MediaFiles WHERE Id = %s
+                """,
+                (SourceMediaFileId,),
+            )
+            if not SourceRows:
+                return {'Compliant': False, 'RefusalReason': 'source_row_missing'}
+            Src = SourceRows[0]
+
+            # Synthesize the candidate row -- probe fields override, source
+            # carries forward the things ffprobe can't derive.
+            Resolution = ProbeResult.get('Resolution')
+            ResolutionCategory = None
+            try:
+                Height = None
+                if Resolution and 'x' in Resolution:
+                    Height = int(Resolution.split('x')[1])
+                if Height is not None:
+                    if Height >= 2000:
+                        ResolutionCategory = '2160p'
+                    elif Height >= 1000:
+                        ResolutionCategory = '1080p'
+                    elif Height >= 700:
+                        ResolutionCategory = '720p'
+                    elif Height >= 400:
+                        ResolutionCategory = '480p'
+            except Exception:
+                pass
+
+            # SizeMB from the staged file directly -- it's the candidate.
+            try:
+                SizeMB = os.path.getsize(LocalStagedPath) / (1024.0 * 1024.0)
+            except Exception:
+                SizeMB = 0
+
+            CandidateRow = {
+                # From probe (the candidate's actual measurements):
+                'FilePath': Src.get('FilePath'),  # source path -- profile cascade keys on this
+                'Resolution': Resolution,
+                'ResolutionCategory': ResolutionCategory,
+                'Codec': ProbeResult.get('VideoCodec'),
+                'ContainerFormat': ProbeResult.get('ContainerFormat'),
+                'AudioCodec': ProbeResult.get('AudioCodec'),
+                'AudioChannels': ProbeResult.get('AudioChannels'),
+                'AudioBitrateKbps': ProbeResult.get('AudioBitrateKbps'),
+                'VideoBitrateKbps': ProbeResult.get('VideoBitrateKbps'),
+                'DurationMinutes': ProbeResult.get('DurationMinutes'),
+                'SizeMB': SizeMB,
+                # From source (carried forward -- the encode preserves these):
+                'AssignedProfile': Src.get('AssignedProfile'),
+                'HasExplicitEnglishAudio': Src.get('HasExplicitEnglishAudio'),
+                'AudioLanguages': Src.get('AudioLanguages'),
+                'AudioComplete': Src.get('AudioComplete'),
+                'AudioCorruptSuspect': Src.get('AudioCorruptSuspect'),
+                'SourceIntegratedLufs': Src.get('SourceIntegratedLufs'),
+                'SourceLoudnessRangeLU': Src.get('SourceLoudnessRangeLU'),
+                'SourceTruePeakDbtp': Src.get('SourceTruePeakDbtp'),
+                'SourceIntegratedThresholdLufs': Src.get('SourceIntegratedThresholdLufs'),
+                'LoudnessMeasuredAt': Src.get('LoudnessMeasuredAt'),
+                'LoudnessMeasurementFailureReason': Src.get('LoudnessMeasurementFailureReason'),
+            }
+
+            # Special case: this very encode just ran loudnorm. The source row
+            # still shows AudioComplete=False at gate time because MarkAudioComplete
+            # fires AFTER the rename (post-rename branch in _ProcessCompleteFileReplacement).
+            # Without this override, the gate would refuse the very encode that
+            # normalized audio -- a false negative that breaks every first-pass
+            # transcode of unnormalized content. Detect loudnorm in the command
+            # and set AudioComplete=True in the candidate row so the cascade
+            # skips both the LUFS-measurement gate and the AudioConfirmedOffTarget
+            # check (both predicates short-circuit when AudioComplete is True).
+            try:
+                from Features.AudioCompletion.AudioCompletionService import AudioCompletionService
+                if FFmpegCommand and AudioCompletionService.DetectNormalizationInCommand(FFmpegCommand):
+                    CandidateRow['AudioComplete'] = True
+            except Exception:
+                pass  # fail-open on the override only -- if detect fails, gate
+                      # still uses the source row's AudioComplete (which may
+                      # cause a false negative; the canary catches it).
+
+            Eval = QueueManagementBusinessService().EvaluateCandidateCompliance(CandidateRow)
+
+            if Eval.get('IsCompliant') is True and Eval.get('RecommendedMode') is None:
+                return {'Compliant': True, 'RefusalReason': None}
+
+            RefusalReason = Eval.get('RefusalReason') or (
+                f"undecidable_{Eval.get('RecommendedMode') or 'unknown'}"
+                if Eval.get('IsCompliant') is None
+                else f"non_compliant_{Eval.get('RecommendedMode') or 'unknown'}"
+            )
+            return {'Compliant': False, 'RefusalReason': RefusalReason}
+
+        except Exception as e:
+            LoggingService.LogException(
+                f"Compliance gate raised for staged={LocalStagedPath}, SourceMediaFileId={SourceMediaFileId}",
+                e, "FileReplacementBusinessService", "_RunComplianceGate"
+            )
+            return {'Compliant': False, 'RefusalReason': 'gate_evaluation_error'}
+
+    def _ProcessCompleteFileReplacement(self, OriginalFilePath: str, TranscodedFilePath: str, NetworkOriginalPath: str = None, FFmpegCommand: Optional[str] = None, SourceMediaFileId: Optional[int] = None) -> Dict[str, Any]:
         """Finalize a transcode by renaming the `.inprogress` staged file to its
         final name, updating MediaFiles, and deleting the original source.
 
@@ -453,7 +638,18 @@ class FileReplacementBusinessService:
 
             TargetPath = LocalStagedPath[:-len('.inprogress')]
 
-            if os.path.exists(TargetPath):
+            # Same-slot replacement: the source IS the target (re-transcode of a
+            # `-mv.<ext>` file -- compliance-gated-rename.feature.md criterion 7).
+            # `_CollapseMvSuffix` in CommandBuilder collapses `foo-mv.<src>` to
+            # produce `foo-mv.<dst>.inprogress` instead of `foo-mv-mv.<dst>.inprogress`.
+            # When the source and target paths match, the standard refuse-on-target-exists
+            # check would incorrectly trip; instead we do a safe rename dance.
+            SameSlotReplacement = (
+                os.path.normcase(os.path.normpath(TargetPath))
+                == os.path.normcase(os.path.normpath(LocalOriginalPath))
+            )
+
+            if os.path.exists(TargetPath) and not SameSlotReplacement:
                 ErrorMsg = (
                     f"Refusing to overwrite existing file at target: {TargetPath}. "
                     f"A prior replacement may have partially succeeded and left this artifact behind."
@@ -461,15 +657,121 @@ class FileReplacementBusinessService:
                 LoggingService.LogError(ErrorMsg, "FileReplacementBusinessService", "_ProcessCompleteFileReplacement")
                 return {'Success': False, 'ErrorMessage': ErrorMsg}
 
-            try:
-                os.rename(LocalStagedPath, TargetPath)
-                StepsCompleted.append(f"Renamed {os.path.basename(LocalStagedPath)} -> {os.path.basename(TargetPath)}")
-                LoggingService.LogInfo(f"Dropped .inprogress suffix: {LocalStagedPath} -> {TargetPath}",
-                                     "FileReplacementBusinessService", "_ProcessCompleteFileReplacement")
-            except Exception as e:
-                ErrorMsg = f"Failed to rename .inprogress to final target: {str(e)}"
-                LoggingService.LogError(ErrorMsg, "FileReplacementBusinessService", "_ProcessCompleteFileReplacement")
-                return {'Success': False, 'ErrorMessage': ErrorMsg}
+            # ── Compliance gate (compliance-gated-rename.feature.md C1, C3) ──
+            # The cascade predicate is the gatekeeper for the `-mv` rename.
+            # FFmpeg returning 0 + valid container is necessary but no longer
+            # sufficient: if the next cascade pass would re-queue this output,
+            # we must NOT promote it -- doing so creates `-mv-mv.<ext>`.
+            # Gate fails closed (refuse on any error -- prevents -mv-mv).
+            # SourceMediaFileId is optional only to preserve the FinalizePartialReplacement
+            # crash-recovery entry point; the normal ProcessFileReplacement path
+            # always supplies it.
+            if SourceMediaFileId is not None:
+                GateResult = self._RunComplianceGate(LocalStagedPath, SourceMediaFileId, FFmpegCommand)
+                if not GateResult.get('Compliant', False):
+                    CascadeReason = GateResult.get('RefusalReason') or 'unknown'
+                    ErrorMsg = f'ComplianceGateFailed: {CascadeReason}'
+                    LoggingService.LogWarning(
+                        f"Compliance gate refused rename for {LocalStagedPath}: {CascadeReason}. "
+                        f"Deleting `.inprogress`; source `{LocalOriginalPath}` untouched.",
+                        "FileReplacementBusinessService", "_ProcessCompleteFileReplacement",
+                    )
+                    # Delete the .inprogress (criterion 3). Source file untouched.
+                    try:
+                        if os.path.exists(LocalStagedPath):
+                            os.remove(LocalStagedPath)
+                    except Exception as DelEx:
+                        LoggingService.LogException(
+                            f"Compliance gate refused but failed to delete `.inprogress` {LocalStagedPath}",
+                            DelEx, "FileReplacementBusinessService", "_ProcessCompleteFileReplacement"
+                        )
+                    return {
+                        'Success': False,
+                        'ErrorMessage': ErrorMsg,
+                        'ComplianceGateRefused': True,
+                        'CascadeReason': CascadeReason,
+                    }
+
+            if SameSlotReplacement:
+                # Source path == target path (re-transcode of a `-mv.<ext>` file).
+                # Atomic rename dance with a `.replacing.bak` to keep the slot
+                # recoverable across a mid-rename crash. Sequence:
+                #   1. rename source -> source.replacing.bak  (target slot free)
+                #   2. rename .inprogress -> target           (publish new file)
+                #   3. delete source.replacing.bak           (cleanup)
+                # Rollback on (2) failure restores the source from the backup so
+                # the file is never lost. A leftover .replacing.bak from a crash
+                # between (2) and (3) is operator-cleanable; the new file is
+                # already at the canonical name so DB consistency is preserved.
+                BackupPath = LocalOriginalPath + '.replacing.bak'
+                try:
+                    if os.path.exists(BackupPath):
+                        try:
+                            os.remove(BackupPath)
+                            LoggingService.LogInfo(
+                                f"Removed pre-existing backup before same-slot replacement: {BackupPath}",
+                                "FileReplacementBusinessService", "_ProcessCompleteFileReplacement"
+                            )
+                        except Exception as PreBakEx:
+                            ErrorMsg = (
+                                f"Same-slot replacement: pre-existing backup {BackupPath} could not be cleared: {str(PreBakEx)}. "
+                                f"Refusing to proceed."
+                            )
+                            LoggingService.LogError(ErrorMsg, "FileReplacementBusinessService", "_ProcessCompleteFileReplacement")
+                            return {'Success': False, 'ErrorMessage': ErrorMsg}
+
+                    os.rename(LocalOriginalPath, BackupPath)
+                    StepsCompleted.append(
+                        f"Same-slot replacement: backed up source to {os.path.basename(BackupPath)}"
+                    )
+                    try:
+                        os.rename(LocalStagedPath, TargetPath)
+                        StepsCompleted.append(f"Renamed {os.path.basename(LocalStagedPath)} -> {os.path.basename(TargetPath)}")
+                        LoggingService.LogInfo(
+                            f"Same-slot replacement: dropped .inprogress suffix: {LocalStagedPath} -> {TargetPath}",
+                            "FileReplacementBusinessService", "_ProcessCompleteFileReplacement"
+                        )
+                    except Exception as RenameEx:
+                        # Rollback: restore source from backup.
+                        try:
+                            os.rename(BackupPath, LocalOriginalPath)
+                            LoggingService.LogWarning(
+                                f"Same-slot replacement: restored source from backup after rename failure",
+                                "FileReplacementBusinessService", "_ProcessCompleteFileReplacement"
+                            )
+                        except Exception as RestoreEx:
+                            LoggingService.LogException(
+                                f"Same-slot replacement: rollback FAILED -- source at {BackupPath}, "
+                                f"in-progress at {LocalStagedPath}. Manual recovery required.",
+                                RestoreEx, "FileReplacementBusinessService", "_ProcessCompleteFileReplacement"
+                            )
+                        ErrorMsg = f"Same-slot replacement: failed to rename .inprogress to target: {str(RenameEx)}"
+                        LoggingService.LogError(ErrorMsg, "FileReplacementBusinessService", "_ProcessCompleteFileReplacement")
+                        return {'Success': False, 'ErrorMessage': ErrorMsg}
+
+                    # Step 3: delete backup. Best-effort.
+                    try:
+                        os.remove(BackupPath)
+                        StepsCompleted.append(f"Removed backup {os.path.basename(BackupPath)}")
+                    except Exception as DelBakEx:
+                        LoggingService.LogWarning(
+                            f"Same-slot replacement: backup {BackupPath} could not be deleted (operator cleanup): {str(DelBakEx)}",
+                            "FileReplacementBusinessService", "_ProcessCompleteFileReplacement"
+                        )
+                except Exception as e:
+                    ErrorMsg = f"Same-slot replacement: rename dance failed before published: {str(e)}"
+                    LoggingService.LogError(ErrorMsg, "FileReplacementBusinessService", "_ProcessCompleteFileReplacement")
+                    return {'Success': False, 'ErrorMessage': ErrorMsg}
+            else:
+                try:
+                    os.rename(LocalStagedPath, TargetPath)
+                    StepsCompleted.append(f"Renamed {os.path.basename(LocalStagedPath)} -> {os.path.basename(TargetPath)}")
+                    LoggingService.LogInfo(f"Dropped .inprogress suffix: {LocalStagedPath} -> {TargetPath}",
+                                         "FileReplacementBusinessService", "_ProcessCompleteFileReplacement")
+                except Exception as e:
+                    ErrorMsg = f"Failed to rename .inprogress to final target: {str(e)}"
+                    LoggingService.LogError(ErrorMsg, "FileReplacementBusinessService", "_ProcessCompleteFileReplacement")
+                    return {'Success': False, 'ErrorMessage': ErrorMsg}
 
             try:
                 TargetSize = os.path.getsize(TargetPath)
