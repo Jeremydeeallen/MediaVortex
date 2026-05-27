@@ -2,21 +2,27 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Task discipline (READ FIRST)
+## Active mode (READ FIRST)
 
-Every non-trivial code task starts with a task contract. The user confirms or corrects before any code is touched.
+Two delegation modes:
 
-```
-SCOPE: [exactly what will be done]
-NOT IN SCOPE: [things noticed but not fixed this session]
-DONE WHEN: [observable success criteria]
-PIPELINE SURFACES TOUCHED: [other features/files that read/write this code]
-BUDGET: [file/step cap before checking back]
-```
+- **CEO mode** — active whenever `.claude/directive.md` contains a non-empty directive. User sets production acceptance criteria; Claude owns design, planning, sequencing, implementation, and testing. Delivery is "done, here's how to use it" — not "PR for review." Full rules: `.claude/rules/ceo-mode.md`. Current directive: `.claude/directive.md` (auto-loaded).
 
-Correction signal: if the user says **"scope"** (alone or in a sentence), stop, re-read the task contract, and either get back in scope or surface that the scope was wrong. Do not argue. Do not proceed past the redirect.
+- **Task-delegation mode** — fallback when `.claude/directive.md` is empty. Every non-trivial code task starts with a task contract:
 
-Full rules: `.claude/rules/scope-discipline.md`. Mandatory reading for every non-trivial code task.
+  ```
+  SCOPE: [exactly what will be done]
+  NOT IN SCOPE: [things noticed but not fixed this session]
+  DONE WHEN: [observable success criteria]
+  PIPELINE SURFACES TOUCHED: [other features/files that read/write this code]
+  BUDGET: [file/step cap before checking back]
+  ```
+
+  User confirms or corrects before any code is touched.
+
+Correction signal (both modes): if the user says **"scope"** (alone or in a sentence), stop, re-read the directive (CEO mode) or task contract (task-delegation), and either get back in scope or surface that the scope was wrong. Do not argue. Do not proceed past the redirect.
+
+Both modes share `.claude/rules/scope-discipline.md` for per-task discipline (pre-change checks, post-change verification, drift signals). Mandatory reading for every non-trivial code task.
 
 ## Project Overview
 
