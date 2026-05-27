@@ -2,8 +2,76 @@
 
 ## Open
 
-### [BUG-0017] MediaFiles.FileSize NULL on most rows despite recent transcodes that should populate it
+### [BUG-0020] Workers must own their processes end-to-end, and `-mv` must only be appended when the output is actually compliant
+**Date:** 2026-05-26 | **Area:** worker-lifecycle / file-replacement
+
+**What breaks (two coupled gaps):**
+
+1. **End-to-end ownership.** Workers do not own the lifecycle of the processes they spawn. When a worker's encode finishes but a downstream step (FileReplacement, VMAF dispatch, TFP cleanup) fails or races a sibling sweep (see BUG-0018), the partial artifact survives as a disk and/or DB orphan. The worker that created the artifact is in the best position to clean it up -- it knows its own attempt ID, its own `.inprogress` path, and whether FileReplacement returned success. Today that responsibility is split across multiple services (OrphanCleanupService, scan adoption, manual scripts), creating the BUG-0015 + BUG-0018 lifecycle holes we are currently mitigating by hand.
+
+2. **Premature `-mv` naming.** A file is renamed to `<basename>-mv.mp4` once FFmpeg returns 0 and the FFprobe sanity check passes (`worker-lifecycle.feature.md` criterion 8). But "FFmpeg produced a valid MP4" is not the same as "the output is compliant" -- the rename can land on a file that still has wrong audio, missed loudnorm, oversized output (no-savings refusal), or any other downstream-detectable defect. The next scan / cascade recompute then sees a `-mv.mp4` path and assumes work is done, when in fact the file would still get picked up by a remux / audio / transcode job if it were re-evaluated.
+
+   Stronger rule: `-mv` should only be appended when the output passes the same compliance gate that the cascade uses to decide whether a file needs work. If the output would still get re-queued, the rename is misleading at best, an infinite-loop risk at worst (re-encode produces same non-compliant output, `-mv-mv.mp4` grows another generation each cycle -- see Doctor Who / Love Death Robots ghost-row pattern this session).
+
+**Success criteria for the real fix:**
+1. A worker process that produces a `.inprogress` file is responsible for that file's terminal state. On any non-success exit (encode failure, FFprobe failure, FileReplacement failure, kill/crash mid-flow), the same worker deletes the `.inprogress` before releasing the active-job slot. No other service is permitted to delete `.inprogress` files belonging to a live worker.
+2. A worker that completes an encode AND succeeds at FileReplacement is responsible for the post-replacement state (TFP cleanup, MediaFile row update). No other service may touch TFP rows for an attempt whose owning worker is alive.
+3. The `-mv.mp4` rename happens only after compliance is verified against the same predicate the cascade uses (`NeedsQuick`, `NeedsTranscode`, audio criteria, savings gate). If the candidate output would still be re-queued by the cascade, the worker must not rename and must instead emit a non-Replace disposition with the audit trail naming which compliance check failed.
+4. Crash recovery on worker startup (`worker-lifecycle.feature.md` C11-C13) remains the safety net for the case where the worker died before reaching its own cleanup. Crash recovery operates only on rows OWNED by the restarting worker.
+5. After the fix, the operator-run scripts (`CleanupSourceFileOrphans.py`, `CleanupStaleInProgressFiles.py`, `CleanupGenerationalGhostRows.py`, `CleanupOrphanMvPairs.py`) should report zero candidates on a fresh fleet pass -- if they find candidates, that is a worker bug, not an expected sweep target.
+
+**Violates:**
+- `WorkerService/worker-lifecycle.feature.md` criteria 8-13 (rename / cleanup ownership)
+- `Features/FileReplacement/FileReplacement.feature.md` (transition contract)
+- The compliance contract enforced by the cascade in `Features/TranscodeQueue/QueueManagementBusinessService._EvaluateCompliance`
+
+**Related:** BUG-0015 (disk orphans), BUG-0016 (DB ghost-row pairs), BUG-0018 (TFP sweep race). All three are downstream symptoms of the ownership gap this bug names. Fix them together as a single "worker process ownership + compliance-gated rename" feature pass.
+
+---
+
+### [BUG-0019] MediaFiles.AudioNormalizationMode stays NULL after encode that ran loudnorm
+**Date:** 2026-05-25 | **Area:** linear-loudnorm / file-replacement
+
+**What breaks:** Per `linear-loudnorm.feature.md` criterion 14 the column should record `'linear' | 'dynamic' | NULL` based on the mode that BuildAudioFilters selected. Doctor Who S06E04 canary v5 ran with predicted_peak=+2.8 dBTP (forcing dynamic mode) and the emitted ffmpeg command confirms the dynamic-mode loudnorm+alimiter chain ran. Post-replacement `MediaFiles.AudioNormalizationMode = NULL`. Pipeline impact: none -- the column is only read by the Library Compliance tally SQL (linear/dynamic counts) for operator visibility. Files transcode, replace, and serve correctly.
+
+**Repro:** queue any dynamic-mode-eligible source (`SourceIntegratedLufs <= -28 AND SourceTruePeakDbtp >= -3`) through the Transcode path; after FileReplacement, `SELECT AudioNormalizationMode FROM MediaFiles WHERE Id = ...` returns NULL despite the TranscodeAttempts.FfpmpegCommand showing the loudnorm filter ran.
+
+**Look first:** `Models/CommandBuilder.BuildAudioFilters` returns the filter string but does not write the mode anywhere. Either (a) BuildAudioFilters needs to write `AudioNormalizationMode` directly when it picks linear vs dynamic, or (b) FileReplacement / disposition needs to parse the recorded FfpmpegCommand and derive the mode at replacement time. Owner contract per linear-loudnorm.feature.md C14.
+
+**Violates:** `Features/LoudnessAnalysis/linear-loudnorm.feature.md` criterion 14 (mode tally column populated for every encode that ran loudnorm).
+
+---
+
+### [BUG-0018] OrphanCleanupService._SweepTemporaryFilePaths races FileReplacement during the VMAF window
+**Date:** 2026-05-25 | **Area:** orphan-cleanup / file-replacement
+
+**Status:** **Mitigated, not fixed.** Sweep is disabled (`return 0`) in `Features/ServiceControl/OrphanCleanupService.py` pending the redesign below. Operator-cleanable TFP accumulation is the accepted trade until the proper fix ships.
+
+**Related: [BUG-0015]** is the disk-side companion to this DB-side hole. Both are symptoms of the same architectural gap: nothing reconciles disk `.inprogress` / `-mv.mp4` orphans against `TemporaryFilePaths` + `TranscodeAttempts` state. Fix them together as a single "TFP/disk lifecycle" feature pass, otherwise the disk-orphan sweep and DB-orphan sweep will keep racing each other and the live pipeline.
+
+**Reproduced twice on Doctor Who S06E04:**
+- *Canary v2* (legacy predicate `Success IS NOT NULL`): encode 16:32-16:48 -> VMAF -> Disposition=Replace+VmafPassed, FileReplaced=FALSE, `.inprogress` (297 MB) stranded.
+- *Canary v3* (tightened predicate `Success=FALSE OR FileReplaced=TRUE OR Disposition IN ('Discard','NoReplace','Requeue')`): same outcome. OrphanCleanup logged `removed 1 TemporaryFilePaths rows` at 23:15:26 UTC while attempt 25927 was `Success=TRUE, Disposition=Pending` -- a state that should NOT match the tightened predicate. Predicate-tightening is the wrong gate either way; investigation halted at the user's request to avoid further token spend.
+
+**What breaks:** Encode finishes -> `Success=TRUE` committed -> file sits in QualityTestingQueue for 5-15 min while VMAF runs -> OrphanCleanup sweeps every ~120s on each of 4 worker containers. The TFP row gets deleted somewhere in that window. When VMAF lands and disposition flips to Replace, `FileReplacementBusinessService.ProcessFileReplacement` reads SourceStorageRootId/SourceRelativePath from TFP, finds nothing, bails silently. `.inprogress` stays on disk, MediaFiles row never updates, no audit trail beyond `_AutoCaptureStillsIfPolicyFires` warnings logged after VMAF score lands.
+
+**Why predicate-tightening is the wrong approach:** "Orphan" is being inferred from columns on the parent attempt (Success/Disposition/FileReplaced). The actual orphan signal is *no live owner has work in progress* -- and during the VMAF window the live owner is the QualityTesting worker, whose presence is recorded in `QualityTestingQueue` + `ActiveJobs`, not in `TranscodeAttempts`. The sweep can't see liveness from the columns it's checking.
+
+**Success criteria for the real fix:**
+1. `_SweepTemporaryFilePaths` deletes a TFP row only when **all three** are true: (a) no `QualityTestingQueue` row exists for the parent TranscodeAttemptId; (b) no `ActiveJobs` row exists for that attempt (across both `Transcode` and `QualityTest` ServiceNames); (c) the parent attempt's terminal state is recorded (`Success=FALSE` OR `FileReplaced=TRUE` OR `Disposition IN ('Discard','NoReplace','Requeue')`).
+2. After re-enabling, a 4-file Transcode+VMAF canary across larry-worker-1..4 must produce zero `.inprogress` files stranded; every attempt either reaches FileReplaced=TRUE or records a non-Replace disposition with TFP cleaned by the disposition owner.
+3. The sweep logs the attempt IDs it touches on each non-zero run (`OrphanCleanup deleted TFP for TranscodeAttemptIds=[...]`) so any future race is diagnosable from logs alone, not from inference.
+
+**Violates:** `transcode.flow.md` Stage 7 (FileReplacement must complete for any Disposition in {Replace, BypassReplace}).
+
+---
+
+### [BUG-0017 - RESOLVED 2026-05-25] MediaFiles.FileSize NULL on most rows despite recent transcodes that should populate it
 **Date:** 2026-05-24 | **Area:** file-replacement
+
+**Resolution 2026-05-25:** Root cause confirmed -- `Repositories/DatabaseManager.SaveMediaFile` UPDATE and INSERT both omitted `FileSize` from their column lists. Same omission silently dropped 5 sibling columns assigned by `FileReplacementBusinessService._UpdateMediaFilesAfterReplacement`: `LastModifiedDate`, `ResolutionCategory`, `IsInterlaced`, `AudioLanguages`, `HasExplicitEnglishAudio`. Fix adds all 6 columns to both UPDATE branches and the INSERT. UPDATEs use `COALESCE(%s, ColumnName)` so callers that fetched a model via legacy SELECT paths (which still don't load these columns) cannot blank existing DB values. INSERT is direct since new rows have no prior state. Round-trip verified on Id=7323.
+
+**Original report below.**
 
 **What breaks:** `FileReplacementBusinessService._UpdateMediaFilesAfterReplacement` sets `media_file.FileSize = os.path.getsize(LocalNewFilePath)` and then calls `SaveMediaFile`. Per `Repositories/DatabaseManager.SaveMediaFile`, the column SHOULD be persisted. In practice many MediaFiles rows have `FileSize IS NULL` even when their corresponding TranscodeAttempts shows a successful post-flight replacement. The downstream impact: queue inserts that read `MediaFiles.FileSize` and propagate it to `TranscodeQueue.SizeBytes` and then `TranscodeAttempts.OldSizeBytes` end up with 0 -- the post-transcode defense-in-depth check at `FileReplacementBusinessService.py:196-208` then refuses with `NewSize >= OldSize=0`, even though a successful encode just happened.
 
@@ -16,8 +84,6 @@
 - Triggered the defense-in-depth refusal in the second harness test case, blocking the Transcode step.
 
 **Look first:** `Repositories/DatabaseManager.SaveMediaFile` UPDATE SET clause -- is `FileSize` actually in the column list, or is it being silently dropped? Compare to the INSERT path. If the column is in both paths, check whether some caller is overwriting with None on a later UPDATE.
-
-**Fix with:** `/t BUG-0017`.
 
 ---
 
@@ -55,6 +121,8 @@ Returns matched pairs. Pipeline runs on any source_id will hit the constraint.
 ### [BUG-0015] Orphan `-mv.mp4` files on disk without corresponding MediaFiles row
 **Date:** 2026-05-24 | **Area:** file-replacement
 
+**Related: [BUG-0018]** is the DB-side companion to this disk-side hole. Both are symptoms of the same architectural gap: nothing reconciles disk `.inprogress` / `-mv.mp4` orphans against `TemporaryFilePaths` + `TranscodeAttempts` state. Fix them together as a single "TFP/disk lifecycle" feature pass -- piecemeal fixes will keep racing each other and the live pipeline.
+
 **What breaks:** Filesystem directories accumulate `-mv.mp4` (and `-mv.mp4.inprogress`) files with no DB row pointing at them. When the pipeline runs a Quick Fix on a sibling source, `_ProcessCompleteFileReplacement` at line 425 refuses with `"Refusing to overwrite existing file at target"`. Encode aborts before any state change.
 
 **Repro:**
@@ -73,8 +141,16 @@ Returns matched pairs. Pipeline runs on any source_id will hit the constraint.
 
 ---
 
-### [BUG-0014] Linear-loudnorm overshoots TargetTruePeak in dynamic-mode fallback
+### [BUG-0014 - RESOLVED 2026-05-26] Linear-loudnorm overshoots TargetTruePeak in dynamic-mode fallback
 **Date:** 2026-05-24 | **Area:** linear-loudnorm
+
+**Resolution 2026-05-26 (v2, verified on real-world content):** `Models/CommandBuilder.BuildAudioFilters` appends `,alimiter=limit=<linear>:attack=1:level=0` after `loudnorm=...` ONLY when dynamic mode fires (linear mode untouched -- it hits TP precisely on its own). The alimiter ceiling is set **2 dB under** `TargetTruePeak` (default -2 -> alimiter at -4 dBFS sample-peak, linear amplitude 0.6310) and `attack=1` (1ms, down from the 5ms default) so transient peaks get clamped before they leak through the attack window. `level=0` disables alimiter's auto-leveling so loudnorm's integrated loudness target survives unchanged. The chain is transparent on quiet content (no clamping below the ceiling).
+
+**v1 (-3 dBFS / default 5ms attack) failed in production:** Doctor Who S06E04 canary 2026-05-25 18:42 measured **-1.6 dBTP** post-encode -- alimiter clamped sample peaks but the 5ms attack let individual transients ride 1.4 dB above the threshold into the inter-sample-peak region. v2 tightens both limit and attack.
+
+**v2 verification (2026-05-26 04:13):** Doctor Who S03E10 (Blink) Bluray-720p, source measured I=-28.0 LUFS, TP=-0.8 dBTP, predicted_peak=+4.2 dBTP -> dynamic mode fires. Post-encode ebur128: I=-22.3 LUFS, **Peak=-2.6 dBFS**. Criterion 26 passes with 0.6 dB margin. Audio path command captured in TranscodeAttempts.FfpmpegCommand: `loudnorm=I=-23:LRA=...:TP=-2:measured_I=-28.00:...,alimiter=limit=0.6310:attack=1:level=0`.
+
+**Original report below.**
 
 **What breaks:** Per `linear-loudnorm.feature.md` criterion 12 the loudnorm filter is supposed to honor `TargetTruePeak` (default -2 dBTP) in both linear and dynamic modes. In practice, dynamic-mode fallback (triggered when predicted_peak > TP at gate time -- criterion 10) produces output that exceeds the TP target by 1-3 dBTP. FFmpeg loudnorm's internal limiter is not enforcing TP=-2 reliably; output peak can ride well above 0 dBTP, causing audible clipping on downstream playback.
 
@@ -97,8 +173,6 @@ Returns matched pairs. Pipeline runs on any source_id will hit the constraint.
 - Use a lower `TargetLoudness` for ungainable files (compute the max integrated that keeps peak <= -2)
 
 **Violates:** `Features/LoudnessAnalysis/linear-loudnorm.feature.md` criterion 26 (output TP at or below TargetTruePeak).
-
-**Fix with:** `/t BUG-0014`.
 
 ---
 

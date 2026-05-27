@@ -513,17 +513,19 @@ class DatabaseManager:
     def GetAllMediaFiles(self) -> List[MediaFileModel]:
         """Get all media files."""
         query = """
-            SELECT Id, SeasonId, StorageRootId, RelativePath, FilePath, FileName, SizeMB, VideoBitrateKbps, AudioBitrateKbps,
+            SELECT Id, SeasonId, StorageRootId, RelativePath, FilePath, FileName, SizeMB, FileSize,
+                   VideoBitrateKbps, AudioBitrateKbps,
                    Resolution, Codec, DurationMinutes, FrameRate, LastScannedDate,
                    CompressionPotential, AssignedProfile, IsInterlaced, ResolutionCategory,
-                   FileModificationTime, TotalFrames, CodecProfile, ColorRange, FieldOrder,
+                   FileModificationTime, LastModifiedDate, TotalFrames, CodecProfile, ColorRange, FieldOrder,
                    HasBFrames, RefFrames, PixelFormat, Level, AudioChannels, AudioSampleRate,
-                   AudioSampleFormat, AudioChannelLayout, AudioCodec, SubtitleFormats,
+                   AudioSampleFormat, AudioChannelLayout, AudioCodec, AudioLanguages, HasExplicitEnglishAudio,
+                   SubtitleFormats,
                    ContainerFormat, OverallBitrate, TranscodedByMediaVortex
             FROM MediaFiles
         """
         rows = self.DatabaseService.ExecuteQuery(query)
-        
+
         mediaFiles = []
         for row in rows:
             mediaFile = MediaFileModel(
@@ -534,6 +536,7 @@ class DatabaseManager:
                 FilePath=row['FilePath'],
                 FileName=row['FileName'],
                 SizeMB=row['SizeMB'],
+                FileSize=row.get('FileSize'),
                 VideoBitrateKbps=row['VideoBitrateKbps'],
                 AudioBitrateKbps=row['AudioBitrateKbps'],
                 Resolution=row['Resolution'],
@@ -546,6 +549,7 @@ class DatabaseManager:
                 IsInterlaced=row['IsInterlaced'],
                 ResolutionCategory=row['ResolutionCategory'],
                 FileModificationTime=row['FileModificationTime'],
+                LastModifiedDate=row.get('LastModifiedDate'),
                 TotalFrames=row['TotalFrames'],
                 CodecProfile=row['CodecProfile'],
                 ColorRange=row['ColorRange'],
@@ -559,6 +563,8 @@ class DatabaseManager:
                 AudioSampleFormat=row['AudioSampleFormat'],
                 AudioChannelLayout=row['AudioChannelLayout'],
                 AudioCodec=row['AudioCodec'],
+                AudioLanguages=row.get('AudioLanguages'),
+                HasExplicitEnglishAudio=row.get('HasExplicitEnglishAudio'),
                 SubtitleFormats=row['SubtitleFormats'],
                 ContainerFormat=row['ContainerFormat'],
                 OverallBitrate=row['OverallBitrate'],
@@ -571,12 +577,14 @@ class DatabaseManager:
     def GetMediaFileById(self, MediaFileId: int) -> Optional[MediaFileModel]:
         """Get a specific media file by ID."""
         query = """
-            SELECT Id, SeasonId, StorageRootId, RelativePath, FilePath, FileName, SizeMB, VideoBitrateKbps, AudioBitrateKbps,
+            SELECT Id, SeasonId, StorageRootId, RelativePath, FilePath, FileName, SizeMB, FileSize,
+                   VideoBitrateKbps, AudioBitrateKbps,
                    Resolution, Codec, DurationMinutes, FrameRate, LastScannedDate,
                    CompressionPotential, AssignedProfile, IsInterlaced, ResolutionCategory,
-                   FileModificationTime, TotalFrames, CodecProfile, ColorRange, FieldOrder,
+                   FileModificationTime, LastModifiedDate, TotalFrames, CodecProfile, ColorRange, FieldOrder,
                    HasBFrames, RefFrames, PixelFormat, Level, AudioChannels, AudioSampleRate,
-                   AudioSampleFormat, AudioChannelLayout, AudioCodec, SubtitleFormats,
+                   AudioSampleFormat, AudioChannelLayout, AudioCodec, AudioLanguages, HasExplicitEnglishAudio,
+                   SubtitleFormats,
                    ContainerFormat, OverallBitrate, TranscodedByMediaVortex,
                    AudioComplete, AudioCorruptSuspect, AudioCorruptReason,
                    SourceIntegratedLufs, SourceLoudnessRangeLU, SourceTruePeakDbtp,
@@ -600,6 +608,7 @@ class DatabaseManager:
                 FilePath=row['FilePath'],
             FileName=row['FileName'],
             SizeMB=row['SizeMB'],
+            FileSize=row.get('FileSize'),
             VideoBitrateKbps=row['VideoBitrateKbps'],
             AudioBitrateKbps=row['AudioBitrateKbps'],
             Resolution=row['Resolution'],
@@ -612,6 +621,7 @@ class DatabaseManager:
             IsInterlaced=row['IsInterlaced'],
             ResolutionCategory=row['ResolutionCategory'],
             FileModificationTime=row['FileModificationTime'],
+            LastModifiedDate=row.get('LastModifiedDate'),
             TotalFrames=row['TotalFrames'],
             CodecProfile=row['CodecProfile'],
             ColorRange=row['ColorRange'],
@@ -625,6 +635,8 @@ class DatabaseManager:
             AudioSampleFormat=row['AudioSampleFormat'],
             AudioChannelLayout=row['AudioChannelLayout'],
             AudioCodec=row['AudioCodec'],
+            AudioLanguages=row.get('AudioLanguages'),
+            HasExplicitEnglishAudio=row.get('HasExplicitEnglishAudio'),
             SubtitleFormats=row['SubtitleFormats'],
             ContainerFormat=row['ContainerFormat'],
             OverallBitrate=row['OverallBitrate'],
@@ -666,27 +678,45 @@ class DatabaseManager:
                         # Record already exists - convert to update instead of creating a duplicate
                         MediaFile.Id = existingRow['Id']
                         LoggingService.LogInfo(f"Duplicate prevented: file already exists with ID {MediaFile.Id}, converting to update: {MediaFile.FilePath}", "DatabaseManager", "SaveMediaFile")
+                        # COALESCE-protected columns (FileSize, ResolutionCategory, IsInterlaced,
+                        # LastModifiedDate, AudioLanguages, HasExplicitEnglishAudio): pre-2026-05-25
+                        # these were silently dropped from UPDATE, so existing rows may have
+                        # values set by separate writers. None-on-model means "do not touch."
                         query = """
                             UPDATE MediaFiles
-                            SET SeasonId = %s, FilePath = %s, FileName = %s, SizeMB = %s, VideoBitrateKbps = %s,
-                                AudioBitrateKbps = %s, Resolution = %s, Codec = %s, DurationMinutes = %s,
+                            SET SeasonId = %s, FilePath = %s, FileName = %s, SizeMB = %s,
+                                FileSize = COALESCE(%s, FileSize),
+                                VideoBitrateKbps = %s,
+                                AudioBitrateKbps = %s, Resolution = %s,
+                                ResolutionCategory = COALESCE(%s, ResolutionCategory),
+                                IsInterlaced = COALESCE(%s, IsInterlaced),
+                                Codec = %s, DurationMinutes = %s,
                                 FrameRate = %s, LastScannedDate = %s, CompressionPotential = %s, AssignedProfile = %s,
-                                FileModificationTime = %s, TotalFrames = %s, CodecProfile = %s, ColorRange = %s,
-                                FieldOrder = %s, HasBFrames = %s, RefFrames = %s, PixelFormat = %s, Level = %s,
-                                AudioChannels = %s, AudioSampleRate = %s, AudioSampleFormat = %s,
-                                AudioChannelLayout = %s, AudioCodec = %s, SubtitleFormats = %s,
+                                FileModificationTime = %s,
+                                LastModifiedDate = COALESCE(%s, LastModifiedDate),
+                                TotalFrames = %s, CodecProfile = %s,
+                                ColorRange = %s, FieldOrder = %s, HasBFrames = %s, RefFrames = %s, PixelFormat = %s,
+                                Level = %s, AudioChannels = %s, AudioSampleRate = %s, AudioSampleFormat = %s,
+                                AudioChannelLayout = %s, AudioCodec = %s,
+                                AudioLanguages = COALESCE(%s, AudioLanguages),
+                                HasExplicitEnglishAudio = COALESCE(%s, HasExplicitEnglishAudio),
+                                SubtitleFormats = %s,
                                 ContainerFormat = %s, OverallBitrate = %s, TranscodedByMediaVortex = %s
                             WHERE Id = %s
                         """
                         parameters = (
                             MediaFile.SeasonId, MediaFile.FilePath, MediaFile.FileName, MediaFile.SizeMB,
+                            MediaFile.FileSize,
                             MediaFile.VideoBitrateKbps, MediaFile.AudioBitrateKbps, MediaFile.Resolution,
+                            MediaFile.ResolutionCategory, MediaFile.IsInterlaced,
                             MediaFile.Codec, MediaFile.DurationMinutes, MediaFile.FrameRate,
                             MediaFile.LastScannedDate, MediaFile.CompressionPotential, MediaFile.AssignedProfile,
-                            MediaFile.FileModificationTime, MediaFile.TotalFrames, MediaFile.CodecProfile,
+                            MediaFile.FileModificationTime, MediaFile.LastModifiedDate,
+                            MediaFile.TotalFrames, MediaFile.CodecProfile,
                             MediaFile.ColorRange, MediaFile.FieldOrder, MediaFile.HasBFrames, MediaFile.RefFrames,
                             MediaFile.PixelFormat, MediaFile.Level, MediaFile.AudioChannels, MediaFile.AudioSampleRate,
                             MediaFile.AudioSampleFormat, MediaFile.AudioChannelLayout, MediaFile.AudioCodec,
+                            MediaFile.AudioLanguages, MediaFile.HasExplicitEnglishAudio,
                             MediaFile.SubtitleFormats, MediaFile.ContainerFormat,
                             MediaFile.OverallBitrate, MediaFile.TranscodedByMediaVortex, MediaFile.Id
                         )
@@ -698,27 +728,33 @@ class DatabaseManager:
                     LoggingService.LogInfo("Inserting new media file...")
                     query = """
                         INSERT INTO MediaFiles
-                        (SeasonId, StorageRootId, RelativePath, FilePath, FileName, SizeMB, VideoBitrateKbps, AudioBitrateKbps,
-                         Resolution, Codec, DurationMinutes, FrameRate, LastScannedDate,
-                         CompressionPotential, AssignedProfile, FileModificationTime,
+                        (SeasonId, StorageRootId, RelativePath, FilePath, FileName, SizeMB, FileSize,
+                         VideoBitrateKbps, AudioBitrateKbps,
+                         Resolution, ResolutionCategory, IsInterlaced,
+                         Codec, DurationMinutes, FrameRate, LastScannedDate,
+                         CompressionPotential, AssignedProfile, FileModificationTime, LastModifiedDate,
                          TotalFrames, CodecProfile, ColorRange, FieldOrder, HasBFrames, RefFrames,
                          PixelFormat, Level, AudioChannels, AudioSampleRate, AudioSampleFormat,
-                         AudioChannelLayout, AudioCodec, SubtitleFormats,
+                         AudioChannelLayout, AudioCodec, AudioLanguages, HasExplicitEnglishAudio,
+                         SubtitleFormats,
                          ContainerFormat, OverallBitrate, TranscodedByMediaVortex)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         RETURNING Id
                     """
                     parameters = (
                         MediaFile.SeasonId, MediaFile.StorageRootId, MediaFile.RelativePath,
-                        MediaFile.FilePath, MediaFile.FileName, MediaFile.SizeMB,
+                        MediaFile.FilePath, MediaFile.FileName, MediaFile.SizeMB, MediaFile.FileSize,
                         MediaFile.VideoBitrateKbps, MediaFile.AudioBitrateKbps, MediaFile.Resolution,
+                        MediaFile.ResolutionCategory, MediaFile.IsInterlaced,
                         MediaFile.Codec, MediaFile.DurationMinutes, MediaFile.FrameRate,
                         MediaFile.LastScannedDate, MediaFile.CompressionPotential, MediaFile.AssignedProfile,
-                        MediaFile.FileModificationTime, MediaFile.TotalFrames, MediaFile.CodecProfile,
+                        MediaFile.FileModificationTime, MediaFile.LastModifiedDate,
+                        MediaFile.TotalFrames, MediaFile.CodecProfile,
                         MediaFile.ColorRange, MediaFile.FieldOrder, MediaFile.HasBFrames, MediaFile.RefFrames,
                         MediaFile.PixelFormat, MediaFile.Level, MediaFile.AudioChannels, MediaFile.AudioSampleRate,
                         MediaFile.AudioSampleFormat, MediaFile.AudioChannelLayout, MediaFile.AudioCodec,
-                            MediaFile.SubtitleFormats, MediaFile.ContainerFormat,
+                        MediaFile.AudioLanguages, MediaFile.HasExplicitEnglishAudio,
+                        MediaFile.SubtitleFormats, MediaFile.ContainerFormat,
                         MediaFile.OverallBitrate, MediaFile.TranscodedByMediaVortex
                     )
                     LoggingService.LogInfo(f"Insert media file parameters: {parameters}", "DatabaseManager", "SaveMediaFile")
@@ -730,30 +766,44 @@ class DatabaseManager:
                 else:
                     # Update existing media file
                     LoggingService.LogInfo(f"Updating existing media file with ID: {MediaFile.Id}", "DatabaseManager", "SaveMediaFile")
+                    # COALESCE-protected columns: see duplicate-path UPDATE above.
                     query = """
                         UPDATE MediaFiles
                         SET SeasonId = %s, StorageRootId = %s, RelativePath = %s,
-                            FilePath = %s, FileName = %s, SizeMB = %s, VideoBitrateKbps = %s,
-                            AudioBitrateKbps = %s, Resolution = %s, Codec = %s, DurationMinutes = %s,
+                            FilePath = %s, FileName = %s, SizeMB = %s,
+                            FileSize = COALESCE(%s, FileSize),
+                            VideoBitrateKbps = %s,
+                            AudioBitrateKbps = %s, Resolution = %s,
+                            ResolutionCategory = COALESCE(%s, ResolutionCategory),
+                            IsInterlaced = COALESCE(%s, IsInterlaced),
+                            Codec = %s, DurationMinutes = %s,
                             FrameRate = %s, LastScannedDate = %s, CompressionPotential = %s, AssignedProfile = %s,
-                            FileModificationTime = %s, TotalFrames = %s, CodecProfile = %s, ColorRange = %s,
-                            FieldOrder = %s, HasBFrames = %s, RefFrames = %s, PixelFormat = %s, Level = %s,
-                            AudioChannels = %s, AudioSampleRate = %s, AudioSampleFormat = %s,
-                            AudioChannelLayout = %s, AudioCodec = %s, SubtitleFormats = %s,
+                            FileModificationTime = %s,
+                            LastModifiedDate = COALESCE(%s, LastModifiedDate),
+                            TotalFrames = %s, CodecProfile = %s,
+                            ColorRange = %s, FieldOrder = %s, HasBFrames = %s, RefFrames = %s, PixelFormat = %s,
+                            Level = %s, AudioChannels = %s, AudioSampleRate = %s, AudioSampleFormat = %s,
+                            AudioChannelLayout = %s, AudioCodec = %s,
+                            AudioLanguages = COALESCE(%s, AudioLanguages),
+                            HasExplicitEnglishAudio = COALESCE(%s, HasExplicitEnglishAudio),
+                            SubtitleFormats = %s,
                             ContainerFormat = %s, OverallBitrate = %s, TranscodedByMediaVortex = %s
                         WHERE Id = %s
                     """
                     parameters = (
                         MediaFile.SeasonId, MediaFile.StorageRootId, MediaFile.RelativePath,
-                        MediaFile.FilePath, MediaFile.FileName, MediaFile.SizeMB,
+                        MediaFile.FilePath, MediaFile.FileName, MediaFile.SizeMB, MediaFile.FileSize,
                         MediaFile.VideoBitrateKbps, MediaFile.AudioBitrateKbps, MediaFile.Resolution,
+                        MediaFile.ResolutionCategory, MediaFile.IsInterlaced,
                         MediaFile.Codec, MediaFile.DurationMinutes, MediaFile.FrameRate,
                         MediaFile.LastScannedDate, MediaFile.CompressionPotential, MediaFile.AssignedProfile,
-                        MediaFile.FileModificationTime, MediaFile.TotalFrames, MediaFile.CodecProfile,
+                        MediaFile.FileModificationTime, MediaFile.LastModifiedDate,
+                        MediaFile.TotalFrames, MediaFile.CodecProfile,
                         MediaFile.ColorRange, MediaFile.FieldOrder, MediaFile.HasBFrames, MediaFile.RefFrames,
                         MediaFile.PixelFormat, MediaFile.Level, MediaFile.AudioChannels, MediaFile.AudioSampleRate,
                         MediaFile.AudioSampleFormat, MediaFile.AudioChannelLayout, MediaFile.AudioCodec,
-                            MediaFile.SubtitleFormats, MediaFile.ContainerFormat,
+                        MediaFile.AudioLanguages, MediaFile.HasExplicitEnglishAudio,
+                        MediaFile.SubtitleFormats, MediaFile.ContainerFormat,
                         MediaFile.OverallBitrate, MediaFile.TranscodedByMediaVortex, MediaFile.Id
                     )
                     LoggingService.LogInfo(f"Update media file parameters: {parameters}", "DatabaseManager", "SaveMediaFile")

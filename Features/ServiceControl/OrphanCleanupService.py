@@ -53,30 +53,23 @@ class OrphanCleanupService:
         }
 
     def _SweepTemporaryFilePaths(self) -> int:
-        try:
-            Removed = self.DatabaseService.ExecuteNonQuery(
-                """
-                DELETE FROM TemporaryFilePaths
-                WHERE TranscodeAttemptId IN (
-                    SELECT Id FROM TranscodeAttempts WHERE Success IS NOT NULL
-                )
-                """,
-                (),
-            )
-            if Removed:
-                LoggingService.LogWarning(
-                    f"OrphanCleanup removed {Removed} TemporaryFilePaths rows "
-                    f"for finished TranscodeAttempts -- a terminal-state cleanup "
-                    f"path is leaking, investigate.",
-                    "OrphanCleanupService", "_SweepTemporaryFilePaths",
-                )
-            return Removed or 0
-        except Exception as Ex:
-            LoggingService.LogException(
-                "TFP orphan sweep failed", Ex,
-                "OrphanCleanupService", "_SweepTemporaryFilePaths",
-            )
-            return 0
+        # 2026-05-25: TFP sweep disabled pending BUG-0018 redesign. The legacy
+        # `Success IS NOT NULL` predicate and the first-attempt tighter predicate
+        # (Success=FALSE / FileReplaced=TRUE / Disposition IN terminal-no-replace)
+        # both raced FileReplacement during the VMAF window and silently deleted
+        # in-flight TFP rows -- Doctor Who S06E04 canary v2 + v3 lost their TFP
+        # mid-VMAF and ended with `.inprogress` files stranded on disk. Correct
+        # design uses liveness signals (QualityTestingQueue + ActiveJobs rows for
+        # the parent TranscodeAttemptId) instead of column inference. Until that
+        # ships, no sweep -- real TFP cleanup is owned by FileReplacement on
+        # Replace/BypassReplace and by _CommitDisposition on terminal-no-replace.
+        # Small operator-cleanable accumulation is the accepted trade for not
+        # racing the live pipeline.
+        LoggingService.LogInfo(
+            "TFP sweep disabled pending BUG-0018 redesign (liveness-based predicate).",
+            "OrphanCleanupService", "_SweepTemporaryFilePaths",
+        )
+        return 0
 
     def _SweepActiveJobs(self, ServiceName: str, QueueTable: str) -> int:
         try:

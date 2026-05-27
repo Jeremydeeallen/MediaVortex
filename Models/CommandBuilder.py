@@ -557,11 +557,26 @@ class CommandBuilder:
                 "CommandBuilder", "BuildAudioFilters",
             )
         else:
-            Filter = Common
+            # BUG-0014: loudnorm's dynamic-mode internal limiter does not
+            # reliably enforce TP -- observed overshoot of +1 to +3 dBTP on
+            # quiet-but-peaky sources. Chain a sample-peak alimiter after
+            # loudnorm with 2 dB headroom under TargetTruePeak and a 1ms
+            # attack so transient peaks get clamped before they ride
+            # through. First-iteration value of -1 dB / 5ms attack landed
+            # Doctor Who S06E04 output at -1.6 dBTP (criterion 26 needs
+            # <= -2 dBTP) -- the 5ms default attack let individual sample
+            # transients leak above the threshold. level=0 disables
+            # alimiter's autoleveling so loudnorm's integrated target is
+            # preserved; alimiter only acts when peaks would otherwise
+            # exceed the ceiling.
+            SafetyDb = float(TargetTp) - 2.0
+            SafetyLinear = 10.0 ** (SafetyDb / 20.0)
+            Filter = f"{Common},alimiter=limit={SafetyLinear:.4f}:attack=1:level=0"
             LoggingService.LogInfo(
                 f"dynamic loudnorm: ungainable peak (would clip at "
                 f"{PredictedPeak:+.2f} dBTP), target_LRA={TargetLra:.2f} "
-                f"(source {float(L_Lu):.2f}), "
+                f"(source {float(L_Lu):.2f}), TP-safety alimiter at "
+                f"{SafetyDb:+.1f} dBFS with 1ms attack, "
                 f"MediaFileId={getattr(MediaFile, 'Id', None)}",
                 "CommandBuilder", "BuildAudioFilters",
             )
