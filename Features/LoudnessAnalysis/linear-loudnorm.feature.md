@@ -210,8 +210,11 @@ pipeline.
     loudnorm (see criterion 12). Otherwise emits dynamic-mode loudnorm
     with the same `measured_*` params, same target loudness, same
     target TP, no `linear=true` flag. The mode actually used is
-    written to `MediaFiles.AudioNormalizationMode` in the same
-    post-flight transaction as `MarkAudioComplete`. Mode choice is
+    written to `MediaFiles.AudioNormalizationMode` by FileReplacement
+    after the post-replacement FFprobe, by parsing the just-run
+    FFmpeg command via `AudioCompletionService.DetectNormalizationMode`
+    (`linear=true` token => `'linear'`, `loudnorm` without the flag =>
+    `'dynamic'`, no `loudnorm` => leave unchanged). Mode choice is
     logged per encode (`linear loudnorm: gain=+X dB` or
     `dynamic loudnorm: ungainable peak (would clip at +Y dBTP)`).
     Verifiable: build commands for two synthetic rows -- one with
@@ -398,6 +401,7 @@ DRAFT -- criteria pending operator approval. No code until approved.
 - [x] Step 8: Doc consolidation done. Parameter tables removed from Docs/AudioStrategy.md, audio-completion.feature.md, audio-completion.flow.md, remux.flow.md, transcode.flow.md, media-tabs-and-loudness.feature.md, command-builder.feature.md, transcode-vs-remux-routing.feature.md. Grep audit clean -- only allowed files (this feature's docs, KNOWN-ISSUES, mediavortex-analyze-transcode) contain the forbidden tokens.
 - [x] Step 9: Operator visibility -- SQL one-liner in Runbook produces all four counts (awaiting / failed / linear / dynamic). Activity panel sub-section will be added when the parent Library Compliance panel ships (per audio-completion.feature.md criterion 18 DEFERRED note). Criterion 23 satisfied via documented SQL fallback.
 - [ ] Step 10: Live verify on a real cinematic file per criteria 25-27. Partial verification via pipeline-test-harness 2026-05-24: Quick Fix on MediaFile 683333 (HIMYM S06E08-mv.mp4, 81 MB) ran end-to-end -- integrated loudness landed within ±1 LUFS of target (criterion 25 PASS) BUT true peak measured +1.70 dBTP, exceeding the -2 dBTP target by 3.7 dB (criterion 26 FAIL). Filed as BUG-0014. Dynamic-mode TP enforcement appears broken on hot-peak sources. Full criterion 27 (output LRA >= source LRA) not yet measured. Step requires BUG-0014 fix before re-running. Also surfaced production gaps captured as BUG-0015 (orphan -mv.mp4 disk files), BUG-0016 (orphan MediaFiles rows for -mv.mp4 paths), BUG-0017 (MediaFiles.FileSize NULL drops downstream defense-in-depth check).
+- [x] BUG-0019 fix (2026-05-27): `MediaFiles.AudioNormalizationMode` was staying NULL after encodes that ran loudnorm. Two-gap fix: (a) added the column to `DatabaseManager.SaveMediaFile`'s UPDATE/INSERT with COALESCE protection; (b) `FileReplacementBusinessService._UpdateMediaFilesAfterReplacement` now accepts an `FFmpegCommand` parameter and derives the mode via the new `AudioCompletionService.DetectNormalizationMode` helper. Live-verified on canary 3 (MediaFile 6490, Steven Universe S01E37) -- column reads `'linear'`. Round-trip protected by `Tests/Contract/TestMediaFilePersistence.py`. Commit d93c485.
 
 ## Runbook
 
