@@ -2,6 +2,22 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Task discipline (READ FIRST)
+
+Every non-trivial code task starts with a task contract. The user confirms or corrects before any code is touched.
+
+```
+SCOPE: [exactly what will be done]
+NOT IN SCOPE: [things noticed but not fixed this session]
+DONE WHEN: [observable success criteria]
+PIPELINE SURFACES TOUCHED: [other features/files that read/write this code]
+BUDGET: [file/step cap before checking back]
+```
+
+Correction signal: if the user says **"scope"** (alone or in a sentence), stop, re-read the task contract, and either get back in scope or surface that the scope was wrong. Do not argue. Do not proceed past the redirect.
+
+Full rules: `.claude/rules/scope-discipline.md`. Mandatory reading for every non-trivial code task.
+
 ## Project Overview
 
 MediaVortex is a media transcoding and management system built with Python/Flask. It scans media files, assigns transcode profiles, queues and executes FFmpeg transcoding jobs, and integrates with Jellyfin for playback optimization.
