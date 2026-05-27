@@ -61,11 +61,11 @@ COMPLETE 2026-05-27 — verified live on I9 against MediaFile 6486 (Steven Unive
 1. `IsCompliant=true, RecommendedMode=NULL` ✓
 2. Probe-populated columns match re-probe, including the new `AudioNormalizationMode='linear'` (BUG-0019 closed live) and IsInterlaced derived from FieldOrder ✓
 3. `FilePath` ends in `-mv.mp4`, original `.mkv` gone, no `.inprogress`/`.replacing.bak` artifacts ✓
-4. Jellyfin notify code path executed with correct payload (2 updates: Deleted source + Created -mv.mp4); the "POST returned 204" verification is operator-suppressed because `JellyfinNotifyDryRun=1` is set — dry-run logs show the in-our-control intent ✓ (with caveat)
+4. Jellyfin POST returned 204 — live-verified on canary 3 (MediaFile 6490, Steven Universe S01E37). Log line: `JellyfinNotify: sent 2 update(s), status=204`. `JellyfinNotifyDryRun` was flipped 1→0 for the verification and restored to 1 on completion ✓
 5. `TranscodeAttempts.Success=true, FileReplaced=true, Disposition='BypassReplace', FileReplacedDate IS NOT NULL`; `ActiveJobs`/`TranscodeQueue`/`TemporaryFilePaths` rows cleared ✓
 6. Worker stayed Online and continued polling (heartbeat fresh, queue empty after the canary) ✓
 7. No ERROR/CRITICAL log lines tied to `TranscodeAttemptId=26080` or `QueueId=126100` ✓
 
 Code shipped in commit d93c485. Round-trip contract test `Tests/Contract/TestMediaFilePersistence.py` protects criterion 2 from future drift.
 
-Caveat: criterion 4's literal 204-response check was not exercised because dry-run is the operator's current Jellyfin config. The code path is verified live by other features (`jellyfin-push-notify.feature.md`); the new directive code does not change that path.
+Live canaries: MediaFile 6486 (Steven Universe S01E32, dry-run on) and MediaFile 6490 (Steven Universe S01E37, dry-run off) — both passed all seven criteria. WorkerService and `JellyfinNotifyDryRun` were left in the state Claude found them.
