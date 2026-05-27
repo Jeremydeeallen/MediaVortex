@@ -1040,6 +1040,23 @@ class FileReplacementBusinessService:
             # Save the updated MediaFile
             self.DatabaseManager.SaveMediaFile(media_file)
 
+            # Clear operator-triggered NeedsReprobe flag. The post-replacement
+            # FFprobe above already refreshed every metadata column the
+            # MediaProbe batch would have refreshed, so leaving the flag set
+            # would queue a second redundant probe on the next batch pass.
+            # Direct UPDATE because NeedsReprobe is not on the SaveMediaFile
+            # UPDATE column list.
+            try:
+                self.DatabaseManager.DatabaseService.ExecuteNonQuery(
+                    "UPDATE MediaFiles SET NeedsReprobe = FALSE WHERE Id = %s AND NeedsReprobe = TRUE",
+                    (media_file.Id,),
+                )
+            except Exception as ReprobeEx:
+                LoggingService.LogException(
+                    f"Failed to clear NeedsReprobe after replacement for MediaFileId={media_file.Id}",
+                    ReprobeEx, "FileReplacementBusinessService", "_UpdateMediaFilesAfterReplacement",
+                )
+
             LoggingService.LogInfo(f"Successfully updated MediaFiles record for: {OriginalFilePath}",
                                  "FileReplacementBusinessService", "_UpdateMediaFilesAfterReplacement")
 
