@@ -1,24 +1,22 @@
 # Flow: Windows Worker Deploy
 
-Deploys a MediaVortex `WorkerService` instance natively on a Windows host (not Docker). Counterpart to `worker-deploy-linux.flow.md` (Docker on Linux -- covers LXC and bare-metal). Both deployment models coexist; this flow covers the Windows-native path used by I9-2024 and (as of 2026-05-09) REMINGTON.
+Deploys a MediaVortex `WorkerService` instance natively on a Windows host (not Docker). Counterpart to `worker-deploy-linux.flow.md` (Docker on Linux -- covers LXC and bare-metal). Both deployment models coexist; this flow covers the Windows-native path used by I9-2024.
 
 ## Entry Point
 
-`scp` the repo from the dev workstation to the target Windows host, recreate the venv, set env vars, mount required NFS shares, run `WorkerService\Main.py`.
+`scp` the repo from the dev workstation to the target Windows host, recreate the venv, set env vars, cache the SMB credentials for the storage shares, run `WorkerService\Main.py`.
 
 ## Host Inventory (active Windows workers)
 
 | Hostname | IP | SSH user | Repo path | Notes |
 |---|---|---|---|---|
 | `I9-2024` | (dev workstation, varies) | (operator) | `C:\Code\MediaVortex` | Hosts both WebService + a co-located WorkerService process. Currently the only Online Windows worker. |
-| `Remington` | -- | -- | -- | **Retired.** Host hardware rebuilt to Linux Mint and now runs as Wakko (`client-b450m-01`, 10.0.0.230). The `Remington` Workers row lingers in DB with a stale heartbeat (6+ days) and can be deleted on the next cleanup pass per `worker-deploy.feature.md` criterion 12. |
 
 **SSH from dev workstation to a worker:**
 
 ```bash
 # Verify reachable + identify which host
-ssh owner@10.0.0.230 'hostname'
-# -> Remington
+ssh owner@<target-ip> 'hostname'
 
 # Default SSH user across Windows workers in this homelab is `owner`.
 # It is NOT root/Administrator/jeremy; the deploy-windows-worker.py
@@ -29,14 +27,12 @@ If `Permission denied (publickey,password)` -- the host is up but the dev workst
 
 ## Code-Only Update (Hot-Swap, the most common case)
 
-When you've shipped a code change to `main` and want to roll it out to a Windows worker without re-running the full deploy (no venv rebuild, no env-var push, no NFS mount changes -- just code + restart), use this exact sequence.
+When you've shipped a code change to `main` and want to roll it out to a Windows worker without re-running the full deploy (no venv rebuild, no env-var push, no SMB credential changes -- just code + restart), use this exact sequence.
 
-**Step 1 -- stop the scheduled task AND explicitly kill the Python child processes.** This is critical and easy to get wrong. `Stop-ScheduledTask` only marks the scheduler entry as stopped; **it does NOT kill the python.exe processes the task spawned**. Those processes keep running, holding file locks, and -- worse -- continue to claim and process queue jobs with stale in-memory code. A subsequent `Start-ScheduledTask` then spawns a SECOND set of processes alongside the first, accumulating zombie workers.
-
-This was discovered the hard way on 2026-05-09 when a remux job built an FFmpeg command with pre-fix shape (unconditional `-tag:v hvc1`, `-c:a copy`, no `loudnorm`) hours after the fix was deployed. Six zombie Python processes had accumulated on Remington across multiple "stop -> deploy -> start" cycles, and a stale one claimed the job. The fix below kills them explicitly.
+**Step 1 -- stop the scheduled task AND explicitly kill the Python child processes.** `Stop-ScheduledTask` only marks the scheduler entry as stopped; it does NOT kill the python.exe processes the task spawned. Those processes keep running, holding file locks, and continue to claim and process queue jobs with stale in-memory code. A subsequent `Start-ScheduledTask` then spawns a SECOND set of processes alongside the first, accumulating zombie workers.
 
 ```bash
-ssh owner@10.0.0.230 'powershell -Command "
+ssh owner@<target-ip> 'powershell -Command "
   Stop-ScheduledTask -TaskName \"MediaVortex Worker\" -ErrorAction SilentlyContinue;
   Get-Process python* -ErrorAction SilentlyContinue | Where-Object {
     (Get-CimInstance Win32_Process -Filter \"ProcessId=\$(\$_.Id)\").CommandLine -like \"*MediaVortex*\"
@@ -50,11 +46,10 @@ ssh owner@10.0.0.230 'powershell -Command "
   } | Measure-Object).Count;
   Write-Host \"Remaining MediaVortex python procs: \$count\"
 "'
-# Expected: list of killed PIDs (often 1-6 depending on accumulated zombies),
-# then "Remaining MediaVortex python procs: 0".
+# Expected: list of killed PIDs, then "Remaining MediaVortex python procs: 0".
 ```
 
-The CommandLine filter (`*MediaVortex*`) catches every Python process whose command line includes the repo path, regardless of whether they were spawned by the scheduled task, by `StartWorker.py`, or directly. **Do not skip the explicit-kill step on Windows hosts** -- the doc's old version did and it caused a real production incident.
+The CommandLine filter (`*MediaVortex*`) catches every Python process whose command line includes the repo path, regardless of whether they were spawned by the scheduled task, by `StartWorker.py`, or directly. Do not skip the explicit-kill step on Windows hosts.
 
 **Step 2 -- scp the changed files from dev workstation.**
 
@@ -64,49 +59,49 @@ The CommandLine filter (`*MediaVortex*`) catches every Python process whose comm
 # on the worker returns True for the same path. This is an OpenSSH/scp Windows
 # server quirk. Sample of a correct invocation:
 
-scp Models/CommandBuilder.py 'owner@10.0.0.230:C:/Code/MediaVortex/Models/CommandBuilder.py'
-scp Features/FileReplacement/FileReplacementBusinessService.py 'owner@10.0.0.230:C:/Code/MediaVortex/Features/FileReplacement/FileReplacementBusinessService.py'
+scp Models/CommandBuilder.py 'owner@<target-ip>:C:/Code/MediaVortex/Models/CommandBuilder.py'
+scp Features/FileReplacement/FileReplacementBusinessService.py 'owner@<target-ip>:C:/Code/MediaVortex/Features/FileReplacement/FileReplacementBusinessService.py'
 # ...etc, one file at a time, or scp -r a directory.
 ```
 
 **Step 3 -- clear .pyc caches on the worker.** Python normally invalidates a `.pyc` whose source mtime is newer than the cached compile, but scp can produce mtimes that confuse the cache check (clock skew, filesystem timestamp granularity). Belt-and-suspenders:
 
 ```bash
-ssh owner@10.0.0.230 'powershell -Command "Remove-Item -Force -ErrorAction SilentlyContinue C:\Code\MediaVortex\Models\__pycache__\CommandBuilder*.pyc, C:\Code\MediaVortex\Features\FileReplacement\__pycache__\FileReplacementBusinessService*.pyc; Write-Host pyc-cleared"'
+ssh owner@<target-ip> 'powershell -Command "Remove-Item -Force -ErrorAction SilentlyContinue C:\Code\MediaVortex\Models\__pycache__\CommandBuilder*.pyc, C:\Code\MediaVortex\Features\FileReplacement\__pycache__\FileReplacementBusinessService*.pyc; Write-Host pyc-cleared"'
 ```
 
 **Step 4 -- start the scheduled task.**
 
 ```bash
-ssh owner@10.0.0.230 'powershell -Command "Start-ScheduledTask -TaskName \"MediaVortex Worker\"; Start-Sleep -Seconds 4; (Get-ScheduledTask -TaskName \"MediaVortex Worker\").State"'
+ssh owner@<target-ip> 'powershell -Command "Start-ScheduledTask -TaskName \"MediaVortex Worker\"; Start-Sleep -Seconds 4; (Get-ScheduledTask -TaskName \"MediaVortex Worker\").State"'
 # Expected output: Running
 ```
 
 **Step 5 -- verify Workers row is Online with a fresh heartbeat.** Run from the dev workstation against the production DB:
 
 ```bash
-sleep 8 && py Scripts/SQLScripts/QueryDatabase.py sql "SELECT WorkerName, Status, AGE(NOW(), LastHeartbeat) AS HeartbeatAge FROM Workers WHERE WorkerName = 'Remington'"
+sleep 8 && py Scripts/SQLScripts/QueryDatabase.py sql "SELECT WorkerName, Status, AGE(NOW(), LastHeartbeat) AS HeartbeatAge FROM Workers WHERE WorkerName = '<hostname>'"
 # Expected: Status=Online, HeartbeatAge under ~30 seconds.
 ```
 
-**Step 6 (optional but recommended) -- verify the new code is actually loaded.** Queue a single test job and inspect the resulting `TranscodeAttempts.FFpmpegCommand` for a known signature of the new code. For the 2026-05-09 remux safety fix the signature is `_remuxed.mp4` in the output path:
+**Step 6 (optional but recommended) -- verify the new code is actually loaded.** Queue a single test job and inspect the resulting `TranscodeAttempts.FFpmpegCommand` for a known signature of the new code:
 
 ```bash
 py Scripts/SQLScripts/QueueRemux.py --pick-one
 # Wait ~10s, then:
 py Scripts/SQLScripts/QueryDatabase.py sql "SELECT FFpmpegCommand FROM TranscodeAttempts ORDER BY Id DESC LIMIT 1"
-# Confirm the OUTPUT path (last quoted string in the command) ends with _remuxed.mp4.
+# Confirm the command shape matches the expected new behavior.
 # If it does not, the worker did not pick up the new code -- restart again.
 ```
 
-This whole sequence takes about 30 seconds end-to-end and is idempotent. Use this for routine code shipping; reserve the full `deploy-windows-worker.py` only for fresh hosts or when env vars / NFS mounts changed.
+This whole sequence takes about 30 seconds end-to-end and is idempotent. Use this for routine code shipping; reserve the full `deploy-windows-worker.py` only for fresh hosts or when env vars / SMB credentials changed.
 
 ### Gotchas
 
-- **`git` is not on Remington's PATH.** scp from the dev workstation is the only update channel. Don't waste time trying `git pull` on the remote.
-- **Unix tools (`head`, `tail`, `grep`) don't exist on Remington's default shell.** Wrap remote commands in PowerShell and use `Select-Object -First N` for truncation.
+- **`git` is not on every worker's PATH.** scp from the dev workstation is the only update channel. Don't waste time trying `git pull` on the remote.
+- **Unix tools (`head`, `tail`, `grep`) don't exist on the default Windows shell.** Wrap remote commands in PowerShell and use `Select-Object -First N` for truncation.
 - **scp path syntax must be `C:/Code/...` (forward slashes, drive-prefix form), not `/c/Code/...`.** Same path in a remote PowerShell command works either way; the asymmetry is specific to scp's path parser when the target is a Windows OpenSSH server.
-- **Stopping the scheduled task does NOT kill the Python child processes.** It only marks the scheduler entry as stopped. The Python processes keep running and claiming jobs with their stale in-memory code -- and a subsequent `Start-ScheduledTask` spawns ANOTHER set of processes on top, accumulating zombies. **You must explicitly `Stop-Process` every Python process whose command line includes "MediaVortex"** before scp + restart. The Step 1 snippet above does this. (Discovered 2026-05-09 after a remux job ran with stale code despite three rounds of "successful" hot-swap; six zombie pythons had accumulated.)
+- **Stopping the scheduled task does NOT kill the Python child processes.** It only marks the scheduler entry as stopped. The Python processes keep running and claiming jobs with their stale in-memory code -- and a subsequent `Start-ScheduledTask` spawns ANOTHER set of processes on top, accumulating zombies. You must explicitly `Stop-Process` every Python process whose command line includes "MediaVortex" before scp + restart. The Step 1 snippet above does this.
 - **`__pycache__` directories sometimes survive an scp + restart cycle and serve stale bytecode.** The Step 3 explicit removal eliminates the variable.
 - **The deploy-windows-worker.py automation does NOT stop the running worker before scp.** It assumes a fresh host. For an in-place code update on a running worker, prefer the manual sequence above.
 
@@ -143,11 +138,11 @@ Expected timing on a host with a built venv and reachable network: full sequence
 | OpenSSH Server running | `Get-Service sshd` | Running, StartType Automatic |
 | Network profile is Private (not Public) | `Get-NetConnectionProfile` | NetworkCategory = Private |
 | Can reach DB | `Test-NetConnection 10.0.0.15 -Port 5432` | TcpTestSucceeded = True |
-| Can reach Porky NFS | `Test-NetConnection 10.0.0.43 -Port 2049` | TcpTestSucceeded = True |
-| Can reach Synology NFS | `Test-NetConnection 10.0.0.61 -Port 2049` | TcpTestSucceeded = True |
-| NFS client installed | `(Get-WindowsOptionalFeature -Online -FeatureName ClientForNFS-Infrastructure).State` | Enabled |
+| Can reach Porky SMB | `Test-NetConnection 10.0.0.43 -Port 445` | TcpTestSucceeded = True |
+| Can reach Synology SMB | `Test-NetConnection 10.0.0.61 -Port 445` | TcpTestSucceeded = True |
+| SMB credentials cached | `cmdkey /list:10.0.0.43; cmdkey /list:10.0.0.61` | Both list a stored credential |
 
-If `NetworkCategory = Public`, fix it before mounting drives:
+If `NetworkCategory = Public`, fix it before opening SMB sessions:
 
 ```powershell
 Set-NetConnectionProfile -InterfaceAlias Ethernet -NetworkCategory Private
@@ -169,7 +164,7 @@ New-NetFirewallRule -Name sshd -DisplayName 'OpenSSH Server' -Enabled True -Dire
 
 ## Build and Deploy
 
-Run from the dev workstation (PowerShell or Git Bash). Targets the Windows worker host directly via SSH/SCP — no LXC intermediary.
+Run from the dev workstation (PowerShell or Git Bash). Targets the Windows worker host directly via SSH/SCP -- no LXC intermediary.
 
 ```powershell
 # 1. Pre-create destination
@@ -187,58 +182,61 @@ ssh owner@<target-ip> "powershell -Command \"
 ssh owner@<target-ip> "cd C:\Code\MediaVortex && py -m venv venv && venv\Scripts\python.exe -m pip install --upgrade pip && venv\Scripts\python.exe -m pip install -r requirements.txt"
 ```
 
-The repo's `venv/`, `WebService/venv/`, and any archived `*/venv/` directories scp over but are unusable on the target — Python venvs bake absolute paths into `pyvenv.cfg`. Always recreate.
+The repo's `venv/`, `WebService/venv/`, and any archived `*/venv/` directories scp over but are unusable on the target -- Python venvs bake absolute paths into `pyvenv.cfg`. Always recreate.
 
 ## Deploy Automation (`deploy/deploy-windows-worker.py`)
 
-A single-command wrapper around steps 1-8 above. Lives at `deploy/deploy-windows-worker.py` in the MediaVortex repo. Designed to be run from the dev workstation against a fresh Windows host that has only Python 3.12 and OpenSSH Server installed.
+A single-command wrapper around the steps above. Lives at `deploy/deploy-windows-worker.py` in the MediaVortex repo. Designed to be run from the dev workstation against a fresh Windows host that has only Python 3.12 and OpenSSH Server installed.
 
 ```powershell
 # Full deploy from scratch:
 cd C:\Code\MediaVortex
-.\venv\Scripts\python.exe deploy\deploy-windows-worker.py 10.0.0.230
+.\venv\Scripts\python.exe deploy\deploy-windows-worker.py <target-ip>
 
 # Pre-flight only (no changes made):
-.\venv\Scripts\python.exe deploy\deploy-windows-worker.py 10.0.0.230 --check
+.\venv\Scripts\python.exe deploy\deploy-windows-worker.py <target-ip> --check
 
 # Skip steps that are already done (idempotent re-run):
-.\venv\Scripts\python.exe deploy\deploy-windows-worker.py 10.0.0.230 --skip-scp --skip-venv
+.\venv\Scripts\python.exe deploy\deploy-windows-worker.py <target-ip> --skip-scp --skip-venv
 ```
 
 The script:
-- Pushes DB env vars (and optional CPU-thread cap) through SSH stdin into a remote PowerShell `-EncodedCommand` block on the worker host (the only safe quoting strategy across Bash/PS/SSH layers; see Failure Modes for what happens if you try plain `-Command "..."`). NFS mounts use AUTH_SYS, so no share credentials are pushed.
+- Pushes DB env vars (and optional CPU-thread cap) through SSH stdin into a remote PowerShell `-EncodedCommand` block on the worker host (the only safe quoting strategy across Bash/PS/SSH layers; see Failure Modes for what happens if you try plain `-Command "..."`). SMB share credentials are not pushed -- they must be cached on the worker host via `cmdkey` once, by the operator.
 - Verifies the `Workers` row reaches `Status='Online'` with a heartbeat <60s old within 90s of triggering the task; exits non-zero if not
 - Idempotent: each step has a "skip if already done" check, so re-running on a partially-deployed host completes only the missing steps
 
 Manual deploy is still supported -- every section below documents the by-hand command equivalents the script wraps.
 
-## Drive Mappings
+## Storage Path Resolutions
 
-The worker's Step 0 `_VerifyRequiredPaths()` reads `DISTINCT LEFT(FilePath,2)` from `MediaFiles` and verifies each prefix is accessible via `os.path.exists()`. If any required drive is missing the worker hard-fails before any DB writes. The required prefixes are `T:`, `M:`, `Z:`.
+The worker reads its storage paths from the `StorageRootResolutions` table at startup. Each row maps a canonical prefix (`T:`, `M:`, `Z:`) to the SMB UNC path this specific worker should use. ffmpeg receives the UNC string directly -- the worker does not bind drive letters or hold a per-session mount.
 
-| Letter | UNC | Server | Protocol |
+| Canonical | SMB UNC | Server | Share type |
 |---|---|---|---|
-| T: | `\\10.0.0.43\srv\nfs-media-_tv` | Porky | NFS (AUTH_SYS) |
-| M: | `\\10.0.0.61\volume1\_video\Adults\Movies` | Synology | NFS (AUTH_SYS) |
-| Z: | `\\10.0.0.61\volume2\XXX` | Synology | NFS (AUTH_SYS) |
+| T: | `\\10.0.0.43\TV\` | Porky | Samba (Linux host serving the TV data) |
+| M: | `\\10.0.0.61\_video\Adults\Movies\` | Synology | Native SMB |
+| Z: | `\\10.0.0.61\XXX\` | Synology | Native SMB |
 
-All mounts are NFS via the Windows NFS client. No credentials are required. Install the client once per host:
+`Scripts/SQLScripts/SetWindowsWorkerUncPaths.py` is the sole writer of these rows. `StartWorker.py` runs it idempotently at every launch, so the rows self-heal after a DB restore or manual edit.
 
-```powershell
-Enable-WindowsOptionalFeature -Online -FeatureName ServicesForNFS-ClientOnly,ClientForNFS-Infrastructure -All
-```
+### Credentials (one-time per worker host)
 
-Establish drive mappings via `mount.exe` (run interactively on the worker host so the operator's SID owns the mappings). **Always use `mtype=hard`** -- plain `net use` defaults to `mtype=soft, timeout=0.8s, retry=1`, which produces intermittent FFmpeg `Error opening output file: Invalid argument` (EINVAL) failures when the NFS server is briefly slow:
+Cache SMB credentials for both servers via `cmdkey` while logged in as the user that will run the worker. Mappings persist across reboots:
 
 ```powershell
-mount.exe -o mtype=hard -o timeout=30 -o rsize=1024 -o wsize=1024 -o anon \\10.0.0.43\srv\nfs-media-_tv T:
-mount.exe -o mtype=hard -o timeout=30 -o rsize=1024 -o wsize=1024 -o anon \\10.0.0.61\volume1\_video\Adults\Movies M:
-mount.exe -o mtype=hard -o timeout=30 -o rsize=1024 -o wsize=1024 -o anon \\10.0.0.61\volume2\XXX Z:
+cmdkey /add:10.0.0.43 /user:<porky-smb-user> /pass:<password>
+cmdkey /add:10.0.0.61 /user:<synology-smb-user> /pass:<password>
 ```
 
-Verify: `mount.exe` output must show `mount=hard` on each row. `mount=soft` is the failure mode.
+Credentials live in Vaultwarden under `homelab/porky/smb/...` and `homelab/synology/smb/...`. Verify:
 
-`StartWorker.py` re-runs these `mount.exe` commands in its own process at every launch -- mappings reconnect at interactive logon, but SSH sessions and Task Scheduler runs do NOT inherit them. `mount.exe` does not accept `retry=` together with `mtype=hard` (hard mounts retry forever by definition).
+```powershell
+cmdkey /list:10.0.0.43
+cmdkey /list:10.0.0.61
+# Both must report a stored Domain:target row.
+```
+
+If a credential is missing, the worker's first ffmpeg open against that share returns `Logon failure` and the job fails. Re-cache via `cmdkey /add` and retry.
 
 ## Environment Variables
 
@@ -256,25 +254,23 @@ Set at User scope so they survive across sessions. Worker startup reads them onc
 
 ## First Run
 
-The path-verification step rejects the launch if any required drive is missing in the worker's session. Always mount drives in the **same session** that launches the worker. Use `StartWorker.py` (added 2026-05-09) -- it mounts T:/M:/Z: in its own process, then launches `WorkerService\Main.py` inline.
+Launch via `StartWorker.py`, which runs `SetWindowsWorkerUncPaths.py` to write/refresh the `StorageRootResolutions` rows for this host, then launches `WorkerService\Main.py` inline.
 
 ```powershell
 # Single command, ad-hoc test from a logged-in shell:
 cd C:\Code\MediaVortex
-.\venv\Scripts\python.exe StartWorker.py            # mount + verify + launch
-.\venv\Scripts\python.exe StartWorker.py --dry-run  # mount + verify; do not launch
-.\venv\Scripts\python.exe StartWorker.py --no-mount # drives already mounted
+.\venv\Scripts\python.exe StartWorker.py            # apply path resolutions + launch
+.\venv\Scripts\python.exe StartWorker.py --dry-run  # apply path resolutions + verify; do not launch
 ```
-
-`StartWorker.py` mounts T:/M:/Z: via `net use ... /persistent:yes`. NFS uses AUTH_SYS, so no credentials are passed. If a required drive cannot be mounted (NFS client not installed, server unreachable, etc.), the launcher exits with code 2.
 
 Expected first-run sequence (visible in stdout / `Logs` table):
 
-1. `_VerifyRequiredPaths()` confirms each `MediaFiles` drive prefix is accessible
-2. `_RegisterAndLoadWorkerConfig()` resolves `FFmpegPath` from `FFmpegMaster\bin\ffmpeg.exe` (project-bundled) and UPSERTs the `Workers` row with `WorkerName = <hostname>`, `Status='Online'`, `LastHeartbeat=NOW()`
-3. Health, status, and capability polling threads start
-4. `MainLoop` blocks on `ShutdownEvent`
-5. Within ~60 s the capability poller picks up `TranscodeEnabled=true` (default for new rows) and the transcode loop begins claiming jobs
+1. `SetWindowsWorkerUncPaths.py` writes/refreshes `StorageRootResolutions` for this worker with the SMB UNCs
+2. `_VerifyRequiredPaths()` reads `StorageRootResolutions.AbsolutePath` and confirms each UNC is reachable via `os.path.exists()`
+3. `_RegisterAndLoadWorkerConfig()` resolves `FFmpegPath` from `FFmpegMaster\bin\ffmpeg.exe` (project-bundled) and UPSERTs the `Workers` row with `WorkerName = <hostname>`, `Status='Online'`, `LastHeartbeat=NOW()`
+4. Health, status, and capability polling threads start
+5. `MainLoop` blocks on `ShutdownEvent`
+6. Within ~60 s the capability poller picks up `TranscodeEnabled=true` (default for new rows) and the transcode loop begins claiming jobs
 
 ## Post-Deploy Verification
 
@@ -312,10 +308,10 @@ For production, run the worker outside an SSH session so disconnects do not kill
 
 | Option | Pros | Cons |
 |---|---|---|
-| Task Scheduler "On user logon" | Simple, runs as the logged-in user (sees user-scoped NFS drive mappings). | Requires user to log in interactively after reboot. |
-| NSSM (`nssm install MediaVortexWorker ...`) | Runs as service account, survives reboot without logon. | NFS drive mappings are per-user; the service account needs its own persistent mappings established once via `mount`/`net use` while logged in as that account. |
+| Task Scheduler "On user logon" | Simple, runs as the logged-in user (inherits that user's cached SMB credentials). | Requires user to log in interactively after reboot. |
+| NSSM (`nssm install MediaVortexWorker ...`) | Runs as service account, survives reboot without logon. | SMB credentials are per-user; the service account needs its own `cmdkey` entries established once while logged in as that account. |
 
-`StartWorker.py` (in the repo root) handles drive mounting in either option. **Recommended: Task Scheduler** for hosts that double as a workstation (REMINGTON), so the worker yields whenever the user logs off; **NSSM** for dedicated worker hosts.
+Recommended: Task Scheduler for hosts that double as a workstation, so the worker yields whenever the user logs off; NSSM for dedicated worker hosts.
 
 ### Register the Task Scheduler entry
 
@@ -348,12 +344,11 @@ Unregister-ScheduledTask -TaskName "MediaVortex Worker" -Confirm:$false
 
 | Failure | Symptom | Resolution |
 |---|---|---|
-| Worker exits with `Required network drives not accessible: M:, T:, Z:` | Persistent mappings exist in `net use` but `Test-Path "T:\\"` returns False from a fresh session | NFS session isolation: persistent mappings reconnect at interactive logon only, not for SSH or Task Scheduler. Re-run `net use ... /persistent:yes` in the same session that launches the worker -- `StartWorker.py` does this automatically. |
-| `mount` / `net use` to porky returns `System error 53` or `network path was not found` | NFS port 2049 unreachable from this host | Verify reachability: `Test-NetConnection 10.0.0.43 -Port 2049`. If the port is closed, check porky's NFS server status. If the port is open but the mount still fails, confirm the Windows NFS client feature is installed (`Get-WindowsOptionalFeature -Online -FeatureName ClientForNFS-Infrastructure`). |
+| Worker exits with `Required storage paths not accessible: \\10.0.0.43\TV\, ...` | `os.path.exists()` on the SMB UNC returns False from the worker's session | The SMB credential for that server is missing or stale in this user's Credential Manager. Run `cmdkey /list:<server>` to confirm; re-cache with `cmdkey /add:<server> /user:<u> /pass:<p>`. If the credential is present, verify SMB port 445 is reachable: `Test-NetConnection <server> -Port 445`. |
+| First ffmpeg open against a share returns `Logon failure` | UNC is reachable but the session has no credentials | Same as above -- `cmdkey` entry is missing for that server. |
 | `Get-Disk -Number 0` reports "no MSFT_Disk objects found" but `Get-PhysicalDisk` shows the disk | Cannot initialize via PowerShell | Initialize via Disk Management UI (or `diskpart`) once; PowerShell sees the disk after that. Cause is a quirk in MSFT_Disk surfacing for raw SSDs. |
-| `Workers.FFmpegPath = NULL` after registration | All transcode jobs fail with bland "Failed to build transcoding command" | Pre-`_ResolveBundledOrPathBinary` regression. Verify `FFmpegMaster\bin\ffmpeg.exe` exists in the repo (size ~190 MB). Reinstall by re-running the scp step. |
-| FFmpeg pegs all logical cores despite `MEDIAVORTEX_MAX_CPU_THREADS=12` | `Get-Counter '\Processor(*)\% Processor Time'` shows every core at 100% | The env var sets FFmpeg `-threads` but SVT-AV1's internal worker pool ignores it. Use `-svtav1-params lp=12` if real thread limiting is required (would need a profile-level change). For the kids-PC use case, prefer reducing `MaxConcurrentJobs` or scheduling to off-hours instead. |
+| `Workers.FFmpegPath = NULL` after registration | All transcode jobs fail with bland "Failed to build transcoding command" | Verify `FFmpegMaster\bin\ffmpeg.exe` exists in the repo (size ~190 MB). Reinstall by re-running the scp step. |
+| FFmpeg pegs all logical cores despite `MEDIAVORTEX_MAX_CPU_THREADS=12` | `Get-Counter '\Processor(*)\% Processor Time'` shows every core at 100% | The env var sets FFmpeg `-threads` but SVT-AV1's internal worker pool ignores it. Use `-svtav1-params lp=12` if real thread limiting is required (would need a profile-level change). Alternatively reduce `MaxConcurrentJobs` or schedule to off-hours. |
 | psql fails because `psql` not installed on dev workstation | `psql: command not found` | Use the project's QueryDatabase.py: `cd C:\Code\MediaVortex && .\venv\Scripts\python.exe Scripts\SQLScripts\QueryDatabase.py sql "..."` |
-| `Register-ScheduledTask` exits with `HRESULT 0x80070534` ("No mapping between account names and security IDs was done") | Workgroup-only Windows host: `$env:USERDOMAIN` returns the literal string `WORKGROUP`, which is not a real SID-resolvable principal | Register-WorkerTask.ps1 uses `$env:COMPUTERNAME\$env:USERNAME` as the task UserId; if that ever changes, restore that pattern. Do NOT use `$env:USERDOMAIN` -- on domain-joined hosts it works, on workgroup hosts it does not, and worker hosts are typically workgroup. |
-| FFmpeg output `open()` returns EINVAL intermittently (`Error opening output ... .mp4.inprogress: Invalid argument`, return code 4294967274 / `TranscodeDurationSeconds=0`) on a Windows worker mounting Linux nfsd over the Microsoft NFS client | Defect in the Microsoft NFS client itself (FIXED 2026-05-22 via SMB cutover; see resolved BUG-0008 in KNOWN-ISSUES.md). The MS NFS client returns intermittent `ERROR_INVALID_PARAMETER` on `CreateFile` against Linux nfsd; Linux NFS clients to the same exports are stable. No client-side workaround (concurrency throttle, hard mount, drive-letter remap, AV exclusion, shell=False) fully stabilizes it. | Switch the Windows worker to SMB. Stand up Samba on the Linux host serving the share OR use the NAS's native SMB if available. Update `StorageRootResolutions.AbsolutePath` for the worker to the SMB UNC via `Scripts/SQLScripts/SetWindowsWorkerUncPaths.py`. Linux containers can stay on NFS unchanged. Verified pattern: porky Samba for TV (`\\10.0.0.43\TV`), Synology native SMB for Movies + XXX (`\\10.0.0.61\_video\Adults\Movies`, `\\10.0.0.61\XXX`). 329-for-329 success post-cutover on I9-2024. |
+| `Register-ScheduledTask` exits with `HRESULT 0x80070534` ("No mapping between account names and security IDs was done") | Workgroup-only Windows host: `$env:USERDOMAIN` returns the literal string `WORKGROUP`, which is not a real SID-resolvable principal | Register-WorkerTask.ps1 uses `$env:COMPUTERNAME\$env:USERNAME` as the task UserId; do NOT change that to `$env:USERDOMAIN` -- on domain-joined hosts it works, on workgroup hosts it does not, and worker hosts are typically workgroup. |
 | Inline PowerShell `-Command "..."` over SSH drops or merges quotes (`length : The term 'length' is not recognized as a cmdlet`) | The Bash/cmd/PS quote layers each strip a level of quoting; what the local shell sees is not what PS receives | Use `-EncodedCommand <base64>` with UTF-16-LE-encoded script bytes -- this carries the script through all three layers untouched. The deploy automation always uses this form for any inline PowerShell over SSH. Reserve `-File` for scripts that are already on the remote host. |

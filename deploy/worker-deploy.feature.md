@@ -11,7 +11,7 @@ This feature owns the deploy contract only. Worker runtime invariants -- FFmpeg 
 Operator-facing CLI on the dev workstation, plus two colocated flow docs and a top-level runbook:
 
 - `deploy/deploy-linux-worker.py <target>` -- Docker on Linux. Covers LXC hosts (Larry), bare-metal workstations (Wakko), and bare-metal servers (dot). Same script -- per-host differences (SSH user, compose file path, mount style) come from `inventory.toml`, not script branching.
-- `deploy/deploy-windows-worker.py <target>` -- Task Scheduler + SMB on Windows (Remington, I9-2024).
+- `deploy/deploy-windows-worker.py <target>` -- Task Scheduler + SMB on Windows (I9-2024).
 - `deploy/bringup.md` -- one-page runbook that picks the OS family and points at the right command.
 - `deploy/worker-deploy-{linux,windows}.flow.md` -- per-OS-family flow docs with parity sections.
 
@@ -106,7 +106,7 @@ deploy/.deployignore
 - `deploy/worker-deploy.feature.md` -- this doc (operator-experience criteria)
 - `deploy/bringup.md` -- one-page runbook covering both OS families (criterion 9)
 - `deploy/worker-deploy-linux.flow.md` -- Docker on Linux flow, covers LXC and bare-metal (Larry, Wakko, dot)
-- `deploy/worker-deploy-windows.flow.md` -- Task Scheduler + NFS flow (Remington, I9-2024)
+- `deploy/worker-deploy-windows.flow.md` -- Task Scheduler + SMB flow (I9-2024)
 - `deploy/deploy-linux-worker.py` -- Linux entry script (works against LXC or bare-metal)
 - `deploy/deploy-windows-worker.py` -- Windows entry script (already exists)
 - `deploy/Register-WorkerTask.ps1` -- Windows Task Scheduler registration

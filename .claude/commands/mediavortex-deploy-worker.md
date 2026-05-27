@@ -1,5 +1,5 @@
 ---
-description: Deploy a MediaVortex WorkerService. Two scripts -- one for Linux (LXC or bare-metal Docker) and one for Windows (Task Scheduler + NFS). See deploy/bringup.md for shape selection.
+description: Deploy a MediaVortex WorkerService. Two scripts -- one for Linux (LXC or bare-metal Docker) and one for Windows (Task Scheduler + SMB). See deploy/bringup.md for shape selection.
 argument-hint: <linux|windows> <target-host-or-ip>
 ---
 
@@ -18,14 +18,13 @@ Deploy a MediaVortex worker. Do NOT improvise -- the deploy steps live in the fl
      - Source sync uses tar-over-ssh with `.deployignore` (NOT blind `scp -r`).
 
    - **`windows`** (native, Task Scheduler):
-     - Flow doc: `deploy/worker-deploy-windows.flow.md`
+     - Flow doc: `deploy/worker-deploy-windows.flow.md` (covers prerequisites, SMB credential caching, storage path resolutions, and troubleshooting)
      - Entry script: `deploy/deploy-windows-worker.py <target>` (idempotent)
-     - Targets today: I9-2024, Remington
-     - NFS drive mappings (T:/M:/Z:) must be established interactively on the host via `net use ... /persistent:yes` -- per-user mappings cannot be created from an SSH session.
+     - Targets today: I9-2024
 
 4. If the user did not specify a shape, ask before doing anything.
 
-5. Run the deploy. Stream output so the user sees each step. Do NOT skip verification (poll `Workers` row, confirm `Status='Online'`, `FFmpegPath` non-NULL, `LastHeartbeat` < 60s).
+5. Run the deploy. Stream output so the user sees each step. Do NOT skip verification (poll `Workers` row, confirm `Status IN ('Online','Paused')`, `FFmpegPath` non-NULL, `LastHeartbeat` < 60s, `MountValidationError IS NULL`).
 
 6. If deploy fails, do NOT retry blindly. Read the failing step in the flow doc, identify the cause, and report to the user before attempting any fix.
 

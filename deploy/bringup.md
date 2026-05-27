@@ -20,7 +20,7 @@ The `infrastructure` repo (`https://github.com/TheAdroitDBA/infrastructure`) is 
 
 After the host-shape step, `/mnt/{media_tv,movies,xxx}` are mounted, Docker is installed, and `deploy-linux-worker.py` will pass pre-flight.
 
-**Windows** -- host onboarded per `infrastructure/docs/features/windows-worker-deploy.md`; OpenSSH Server reachable; Python 3.12+ installed; Windows NFS client feature installed; T:/M:/Z: NFS drive mappings established (`net use ... /persistent:yes`).
+**Windows** -- see `worker-deploy-windows.flow.md` "Pre-Flight Checks" and "Storage Path Resolutions" for the full prereq list (OpenSSH Server, Python 3.12+, SMB credential caching, Vaultwarden references). That doc is the operational source of truth -- no Windows-specific values are duplicated here.
 
 ## 3. Run the deploy
 
