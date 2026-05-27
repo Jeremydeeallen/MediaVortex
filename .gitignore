@@ -91,3 +91,7 @@ vmaf_exp_*.xml
 # Smoke-test large binary artifacts (regeneratable on demand)
 Scripts/Smoke/*.mp4
 Scripts/Smoke/*.png
+
+# Deploy-stamped version artifacts (written by deploy scripts onto targets, not committed)
+/VERSION
+/BUILD_INFO

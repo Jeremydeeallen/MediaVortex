@@ -50,10 +50,12 @@ Exit codes:
 
 import argparse
 import base64
+import datetime as _dt
 import fnmatch
 import json
 import os
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -257,6 +259,55 @@ def StepRecreateVenv(Target: str) -> bool:
     return True
 
 
+def _ResolveLocalHeadSha() -> str:
+    """Return the dev workstation's git HEAD, or empty string on any failure."""
+    try:
+        R = subprocess.run(
+            ["git", "-C", str(MediaVortexRoot), "rev-parse", "HEAD"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if R.returncode == 0:
+            return (R.stdout or "").strip()
+    except Exception:
+        pass
+    return ""
+
+
+def StepStampVersion(Target: str, Sha: str) -> bool:
+    """Write VERSION + BUILD_INFO into C:\\Code\\MediaVortex on the target.
+
+    Uses the same artifact shape as Scripts/StampVersion.py and the Linux
+    Dockerfile, so WorkerService.Main._ResolveWorkerVersion has one reader.
+    Idempotent: re-running with the same Sha produces identical files.
+    """
+    if not Sha:
+        print("    refusing to stamp: dev-workstation HEAD did not resolve")
+        return False
+
+    BuiltAt = _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    BuiltBy = socket.gethostname()
+
+    Payload = {"sha": Sha, "built_at": BuiltAt, "built_by": BuiltBy}
+    Script = (
+        '$j = [Console]::In.ReadToEnd() | ConvertFrom-Json\n'
+        '$root = "C:\\Code\\MediaVortex"\n'
+        'if (-not (Test-Path $root)) {\n'
+        '  Write-Error "MediaVortex root not present at $root"; exit 1\n'
+        '}\n'
+        '$verPath = Join-Path $root "VERSION"\n'
+        '$biPath = Join-Path $root "BUILD_INFO"\n'
+        '[IO.File]::WriteAllText($verPath, $j.sha + "`n", [Text.UTF8Encoding]::new($false))\n'
+        '$bi = "commit=" + $j.sha + "`n" + "built_at=" + $j.built_at + "`n" + "built_by=" + $j.built_by + "`n"\n'
+        '[IO.File]::WriteAllText($biPath, $bi, [Text.UTF8Encoding]::new($false))\n'
+        'Write-Host ("stamped " + $verPath + " (" + $j.sha.Substring(0,7) + ")")\n'
+    )
+    R = _RunRemotePowerShell(Target, Script, Timeout=20, Input=json.dumps(Payload))
+    if R.returncode != 0:
+        print(f"    stamp failed: {(R.stderr or R.stdout).strip()[:300]}")
+        return False
+    return True
+
+
 def StepPushEnvVars(Target: str, EnvVars: dict[str, str]) -> bool:
     """Set User-scope env vars on the remote host via SSH stdin."""
     Script = (
@@ -308,8 +359,12 @@ def StepGetRemoteHostname(Target: str) -> Optional[str]:
     return Name or None
 
 
-def StepVerifyWorkerOnline(WorkerName: str) -> bool:
-    """Poll the Workers row from the dev workstation; verdict within 90 s."""
+def StepVerifyWorkerOnline(WorkerName: str, ExpectedSha: str) -> bool:
+    """Poll the Workers row from the dev workstation; verdict within 90 s.
+
+    Asserts Status IN ('Online','Paused'), FFmpegPath non-NULL, heartbeat fresh,
+    and Workers.Version equals ExpectedSha (the SHA just stamped on the target).
+    """
     PythonExe = MediaVortexRoot / "venv" / "Scripts" / "python.exe"
     QueryScript = MediaVortexRoot / "Scripts" / "SQLScripts" / "QueryDatabase.py"
     if not PythonExe.exists() or not QueryScript.exists():
@@ -317,7 +372,7 @@ def StepVerifyWorkerOnline(WorkerName: str) -> bool:
         return False
 
     Sql = (
-        f"SELECT WorkerName, Status, FFmpegPath, "
+        f"SELECT WorkerName, Status, FFmpegPath, Version, "
         f"EXTRACT(EPOCH FROM (NOW() - LastHeartbeat))::int AS hb_age "
         f"FROM Workers WHERE LOWER(WorkerName) = LOWER('{WorkerName}')"
     )
@@ -334,13 +389,10 @@ def StepVerifyWorkerOnline(WorkerName: str) -> bool:
             LastReason = "QueryDatabase.py timed out"
             time.sleep(VerificationPollSec); continue
         Out = R.stdout
-        # QueryDatabase.py output format:
-        #   "1 rows returned\n\nworkername | status | ffmpegpath | hb_age\n----+...\nRemington | Online | ... | 12"
         if "0 rows returned" in Out or "1 rows returned" not in Out:
             LastReason = "Workers row not present yet"
             time.sleep(VerificationPollSec); continue
 
-        # Parse the data line (last non-separator, non-header line).
         DataLines = [
             ln for ln in Out.splitlines()
             if "|" in ln and "---" not in ln and "workername" not in ln.lower()
@@ -350,26 +402,31 @@ def StepVerifyWorkerOnline(WorkerName: str) -> bool:
             time.sleep(VerificationPollSec); continue
 
         Cols = [c.strip() for c in DataLines[-1].split("|")]
-        if len(Cols) < 4:
+        if len(Cols) < 5:
             LastReason = f"unexpected col count: {Cols}"
             time.sleep(VerificationPollSec); continue
 
-        Name, Status, FfmpegPath, HbAge = Cols[0], Cols[1], Cols[2], Cols[3]
+        Name, Status, FfmpegPath, Version, HbAge = Cols[0], Cols[1], Cols[2], Cols[3], Cols[4]
         try:
             HbAgeInt = int(HbAge)
         except ValueError:
             LastReason = f"could not parse heartbeat age: {HbAge!r}"
             time.sleep(VerificationPollSec); continue
 
-        if Status != "Online":
-            LastReason = f"Status={Status!r} (want Online)"
+        if Status not in ("Online", "Paused"):
+            LastReason = f"Status={Status!r} (want Online or Paused)"
         elif not FfmpegPath or FfmpegPath.lower() == "none":
             LastReason = "FFmpegPath is NULL"
         elif HbAgeInt > HeartbeatStaleThresholdSec:
             LastReason = f"heartbeat stale: {HbAgeInt}s old"
+        elif Version != ExpectedSha:
+            LastReason = (
+                f"version mismatch: Workers.Version={Version!r} but stamped "
+                f"{ExpectedSha!r} (worker likely did not restart after stamp)"
+            )
         else:
-            print(f"    Workers.{Name}: Status=Online, FFmpegPath set, "
-                  f"heartbeat {HbAgeInt}s old")
+            print(f"    Workers.{Name}: Status={Status}, FFmpegPath set, "
+                  f"heartbeat {HbAgeInt}s, version={Version[:7]}")
             return True
 
         time.sleep(VerificationPollSec)
@@ -480,10 +537,18 @@ def main() -> int:
         _Status(4, Total, "Push env vars (DB)", "OK",
                 Detail=f"{len(Payload)} vars set at User scope")
 
-    # Step 5: scratch volume hint. Not handled automatically -- requires
-    # Disk Management UI for some SSDs. Just report status.
-    _Status(5, Total, "Scratch volume (S:)", "SKIPPED",
-            Detail="manual step; see flow doc 'Optional: Dedicated Scratch Volume'")
+    # Step 5: stamp VERSION + BUILD_INFO on the target with dev workstation HEAD.
+    Sha = _ResolveLocalHeadSha()
+    if not Sha:
+        _Status(5, Total, "Stamp VERSION on target", "FAILED",
+                Detail="dev-workstation git rev-parse HEAD failed")
+        return 2
+    _Status(5, Total, "Stamp VERSION on target", "...")
+    if not StepStampVersion(Target, Sha):
+        _Status(5, Total, "Stamp VERSION on target", "FAILED")
+        return 2
+    _Status(5, Total, "Stamp VERSION on target", "OK",
+            Detail=f"sha={Sha[:7]}")
 
     # Step 6: register task.
     if Args.skip_task:
@@ -520,13 +585,13 @@ def main() -> int:
         _Status(8, Total, "Verify worker Online", "FAILED",
                 Detail="could not get remote socket.gethostname()")
         return 3
-    if StepVerifyWorkerOnline(Hostname):
+    if StepVerifyWorkerOnline(Hostname, Sha):
         _Status(8, Total, "Verify worker Online", "OK",
-                Detail=f"WorkerName={Hostname}")
-        print("\nDeploy complete. Worker is Online and heartbeating.")
+                Detail=f"WorkerName={Hostname}, version={Sha[:7]}")
+        print("\nDeploy complete. Worker is Online, heartbeating, and on the stamped version.")
         return 0
     _Status(8, Total, "Verify worker Online", "FAILED",
-            Detail=f"WorkerName={Hostname} did not reach Online state")
+            Detail=f"WorkerName={Hostname} did not reach a healthy state on version {Sha[:7]}")
     return 3
 
 

@@ -252,19 +252,22 @@ def StepSyncSource(Target: str) -> bool:
     return R.returncode == 0
 
 
-def StepDockerBuild(Target: str) -> bool:
-    """Build the worker image on the target. Passes COMMIT_SHA from dev workstation."""
-    Sha = ""
+def _ResolveLocalHeadSha() -> str:
+    """Return the dev workstation's git HEAD, or empty string on any failure."""
     try:
         R = subprocess.run(
             ["git", "-C", str(MediaVortexRoot), "rev-parse", "HEAD"],
             capture_output=True, text=True, timeout=10,
         )
         if R.returncode == 0:
-            Sha = R.stdout.strip()
+            return R.stdout.strip()
     except Exception:
         pass
+    return ""
 
+
+def StepDockerBuild(Target: str, Sha: str) -> bool:
+    """Build the worker image on the target. Passes COMMIT_SHA from dev workstation."""
     BuildArg = f"--build-arg COMMIT_SHA={Sha}" if Sha else ""
     Cmd = (
         f"docker build {BuildArg} "
@@ -306,14 +309,22 @@ def StepCleanupBuild(Target: str) -> bool:
     return R.returncode == 0
 
 
-def StepVerifyWorkers(Friendly: str) -> tuple[bool, str]:
-    """Poll Workers rows until all <friendly>-worker-N are Online with fresh heartbeat."""
+def StepVerifyWorkers(Friendly: str, ExpectedSha: str) -> tuple[bool, str]:
+    """Poll Workers rows until all <friendly>-worker-N are healthy on the expected version.
+
+    A worker is healthily deployed when:
+      - row exists, FFmpegPath resolved
+      - Status IN ('Online','Paused')   (Paused is preserved by UPSERT for previously-paused rows)
+      - heartbeat fresh
+      - no mount-validation error
+      - Workers.Version equals the SHA baked into the image at build time
+    """
     QueryDb = MediaVortexRoot / "Scripts" / "SQLScripts" / "QueryDatabase.py"
     if not QueryDb.exists():
         return False, f"QueryDatabase.py missing at {QueryDb}"
 
     Sql = (
-        f"SELECT WorkerName, Status, FFmpegPath, "
+        f"SELECT WorkerName, Status, FFmpegPath, Version, "
         f"EXTRACT(EPOCH FROM (NOW() - LastHeartbeat))::int AS heartbeat_age_sec, "
         f"MountValidationError "
         f"FROM Workers "
@@ -339,21 +350,17 @@ def StepVerifyWorkers(Friendly: str) -> tuple[bool, str]:
             time.sleep(VerificationPollSec)
             continue
 
-        # A worker is healthily deployed when: row exists, FFmpegPath
-        # resolved, heartbeat fresh, no mount error, and Status is one of
-        # the steady states. Online means accepting work; Paused means
-        # registered + healthy but waiting for the operator to flip it on
-        # (per worker-lifecycle criterion 5: UPSERT preserves prior status).
         SteadyStates = ("Online", "Paused")
         Unhealthy = [r for r in Rows if r.get("status") not in SteadyStates]
         Stale = [r for r in Rows if int(r.get("heartbeat_age_sec") or 9999) > HeartbeatStaleThresholdSec]
         NullFfmpeg = [r for r in Rows if not r.get("ffmpegpath")]
         MountErrors = [r for r in Rows if r.get("mountvalidationerror")]
+        WrongVersion = [r for r in Rows if (r.get("version") or "") != ExpectedSha] if ExpectedSha else []
 
-        if not Unhealthy and not Stale and not NullFfmpeg and not MountErrors:
+        if not Unhealthy and not Stale and not NullFfmpeg and not MountErrors and not WrongVersion:
             Lines = [
                 f"{r['workername']}: {r['status']}, FFmpeg={r['ffmpegpath']}, "
-                f"heartbeat={r.get('heartbeat_age_sec')}s"
+                f"heartbeat={r.get('heartbeat_age_sec')}s, version={(r.get('version') or '?')[:7]}"
                 for r in Rows
             ]
             PausedCount = sum(1 for r in Rows if r.get("status") == "Paused")
@@ -381,6 +388,15 @@ def StepVerifyWorkers(Friendly: str) -> tuple[bool, str]:
         elif Stale:
             States = ", ".join(f"{r['workername']}={r.get('heartbeat_age_sec')}s" for r in Stale)
             LastSummary = f"stale heartbeat: {States}"
+        elif WrongVersion:
+            States = ", ".join(
+                f"{r['workername']}={(r.get('version') or 'NULL')[:7]}"
+                for r in WrongVersion
+            )
+            LastSummary = (
+                f"version mismatch: stamped {ExpectedSha[:7]} but workers report {States} "
+                f"(containers likely not recreated -- re-run with no --skip flags)"
+            )
 
         time.sleep(VerificationPollSec)
 
@@ -447,9 +463,16 @@ def Main(Argv: Optional[list] = None) -> int:
         return 1
 
     Target = _SshTarget(User, Ip)
+    Sha = _ResolveLocalHeadSha()
     print(f"Target: {Friendly} ({Target})")
     print(f"Compose template: deploy/compose-templates/{Friendly}.yml")
+    print(f"Stamping image with COMMIT_SHA={Sha[:7] if Sha else '(unresolved)'}")
     print()
+
+    if not Sha and not Args.check:
+        print("[FAIL] dev workstation `git rev-parse HEAD` did not resolve. "
+              "Deploy refuses to stamp an unknown version.", file=sys.stderr)
+        return 2
 
     Total = 1 if Args.check else 7
     print("Pre-flight:")
@@ -479,7 +502,7 @@ def Main(Argv: Optional[list] = None) -> int:
     if Args.skip_build:
         _Status(3, Total, "docker build", "SKIPPED", "--skip-build")
     else:
-        if not StepDockerBuild(Target):
+        if not StepDockerBuild(Target, Sha):
             _Status(3, Total, "docker build", "FAILED")
             return 2
         _Status(3, Total, "docker build", "OK")
@@ -502,7 +525,7 @@ def Main(Argv: Optional[list] = None) -> int:
         _Status(6, Total, "cleanup build", "OK")
 
     print("\nVerify:")
-    Ok, Summary = StepVerifyWorkers(Friendly)
+    Ok, Summary = StepVerifyWorkers(Friendly, Sha)
     if Ok:
         _Status(7, Total, "workers online", "OK", Summary)
         return 0

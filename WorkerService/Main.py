@@ -257,11 +257,14 @@ class WorkerServiceApp:
         return ""
 
     def _ResolveWorkerVersion(self):
-        """Three-tier resolver returning (version, build_info_or_none):
-          1. /opt/mediavortex/VERSION (Docker workers, baked in via --build-arg COMMIT_SHA)
-          2. `git rev-parse HEAD` in the project root (Windows / dev hosts running from a checkout)
-          3. literal "unknown" (anything else)
-        BuildInfo is the contents of /opt/mediavortex/BUILD_INFO when tier 1 hits, else None."""
+        """Read worker version from the deploy-stamped artifact. Returns (version, build_info_or_none).
+
+        The VERSION file is written by the deploy script at deploy time -- never
+        resolved live. If the file is missing or empty, returns "unknown" rather
+        than guessing from a live source (e.g. git HEAD), so the displayed
+        version never advances past the running code.
+
+        BuildInfo is the contents of <repo>/BUILD_INFO when present, else None."""
         try:
             ProjectRoot = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
             VersionFile = os.path.join(ProjectRoot, "VERSION")
@@ -276,23 +279,7 @@ class WorkerServiceApp:
                             BuildInfo = Fh.read()
                     return (Sha[:64], BuildInfo)
         except Exception as Ex:
-            LoggingService.LogException("VERSION-file read failed; falling through", Ex, "WorkerService", "_ResolveWorkerVersion")
-
-        try:
-            import subprocess
-            Result = subprocess.run(
-                ["git", "rev-parse", "HEAD"],
-                cwd=ProjectRoot,
-                capture_output=True,
-                text=True,
-                timeout=2,
-            )
-            if Result.returncode == 0:
-                Sha = (Result.stdout or "").strip()
-                if Sha:
-                    return (Sha[:64], None)
-        except Exception as Ex:
-            LoggingService.LogException("git rev-parse HEAD failed; falling through", Ex, "WorkerService", "_ResolveWorkerVersion")
+            LoggingService.LogException("VERSION-file read failed", Ex, "WorkerService", "_ResolveWorkerVersion")
 
         return ("unknown", None)
 

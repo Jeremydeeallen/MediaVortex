@@ -2,70 +2,52 @@
 
 **Set:** 2026-05-27
 **Status:** Active
+**Replaces:** `directives/closed/2026-05-27-transcode-pipeline-happy-path.md` (closed Success, all 7 criteria verified)
 
 ## Outcome
 
-The transcode pipeline executes a MediaFile from queue claim through final state without manual intervention. After a successful transcode, every `MediaFiles` column derived from the new file matches a fresh FFprobe of that file, the row is marked compliant, Jellyfin has been notified to refresh, and the worker is free to claim its next pending job. The end state of any successful transcode is fully verifiable in SQL: file is compliant, metadata is fresh, audit trail is intact.
+The /Activity page is the single source of truth for "what code is running on every worker right now." After a deploy lands, the operator sees the new SHA on /Activity within one poll without taking any extra action. There is no way for the displayed version to drift from the running code -- no live resolution, no half-stamped artifact, no special case for the dev-workstation-hosted worker.
 
 ## Acceptance Criteria
 
-1. After a successful transcode-replace cycle, `SELECT IsCompliant, RecommendedMode FROM MediaFiles WHERE Id=<id>` returns `(true, NULL)`.
+1. **/Activity displays each worker's running version.** Per-worker tile shows the short SHA; tooltip shows the full SHA plus `commit / built_at / built_by`. Workers with no resolvable version display "unknown" in a warning color.
 
-2. After a successful transcode-replace cycle, every `MediaFiles` column that FFprobe populates matches an independent re-probe of the new file on disk: `Codec, AudioCodec, Resolution, ResolutionCategory, VideoBitrateKbps, AudioBitrateKbps, DurationMinutes, FrameRate, AudioChannels, AudioSampleRate, AudioSampleFormat, AudioChannelLayout, ContainerFormat, OverallBitrate, SubtitleFormats, AudioLanguages, HasExplicitEnglishAudio, FileSize, ColorRange, FieldOrder, HasBFrames, RefFrames, PixelFormat, Level, CodecProfile, TotalFrames, IsInterlaced, AudioComplete, AudioNormalizationMode (when loudnorm ran), LastModifiedDate, LastScannedDate`.
+2. **Displayed version equals the code the worker process loaded at startup.** No code path resolves the version from a live source that can change while the worker is running. Specifically, `_ResolveWorkerVersion` does not fall through to `git rev-parse HEAD` against a checkout an operator can commit to. The version is read from a deploy-stamped artifact (`VERSION` + `BUILD_INFO`) or it is "unknown."
 
-3. After a successful transcode-replace cycle, `MediaFiles.FilePath` points at the new file on disk; the old file is gone (or replaced in place for `-mv` sources); no `.inprogress` or `.replacing.bak` artifact left in the directory.
+3. **Every successful deploy stamps VERSION and BUILD_INFO on the target.** `deploy-linux-worker.py` (already does via Docker `--build-arg COMMIT_SHA`) and `deploy-windows-worker.py` (currently does not) both write the dev workstation's `git rev-parse HEAD` into `<repo>/VERSION` and a `BUILD_INFO` file containing `commit`, `built_at`, and `built_by` on the target before the worker restarts.
 
-4. After a successful transcode-replace cycle, Jellyfin's `/Library/Media/Updated` endpoint received a POST for the new file's parent folder and returned 204 (the in-our-control success signal; downstream Jellyfin refresh latency is not part of this criterion).
+4. **Deploy verifies the version round-trip.** Both deploy scripts assert, as part of their post-restart verification, that `Workers.Version` for every worker on the target equals the SHA they just stamped. Mismatch causes the deploy to exit non-zero with the expected and actual SHAs in the error message.
 
-5. After a successful transcode-replace cycle, `TranscodeAttempts` shows `Success=true, FileReplaced=true, Disposition IN ('Replace','BypassReplace'), FileReplacedDate IS NOT NULL`; `ActiveJobs` row cleared; `TranscodeQueue` row deleted; `TemporaryFilePaths` row deleted.
+5. **Fleet-wide mismatch is surfaced on /Activity.** When workers report different versions, the existing banner lists each version with its worker count. Workers reporting "unknown" are called out separately. (Existing capability -- no regression.)
 
-6. After a successful transcode-replace cycle, the worker claims its next pending job within one polling interval without operator intervention.
-
-7. The happy path runs end-to-end without writing ERROR-level log lines tied to the attempt's `TranscodeAttemptId`. Pre-existing ERRORs on unrelated files don't count.
+6. **Displayed version updates without page reload after a deploy.** Operator's open /Activity page picks up the new SHA on the next periodic refresh, without any cache busting or manual reload. (Existing poll -- no regression.)
 
 ## Out of Scope
 
-- Failure paths (transcode fails, compliance gate refuses, VMAF below min, no savings) — separate directive
-- VMAF testing internals — handled by existing disposition logic
-- Existing dirty-state cleanup (the library-wide reprobe is parallel operator work)
-- v2 rewrite decisions
-- Other tables' persistence drift (TranscodeAttempts, Workers, etc.)
-- UI / Activity page changes
-- Cross-worker race conditions
+- Worker restart automation for Windows hot-swap (operator still runs the kill+restart sequence per `worker-deploy-windows.flow.md`)
+- Build metadata beyond SHA / built_at / built_by (no semver, no release notes, no changelog)
+- Automatic action on version mismatch beyond the existing banner (no auto-rollback, no auto-redeploy)
+- I9-specific deploy automation that solves dirty-working-tree at deploy time (uncommitted local changes still ship, as today; deploy stamps the committed SHA only)
 
 ## Constraints
 
-- No destructive schema changes without explicit confirm
-- Preserve existing operator queries against `TranscodeAttempts.Disposition / DispositionReason / FileReplaced`
-- Worker restarts are the user's call (per existing memory — Claude never starts services on I9)
+- No destructive schema changes (Workers.Version already exists)
+- Preserve the existing /Activity per-worker tile + fleet-mismatch banner shape (no UI rework)
+- Worker restarts are the operator's call on Windows (per existing memory -- Claude never starts services on I9)
 - Scope-discipline.md applies per-task
 
 ## Escalation Defaults
 
-- Tradeoff between code complexity and operator visibility → operator visibility
-- Tradeoff between rollout speed and data safety → data safety
-- Risk tolerance: low. Stage changes through canary first when feasible.
-- When a criterion is ambiguous against real-world data, pick one interpretation, proceed, surface the choice in the delivery report.
+- Tradeoff between code complexity and operator visibility -> operator visibility (verbose tooltip + full SHA in DB over short-only display)
+- Tradeoff between deploy strictness and operator friction -> strictness (mismatch on verify fails the deploy)
+- Risk tolerance: medium. Version drift is operator-visible but not safety-critical; favor correctness over conservatism.
 
 ## Engineering Calls Already Made
 
-- Same-slot `-mv` re-transcode is included in the happy path (compliance-gated-rename Slice 1 shipped covers this)
-- Quick Fix / Remux / Transcode all share these criteria (same worker → replace → notify cycle)
-- Jellyfin success = 204 returned, not downstream refresh visibility
-- ERROR scoping is per-attempt-id, not per-window
+- VERSION + BUILD_INFO file shape stays consistent with the existing Docker build-arg artifact (`/opt/mediavortex/VERSION` and `/opt/mediavortex/BUILD_INFO`), so a single reader in `_ResolveWorkerVersion` covers both deploy paths.
+- The fallback to "unknown" is preferred over `git rev-parse HEAD`; an honest "unknown" is more useful than a misleading SHA.
+- Windows deploy will write the VERSION + BUILD_INFO file on the target via the existing SSH/PowerShell channel; no new auth or transport.
 
 ## Status
 
-COMPLETE 2026-05-27 — verified live on I9 against MediaFile 6486 (Steven Universe S01E32, Transcode→AV1, BypassReplace). All seven criteria verified:
-
-1. `IsCompliant=true, RecommendedMode=NULL` ✓
-2. Probe-populated columns match re-probe, including the new `AudioNormalizationMode='linear'` (BUG-0019 closed live) and IsInterlaced derived from FieldOrder ✓
-3. `FilePath` ends in `-mv.mp4`, original `.mkv` gone, no `.inprogress`/`.replacing.bak` artifacts ✓
-4. Jellyfin POST returned 204 — live-verified on canary 3 (MediaFile 6490, Steven Universe S01E37). Log line: `JellyfinNotify: sent 2 update(s), status=204`. The `JellyfinNotifyDryRun` runtime gate was removed 2026-05-27 — downstream-of-state-change notifications must not be silenceable. Operator preview is now in `Scripts/DryRunJellyfinNotify.py` (off-pipeline). ✓
-5. `TranscodeAttempts.Success=true, FileReplaced=true, Disposition='BypassReplace', FileReplacedDate IS NOT NULL`; `ActiveJobs`/`TranscodeQueue`/`TemporaryFilePaths` rows cleared ✓
-6. Worker stayed Online and continued polling (heartbeat fresh, queue empty after the canary) ✓
-7. No ERROR/CRITICAL log lines tied to `TranscodeAttemptId=26080` or `QueueId=126100` ✓
-
-Code shipped in commit d93c485. Round-trip contract test `Tests/Contract/TestMediaFilePersistence.py` protects criterion 2 from future drift.
-
-Live canaries: MediaFile 6486 (Steven Universe S01E32, dry-run on) and MediaFile 6490 (Steven Universe S01E37, dry-run off) — both passed all seven criteria. WorkerService and `JellyfinNotifyDryRun` were left in the state Claude found them.
+In progress -- 2026-05-27. Discovery complete; feature doc + plan next.

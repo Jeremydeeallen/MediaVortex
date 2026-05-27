@@ -70,6 +70,14 @@ scp Features/FileReplacement/FileReplacementBusinessService.py 'owner@<target-ip
 ssh owner@<target-ip> 'powershell -Command "Remove-Item -Force -ErrorAction SilentlyContinue C:\Code\MediaVortex\Models\__pycache__\CommandBuilder*.pyc, C:\Code\MediaVortex\Features\FileReplacement\__pycache__\FileReplacementBusinessService*.pyc; Write-Host pyc-cleared"'
 ```
 
+**Step 3b -- restamp `VERSION` + `BUILD_INFO` on the worker.** The worker reads its version from these two files at startup. Hot-swap does NOT refresh them on its own; without this step the /Activity tile keeps reporting the pre-swap SHA. One-liner using the dev workstation's current HEAD:
+
+```bash
+SHA=$(git rev-parse HEAD); \
+BUILT_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ); \
+ssh owner@<target-ip> "powershell -Command \"\$bom = New-Object System.Text.UTF8Encoding(\$false); [IO.File]::WriteAllText('C:\\Code\\MediaVortex\\VERSION', '$SHA`n', \$bom); [IO.File]::WriteAllText('C:\\Code\\MediaVortex\\BUILD_INFO', 'commit=$SHA`nbuilt_at=$BUILT_AT`nbuilt_by=$(hostname)`n', \$bom); Write-Host stamped-$SHA\""
+```
+
 **Step 4 -- start the scheduled task.**
 
 ```bash
