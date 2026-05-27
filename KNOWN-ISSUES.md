@@ -2,6 +2,33 @@
 
 ## Open
 
+### [BUG-0021] SaveMediaFile UPDATE silently drops Codec, AudioCodec, AudioComplete after FileReplacement re-probe
+**Date:** 2026-05-27 | **Area:** file-replacement / mediafile-persistence
+
+**What breaks:** `Features/FileReplacement/FileReplacementBusinessService._UpdateMediaFilesAfterReplacement` assigns `Codec`, `AudioCodec`, and `AudioComplete` on the MediaFile model from the post-replacement FFprobe pass and calls `SaveMediaFile`. `Repositories/DatabaseManager.SaveMediaFile` does NOT include these three columns in its UPDATE statement, so they are silently dropped. The DB row keeps its pre-replacement values even though the file on disk has been fully transcoded. Operator-visible Library Compliance tallies (e.g. AudioFix routing decisions, codec-distribution counts) misreport the affected files as still being the source codec until the next probe pass refreshes them.
+
+**Same shape as BUG-0017** (resolved 2026-05-25 by adding 6 columns: FileSize, LastModifiedDate, ResolutionCategory, IsInterlaced, AudioLanguages, HasExplicitEnglishAudio). The pattern is: hand-maintained UPDATE column list in SaveMediaFile drifts out of sync with model attributes assigned by callers; any column not in the list is silently dropped. The BUG-0017 fix patched 6 columns but did not address the architectural cause -- so the next column class (Codec/AudioCodec/AudioComplete) repeats the failure.
+
+**Repro:** Queue any `-mv.mp4` HEVC source for re-encode through the compliance-gated-rename slice (commit d26f77e or later). After successful encode + replacement (FileReplaced=true, file visibly AV1 on disk):
+```sql
+SELECT Id, FilePath, Codec, AudioCodec, AudioComplete, LastScannedDate FROM MediaFiles WHERE Id=<id>;
+```
+Codec returns the pre-replacement value (e.g. `'hevc'` for an AV1 file on disk); AudioCodec returns the pre-replacement value; AudioComplete returns NULL.
+
+**Evidence:** Canary 3 of compliance-gated-rename slice on 2026-05-27. MediaFile 683466 (So I'm a Spider S01E16): pre-encode HEVC/AAC, post-encode visually verified 720p AV1 with normalized audio, FileReplaced=true, but DB row shows Codec='hevc', AudioCodec='aac', AudioComplete=NULL, LastScannedDate from 2026-05-23.
+
+**Workaround:** Trigger a library-wide reprobe via `UPDATE MediaFiles SET NeedsReprobe=TRUE` then run the probe pass. Resets all stale columns from on-disk FFprobe.
+
+**Look first:** `Repositories/DatabaseManager.SaveMediaFile` UPDATE SET clause. Confirm Codec/AudioCodec/AudioComplete absent. Immediate patch: add the three columns (matching the BUG-0017 pattern -- use COALESCE on the UPDATE so legacy SELECT paths that don't load these columns can't blank existing values). Then audit every other column on MediaFiles model against the UPDATE list -- there may be more dropped columns lurking that nobody has hit yet.
+
+**Real fix is architectural:** new feature `mediafile-persistence-no-drift` -- replace the hand-maintained UPDATE column list with one of: (1) generate UPDATE from model fields (`dataclasses.fields()` or pydantic), (2) single canonical `MEDIAFILE_PERSISTENT_COLUMNS` constant referenced by model + repository + migration, (3) runtime drift check at startup that ERRORs when model attributes don't match UPDATE list. Pick one and prevent the recurring class.
+
+**Violates:** `Features/FileReplacement/FileReplacement.feature.md` criterion 3 ("After replacement, the new file is re-probed and all MediaFiles columns are updated with fresh metadata") and criterion 14 (added with this bug).
+
+**Fix with:** `/t BUG-0021` for the immediate patch (3 columns). Architectural fix lives in the new `mediafile-persistence-no-drift` feature.
+
+---
+
 ### [BUG-0020] Workers must own their processes end-to-end, and `-mv` must only be appended when the output is actually compliant
 **Date:** 2026-05-26 | **Area:** worker-lifecycle / file-replacement
 
