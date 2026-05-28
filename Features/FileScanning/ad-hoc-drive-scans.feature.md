@@ -53,8 +53,8 @@ DRAFTED -- awaiting operator approval. No code written.
 - [ ] 7. Repository + business service: `FileScanningRepository.UpdateRootFolderScanEnabled(id, bool)`, `GetRootFoldersWithStatus()`; `ContinuousScanService._ExecuteScan` filter on `ScanEnabled=true`
 - [ ] 8. Controller: `PATCH /api/RootFolders/<id>`, `POST /api/RootFolders/<id>/ScanNow`
 - [ ] 9. UI: `/Scanning` "Registered Drives" section with toggle + Scan Now per row
-- [ ] 10. Co-deliver `scanning-on-activity-page.feature.md` (criteria A1-G15 in that doc)
-- [ ] 11. Smoke test: toggle a drive off, confirm continuous mode skips it; click Scan Now, confirm a ScanJobs row appears and `/Activity` shows it live; let it complete and confirm Recent History updates
+- [ ] 10. Activity-page rendering is covered by the directives at `.claude/directives/closed/2026-05-27-active-scan-visibility.md` and `2026-05-28-scan-largest-first.md`; this feature doesn't redefine that surface.
+- [ ] 11. Smoke test: toggle a drive off, confirm continuous mode skips it; click Scan Now, confirm a ScanJobs row appears and `/Activity` shows it live; let it complete and confirm the Recent Scans card on `/Operations` updates.
 - [ ] 12. `/f` finalize and `/fs` full pipeline
 
 ## Scope

@@ -128,40 +128,6 @@ def _BuildActiveScans(DbManager):
     return Out
 
 
-def _BuildRecentScans(DbManager, Limit: int = 5):
-    """Last N terminal-status scans for the Recent Scans strip on /Activity."""
-    Query = """
-        SELECT JobId, WorkerName, RootFolderPath, Status,
-               StartTime, EndTime, ErrorMessage,
-               NewFiles, UpdatedFiles, DeletedFiles, ProcessedFiles, TotalFiles,
-               EXTRACT(EPOCH FROM (EndTime - StartTime)) AS DurationSec
-        FROM ScanJobs
-        WHERE Status IN ('Completed', 'Failed', 'Stopped')
-          AND EndTime IS NOT NULL
-        ORDER BY EndTime DESC
-        LIMIT %s
-    """
-    Rows = DbManager.DatabaseService.ExecuteQuery(Query, (Limit,)) or []
-    Out = []
-    for Row in Rows:
-        Out.append({
-            "JobId": Row.get('JobId'),
-            "WorkerName": Row.get('WorkerName') or '<unknown>',
-            "RootFolderPath": Row.get('RootFolderPath'),
-            "Status": Row.get('Status'),
-            "StartTime": str(Row.get('StartTime')) if Row.get('StartTime') else None,
-            "EndTime": str(Row.get('EndTime')) if Row.get('EndTime') else None,
-            "DurationSec": int(Row.get('DurationSec') or 0),
-            "ErrorMessage": Row.get('ErrorMessage'),
-            "NewFiles": int(Row.get('NewFiles') or 0),
-            "UpdatedFiles": int(Row.get('UpdatedFiles') or 0),
-            "DeletedFiles": int(Row.get('DeletedFiles') or 0),
-            "ProcessedFiles": int(Row.get('ProcessedFiles') or 0),
-            "TotalFiles": int(Row.get('TotalFiles') or 0),
-        })
-    return Out
-
-
 def _GetContinuousScanIntervalMinutes() -> int:
     try:
         Val = SystemSettingsRepository().GetSystemSetting('ContinuousScanIntervalMinutes')
@@ -327,11 +293,11 @@ def GetOverview():
         # Backward compat: CurrentJob is first active job (or null)
         CurrentJob = ActiveJobs[0] if ActiveJobs else None
 
-        # Directive 2026-05-27: ActiveScans + RecentScans for /Activity scan
-        # rows. Server-computes FilesPerSec / EtaSec / ElapsedSec / IsStuck so
-        # the client renders without computation.
+        # ActiveScans for the in-flight /Activity scan block (directive 2026-05-27).
+        # Server-computes FilesPerSec / EtaSec / ElapsedSec / IsStuck so the client
+        # renders without computation. Scan history is served separately from
+        # /api/SQLQueries/GetRecentScanRuns to the /Operations dashboard.
         ActiveScans = _BuildActiveScans(DbManager)
-        RecentScans = _BuildRecentScans(DbManager, Limit=5)
 
         return jsonify({
             "Success": True,
@@ -346,8 +312,7 @@ def GetOverview():
                 "ActiveJobsCount": ActiveJobsCount,
                 "CurrentJob": CurrentJob,
                 "ActiveJobs": ActiveJobs,
-                "ActiveScans": ActiveScans,
-                "RecentScans": RecentScans
+                "ActiveScans": ActiveScans
             }
         })
 

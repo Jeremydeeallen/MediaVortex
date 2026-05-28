@@ -1,68 +1,73 @@
 # Current Directive
 
-**Set:** 2026-05-28
+**Set:** YYYY-MM-DD
 **Status:** Active
-**Replaces:** `directives/closed/2026-05-28-scan-largest-first.md` (closed Success)
+**Replaces:** `directives/closed/<previous-slug>.md` (closed Success | Partial | Abandoned)
 
 ## Outcome
 
-Scan history lives on `/Operations` the same way transcode and VMAF history does -- one place to look for "what's run, what's failed, what succeeded." The `/Activity` page stops carrying a Recent Scans strip because that's not where activity history belongs; activity surfaces in-flight work, history surfaces on Operations. When the operator looks at scan failures, they see real failures only -- not the noise from admin housekeeping (zombie clears, application restarts, deploy-time stuck cleanups, operator soft-stops). The classification of "real failure" is defined by `Status='Failed'` with an `ErrorMessage` that doesn't match a small, explicit set of housekeeping patterns; everything else is omitted from operator views.
+One paragraph describing the operator-observable end state. What is true after this directive is done that wasn't true before.
 
 ## Acceptance Criteria
 
-1. **`/Activity` Recent Scans strip removed.** The `<div id="RecentScansStrip">` block and `RenderRecentScans` function come out of `Templates/Activity.html`. `_BuildRecentScans` stays in the controller for now (Operations uses it via a different endpoint) but is no longer rendered on /Activity. Verifiable: `/Activity` has no "Recent scans" section anywhere.
+1. ...
+2. ...
 
-2. **`/Operations` gains a "Recent Scans" card.** Same visual shape as the existing "Recent Successes" / "Recent Failures" transcode cards -- a card with header, last N entries listed below. Defaults to the last 15 entries. Each entry shows: drive (RootFolderPath), worker, status icon (Completed=green / Failed=red), duration, dispositions (+N ~U -D), end time relative ("4m ago"). Verifiable: visual inspection -- card present, entries readable.
-
-3. **"Real failure" filter.** Recent Scans on Operations includes:
-   - `Status='Completed'` -- always
-   - `Status='Failed'` with `ErrorMessage NOT NULL` AND not matching the housekeeping patterns below
-   And EXCLUDES:
-   - `Status='Stopped'` -- soft-stop is an operator action, not a failure
-   - `Status='Failed'` with `ErrorMessage` matching any of: `%Application restarted%`, `%Zombie%`, `%pre-redeploy%`, `%Stuck scan cleaned by StuckJobDetectionService%`, `%post-deploy mass clear%`, `%Stopped pre-redeploy%`
-   Verifiable: SQL preview against current data -- the existing zombie / stuck-cleanup / application-restarted rows do NOT appear in the Operations Recent Scans card.
-
-4. **Sort + limit contract.** Recent Scans on Operations is ordered by `EndTime DESC`, limit configurable via query param `?limit=N` (default 15, max 50). Verifiable: hit endpoint with limit=5, get exactly 5; limit=100, get 50 (capped).
-
-5. **New endpoint `GET /api/SQLQueries/GetRecentScanRuns`** lives in `Features/SQLQueries/SQLQueriesController.py` next to `GetRecentSuccesses`. Same JSON shape: `{Success, Results: [...], Count}`. Each Result entry: `RootFolderPath, WorkerName, Status, StartTime, EndTime, DurationSec, NewFiles, UpdatedFiles, DeletedFiles, ProcessedFiles, ErrorMessage`. Verifiable: GET the endpoint, response matches shape.
-
-6. **Refresh button on the Recent Scans card** calls the endpoint and re-renders. Same pattern the Recent Successes / Recent Failures cards use. Verifiable: visual click + observe re-fetch.
-
-7. **Doc sweep on close.** Update `FileScanning.flow.md` Surface section to point Scan history → `/Operations` (not `/Activity`). Drop the obsolete `RecentScansStrip` mention. Add a one-paragraph note explaining the "real failure" classification so a future reader can extend the pattern set without re-discovering the rationale.
+(Each criterion: observable behavior, verifiable in SQL or by a single command. Rename-test, outsider-test, rewrite-test, negation-test, stability-test per `.claude/rules/feature-criteria.md`.)
 
 ## Out of Scope
 
-- Re-rendering or filtering the Operations transcode-failure card. Transcode failures already use TranscodeAttempts, separate pipeline, separate doc.
-- A scan-row click-through / detail modal. Card shows summary lines only; if the operator wants details they hit `/SQLQueries`.
-- Cleaning up the existing noise rows in `ScanJobs`. The filter handles them at query time; bulk delete is a separate operator decision.
-- Schema changes. No new columns -- the filter is pattern-based against the existing `ErrorMessage` column.
+- ...
 
 ## Constraints
 
-- Pattern list lives in ONE place (the controller query) so future additions are a single-file edit.
-- No new pollers on `/Operations`; card loads on page load + on Refresh button click. Same shape as the existing cards.
-- `/Activity` stops touching scan history entirely -- the strip element is removed from the DOM, not just hidden.
-- Empty-state for the Operations card: `<em>No recent scans</em>` when zero results, matching the transcode cards' empty state.
+- ...
 
 ## Escalation Defaults
 
-- If the pattern list misses a real-world admin message (operator sees noise re-appear later), add it to the list -- not a re-architect. The directive accepts that the list will grow over time.
-- Risk tolerance: low. UI + read-only endpoint; no producer-side changes; trivial rollback.
+- Tradeoff between A and B -> B
+- Risk tolerance: low | medium | high
 
 ## Engineering Calls Already Made
 
-- Recent Scans goes on /Operations as a third card alongside Recent Successes + Recent Failures, NOT folded into either. Scan completions have a different shape (drive, file counts, duration) than transcode completions (savings %, profile, attempt).
-- The "real failure" filter is a pattern list -- not a new `IsRealFailure` column -- because the symptom is small (today's debug noise) and a schema change would be wrong-scoped.
-- The /Activity strip is removed entirely, not feature-flagged. CEO mode + tight criteria -- no need for a toggle.
+- ...
 
 ## Status
 
-Active 2026-05-28 -- next step: implement.
+Active YYYY-MM-DD -- next step.
 
-Plan:
-1. Remove `RecentScansStrip` DOM block + `RenderRecentScans` from `Templates/Activity.html`. Stop calling RenderRecentScans from RenderActiveJobs.
-2. Add `GetRecentScanRuns` endpoint to `SQLQueriesController.py` with the pattern filter applied via SQL `NOT ILIKE` chain.
-3. Add Recent Scans card markup + JS loader (`LoadRecentScans` / `RenderRecentScans`) to `Templates/Operations.html` -- mirror the Recent Successes / Recent Failures card structure.
-4. Wire the card into the page-load + Refresh sequence in `operationsManager`.
-5. Restart WebService, verify on /Operations + /Activity in browser.
-6. Doc sweep: `FileScanning.flow.md` Surface section.
+---
+
+## Closure (fill in when transitioning to closed)
+
+Closure is gated on the doc supersession sweep. Do not close without completing it.
+
+### 1. Doc supersession sweep (required)
+
+For every doc the directive changed behavior in, walk it through the three-state decision:
+
+| State | Action |
+|---|---|
+| Doc describes behavior the directive CHANGED | Update in place. Stale text = future cost. |
+| Doc describes a feature the directive SUPERSEDED in part | Add a `> **Superseded in part by `<new-doc-path>`** (YYYY-MM-DD): <one-line what changed>` block at the top. Keep the original as historical record; readers see what's no longer true. |
+| Doc describes something now fully REMOVED | Delete the file after `grep -r '<old-doc-basename>'` returns zero matches outside the file itself. |
+
+Concrete sweep commands (adjust to the directive's blast radius):
+```bash
+# Find docs that mention the feature areas this directive touched
+grep -rln "<keyword>" --include="*.feature.md" --include="*.flow.md" --include="*.md"
+# For each hit: classify (update | mark superseded | delete) and act.
+```
+
+Record the sweep outcome in the directive's Status block (which docs were updated, marked superseded, or deleted). This is the audit trail.
+
+### 2. Mark closed + archive
+
+Change `Status: Active` -> `Status: Closed -- Success | Partial | Abandoned`. Add a `**Closed:** YYYY-MM-DD` line under Set. Then:
+
+```bash
+git mv .claude/directive.md .claude/directives/closed/YYYY-MM-DD-<slug>.md
+cp .claude/directives/_template.md .claude/directive.md
+```
+
+Edit the new `.claude/directive.md` with the next directive. The renamed file becomes the archived record; `git log --follow` traces it.
