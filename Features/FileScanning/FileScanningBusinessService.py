@@ -610,10 +610,21 @@ class FileScanningBusinessService:
             try:
                 MediaFile = self.Repository.GetMediaFileById(Rec['Id'])
                 if MediaFile is not None:
-                    Result = self.MediaProbeService._ExecuteProbe(MediaFile)
-                    if not Result.get('Success', False):
-                        LoggingService.LogWarning(
-                            f"SizeSurvey probe failed for {Rec['path']}: {Result.get('Message') or Result.get('Error')}",
+                    # Skip the probe if the file already has full metadata. The
+                    # operator still sees this entry roll off TopFiles, but we
+                    # don't waste minutes re-probing a 4K Bluray whose metadata
+                    # is already current. ShouldExtractMetadata also gates on
+                    # the FFprobe failure limit.
+                    if self.ShouldExtractMetadata(MediaFile):
+                        Result = self.MediaProbeService._ExecuteProbe(MediaFile)
+                        if not Result.get('Success', False):
+                            LoggingService.LogWarning(
+                                f"SizeSurvey probe failed for {Rec['path']}: {Result.get('Message') or Result.get('Error')}",
+                                'FileScanningBusinessService', '_RunSizeSurvey'
+                            )
+                    else:
+                        LoggingService.LogDebug(
+                            f"SizeSurvey skip-probe (metadata current): {Rec['path']}",
                             'FileScanningBusinessService', '_RunSizeSurvey'
                         )
             except Exception as ProbeEx:
