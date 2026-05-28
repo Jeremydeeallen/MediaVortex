@@ -30,6 +30,15 @@ class FileScanningBusinessService:
         self.ScanErrors = []
         self.IsScanning = False
         self.CurrentScanDirectory = ""
+        # Directive 2026-05-27: phase visibility + soft-stop on Activity page.
+        # _CurrentPhase mirrors ScanJobs.Phase so the heartbeat re-asserts it.
+        # _StopRequested is flipped by the heartbeat when it observes
+        # ScanJobs.Status='Stopping' (set by POST /api/FileScanning/Scan/<JobId>/Stop)
+        # so the per-file/per-probe loops can exit cleanly to 'Stopped'.
+        self._CurrentPhase = None
+        self._FilesNeedingProbe = None
+        self._ProbedFiles = None
+        self._StopRequested = False
 
         # Pick up CurrentJobId if a scan is already running (so StopScanning
         # can target it). Single repository call -- the eight is-running
@@ -162,6 +171,12 @@ class FileScanningBusinessService:
             self.IsScanning = True
             self.ScanProgress = 0.0
             self.CurrentScanDirectory = RootFolderPath
+            # Reset directive-2026-05-27 phase state for this scan; PerformScan
+            # transitions it through Walking -> Reconciling -> Probing -> Completing.
+            self._CurrentPhase = 'Walking'
+            self._FilesNeedingProbe = None
+            self._ProbedFiles = None
+            self._StopRequested = False
 
             LoggingService.LogInfo(f"Starting direct scan for {RootFolderPath}", 'FileScanningBusinessService', 'StartScanning')
 
@@ -176,10 +191,18 @@ class FileScanningBusinessService:
             finally:
                 self._StopProgressHeartbeat()
 
-            if result.get('Success', False):
-                self.UpdateJobStatus(JobId, 'Completed', Progress=100.0, EndTime=datetime.now(timezone.utc), ScanResults=self.ScanResults)
+            # Soft-stop transition: if the heartbeat saw Status='Stopping', the
+            # per-file loop exited early -- record Status='Stopped' rather than
+            # Completed/Failed so the operator sees the actual outcome.
+            if self._StopRequested:
+                self.UpdateJobStatus(JobId, 'Stopped', EndTime=datetime.now(timezone.utc),
+                                     ScanResults=self.ScanResults, ClearPhase=True)
+            elif result.get('Success', False):
+                self.UpdateJobStatus(JobId, 'Completed', Progress=100.0, EndTime=datetime.now(timezone.utc),
+                                     ScanResults=self.ScanResults, ClearPhase=True)
             else:
-                self.UpdateJobStatus(JobId, 'Failed', ErrorMessage=result.get('Message', 'Unknown error'), EndTime=datetime.now(timezone.utc), ScanResults=self.ScanResults)
+                self.UpdateJobStatus(JobId, 'Failed', ErrorMessage=result.get('Message', 'Unknown error'),
+                                     EndTime=datetime.now(timezone.utc), ScanResults=self.ScanResults, ClearPhase=True)
 
             return result
 
@@ -207,8 +230,15 @@ class FileScanningBusinessService:
 
     def UpdateJobStatus(self, JobId: str, Status: str, Progress: float = None, CurrentDirectory: str = None,
                        ProcessId: str = None, StartTime: datetime = None, EndTime: datetime = None,
-                       ErrorMessage: str = None, ScanResults: FileScanResultModel = None):
-        """Update the status of a scan job."""
+                       ErrorMessage: str = None, ScanResults: FileScanResultModel = None,
+                       Phase: Optional[str] = None, FilesNeedingProbe: Optional[int] = None,
+                       ProbedFiles: Optional[int] = None, ClearPhase: bool = False):
+        """Update the status of a scan job.
+
+        Phase / FilesNeedingProbe / ProbedFiles support directive 2026-05-27 (Activity-page
+        scan visibility). ClearPhase=True writes Phase=NULL (used on terminal transitions
+        so a completed/failed row does not retain a stale phase value).
+        """
         try:
             UpdateFields = []
             UpdateValues = []
@@ -240,6 +270,21 @@ class FileScanningBusinessService:
             if ErrorMessage is not None:
                 UpdateFields.append("ErrorMessage = %s")
                 UpdateValues.append(ErrorMessage)
+
+            if ClearPhase:
+                UpdateFields.append("Phase = NULL")
+                UpdateFields.append("FilesNeedingProbe = NULL")
+                UpdateFields.append("ProbedFiles = NULL")
+            else:
+                if Phase is not None:
+                    UpdateFields.append("Phase = %s")
+                    UpdateValues.append(Phase)
+                if FilesNeedingProbe is not None:
+                    UpdateFields.append("FilesNeedingProbe = %s")
+                    UpdateValues.append(FilesNeedingProbe)
+                if ProbedFiles is not None:
+                    UpdateFields.append("ProbedFiles = %s")
+                    UpdateValues.append(ProbedFiles)
 
             if ScanResults is not None:
                 UpdateFields.extend([
@@ -314,6 +359,10 @@ class FileScanningBusinessService:
         Without this loop, ScanJobs only sees writes at start and end -- a
         healthy walking scan and a hung scan are indistinguishable until
         StuckJobDetectionService fires at the 15-minute threshold.
+
+        Also owns directive 2026-05-27 soft-stop polling: on each beat, reads
+        ScanJobs.Status; if 'Stopping', sets self._StopRequested so the per-file
+        and per-probe loops can exit cleanly to 'Stopped'.
         """
         self._HeartbeatStopEvent = threading.Event()
 
@@ -326,7 +375,21 @@ class FileScanningBusinessService:
                         Progress=float(self.ScanProgress) if self.ScanProgress is not None else None,
                         CurrentDirectory=self.CurrentScanDirectory or None,
                         ScanResults=self.ScanResults,
+                        Phase=self._CurrentPhase,
+                        FilesNeedingProbe=self._FilesNeedingProbe,
+                        ProbedFiles=self._ProbedFiles,
                     )
+                    # Soft-stop poll: cheap one-column read; the per-file loops
+                    # observe self._StopRequested and exit before issuing more
+                    # filesystem / DB work.
+                    try:
+                        Rows = self.Repository.DatabaseService.ExecuteQuery(
+                            "SELECT Status FROM ScanJobs WHERE JobId = %s", (JobId,)
+                        )
+                        if Rows and str(Rows[0].get('Status', '')).lower() == 'stopping':
+                            self._StopRequested = True
+                    except Exception as PollEx:
+                        LoggingService.LogException("Soft-stop poll failed", PollEx, 'FileScanningBusinessService', '_StartProgressHeartbeat')
                 except Exception as Ex:
                     LoggingService.LogException("Heartbeat write failed", Ex, 'FileScanningBusinessService', '_StartProgressHeartbeat')
 
@@ -334,6 +397,34 @@ class FileScanningBusinessService:
             target=_Beat, daemon=True, name=f"ScanHeartbeat-{JobId[:8]}"
         )
         self._HeartbeatThread.start()
+
+    def _SetPhase(self, JobId: Optional[str], Phase: str,
+                  FilesNeedingProbe: Optional[int] = None,
+                  ProbedFiles: Optional[int] = None):
+        """Write a Phase transition to ScanJobs immediately and update the
+        in-memory mirror so the next heartbeat re-asserts the value.
+
+        Directive 2026-05-27 criterion 13: phase visible in real time, not
+        only on the 5s heartbeat tick.
+        """
+        self._CurrentPhase = Phase
+        if FilesNeedingProbe is not None:
+            self._FilesNeedingProbe = FilesNeedingProbe
+        if ProbedFiles is not None:
+            self._ProbedFiles = ProbedFiles
+        Target = JobId or self.CurrentJobId
+        if not Target:
+            return
+        try:
+            self.UpdateJobStatus(
+                Target,
+                Status='Running',
+                Phase=Phase,
+                FilesNeedingProbe=FilesNeedingProbe,
+                ProbedFiles=ProbedFiles,
+            )
+        except Exception as Ex:
+            LoggingService.LogException(f"Failed to write Phase={Phase}", Ex, 'FileScanningBusinessService', '_SetPhase')
 
     def _StopProgressHeartbeat(self):
         Ev = getattr(self, '_HeartbeatStopEvent', None)
@@ -431,7 +522,22 @@ class FileScanningBusinessService:
             try:
                 if RootFolder and RootFolder.Id:
                     LoggingService.LogInfo(f"Starting automatic metadata extraction for RootFolderId: {RootFolder.Id}", 'PerformScan', 'FileScanningBusinessService')
-                    metadataResult = self.MediaProbeService.ProbeFilesNeedingMetadata(RootFolder.Id)
+                    # Directive 2026-05-27 criteria 13-14: enter Probing phase. Count the
+                    # files we are about to probe so the Activity page can render a real
+                    # bar instead of a spinner; the callback advances ProbedFiles per file.
+                    FilesQueued = self.MediaProbeService.Repository.GetFilesNeedingProbeCount(RootFolder.Id, self.MediaProbeService.MaxFFprobeFailures)
+                    self._SetPhase(self.CurrentJobId, 'Probing', FilesNeedingProbe=FilesQueued, ProbedFiles=0)
+
+                    def _OnProbed(Index: int):
+                        # Per-probe counter for the Activity page's progress bar.
+                        # Also the soft-stop signal arrives via self._StopRequested;
+                        # the probe loop reads it and exits cleanly.
+                        self._ProbedFiles = Index
+                        return self._StopRequested
+
+                    metadataResult = self.MediaProbeService.ProbeFilesNeedingMetadata(
+                        RootFolder.Id, ProgressCallback=_OnProbed
+                    )
                 else:
                     LoggingService.LogWarning("No RootFolderId available - skipping automatic metadata extraction", 'PerformScan', 'FileScanningBusinessService')
                     metadataResult = {'Success': True, 'Message': 'No RootFolderId - metadata extraction skipped', 'Processed': 0}
@@ -442,6 +548,9 @@ class FileScanningBusinessService:
                     LoggingService.LogWarning(f"Metadata extraction failed: {metadataResult.get('Message', 'Unknown error')}")
             except Exception as e:
                 LoggingService.LogException("Error during automatic metadata extraction", e, 'PerformScan', 'FileScanningBusinessService')
+
+            # Step 8: Completing -- final stats / RootFolder.LastScannedDate update.
+            self._SetPhase(self.CurrentJobId, 'Completing')
 
             return {
                 'Success': True,
@@ -1714,11 +1823,17 @@ class FileScanningBusinessService:
             # sequence which serially stat-checked every DB row twice over
             # NFS (criterion 23 fix).
             if RootFolderId:
+                # Directive 2026-05-27 criterion 13: phase transition visible to operator.
+                self._SetPhase(self.CurrentJobId, 'Reconciling')
                 ReconcileResult = self.ReconcileWithDisk(MediaFiles, RootFolderId)
                 LoggingService.LogInfo(
                     f"Reconcile result: moved={ReconcileResult.get('MovedFiles', 0)} deleted={ReconcileResult.get('DeletedFiles', 0)}",
                     'ProcessMediaFilesWithMetadata', 'FileScanningBusinessService'
                 )
+            # Per-file insert/update pass -- back to Walking semantically (the bar
+            # tracks ProcessedFiles / TotalFiles which is what the operator wants
+            # to see during this slice).
+            self._SetPhase(self.CurrentJobId, 'Walking')
 
             TotalFiles = len(MediaFiles)
             ProcessedCount = 0
@@ -1727,6 +1842,12 @@ class FileScanningBusinessService:
             def ProcessSingleFile(FilePath: str):
                 """Process a single file and return result."""
                 nonlocal ProcessedCount
+
+                # Directive 2026-05-27 criterion 21: soft-stop. The heartbeat thread
+                # observes ScanJobs.Status='Stopping' and flips _StopRequested; we exit
+                # without queuing additional disk/DB work for remaining files.
+                if self._StopRequested:
+                    return {'Success': False, 'FilePath': FilePath, 'Error': 'Stopped'}
 
                 try:
                     # Process the file with metadata extraction

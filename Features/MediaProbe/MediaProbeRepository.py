@@ -94,6 +94,33 @@ class MediaProbeRepository(BaseRepository):
             LoggingService.LogException("Error getting files needing probe", Ex, "MediaProbeRepository", "GetFilesNeedingProbe")
             return []
 
+    def GetFilesNeedingProbeCount(self, RootFolderId: Optional[int] = None, MaxFailures: int = 3) -> int:
+        """Count of files that match the GetFilesNeedingProbe predicate.
+
+        Used by directive 2026-05-27 to populate ScanJobs.FilesNeedingProbe at
+        the start of the Probing phase so the Activity page can show a real
+        bar instead of an indeterminate spinner.
+        """
+        try:
+            Conditions = [
+                "(NeedsReprobe = TRUE OR Resolution IS NULL OR TotalFrames IS NULL OR AudioCodec IS NULL)",
+                f"COALESCE(FFprobeFailureCount, 0) < %s",
+            ]
+            Params = [MaxFailures]
+            if RootFolderId is not None:
+                RootRows = self.ExecuteQuery("SELECT RootFolder FROM RootFolders WHERE Id = %s", (RootFolderId,))
+                if not RootRows:
+                    return 0
+                RootPath = RootRows[0]['RootFolder']
+                Conditions.append("LEFT(FilePath, %s) = %s")
+                Params.extend([len(RootPath), RootPath])
+            WhereClause = " AND ".join(Conditions)
+            Rows = self.ExecuteQuery(f"SELECT COUNT(*) AS N FROM MediaFiles WHERE {WhereClause}", tuple(Params))
+            return int(Rows[0]['N']) if Rows else 0
+        except Exception as Ex:
+            LoggingService.LogException("Error counting files needing probe", Ex, "MediaProbeRepository", "GetFilesNeedingProbeCount")
+            return 0
+
     def GetPermanentlyFailedFiles(self, MaxFailures: int = 3) -> List[MediaFileModel]:
         """Get files that have exceeded the max failure threshold."""
         try:

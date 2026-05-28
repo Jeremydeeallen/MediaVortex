@@ -293,8 +293,14 @@ class MediaProbeBusinessService:
 
     # ─── Batch Operations ──────────────────────────────────────────────
 
-    def ProbeFilesNeedingMetadata(self, RootFolderId: Optional[int] = None) -> Dict[str, Any]:
-        """Probe all files that need metadata, respecting failure limits."""
+    def ProbeFilesNeedingMetadata(self, RootFolderId: Optional[int] = None, ProgressCallback=None) -> Dict[str, Any]:
+        """Probe all files that need metadata, respecting failure limits.
+
+        ProgressCallback(Index: int) is called after each probe completion with the
+        1-based count of probes finished so far. If the callback returns truthy,
+        the loop exits early (directive 2026-05-27 soft-stop). Callback errors are
+        non-fatal -- the probe loop continues even if the caller raises.
+        """
         try:
             FilesToProbe = self.Repository.GetFilesNeedingProbe(RootFolderId, self.MaxFFprobeFailures)
 
@@ -313,12 +319,20 @@ class MediaProbeBusinessService:
             Succeeded = 0
             Failed = 0
 
-            for File in FilesToProbe:
+            for Index, File in enumerate(FilesToProbe, start=1):
                 Result = self._ExecuteProbe(File)
                 if Result.get('Success', False):
                     Succeeded += 1
                 else:
                     Failed += 1
+                if ProgressCallback is not None:
+                    try:
+                        ShouldStop = ProgressCallback(Index)
+                        if ShouldStop:
+                            LoggingService.LogInfo(f"Probe loop stopped via callback at {Index}/{len(FilesToProbe)}", "MediaProbeBusinessService", "ProbeFilesNeedingMetadata")
+                            break
+                    except Exception as CbEx:
+                        LoggingService.LogException("ProgressCallback raised", CbEx, "MediaProbeBusinessService", "ProbeFilesNeedingMetadata")
 
             LoggingService.LogInfo(f"Batch probe complete: {Succeeded} succeeded, {Failed} failed out of {len(FilesToProbe)}", "MediaProbeBusinessService", "ProbeFilesNeedingMetadata")
 

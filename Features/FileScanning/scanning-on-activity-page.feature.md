@@ -1,5 +1,14 @@
 # Scanning on the Activity Page -- show what each worker is scanning right now
 
+> **Superseded by `.claude/directives/closed/2026-05-27-active-scan-visibility.md`** (closed 2026-05-27):
+> CEO directed scans render in the existing Active Jobs table alongside transcode + VMAF rows
+> instead of in a dedicated "File Scanning" card. The implemented surface differs from the
+> draft below in three ways: (1) no separate card, (2) Recent Scans is a one-line-per-scan
+> strip inside the Active Jobs card rather than a full subsection, (3) the worker tile gains
+> a single `Scan:` line (current rootfolder OR next-tick ETA) rather than two parallel lines.
+> Phase visibility (Walking / Reconciling / Probing / Completing) and a per-row Stop button
+> were added beyond the draft's scope. The draft text below is preserved as historical record.
+
 ## What It Does
 
 Adds a "File Scanning" panel to the Activity page (between Workers and Quality Testing Queue) plus per-worker scan-current-job echoes, so the operator can see scans the same way they already see transcodes and VMAF jobs. Today scanning is invisible from the dashboard: a worker with `ScanEnabled=true` could be 5 minutes into walking T:\ for a 60-minute pass and the operator's only signal is `RootFolders.LastScannedDate` shifting an hour from now.

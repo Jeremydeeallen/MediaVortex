@@ -21,12 +21,16 @@ Both paths land in `FileScanningBusinessService.StartScan(rootfolderpath, recurs
 
 `ScanJobs` columns the operator might see:
 - `RootFolderPath` -- which mount is being scanned
-- `Status` -- `Pending` / `Running` / `Completed` / `Failed` / `Stopped`
+- `Status` -- `Pending` / `Running` / `Stopping` / `Completed` / `Failed` / `Stopped`
+- `Phase` -- `Walking` / `Reconciling` / `Probing` / `Completing` (NULL on legacy rows and after Status flips terminal); written by `FileScanningBusinessService._SetPhase` at each transition for /Activity-page visibility
 - `Progress` (0-100, double) -- updated periodically during the walk
 - `CurrentDirectory` -- last-seen directory path (truncated for UI)
 - `TotalFiles` / `ProcessedFiles` / `NewFiles` / `UpdatedFiles` / `DeletedFiles` / `SkippedFiles` / `EncodingErrors`
+- `FilesNeedingProbe` / `ProbedFiles` -- populated during `Phase='Probing'` so the Activity page shows a real per-probe bar instead of a spinner
 - `StartTime` / `EndTime` / `LastUpdated`
 - `ErrorMessage` (when Status='Failed')
+
+`Status='Stopping'` is the soft-stop signal: a row flipped to `Stopping` by `POST /api/Scan/<JobId>/Stop` is observed by the owning worker's heartbeat (~5s), which flips an in-process flag; the per-file and per-probe loops exit cleanly and the worker writes `Status='Stopped'` with `EndTime=NOW()`.
 
 `RootFolders.LastScannedDate` is the operator-facing "last successful scan" anchor.
 
@@ -113,4 +117,4 @@ Skipping move detection means a rename/move outside MediaVortex degrades to dele
 
 `/` Home -- root-folder summaries (last-scanned date).
 
-`/Activity` -- **gap today.** The operator cannot see active scans on the dashboard alongside transcodes and quality tests. Closed by the `scanning-on-activity-page.feature.md` feature.
+`/Activity` -- in-flight scans render as rows in the existing Active Jobs table alongside transcodes and VMAF jobs (directive 2026-05-27). Columns reused: File=RootFolder+CurrentDirectory, Type=`Scan` badge, Worker, Size=`+N ~U -D` disposition counters, Progress=phase-aware bar+count, FPS=files/sec rolling rate, Speed=Phase label (e.g. `Probing (1234/45716)`), ETA=server-computed, Action=Stop button. Stale-heartbeat rows (>10 min) render amber (`table-warning`). Below the table, a Recent Scans strip shows the last 5 terminal scans. Worker tiles gain a `Scan:` line when `ScanEnabled=true` showing either the current rootfolder or the next-tick ETA. Payload extensions: `/api/TeamStatus/Overview` (`ActiveScans`, `RecentScans` arrays), `/api/TeamStatus/Workers` (`LastScanCompleted`, `NextScanEstimate`, `CurrentScanRootFolder` per worker), `POST /api/Scan/<JobId>/Stop` (soft-stop endpoint).

@@ -61,6 +61,11 @@
                 </table>
                 <div id="MachineFpsSummary" class="px-3 py-2 small text-muted border-top d-none"></div>
             </div>
+            <!-- Directive 2026-05-27: Recent scans strip (last 5 terminal scans) -->
+            <div id="RecentScansStrip" class="border-top d-none">
+                <div class="px-3 py-2 small text-muted fw-bold">Recent scans</div>
+                <ul id="RecentScansList" class="list-unstyled mb-0 small"></ul>
+            </div>
         </div>
     </div>
 
@@ -262,10 +267,160 @@ var ActivityPage = (function() {
         });
     }
 
+    // Directive 2026-05-27 criteria 1-11: render in-flight scans as rows in
+    // the same Active Jobs table that holds transcode + VMAF, reusing the
+    // 9-column layout via column repurposing rather than introducing a
+    // scan-specific row shape.
+    function FormatEtaSec(EtaSec) {
+        if (EtaSec === null || EtaSec === undefined || EtaSec < 0) return '-';
+        if (EtaSec < 60) return Math.round(EtaSec) + 's';
+        var Mins = Math.floor(EtaSec / 60);
+        var Secs = Math.round(EtaSec % 60);
+        if (Mins < 60) return Mins + 'm ' + (Secs < 10 ? '0' : '') + Secs + 's';
+        var Hours = Math.floor(Mins / 60);
+        return Hours + 'h ' + (Mins % 60) + 'm';
+    }
+
+    function RenderScanRow(S) {
+        var Phase = S.Phase || 'Walking';
+        var IsStuck = !!S.IsStuck;
+        var StatusIcon = IsStuck
+            ? '<i class="fas fa-exclamation-triangle me-1 text-warning" title="Heartbeat stale (>10 min)"></i>'
+            : '<i class="fas fa-search me-1 text-success"></i>';
+        var RowClass = IsStuck ? ' class="table-warning"' : '';
+        var RootEsc = EscapeHtml(S.RootFolderPath || '');
+        var CurDir = (S.CurrentDirectory && S.CurrentDirectory !== S.RootFolderPath)
+            ? '<div class="text-muted small text-truncate" style="max-width:280px" title="' + EscapeHtml(S.CurrentDirectory) + '">' + EscapeHtml(S.CurrentDirectory) + '</div>'
+            : '';
+        var FileCell = '<td class="ps-3">' + StatusIcon +
+            '<span title="' + EscapeHtml(S.RootFolderPath || '') + '"><strong>' + RootEsc + '</strong></span>' + CurDir + '</td>';
+
+        var WorkerEsc = EscapeHtml(S.WorkerName || '<unknown>');
+
+        // Progress bar + count label is phase-aware (criterion 5).
+        var Pct = Math.max(0, Math.min(100, parseFloat(S.Progress) || 0)).toFixed(1);
+        var BarStripeClass, CountLabel;
+        if (Phase === 'Probing') {
+            var TotalP = S.FilesNeedingProbe || 0;
+            var DoneP = S.ProbedFiles || 0;
+            var ProbePct = TotalP > 0 ? (DoneP * 100.0 / TotalP).toFixed(1) : '0.0';
+            Pct = ProbePct;
+            BarStripeClass = 'bg-info progress-bar-striped progress-bar-animated';
+            CountLabel = DoneP + ' / ' + TotalP + ' probed';
+        } else if (Phase === 'Reconciling') {
+            Pct = '100';
+            BarStripeClass = 'bg-warning progress-bar-striped progress-bar-animated';
+            CountLabel = 'reconciling DB vs disk';
+        } else if (Phase === 'Completing') {
+            Pct = '100';
+            BarStripeClass = 'bg-success';
+            CountLabel = 'finalizing';
+        } else {
+            BarStripeClass = 'bg-success progress-bar-striped progress-bar-animated';
+            CountLabel = (S.TotalFiles > 0)
+                ? (S.ProcessedFiles || 0) + ' / ' + S.TotalFiles + ' files'
+                : (S.ProcessedFiles || 0) + ' files';
+        }
+        var ProgressBar =
+            '<div class="d-flex align-items-center gap-2">' +
+                '<div class="progress flex-grow-1" style="height: 18px;">' +
+                    '<div class="progress-bar ' + BarStripeClass + '" role="progressbar" ' +
+                        'style="width: ' + Pct + '%" aria-valuenow="' + Pct + '" aria-valuemin="0" aria-valuemax="100"></div>' +
+                '</div>' +
+                '<small class="text-nowrap">' + EscapeHtml(CountLabel) + '</small>' +
+            '</div>';
+
+        // Size column repurposed for disposition counters (criterion 6).
+        var Counters = '<span title="' +
+            (S.NewFiles || 0) + ' new, ' + (S.UpdatedFiles || 0) + ' updated, ' + (S.DeletedFiles || 0) + ' deleted">' +
+            '<span class="text-success">+' + (S.NewFiles || 0) + '</span> ' +
+            '<span class="text-warning">~' + (S.UpdatedFiles || 0) + '</span> ' +
+            '<span class="text-danger">-' + (S.DeletedFiles || 0) + '</span></span>';
+
+        // FPS = files/sec rolling rate (criterion 7); Speed = phase label
+        // possibly with probe sub-state (criterion 8); ETA from server (criterion 9).
+        var Fps = (S.FilesPerSec > 0) ? S.FilesPerSec.toFixed(1) + ' f/s' : '-';
+        var PhaseCell = Phase;
+        if (Phase === 'Probing' && S.FilesNeedingProbe) {
+            PhaseCell = 'Probing (' + (S.ProbedFiles || 0) + '/' + S.FilesNeedingProbe + ')';
+        }
+        var Eta = (Phase === 'Reconciling' || Phase === 'Completing') ? '-' : FormatEtaSec(S.EtaSec);
+
+        // Stop button -- POST /api/FileScanning/Scan/<JobId>/Stop
+        var JobIdJs = EscapeHtml(S.JobId || '').replace(/'/g, "\\'");
+        var StopBtn = '<button class="btn btn-outline-danger btn-sm py-0 px-1" ' +
+            'onclick="ActivityPage.StopScan(\'' + JobIdJs + '\')" title="Soft-stop this scan">' +
+            '<i class="fas fa-stop"></i></button>';
+
+        return '<tr' + RowClass + '>' +
+            FileCell +
+            '<td><span class="badge bg-success">Scan</span></td>' +
+            '<td>' + WorkerEsc + '</td>' +
+            '<td>' + Counters + '</td>' +
+            '<td>' + ProgressBar + '</td>' +
+            '<td>' + Fps + '</td>' +
+            '<td>' + EscapeHtml(PhaseCell) + '</td>' +
+            '<td>' + Eta + '</td>' +
+            '<td class="text-center">' + StopBtn + '</td>' +
+        '</tr>';
+    }
+
+    function RenderRecentScans(RecentScans) {
+        var Strip = document.getElementById('RecentScansStrip');
+        var List = document.getElementById('RecentScansList');
+        if (!RecentScans || RecentScans.length === 0) {
+            Strip.classList.add('d-none');
+            List.innerHTML = '';
+            return;
+        }
+        var Now = Date.now();
+        var Html = RecentScans.map(function(R) {
+            var Status = R.Status || 'Completed';
+            var Icon, IconCls;
+            if (Status === 'Completed') { Icon = 'fa-check-circle'; IconCls = 'text-success'; }
+            else if (Status === 'Failed') { Icon = 'fa-times-circle'; IconCls = 'text-danger'; }
+            else { Icon = 'fa-stop-circle'; IconCls = 'text-secondary'; }
+            var DurSec = R.DurationSec || 0;
+            var DurStr = (DurSec < 60) ? DurSec + 's'
+                : (DurSec < 3600) ? Math.floor(DurSec / 60) + 'm ' + (DurSec % 60) + 's'
+                : Math.floor(DurSec / 3600) + 'h ' + Math.floor((DurSec % 3600) / 60) + 'm';
+            var EndedRel = R.EndTime ? FormatRelativeTime(R.EndTime, Now) : '';
+            var ErrSnippet = (Status === 'Failed' && R.ErrorMessage)
+                ? ' <span class="text-danger" title="' + EscapeHtml(R.ErrorMessage) + '">-- ' + EscapeHtml(R.ErrorMessage.substring(0, 80)) + (R.ErrorMessage.length > 80 ? '...' : '') + '</span>'
+                : '';
+            return '<li class="px-3 py-1 border-top">' +
+                '<i class="fas ' + Icon + ' me-2 ' + IconCls + '"></i>' +
+                '<strong>' + EscapeHtml(R.RootFolderPath || '') + '</strong>' +
+                ' on ' + EscapeHtml(R.WorkerName || '<unknown>') +
+                ' <span class="text-muted">--</span> ' + DurStr +
+                ' <span class="text-muted">--</span> ' +
+                '<span class="text-success">+' + (R.NewFiles || 0) + '</span> ' +
+                '<span class="text-warning">~' + (R.UpdatedFiles || 0) + '</span> ' +
+                '<span class="text-danger">-' + (R.DeletedFiles || 0) + '</span>' +
+                ' <span class="text-muted">-- ' + EndedRel + '</span>' +
+                ErrSnippet +
+            '</li>';
+        }).join('');
+        List.innerHTML = Html;
+        Strip.classList.remove('d-none');
+    }
+
+    function FormatRelativeTime(Iso, NowMs) {
+        try {
+            var T = new Date(Iso + (Iso.endsWith('Z') ? '' : 'Z')).getTime();
+            var DiffSec = Math.max(0, Math.floor((NowMs - T) / 1000));
+            if (DiffSec < 60) return DiffSec + 's ago';
+            if (DiffSec < 3600) return Math.floor(DiffSec / 60) + 'm ago';
+            if (DiffSec < 86400) return Math.floor(DiffSec / 3600) + 'h ago';
+            return Math.floor(DiffSec / 86400) + 'd ago';
+        } catch (e) { return Iso; }
+    }
+
     function RenderActiveJobs(D, VmafJob) {
         var Status = D.ServiceStatus;
         var IsProcessing = D.IsProcessing;
         var ActiveJobs = D.ActiveJobs || [];
+        var ActiveScans = D.ActiveScans || [];
 
         var Badge = document.getElementById('TranscodeStatusBadge');
         var BtnStop = document.getElementById('BtnStopAfterJob');
@@ -342,11 +497,16 @@ var ActivityPage = (function() {
             '</tr>';
         }
 
-        // Single-pass render: combined transcode + VMAF rows. Visibility derived
-        // from the COMBINED count, not just transcode count -- earlier two-step
-        // approach hid the table whenever transcode finished but VMAF was still
-        // running, then unhid it on the next async tick (visible flicker).
-        var CombinedHtml = TranscodeRows.join('') + VmafRow;
+        // Directive 2026-05-27: scan rows live in the same table alongside
+        // transcode + VMAF (criterion 1). Empty-state visibility derives from
+        // the union of all three so a scan-only state still renders the table.
+        var ScanRowsHtml = ActiveScans.map(RenderScanRow).join('');
+
+        // Single-pass render: combined transcode + VMAF + scan rows. Visibility
+        // from the COMBINED count -- earlier two-step approach hid the table
+        // whenever transcode finished but VMAF was still running, then unhid
+        // it on the next async tick (visible flicker).
+        var CombinedHtml = TranscodeRows.join('') + VmafRow + ScanRowsHtml;
         if (CombinedHtml) {
             NoJob.classList.add('d-none');
             JobsTable.classList.remove('d-none');
@@ -359,6 +519,10 @@ var ActivityPage = (function() {
             document.getElementById('ActiveJobsFooter').classList.add('d-none');
             document.getElementById('MachineFpsSummary').classList.add('d-none');
         }
+
+        // Recent scans strip below the table (criteria 15-16). Reuses the same
+        // /Overview tick -- no separate poller.
+        RenderRecentScans(D.RecentScans || []);
     }
 
     function RenderJobFooter(ActiveJobs) {
@@ -565,6 +729,36 @@ var ActivityPage = (function() {
         var ToggleIcon = IsOnline ? 'fa-pause' : 'fa-play';
         var ToggleLabel = IsOnline ? 'Pause' : 'Online';
 
+        // Directive 2026-05-27 criterion 17: scan posture line.
+        // Three states: currently scanning, idle with prior history (show next ETA),
+        // or idle without history (show "imminent"). Omitted entirely when
+        // ScanEnabled=false so the tile stays compact for non-scanning workers.
+        var ScanLineHtml = '';
+        if (W.ScanEnabled) {
+            if (W.CurrentScanRootFolder) {
+                ScanLineHtml = '<div class="small text-success mb-1">' +
+                    '<i class="fas fa-search me-1"></i>Scan: <strong>' + EscapeHtml(W.CurrentScanRootFolder) + '</strong>' +
+                    '</div>';
+            } else if (W.NextScanEstimate) {
+                var NextStr = '';
+                try {
+                    var T = new Date(W.NextScanEstimate + (W.NextScanEstimate.endsWith('Z') ? '' : 'Z')).getTime();
+                    var Delta = Math.floor((T - Date.now()) / 1000);
+                    if (Delta <= 0) NextStr = 'imminent';
+                    else if (Delta < 60) NextStr = 'in ' + Delta + 's';
+                    else if (Delta < 3600) NextStr = 'in ' + Math.floor(Delta / 60) + 'm';
+                    else NextStr = 'in ' + Math.floor(Delta / 3600) + 'h ' + Math.floor((Delta % 3600) / 60) + 'm';
+                } catch (e) { NextStr = String(W.NextScanEstimate); }
+                ScanLineHtml = '<div class="small text-muted mb-1">' +
+                    '<i class="fas fa-clock me-1"></i>Scan: idle -- next ' + EscapeHtml(NextStr) +
+                    '</div>';
+            } else {
+                ScanLineHtml = '<div class="small text-muted mb-1">' +
+                    '<i class="fas fa-clock me-1"></i>Scan: idle -- next imminent' +
+                    '</div>';
+            }
+        }
+
         var Col = document.createElement('div');
         Col.className = 'col-6 col-lg-4 col-xl-3';
         Col.innerHTML = '<div class="' + CardCls + '" style="cursor:pointer" onclick="ActivityPage.OpenWorkerSettings(\'' + WorkerNameJs + '\')">' +
@@ -574,6 +768,7 @@ var ActivityPage = (function() {
                     '<span class="badge ' + BadgeCls + '">' + DisplayStatus + '</span>' +
                 '</h6>' +
                 MountErrorHtml +
+                ScanLineHtml +
                 '<button class="btn btn-sm w-100 ' + ToggleClass + '" onclick="event.stopPropagation(); ActivityPage.SetWorkerStatus(\'' + WorkerNameJs + '\', \'' + ToggleTarget + '\')">' +
                     '<i class="fas ' + ToggleIcon + ' me-1"></i>' + ToggleLabel +
                 '</button>' +
@@ -901,12 +1096,32 @@ var ActivityPage = (function() {
         StartPolling();
     }
 
+    // Directive 2026-05-27 criterion 10/21: soft-stop a scan via the row's
+    // Stop button. POST /api/FileScanning/Scan/<JobId>/Stop flips the DB row
+    // to Status='Stopping'; the worker's heartbeat sees it within ~5s and
+    // the scan exits cleanly to Status='Stopped'.
+    function StopScan(JobId) {
+        if (!confirm('Soft-stop this scan? The worker will finish the current file then halt.')) return;
+        fetch('/api/Scan/' + encodeURIComponent(JobId) + '/Stop', { method: 'POST' })
+            .then(function(R) { return R.json(); })
+            .then(function(J) {
+                if (J && J.Success) {
+                    showToastAlert(J.Message || 'Stop requested.', 'success');
+                    LoadOverview();
+                } else {
+                    showToastAlert((J && J.Message) || 'Failed to stop scan.', 'danger');
+                }
+            })
+            .catch(function() { showToastAlert('Network error stopping scan.', 'danger'); });
+    }
+
     document.addEventListener('DOMContentLoaded', Init);
 
     return {
         StopAfterJob: StopAfterJob,
         ResumeTranscoding: ResumeTranscoding,
         ResetStuckJob: ResetStuckJob,
+        StopScan: StopScan,
         SetWorkerStatus: SetWorkerStatus,
         SetAllWorkersStatus: SetAllWorkersStatus,
         SetMachineStatus: SetMachineStatus,

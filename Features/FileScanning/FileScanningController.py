@@ -131,6 +131,53 @@ class FileScanningController:
                     'Error': 'StopScanError'
                 }), 500
 
+        @self.Blueprint.route('/Scan/<string:JobId>/Stop', methods=['POST'])
+        def StopScanByJobId(JobId):
+            """Soft-stop a specific scan by JobId.
+
+            Directive 2026-05-27 criterion 21. Flips ScanJobs.Status='Stopping'; the
+            owning worker's heartbeat thread observes the transition and flips
+            self._StopRequested, the per-file / per-probe loops exit, and the worker
+            writes the terminal Status='Stopped' row.
+
+            Returns 404 if the JobId is not in a Running state.
+            """
+            try:
+                from Core.Database.DatabaseService import DatabaseService
+                Db = DatabaseService()
+                Rows = Db.ExecuteQuery(
+                    "SELECT Status, WorkerName FROM ScanJobs WHERE JobId = %s", (JobId,)
+                )
+                if not Rows:
+                    return jsonify({'Success': False, 'Message': f'Scan {JobId} not found'}), 404
+                CurrentStatus = (Rows[0].get('Status') or '').lower()
+                if CurrentStatus != 'running':
+                    return jsonify({
+                        'Success': False,
+                        'Message': f'Scan {JobId} is not Running (current: {Rows[0].get("Status")})',
+                    }), 409
+                Db.ExecuteNonQuery(
+                    "UPDATE ScanJobs SET Status = 'Stopping' WHERE JobId = %s AND Status = 'Running'",
+                    (JobId,),
+                )
+                LoggingService.LogInfo(
+                    f"Soft-stop requested for scan {JobId} (worker: {Rows[0].get('WorkerName')})",
+                    "FileScanningController", "StopScanByJobId",
+                )
+                return jsonify({
+                    'Success': True,
+                    'Message': f'Stop requested for scan {JobId}; worker will exit on next heartbeat (~5s).',
+                    'JobId': JobId,
+                    'Worker': Rows[0].get('WorkerName'),
+                }), 200
+            except Exception as e:
+                LoggingService.LogException("Error in StopScanByJobId endpoint", e, "FileScanningController", "StopScanByJobId")
+                return jsonify({
+                    'Success': False,
+                    'Message': f'Error stopping scan: {str(e)}',
+                    'Error': 'StopScanError',
+                }), 500
+
         @self.Blueprint.route('/RootFolders', methods=['GET'])
         def GetRootFolders():
             """Get root folders with pagination, filtering, and sorting."""

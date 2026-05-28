@@ -8,6 +8,145 @@ from Repositories.DatabaseManager import DatabaseManager
 from Services.LoggingService import LoggingService
 from Features.SystemSettings.SystemSettingsRepository import SystemSettingsRepository
 
+# Directive 2026-05-27: cache last (ProcessedFiles, ProbedFiles, LastUpdated)
+# per scan JobId so files-per-second can be computed as a rolling delta against
+# the prior /Overview call instead of cumulative-since-start. Cleared on row
+# disappearance (terminal status). One entry per active scan; bounded by the
+# number of workers, not by scan history.
+_ScanRateCache = {}
+
+
+def _BuildActiveScans(DbManager):
+    """Server-side projection of ScanJobs.Status='Running' rows for /Activity.
+
+    Adds derived fields the client should not have to compute:
+      - ElapsedSec        : seconds since StartTime
+      - FilesPerSec       : rolling delta vs prior call (via _ScanRateCache);
+                            cumulative-since-start on the first observation.
+      - EtaSec            : Walking -> remaining files / rate; Probing -> remaining probes / probe-rate; else null.
+      - IsStuck           : LastUpdated > 10 minutes ago.
+    """
+    from datetime import datetime, timezone
+    Query = """
+        SELECT JobId, WorkerName, RootFolderPath, CurrentDirectory, Phase,
+               Progress, TotalFiles, ProcessedFiles, FilesNeedingProbe, ProbedFiles,
+               NewFiles, UpdatedFiles, DeletedFiles, StartTime, LastUpdated,
+               EXTRACT(EPOCH FROM (NOW() - StartTime))   AS ElapsedSec,
+               EXTRACT(EPOCH FROM (NOW() - LastUpdated)) AS StaleSec
+        FROM ScanJobs
+        WHERE Status = 'Running'
+        ORDER BY StartTime ASC
+    """
+    Rows = DbManager.DatabaseService.ExecuteQuery(Query) or []
+    Now = datetime.now(timezone.utc).timestamp()
+    SeenJobIds = set()
+    Out = []
+    for Row in Rows:
+        JobId = Row.get('JobId')
+        SeenJobIds.add(JobId)
+        Phase = Row.get('Phase') or 'Walking'
+        Processed = int(Row.get('ProcessedFiles') or 0)
+        Probed = int(Row.get('ProbedFiles') or 0)
+        Total = int(Row.get('TotalFiles') or 0)
+        NeedProbe = int(Row.get('FilesNeedingProbe') or 0)
+        ElapsedSec = float(Row.get('ElapsedSec') or 0)
+        StaleSec = float(Row.get('StaleSec') or 0)
+
+        # Rolling rate via cache; falls back to since-start average on first sighting.
+        Prev = _ScanRateCache.get(JobId)
+        if Prev is not None:
+            PrevProc, PrevProbed, PrevTs = Prev
+            DeltaT = max(Now - PrevTs, 0.001)
+            DeltaProc = max(Processed - PrevProc, 0)
+            DeltaProbed = max(Probed - PrevProbed, 0)
+            WalkRate = DeltaProc / DeltaT
+            ProbeRate = DeltaProbed / DeltaT
+        else:
+            WalkRate = (Processed / ElapsedSec) if ElapsedSec > 0 else 0.0
+            ProbeRate = (Probed / ElapsedSec) if ElapsedSec > 0 else 0.0
+        _ScanRateCache[JobId] = (Processed, Probed, Now)
+
+        # Phase-aware rate + ETA. The UI's FPS cell reads the phase-appropriate rate.
+        if Phase == 'Probing':
+            FilesPerSec = ProbeRate
+            Remaining = max(NeedProbe - Probed, 0)
+            EtaSec = (Remaining / ProbeRate) if ProbeRate > 0.01 else None
+        elif Phase in ('Reconciling', 'Completing'):
+            FilesPerSec = 0.0
+            EtaSec = None
+        else:  # Walking (or NULL legacy)
+            FilesPerSec = WalkRate
+            Remaining = max(Total - Processed, 0) if Total > 0 else 0
+            EtaSec = (Remaining / WalkRate) if WalkRate > 0.01 and Total > 0 else None
+
+        Out.append({
+            "JobId": JobId,
+            "WorkerName": Row.get('WorkerName') or '<unknown>',
+            "RootFolderPath": Row.get('RootFolderPath'),
+            "CurrentDirectory": Row.get('CurrentDirectory'),
+            "Phase": Phase,
+            "Progress": float(Row.get('Progress') or 0.0),
+            "TotalFiles": Total,
+            "ProcessedFiles": Processed,
+            "FilesNeedingProbe": NeedProbe,
+            "ProbedFiles": Probed,
+            "NewFiles": int(Row.get('NewFiles') or 0),
+            "UpdatedFiles": int(Row.get('UpdatedFiles') or 0),
+            "DeletedFiles": int(Row.get('DeletedFiles') or 0),
+            "StartTime": str(Row.get('StartTime')) if Row.get('StartTime') else None,
+            "LastUpdated": str(Row.get('LastUpdated')) if Row.get('LastUpdated') else None,
+            "ElapsedSec": int(ElapsedSec),
+            "FilesPerSec": round(FilesPerSec, 2),
+            "EtaSec": int(EtaSec) if EtaSec is not None else None,
+            "IsStuck": StaleSec > 600,
+        })
+    # Evict cache entries for scans that completed since the last call.
+    for Stale in [k for k in _ScanRateCache.keys() if k not in SeenJobIds]:
+        _ScanRateCache.pop(Stale, None)
+    return Out
+
+
+def _BuildRecentScans(DbManager, Limit: int = 5):
+    """Last N terminal-status scans for the Recent Scans strip on /Activity."""
+    Query = """
+        SELECT JobId, WorkerName, RootFolderPath, Status,
+               StartTime, EndTime, ErrorMessage,
+               NewFiles, UpdatedFiles, DeletedFiles, ProcessedFiles, TotalFiles,
+               EXTRACT(EPOCH FROM (EndTime - StartTime)) AS DurationSec
+        FROM ScanJobs
+        WHERE Status IN ('Completed', 'Failed', 'Stopped')
+          AND EndTime IS NOT NULL
+        ORDER BY EndTime DESC
+        LIMIT %s
+    """
+    Rows = DbManager.DatabaseService.ExecuteQuery(Query, (Limit,)) or []
+    Out = []
+    for Row in Rows:
+        Out.append({
+            "JobId": Row.get('JobId'),
+            "WorkerName": Row.get('WorkerName') or '<unknown>',
+            "RootFolderPath": Row.get('RootFolderPath'),
+            "Status": Row.get('Status'),
+            "StartTime": str(Row.get('StartTime')) if Row.get('StartTime') else None,
+            "EndTime": str(Row.get('EndTime')) if Row.get('EndTime') else None,
+            "DurationSec": int(Row.get('DurationSec') or 0),
+            "ErrorMessage": Row.get('ErrorMessage'),
+            "NewFiles": int(Row.get('NewFiles') or 0),
+            "UpdatedFiles": int(Row.get('UpdatedFiles') or 0),
+            "DeletedFiles": int(Row.get('DeletedFiles') or 0),
+            "ProcessedFiles": int(Row.get('ProcessedFiles') or 0),
+            "TotalFiles": int(Row.get('TotalFiles') or 0),
+        })
+    return Out
+
+
+def _GetContinuousScanIntervalMinutes() -> int:
+    try:
+        Val = SystemSettingsRepository().GetSystemSetting('ContinuousScanIntervalMinutes')
+        return int(Val) if Val else 60
+    except Exception:
+        return 60
+
 
 def _GetDisplayTimezone() -> str:
     """Read SystemSettings.DisplayTimezone for SQL day-bucketing.
@@ -166,6 +305,12 @@ def GetOverview():
         # Backward compat: CurrentJob is first active job (or null)
         CurrentJob = ActiveJobs[0] if ActiveJobs else None
 
+        # Directive 2026-05-27: ActiveScans + RecentScans for /Activity scan
+        # rows. Server-computes FilesPerSec / EtaSec / ElapsedSec / IsStuck so
+        # the client renders without computation.
+        ActiveScans = _BuildActiveScans(DbManager)
+        RecentScans = _BuildRecentScans(DbManager, Limit=5)
+
         return jsonify({
             "Success": True,
             "Data": {
@@ -178,7 +323,9 @@ def GetOverview():
                 "IsProcessing": IsProcessing,
                 "ActiveJobsCount": ActiveJobsCount,
                 "CurrentJob": CurrentJob,
-                "ActiveJobs": ActiveJobs
+                "ActiveJobs": ActiveJobs,
+                "ActiveScans": ActiveScans,
+                "RecentScans": RecentScans
             }
         })
 
@@ -303,12 +450,44 @@ def GetWorkers():
         """.format(where='' if IncludeDisabled else 'WHERE Enabled = TRUE')
         Rows = DbManager.DatabaseService.ExecuteQuery(Query)
 
+        # Directive 2026-05-27 criterion 20: per-worker scan posture for the
+        # /Activity worker-tile "Scan:" line. One round-trip across all workers
+        # (no per-worker DB query in the loop).
+        ScanPostureRows = DbManager.DatabaseService.ExecuteQuery(
+            """
+            SELECT WorkerName,
+                   MAX(EndTime) FILTER (WHERE Status='Completed') AS LastScanCompleted,
+                   MAX(RootFolderPath) FILTER (WHERE Status='Running') AS CurrentScanRootFolder
+            FROM ScanJobs
+            WHERE WorkerName IS NOT NULL
+            GROUP BY WorkerName
+            """
+        ) or []
+        ScanPostureByWorker = {
+            (R.get('WorkerName') or ''): {
+                'LastScanCompleted': R.get('LastScanCompleted'),
+                'CurrentScanRootFolder': R.get('CurrentScanRootFolder'),
+            } for R in ScanPostureRows
+        }
+        IntervalMin = _GetContinuousScanIntervalMinutes()
+
         Workers = []
         for Row in (Rows or []):
             HeartbeatAge = Row.get('HeartbeatAgeSec')
             IsAlive = HeartbeatAge is not None and HeartbeatAge < 300
+            WorkerName = Row.get('WorkerName', '') or ''
+            ScanPosture = ScanPostureByWorker.get(WorkerName, {})
+            LastScanCompleted = ScanPosture.get('LastScanCompleted')
+            ScanEnabled = bool(Row.get('ScanEnabled', False))
+            # NextScanEstimate is null when the worker can't scan; otherwise
+            # LastScanCompleted + ContinuousScanIntervalMinutes. If a worker
+            # has no prior scan, the UI renders "imminent" -- not our concern.
+            NextScanEstimate = None
+            if ScanEnabled and LastScanCompleted is not None:
+                from datetime import timedelta
+                NextScanEstimate = LastScanCompleted + timedelta(minutes=IntervalMin)
             Workers.append({
-                "WorkerName": Row.get('WorkerName', ''),
+                "WorkerName": WorkerName,
                 "Platform": Row.get('Platform', ''),
                 "Status": Row.get('Status', 'Paused'),
                 "IsAlive": IsAlive,
@@ -319,7 +498,7 @@ def GetWorkers():
                 "AcceptsInterlaced": bool(Row.get('AcceptsInterlaced', True)),
                 "TranscodeEnabled": bool(Row.get('TranscodeEnabled', True)),
                 "QualityTestEnabled": bool(Row.get('QualityTestEnabled', False)),
-                "ScanEnabled": bool(Row.get('ScanEnabled', False)),
+                "ScanEnabled": ScanEnabled,
                 "RemuxEnabled": bool(Row.get('RemuxEnabled', True)),
                 "MaxConcurrentTranscodeJobs": Row.get('MaxConcurrentTranscodeJobs') or 1,
                 "MaxConcurrentQualityTestJobs": Row.get('MaxConcurrentQualityTestJobs') or 2,
@@ -328,6 +507,9 @@ def GetWorkers():
                 "Version": Row.get('Version'),
                 "BuildInfo": Row.get('BuildInfo'),
                 "MountValidationError": Row.get('MountValidationError'),
+                "LastScanCompleted": str(LastScanCompleted) if LastScanCompleted else None,
+                "NextScanEstimate": str(NextScanEstimate) if NextScanEstimate else None,
+                "CurrentScanRootFolder": ScanPosture.get('CurrentScanRootFolder'),
             })
 
         return jsonify({"Success": True, "Data": Workers})
