@@ -86,11 +86,7 @@
                 </table>
             </div>
 
-            <!-- Recent scans strip (last 5 terminal scans) -->
-            <div id="RecentScansStrip" class="border-top d-none">
-                <div class="px-3 py-2 small text-muted fw-bold">Recent scans</div>
-                <ul id="RecentScansList" class="list-unstyled mb-0 small"></ul>
-            </div>
+            <!-- Scan history lives on /Operations. /Activity surfaces in-flight work only. -->
         </div>
     </div>
 
@@ -440,57 +436,6 @@ var ActivityPage = (function() {
         Block.classList.remove('d-none');
     }
 
-    function RenderRecentScans(RecentScans) {
-        var Strip = document.getElementById('RecentScansStrip');
-        var List = document.getElementById('RecentScansList');
-        if (!RecentScans || RecentScans.length === 0) {
-            Strip.classList.add('d-none');
-            List.innerHTML = '';
-            return;
-        }
-        var Now = Date.now();
-        var Html = RecentScans.map(function(R) {
-            var Status = R.Status || 'Completed';
-            var Icon, IconCls;
-            if (Status === 'Completed') { Icon = 'fa-check-circle'; IconCls = 'text-success'; }
-            else if (Status === 'Failed') { Icon = 'fa-times-circle'; IconCls = 'text-danger'; }
-            else { Icon = 'fa-stop-circle'; IconCls = 'text-secondary'; }
-            var DurSec = R.DurationSec || 0;
-            var DurStr = (DurSec < 60) ? DurSec + 's'
-                : (DurSec < 3600) ? Math.floor(DurSec / 60) + 'm ' + (DurSec % 60) + 's'
-                : Math.floor(DurSec / 3600) + 'h ' + Math.floor((DurSec % 3600) / 60) + 'm';
-            var EndedRel = R.EndTime ? FormatRelativeTime(R.EndTime, Now) : '';
-            var ErrSnippet = (Status === 'Failed' && R.ErrorMessage)
-                ? ' <span class="text-danger" title="' + EscapeHtml(R.ErrorMessage) + '">-- ' + EscapeHtml(R.ErrorMessage.substring(0, 80)) + (R.ErrorMessage.length > 80 ? '...' : '') + '</span>'
-                : '';
-            return '<li class="px-3 py-1 border-top">' +
-                '<i class="fas ' + Icon + ' me-2 ' + IconCls + '"></i>' +
-                '<strong>' + EscapeHtml(R.RootFolderPath || '') + '</strong>' +
-                ' on ' + EscapeHtml(R.WorkerName || '<unknown>') +
-                ' <span class="text-muted">--</span> ' + DurStr +
-                ' <span class="text-muted">--</span> ' +
-                '<span class="text-success">+' + (R.NewFiles || 0) + '</span> ' +
-                '<span class="text-warning">~' + (R.UpdatedFiles || 0) + '</span> ' +
-                '<span class="text-danger">-' + (R.DeletedFiles || 0) + '</span>' +
-                ' <span class="text-muted">-- ' + EndedRel + '</span>' +
-                ErrSnippet +
-            '</li>';
-        }).join('');
-        List.innerHTML = Html;
-        Strip.classList.remove('d-none');
-    }
-
-    function FormatRelativeTime(Iso, NowMs) {
-        try {
-            var T = new Date(Iso + (Iso.endsWith('Z') ? '' : 'Z')).getTime();
-            var DiffSec = Math.max(0, Math.floor((NowMs - T) / 1000));
-            if (DiffSec < 60) return DiffSec + 's ago';
-            if (DiffSec < 3600) return Math.floor(DiffSec / 60) + 'm ago';
-            if (DiffSec < 86400) return Math.floor(DiffSec / 3600) + 'h ago';
-            return Math.floor(DiffSec / 86400) + 'd ago';
-        } catch (e) { return Iso; }
-    }
-
     function RenderActiveJobs(D, VmafJob) {
         var Status = D.ServiceStatus;
         var IsProcessing = D.IsProcessing;
@@ -593,10 +538,9 @@ var ActivityPage = (function() {
             NoJob.classList.remove('d-none');
         }
 
-        // Active Scans block + Recent Scans strip -- both fed from the same
-        // /Overview tick, no separate poller.
+        // Active Scans block fed from the same /Overview tick. Recent Scans
+        // history lives on /Operations (directive 2026-05-28).
         RenderActiveScans(D.ActiveScans || []);
-        RenderRecentScans(D.RecentScans || []);
     }
 
     function RenderJobFooter(ActiveJobs) {

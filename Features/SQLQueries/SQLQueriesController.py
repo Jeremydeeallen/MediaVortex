@@ -461,6 +461,81 @@ def GetRecentSuccesses():
         LoggingService.LogException(error_msg, e, "SQLQueriesController", "GetRecentSuccesses")
         return jsonify({"Success": False, "ErrorMessage": error_msg}), 500
 
+@SQLQueriesBlueprint.route('/GetRecentScanRuns', methods=['GET'])
+def GetRecentScanRuns():
+    """Recent scan completions for the Operations dashboard (directive 2026-05-28).
+
+    "Real failure" classification:
+      - Always include Status='Completed'
+      - Include Status='Failed' UNLESS ErrorMessage matches a housekeeping
+        pattern (zombie clear, application restart, deploy-time stuck cleanup,
+        operator soft-stop). These are admin actions, not failures the operator
+        needs to investigate.
+      - Exclude Status='Stopped' entirely -- soft-stop is an operator action.
+
+    The pattern list is intentionally explicit so future additions are one
+    line in this file. If the operator starts seeing noise on Operations,
+    add the matching substring here.
+    """
+    try:
+        LoggingService.LogFunctionEntry("GetRecentScanRuns", "SQLQueriesController")
+
+        Limit = int(request.args.get('limit', 15))
+        if Limit < 1:
+            Limit = 15
+        if Limit > 50:
+            Limit = 50
+
+        # Housekeeping patterns -- substrings matched case-insensitively
+        # against ScanJobs.ErrorMessage. Failed rows matching ANY of these
+        # are admin actions, not real failures.
+        HousekeepingPatterns = [
+            '%Application restarted%',
+            '%Zombie%',
+            '%pre-redeploy%',
+            '%Stuck scan cleaned by StuckJobDetectionService%',
+            '%post-deploy mass clear%',
+            '%post-redeploy mass clear%',
+            '%Stopped pre-redeploy%',
+            '%cleared post-restart%',
+            '%cleared post-deploy%',
+        ]
+
+        # Build NOT ILIKE ALL (pattern1, pattern2, ...) clause
+        NotLikeClauses = " AND ".join(["sj.ErrorMessage NOT ILIKE %s"] * len(HousekeepingPatterns))
+
+        # The filter applies to BOTH Completed and Failed rows. A scan that
+        # was interrupted by an Application restart is marked Status='Completed'
+        # with ErrorMessage='Application restarted' (known quirk per
+        # FileScanning.flow.md). Operators don't want that in their success
+        # list either -- the partial counts are not a real success.
+        Query = f"""
+            SELECT sj.RootFolderPath, sj.WorkerName, sj.Status,
+                   sj.StartTime, sj.EndTime,
+                   EXTRACT(EPOCH FROM (sj.EndTime - sj.StartTime))::int AS DurationSec,
+                   sj.NewFiles, sj.UpdatedFiles, sj.DeletedFiles, sj.ProcessedFiles,
+                   sj.ErrorMessage
+            FROM ScanJobs sj
+            WHERE sj.EndTime IS NOT NULL
+              AND sj.Status IN ('Completed', 'Failed')
+              AND (sj.ErrorMessage IS NULL OR ({NotLikeClauses}))
+            ORDER BY sj.EndTime DESC
+            LIMIT %s
+        """
+        Params = HousekeepingPatterns + [Limit]
+        Results = SharedDatabaseManager.DatabaseService.ExecuteQuery(Query, Params)
+        Rows = [dict(R) for R in (Results or [])]
+
+        LoggingService.LogInfo(f"Retrieved {len(Rows)} recent scan runs", "SQLQueriesController", "GetRecentScanRuns")
+
+        return jsonify({"Success": True, "Results": Rows, "Count": len(Rows)})
+
+    except Exception as e:
+        error_msg = f"Exception getting recent scan runs: {str(e)}"
+        LoggingService.LogException(error_msg, e, "SQLQueriesController", "GetRecentScanRuns")
+        return jsonify({"Success": False, "ErrorMessage": error_msg}), 500
+
+
 @SQLQueriesBlueprint.route('/GetStuckJobs', methods=['GET'])
 def GetStuckJobs():
     """Get jobs stuck in processing."""
