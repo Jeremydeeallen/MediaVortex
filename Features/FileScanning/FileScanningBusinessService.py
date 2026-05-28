@@ -510,11 +510,12 @@ class FileScanningBusinessService:
             'FileScanningBusinessService', '_RunSizeSurvey'
         )
 
-        # UPSERT each top-N row into MediaFiles + assemble the JSON payload.
+        # Pass 1: UPSERT each top-N row into MediaFiles, assemble initial JSON,
+        # and capture the row Id so the probe pass can fetch it back.
         from Core.PathStorage import LoadStorageRoots, Parse as PathParse
         Roots = LoadStorageRoots()
-        TopJson = []
-        UpsertedCount = 0
+        # Each Record: {'Id', 'localPath', 'path', 'fileName', 'sizeMB', 'modifiedAt'}
+        Records = []
         for SizeBytes, Mtime, LocalPath in TopList:
             try:
                 CanonicalPath = self._ToCanonicalPath(LocalPath)
@@ -523,8 +524,6 @@ class FileScanningBusinessService:
                 MtimeDt = datetime.fromtimestamp(Mtime, tz=timezone.utc).replace(tzinfo=None)
                 StorageRootId, RelativePath = PathParse(CanonicalPath, Roots)
 
-                # Check existing row by (StorageRootId, RelativePath) so we
-                # update in place rather than create a duplicate.
                 ExistingId = None
                 if StorageRootId is not None and RelativePath is not None:
                     Found = self.Repository.DatabaseService.ExecuteQuery(
@@ -535,7 +534,6 @@ class FileScanningBusinessService:
                         ExistingId = Found[0].get('Id') or Found[0].get('id')
 
                 if ExistingId is not None:
-                    # Refresh size + mtime; preserve probe state and identity.
                     self.Repository.DatabaseService.ExecuteNonQuery(
                         """
                         UPDATE MediaFiles
@@ -550,6 +548,7 @@ class FileScanningBusinessService:
                         """,
                         (SizeMB, SizeBytes, MtimeDt, MtimeDt, datetime.now(timezone.utc), CanonicalPath, FileName, ExistingId),
                     )
+                    RowId = ExistingId
                 else:
                     NewFile = MediaFileModel(
                         SeasonId=None,
@@ -563,29 +562,77 @@ class FileScanningBusinessService:
                         FileSize=SizeBytes,
                         LastScannedDate=datetime.now(timezone.utc),
                     )
-                    self.Repository.SaveMediaFile(NewFile)
-                UpsertedCount += 1
-                TopJson.append({
-                    "path": CanonicalPath,
-                    "fileName": FileName,
-                    "sizeMB": SizeMB,
-                    "modifiedAt": MtimeDt.isoformat() + 'Z',
-                })
+                    RowId = self.Repository.SaveMediaFile(NewFile)
+
+                if RowId is not None:
+                    Records.append({
+                        'Id': RowId,
+                        'path': CanonicalPath,
+                        'fileName': FileName,
+                        'sizeMB': SizeMB,
+                        'modifiedAt': MtimeDt.isoformat() + 'Z',
+                    })
             except Exception as Ex:
                 LoggingService.LogException(f"SizeSurvey UPSERT failed for {LocalPath}", Ex, 'FileScanningBusinessService', '_RunSizeSurvey')
 
-        # Persist TopFiles JSON on the scan row.
-        try:
-            self.Repository.DatabaseService.ExecuteNonQuery(
-                "UPDATE ScanJobs SET TopFiles = %s::jsonb, LastUpdated = NOW() WHERE JobId = %s",
-                (json.dumps(TopJson), self.CurrentJobId),
-            )
-        except Exception as Ex:
-            LoggingService.LogException("Failed to persist ScanJobs.TopFiles", Ex, 'FileScanningBusinessService', '_RunSizeSurvey')
+        # Initial TopFiles snapshot (all enumerated entries) + counter init for
+        # the heartbeat. The probe pass below drops each entry as it completes,
+        # so /Activity shows the list drain in real time.
+        def _WriteTopFiles(EntriesList):
+            try:
+                Payload = [{k: r[k] for k in ('path', 'fileName', 'sizeMB', 'modifiedAt')} for r in EntriesList]
+                self.Repository.DatabaseService.ExecuteNonQuery(
+                    "UPDATE ScanJobs SET TopFiles = %s::jsonb, LastUpdated = NOW() WHERE JobId = %s",
+                    (json.dumps(Payload), self.CurrentJobId),
+                )
+            except Exception as WriteEx:
+                LoggingService.LogException("Failed to persist ScanJobs.TopFiles", WriteEx, 'FileScanningBusinessService', '_RunSizeSurvey')
 
-        TotalElapsedSec = (datetime.now(timezone.utc) - SurveyStart).total_seconds()
+        _WriteTopFiles(Records)
+        EnumSec = (datetime.now(timezone.utc) - SurveyStart).total_seconds()
         LoggingService.LogInfo(
-            f"SizeSurvey complete: {UpsertedCount} top files persisted in {TotalElapsedSec:.1f}s total ({FilesSeen} surveyed)",
+            f"SizeSurvey enumeration: {len(Records)} top files staged in {EnumSec:.1f}s ({FilesSeen} surveyed); now probing largest-first",
+            'FileScanningBusinessService', '_RunSizeSurvey'
+        )
+
+        # Pass 2: probe each top-N file in size-descending order. Roll each one
+        # off the TopFiles list as it completes so the operator watches the
+        # largest items drain. Soft-stop honored.
+        self._FilesNeedingProbe = len(Records)
+        self._ProbedFiles = 0
+        ProbeStart = datetime.now(timezone.utc)
+        Remaining = list(Records)
+        ProbedCount = 0
+        for Rec in Records:
+            if self._StopRequested:
+                LoggingService.LogInfo("SizeSurvey probe loop interrupted by soft-stop", 'FileScanningBusinessService', '_RunSizeSurvey')
+                break
+            try:
+                MediaFile = self.Repository.GetMediaFileById(Rec['Id'])
+                if MediaFile is not None:
+                    Result = self.MediaProbeService._ExecuteProbe(MediaFile)
+                    if not Result.get('Success', False):
+                        LoggingService.LogWarning(
+                            f"SizeSurvey probe failed for {Rec['path']}: {Result.get('Message') or Result.get('Error')}",
+                            'FileScanningBusinessService', '_RunSizeSurvey'
+                        )
+            except Exception as ProbeEx:
+                LoggingService.LogException(f"SizeSurvey probe exception for {Rec['path']}", ProbeEx, 'FileScanningBusinessService', '_RunSizeSurvey')
+
+            # Roll this entry off the list regardless of probe outcome -- the
+            # MediaFiles row carries any failure state (FFprobeFailureCount).
+            try:
+                Remaining.remove(Rec)
+            except ValueError:
+                pass
+            ProbedCount += 1
+            self._ProbedFiles = ProbedCount
+            _WriteTopFiles(Remaining)
+
+        TotalSec = (datetime.now(timezone.utc) - SurveyStart).total_seconds()
+        ProbeSec = (datetime.now(timezone.utc) - ProbeStart).total_seconds()
+        LoggingService.LogInfo(
+            f"SizeSurvey complete: enumerated {FilesSeen}, staged {len(Records)}, probed {ProbedCount} in {ProbeSec:.1f}s (total {TotalSec:.1f}s)",
             'FileScanningBusinessService', '_RunSizeSurvey'
         )
 
