@@ -75,13 +75,26 @@ The phrase "70% of our problem" in the CEO statement = storage-savings opportuni
 
 ## Status
 
-Active 2026-05-27 -- next step: implement.
+Active 2026-05-28 -- shipped and verified live; operator UX confirmation pending.
 
-Plan:
-1. Migration: `Scripts/SQLScripts/AddScanJobsTopFiles.py` -- idempotent `ALTER TABLE ScanJobs ADD COLUMN IF NOT EXISTS TopFiles JSONB`. Seed `SystemSettings('SizeSurveyTopN', '100', 'integer')`.
-2. Fix `ContinuousScanService._GetTopLevelFolders` to dedupe on Windows-style separators (criterion 6).
-3. Add `SizeSurvey` phase to `FileScanningBusinessService.PerformScan` -- new helper `_RunSizeSurvey(LocalRootPath, RootFolder, TopN)` runs first, writes `TopFiles` JSON + UPSERTs the top-N MediaFiles rows.
-4. Extend `_BuildActiveScans` in `TeamStatusController` to include `TopFiles` (parsed) on each ActiveScan entry.
-5. Rewrite scan-row rendering in `Templates/Activity.html`: new `<tbody>` section with scan-appropriate columns, top-5 largest files inline below each row.
-6. Deploy to larry + restart WebService; smoke-test against a real scan on each of T:\, M:\, Z:\; observe top-N populated within 30s.
-7. Doc sweep: update `FileScanning.flow.md` for the new phase + dispatch fix; update `FileScanning.feature.md` criterion text where the phase chain is named.
+Shipped 2026-05-28 (commit 7e0919c):
+- [x] 1. `Scripts/SQLScripts/AddScanJobsTopFiles.py` run against live DB. ScanJobs.TopFiles JSONB column added (nullable). `SystemSettings('SizeSurveyTopN', '100')` seeded.
+- [x] 2. `ContinuousScanService._GetTopLevelFolders` rewritten to dedupe on Windows-style backslash separators directly (no `os.sep` / `os.path.normpath`). Smoke-tested locally: 9 mixed inputs (T:\, T:\30 Rock, T:\FBI, T:\\, M:\, M:\Saving Private Ryan, Z:\, Z:\Some Folder, dupes) collapse to exactly 3 share roots.
+- [x] 3. `FileScanningBusinessService._RunSizeSurvey` -- heap-based top-N (`heapq.heappushpop`, O(N log K)); media-extension filter; excluded-directory honored; `os.scandir` recursive (no `subprocess`, cross-platform). UPSERTs by `(StorageRootId, LOWER(RelativePath))`; preserves Id on existing rows; refreshes SizeMB + FileSize + FileModificationTime + FilePath + FileName. Writes JSON array to `ScanJobs.TopFiles` at completion. `_SetPhase('SizeSurvey')` then `_SetPhase('Walking')` bracket the call; any exception is caught and logged so the full scan still proceeds.
+- [x] 4. `_BuildActiveScans` selects `TopFiles` and emits the top-5 entries per ActiveScan in the /api/TeamStatus/Overview payload.
+- [x] 5. `Templates/Activity.html` rewrite: dedicated `<div id="ActiveScansBlock">` under the Active Jobs card with scan-appropriate columns (Drive | Worker | Phase | Progress | Files | Rate | ETA | Stop). Inline top-5 largest files render under each row with size labels. Phase badge color-coded per phase. Old "cram into transcode columns" `RenderScanRow` removed.
+- [x] 6. Deployed to larry (image tag `cf9ea19` -- file sync via tar-over-ssh, latest code in container). WebService restarted. Worker containers restarted post-deploy to clear deploy-time zombie ScanJobs rows (old-container final heartbeat overwriting Stopped -- known race from the prior directive). Fresh scans 73180/73181/73182 verified end-to-end: three workers each picked a distinct share root (M:\, T:\, Z:\); each SizeSurvey completed and persisted `TopFiles` (length 100) within ~30s; Phase advanced to Walking with correct ProcessedFiles vs TotalFiles counters.
+- [x] 7. Doc sweep: `FileScanning.flow.md` updated -- new "1.5. SizeSurvey" pipeline row; State Surface lists SizeSurvey in the Phase enum and adds the TopFiles column. `FileScanning.feature.md` did not name the prior phase chain explicitly, so no edit needed there. Prior directive at `.claude/directives/closed/2026-05-27-active-scan-visibility.md` already marked Closed -- Partial with the supersession pointer.
+
+Verified live data (from the three fresh post-deploy scans):
+- M:\ top file: *Saving Private Ryan (1998) Bluray-2160p.mkv* @ 10.6 GB
+- T:\ top file: *Westworld - S01E10 - The Bicameral Mind Bluray-1080p.mkv* @ 7.8 GB
+- Z:\ top file: 22.0 GB
+- TopFiles length: 100 on all three (matches SizeSurveyTopN setting)
+- Phase transition observable: SizeSurvey -> Walking happened within 30s of scan start
+- Dispatch fix: three workers picked three distinct share roots on the same restart tick
+
+Operator-pending verification:
+- Refresh /Activity in a browser. Expected: Active Scans block with three rows (T:\, M:\, Z:\); each row shows phase badge, progress bar, files counters; under each row a "Largest files found" inline list of 5 entries with sizes. If the rendering doesn't match -- or if the layout is still wrong -- report and I'll iterate.
+
+Close (Success) when operator confirms the UI render is what they want.

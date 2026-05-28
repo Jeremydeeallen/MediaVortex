@@ -10,7 +10,8 @@ Both paths land in `FileScanningBusinessService.StartScan(rootfolderpath, recurs
 
 | Stage | File | What It Does |
 |------|------|--------------|
-| 1. Pick / start | `FileScanningBusinessService.StartScan` | UPSERTs ScanJobs row; if no other Running scan for this rootfolder, sets Status='Running', StartTime=NOW(), spawns a worker thread |
+| 1. Pick / start | `FileScanningBusinessService.StartScan` | UPSERTs ScanJobs row; if no other Running scan for this rootfolder, sets Status='Running', StartTime=NOW(), spawns a worker thread. Phase initialized to `Walking`; SizeSurvey transition follows immediately in PerformScan. |
+| 1.5. SizeSurvey | `FileScanningBusinessService._RunSizeSurvey` | Stat-only recursive enumeration via `os.scandir`; heap-based top-N selection (default 100, configurable via `SystemSettings('SizeSurveyTopN')`, soft-cap 500). Top-N files UPSERTed into `MediaFiles` with size + mtime; full list persisted to `ScanJobs.TopFiles` JSONB for /Activity surfacing. Budget ~30s per share on Larry NFS. Front-loads biggest savings opportunities before the long walk. Owns directive 2026-05-28 (closed). |
 | 2. Walk filesystem | `FileScanningBusinessService._WalkRootFolder` | `os.walk` (or platform-equivalent) over `rootfolderpath`; updates `ScanJobs.CurrentDirectory` per directory enter; counts each candidate via `TotalFiles += 1` |
 | 3. Per-file decision | same | For each file: `MediaFiles.Path = ?` lookup. If absent -> insert MediaFiles row (NewFiles += 1). If present and size/mtime changed -> update (UpdatedFiles += 1). If present and unchanged -> skip (SkippedFiles += 1). |
 | 4. Reconcile DB vs disk | `FileScanningBusinessService.ReconcileWithDisk` | Single pass over the disk file list returned by ScanDirectory. Builds a path set + filename->paths index, iterates DB rows for this rootfolder: row in disk set -> skip (handled by per-file processor); row missing but basename matches a disk path AND `IsSameFile` confirms (size/mtime within tolerance) -> reassign FilePath / FileName / StorageRootId / RelativePath in place; row missing with no fuzzy match -> delete. Replaces the prior `DetectMovedFiles` + `CleanupMissingFiles` sequence which serially stat-checked each DB row twice over NFS. Move-detection cap (criterion 12) preserved -- above the cap, fuzzy-match step is skipped. |
@@ -22,7 +23,8 @@ Both paths land in `FileScanningBusinessService.StartScan(rootfolderpath, recurs
 `ScanJobs` columns the operator might see:
 - `RootFolderPath` -- which mount is being scanned
 - `Status` -- `Pending` / `Running` / `Stopping` / `Completed` / `Failed` / `Stopped`
-- `Phase` -- `Walking` / `Reconciling` / `Probing` / `Completing` (NULL on legacy rows and after Status flips terminal); written by `FileScanningBusinessService._SetPhase` at each transition for /Activity-page visibility
+- `Phase` -- `SizeSurvey` / `Walking` / `Reconciling` / `Probing` / `Completing` (NULL on legacy rows and after Status flips terminal); written by `FileScanningBusinessService._SetPhase` at each transition for /Activity-page visibility. SizeSurvey is the new initial phase (directive 2026-05-28); the prior chain (Walking -> Reconciling -> Probing -> Completing) is preserved.
+- `TopFiles` (JSONB) -- array of `{path, fileName, sizeMB, modifiedAt}` for the top-N largest files found by SizeSurvey; surfaced on /Activity under each running scan row. NULL on legacy rows and on scans where SizeSurvey failed (caught + logged; full scan still proceeds).
 - `Progress` (0-100, double) -- updated periodically during the walk
 - `CurrentDirectory` -- last-seen directory path (truncated for UI)
 - `TotalFiles` / `ProcessedFiles` / `NewFiles` / `UpdatedFiles` / `DeletedFiles` / `SkippedFiles` / `EncodingErrors`
