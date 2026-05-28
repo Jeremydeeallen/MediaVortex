@@ -436,6 +436,159 @@ class FileScanningBusinessService:
         self._HeartbeatStopEvent = None
         self._HeartbeatThread = None
 
+    def _RunSizeSurvey(self, LocalRootPath: str, CanonicalRootPath: str, RootFolder: RootFolderModel):
+        """Directive 2026-05-27 (scan -- largest files first), criteria 1-5.
+
+        Stat-only recursive enumeration of media files under LocalRootPath.
+        Sorts by size descending, takes top-N (SystemSettings SizeSurveyTopN,
+        default 100, soft-cap 500), UPSERTs those MediaFiles rows so the rest
+        of the pipeline can act on them immediately, and writes a JSON array
+        of {path, sizeMB, modifiedAt} to ScanJobs.TopFiles so /Activity can
+        surface them inline under the scan row.
+
+        No FFprobe, no metadata reads -- stat-only. Budget: ~30s on Larry NFS
+        for a 40k-file share.
+        """
+        import json
+        from datetime import datetime, timezone
+
+        SurveyStart = datetime.now(timezone.utc)
+
+        # Read TopN fresh from settings every scan (no worker restart for changes).
+        TopN = 100
+        try:
+            from Features.SystemSettings.SystemSettingsRepository import SystemSettingsRepository
+            Raw = SystemSettingsRepository().GetSystemSetting('SizeSurveyTopN')
+            if Raw:
+                TopN = max(1, min(500, int(Raw)))
+        except Exception as Ex:
+            LoggingService.LogException("Failed to read SizeSurveyTopN, using default 100", Ex, 'FileScanningBusinessService', '_RunSizeSurvey')
+
+        MediaExts = self.FileManager.MediaExtensions
+        Excluded = {p.lower() for p in (self.FileManager.ExcludedDirectories or [])}
+
+        # Heap-based top-N via os.scandir recursion. Avoids holding all 40k
+        # entries in memory and avoids a full sort -- O(N log K) instead of
+        # O(N log N) where K << N.
+        import heapq
+        Heap = []  # min-heap of (sizeBytes, mtimeFloat, localPath)
+        FilesSeen = 0
+
+        def _WalkSurvey(Path: str):
+            nonlocal FilesSeen
+            try:
+                with os.scandir(Path) as It:
+                    for Entry in It:
+                        try:
+                            if Entry.is_dir(follow_symlinks=False):
+                                if Entry.name.lower() in Excluded:
+                                    continue
+                                _WalkSurvey(Entry.path)
+                            elif Entry.is_file(follow_symlinks=False):
+                                Ext = os.path.splitext(Entry.name)[1].lower()
+                                if Ext not in MediaExts:
+                                    continue
+                                St = Entry.stat(follow_symlinks=False)
+                                FilesSeen += 1
+                                Item = (St.st_size, St.st_mtime, Entry.path)
+                                if len(Heap) < TopN:
+                                    heapq.heappush(Heap, Item)
+                                elif St.st_size > Heap[0][0]:
+                                    heapq.heapreplace(Heap, Item)
+                        except (PermissionError, OSError):
+                            continue
+            except (PermissionError, OSError) as DirEx:
+                LoggingService.LogWarning(f"SizeSurvey could not enter {Path}: {DirEx}", 'FileScanningBusinessService', '_RunSizeSurvey')
+
+        _WalkSurvey(LocalRootPath)
+
+        # Drain the heap, largest first.
+        TopList = sorted(Heap, key=lambda x: -x[0])
+        ElapsedSec = (datetime.now(timezone.utc) - SurveyStart).total_seconds()
+        LoggingService.LogInfo(
+            f"SizeSurvey: enumerated {FilesSeen} media files under {LocalRootPath} in {ElapsedSec:.1f}s; top-{len(TopList)} surfaced",
+            'FileScanningBusinessService', '_RunSizeSurvey'
+        )
+
+        # UPSERT each top-N row into MediaFiles + assemble the JSON payload.
+        from Core.PathStorage import LoadStorageRoots, Parse as PathParse
+        Roots = LoadStorageRoots()
+        TopJson = []
+        UpsertedCount = 0
+        for SizeBytes, Mtime, LocalPath in TopList:
+            try:
+                CanonicalPath = self._ToCanonicalPath(LocalPath)
+                FileName = os.path.basename(LocalPath)
+                SizeMB = round(SizeBytes / (1024 * 1024), 2)
+                MtimeDt = datetime.fromtimestamp(Mtime, tz=timezone.utc).replace(tzinfo=None)
+                StorageRootId, RelativePath = PathParse(CanonicalPath, Roots)
+
+                # Check existing row by (StorageRootId, RelativePath) so we
+                # update in place rather than create a duplicate.
+                ExistingId = None
+                if StorageRootId is not None and RelativePath is not None:
+                    Found = self.Repository.DatabaseService.ExecuteQuery(
+                        "SELECT Id FROM MediaFiles WHERE StorageRootId = %s AND LOWER(RelativePath) = LOWER(%s) LIMIT 1",
+                        (StorageRootId, RelativePath),
+                    )
+                    if Found:
+                        ExistingId = Found[0].get('Id') or Found[0].get('id')
+
+                if ExistingId is not None:
+                    # Refresh size + mtime; preserve probe state and identity.
+                    self.Repository.DatabaseService.ExecuteNonQuery(
+                        """
+                        UPDATE MediaFiles
+                        SET SizeMB = %s,
+                            FileSize = %s,
+                            FileModificationTime = %s,
+                            LastModifiedDate = %s,
+                            LastScannedDate = %s,
+                            FilePath = %s,
+                            FileName = %s
+                        WHERE Id = %s
+                        """,
+                        (SizeMB, SizeBytes, MtimeDt, MtimeDt, datetime.now(timezone.utc), CanonicalPath, FileName, ExistingId),
+                    )
+                else:
+                    NewFile = MediaFileModel(
+                        SeasonId=None,
+                        StorageRootId=StorageRootId,
+                        RelativePath=RelativePath or '',
+                        FilePath=CanonicalPath,
+                        FileName=FileName,
+                        SizeMB=SizeMB,
+                        FileModificationTime=MtimeDt,
+                        LastModifiedDate=MtimeDt,
+                        FileSize=SizeBytes,
+                        LastScannedDate=datetime.now(timezone.utc),
+                    )
+                    self.Repository.SaveMediaFile(NewFile)
+                UpsertedCount += 1
+                TopJson.append({
+                    "path": CanonicalPath,
+                    "fileName": FileName,
+                    "sizeMB": SizeMB,
+                    "modifiedAt": MtimeDt.isoformat() + 'Z',
+                })
+            except Exception as Ex:
+                LoggingService.LogException(f"SizeSurvey UPSERT failed for {LocalPath}", Ex, 'FileScanningBusinessService', '_RunSizeSurvey')
+
+        # Persist TopFiles JSON on the scan row.
+        try:
+            self.Repository.DatabaseService.ExecuteNonQuery(
+                "UPDATE ScanJobs SET TopFiles = %s::jsonb, LastUpdated = NOW() WHERE JobId = %s",
+                (json.dumps(TopJson), self.CurrentJobId),
+            )
+        except Exception as Ex:
+            LoggingService.LogException("Failed to persist ScanJobs.TopFiles", Ex, 'FileScanningBusinessService', '_RunSizeSurvey')
+
+        TotalElapsedSec = (datetime.now(timezone.utc) - SurveyStart).total_seconds()
+        LoggingService.LogInfo(
+            f"SizeSurvey complete: {UpsertedCount} top files persisted in {TotalElapsedSec:.1f}s total ({FilesSeen} surveyed)",
+            'FileScanningBusinessService', '_RunSizeSurvey'
+        )
+
     def CleanupCompletedJobs(self):
         """Clean up old completed scan jobs."""
         try:
@@ -490,9 +643,21 @@ class FileScanningBusinessService:
                     'Error': 'RootFolderCreationFailed'
                 }
 
+            # Step 2.5: SizeSurvey -- directive 2026-05-27 (scan -- largest files first).
+            # Stat-only enumeration that front-loads the top-N largest files into
+            # MediaFiles so the operator gets the biggest savings opportunities on
+            # /Activity within ~30s, before the long walk. Reads SizeSurveyTopN
+            # fresh from SystemSettings each scan; default 100, soft cap 500.
+            self._SetPhase(self.CurrentJobId, 'SizeSurvey')
+            try:
+                self._RunSizeSurvey(LocalRootPath, RootFolderPath, RootFolder)
+            except Exception as SurveyEx:
+                LoggingService.LogException("SizeSurvey failed -- continuing to full scan", SurveyEx, 'PerformScan', 'FileScanningBusinessService')
+
             # Step 3: Walk the LOCAL path; convert results back to canonical
             # for DB storage so MediaFiles.FilePath stays portable across hosts.
             self.ScanProgress = 30.0
+            self._SetPhase(self.CurrentJobId, 'Walking')
             LocalMediaFiles = self.FileManager.ScanDirectory(LocalRootPath, Recursive)
             MediaFiles = [self._ToCanonicalPath(p) for p in LocalMediaFiles]
             self.ScanResults.TotalFilesFound = len(MediaFiles)

@@ -2,130 +2,86 @@
 
 **Set:** 2026-05-27
 **Status:** Active
-**Replaces:** `directives/closed/2026-05-27-version-stamping.md` (closed Success)
+**Replaces:** `directives/closed/2026-05-27-active-scan-visibility.md` (closed Partial -- producer-side phase/probe writes kept; UI scrapped here)
 
 ## Outcome
 
-The /Activity page becomes the operator's home base for scans. Today: invisible -- a worker scanning T:\ at 80% looks identical on /Activity to a worker doing nothing. After: every in-flight scan appears as a row in the existing Active Jobs table next to transcodes and VMAF jobs, with the same fidelity as a transcode row (rate, ETA, stop button), PLUS a clear phase indicator (Walking / Reconciling / Probing -- so a busy scan and a hung scan are not indistinguishable), PLUS each worker tile shows its scan posture (last scan + next scheduled), PLUS a Recent Scans strip below the Active Jobs table shows the last 5 completed/failed scans with counts so the operator can answer "what just happened" without leaving /Activity. The operator can start, watch, distinguish, stop, and review scans from one page.
+Within ~30 seconds of a scan starting on any Larry worker, the operator sees the top-N largest files on the share surfaced on /Activity -- file path, size, worker -- before the full walk completes. Those largest files land in `MediaFiles` immediately so the rest of the pipeline (probe + transcode eligibility) acts on the biggest savings opportunities while the long-tail walk continues in background. /Activity scan rows are their own self-contained section -- not shoehorned into transcode-shaped columns -- so the operator can read what's happening at a glance.
+
+The phrase "70% of our problem" in the CEO statement = storage-savings opportunity: largest files yield the largest transcode wins. Front-loading them means visible value within seconds instead of waiting for a 40k-file scan to complete.
 
 ## Acceptance Criteria
 
-### A. Scan rows in the existing Active Jobs table
+### A. SizeSurvey phase
 
-1. **Scan rows render in `<table id="ActiveJobsTable">` alongside transcode + VMAF rows.** No new card, no new table. When zero scans are running, the table looks identical to today. Verifiable: with at least one `ScanJobs.Status='Running'` row, the row appears in the same table that today holds transcode + VMAF jobs.
+1. **Every scan starts with a `SizeSurvey` phase** before `Walking`. The worker enumerates every media file under the rootfolder with size and mtime, sorts descending by size, and isolates the top N (default 100). Default media extensions: `.mkv .mp4 .avi .m4v .mov .ts .wmv .mpg .mpeg`. Verifiable: trigger a scan; `SELECT Phase FROM ScanJobs WHERE Id=<new>` reads `SizeSurvey` within 1s of start.
 
-2. **Type cell reads `Scan` with a distinct badge color** (not the existing transcode-blue or VMAF-color). Verifiable: visual inspection -- badge text is exactly `Scan`, color is distinct from the other two types.
+2. **SizeSurvey returns within 30 seconds on Larry against any registered share root** (T:\ ~40k files, M:\ ~3k, Z:\ ~8k). No FFprobe, no metadata reads -- stat-only enumeration. Verifiable: kick a scan from any larry-worker; `SELECT EXTRACT(EPOCH FROM (LastUpdated - StartTime)) FROM ScanJobs WHERE JobId=<new> AND Phase != 'SizeSurvey' ORDER BY LastUpdated LIMIT 1` is < 30.
 
-3. **File cell shows RootFolder primary, current directory secondary.** Primary line: `RootFolderPath` (e.g. `T:\`). Secondary line (smaller, muted): `CurrentDirectory` truncated to fit, full path on hover. If `CurrentDirectory` is NULL or equal to `RootFolderPath`, only the primary line shows. Verifiable: pick a scan whose CurrentDirectory is several levels deep; both lines render; hover tooltip shows the full path.
+3. **Top-N largest files land in `MediaFiles` during SizeSurvey.** For each file in the top-N: UPSERT a `MediaFiles` row keyed on `(StorageRootId, LOWER(RelativePath))` -- populate `FilePath`, `FileName`, `SizeMB`, `FileModificationTime`, `StorageRootId`, `RelativePath`, `RootFolderId`. Probe-dependent columns (`Resolution`, `Codec`, etc.) stay NULL; they fill in during the later Probing phase. Existing rows have their `SizeMB` / `FileModificationTime` refreshed but identity (`Id`) preserved. Verifiable: pick a known large file before scan, note its `Id` and `SizeMB`; trigger a scan; within ~30s the same `Id` is present with refreshed `SizeMB`.
 
-4. **Worker cell shows `ScanJobs.WorkerName`.** NULL renders as `<unknown>`. Verifiable: SQL value matches rendered value.
+4. **The top-N count is configurable via SystemSettings.** Key `SizeSurveyTopN`, integer, default `100`. Read fresh per scan -- no worker restart needed to change. Verifiable: `UPDATE SystemSettings SET SettingValue='50' WHERE SettingKey='SizeSurveyTopN'`; next scan writes 50 entries to the JSON column (criterion 5).
 
-5. **Progress cell shows phase-aware progress bar + count.** During `Walking` phase: bar = `Progress %`, label = `<ProcessedFiles> / <TotalFiles> files walked` (label = `<ProcessedFiles> files` if TotalFiles=0). During `Probing` phase: bar = probe progress, label = `<ProbedFiles> / <FilesNeedingProbe> probed`. During `Reconciling`: indeterminate bar, label = `reconciling DB vs disk`. During `Completing`: bar = 100%, label = `finalizing`. Verifiable: kick a scan; watch the bar label change as phase transitions; SQL `SELECT Phase, Progress FROM ScanJobs WHERE Id=<id>` matches.
+5. **SizeSurvey results are persisted on the `ScanJobs` row** so /Activity can render them. New column `ScanJobs.TopFiles JSONB NULL`, written once at SizeSurvey completion. Shape: `[{"path": "T:\\Show\\file.mkv", "sizeMB": 4823.1, "modifiedAt": "2026-05-12T14:32:01Z"}, ...]`. Length matches `SizeSurveyTopN`. Verifiable: `SELECT jsonb_array_length(TopFiles) FROM ScanJobs WHERE Id=<scan>` returns N after SizeSurvey completes.
 
-6. **Size cell shows file-disposition counters `+N ~U -D`.** Format: `+<NewFiles> ~<UpdatedFiles> -<DeletedFiles>` (e.g. `+2 ~0 -0`). Tooltip on hover: `2 new, 0 updated, 0 deleted`. Verifiable: counters in SQL match rendered cell.
+### B. Worker dispatch fix (blocker for criterion 2 across M:\ + Z:\)
 
-7. **FPS cell shows files-per-second throughput.** Computed as `(delta-ProcessedFiles) / (delta-LastUpdated)` over the most recent two heartbeats, rendered as `<N> f/s`. Blank if fewer than two heartbeats yet observed. Verifiable: hit /api/TeamStatus/Overview twice 5s apart, the f/s value in the response equals `(processed_t2 - processed_t1) / 5`.
+6. **`ContinuousScanService._GetTopLevelFolders` collapses subfolders under their share root regardless of host OS.** Today the function uses POSIX `os.sep` on Windows-style canonical paths, so on Linux workers every individual subfolder appears as its own top-level target -- three Linux workers all alphabetically pick `T:\<show>` entries and M:\ + Z:\ never get scanned. Fix: dedup on canonical Windows-style separators directly (split on `\`, prefix-match case-insensitively), not on `os.sep`. Verifiable: with RootFolders containing `T:\`, `T:\30 Rock`, `M:\`, `Z:\`: function returns exactly `T:\`, `M:\`, `Z:\` on Linux AND Windows.
 
-8. **Speed cell shows phase indicator** -- one of `Walking`, `Reconciling`, `Probing`, `Completing`, or a phase-specific sub-state when available (e.g. `Probing (1234/45716)`). Same column the transcode rows use for "Speed" (1.5x etc). Verifiable: scan in the Probing phase shows `Probing` (or `Probing (X/Y)`) in this cell, not `Walking`.
+7. **Workers spread across share roots, not pile on one.** With criterion 6 fixed and three ScanEnabled larry workers, the next scan tick produces three concurrent scans -- one each on T:\, M:\, Z:\ (per-rootfolder claim guard already prevents collision). Verifiable: post-fix, kick a scan tick; SQL shows three Running ScanJobs rows, one per drive letter, distinct workers.
 
-9. **ETA cell shows estimated time to completion.** During Walking: `(TotalFiles - ProcessedFiles) / FilesPerSecond`. During Probing: `(FilesNeedingProbe - ProbedFiles) / ProbesPerSecond`. During Reconciling: `--` (no ETA). Format matches the transcode-row ETA format (e.g. `3m 42s`, `42s`, `~`). Verifiable: pick a running scan, manually compute ETA from the underlying counters, value within 10% of rendered.
+### C. /Activity scan rows (clean, self-contained)
 
-10. **Action cell shows a Stop button for scans.** Same component as the transcode Stop button. Clicking it calls a new endpoint that flips the ScanJobs row to `Status='Stopping'`; the producer-side scan loop checks Status each iteration and exits cleanly to `Status='Stopped'`. Verifiable: kick a scan, click Stop, observe Status='Stopping' immediately in SQL, then Status='Stopped' within ~5s, row drops out of Active table on next refresh.
+8. **Scan rows render as a separate `<tbody>` section under the Active Jobs card** with scan-appropriate columns -- not the 9-column transcode row layout. Columns:
+   `Drive | Worker | Phase | Progress | Files (+N ~U -D) | Rate | ETA | Stop`
+   Section header row (within the table): `Scans` with the running count, e.g. `Scans (3)`. Transcode + VMAF rows keep their existing layout in a sibling section. Verifiable: visual inspection -- distinct column headers, no Size/FPS/Speed columns above scan rows.
 
-11. **Stuck-scan visual indicator on the row.** If `LastUpdated > 10 minutes ago` while Status='Running', the row gets `table-warning` class and a small warning icon next to the Worker name with tooltip `Heartbeat stale (last update: 14m ago)`. Verifiable: `UPDATE ScanJobs SET LastUpdated = NOW() - INTERVAL '15 minutes' WHERE Id=<running>`; refresh /Activity; row is amber with the icon.
+9. **Each running scan row also shows the top-5 largest files from its SizeSurvey** inline below the row (collapsible if >5). Shape: `<filename> -- <size>` per line. Pulled from `ScanJobs.TopFiles` JSON. Empty until SizeSurvey completes for new scans; immediately populated on refresh for scans whose SizeSurvey has finished. Verifiable: row for active scan whose SizeSurvey is done shows 5 file lines with sizes (e.g. `Big.Show.S01E03.mkv -- 4.7 GB`); row for scan still in SizeSurvey shows `enumerating files...`.
 
-### B. Phase column (producer-side)
+10. **/Activity refresh cadence unchanged** -- the existing `LoadOverview()` tick (~5s) picks up scan rows + top-files via the existing `/api/TeamStatus/Overview` payload. No new poller. Verifiable: code inspection.
 
-12. **`ScanJobs.Phase TEXT NULL` column exists** with idempotent migration. Values: `Walking | Reconciling | Probing | Completing | NULL`. Verifiable: `\d ScanJobs` shows the column; migration is re-runnable without error.
+### D. Producer-side preservation
 
-13. **Producer writes Phase at every transition** in `FileScanningBusinessService.PerformScan`: set to `Walking` at scan start, `Reconciling` when the walk completes and `ReconcileWithDisk` is entered, `Probing` when control passes to `MediaProbeBusinessService.ProbeFilesNeedingMetadata`, `Completing` for final stats/RootFolder update, then `Status='Completed'`+`Phase=NULL`. Heartbeat continues to fire. Verifiable: kick a scan, poll `SELECT Phase, Status FROM ScanJobs WHERE Id=<id>` every 5s, observe each phase appear in order before Status flips to Completed.
-
-14. **Probe phase tracks per-probe progress on the same ScanJobs row.** Two new columns: `FilesNeedingProbe INTEGER NULL` (set at Probing-phase entry), `ProbedFiles INTEGER NULL` (incremented per probe completion). Reused by criterion 5 / 9 for the bar + ETA during Probing. Verifiable: during a Probing phase, both columns are non-NULL and `ProbedFiles` advances.
-
-### C. Recent Scans strip (last 5)
-
-15. **Below the Active Jobs table, a one-line-per-scan "Recent Scans" strip shows the last 5 ScanJobs rows** with `Status IN ('Completed', 'Failed', 'Stopped')` ordered by `EndTime DESC`. Each line: `<status icon> <RootFolderPath> on <WorkerName> -- <duration> -- +<N> ~<U> -<D> -- <ended-relative-time>` (e.g. `[OK] T:\ on larry-worker-3 -- 14m 22s -- +47 ~3 -0 -- 4m ago`). Failed rows use a red icon and append the truncated ErrorMessage; Stopped rows use a grey icon. Verifiable: trigger a quick scan, let it complete, observe the new entry as the first line of the strip within one /Activity polling tick.
-
-16. **Recent Scans strip hides when there are zero rows** in the last 7 days; otherwise always renders even if no active scans. Verifiable: with empty ScanJobs, the strip's container has display:none; with at least one recent row, it renders.
-
-### D. Per-worker tile -- scan posture
-
-17. **Worker tile gains a `Scan` line when `Workers.ScanEnabled=true`.** Format -- one of:
-    - Currently scanning (matching `ScanJobs.Status='Running'` row for this WorkerName): `Scan: <RootFolderPath> (<Phase>, <Progress>%)` -- e.g. `Scan: T:\ (Probing, 87%)`
-    - Idle with prior history: `Scan: idle -- next ~<HH:MM>` where next = `(MAX(EndTime) WHERE WorkerName=<this> AND Status='Completed') + ContinuousScanIntervalMinutes`
-    - Idle with no prior history: `Scan: idle -- next imminent`
-    
-    If `ScanEnabled=false`, line is omitted entirely. Verifiable: each of the three states reproducible by manipulating ScanJobs + Workers rows; renders match.
-
-### E. API contract
-
-18. **`/api/TeamStatus/Overview` payload gains `ActiveScans` array.** Each entry: `JobId, WorkerName, RootFolderPath, CurrentDirectory, Phase, Progress, TotalFiles, ProcessedFiles, FilesNeedingProbe, ProbedFiles, NewFiles, UpdatedFiles, DeletedFiles, StartTime, LastUpdated, ElapsedSec, FilesPerSec, EtaSec, IsStuck`. Server-computed where reasonable (ElapsedSec, FilesPerSec, EtaSec, IsStuck) -- the client renders, doesn't recompute. Verifiable: GET endpoint, array present with all listed fields.
-
-19. **`/api/TeamStatus/Overview` payload gains `RecentScans` array (length <=5).** Same shape as ActiveScans plus `Status, EndTime, DurationSec, ErrorMessage`. Verifiable: GET endpoint, RecentScans present with up to 5 entries ordered by EndTime DESC.
-
-20. **`/api/TeamStatus/Workers` per-worker payload gains `LastScanCompleted` (timestamp), `NextScanEstimate` (timestamp, NULL if ScanEnabled=false), `CurrentScanRootFolder` (string, NULL if no Running scan for this worker).** Verifiable: GET endpoint, fields present on each worker entry with correct values matching SQL.
-
-21. **New endpoint `POST /api/FileScanning/Scan/<JobId>/Stop`** flips `ScanJobs.Status='Stopping'`. Returns `{'Success': true}` if the row existed and was Running. The producer-side scan loop polls Status each iteration and exits cleanly to `Status='Stopped'` with `EndTime=NOW()`. Verifiable: kick a scan, POST to the endpoint, observe Status='Stopping' immediately and Status='Stopped' within ~5s.
-
-### F. Refresh + plumbing
-
-22. **No new background poller on the page.** The existing `LoadOverview()` tick (~5s) pulls everything via the extended `/Overview` payload. Verifiable: code inspection -- no new `setInterval`, no new top-level `fetch()` for scans / recent / worker-posture data; all three come from the single existing tick.
-
-23. **Empty-state behavior preserved.** When the table has zero rows (no transcode + no VMAF + no scan), the existing `<div id="NoJobInfo">No active jobs</div>` shows just as today. Verifiable: stop all activity, observe the empty-state message.
+11. **The prior directive's producer-side work stays as-is.** Phase transitions (Walking / Reconciling / Probing / Completing), probe counters (`FilesNeedingProbe` / `ProbedFiles`), soft-stop via `Status='Stopping'`, and the `_StartProgressHeartbeat` loop are all preserved -- SizeSurvey is inserted ahead of Walking as a new initial phase. No regressions. Verifiable: existing post-SizeSurvey behavior unchanged in a smoke scan.
 
 ## Out of Scope
 
-- `/Scanning` page redesign -- this directive touches /Activity only. /Scanning stays as-is.
-- Multi-worker scan dispatch / scheduling changes -- existing `ContinuousScanService` + claim-guard behavior is unchanged.
-- Editing `Workers.ScanEnabled` from the row's action cell -- the worker tile's existing controls already cover this.
-- Pause-scan (different from Stop). Only Stop is in scope.
-- Persistent scan history beyond the last 5 -- /Scanning's existing history view covers deeper lookback.
+- RootFolder data cleanup (the 534 individual show-folder rows). Criterion 6 + 7 make their presence harmless (parent-dedupe ignores them), but the rows themselves are not deleted here. Separate operator decision.
+- "Dynamic-name" display on /Activity rows (using show metadata vs raw path). The drive label `T:\` is enough -- there is only one row per share. If show-name display is wanted later, that is a follow-up.
+- FFprobing the top-N inline as part of SizeSurvey. Probe still happens in the existing Probing phase after Walking completes; SizeSurvey only stats + UPSERTs.
+- Replacing `RootFolders` with a share-root-only model (path-storage.feature.md scope).
+- Worker-tile "Scan:" line (carryover from prior directive) -- leave as-is; not regressed, not improved.
 
 ## Constraints
 
-- One new producer-side migration: `ScanJobs.Phase`, `ScanJobs.FilesNeedingProbe`, `ScanJobs.ProbedFiles`. All nullable, all idempotent ADD COLUMN IF NOT EXISTS. Pre-existing rows stay NULL; the UI handles NULL Phase as "Running" with no sub-state.
-- No changes to the Active Jobs table's column layout (same 9 columns) -- scan rows reuse columns by repurposing semantics (Size -> counters, Speed -> Phase, FPS -> files/sec). Transcode and VMAF rows render identically to today.
-- All settings stay data-driven: scan interval is already `Workers.ContinuousScanIntervalMinutes`; stuck threshold is the existing `SystemSettings('StuckScanThresholdMin')` if present, fallback 10 minutes for the row indicator.
-- No new env vars.
+- One new schema column: `ScanJobs.TopFiles JSONB NULL`. Idempotent ADD COLUMN IF NOT EXISTS.
+- SizeSurvey must NOT FFprobe -- one stat per file only. The whole point is "fast first signal."
+- SizeSurvey must respect existing safety guards: `(StorageRootId, LOWER(RelativePath))` unique index, EscapeLikePattern when used, FFprobe failure limit (does not apply since no probe).
+- Default `SizeSurveyTopN = 100`. If operator raises this very high, the JSON column grows -- soft cap at 500 (above that, log a WARNING and truncate to 500 in code).
+- Larry's NFS is fast (operator-confirmed); 30s budget is comfortable for 40k files. On a slower host (I9 over SMB), budget may overflow -- the directive doesn't promise speed off Larry. Criterion 2 explicitly scoped to Larry.
 
 ## Escalation Defaults
 
-- Tradeoff between visual consistency and information density -> consistency. Scans use the same row shape as transcode/VMAF; if a field doesn't fit, leave blank rather than introduce a scan-specific layout.
-- If the FPS / ETA computation produces noisy / spiky numbers in the Probing phase (probes have high per-file variance), smooth via 3-heartbeat moving average rather than expose volatility to the operator.
-- Risk tolerance: medium. The producer-side Phase + Probe-counter writes touch the scan hot path. Worker restarts are required to pick up the new producer code; pre-deploy rows continue to work as Phase=NULL.
+- Tradeoff between "show partial results immediately" vs "write once at SizeSurvey end" -> write once. Simpler, atomic, no torn-read on /Activity polls.
+- If SizeSurvey budget breached (>30s), do not abort -- log WARNING + continue. The 30s is a target, not a hard kill.
+- Risk tolerance: medium. One new column, one new phase, dispatch fix. Rollback = revert + drop column.
 
 ## Engineering Calls Already Made
 
-- Reuse the existing Active Jobs table per CEO answer 2026-05-27. The prior `scanning-on-activity-page.feature.md` draft (separate "File Scanning" card between Workers and Quality Testing) is **superseded by this directive** -- doc supersession sweep at closure will update it.
-- Pull active rows from `ScanJobs WHERE Status='Running'` so manual and continuous scans appear identically.
-- Phase is a text column not an enum -- text is cheaper to migrate and the producer-side writers control the value set; the UI renders unknown values literally.
-- Stop is a soft-stop via Status flag, not a thread.kill -- consistent with how transcode-stop already works and avoids leaving partial scan state.
-- ETA + FPS are server-computed in the controller (not the producer) so they're cheap re-derivations and never stale relative to the heartbeat the controller is reading.
+- SizeSurvey enumeration uses `os.scandir` recursive Python (cross-platform; same speed as `find` on Linux; works on Windows). Not subprocess `find`.
+- Top-N persisted as JSONB on ScanJobs (not a side table). Read-once consumer (/Activity), bounded size, no FK semantics needed.
+- The "70% of our problem" interpretation = storage-savings opportunity, NOT fault detection or corruption surfacing. CEO can redirect.
+- Dispatch fix lands here, not in a separate directive -- criterion 2's "30s on any share" can't be met without it.
 
 ## Status
 
-Active 2026-05-27 -- code complete; awaiting worker redeploy before closure.
+Active 2026-05-27 -- next step: implement.
 
-Shipped 2026-05-27:
-- [x] 1. Migration `Scripts/SQLScripts/AddScanJobsPhaseAndProbeCounters.py` run against live DB. Three nullable columns added on ScanJobs (Phase, FilesNeedingProbe, ProbedFiles). 73,125 existing rows untouched (Phase=NULL fallback in UI).
-- [x] 2. Producer-side phase writes in `FileScanningBusinessService.PerformScan` (Walking -> Reconciling -> Walking -> Probing -> Completing -> terminal+ClearPhase). Probe-progress callback wired into `MediaProbeBusinessService.ProbeFilesNeedingMetadata` (new optional `ProgressCallback` parameter, also serves as soft-stop signal). Heartbeat extended to re-assert Phase / FilesNeedingProbe / ProbedFiles each tick.
-- [x] 3. `_BuildActiveScans` + `_BuildRecentScans` helpers in `Features/TeamStatus/TeamStatusController.py` -- server-computed `FilesPerSec` (rolling delta via module-level `_ScanRateCache`, evicted on terminal status), `EtaSec` (phase-aware), `IsStuck` (StaleSec>600). `/Overview` payload gains both arrays; `/Workers` payload gains `LastScanCompleted`, `NextScanEstimate`, `CurrentScanRootFolder` per worker via a single round-trip aggregate query.
-- [x] 4. `POST /api/Scan/<JobId>/Stop` endpoint -- flips DB row to Status='Stopping'; soft-stop polling in scan heartbeat thread observes and sets `_StopRequested`; per-file loop in `ProcessSingleFile` and per-probe loop in `ProbeFilesNeedingMetadata` exit cleanly; terminal write is Status='Stopped' with `ClearPhase=True`.
-- [x] 5. `Templates/Activity.html` -- `RenderScanRow` for the merged Active Jobs table (badge=`Scan` green, phase-aware progress bar, files/sec, ETA, Stop button), `RenderRecentScans` strip below the table (last 5 with status icon, duration, counters, relative time), worker-tile `Scan:` line (current rootfolder when active / next-tick relative ETA when idle).
-- [x] 6. Smoke tests against live DB: `_BuildActiveScans` returns the 3 in-flight larry-worker scans correctly; `_BuildRecentScans` returns the last 5 (3 Failed + 2 Completed); IsStuck verified via fake row (LastUpdated 15 min ago) -- `True`; controller imports green; Flask route `/api/Scan/<string:JobId>/Stop` registered.
-- [x] 7. Doc sweep: `scanning-on-activity-page.feature.md` marked superseded with a header block pointing to this directive (draft preserved as historical record). `FileScanning.flow.md` State Surface lists the three new columns and Status='Stopping'; Surface section now describes the merged-into-Active-Jobs design instead of the old "gap today" stub.
-
-Not yet verified (requires worker redeploy):
-- Phase transitions observable in-flight (Walking -> Reconciling -> Probing). The 3 active scans in the DB right now run on pre-deploy producer code -- they will continue with Phase=NULL until restart.
-- Soft-stop end-to-end (currently the DB flip will register, but no live worker is yet running the new heartbeat that polls for it).
-- Probe-phase per-probe bar advancement.
-
-### Operator -- what to execute to verify acceptance
-
-1. Redeploy the three larry-worker containers (or restart the WorkerService process on each). This picks up the producer-side phase + probe-counter writes and the soft-stop poller.
-2. Restart the WebService (it serves the new payloads + UI; old workers do not need it).
-3. Open `/Activity`. Existing scan rows render with Phase fallback (Walking); new scans started after restart should advance through Walking -> Reconciling -> Probing -> Completing in the Speed column.
-4. (Optional) Click Stop on a fresh scan row; observe Status='Stopping' immediately in SQL, Status='Stopped' within ~5s, row drops from Active table on next tick.
-5. (Optional) Manually `UPDATE ScanJobs SET LastUpdated = NOW() - INTERVAL '15 minutes' WHERE Id=<running>` to verify amber stuck-row rendering.
-
-Once 1-3 are confirmed working, close this directive (Success).
+Plan:
+1. Migration: `Scripts/SQLScripts/AddScanJobsTopFiles.py` -- idempotent `ALTER TABLE ScanJobs ADD COLUMN IF NOT EXISTS TopFiles JSONB`. Seed `SystemSettings('SizeSurveyTopN', '100', 'integer')`.
+2. Fix `ContinuousScanService._GetTopLevelFolders` to dedupe on Windows-style separators (criterion 6).
+3. Add `SizeSurvey` phase to `FileScanningBusinessService.PerformScan` -- new helper `_RunSizeSurvey(LocalRootPath, RootFolder, TopN)` runs first, writes `TopFiles` JSON + UPSERTs the top-N MediaFiles rows.
+4. Extend `_BuildActiveScans` in `TeamStatusController` to include `TopFiles` (parsed) on each ActiveScan entry.
+5. Rewrite scan-row rendering in `Templates/Activity.html`: new `<tbody>` section with scan-appropriate columns, top-5 largest files inline below each row.
+6. Deploy to larry + restart WebService; smoke-test against a real scan on each of T:\, M:\, Z:\; observe top-N populated within 30s.
+7. Doc sweep: update `FileScanning.flow.md` for the new phase + dispatch fix; update `FileScanning.feature.md` criterion text where the phase chain is named.

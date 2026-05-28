@@ -209,23 +209,35 @@ class ContinuousScanService:
 
         If both T:\\ and T:\\Ted Lasso are root folders, scanning T:\\ recursively
         already covers T:\\Ted Lasso, so we skip the child to avoid redundant work.
+
+        Directive 2026-05-27 (scan -- largest files first) criterion 6: the dedup
+        must work on Windows-style canonical paths regardless of host OS. The prior
+        implementation used `os.path.normpath` + `os.sep`, which on Linux workers
+        treats `T:\\30 Rock` as a single filename and never collapses it under `T:\\`
+        -- result: three Linux workers all pile on T:\\ subfolders, M:\\ and Z:\\
+        never get scanned. Fix: dedup directly on the canonical backslash form.
         """
-        # Normalize all paths for comparison
+        # Normalize: lower-case + trailing backslash for prefix matching.
+        # No os.path involvement -- canonical paths are Windows-shaped strings,
+        # not the host's native shape.
         NormalizedFolders = []
         for Folder in RootFolders:
-            NormPath = os.path.normpath(Folder.RootFolder).lower()
-            if not NormPath.endswith(os.sep):
-                NormPath += os.sep
+            NormPath = (Folder.RootFolder or '').strip()
+            # Collapse accidental doubled backslashes (the T:\\ rows from path-shape history).
+            while '\\\\' in NormPath:
+                NormPath = NormPath.replace('\\\\', '\\')
+            NormPath = NormPath.lower()
+            if not NormPath.endswith('\\'):
+                NormPath += '\\'
             NormalizedFolders.append((NormPath, Folder))
 
-        # Sort by path length so parents come before children
+        # Sort by path length so parents come before children. Stable on ties.
         NormalizedFolders.sort(key=lambda x: len(x[0]))
 
         TopLevel = []
         CoveredPrefixes = []
 
         for NormPath, Folder in NormalizedFolders:
-            # Check if this path is already covered by a previously accepted parent
             IsCovered = any(NormPath.startswith(Prefix) for Prefix in CoveredPrefixes)
             if not IsCovered:
                 TopLevel.append(Folder)

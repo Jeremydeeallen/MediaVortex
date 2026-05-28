@@ -31,6 +31,7 @@ def _BuildActiveScans(DbManager):
         SELECT JobId, WorkerName, RootFolderPath, CurrentDirectory, Phase,
                Progress, TotalFiles, ProcessedFiles, FilesNeedingProbe, ProbedFiles,
                NewFiles, UpdatedFiles, DeletedFiles, StartTime, LastUpdated,
+               TopFiles,
                EXTRACT(EPOCH FROM (NOW() - StartTime))   AS ElapsedSec,
                EXTRACT(EPOCH FROM (NOW() - LastUpdated)) AS StaleSec
         FROM ScanJobs
@@ -79,6 +80,26 @@ def _BuildActiveScans(DbManager):
             Remaining = max(Total - Processed, 0) if Total > 0 else 0
             EtaSec = (Remaining / WalkRate) if WalkRate > 0.01 and Total > 0 else None
 
+        # Directive 2026-05-27: surface top-5 largest files from SizeSurvey
+        # under each scan row. Limit to 5 to keep payload small; full list
+        # remains on ScanJobs.TopFiles for ad-hoc queries.
+        TopFiles = Row.get('TopFiles')
+        TopFilesOut = []
+        if TopFiles:
+            try:
+                if isinstance(TopFiles, str):
+                    import json as _json
+                    TopFiles = _json.loads(TopFiles)
+                if isinstance(TopFiles, list):
+                    for Entry in TopFiles[:5]:
+                        TopFilesOut.append({
+                            "fileName": Entry.get('fileName') or '',
+                            "path": Entry.get('path') or '',
+                            "sizeMB": Entry.get('sizeMB') or 0,
+                        })
+            except Exception:
+                pass
+
         Out.append({
             "JobId": JobId,
             "WorkerName": Row.get('WorkerName') or '<unknown>',
@@ -99,6 +120,7 @@ def _BuildActiveScans(DbManager):
             "FilesPerSec": round(FilesPerSec, 2),
             "EtaSec": int(EtaSec) if EtaSec is not None else None,
             "IsStuck": StaleSec > 600,
+            "TopFiles": TopFilesOut,
         })
     # Evict cache entries for scans that completed since the last call.
     for Stale in [k for k in _ScanRateCache.keys() if k not in SeenJobIds]:

@@ -61,7 +61,32 @@
                 </table>
                 <div id="MachineFpsSummary" class="px-3 py-2 small text-muted border-top d-none"></div>
             </div>
-            <!-- Directive 2026-05-27: Recent scans strip (last 5 terminal scans) -->
+
+            <!-- Directive 2026-05-27 (scan -- largest files first): dedicated Active Scans block.
+                 Separate from the transcode/VMAF table because scan progress doesn't share a row
+                 shape with a transcode (no codec, no FPS, no SizeMB). Columns specific to scans. -->
+            <div id="ActiveScansBlock" class="border-top d-none">
+                <div class="px-3 py-2 small fw-bold d-flex justify-content-between align-items-center">
+                    <span><i class="fas fa-search me-2 text-success"></i>Active Scans <span id="ActiveScansCount" class="text-muted"></span></span>
+                </div>
+                <table class="table table-sm table-hover mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th class="ps-3" style="width: 90px;">Drive</th>
+                            <th style="width: 130px;">Worker</th>
+                            <th style="width: 130px;">Phase</th>
+                            <th style="width: 240px;">Progress</th>
+                            <th style="width: 110px;">Files</th>
+                            <th style="width: 90px;">Rate</th>
+                            <th style="width: 90px;">ETA</th>
+                            <th style="width: 60px;"></th>
+                        </tr>
+                    </thead>
+                    <tbody id="ActiveScansBody"></tbody>
+                </table>
+            </div>
+
+            <!-- Recent scans strip (last 5 terminal scans) -->
             <div id="RecentScansStrip" class="border-top d-none">
                 <div class="px-3 py-2 small text-muted fw-bold">Recent scans</div>
                 <ul id="RecentScansList" class="list-unstyled mb-0 small"></ul>
@@ -267,10 +292,10 @@ var ActivityPage = (function() {
         });
     }
 
-    // Directive 2026-05-27 criteria 1-11: render in-flight scans as rows in
-    // the same Active Jobs table that holds transcode + VMAF, reusing the
-    // 9-column layout via column repurposing rather than introducing a
-    // scan-specific row shape.
+    // Directive 2026-05-27 (scan -- largest files first): scans render in a
+    // dedicated Active Scans block with scan-appropriate columns
+    // (Drive | Worker | Phase | Progress | Files | Rate | ETA | Stop).
+    // No more cramming into transcode columns.
     function FormatEtaSec(EtaSec) {
         if (EtaSec === null || EtaSec === undefined || EtaSec < 0) return '-';
         if (EtaSec < 60) return Math.round(EtaSec) + 's';
@@ -281,88 +306,138 @@ var ActivityPage = (function() {
         return Hours + 'h ' + (Mins % 60) + 'm';
     }
 
-    function RenderScanRow(S) {
+    function FormatSizeMB(SizeMB) {
+        var N = parseFloat(SizeMB) || 0;
+        if (N >= 1024) return (N / 1024).toFixed(2) + ' GB';
+        return N.toFixed(0) + ' MB';
+    }
+
+    function RenderScanRowAndTopFiles(S) {
         var Phase = S.Phase || 'Walking';
         var IsStuck = !!S.IsStuck;
-        var StatusIcon = IsStuck
-            ? '<i class="fas fa-exclamation-triangle me-1 text-warning" title="Heartbeat stale (>10 min)"></i>'
-            : '<i class="fas fa-search me-1 text-success"></i>';
         var RowClass = IsStuck ? ' class="table-warning"' : '';
-        var RootEsc = EscapeHtml(S.RootFolderPath || '');
-        var CurDir = (S.CurrentDirectory && S.CurrentDirectory !== S.RootFolderPath)
-            ? '<div class="text-muted small text-truncate" style="max-width:280px" title="' + EscapeHtml(S.CurrentDirectory) + '">' + EscapeHtml(S.CurrentDirectory) + '</div>'
+        var StuckBadge = IsStuck
+            ? '<i class="fas fa-exclamation-triangle ms-1 text-warning" title="Heartbeat stale (>10 min)"></i>'
             : '';
-        var FileCell = '<td class="ps-3">' + StatusIcon +
-            '<span title="' + EscapeHtml(S.RootFolderPath || '') + '"><strong>' + RootEsc + '</strong></span>' + CurDir + '</td>';
 
-        var WorkerEsc = EscapeHtml(S.WorkerName || '<unknown>');
+        // Drive cell: just the root (T:\, M:\, Z:\). Current directory shown
+        // under the progress bar instead -- the drive header stays clean.
+        var DriveEsc = EscapeHtml(S.RootFolderPath || '');
+        var DriveCell = '<td class="ps-3"><strong>' + DriveEsc + '</strong>' + StuckBadge + '</td>';
 
-        // Progress bar + count label is phase-aware (criterion 5).
+        // Phase cell -- phase name with probe sub-count when relevant.
+        var PhaseLabel = Phase;
+        var PhaseBadgeClass = 'bg-secondary';
+        if (Phase === 'SizeSurvey') { PhaseBadgeClass = 'bg-primary'; PhaseLabel = 'Size Survey'; }
+        else if (Phase === 'Walking') { PhaseBadgeClass = 'bg-success'; }
+        else if (Phase === 'Reconciling') { PhaseBadgeClass = 'bg-warning text-dark'; }
+        else if (Phase === 'Probing') {
+            PhaseBadgeClass = 'bg-info text-dark';
+            if (S.FilesNeedingProbe) {
+                PhaseLabel = 'Probing ' + (S.ProbedFiles || 0) + '/' + S.FilesNeedingProbe;
+            }
+        }
+        else if (Phase === 'Completing') { PhaseBadgeClass = 'bg-success'; }
+        var PhaseCell = '<td><span class="badge ' + PhaseBadgeClass + '">' + EscapeHtml(PhaseLabel) + '</span></td>';
+
+        // Progress bar -- phase-aware percent.
         var Pct = Math.max(0, Math.min(100, parseFloat(S.Progress) || 0)).toFixed(1);
-        var BarStripeClass, CountLabel;
-        if (Phase === 'Probing') {
-            var TotalP = S.FilesNeedingProbe || 0;
-            var DoneP = S.ProbedFiles || 0;
-            var ProbePct = TotalP > 0 ? (DoneP * 100.0 / TotalP).toFixed(1) : '0.0';
-            Pct = ProbePct;
-            BarStripeClass = 'bg-info progress-bar-striped progress-bar-animated';
+        var CountLabel;
+        if (Phase === 'SizeSurvey') {
+            Pct = '100';
+            CountLabel = 'enumerating files';
+        } else if (Phase === 'Probing') {
+            var TotalP = S.FilesNeedingProbe || 0, DoneP = S.ProbedFiles || 0;
+            Pct = TotalP > 0 ? (DoneP * 100.0 / TotalP).toFixed(1) : '0.0';
             CountLabel = DoneP + ' / ' + TotalP + ' probed';
         } else if (Phase === 'Reconciling') {
             Pct = '100';
-            BarStripeClass = 'bg-warning progress-bar-striped progress-bar-animated';
-            CountLabel = 'reconciling DB vs disk';
+            CountLabel = 'comparing DB vs disk';
         } else if (Phase === 'Completing') {
             Pct = '100';
-            BarStripeClass = 'bg-success';
             CountLabel = 'finalizing';
         } else {
-            BarStripeClass = 'bg-success progress-bar-striped progress-bar-animated';
             CountLabel = (S.TotalFiles > 0)
-                ? (S.ProcessedFiles || 0) + ' / ' + S.TotalFiles + ' files'
-                : (S.ProcessedFiles || 0) + ' files';
+                ? (S.ProcessedFiles || 0).toLocaleString() + ' / ' + S.TotalFiles.toLocaleString()
+                : (S.ProcessedFiles || 0).toLocaleString() + ' files';
         }
-        var ProgressBar =
-            '<div class="d-flex align-items-center gap-2">' +
-                '<div class="progress flex-grow-1" style="height: 18px;">' +
-                    '<div class="progress-bar ' + BarStripeClass + '" role="progressbar" ' +
-                        'style="width: ' + Pct + '%" aria-valuenow="' + Pct + '" aria-valuemin="0" aria-valuemax="100"></div>' +
+        var CurDir = (S.CurrentDirectory && S.CurrentDirectory !== S.RootFolderPath)
+            ? '<div class="text-muted small text-truncate" style="max-width:320px" title="' + EscapeHtml(S.CurrentDirectory) + '">' + EscapeHtml(S.CurrentDirectory) + '</div>'
+            : '';
+        var ProgressCell =
+            '<td>' +
+                '<div class="d-flex align-items-center gap-2">' +
+                    '<div class="progress flex-grow-1" style="height: 14px;">' +
+                        '<div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" ' +
+                            'style="width: ' + Pct + '%" aria-valuenow="' + Pct + '" aria-valuemin="0" aria-valuemax="100"></div>' +
+                    '</div>' +
+                    '<small class="text-nowrap">' + EscapeHtml(CountLabel) + '</small>' +
                 '</div>' +
-                '<small class="text-nowrap">' + EscapeHtml(CountLabel) + '</small>' +
-            '</div>';
+                CurDir +
+            '</td>';
 
-        // Size column repurposed for disposition counters (criterion 6).
-        var Counters = '<span title="' +
+        // Files cell -- disposition counters in their own column.
+        var FilesCell = '<td><span title="' +
             (S.NewFiles || 0) + ' new, ' + (S.UpdatedFiles || 0) + ' updated, ' + (S.DeletedFiles || 0) + ' deleted">' +
             '<span class="text-success">+' + (S.NewFiles || 0) + '</span> ' +
             '<span class="text-warning">~' + (S.UpdatedFiles || 0) + '</span> ' +
-            '<span class="text-danger">-' + (S.DeletedFiles || 0) + '</span></span>';
+            '<span class="text-danger">&minus;' + (S.DeletedFiles || 0) + '</span>' +
+            '</span></td>';
 
-        // FPS = files/sec rolling rate (criterion 7); Speed = phase label
-        // possibly with probe sub-state (criterion 8); ETA from server (criterion 9).
-        var Fps = (S.FilesPerSec > 0) ? S.FilesPerSec.toFixed(1) + ' f/s' : '-';
-        var PhaseCell = Phase;
-        if (Phase === 'Probing' && S.FilesNeedingProbe) {
-            PhaseCell = 'Probing (' + (S.ProbedFiles || 0) + '/' + S.FilesNeedingProbe + ')';
-        }
-        var Eta = (Phase === 'Reconciling' || Phase === 'Completing') ? '-' : FormatEtaSec(S.EtaSec);
+        var RateCell = '<td>' + (S.FilesPerSec > 0 ? S.FilesPerSec.toFixed(1) + ' f/s' : '-') + '</td>';
+        var EtaCell = '<td>' + ((Phase === 'Reconciling' || Phase === 'Completing' || Phase === 'SizeSurvey') ? '-' : FormatEtaSec(S.EtaSec)) + '</td>';
 
-        // Stop button -- POST /api/FileScanning/Scan/<JobId>/Stop
         var JobIdJs = EscapeHtml(S.JobId || '').replace(/'/g, "\\'");
         var StopBtn = '<button class="btn btn-outline-danger btn-sm py-0 px-1" ' +
             'onclick="ActivityPage.StopScan(\'' + JobIdJs + '\')" title="Soft-stop this scan">' +
             '<i class="fas fa-stop"></i></button>';
 
-        return '<tr' + RowClass + '>' +
-            FileCell +
-            '<td><span class="badge bg-success">Scan</span></td>' +
-            '<td>' + WorkerEsc + '</td>' +
-            '<td>' + Counters + '</td>' +
-            '<td>' + ProgressBar + '</td>' +
-            '<td>' + Fps + '</td>' +
-            '<td>' + EscapeHtml(PhaseCell) + '</td>' +
-            '<td>' + Eta + '</td>' +
+        var MainRow = '<tr' + RowClass + '>' +
+            DriveCell +
+            '<td>' + EscapeHtml(S.WorkerName || '<unknown>') + '</td>' +
+            PhaseCell +
+            ProgressCell +
+            FilesCell +
+            RateCell +
+            EtaCell +
             '<td class="text-center">' + StopBtn + '</td>' +
         '</tr>';
+
+        // Inline top-5 largest files from SizeSurvey under the row.
+        // Empty during SizeSurvey itself; populated as soon as it finishes.
+        var TopFiles = S.TopFiles || [];
+        var TopRowsHtml = '';
+        if (TopFiles.length > 0) {
+            var TopLis = TopFiles.map(function(F) {
+                var Name = EscapeHtml(F.fileName || F.path || '');
+                return '<li class="d-flex justify-content-between"><span class="text-truncate me-2" style="max-width:480px" title="' + EscapeHtml(F.path || '') + '">' + Name + '</span><span class="text-muted">' + FormatSizeMB(F.sizeMB) + '</span></li>';
+            }).join('');
+            TopRowsHtml = '<tr><td colspan="8" class="px-3 py-2 bg-light">' +
+                '<div class="small text-muted mb-1"><i class="fas fa-star me-1 text-warning"></i>Largest files found</div>' +
+                '<ul class="list-unstyled mb-0 small">' + TopLis + '</ul>' +
+                '</td></tr>';
+        } else if (Phase === 'SizeSurvey') {
+            TopRowsHtml = '<tr><td colspan="8" class="px-3 py-1 bg-light text-muted small">' +
+                '<i class="fas fa-spinner fa-spin me-1"></i>Enumerating largest files...' +
+                '</td></tr>';
+        }
+
+        return MainRow + TopRowsHtml;
+    }
+
+    function RenderActiveScans(ActiveScans) {
+        var Block = document.getElementById('ActiveScansBlock');
+        var Body = document.getElementById('ActiveScansBody');
+        var Count = document.getElementById('ActiveScansCount');
+        if (!ActiveScans || ActiveScans.length === 0) {
+            Block.classList.add('d-none');
+            Body.innerHTML = '';
+            Count.textContent = '';
+            return;
+        }
+        Body.innerHTML = ActiveScans.map(RenderScanRowAndTopFiles).join('');
+        Count.textContent = '(' + ActiveScans.length + ')';
+        Block.classList.remove('d-none');
     }
 
     function RenderRecentScans(RecentScans) {
@@ -420,7 +495,6 @@ var ActivityPage = (function() {
         var Status = D.ServiceStatus;
         var IsProcessing = D.IsProcessing;
         var ActiveJobs = D.ActiveJobs || [];
-        var ActiveScans = D.ActiveScans || [];
 
         var Badge = document.getElementById('TranscodeStatusBadge');
         var BtnStop = document.getElementById('BtnStopAfterJob');
@@ -497,31 +571,31 @@ var ActivityPage = (function() {
             '</tr>';
         }
 
-        // Directive 2026-05-27: scan rows live in the same table alongside
-        // transcode + VMAF (criterion 1). Empty-state visibility derives from
-        // the union of all three so a scan-only state still renders the table.
-        var ScanRowsHtml = ActiveScans.map(RenderScanRow).join('');
-
-        // Single-pass render: combined transcode + VMAF + scan rows. Visibility
-        // from the COMBINED count -- earlier two-step approach hid the table
-        // whenever transcode finished but VMAF was still running, then unhid
-        // it on the next async tick (visible flicker).
-        var CombinedHtml = TranscodeRows.join('') + VmafRow + ScanRowsHtml;
+        // Single-pass render: combined transcode + VMAF rows. Scans render in
+        // their OWN block (RenderActiveScans below) -- directive 2026-05-27
+        // moved them out of the transcode-shaped table.
+        var CombinedHtml = TranscodeRows.join('') + VmafRow;
+        var HasAnyJob = !!CombinedHtml || (D.ActiveScans && D.ActiveScans.length > 0);
         if (CombinedHtml) {
-            NoJob.classList.add('d-none');
             JobsTable.classList.remove('d-none');
             JobsBody.innerHTML = CombinedHtml;
             RenderJobFooter(ActiveJobs);
         } else {
-            NoJob.classList.remove('d-none');
             JobsTable.classList.add('d-none');
             JobsBody.innerHTML = '';
             document.getElementById('ActiveJobsFooter').classList.add('d-none');
             document.getElementById('MachineFpsSummary').classList.add('d-none');
         }
+        // "No active jobs" message hides if we have any scan OR transcode/VMAF.
+        if (HasAnyJob) {
+            NoJob.classList.add('d-none');
+        } else {
+            NoJob.classList.remove('d-none');
+        }
 
-        // Recent scans strip below the table (criteria 15-16). Reuses the same
-        // /Overview tick -- no separate poller.
+        // Active Scans block + Recent Scans strip -- both fed from the same
+        // /Overview tick, no separate poller.
+        RenderActiveScans(D.ActiveScans || []);
         RenderRecentScans(D.RecentScans || []);
     }
 
