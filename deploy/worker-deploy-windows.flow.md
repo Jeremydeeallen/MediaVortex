@@ -70,27 +70,21 @@ scp Features/FileReplacement/FileReplacementBusinessService.py 'owner@<target-ip
 ssh owner@<target-ip> 'powershell -Command "Remove-Item -Force -ErrorAction SilentlyContinue C:\Code\MediaVortex\Models\__pycache__\CommandBuilder*.pyc, C:\Code\MediaVortex\Features\FileReplacement\__pycache__\FileReplacementBusinessService*.pyc; Write-Host pyc-cleared"'
 ```
 
-**Step 3b -- restamp `VERSION` + `BUILD_INFO` on the worker.** The worker reads its version from these two files at startup. Hot-swap does NOT refresh them on its own; without this step the /Activity tile keeps reporting the pre-swap SHA. One-liner using the dev workstation's current HEAD:
-
-```bash
-SHA=$(git rev-parse HEAD); \
-BUILT_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ); \
-ssh owner@<target-ip> "powershell -Command \"\$bom = New-Object System.Text.UTF8Encoding(\$false); [IO.File]::WriteAllText('C:\\Code\\MediaVortex\\VERSION', '$SHA`n', \$bom); [IO.File]::WriteAllText('C:\\Code\\MediaVortex\\BUILD_INFO', 'commit=$SHA`nbuilt_at=$BUILT_AT`nbuilt_by=$(hostname)`n', \$bom); Write-Host stamped-$SHA\""
-```
-
-**Step 4 -- start the scheduled task.**
+**Step 4 -- start the scheduled task.** `StartWorker.py` runs `Scripts/StampVersion.py` automatically before launching the WorkerService, so `VERSION` + `BUILD_INFO` refresh from the host's local git HEAD as part of the launch. The /Activity tile picks up the new SHA on the next heartbeat -- no manual stamp step required during hot-swap.
 
 ```bash
 ssh owner@<target-ip> 'powershell -Command "Start-ScheduledTask -TaskName \"MediaVortex Worker\"; Start-Sleep -Seconds 4; (Get-ScheduledTask -TaskName \"MediaVortex Worker\").State"'
 # Expected output: Running
 ```
 
-**Step 5 -- verify Workers row is Online with a fresh heartbeat.** Run from the dev workstation against the production DB:
+**Step 5 -- verify Workers row is Online with a fresh heartbeat and the expected version.** Run from the dev workstation against the production DB:
 
 ```bash
-sleep 8 && py Scripts/SQLScripts/QueryDatabase.py sql "SELECT WorkerName, Status, AGE(NOW(), LastHeartbeat) AS HeartbeatAge FROM Workers WHERE WorkerName = '<hostname>'"
-# Expected: Status=Online, HeartbeatAge under ~30 seconds.
+sleep 8 && py Scripts/SQLScripts/QueryDatabase.py sql "SELECT WorkerName, Status, SUBSTRING(Version,1,7) AS Ver, AGE(NOW(), LastHeartbeat) AS HeartbeatAge FROM Workers WHERE WorkerName = '<hostname>'"
+# Expected: Status=Online, Ver=<dev-workstation `git rev-parse HEAD | head -c7`>, HeartbeatAge under ~30 seconds.
 ```
+
+If `Ver` is `unknown`, `StartWorker.py` could not resolve a SHA on this host (typically: `git` not on PATH, or the checkout is not a git repo). The launch still succeeded; the worker just couldn't self-stamp. Re-run with `git` on PATH or run a full `deploy/deploy-windows-worker.py <ip>` from the dev workstation -- that path stamps over SSH without requiring git on the target.
 
 **Step 6 (optional but recommended) -- verify the new code is actually loaded.** Queue a single test job and inspect the resulting `TranscodeAttempts.FFpmpegCommand` for a known signature of the new code:
 

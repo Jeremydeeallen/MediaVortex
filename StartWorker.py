@@ -140,6 +140,26 @@ def _SetUncResolutions():
     return True
 
 
+def _StampVersion():
+    """Run Scripts/StampVersion.py to refresh VERSION + BUILD_INFO from local git HEAD.
+
+    Non-fatal: if git is missing or the checkout isn't a repo, the stamper exits
+    non-zero and we leave any existing VERSION file alone. The worker process
+    will then read whatever VERSION says, or "unknown" if nothing was ever
+    stamped. The directive (criterion 2) demands we never fall through to a
+    live git resolution INSIDE the worker -- stamping here is fine because
+    it writes a file the worker reads at startup; the worker never sees git."""
+    Script = RootDirectory / "Scripts" / "StampVersion.py"
+    if not Script.exists():
+        print(f"  [WARN] StampVersion.py not found at {Script}; skipping (VERSION not refreshed)")
+        return
+    PythonExe = _ResolveWorkerPython()
+    try:
+        subprocess.run([PythonExe, str(Script), "--quiet"], cwd=str(RootDirectory), timeout=10)
+    except subprocess.TimeoutExpired:
+        print("  [WARN] StampVersion.py timed out; leaving existing VERSION as-is")
+
+
 def _LaunchWorker():
     if not WorkerEntry.exists():
         print(f"[FAIL] WorkerService entry not found at {WorkerEntry}")
@@ -189,6 +209,8 @@ def main():
     if not _SetUncResolutions():
         print("\n[FAIL] could not apply UNC path resolutions")
         return 2
+
+    _StampVersion()
 
     if Args.dry_run:
         print("\n[DRY-RUN] all checks passed; not launching worker.")

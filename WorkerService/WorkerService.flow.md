@@ -28,13 +28,20 @@ Replaces the former `TranscodeService/Main.py` + `QualityTestService/Main.py` du
 
 ## Version
 
-Each worker stamps `Workers.Version` (and `BuildInfo` when available) at registration so the operator can see what code each worker is running from the Activity page. Resolver order (`WorkerService/Main.py::_ResolveWorkerVersion`):
+Each worker stamps `Workers.Version` (and `BuildInfo` when available) at registration so the operator can see what code each worker is running from the Activity page. Resolver (`WorkerService/Main.py::_ResolveWorkerVersion`):
 
-1. **`/opt/mediavortex/VERSION`** -- baked into the Docker image at build time via `--build-arg COMMIT_SHA=<sha>` (see `deploy/worker-deploy-linux.flow.md` step 2). Also reads `/opt/mediavortex/BUILD_INFO` (commit + built_at + built_by) into the `BuildInfo` column.
-2. **`git rev-parse HEAD`** in the project root with a 2-second timeout -- for Windows / dev-host workers running from a git checkout.
-3. Literal **`"unknown"`** when neither resolves.
+1. Read `<repo>/VERSION` (and `<repo>/BUILD_INFO` when present) -- written by the deploy event for this worker.
+2. Return the literal `"unknown"` when the file is missing or empty.
 
-The Activity page tile shows the short SHA next to the worker name; the tooltip shows the full SHA + BuildInfo. A fleet-wide mismatch banner (`/api/TeamStatus/Workers/VersionStatus`) appears when two or more enabled workers report different non-unknown versions. See `Features/TeamStatus/worker-versioning.feature.md`.
+The worker never resolves the version live (no `git rev-parse HEAD`, no environment lookup), so the displayed value cannot drift past the code the process actually loaded at startup.
+
+**Who writes `VERSION` + `BUILD_INFO`:**
+- **Linux (Docker):** `deploy/deploy-linux-worker.py` passes `--build-arg COMMIT_SHA=<dev HEAD>`; `deploy/Dockerfile` writes both files into `/opt/mediavortex/` at image build time.
+- **Windows native:** `deploy/deploy-windows-worker.py` step 5 (`StepStampVersion`) writes both files to `C:\Code\MediaVortex\` on the target via SSH/PowerShell. `StartWorker.py` also runs `Scripts/StampVersion.py` at every launch as belt-and-suspenders, so an operator restart picks up the local HEAD even without re-running the full deploy.
+
+Both deploy scripts assert, after restart, that `Workers.Version` equals the SHA they just stamped. Mismatch fails the deploy with exit code 3.
+
+The Activity page tile shows the short SHA next to the worker name; the tooltip shows the full SHA + BuildInfo. A fleet-wide mismatch banner (`/api/TeamStatus/Workers/VersionStatus`) appears when two or more enabled workers report different non-unknown versions. See `deploy/version-on-deploy.feature.md` for the current contract; `Features/TeamStatus/worker-versioning.feature.md` documents the original 3-tier shape (tier 2 removed 2026-05-27).
 
 ## Per-Worker Status Control
 

@@ -78,18 +78,21 @@ ssh root@<ip> 'docker ps --format "{{.Names}}\t{{.Status}}"'
 
 Expected: N containers, all `Up`, none `Restarting`.
 
-### 2. Workers rows present and Online
+### 2. Workers rows present and Online with correct version
 
 ```bash
 py Scripts/SQLScripts/QueryDatabase.py sql \
-  "SELECT WorkerName, Status, FFmpegPath, AGE(NOW(), LastHeartbeat) AS HeartbeatAge
+  "SELECT WorkerName, Status, FFmpegPath, SUBSTRING(Version,1,7) AS Ver, AGE(NOW(), LastHeartbeat) AS HeartbeatAge
    FROM Workers WHERE WorkerName LIKE '<friendly>-worker-%' ORDER BY WorkerName"
 ```
 
 Expected per worker:
-- `Status = 'Online'` (or `Paused` if mount validation has not yet completed -- see Troubleshooting)
+- `Status IN ('Online','Paused')` (Paused preserved by UPSERT if the row was previously paused)
 - `FFmpegPath` is NOT NULL and ends in `/usr/local/bin/ffmpeg`
+- `Ver` equals the first 7 chars of `git rev-parse HEAD` on the dev workstation at deploy time
 - `HeartbeatAge < 60s`
+
+The deploy script asserts the Ver match automatically; mismatch fails the deploy with exit code 3. The post-deploy line `version=<sha7>` reports the value alongside heartbeat age.
 
 ### 3. Share mappings registered
 

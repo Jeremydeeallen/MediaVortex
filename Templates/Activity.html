@@ -547,7 +547,7 @@ var ActivityPage = (function() {
             VersionTooltip = 'Worker has not reported a build version.';
             VersionCls = 'text-warning';
         }
-        var VersionHtml = '<small class="' + VersionCls + ' ms-2" title="' + VersionTooltip + '" style="white-space:pre-line">v' + VersionShort + '</small>';
+        var VersionHtml = ' <small class="' + VersionCls + ' ms-2" title="' + VersionTooltip + '" style="white-space:pre-line">v: ' + VersionShort + '</small>';
 
         var MountErrorHtml = '';
         if (W.MountValidationError) {

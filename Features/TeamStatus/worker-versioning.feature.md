@@ -1,5 +1,10 @@
 # Worker Versioning -- know what code each worker is running
 
+> **Superseded in part by `deploy/version-on-deploy.feature.md`** (2026-05-27):
+> - Tier 2 of the resolver (`git rev-parse HEAD` in the worker process) removed; the worker now reads only `<repo>/VERSION` and returns `"unknown"` if missing. Criterion 4 below describes the original 3-tier shape; current behavior is 2-state (file or unknown).
+> - `deploy/deploy-windows-worker.py` now stamps `VERSION` + `BUILD_INFO` on the target (previously Windows had no stamp -- only the Linux Docker build-arg path produced files). `StartWorker.py` also self-stamps at every launch.
+> - Both deploy scripts verify `Workers.Version == stamped SHA` after restart; mismatch fails the deploy (exit 3). Criteria 1-3 and 6-11 below remain accurate.
+
 ## What It Does
 
 Stamps each worker's Docker image and Python process with the git commit SHA that built it, then surfaces that version on every Workers row and on the Activity page. After a deploy the operator can confirm at a glance that all workers are running the new code -- not a mix of old and new because one container failed to recreate or the Windows host wasn't restarted. Exposes mismatch as a visible row decoration so a forgotten worker can't quietly stay on yesterday's code.

@@ -49,30 +49,36 @@ Operator-visible:
 
 ## Status
 
-In progress -- 2026-05-27. Plan approved, executing.
+COMPLETE 2026-05-27. CEO directive closed. All criteria PASS or PASS-conditional-on-I9-restart (operator authority); fleet is on the new resolver + stamping pipeline.
 
 ### Progress
 
 - [x] Discovery: located worker resolver, deploy scripts, /Activity render path, existing fleet-mismatch banner
 - [x] Feature doc + criteria pinned to directive
-- [ ] Slice A: `_ResolveWorkerVersion` drops git fallback (criterion 2)
-- [ ] Slice B: `Scripts/StampVersion.py` (new shared helper)
-- [ ] Slice B: `deploy-windows-worker.py` stamps VERSION + BUILD_INFO on target (criterion 4)
-- [ ] Slice C: linux + windows deploy verify `Workers.Version == stamped SHA` post-restart (criterion 5)
-- [ ] `.gitignore` entries for VERSION + BUILD_INFO (criterion 6)
-- [ ] Hot-swap doc updated to reference stamp step (criterion 7)
-- [ ] Linux fleet redeployed -- larry, dot, wakko all show current HEAD SHA on /Activity
-- [ ] Operator runs Windows redeploy on I9; I9 row shows the same SHA; /Activity banner clears
-- [ ] Live verify: take a screenshot or `SELECT WorkerName, Version FROM Workers ORDER BY WorkerName` showing all 13 workers on one SHA
+- [x] Slice A: `_ResolveWorkerVersion` drops git fallback (criterion 2) -- commit `c401ae6`
+- [x] Slice B: `Scripts/StampVersion.py` (new shared helper) -- commit `c401ae6`
+- [x] Slice B: `deploy-windows-worker.py` stamps VERSION + BUILD_INFO on target via SSH/PowerShell (criterion 4) -- commit `c401ae6`
+- [x] Slice C: linux + windows deploy verify `Workers.Version == stamped SHA` post-restart (criterion 5) -- commit `c401ae6`
+- [x] `.gitignore` entries for VERSION + BUILD_INFO (criterion 6) -- commit `c401ae6`
+- [x] Hot-swap doc updated -- StartWorker.py self-stamps via Scripts/StampVersion.py at every launch, so hot-swap no longer needs an explicit stamp step
+- [x] Linux fleet redeployed (dot, larry, wakko) -- all 12 workers show `c401ae6` on /Activity with BuildInfo populated
+- [x] `Templates/Activity.html`: version separator changed `v` -> `v: ` plus explicit leading space for readability
+- [x] `StartWorker.py`: pre-launch self-stamp step added -- I9 / future Windows hosts pick up local HEAD without operator intervention
+- [x] Doc supersession sweep (per directive closure gate): `WorkerService/WorkerService.flow.md` Version section rewritten; `Features/TeamStatus/worker-versioning.feature.md` marked superseded in part; `deploy/worker-deploy-linux.flow.md` post-deploy verify SELECT gained Version
+- [ ] OPERATOR: restart I9 worker so the new code path takes effect and VERSION is read at startup. /Activity should then show I9 on the same SHA as the Linux fleet; mismatch banner clears.
 
 ## Files
 
 | File | Role |
 |---|---|
-| `WorkerService/Main.py` | Worker entry point; `_ResolveWorkerVersion` reads VERSION at startup |
-| `deploy/deploy-linux-worker.py` | Stamps via Docker `--build-arg COMMIT_SHA`; gains version-match verify |
-| `deploy/deploy-windows-worker.py` | Gains stamp step; gains version-match verify |
-| `Scripts/StampVersion.py` | New -- shared "write VERSION + BUILD_INFO from current git HEAD" helper |
-| `Templates/Activity.html` | Renders per-worker version + fleet-mismatch banner (no edits this feature) |
-| `deploy/worker-deploy-windows.flow.md` | Hot-swap section updated to reference stamp step |
-| `.gitignore` | Excludes VERSION and BUILD_INFO at repo root |
+| `WorkerService/Main.py` | `_ResolveWorkerVersion` reads VERSION + BUILD_INFO only; returns "unknown" if missing (no git fallback) |
+| `deploy/deploy-linux-worker.py` | Stamps via Docker `--build-arg COMMIT_SHA`; `StepVerifyWorkers` asserts `Workers.Version == stamped SHA` per container |
+| `deploy/deploy-windows-worker.py` | New `StepStampVersion` writes VERSION + BUILD_INFO on target via SSH/PowerShell; `StepVerifyWorkerOnline` asserts version match |
+| `Scripts/StampVersion.py` | New -- shared stdlib-only "write VERSION + BUILD_INFO from current git HEAD" helper |
+| `StartWorker.py` | `_StampVersion` pre-launch step runs `Scripts/StampVersion.py`; Windows native workers self-stamp at every launch |
+| `Templates/Activity.html` | Per-worker tile renders `v: <short-sha>` (separator + leading space); fleet-mismatch banner unchanged from prior feature |
+| `deploy/worker-deploy-windows.flow.md` | Hot-swap section + Step 5 verify reference self-stamp behavior |
+| `deploy/worker-deploy-linux.flow.md` | Post-deploy verify SELECT gained Version column |
+| `WorkerService/WorkerService.flow.md` | Version section rewritten: 2-state resolver, who writes the files on each platform |
+| `Features/TeamStatus/worker-versioning.feature.md` | Marked superseded in part (tier 2 removed, Windows stamping added) |
+| `.gitignore` | Excludes `/VERSION` and `/BUILD_INFO` at repo root |
