@@ -177,10 +177,25 @@ class ProcessQualityTestQueueService:
             self.IsProcessing = False
 
     def ClaimNextJob(self) -> Optional[Dict[str, Any]]:
-        """Claim the next available quality testing job from the queue."""
+        """Claim the next available quality testing job from the queue.
+
+        Worker name is sourced from WorkerContext (the canonical singleton);
+        the DB authority check inside ClaimQualityTestJob refuses the claim
+        when this worker is Paused or has QualityTestEnabled=FALSE. No local
+        capability check needed here -- the DB is the gate.
+        """
         try:
-            # Use the DatabaseManager's atomic claiming method
-            job = self.DatabaseManager.ClaimQualityTestJob()
+            from Core.WorkerContext import WorkerContext
+            Ctx = WorkerContext.Current()
+            WorkerName = Ctx.WorkerName if Ctx else None
+            if not WorkerName:
+                LoggingService.LogWarning(
+                    "ClaimNextJob: no WorkerContext.WorkerName registered; refusing claim",
+                    "ProcessQualityTestQueueService", "ClaimNextJob",
+                )
+                return None
+
+            job = self.DatabaseManager.ClaimQualityTestJob(WorkerName)
 
             if job:
                 LoggingService.LogInfo(f"Claimed quality test job {job['Id']}",

@@ -56,50 +56,13 @@ class QualityTestRepository(BaseRepository):
             LoggingService.LogException("Exception getting quality test queue", e, "QualityTestRepository", "GetQualityTestQueue")
             return []
 
-    def ClaimQualityTestJob(self) -> Optional[Dict[str, Any]]:
-        """Atomically claim a pending quality test job to prevent race conditions."""
-        try:
-            select_query = """
-                SELECT Id, TranscodeAttemptId, OriginalFilePath, LocalSourcePath, TranscodedFilePath, DateAdded
-                FROM QualityTestingQueue
-                WHERE DateStarted IS NULL
-                ORDER BY DateAdded ASC
-                LIMIT 1
-            """
-
-            jobs = self.ExecuteQuery(select_query)
-            if not jobs or len(jobs) == 0:
-                LoggingService.LogDebug("No pending quality test jobs available to claim", "QualityTestRepository", "ClaimQualityTestJob")
-                return None
-
-            job_to_claim = jobs[0]
-            job_id = job_to_claim["Id"]
-
-            update_query = """
-                UPDATE QualityTestingQueue
-                SET DateStarted = NOW()
-                WHERE Id = %s AND DateStarted IS NULL
-            """
-
-            rows_affected = self.ExecuteNonQuery(update_query, (job_id,))
-
-            if rows_affected > 0:
-                LoggingService.LogInfo(f"Successfully claimed quality test job {job_id}", "QualityTestRepository", "ClaimQualityTestJob")
-                return {
-                    "Id": job_to_claim["Id"],
-                    "TranscodeAttemptId": job_to_claim["TranscodeAttemptId"],
-                    "OriginalFilePath": job_to_claim["OriginalFilePath"],
-                    "LocalSourcePath": job_to_claim["LocalSourcePath"],
-                    "TranscodedFilePath": job_to_claim["TranscodedFilePath"],
-                    "DateAdded": job_to_claim["DateAdded"]
-                }
-            else:
-                LoggingService.LogDebug(f"Job {job_id} was already claimed by another worker", "QualityTestRepository", "ClaimQualityTestJob")
-                return None
-
-        except Exception as e:
-            LoggingService.LogException("Exception claiming quality test job", e, "QualityTestRepository", "ClaimQualityTestJob")
-            return None
+    # ClaimQualityTestJob lived here as a shadow with no DB-authority gate.
+    # Deleted 2026-05-29: the canonical implementation is
+    # DatabaseManager.ClaimQualityTestJob(WorkerName) which enforces the
+    # Workers.Status + QualityTestEnabled predicate via
+    # Core.Database.WorkerCapabilityPredicate. See
+    # `.claude/rules/db-is-authority.md` and
+    # `.claude/programs/db-authority-program.md` P1.
 
     def CreateQualityTestQueueEntry(self, TranscodeAttemptId: int, OriginalFilePath: str, LocalSourcePath: str, TranscodedFilePath: str) -> Optional[int]:
         """Create a new quality test queue entry."""

@@ -43,10 +43,23 @@ class QualityTestingViewModel:
             return {"Success": False, "Message": str(e)}
 
     def ClaimJob(self) -> dict:
-        """Atomically claim a pending quality test job."""
+        """Atomically claim a pending quality test job.
+
+        Worker name is sourced from WorkerContext. The DB-authoritative gate
+        inside ClaimQualityTestJob refuses the claim when this worker is not
+        eligible. See `.claude/rules/db-is-authority.md`.
+        """
         try:
-            # Use the new atomic job claiming method
-            job = self.DatabaseManager.ClaimQualityTestJob()
+            from Core.WorkerContext import WorkerContext
+            Ctx = WorkerContext.Current()
+            WorkerName = Ctx.WorkerName if Ctx else None
+            if not WorkerName:
+                LoggingService.LogWarning(
+                    "ClaimJob: no WorkerContext.WorkerName registered; refusing claim",
+                    "QualityTestingViewModel", "ClaimJob",
+                )
+                return None
+            job = self.DatabaseManager.ClaimQualityTestJob(WorkerName)
             return job
 
         except Exception as e:

@@ -37,6 +37,7 @@ Before editing any file not already read this session:
 3. Grep for other callers of the function being changed
 4. Name the rules in `.claude/rules/` that apply
 5. State the proposed change in one sentence
+6. If the change touches a claim, decision, or repository query: run `py -m pytest Tests/Contract/TestClaimAuthority.py` AND reference `.claude/rules/db-is-authority.md` in the commit message. The conformance suite must stay green.
 
 Slow + correct beats fast + broken.
 

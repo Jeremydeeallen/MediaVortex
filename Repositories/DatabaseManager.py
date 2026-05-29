@@ -1772,12 +1772,24 @@ class DatabaseManager:
                 # EXISTS subquery keeps the check atomic with the claim itself, so
                 # flipping Pause or disabling Transcode takes effect on the very next
                 # claim attempt -- no polling lag, no cached-snapshot drift.
-                # NVENC capability gate: if the queue row's assigned profile has
-                # UseNvidiaHardware=1, only workers with Workers.nvenccapable=TRUE
-                # may claim it. LEFT JOIN MediaFiles + Profiles to surface the
-                # assigned-profile's NVENC flag in the EXISTS predicate.
+                # DB-authoritative claim: gated on Workers via the shared
+                # WorkerCapabilityPredicate helper (`.claude/rules/db-is-authority.md`).
+                # NVENC profiles additionally require Workers.nvenccapable=TRUE;
+                # that's expressed as an extra AND on the same Workers row
+                # surfaced by the helper.
+                from Core.Database.WorkerCapabilityPredicate import BuildClaimPredicate
+                CapabilityFragment, CapabilityParams = BuildClaimPredicate(WorkerName, "TranscodeEnabled")
+                # NVENC routing: the EXISTS subquery alone gates capability;
+                # the NVENC join lives in the outer query so the predicate can
+                # reference p.usenvidiahardware. Same Workers row is checked
+                # via a parallel EXISTS for the NVENC capability flag.
+                NvencGate = (
+                    "(COALESCE(p.usenvidiahardware, 0) = 0 "
+                    "OR EXISTS (SELECT 1 FROM Workers w2 "
+                    "WHERE w2.WorkerName = %s AND w2.nvenccapable = TRUE))"
+                )
                 if AcceptsInterlaced:
-                    query = """
+                    query = f"""
                         UPDATE TranscodeQueue
                         SET Status = 'Running', ClaimedBy = %s, ClaimedAt = NOW(), DateStarted = NOW()
                         WHERE Id = (
@@ -1786,24 +1798,18 @@ class DatabaseManager:
                             LEFT JOIN Profiles p ON p.profilename = mf.AssignedProfile
                             WHERE tq.Status = 'Pending'
                               AND (tq.ProcessingMode IS NULL OR tq.ProcessingMode = 'Transcode')
-                              AND EXISTS (
-                                SELECT 1 FROM Workers w
-                                WHERE w.WorkerName = %s
-                                  AND w.Status = 'Online'
-                                  AND w.TranscodeEnabled = TRUE
-                                  AND (COALESCE(p.usenvidiahardware, 0) = 0 OR w.nvenccapable = TRUE)
-                              )
+                              AND {CapabilityFragment}
+                              AND {NvencGate}
                             ORDER BY tq.Priority DESC, tq.DateAdded ASC
                             LIMIT 1
                             FOR UPDATE OF tq SKIP LOCKED
                         )
                         RETURNING Id, StorageRootId, RelativePath, FilePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted, ProcessingMode, MediaFileId, TestVariantSetId
                     """
-                    cursor.execute(query, (WorkerName, WorkerName))
+                    cursor.execute(query, (WorkerName,) + CapabilityParams + (WorkerName,))
                 else:
                     # Skip interlaced files (join MediaFiles to check IsInterlaced TEXT column).
-                    # Same NVENC capability gate as the AcceptsInterlaced=True branch.
-                    query = """
+                    query = f"""
                         UPDATE TranscodeQueue
                         SET Status = 'Running', ClaimedBy = %s, ClaimedAt = NOW(), DateStarted = NOW()
                         WHERE Id = (
@@ -1813,20 +1819,15 @@ class DatabaseManager:
                             WHERE tq.Status = 'Pending'
                               AND (tq.ProcessingMode IS NULL OR tq.ProcessingMode = 'Transcode')
                               AND (mf.IsInterlaced IS NULL OR mf.IsInterlaced = '0')
-                              AND EXISTS (
-                                SELECT 1 FROM Workers w
-                                WHERE w.WorkerName = %s
-                                  AND w.Status = 'Online'
-                                  AND w.TranscodeEnabled = TRUE
-                                  AND (COALESCE(p.usenvidiahardware, 0) = 0 OR w.nvenccapable = TRUE)
-                              )
+                              AND {CapabilityFragment}
+                              AND {NvencGate}
                             ORDER BY tq.Priority DESC, tq.DateAdded ASC
                             LIMIT 1
                             FOR UPDATE OF tq SKIP LOCKED
                         )
                         RETURNING Id, StorageRootId, RelativePath, FilePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted, ProcessingMode, MediaFileId, TestVariantSetId
                     """
-                    cursor.execute(query, (WorkerName, WorkerName))
+                    cursor.execute(query, (WorkerName,) + CapabilityParams + (WorkerName,))
 
                 row = cursor.fetchone()
                 connection.commit()
@@ -1869,29 +1870,27 @@ class DatabaseManager:
             try:
                 cursor = connection.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
-                # Gate on the worker's live Status + RemuxEnabled. EXISTS keeps the
-                # check atomic with the claim, so Pause / RemuxEnabled=False take
-                # effect on the very next claim attempt -- no polling lag.
-                query = """
+                # DB-authoritative claim: gated on Workers via the shared
+                # WorkerCapabilityPredicate helper. Pause / RemuxEnabled=False
+                # take effect on the next claim attempt -- no polling lag.
+                # See `.claude/rules/db-is-authority.md`.
+                from Core.Database.WorkerCapabilityPredicate import BuildClaimPredicate
+                CapabilityFragment, CapabilityParams = BuildClaimPredicate(WorkerName, "RemuxEnabled")
+                query = f"""
                     UPDATE TranscodeQueue
                     SET Status = 'Running', ClaimedBy = %s, ClaimedAt = NOW(), DateStarted = NOW()
                     WHERE Id = (
                         SELECT Id FROM TranscodeQueue
                         WHERE Status = 'Pending'
                           AND ProcessingMode IN ('Remux', 'Quick', 'AudioFix')
-                          AND EXISTS (
-                            SELECT 1 FROM Workers w
-                            WHERE w.WorkerName = %s
-                              AND w.Status = 'Online'
-                              AND w.RemuxEnabled = TRUE
-                          )
+                          AND {CapabilityFragment}
                         ORDER BY Priority DESC, DateAdded ASC
                         LIMIT 1
                         FOR UPDATE SKIP LOCKED
                     )
                     RETURNING Id, StorageRootId, RelativePath, FilePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted, ProcessingMode, MediaFileId, TestVariantSetId
                 """
-                cursor.execute(query, (WorkerName, WorkerName))
+                cursor.execute(query, (WorkerName,) + CapabilityParams)
 
                 row = cursor.fetchone()
                 connection.commit()
@@ -4444,39 +4443,54 @@ class DatabaseManager:
             LoggingService.LogException("Exception getting running quality test progress", e, "DatabaseManager", "GetRunningQualityTestProgress")
             return None
     
-    def ClaimQualityTestJob(self) -> dict:
-        """Atomically claim a pending quality test job to prevent race conditions."""
+    def ClaimQualityTestJob(self, WorkerName: str) -> dict:
+        """Atomically claim a pending quality test job, gated on DB authority.
+
+        DB-authoritative gate (see `.claude/rules/db-is-authority.md`):
+        Workers.Status='Online' AND Workers.QualityTestEnabled=TRUE enforced
+        via the shared WorkerCapabilityPredicate helper. A Paused worker or
+        a worker with QualityTestEnabled=FALSE cannot claim, regardless of
+        any cached state in the calling service. Mid-flight GUI flag changes
+        are honored on the next claim attempt -- no restart needed.
+
+        Override-aware: rows with ForceDisposition set are reserved for the
+        WebService override path -- workers must not race them. See
+        qt-queue-visibility-and-override.feature.md C4.
+        """
         try:
-            # First, get the job to claim
-            # Override-aware claim: ForceDisposition IS NOT NULL rows are
-            # reserved for the WebService override path -- workers must not
-            # race them. See qt-queue-visibility-and-override.feature.md C4.
-            select_query = """
+            from Core.Database.WorkerCapabilityPredicate import BuildClaimPredicate
+            CapabilityFragment, CapabilityParams = BuildClaimPredicate(WorkerName, "QualityTestEnabled")
+            select_query = f"""
                 SELECT Id, TranscodeAttemptId, OriginalFilePath, LocalSourcePath, TranscodedFilePath, DateAdded
                 FROM QualityTestingQueue
                 WHERE Status = 'Pending'
                   AND ForceDisposition IS NULL
                   AND DateStarted IS NULL
+                  AND {CapabilityFragment}
                 ORDER BY DateAdded ASC
                 LIMIT 1
             """
 
-            jobs = self.DatabaseService.ExecuteQuery(select_query)
+            jobs = self.DatabaseService.ExecuteQuery(select_query, CapabilityParams)
             if not jobs or len(jobs) == 0:
-                LoggingService.LogDebug("No pending quality test jobs available to claim", "DatabaseManager", "ClaimQualityTestJob")
+                LoggingService.LogDebug(f"No claimable QT jobs for {WorkerName} (Paused / QualityTestEnabled=FALSE / no Pending rows)", "DatabaseManager", "ClaimQualityTestJob")
                 return None
 
             job_to_claim = jobs[0]
             job_id = job_to_claim["Id"]
 
-            # Now atomically claim the job
-            update_query = """
+            # Atomic claim: re-gate on the same predicate inside the UPDATE so
+            # a flag flip between SELECT and UPDATE refuses the claim.
+            update_query = f"""
                 UPDATE QualityTestingQueue
                 SET DateStarted = NOW(), Status = 'Running'
-                WHERE Id = %s AND DateStarted IS NULL AND ForceDisposition IS NULL
+                WHERE Id = %s
+                  AND DateStarted IS NULL
+                  AND ForceDisposition IS NULL
+                  AND {CapabilityFragment}
             """
-            
-            rows_affected = self.DatabaseService.ExecuteNonQuery(update_query, (job_id,))
+
+            rows_affected = self.DatabaseService.ExecuteNonQuery(update_query, (job_id,) + CapabilityParams)
             
             if rows_affected > 0:
                 LoggingService.LogInfo(f"Successfully claimed quality test job {job_id}", "DatabaseManager", "ClaimQualityTestJob")

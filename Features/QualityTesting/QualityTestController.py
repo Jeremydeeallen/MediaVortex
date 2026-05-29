@@ -961,7 +961,12 @@ def OverrideQualityTest():
         Db = DatabaseService()
 
         # Atomic claim: only succeeds if the row is still operator-overridable.
-        ClaimedRows = Db.ExecuteQuery(
+        # NOTE: DatabaseService.ExecuteQuery does NOT auto-commit; use
+        # ExecuteNonQuery for the UPDATE (commits) + a separate SELECT to
+        # confirm we actually claimed the row. The "we claimed it" guarantee
+        # is the rows-affected count from ExecuteNonQuery, not the RETURNING
+        # output of ExecuteQuery.
+        AffectedRows = Db.ExecuteNonQuery(
             """
             UPDATE QualityTestingQueue
             SET ForceDisposition = %s,
@@ -970,13 +975,18 @@ def OverrideQualityTest():
             WHERE Id = %s
               AND Status = 'Pending'
               AND ForceDisposition IS NULL
-            RETURNING Id, TranscodeAttemptId
             """,
             (ForceDisposition, QueueId),
         )
-        if not ClaimedRows:
+        if not AffectedRows:
             return jsonify({"Success": False, "Message": "Queue row not in Pending state (already running, completed, or overridden)"}), 409
-        AttemptId = ClaimedRows[0]['TranscodeAttemptId']
+        AttemptRows = Db.ExecuteQuery(
+            "SELECT TranscodeAttemptId FROM QualityTestingQueue WHERE Id = %s",
+            (QueueId,),
+        )
+        if not AttemptRows:
+            return jsonify({"Success": False, "Message": "Queue row disappeared between claim and lookup"}), 500
+        AttemptId = AttemptRows[0]['TranscodeAttemptId']
 
         # Commit disposition on the attempt.
         Disposition = 'BypassReplace' if ForceDisposition == 'Replace' else 'Discard'
