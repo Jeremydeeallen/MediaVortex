@@ -8,6 +8,22 @@ For every capability-gated claim query, the SQL embeds the worker-capability gat
 
 For every decision/disposition read of config (thresholds, gate state, system settings), the code calls a repository method that reads the DB fresh per call. No `self._cached_*` on long-lived service instances. No `_LoadConfig()` invoked once in `__init__`.
 
+## Operator visibility into dynamic re-evaluation (the boot-spawn question)
+
+A reasonable question when reading this rule: "if the claim is the gate, do polling threads need to know the capability flag at all?"
+
+In practice the polling threads DO honor mid-flight flag changes -- not via the claim alone, but via `WorkerService.Main._CapabilityPollingLoop` (default interval 15s, configurable via `SystemSettings.CapabilityPollingIntervalSec`). The loop re-reads `Workers` and calls `_ApplyCapabilities()` to start/stop capability threads as flags change. This is the dynamic mechanism that keeps `self.QualityTestEnabled` etc. fresh on a long-lived worker.
+
+The loop has one design constraint worth noting: it only re-applies capabilities while `Workers.Status='Online'`. When a worker is `Paused`, the reload step is skipped (the worker shouldn't be claiming work anyway). This is intentional and harmless post-claim-authority: even if `self.QualityTestEnabled` is stale during a Paused window, the claim refuses on Status, so no claim is attempted. When the worker transitions back to Online, the next loop tick reloads + reconciles within `CapabilityPollingIntervalSec`.
+
+Net behavior the operator sees:
+- Flip `Status` Online -> Paused: claim refusal is immediate (DB gate); the running poller becomes a no-op within ~1 cycle.
+- Flip `Status` Paused -> Online: capability reconciliation within `CapabilityPollingIntervalSec`. Threads start.
+- Flip `QualityTestEnabled` while Online: thread start/stop within `CapabilityPollingIntervalSec`.
+- Flip `QualityTestEnabled` while Paused: cached locally; no effect until Status returns to Online (at which point the loop reads it fresh).
+
+This is symmetric enough that an operator does NOT need to restart a worker to apply a flag change in any normal scenario. If the polling interval is too long for an operator's taste, lower `SystemSettings.CapabilityPollingIntervalSec`.
+
 ## Verified conventions
 
 - `Core/Database/WorkerCapabilityPredicate.py` is the single source for the capability-gate SQL fragment. The function whitelists the allowed capability column names to prevent SQL injection via column-name interpolation.

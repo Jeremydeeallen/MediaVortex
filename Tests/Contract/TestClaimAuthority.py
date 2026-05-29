@@ -163,16 +163,192 @@ class TestQualityTestClaimAuthority(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# Note on transcode + remux conformance
+# Transcode claim authority
 # ---------------------------------------------------------------------------
-# Transcode + remux claims require setting up a TranscodeQueue row that survives
-# round-trips through the worker's processing dispatch. The setup is heavier
-# than the QT case because production has more downstream services that watch
-# TranscodeQueue rows. For P1 we conformance-test the QT path (the path the
-# bug surfaced on) and verify by smoke that transcode + remux use the same
-# helper. P3 expands this test file to cover the relocated transcode + remux
-# claims with full fixture isolation. Recorded in
-# `.claude/programs/db-authority-program.md` P3.B5 / P3.B6.
+
+SENTINEL_FILE_TRANSCODE = "_test-claim-authority-transcode.mkv"
+
+
+class TestTranscodeClaimAuthority(unittest.TestCase):
+    """ClaimNextPendingTranscodeJob must honor Workers.Status + Workers.TranscodeEnabled.
+
+    Fixture safety: sentinel queue row has Priority=-1000 (production rows
+    always rank higher), FilePath prefixed with `_test-claim-authority-`
+    (greppable for cleanup), MediaFileId NULL (no downstream side effects on
+    real MediaFiles).
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.Db = DatabaseService()
+        cls.Dm = DatabaseManager()
+        cls.Db.ExecuteNonQuery("DELETE FROM Workers WHERE WorkerName = %s", (SENTINEL_WORKER,))
+        cls.Db.ExecuteNonQuery(
+            """INSERT INTO Workers (WorkerName, Platform, Status,
+                   TranscodeEnabled, QualityTestEnabled, RemuxEnabled, ScanEnabled,
+                   Enabled, AcceptsInterlaced, LastHeartbeat)
+               VALUES (%s, 'linux', 'Online', TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, NOW())""",
+            (SENTINEL_WORKER,),
+        )
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.Db.ExecuteNonQuery("DELETE FROM Workers WHERE WorkerName = %s", (SENTINEL_WORKER,))
+        cls.Db.ExecuteNonQuery(
+            "DELETE FROM TranscodeQueue WHERE FilePath LIKE %s",
+            ("_test-claim-authority-%",),
+        )
+
+    def setUp(self):
+        self.Db.ExecuteNonQuery(
+            "UPDATE Workers SET Status='Online', TranscodeEnabled=TRUE, LastHeartbeat=NOW() WHERE WorkerName=%s",
+            (SENTINEL_WORKER,),
+        )
+        # Clear any stale sentinel rows from a prior failed run.
+        self.Db.ExecuteNonQuery(
+            "DELETE FROM TranscodeQueue WHERE FilePath = %s", (SENTINEL_FILE_TRANSCODE,),
+        )
+        # Insert the test queue row at lowest priority so any real production
+        # worker (if running) doesn't accidentally claim it before our test.
+        self.Db.ExecuteNonQuery(
+            """INSERT INTO TranscodeQueue
+                  (FilePath, FileName, Directory, SizeBytes, SizeMB,
+                   Priority, Status, ProcessingMode, MediaFileId, DateAdded)
+               VALUES (%s, '_test.mkv', '_test', 1, 1.0, -1000, 'Pending', 'Transcode', NULL, NOW())""",
+            (SENTINEL_FILE_TRANSCODE,),
+        )
+        Rows = self.Db.ExecuteQuery(
+            "SELECT Id FROM TranscodeQueue WHERE FilePath = %s", (SENTINEL_FILE_TRANSCODE,),
+        )
+        self.QueueId = Rows[0]["Id"]
+
+    def tearDown(self):
+        self.Db.ExecuteNonQuery("DELETE FROM TranscodeQueue WHERE Id = %s", (self.QueueId,))
+
+    def test_eligible_worker_claims(self):
+        Job = self.Dm.ClaimNextPendingTranscodeJob(SENTINEL_WORKER, AcceptsInterlaced=True)
+        # Production rows may rank higher; only assert if our sentinel was the
+        # chosen row OR no claim happened due to higher-priority production work.
+        # If Job is None, verify the queue row is still claimable in isolation.
+        if Job is None:
+            ProdPending = self.Db.ExecuteQuery(
+                "SELECT COUNT(*) AS n FROM TranscodeQueue WHERE Status='Pending' AND Priority > -1000",
+            )
+            self.assertGreater(
+                ProdPending[0]["n"], 0,
+                "claim returned None and no production rows exist -- eligible worker should have claimed sentinel",
+            )
+        else:
+            self.assertIsNotNone(Job.Id, "claim returned a job with no Id")
+            # If we did claim our sentinel, re-pend it for tearDown DELETE.
+            if Job.Id == self.QueueId:
+                self.Db.ExecuteNonQuery(
+                    "UPDATE TranscodeQueue SET Status='Pending', ClaimedBy=NULL, ClaimedAt=NULL, DateStarted=NULL WHERE Id=%s",
+                    (self.QueueId,),
+                )
+
+    def test_paused_worker_refused(self):
+        self.Db.ExecuteNonQuery(
+            "UPDATE Workers SET Status='Paused' WHERE WorkerName=%s", (SENTINEL_WORKER,),
+        )
+        Job = self.Dm.ClaimNextPendingTranscodeJob(SENTINEL_WORKER, AcceptsInterlaced=True)
+        self.assertIsNone(Job, "Paused worker MUST NOT claim")
+
+    def test_transcode_disabled_refused(self):
+        self.Db.ExecuteNonQuery(
+            "UPDATE Workers SET TranscodeEnabled=FALSE WHERE WorkerName=%s", (SENTINEL_WORKER,),
+        )
+        Job = self.Dm.ClaimNextPendingTranscodeJob(SENTINEL_WORKER, AcceptsInterlaced=True)
+        self.assertIsNone(Job, "TranscodeEnabled=FALSE worker MUST NOT claim")
+
+
+# ---------------------------------------------------------------------------
+# Remux claim authority
+# ---------------------------------------------------------------------------
+
+SENTINEL_FILE_REMUX = "_test-claim-authority-remux.mkv"
+
+
+class TestRemuxClaimAuthority(unittest.TestCase):
+    """ClaimNextPendingRemuxJob must honor Workers.Status + Workers.RemuxEnabled."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.Db = DatabaseService()
+        cls.Dm = DatabaseManager()
+        cls.Db.ExecuteNonQuery("DELETE FROM Workers WHERE WorkerName = %s", (SENTINEL_WORKER,))
+        cls.Db.ExecuteNonQuery(
+            """INSERT INTO Workers (WorkerName, Platform, Status,
+                   TranscodeEnabled, QualityTestEnabled, RemuxEnabled, ScanEnabled,
+                   Enabled, AcceptsInterlaced, LastHeartbeat)
+               VALUES (%s, 'linux', 'Online', TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, NOW())""",
+            (SENTINEL_WORKER,),
+        )
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.Db.ExecuteNonQuery("DELETE FROM Workers WHERE WorkerName = %s", (SENTINEL_WORKER,))
+        cls.Db.ExecuteNonQuery(
+            "DELETE FROM TranscodeQueue WHERE FilePath LIKE %s",
+            ("_test-claim-authority-%",),
+        )
+
+    def setUp(self):
+        self.Db.ExecuteNonQuery(
+            "UPDATE Workers SET Status='Online', RemuxEnabled=TRUE, LastHeartbeat=NOW() WHERE WorkerName=%s",
+            (SENTINEL_WORKER,),
+        )
+        self.Db.ExecuteNonQuery(
+            "DELETE FROM TranscodeQueue WHERE FilePath = %s", (SENTINEL_FILE_REMUX,),
+        )
+        self.Db.ExecuteNonQuery(
+            """INSERT INTO TranscodeQueue
+                  (FilePath, FileName, Directory, SizeBytes, SizeMB,
+                   Priority, Status, ProcessingMode, MediaFileId, DateAdded)
+               VALUES (%s, '_test.mkv', '_test', 1, 1.0, -1000, 'Pending', 'Remux', NULL, NOW())""",
+            (SENTINEL_FILE_REMUX,),
+        )
+        Rows = self.Db.ExecuteQuery(
+            "SELECT Id FROM TranscodeQueue WHERE FilePath = %s", (SENTINEL_FILE_REMUX,),
+        )
+        self.QueueId = Rows[0]["Id"]
+
+    def tearDown(self):
+        self.Db.ExecuteNonQuery("DELETE FROM TranscodeQueue WHERE Id = %s", (self.QueueId,))
+
+    def test_eligible_worker_claims(self):
+        Job = self.Dm.ClaimNextPendingRemuxJob(SENTINEL_WORKER)
+        if Job is None:
+            ProdPending = self.Db.ExecuteQuery(
+                "SELECT COUNT(*) AS n FROM TranscodeQueue "
+                "WHERE Status='Pending' AND Priority > -1000 "
+                "AND ProcessingMode IN ('Remux','Quick','AudioFix')",
+            )
+            self.assertGreater(
+                ProdPending[0]["n"], 0,
+                "claim returned None and no production remux rows exist -- eligible worker should have claimed sentinel",
+            )
+        else:
+            self.assertIsNotNone(Job.Id)
+            if Job.Id == self.QueueId:
+                self.Db.ExecuteNonQuery(
+                    "UPDATE TranscodeQueue SET Status='Pending', ClaimedBy=NULL, ClaimedAt=NULL, DateStarted=NULL WHERE Id=%s",
+                    (self.QueueId,),
+                )
+
+    def test_paused_worker_refused(self):
+        self.Db.ExecuteNonQuery(
+            "UPDATE Workers SET Status='Paused' WHERE WorkerName=%s", (SENTINEL_WORKER,),
+        )
+        Job = self.Dm.ClaimNextPendingRemuxJob(SENTINEL_WORKER)
+        self.assertIsNone(Job, "Paused worker MUST NOT claim remux")
+
+    def test_remux_disabled_refused(self):
+        self.Db.ExecuteNonQuery(
+            "UPDATE Workers SET RemuxEnabled=FALSE WHERE WorkerName=%s", (SENTINEL_WORKER,),
+        )
+        Job = self.Dm.ClaimNextPendingRemuxJob(SENTINEL_WORKER)
+        self.assertIsNone(Job, "RemuxEnabled=FALSE worker MUST NOT claim remux")
 
 
 if __name__ == "__main__":

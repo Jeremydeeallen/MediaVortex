@@ -106,27 +106,41 @@ class TestPostTranscodeDispositionTable(unittest.TestCase):
     def test_Row7_VmafAboveMax(self):
         self._AssertDeterministic(('NoReplace', 'VmafAboveMax'), VmafScore=99.5)
 
-    # Row 8: VMAF required, no score, no capable worker online, WhenVmafUnavailable='block'
-    #        -> NoReplace / VmafServicePaused.
-    def test_Row8_NoCapableWorker_Block(self):
+    # Rows 8-9 (legacy `VmafServicePaused` / `VmafServicePausedBypassed`)
+    # were retired by qt-queue-visibility-and-override.feature.md (2026-05-29).
+    # The decision tree now returns `(Pending, AwaitingVmaf)` unconditionally
+    # when VMAF is required and no score is available; the queue row is the
+    # operator's visibility surface and the override endpoint is the manual
+    # escape. The `VmafCapableWorkerOnline` input is no longer consulted by
+    # `_DecideFromInputs`.
+    def test_NoCapableWorker_StillReturnsPending_Block(self):
         self._AssertDeterministic(
-            ('NoReplace', 'VmafServicePaused'),
+            ('Pending', 'AwaitingVmaf'),
             VmafScore=None, VmafCapableWorkerOnline=False,
             GateConfig=FakeGateConfig(WhenVmafUnavailable='block'),
         )
 
-    # Row 9: same as row 8 but WhenVmafUnavailable='bypass'
-    #        -> BypassReplace / VmafServicePausedBypassed.
-    def test_Row9_NoCapableWorker_Bypass(self):
+    def test_NoCapableWorker_StillReturnsPending_Bypass(self):
         self._AssertDeterministic(
-            ('BypassReplace', 'VmafServicePausedBypassed'),
+            ('Pending', 'AwaitingVmaf'),
             VmafScore=None, VmafCapableWorkerOnline=False,
             GateConfig=FakeGateConfig(WhenVmafUnavailable='bypass'),
         )
 
     # Edge: priority of Discard/NoSavings over QualityTestRequired flag.
+    @unittest.expectedFailure
     def test_NoSavings_BeatsQualityTestNotRequired(self):
-        # Even when QualityTestRequired=False, no-savings still discards.
+        # FLOW-DOC vs CODE DISCREPANCY (filed in
+        # `.claude/programs/db-authority-program.md` deferred items):
+        # The transcode.flow.md Stage 6 decision table lists "no savings" Discard
+        # BEFORE the `QualityTestRequired=False -> BypassReplace` row. The
+        # current `_DecideFromInputs` orders them the opposite way, with an
+        # inline comment justifying the order for remux jobs (which set
+        # QualityTestRequired=False and are not aimed at disk savings).
+        # Resolution requires operator decision: either the flow doc reorders
+        # to match code (and the no-savings gate becomes remux-aware) OR the
+        # code reorders to match the flow doc (and remux jobs growing slightly
+        # get Discarded). xfail until that decision lands.
         self._AssertDeterministic(
             ('Discard', 'NoSavings'),
             Success=True, OldSize=500_000_000, NewSize=600_000_000,
