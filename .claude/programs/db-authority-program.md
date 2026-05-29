@@ -16,10 +16,13 @@ If you say `scope` at any point during execution, the executing agent stops and 
 
 ## Current State (UPDATE THIS AT EVERY CHECKPOINT)
 
-- **Last shipped:** P1 (Claim Authority) — 2026-05-29. See commit SHA in P1 status block below.
+- **Last shipped:** P1 (Claim Authority) — 2026-05-29. Commit `ffe1b84de8aa45cb66800466612bde379e1701f0`.
 - **In progress:** None. Awaiting CEO go on P2.
 - **Next action:** Start P2.A (decision authority inventory) on operator authorization.
-- **Conformance suite status:** Green (P1 tests only). Extends in P2/P3/P4.
+- **Conformance suite status:** 8/8 green (P1 tests only). Extends in P2/P3/P4.
+- **Deferred items surfaced during P1 (not in scope for P1, captured here so they aren't forgotten):**
+  - 5 Somebody Somewhere S01 TranscodeAttempts (26111-26115) ran VMAF through the recovery path on 2026-05-29; disposition decided `Replace / VmafPassed` but `FileReplaced=False`. Likely size-regression defense (same pattern as Cheers S03E03 canary, attempt 26110). Operator can call POST /api/QualityTest/Override with ForceDisposition=Discard to clean up, or investigate whether the size-regression gate should be re-tuned. Not blocking; the bug fix shipped is independent.
+  - `DatabaseService.ExecuteQuery` does not auto-commit. Used in `QualityTestController.OverrideQualityTest` (pre-this-commit) for UPDATE...RETURNING and would have lost the write. Fixed in this commit. A wider audit of `ExecuteQuery` callers for INSERT/UPDATE/DELETE misuse is in scope for P3 (DatabaseManager retirement) -- the dedicated repositories should not expose `ExecuteQuery` as an INSERT/UPDATE entry point.
 
 ---
 
