@@ -43,10 +43,12 @@ REASONS = (
     'VmafBelowMin',
     'VmafPassed',
     'VmafAboveMax',
-    'VmafServicePaused',
-    'VmafServicePausedBypassed',
-    'VmafCapabilityNotConfigured',
+    'VmafServicePaused',           # legacy -- pre-2026-05-29; not emitted by new decisions
+    'VmafServicePausedBypassed',   # legacy -- pre-2026-05-29; not emitted by new decisions
+    'VmafCapabilityNotConfigured', # legacy
     'QualityTestingGloballyDisabled',
+    'OperatorForcedReplace',       # operator override via /api/QualityTest/Override
+    'OperatorDiscarded',           # operator override via /api/QualityTest/Override
     'TestMode',
     # compliance-gated-rename.feature.md criterion 2 (BUG-0020 Slice 1).
     # Reached when FileReplacement's pre-rename compliance gate refuses
@@ -239,10 +241,6 @@ class PostTranscodeDispositionService:
         if NewSize and OldSize and NewSize >= OldSize:
             return ('Discard', 'NoSavings')
 
-        # Row 4: VMAF required, no score yet, capable worker online -> wait for VMAF.
-        if VmafScore is None and VmafCapableWorkerOnline:
-            return ('Pending', 'AwaitingVmaf')
-
         # Rows 5-7: VMAF score available -> compare to thresholds.
         if VmafScore is not None:
             try:
@@ -256,14 +254,13 @@ class PostTranscodeDispositionService:
                     return ('Replace', 'VmafPassed')
                 return ('NoReplace', 'VmafAboveMax')
 
-        # Rows 8-9: VMAF required, no score, no capable worker available.
-        # Reason names retained for audit-history compatibility -- their
-        # semantic meaning shifted from "ServiceStatus=Paused" to "no live
-        # worker has the capability". Both observably mean: VMAF didn't run.
-        if GateConfig.WhenVmafUnavailable == 'bypass':
-            return ('BypassReplace', 'VmafServicePausedBypassed')
-        # Default: 'block'.
-        return ('NoReplace', 'VmafServicePaused')
+        # Row 4 (rewritten 2026-05-29): VMAF required, no score yet -> always
+        # Pending/AwaitingVmaf. The QualityTestingQueue row is created by the
+        # dispatcher regardless of whether a capable worker is online; the
+        # operator either brings one online OR overrides the queue row via
+        # the WebService endpoint. The legacy VmafServicePaused / Bypassed
+        # branches are retired -- see qt-queue-visibility-and-override.feature.md.
+        return ('Pending', 'AwaitingVmaf')
 
     def _CommitDisposition(self, TranscodeAttemptId: int, Disposition: str, Reason: str) -> None:
         """Write the audit columns. Single UPDATE per disposition decision."""

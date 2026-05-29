@@ -236,16 +236,27 @@ class QualityTestingBusinessService:
             original_resolution = self.GetVideoResolution(original_file, ffmpeg_path)
             transcoded_resolution = self.GetVideoResolution(transcoded_file, ffmpeg_path)
 
-            # Check if resolutions match
+            # Unified VMAF chain (2026-05-29 -- shipped from EncoderShootout.feature.md
+            # findings). Both inputs get: PTS reset (kills container timestamp drift
+            # that causes frame-alignment slippage), scale to a common target with
+            # lanczos and explicit limited-range output (NVENC outputs tv-range;
+            # mismatched ranges collapse VMAF scores), 10-bit precision (preserves
+            # both NVENC p010le and SVT-AV1 yuv420p10le encoder outputs). libvmaf
+            # runs threaded (n_threads=4) without subsampling -- prior chain used
+            # n_subsample=10 which scored only every 10th frame and made the
+            # motion filter unreliable because integer_motion between subsampled
+            # frames is meaningless. Always scale (no-op when target == source).
+            target_width, target_height = self.DetermineVMAFTargetResolution(original_resolution, transcoded_resolution)
+            scale_chain = f"scale={target_width}:{target_height}:flags=lanczos:in_range=auto:out_range=tv,format=yuv420p10le"
+            vmaf_filter = (
+                f"[0:v]setpts=PTS-STARTPTS,{scale_chain}[dist];"
+                f"[1:v]setpts=PTS-STARTPTS,{scale_chain}[ref];"
+                f"[dist][ref]libvmaf=log_fmt=xml:log_path=vmaf_output.xml:n_threads=4"
+            )
             if original_resolution == transcoded_resolution:
-                # Resolutions match - use direct VMAF comparison without scaling
-                vmaf_filter = "[0:v]format=yuv420p[dist];[1:v]format=yuv420p[ref];[dist][ref]libvmaf=log_path=vmaf_output.xml:n_subsample=10"
-                LoggingService.LogInfo(f"Resolutions match ({original_resolution[0]}x{original_resolution[1]}) - using direct VMAF comparison", "QualityTestingBusinessService", "BuildVMAFCommand")
+                LoggingService.LogInfo(f"VMAF compare at native {target_width}x{target_height} (resolutions match)", "QualityTestingBusinessService", "BuildVMAFCommand")
             else:
-                # Resolutions don't match - determine target resolution and scale both videos
-                target_width, target_height = self.DetermineVMAFTargetResolution(original_resolution, transcoded_resolution)
-                vmaf_filter = f"[0:v]scale={target_width}:{target_height},format=yuv420p[dist];[1:v]scale={target_width}:{target_height},format=yuv420p[ref];[dist][ref]libvmaf=log_path=vmaf_output.xml:n_subsample=10"
-                LoggingService.LogInfo(f"Resolutions don't match (Original: {original_resolution[0]}x{original_resolution[1]}, Transcoded: {transcoded_resolution[0]}x{transcoded_resolution[1]}) - scaling to {target_width}x{target_height}", "QualityTestingBusinessService", "BuildVMAFCommand")
+                LoggingService.LogInfo(f"VMAF compare at {target_width}x{target_height} (original {original_resolution[0]}x{original_resolution[1]}, transcoded {transcoded_resolution[0]}x{transcoded_resolution[1]})", "QualityTestingBusinessService", "BuildVMAFCommand")
 
             # Get StartTime from TranscodeAttempts table if available
             StartTime = None
@@ -264,16 +275,22 @@ class QualityTestingBusinessService:
                     LoggingService.LogException("Error retrieving StartTime from TranscodeAttempts", e,
                                              "QualityTestingBusinessService", "BuildVMAFCommand")
 
-            # Build command as string (like TranscodeService)
-            # VMAF structure: ffmpeg -i original_file -i transcoded_file -lavfi [vmaf filter]
+            # Build command as string (like TranscodeService).
+            # Input order MUST be (encoded, original) -- libvmaf reads inputs
+            # positionally as (distorted, reference). The filter chain labels
+            # [0:v] as [dist] and [1:v] as [ref], so input 0 is the encoded
+            # (distorted) output and input 1 is the original (reference) master.
+            # VMAF is asymmetric; running it with inputs swapped produces an
+            # incorrect (typically lower) score. Bug pre-dated 2026-05-29 chain
+            # rewrite; fixed alongside the chain improvements as part of BUG-0022.
             command_parts = [ffmpeg_path]
 
-            # Add start time parameter to original file input if specified
+            # Add start time parameter (applies to the next -i input)
             if StartTime and StartTime.strip():
                 command_parts.extend(["-ss", StartTime.strip()])
 
-            # Add input files (no CUDA acceleration) - quote paths to handle spaces
-            command_parts.extend(["-i", f'"{original_file}"', "-i", f'"{transcoded_file}"'])
+            # Inputs: encoded first (becomes [0:v] -> [dist]), original second (becomes [1:v] -> [ref]).
+            command_parts.extend(["-i", f'"{transcoded_file}"', "-i", f'"{original_file}"'])
 
             # Add VMAF filter and output options.
             # Quote vmaf_filter so bash does not split on ';' or interpret '[' / ']'

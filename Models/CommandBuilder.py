@@ -326,14 +326,31 @@ class CommandBuilder:
             UseNvidiaHardware = ProfileSettings.get('UseNvidiaHardware', 0)
             
             if UseNvidiaHardware == 1:
-                # NVIDIA hardware encoding parameters
-                Quality = ProfileSettings.get('Quality')
-                if Quality is not None and Quality != '' and Quality != 'None':
-                    CommandParts.extend(['-qp', str(Quality)])
-                
+                # NVENC quality knob set from the 2026-05-28 shootout
+                # (Scripts/Smoke/EncoderShootout.feature.md, nv_cq32_sink: -14% size
+                # vs SVT P6 CRF26 reference at -0.47 VMAF, ~1.6x faster). Profile
+                # contributes Preset + Quality; the rest are fixed to the winning
+                # config until a future test motivates per-profile variation.
                 Preset = ProfileSettings.get('Preset')
                 if Preset is not None and Preset != '' and Preset != 'None':
                     CommandParts.extend(['-preset', f'p{Preset}'])
+                CommandParts.extend([
+                    '-tune', 'uhq',
+                    '-multipass', 'fullres',
+                    '-rc', 'vbr',
+                    '-b:v', '0',
+                ])
+                Quality = ProfileSettings.get('Quality')
+                if Quality is not None and Quality != '' and Quality != 'None':
+                    CommandParts.extend(['-cq', str(Quality)])
+                CommandParts.extend([
+                    '-spatial-aq', '1',
+                    '-temporal-aq', '1',
+                    '-aq-strength', '15',
+                    '-rc-lookahead', '32',
+                    '-bf', '7',
+                    '-b_ref_mode', 'middle',
+                ])
             else:
                 # Software encoding parameters
                 Quality = ProfileSettings.get('Quality')
@@ -388,11 +405,17 @@ class CommandBuilder:
             )
     
     def AddPixelFormatParameter(self, CommandParts: list, CodecParameters: list, ProfileSettings: Dict[str, Any]) -> None:
-        """Add pixel format parameter for 10-bit encoding."""
+        """Add pixel format parameter for 10-bit encoding.
+
+        NVENC AV1 takes p010le (semi-planar 10-bit); SVT-AV1 takes yuv420p10le
+        (planar 10-bit). Mixing them works via filter-graph autoconvert but
+        wastes a copy and can subtly alter color-range handling -- match the
+        encoder's native format.
+        """
         try:
-            # Always add 10-bit encoding for SVT-AV1 to improve quality and VMAF scores
-            # Use yuv420p10le for 10-bit color depth to reduce banding and improve compression efficiency
-            CommandParts.extend(['-pix_fmt', 'yuv420p10le'])
+            UseNvidiaHardware = ProfileSettings.get('UseNvidiaHardware', 0)
+            PixFmt = 'p010le' if UseNvidiaHardware == 1 else 'yuv420p10le'
+            CommandParts.extend(['-pix_fmt', PixFmt])
 
         except Exception as e:
             LoggingService.LogException(

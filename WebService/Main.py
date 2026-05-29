@@ -26,7 +26,15 @@ class WebServiceApp:
     """Main Flask application for MediaVortex WebService."""
     
     def __init__(self):
-        # Check if another instance is already running using ServiceStatusService
+        # Single-instance startup: kill any prior WebService process before
+        # claiming port 5000. See WebService/single-instance-startup.feature.md
+        # and WebService/startup.flow.md.
+        self._SupersedeExistingInstance()
+
+        # Final safety net -- after the supersede, the prior PID record (if any)
+        # should be stale and RegisterServiceStartup will clean it up. If a new
+        # process somehow appeared in the small window between kill and here,
+        # refuse to start.
         if self.PrivateIsServiceAlreadyRunning():
             print("ERROR: WebService is already running. Preventing duplicate instance.")
             sys.exit(1)
@@ -171,6 +179,79 @@ class WebServiceApp:
         thread = threading.Thread(target=sync_worker, daemon=True, name="JellyfinSync")
         thread.start()
         LoggingService.LogInfo("Started Jellyfin auto-sync background thread", "WebService", "_start_jellyfin_sync")
+
+    def _SupersedeExistingInstance(self) -> None:
+        """Kill any prior WebService process recorded in ServiceStatus, then wait
+        for port 5000 to release. No-op if no prior PID or the PID is stale.
+
+        Validates the target process before killing -- if PID was recycled to a
+        non-WebService process, skips the kill (no false positives).
+        """
+        try:
+            import socket as _socket
+            import psutil
+            from Repositories.DatabaseManager import DatabaseManager
+
+            current_pid = os.getpid()
+            db = DatabaseManager()
+            status = db.GetServiceStatus("WebService")
+            prior_pid = status.get('ProcessId') if status else None
+            if not prior_pid or prior_pid == current_pid:
+                return
+
+            try:
+                proc = psutil.Process(prior_pid)
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                print(f"Supersede: prior WebService PID {prior_pid} not running. Proceeding.")
+                return
+
+            # Confirm this PID is actually a WebService -- guard against PID recycle.
+            try:
+                cmdline = " ".join(proc.cmdline() or [])
+                proc_name = (proc.name() or "").lower()
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                cmdline, proc_name = "", ""
+            looks_like_webservice = (
+                "webservice" in cmdline.lower()
+                or "main.py" in cmdline.lower() and "webservice" in cmdline.lower()
+                or proc_name == "webservice"
+            )
+            if not looks_like_webservice:
+                print(f"Supersede: PID {prior_pid} is not WebService ('{proc_name}' / '{cmdline[:80]}'). Skipping kill.")
+                return
+
+            print(f"Supersede: terminating prior WebService PID {prior_pid} ('{proc_name}')...")
+            try:
+                proc.terminate()
+                proc.wait(timeout=5)
+                print(f"Supersede: PID {prior_pid} exited cleanly.")
+            except psutil.TimeoutExpired:
+                print(f"Supersede: PID {prior_pid} did not exit in 5s; force killing.")
+                proc.kill()
+                try:
+                    proc.wait(timeout=3)
+                except psutil.TimeoutExpired:
+                    pass
+
+            # Wait up to 10s for port 5000 to release.
+            deadline = time.time() + 10
+            while time.time() < deadline:
+                s = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
+                s.settimeout(0.5)
+                try:
+                    rc = s.connect_ex(("127.0.0.1", 5000))
+                finally:
+                    s.close()
+                if rc != 0:
+                    print(f"Supersede: port 5000 released. Proceeding.")
+                    return
+                time.sleep(0.5)
+            print("ERROR: port 5000 still bound after 10s; another process holds it. Exiting.")
+            sys.exit(1)
+        except Exception as e:
+            # Don't let supersede errors block startup. The downstream
+            # RegisterServiceStartup check will still gate on real duplicates.
+            print(f"Supersede: non-fatal error -- {e}. Continuing with normal duplicate check.")
 
     def PrivateIsServiceAlreadyRunning(self) -> bool:
         """Check if another WebService instance is already running using ServiceStatusService."""

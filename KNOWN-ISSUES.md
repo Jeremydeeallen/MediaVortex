@@ -2,6 +2,62 @@
 
 ## Open
 
+### [BUG-0022 - RESOLVED 2026-05-29] VMAF not working properly; transcoding using NVIDIA (NVENC) enhancements
+**Date:** 2026-05-28 | **Area:** quality-testing / nvenc-evaluation
+
+**Resolution 2026-05-29 (VMAF measurement arm):** Three production-VMAF fixes in `Features/QualityTesting/QualityTestingBusinessService.BuildVMAFCommand`:
+
+1. **Input order corrected.** Production had `-i original -i transcoded` with the filter mapping `[0:v]->[dist]` and `[1:v]->[ref]`. libvmaf reads positionally as (distorted, reference), so production was treating the ORIGINAL as the distorted input and the TRANSCODED as the reference -- backwards. VMAF model is asymmetric; the wrong direction produces content-dependent inverted scores. This bug pre-dated the chain rewrite and is the most likely root cause of historically inconsistent VMAF readings. Found during the 2026-05-29 canary on Cheers S03E03 where the corrected chain initially produced VMAF=67.40 (wrong direction). Fixed by swapping the ffmpeg input order; the filter pad labels stay the same.
+
+2. **Chain modernized** to match the production-decision shootout: PTS reset on both inputs (kills container timestamp drift causing frame-alignment slippage), unified scale-to-target with lanczos + `in_range=auto:out_range=tv` color-range pinning (NVENC outputs limited range -- mismatches collapsed scores), 10-bit precision (`yuv420p10le`), libvmaf with explicit `log_fmt=xml` + `n_threads=4`.
+
+3. **`n_subsample=10` removed.** Old chain scored only every 10th frame, which made the held-frame motion-filter unreliable (integer_motion between non-consecutive frames is meaningless) and lost tail-of-distribution detail that the percentile metrics (P1/P5/P10/P25) depend on.
+
+**Historical impact:** `TranscodeAttempts.VMAF` values from before 2026-05-29 are inverted-direction measurements. They remain valid for relative comparisons within the same content/profile pair (the bug was systematic) but the absolute number is not what libvmaf normally reports. Auto-replace thresholds (`VMAFAutoReplaceMinThreshold=88`) were calibrated against inverted readings and may need re-tuning -- track that as a separate follow-up once enough new (correct-direction) scores accumulate.
+
+Motion-filter threshold recalibration (the `integer_motion < 0.5` cutoff over-triggers on plain low-motion live action -- 2026-05-28 shootout data shows 32-60% MotionZeroFraction across sitcom + drama, not just held-frame animation as the 15% trigger was tuned for) deferred to a separate follow-up; needs per-frame XML data captured under the new chain to calibrate, and the three fixes above already address the user-reported "wildly inconsistent" VMAF symptom independently.
+
+**Resolution 2026-05-28 (NVENC adoption arm):** NVENC AV1 evaluation complete. Shootout matrix tested SVT-AV1 P6 FG8 CRF26 (production-dominant) vs 7 NVENC variants across 4 content types (anime held-frame, anime action, sitcom, drama). Winner: NVENC av1_nvenc p7 tune=uhq multipass=fullres rc=vbr+cq aq-strength=15 rc-lookahead=32 bf=7 (`nv_cq32_sink` in matrix). Median: -14% size vs SVT reference at -0.47 VMAF Mean, ~1.6x faster wall encode. Within the operator's "closish quality at sameish size" criterion on every source.
+
+Production wiring shipped: `Features/Profiles/nvenc-profiles.feature.md`. Two new Profiles in DB (`NVENC AV1 P7 UHQ CQ32 -480p`, `NVENC AV1 P7 UHQ CQ32 -720p`); CommandBuilder NVENC branch updated to emit the full quality knob set + p010le pix_fmt; `Workers.nvenccapable` column added with I9-2024 marked capable; queue claim filter routes NVENC jobs to capable workers only.
+
+**Still open (VMAF measurement arm):** The "VMAF not working properly" framing remains a latent concern -- the shootout used the production-equivalent motion-filter pooling and saw motion-filter trigger on live-action sitcom and drama (not just held-frame animation, where it was designed to). The 15% motion-zero threshold may be miscalibrated for non-anime content. Track that as a separate VMAF measurement bug if it surfaces in production VMAF scores diverging from operator perception. Not gating NVENC rollout -- the shootout's relative comparison is valid even if absolute VMAF numbers are content-quirky.
+
+**Original report below.**
+
+
+
+**Reported as (verbatim):** "vmaf not working properly and transcoding using nvidia enhancements."
+
+**Context not yet investigated.** Captured at record time; do not infer beyond this until `/t BUG-0022`.
+
+**Repro:** TBD -- operator to narrow during `/t`. Two distinct concerns conflated in the report:
+1. VMAF measurement / scoring is producing wrong or unexpected results in some scenario (encoder choice? hardware path? content type? threshold gate?).
+2. Transcoding is using or should use NVIDIA hardware enhancements (NVENC encoder, CUDA scaling, NPP filters, hardware decode). MediaVortex's documented encoder is `libsvtav1` (CPU). It is unclear whether (a) NVENC was switched in somewhere and is producing the VMAF issue, (b) NVENC is being evaluated as an upgrade path and the comparison harness is producing the VMAF issue, or (c) the two are independent and should be split into separate bugs.
+
+**Evidence:**
+- Untracked PowerShell harnesses live under `Scripts/CodecAnalysis/`: `NvidiaVariableRunsAddScale.ps1` (on disk 2026-05-28); git status also shows `NvidiaVariableRuns.ps1` and `Nvidia full quality vs MV.ps1` as untracked (not present on disk at record time -- may have been deleted, renamed, or live elsewhere). These suggest an in-flight NVENC vs MediaVortex (libsvtav1) comparison effort.
+- Existing related (NOT this bug, do not auto-merge):
+  - BUG (line 668, PARTIAL FIX 2026-05-16): held-frame content bimodal VMAF -- motion-filtered pooling shipped, residual threshold-gate gap.
+  - BUG (line 725): MonitorVMAFProgress stops emitting updates ~25% before FFmpeg exits -- cosmetic, score integrity OK.
+  - BUG (line 832, RESOLVED 2026-05-16): QualityTestEnabled flip mid-run missed by transcode producer.
+
+**Look first:**
+- `Scripts/CodecAnalysis/NvidiaVariableRunsAddScale.ps1` -- recent harness, likely the source of the "not working properly" observation.
+- `Features/QualityTesting/QualityTestingBusinessService.py` `BuildVMAFCommand` / `ParseVMAFMetrics` -- VMAF filter chain and metric pooling. Confirm the chain matches reference parameters when source vs encoded differ in pixel format / color range / scale (NVENC commonly emits limited-range NV12; libvmaf wants matched ranges or the score collapses).
+- `Features/CommandBuilder/CommandBuilderService.py` -- confirm whether any NVENC path exists; if not, the "nvidia enhancements" arm is an open question, not a current code path.
+- `Models/CommandBuilder.py` BuildAudioFilters / BuildVideoFilters -- scale/format insertion that NVENC vs CPU paths would differ on.
+
+**Violates:** `Features/QualityTesting/QualityTesting.feature.md` criterion 2 (VMAF produces a meaningful 0-100 score) and `Features/TranscodeJob/TranscodeJob.feature.md` (encoder selection contract). [BUG-0022] criterion added to both.
+
+**Flow doc:** Affected pipeline is the post-transcode quality test path in `Features/QualityTesting/QualityTesting.feature.md` -- no dedicated `*.flow.md` exists for the VMAF dispatch + scoring pipeline. `/t` should create it before fixing.
+
+**Fix with:** `/t BUG-0022` -- first action is to ask the operator to split (a) the VMAF measurement failure and (b) the NVENC evaluation/adoption into separate bugs if they are independent, then proceed.
+
+**Update 2026-05-28 (NVENC arm):** Test harness built and ready to run on I9. See `Scripts/Smoke/EncoderShootout.feature.md`. Matrix: 6 sources (Black Butler S01E05, One Piece S14E03, New Girl S01E03 + S07E01, Curb Your Enthusiasm S04E08, Cheers S01E07) x 4 variants (SVT-AV1 P6 FG8 CRF26 production-reference + NVENC av1_nvenc p7 hq fullres at CQ 28/32/36), all encoded at 854x480 to match the production-dominant >480p downscale path. Run: `py Scripts/Smoke/EncoderShootout.py --matrix Scripts/Smoke/NvencVsSvtAv1.matrix.json`. VMAF chain uses the production motion-filter pooling (held-frame fix), 10-bit precision, PTS+color-range alignment. Operator decision rule: NVENC wins if any CQ rung lands within 2.0 VMAF Mean points of SVT AND within 15% of SVT size, OR if speed savings outweigh a larger gap. Result sidecar will be `Scripts/Smoke/NvencVsSvtAv1-1080pTo480p-2026-05-28.shootout.json`.
+
+---
+
 ### [BUG-0021 - RESOLVED 2026-05-27] Codec/AudioCodec/AudioComplete stale on MediaFiles row after seemingly successful replacement
 **Date:** 2026-05-27 | **Area:** file-replacement / mediafile-persistence
 

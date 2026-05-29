@@ -943,3 +943,96 @@ def ResumeQualityTest():
         errorMsg = f"Exception resuming quality testing: {str(e)}"
         LoggingService.LogException(errorMsg, e, "QualityTestController", "ResumeQualityTest")
         return jsonify({"Success": False, "ErrorMessage": errorMsg}), 500
+
+
+# Operator override -- see qt-queue-visibility-and-override.feature.md C5.
+# Synchronous: WebService performs the disposition action itself; no worker needed.
+@QualityTestBlueprint.route('/api/QualityTest/Override', methods=['POST'])
+def OverrideQualityTest():
+    from datetime import datetime, timezone
+    from Core.Database.DatabaseService import DatabaseService
+    try:
+        Data = request.get_json() or {}
+        QueueId = Data.get('QueueId') or Data.get('queueId')
+        ForceDisposition = Data.get('ForceDisposition') or Data.get('forceDisposition')
+        if not QueueId or ForceDisposition not in ('Replace', 'Discard'):
+            return jsonify({"Success": False, "Message": "QueueId and ForceDisposition in {'Replace','Discard'} required"}), 400
+
+        Db = DatabaseService()
+
+        # Atomic claim: only succeeds if the row is still operator-overridable.
+        ClaimedRows = Db.ExecuteQuery(
+            """
+            UPDATE QualityTestingQueue
+            SET ForceDisposition = %s,
+                OverrideSetAt = NOW(),
+                Status = 'Cancelled'
+            WHERE Id = %s
+              AND Status = 'Pending'
+              AND ForceDisposition IS NULL
+            RETURNING Id, TranscodeAttemptId
+            """,
+            (ForceDisposition, QueueId),
+        )
+        if not ClaimedRows:
+            return jsonify({"Success": False, "Message": "Queue row not in Pending state (already running, completed, or overridden)"}), 409
+        AttemptId = ClaimedRows[0]['TranscodeAttemptId']
+
+        # Commit disposition on the attempt.
+        Disposition = 'BypassReplace' if ForceDisposition == 'Replace' else 'Discard'
+        Reason = 'OperatorForcedReplace' if ForceDisposition == 'Replace' else 'OperatorDiscarded'
+        Db.ExecuteNonQuery(
+            """
+            UPDATE TranscodeAttempts
+            SET Disposition = %s, DispositionReason = %s, DispositionDecidedAt = %s
+            WHERE Id = %s
+            """,
+            (Disposition, Reason, datetime.now(timezone.utc), AttemptId),
+        )
+        LoggingService.LogInfo(
+            f"Operator override: QueueId={QueueId} AttemptId={AttemptId} Disposition={Disposition} Reason={Reason}",
+            "QualityTestController", "OverrideQualityTest",
+        )
+
+        if ForceDisposition == 'Replace':
+            from Features.FileReplacement.FileReplacementBusinessService import FileReplacementBusinessService
+            Result = FileReplacementBusinessService(DatabaseManager()).ProcessFileReplacement(AttemptId)
+            return jsonify({
+                "Success": bool(Result.get('Success')) if isinstance(Result, dict) else True,
+                "AttemptId": AttemptId, "Disposition": Disposition, "Reason": Reason,
+                "FileReplaced": bool(Result.get('FileReplaced')) if isinstance(Result, dict) else None,
+                "Detail": Result if isinstance(Result, dict) else None,
+            }), 200
+
+        # Discard: drop the inprogress file + TFP row.
+        TfpRows = Db.ExecuteQuery(
+            "SELECT Id, OutputStorageRootId, OutputRelativePath FROM TemporaryFilePaths WHERE TranscodeAttemptId = %s",
+            (AttemptId,),
+        )
+        DeletedPath = None
+        if TfpRows:
+            try:
+                from Core.PathStorage import Resolve
+                from Core.WorkerContext import WorkerContext
+                Ctx = WorkerContext.Current()
+                WorkerName = Ctx.WorkerName if Ctx and Ctx.WorkerName else None
+                if WorkerName and TfpRows[0].get('OutputStorageRootId'):
+                    LocalOut = Resolve(TfpRows[0]['OutputStorageRootId'], TfpRows[0]['OutputRelativePath'], WorkerName)
+                    if LocalOut and os.path.exists(LocalOut):
+                        os.remove(LocalOut)
+                        DeletedPath = LocalOut
+            except Exception as DelEx:
+                LoggingService.LogWarning(
+                    f"OverrideQualityTest Discard: could not delete inprogress for AttemptId={AttemptId}: {DelEx}",
+                    "QualityTestController", "OverrideQualityTest",
+                )
+            Db.ExecuteNonQuery("DELETE FROM TemporaryFilePaths WHERE TranscodeAttemptId = %s", (AttemptId,))
+        return jsonify({
+            "Success": True,
+            "AttemptId": AttemptId, "Disposition": Disposition, "Reason": Reason,
+            "DeletedInProgress": DeletedPath,
+        }), 200
+    except Exception as e:
+        ErrorMsg = f"Exception in OverrideQualityTest endpoint: {str(e)}"
+        LoggingService.LogException(ErrorMsg, e, "QualityTestController", "OverrideQualityTest")
+        return jsonify({"Success": False, "Message": "Override failed", "Error": ErrorMsg}), 500

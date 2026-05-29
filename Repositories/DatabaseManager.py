@@ -1772,35 +1772,44 @@ class DatabaseManager:
                 # EXISTS subquery keeps the check atomic with the claim itself, so
                 # flipping Pause or disabling Transcode takes effect on the very next
                 # claim attempt -- no polling lag, no cached-snapshot drift.
+                # NVENC capability gate: if the queue row's assigned profile has
+                # UseNvidiaHardware=1, only workers with Workers.nvenccapable=TRUE
+                # may claim it. LEFT JOIN MediaFiles + Profiles to surface the
+                # assigned-profile's NVENC flag in the EXISTS predicate.
                 if AcceptsInterlaced:
                     query = """
                         UPDATE TranscodeQueue
                         SET Status = 'Running', ClaimedBy = %s, ClaimedAt = NOW(), DateStarted = NOW()
                         WHERE Id = (
-                            SELECT Id FROM TranscodeQueue
-                            WHERE Status = 'Pending'
-                              AND (ProcessingMode IS NULL OR ProcessingMode = 'Transcode')
+                            SELECT tq.Id FROM TranscodeQueue tq
+                            LEFT JOIN MediaFiles mf ON tq.MediaFileId = mf.Id
+                            LEFT JOIN Profiles p ON p.profilename = mf.AssignedProfile
+                            WHERE tq.Status = 'Pending'
+                              AND (tq.ProcessingMode IS NULL OR tq.ProcessingMode = 'Transcode')
                               AND EXISTS (
                                 SELECT 1 FROM Workers w
                                 WHERE w.WorkerName = %s
                                   AND w.Status = 'Online'
                                   AND w.TranscodeEnabled = TRUE
+                                  AND (COALESCE(p.usenvidiahardware, 0) = 0 OR w.nvenccapable = TRUE)
                               )
-                            ORDER BY Priority DESC, DateAdded ASC
+                            ORDER BY tq.Priority DESC, tq.DateAdded ASC
                             LIMIT 1
-                            FOR UPDATE SKIP LOCKED
+                            FOR UPDATE OF tq SKIP LOCKED
                         )
                         RETURNING Id, StorageRootId, RelativePath, FilePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted, ProcessingMode, MediaFileId, TestVariantSetId
                     """
                     cursor.execute(query, (WorkerName, WorkerName))
                 else:
-                    # Skip interlaced files (join MediaFiles to check IsInterlaced TEXT column)
+                    # Skip interlaced files (join MediaFiles to check IsInterlaced TEXT column).
+                    # Same NVENC capability gate as the AcceptsInterlaced=True branch.
                     query = """
                         UPDATE TranscodeQueue
                         SET Status = 'Running', ClaimedBy = %s, ClaimedAt = NOW(), DateStarted = NOW()
                         WHERE Id = (
                             SELECT tq.Id FROM TranscodeQueue tq
                             JOIN MediaFiles mf ON tq.MediaFileId = mf.Id
+                            LEFT JOIN Profiles p ON p.profilename = mf.AssignedProfile
                             WHERE tq.Status = 'Pending'
                               AND (tq.ProcessingMode IS NULL OR tq.ProcessingMode = 'Transcode')
                               AND (mf.IsInterlaced IS NULL OR mf.IsInterlaced = '0')
@@ -1809,10 +1818,11 @@ class DatabaseManager:
                                 WHERE w.WorkerName = %s
                                   AND w.Status = 'Online'
                                   AND w.TranscodeEnabled = TRUE
+                                  AND (COALESCE(p.usenvidiahardware, 0) = 0 OR w.nvenccapable = TRUE)
                               )
                             ORDER BY tq.Priority DESC, tq.DateAdded ASC
                             LIMIT 1
-                            FOR UPDATE SKIP LOCKED
+                            FOR UPDATE OF tq SKIP LOCKED
                         )
                         RETURNING Id, StorageRootId, RelativePath, FilePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted, ProcessingMode, MediaFileId, TestVariantSetId
                     """
@@ -4438,27 +4448,32 @@ class DatabaseManager:
         """Atomically claim a pending quality test job to prevent race conditions."""
         try:
             # First, get the job to claim
+            # Override-aware claim: ForceDisposition IS NOT NULL rows are
+            # reserved for the WebService override path -- workers must not
+            # race them. See qt-queue-visibility-and-override.feature.md C4.
             select_query = """
                 SELECT Id, TranscodeAttemptId, OriginalFilePath, LocalSourcePath, TranscodedFilePath, DateAdded
-                FROM QualityTestingQueue 
-                WHERE DateStarted IS NULL 
-                ORDER BY DateAdded ASC 
+                FROM QualityTestingQueue
+                WHERE Status = 'Pending'
+                  AND ForceDisposition IS NULL
+                  AND DateStarted IS NULL
+                ORDER BY DateAdded ASC
                 LIMIT 1
             """
-            
+
             jobs = self.DatabaseService.ExecuteQuery(select_query)
             if not jobs or len(jobs) == 0:
                 LoggingService.LogDebug("No pending quality test jobs available to claim", "DatabaseManager", "ClaimQualityTestJob")
                 return None
-            
+
             job_to_claim = jobs[0]
             job_id = job_to_claim["Id"]
-            
+
             # Now atomically claim the job
             update_query = """
-                UPDATE QualityTestingQueue 
-                SET DateStarted = NOW()
-                WHERE Id = %s AND DateStarted IS NULL
+                UPDATE QualityTestingQueue
+                SET DateStarted = NOW(), Status = 'Running'
+                WHERE Id = %s AND DateStarted IS NULL AND ForceDisposition IS NULL
             """
             
             rows_affected = self.DatabaseService.ExecuteNonQuery(update_query, (job_id,))

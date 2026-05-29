@@ -286,18 +286,18 @@ The disposition decision is **the only post-transcode branch point**. It reads f
 
 **Decision table** (canonical -- code MUST mirror this 1:1):
 
-| Success | NewSize >= OldSize | QualityTestRequired | VMAF score | VmafCapableWorkerOnline | WhenVmafUnavailable | Disposition | Reason |
-|---|---|---|---|---|---|---|---|
-| false | n/a | n/a | n/a | any | any | `Discard` | `TranscodeFailed` |
-| true (and `QualityTestEnabled=FALSE` globally) | n/a | n/a | n/a | any | any | `BypassReplace` | `QualityTestingGloballyDisabled` |
-| true | true (no savings) | any | any | any | any | `Discard` | `NoSavings` |
-| true | false | false | n/a | any | any | `BypassReplace` | `QualityTestNotRequired` |
-| true | false | true | NULL | true | any | `Pending` | `AwaitingVmaf` |
-| true | false | true | < min | any | any | `Requeue` | `VmafBelowMin` |
-| true | false | true | >= min, <= max | any | any | `Replace` | `VmafPassed` |
-| true | false | true | > max | any | any | `NoReplace` | `VmafAboveMax` |
-| true | false | true | NULL | false | block | `NoReplace` | `VmafServicePaused` |
-| true | false | true | NULL | false | bypass | `BypassReplace` | `VmafServicePausedBypassed` |
+| Success | NewSize >= OldSize | QualityTestRequired | VMAF score | Disposition | Reason |
+|---|---|---|---|---|---|
+| false | n/a | n/a | n/a | `Discard` | `TranscodeFailed` |
+| true (and `QualityTestEnabled=FALSE` globally) | n/a | n/a | n/a | `BypassReplace` | `QualityTestingGloballyDisabled` |
+| true | true (no savings) | any | any | `Discard` | `NoSavings` |
+| true | false | false | n/a | `BypassReplace` | `QualityTestNotRequired` |
+| true | false | true | NULL | `Pending` | `AwaitingVmaf` |
+| true | false | true | < min | `Requeue` | `VmafBelowMin` |
+| true | false | true | >= min, <= max | `Replace` | `VmafPassed` |
+| true | false | true | > max | `NoReplace` | `VmafAboveMax` |
+
+**Note (2026-05-29):** the legacy `VmafCapableWorkerOnline` / `WhenVmafUnavailable` branching is retired. `Pending/AwaitingVmaf` is now the only outcome when VMAF is required and no score is available -- the row is enqueued to `QualityTestingQueue` regardless of whether a capable worker is currently online. Operators see the pending work in the queue surface (Stage 7) and either bring a capable worker online OR override the row to force an immediate disposition. `VmafServicePaused` / `VmafServicePausedBypassed` reasons remain in the closed enum for audit history (legacy attempts) but are no longer emitted by new decisions. See `Features/QualityTesting/qt-queue-visibility-and-override.feature.md`.
 
 **Disposition outcomes:**
 
@@ -334,17 +334,32 @@ ORDER BY DispositionDecidedAt DESC;
 
 ## Stage 7: VMAF -- Quality Test Execution (when Disposition='Pending' on first decision)
 
-**Trigger:** Worker with `Workers.QualityTestEnabled=true` polls `QualityTestQueue` for rows added by the disposition function (Stage 6 row `Pending`/`AwaitingVmaf`).
+**Trigger:** Stage 6 enqueued a row to `QualityTestingQueue` with `Status='Pending'`. Two consumers can resolve the row:
 
-**Code path:**
+| Path | Consumer | Condition |
+|---|---|---|
+| Normal VMAF run | Any worker with `Workers.QualityTestEnabled=true` polls `QualityTestingQueue WHERE Status='Pending' AND ForceDisposition IS NULL` | Capable worker is online and heartbeating |
+| Operator override | WebService endpoint `POST /api/QualityTest/Override` sets `ForceDisposition='Replace'` or `'Discard'` on a queue row; WebService acts immediately | Operator decides to short-circuit (no worker available, or known-good encode, or known-bad encode) |
+
+**Normal VMAF path:**
 - `WorkerService/Main.py` -> `QualityTestingBusinessService.ProcessQualityTestQueue()`
 - For each pending test:
-  1. Build FFmpeg VMAF command: compare original vs transcoded using `libvmaf`
-  2. Execute, parse JSON output for VMAF score (0-100)
-  3. Insert `QualityTestResults` row with the score
-  4. Re-call `DecidePostTranscodeDisposition(TranscodeAttemptId)` -- this time the VMAF score is available, the disposition will be `Replace` / `NoReplace` / `Requeue` per the table.
+  1. Build FFmpeg VMAF command: compare original vs transcoded using `libvmaf` (input order: `-i transcoded -i original`; see `QualityTesting.feature.md` C11c)
+  2. Execute, parse XML output for VMAF score (0-100) + motion-filtered metrics
+  3. Insert `QualityTestResults` row with the score; update `TranscodeAttempts.VMAF` + `QualityTestCompleted`
+  4. Re-call `DecidePostTranscodeDisposition(TranscodeAttemptId)` -- this time the VMAF score is available, the disposition will be `Replace` / `NoReplace` / `Requeue` per the table
+  5. UPDATE QualityTestingQueue SET Status='Completed' for this row
 
-**Tables written:** QualityTestResults (new), TranscodeAttempts (VMAF score, QualityTestCompleted, Disposition+Reason re-decided).
+**Operator override path:**
+- Operator POSTs `{queueId, forceDisposition: 'Replace'|'Discard', reason: 'optional note'}` to `/api/QualityTest/Override`
+- WebService (no worker capability required -- has DB + share access):
+  1. UPDATE QualityTestingQueue SET ForceDisposition=$1, OverrideSetAt=NOW(), Status='Cancelled' WHERE Id=$2
+  2. Write `TranscodeAttempts.Disposition='BypassReplace'` (for Replace) or `'Discard'` (for Discard); `DispositionReason='OperatorForcedReplace'` or `'OperatorDiscarded'`
+  3. If Replace: call `FileReplacementBusinessService.ProcessFileReplacement(attemptId)` synchronously
+  4. If Discard: delete the `.inprogress` output and the TFP row
+- Worker poll query excludes `ForceDisposition IS NOT NULL` rows so a worker can't race the override.
+
+**Tables written:** QualityTestResults (normal path), QualityTestingQueue (Status flip, ForceDisposition + OverrideSetAt on override), TranscodeAttempts (VMAF score + QualityTestCompleted on normal path; Disposition+Reason on either path).
 
 ---
 
