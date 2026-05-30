@@ -1083,48 +1083,85 @@ class WorkerServiceApp:
             LoggingService.LogException("Error during shutdown", e, "WorkerService", "Shutdown")
 
 
-_SIGNAL_BUDGET_SECONDS = 2.0
+# Drain budget: long enough for a typical in-flight transcode to finish.
+# Bumped 2026-05-30 (P6) from 2s to 1800s so SIGTERM no longer kills mid-
+# encode work. Docker's stop_grace_period in the compose templates must be
+# >= this value or docker will SIGKILL the worker before drain completes.
+_SIGNAL_BUDGET_SECONDS = 1800.0  # 30 minutes
+_PER_INTERVAL_CHECK_SEC = 5.0
 
 
 def SignalHandler(signum, frame):
-    """Handle shutdown signals so a single Ctrl+C exits cleanly.
+    """Handle shutdown signals with a GRACEFUL DRAIN -- no SIGKILL on subprocesses.
 
-    The handler must NOT block on potentially-slow operations (DB queries can
-    stall when the pool is contended or postgres is unresponsive). Any work
-    that touches the network or DB runs in a daemon thread with a 2s budget;
-    after the budget the process exits via os._exit regardless. Re-entry from
-    a second signal during cleanup is a no-op so spamming Ctrl+C does not
-    confuse the handler.
+    Contract (P6, .claude/programs/db-authority-program.md):
+      On SIGTERM/SIGINT, signal every long-running operation to stop at its
+      next safe boundary (via the existing `_StopAllCapabilities` path used
+      by capability flag flips). Wait for the operation threads to drain.
+      Then exit cleanly.
+
+    Why this matters: the prior behavior called `Proc.kill()` on every active
+    FFmpeg subprocess inline. Docker container restarts (deploy, compose
+    recreate) were silently killing in-flight transcodes and VMAFs at any
+    progress point, requiring operator recovery work afterward. The graceful
+    path lets in-flight work complete (typical encode = 1-5 min wall;
+    occasional long-form = 20-30 min).
+
+    Re-entry from a second signal during drain forces immediate exit. So if
+    the operator REALLY needs out, second Ctrl+C exits hard.
     """
     if getattr(SignalHandler, '_in_progress', False):
-        # Operator hit Ctrl+C again while we were cleaning up. Force exit.
-        print("\nForcing exit (already shutting down)...")
+        # Operator sent a second signal while we were draining. Force exit.
+        print("\nForcing exit (already draining)...")
         os._exit(1)
     SignalHandler._in_progress = True
 
-    print("\nWorkerService shutting down...")
+    print(f"\nWorkerService received signal {signum}; draining in-flight work "
+          f"(budget {_SIGNAL_BUDGET_SECONDS:.0f}s). Send another signal to force exit.")
 
-    # Step 1: kill FFmpeg subprocesses inline. proc.kill() does not block --
-    # it just delivers a terminate signal -- so this is safe in the handler.
-    if hasattr(Main, 'app') and Main.app:
-        App = Main.app
+    if not (hasattr(Main, 'app') and Main.app):
+        # No app context yet -- nothing to drain.
+        os._exit(0)
+    App = Main.app
+
+    # Step 1: signal every capability to stop at its next safe boundary.
+    # _StopAllCapabilities sets StopRequested synchronously on each service
+    # AND spawns daemon threads that do the actual join+cleanup (which can
+    # take minutes if an encode is in flight). We don't block here on those
+    # threads -- we wait below by polling for the services to clear.
+    try:
+        App._StopAllCapabilities()
+        print("  drain signal sent to all capabilities")
+    except Exception as e:
         try:
-            if App.TranscodeService is not None:
-                ActiveJobIds = App.TranscodeService.VideoTranscoding.GetActiveJobs()
-                for JobId in ActiveJobIds:
-                    try:
-                        Proc = App.TranscodeService.VideoTranscoding.ActiveProcesses.get(JobId)
-                        if Proc:
-                            Proc.kill()
-                    except Exception:
-                        pass
-        except Exception as e:
-            try:
-                LoggingService.LogException(
-                    "Error killing FFmpeg processes during SignalHandler", e, "SignalHandler", "WorkerService"
-                )
-            except Exception:
-                print(f"EXCEPTION (logger unavailable): killing FFmpeg processes: {e}")
+            LoggingService.LogException(
+                "Error signalling capabilities to stop during SignalHandler",
+                e, "SignalHandler", "WorkerService",
+            )
+        except Exception:
+            print(f"  EXCEPTION signalling drain (logger unavailable): {e}")
+
+    # Step 2: wait for capabilities to actually drain. Each long-running
+    # operation checks its StopRequested flag at safe boundaries and exits;
+    # the corresponding cleanup thread joins on the processing thread.
+    # We poll the App-level service handles -- they go None when their
+    # cleanup thread completes.
+    import time as _time
+    Start = _time.time()
+    while _time.time() - Start < _SIGNAL_BUDGET_SECONDS:
+        Active = []
+        if getattr(App, 'TranscodeService', None) is not None: Active.append('transcode')
+        if getattr(App, 'RemuxService', None) is not None: Active.append('remux')
+        if getattr(App, 'QualityTestService', None) is not None: Active.append('quality-test')
+        if getattr(App, 'ContinuousScanService', None) is not None: Active.append('scan')
+        if not Active:
+            print(f"  drain complete in {_time.time() - Start:.0f}s")
+            break
+        Elapsed = int(_time.time() - Start)
+        print(f"  draining: {','.join(Active)} still active ({Elapsed}s elapsed)")
+        _time.sleep(_PER_INTERVAL_CHECK_SEC)
+    else:
+        print(f"  drain budget exceeded; forcing exit with capabilities still active")
 
     # Step 2: do potentially-slow DB cleanup in a background thread with a hard
     # budget. Status is left untouched -- heartbeat staleness tells the UI
@@ -1162,9 +1199,12 @@ def SignalHandler(signum, frame):
                 except Exception:
                     print(f"EXCEPTION (logger unavailable): closing DB pool: {e}")
 
+    # DB cleanup is fast (single UPDATE + pool close); give it a short budget
+    # independent of the (much longer) drain budget above.
+    _CLEANUP_BUDGET_SECONDS = 5.0
     CleanupThread = threading.Thread(target=_DeferredCleanup, name="ShutdownCleanup", daemon=True)
     CleanupThread.start()
-    CleanupThread.join(timeout=_SIGNAL_BUDGET_SECONDS)
+    CleanupThread.join(timeout=_CLEANUP_BUDGET_SECONDS)
 
     # Step 3: exit -- whether cleanup finished, timed out, or threw, the
     # process must terminate now so the operator's Ctrl+C is honored.

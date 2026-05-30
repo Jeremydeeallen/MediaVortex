@@ -4,6 +4,8 @@
 x-worker: &worker-base
   image: mediavortex-worker:latest
   restart: unless-stopped
+  # Graceful drain budget for SIGTERM. See larry.yml comment.
+  stop_grace_period: 30m
   environment:
     PYTHONUNBUFFERED: "1"
     MEDIAVORTEX_DB_HOST: "10.0.0.15"
