@@ -126,18 +126,18 @@ The rules table is the contract -- it makes the classifier's behavior fully visi
 
 ## Status
 
-NOT STARTED -- 2026-05-30.
+COMPLETE 2026-05-30. Deployed to larry workers (commit c4f8890b + d17e2d1 for rule activation). Backfill ran on the 12 NULL-profile rows that existed: 2 matched Default1080pLiveAction, 10 unmatched (resolution not in active rule set). Going forward every newly-probed file is auto-classified.
 
 ### Progress
 
-- [ ] 1. Migration script `AddContentClassificationRules.py` (criteria 1-3) + seeded baseline rules (criterion 14).
-- [ ] 2. `Features/ContentClassifier/` directory: `ContentClassifierService.py`, `Models/`, `ContentClassifierRepository.py`.
-- [ ] 3. Probe hook in `MediaProbeBusinessService._ExecuteProbe` after ContentSignals + PriorityScore.
-- [ ] 4. Backfill script `BackfillProfileAssignments.py` (criteria 16-17).
-- [ ] 5. Update flow doc `content-classifier.flow.md`, `MediaProbe.feature.md`, `transcode.flow.md` Stage 3.5.
-- [ ] 6. Deploy to fleet so probe-time auto-assignment fires.
-- [ ] 7. Run backfill for already-probed library; report hit-count breakdown.
-- [ ] 8. Live verify: assign a folder manually -> classifier respects it. Probe a new file -> classifier picks the right profile.
+- [x] 1. Migration script `AddContentClassificationRules.py` applied. Table + AssignedProfileSource column + 6 seeded rules.
+- [x] 2. `Features/ContentClassifier/` directory: service + repository + model + `__init__`.
+- [x] 3. Probe hook inserted after ContentSignals + PriorityScore in `MediaProbeBusinessService._ExecuteProbe`.
+- [x] 4. `BackfillProfileAssignments.py` written + run on the 12-row backlog.
+- [x] 5. `content-classifier.flow.md` written; `transcode.flow.md` Stage 7.6 updated.
+- [x] 6. Deployed to larry (c4f8890b).
+- [x] 7. Anime + LowBitrateLiveAction rules activated 2026-05-30 once the corresponding profiles landed (commit d17e2d1).
+- [ ] 8. Live verify against a fresh probe (operator action: re-probe a known anime file, observe AssignedProfileSource='classifier' and AssignedProfile='NVENC AV1 P7 HQ CQ29 G480 ANIME -720p').
 
 ## Scope
 

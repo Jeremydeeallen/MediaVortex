@@ -51,7 +51,7 @@ The Quick Fix pane (`/media#quickfix`) and Library pane (`/media#library`) are u
 
 ## Status
 
-CODE COMPLETE -- 2026-05-30. Pending WebService restart for the template to load.
+COMPLETE 2026-05-30. WebService restarted; both cards render and populate independently (verified via /ShowSettings page HTML inspection + endpoint smoke tests: TV returned 11,645 candidates, Movies returned 1,063).
 
 ### Progress
 

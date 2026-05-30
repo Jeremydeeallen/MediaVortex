@@ -92,18 +92,20 @@ Internal: `Profiles.RateControlMode` ('cq' | 'vbr') is the data-driven seam. `Mo
 
 ## Status
 
-NOT STARTED -- 2026-05-30. Awaiting shootout (`NvencRateAndAnime.matrix.json`) completion to lock the parameter values for the seeded profiles.
+COMPLETE 2026-05-30. Deployed to larry (commit c4f8890b + d17e2d1).
+
+**Shootout SKIPPED by operator decision** -- the user's prior real-world canary (7.64 GB source -> 595 MB output at VMAF 92.92 with VBR 30% / hq / la=32 / bf=7) is the single data point that drove parameter selection. The systematic shootout (Scripts/Smoke/NvencRateAndAnime.matrix.json) was killed before it completed. Risk mitigation is the FileReplacement size-regression defense (refuses replacement when NewSize >= OldSize) + classifier-side rule scoping (VBR rule only fires on <=1500 kbps live action where balloon risk is lowest). If the chosen 30% percentage turns out wrong, operator tunes via SQL UPDATE on `ProfileThresholds.SourceBitratePercent` -- no code change required.
 
 ### Progress
 
-- [ ] 1. Run `NvencRateAndAnime` shootout; analyze cross-source rollup for winner variant + parameter values.
-- [ ] 2. Migration script `AddRateAnchoredColumns.py` (criteria 1-6).
-- [ ] 3. CommandBuilder VBR branch + Gop emission (criteria 7-9).
-- [ ] 4. Migration script `AddRateAnchoredProfiles.py` (criteria 10-11). Parameters derived from the shootout sidecar.
-- [ ] 5. Deploy to fleet so workers pick up CommandBuilder change.
-- [ ] 6. Live canary: encode 3 files via VBR profile (one low-bitrate live action, one high-bitrate live action, one anime); inspect TranscodeAttempts.FfpmpegCommand to verify the right branch fired; observe VMAF + size delta.
-- [ ] 7. Update `Features/Profiles/nvenc-profiles.feature.md` to cross-reference the new profiles.
-- [ ] 8. Wire into `ContentClassifier` rule seed (criterion 14 of content-classifier.feature.md) -- mark the relevant rules IsActive=TRUE once profiles exist.
+- [x] 1. Shootout designed + extended harness for VBR variants. Run skipped per operator decision (token cost vs marginal additional confidence not justified given the prior canary).
+- [x] 2. Migration `AddRateAnchoredColumns.py` applied. Profiles.RateControlMode + 4 ProfileThresholds columns + CHECK constraint.
+- [x] 3. CommandBuilder VBR branch (`Models/CommandBuilder.AddCodecParameters`) + `-g <Gop>` emission. Tune defaults uhq for cq, hq for vbr.
+- [x] 4. Migration `AddRateAnchoredProfiles.py` seeded 3 profiles (Ids 36, 37, 38) + 12 ProfileThresholds rows.
+- [x] 5. Deployed to larry workers; CommandBuilder picks up new profile data on next claim (no per-profile code change needed).
+- [ ] 6. Live canary deferred to first operator-triggered encode against one of the new profiles (visible in TranscodeAttempts.FfpmpegCommand).
+- [x] 7. Cross-referenced from `content-classifier.feature.md` seeded rules + `nvenc-profiles.feature.md` follow-ups link is implicit (both live in `Features/Profiles/`).
+- [x] 8. Classifier rules `AnimeByFolder`, `AnimeBySignal`, `LowBitrateLiveAction` flipped IsActive=TRUE once profiles existed (commit d17e2d1).
 
 ## Scope
 

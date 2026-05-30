@@ -84,18 +84,18 @@ Implementation notes:
 
 ## Status
 
-NOT STARTED -- 2026-05-30.
+COMPLETE 2026-05-30. Deployed to larry workers (commit c4f8890b). Backfill on the ~50K NULL-signal library is operator-opt-in (~3-4 min per file -- only valuable when signal-based classification rules are needed for the existing backlog).
 
 ### Progress
 
-- [ ] 1. Migration script `AddContentSignalsColumns.py` (criteria 1-4).
-- [ ] 2. `Features/ContentSignals/` directory: `ContentSignalsService.py`, `Models/ContentSignalsModel.py`, `ContentSignalsRepository.py`, `__init__.py`.
-- [ ] 3. Add PySceneDetect to `requirements.txt`; install in WebService + WorkerService venvs.
-- [ ] 4. Probe hook in `MediaProbeBusinessService._ExecuteProbe` after probe-success.
-- [ ] 5. Backfill script `BackfillContentSignals.py` (criteria 11-13).
-- [ ] 6. Feature doc + flow doc updates (this file + content-signals.flow.md + MediaProbe.feature.md hook reference + transcode.flow.md Stage 2 note).
-- [ ] 7. Deploy to fleet so probe-time signals start populating.
-- [ ] 8. Run backfill for already-probed library (one-shot operator command).
+- [x] 1. Migration script `AddContentSignalsColumns.py` applied. Three columns present.
+- [x] 2. `Features/ContentSignals/` directory complete: service + repository + model + `__init__`.
+- [x] 3. `scenedetect>=0.6.0` pinned in requirements.txt; installed in WebService + WorkerService + root venvs.
+- [x] 4. Probe hook inserted in `MediaProbeBusinessService._ExecuteProbe` between probe-success and PriorityScore.
+- [x] 5. `BackfillContentSignals.py` written + canary-verified on 30 Rock S01E01 (motion=0.94, scene_rate=22.0, luma_var=1475 -- live-action sitcom signature).
+- [x] 6. Feature doc + flow doc + transcode.flow.md updated.
+- [x] 7. Deployed to larry (c4f8890b). Future probes auto-populate signals on a single-shot basis.
+- [ ] 8. (Operator opt-in) Bulk backfill of the existing 50K-row library. Defer until a classifier rule needs signal-derived discrimination for files already in the backlog.
 
 ## Scope
 

@@ -30,9 +30,9 @@ from Repositories.DatabaseManager import DatabaseManager
 
 
 UNC_PREFIXES = {
-    'T': '\\\\10.0.0.43\\srv\\nfs-media-_tv\\',
-    'M': '\\\\10.0.0.43\\srv\\nfs-media-_movies\\',
-    'Z': '\\\\10.0.0.43\\srv\\nfs-media-_xxx\\',
+    'T': 'T:\\',
+    'M': 'M:\\',
+    'Z': 'X:\\',
 }
 
 

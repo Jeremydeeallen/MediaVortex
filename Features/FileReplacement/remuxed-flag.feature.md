@@ -54,7 +54,7 @@ Internal data correctness fix. No new UI surface. Observable effects:
 
 ## Status
 
-CODE COMPLETE -- 2026-05-30. Pending fleet deploy for writer fix to land, then live verify.
+COMPLETE 2026-05-30. Writer fix deployed to larry (c4f8890b). Live verify deferred until next remux completes through the new code path.
 
 ### Progress
 
