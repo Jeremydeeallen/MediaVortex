@@ -321,7 +321,18 @@ class FileScanningBusinessService:
 
 
     def StopScanning(self) -> Dict[str, Any]:
-        """Stop the current scanning process."""
+        """Stop the current scanning process.
+
+        Soft-stop discipline: flip `self._StopRequested = True` FIRST so the
+        in-flight per-file and per-probe loops observe the signal at their
+        next safe boundary and exit cleanly. Without this, only the DB status
+        flips and the loop keeps walking until natural completion -- the
+        heartbeat path that ALSO flips _StopRequested only triggers when it
+        observes `ScanJobs.Status='Stopping'`, and this method jumps straight
+        to 'Stopped'. Result was: capability flag flips OFF, DB says scan is
+        stopped, but the operator still sees per-directory progress updates
+        for several more minutes. Fixed 2026-05-30.
+        """
         try:
             if not self.CurrentJobId:
                 return {
@@ -329,6 +340,9 @@ class FileScanningBusinessService:
                     'Message': 'No scan is currently in progress',
                     'Error': 'NoScanInProgress'
                 }
+
+            # Soft-stop signal -- must precede any other state changes below.
+            self._StopRequested = True
 
             # Update job status to stopped
             self.UpdateJobStatus(self.CurrentJobId, 'Stopped', EndTime=datetime.now(timezone.utc))
