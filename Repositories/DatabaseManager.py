@@ -4389,8 +4389,10 @@ class DatabaseManager:
             LoggingService.LogException("Exception getting quality test results count", e, "DatabaseManager", "GetQualityTestResultsCount")
             return 0
     
-    def GetRunningQualityTestProgress(self) -> dict:
-        """Get running quality test progress from QualityTestProgress table with file information"""
+    def GetRunningQualityTestProgress(self) -> list:
+        """Get ALL running quality test progress rows (one dict per concurrently-
+        running VMAF job). Returns a list so the UI can show every worker that
+        is actively processing -- previously LIMIT 1 hid concurrent runs."""
         try:
             # Operator-facing data: surface the worker that claimed the row
             # (qtq.ClaimedBy), source/output sizes from TranscodeAttempts, and
@@ -4425,13 +4427,12 @@ class DatabaseManager:
                 LEFT JOIN TranscodeAttempts ta ON ta.Id = qtp.TranscodeAttemptId
                 WHERE qtp.Status = 'Processing'
                 ORDER BY qtp.StartTime DESC
-                LIMIT 1
             """
             rows = self.DatabaseService.ExecuteQuery(query)
 
-            if rows and len(rows) > 0:
-                row = rows[0]
-                return {
+            results = []
+            for row in rows or []:
+                results.append({
                     "Id": row["Id"],
                     "TranscodeAttemptId": row["TranscodeAttemptId"],
                     "Status": row["Status"],
@@ -4455,13 +4456,13 @@ class DatabaseManager:
                     "NewSizeBytes": row.get("NewSizeBytes"),
                     "EndTime": None,
                     "ErrorMessage": None
-                }
-            return None
-            
+                })
+            return results
+
         except Exception as e:
             LoggingService.LogException("Exception getting running quality test progress", e, "DatabaseManager", "GetRunningQualityTestProgress")
-            return None
-    
+            return []
+
     def ClaimQualityTestJob(self, WorkerName: str) -> dict:
         """Atomically claim a pending quality test job, gated on DB authority.
 

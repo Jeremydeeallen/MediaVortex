@@ -281,10 +281,15 @@ var ActivityPage = (function() {
             var Overview = Both[0];
             var VmafResp = Both[1];
             if (!Overview || !Overview.Success) return;
-            var VmafJob = (VmafResp && VmafResp.Success && VmafResp.IsRunning)
-                ? (VmafResp.Progress || VmafResp.CurrentJob || null)
-                : null;
-            RenderActiveJobs(Overview.Data, VmafJob);
+            // Pass the FULL list of concurrent VMAF runs (one row per
+            // worker actively processing). Older shape returned only the
+            // first running job under .Progress / .CurrentJob.
+            var VmafJobs = (VmafResp && VmafResp.Success && VmafResp.IsRunning && Array.isArray(VmafResp.Jobs))
+                ? VmafResp.Jobs
+                : ((VmafResp && VmafResp.Success && VmafResp.IsRunning)
+                    ? [(VmafResp.Progress || VmafResp.CurrentJob)].filter(Boolean)
+                    : []);
+            RenderActiveJobs(Overview.Data, VmafJobs);
         });
     }
 
@@ -436,7 +441,7 @@ var ActivityPage = (function() {
         Block.classList.remove('d-none');
     }
 
-    function RenderActiveJobs(D, VmafJob) {
+    function RenderActiveJobs(D, VmafJobs) {
         var Status = D.ServiceStatus;
         var IsProcessing = D.IsProcessing;
         var ActiveJobs = D.ActiveJobs || [];
@@ -491,8 +496,13 @@ var ActivityPage = (function() {
             '</tr>';
         });
 
-        var VmafRow = '';
-        if (VmafJob) {
+        // Render one row PER concurrent VMAF job. Each worker that is
+        // actively processing gets its own row -- previously this rendered
+        // only the most recent and hid parallel runs.
+        var VmafRowsHtml = '';
+        var VmafList = Array.isArray(VmafJobs) ? VmafJobs : (VmafJobs ? [VmafJobs] : []);
+        VmafList.forEach(function(VmafJob) {
+            if (!VmafJob) return;
             var VFile = VmafJob.FileName || (VmafJob.OriginalFilePath ? VmafJob.OriginalFilePath.split(/[/\\]/).pop() : 'VMAF');
             var VPct = (parseFloat(VmafJob.ProgressPercentage) || 0).toFixed(1);
             var VWorker = VmafJob.ClaimedBy || '-';
@@ -520,26 +530,29 @@ var ActivityPage = (function() {
             } else {
                 VEta = VmafJob.ETA || '-';
             }
-            VmafRow = '<tr>' +
-                '<td class="ps-3"><i class="fas fa-chart-line me-1 text-info"></i>' +
-                    '<span title="' + EscapeHtml(VmafJob.OriginalFilePath || '') + '">' + EscapeHtml(VFile) + '</span></td>' +
-                '<td><span class="badge bg-info">VMAF</span></td>' +
-                '<td>' + EscapeHtml(String(VWorker)) + '</td>' +
-                '<td>' + EscapeHtml(String(VSize)) + '</td>' +
-                '<td><div class="d-flex align-items-center gap-2">' +
-                    '<div class="progress flex-grow-1" style="height: 18px;">' +
-                        '<div class="progress-bar progress-bar-striped progress-bar-animated bg-info" ' +
-                            'role="progressbar" style="width: ' + VPct + '%" ' +
-                            'aria-valuenow="' + VPct + '" aria-valuemin="0" aria-valuemax="100"></div>' +
-                    '</div>' +
-                    '<small class="text-nowrap">' + VPct + '%</small>' +
-                '</div></td>' +
-                '<td>' + EscapeHtml(String(VFps)) + '</td>' +
-                '<td>' + EscapeHtml(String(VmafJob.ProcessingSpeed || '-')) + '</td>' +
-                '<td>' + EscapeHtml(String(VEta)) + '</td>' +
-                '<td>-</td>' +
-            '</tr>';
-        }
+            VmafRowsHtml +=
+                '<tr>' +
+                    '<td class="ps-3"><i class="fas fa-chart-line me-1 text-info"></i>' +
+                        '<span title="' + EscapeHtml(VmafJob.OriginalFilePath || '') + '">' + EscapeHtml(VFile) + '</span></td>' +
+                    '<td><span class="badge bg-info">VMAF</span></td>' +
+                    '<td>' + EscapeHtml(String(VWorker)) + '</td>' +
+                    '<td>' + EscapeHtml(String(VSize)) + '</td>' +
+                    '<td><div class="d-flex align-items-center gap-2">' +
+                        '<div class="progress flex-grow-1" style="height: 18px;">' +
+                            '<div class="progress-bar progress-bar-striped progress-bar-animated bg-info" ' +
+                                'role="progressbar" style="width: ' + VPct + '%" ' +
+                                'aria-valuenow="' + VPct + '" aria-valuemin="0" aria-valuemax="100"></div>' +
+                        '</div>' +
+                        '<small class="text-nowrap">' + VPct + '%</small>' +
+                    '</div></td>' +
+                    '<td>' + EscapeHtml(String(VFps)) + '</td>' +
+                    '<td>' + EscapeHtml(String(VmafJob.ProcessingSpeed || '-')) + '</td>' +
+                    '<td>' + EscapeHtml(String(VEta)) + '</td>' +
+                    '<td>-</td>' +
+                '</tr>';
+        });
+        // Backward-compat alias for the single-row variable used below.
+        var VmafRow = VmafRowsHtml;
 
         // Single-pass render: combined transcode + VMAF rows. Scans render in
         // their OWN block (RenderActiveScans below) -- directive 2026-05-27

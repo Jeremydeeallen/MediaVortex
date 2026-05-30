@@ -156,21 +156,31 @@ class QualityTestController:
             return {"Success": False, "Message": str(e)}
 
     def GetQualityTestProgress(self) -> dict:
-        """Get running quality test progress from QualityTestProgress table"""
+        """Get all currently-running quality test progress rows.
+
+        Returns:
+            Success: bool
+            IsRunning: bool        -- true when at least one VMAF job is running
+            Jobs: list[dict]       -- all concurrent VMAF runs (canonical surface)
+            CurrentJob: dict|None  -- LEGACY: first job in Jobs (or None). Kept
+                                      for Templates/Queue.html which still uses
+                                      the singular shape.
+            Progress: dict|None    -- LEGACY alias for CurrentJob (Queue.html
+                                      reads `Data.Progress.ProgressPercentage`).
+        """
         try:
-            Progress = self.DatabaseManager.GetRunningQualityTestProgress()
-            if Progress:
-                return {
-                    "Success": True,
-                    "IsRunning": True,
-                    "CurrentJob": Progress,
-                    "Progress": Progress
-                }
-            else:
-                return {"Success": True, "IsRunning": False, "CurrentJob": None}
+            Jobs = self.DatabaseManager.GetRunningQualityTestProgress() or []
+            First = Jobs[0] if Jobs else None
+            return {
+                "Success": True,
+                "IsRunning": bool(Jobs),
+                "Jobs": Jobs,
+                "CurrentJob": First,
+                "Progress": First,
+            }
         except Exception as e:
             self.LoggingService.LogError(f"Error getting quality test progress: {str(e)}")
-            return {"Success": False, "Message": str(e)}
+            return {"Success": False, "Message": str(e), "Jobs": [], "IsRunning": False}
 
     def AddToQueue(self, TranscodeAttemptId: int) -> dict:
         """Add a transcode attempt to the quality test queue."""
