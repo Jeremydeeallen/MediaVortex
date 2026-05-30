@@ -36,12 +36,14 @@ class OrphanCleanupService:
         )
         QtQueueSwept = self._SweepStaleQualityTestingQueue()
         ProgressSwept = self._SweepOrphanedTranscodeProgress()
+        QtProgressSwept = self._SweepOrphanedQualityTestProgress()
 
         LoggingService.LogInfo(
             f"OrphanCleanup swept: TFP={TfpSwept} "
             f"ActiveJobs(Transcode)={TranscodeAjSwept} "
             f"ActiveJobs(QualityTest)={QtAjSwept} "
-            f"QTQueue={QtQueueSwept} Progress={ProgressSwept}",
+            f"QTQueue={QtQueueSwept} Progress={ProgressSwept} "
+            f"QtProgress={QtProgressSwept}",
             "OrphanCleanupService", "SweepOrphans",
         )
         return {
@@ -50,6 +52,7 @@ class OrphanCleanupService:
             "ActiveJobsQualityTest": QtAjSwept,
             "QualityTestingQueue": QtQueueSwept,
             "TranscodeProgress": ProgressSwept,
+            "QualityTestProgress": QtProgressSwept,
         }
 
     def _SweepTemporaryFilePaths(self) -> int:
@@ -165,5 +168,26 @@ class OrphanCleanupService:
             LoggingService.LogException(
                 "TranscodeProgress orphan sweep failed", Ex,
                 "OrphanCleanupService", "_SweepOrphanedTranscodeProgress",
+            )
+            return 0
+
+    def _SweepOrphanedQualityTestProgress(self) -> int:
+        try:
+            Removed = self.DatabaseService.ExecuteNonQuery(
+                """
+                DELETE FROM QualityTestProgress
+                WHERE TranscodeAttemptId NOT IN (
+                    SELECT TranscodeAttemptId FROM QualityTestingQueue
+                    WHERE Status IN ('Pending','Running')
+                )
+                OR (Status = 'Processing' AND UpdatedAt < NOW() - INTERVAL '30 minutes')
+                """,
+                (),
+            )
+            return Removed or 0
+        except Exception as Ex:
+            LoggingService.LogException(
+                "QualityTestProgress orphan sweep failed", Ex,
+                "OrphanCleanupService", "_SweepOrphanedQualityTestProgress",
             )
             return 0

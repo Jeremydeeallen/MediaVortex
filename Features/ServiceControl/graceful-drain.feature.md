@@ -21,6 +21,7 @@ Replaces the prior "kill mid-flight FFmpeg subprocesses on SIGTERM" behavior wit
 3. `py deploy/deploy-fleet.py` runs `DrainWorkers` BEFORE the per-host deploy. Each target worker is flipped to `Status='Paused'`, then polled for ActiveJobs to clear. Workers that finish drain are deployed; workers that exceed the 30-min budget cause a warning and the deploy proceeds anyway (operator-visible).
 4. After deploy completes, every worker's `Status` is restored to its pre-drain value. Workers that were already Paused before drain stay Paused.
 5. `--no-drain` skips DrainWorkers entirely and falls through to the prior immediate-restart behavior. Used only when in-flight work is acceptable to lose (e.g. corrupted-image deploy that needs to land now).
+6. `OrphanCleanupService._SweepOrphanedQualityTestProgress` deletes any `QualityTestProgress` row whose owning `QualityTestingQueue` entry is no longer in Pending/Running, OR which has been `Status='Processing'` with no `UpdatedAt` change for >30 minutes. Prevents the UI "Currently Testing" panel from displaying zombie rows after a worker crash, drain timeout, or VMAF-loop exit that does not clear its own progress record.
 
 ## Status
 
