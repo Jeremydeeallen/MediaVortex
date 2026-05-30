@@ -12,12 +12,12 @@
     <!-- ── Transcode pane ── -->
     <div class="media-pane" id="tab-transcode">
 
-    <!-- Card 1: Next Batch -->
+    <!-- Card 1: TV - Next Batch (Drive='T:') -->
     <div class="card border-primary mb-3" id="BatchCard">
         <div class="card-header bg-primary text-white py-2">
             <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
                 <div>
-                    <h5 class="mb-0 d-inline">Next Batch</h5>
+                    <h5 class="mb-0 d-inline">TV - Next Batch</h5>
                     <span id="BatchCount" class="badge bg-light text-primary ms-2">0</span>
                     <small class="fw-normal ms-2 opacity-75" style="font-size: 0.75rem;">Ranked by post-transcode impact</small>
                 </div>
@@ -68,6 +68,70 @@
                             <td colspan="2"></td>
                             <td colspan="2">Batch Total</td>
                             <td id="BatchTotalSize" class="text-end"></td>
+                            <td colspan="3"></td>
+                        </tr>
+                    </tfoot>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Card 1.2: Movies - Next Batch (Drive='M:') -->
+    <div class="card border-primary mb-3" id="MoviesBatchCard">
+        <div class="card-header bg-primary text-white py-2">
+            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <div>
+                    <h5 class="mb-0 d-inline">Movies - Next Batch</h5>
+                    <span id="MoviesBatchCount" class="badge bg-light text-primary ms-2">0</span>
+                    <small class="fw-normal ms-2 opacity-75" style="font-size: 0.75rem;">Ranked by post-transcode impact</small>
+                </div>
+                <div class="d-flex align-items-center gap-2 flex-wrap">
+                    <input id="MoviesBatchSearch" type="search" class="form-control form-control-sm" placeholder="Search title or file..." style="width: 200px;" maxlength="100">
+                    <label class="mb-0 text-white text-nowrap small">Size:</label>
+                    <input id="MoviesBatchSizeSelect" type="number" min="1" max="1000" step="1" value="100" class="form-control form-control-sm" style="width: 80px;" list="MoviesBatchSizeChoices">
+                    <datalist id="MoviesBatchSizeChoices">
+                        <option value="1"></option>
+                        <option value="25"></option>
+                        <option value="50"></option>
+                        <option value="100"></option>
+                        <option value="250"></option>
+                        <option value="500"></option>
+                    </datalist>
+                    <label class="mb-0 text-white text-nowrap small">Profile:</label>
+                    <select id="MoviesBatchProfileSelect" class="form-select form-select-sm" style="width: 220px;">
+                        <option value="">-- Select a Profile --</option>
+                    </select>
+                    <button class="btn btn-light btn-sm" onclick="AddMoviesBatchToQueue()" id="AddMoviesBatchBtn">Add Batch</button>
+                    <button class="btn btn-outline-light btn-sm" onclick="SmartPopulateMovies()" id="MoviesAnalyzeBtn">Re-Analyze</button>
+                </div>
+            </div>
+        </div>
+        <div class="card-body p-0">
+            <div id="MoviesBatchInfo" class="px-3 py-2 border-bottom bg-light">
+                <small class="text-muted">Loading candidates...</small>
+            </div>
+            <div class="table-responsive">
+                <table class="table table-hover table-sm mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th style="width: 30px;"></th>
+                            <th style="width: 70px;" class="text-center">Priority</th>
+                            <th>Title</th>
+                            <th>File</th>
+                            <th style="width: 90px;" class="text-end">Size</th>
+                            <th style="width: 80px;">Codec</th>
+                            <th style="width: 100px;" class="text-end">Bitrate</th>
+                            <th style="width: 100px;">Resolution</th>
+                        </tr>
+                    </thead>
+                    <tbody id="MoviesBatchTableBody">
+                        <tr><td colspan="8" class="text-center py-3 text-muted">Analyzing...</td></tr>
+                    </tbody>
+                    <tfoot class="table-light">
+                        <tr class="fw-bold">
+                            <td colspan="2"></td>
+                            <td colspan="2">Batch Total</td>
+                            <td id="MoviesBatchTotalSize" class="text-end"></td>
                             <td colspan="3"></td>
                         </tr>
                     </tfoot>
@@ -257,7 +321,7 @@ let SearchResults = [];
 let SelectedShows = new Set();
 let LibrarySort = { Column: 'TotalGB', Direction: 'desc' };
 
-// Card 1 (Transcode) batch state
+// Card 1 (TV Transcode) batch state
 let AllSuggestions = [];
 let BatchItems = [];
 let AllProfiles = [];
@@ -269,6 +333,17 @@ let SearchDebounceTimer = null;
 let CurrentOffset = 0;
 let TotalCandidates = 0;
 let HasMore = false;
+
+// Card 1.2 (Movies Transcode) batch state -- INDEPENDENT of Card 1
+// (next-batch-per-drive.feature.md criterion 5).
+let MoviesAllSuggestions = [];
+let MoviesBatchItems = [];
+let MOVIES_BATCH_SIZE = 100;
+let MoviesCurrentSearch = '';
+let MoviesSearchDebounceTimer = null;
+let MoviesCurrentOffset = 0;
+let MoviesTotalCandidates = 0;
+let MoviesHasMore = false;
 
 // Card 1.5 (Remux) batch state -- INDEPENDENT of Card 1
 // (remux-populate-card.feature.md criterion 7).
@@ -312,8 +387,10 @@ $(document).ready(function() {
     // Hydrate sticky batch sizes from localStorage (criterion 20).
     BATCH_SIZE = _ReadStickySize('ShowSettings.BatchSize', 100, 1000);
     REMUX_BATCH_SIZE = _ReadStickySize('ShowSettings.RemuxBatchSize', 250, 1000);
+    MOVIES_BATCH_SIZE = _ReadStickySize('ShowSettings.MoviesBatchSize', 100, 1000);
     $('#BatchSizeSelect').val(BATCH_SIZE);
     $('#RemuxSizeSelect').val(REMUX_BATCH_SIZE);
+    $('#MoviesBatchSizeSelect').val(MOVIES_BATCH_SIZE);
 
     // Search box: debounce 300ms (criterion 5).
     $('#BatchSearch').on('input', function() {
@@ -331,6 +408,25 @@ $(document).ready(function() {
             BATCH_SIZE = NewSize;
             _WriteStickySize('ShowSettings.BatchSize', NewSize);
             SmartPopulate();
+        }
+    });
+
+    // Movies card handlers (parallel to TV; next-batch-per-drive.feature.md criteria 4, 5, 7).
+    $('#MoviesBatchSearch').on('input', function() {
+        const Val = $(this).val() || '';
+        clearTimeout(MoviesSearchDebounceTimer);
+        MoviesSearchDebounceTimer = setTimeout(function() {
+            MoviesCurrentSearch = Val;
+            SmartPopulateMovies();
+        }, 300);
+    });
+
+    $('#MoviesBatchSizeSelect').on('change', function() {
+        const NewSize = parseInt($(this).val(), 10);
+        if (Number.isFinite(NewSize) && NewSize >= 1 && NewSize <= 1000) {
+            MOVIES_BATCH_SIZE = NewSize;
+            _WriteStickySize('ShowSettings.MoviesBatchSize', NewSize);
+            SmartPopulateMovies();
         }
     });
 
@@ -373,6 +469,7 @@ $(document).ready(function() {
     } catch (e) {}
 
     SmartPopulate();
+    SmartPopulateMovies();
     SmartPopulateAudioFix();
     LoadAudioFixPins();
 
@@ -428,6 +525,7 @@ function LoadProfiles() {
                 Html += '<option value="' + P.Id + '">' + EscapeHtml(P.ProfileName) + '</option>';
             });
             $('#BatchProfileSelect').html(Html);
+            $('#MoviesBatchProfileSelect').html(Html);
             $('#QueueProfileSelect').html(Html);
         }
     });
@@ -1264,6 +1362,158 @@ function AddBatchToQueue() {
         error: function() {
             Btn.prop('disabled', false).html(OrigText);
             ShowNotification('Failed to add batch to queue', 'danger');
+        }
+    });
+}
+
+// ── Card 1.2: Movies - Next Batch (parallel to SmartPopulate / RenderBatch / AddBatchToQueue, Drive='M:') ──
+
+function SmartPopulateMovies(IsNextPage) {
+    const Btn = $('#MoviesAnalyzeBtn');
+    const OrigText = Btn.html();
+
+    if (!IsNextPage) {
+        MoviesCurrentOffset = 0;
+        MoviesAllSuggestions = [];
+        MoviesBatchItems = [];
+        Btn.prop('disabled', true).text('Analyzing...');
+    }
+
+    const Payload = {
+        Drive: 'M:',
+        Limit: MOVIES_BATCH_SIZE,
+        Offset: MoviesCurrentOffset,
+        Search: MoviesCurrentSearch || '',
+        Mode: 'Transcode'
+    };
+
+    $.ajax({
+        url: '/api/ShowSettings/SmartPopulate',
+        method: 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify(Payload),
+        timeout: 30000,
+        success: function(Response) {
+            Btn.prop('disabled', false).html(OrigText);
+            if (Response.Success) {
+                const NewItems = Response.Suggestions || [];
+                MoviesTotalCandidates = Response.TotalCandidates || 0;
+                MoviesHasMore = Response.HasMore || false;
+                MoviesCurrentOffset += NewItems.length;
+
+                MoviesAllSuggestions = MoviesAllSuggestions.concat(NewItems);
+
+                if (MoviesBatchItems.length === 0) {
+                    MoviesBatchItems = MoviesAllSuggestions.splice(0, MOVIES_BATCH_SIZE);
+                }
+
+                const FilterText = MoviesCurrentSearch
+                    ? ' matching "' + EscapeHtml(MoviesCurrentSearch) + '"'
+                    : '';
+                $('#MoviesBatchInfo').html('<small><strong>' + MoviesTotalCandidates.toLocaleString() + '</strong> candidates' + FilterText + '. Showing top ' + MOVIES_BATCH_SIZE + ' by priority.</small>');
+                RenderMoviesBatch();
+            } else {
+                ShowNotification('Movies batch error: ' + (Response.Message || Response.ErrorMessage || 'Unknown error'), 'danger');
+            }
+        },
+        error: function() {
+            Btn.prop('disabled', false).html(OrigText);
+            ShowNotification('Failed to run Movies batch analysis', 'danger');
+        }
+    });
+}
+
+function RenderMoviesBatch() {
+    const Tbody = $('#MoviesBatchTableBody');
+    $('#MoviesBatchCount').text(MoviesBatchItems.length + '/' + (MoviesTotalCandidates || 0).toLocaleString());
+
+    if (MoviesBatchItems.length === 0) {
+        const EmptyMsg = MoviesCurrentSearch
+            ? 'No matches for "' + EscapeHtml(MoviesCurrentSearch) + '"'
+            : 'Batch is empty';
+        Tbody.html('<tr><td colspan="8" class="text-center py-3 text-muted">' + EmptyMsg + '</td></tr>');
+        $('#MoviesBatchTotalSize').text('');
+        return;
+    }
+
+    let Html = '';
+    let TotalSize = 0;
+
+    MoviesBatchItems.forEach(function(S, Idx) {
+        TotalSize += S.SizeMB;
+        const PriorityCell = (S.PriorityScore != null)
+            ? '<span class="badge ' + GetPriorityBadgeClass(S.PriorityScore) + '">' + S.PriorityScore + '</span>'
+            : '<span class="text-muted small">-</span>';
+        Html += '<tr>'
+            + '<td><button class="btn btn-sm btn-outline-danger py-0 px-1" onclick="RemoveFromMoviesBatch(' + Idx + ')" title="Remove">x</button></td>'
+            + '<td class="text-center">' + PriorityCell + '</td>'
+            + '<td>' + EscapeHtml(S.ShowName) + '</td>'
+            + '<td title="' + EscapeAttr(S.FilePath) + '">' + EscapeHtml(S.FileName) + '</td>'
+            + '<td class="text-end">' + FormatSize(S.SizeMB) + '</td>'
+            + '<td><span class="badge ' + GetCodecBadgeClass(S.Codec) + '">' + EscapeHtml(S.Codec) + '</span></td>'
+            + '<td class="text-end">' + FormatBitrate(S.BitrateKbps) + '</td>'
+            + '<td>' + EscapeHtml(S.Resolution) + '</td>'
+            + '</tr>';
+    });
+
+    Tbody.html(Html);
+    $('#MoviesBatchTotalSize').text(FormatSize(TotalSize));
+}
+
+function RemoveFromMoviesBatch(Idx) {
+    MoviesBatchItems.splice(Idx, 1);
+    RenderMoviesBatch();
+}
+
+function AddMoviesBatchToQueue() {
+    if (MoviesBatchItems.length === 0) {
+        ShowNotification('Movies batch is empty', 'danger');
+        return;
+    }
+
+    const ProfileId = $('#MoviesBatchProfileSelect').val();
+    if (!ProfileId) {
+        $('#MoviesBatchProfileSelect').addClass('is-invalid');
+        setTimeout(function() { $('#MoviesBatchProfileSelect').removeClass('is-invalid'); }, 1500);
+        ShowNotification('Select a profile before adding to queue', 'danger');
+        return;
+    }
+
+    const MediaFileIds = MoviesBatchItems.map(function(S) { return S.MediaFileId; });
+
+    const Btn = $('#AddMoviesBatchBtn');
+    const OrigText = Btn.html();
+    Btn.prop('disabled', true).text('Adding...');
+
+    $.ajax({
+        url: '/api/ShowSettings/AddToQueue',
+        method: 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify({ Mode: 'Transcode', ProfileId: parseInt(ProfileId), MediaFileIds: MediaFileIds }),
+        success: function(Response) {
+            Btn.prop('disabled', false).html(OrigText);
+            if (Response.Success) {
+                const Added = Response.ItemsAdded || 0;
+                const Skipped = Response.ItemsSkipped || 0;
+                let Msg = Added + ' items added to queue.';
+                if (Skipped > 0) Msg += ' ' + Skipped + ' already queued.';
+
+                MoviesBatchItems = MoviesAllSuggestions.splice(0, MOVIES_BATCH_SIZE);
+
+                if (MoviesBatchItems.length === 0 && MoviesHasMore) {
+                    ShowNotification(Msg + ' Loading next Movies batch...', 'success');
+                    SmartPopulateMovies(true);
+                } else {
+                    RenderMoviesBatch();
+                    ShowNotification(Msg, 'success');
+                }
+            } else {
+                ShowNotification('Error: ' + (Response.Message || Response.ErrorMessage || 'Unknown error'), 'danger');
+            }
+        },
+        error: function() {
+            Btn.prop('disabled', false).html(OrigText);
+            ShowNotification('Failed to add Movies batch to queue', 'danger');
         }
     });
 }

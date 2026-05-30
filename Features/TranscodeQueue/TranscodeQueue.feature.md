@@ -8,7 +8,7 @@ Populates and manages the queue of files awaiting FFmpeg transcoding. Filters fi
 
 1. PopulateQueue filters MediaFiles by comparing their Resolution against the assigned profile's ProfileThresholds.TranscodeDownTo to determine which files need transcoding.
 2. Files without explicit English audio (HasExplicitEnglishAudio = false) are blocked from queue population. Files with NULL (not yet probed) are allowed through.
-3. Files already transcoded by MediaVortex (TranscodedByMediaVortex = true) with VMAF >= 80 are not re-queued.
+3. Files where the video stream was re-encoded by MediaVortex (TranscodedByMediaVortex = true) with VMAF >= 80 are not re-queued. A file that has only been remuxed / audio-fixed (RemuxedByMediaVortex = true, TranscodedByMediaVortex = false) remains eligible for transcode admission -- the remux flag does not satisfy the "already transcoded" predicate. See `Features/FileReplacement/remuxed-flag.feature.md` for the two-flag model.
 4. Files with VMAF < 80 get CRF adjustment. Adjusted CRF cannot go below 15 -- files that would need lower CRF are logged as ProblemFiles.
 5. Queue items are sortable by size, priority, and date added.
 6. Queue supports pagination (10/25/50/100 per page).

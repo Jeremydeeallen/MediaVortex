@@ -286,10 +286,13 @@ class FileReplacementBusinessService:
 
             self._ArchiveOriginalFileDetails(OriginalPath, TranscodeAttemptId)
 
+            AttemptProfileName = (transcode_attempt.ProfileName or '')
+            ReplacementMode = 'Remux' if AttemptProfileName in ('Remux', 'SubtitleFix') else 'Transcode'
             replacement_result = self._ProcessCompleteFileReplacement(
                 OriginalPath, TranscodedPath, OriginalPath,
                 FFmpegCommand=getattr(transcode_attempt, 'FfpmpegCommand', None),
                 SourceMediaFileId=SourceMediaFileId,
+                Mode=ReplacementMode,
             )
 
             if replacement_result.get('Success', False):
@@ -607,7 +610,7 @@ class FileReplacementBusinessService:
             )
             return {'Compliant': False, 'RefusalReason': 'gate_evaluation_error'}
 
-    def _ProcessCompleteFileReplacement(self, OriginalFilePath: str, TranscodedFilePath: str, NetworkOriginalPath: str = None, FFmpegCommand: Optional[str] = None, SourceMediaFileId: Optional[int] = None) -> Dict[str, Any]:
+    def _ProcessCompleteFileReplacement(self, OriginalFilePath: str, TranscodedFilePath: str, NetworkOriginalPath: str = None, FFmpegCommand: Optional[str] = None, SourceMediaFileId: Optional[int] = None, Mode: str = 'Transcode') -> Dict[str, Any]:
         """Finalize a transcode by renaming the `.inprogress` staged file to its
         final name, updating MediaFiles, and deleting the original source.
 
@@ -820,7 +823,8 @@ class FileReplacementBusinessService:
             CanonicalOriginal = NetworkOriginalPath or OriginalFilePath
             CanonicalNewPath = ntpath.join(ntpath.dirname(CanonicalOriginal), os.path.basename(TargetPath))
             UpdateResult = self._UpdateMediaFilesAfterReplacement(CanonicalOriginal, CanonicalNewPath,
-                                                                   FFmpegCommand=FFmpegCommand)
+                                                                   FFmpegCommand=FFmpegCommand,
+                                                                   Mode=Mode)
             if UpdateResult.get('Success', False):
                 StepsCompleted.append("Updated MediaFiles table")
                 RecomputeMediaFileId = UpdateResult.get('MediaFileId')
@@ -896,7 +900,8 @@ class FileReplacementBusinessService:
             }
 
     def _UpdateMediaFilesAfterReplacement(self, OriginalFilePath: str, NewFilePath: str,
-                                          FFmpegCommand: Optional[str] = None) -> Dict[str, Any]:
+                                          FFmpegCommand: Optional[str] = None,
+                                          Mode: str = 'Transcode') -> Dict[str, Any]:
         """Update MediaFiles table with new file information after successful replacement.
 
         FFmpegCommand (optional): the command that just produced the new file.
@@ -1016,8 +1021,11 @@ class FileReplacementBusinessService:
                 except (ValueError, IndexError):
                     pass
 
-            # Set TranscodedByMediaVortex to True
-            media_file.TranscodedByMediaVortex = True
+            if Mode in ('Remux', 'SubtitleFix', 'AudioFix', 'Quick'):
+                media_file.RemuxedByMediaVortex = True
+                media_file.RemuxedByMediaVortexDate = datetime.now(timezone.utc)
+            else:
+                media_file.TranscodedByMediaVortex = True
 
             # Derive IsInterlaced from FieldOrder on the re-probe. FFprobe's
             # field_order is 'progressive' for progressive content and one of
