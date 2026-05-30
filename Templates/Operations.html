@@ -693,6 +693,7 @@ class OperationsManager {
                                         <th class="fw-bold">File</th>
                                         <th class="fw-bold">Profile</th>
                                         <th class="fw-bold">Reduction</th>
+                                        <th class="fw-bold">VMAF</th>
                                         <th class="fw-bold">Duration</th>
                                         <th class="fw-bold">Date</th>
                                     </tr>
@@ -710,6 +711,18 @@ class OperationsManager {
                         } else {
                             ReductionBadge = '<span class="badge bg-secondary">N/A</span>';
                         }
+                        // VMAF badge: green >=88 (auto-replace floor), blue 80-87 (passing but below floor),
+                        // amber <80 (Requeue territory; included here for visibility on replaced files
+                        // whose disposition predated the current gate). Dash when no VMAF was run
+                        // (BypassReplace / QualityTestNotRequired).
+                        let VmafBadge;
+                        if (item.VMAF != null) {
+                            const v = parseFloat(item.VMAF);
+                            const vColor = v >= 88 ? 'success' : v >= 80 ? 'info' : 'warning';
+                            VmafBadge = `<span class="badge bg-${vColor}">${v.toFixed(1)}</span>`;
+                        } else {
+                            VmafBadge = '<span class="text-muted">-</span>';
+                        }
                         const Duration = item.TranscodeDurationSeconds != null ? `${Math.round(item.TranscodeDurationSeconds)}s` : 'N/A';
                         const DateStr = item.AttemptDate ? window.formatTime(item.AttemptDate, 'short') : 'N/A';
 
@@ -718,6 +731,7 @@ class OperationsManager {
                                 <td title="${item.FilePath}">${FileName}</td>
                                 <td>${item.ProfileName || 'N/A'}</td>
                                 <td>${ReductionBadge}</td>
+                                <td>${VmafBadge}</td>
                                 <td>${Duration}</td>
                                 <td>${DateStr}</td>
                             </tr>

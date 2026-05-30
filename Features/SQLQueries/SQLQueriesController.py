@@ -434,7 +434,8 @@ def GetRecentSuccesses():
         # them actually saved bytes.
         query = """
         SELECT ta.FilePath, ta.ProfileName, ta.SizeReductionPercent,
-               ta.TranscodeDurationSeconds, ta.AttemptDate, ta.NewSizeBytes, ta.OldSizeBytes
+               ta.TranscodeDurationSeconds, ta.AttemptDate, ta.NewSizeBytes, ta.OldSizeBytes,
+               ta.VMAF
         FROM TranscodeAttempts ta
         WHERE ta.Success = TRUE AND ta.FileReplaced = TRUE
         ORDER BY ta.AttemptDate DESC
