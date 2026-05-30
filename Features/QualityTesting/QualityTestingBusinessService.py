@@ -839,8 +839,18 @@ class QualityTestingBusinessService:
             LoggingService.LogException(f"Error creating progress record for job {JobId}", e, "QualityTestingBusinessService", "CreateProgressRecord")
             return 0
 
-    def UpdateProgressRecord(self, ProgressId: int, Status: str, ProgressPercentage: int, CurrentStep: str, ETA: str = None, CurrentFrame: int = None, CurrentTime: str = None, ProcessingSpeed: str = None):
-        """Update a progress tracking record."""
+    def UpdateProgressRecord(self, ProgressId: int, Status: str, ProgressPercentage: int, CurrentStep: str,
+                             ETA: str = None, CurrentFrame: int = None, CurrentTime: str = None,
+                             ProcessingSpeed: str = None,
+                             CurrentFps: float = None, AverageFps: float = None, EtaSeconds: float = None):
+        """Update a progress tracking record.
+
+        Numeric fields (CurrentFps, AverageFps, EtaSeconds) added 2026-05-30 so
+        operator-facing UIs can render the data without parsing the free-text
+        `CurrentStep` / `ETA` strings. The string fields are kept for backward
+        compatibility with existing surfaces; new surfaces should prefer the
+        numeric columns.
+        """
         try:
 
             if ProgressId == 0:
@@ -852,10 +862,16 @@ class QualityTestingBusinessService:
             query = """
                 UPDATE QualityTestProgress
                 SET Status = %s, ProgressPercentage = %s, CurrentStep = %s, UpdatedAt = %s,
-                    ETA = %s, CurrentFrame = %s, CurrentTime = %s, ProcessingSpeed = %s
+                    ETA = %s, CurrentFrame = %s, CurrentTime = %s, ProcessingSpeed = %s,
+                    CurrentFps = %s, AverageFps = %s, EtaSeconds = %s
                 WHERE Id = %s
             """
-            result = self.DatabaseManager.DatabaseService.ExecuteNonQuery(query, (Status, ProgressPercentage, CurrentStep, current_time, ETA, CurrentFrame, CurrentTime, ProcessingSpeed, ProgressId))
+            result = self.DatabaseManager.DatabaseService.ExecuteNonQuery(
+                query,
+                (Status, ProgressPercentage, CurrentStep, current_time,
+                 ETA, CurrentFrame, CurrentTime, ProcessingSpeed,
+                 CurrentFps, AverageFps, EtaSeconds, ProgressId),
+            )
 
         except Exception as e:
             LoggingService.LogException(f"Error updating progress record {ProgressId}", e, "QualityTestingBusinessService", "UpdateProgressRecord")
@@ -992,9 +1008,16 @@ class QualityTestingBusinessService:
             raise
 
     def MonitorVMAFProgress(self, ProgressId: int, Process: subprocess.Popen, JobDetails: dict = None):
-        """Monitor VMAF progress and update database (using same pattern as TranscodeService)."""
+        """Monitor VMAF progress and update database (using same pattern as TranscodeService).
+
+        Computes AverageFps and EtaSeconds as numeric columns so operator UIs
+        can render them without parsing the free-text CurrentStep / ETA strings.
+        """
         try:
             import time
+
+            _MonitorStart = time.time()
+            _StartFrame = None
 
             while Process.poll() is None:
                 # Read output line by line
@@ -1015,10 +1038,23 @@ class QualityTestingBusinessService:
 
                         # Update progress for every frame - real-time updates
                         if current_frame > 0:
-                            # Create a simple current step description
-                            current_step = f"Processing VMAF analysis - {fps:.1f} fps"
+                            # Track start frame for average-fps math (first observed frame).
+                            if _StartFrame is None:
+                                _StartFrame = current_frame
+                            Elapsed = time.time() - _MonitorStart
+                            AvgFps = ((current_frame - _StartFrame) / Elapsed) if Elapsed > 0.5 else None
 
-                            # Format processing speed as string
+                            # Parse eta HH:MM:SS -> seconds for the numeric column.
+                            EtaSec = None
+                            if eta and eta not in ("Calculating...", ""):
+                                _Parts = eta.split(':')
+                                if len(_Parts) == 3:
+                                    try:
+                                        EtaSec = int(_Parts[0]) * 3600 + int(_Parts[1]) * 60 + int(_Parts[2])
+                                    except (TypeError, ValueError):
+                                        EtaSec = None
+
+                            current_step = f"Processing VMAF analysis - {fps:.1f} fps"
                             processing_speed = f"{speed:.2f}x"
 
                             self.UpdateProgressRecord(
@@ -1029,7 +1065,10 @@ class QualityTestingBusinessService:
                                 ETA=eta,
                                 CurrentFrame=current_frame,
                                 CurrentTime=current_time,
-                                ProcessingSpeed=processing_speed
+                                ProcessingSpeed=processing_speed,
+                                CurrentFps=fps if fps else None,
+                                AverageFps=AvgFps,
+                                EtaSeconds=EtaSec,
                             )
 
                 time.sleep(0.1)  # Small delay to prevent excessive CPU usage

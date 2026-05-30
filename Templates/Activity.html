@@ -495,12 +495,37 @@ var ActivityPage = (function() {
         if (VmafJob) {
             var VFile = VmafJob.FileName || (VmafJob.OriginalFilePath ? VmafJob.OriginalFilePath.split(/[/\\]/).pop() : 'VMAF');
             var VPct = (parseFloat(VmafJob.ProgressPercentage) || 0).toFixed(1);
+            var VWorker = VmafJob.ClaimedBy || '-';
+            // Size: encoded output bytes when available, otherwise source bytes.
+            var VSizeBytes = VmafJob.NewSizeBytes || VmafJob.OldSizeBytes;
+            var VSize = VSizeBytes ? (VSizeBytes / (1024 * 1024)).toFixed(0) + ' MB' : '-';
+            // FPS: prefer the numeric column; fall back to parsing CurrentStep
+            // legacy text (e.g. "Processing VMAF analysis - 132.0 fps").
+            var VFps = '-';
+            if (VmafJob.CurrentFps != null) {
+                VFps = parseFloat(VmafJob.CurrentFps).toFixed(0) + ' fps';
+            } else if (VmafJob.CurrentStep) {
+                var _M = String(VmafJob.CurrentStep).match(/(\d+(?:\.\d+)?)\s*fps/);
+                if (_M) { VFps = parseFloat(_M[1]).toFixed(0) + ' fps'; }
+            }
+            // ETA: prefer numeric seconds -> HH:MM:SS; fall back to the legacy
+            // string column (which may literally be "Calculating...").
+            var VEta;
+            if (VmafJob.EtaSeconds != null && VmafJob.EtaSeconds > 0) {
+                var _S = Math.round(VmafJob.EtaSeconds);
+                var _H = Math.floor(_S / 3600);
+                var _Mn = Math.floor((_S % 3600) / 60);
+                var _Sc = _S % 60;
+                VEta = (_H > 0 ? (_H + ':' + (_Mn < 10 ? '0' : '') + _Mn) : _Mn) + ':' + (_Sc < 10 ? '0' : '') + _Sc;
+            } else {
+                VEta = VmafJob.ETA || '-';
+            }
             VmafRow = '<tr>' +
                 '<td class="ps-3"><i class="fas fa-chart-line me-1 text-info"></i>' +
                     '<span title="' + EscapeHtml(VmafJob.OriginalFilePath || '') + '">' + EscapeHtml(VFile) + '</span></td>' +
                 '<td><span class="badge bg-info">VMAF</span></td>' +
-                '<td><em class="text-muted">-</em></td>' +
-                '<td>-</td>' +
+                '<td>' + EscapeHtml(String(VWorker)) + '</td>' +
+                '<td>' + EscapeHtml(String(VSize)) + '</td>' +
                 '<td><div class="d-flex align-items-center gap-2">' +
                     '<div class="progress flex-grow-1" style="height: 18px;">' +
                         '<div class="progress-bar progress-bar-striped progress-bar-animated bg-info" ' +
@@ -509,9 +534,9 @@ var ActivityPage = (function() {
                     '</div>' +
                     '<small class="text-nowrap">' + VPct + '%</small>' +
                 '</div></td>' +
-                '<td>-</td>' +
+                '<td>' + EscapeHtml(String(VFps)) + '</td>' +
                 '<td>' + EscapeHtml(String(VmafJob.ProcessingSpeed || '-')) + '</td>' +
-                '<td>' + EscapeHtml(String(VmafJob.ETA || '-')) + '</td>' +
+                '<td>' + EscapeHtml(String(VEta)) + '</td>' +
                 '<td>-</td>' +
             '</tr>';
         }

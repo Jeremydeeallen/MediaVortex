@@ -4392,8 +4392,14 @@ class DatabaseManager:
     def GetRunningQualityTestProgress(self) -> dict:
         """Get running quality test progress from QualityTestProgress table with file information"""
         try:
+            # Operator-facing data: surface the worker that claimed the row
+            # (qtq.ClaimedBy), source/output sizes from TranscodeAttempts, and
+            # the numeric Fps/Eta columns on QualityTestProgress so the UI does
+            # not have to parse free-text fields. All new fields are nullable
+            # so legacy rows (pre-2026-05-30 schema) render with `-` instead
+            # of failing.
             query = """
-                SELECT 
+                SELECT
                     qtp.Id,
                     qtp.TranscodeAttemptId,
                     qtp.Status,
@@ -4402,20 +4408,27 @@ class DatabaseManager:
                     qtp.CurrentFrame,
                     qtp.CurrentTime,
                     qtp.ProcessingSpeed,
-                    qtp.ETA, 
-                    qtp.StartTime, 
+                    qtp.ETA,
+                    qtp.StartTime,
                     qtp.UpdatedAt,
+                    qtp.CurrentFps,
+                    qtp.AverageFps,
+                    qtp.EtaSeconds,
                     qtq.OriginalFilePath,
                     qtq.TranscodedFilePath,
-                    qtq.LocalSourcePath
+                    qtq.LocalSourcePath,
+                    qtq.ClaimedBy,
+                    ta.OldSizeBytes,
+                    ta.NewSizeBytes
                 FROM QualityTestProgress qtp
                 LEFT JOIN QualityTestingQueue qtq ON qtp.TranscodeAttemptId = qtq.TranscodeAttemptId
-                WHERE qtp.Status = 'Processing' 
-                ORDER BY qtp.StartTime DESC 
+                LEFT JOIN TranscodeAttempts ta ON ta.Id = qtp.TranscodeAttemptId
+                WHERE qtp.Status = 'Processing'
+                ORDER BY qtp.StartTime DESC
                 LIMIT 1
             """
             rows = self.DatabaseService.ExecuteQuery(query)
-            
+
             if rows and len(rows) > 0:
                 row = rows[0]
                 return {
@@ -4434,6 +4447,12 @@ class DatabaseManager:
                     "OriginalFilePath": row["OriginalFilePath"] or f"TranscodeAttempt_{row['TranscodeAttemptId']}",
                     "TranscodedFilePath": row["TranscodedFilePath"] or f"TranscodeAttempt_{row['TranscodeAttemptId']}",
                     "LocalSourcePath": row["LocalSourcePath"],
+                    "ClaimedBy": row.get("ClaimedBy"),
+                    "CurrentFps": row.get("CurrentFps"),
+                    "AverageFps": row.get("AverageFps"),
+                    "EtaSeconds": row.get("EtaSeconds"),
+                    "OldSizeBytes": row.get("OldSizeBytes"),
+                    "NewSizeBytes": row.get("NewSizeBytes"),
                     "EndTime": None,
                     "ErrorMessage": None
                 }
@@ -4480,17 +4499,19 @@ class DatabaseManager:
             job_id = job_to_claim["Id"]
 
             # Atomic claim: re-gate on the same predicate inside the UPDATE so
-            # a flag flip between SELECT and UPDATE refuses the claim.
+            # a flag flip between SELECT and UPDATE refuses the claim. Records
+            # the claiming worker on the row so operator UIs can show which
+            # host is doing the work.
             update_query = f"""
                 UPDATE QualityTestingQueue
-                SET DateStarted = NOW(), Status = 'Running'
+                SET DateStarted = NOW(), Status = 'Running', ClaimedBy = %s
                 WHERE Id = %s
                   AND DateStarted IS NULL
                   AND ForceDisposition IS NULL
                   AND {CapabilityFragment}
             """
 
-            rows_affected = self.DatabaseService.ExecuteNonQuery(update_query, (job_id,) + CapabilityParams)
+            rows_affected = self.DatabaseService.ExecuteNonQuery(update_query, (WorkerName, job_id) + CapabilityParams)
             
             if rows_affected > 0:
                 LoggingService.LogInfo(f"Successfully claimed quality test job {job_id}", "DatabaseManager", "ClaimQualityTestJob")
