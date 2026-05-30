@@ -2968,8 +2968,9 @@ class DatabaseManager:
             if targetResolution == 'No downscaling':
                 # Get all settings from the current resolution entry (use the resolution that was found)
                 query = """
-                    SELECT pt.VideoBitrateKbps, pt.AudioBitrateKbps, pt.Quality, pt.Resolution, 
-                           p.Codec, p.Preset, p.FilmGrain, p.YadifMode, p.YadifParity, p.YadifDeint, p.UseNvidiaHardware, pt.ContainerType, p.Id as ProfileId
+                    SELECT pt.VideoBitrateKbps, pt.AudioBitrateKbps, pt.Quality, pt.Resolution,
+                           p.Codec, p.Preset, p.FilmGrain, p.YadifMode, p.YadifParity, p.YadifDeint, p.UseNvidiaHardware, pt.ContainerType, p.Id as ProfileId,
+                           p.RateControlMode, pt.SourceBitratePercent, pt.MinBitrateKbps, pt.MaxBitrateKbps, pt.Gop
                     FROM ProfileThresholds pt
                     JOIN Profiles p ON pt.ProfileId = p.Id
                     WHERE p.ProfileName = %s AND pt.Resolution = %s
@@ -2979,8 +2980,9 @@ class DatabaseManager:
             else:
                 # Now get all settings for the target resolution
                 query = """
-                    SELECT pt.VideoBitrateKbps, pt.AudioBitrateKbps, pt.Quality, pt.Resolution, 
-                           p.Codec, p.Preset, p.FilmGrain, p.YadifMode, p.YadifParity, p.YadifDeint, p.UseNvidiaHardware, pt.ContainerType, p.Id as ProfileId
+                    SELECT pt.VideoBitrateKbps, pt.AudioBitrateKbps, pt.Quality, pt.Resolution,
+                           p.Codec, p.Preset, p.FilmGrain, p.YadifMode, p.YadifParity, p.YadifDeint, p.UseNvidiaHardware, pt.ContainerType, p.Id as ProfileId,
+                           p.RateControlMode, pt.SourceBitratePercent, pt.MinBitrateKbps, pt.MaxBitrateKbps, pt.Gop
                     FROM ProfileThresholds pt
                     JOIN Profiles p ON pt.ProfileId = p.Id
                     WHERE p.ProfileName = %s AND pt.Resolution = %s
@@ -3005,7 +3007,12 @@ class DatabaseManager:
                     'YadifDeint': row['YadifDeint'],
                     'UseNvidiaHardware': row['UseNvidiaHardware'],
                     'ContainerType': row['ContainerType'],
-                    'ProfileId': row['ProfileId']
+                    'ProfileId': row['ProfileId'],
+                    'RateControlMode': row.get('RateControlMode'),
+                    'SourceBitratePercent': row.get('SourceBitratePercent'),
+                    'MinBitrateKbps': row.get('MinBitrateKbps'),
+                    'MaxBitrateKbps': row.get('MaxBitrateKbps'),
+                    'Gop': row.get('Gop'),
                 }
                 LoggingService.LogInfo(f"Found ProfileSettings for {ProfileName} targeting {actualTargetResolution}: {settings}", "DatabaseManager", "GetProfileSettingsForTargetResolution")
                 return settings

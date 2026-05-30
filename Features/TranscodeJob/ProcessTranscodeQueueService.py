@@ -1224,6 +1224,8 @@ class ProcessTranscodeQueueService:
             if not ProfileSettings:
                 return None
 
+            ProfileSettings['SourceVideoBitrateKbps'] = MediaFile.VideoBitrateKbps
+
             # Apply ShowSettings override only when a per-show row exists for
             # this file. The `*` global default does NOT override an explicit
             # profile target -- profile.TranscodeDownTo is the default, and

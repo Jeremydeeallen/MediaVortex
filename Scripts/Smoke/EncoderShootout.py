@@ -41,10 +41,17 @@ def Log(Msg):
 
 
 def BuildEncodeCmd(Source, Variant, OutputPath, OutputScale):
-    """Return the full ffmpeg arg list for one (source, variant) encode."""
+    """Return the full ffmpeg arg list for one (source, variant) encode.
+
+    Source is the source dict from the matrix (has `path`, `fps`,
+    `source_video_bitrate_kbps`, etc). Variant declares either CQ-anchored
+    (`cq: N`) or rate-anchored (`rc_mode: vbr`, `rate_pct: N`) mode for
+    NVENC. SVT-AV1 stays CRF-anchored.
+    """
+    SourcePath = Source["path"]
     Common = [
         FFMPEG, "-hide_banner", "-loglevel", "warning", "-stats",
-        "-i", Source,
+        "-i", SourcePath,
         "-map", "0:v:0", "-map", "0:a:0?",
         "-vf", f"scale={OutputScale}:flags=lanczos",
     ]
@@ -58,14 +65,32 @@ def BuildEncodeCmd(Source, Variant, OutputPath, OutputScale):
             "-pix_fmt", Variant.get("pix_fmt", "yuv420p10le"),
         ]
     elif Enc == "av1_nvenc":
+        RcMode = Variant.get("rc_mode", "cq")
+        if RcMode == "vbr":
+            SrcKbps = Source.get("source_video_bitrate_kbps")
+            if not SrcKbps or SrcKbps <= 0:
+                raise ValueError(f"VBR variant {Variant['name']} requires source_video_bitrate_kbps on source {Source['id']}")
+            TargetKbps = int(round(SrcKbps * Variant["rate_pct"] / 100))
+            MaxKbps = TargetKbps * 2
+            BufKbps = MaxKbps
+            RateArgs = [
+                "-rc", "vbr",
+                "-b:v", f"{TargetKbps}k",
+                "-maxrate:v", f"{MaxKbps}k",
+                "-bufsize:v", f"{BufKbps}k",
+            ]
+        else:
+            RateArgs = [
+                "-rc", str(Variant.get("rc", "vbr")),
+                "-cq", str(Variant["cq"]),
+                "-b:v", "0",
+            ]
         VideoArgs = [
             "-c:v", "av1_nvenc",
             "-preset", str(Variant["preset"]),
             "-tune", str(Variant["tune"]),
             "-multipass", str(Variant["multipass"]),
-            "-rc", str(Variant["rc"]),
-            "-cq", str(Variant["cq"]),
-            "-b:v", "0",
+        ] + RateArgs + [
             "-spatial-aq", str(Variant.get("spatial_aq", 1)),
             "-temporal-aq", str(Variant.get("temporal_aq", 1)),
             "-aq-strength", str(Variant.get("aq_strength", 8)),
@@ -75,6 +100,8 @@ def BuildEncodeCmd(Source, Variant, OutputPath, OutputScale):
             "-weighted_pred", str(Variant.get("weighted_pred", 0)),
             "-pix_fmt", Variant.get("pix_fmt", "p010le"),
         ]
+        if Variant.get("gop"):
+            VideoArgs += ["-g", str(Variant["gop"])]
     else:
         raise ValueError(f"Unknown encoder: {Enc}")
 
@@ -92,9 +119,13 @@ def BuildEncodeCmd(Source, Variant, OutputPath, OutputScale):
     return Common + VideoArgs + AudioArgs + Tail
 
 
-def Encode(Source, Variant, OutputPath, OutputScale):
-    """Run one encode. Returns (success_bool, encode_seconds, size_bytes)."""
-    Cmd = BuildEncodeCmd(Source, Variant, OutputPath, OutputScale)
+def Encode(SourceDict, Variant, OutputPath, OutputScale):
+    """Run one encode. Returns (success_bool, encode_seconds, size_bytes).
+
+    SourceDict is the matrix source dict (has path + metadata). Required
+    for VBR variants that compute target bitrate from source bitrate.
+    """
+    Cmd = BuildEncodeCmd(SourceDict, Variant, OutputPath, OutputScale)
     Log(f"  ENCODE {Variant['label']}")
     T0 = time.time()
     R = subprocess.run(Cmd, capture_output=True, text=True)
@@ -368,7 +399,7 @@ def Main():
                 "metrics": None,
             }
 
-            EncodeOk, EncodeDt, SizeB = Encode(SrcPath, V, OutPath, OutputScale)
+            EncodeOk, EncodeDt, SizeB = Encode(Src, V, OutPath, OutputScale)
             Result["encode_ok"] = EncodeOk
             Result["encode_seconds"] = EncodeDt
             Result["size_bytes"] = SizeB

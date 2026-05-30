@@ -154,6 +154,23 @@ class MediaProbeBusinessService:
                             ProblemEx, "MediaProbeBusinessService", "_ExecuteProbe"
                         )
 
+                # ContentSignals: compute MotionFraction / SceneChangeRatePerMin /
+                # LumaVariance once per file. Failure logged, never blocks probe.
+                # See Features/ContentSignals/content-signals.feature.md.
+                try:
+                    from Features.ContentSignals.ContentSignalsRepository import ContentSignalsRepository
+                    from Features.ContentSignals.ContentSignalsService import ContentSignalsService
+                    SignalsRepo = ContentSignalsRepository()
+                    if not SignalsRepo.HasSignals(MediaFile.Id):
+                        Signals = ContentSignalsService.ComputeSignals(LocalPath)
+                        if Signals is not None:
+                            SignalsRepo.WriteSignals(MediaFile.Id, Signals)
+                except Exception as SignalsEx:
+                    LoggingService.LogException(
+                        f"ContentSignals after probe failed for MediaFileId={MediaFile.Id} -- probe data is saved",
+                        SignalsEx, "MediaProbeBusinessService", "_ExecuteProbe"
+                    )
+
                 # Materialize PriorityScore + AssignedProfile + IsCompliant + RecommendedMode
                 # via the unified updater. RecomputeForFiles applies the ShowSettings ->
                 # SystemSettings.DefaultProfileName cascade so newly-discovered files get
@@ -168,6 +185,19 @@ class MediaProbeBusinessService:
                     LoggingService.LogException(
                         f"Priority recompute after probe failed for MediaFileId={MediaFile.Id} -- probe data is saved",
                         PriorityEx, "MediaProbeBusinessService", "_ExecuteProbe"
+                    )
+
+                # ContentClassifier: auto-assign profile if AssignedProfile is still NULL
+                # after the cascade above. Operator overrides are respected (the service
+                # short-circuits on non-NULL AssignedProfile). Failure never blocks probe.
+                # See Features/ContentClassifier/content-classifier.feature.md.
+                try:
+                    from Features.ContentClassifier.ContentClassifierService import ContentClassifierService
+                    ContentClassifierService().ClassifyAndAssign(MediaFile.Id)
+                except Exception as ClassifierEx:
+                    LoggingService.LogException(
+                        f"ContentClassifier after probe failed for MediaFileId={MediaFile.Id} -- probe data is saved",
+                        ClassifierEx, "MediaProbeBusinessService", "_ExecuteProbe"
                     )
 
                 LoggingService.LogInfo(f"Probe succeeded: {FilePath} ({MediaFile.Resolution}, {MediaFile.Codec})", "MediaProbeBusinessService", "_ExecuteProbe")

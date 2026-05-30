@@ -16,6 +16,7 @@ requests
 
 # Video transcoding (FFmpeg integration)
 ffmpeg-python>=0.2.0
+scenedetect>=0.6.0
 
 # SSH connectivity (Jellyfin server)
 paramiko>=3.0.0

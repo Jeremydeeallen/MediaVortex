@@ -326,23 +326,48 @@ class CommandBuilder:
             UseNvidiaHardware = ProfileSettings.get('UseNvidiaHardware', 0)
             
             if UseNvidiaHardware == 1:
-                # NVENC quality knob set from the 2026-05-28 shootout
-                # (Scripts/Smoke/EncoderShootout.feature.md, nv_cq32_sink: -14% size
-                # vs SVT P6 CRF26 reference at -0.47 VMAF, ~1.6x faster). Profile
-                # contributes Preset + Quality; the rest are fixed to the winning
-                # config until a future test motivates per-profile variation.
                 Preset = ProfileSettings.get('Preset')
                 if Preset is not None and Preset != '' and Preset != 'None':
                     CommandParts.extend(['-preset', f'p{Preset}'])
+
+                RateControlMode = (ProfileSettings.get('RateControlMode') or 'cq').lower()
+                Tune = 'uhq' if RateControlMode == 'cq' else 'hq'
                 CommandParts.extend([
-                    '-tune', 'uhq',
+                    '-tune', Tune,
                     '-multipass', 'fullres',
                     '-rc', 'vbr',
-                    '-b:v', '0',
                 ])
-                Quality = ProfileSettings.get('Quality')
-                if Quality is not None and Quality != '' and Quality != 'None':
-                    CommandParts.extend(['-cq', str(Quality)])
+
+                if RateControlMode == 'vbr':
+                    SrcKbps = ProfileSettings.get('SourceVideoBitrateKbps')
+                    Pct = ProfileSettings.get('SourceBitratePercent')
+                    MinKbps = ProfileSettings.get('MinBitrateKbps')
+                    MaxKbps = ProfileSettings.get('MaxBitrateKbps')
+                    if not SrcKbps or float(SrcKbps) <= 0:
+                        raise ValueError(
+                            f"VBR profile cannot encode: source VideoBitrateKbps is missing or zero "
+                            f"(SrcKbps={SrcKbps}). See nvenc-rate-anchored.feature.md C8."
+                        )
+                    if not Pct or float(Pct) <= 0:
+                        raise ValueError(
+                            f"VBR profile missing SourceBitratePercent on ProfileThresholds (got {Pct})."
+                        )
+                    Calc = int(round(float(SrcKbps) * float(Pct) / 100.0))
+                    if MinKbps is not None:
+                        Calc = max(Calc, int(MinKbps))
+                    if MaxKbps is not None:
+                        Calc = min(Calc, int(MaxKbps))
+                    CommandParts.extend([
+                        '-b:v', f'{Calc}k',
+                        '-maxrate:v', f'{Calc * 2}k',
+                        '-bufsize:v', f'{Calc * 2}k',
+                    ])
+                else:
+                    CommandParts.extend(['-b:v', '0'])
+                    Quality = ProfileSettings.get('Quality')
+                    if Quality is not None and Quality != '' and Quality != 'None':
+                        CommandParts.extend(['-cq', str(Quality)])
+
                 CommandParts.extend([
                     '-spatial-aq', '1',
                     '-temporal-aq', '1',
@@ -351,6 +376,10 @@ class CommandBuilder:
                     '-bf', '7',
                     '-b_ref_mode', 'middle',
                 ])
+
+                Gop = ProfileSettings.get('Gop')
+                if Gop is not None and Gop != '' and Gop != 'None':
+                    CommandParts.extend(['-g', str(int(Gop))])
             else:
                 # Software encoding parameters
                 Quality = ProfileSettings.get('Quality')
