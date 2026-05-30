@@ -17,8 +17,8 @@ If you say `scope` at any point during execution, the executing agent stops and 
 ## Current State (UPDATE THIS AT EVERY CHECKPOINT)
 
 - **Last shipped:** P1 (Claim Authority) — 2026-05-29. Code commit `ffe1b84`; tracker commit `83c1cb9`; P1-finish gap-closure commit pending.
-- **In progress:** None. Awaiting CEO go on P2.
-- **Next action:** Start P2.A (decision authority inventory) on operator authorization.
+- **In progress:** None. Awaiting CEO direction on P2 vs P6 prioritization.
+- **Next action:** Pick between P2 (decision authority, prevents the next class of stale-cache bug) and **P6 (worker commands respected end-to-end, fixes the visible-today symptom of operator state changes not reaching in-flight work)**. P6 is the more operationally painful gap right now -- the partial scan-stop fix (commit 056a62b) closed one specific instance but the class of bug remains across transcode/VMAF/remux long-running ops.
 - **Conformance suite status:** 14/14 green (Transcode + Remux + QT claim paths). Extends in P2/P3/P4.
 - **Broader Contract suite status:** 40 passed, 1 xfailed (legitimate contract-vs-code dispute on NoSavings precedence -- filed below), 5 pre-existing TestTranscodeStart failures NOT introduced by P1 (filed below).
 
@@ -124,6 +124,33 @@ Original B+ raised to A-. Structural fix is solid; tests cover all three claim p
 - [ ] P4.D — Commit.
 
 **P4 DONE WHEN:** every vertical has its full assertion set; CI lint blocks regression.
+
+---
+
+## P6 — Worker Commands Respected End-to-End — STATUS: NOT STARTED
+
+**Why this exists:** P1-P5 fix the *new-work* side -- a worker with capability=FALSE or Status='Paused' won't claim new work, and mid-flight config reads see fresh DB values. They do NOT fix the *in-flight work* side. If a worker is mid-scan / mid-encode / mid-VMAF when the operator flips a flag, the running operation keeps churning until natural completion. Symptoms observed in production:
+
+- Operator flips `Workers.ScanEnabled=FALSE`; ScanJobs.Status flips to 'Stopped' in DB; the scan loop keeps emitting per-directory progress updates for several minutes because `_StopRequested` was never set (FileScanningBusinessService.StopScanning omission, partial fix 2026-05-30, but the *class* of bug needs systematic coverage).
+- Similar gap pattern hypothesized for transcode + VMAF + remux long-running operations: they may not check the stop signal at all safe boundaries, or the wiring from operator-flag-flip to the in-flight loop's signal may be broken.
+
+**Scope:** Every long-running worker operation (scan, transcode, VMAF, remux, file-replacement) checks for a coordinated stop signal at safe boundaries, and the stop signal is set within bounded time whenever the operator-driven DB state changes against the running operation. The DB is authoritative for both *whether to start* (P1) and *whether to keep going* (P6).
+
+- [ ] P6.A -- Inventory long-running operations:
+  - [ ] Every `def <Op>` whose runtime is > a few seconds (scan loop, transcode encode wait, VMAF wait, remux wait, file replacement, archive sweep, orphan cleanup).
+  - [ ] Per operation, identify: (a) what stop signal it checks (`self._StopRequested`, `subprocess.terminate`, etc.), (b) at what boundaries it checks (per-file, per-frame, per-iteration), (c) what propagates the stop signal (heartbeat, capability-change reconciler, direct method call from `_ApplyCapabilities`).
+- [ ] P6.B -- Coverage gap matrix: for each (operator command, running operation) pair, mark whether the propagation chain reaches the loop within a bounded time. Examples to test:
+  - Flip `Workers.ScanEnabled=FALSE` while a scan is running -> scan halts within N seconds.
+  - Flip `Workers.TranscodeEnabled=FALSE` while a transcode is encoding -> ffmpeg is sent SIGTERM and the job is requeued cleanly.
+  - Flip `Workers.QualityTestEnabled=FALSE` while VMAF is running -> libvmaf ffmpeg SIGTERMed; QualityTestingQueue row reset to Pending.
+  - Flip `Workers.RemuxEnabled=FALSE` mid-remux -> same.
+  - Flip `Workers.Status='Paused'` while ANY operation is running -> uniform stop across all of them (BUG-0004 capability-control-plane criterion 8 sketched this; verify it actually holds for long-running ops).
+- [ ] P6.C -- Per-gap fix: missing `_StopRequested` checks added at safe boundaries; missing wiring added from `_ApplyCapabilities` to operation-specific stop methods.
+- [ ] P6.D -- Conformance tests: `Tests/Contract/TestInFlightCancellation.py`. One assertion per (command, operation) pair that flips the flag mid-run and asserts the loop exits within N seconds. Real fixture: spawn a long-running op against a sentinel input, flip flag, assert exit before timeout.
+- [ ] P6.E -- Rule file: extend `.claude/rules/db-is-authority.md` (or new `in-flight-cancellation.md`) with the invariant: "Every long-running operation checks the DB-derived stop signal at safe boundaries. Operator state changes propagate to in-flight work within `CapabilityPollingIntervalSec` + the operation's own boundary check interval."
+- [ ] P6.F -- Docs-audit sweep.
+
+**P6 DONE WHEN:** every long-running operation honors operator commands within a bounded time, conformance tests prove it per operation, the rule prevents new long-running ops from shipping without a stop-check.
 
 ---
 
