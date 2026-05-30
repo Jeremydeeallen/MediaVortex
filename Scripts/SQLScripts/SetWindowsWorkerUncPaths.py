@@ -29,23 +29,10 @@ from Core.Database.DatabaseService import DatabaseService
 from Repositories.DatabaseManager import DatabaseManager
 
 
-# Single source of truth for UNC prefixes. The ONLY place in the repo where
-# these literal strings should live in code. Anything else that needs a UNC
-# must read it back from StorageRootResolutions.
-#
-# T: served via Samba on porky (the migrated TV data). M: and Z: served via
-# Synology's native SMB (data never migrated to porky). The Microsoft NFS
-# client is bypassed entirely on Windows -- BUG-0008 root cause.
-#
-# Synology auth: the worker host needs a cached credential for 10.0.0.61.
-# Apply once interactively, persists across reboots:
-#   cmdkey /add:10.0.0.61 /user:<user> /pass:<password>
-# Porky's SMB shares allow the local `mediavortex` user (already created
-# server-side; cmdkey on the worker for 10.0.0.43 caches that).
 UNC_PREFIXES = {
-    'T': '\\\\10.0.0.43\\TV\\',
-    'M': '\\\\10.0.0.61\\_video\\Adults\\Movies\\',
-    'Z': '\\\\10.0.0.61\\XXX\\',
+    'T': '\\\\10.0.0.43\\srv\\nfs-media-_tv\\',
+    'M': '\\\\10.0.0.43\\srv\\nfs-media-_movies\\',
+    'Z': '\\\\10.0.0.43\\srv\\nfs-media-_xxx\\',
 }
 
 

@@ -2,7 +2,7 @@
 
 ## What It Does
 
-Resolves [BUG-0008]. The Windows WorkerService translates DB-stored drive-letter paths (`T:\...`, `M:\...`, `Z:\...`) to UNC paths (`\\10.0.0.43\srv\nfs-media-_tv\...`, `\\10.0.0.61\volume1\_video\Adults\Movies\...`, `\\10.0.0.61\volume2\XXX\...`) at every point where the worker hands a path to ffmpeg, ffprobe, or any `CreateFile`-equivalent syscall. UNC paths bypass the per-logon-session drive-letter mapping that intermittently unbinds on Windows NFS (root cause documented in `deploy/BUG-0008-i9-nfs-einval.troubleshooting.md`).
+Resolves [BUG-0008]. The Windows WorkerService translates DB-stored drive-letter paths (`T:\...`, `M:\...`, `Z:\...`) to UNC paths pointing at porky's NFSv4 exports (`\\10.0.0.43\srv\nfs-media-_tv\...`, `\\10.0.0.43\srv\nfs-media-_movies\...`, `\\10.0.0.43\srv\nfs-media-_xxx\...`) at every point where the worker hands a path to ffmpeg, ffprobe, or any `CreateFile`-equivalent syscall. UNC paths bypass the per-logon-session drive-letter mapping that intermittently unbinds on Windows NFS (root cause documented in `deploy/BUG-0008-i9-nfs-einval.troubleshooting.md`). All three shares consolidated on porky 2026-05-30; the previous .61 Synology shares are retired.
 
 Linux workers are unaffected -- their translator path is unchanged.
 
@@ -64,11 +64,11 @@ There are TWO per-worker path tables, both involved:
 
 ### Behavior
 
-1. **No drive-letter paths reach the syscall on Windows.** When `platform.system().lower() == 'windows'` and SRR rows exist for the worker, every path the worker passes to `subprocess.run`/`Popen`, `os.path.exists`, `pathlib.Path`, or `open()` for a share-rooted file is a UNC string starting with `\\<host>\<share>\`, not a drive letter. Verifiable: a Process Monitor capture filtered to `Operation = CreateFile AND ProcessName = ffmpeg.exe` while the worker is running shows zero accesses whose `Path` starts with `T:\`, `M:\`, or `Z:\`. The same capture shows UNC paths in the form `\\10.0.0.43\srv\...` or `\\10.0.0.61\...` instead.
+1. **No drive-letter paths reach the syscall on Windows.** When `platform.system().lower() == 'windows'` and SRR rows exist for the worker, every path the worker passes to `subprocess.run`/`Popen`, `os.path.exists`, `pathlib.Path`, or `open()` for a share-rooted file is a UNC string starting with `\\<host>\<share>\`, not a drive letter. Verifiable: a Process Monitor capture filtered to `Operation = CreateFile AND ProcessName = ffmpeg.exe` while the worker is running shows zero accesses whose `Path` starts with `T:\`, `M:\`, or `Z:\`. The same capture shows UNC paths in the form `\\10.0.0.43\srv\...` or `\\10.0.0.43\srv\nfs-media-_...` instead.
 
 2. **Linux workers are unchanged.** A worker running on Linux (larry-worker-N, wakko-worker-N, dot-worker-N) continues to translate `T:\...` -> `/mnt/mediafiles/tv/...` (or whichever POSIX mount-point it was using) via the existing `ToLocalPath` path. No UNC strings appear in any Linux worker log or ffmpeg command line. Verifiable: `grep -E '\\\\\\\\[0-9]' /var/log/mediavortex-worker.log` on any Linux worker returns nothing.
 
-3. **No code constants for share UNCs.** A grep of the codebase for the literal strings `\\10.0.0.43\` and `\\10.0.0.61\` returns hits only in: (a) the `WorkerShareMappings` DB seed/migration, (b) `StartWorker.py`'s `NetworkDrives` list (the source-of-truth for I9 boot-time mount + env-var export), (c) test fixtures, (d) documentation (this doc, troubleshooting doc, flow doc). It returns NO hits in `Core/`, `Features/`, `Models/`, or anywhere else that decides what path to use at runtime. The runtime decision flows from `WorkerContext.ShareMappings` only.
+3. **No code constants for share UNCs.** A grep of the codebase for the literal strings `\\10.0.0.43\` and `\\10.0.0.43\srv\nfs-media-_` returns hits only in: (a) the `WorkerShareMappings` DB seed/migration, (b) `StartWorker.py`'s `NetworkDrives` list (the source-of-truth for I9 boot-time mount + env-var export), (c) test fixtures, (d) documentation (this doc, troubleshooting doc, flow doc). It returns NO hits in `Core/`, `Features/`, `Models/`, or anywhere else that decides what path to use at runtime. The runtime decision flows from `WorkerContext.ShareMappings` only.
 
 4. **[BUG-0008] criterion holds.** Across 100 consecutive `TranscodeAttempts` rows where `WorkerName='I9-2024'`, zero rows have `Success=false` with `ErrorMessage` matching `return code 4294967274` AND `TranscodeDurationSeconds=0`. This is the original BUG-0008 verification bar; this feature owns its closure.
 
