@@ -1670,41 +1670,54 @@ class QualityTestingBusinessService:
             return False
 
     def GetVideoDuration(self, JobDetails: dict) -> float:
-        """Get video duration in seconds from the transcoded file."""
         try:
             import subprocess
+            import socket
+            from Core.WorkerContext import WorkerContext
+            from Core.PathStorage import Resolve as PathResolve
 
-            transcoded_file = JobDetails.get('TranscodedFilePath', '')
-            if not transcoded_file or not os.path.exists(transcoded_file):
+            Ctx = WorkerContext.Current()
+            WorkerName = (Ctx.WorkerName if Ctx else None) or socket.gethostname()
+
+            local_path = None
+            attempt_id = JobDetails.get('TranscodeAttemptId') if JobDetails else None
+            if attempt_id:
+                try:
+                    Rows = self.DatabaseManager.DatabaseService.ExecuteQuery(
+                        "SELECT OutputStorageRootId, OutputRelativePath FROM TemporaryFilePaths WHERE TranscodeAttemptId = %s LIMIT 1",
+                        (attempt_id,),
+                    )
+                    if Rows and Rows[0].get('OutputStorageRootId') and Rows[0].get('OutputRelativePath'):
+                        local_path = PathResolve(Rows[0]['OutputStorageRootId'], Rows[0]['OutputRelativePath'], WorkerName)
+                except Exception:
+                    local_path = None
+            if not local_path:
+                local_path = JobDetails.get('TranscodedFilePath', '') if JobDetails else ''
+
+            if not local_path or not os.path.exists(local_path):
                 return 0.0
 
-            # Resolve FFprobe from WorkerContext (canonical -- same fix as
-            # the FFmpeg lookup at line 169 area).
-            from Core.WorkerContext import WorkerContext
-            Ctx = WorkerContext.Current()
             ffprobe_path = Ctx.FFprobePath if Ctx and Ctx.FFprobePath else None
             if not ffprobe_path or not os.path.exists(ffprobe_path):
                 return 0.0
 
-            # Use FFprobe to get video duration
             command = [
                 ffprobe_path,
                 "-v", "quiet",
                 "-show_entries", "format=duration",
                 "-of", "csv=p=0",
-                transcoded_file
+                local_path
             ]
 
             result = subprocess.run(command, capture_output=True, text=True, timeout=10)
 
             if result.returncode == 0 and result.stdout.strip():
-                duration = float(result.stdout.strip())
-                return duration
+                return float(result.stdout.strip())
 
             return 0.0
 
         except Exception as e:
-            LoggingService.LogException(f"Error getting video duration for {JobDetails.get('TranscodedFilePath', '')}", e, "QualityTestingBusinessService", "GetVideoDuration")
+            LoggingService.LogException(f"Error getting video duration for attempt {JobDetails.get('TranscodeAttemptId') if JobDetails else None}", e, "QualityTestingBusinessService", "GetVideoDuration")
             return 0.0
 
     def SkipQualityTest(self, TranscodeAttemptId: int) -> dict:
