@@ -1083,35 +1083,13 @@ class WorkerServiceApp:
             LoggingService.LogException("Error during shutdown", e, "WorkerService", "Shutdown")
 
 
-# Drain budget: long enough for a typical in-flight transcode to finish.
-# Bumped 2026-05-30 (P6) from 2s to 1800s so SIGTERM no longer kills mid-
-# encode work. Docker's stop_grace_period in the compose templates must be
-# >= this value or docker will SIGKILL the worker before drain completes.
-_SIGNAL_BUDGET_SECONDS = 1800.0  # 30 minutes
+_SIGNAL_BUDGET_SECONDS = 1800.0
 _PER_INTERVAL_CHECK_SEC = 5.0
 
 
 def SignalHandler(signum, frame):
-    """Handle shutdown signals with a GRACEFUL DRAIN -- no SIGKILL on subprocesses.
-
-    Contract (P6, .claude/programs/db-authority-program.md):
-      On SIGTERM/SIGINT, signal every long-running operation to stop at its
-      next safe boundary (via the existing `_StopAllCapabilities` path used
-      by capability flag flips). Wait for the operation threads to drain.
-      Then exit cleanly.
-
-    Why this matters: the prior behavior called `Proc.kill()` on every active
-    FFmpeg subprocess inline. Docker container restarts (deploy, compose
-    recreate) were silently killing in-flight transcodes and VMAFs at any
-    progress point, requiring operator recovery work afterward. The graceful
-    path lets in-flight work complete (typical encode = 1-5 min wall;
-    occasional long-form = 20-30 min).
-
-    Re-entry from a second signal during drain forces immediate exit. So if
-    the operator REALLY needs out, second Ctrl+C exits hard.
-    """
+    """Graceful drain on SIGTERM/SIGINT. See Features/ServiceControl/graceful-drain.feature.md."""
     if getattr(SignalHandler, '_in_progress', False):
-        # Operator sent a second signal while we were draining. Force exit.
         print("\nForcing exit (already draining)...")
         os._exit(1)
     SignalHandler._in_progress = True
@@ -1120,15 +1098,9 @@ def SignalHandler(signum, frame):
           f"(budget {_SIGNAL_BUDGET_SECONDS:.0f}s). Send another signal to force exit.")
 
     if not (hasattr(Main, 'app') and Main.app):
-        # No app context yet -- nothing to drain.
         os._exit(0)
     App = Main.app
 
-    # Step 1: signal every capability to stop at its next safe boundary.
-    # _StopAllCapabilities sets StopRequested synchronously on each service
-    # AND spawns daemon threads that do the actual join+cleanup (which can
-    # take minutes if an encode is in flight). We don't block here on those
-    # threads -- we wait below by polling for the services to clear.
     try:
         App._StopAllCapabilities()
         print("  drain signal sent to all capabilities")
@@ -1141,11 +1113,6 @@ def SignalHandler(signum, frame):
         except Exception:
             print(f"  EXCEPTION signalling drain (logger unavailable): {e}")
 
-    # Step 2: wait for capabilities to actually drain. Each long-running
-    # operation checks its StopRequested flag at safe boundaries and exits;
-    # the corresponding cleanup thread joins on the processing thread.
-    # We poll the App-level service handles -- they go None when their
-    # cleanup thread completes.
     import time as _time
     Start = _time.time()
     while _time.time() - Start < _SIGNAL_BUDGET_SECONDS:
@@ -1199,8 +1166,6 @@ def SignalHandler(signum, frame):
                 except Exception:
                     print(f"EXCEPTION (logger unavailable): closing DB pool: {e}")
 
-    # DB cleanup is fast (single UPDATE + pool close); give it a short budget
-    # independent of the (much longer) drain budget above.
     _CLEANUP_BUDGET_SECONDS = 5.0
     CleanupThread = threading.Thread(target=_DeferredCleanup, name="ShutdownCleanup", daemon=True)
     CleanupThread.start()

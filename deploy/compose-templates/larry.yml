@@ -3,11 +3,6 @@
 x-worker: &worker-base
   image: mediavortex-worker:latest
   restart: unless-stopped
-  # Graceful drain budget for SIGTERM. WorkerService.SignalHandler signals
-  # in-flight ops to stop at their next safe boundary and waits up to 30 min
-  # for them to drain. Docker must wait at least as long before sending
-  # SIGKILL, otherwise mid-encode work is lost. See P6 in
-  # .claude/programs/db-authority-program.md.
   stop_grace_period: 30m
   environment:
     PYTHONUNBUFFERED: "1"

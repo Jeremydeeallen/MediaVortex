@@ -46,9 +46,6 @@ LOCAL_DEV_PREFIX = "I9"
 POLL_INTERVAL_SEC = 5
 POLL_TIMEOUT_SEC = 300
 
-# Drain budget for in-flight worker operations. Must be >= the
-# WorkerService SignalHandler drain budget (currently 30 min) AND <= the
-# docker compose stop_grace_period set in deploy/compose-templates/*.yml.
 DRAIN_TIMEOUT_SEC = 1800
 DRAIN_POLL_INTERVAL_SEC = 10
 
@@ -94,22 +91,7 @@ def LiveWorkers(Db) -> list:
 
 
 def DrainWorkers(Db, WorkerNames: list) -> dict:
-    """Signal each worker to stop accepting new work and wait for in-flight
-    operations to drain. Returns a dict mapping WorkerName -> original Status
-    so the caller can restore after restart.
-
-    The drain signal is `Workers.Status='Paused'`. The worker's
-    `_CapabilityPollingLoop` observes the change within
-    `CapabilityPollingIntervalSec` (default 15s), then calls
-    `_StopAllCapabilities` which sets `StopRequested` on every running
-    operation. The operation loops exit at their next safe boundary
-    (per-file for scan, per-job for transcode/remux/VMAF). FFmpeg processes
-    that are mid-encode are NOT killed -- they complete naturally.
-
-    Returns the original Status per worker so the caller can restore it
-    after restart. If any worker doesn't drain within DRAIN_TIMEOUT_SEC,
-    returns whatever drained and logs which didn't.
-    """
+    """Drain workers before deploy. See Features/ServiceControl/graceful-drain.feature.md."""
     if not WorkerNames:
         return {}
 
@@ -129,10 +111,6 @@ def DrainWorkers(Db, WorkerNames: list) -> dict:
     Deadline = _time.time() + DRAIN_TIMEOUT_SEC
     StillBusy = list(WorkerNames)
     while _time.time() < Deadline and StillBusy:
-        # IsProcessing/ActiveJobsCount live on ServiceStatus, keyed by the
-        # ServiceName 'WorkerService' (one row per process). For per-worker
-        # drain confirmation we use Workers.LastHeartbeat freshness as a
-        # liveness proxy + ServiceStatus IsProcessing flag.
         BusyRows = Db.ExecuteQuery(
             "SELECT w.WorkerName "
             "FROM Workers w "
@@ -159,14 +137,12 @@ def DrainWorkers(Db, WorkerNames: list) -> dict:
 
 
 def RestoreWorkerStatus(Db, OriginalStatus: dict) -> None:
-    """Restore each worker's Status to its pre-drain value, but only if the
-    current Status is still 'Paused' (i.e. nobody else manually changed it
-    during the deploy window)."""
+    """Restore pre-drain Status. See Features/ServiceControl/graceful-drain.feature.md."""
     if not OriginalStatus:
         return
     for WorkerName, OrigStatus in OriginalStatus.items():
         if OrigStatus == 'Paused':
-            continue  # was already Paused; leave it
+            continue
         Db.ExecuteNonQuery(
             "UPDATE Workers SET Status = %s WHERE WorkerName = %s AND Status = 'Paused'",
             (OrigStatus, WorkerName),
@@ -325,13 +301,6 @@ def Main() -> int:
     WriteVersion(Sha)
     print(f"VERSION bumped -> {Sha[:8]}")
 
-    # Drain BEFORE restart so in-flight encodes / VMAFs / scans complete
-    # cleanly instead of being SIGKILLed by docker compose recreate. The
-    # docker stop_grace_period of 30m gives a second safety net for the
-    # SignalHandler-driven drain inside the container, but draining via
-    # the DB-status flip is the primary mechanism because it propagates
-    # uniformly across all targets and starts the clock before the deploy
-    # script begins the build step.
     AllTargets = list(LocalNames) + [W for V in HostGroups.values() for W in V]
     OriginalStatus = {}
     if AllTargets and not Args.no_drain:
@@ -359,9 +328,6 @@ def Main() -> int:
         Status = RestartLocalWorker()
         print(f"   [OK]   local I9: {Status}")
 
-    # Restore the pre-drain Status on each worker (drain set them to Paused
-    # so they wouldn't accept new work mid-deploy). Workers that were
-    # already Paused before drain stay Paused.
     if OriginalStatus:
         RestoreWorkerStatus(Db, OriginalStatus)
 

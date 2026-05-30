@@ -127,7 +127,15 @@ Original B+ raised to A-. Structural fix is solid; tests cover all three claim p
 
 ---
 
-## P6 — Worker Commands Respected End-to-End — STATUS: NOT STARTED
+## P6 — Worker Commands Respected End-to-End — STATUS: IN PROGRESS (Phase 1 complete)
+
+### Phase 1 complete (commit `d57bdb6`, 2026-05-30)
+
+- `WorkerService.Main.SignalHandler` rewritten: replaces `Proc.kill()` with `App._StopAllCapabilities()` graceful drain + 30-min wait-for-drain poll loop. Second signal forces immediate exit.
+- Compose templates (larry/dot/wakko) gain `stop_grace_period: 30m` so docker doesn't SIGKILL the container before drain completes.
+- `deploy/deploy-fleet.py` drains before deploy by default: flips `Workers.Status='Paused'`, polls ActiveJobs until empty per worker, then restarts containers, then restores pre-deploy Status. `--no-drain` flag for emergencies.
+- Net: `py deploy/deploy-fleet.py` is now safe to run while workers are mid-encode. No more lost VMAFs / transcodes from container recreation.
+
 
 **Why this exists:** P1-P5 fix the *new-work* side -- a worker with capability=FALSE or Status='Paused' won't claim new work, and mid-flight config reads see fresh DB values. They do NOT fix the *in-flight work* side. If a worker is mid-scan / mid-encode / mid-VMAF when the operator flips a flag, the running operation keeps churning until natural completion. Symptoms observed in production:
 
@@ -149,6 +157,7 @@ Original B+ raised to A-. Structural fix is solid; tests cover all three claim p
 - [ ] P6.D -- Conformance tests: `Tests/Contract/TestInFlightCancellation.py`. One assertion per (command, operation) pair that flips the flag mid-run and asserts the loop exits within N seconds. Real fixture: spawn a long-running op against a sentinel input, flip flag, assert exit before timeout.
 - [ ] P6.E -- Rule file: extend `.claude/rules/db-is-authority.md` (or new `in-flight-cancellation.md`) with the invariant: "Every long-running operation checks the DB-derived stop signal at safe boundaries. Operator state changes propagate to in-flight work within `CapabilityPollingIntervalSec` + the operation's own boundary check interval."
 - [ ] P6.F -- Docs-audit sweep.
+- [ ] P6.G -- Operator-display dynamic naming: stop showing platform-specific path prefixes (`T:\\`, `Z:\\`) in scan dropdowns, file paths in tables, error messages. Use `StorageRoots.Name` (friendly name like "TV" / "Movies") OR the worker's local mount shape OR an operator-readable "share" label. Out-of-scope for the in-flight cancellation core but rolled into P6 because both are about "operator-facing UX of the worker layer." Filed 2026-05-30 during P6 Phase 1.
 
 **P6 DONE WHEN:** every long-running operation honors operator commands within a bounded time, conformance tests prove it per operation, the rule prevents new long-running ops from shipping without a stop-check.
 
