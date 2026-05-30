@@ -136,6 +136,11 @@ Original B+ raised to A-. Structural fix is solid; tests cover all three claim p
 - `deploy/deploy-fleet.py` drains before deploy by default: flips `Workers.Status='Paused'`, polls ActiveJobs until empty per worker, then restarts containers, then restores pre-deploy Status. `--no-drain` flag for emergencies.
 - Net: `py deploy/deploy-fleet.py` is now safe to run while workers are mid-encode. No more lost VMAFs / transcodes from container recreation.
 
+### Phase 2 complete (2026-05-30)
+
+- Inventory: transcode + remux + VMAF queue loops all use `while not self.StopRequested:` at the top; scan walker has 4+ `if self._StopRequested:` checkpoints across the walk. OrphanCleanup + StuckJobDetection are single-pass (no loop guard needed). Pattern is correct; gap was zero conformance coverage.
+- `Tests/Contract/TestInFlightCancellation.py` added. 5 assertions: transcode / remux / VMAF loops exit within 10s of `StopRequested=True`; `StopScanning()` flips `_StopRequested` synchronously; SignalHandler invokes `_StopAllCapabilities` (graceful) and not `Proc.kill` (immediate). All 5 green.
+
 
 **Why this exists:** P1-P5 fix the *new-work* side -- a worker with capability=FALSE or Status='Paused' won't claim new work, and mid-flight config reads see fresh DB values. They do NOT fix the *in-flight work* side. If a worker is mid-scan / mid-encode / mid-VMAF when the operator flips a flag, the running operation keeps churning until natural completion. Symptoms observed in production:
 
