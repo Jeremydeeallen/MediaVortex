@@ -227,8 +227,37 @@ class FileReplacementBusinessService:
                     MfLookupEx, "FileReplacementBusinessService", "ProcessFileReplacement",
                 )
 
-            TranscodedPath = LocalOutputPathStr
-            LocalTranscodedPath = self._ToLocalPath(TranscodedPath) if TranscodedPath else None
+            # Shape-aware path resolution: prefer canonical (StorageRootId,
+            # RelativePath) + PathStorage.Resolve(WorkerName) over the legacy
+            # `LocalOutputPath` text column. The legacy column was written by
+            # different code paths in different shapes (drive-letter, UNC, raw
+            # POSIX) and is not safe to use for I/O across workers with
+            # different mounts (I9 SMB T:\\, Larry NFS /mnt/media_tv/). The
+            # canonical path lives in TFP's StorageRootId+RelativePath columns;
+            # resolving them per-worker is the durable fix. Falls back to the
+            # legacy column only when canonical fields are missing (very old
+            # TFP rows from before BUG-0014's path-storage migration).
+            from Core.PathStorage import Resolve as PathResolve, PathStorageError
+            TranscodedPath = CanonicalNewPath  # canonical T:\\ shape for display + downstream archive call
+            if OutputSrId is not None and OutputRel is not None:
+                try:
+                    LocalTranscodedPath = PathResolve(
+                        OutputSrId, OutputRel, self.WorkerName,
+                        self.DatabaseManager.DatabaseService,
+                    )
+                except PathStorageError as ResolveEx:
+                    LoggingService.LogError(
+                        f"Cannot resolve output path for worker {self.WorkerName!r}: {ResolveEx}",
+                        "FileReplacementBusinessService", "ProcessFileReplacement",
+                    )
+                    return {
+                        'Success': False,
+                        'ErrorMessage': f"No StorageRootResolutions row for (StorageRootId={OutputSrId}, Worker={self.WorkerName}); cannot translate output path."
+                    }
+            else:
+                # Pre-BUG-0014 TFP row -- fall back to legacy text column.
+                TranscodedPath = LocalOutputPathStr
+                LocalTranscodedPath = self._ToLocalPath(TranscodedPath) if TranscodedPath else None
 
             if not LocalTranscodedPath or not self.FileManager.ValidateFileExists(LocalTranscodedPath):
                 return {
