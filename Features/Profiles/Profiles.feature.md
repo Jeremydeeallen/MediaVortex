@@ -15,6 +15,8 @@ Defines transcode encoding profiles with per-resolution thresholds. Each profile
 7. Profile changes do not retroactively affect already-queued or already-transcoded files.
 8. There is exactly ONE editor for the Profile + ProfileThresholds conceptual unit: the cogs modal (`ShowProfileKnobs`). Verifiable: `grep -n 'id="ProfileManagementModal"' Templates/Settings.html` returns 0 matches.
 
+9. **Source-resolution bucketing is letterbox-safe.** `EncoderKnobRepository._NormalizeResolution` buckets `WIDTHxHEIGHT` pixel strings by long-edge (`max(W, H)`), not height alone, so wide-aspect cinematic crops (1920x802 Bluray, 3840x1600 4K letterbox) bucket to the tier their canvas implies (1080p, 2160p) rather than to the tier their letterboxed height implies (720p, 1080p). Verifiable: a `MediaFiles` row with `Resolution='1920x802'` assigned a profile whose 1080p `TranscodeDownTo='720p'` produces a job whose `FfpmpegCommand` contains `-vf "scale=w=1280:h=-2"`. Negation: a row with `Resolution='1920x802'` no longer resolves to the 720p threshold row's "No downscaling" default.
+
 ## Status
 
 COMPLETE
