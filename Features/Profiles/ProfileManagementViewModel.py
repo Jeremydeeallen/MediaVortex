@@ -472,6 +472,7 @@ class ProfileManagementViewModel:
                     'FallbackVideoBitrateKbps': threshold.FallbackVideoBitrateKbps,
                     'FallbackAudioBitrateKbps': threshold.FallbackAudioBitrateKbps,
                     'TranscodeDownTo': threshold.TranscodeDownTo,
+                    'ContainerType': threshold.ContainerType,
                     'Quality': threshold.Quality,
                     'RcLookahead': ExtraByThresholdId.get(threshold.Id, {}).get('RcLookahead'),
                     'BFrames': ExtraByThresholdId.get(threshold.Id, {}).get('BFrames'),

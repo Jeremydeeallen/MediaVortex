@@ -6,22 +6,22 @@ from Core.Logging.LoggingService import LoggingService
 from datetime import datetime
 
 
-# directive: nvenc-rate-anchored-remediation
+# directive: unify-profile-editor
 class ProfileController:
     """API controller for profile management endpoints."""
 
-    # directive: nvenc-rate-anchored-remediation
+    # directive: unify-profile-editor
     def __init__(self, view_model: ProfileManagementViewModel = None):
         self.ViewModel = view_model or ProfileManagementViewModel()
         self.Blueprint = Blueprint('profiles', __name__, url_prefix='/api')
         self._register_routes()
 
-    # directive: nvenc-rate-anchored-remediation
+    # directive: unify-profile-editor
     def _register_routes(self):
         """Register all profile-related routes."""
 
         @self.Blueprint.route('/profiles', methods=['GET'])
-        # directive: nvenc-rate-anchored-remediation
+        # directive: unify-profile-editor
         def get_all_profiles():
             """Get all profiles."""
             try:
@@ -45,7 +45,7 @@ class ProfileController:
                 }), 500
 
         @self.Blueprint.route('/profiles/<int:profile_id>', methods=['GET'])
-        # directive: nvenc-rate-anchored-remediation
+        # directive: unify-profile-editor
         def get_profile(profile_id):
             """Get a specific profile with its thresholds."""
             try:
@@ -69,7 +69,7 @@ class ProfileController:
                 }), 500
 
         @self.Blueprint.route('/profiles', methods=['POST'])
-        # directive: nvenc-rate-anchored-remediation
+        # directive: unify-profile-editor
         def create_profile():
             """Create a new profile with thresholds."""
             try:
@@ -122,7 +122,7 @@ class ProfileController:
                 }), 500
 
         @self.Blueprint.route('/profiles/<int:profile_id>', methods=['PUT'])
-        # directive: nvenc-rate-anchored-remediation
+        # directive: unify-profile-editor
         def UpdateProfile(profile_id):
             """Update an existing profile with thresholds."""
             try:
@@ -175,16 +175,28 @@ class ProfileController:
                 }), 500
 
         @self.Blueprint.route('/profiles/<int:profile_id>/knobs', methods=['PATCH'])
-        # directive: nvenc-rate-anchored-remediation
+        # directive: unify-profile-editor
         def patch_profile_knobs(profile_id):
             """Update lifted knob columns on Profiles + ProfileThresholds. Column names whitelisted."""
             try:
                 Payload = request.get_json() or {}
-                PROFILE_COLS = {'Tune', 'Multipass', 'PixelFormat', 'AudioCodec', 'AudioBitrateKbps',
-                                'AudioChannels', 'AudioFilter', 'Container', 'FastStart', 'RateControlMode'}
-                THRESHOLD_COLS = {'RcLookahead', 'BFrames', 'BRefMode', 'ScaleHeight', 'PreserveAspect',
-                                  'MaxBitrateMultiplier', 'SourceBitratePercent', 'MinBitrateKbps',
-                                  'MaxBitrateKbps', 'Gop', 'Quality', 'TranscodeDownTo'}
+                PROFILE_COLS = {
+                    'ProfileName', 'Description',
+                    'Codec', 'Preset', 'FilmGrain',
+                    'YadifMode', 'YadifParity', 'YadifDeint', 'UseNvidiaHardware',
+                    'Tune', 'Multipass', 'PixelFormat',
+                    'AudioCodec', 'AudioBitrateKbps', 'AudioChannels', 'AudioFilter',
+                    'Container', 'FastStart', 'RateControlMode', 'AqStrength',
+                }
+                THRESHOLD_COLS = {
+                    'Resolution', 'TranscodeDownTo', 'Quality', 'ContainerType',
+                    'Under30MinMB', 'Under65MinMB', 'Over65MinMB',
+                    'VideoBitrateKbps', 'AudioBitrateKbps',
+                    'FallbackVideoBitrateKbps', 'FallbackAudioBitrateKbps',
+                    'RcLookahead', 'BFrames', 'BRefMode',
+                    'ScaleHeight', 'PreserveAspect', 'MaxBitrateMultiplier',
+                    'SourceBitratePercent', 'MinBitrateKbps', 'MaxBitrateKbps', 'Gop',
+                }
                 from Core.Database.DatabaseService import DatabaseService
                 Db = DatabaseService()
 
@@ -221,7 +233,7 @@ class ProfileController:
                 return jsonify({'success': False, 'error': str(e)}), 500
 
         @self.Blueprint.route('/profiles/<int:profile_id>', methods=['DELETE'])
-        # directive: nvenc-rate-anchored-remediation
+        # directive: unify-profile-editor
         def delete_profile(profile_id):
             """Delete a profile."""
             try:
@@ -244,7 +256,7 @@ class ProfileController:
                 }), 500
 
         @self.Blueprint.route('/profiles/reorder', methods=['POST'])
-        # directive: nvenc-rate-anchored-remediation
+        # directive: unify-profile-editor
         def reorder_profiles():
             """Update the display order of profiles."""
             try:
@@ -265,7 +277,7 @@ class ProfileController:
                 return jsonify({'success': False, 'error': str(e)}), 500
 
         @self.Blueprint.route('/profiles/<int:profile_id>/thresholds', methods=['POST'])
-        # directive: nvenc-rate-anchored-remediation
+        # directive: unify-profile-editor
         def add_threshold(profile_id):
             """Add a threshold to a profile."""
             try:
@@ -319,7 +331,7 @@ class ProfileController:
                 }), 500
 
         @self.Blueprint.route('/profiles/<int:profile_id>/thresholds/<int:threshold_id>', methods=['PUT'])
-        # directive: nvenc-rate-anchored-remediation
+        # directive: unify-profile-editor
         def update_threshold(profile_id, threshold_id):
             """Update a threshold."""
             try:
@@ -364,7 +376,7 @@ class ProfileController:
                 }), 500
 
         @self.Blueprint.route('/profiles/<int:profile_id>/thresholds/<int:threshold_id>', methods=['DELETE'])
-        # directive: nvenc-rate-anchored-remediation
+        # directive: unify-profile-editor
         def delete_threshold(profile_id, threshold_id):
             """Delete a threshold."""
             try:
@@ -387,7 +399,7 @@ class ProfileController:
                 }), 500
 
         @self.Blueprint.route('/profiles/assign-to-root-folder', methods=['POST'])
-        # directive: nvenc-rate-anchored-remediation
+        # directive: unify-profile-editor
         def assign_profile_to_root_folder():
             """Assign a profile to all media files in a specific root folder."""
             try:

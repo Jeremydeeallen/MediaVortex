@@ -2,6 +2,19 @@
 
 ## Open
 
+### [BUG-0023 - RESOLVED 2026-05-31] Legacy ProfileManagementModal silently corrupted NVENC profiles' Codec column
+**Date:** 2026-05-31 | **Area:** ui / profiles | **Closed by:** `directives/closed/2026-05-31-unify-profile-editor.md`
+
+**The footgun:** Opening an NVENC profile (Codec='av1_nvenc') in the legacy `ProfileManagementModal` Edit dialog silently coerced the Codec dropdown to `libsvtav1`. The dropdown's `<select>` options were `libsvtav1 / libx265 / libx264 / libvpx-vp9` -- no `av1_nvenc` option existed -- so `$('#ProfileCodec').val('av1_nvenc')` silently failed and the dropdown defaulted to the first available option (`libsvtav1`). The operator saw "AV1 (libsvtav1)" in the dropdown without realizing it was wrong. On Save, the PUT `/api/profiles/<id>` endpoint posted `Codec='libsvtav1'`, overwriting the DB column. The NVENC profile then routed to `libsvtav1` encoding instead of NVENC -- breaking the queue's worker-capability filter (`Workers.nvenccapable`) and the CommandBuilder NVENC branch.
+
+**Caught:** during `unify-profile-editor` close-out discussion (operator asked "is the NVENC codec set in the DB but just not exposed in the GUI?"). The legacy modal's Codec dropdown HTML (`Templates/Settings.html:560-565` before retirement) had only `libsvtav1` as the enabled option, with three other codecs marked `disabled` as "Not Implemented Yet" placeholders -- but `av1_nvenc` was never in the list at all even after the NVENC adoption shipped.
+
+**Resolution:** Legacy `ProfileManagementModal` removed entirely; the cogs/knob modal is now the canonical Profile + ProfileThresholds editor. Codec dropdown in the unified editor includes `av1_nvenc` + `libsvtav1`. PATCH `/api/profiles/<id>/knobs` allowlists every editable column. Verified: opening `NVENC AV1 P7 CANARY VBR -720p` in the new editor shows Codec=`av1_nvenc` correctly; saving any unrelated field leaves Codec='av1_nvenc' unchanged.
+
+**Historical data:** if any NVENC profile in the wild had its Codec silently overwritten to `libsvtav1` before this fix, audit via `SELECT ProfileName, Codec, UseNvidiaHardware FROM Profiles WHERE UseNvidiaHardware = 1 AND Codec != 'av1_nvenc';` -- any rows returned are corruption survivors that need manual `UPDATE Profiles SET Codec='av1_nvenc'`.
+
+---
+
 ### [BUG-0022 - RESOLVED 2026-05-29] VMAF not working properly; transcoding using NVIDIA (NVENC) enhancements
 **Date:** 2026-05-28 | **Area:** quality-testing / nvenc-evaluation
 

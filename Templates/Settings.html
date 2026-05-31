@@ -164,8 +164,7 @@
             <div id="ProfileManagementSection" class="collapse">
                 <div class="settings-block">
                     <div class="d-flex justify-content-between align-items-center mb-2">
-                        <small class="text-muted">Each profile defines codec, preset, film grain, and per-resolution bitrate/CRF targets.</small>
-                        <button class="btn btn-sm btn-primary" onclick="ShowCreateProfileModal()"><i class="fas fa-plus me-1"></i> New profile</button>
+                        <small class="text-muted">Each profile defines codec, preset, film grain, and per-resolution bitrate/CRF targets. Edit via the pencil button on each card; profile creation is currently SQL-only (a future directive ships create-in-modal).</small>
                     </div>
                     <div id="ProfilesList"></div>
                 </div>
@@ -516,417 +515,6 @@
     </div>
 </div>
 
-<!-- Profile Management Modal -->
-<div class="modal fade" id="ProfileManagementModal" tabindex="-1">
-    <div class="modal-dialog modal-xl">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title">Profile Management</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-            </div>
-            <div class="modal-body">
-                <form id="ProfileManagementForm">
-                    <input type="hidden" id="ProfileId">
-                    
-                    <!-- Profile Details -->
-                    <div class="row mb-4">
-                        <div class="col-md-6">
-                            <div class="mb-3">
-                                <label for="ProfileName" class="form-label">Profile Name</label>
-                                <input type="text" class="form-control" id="ProfileName" required>
-                                <div class="form-text" id="ProfileNote"></div>
-                            </div>
-                        </div>
-                        <div class="col-md-6">
-                            <div class="mb-3">
-                                <label for="ProfileDescription" class="form-label">Description</label>
-                                <input type="text" class="form-control" id="ProfileDescription">
-                                <div class="form-text">Description of the profile</div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Profile-Level FFmpeg Settings -->
-                    <div class="card mb-4">
-                        <div class="card-header">
-                            <h6 class="mb-0">
-                                <i class="fas fa-cog"></i> FFmpeg Settings (Apply to All Resolutions)
-                            </h6>
-                        </div>
-                        <div class="card-body">
-                            <div class="row g-3">
-                                <div class="col-md-3">
-                                    <label for="ProfileCodec" class="form-label">Video Codec</label>
-                                    <select class="form-select" id="ProfileCodec">
-                                        <option value="libsvtav1">AV1 (libsvtav1)</option>
-                                        <option value="libx265" disabled>H.265 (libx265) - Not Implemented Yet</option>
-                                        <option value="libx264" disabled>H.264 (libx264) - Not Implemented Yet</option>
-                                        <option value="libvpx-vp9" disabled>VP9 (libvpx-vp9) - Not Implemented Yet</option>
-                                    </select>
-                                    <div class="form-text">Video encoding codec</div>
-                                </div>
-                                <div class="col-md-3">
-                                    <label for="ProfilePreset" class="form-label">Preset</label>
-                                    <select class="form-select" id="ProfilePreset">
-                                        <option value="0">0 - Research (Extremely Slow)</option>
-                                        <option value="1">1 - Very High Quality</option>
-                                        <option value="2">2 - High Quality</option>
-                                        <option value="3">3 - Quality Focus</option>
-                                        <option value="4">4 - Quality/Speed Balance</option>
-                                        <option value="5">5 - Balanced</option>
-                                        <option value="6" selected>6 - Speed/Quality Balance (Default)</option>
-                                        <option value="7">7 - Speed Focus</option>
-                                        <option value="8">8 - Fast</option>
-                                        <option value="9">9 - Very Fast</option>
-                                        <option value="10">10 - Ultra Fast</option>
-                                        <option value="11">11 - Fastest Usable</option>
-                                        <option value="12">12 - Real-Time</option>
-                                        <option value="13">13 - Fastest (Lowest Quality)</option>
-                                    </select>
-                                    <div class="form-text">SVT-AV1 preset (0=best quality/slowest, 13=fastest/lowest quality). Preset 4-6 recommended for most content.</div>
-                                </div>
-                                <div class="col-md-3">
-                                    <label for="ProfileFilmGrain" class="form-label">Film Grain</label>
-                                    <input type="number" class="form-control" id="ProfileFilmGrain" value="10" min="0" max="50">
-                                    <div class="form-text">Film grain synthesis (0=off/clean, 5-10=light grain, 15-25=moderate, 30-50=heavy). Higher values improve compression but add synthetic grain.</div>
-                                </div>
-                                <div class="col-md-3">
-                                    <label for="ProfileYadifMode" class="form-label">Deinterlacing</label>
-                                    <select class="form-select" id="ProfileYadifMode">
-                                        <option value="0">Off</option>
-                                        <option value="1" selected>On (Default)</option>
-                                        <option value="2">Spatial</option>
-                                        <option value="3">Temporal</option>
-                                    </select>
-                                    <div class="form-text">Deinterlacing mode</div>
-                                </div>
-                            </div>
-                            <div class="row g-3 mt-2">
-                                <div class="col-md-4">
-                                    <label for="ProfileYadifParity" class="form-label">Deinterlacing Parity</label>
-                                    <select class="form-select" id="ProfileYadifParity">
-                                        <option value="0">Auto</option>
-                                        <option value="1" selected>Top Field First</option>
-                                        <option value="-1">Bottom Field First</option>
-                                    </select>
-                                    <div class="form-text">Field order for deinterlacing</div>
-                                </div>
-                                <div class="col-md-4">
-                                    <label for="ProfileYadifDeint" class="form-label">Deinterlacing Type</label>
-                                    <select class="form-select" id="ProfileYadifDeint">
-                                        <option value="0">All Frames</option>
-                                        <option value="1" selected>Interlaced Only</option>
-                                    </select>
-                                    <div class="form-text">Which frames to deinterlace</div>
-                                </div>
-                                <div class="col-md-4">
-                                    <div class="form-check mt-4">
-                                        <input class="form-check-input" type="checkbox" id="ProfileUseNvidiaHardware">
-                                        <label class="form-check-label" for="ProfileUseNvidiaHardware">
-                                            Use NVIDIA Hardware Acceleration
-                                        </label>
-                                        <div class="form-text">Requires RTX 40 Series GPU</div>
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="row g-3 mt-2">
-                                <div class="col-md-3">
-                                    <label for="ProfileTranscodeDownTo" class="form-label">Transcode Down To</label>
-                                    <select class="form-select" id="ProfileTranscodeDownTo" onchange="ApplyTranscodeDownTo()">
-                                        <option value="No downscaling">No downscaling</option>
-                                        <option value="720p">720p</option>
-                                        <option value="480p">480p</option>
-                                        <option value="360p">360p</option>
-                                    </select>
-                                    <div class="form-text">Sets all resolution thresholds to this target</div>
-                                </div>
-                                <div class="col-md-9 d-flex align-items-end">
-                                    <small class="text-muted">
-                                        <i class="fas fa-info-circle"></i> These settings apply to all resolution thresholds below.
-                                    </small>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Profile Thresholds -->
-                    <h6 class="mb-3">Profile Thresholds</h6>
-                    
-                    <!-- 480p Settings -->
-                    <div class="card mb-2">
-                        <div class="card-header py-2">
-                            <h6 class="mb-0">480p Settings</h6>
-                        </div>
-                        <div class="card-body py-2">
-                            <div class="row g-2">
-                                <div class="col-md-2">
-                                    <label for="VideoBitrate480p" class="form-label small">Video Bitrate (kbps)</label>
-                                    <input type="number" class="form-control form-control-sm" id="VideoBitrate480p" value="400">
-                                </div>
-                                <div class="col-md-2">
-                                    <label for="FallbackVideo480p" class="form-label small">Fallback Video (kbps)</label>
-                                    <input type="number" class="form-control form-control-sm" id="FallbackVideo480p" value="350">
-                                </div>
-                                <div class="col-md-2">
-                                    <label for="AudioBitrate480p" class="form-label small">Audio Bitrate (kbps)</label>
-                                    <input type="number" class="form-control form-control-sm" id="AudioBitrate480p" value="80">
-                                </div>
-                                <div class="col-md-2">
-                                    <label for="FallbackAudio480p" class="form-label small">Fallback Audio (kbps)</label>
-                                    <input type="number" class="form-control form-control-sm" id="FallbackAudio480p" value="80">
-                                </div>
-                                <div class="col-md-2">
-                                    <label for="Quality480p" class="form-label small">Quality (CRF)</label>
-                                    <input type="number" class="form-control form-control-sm" id="Quality480p" placeholder="Empty for bitrate" min="0" max="51">
-                                </div>
-                                <div class="col-md-2">
-                                    <div class="mt-4">
-                                        <small class="text-muted">Codec set at profile level</small>
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="row g-2 mt-1">
-                                <div class="col-md-3">
-                                    <label for="Under30Min480p" class="form-label small">Under 30 Min (MB)</label>
-                                    <input type="number" class="form-control form-control-sm" id="Under30Min480p" value="200">
-                                </div>
-                                <div class="col-md-3">
-                                    <label for="Under65Min480p" class="form-label small">Under 65 Min (MB)</label>
-                                    <input type="number" class="form-control form-control-sm" id="Under65Min480p" value="300">
-                                </div>
-                                <div class="col-md-3">
-                                    <label for="Over65Min480p" class="form-label small">Over 65 Min (MB)</label>
-                                    <input type="number" class="form-control form-control-sm" id="Over65Min480p" value="700">
-                                </div>
-                                <div class="col-md-3">
-                                    <label for="TranscodeDownTo480p" class="form-label small">Transcode Down To</label>
-                                    <select class="form-select form-select-sm" id="TranscodeDownTo480p">
-                                        <option value="No downscaling">No downscaling</option>
-                                        <option value="360p">360p</option>
-                                    </select>
-                                </div>
-                            </div>
-                            <div class="row g-2 mt-1">
-                                <div class="col-md-12">
-                                    <small class="text-muted">
-                                        <i class="fas fa-info-circle"></i> Grain processing and source file handling are controlled at the profile level above.
-                                    </small>
-                                </div>
-                            </div>
-                            <small class="text-muted">Video bitrate sets the maximum bitrate limit when using CRF</small>
-                        </div>
-                    </div>
-
-                    <!-- 720p Settings -->
-                    <div class="card mb-2">
-                        <div class="card-header py-2">
-                            <h6 class="mb-0">720p Settings</h6>
-                        </div>
-                        <div class="card-body py-2">
-                            <div class="row g-2">
-                                <div class="col-md-2">
-                                    <label for="VideoBitrate720p" class="form-label small">Video Bitrate (kbps)</label>
-                                    <input type="number" class="form-control form-control-sm" id="VideoBitrate720p" value="450">
-                                </div>
-                                <div class="col-md-2">
-                                    <label for="FallbackVideo720p" class="form-label small">Fallback Video (kbps)</label>
-                                    <input type="number" class="form-control form-control-sm" id="FallbackVideo720p" value="400">
-                                </div>
-                                <div class="col-md-2">
-                                    <label for="AudioBitrate720p" class="form-label small">Audio Bitrate (kbps)</label>
-                                    <input type="number" class="form-control form-control-sm" id="AudioBitrate720p" value="70">
-                                </div>
-                                <div class="col-md-2">
-                                    <label for="FallbackAudio720p" class="form-label small">Fallback Audio (kbps)</label>
-                                    <input type="number" class="form-control form-control-sm" id="FallbackAudio720p" value="70">
-                                </div>
-                                <div class="col-md-2">
-                                    <label for="Quality720p" class="form-label small">Quality (CRF)</label>
-                                    <input type="number" class="form-control form-control-sm" id="Quality720p" placeholder="Empty for bitrate" min="0" max="51">
-                                </div>
-                                <div class="col-md-2">
-                                    <div class="mt-4">
-                                        <small class="text-muted">Codec set at profile level</small>
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="row g-2 mt-1">
-                                <div class="col-md-3">
-                                    <label for="Under30Min720p" class="form-label small">Under 30 Min (MB)</label>
-                                    <input type="number" class="form-control form-control-sm" id="Under30Min720p" value="200">
-                                </div>
-                                <div class="col-md-3">
-                                    <label for="Under65Min720p" class="form-label small">Under 65 Min (MB)</label>
-                                    <input type="number" class="form-control form-control-sm" id="Under65Min720p" value="300">
-                                </div>
-                                <div class="col-md-3">
-                                    <label for="Over65Min720p" class="form-label small">Over 65 Min (MB)</label>
-                                    <input type="number" class="form-control form-control-sm" id="Over65Min720p" value="800">
-                                </div>
-                                <div class="col-md-3">
-                                    <label for="TranscodeDownTo720p" class="form-label small">Transcode Down To</label>
-                                    <select class="form-select form-select-sm" id="TranscodeDownTo720p">
-                                        <option value="480p">480p</option>
-                                        <option value="360p">360p</option>
-                                        <option value="No downscaling">No downscaling</option>
-                                    </select>
-                                </div>
-                            </div>
-                            <div class="row g-2 mt-1">
-                                <div class="col-md-12">
-                                    <small class="text-muted">
-                                        <i class="fas fa-info-circle"></i> Grain processing and source file handling are controlled at the profile level above.
-                                    </small>
-                                </div>
-                            </div>
-                            <small class="text-muted">Video bitrate sets the maximum bitrate limit when using CRF</small>
-                        </div>
-                    </div>
-
-                    <!-- 1080p Settings -->
-                    <div class="card mb-2">
-                        <div class="card-header py-2">
-                            <h6 class="mb-0">1080p Settings</h6>
-                        </div>
-                        <div class="card-body py-2">
-                            <div class="row g-2">
-                                <div class="col-md-2">
-                                    <label for="VideoBitrate1080p" class="form-label small">Video Bitrate (kbps)</label>
-                                    <input type="number" class="form-control form-control-sm" id="VideoBitrate1080p" value="500">
-                                </div>
-                                <div class="col-md-2">
-                                    <label for="FallbackVideo1080p" class="form-label small">Fallback Video (kbps)</label>
-                                    <input type="number" class="form-control form-control-sm" id="FallbackVideo1080p" value="450">
-                                </div>
-                                <div class="col-md-2">
-                                    <label for="AudioBitrate1080p" class="form-label small">Audio Bitrate (kbps)</label>
-                                    <input type="number" class="form-control form-control-sm" id="AudioBitrate1080p" value="80">
-                                </div>
-                                <div class="col-md-2">
-                                    <label for="FallbackAudio1080p" class="form-label small">Fallback Audio (kbps)</label>
-                                    <input type="number" class="form-control form-control-sm" id="FallbackAudio1080p" value="80">
-                                </div>
-                                <div class="col-md-2">
-                                    <label for="Quality1080p" class="form-label small">Quality (CRF)</label>
-                                    <input type="number" class="form-control form-control-sm" id="Quality1080p" placeholder="Empty for bitrate" min="0" max="51">
-                                </div>
-                                <div class="col-md-2">
-                                    <div class="mt-4">
-                                        <small class="text-muted">Codec set at profile level</small>
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="row g-2 mt-1">
-                                <div class="col-md-3">
-                                    <label for="Under30Min1080p" class="form-label small">Under 30 Min (MB)</label>
-                                    <input type="number" class="form-control form-control-sm" id="Under30Min1080p" value="200">
-                                </div>
-                                <div class="col-md-3">
-                                    <label for="Under65Min1080p" class="form-label small">Under 65 Min (MB)</label>
-                                    <input type="number" class="form-control form-control-sm" id="Under65Min1080p" value="300">
-                                </div>
-                                <div class="col-md-3">
-                                    <label for="Over65Min1080p" class="form-label small">Over 65 Min (MB)</label>
-                                    <input type="number" class="form-control form-control-sm" id="Over65Min1080p" value="800">
-                                </div>
-                                <div class="col-md-3">
-                                    <label for="TranscodeDownTo1080p" class="form-label small">Transcode Down To</label>
-                                    <select class="form-select form-select-sm" id="TranscodeDownTo1080p">
-                                        <option value="480p">480p</option>
-                                        <option value="720p">720p</option>
-                                        <option value="360p">360p</option>
-                                        <option value="No downscaling">No downscaling</option>
-                                    </select>
-                                </div>
-                            </div>
-                            <div class="row g-2 mt-1">
-                                <div class="col-md-12">
-                                    <small class="text-muted">
-                                        <i class="fas fa-info-circle"></i> Grain processing and source file handling are controlled at the profile level above.
-                                    </small>
-                                </div>
-                            </div>
-                            <small class="text-muted">Video bitrate sets the maximum bitrate limit when using CRF</small>
-                        </div>
-                    </div>
-
-                    <!-- 4K (2160p) Settings -->
-                    <div class="card mb-2">
-                        <div class="card-header py-2">
-                            <h6 class="mb-0">4K (2160p) Settings</h6>
-                        </div>
-                        <div class="card-body py-2">
-                            <div class="row g-2">
-                                <div class="col-md-2">
-                                    <label for="VideoBitrate2160p" class="form-label small">Video Bitrate (kbps)</label>
-                                    <input type="number" class="form-control form-control-sm" id="VideoBitrate2160p" value="2000">
-                                </div>
-                                <div class="col-md-2">
-                                    <label for="FallbackVideo2160p" class="form-label small">Fallback Video (kbps)</label>
-                                    <input type="number" class="form-control form-control-sm" id="FallbackVideo2160p" value="1800">
-                                </div>
-                                <div class="col-md-2">
-                                    <label for="AudioBitrate2160p" class="form-label small">Audio Bitrate (kbps)</label>
-                                    <input type="number" class="form-control form-control-sm" id="AudioBitrate2160p" value="128">
-                                </div>
-                                <div class="col-md-2">
-                                    <label for="FallbackAudio2160p" class="form-label small">Fallback Audio (kbps)</label>
-                                    <input type="number" class="form-control form-control-sm" id="FallbackAudio2160p" value="128">
-                                </div>
-                                <div class="col-md-2">
-                                    <label for="Quality2160p" class="form-label small">Quality (CRF)</label>
-                                    <input type="number" class="form-control form-control-sm" id="Quality2160p" placeholder="Empty for bitrate" min="0" max="51">
-                                </div>
-                                <div class="col-md-2">
-                                    <div class="mt-4">
-                                        <small class="text-muted">Codec set at profile level</small>
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="row g-2 mt-1">
-                                <div class="col-md-3">
-                                    <label for="Under30Min2160p" class="form-label small">Under 30 Min (MB)</label>
-                                    <input type="number" class="form-control form-control-sm" id="Under30Min2160p" value="800">
-                                </div>
-                                <div class="col-md-3">
-                                    <label for="Under65Min2160p" class="form-label small">Under 65 Min (MB)</label>
-                                    <input type="number" class="form-control form-control-sm" id="Under65Min2160p" value="1200">
-                                </div>
-                                <div class="col-md-3">
-                                    <label for="Over65Min2160p" class="form-label small">Over 65 Min (MB)</label>
-                                    <input type="number" class="form-control form-control-sm" id="Over65Min2160p" value="3000">
-                                </div>
-                                <div class="col-md-3">
-                                    <label for="TranscodeDownTo2160p" class="form-label small">Transcode Down To</label>
-                                    <select class="form-select form-select-sm" id="TranscodeDownTo2160p">
-                                        <option value="1080p">1080p</option>
-                                        <option value="720p">720p</option>
-                                        <option value="480p">480p</option>
-                                        <option value="No downscaling">No downscaling</option>
-                                    </select>
-                                </div>
-                            </div>
-                            <div class="row g-2 mt-1">
-                                <div class="col-md-12">
-                                    <small class="text-muted">
-                                        <i class="fas fa-info-circle"></i> Grain processing and source file handling are controlled at the profile level above.
-                                    </small>
-                                </div>
-                            </div>
-                            <small class="text-muted">Video bitrate sets the maximum bitrate limit when using CRF</small>
-                        </div>
-                    </div>
-                </form>
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                <button type="button" class="btn btn-primary" onclick="SaveProfile()">
-                    <i class="fas fa-check"></i> Save Profile
-                </button>
-            </div>
-        </div>
-    </div>
-</div>
 
 <!-- Scan Directory Management Modal -->
 <div class="modal fade" id="ScanDirectoryModal" tabindex="-1">
@@ -973,35 +561,6 @@ let AllLoadedProfiles = [];
 
 // Load profiles and scan directories on page load
 // Function to update bitrate fields state based on Quality field
-function UpdateBitrateFieldsState(resolution) {
-    const qualityValue = $(`#Quality${resolution}`).val();
-    const hasQuality = qualityValue && qualityValue.trim() !== '';
-    
-    // Video bitrate fields (always enabled for max bitrate setting)
-    const videoBitrateFields = [
-        `#VideoBitrate${resolution}`,
-        `#FallbackVideo${resolution}`
-    ];
-    
-    // Audio bitrate fields (always enabled - can be adjusted even with Quality mode)
-    const audioBitrateFields = [
-        `#AudioBitrate${resolution}`,
-        `#FallbackAudio${resolution}`
-    ];
-    
-    // Video bitrate fields are always enabled (needed for max bitrate setting)
-    videoBitrateFields.forEach(fieldId => {
-        const field = $(fieldId);
-        field.prop('disabled', false).removeClass('text-muted');
-    });
-    
-    // Audio bitrate fields are always enabled
-    audioBitrateFields.forEach(fieldId => {
-        const field = $(fieldId);
-        field.prop('disabled', false).removeClass('text-muted');
-    });
-}
-
 // --- Worker Concurrency ---
 function LoadWorkerConcurrency() {
     fetch('/api/TeamStatus/Workers')
@@ -1085,9 +644,6 @@ $(document).ready(function() {
     $('#EnableContinuousScanBtn').on('click', EnableContinuousScanning);
     $('#DisableContinuousScanBtn').on('click', DisableContinuousScanning);
 
-    // Auto-generate profile name when key settings change
-    $('#ProfileCodec, #ProfilePreset, #ProfileFilmGrain').on('change input', GenerateProfileName);
-    $('#ProfileUseNvidiaHardware, #ProfileTranscodeDownTo').on('change', GenerateProfileName);
 
     // Toggle chevron icons on collapse
     $('.collapse').on('show.bs.collapse', function() {
@@ -1096,11 +652,6 @@ $(document).ready(function() {
         $(this).prev('.card-header').find('.fa-chevron-up').removeClass('fa-chevron-up').addClass('fa-chevron-down');
     });
     
-    // Add event listeners for Quality field changes
-    $('#Quality480p, #Quality720p, #Quality1080p').on('input', function() {
-        const resolution = $(this).attr('id').replace('Quality', '');
-        UpdateBitrateFieldsState(resolution);
-    });
     
     // Add event delegation for scan directory buttons
     $(document).on('click', '.edit-scan-dir-btn', function() {
@@ -1121,53 +672,6 @@ function ShowAlert(Message, Type = 'info') {
     showToastAlert(Message, Type);
 }
 
-function GenerateProfileName() {
-    if (SuppressAutoName) return;
-    const CodecMap = { 'libsvtav1': 'SVT-AV1', 'libx265': 'x265', 'libx264': 'x264', 'libvpx-vp9': 'VP9' };
-    const Codec = CodecMap[$('#ProfileCodec').val()] || $('#ProfileCodec').val();
-    const Preset = parseInt($('#ProfilePreset').val());
-    const FilmGrain = parseInt($('#ProfileFilmGrain').val());
-    const Nvidia = $('#ProfileUseNvidiaHardware').is(':checked');
-    const DownTo = $('#ProfileTranscodeDownTo').val();
-
-    let Name = Codec + ' P' + Preset + ' FG' + FilmGrain;
-    if (DownTo && DownTo !== 'No downscaling') Name += ' >' + DownTo;
-    if (Nvidia) Name += ' NVENC';
-    $('#ProfileName').val(Name);
-
-    // Build usage note
-    let Notes = [];
-    if (Preset <= 4) Notes.push('slow but high quality');
-    else if (Preset <= 6) Notes.push('balanced speed/quality');
-    else if (Preset <= 8) Notes.push('fast encoding');
-    else Notes.push('very fast, lower quality');
-
-    if (FilmGrain === 0) Notes.push('CGI, clean digital content (CRF ~20)');
-    else if (FilmGrain <= 3) Notes.push('cartoons, animation (CRF ~25)');
-    else if (FilmGrain <= 10) Notes.push('general live-action');
-    else if (FilmGrain <= 20) Notes.push('older/film content with natural grain');
-    else Notes.push('very grainy sources');
-
-    if (DownTo && DownTo !== 'No downscaling') Notes.push('downscales to ' + DownTo);
-    if (Nvidia) Notes.push('GPU-accelerated');
-
-    $('#ProfileNote').html('<i class="fas fa-lightbulb text-warning"></i> <strong>Good for:</strong> ' + Notes.join(', '));
-}
-
-function ApplyTranscodeDownTo() {
-    const Target = $('#ProfileTranscodeDownTo').val();
-    const Map = {
-        'No downscaling': { '480p': 'No downscaling', '720p': 'No downscaling', '1080p': 'No downscaling', '2160p': 'No downscaling' },
-        '720p': { '480p': 'No downscaling', '720p': 'No downscaling', '1080p': '720p', '2160p': '720p' },
-        '480p': { '480p': 'No downscaling', '720p': '480p', '1080p': '480p', '2160p': '480p' },
-        '360p': { '480p': '360p', '720p': '360p', '1080p': '360p', '2160p': '360p' }
-    };
-    const Settings = Map[Target] || Map['No downscaling'];
-    ['480p', '720p', '1080p', '2160p'].forEach(function(Res) {
-        $('#TranscodeDownTo' + Res).val(Settings[Res]);
-    });
-    GenerateProfileName();
-}
 
 function LoadProfiles() {
     $.get('/api/profiles')
@@ -1281,24 +785,42 @@ function ShowProfileKnobs(ProfileId) {
         }
         const P = Resp.profile;
         const ProfileEditable = [
-            {name: 'RateControlMode', kind: 'select', options: ['cq','vbr']},
-            {name: 'Tune', kind: 'text'},
-            {name: 'Multipass', kind: 'select', options: ['fullres','qres','disabled','2pass']},
-            {name: 'PixelFormat', kind: 'text'},
-            {name: 'AudioCodec', kind: 'text'},
-            {name: 'AudioBitrateKbps', kind: 'int'},
-            {name: 'AudioChannels', kind: 'int'},
-            {name: 'AudioFilter', kind: 'text'},
-            {name: 'Container', kind: 'text'},
-            {name: 'FastStart', kind: 'bool'},
+            {name: 'ProfileName', kind: 'text', group: 'Identity'},
+            {name: 'Description', kind: 'text', group: 'Identity'},
+            {name: 'Codec', kind: 'select', options: ['libsvtav1','av1_nvenc'], group: 'Codec'},
+            {name: 'Preset', kind: 'int', group: 'Codec'},
+            {name: 'UseNvidiaHardware', kind: 'bool_int', group: 'Codec'},
+            {name: 'RateControlMode', kind: 'select', options: ['cq','vbr'], group: 'Codec'},
+            {name: 'FilmGrain', kind: 'int', group: 'Codec'},
+            {name: 'Tune', kind: 'text', group: 'NVENC'},
+            {name: 'Multipass', kind: 'select', options: ['fullres','qres','disabled','2pass'], group: 'NVENC'},
+            {name: 'PixelFormat', kind: 'text', group: 'NVENC'},
+            {name: 'AqStrength', kind: 'int', group: 'NVENC'},
+            {name: 'YadifMode', kind: 'int', group: 'Deinterlace'},
+            {name: 'YadifParity', kind: 'int', group: 'Deinterlace'},
+            {name: 'YadifDeint', kind: 'int', group: 'Deinterlace'},
+            {name: 'AudioCodec', kind: 'text', group: 'Audio'},
+            {name: 'AudioBitrateKbps', kind: 'int', group: 'Audio'},
+            {name: 'AudioChannels', kind: 'int', group: 'Audio'},
+            {name: 'AudioFilter', kind: 'text', group: 'Audio'},
+            {name: 'Container', kind: 'text', group: 'Output'},
+            {name: 'FastStart', kind: 'bool', group: 'Output'},
         ];
         const ThresholdEditable = [
             {name: 'TranscodeDownTo', kind: 'text'},
             {name: 'Quality', kind: 'int'},
+            {name: 'ContainerType', kind: 'text'},
             {name: 'SourceBitratePercent', kind: 'int'},
             {name: 'MinBitrateKbps', kind: 'int'},
             {name: 'MaxBitrateKbps', kind: 'int'},
             {name: 'MaxBitrateMultiplier', kind: 'float'},
+            {name: 'VideoBitrateKbps', kind: 'int'},
+            {name: 'AudioBitrateKbps', kind: 'int'},
+            {name: 'FallbackVideoBitrateKbps', kind: 'int'},
+            {name: 'FallbackAudioBitrateKbps', kind: 'int'},
+            {name: 'Under30MinMB', kind: 'int'},
+            {name: 'Under65MinMB', kind: 'int'},
+            {name: 'Over65MinMB', kind: 'int'},
             {name: 'RcLookahead', kind: 'int'},
             {name: 'BFrames', kind: 'int'},
             {name: 'BRefMode', kind: 'select', options: ['middle','each','disabled']},
@@ -1318,6 +840,15 @@ function ShowProfileKnobs(ProfileId) {
                     <option value="false" ${FalseSel}>false</option>
                 </select>`;
             }
+            if (Col.kind === 'bool_int') {
+                const OneSel = (Val === 1 || Val === '1') ? 'selected' : '';
+                const ZeroSel = (Val === 0 || Val === '0') ? 'selected' : '';
+                return `<select id="${FieldId}" data-kind="bool_int" class="form-select form-select-sm">
+                    <option value="">NULL</option>
+                    <option value="1" ${OneSel}>true (1)</option>
+                    <option value="0" ${ZeroSel}>false (0)</option>
+                </select>`;
+            }
             if (Col.kind === 'select') {
                 let Opts = '<option value="">NULL</option>';
                 Col.options.forEach(function(O) {
@@ -1329,13 +860,20 @@ function ShowProfileKnobs(ProfileId) {
             return `<input type="text" id="${FieldId}" data-kind="${Col.kind}" value="${V.replace(/"/g,'&quot;')}" class="form-control form-control-sm">`;
         }
 
-        let Body = '<h6 class="mb-2">Profile-level knobs <small class="text-muted">(editable; click Save to commit)</small></h6>';
-        Body += '<table class="table table-sm table-bordered mb-3"><tbody>';
-        Body += `<tr><th style="width:200px;">Codec</th><td><code>${P.Codec || ''}</code> <small class="text-muted">(structural -- edit via main Edit dialog)</small></td></tr>`;
-        Body += `<tr><th>Preset</th><td><code>${P.Preset !== null && P.Preset !== undefined ? P.Preset : ''}</code></td></tr>`;
-        Body += `<tr><th>UseNvidiaHardware</th><td><code>${P.UseNvidiaHardware}</code></td></tr>`;
+        let Body = '<h6 class="mb-2">Profile <small class="text-muted">(every field editable; Save commits)</small></h6>';
+        const Groups = {};
         ProfileEditable.forEach(function(Col) {
-            Body += `<tr><th>${Col.name}</th><td>${CellInput(Col, P[Col.name], 'pk_' + Col.name)}</td></tr>`;
+            const G = Col.group || 'Other';
+            (Groups[G] = Groups[G] || []).push(Col);
+        });
+        const GroupOrder = ['Identity', 'Codec', 'NVENC', 'Deinterlace', 'Audio', 'Output'];
+        Body += '<table class="table table-sm table-bordered mb-3"><tbody>';
+        GroupOrder.forEach(function(G) {
+            if (!Groups[G]) return;
+            Body += `<tr class="table-secondary"><th colspan="2" style="font-size:0.85rem;">${G}</th></tr>`;
+            Groups[G].forEach(function(Col) {
+                Body += `<tr><th style="width:200px;">${Col.name}</th><td>${CellInput(Col, P[Col.name], 'pk_' + Col.name)}</td></tr>`;
+            });
         });
         Body += '</tbody></table>';
 
@@ -1384,7 +922,7 @@ function ShowProfileKnobs(ProfileId) {
                 if (!El) return null;
                 const Raw = El.value;
                 if (Raw === '' || Raw === null) return null;
-                if (Kind === 'int') { const N = parseInt(Raw, 10); return isNaN(N) ? null : N; }
+                if (Kind === 'int' || Kind === 'bool_int') { const N = parseInt(Raw, 10); return isNaN(N) ? null : N; }
                 if (Kind === 'float') { const N = parseFloat(Raw); return isNaN(N) ? null : N; }
                 if (Kind === 'bool') return Raw === 'true';
                 return Raw;
@@ -1458,13 +996,9 @@ function DisplayProfiles(Profiles) {
                             ${KnobChips}
                         </div>
                         <div class="text-end text-nowrap">
-                            <button class="btn btn-outline-primary btn-sm me-1" onclick="EditProfile(${Profile.Id})">
+                            <button class="btn btn-outline-primary btn-sm me-1" onclick="ShowProfileKnobs(${Profile.Id})" title="Edit profile + thresholds">
                                 <i class="fas fa-edit"></i>
                             </button>
-                            <button class="btn btn-outline-primary btn-sm me-1" onclick="ShowProfileKnobs(${Profile.Id})" title="Show all lifted knobs">
-                                <i class="fas fa-cogs"></i>
-                            </button>
-                            <button class="btn btn-outline-secondary btn-sm me-1" onclick="CopyProfile(${Profile.Id})">
                                 <i class="fas fa-copy"></i>
                             </button>
                             <button class="btn btn-outline-danger btn-sm" onclick="DeleteProfile(${Profile.Id}, '${SafeName}')">
@@ -1545,304 +1079,9 @@ function SaveProfileOrder() {
     });
 }
 
-function ShowCreateProfileModal() {
-    IsEditMode = false;
-    CurrentProfile = null;
-    ClearProfileForm();
-    $('#ProfileManagementModal').modal('show');
-}
 
-function EditProfile(ProfileId) {
-    IsEditMode = true;
-    $.get(`/api/profiles/${ProfileId}`)
-        .done(function(Response) {
-            if (Response.success) {
-                CurrentProfile = Response.profile;
-                PopulateProfileForm(Response.profile);
-                $('#ProfileManagementModal').modal('show');
-            } else {
-                ShowAlert('Failed to load profile: ' + Response.error, 'danger');
-            }
-        })
-        .fail(function() {
-            ShowAlert('Failed to load profile', 'danger');
-        });
-}
 
-function CopyProfile(ProfileId) {
-    IsEditMode = false;
-    $.get(`/api/profiles/${ProfileId}`)
-        .done(function(Response) {
-            if (Response.success) {
-                CurrentProfile = null;
-                const Profile = Response.profile;
-                Profile.ProfileName = Profile.ProfileName + ' - Copy';
-                PopulateProfileForm(Profile);
-                $('#ProfileManagementModal').modal('show');
-            } else {
-                ShowAlert('Failed to load profile: ' + Response.error, 'danger');
-            }
-        })
-        .fail(function() {
-            ShowAlert('Failed to load profile', 'danger');
-        });
-}
 
-function PopulateProfileForm(Profile) {
-    SuppressAutoName = true;
-    // Only set the ID if we're in edit mode, otherwise clear it for new profiles
-    if (IsEditMode) {
-        $('#ProfileId').val(Profile.Id || '');
-    } else {
-        $('#ProfileId').val(''); // Clear ID for new profiles (create/copy)
-    }
-    $('#ProfileName').val(Profile.ProfileName || '');
-    $('#ProfileDescription').val(Profile.Description || '');
-    
-    // Populate profile-level FFmpeg settings
-    $('#ProfileCodec').val(Profile.Codec || 'libsvtav1');
-    $('#ProfilePreset').val(Profile.Preset || 6);
-    $('#ProfileFilmGrain').val(Profile.FilmGrain !== undefined ? Profile.FilmGrain : 10);
-    $('#ProfileYadifMode').val(Profile.YadifMode || 1);
-    $('#ProfileYadifParity').val(Profile.YadifParity || 1);
-    $('#ProfileYadifDeint').val(Profile.YadifDeint || 1);
-    $('#ProfileUseNvidiaHardware').prop('checked', Profile.UseNvidiaHardware === 1);
-
-    // Derive profile-level TranscodeDownTo from thresholds (use 1080p as reference)
-    const Thresholds = Profile.Thresholds || [];
-    const Ref1080 = Thresholds.find(t => t.Resolution === '1080p');
-    const DownTo = Ref1080 ? Ref1080.TranscodeDownTo : 'No downscaling';
-    $('#ProfileTranscodeDownTo').val(DownTo || 'No downscaling');
-
-    SuppressAutoName = false;
-    
-    // 480p settings
-    const Threshold480p = Thresholds.find(t => t.Resolution === '480p');
-    if (Threshold480p) {
-        $('#VideoBitrate480p').val(Threshold480p.VideoBitrateKbps);
-        $('#FallbackVideo480p').val(Threshold480p.FallbackVideoBitrateKbps);
-        $('#AudioBitrate480p').val(Threshold480p.AudioBitrateKbps);
-        $('#FallbackAudio480p').val(Threshold480p.FallbackAudioBitrateKbps);
-        $('#Quality480p').val(Threshold480p.Quality || '');
-        $('#Under30Min480p').val(Threshold480p.Under30MinMB);
-        $('#Under65Min480p').val(Threshold480p.Under65MinMB);
-        $('#Over65Min480p').val(Threshold480p.Over65MinMB);
-        $('#TranscodeDownTo480p').val(Threshold480p.TranscodeDownTo);
-        UpdateBitrateFieldsState('480p');
-    }
-    
-    // 720p settings
-    const Threshold720p = Thresholds.find(t => t.Resolution === '720p');
-    if (Threshold720p) {
-        $('#VideoBitrate720p').val(Threshold720p.VideoBitrateKbps);
-        $('#FallbackVideo720p').val(Threshold720p.FallbackVideoBitrateKbps);
-        $('#AudioBitrate720p').val(Threshold720p.AudioBitrateKbps);
-        $('#FallbackAudio720p').val(Threshold720p.FallbackAudioBitrateKbps);
-        $('#Quality720p').val(Threshold720p.Quality || '');
-        $('#Under30Min720p').val(Threshold720p.Under30MinMB);
-        $('#Under65Min720p').val(Threshold720p.Under65MinMB);
-        $('#Over65Min720p').val(Threshold720p.Over65MinMB);
-        $('#TranscodeDownTo720p').val(Threshold720p.TranscodeDownTo);
-        UpdateBitrateFieldsState('720p');
-    }
-    
-    // 1080p settings
-    const Threshold1080p = Thresholds.find(t => t.Resolution === '1080p');
-    if (Threshold1080p) {
-        $('#VideoBitrate1080p').val(Threshold1080p.VideoBitrateKbps);
-        $('#FallbackVideo1080p').val(Threshold1080p.FallbackVideoBitrateKbps);
-        $('#AudioBitrate1080p').val(Threshold1080p.AudioBitrateKbps);
-        $('#FallbackAudio1080p').val(Threshold1080p.FallbackAudioBitrateKbps);
-        $('#Quality1080p').val(Threshold1080p.Quality || '');
-        $('#Under30Min1080p').val(Threshold1080p.Under30MinMB);
-        $('#Under65Min1080p').val(Threshold1080p.Under65MinMB);
-        $('#Over65Min1080p').val(Threshold1080p.Over65MinMB);
-        $('#TranscodeDownTo1080p').val(Threshold1080p.TranscodeDownTo);
-        UpdateBitrateFieldsState('1080p');
-    }
-    
-    // 2160p (4K) settings
-    const Threshold2160p = Thresholds.find(t => t.Resolution === '2160p');
-    if (Threshold2160p) {
-        $('#VideoBitrate2160p').val(Threshold2160p.VideoBitrateKbps);
-        $('#FallbackVideo2160p').val(Threshold2160p.FallbackVideoBitrateKbps);
-        $('#AudioBitrate2160p').val(Threshold2160p.AudioBitrateKbps);
-        $('#FallbackAudio2160p').val(Threshold2160p.FallbackAudioBitrateKbps);
-        $('#Quality2160p').val(Threshold2160p.Quality || '');
-        $('#Under30Min2160p').val(Threshold2160p.Under30MinMB);
-        $('#Under65Min2160p').val(Threshold2160p.Under65MinMB);
-        $('#Over65Min2160p').val(Threshold2160p.Over65MinMB);
-        $('#TranscodeDownTo2160p').val(Threshold2160p.TranscodeDownTo);
-        UpdateBitrateFieldsState('2160p');
-    }
-}
-
-function ClearProfileForm() {
-    $('#ProfileId').val('');
-    $('#ProfileDescription').val('');
-    
-    // Clear profile-level FFmpeg settings
-    $('#ProfileCodec').val('libsvtav1');
-    $('#ProfilePreset').val('6');
-    $('#ProfileFilmGrain').val('10');
-    $('#ProfileYadifMode').val('1');
-    $('#ProfileYadifParity').val('1');
-    $('#ProfileYadifDeint').val('1');
-    $('#ProfileUseNvidiaHardware').prop('checked', false);
-    $('#ProfileTranscodeDownTo').val('No downscaling');
-
-    GenerateProfileName();
-    
-    // Clear all threshold fields
-    const Resolutions = ['480p', '720p', '1080p', '2160p'];
-    Resolutions.forEach(function(Resolution) {
-        $(`#VideoBitrate${Resolution}`).val('');
-        $(`#FallbackVideo${Resolution}`).val('');
-        $(`#AudioBitrate${Resolution}`).val('');
-        $(`#FallbackAudio${Resolution}`).val('');
-        $(`#Quality${Resolution}`).val('');
-        $(`#Under30Min${Resolution}`).val('');
-        $(`#Under65Min${Resolution}`).val('');
-        $(`#Over65Min${Resolution}`).val('');
-        $(`#TranscodeDownTo${Resolution}`).val('No downscaling');
-        UpdateBitrateFieldsState(Resolution);
-    });
-}
-
-function SaveProfile() {
-    const ProfileName = $('#ProfileName').val().trim();
-    const Description = $('#ProfileDescription').val().trim();
-    
-    if (!ProfileName) {
-        ShowAlert('Profile name is required', 'warning');
-        return;
-    }
-
-    // Check for duplicate settings
-    const Codec = $('#ProfileCodec').val();
-    const Preset = parseInt($('#ProfilePreset').val());
-    const FilmGrain = parseInt($('#ProfileFilmGrain').val());
-    const Nvidia = $('#ProfileUseNvidiaHardware').is(':checked') ? 1 : 0;
-    const DownTo = $('#ProfileTranscodeDownTo').val();
-    const EditingId = IsEditMode && CurrentProfile ? CurrentProfile.Id : null;
-
-    const Duplicate = AllLoadedProfiles.find(function(P) {
-        if (EditingId && P.Id === EditingId) return false;
-        // Derive the stored profile's DownTo from its thresholds (1080p as reference)
-        const PThresholds = P.Thresholds || [];
-        const PRef = PThresholds.find(t => t.Resolution === '1080p');
-        const PDownTo = PRef ? PRef.TranscodeDownTo : 'No downscaling';
-        return P.Codec === Codec && P.Preset === Preset && P.FilmGrain === FilmGrain && (P.UseNvidiaHardware || 0) === Nvidia && PDownTo === DownTo;
-    });
-
-    if (Duplicate && !confirm('A profile with identical settings already exists: "' + Duplicate.ProfileName + '"\n\nDo you still want to save this profile?')) {
-        return;
-    }
-    
-    const ProfileData = {
-        ProfileName: ProfileName,
-        Description: Description,
-        Codec: $('#ProfileCodec').val(),
-        Preset: parseInt($('#ProfilePreset').val()),
-        FilmGrain: parseInt($('#ProfileFilmGrain').val()),
-        YadifMode: parseInt($('#ProfileYadifMode').val()),
-        YadifParity: parseInt($('#ProfileYadifParity').val()),
-        YadifDeint: parseInt($('#ProfileYadifDeint').val()),
-        UseNvidiaHardware: $('#ProfileUseNvidiaHardware').is(':checked') ? 1 : 0,
-        Thresholds: [
-            {
-                Resolution: '480p',
-                VideoBitrateKbps: parseInt($('#VideoBitrate480p').val()) || 0,
-                FallbackVideoBitrateKbps: parseInt($('#FallbackVideo480p').val()) || 0,
-                AudioBitrateKbps: parseInt($('#AudioBitrate480p').val()) || 0,
-                FallbackAudioBitrateKbps: parseInt($('#FallbackAudio480p').val()) || 0,
-                Quality: parseInt($('#Quality480p').val()) || null,
-                Under30MinMB: parseInt($('#Under30Min480p').val()) || 0,
-                Under65MinMB: parseInt($('#Under65Min480p').val()) || 0,
-                Over65MinMB: parseInt($('#Over65Min480p').val()) || 0,
-                TranscodeDownTo: $('#TranscodeDownTo480p').val()
-            },
-            {
-                Resolution: '720p',
-                VideoBitrateKbps: parseInt($('#VideoBitrate720p').val()) || 0,
-                FallbackVideoBitrateKbps: parseInt($('#FallbackVideo720p').val()) || 0,
-                AudioBitrateKbps: parseInt($('#AudioBitrate720p').val()) || 0,
-                FallbackAudioBitrateKbps: parseInt($('#FallbackAudio720p').val()) || 0,
-                Quality: parseInt($('#Quality720p').val()) || null,
-                Under30MinMB: parseInt($('#Under30Min720p').val()) || 0,
-                Under65MinMB: parseInt($('#Under65Min720p').val()) || 0,
-                Over65MinMB: parseInt($('#Over65Min720p').val()) || 0,
-                TranscodeDownTo: $('#TranscodeDownTo720p').val()
-            },
-            {
-                Resolution: '1080p',
-                VideoBitrateKbps: parseInt($('#VideoBitrate1080p').val()) || 0,
-                FallbackVideoBitrateKbps: parseInt($('#FallbackVideo1080p').val()) || 0,
-                AudioBitrateKbps: parseInt($('#AudioBitrate1080p').val()) || 0,
-                FallbackAudioBitrateKbps: parseInt($('#FallbackAudio1080p').val()) || 0,
-                Quality: parseInt($('#Quality1080p').val()) || null,
-                Under30MinMB: parseInt($('#Under30Min1080p').val()) || 0,
-                Under65MinMB: parseInt($('#Under65Min1080p').val()) || 0,
-                Over65MinMB: parseInt($('#Over65Min1080p').val()) || 0,
-                TranscodeDownTo: $('#TranscodeDownTo1080p').val()
-            },
-            {
-                Resolution: '2160p',
-                VideoBitrateKbps: parseInt($('#VideoBitrate2160p').val()) || 0,
-                FallbackVideoBitrateKbps: parseInt($('#FallbackVideo2160p').val()) || 0,
-                AudioBitrateKbps: parseInt($('#AudioBitrate2160p').val()) || 0,
-                FallbackAudioBitrateKbps: parseInt($('#FallbackAudio2160p').val()) || 0,
-                Quality: parseInt($('#Quality2160p').val()) || null,
-                Under30MinMB: parseInt($('#Under30Min2160p').val()) || 0,
-                Under65MinMB: parseInt($('#Under65Min2160p').val()) || 0,
-                Over65MinMB: parseInt($('#Over65Min2160p').val()) || 0,
-                TranscodeDownTo: $('#TranscodeDownTo2160p').val()
-            }
-        ]
-    };
-    
-    if (IsEditMode && CurrentProfile) {
-        // Update existing profile
-        $.ajax({
-            url: `/api/profiles/${CurrentProfile.Id}`,
-            type: 'PUT',
-            contentType: 'application/json',
-            data: JSON.stringify(ProfileData)
-        })
-        .done(function(Response) {
-            if (Response.success) {
-                $('#ProfileManagementModal').modal('hide');
-                ShowAlert(Response.message, 'success');
-                LoadProfiles();
-            } else {
-                ShowAlert('Failed to update profile: ' + Response.error, 'danger');
-            }
-        })
-        .fail(function() {
-            ShowAlert('Failed to update profile', 'danger');
-        });
-    } else {
-        // Create new profile
-        $.ajax({
-            url: '/api/profiles',
-            type: 'POST',
-            contentType: 'application/json',
-            data: JSON.stringify(ProfileData)
-        })
-        .done(function(Response) {
-            if (Response.success) {
-                $('#ProfileManagementModal').modal('hide');
-                ShowAlert(Response.message, 'success');
-                LoadProfiles();
-            } else {
-                ShowAlert('Failed to create profile: ' + Response.error, 'danger');
-            }
-        })
-        .fail(function() {
-            ShowAlert('Failed to create profile', 'danger');
-        });
-    }
-}
 
 function DeleteProfile(ProfileId, ProfileName) {
     if (!confirm(`Are you sure you want to delete the profile "${ProfileName}"? This will also delete all associated thresholds.`)) {
