@@ -1,457 +1,133 @@
 # Current Directive
 
-**Set:** 2026-05-30
-**Status:** Active -- phase: NEEDS_PLAN -- scaffolding the destination target, fleshing out criteria
-**Slug:** unified-standards-destination
-**Replaces:** Interrupts paused `nvenc-rate-anchored-remediation` and paused `ceo-mode-enforcement`. Both resume against the shape this directive produces.
+**Set:** 2026-05-30 -- resumed 2026-05-31 after unified-standards-destination paused
+**Status:** Active -- phase: NEEDS_PLAN -- criteria drafted (data-driven schema lift; see acceptance criteria below) but not yet ratified. Operator review next. Resumed ahead of destination directive's full completion; section G of destination is locked (judgment standards) and informs the criteria here (no-hardcoded-values is the canonical principle this directive operationalizes).
+**Slug:** nvenc-rate-anchored-remediation
+**Replaces:** none (new directive). Interrupts paused `ceo-mode-enforcement` (`.claude/directives/paused/2026-05-30-ceo-mode-enforcement.md`) and paused `unified-standards-destination` (`.claude/directives/paused/2026-05-30-unified-standards-destination.md`).
 
 ## Outcome
 
-<a id="outcome"></a>
+Every tunable encoder knob the operator's canary command names is held in a `ProfileThresholds` or `Profiles` column, not as a literal in `Models/CommandBuilder.py`. The operator-validated canary command is recoverable from the database as a `Profiles` + `ProfileThresholds` row pair: a SELECT against those rows reproduces the canary's knob values exactly. A live transcode against that profile emits an ffmpeg command matching the canary in the knob dimensions the canary covers (rate-control, lookahead, B-frame depth, tune, multipass, scale shape, pixel format, audio codec/bitrate, container muxing).
 
-MediaVortex has ONE standards layer, ONE workflow, ONE source of truth for design rationale, and ONE mechanism for tracking code-health debt. After this directive closes:
+CommandBuilder reads; it does not decide. After this directive, adding a new encoder regime is a row insert -- not a code change. Adjusting an existing regime is a SQL UPDATE -- not a code change. The "Pinned knobs that... currently DIVERGE" audit list in `Features/Profiles/nvenc-rate-anchored.feature.md` is gone because divergence is no longer expressible: code does not carry the values to diverge from.
 
-- `*.feature.md` files do not exist in the repo. Every prior feature doc is either a closed directive in `.claude/directives/closed/` or deleted.
-- `*.flow.md` files describe current pipeline architecture; they are the only colocated `.md` artifact and are maintained by directives that change their pipeline.
-- Every touched function carries a `# directive: <slug>` anchor (R15, mandatory and enforced).
-- File line ceiling (R16) and method line ceiling (R17) are mechanical, with a baseline + monotonic-improvement model so monoliths can't grow but don't force big-bang refactors.
-- Plan-review and code-review gates use specialized expert skills (`software-architect`, `data-expert`, `security-expert`, etc.) at phase transitions.
-- Named judgment standards (no hardcoded values, no silent fallbacks, no two-place sources of truth, no magic strings as switch keys, plus the rest of the catalogue) live in `.claude/standards/judgment/` and surface at plan review.
-- A conversion-debt table ranks files by gap from R16 target, making refactor prioritization objective.
-- CLAUDE.md is a thin orient pointing at standards, not a duplicate of them.
-- Closed directives are append-only (R18). Reading the archive is the canonical way to discover why code looks the way it does; bidirectional via R15 forward and `## Files` reverse.
-- The `/n` skill ambiguity is gone: one `/n`, one workflow, one directive doc.
-
-The repo can be fully understood by: (1) reading the unified standards, (2) reading flow docs for pipeline understanding, (3) opening code and following `# directive:` anchors to closed directives for the why. No third source of truth, no stale parallel docs, no per-area pattern guessing.
+The standards index gains a named (not gated, judgment-reviewed) entry calling out "no hardcoded values where DB-driven is possible" so the next directive does not repeat this miss.
 
 ## Acceptance Criteria
 
-<a id="criteria"></a>
+### A. Schema lifts every canary knob to a column
 
-Criteria below are STUBS. Each section names the intent + open questions. We flesh out the specific verifiable form per criterion during this NEEDS_PLAN phase.
+Each criterion adds (or repurposes) a column that holds a knob the canary command pins. Columns live on `ProfileThresholds` unless the knob is regime-level (varies by Profile, not by resolution tier) -- in which case it lives on `Profiles`. Choice of table is per-knob:
 
-### A. Standards source consolidation
+1. **`ProfileThresholds.RcLookahead INTEGER`** holds the `-rc-lookahead` value. Nullable; when NULL, CommandBuilder does NOT emit the flag (encoder default applies). Verifiable: `\d ProfileThresholds` shows the column; canary-derived seed row carries `20`.
 
-<a id="a-standards-consolidation"></a>
+2. **`ProfileThresholds.BFrames INTEGER`** holds the `-bf` value. Nullable; when NULL, no `-bf` flag emitted. Verifiable: column exists; canary-derived seed row carries `4`.
 
-**REVISED 2026-05-30 after auto-load investigation:** Claude Code auto-loads `.claude/rules/*.md` as project instructions by convention -- this is a product behavior tied to that specific path, not driven by settings.json. Moving rule docs OUT of `.claude/rules/` would lose the free auto-load (~18K tokens of context per session would have to be re-Read explicitly). So the consolidation shape changes: `.claude/rules/` stays as the judgment-standards home; `.claude/standards/` becomes the mechanical-rule home + index/routing layer.
+3. **`ProfileThresholds.BRefMode TEXT`** holds the `-b_ref_mode` value (`'middle'` in canary, also valid: `'each'`, `'disabled'`). Nullable; when NULL, no flag emitted. CHECK constraint enforces the allowed values OR is omitted with the trade documented. Verifiable: column exists; canary-derived seed row carries `'middle'`.
 
-1. **`.claude/rules/*.md` is the judgment-standards layer.** Existing rule docs stay; new judgment standards (`no-hardcoded-values.md`, `no-silent-fallbacks.md`, etc. -- the catalogue from section G) are ADDED here, not under standards/. Each rule doc covers one principle (split if needed). After this directive, every named judgment standard from section G has a file in `.claude/rules/`. Verifiable: every named principle is one `.claude/rules/<slug>.md` file; index.md links to it. **OPEN:** which existing rule docs need splitting vs stay one-to-one?
+4. **`Profiles.Tune TEXT`** holds the `-tune` value (`'hq'`, `'uhq'`, `'ll'`, ...). Already implicit in existing CommandBuilder branching; remediation makes it a column. Nullable allowed for backward-compat with existing rows; CommandBuilder falls back to the current hardcoded default ONLY when the column is NULL on an existing row, AND a one-time migration backfills the column to the current default for every existing row. After backfill, no future code path reads a default literal. Verifiable: column exists; all pre-existing rows have a non-NULL value matching what CommandBuilder used to emit; canary-derived seed row carries `'hq'`.
 
-   **Auto-load verification subtask:** before relying on this, write a stub `.claude/rules/test-autoload.md` and confirm it appears as "project instructions" at next session start. If yes, proceed. If no, fall back to NEEDS_STANDARDS_REVIEW phase as the loading mechanism + reshape this section.
+5. **`Profiles.Multipass TEXT`** holds the `-multipass` value (`'fullres'`, `'qres'`, `'disabled'`, `'2pass'`). Same shape as criterion 4 -- nullable with backfill. Verifiable: column exists, backfilled, canary seed carries `'fullres'`.
 
-2. **`.claude/standards/mechanical/` holds the R-rule definitions** (one file per rule R1-R18, each ~30 lines: pattern, refusal message, override semantics). The hook reads these instead of carrying inline rule logic. Verifiable: hook script length drops; each `Test-R<N>` function reads its rule file. **OPEN:** does hook reload per call, or load-once-at-session-start?
+6. **`Profiles.PixelFormat TEXT`** holds the `-pix_fmt` value. Same shape as 4 / 5. Verifiable: column exists, backfilled, canary seed carries `'p010le'`.
 
-3. **`.claude/standards/index.md` is the entry point**, listing every mechanical R-rule + every named judgment standard with one-line summary + link to the canonical doc. Verifiable: every R-rule and every judgment standard has exactly one entry; entries link to existing files; no orphans.
+7. **`Profiles.AudioCodec TEXT` and `Profiles.AudioBitrateKbps INTEGER`** hold the `-c:a` value and the `-b:a` value (kbps, integer). Same backfill discipline -- existing rows get the value MediaVortex currently uses for audio re-encoding so the data-driven path is byte-identical to today for legacy profiles. Verifiable: both columns exist, backfilled, canary seed carries `'eac3'` + `256`.
 
-4. **CLAUDE.md becomes thin orient** built on the [multica-ai/andrej-karpathy-skills](https://github.com/multica-ai/andrej-karpathy-skills) 4-rule base (think before coding / simplicity first / surgical changes / goal-driven execution), plus MediaVortex-specific pointers (standards index, flow docs, directives/closed/, naming + commands). Verbatim Karpathy content stashed in `### Karpathy CLAUDE.md content (locked, source for merge)` working-notes section below. Total target ~80 lines. Verifiable: line count ≤ 90; Karpathy 4 rules present verbatim; pointers to standards / flow docs / directives present; no embedded R-rule definitions; no embedded judgment-standards prose.
+8. **`Profiles.Container TEXT`** holds the `-f` value (`'mp4'`, `'mkv'`, ...). **`Profiles.FastStart BOOLEAN`** holds whether `-movflags +faststart` is emitted. Nullable / backfilled per the 4 / 5 / 6 pattern; canary seed carries `'mp4'` + `TRUE`. Verifiable: columns exist, backfilled, seeded.
 
-   **OPEN:** which CLAUDE.md sections survive (naming, commands, project overview) vs move to standards (architecture pattern, key tables, etc.)? Current CLAUDE.md is ~250 lines; ~170 lines need to go somewhere or disappear.
+9. **`ProfileThresholds.ScaleHeight INTEGER`** AND **`ProfileThresholds.PreserveAspect BOOLEAN`** together encode the scale filter. When `PreserveAspect=TRUE`, CommandBuilder emits `-vf scale=w=<width>:h=-1` where `<width>` is derived from the resolution tier ScaleHeight + a 16:9 default OR from a `ScaleWidth` column if added in a follow-up; this directive picks the simpler "PreserveAspect drives the `-1` form, ScaleHeight pins the height target" shape. When `PreserveAspect=FALSE`, CommandBuilder emits `-vf scale=<derived_width>:<ScaleHeight>` (forced aspect). Verifiable: columns exist; canary-derived seed row for 720p tier carries `ScaleHeight=720, PreserveAspect=TRUE`; emitted command for that row is `-vf scale=w=1280:h=-1`. (Width=1280 is derived from `round(720 * 16/9)`; documenting the formula as an `## Engineering Calls Already Made` entry is acceptable in lieu of a separate `ScaleWidth` column.)
 
-### B. Workflow consolidation
+10. **Rate-anchored bitrate triplet:** the canary uses fixed `-b:v 600k -maxrate:v 1200k -bufsize:v 1200k`. Existing schema already has `SourceBitratePercent / Min / Max` (percentage-of-source clamp). Resolution: ADD `ProfileThresholds.TargetBitrateKbps INTEGER` AND `ProfileThresholds.MaxBitrateMultiplier NUMERIC(3,2) DEFAULT 2.0`. When `TargetBitrateKbps` is non-NULL on a VBR profile, CommandBuilder ignores `SourceBitratePercent / Min / Max` and emits `-b:v <TargetBitrateKbps>k -maxrate:v <TargetBitrateKbps * MaxBitrateMultiplier>k -bufsize:v <same>k`. When `TargetBitrateKbps` is NULL, the existing percentage-of-source path applies. Both regimes coexist on the same VBR profile family -- the canary becomes a `TargetBitrateKbps=600` seed row; existing percentage-of-source profiles keep their behavior. Verifiable: both column families exist; the canary-derived seed row has `TargetBitrateKbps=600, MaxBitrateMultiplier=2.0` and NULL on `SourceBitratePercent / Min / Max`; existing rate-anchored rows are unchanged.
 
-<a id="b-workflow-consolidation"></a>
+### B. CommandBuilder is read-only on knob values
 
-**REVISED 2026-05-30 after superpowers adoption decision:** The workflow phase machine + plan-doc + criteria pattern is largely supplied by [obra/superpowers](https://github.com/obra/superpowers) (brainstorming / writing-plans / TDD / subagent-driven-development / code-review skills). Install command: `/plugin install superpowers@claude-plugins-official` (operator runs this; not gated by directive). Workflow criteria below describe how MediaVortex-specific shapes (directive doc, phase markers, CEO authority split) sit on top of superpowers.
+11. **`Models/CommandBuilder.AddCodecParameters`** contains zero numeric literals or string literals for any knob covered by criteria A.1-A.10. Specifically, the following must NOT appear as literals: `'-rc-lookahead' + ' 32'`, `'-bf' + ' 7'`, `'-tune' + ' uhq'`, `'-multipass' + ' fullres'`, `'-pix_fmt' + ' yuv420p'` (or any pixel format), `'eac3'`, `'mp4'`, `'+faststart'`, `'1280:720'`, `'h=-1'`. Each is read from the Profile / ProfileThresholds row. The ffmpeg argument NAMES (`-rc-lookahead`, `-bf`, `-tune`, etc.) are NOT covered by this criterion -- they are protocol constants, not tuning choices. Verifiable: grep for each forbidden literal in `Models/CommandBuilder.py` returns zero matches; emitted command for the legacy `nv_cq32_sink` profile is byte-identical to today (backfill made this possible).
 
-5. **One `/n` skill.** When `.claude/directive.md` is non-empty and not the template, `/n` opens a new directive (current CEO behavior). When the template, `/n` opens a fresh directive. Internally `/n` invokes superpowers' brainstorming skill to walk criteria, then drafts the directive doc shape on top. The legacy feature-based `/n` is retired or its file deleted from the skill registry. Verifiable: `/n <slug>` always produces directive-doc behavior; `*.feature.md` is never created; brainstorming skill is invoked during criteria-drafting. **OPEN:** does `/n` wrap brainstorming explicitly or just let it auto-trigger from context?
+12. **CommandBuilder branching depends only on column VALUES, not on Profile name strings.** The function does NOT contain `if ProfileName == 'NVENC AV1 P7 VBR 30pct -720p'` or any name-based switch. Verifiable: grep for `ProfileName ==` and `ProfileName.startswith(` and `ProfileName.contains(` in CommandBuilder returns zero matches.
 
-6. **`.claude/current-feature` stack retired.** Closed directives in `.claude/directives/closed/` are the historical record. Verifiable: file does not exist (or exists empty as an explicit "intentionally empty" marker); no skill/script references it. **OPEN:** are the 5 paused entries currently in `.claude/current-feature` (media-tabs-and-loudness, scan drives ad-hoc, linear-loudnorm, pipeline-test-harness, compliance-gated-rename) closed-as-abandoned, converted to directives, or just deleted? Each needs a per-feature decision.
+13. **Adding a new encoder regime requires a row insert, not a code change.** Verifiable: a hypothetical new profile (e.g. `NVENC AV1 P7 CBR -720p` with `-rc cbr -b:v 800k`) can be expressed as a Profile + ProfileThresholds INSERT pair using the columns from criterion A, with no edit to `CommandBuilder.py`. This criterion is verified by writing the migration as a sample (NOT applying it to production) and confirming the command builder produces the expected ffmpeg invocation.
 
-7. **R13 changes from "no new" to "none exist."** Every existing `*.feature.md` is either migrated to a closed directive or deleted. New rule wording: "`*.feature.md` files do not exist in the repo." Verifiable: `Get-ChildItem -Recurse -Filter '*.feature.md'` returns zero results.
+### C. Canary seed migration
 
-### C. Feature-doc migration sweep
+14. **A new migration `Scripts/SQLScripts/AddCanaryAnchoredProfile_2026-05-30.py`** seeds one Profile row + four ProfileThresholds rows (480p / 720p / 1080p / 2160p) representing the operator's verbatim canary command. The 720p row is the canonical one (TargetBitrateKbps=600, RcLookahead=20, BFrames=4, etc.). The 480p / 1080p / 2160p rows are either (a) populated with reasonable scaled values + `# from: derivation note` citations OR (b) marked NULL on the knobs the canary doesn't address (in which case CommandBuilder reads them from the 720p row OR raises a clear "tier not configured" error -- this directive picks "raise" for safety). Profile name: `NVENC AV1 P7 CANARY VBR -720p`. The pre-existing `NVENC AV1 P7 VBR 30pct -720p` profile is NOT touched by this migration -- it remains percentage-of-source. Verifiable: SELECT confirms the new profile + 720p threshold row exists with the canary's exact values; the existing VBR 30pct profile is unchanged.
 
-<a id="c-feature-migration"></a>
+15. **Migration is idempotent and uses `# from:` citations** (R2) for every numeric literal. Each citation points to the "Reference canary command" block in `Features/Profiles/nvenc-rate-anchored.feature.md`. Verifiable: R2 hook does not refuse the migration; second run produces zero row diffs.
 
-8. **Inventory captured.** Every existing `*.feature.md` is listed with its current Status (COMPLETE / in-flight / abandoned) and a per-file disposition (convert / merge / delete). Verifiable: this directive's `### Inventory` section lists every file with disposition. **OPEN:** full inventory below to be filled during this NEEDS_PLAN phase. Known so far:
-   - `Features/Profiles/nvenc-rate-anchored.feature.md` (COMPLETE, convert)
-   - `Features/Profiles/nvenc-profiles.feature.md` (TODO: status check)
-   - `Features/ContentClassifier/content-classifier.feature.md` (TODO)
-   - `Features/ServiceControl/graceful-drain.feature.md` (TODO)
-   - `Features/QualityTesting/post-transcode-disposition.feature.md` (TODO)
-   - `Features/QualityTesting/qt-queue-visibility-and-override.feature.md` (TODO)
-   - `Scripts/Smoke/EncoderShootout.feature.md` (TODO)
-   - `WorkerService/worker-lifecycle.feature.md` (TODO)
-   - **OPEN:** glob-sweep for full set
+### D. Schema migration discipline
 
-9. **Convert: feature doc -> closed directive.** Each "convert" disposition produces `.claude/directives/closed/YYYY-MM-DD-<slug>.md` carrying outcome / criteria / files list / status. Original deleted in the same commit. Date = feature's COMPLETE date if recorded, else `synthesized 2026-05-30`. Verifiable: every converted feature has a closed-directive sibling with matching slug.
+16. **A new migration `Scripts/SQLScripts/AddCommandBuilderColumns_2026-05-30.py`** adds every column in criteria A.1-A.10. Idempotent (R11). Backfills the four columns whose criteria require backfill (4 / 5 / 6 / 7 / 8) using values that preserve current CommandBuilder behavior byte-for-byte on existing profiles. Verifiable: run twice; second run zero diff. After running, every existing Profile / ProfileThresholds row has non-NULL values on the backfilled columns, and a representative legacy profile's emitted command matches a saved fixture.
 
-10. **Delete: feature doc fully redundant with flow doc + code.** Some feature docs (likely the older ones) describe behavior fully captured in the flow doc; their closed-directive form would carry no information not already there. These are deleted outright. Verifiable: deletion noted in this directive's Verification.
+17. **The original `Scripts/SQLScripts/AddRateAnchoredColumns.py` and `Scripts/SQLScripts/AddRateAnchoredProfiles.py` are NOT edited.** They are part of production's audit trail. The new migrations are additive and forward-only. Verifiable: `git diff` shows both original migrations untouched.
 
-11. **Flow docs preserved unchanged unless their feature doc carried information not in the flow.** In that case, the missing content moves to the flow doc, then the feature doc is deleted. Verifiable: per-flow-doc diff shows additions are sourced from feature-doc migrations.
+### E. Documentation closure
 
-### D. Bidirectional index
+18. **The "Reference canary command" section of `Features/Profiles/nvenc-rate-anchored.feature.md` is preserved verbatim** -- the canary command is the seed-row source, and `# from:` citations point at it. Verifiable: grep for `ffmpeg -i c:\myvideo.mkv` in the feature doc returns the canary block intact.
 
-<a id="d-bidirectional-index"></a>
+19. **The "Pinned knobs that... currently DIVERGE" audit list is REMOVED** from `Features/Profiles/nvenc-rate-anchored.feature.md`. Divergence is no longer expressible -- the values live in DB columns now, and the canary's values live in a seeded profile row. Verifiable: grep for `currently DIVERGE` returns zero matches.
 
-12. **R15 (directive anchor) is reaffirmed as mandatory.** Every function/class touched by a directive has `# directive: <slug>` directly above its `def`/`class` line. No grace period; new touches must comply. Verifiable: hook test simulates non-anchored edit on a directive-listed file; refused.
+20. **The feature doc gains a `### Remediation 2026-05-30` block under Status** naming the migration files (criteria 14, 16) and the new profile (`NVENC AV1 P7 CANARY VBR -720p`). The feature doc's `## Scope` Files list is updated to add the new migration files. R14-compliant: no `removed YYYY-MM-DD` lines added. Verifiable: feature doc Status contains the block; Scope lists the new files.
 
-13. **R18 (closed-directive append-only) added.** Edits to files under `.claude/directives/closed/` are refused. To supersede a closed directive, open a new one that names the prior one in `**Replaces:**`. Verifiable: hook simulates edit of a closed directive file; refused with pointer to supersede pattern.
+21. **`.claude/standards/index.md` "What is NOT gated" section gains one bullet:** "No hardcoded values where DB-driven is possible -- tunable encoder knobs / thresholds / policy values belong in columns; CommandBuilder + decision functions read, they don't decide. Memory: `feedback_no_hardcoded_values.md`." Verifiable: grep returns the line; the cited memory file exists.
 
-14. **`Scripts/Directives/WhatTouchedThis.py <path>` exists** and greps closed directives' `## Files` sections for the given path, returning slugs in chronological order. Verifiable: invoke against `Models/CommandBuilder.py`; returns the closed directive that touched it last.
+### F. Live canary (the deferred Progress item 6 from the parent feature)
 
-15. **Directive granularity guidance written into standards.** Soft cap on file count per directive (TBD: 8? 10?); large scope splits into a program of small directives. Verifiable: standards doc has the guidance; plan-review gate checks file count and flags. **OPEN:** hard cap or soft cap? What's the right number?
+22. **One operator-triggered transcode against `NVENC AV1 P7 CANARY VBR -720p`** has completed end-to-end. Verifiable: `SELECT FfpmpegCommand, NewSize, OriginalSize, VMAF FROM TranscodeAttempts WHERE ProfileName = 'NVENC AV1 P7 CANARY VBR -720p' ORDER BY Id DESC LIMIT 1` returns a row whose command matches the canary in `-rc-lookahead 20`, `-bf 4`, `-b_ref_mode middle`, `-tune hq`, `-multipass fullres`, `-pix_fmt p010le`, `-c:a eac3 -b:a 256k`, `-f mp4`, `-movflags +faststart`, `-b:v 600k -maxrate:v 1200k -bufsize:v 1200k`, `-vf scale=w=1280:h=-1`. NewSize < OriginalSize on the test source (FileReplacement gate passes).
 
-### E. File and method line discipline
-
-<a id="e-line-ceilings"></a>
-
-16. **R16 (file line ceiling) added** with baseline + monotonic-improvement model:
-    - Per-directory target configurable (e.g., `Features/*/Controller.py` = 150, `Models/` = 200, `Scripts/SQLScripts/Add*.py` = 100). Defaults in `.claude/standards/file-size-targets.json`.
-    - `.claude/.file-baselines.json` snapshots every file's current line count at directive close.
-    - Edit/Write to a file: new file size ≤ max(target, baseline). Files at/under target held there; files over baseline can only shrink.
-    - Verifiable: simulated Edit that grows a baseline-tracked file past its baseline → refused; Edit that shrinks it → allowed.
-    - **OPEN:** how are baselines updated when a refactor directive intentionally restructures? Mechanism: refactor directives include `baseline_update` block in their criteria.
-
-17. **R17 (method line ceiling) added**, unconditional on touched functions:
-    - Any function modified in any Edit must end ≤ 50 lines (configurable).
-    - Surrounding monolithic file can stay over R16 baseline; the touched function must conform.
-    - Verifiable: simulated edit producing a 60-line function → refused; 50-line → allowed.
-    - **OPEN:** what counts as "touched"? Whole-function rewrite vs single-line patch? Likely: any def/class whose body the diff alters.
-
-18. **Conversion-debt table script.** `Scripts/Directives/ConversionDebt.py` reports files sorted by `(baseline - target)` so the worst SRP offenders are visible and prioritizable. Verifiable: invoke; produces ranked table; top entries match known monoliths (e.g., `WorkerService/Main.py`).
-
-19. **Refactor directives are first-class.** Standards doc explicitly names "refactor directive" as a legitimate directive shape (outcome = decompose file X; no new features). The plan-review gate accepts these. Verifiable: standards doc has the entry; example refactor-directive template in `.claude/directives/_template-refactor.md`.
-
-### F. Plan and code review gates
-
-<a id="f-review-gates"></a>
-
-**REVISED 2026-05-30 after superpowers adoption:** superpowers' code-review and subagent-driven-development skills implement the review patterns. MediaVortex layer = the phase hook enforces invocation of these skills at specific phase transitions, not their implementation.
-
-20. **Plan-review gate between NEEDS_PLAN and NEEDS_DOC_PREREAD.** The hook refuses the phase advance unless the session transcript shows invocation of superpowers' brainstorming skill (or the `software-architect` claude-rails agent) against the directive's criteria + Files list. Verifiable: try advancing without the review; refused. With the review; allowed.
-    - **OPEN:** which review skill is the gate? superpowers brainstorming vs claude-rails software-architect vs both?
-    - **OPEN:** is the review's output captured in the directive doc as a section, or just in the transcript?
-
-21. **Code-review gate between IMPLEMENTING and VERIFYING.** The hook refuses phase advance unless superpowers' requesting-code-review skill has been invoked against the diff. Specialized expert skills (data-expert / security-expert) are opt-in additional reviewers per directive.
-    - **OPEN:** how does the hook know which expert to require beyond the base code-review? Tag system on the directive ("expert: data" / "expert: security")? Auto-detection from touched paths?
-
-22. **Litmus check criterion-by-criterion.** During plan-review, the reviewer applies the 5 feature-criteria tests (rename / outsider / rewrite / negation / stability) to each criterion. superpowers' code-review skill has a "pre-review checklist" pattern that maps to this; MediaVortex extension is the 5-test litmus. Verifiable: review output includes pass/fail per criterion per test.
-
-### G. Named judgment standards
-
-<a id="g-judgment-standards"></a>
-
-**LOCKED 2026-05-31 after 20-pain-point walk:** 8 new files, 3 extensions to existing rule docs, the rest covered by mechanical rules or already-existing entries. Each entry below names a verifiable shape.
-
-#### G.1 New standards (one file each in `.claude/rules/`)
-
-23. **`no-hardcoded-values.md`** -- Tunable parameters (encoder knobs, thresholds, policy values) belong in DB columns, not as literals in code. CommandBuilder / decision functions READ; they don't DECIDE. Counter-examples (NOT in scope): ffmpeg arg keywords (`-rc`, `-tune`), schema column names, protocol constants, magic numbers with one true value (seconds in a minute). The rule fires when the value reflects a TUNING CHOICE. Memory source: `feedback_no_hardcoded_values.md`. Verifiable: file exists; standards index links to it.
-
-24. **`no-silent-fallbacks.md`** -- Missing data -> explicit error, not degraded mode. Reason: silent fallbacks produce bugs that hide for weeks. Example: VBR profile + NULL source bitrate must raise `"VBR profile cannot encode {file}: source VideoBitrateKbps is missing or zero"`, not silently switch to CQ. Counter-examples: graceful degradation at user-experience boundary (loading spinner during network timeout) where the operator EXPLICITLY chose the fallback path. Verifiable: file exists; surfaces in plan review when criteria reference data-validation gaps.
-
-25. **`no-magic-strings.md`** -- Profile names, status enums, rule names as raw strings in `if x == 'literal'` switches. Use columns, enum tables, or typed dispatch. Specific MediaVortex anti-pattern: `if ProfileName == 'NVENC AV1 P7 VBR 30pct -720p'` in CommandBuilder branches. Verifiable: file exists; surfaces when grep finds magic-string switching on touched files.
-
-26. **`directive-granularity.md`** -- A directive's `## Files` list has a soft cap (target: 8 files, hard cap 12). Larger scope is a program of smaller directives. Absorbs the "god-object / SRP at file level" pain (god-files emerge when directives bundle too much). Reason: large directives are grep-unfriendly in the closed-directive archive; small directives compose into the archive cleanly. Verifiable: file exists; plan-review gate (criterion 20) flags directives over the cap.
-
-27. **`explicit-construction-order.md`** -- "A must be called before B" requires enforcement, not convention. Construction-time wiring, factory functions, or fail-loud guards. MediaVortex example: worker bootstrap reads `Workers` row before `StorageRootResolutions` -- the dependency must be explicit, not implicit. Verifiable: file exists; lower frequency but surfaces during plan review on bootstrap / lifecycle work.
-
-28. **`aggregate-roots.md`** -- A single conceptual entity lives in ONE place. State spread across `TranscodeQueue` + `TranscodeAttempts` + `TranscodeFiles` + `MediaFiles` + `MediaFilesArchive` is the recurring pain. New code introducing per-entity state goes through an aggregate root pattern (one repository, one canonical query for "what's the state of X"). Verifiable: file exists; surfaces during plan review when criteria touch multi-table writes for one logical entity.
-
-29. **`api-envelope-uniformity.md`** -- Every endpoint returns `{'Success': bool, 'Message': str, 'Data': obj}`. No raw JSON, no string-only 500 responses. Promoted from a brief mention in CLAUDE.md to a standalone standard. Verifiable: file exists; surfaces during plan review on Controller / Blueprint work.
-
-30. **`vertical-slice-isolation.md`** -- Feature A's Controller does NOT reach into Feature B's Repository or BusinessService. Cross-feature access goes through explicit APIs (the BusinessService of B exposes a clear method; A's Controller calls THAT, not raw queries). Complements the existing MVVM pattern; calls out the violation shape. Verifiable: file exists; grep refuses Controllers importing from other features' Repositories.
-
-#### G.2 Extensions to existing rule docs
-
-31. **Extend `.claude/rules/db-is-authority.md`** with a "Semantic DRY" section absorbing pain points #6 (duplicate code) and #8 (two-place sources of truth). Same claim implemented in two repositories = pick one canonical, other routes to it. Verifiable: db-is-authority.md has the new section; standards index links to the anchor.
-
-32. **Extend `.claude/rules/test-placement.md`** with a "Behavior not implementation" section absorbing pain point #15. Tests assert behavior boundary (input + observable output), not internal call sequences, log strings, or specific function names. Brittle tests get fixed by removing the implementation coupling, not by tightening assertions. Verifiable: test-placement.md has the new section.
-
-33. **Extend `.claude/rules/data-integrity.md`** with a "Migration consolidation" section absorbing pain point #19. Migrations accumulate; periodic consolidation (squash) keeps current schema legible. Trigger criterion: when `Scripts/SQLScripts/` accumulates >20 files OR when re-reading >5 migrations to understand one column. Verifiable: data-integrity.md has the new section.
-
-#### G.3 Lower priority (deferred from this directive)
-
-34. **`feature-flag-sunset.md`** -- Every feature flag introduced has a sunset criterion at intro: either condition that flips it permanently ON, or date for removal. Lower priority because MediaVortex has few flags today; revisit when first flag lands.
-
-#### G.4 Covered without new files
-
-- **Unclear success criteria** (#2): covered by existing `.claude/rules/feature-criteria.md` 5 litmus tests.
-- **Mixed coding standards** (#3): this directive's meta scope -- one-time consolidation, not per-touch.
-- **Monolithic files** (#5): covered by R16/R17 mechanical (criteria 16, 17 of this directive).
-- **Boot-cached config** (#7): covered by R3 mechanical + existing `db-is-authority.md` judgment.
-- **YAGNI violations** (#14): covered by Karpathy rule 2 ("Simplicity First") in the CLAUDE.md base lift (criterion 4).
-- **Documentation drift** (#17): covered by R14 mechanical + the destination directive's feature-doc deletion sweep (section C).
-
-#### G.5 Cross-cutting principles already in existing rules (no action)
-
-- **Outside-in design**: `.claude/rules/flow-docs.md` already encodes this for user-facing features.
-- **Criteria as contract**: `.claude/rules/ceo-mode.md` already encodes this under "Success criteria as contract."
-- **Scope discipline**: `.claude/rules/scope-discipline.md` already exists.
-
-#### G.6 Section tally
-
-- 8 new standalone files (criteria 23-30)
-- 3 extensions to existing files (criteria 31-33)
-- 1 deferred to later directive (criterion 34)
-- 6 already covered (no action)
-
-Total `.claude/rules/` file count after this directive: 9 existing + 8 new = **17 files**.
-
-### H. Hook + state machine
-
-<a id="h-hook-state"></a>
-
-37. **Hook loads rule definitions from `.claude/standards/mechanical/R*.md` files**, not from inline PowerShell. Verifiable: hook script ≤ N lines (TBD); each `Test-R<N>` reads its rule file at session start. **OPEN:** N value.
-
-38. **Phase machine extended with review gates** (criteria 20, 21). Verifiable: phase transitions refused without satisfying review.
-
-39. **Override mechanism unchanged.** `# allow: <reason>` still works per-rule, logged to `.claude/.standards-overrides.log`. No global disable.
-
-40. **`.gitignore`** covers `.session-state.json`, `.standards-overrides.log`, `.file-baselines.json`. Verifiable: `git status` does not show them as untracked.
-
-### I. Memory cleanup
-
-<a id="i-memory-cleanup"></a>
-
-41. **Memory entries that duplicate new judgment standards get deleted.** Specifically: entries that are now load-bearing in `.claude/standards/judgment/` are removed from the user-memory index, with the standards file as the canonical home. Memory keeps only entries that capture operator preferences not expressible as repo-checked standards (e.g., I9 ownership, NFS reliability, ebur128 parser anchor).
-    - **OPEN:** walk MEMORY.md entry-by-entry and decide.
-
-42. **Memory entries renamed to match standards file slugs** where they survive but are now backed by a standards file. Verifiable: each memory entry's `description` line names the standards file it complements.
+23. **One operator-triggered transcode against an EXISTING profile** (e.g. `NVENC AV1 P7 UHQ CQ32 -720p`) has completed end-to-end and its emitted command is byte-identical to a pre-migration fixture. Verifiable: `TranscodeAttempts.FfpmpegCommand` for a post-migration encode matches a saved pre-migration command for the same profile against the same source. This is the regression check that the column lift + backfill preserved legacy behavior.
 
 ## Out of Scope
 
-<a id="out-of-scope"></a>
-
-- Actually executing the nvenc remediation or any other deferred work. This directive only sets up the unified shape; nvenc resumes after, against that shape.
-- Production code changes other than what's necessary to add `# directive:` anchors to existing functions that get touched as part of standards consolidation (likely few or none).
-- Migrating closed directives in `.claude/directives/closed/` -- they're already in target shape.
-- Rewriting flow docs. They stay as-is unless content from a deleted feature doc needs to merge into one (criterion 11).
-- Changing skill or hook plugin packaging (the `~/claude-config` plugin, the claude-rails distribution). Local repo changes only; upstream skill/plugin changes are a separate problem.
-- Auto-running the conversion sweep on every `.py` file. R16 baselines are captured; refactor directives convert. No mass refactor.
+- Lifting knobs from CQ-anchored profiles' OTHER unique args (e.g. `-cq <Q>`, `-spatial-aq`, `-temporal-aq`) into columns IF they are already represented in code as Profile.Cq or sibling columns. The intent is "knobs the canary names + knobs already hardcoded in the rate-anchored / anime branch." A full audit of every NVENC arg literal in CommandBuilder is a follow-up directive.
+- Removing the existing `NVENC AV1 P7 VBR 30pct -720p` / `-480p` profiles. They keep working via the percentage-of-source path (criterion 10).
+- Dropping the existing `SourceBitratePercent / Min / Max` columns. They remain operative for percentage-of-source profiles.
+- Re-running the systematic shootout (`Scripts/Smoke/NvencRateAndAnime.matrix.json`). Operator declared SKIPPED.
+- ContentClassifier rule tuning. Out of scope.
+- libsvtav1 (CPU) profile column lifts. This directive is NVENC-scoped; svtav1 profiles' hardcoded knobs are a follow-up.
+- Resuming `ceo-mode-enforcement`. That directive remains paused; resumption is its own decision after this remediation ships.
 
 ## Constraints
 
-<a id="constraints"></a>
-
-- **No production behavior change.** This is a meta-directive about how we work. If a production file is touched at all, only to add `# directive:` anchor lines OR to migrate a colocated feature doc. No logic edits.
-- **R14 (annotation drift) applies to flow docs during migration.** Adding "(formerly in feature.md)" lines is forbidden; merged content reads as native flow-doc content.
-- **All migrations idempotent.** Re-running the destination-directive's migration scripts on a partially-converted repo produces no diffs.
-- **Existing closed directives are not edited.** R18 applies even before it's added; the migration sweep does not touch the existing closed-directive archive.
-- **No new env vars.** All config comes from files already in `.claude/` or memory.
+- **Backwards compatibility is non-negotiable.** Every existing profile must emit a byte-identical command after the schema lift + backfill. Verified by criterion 23 against a saved fixture. If a knob lift breaks legacy behavior on an existing profile, the backfill default is wrong, not the lift.
+- **No env vars introduced** (R4). All knob values come from DB columns.
+- **Directive anchors required** (R15) on every edited function/class in `Models/CommandBuilder.py` and on the new migrations: `# directive: nvenc-rate-anchored-remediation` on the line directly above.
+- **Migrations idempotent** (R11), seed values cited (R2).
+- **No new `*.feature.md` / `*.flow.md` files** (R13). Documentation updates go in this directive doc and in the existing `nvenc-rate-anchored.feature.md` (per criteria 19 / 20).
+- **No `removed YYYY-MM-DD` annotation drift** (R14) when editing the feature doc. Delete sections; don't annotate.
 
 ## Escalation Defaults
 
-<a id="escalation-defaults"></a>
-
-- Tradeoff between "split a `.claude/rules/*.md` doc into multiple judgment standards" vs "keep as one" -> default SPLIT when a doc covers >2 distinct invariants; KEEP when it's one cohesive principle.
-- Tradeoff between "convert feature doc to closed directive" vs "delete outright" -> default CONVERT when the feature has criteria + status worth preserving; DELETE when the content duplicates the flow doc + code.
-- Tradeoff between "rich plan-review (architect + 1-2 specialized experts)" vs "minimal (architect only)" -> default ARCHITECT-ONLY for the gate to keep token cost predictable; specialized expert is opt-in per directive via a tag.
-- Risk tolerance: low on losing operator-validated content (memory, flow docs, closed directives); medium on workflow simplification (some short-term friction is acceptable for long-term clarity).
+- Tradeoff between "lift the knob to a column" vs "leave it hardcoded because it's a protocol constant" -> default LIFT unless the value is unambiguously a definitional constant (ffmpeg arg NAME, schema NAME). Operator can override per knob in `Out of Scope`.
+- Tradeoff between "one big migration" vs "one schema migration + one seed migration" -> SPLIT (criteria 14 + 16). Schema add is reusable; seed is canary-specific.
+- Tradeoff between "raise error on unconfigured tier" vs "fall back to nearest tier" when a knob is NULL in the resolution tier being encoded -> RAISE (criterion 14). Silent fallback hides config gaps; explicit failure surfaces them. The operator decides on a per-knob basis whether NULL means "encoder default" (allowed for criteria 1, 2, 3) or "config gap" (criterion 14's tier-not-configured case for backfilled knobs).
+- Risk tolerance: low on legacy regression (constraint above + criterion 23), medium on the canary profile's encode quality (FileReplacement size gate is the safety net).
 
 ## Engineering Calls Already Made
 
-<a id="engineering-calls"></a>
-
-- Destination is implemented as ONE directive, not a program of many. Reason: a program creates per-piece commits but the unified shape needs to land as a coherent state. Partial standards consolidation is worse than current state because it adds N+1 sources of truth.
-- Feature docs do not survive as a parallel layer (operator explicit decision this session). Migration is delete-or-convert; no read-only legacy state.
-- Closed directives are append-only (R18). Reason: their value is being trustworthy historical records; editable closed directives are no better than editable feature docs.
-- Baseline + monotonic-improvement model on R16/R17 (operator-discussed). Reason: hard-fail on existing monoliths breaks production work; pure grandfather lets monoliths win.
-- Plan-review and code-review gates use the existing claude-rails skill catalogue (software-architect, data-expert, security-expert, etc.). Reason: those skills already exist; no need to build new agent roles.
+- The canary becomes a NEW profile (`NVENC AV1 P7 CANARY VBR -720p`), not an edit of the existing `NVENC AV1 P7 VBR 30pct -720p`. Reason: the two regimes are different (fixed vs percentage); preserving both lets the operator A/B them and avoids destroying production rows that workers may have queued against.
+- Backfill discipline (criteria 4 / 5 / 6 / 7 / 8) is the linchpin: it lets the lift be a refactor that preserves byte-for-byte behavior on legacy profiles. Without backfill, the lift would silently change legacy commands. The backfill values are derived by inspecting the current hardcoded CommandBuilder defaults at the moment of the lift -- those are pulled into the migration's INSERT values with `# from: Models/CommandBuilder.py:<line>` citations.
+- ScaleHeight + PreserveAspect (criterion 9) is preferred over a more-general `ScaleFilter TEXT` column. Reason: an opaque text column is a config trap; structured columns make the intent legible and let the CommandBuilder fail loudly on impossible combinations.
+- The original `AddRateAnchoredColumns.py` / `AddRateAnchoredProfiles.py` stay untouched (criterion 17). Reason: production audit trail. The schema additions in this directive are additive, not corrective.
+- Criterion 21 patches the standards index. Reason: the principle that should have caught this miss did not exist anywhere. Adding it as a NAMED operator-reviewed standard is the cheapest insurance against repeating the miss; making it a mechanical R16 is harder (judgment call) and deferred to a future directive if the principle keeps getting violated.
 
 ## Status
 
-<a id="status"></a>
-
-Active 2026-05-30 -- phase: NEEDS_PLAN -- fleshing out criteria. The directive doc is the working scratch; flesh-out happens here non-linearly via the anchors above. No phase advance until every `**OPEN:**` is resolved AND the operator ratifies the full criteria set.
-
-### Progress
-
-<a id="progress"></a>
-
-- [x] Outcome drafted (need ratification before considered locked)
-- [x] Criteria sections scaffolded with anchors
-- [x] superpowers adoption locked (workflow layer)
-- [x] Karpathy CLAUDE.md base lift locked (source verbatim in working notes)
-- [x] Pain-point catalogue walked for judgment-standard candidates (criterion 36 resolved 2026-05-31; 8 new + 3 extensions + 1 deferred + 6 covered)
-- [x] Directive granularity cap decided (criterion 15: target 8, hard cap 12 -- absorbed into criterion 26 / `directive-granularity.md`)
-- [ ] Open questions resolved per section (see `**OPEN:**` markers below)
-- [ ] Feature-doc inventory completed (criterion 8 full list)
-- [ ] Memory walk completed (criterion 41 disposition list)
-- [ ] Per-directory file-size targets set (criterion 16 config)
-- [ ] Hook reload mechanism decided (criterion 2)
-- [ ] Plan-review expert selection mechanism decided (criterion 20)
-- [ ] Code-review expert selection mechanism decided (criterion 21)
-- [ ] Method-touched definition decided (criterion 17)
-- [ ] CLAUDE.md surviving sections decided (criterion 4)
-- [ ] Rule-doc fold mapping decided (criterion 1 -- reduced after auto-load investigation; mostly resolved)
-- [ ] Operator ratifies full criteria set -- advance to NEEDS_DOC_PREREAD
-
-### Open questions
-
-<a id="open-questions"></a>
-
-Collected from `**OPEN:**` markers above for visibility. Resolve each, then strike from this list.
-
-~~1. (crit 1) Rule-doc fold mapping~~ -- RESOLVED 2026-05-30: `.claude/rules/` stays put (auto-load convention); only doc splitting question remains, deferred to IMPLEMENTING per-rule.
-2. (crit 2) Hook reload: per-call or load-once-at-session-start?
-3. (crit 4) CLAUDE.md surviving sections: which stay, which move to standards?
-4. (crit 5) `/n` skill mechanics: edit plugin file or local override?
-5. (crit 6) `.claude/current-feature` paused entries: close-abandoned / convert / delete per entry?
-6. (crit 8) Feature-doc full inventory + disposition.
-~~7. (crit 15) Directive granularity~~ -- RESOLVED 2026-05-31: soft target 8 files, hard cap 12. Lives in `directive-granularity.md` (criterion 26).
-8. (crit 16) Per-directory R16 targets: what values per directory?
-9. (crit 16) Baseline update on refactor directives: mechanism shape?
-10. (crit 17) "Touched function" definition: whole rewrite vs any diff line?
-11. (crit 20) Plan-review expert selection: default architect-only? auto-detect?
-12. (crit 20) Plan-review output captured in directive or just transcript?
-13. (crit 21) Code-review expert selection mechanism?
-~~14. (crit 36) Pain-point walk for additional judgment standards~~ -- RESOLVED 2026-05-31: see section G.
-15. (crit 37) Hook script length target.
-16. (crit 41) Memory entry walk + disposition.
-
-**Remaining: 12 OPEN questions.** Next highest leverage: crit 8 (feature-doc inventory) and crit 41 (memory walk). Both need operator input on per-item decisions.
+Active 2026-05-30 -- phase: NEEDS_PLAN -- awaiting operator ratification of criteria. No code changes until criteria are explicitly approved or amended.
 
 ### Files
 
-<a id="files"></a>
-
-This list is TENTATIVE -- changes during flesh-out as we resolve OPENs.
-
 ```
-.claude/directive.md                                    -- THIS doc
-.claude/standards/index.md                              -- EDIT: add judgment-section, R16/R17/R18, refactor-directive entry
-.claude/standards/mechanical/R*.md                      -- NEW: one file per R-rule (extracted from hook + standards/index.md)
-.claude/standards/judgment/*.md                         -- NEW: one file per named principle
-.claude/standards/file-size-targets.json                -- NEW: per-directory R16 targets
-.claude/rules/                                          -- DELETE entire directory after fold (criterion 1)
-.claude/hooks/pre-edit-standards.ps1                    -- EDIT: load rules from files, add R16/R17/R18, add review-gate checks
-.claude/hooks/session-start-ceo.ps1                     -- EDIT: initialize baseline file if missing
-.claude/.file-baselines.json                            -- NEW (gitignored): per-file line-count baselines
-.gitignore                                              -- EDIT: add .file-baselines.json
-CLAUDE.md                                               -- EDIT: thin orient (~50 lines)
-MEMORY.md                                               -- EDIT: prune entries duplicated by judgment standards
-Scripts/Directives/WhatTouchedThis.py                   -- NEW: code -> directive reverse-index helper
-Scripts/Directives/ConversionDebt.py                    -- NEW: file-size debt table
-Features/**/*.feature.md                                -- DELETE or MIGRATE per criterion 8 inventory
-WorkerService/worker-lifecycle.feature.md               -- DELETE or MIGRATE per inventory
-Scripts/Smoke/EncoderShootout.feature.md                -- DELETE or MIGRATE per inventory
-.claude/directives/closed/YYYY-MM-DD-<slug>.md          -- NEW: one per converted feature doc
-.claude/directives/_template.md                         -- EDIT: align with new shape if needed
-.claude/directives/_template-refactor.md                -- NEW: refactor-directive template
-.claude/current-feature                                 -- DELETE per criterion 6
+.claude/directive.md                                            -- THIS doc
+.claude/standards/index.md                                      -- EDIT: criterion 21 named-standard bullet
+Features/Profiles/nvenc-rate-anchored.feature.md                -- EDIT: remove audit list (criterion 19), Remediation Status block (criterion 20), Scope file list update
+Models/CommandBuilder.py                                        -- EDIT: read every knob from row, no literals for tuning values (criterion 11), no name-based switching (criterion 12)
+Scripts/SQLScripts/AddCommandBuilderColumns_2026-05-30.py       -- NEW: schema lift + backfill (criterion 16)
+Scripts/SQLScripts/AddCanaryAnchoredProfile_2026-05-30.py       -- NEW: canary seed profile + thresholds (criterion 14)
 ```
 
 ### Verification (filled during VERIFYING phase)
-
-<a id="verification"></a>
 
 Per criterion -- to be recorded here when each one passes.
 
 ### Closure
 
-<a id="closure"></a>
-
-Closure is gated on all criteria + the doc supersession sweep (criterion 8-11 capture this directly).
-
-After close: pull `nvenc-rate-anchored-remediation` and `ceo-mode-enforcement` back to active in fresh sessions, each running against the unified shape.
-
----
-
-## Working notes
-
-<a id="working-notes"></a>
-
-Free-form area for flesh-out scratch. Move resolved items to the appropriate criterion + strike from `### Open questions`.
-
-### Flesh-out queue (next session priorities)
-
-- Pain-point catalogue walked (criterion 36): determines size of judgment-standards section.
-- Feature-doc inventory (criterion 8): determines size of migration sweep.
-- Memory walk (criterion 41): determines cleanup scope.
-
-These three are the highest-leverage flesh-outs because they bound the size of the directive. Once we know "N judgment standards, M feature docs to migrate, K memory entries to clean," the directive's size and shape lock.
-
-### External adoptions locked
-
-**superpowers** ([obra/superpowers](https://github.com/obra/superpowers)) -- workflow layer. Install: `/plugin install superpowers@claude-plugins-official`. Provides skills: brainstorming, writing-plans, test-driven-development, subagent-driven-development, requesting-code-review, using-git-worktrees. Maps to MediaVortex layer as:
-- brainstorming -> drives NEEDS_PLAN criteria-drafting
-- writing-plans -> shape of the directive doc's criteria + files + verification sections (we extend with CEO-mode-specific Escalation Defaults + Engineering Calls Already Made + closure block)
-- subagent-driven-development -> the dispatcher pattern under plan-review and code-review gates
-- requesting-code-review -> the IMPLEMENTING -> VERIFYING gate skill
-- test-driven-development -> optional discipline, not phase-gated
-- using-git-worktrees -> optional for parallel exploration, not phase-gated
-
-**Karpathy 4 rules** ([multica-ai/andrej-karpathy-skills](https://github.com/multica-ai/andrej-karpathy-skills)) -- CLAUDE.md base. Lifted verbatim into our CLAUDE.md during IMPLEMENTING phase. Source content stashed below.
-
-### Karpathy CLAUDE.md content (locked, source for merge)
-
-The following block is the verbatim source for the rules section of our merged CLAUDE.md. During IMPLEMENTING, this block lifts wholesale into `CLAUDE.md`, followed by MediaVortex-specific pointers (standards index, flow docs, directives/closed/, naming conventions, commands).
-
-```markdown
-# Behavioral guidelines (Karpathy-derived)
-
-Behavioral guidelines to reduce common LLM coding mistakes. Merge with project-specific instructions as needed.
-
-**Tradeoff:** These guidelines bias toward caution over speed. For trivial tasks, use judgment.
-
-## 1. Think Before Coding
-
-**Don't assume. Don't hide confusion. Surface tradeoffs.**
-
-Before implementing:
-- State your assumptions explicitly. If uncertain, ask.
-- If multiple interpretations exist, present them - don't pick silently.
-- If a simpler approach exists, say so. Push back when warranted.
-- If something is unclear, stop. Name what's confusing. Ask.
-
-## 2. Simplicity First
-
-**Minimum code that solves the problem. Nothing speculative.**
-
-- No features beyond what was asked.
-- No abstractions for single-use code.
-- No "flexibility" or "configurability" that wasn't requested.
-- No error handling for impossible scenarios.
-- If you write 200 lines and it could be 50, rewrite it.
-
-Ask yourself: "Would a senior engineer say this is overcomplicated?" If yes, simplify.
-
-## 3. Surgical Changes
-
-**Touch only what you must. Clean up only your own mess.**
-
-When editing existing code:
-- Don't "improve" adjacent code, comments, or formatting.
-- Don't refactor things that aren't broken.
-- Match existing style, even if you'd do it differently.
-- If you notice unrelated dead code, mention it - don't delete it.
-
-When your changes create orphans:
-- Remove imports/variables/functions that YOUR changes made unused.
-- Don't remove pre-existing dead code unless asked.
-
-The test: Every changed line should trace directly to the user's request.
-
-## 4. Goal-Driven Execution
-
-**Define success criteria. Loop until verified.**
-
-Transform tasks into verifiable goals:
-- "Add validation" -> "Write tests for invalid inputs, then make them pass"
-- "Fix the bug" -> "Write a test that reproduces it, then make it pass"
-- "Refactor X" -> "Ensure tests pass before and after"
-
-For multi-step tasks, state a brief plan:
-1. [Step] -> verify: [check]
-2. [Step] -> verify: [check]
-3. [Step] -> verify: [check]
-
-Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
-
-**These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
-```
-
-### Overlap with existing MediaVortex scope-discipline.md
-
-Karpathy rules 2 and 3 substantially overlap with `.claude/rules/scope-discipline.md`. During IMPLEMENTING, decide whether scope-discipline.md is folded into CLAUDE.md (since the 4 rules cover most of it) OR stays as a deeper standards-layer doc that scope-discipline.md becomes after editing. Likely the latter: CLAUDE.md gets the 4 high-level rules + pointer to scope-discipline.md for the task-contract shape and pre/post checks.
-
-### Workflow-layer overlap reductions to claim
-
-After superpowers adoption, the destination directive's scope reduces by:
-- Sections F (review gates): adopt superpowers code-review; we just gate phase advance on its invocation
-- Section H (hook + state machine): only the phase-gate enforcement and content rules (R1-R18) stay MediaVortex-custom; the brainstorm/plan/review workflow comes from superpowers
-- Section B (workflow consolidation): one `/n` that wraps superpowers brainstorming for criteria + writes directive shape; significantly smaller than hand-rolled
-
-Net: maybe 25-30% of the destination directive's planned criteria become "adopt superpowers skill X for criterion Y" instead of "build mechanism Z." Lower implementation cost, fewer OPENs to resolve.
+Closure is gated on all 23 criteria. The paused `ceo-mode-enforcement` directive's resumption is a separate decision.
