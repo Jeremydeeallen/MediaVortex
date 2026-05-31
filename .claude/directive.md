@@ -133,35 +133,61 @@ Criteria below are STUBS. Each section names the intent + open questions. We fle
 
 <a id="g-judgment-standards"></a>
 
-Each entry is a named principle, not hook-gated but surfaced at plan review. The catalogue below is the FIRST PASS; we add/refine as we agree.
+**LOCKED 2026-05-31 after 20-pain-point walk:** 8 new files, 3 extensions to existing rule docs, the rest covered by mechanical rules or already-existing entries. Each entry below names a verifiable shape.
 
-23. **No hardcoded values where DB-driven is possible.** Already memory-captured (`feedback_no_hardcoded_values.md`); gets a canonical file in `.claude/standards/judgment/no-hardcoded-values.md`.
+#### G.1 New standards (one file each in `.claude/rules/`)
 
-24. **No silent fallbacks.** Missing data → explicit error, not degraded mode. Reason: silent fallbacks produce bugs that hide for weeks; explicit errors surface the gap. Per directive `nvenc-rate-anchored.feature.md` criterion 8 wording: clear error message naming the file and the column, no silent fallback to CQ.
+23. **`no-hardcoded-values.md`** -- Tunable parameters (encoder knobs, thresholds, policy values) belong in DB columns, not as literals in code. CommandBuilder / decision functions READ; they don't DECIDE. Counter-examples (NOT in scope): ffmpeg arg keywords (`-rc`, `-tune`), schema column names, protocol constants, magic numbers with one true value (seconds in a minute). The rule fires when the value reflects a TUNING CHOICE. Memory source: `feedback_no_hardcoded_values.md`. Verifiable: file exists; standards index links to it.
 
-25. **No two-place sources of truth.** Same claim/decision in two repositories → drift. One canonical, others route to it. Already in `db-is-authority.md`; promoted to named judgment standard.
+24. **`no-silent-fallbacks.md`** -- Missing data -> explicit error, not degraded mode. Reason: silent fallbacks produce bugs that hide for weeks. Example: VBR profile + NULL source bitrate must raise `"VBR profile cannot encode {file}: source VideoBitrateKbps is missing or zero"`, not silently switch to CQ. Counter-examples: graceful degradation at user-experience boundary (loading spinner during network timeout) where the operator EXPLICITLY chose the fallback path. Verifiable: file exists; surfaces in plan review when criteria reference data-validation gaps.
 
-26. **No magic strings as switch keys.** Profile names, status enums in `if x == 'literal'` switches. Use columns, enums, or typed dispatch.
+25. **`no-magic-strings.md`** -- Profile names, status enums, rule names as raw strings in `if x == 'literal'` switches. Use columns, enum tables, or typed dispatch. Specific MediaVortex anti-pattern: `if ProfileName == 'NVENC AV1 P7 VBR 30pct -720p'` in CommandBuilder branches. Verifiable: file exists; surfaces when grep finds magic-string switching on touched files.
 
-27. **No boot-cached dynamic config.** `self._cached_*` in `__init__` of services/repositories. Already R3 (mechanical); judgment-layer entry explains WHY (db-authority).
+26. **`directive-granularity.md`** -- A directive's `## Files` list has a soft cap (target: 8 files, hard cap 12). Larger scope is a program of smaller directives. Absorbs the "god-object / SRP at file level" pain (god-files emerge when directives bundle too much). Reason: large directives are grep-unfriendly in the closed-directive archive; small directives compose into the archive cleanly. Verifiable: file exists; plan-review gate (criterion 20) flags directives over the cap.
 
-28. **No god-objects / single-responsibility at file level.** Companion to R16/R17. Judgment-layer entry: a file does one thing; if you find yourself naming the file with "and," split.
+27. **`explicit-construction-order.md`** -- "A must be called before B" requires enforcement, not convention. Construction-time wiring, factory functions, or fail-loud guards. MediaVortex example: worker bootstrap reads `Workers` row before `StorageRootResolutions` -- the dependency must be explicit, not implicit. Verifiable: file exists; lower frequency but surfaces during plan review on bootstrap / lifecycle work.
 
-29. **No YAGNI violations.** Schema columns / branches added "just in case." If the second use case isn't shipping, the column isn't either.
+28. **`aggregate-roots.md`** -- A single conceptual entity lives in ONE place. State spread across `TranscodeQueue` + `TranscodeAttempts` + `TranscodeFiles` + `MediaFiles` + `MediaFilesArchive` is the recurring pain. New code introducing per-entity state goes through an aggregate root pattern (one repository, one canonical query for "what's the state of X"). Verifiable: file exists; surfaces during plan review when criteria touch multi-table writes for one logical entity.
 
-30. **No tests over-coupled to implementation.** Tests assert behavior, not internal call sequences or log strings.
+29. **`api-envelope-uniformity.md`** -- Every endpoint returns `{'Success': bool, 'Message': str, 'Data': obj}`. No raw JSON, no string-only 500 responses. Promoted from a brief mention in CLAUDE.md to a standalone standard. Verifiable: file exists; surfaces during plan review on Controller / Blueprint work.
 
-31. **No annotation drift in docs.** Already R14 (mechanical); judgment-layer entry explains WHY (docs as spec, not log).
+30. **`vertical-slice-isolation.md`** -- Feature A's Controller does NOT reach into Feature B's Repository or BusinessService. Cross-feature access goes through explicit APIs (the BusinessService of B exposes a clear method; A's Controller calls THAT, not raw queries). Complements the existing MVVM pattern; calls out the violation shape. Verifiable: file exists; grep refuses Controllers importing from other features' Repositories.
 
-32. **No implicit temporal coupling.** A-must-be-called-before-B without enforcement. Explicit construction-time wiring instead.
+#### G.2 Extensions to existing rule docs
 
-33. **No cross-feature reach-around.** Feature A's controller accessing Feature B's repository directly. Use explicit cross-feature APIs.
+31. **Extend `.claude/rules/db-is-authority.md`** with a "Semantic DRY" section absorbing pain points #6 (duplicate code) and #8 (two-place sources of truth). Same claim implemented in two repositories = pick one canonical, other routes to it. Verifiable: db-is-authority.md has the new section; standards index links to the anchor.
 
-34. **Outside-in design preserved.** User-facing features start with the flow doc (what the user sees) before any implementation. The flow doc is the contract criteria must trace to.
+32. **Extend `.claude/rules/test-placement.md`** with a "Behavior not implementation" section absorbing pain point #15. Tests assert behavior boundary (input + observable output), not internal call sequences, log strings, or specific function names. Brittle tests get fixed by removing the implementation coupling, not by tightening assertions. Verifiable: test-placement.md has the new section.
 
-35. **Criteria as contract.** Done is defined per-criterion, with evidence in the directive's Verification section. No "ship and document later."
+33. **Extend `.claude/rules/data-integrity.md`** with a "Migration consolidation" section absorbing pain point #19. Migrations accumulate; periodic consolidation (squash) keeps current schema legible. Trigger criterion: when `Scripts/SQLScripts/` accumulates >20 files OR when re-reading >5 migrations to understand one column. Verifiable: data-integrity.md has the new section.
 
-36. **OPEN:** what else? We've listed pain points 1-20 from the elephant discussion; not all need to be judgment standards. Walk that list once and decide per item.
+#### G.3 Lower priority (deferred from this directive)
+
+34. **`feature-flag-sunset.md`** -- Every feature flag introduced has a sunset criterion at intro: either condition that flips it permanently ON, or date for removal. Lower priority because MediaVortex has few flags today; revisit when first flag lands.
+
+#### G.4 Covered without new files
+
+- **Unclear success criteria** (#2): covered by existing `.claude/rules/feature-criteria.md` 5 litmus tests.
+- **Mixed coding standards** (#3): this directive's meta scope -- one-time consolidation, not per-touch.
+- **Monolithic files** (#5): covered by R16/R17 mechanical (criteria 16, 17 of this directive).
+- **Boot-cached config** (#7): covered by R3 mechanical + existing `db-is-authority.md` judgment.
+- **YAGNI violations** (#14): covered by Karpathy rule 2 ("Simplicity First") in the CLAUDE.md base lift (criterion 4).
+- **Documentation drift** (#17): covered by R14 mechanical + the destination directive's feature-doc deletion sweep (section C).
+
+#### G.5 Cross-cutting principles already in existing rules (no action)
+
+- **Outside-in design**: `.claude/rules/flow-docs.md` already encodes this for user-facing features.
+- **Criteria as contract**: `.claude/rules/ceo-mode.md` already encodes this under "Success criteria as contract."
+- **Scope discipline**: `.claude/rules/scope-discipline.md` already exists.
+
+#### G.6 Section tally
+
+- 8 new standalone files (criteria 23-30)
+- 3 extensions to existing files (criteria 31-33)
+- 1 deferred to later directive (criterion 34)
+- 6 already covered (no action)
+
+Total `.claude/rules/` file count after this directive: 9 existing + 8 new = **17 files**.
 
 ### H. Hook + state machine
 
@@ -236,18 +262,20 @@ Active 2026-05-30 -- phase: NEEDS_PLAN -- fleshing out criteria. The directive d
 
 - [x] Outcome drafted (need ratification before considered locked)
 - [x] Criteria sections scaffolded with anchors
+- [x] superpowers adoption locked (workflow layer)
+- [x] Karpathy CLAUDE.md base lift locked (source verbatim in working notes)
+- [x] Pain-point catalogue walked for judgment-standard candidates (criterion 36 resolved 2026-05-31; 8 new + 3 extensions + 1 deferred + 6 covered)
+- [x] Directive granularity cap decided (criterion 15: target 8, hard cap 12 -- absorbed into criterion 26 / `directive-granularity.md`)
 - [ ] Open questions resolved per section (see `**OPEN:**` markers below)
 - [ ] Feature-doc inventory completed (criterion 8 full list)
 - [ ] Memory walk completed (criterion 41 disposition list)
-- [ ] Pain-point catalogue walked for judgment-standard candidates (criterion 36)
 - [ ] Per-directory file-size targets set (criterion 16 config)
 - [ ] Hook reload mechanism decided (criterion 2)
 - [ ] Plan-review expert selection mechanism decided (criterion 20)
 - [ ] Code-review expert selection mechanism decided (criterion 21)
-- [ ] Directive granularity cap decided (criterion 15)
 - [ ] Method-touched definition decided (criterion 17)
 - [ ] CLAUDE.md surviving sections decided (criterion 4)
-- [ ] Rule-doc fold mapping decided (criterion 1)
+- [ ] Rule-doc fold mapping decided (criterion 1 -- reduced after auto-load investigation; mostly resolved)
 - [ ] Operator ratifies full criteria set -- advance to NEEDS_DOC_PREREAD
 
 ### Open questions
@@ -256,22 +284,24 @@ Active 2026-05-30 -- phase: NEEDS_PLAN -- fleshing out criteria. The directive d
 
 Collected from `**OPEN:**` markers above for visibility. Resolve each, then strike from this list.
 
-1. (crit 1) Rule-doc fold mapping: which `.claude/rules/*.md` merge vs stay distinct?
+~~1. (crit 1) Rule-doc fold mapping~~ -- RESOLVED 2026-05-30: `.claude/rules/` stays put (auto-load convention); only doc splitting question remains, deferred to IMPLEMENTING per-rule.
 2. (crit 2) Hook reload: per-call or load-once-at-session-start?
 3. (crit 4) CLAUDE.md surviving sections: which stay, which move to standards?
 4. (crit 5) `/n` skill mechanics: edit plugin file or local override?
 5. (crit 6) `.claude/current-feature` paused entries: close-abandoned / convert / delete per entry?
 6. (crit 8) Feature-doc full inventory + disposition.
-7. (crit 15) Directive granularity: hard cap or soft? what number?
+~~7. (crit 15) Directive granularity~~ -- RESOLVED 2026-05-31: soft target 8 files, hard cap 12. Lives in `directive-granularity.md` (criterion 26).
 8. (crit 16) Per-directory R16 targets: what values per directory?
 9. (crit 16) Baseline update on refactor directives: mechanism shape?
 10. (crit 17) "Touched function" definition: whole rewrite vs any diff line?
 11. (crit 20) Plan-review expert selection: default architect-only? auto-detect?
 12. (crit 20) Plan-review output captured in directive or just transcript?
 13. (crit 21) Code-review expert selection mechanism?
-14. (crit 36) Pain-point walk for additional judgment standards.
+~~14. (crit 36) Pain-point walk for additional judgment standards~~ -- RESOLVED 2026-05-31: see section G.
 15. (crit 37) Hook script length target.
 16. (crit 41) Memory entry walk + disposition.
+
+**Remaining: 12 OPEN questions.** Next highest leverage: crit 8 (feature-doc inventory) and crit 41 (memory walk). Both need operator input on per-item decisions.
 
 ### Files
 
