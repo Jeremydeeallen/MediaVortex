@@ -18,6 +18,19 @@ Stages 1-4 require user action. Stages 5-7 are automatic once WorkerService is r
 
 ---
 
+## Seams
+
+Stage-transition data contracts. See `Features/TranscodeJob/TranscodeJob.feature.md` and `Features/FileReplacement/FileReplacement.feature.md` for intra-feature seams.
+
+| Transition | Producer (writer) | Wire shape | Consumer (reader) expects | Verification |
+|---|---|---|---|---|
+| QUEUE → TRANSCODE (4→5) | `QueueManagementBusinessService` | `TranscodeQueue.(Id BIGINT, StorageRootId BIGINT, RelativePath TEXT, AssignedProfile TEXT, ProcessingMode TEXT, AcceptsInterlaced BOOLEAN) Status='Pending'` | `DatabaseManager.ClaimNextPendingTranscodeJob` — atomic claim via `FOR UPDATE OF tq SKIP LOCKED`; NVENC profiles additionally require `Workers.nvenccapable=TRUE` | `SELECT COUNT(*) FROM TranscodeQueue WHERE Status='Pending'` decrements by 1 per claim |
+| TRANSCODE → VMAF or REPLACE (5→6 or 5→7) | `ProcessTranscodeQueueService` (on encode success) | `TranscodeAttempts.(Id BIGINT, Success=NULL, QualityTestRequired BOOLEAN)` + `TemporaryFilePaths.(TranscodeAttemptId, OriginalPath TEXT, LocalOutputPath TEXT, OutputStorageRootId BIGINT, OutputRelativePath TEXT)` in canonical DB form. In-place output: `LocalOutputPath` ends in `-mv.mp4.inprogress` adjacent to source on shared mount | `ShouldQualityTest.ProcessTranscodedFile(AttemptId)` reads `QualityTestRequired`; dispatches to `QualityTestQueueService.AddToQualityTestQueue` or `FileReplacementBusinessService.ProcessFileReplacement` | `SELECT COUNT(*) FROM TemporaryFilePaths WHERE TranscodeAttemptId IN (SELECT Id FROM TranscodeAttempts WHERE Success IS NULL)` → in-flight count |
+| VMAF → REPLACE (6→7) | `QualityTestingBusinessService` | `TranscodeAttempts.vmaf DOUBLE PRECISION NOT NULL, QualityTestCompleted=TRUE`; `ForceDisposition TEXT NULL` (operator override) | `PostTranscodeDispositionService._DecideFromInputs` — Replace when `VMAF >= 80.0` and `ForceDisposition IS NULL`; operator `ForceDisposition` bypasses the threshold | `SELECT COUNT(*) FROM TranscodeAttempts WHERE QualityTestCompleted=TRUE AND VMAF IS NULL` → 0 |
+| REPLACE → done (7→end) | `FileReplacementBusinessService._ProcessCompleteFileReplacement` | `MediaFiles.(FilePath, Codec, Resolution, SizeMB, TranscodedByMediaVortex=TRUE, etc.)` updated; `MediaFilesArchive` row written; `TranscodeAttempts.FileReplaced=TRUE`; `TemporaryFilePaths` row deleted | `MediaFiles` is the authoritative post-replacement record; `MediaFilesArchive` has the pre-replacement snapshot | `SELECT COUNT(*) FROM TemporaryFilePaths tfp JOIN TranscodeAttempts ta ON ta.Id = tfp.TranscodeAttemptId WHERE ta.FileReplaced=TRUE` → 0 (no orphaned TFP after successful replace) |
+
+---
+
 ## Stage 1: SCAN -- File Discovery
 
 **Trigger:** User clicks scan or calls `POST /api/Scan/Start`

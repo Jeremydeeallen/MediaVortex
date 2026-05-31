@@ -62,7 +62,8 @@ class EncoderKnobRepository(BaseRepository):
             if TargetResolution is None:
                 return None
 
-            LookupResolution = SourceResolution if TargetResolution == 'No downscaling' else TargetResolution
+            NormalizedSource = self._NormalizeResolution(SourceResolution)
+            LookupResolution = NormalizedSource if TargetResolution == 'No downscaling' else TargetResolution
 
             Query = (
                 "SELECT p.Id AS ProfileId, p.ProfileName, "
@@ -84,7 +85,7 @@ class EncoderKnobRepository(BaseRepository):
             Rows = self.ExecuteQuery(Query, (ProfileName, LookupResolution))
             if not Rows:
                 LoggingService.LogWarning(
-                    f"EncoderKnobs not found: profile='{ProfileName}' resolution='{LookupResolution}'",
+                    f"EncoderKnobs not found: profile='{ProfileName}' source='{SourceResolution}' lookup='{LookupResolution}'",
                     "EncoderKnobRepository", "GetEncoderKnobsForProfile",
                 )
                 return None
