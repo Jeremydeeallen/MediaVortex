@@ -37,6 +37,15 @@ See `Scripts/Smoke/EncoderShootout.feature.md` for the test methodology and the 
 
 If future NVENC tuning needs to vary per profile (e.g. tune=hq for fast-motion live action vs uhq for animation), the hardcoded knob set in `CommandBuilder.AddCodecParameters` becomes a Profile column. Not needed today -- one config wins across all four content types tested.
 
+## Seams
+
+| Seam | Producer | Wire shape | Consumer expects | Verification |
+|---|---|---|---|---|
+| `Profiles.usenvidiahardware` → claim gate | `Profiles.usenvidiahardware BIGINT` (1=NVENC, 0/NULL=software) | EXISTS subquery: `p.usenvidiahardware = 1` ANDed with `Workers.nvenccapable = TRUE` in `BuildClaimPredicate` | `DatabaseManager.ClaimNextPendingTranscodeJob` — NVENC jobs claimed only by workers where `Workers.nvenccapable=TRUE` | `py -m pytest Tests/Contract/TestClaimAuthority.py` |
+| `Workers.nvenccapable` → claim gate | Migration `AddNvencProfiles.py` sets `nvenccapable=TRUE` for I9-2024; all others FALSE | `Workers.nvenccapable BOOLEAN DEFAULT FALSE` | `BuildClaimPredicate` SQL fragment includes `w.nvenccapable = TRUE` for NVENC profiles | `SELECT workername, nvenccapable FROM Workers ORDER BY workername` |
+| `Profiles.usenvidiahardware` → CommandBuilder NVENC branch | `EncoderKnobs.UseNvidiaHardware Optional[int]` (0/1/None) read by `EncoderKnobRepository` | Python int; `CommandBuilder` checks `== 1` (not truthiness) | `CommandBuilder.AddCodecParameters` branches on `ProfileSettings['UseNvidiaHardware'] == 1` → emits `-c:v av1_nvenc` + full shootout-winner knob set | Smoke: output contains `av1_nvenc -preset p7 -tune uhq` for an NVENC profile |
+| NVENC encode output → FileReplacement | Worker writes `-mv.mp4.inprogress` path (same convention as SVT) | Standard inprogress file path | FileReplacement vertical consumes path unchanged; no NVENC-specific logic | Canary 2026-05-29: FileReplacement defense-in-depth triggered correctly (NewSize >= OldSize refused) |
+
 ## Scope
 
 ```

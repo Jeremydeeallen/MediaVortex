@@ -108,6 +108,15 @@ Internal: `Profiles.RateControlMode` ('cq' | 'vbr') is the data-driven seam. `Mo
 
 14. No existing operator workflow changes. Folder assignment still picks profiles by name; queue admission still uses the same gate. Verifiable: a folder pinned to `NVENC AV1 P7 UHQ CQ32 -720p` continues to queue identically before and after this feature ships.
 
+## Seams
+
+| Seam | Producer | Wire shape | Consumer expects | Verification |
+|---|---|---|---|---|
+| `Profiles.RateControlMode` → CommandBuilder branch | `Profiles.ratecontrolmode TEXT CHECK IN ('cq','vbr') DEFAULT 'cq'` via `EncoderKnobs.RateControlMode Optional[str]` | String `'cq'` or `'vbr'` | `CommandBuilder.AddCodecParameters` — `if RateControlMode == 'vbr'` takes rate-anchored path; else CQ (unchanged) | `py /tmp/smoke_legacy.py` (cq path); `py /tmp/smoke_canary.py` (vbr path) |
+| `MediaFiles.VideoBitrateKbps` → VBR rate calc | `ProcessTranscodeQueueService.GetTranscodingSettings` injects `MediaFile.VideoBitrateKbps` as `ProfileSettings['SourceVideoBitrateKbps']` | `MediaFiles.videobitrateKbps INTEGER` (nullable); Python int or None | `CommandBuilder` VBR branch: `clamp(SrcKbps * SourceBitratePercent / 100, MinBitrateKbps, MaxBitrateKbps)`. NULL `SrcKbps` → explicit error `"VBR profile cannot encode {file}: source VideoBitrateKbps is missing or zero"` | Encode attempt against a file with NULL `VideoBitrateKbps` → worker logs error + marks queue failed |
+| `ProfileThresholds` VBR columns → VBR calc | `ProfileThresholds.sourcebitratepercent INTEGER NULL`, `minbitratekbps INTEGER NULL`, `maxbitratekbps INTEGER NULL` via `EncoderKnobs` dataclass | Python int or None per field | `CommandBuilder` VBR branch reads all three; NULL on a production VBR profile row indicates a misconfigured seed | `SELECT pt.* FROM ProfileThresholds pt JOIN Profiles p ON p.Id = pt.ProfileId WHERE p.ratecontrolmode='vbr' AND (pt.sourcebitratepercent IS NULL OR pt.minbitratekbps IS NULL OR pt.maxbitratekbps IS NULL)` → 0 rows |
+| `ProfileThresholds.Gop` → CommandBuilder | `ProfileThresholds.gop INTEGER NULL` via `EncoderKnobs.Gop Optional[int]` | Python int or None | `CommandBuilder.AddCodecParameters` — emits `-g <Gop>` when non-NULL; no `-g` flag when NULL | Anime profile (Gop=480): smoke command contains `-g 480`; CQ production profile: no `-g` in output |
+
 ## Stability and operability
 
 - **Single seam**: the VBR branch lives ONLY in `CommandBuilder.AddCodecParameters`. No call sites of CommandBuilder need to know about the regime distinction.
