@@ -1,6 +1,8 @@
 # Claude Code harness ephemera (lock files change every session)
 .claude/*.bak
 .claude/*.lock
+.claude/.session-state.json
+.claude/.standards-overrides.log
 
 # Log files
 *.log

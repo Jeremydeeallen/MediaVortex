@@ -31,18 +31,16 @@ If `.claude/directive.md` is empty, fall back to task-delegation mode (scope-dis
 
 ## Documents first (read, plan, then update)
 
-Token cost compounds. Future sessions reading a stale feature/flow doc waste tokens chasing the truth in code. To prevent that:
+Documentation lives only in the directive doc (`.claude/directive.md`, archived to `.claude/directives/closed/YYYY-MM-DD-<slug>.md`). Code carries one-line `# directive: <slug>` anchors above functions/classes in the directive's `## Files` list. Multi-line comments and module docstrings are mechanically forbidden by R12.
 
-1. **Before any code.** Identify the feature and flow doc that cover the area being touched. Read them. If a doc that should exist does not, create it with the canonical sections (`## What It Does`, `## Scope`, `## Success Criteria`, `## Status`, `## Files`) using the current code as the source of truth.
-2. **Annotate change targets.** Note inline (in the plan / task contract, not in the doc) which sections of which docs will need updating when the work lands. Keeps the closing pass cheap.
-3. **At delivery, close the loop.** Update every doc whose described behavior changed. Stale doc = future cost. Specifically:
-   - Feature docs: criteria text, Status, Progress checklist, Files table
-   - Flow docs: stage details, side-effect tables, code-pointer file:line references
-   - `CLAUDE.md`: the one-line summaries
-   - `KNOWN-ISSUES.md`: any BUG entry whose root cause / repro / fix is now different
-4. **Spell out what the new state ISN'T.** When removing a previously-documented capability (a config flag, a code path, a command), say so explicitly in the doc Status block with the date and reason. Readers see "removed 2026-05-27 because X" rather than wondering whether the missing capability was an oversight.
+1. **Before any code.** The PreToolUse hook gates Edit/Write behind `NEEDS_DOC_PREREAD`: any pre-existing `*.feature.md` / `*.flow.md` ancestor of the file being touched must be Read first. New `*.feature.md` / `*.flow.md` files are refused (R13) -- documentation goes in the directive doc.
+2. **At delivery, close the loop.** Update the directive doc's Status, Verification, and Files sections. If the directive removes capability described in an existing `*.feature.md` / `*.flow.md`, delete the obsolete section or delete the file entirely. Do not annotate. R14 refuses Edits that add `removed YYYY-MM-DD` / `deprecated` / `no longer used` / `previously` / `formerly` lines -- the hook forces deletion instead.
 
 Docs are the cheapest path-to-truth for everyone who comes after, including Claude in the next session. The work isn't done until they match reality.
+
+## Phase state machine
+
+See `.claude/standards/index.md` for the authoritative table. CEO mode runs through `NEEDS_STANDARDS_REVIEW` -> `NEEDS_PLAN` -> `NEEDS_DOC_PREREAD` -> `IMPLEMENTING` -> `VERIFYING` -> `DELIVERING`. The PreToolUse hook refuses tool calls that don't match the current phase's allowed set. Advance phase by editing the directive doc Status line: `**Status:** Active -- phase: <NEXT>`.
 
 ## Success criteria as contract (first-class)
 
