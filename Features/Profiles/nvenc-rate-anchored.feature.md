@@ -1,5 +1,40 @@
 # NVENC AV1 Rate-Anchored Mode + Anime Profile
 
+## Reference canary command (operator-validated, verbatim)
+
+This is the exact ffmpeg command the operator ran during pre-production canary testing and was satisfied with. It is the source of truth for the rate-anchored regime's intended parameters. If the seeded production profiles drift from these knobs, the profiles are wrong, not this command.
+
+```
+ffmpeg -i c:\myvideo.mkv \
+  -map 0:v:0 -map 0:a:0 \
+  -vf scale=w=1280:h=-1 \
+  -c:v av1_nvenc \
+  -preset p7 \
+  -tune hq \
+  -multipass fullres \
+  -rc vbr \
+  -b:v 600k -maxrate:v 1200k -bufsize:v 1200k \
+  -rc-lookahead 20 \
+  -bf 4 -b_ref_mode middle \
+  -temporal-aq 1 -spatial-aq 1 \
+  -c:a eac3 -b:a 256k \
+  -pix_fmt p010le \
+  -f mp4 -movflags +faststart \
+  -y c:\myvideo_done.mp4
+```
+
+Pinned knobs that the seeded production profiles (`AddRateAnchoredProfiles.py`) currently DIVERGE from -- treat these as the canary baseline, not "settings I picked":
+- `-rc-lookahead 20` (NOT 32 -- the matrix/seeded profiles use 32)
+- `-bf 4` (NOT 7 -- the matrix/seeded profiles use 7)
+- `-tune hq -multipass fullres`
+- Fixed `-b:v 600k -maxrate:v 1200k -bufsize:v 1200k` for 720p downscale (NOT percentage-of-source -- the seeded profiles use 30% of source clamped to [350,2500] kbps)
+- `-vf scale=w=1280:h=-1` (preserve aspect, NOT `1280:720` fixed)
+- `-c:a eac3 -b:a 256k`
+- `-pix_fmt p010le`
+- `-movflags +faststart`
+
+Audit task: align `AddRateAnchoredProfiles.py` + `CommandBuilder.py` to this command, or document why each deviation is intentional. Tracked separately; this section's job is to make sure the command itself is never lost again.
+
 ## What It Does
 
 Extends the NVENC production path with two new rate-control regimes alongside the existing CQ-anchored config (`nvenc-profiles.feature.md`):
@@ -94,7 +129,7 @@ Internal: `Profiles.RateControlMode` ('cq' | 'vbr') is the data-driven seam. `Mo
 
 COMPLETE 2026-05-30. Deployed to larry (commit c4f8890b + d17e2d1).
 
-**Shootout SKIPPED by operator decision** -- the user's prior real-world canary (7.64 GB source -> 595 MB output at VMAF 92.92 with VBR 30% / hq / la=32 / bf=7) is the single data point that drove parameter selection. The systematic shootout (Scripts/Smoke/NvencRateAndAnime.matrix.json) was killed before it completed. Risk mitigation is the FileReplacement size-regression defense (refuses replacement when NewSize >= OldSize) + classifier-side rule scoping (VBR rule only fires on <=1500 kbps live action where balloon risk is lowest). If the chosen 30% percentage turns out wrong, operator tunes via SQL UPDATE on `ProfileThresholds.SourceBitratePercent` -- no code change required.
+**Shootout SKIPPED by operator decision** -- the operator's prior real-world canary command (see "Reference canary command" section above: VBR with fixed `-b:v 600k -maxrate 1200k`, `-rc-lookahead 20`, `-bf 4`, `-tune hq`, scale to 720p preserving aspect) is the single data point that drove the decision to ship the rate-anchored regime. The seeded production profiles (`AddRateAnchoredProfiles.py`) diverged from that command (percentage-of-source instead of fixed, la=32 instead of 20, bf=7 instead of 4) and that drift is now flagged for follow-up. The systematic shootout (Scripts/Smoke/NvencRateAndAnime.matrix.json) was killed before it completed. Risk mitigation is the FileReplacement size-regression defense (refuses replacement when NewSize >= OldSize) + classifier-side rule scoping (VBR rule only fires on <=1500 kbps live action where balloon risk is lowest). If the chosen 30% percentage turns out wrong, operator tunes via SQL UPDATE on `ProfileThresholds.SourceBitratePercent` -- no code change required.
 
 ### Progress
 
