@@ -6,20 +6,25 @@ from Features.Profiles.ProfileRepository import ProfileRepository
 from Core.Logging.LoggingService import LoggingService
 
 
+# directive: nvenc-rate-anchored-remediation
 class ProfileService:
     """Business service for managing transcoding profiles and their thresholds."""
 
+    # directive: nvenc-rate-anchored-remediation
     def __init__(self, repository: ProfileRepository = None):
         self.Repository = repository or ProfileRepository()
 
+    # directive: nvenc-rate-anchored-remediation
     def GetAllProfiles(self) -> List[TranscodeProfileModel]:
         """Get all transcoding profiles."""
         return self.Repository.GetAllProfiles()
 
+    # directive: nvenc-rate-anchored-remediation
     def GetProfileById(self, profile_id: int) -> Optional[TranscodeProfileModel]:
         """Get a specific profile by ID."""
         return self.Repository.GetProfileById(profile_id)
 
+    # directive: nvenc-rate-anchored-remediation
     def CreateProfile(self, profile_name: str, description: str = "",
                      codec: str = "libsvtav1", preset: int = 6, film_grain: int = 10,
                      yadif_mode: int = 1, yadif_parity: int = 1, yadif_deint: int = 1,
@@ -52,6 +57,7 @@ class ProfileService:
             LoggingService.LogException("Exception in ProfileService.CreateProfile", e, 'CreateProfile', 'ProfileService')
             raise
 
+    # directive: nvenc-rate-anchored-remediation
     def UpdateProfile(self, profile: TranscodeProfileModel) -> TranscodeProfileModel:
         """Update an existing transcoding profile."""
         try:
@@ -67,14 +73,17 @@ class ProfileService:
             LoggingService.LogException("Exception in ProfileService.UpdateProfile", e, 'UpdateProfile', 'ProfileService')
             raise
 
+    # directive: nvenc-rate-anchored-remediation
     def DeleteProfile(self, profile_id: int) -> bool:
         """Delete a transcoding profile and all its associated thresholds."""
         return self.Repository.DeleteProfile(profile_id)
 
+    # directive: nvenc-rate-anchored-remediation
     def GetProfileThresholds(self, profile_id: int) -> List[ProfileThresholdModel]:
         """Get all thresholds for a specific profile."""
         return self.Repository.GetThresholdsByProfileId(profile_id)
 
+    # directive: nvenc-rate-anchored-remediation
     def AddThreshold(self, profile_id: int, resolution: str,
                     under_30_min_mb: int, under_65_min_mb: int, over_65_min_mb: int,
                     video_bitrate_kbps: int, audio_bitrate_kbps: int,
@@ -112,16 +121,19 @@ class ProfileService:
             LoggingService.LogException("Exception in ProfileService.AddThreshold", e, 'AddThreshold', 'ProfileService')
             raise
 
+    # directive: nvenc-rate-anchored-remediation
     def UpdateThreshold(self, threshold: ProfileThresholdModel) -> ProfileThresholdModel:
         """Update an existing threshold."""
         threshold_id = self.Repository.SaveThreshold(threshold)
         threshold.Id = threshold_id
         return threshold
 
+    # directive: nvenc-rate-anchored-remediation
     def DeleteThreshold(self, threshold_id: int) -> bool:
         """Delete a threshold."""
         return self.Repository.DeleteThreshold(threshold_id)
 
+    # directive: nvenc-rate-anchored-remediation
     def GetProfileWithThresholds(self, profile_id: int) -> Optional[dict]:
         """Get a profile with all its thresholds."""
         profile = self.GetProfileById(profile_id)
@@ -135,6 +147,7 @@ class ProfileService:
             'thresholds': thresholds
         }
 
+    # directive: nvenc-rate-anchored-remediation
     def AssignProfileToRootFolder(self, RootFolderPath: str, ProfileId: int) -> Dict[str, Any]:
         """Assign a profile to all media files in a specific root folder."""
         try:

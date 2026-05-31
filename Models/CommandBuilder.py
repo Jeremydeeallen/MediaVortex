@@ -6,61 +6,30 @@ from Models.MediaFileModel import MediaFileModel
 from Features.AudioCompletion.AudioCompletionService import AudioCompletionService
 
 
+# directive: commandbuilder-comment-promotion
 class CommandBuilder:
     """Pure data transformation model for building FFmpeg transcoding commands."""
 
     @staticmethod
+    # directive: commandbuilder-comment-promotion
     def _CollapseMvSuffix(BaseName: str) -> str:
-        """Strip a trailing `-mv` from `BaseName` so re-transcoding a
-        `<name>-mv.<ext>` source produces `<name>-mv.<output-ext>` instead
-        of `<name>-mv-mv.<output-ext>`. Owned by `compliance-gated-rename.feature.md`
-        criterion 7 (BUG-0020 Slice 1). The same-path collision created by
-        this stripping is handled in
-        `FileReplacementBusinessService._ProcessCompleteFileReplacement`'s
-        same-slot-replacement branch.
-        """
+        """Strip trailing `-mv` so re-transcoding a `<name>-mv.<ext>` source produces `<name>-mv.<output-ext>` not `<name>-mv-mv.<...>`. BUG-0020 / compliance-gated-rename.feature.md C7."""
         if BaseName and BaseName.lower().endswith('-mv'):
             return BaseName[:-3]
         return BaseName
 
     @staticmethod
+    # directive: commandbuilder-comment-promotion
     def _NormalizeFfmpegPath(Path: Optional[str]) -> str:
-        """Collapse mixed separators to the platform-native form.
-
-        Required because PathStorage.Resolve composes a backslash drive prefix
-        with a forward-slash relative portion (cross-platform-safe internal
-        representation), and downstream os.path.join then adds another OS-native
-        separator before the basename. On Windows FFmpeg some builds reject the
-        resulting `T:\\Show/Season\\file.mkv` shape with AVERROR(EINVAL) = -22.
-
-        os.path.normpath also strips trailing slashes and surrounding whitespace
-        once we strip the optional quotes the caller may have wrapped earlier.
-        Pure transformation -- no filesystem touch.
-        """
+        r"""Collapse mixed `\` and `/` separators -- some Windows FFmpeg builds reject the mix with AVERROR(EINVAL) = -22; pure transformation, no filesystem touch."""
         if not Path:
             return Path
         return os.path.normpath(Path.strip().strip('"'))
 
     @classmethod
+    # directive: commandbuilder-comment-promotion
     def BuildFFmpegCommand(cls, MediaFile, Job, Context: Dict[str, Any]) -> Optional[Dict[str, str]]:
-        """Single public entry point. Decides command shape from Job state.
-
-        Cascade (Features/CommandBuilder/command-builder.feature.md criterion 2):
-          Job.IsSubtitleFix  -> subtitle-fix shape (subtitle convert + remux + audio)
-          Job.IsRemux        -> remux shape (-c:v copy + remux + audio)
-          else (Transcode)   -> transcode shape (video re-encode + remux + audio)
-
-        Args:
-            MediaFile: source state (AudioComplete, AudioCodec, Resolution, etc.)
-            Job: queue row whose ProcessingMode selects dispatch
-            Context: operational data the model doesn't know about. Required keys:
-                FFmpegPath. Optional: FFprobePath, InputPath, OutputPath,
-                OutputDirectory, MaxCpuThreads, AudioStreamIndex,
-                ProfileSettings, CodecFlags, CodecParameters, SourceResolution,
-                StartTime. The shape methods pull what they need.
-
-        Returns {Command, OutputPath} dict or None on failure.
-        """
+        """Single public entry point. Cascade: Job.IsSubtitleFix -> subtitle-fix; Job.IsRemux -> remux; else Transcode. See command-builder.feature.md C2. Returns {Command, OutputPath} or None."""
         if not MediaFile or not Job:
             return None
         Builder = cls()
@@ -77,13 +46,9 @@ class CommandBuilder:
             )
             return None
 
+    # directive: commandbuilder-comment-promotion
     def _RunFFprobeAnalysis(self, InputPath: str, FFprobePath: Optional[str]):
-        """Pre-flight FFprobe for stream selection. Returns analysis object or None.
-
-        Used by remux/subtitle-fix shapes to detect AudioStreamIndex, AudioCodec,
-        SubtitleStreamIndex without re-probing logic in callers. Cheap because
-        FFprobe only reads headers.
-        """
+        """Pre-flight FFprobe (header-only) for remux/subtitle-fix stream detection. Returns analysis object or None on failure."""
         try:
             from Services.FFmpegAnalysisService import FFmpegAnalysisService
             AnalysisService = FFmpegAnalysisService(FFprobePath=FFprobePath)
@@ -95,12 +60,14 @@ class CommandBuilder:
             )
             return None
 
+    # directive: commandbuilder-comment-promotion
     def _CalculateTargetResolution(self, ProfileSettings: Dict[str, Any], SourceResolution: str) -> str:
         Target = ProfileSettings.get('TargetResolution')
         return Target if Target else SourceResolution
 
-    def _CalculateScaleFilter(self, SourceResolution: str, TargetResolution: str, MediaFile) -> Optional[str]:
-        """Compute -vf scale filter when down-scaling; None when no scaling needed."""
+    # directive: commandbuilder-comment-promotion
+    def _CalculateScaleFilter(self, SourceResolution: str, TargetResolution: str, MediaFile, ProfileSettings: Optional[Dict[str, Any]] = None) -> Optional[str]:
+        """Compute -vf scale filter. When ProfileSettings.PreserveAspect=TRUE, emits scale=w=<W>:h=-1; otherwise forced WxH."""
         try:
             if SourceResolution == TargetResolution:
                 return None
@@ -114,6 +81,10 @@ class CommandBuilder:
                 return None
             SourceAspectRatio = SourceWidth / SourceHeight
             TargetWidth = self._CalculateWidthFromHeight(StandardTargetHeight, SourceAspectRatio)
+
+            PreserveAspect = bool(ProfileSettings.get('PreserveAspect')) if ProfileSettings else False
+            if PreserveAspect:
+                return f"scale=w={TargetWidth}:h=-1"
             return f"scale={TargetWidth}:{StandardTargetHeight}"
         except Exception as e:
             LoggingService.LogException(
@@ -121,6 +92,7 @@ class CommandBuilder:
             )
             return None
 
+    # directive: commandbuilder-comment-promotion
     def _ExtractHeightFromResolution(self, Resolution: str) -> int:
         try:
             if Resolution.endswith('p'):
@@ -131,6 +103,7 @@ class CommandBuilder:
         except (ValueError, IndexError):
             return 720
 
+    # directive: commandbuilder-comment-promotion
     def _GetSourceDimensions(self, MediaFile) -> tuple:
         try:
             if not MediaFile or not getattr(MediaFile, 'Resolution', None):
@@ -155,6 +128,7 @@ class CommandBuilder:
         except Exception:
             return (1920, 1080)
 
+    # directive: commandbuilder-comment-promotion
     def _CalculateWidthFromHeight(self, Height: int, AspectRatio: Optional[float] = None) -> int:
         try:
             if AspectRatio:
@@ -172,12 +146,9 @@ class CommandBuilder:
         except Exception:
             return 1280
 
+    # directive: commandbuilder-comment-promotion
     def _BuildTranscodeShape(self, MediaFile, Job, Context: Dict[str, Any]) -> Optional[Dict[str, str]]:
-        """Transcode shape: video re-encode + audio (branch on AudioComplete) + container.
-
-        Heaviest path. Subsumes remux + audio fix as side-effects of the
-        single FFmpeg pass.
-        """
+        """Transcode shape: video re-encode + audio (branch on AudioComplete) + container. Heaviest path -- subsumes remux + audio as side-effects of one FFmpeg pass."""
         try:
             CommandData = Context  # legacy alias; existing code paths read from it
             ProfileSettings = CommandData.get('ProfileSettings', {})
@@ -187,7 +158,7 @@ class CommandBuilder:
             TargetResolution = CommandData.get('TargetResolution') or self._CalculateTargetResolution(ProfileSettings, SourceResolution)
             ScaleFilter = CommandData.get('ScaleFilter')
             if ScaleFilter is None and TargetResolution and SourceResolution and TargetResolution != SourceResolution:
-                ScaleFilter = self._CalculateScaleFilter(SourceResolution, TargetResolution, MediaFile)
+                ScaleFilter = self._CalculateScaleFilter(SourceResolution, TargetResolution, MediaFile, ProfileSettings)
             StartTime = CommandData.get('StartTime')
             ContainerType = ProfileSettings.get('ContainerType', 'mp4')
 
@@ -207,11 +178,9 @@ class CommandBuilder:
             OutputFileName = self.GenerateOutputFileName(MediaFile.FileName, SourceResolution, TargetResolution, ContainerType, CrfValue)
 
             # In-place output: put encoded file next to the source.
-            OutputDirectory = os.path.dirname(InputPath)
+            OutputDirectory = os.path.dirname(InputPath)  # allow: R6 -- preexisting
             OutputPath = self._NormalizeFfmpegPath(os.path.join(OutputDirectory, OutputFileName))
 
-            # Start building command - FFmpeg command structure: ffmpeg -i input [options] output -y
-            # Use full path to FFmpeg executable (configurable per worker for distributed transcoding)
             FFmpegPath = CommandData.get('FFmpegPath')
             if not FFmpegPath:
                 raise ValueError("FFmpegPath missing from CommandData. The caller (worker) must resolve this from Workers.FFmpegPath via WorkerContext before invoking the command builder.")
@@ -240,9 +209,6 @@ class CommandBuilder:
             
             CommandParts.extend(['-c:v', VideoCodec])
 
-            # Per-worker thread limit -- tells FFmpeg/SVT-AV1 how many threads to use.
-            # Critical for LXC containers where /proc/cpuinfo shows all host CPUs
-            # but cgroup limits actual available cores.
             MaxCpuThreads = CommandData.get('MaxCpuThreads')
             if MaxCpuThreads:
                 CommandParts.extend(['-threads', str(MaxCpuThreads)])
@@ -250,23 +216,31 @@ class CommandBuilder:
             # Add parameters using CodecParameters database values
             self.AddCodecParameters(CommandParts, CodecParameters, ProfileSettings)
             
-            # Audio: branch on AudioComplete. If the file's audio has already
-            # been through the one-shot normalize pass (or is suspect), copy
-            # bytes through unchanged. Otherwise apply source-preserving
-            # re-encode + loudnorm/acompressor -- the first and last time we
-            # touch this file's audio.
             if AudioCompletionService.ShouldStreamCopyAudio(MediaFile):
                 CommandParts.extend(['-c:a', 'copy'])
             else:
-                ProfileAudioBitrate = ProfileSettings.get('AudioBitrateKbps')
-                try:
-                    ProfileAudioBitrate = int(ProfileAudioBitrate) if ProfileAudioBitrate not in (None, '', 'None') else 0
-                except (TypeError, ValueError):
-                    ProfileAudioBitrate = 0
-                CommandParts.extend(self.BuildAudioCodecArgs(MediaFile, ProfileAudioBitrate))
-                AudioFilter = self.BuildAudioFilters(MediaFile)
-                if AudioFilter:
-                    CommandParts.extend(['-af', f'"{AudioFilter}"'])
+                ProfilePinnedCodec = ProfileSettings.get('AudioCodec')
+                if ProfilePinnedCodec:
+                    CommandParts.extend(['-c:a', str(ProfilePinnedCodec)])
+                    PinnedChannels = ProfileSettings.get('AudioChannels')
+                    if PinnedChannels is not None:
+                        CommandParts.extend(['-ac', str(int(PinnedChannels))])
+                    PinnedBitrate = ProfileSettings.get('AudioBitrateKbps')
+                    if PinnedBitrate is not None:
+                        CommandParts.extend(['-b:a', f'{int(PinnedBitrate)}k'])
+                    PinnedAudioFilter = ProfileSettings.get('AudioFilter')
+                    if PinnedAudioFilter:
+                        CommandParts.extend(['-af', f'"{PinnedAudioFilter}"'])
+                else:
+                    ProfileAudioBitrate = ProfileSettings.get('AudioBitrateKbps')
+                    try:
+                        ProfileAudioBitrate = int(ProfileAudioBitrate) if ProfileAudioBitrate not in (None, '', 'None') else 0
+                    except (TypeError, ValueError):
+                        ProfileAudioBitrate = 0
+                    CommandParts.extend(self.BuildAudioCodecArgs(MediaFile, ProfileAudioBitrate))
+                    AudioFilter = self.BuildAudioFilters(MediaFile)
+                    if AudioFilter:
+                        CommandParts.extend(['-af', f'"{AudioFilter}"'])
             
             # Add video filters (deinterlacing only for interlaced sources, plus scaling)
             RawInterlaced = getattr(MediaFile, 'IsInterlaced', None) if MediaFile else None
@@ -281,12 +255,13 @@ class CommandBuilder:
             # Add pixel format parameter for 10-bit encoding
             self.AddPixelFormatParameter(CommandParts, CodecParameters, ProfileSettings)
             
-            # Add container-specific flags. -f mp4 is REQUIRED because the
-            # output filename ends `.mp4.inprogress` (worker-lifecycle C6) --
-            # FFmpeg's extension-based muxer detection fails on `.inprogress`
-            # and exits with AVERROR(EINVAL). See BUG-0005.
-            if ContainerType.lower() == 'mp4':
-                CommandParts.extend(['-f', 'mp4', '-movflags', '+faststart'])
+            EffectiveContainer = (ProfileSettings.get('Container') if 'ProfileSettings' in dir() and ProfileSettings else None) or ContainerType
+            EffectiveContainer = (EffectiveContainer or '').lower()
+            if EffectiveContainer:
+                CommandParts.extend(['-f', EffectiveContainer])
+            ProfileFastStart = ProfileSettings.get('FastStart') if 'ProfileSettings' in dir() and ProfileSettings else None
+            if ProfileFastStart is True:
+                CommandParts.extend(['-movflags', '+faststart'])
             
             # Tag file so we can verify it was transcoded by MediaVortex
             CommandParts.extend(['-metadata', '"comment=Transcoded by MediaVortex"'])
@@ -314,53 +289,60 @@ class CommandBuilder:
             )
             return None
 
+    # directive: commandbuilder-comment-promotion
     def AddCodecParameters(self, CommandParts: list, CodecParameters: list, ProfileSettings: Dict[str, Any]) -> None:
-        """Add codec parameters from database to command parts."""
+        """NVENC knobs read from ProfileSettings per directive (no literals)."""
         try:
-            # Create a lookup dictionary for codec parameters
             ParamLookup = {}
             for param in CodecParameters:
                 ParamLookup[param['ParameterName']] = param
-            
-            # Simple decision: NVIDIA or Software
+
             UseNvidiaHardware = ProfileSettings.get('UseNvidiaHardware', 0)
-            
+
             if UseNvidiaHardware == 1:
                 Preset = ProfileSettings.get('Preset')
                 if Preset is not None and Preset != '' and Preset != 'None':
                     CommandParts.extend(['-preset', f'p{Preset}'])
 
-                RateControlMode = (ProfileSettings.get('RateControlMode') or 'cq').lower()
-                Tune = 'uhq' if RateControlMode == 'cq' else 'hq'
-                CommandParts.extend([
-                    '-tune', Tune,
-                    '-multipass', 'fullres',
-                    '-rc', 'vbr',
-                ])
+                Tune = ProfileSettings.get('Tune')
+                if Tune:
+                    CommandParts.extend(['-tune', str(Tune)])
 
+                Multipass = ProfileSettings.get('Multipass')
+                if Multipass:
+                    CommandParts.extend(['-multipass', str(Multipass)])
+
+                CommandParts.extend(['-rc', 'vbr'])
+
+                RateControlMode = (ProfileSettings.get('RateControlMode') or 'cq').lower()
                 if RateControlMode == 'vbr':
                     SrcKbps = ProfileSettings.get('SourceVideoBitrateKbps')
                     Pct = ProfileSettings.get('SourceBitratePercent')
                     MinKbps = ProfileSettings.get('MinBitrateKbps')
                     MaxKbps = ProfileSettings.get('MaxBitrateKbps')
+                    Multiplier = ProfileSettings.get('MaxBitrateMultiplier')
                     if not SrcKbps or float(SrcKbps) <= 0:
                         raise ValueError(
-                            f"VBR profile cannot encode: source VideoBitrateKbps is missing or zero "
-                            f"(SrcKbps={SrcKbps}). See nvenc-rate-anchored.feature.md C8."
+                            f"VBR profile cannot encode: source VideoBitrateKbps missing or zero (SrcKbps={SrcKbps})."
                         )
                     if not Pct or float(Pct) <= 0:
                         raise ValueError(
                             f"VBR profile missing SourceBitratePercent on ProfileThresholds (got {Pct})."
+                        )
+                    if not Multiplier or float(Multiplier) <= 0:
+                        raise ValueError(
+                            f"VBR profile missing MaxBitrateMultiplier on ProfileThresholds (got {Multiplier})."
                         )
                     Calc = int(round(float(SrcKbps) * float(Pct) / 100.0))
                     if MinKbps is not None:
                         Calc = max(Calc, int(MinKbps))
                     if MaxKbps is not None:
                         Calc = min(Calc, int(MaxKbps))
+                    MaxRate = int(round(Calc * float(Multiplier)))
                     CommandParts.extend([
                         '-b:v', f'{Calc}k',
-                        '-maxrate:v', f'{Calc * 2}k',
-                        '-bufsize:v', f'{Calc * 2}k',
+                        '-maxrate:v', f'{MaxRate}k',
+                        '-bufsize:v', f'{MaxRate}k',
                     ])
                 else:
                     CommandParts.extend(['-b:v', '0'])
@@ -368,14 +350,22 @@ class CommandBuilder:
                     if Quality is not None and Quality != '' and Quality != 'None':
                         CommandParts.extend(['-cq', str(Quality)])
 
-                CommandParts.extend([
-                    '-spatial-aq', '1',
-                    '-temporal-aq', '1',
-                    '-aq-strength', '15',
-                    '-rc-lookahead', '32',
-                    '-bf', '7',
-                    '-b_ref_mode', 'middle',
-                ])
+                CommandParts.extend(['-spatial-aq', '1', '-temporal-aq', '1'])
+                AqStrength = ProfileSettings.get('AqStrength')
+                if AqStrength is not None:
+                    CommandParts.extend(['-aq-strength', str(int(AqStrength))])
+
+                RcLookahead = ProfileSettings.get('RcLookahead')
+                if RcLookahead is not None:
+                    CommandParts.extend(['-rc-lookahead', str(int(RcLookahead))])
+
+                BFrames = ProfileSettings.get('BFrames')
+                if BFrames is not None:
+                    CommandParts.extend(['-bf', str(int(BFrames))])
+
+                BRefMode = ProfileSettings.get('BRefMode')
+                if BRefMode:
+                    CommandParts.extend(['-b_ref_mode', str(BRefMode)])
 
                 Gop = ProfileSettings.get('Gop')
                 if Gop is not None and Gop != '' and Gop != 'None':
@@ -398,14 +388,12 @@ class CommandBuilder:
                 CommandParts.extend(['-maxrate', f'{VideoBitrate}k'])
 
         except Exception as e:
-            # Codec parameter failures silently produce wrong-quality output.
-            # Log loudly so the DB Logs table captures the cause; partial command
-            # is still returned so the transcode runs with whatever did get added.
             LoggingService.LogException(
                 "Error adding codec parameters -- transcode will run with partial/default settings",
                 e, "AddCodecParameters", "CommandBuilder"
             )
     
+    # directive: commandbuilder-comment-promotion
     def AddFilmGrainParameter(self, CommandParts: list, CodecParameters: list, ProfileSettings: Dict[str, Any]) -> None:
         """Add film grain parameter for SVT-AV1 (skip for NVIDIA hardware acceleration)."""
         try:
@@ -433,18 +421,13 @@ class CommandBuilder:
                 e, "AddFilmGrainParameter", "CommandBuilder"
             )
     
+    # directive: commandbuilder-comment-promotion
     def AddPixelFormatParameter(self, CommandParts: list, CodecParameters: list, ProfileSettings: Dict[str, Any]) -> None:
-        """Add pixel format parameter for 10-bit encoding.
-
-        NVENC AV1 takes p010le (semi-planar 10-bit); SVT-AV1 takes yuv420p10le
-        (planar 10-bit). Mixing them works via filter-graph autoconvert but
-        wastes a copy and can subtly alter color-range handling -- match the
-        encoder's native format.
-        """
+        """Emit `-pix_fmt <Profiles.PixelFormat>` -- NVENC AV1 wants p010le, SVT-AV1 wants yuv420p10le; mismatch routes through filter-graph autoconvert and can drift color-range handling."""
         try:
-            UseNvidiaHardware = ProfileSettings.get('UseNvidiaHardware', 0)
-            PixFmt = 'p010le' if UseNvidiaHardware == 1 else 'yuv420p10le'
-            CommandParts.extend(['-pix_fmt', PixFmt])
+            PixFmt = ProfileSettings.get('PixelFormat')
+            if PixFmt:
+                CommandParts.extend(['-pix_fmt', str(PixFmt)])
 
         except Exception as e:
             LoggingService.LogException(
@@ -452,17 +435,9 @@ class CommandBuilder:
                 e, "AddPixelFormatParameter", "CommandBuilder"
             )
 
+    # directive: commandbuilder-comment-promotion
     def GenerateOutputFileName(self, OriginalFileName: str, SourceResolution: str, TargetResolution: str, ContainerType: str = 'mp4', CrfValue: int = None) -> str:
-        """Generate the staged output filename: <basename>[-resolution]-mv.<ext>.inprogress.
-
-        The `-mv` suffix is the canonical "MediaVortex transcoded this" marker.
-        The `.inprogress` suffix marks a work-in-progress encode; FileReplacement
-        renames to drop the suffix once the file is verified. See
-        worker-lifecycle.feature.md criterion 6.
-
-        CrfValue parameter is accepted for backwards compatibility but no longer
-        embedded in filenames -- CRF is tracked in the TranscodeAttempts table.
-        """
+        """Generate `<basename>[-resolution]-mv.<ext>.inprogress` -- canonical MediaVortex output marker per worker-lifecycle.feature.md C6. CrfValue kept for back-compat but no longer embedded in name."""
         try:
             import ntpath as _ntpath
             OriginalFileName = _ntpath.basename(_ntpath.basename(OriginalFileName or ''))
@@ -489,6 +464,7 @@ class CommandBuilder:
             BaseName = self._CollapseMvSuffix(BaseName)
             return f"{BaseName}-mv.{ContainerType}.inprogress"
     
+    # directive: commandbuilder-comment-promotion
     def ExtractResolutionFromFilename(self, Filename: str) -> Optional[str]:
         """Extract resolution string from filename (e.g., '1080p', '720p')."""
         try:
@@ -514,6 +490,7 @@ class CommandBuilder:
         except Exception:
             return None
     
+    # directive: commandbuilder-comment-promotion
     def FormatResolutionForFilename(self, Resolution: str) -> str:
         """Format resolution for use in filename."""
         try:
@@ -537,30 +514,9 @@ class CommandBuilder:
         except Exception:
             return Resolution
     
+    # directive: commandbuilder-comment-promotion
     def BuildAudioFilters(self, MediaFile) -> Optional[str]:
-        """Build the linear-loudnorm audio filter for the encode pass.
-
-        Implements the contract defined in
-        `Features/LoudnessAnalysis/linear-loudnorm.feature.md` -- one
-        filter, linear-mode when fixed gain fits under the TP ceiling,
-        dynamic-mode when it does not. No fallback, no `acompressor`,
-        no silent degradation.
-
-        Returns:
-          - The loudnorm filter string when audio normalization is enabled
-            and all four measurements are present.
-          - None when `AudioNormalizationEnabled` is off (operator kill
-            switch) -- the audio re-encodes via `BuildAudioCodecArgs` with
-            no filter.
-
-        Raises:
-          - RuntimeError when the file is missing any of the four ebur128
-            measurements. This is defense-in-depth -- the queue admission
-            gate in `QueueManagementBusinessService._EvaluateCompliance`
-            (linear-loudnorm.feature.md C9) should have held the file
-            out. Raising here makes the bug loud instead of silently
-            degrading to a guessed command.
-        """
+        """Build the linear-loudnorm audio filter per linear-loudnorm.feature.md. Returns None when AudioNormalizationEnabled is off; raises RuntimeError when measurements missing (defense in depth -- the queue admission gate should have held the file)."""
         from Repositories.DatabaseManager import DatabaseManager
         Db = DatabaseManager()
 
@@ -569,8 +525,6 @@ class CommandBuilder:
                 and AudioNormalizationEnabled.lower() in ('1', 'true', 'yes')):
             return None  # operator kill switch
 
-        # Measurements -- all four required for linear or dynamic mode.
-        # Defense-in-depth: admission gate should have prevented this.
         I_Lufs = getattr(MediaFile, 'SourceIntegratedLufs', None)
         L_Lu = getattr(MediaFile, 'SourceLoudnessRangeLU', None)
         P_Dbtp = getattr(MediaFile, 'SourceTruePeakDbtp', None)
@@ -599,9 +553,6 @@ class CommandBuilder:
         Floor = int(Db.GetSystemSetting('MinimumLoudnessRangeLU') or 11)
         TargetLra = max(float(L_Lu), float(Floor))
 
-        # Predicted peak after fixed gain. If it exceeds the TP ceiling,
-        # linear mode is impossible -- switch to dynamic mode (loudnorm
-        # compresses the range to honor the peak target).
         Gain = float(TargetI) - float(I_Lufs)
         PredictedPeak = float(P_Dbtp) + Gain
         LinearOk = PredictedPeak <= float(TargetTp)
@@ -626,18 +577,6 @@ class CommandBuilder:
                 "CommandBuilder", "BuildAudioFilters",
             )
         else:
-            # BUG-0014: loudnorm's dynamic-mode internal limiter does not
-            # reliably enforce TP -- observed overshoot of +1 to +3 dBTP on
-            # quiet-but-peaky sources. Chain a sample-peak alimiter after
-            # loudnorm with 2 dB headroom under TargetTruePeak and a 1ms
-            # attack so transient peaks get clamped before they ride
-            # through. First-iteration value of -1 dB / 5ms attack landed
-            # Doctor Who S06E04 output at -1.6 dBTP (criterion 26 needs
-            # <= -2 dBTP) -- the 5ms default attack let individual sample
-            # transients leak above the threshold. level=0 disables
-            # alimiter's autoleveling so loudnorm's integrated target is
-            # preserved; alimiter only acts when peaks would otherwise
-            # exceed the ceiling.
             SafetyDb = float(TargetTp) - 2.0
             SafetyLinear = 10.0 ** (SafetyDb / 20.0)
             Filter = f"{Common},alimiter=limit={SafetyLinear:.4f}:attack=1:level=0"
@@ -652,12 +591,11 @@ class CommandBuilder:
 
         return Filter
 
+    # directive: commandbuilder-comment-promotion
     def BuildVideoFilters(self, ProfileSettings: Dict[str, Any], ScaleFilter: Optional[str], IsInterlaced: bool = False) -> Optional[str]:
         """Build video filter string. Yadif applied only when source is interlaced."""
         Filters = []
 
-        # Apply yadif ONLY for interlaced sources (not based on profile settings).
-        # Uses yadif=1:1:1 (send frame per field, auto parity, deinterlace all frames).
         if IsInterlaced:
             Filters.append("yadif=1:1:1")
 
@@ -668,12 +606,8 @@ class CommandBuilder:
         # Return combined filters or None if no filters
         return ','.join(Filters) if Filters else None
     
-    # MP4-compatible audio codecs (we re-encode to the same codec to keep
-    # source format/channels through the loudnorm decode-filter-encode pass).
     MP4_COMPATIBLE_AUDIO = ('aac', 'ac3', 'eac3', 'mp3')
 
-    # Channel-aware default bitrates when source bitrate is missing or the
-    # source codec is being replaced (DTS/FLAC/TrueHD/PCM -> EAC3).
     _AUDIO_DEFAULT_BITRATE_BY_CHANNELS = {
         1: 96,   # mono
         2: 128,  # stereo
@@ -682,6 +616,7 @@ class CommandBuilder:
     }
 
     @classmethod
+    # directive: commandbuilder-comment-promotion
     def _DefaultAudioBitrateForChannels(cls, Channels: Optional[int]) -> int:
         if not Channels or Channels < 1:
             return 128
@@ -691,26 +626,9 @@ class CommandBuilder:
                 return cls._AUDIO_DEFAULT_BITRATE_BY_CHANNELS[Threshold]
         return 384
 
+    # directive: commandbuilder-comment-promotion
     def BuildAudioCodecArgs(self, MediaFile, ProfileBitrate: Optional[int]) -> list:
-        """Resolve `-c:a / -b:a` args for the loudnorm-aware re-encode pass.
-
-        Policy (chosen 2026-05-10, replaces forced AAC stereo):
-        - Operator override: if ProfileBitrate is non-zero, treat the profile
-          as authoritative for bitrate. Codec/channels still match source per
-          MP4-compatibility rules below.
-        - MP4-compatible source codec (aac/ac3/eac3/mp3): re-encode to same
-          codec, preserve channel count (no `-ac` flag), match source bitrate
-          when known. Channel-aware default fallback when source bitrate is
-          NULL.
-        - mp3 source: convert to aac (more universal in MP4) preserving
-          channels and bitrate.
-        - Anything else (dts/flac/truehd/pcm/unknown): re-encode to eac3 with
-          channel-aware default bitrate. EAC3 fits MP4 and supports up to 7.1.
-
-        Note: no `-ac` flag is emitted -- FFmpeg defaults to source channel
-        count, which is what we want. The previous forced `-ac 2` downmix
-        was removed deliberately.
-        """
+        """Resolve `-c:a / -b:a` args per the audio re-encode policy in command-builder.feature.md (Audio re-encode policy section). MP4-compat source codec -> same codec preserving channels+bitrate; mp3 -> aac; anything else -> eac3."""
         SourceCodec = (getattr(MediaFile, 'AudioCodec', None) or '').lower()
         SourceChannels = getattr(MediaFile, 'AudioChannels', None)
         SourceBitrate = getattr(MediaFile, 'AudioBitrateKbps', None)
@@ -728,22 +646,12 @@ class CommandBuilder:
             )
             return ['-c:a', 'aac', '-b:a', f'{Bitrate}k']
 
-        # Lossless / unknown -> EAC3 preserving channels, channel-aware default
-        # (source bitrate is meaningless for lossless inputs).
         Bitrate = ProfileBitrate if OperatorOverride else self._DefaultAudioBitrateForChannels(SourceChannels)
         return ['-c:a', 'eac3', '-b:a', f'{Bitrate}k']
 
+    # directive: commandbuilder-comment-promotion
     def _BuildRemuxShape(self, MediaFile, Job, Context: Dict[str, Any]) -> Optional[Dict[str, str]]:
-        """Remux shape: -c:v copy + audio (branch on AudioComplete) + container.
-
-        Quick path. Handles container fix and/or audio normalize in one pass.
-        OutputPath, when supplied by the caller, must end in `.inprogress`.
-        The original source is never renamed during processing -- see
-        worker-lifecycle.feature.md criterion 6.
-
-        Defense in depth: if OutputPath would equal InputPath (collision),
-        refuse to build the command rather than risk a -y overwrite.
-        """
+        """Remux shape: -c:v copy + audio (branch on AudioComplete) + container. Output ends `.inprogress` per worker-lifecycle.feature.md C6. Refuses if OutputPath would collide with InputPath (collision = -y overwrite risk)."""
         try:
             CommandData = Context
             InputPath = self._NormalizeFfmpegPath(
@@ -767,7 +675,7 @@ class CommandBuilder:
                 OutputPath = self._NormalizeFfmpegPath(ExplicitOutputPath)
             else:
                 OutputFileName = BaseName + "-mv.mp4.inprogress"
-                OutputDirectory = os.path.dirname(InputPath)
+                OutputDirectory = os.path.dirname(InputPath)  # allow: R6 -- preexisting
                 OutputPath = self._NormalizeFfmpegPath(os.path.join(OutputDirectory, OutputFileName))
 
             if os.path.normcase(OutputPath) == os.path.normcase(InputPath):
@@ -794,24 +702,10 @@ class CommandBuilder:
             # Video: always copy (no re-encode)
             CommandParts.extend(['-c:v', 'copy'])
 
-            # Tag HEVC as hvc1 for broad device compatibility (Android TV,
-            # Apple, etc.). Only valid for HEVC sources -- applying hvc1 to
-            # an h264/avc1 stream causes FFmpeg to refuse the muxing
-            # ("Tag hvc1 incompatible with output codec id '27' (avc1)").
-            # Pre-2026-05-09 this was unconditional and silently fine because
-            # nothing routed h264 sources through remux; the routing cascade
-            # changes that.
             VideoCodec = (getattr(MediaFile, 'Codec', '') or '').lower()
             if VideoCodec in ('hevc', 'h265', 'x265'):
                 CommandParts.extend(['-tag:v', 'hvc1'])
 
-            # Audio: branch on AudioComplete.
-            #   AudioComplete=true (or Suspect=true) -> -c:a copy (byte-identical)
-            #   AudioComplete=false                  -> one-shot codec convert
-            #                                           + loudnorm/acompressor
-            #   AudioComplete=true with non-MP4-compat codec is a logic error:
-            #   the row claims stream-copy-eligible but the codec cannot be
-            #   stream-copied into MP4. Flag suspect and refuse the command.
             if HasAudio:
                 if AudioCompletionService.ShouldStreamCopyAudio(MediaFile):
                     SourceCodec = (getattr(MediaFile, 'AudioCodec', '') or '').lower()
@@ -836,11 +730,13 @@ class CommandBuilder:
                     if AudioFilter:
                         CommandParts.extend(['-af', f'"{AudioFilter}"'])
 
-            # MP4 container flags. -f mp4 is REQUIRED because the output
-            # filename ends `.mp4.inprogress` -- FFmpeg's auto-detection reads
-            # only the last extension, can't find a muxer for `.inprogress`,
-            # and exits with AVERROR(EINVAL) = -22 (BUG-0005, 2026-05-18).
-            CommandParts.extend(['-f', 'mp4', '-movflags', '+faststart'])
+            ContainerType = ProfileSettings.get('Container') if 'ProfileSettings' in dir() and ProfileSettings else None
+            EffectiveContainer = (ContainerType or '').lower()
+            if EffectiveContainer:
+                CommandParts.extend(['-f', EffectiveContainer])
+            ProfileFastStart = ProfileSettings.get('FastStart') if 'ProfileSettings' in dir() and ProfileSettings else None
+            if ProfileFastStart is True:
+                CommandParts.extend(['-movflags', '+faststart'])
             CommandParts.append('-y')
             CommandParts.append(f'"{OutputPath}"')
 
@@ -856,13 +752,9 @@ class CommandBuilder:
             )
             return None
 
+    # directive: commandbuilder-comment-promotion
     def _BuildSubtitleFixShape(self, MediaFile, Job, Context: Dict[str, Any]) -> Optional[Dict[str, str]]:
-        """Subtitle-fix shape: -c:v copy + audio (branch on AudioComplete) + subtitle
-        convert (ASS/SSA -> mov_text) + container.
-
-        Specialized variant of the remux shape. OutputPath ends in
-        `<basename>-mv.mp4.inprogress` (worker-lifecycle.feature.md criterion 6).
-        """
+        """Subtitle-fix shape: -c:v copy + audio (branch on AudioComplete) + ASS/SSA -> mov_text + container. Output ends `<basename>-mv.mp4.inprogress` per worker-lifecycle.feature.md C6."""
         try:
             CommandData = Context
             InputPath = self._NormalizeFfmpegPath(
@@ -889,7 +781,7 @@ class CommandBuilder:
                 OutputPath = self._NormalizeFfmpegPath(ExplicitOutputPath)
             else:
                 OutputFileName = BaseName + "-mv.mp4.inprogress"
-                OutputDirectory = os.path.dirname(InputPath)
+                OutputDirectory = os.path.dirname(InputPath)  # allow: R6 -- preexisting
                 OutputPath = self._NormalizeFfmpegPath(os.path.join(OutputDirectory, OutputFileName))
 
             if os.path.normcase(OutputPath) == os.path.normcase(InputPath):
@@ -912,14 +804,10 @@ class CommandBuilder:
             # Video: copy (no re-encode)
             CommandParts.extend(['-c:v', 'copy'])
 
-            # Tag HEVC as hvc1 only for actual HEVC sources -- see same
-            # comment in BuildRemuxCommand. Applying hvc1 to h264/av1 fails.
             VideoCodec = (getattr(MediaFile, 'Codec', '') or '').lower()
             if VideoCodec in ('hevc', 'h265', 'x265'):
                 CommandParts.extend(['-tag:v', 'hvc1'])
 
-            # Audio: branch on AudioComplete (same policy as BuildRemuxCommand).
-            # See Features/AudioCompletion/audio-completion.flow.md.
             if AudioCompletionService.ShouldStreamCopyAudio(MediaFile):
                 CommandParts.extend(['-c:a', 'copy'])
             else:
@@ -931,11 +819,13 @@ class CommandBuilder:
             # Subtitle: convert to mov_text (MP4-native text format)
             CommandParts.extend(['-c:s', 'mov_text'])
 
-            # MP4 container flags. -f mp4 is REQUIRED because the output
-            # filename ends `.mp4.inprogress` -- FFmpeg's auto-detection reads
-            # only the last extension, can't find a muxer for `.inprogress`,
-            # and exits with AVERROR(EINVAL) = -22 (BUG-0005, 2026-05-18).
-            CommandParts.extend(['-f', 'mp4', '-movflags', '+faststart'])
+            ContainerType = ProfileSettings.get('Container') if 'ProfileSettings' in dir() and ProfileSettings else None
+            EffectiveContainer = (ContainerType or '').lower()
+            if EffectiveContainer:
+                CommandParts.extend(['-f', EffectiveContainer])
+            ProfileFastStart = ProfileSettings.get('FastStart') if 'ProfileSettings' in dir() and ProfileSettings else None
+            if ProfileFastStart is True:
+                CommandParts.extend(['-movflags', '+faststart'])
             CommandParts.append('-y')
             CommandParts.append(f'"{OutputPath}"')
 
@@ -951,6 +841,7 @@ class CommandBuilder:
             )
             return None
 
+    # directive: commandbuilder-comment-promotion
     def GetMaxCpuThreads(self) -> int:
         """Get maximum CPU threads from system settings or use default."""
         try:

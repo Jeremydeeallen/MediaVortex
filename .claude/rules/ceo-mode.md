@@ -2,6 +2,24 @@
 
 The user sets production acceptance criteria. Claude owns everything below that. Delivery is "done, here's how to use it" — not "PR for review."
 
+## Contents
+
+Jump-to anchors (hook refusals link here directly):
+
+- [When this mode is active](#when-this-mode-is-active)
+- [What the user owns](#what-the-user-owns)
+- [What Claude owns](#what-claude-owns)
+- [Documents first (read, plan, then update)](#documents-first-read-plan-then-update)
+- [Show the road, not the wall](#show-the-road-not-the-wall)
+- [Handling preexisting comment / doc violations encountered mid-directive](#handling-preexisting-comment--doc-violations-encountered-mid-directive)
+- [Phase state machine](#phase-state-machine)
+- [Success criteria as contract (first-class)](#success-criteria-as-contract-first-class)
+- [Escalation rules](#escalation-rules)
+- [Reporting](#reporting)
+- [Operational limits](#operational-limits)
+- [Interaction with scope-discipline.md](#interaction-with-scope-disciplinemd)
+- [Honest caveats](#honest-caveats)
+
 ## When this mode is active
 
 Whenever `.claude/directive.md` exists and contains a non-empty directive. The directive is auto-loaded into Claude's context every session.
@@ -37,6 +55,31 @@ Documentation lives only in the directive doc (`.claude/directive.md`, archived 
 2. **At delivery, close the loop.** Update the directive doc's Status, Verification, and Files sections. If the directive removes capability described in an existing `*.feature.md` / `*.flow.md`, delete the obsolete section or delete the file entirely. Do not annotate. R14 refuses Edits that add `removed YYYY-MM-DD` / `deprecated` / `no longer used` / `previously` / `formerly` lines -- the hook forces deletion instead.
 
 Docs are the cheapest path-to-truth for everyone who comes after, including Claude in the next session. The work isn't done until they match reality.
+
+### Show the road, not the wall
+
+Every rule, refusal message, and policy doc in CEO mode is prescriptive: it names the path forward, not just the violation. A refusal that says "X is wrong" leaves the reader stuck; a refusal that says "X is wrong; do Y next" advances the work. Hook messages, this rule doc, and any future policy you write follow the same shape -- the reader leaves the message knowing the next action, not just the prohibition.
+
+This applies recursively to the rules below: when you cite policy in code review, in a directive doc, or in a refusal, lead with the path forward.
+
+### Handling preexisting comment / doc violations encountered mid-directive
+
+When you touch a file and the hook flags a preexisting R12 (multi-line comments / docstrings), R6 (path-shape), or similar legacy violation on code outside this directive's surface, here is how you handle it.
+
+**Step 1: classify the block.** Read it and put it in one of four buckets:
+
+| Bucket | What it looks like | Path forward |
+|---|---|---|
+| **Pure WHAT-redundancy** | Comment restates what the code does ("Create a lookup dictionary"; "Loop over rows") | Delete entirely. The identifier names already say it. |
+| **Active-directive WHY** | Rationale that emerged during this directive's work | Put the content in the current `.claude/directive.md`; leave a single-line `# directive: <slug>` anchor above the affected def/class. |
+| **Permanent-invariant WHY** | BUG references, hard-won constraints (the BUG-0005 `-f mp4` muxer-detection note, LXC thread-limit reasoning, BUG-0022 VMAF input order) | Open a new directive (e.g. `command-builder-comment-promotion`, `path-shape-migration`) and **MOVE** the content -- never copy -- to its permanent home: `KNOWN-ISSUES.md` under a `BUG-NNNN`, or the relevant `*.feature.md` / `*.flow.md`. Leave a single-line anchor in code pointing at the new home (`# BUG-0005`, `# see worker-lifecycle.feature.md C6`). The source of truth must be unambiguous, hence move-not-copy. |
+| **Surprising WHY that fits nowhere** | A genuine "this code looks weird because..." note with no doc home yet | Collapse to a single-line comment in place. R12 allows one line. |
+
+**Step 2: scope decision.** If the file has many blocks across many sections (5+ blocks, or blocks that all relate to a single subsystem), the classification work IS its own directive. Open `<file>-comment-promotion` or `<subsystem>-rationale-promotion` and do the classification there. This keeps the current directive's blast radius bounded.
+
+**Step 3: code anchors.** Every moved block leaves a one-line pointer in the code at the original location: `# BUG-NNNN`, `# see <doc-path>`, `# directive: <slug>`. Grep on the anchor lands the reader on the rationale.
+
+**Override (`# allow: <reason>`) usage.** Reserve for cases where the proper fix is genuinely non-trivial and would expand the current directive's surface beyond reason. R6 path-shape migration is the canonical example: the proper fix is migrating to `PathTranslationService` or shape-explicit path libs, which is its own directive. For R12, the proper fix is almost always cheaper than an override -- classification + move/delete IS the fix, and the override is just a deferral cost.
 
 ## Phase state machine
 

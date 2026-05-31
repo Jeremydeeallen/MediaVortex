@@ -23,17 +23,7 @@ ffmpeg -i c:\myvideo.mkv \
   -y c:\myvideo_done.mp4
 ```
 
-Pinned knobs that the seeded production profiles (`AddRateAnchoredProfiles.py`) currently DIVERGE from -- treat these as the canary baseline, not "settings I picked":
-- `-rc-lookahead 20` (NOT 32 -- the matrix/seeded profiles use 32)
-- `-bf 4` (NOT 7 -- the matrix/seeded profiles use 7)
-- `-tune hq -multipass fullres`
-- Fixed `-b:v 600k -maxrate:v 1200k -bufsize:v 1200k` for 720p downscale (NOT percentage-of-source -- the seeded profiles use 30% of source clamped to [350,2500] kbps)
-- `-vf scale=w=1280:h=-1` (preserve aspect, NOT `1280:720` fixed)
-- `-c:a eac3 -b:a 256k`
-- `-pix_fmt p010le`
-- `-movflags +faststart`
-
-Audit task: align `AddRateAnchoredProfiles.py` + `CommandBuilder.py` to this command, or document why each deviation is intentional. Tracked separately; this section's job is to make sure the command itself is never lost again.
+Resolved by the nvenc-rate-anchored-remediation directive (2026-05-31): every knob this canary names is now held in a `Profiles` / `ProfileThresholds` column, and `Models/CommandBuilder.py` reads them rather than carrying literal values. The canary command above is reproduced by a seeded profile row (`NVENC AV1 P7 CANARY VBR -720p`); divergence is no longer expressible because the values live in DB columns. See the directive doc at `.claude/directives/closed/<date>-nvenc-rate-anchored-remediation.md` for the full schema lift and per-knob backfill discipline.
 
 ## What It Does
 
@@ -129,6 +119,10 @@ Internal: `Profiles.RateControlMode` ('cq' | 'vbr') is the data-driven seam. `Mo
 
 COMPLETE 2026-05-30. Deployed to larry (commit c4f8890b + d17e2d1).
 
+### Remediation 2026-05-31 (nvenc-rate-anchored-remediation directive)
+
+Every encoder knob the operator-validated canary names is now held in a column on `Profiles` or `ProfileThresholds`. `Models/CommandBuilder.py` reads these columns; literals are gone for the knob set the canary covers. New seed: `NVENC AV1 P7 CANARY VBR -720p` (Id 39) reproducing `Scripts/CodecAnalysis/NvidiaOptimization1.ps1`. Migration files: `Scripts/SQLScripts/AddCommandBuilderColumns_2026-05-30.py` (schema + backfill), `Scripts/SQLScripts/AddCanaryAnchoredProfile_2026-05-30.py` (canary seed). Adding a new NVENC regime is now a row insert; adjusting an existing one is a SQL UPDATE.
+
 **Shootout SKIPPED by operator decision** -- the operator's prior real-world canary command (see "Reference canary command" section above: VBR with fixed `-b:v 600k -maxrate 1200k`, `-rc-lookahead 20`, `-bf 4`, `-tune hq`, scale to 720p preserving aspect) is the single data point that drove the decision to ship the rate-anchored regime. The seeded production profiles (`AddRateAnchoredProfiles.py`) diverged from that command (percentage-of-source instead of fixed, la=32 instead of 20, bf=7 instead of 4) and that drift is now flagged for follow-up. The systematic shootout (Scripts/Smoke/NvencRateAndAnime.matrix.json) was killed before it completed. Risk mitigation is the FileReplacement size-regression defense (refuses replacement when NewSize >= OldSize) + classifier-side rule scoping (VBR rule only fires on <=1500 kbps live action where balloon risk is lowest). If the chosen 30% percentage turns out wrong, operator tunes via SQL UPDATE on `ProfileThresholds.SourceBitratePercent` -- no code change required.
 
 ### Progress
@@ -145,12 +139,15 @@ COMPLETE 2026-05-30. Deployed to larry (commit c4f8890b + d17e2d1).
 ## Scope
 
 ```
-Scripts/SQLScripts/AddRateAnchoredColumns.py      -- NEW: schema columns
-Scripts/SQLScripts/AddRateAnchoredProfiles.py     -- NEW: seed 3 profiles + their thresholds
-Scripts/Smoke/NvencRateAndAnime.matrix.json       -- NEW: shootout matrix
-Scripts/Smoke/EncoderShootout.py                  -- VBR branch added to BuildEncodeCmd
-Models/CommandBuilder.py                          -- VBR + Gop branch in AddCodecParameters
-Features/Profiles/nvenc-rate-anchored.feature.md  -- this file
+Scripts/SQLScripts/AddRateAnchoredColumns.py             -- schema columns (RateControlMode + 4 threshold cols)
+Scripts/SQLScripts/AddRateAnchoredProfiles.py            -- seed 3 production profiles + their thresholds
+Scripts/SQLScripts/AddCommandBuilderColumns_2026-05-30.py  -- nvenc-rate-anchored-remediation schema lift
+Scripts/SQLScripts/AddCanaryAnchoredProfile_2026-05-30.py  -- canary seed reproducing NvidiaOptimization1.ps1
+Scripts/Smoke/NvencRateAndAnime.matrix.json              -- shootout matrix
+Scripts/Smoke/EncoderShootout.py                         -- VBR branch added to BuildEncodeCmd
+Models/CommandBuilder.py                                 -- VBR + Gop branch + knob lifts
+Features/Profiles/EncoderKnobRepository.py               -- single read path for CommandBuilder knob lookup
+Features/Profiles/nvenc-rate-anchored.feature.md         -- this file
 ```
 
 ## Files

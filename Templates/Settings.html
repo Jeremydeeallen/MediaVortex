@@ -1252,6 +1252,187 @@ function SaveDefaultProfile() {
     });
 }
 
+function BuildProfileKnobChips(Profile) {
+    const Bits = [];
+    if (Profile.UseNvidiaHardware === 1) Bits.push('<span class="badge bg-success me-1">NVENC</span>');
+    if (Profile.RateControlMode) Bits.push(`<span class="badge bg-secondary me-1">rc=${Profile.RateControlMode}</span>`);
+    if (Profile.Tune) Bits.push(`<span class="badge bg-info text-dark me-1">tune=${Profile.Tune}</span>`);
+    if (Profile.Multipass) Bits.push(`<span class="badge bg-info text-dark me-1">multipass=${Profile.Multipass}</span>`);
+    if (Profile.PixelFormat) Bits.push(`<span class="badge bg-info text-dark me-1">pix=${Profile.PixelFormat}</span>`);
+    if (Profile.AudioCodec) {
+        const Ch = (Profile.AudioChannels !== null && Profile.AudioChannels !== undefined) ? `/${Profile.AudioChannels}ch` : '';
+        const Br = (Profile.AudioBitrateKbps !== null && Profile.AudioBitrateKbps !== undefined) ? `@${Profile.AudioBitrateKbps}k` : '';
+        Bits.push(`<span class="badge bg-warning text-dark me-1">audio=${Profile.AudioCodec}${Ch}${Br}</span>`);
+    }
+    if (Profile.AudioFilter) Bits.push(`<span class="badge bg-warning text-dark me-1" title="${Profile.AudioFilter}">audio-filter set</span>`);
+    if (Profile.Container) {
+        const FS = Profile.FastStart ? '+faststart' : '';
+        Bits.push(`<span class="badge bg-secondary me-1">container=${Profile.Container}${FS ? ' ' + FS : ''}</span>`);
+    }
+    if (Bits.length === 0) return '';
+    return `<div class="mt-1" style="font-size: 0.75rem;">${Bits.join('')}</div>`;
+}
+
+function ShowProfileKnobs(ProfileId) {
+    $.get('/api/profiles/' + ProfileId).done(function(Resp) {
+        if (!Resp.success) {
+            ShowAlert('Failed to load profile: ' + (Resp.error || 'unknown'), 'danger');
+            return;
+        }
+        const P = Resp.profile;
+        const ProfileEditable = [
+            {name: 'RateControlMode', kind: 'select', options: ['cq','vbr']},
+            {name: 'Tune', kind: 'text'},
+            {name: 'Multipass', kind: 'select', options: ['fullres','qres','disabled','2pass']},
+            {name: 'PixelFormat', kind: 'text'},
+            {name: 'AudioCodec', kind: 'text'},
+            {name: 'AudioBitrateKbps', kind: 'int'},
+            {name: 'AudioChannels', kind: 'int'},
+            {name: 'AudioFilter', kind: 'text'},
+            {name: 'Container', kind: 'text'},
+            {name: 'FastStart', kind: 'bool'},
+        ];
+        const ThresholdEditable = [
+            {name: 'TranscodeDownTo', kind: 'text'},
+            {name: 'Quality', kind: 'int'},
+            {name: 'SourceBitratePercent', kind: 'int'},
+            {name: 'MinBitrateKbps', kind: 'int'},
+            {name: 'MaxBitrateKbps', kind: 'int'},
+            {name: 'MaxBitrateMultiplier', kind: 'float'},
+            {name: 'RcLookahead', kind: 'int'},
+            {name: 'BFrames', kind: 'int'},
+            {name: 'BRefMode', kind: 'select', options: ['middle','each','disabled']},
+            {name: 'ScaleHeight', kind: 'int'},
+            {name: 'PreserveAspect', kind: 'bool'},
+            {name: 'Gop', kind: 'int'},
+        ];
+
+        function CellInput(Col, Val, FieldId) {
+            const V = (Val === null || Val === undefined) ? '' : String(Val);
+            if (Col.kind === 'bool') {
+                const TrueSel = (Val === true) ? 'selected' : '';
+                const FalseSel = (Val === false) ? 'selected' : '';
+                return `<select id="${FieldId}" data-kind="bool" class="form-select form-select-sm">
+                    <option value="">NULL</option>
+                    <option value="true" ${TrueSel}>true</option>
+                    <option value="false" ${FalseSel}>false</option>
+                </select>`;
+            }
+            if (Col.kind === 'select') {
+                let Opts = '<option value="">NULL</option>';
+                Col.options.forEach(function(O) {
+                    const Sel = (V === O) ? 'selected' : '';
+                    Opts += `<option value="${O}" ${Sel}>${O}</option>`;
+                });
+                return `<select id="${FieldId}" data-kind="select" class="form-select form-select-sm">${Opts}</select>`;
+            }
+            return `<input type="text" id="${FieldId}" data-kind="${Col.kind}" value="${V.replace(/"/g,'&quot;')}" class="form-control form-control-sm">`;
+        }
+
+        let Body = '<h6 class="mb-2">Profile-level knobs <small class="text-muted">(editable; click Save to commit)</small></h6>';
+        Body += '<table class="table table-sm table-bordered mb-3"><tbody>';
+        Body += `<tr><th style="width:200px;">Codec</th><td><code>${P.Codec || ''}</code> <small class="text-muted">(structural -- edit via main Edit dialog)</small></td></tr>`;
+        Body += `<tr><th>Preset</th><td><code>${P.Preset !== null && P.Preset !== undefined ? P.Preset : ''}</code></td></tr>`;
+        Body += `<tr><th>UseNvidiaHardware</th><td><code>${P.UseNvidiaHardware}</code></td></tr>`;
+        ProfileEditable.forEach(function(Col) {
+            Body += `<tr><th>${Col.name}</th><td>${CellInput(Col, P[Col.name], 'pk_' + Col.name)}</td></tr>`;
+        });
+        Body += '</tbody></table>';
+
+        Body += '<h6 class="mb-2">Per-resolution threshold knobs <small class="text-muted">(editable; click Save to commit)</small></h6>';
+        const SortedT = (P.Thresholds || []).slice().sort(function(a,b){
+            const order = {'480p':0, '720p':1, '1080p':2, '2160p':3};
+            return (order[a.Resolution] || 99) - (order[b.Resolution] || 99);
+        });
+        Body += '<div class="table-responsive"><table class="table table-sm table-bordered" style="font-size: 0.85rem;"><thead><tr>';
+        Body += '<th>Resolution</th>';
+        ThresholdEditable.forEach(function(C) { Body += `<th>${C.name}</th>`; });
+        Body += '</tr></thead><tbody>';
+        SortedT.forEach(function(T) {
+            Body += `<tr data-tid="${T.Id}"><td><strong>${T.Resolution}</strong></td>`;
+            ThresholdEditable.forEach(function(Col) {
+                const FieldId = `tk_${T.Id}_${Col.name}`;
+                Body += `<td>${CellInput(Col, T[Col.name], FieldId)}</td>`;
+            });
+            Body += '</tr>';
+        });
+        Body += '</tbody></table></div>';
+
+        Body += '<p class="text-muted small mb-0">Empty field = NULL (CommandBuilder omits the flag, encoder default applies). Changes saved here take effect on the next worker claim -- no service restart needed.</p>';
+
+        const Modal = $(`
+            <div class="modal fade" tabindex="-1">
+              <div class="modal-dialog modal-xl modal-dialog-scrollable">
+                <div class="modal-content">
+                  <div class="modal-header"><h5 class="modal-title">${P.ProfileName} -- knob columns</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+                  <div class="modal-body">${Body}</div>
+                  <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary" id="SaveKnobsBtn"><i class="fas fa-save me-1"></i> Save</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+        `);
+        $('body').append(Modal);
+        const BsModal = new bootstrap.Modal(Modal[0]);
+
+        Modal.find('#SaveKnobsBtn').on('click', function() {
+            function ReadField(FieldId, Kind) {
+                const El = document.getElementById(FieldId);
+                if (!El) return null;
+                const Raw = El.value;
+                if (Raw === '' || Raw === null) return null;
+                if (Kind === 'int') { const N = parseInt(Raw, 10); return isNaN(N) ? null : N; }
+                if (Kind === 'float') { const N = parseFloat(Raw); return isNaN(N) ? null : N; }
+                if (Kind === 'bool') return Raw === 'true';
+                return Raw;
+            }
+            const ProfilePayload = {};
+            ProfileEditable.forEach(function(Col) {
+                ProfilePayload[Col.name] = ReadField('pk_' + Col.name, Col.kind);
+            });
+            const ThresholdPayload = SortedT.map(function(T) {
+                const Row = {Id: T.Id};
+                ThresholdEditable.forEach(function(Col) {
+                    Row[Col.name] = ReadField(`tk_${T.Id}_${Col.name}`, Col.kind);
+                });
+                return Row;
+            });
+
+            const Btn = $(this);
+            Btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin me-1"></i> Saving...');
+            $.ajax({
+                url: '/api/profiles/' + ProfileId + '/knobs',
+                method: 'PATCH',
+                contentType: 'application/json',
+                data: JSON.stringify({Profile: ProfilePayload, Thresholds: ThresholdPayload}),
+            })
+            .done(function(R) {
+                if (R.success) {
+                    ShowAlert(R.message || 'Saved.', 'success');
+                    BsModal.hide();
+                    LoadProfiles();
+                } else {
+                    ShowAlert('Save failed: ' + (R.error || 'unknown'), 'danger');
+                    Btn.prop('disabled', false).html('<i class="fas fa-save me-1"></i> Save');
+                }
+            })
+            .fail(function(XHR) {
+                const Msg = (XHR.responseJSON && XHR.responseJSON.error) || 'Request failed';
+                ShowAlert('Save failed: ' + Msg, 'danger');
+                Btn.prop('disabled', false).html('<i class="fas fa-save me-1"></i> Save');
+            });
+        });
+
+        BsModal.show();
+        Modal.on('hidden.bs.modal', function() { Modal.remove(); });
+    }).fail(function() {
+        ShowAlert('Failed to load profile knobs', 'danger');
+    });
+}
+
 function DisplayProfiles(Profiles) {
     const ProfilesList = $('#ProfilesList');
     ProfilesList.empty();
@@ -1263,6 +1444,7 @@ function DisplayProfiles(Profiles) {
     
     Profiles.forEach(function(Profile) {
         const SafeName = Profile.ProfileName.replace(/'/g, "\\'");
+        const KnobChips = BuildProfileKnobChips(Profile);
         const ProfileCard = `
             <div class="card mb-2 profile-sortable" data-profile-id="${Profile.Id}" draggable="true">
                 <div class="card-body py-2">
@@ -1273,10 +1455,14 @@ function DisplayProfiles(Profiles) {
                         <div class="flex-grow-1">
                             <h6 class="card-title mb-0">${Profile.ProfileName}</h6>
                             <small class="text-muted">${Profile.Description || 'No description'}</small>
+                            ${KnobChips}
                         </div>
                         <div class="text-end text-nowrap">
                             <button class="btn btn-outline-primary btn-sm me-1" onclick="EditProfile(${Profile.Id})">
                                 <i class="fas fa-edit"></i>
+                            </button>
+                            <button class="btn btn-outline-primary btn-sm me-1" onclick="ShowProfileKnobs(${Profile.Id})" title="Show all lifted knobs">
+                                <i class="fas fa-cogs"></i>
                             </button>
                             <button class="btn btn-outline-secondary btn-sm me-1" onclick="CopyProfile(${Profile.Id})">
                                 <i class="fas fa-copy"></i>

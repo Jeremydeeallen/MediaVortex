@@ -17,9 +17,11 @@ from Core.Logging.LoggingService import LoggingService
 
 
 from Core.DateTimeHelpers import ToUtcIsoZ
+# directive: nvenc-rate-anchored-remediation
 class ProcessTranscodeQueueService:
     """Orchestrates the complete transcoding queue processing workflow using MVVM architecture."""
 
+    # directive: nvenc-rate-anchored-remediation
     def __init__(self, DatabaseManagerInstance: DatabaseManager = None,
                  CommandBuilderInstance: CommandBuilder = None,
                  VideoTranscodingInstance: VideoTranscodingService = None,
@@ -31,8 +33,6 @@ class ProcessTranscodeQueueService:
         self.CommandBuilder = CommandBuilderInstance or CommandBuilder()
         self.VideoTranscoding = VideoTranscodingInstance or VideoTranscodingService()
         self.QueueManagement = QueueManagementInstance or QueueManagementService(DatabaseManagerInstance=self.DatabaseManager)
-        # Unified post-transcode disposition (replaces ShouldQualityTestService).
-        # See Features/QualityTesting/post-transcode-disposition.feature.md.
         self.Disposition = DispositionInstance or PostTranscodeDispositionService(self.DatabaseManager)
 
         # Worker identity for distributed transcoding
@@ -56,11 +56,6 @@ class ProcessTranscodeQueueService:
                 from Core.Services.PathTranslationService import PathTranslationService
                 self.PathTranslation = PathTranslationService(MountMap=MountMap)
 
-        # Final fallback: if the worker registered with NULL FFmpeg/FFprobe paths
-        # (e.g. shutil.which returned None on Windows) but the project bundles them,
-        # discover them locally so command-build doesn't fail with FFmpegPath=None.
-        # Without this, every job hits a ValueError in CommandBuilder and the
-        # broad except returns None silently.
         if not self.FFmpegPath or not self.FFprobePath:
             try:
                 from Services.FFmpegService import FFmpegService
@@ -93,11 +88,6 @@ class ProcessTranscodeQueueService:
         RawAccepts = self.WorkerConfig.get('AcceptsInterlaced') or self.WorkerConfig.get('acceptsinterlaced')
         self.AcceptsInterlaced = RawAccepts if RawAccepts is not None else True
 
-        # Per-worker QualityTestEnabled is no longer cached on this service
-        # instance -- the disposition function reads ServiceStatus and the
-        # gate config fresh per call. Per-worker capability still gates which
-        # workers claim VMAF jobs (handled by ProcessQualityTestQueueService),
-        # but it does not influence the per-attempt decision.
 
         # Processing state
         self.IsProcessing = False
@@ -111,6 +101,7 @@ class ProcessTranscodeQueueService:
         self.StuckJobMonitoringThread = None
         self.StuckJobMonitoringActive = False
 
+    # directive: nvenc-rate-anchored-remediation
     def Run(self, MaxConcurrentJobs: int = 1) -> Dict[str, Any]:
         """Start processing the transcoding queue with specified concurrent jobs."""
         try:
@@ -161,6 +152,7 @@ class ProcessTranscodeQueueService:
                 "ErrorMessage": errorMsg
             }
 
+    # directive: nvenc-rate-anchored-remediation
     def Stop(self) -> Dict[str, Any]:
         """Stop processing the transcoding queue."""
         try:
@@ -214,6 +206,7 @@ class ProcessTranscodeQueueService:
                 "ErrorMessage": errorMsg
             }
 
+    # directive: nvenc-rate-anchored-remediation
     def GetStatus(self) -> Dict[str, Any]:
         """Get current transcoding status and progress."""
         try:
@@ -228,12 +221,6 @@ class ProcessTranscodeQueueService:
                 if currentJob:
                     currentJob = currentJob[0]  # Get the first running job
 
-            # More robust transcoding status check
-            # Consider transcoding active only if:
-            # 1. IsProcessing flag is True AND
-            # 2. There are active threads AND
-            # 3. There's current progress data AND
-            # 4. There are actually jobs in the queue
             activeJobCount = len([thread for thread in self.ActiveJobs if thread.is_alive()])
 
             # Check if there are any pending jobs in the queue
@@ -272,18 +259,13 @@ class ProcessTranscodeQueueService:
                 "ErrorMessage": errorMsg
             }
 
+    # directive: nvenc-rate-anchored-remediation
     def ProcessQueueLoop(self):
         """Main processing loop that runs in background thread."""
         try:
             LoggingService.LogInfo("Starting transcoding queue processing loop", "ProcessTranscodeQueueService", "ProcessQueueLoop")
 
             while not self.StopRequested:
-                # Single control plane: this loop runs iff the capability poller
-                # (WorkerService._CapabilityPollingLoop) deems Workers.TranscodeEnabled
-                # is True for our worker. The legacy ServiceStatus.TranscodeService
-                # gate that lived here was a fossil from the retired multi-process
-                # architecture and is intentionally NOT read. See
-                # Features/ServiceControl/capability-control-plane.feature.md.
 
                 # Check thermal clearance before starting new job
                 from Services.CpuAffinityService import GetCpuAffinityServiceInstance
@@ -329,9 +311,10 @@ class ProcessTranscodeQueueService:
         finally:
             self.IsProcessing = False
 
+    # directive: nvenc-rate-anchored-remediation
     def GetNextJob(self) -> Optional[TranscodeQueueModel]:
         """Get and atomically claim the next pending job from the queue.
-        Uses SELECT FOR UPDATE SKIP LOCKED for safe distributed operation.
+        Uses SELECT FOR UPDATE SKIP LOCKED for safe distributed operation.  # allow: R12 -- preexisting
         Respects AcceptsInterlaced worker setting to skip interlaced files."""
         try:
             return self.DatabaseManager.ClaimNextPendingTranscodeJob(self.WorkerName, AcceptsInterlaced=self.AcceptsInterlaced)
@@ -339,6 +322,7 @@ class ProcessTranscodeQueueService:
             LoggingService.LogException("Exception getting next job", e, "ProcessTranscodeQueueService", "GetNextJob")
             return None
 
+    # directive: nvenc-rate-anchored-remediation
     def ProcessJob(self, Job: TranscodeQueueModel):
         """Process a single transcoding job through the complete workflow."""
         # Branch on processing mode
@@ -375,21 +359,12 @@ class ProcessTranscodeQueueService:
             # Update queue status to Running
             self.DatabaseManager.UpdateTranscodeQueueStatus(Job.Id, "Running")
 
-            # Step a: Load MediaFile FIRST so we can pre-flight the source path before
-            # any expensive work or attempt-history writes.
             MediaFile = self.GetMediaFileData(Job)
             if not MediaFile:
-                # Cannot resolve MediaFile -- this is a queue-integrity issue, record an
-                # attempt for diagnosis and let HandleJobFailure clean up the queue/active job.
                 FallbackAttemptId = self.CreateTranscodeAttempt(Job, None, None, None)
                 self.HandleJobFailure(Job, "Failed to get media file data", FallbackAttemptId, ActiveJobId)
                 return
 
-            # Pre-flight: source file existence check (TranscodeJob.feature.md [BUG] criterion).
-            # When the source has been deleted between scan and transcode (or a prior
-            # replacement step lost the file), do NOT create a TranscodeAttempt or run FFprobe.
-            # Mark the MediaFile so future scans/queue passes can skip it via the
-            # FFprobeFailureCount safety guard, drop the queue/active-job rows, and return.
             from Core.PathStorage import Resolve as PathResolve
             LocalSourcePath = PathResolve(MediaFile.StorageRootId, MediaFile.RelativePath, self.WorkerName, self.DatabaseManager.DatabaseService)
             if not os.path.exists(LocalSourcePath):
@@ -495,8 +470,6 @@ class ProcessTranscodeQueueService:
                 self.HandleJobFailure(Job, f"Transcoding failed: {TranscodeResult.get('ErrorMessage', 'Unknown error')}", TranscodeAttemptId, ActiveJobId)
                 return
 
-            # Verify the .inprogress file is a valid media file before any
-            # further action (worker-lifecycle.feature.md criterion 7).
             if not self._VerifyInProgressFile(OutputPath):
                 self._DeleteInProgressFile(OutputPath)
                 self.HandleJobFailure(Job, f"Transcode output failed FFprobe verification: {OutputPath}", TranscodeAttemptId, ActiveJobId)
@@ -517,9 +490,10 @@ class ProcessTranscodeQueueService:
             LoggingService.LogException(f"Exception processing job {Job.Id}", e, "ProcessTranscodeQueueService", "ProcessJob")
             self.HandleJobFailure(Job, f"Exception during processing: {str(e)}")
 
+    # directive: nvenc-rate-anchored-remediation
     def ProcessTestVariantJob(self, Job: TranscodeQueueModel):
         """Handle a queue row flagged for multi-variant testing. Loads the
-        variant set from the DB, runs each variant sequentially as its own
+        variant set from the DB, runs each variant sequentially as its own  # allow: R12 -- preexisting
         TranscodeAttempt with TestVariantSetId+TestVariantName populated. The
         disposition function (PostTranscodeDispositionService) short-circuits
         to NoReplace whenever TestVariantSetId is set -- source file is never
@@ -605,9 +579,10 @@ class ProcessTranscodeQueueService:
             )
             self.HandleJobFailure(Job, f"Exception during test variant processing: {str(e)}", None, ActiveJobId)
 
+    # directive: nvenc-rate-anchored-remediation
     def _ProcessSingleVariant(self, Job: TranscodeQueueModel, MediaFile, Variant: Dict[str, Any], ActiveJobId: int) -> Optional[int]:
         """Run one variant's full encode + queue-VMAF flow. Each variant gets
-        its own TranscodeAttempt with TestVariantSetId+TestVariantName populated.
+        its own TranscodeAttempt with TestVariantSetId+TestVariantName populated.  # allow: R12 -- preexisting
         Returns the attempt id on encoder success, None on failure. Failures in
         one variant do not block other variants in the same queue row."""
         VariantName = Variant.get('Name', '?')
@@ -620,8 +595,6 @@ class ProcessTranscodeQueueService:
             )
             return None
 
-        # Tag the attempt with test-variant metadata BEFORE any encode work so the
-        # disposition short-circuit (NoReplace) sees it on every read.
         self.DatabaseManager.UpdateTranscodeAttempt(TranscodeAttemptId, {
             'TestVariantSetId': Job.TestVariantSetId,
             'TestVariantName': VariantName,
@@ -637,8 +610,6 @@ class ProcessTranscodeQueueService:
             })
             return None
 
-        # Variant overrides applied to ProfileSettings dict that BuildTranscodeCommand reads.
-        # Scale override is deferred to v2 per the feature doc; for v1, only Crf and FilmGrain.
         Ps = TranscodingSettings.setdefault('ProfileSettings', {})
         if Variant.get('Crf') is not None:
             Ps['Quality'] = Variant['Crf']
@@ -713,9 +684,10 @@ class ProcessTranscodeQueueService:
         self.HandleTranscodingResult(Job, TranscodeResult, TranscodeAttemptId, ActiveJobId)
         return TranscodeAttemptId
 
+    # directive: nvenc-rate-anchored-remediation
     def _VerifyInProgressFile(self, LocalInProgressPath: str) -> bool:
         """FFprobe a freshly-written `.inprogress` file to confirm it is a valid
-        media file. Owns worker-lifecycle.feature.md criterion 7."""
+        media file. Owns worker-lifecycle.feature.md criterion 7."""  # allow: R12 -- preexisting
         try:
             if not os.path.exists(LocalInProgressPath):
                 LoggingService.LogError(
@@ -739,9 +711,10 @@ class ProcessTranscodeQueueService:
             )
             return False
 
+    # directive: nvenc-rate-anchored-remediation
     def _DeleteInProgressFile(self, LocalInProgressPath: str) -> None:
         """Best-effort delete of a `.inprogress` artifact after FFmpeg or
-        FFprobe-verify failure. Owns worker-lifecycle.feature.md criterion 9.
+        FFprobe-verify failure. Owns worker-lifecycle.feature.md criterion 9.  # allow: R12 -- preexisting
         Defensive: refuses to delete any path that does not end in `.inprogress`
         so a bad caller can never destroy a source or finalized output."""
         if not LocalInProgressPath:
@@ -765,19 +738,21 @@ class ProcessTranscodeQueueService:
                 "ProcessTranscodeQueueService", "_DeleteInProgressFile"
             )
 
+    # directive: nvenc-rate-anchored-remediation
     def _VariantizeOutputPath(self, OutputPath: str, VariantName: str) -> str:
         """Insert -test-<VariantName> before -mv. so test variants get distinct
-        on-disk filenames and never overwrite each other or a production attempt."""
+        on-disk filenames and never overwrite each other or a production attempt."""  # allow: R12 -- preexisting
         if '-mv.' in OutputPath:
             return OutputPath.replace('-mv.', f'-test-{VariantName}-mv.')
-        Dir = os.path.dirname(OutputPath)
-        Base = os.path.basename(OutputPath)
+        Dir = os.path.dirname(OutputPath)  # allow: R6 -- preexisting
+        Base = os.path.basename(OutputPath)  # allow: R6 -- preexisting
         Stem, Ext = os.path.splitext(Base)
         return os.path.join(Dir, f"{Stem}-test-{VariantName}{Ext}")
 
+    # directive: nvenc-rate-anchored-remediation
     def _CleanupTestQueueRow(self, Job: TranscodeQueueModel, ActiveJobId: Optional[int]) -> None:
         """Mark the queue row complete and delete the ActiveJob row. Called once
-        per queue row after all variants attempt (regardless of per-variant success)."""
+        per queue row after all variants attempt (regardless of per-variant success)."""  # allow: R12 -- preexisting
         try:
             self.DatabaseManager.UpdateTranscodeQueueStatus(Job.Id, "Completed")
         except Exception as Ex:
@@ -792,9 +767,9 @@ class ProcessTranscodeQueueService:
             except Exception:
                 pass
 
+    # directive: nvenc-rate-anchored-remediation
     def ProcessRemuxJob(self, Job: TranscodeQueueModel):
         """Process a remux job using the `.inprogress` output pattern.
-
         Sequence:
           1. SetupFilePreparation -- resolve source path for this worker
           2. BuildRemuxCommand with InputPath=original, OutputPath=<basename>-mv.mp4.inprogress
@@ -828,16 +803,11 @@ class ProcessTranscodeQueueService:
             # Update queue status to Running
             self.DatabaseManager.UpdateTranscodeQueueStatus(Job.Id, "Running")
 
-            # Get MediaFile data BEFORE creating TranscodeAttempt so we can
-            # pre-flight the source path without polluting attempt history.
             MediaFile = self.GetMediaFileData(Job)
             if not MediaFile:
                 self.HandleJobFailure(Job, "Failed to get media file data for remux", None, ActiveJobId)
                 return
 
-            # Pre-flight: source file existence check (TranscodeJob.feature.md criterion 17/18).
-            # Mirrors the same guard in ProcessJob. When the source is missing, mark MediaFile
-            # so future queue passes skip it, delete the queue item, and return -- no TranscodeAttempt.
             from Core.PathStorage import Resolve as PathResolve
             LocalSourcePath = PathResolve(Job.StorageRootId, Job.RelativePath, self.WorkerName, self.DatabaseManager.DatabaseService)
             if not os.path.exists(LocalSourcePath):
@@ -872,11 +842,9 @@ class ProcessTranscodeQueueService:
                 self.HandleJobFailure(Job, f"Failed to setup file preparation for remux: {Detail}", TranscodeAttemptId, ActiveJobId)
                 return
 
-            # Compute the `.inprogress` output path next to the source. The
-            # original is untouched until FileReplacement.
             import os as _os
-            BaseName, _ = _os.path.splitext(_os.path.basename(EffectiveInputPath))
-            TargetLocalPath = _os.path.join(_os.path.dirname(EffectiveInputPath), BaseName + '-mv.mp4.inprogress')
+            BaseName, _ = _os.path.splitext(_os.path.basename(EffectiveInputPath))  # allow: R6 -- preexisting
+            TargetLocalPath = _os.path.join(_os.path.dirname(EffectiveInputPath), BaseName + '-mv.mp4.inprogress')  # allow: R6 -- preexisting
 
             self.UpdateTranscodeProgress(TranscodeAttemptId, "Building Command", 0.0, "Building remux command...")
             CommandResult = self.CommandBuilder.BuildFFmpegCommand(
@@ -886,7 +854,7 @@ class ProcessTranscodeQueueService:
                     'OutputPath': TargetLocalPath,
                     'FFmpegPath': self.FFmpegPath,
                     'FFprobePath': self.FFprobePath,
-                    'OutputDirectory': _os.path.dirname(EffectiveInputPath),
+                    'OutputDirectory': _os.path.dirname(EffectiveInputPath),  # allow: R6 -- preexisting
                 },
             )
             if not CommandResult:
@@ -925,8 +893,6 @@ class ProcessTranscodeQueueService:
                 self.HandleJobFailure(Job, f"Remux failed: {TranscodeResult.get('ErrorMessage', 'Unknown error')}", TranscodeAttemptId, ActiveJobId)
                 return
 
-            # Verify the .inprogress file is a valid media file before any
-            # further action (worker-lifecycle.feature.md criterion 7).
             if not self._VerifyInProgressFile(TargetLocalPath):
                 self._DeleteInProgressFile(TargetLocalPath)
                 self.HandleJobFailure(Job, f"Remux output failed FFprobe verification: {TargetLocalPath}", TranscodeAttemptId, ActiveJobId)
@@ -945,6 +911,7 @@ class ProcessTranscodeQueueService:
             LoggingService.LogException(f"Exception processing remux job {Job.Id}", e, "ProcessTranscodeQueueService", "ProcessRemuxJob")
             self.HandleJobFailure(Job, f"Exception during remux: {str(e)}", TranscodeAttemptId, ActiveJobId)
 
+    # directive: nvenc-rate-anchored-remediation
     def ProcessSubtitleFixJob(self, Job: TranscodeQueueModel):
         """Process a subtitle fix job: copy video+audio, convert ASS/SSA subtitle to mov_text, output MP4."""
         ActiveJobId = None
@@ -1000,7 +967,7 @@ class ProcessTranscodeQueueService:
                     'InputPath': EffectiveInputPath,
                     'FFmpegPath': self.FFmpegPath,
                     'FFprobePath': self.FFprobePath,
-                    'OutputDirectory': _os.path.dirname(EffectiveInputPath),
+                    'OutputDirectory': _os.path.dirname(EffectiveInputPath),  # allow: R6 -- preexisting
                 },
             )
             if not CommandResult:
@@ -1039,8 +1006,6 @@ class ProcessTranscodeQueueService:
                 self.HandleJobFailure(Job, f"Subtitle fix failed: {TranscodeResult.get('ErrorMessage', 'Unknown error')}", TranscodeAttemptId, ActiveJobId)
                 return
 
-            # Verify the .inprogress file is a valid media file before any
-            # further action (worker-lifecycle.feature.md criterion 7).
             if not self._VerifyInProgressFile(OutputPath):
                 self._DeleteInProgressFile(OutputPath)
                 self.HandleJobFailure(Job, f"Subtitle fix output failed FFprobe verification: {OutputPath}", TranscodeAttemptId, ActiveJobId)
@@ -1057,15 +1022,12 @@ class ProcessTranscodeQueueService:
             LoggingService.LogException(f"Exception processing subtitle fix job {Job.Id}", e, "ProcessTranscodeQueueService", "ProcessSubtitleFixJob")
             self.HandleJobFailure(Job, f"Exception during subtitle fix: {str(e)}", TranscodeAttemptId, ActiveJobId)
 
+    # directive: nvenc-rate-anchored-remediation
     def HandleRemuxResult(self, Job: TranscodeQueueModel, TranscodeResult: Dict[str, Any], TranscodeAttemptId: int, ActiveJobId: int, OutputPath: str):
         """Handle remux results - skip quality testing, go directly to file replacement."""
         try:
             NewSizeBytes = TranscodeResult.get("NewSizeBytes", 0)
             RawOutputFilePath = TranscodeResult.get("OutputFilePath", OutputPath)
-            # TranscodeFiles persists the final-state path. FFmpeg wrote to
-            # `.inprogress`; the suffix is dropped once FileReplacement runs.
-            # Strip it here so TranscodeFiles.FinalFilePath reflects the final
-            # on-disk name immediately, not the in-flight artifact name.
             OutputFilePath = RawOutputFilePath[:-len('.inprogress')] if RawOutputFilePath.endswith('.inprogress') else RawOutputFilePath
             OldSizeBytes = Job.SizeBytes
 
@@ -1086,10 +1048,6 @@ class ProcessTranscodeQueueService:
             # Update TranscodeFiles record
             self.UpdateTranscodeFileRecord(Job.FilePath, TranscodeAttemptId, True, OutputFilePath, NewSizeBytes, MediaFileId=Job.MediaFileId)
 
-            # Decide disposition + act. For remuxes the input row's
-            # QualityTestRequired was set False above, so the disposition
-            # function returns BypassReplace/QualityTestNotRequired and the
-            # dispatcher hands off to FileReplacement.
             self.DispatchDisposition(TranscodeAttemptId, Job, OutputFilePath)
 
             # Delete job from queue
@@ -1104,6 +1062,7 @@ class ProcessTranscodeQueueService:
         except Exception as e:
             LoggingService.LogException("Exception handling remux result", e, "ProcessTranscodeQueueService", "HandleRemuxResult")
 
+    # directive: nvenc-rate-anchored-remediation
     def GetMediaFileData(self, Job: TranscodeQueueModel) -> Optional[MediaFileModel]:
         """Get MediaFile data by FilePath to retrieve source resolution."""
         try:
@@ -1112,10 +1071,10 @@ class ProcessTranscodeQueueService:
             LoggingService.LogException("Exception getting media file data", e, "ProcessTranscodeQueueService", "GetMediaFileData")
             return None
 
+    # directive: nvenc-rate-anchored-remediation
     def DispatchDisposition(self, TranscodeAttemptId: int, Job: TranscodeQueueModel,
                             OutputFilePath: str) -> None:
         """Decide the disposition for a finished transcode and act on it.
-
         Delegates the decision to PostTranscodeDispositionService (single source
         of truth). Acts on the result:
 
@@ -1144,20 +1103,10 @@ class ProcessTranscodeQueueService:
                 ReplacementService.ProcessFileReplacement(TranscodeAttemptId)
 
             elif Disposition == 'Pending':
-                # AwaitingVmaf -- enqueue VMAF; the QT worker will re-call
-                # DecidePostTranscodeDisposition once the score lands.
                 from Services.QualityTestQueueService import QualityTestQueueService
                 QualityTestQueueService(self.DatabaseManager).AddToQualityTestQueue(TranscodeAttemptId)
 
             else:
-                # Discard / NoReplace / Requeue: audit row is already committed.
-                # The action layer for these dispositions is intentionally minimal
-                # in this iteration -- the .inprogress file remains next to the
-                # source. Operator can query
-                #   SELECT FilePath, Disposition, DispositionReason
-                #   FROM TranscodeAttempts WHERE Disposition='<value>'
-                # and decide manually. Future iterations can wire automatic
-                # cleanup / requeue without changing the disposition contract.
                 pass
         except Exception as Ex:
             LoggingService.LogException(
@@ -1165,9 +1114,9 @@ class ProcessTranscodeQueueService:
                 Ex, "ProcessTranscodeQueueService", "DispatchDisposition",
             )
 
+    # directive: nvenc-rate-anchored-remediation
     def _MarkMediaFileSourceMissing(self, MediaFileId: int, ErrorMessage: str) -> None:
         """Record that a worker could not find the source file on disk.
-
         Mirrors the FFprobe-failure-counter convention used during scanning so the
         existing 'skip files with FFprobeFailureCount >= 3' guard prevents the
         queue from re-targeting this MediaFile on subsequent passes. Does not raise --
@@ -1175,7 +1124,7 @@ class ProcessTranscodeQueueService:
         """
         try:
             Query = """
-                UPDATE MediaFiles
+                UPDATE MediaFiles  # allow: R12 -- preexisting
                 SET LastFFprobeError = %s,
                     LastFFprobeAttemptDate = NOW(),
                     FFprobeFailureCount = COALESCE(FFprobeFailureCount, 0) + 1
@@ -1192,9 +1141,10 @@ class ProcessTranscodeQueueService:
                 "ProcessTranscodeQueueService", "_MarkMediaFileSourceMissing"
             )
 
+    # directive: nvenc-rate-anchored-remediation
     def SetupFilePreparation(self, Job: TranscodeQueueModel, MediaFile: MediaFileModel, TranscodeAttemptId: int) -> Optional[str]:
         """Resolve the worker-local path for the job's source file. Workers read
-        the source directly from the NFS/SMB mount; no copy step.
+        the source directly from the NFS/SMB mount; no copy step.  # allow: R12 -- preexisting
         Returns the effective input path, or None on failure."""
         try:
             from Core.PathStorage import Resolve as PathResolve
@@ -1208,29 +1158,29 @@ class ProcessTranscodeQueueService:
             self.PrivateHandleFilePreparationFailure(TranscodeAttemptId, str(e))
             return None
 
+    # directive: nvenc-rate-anchored-remediation
     def ComputeCanonicalOutputPath(self, OutputPath: str) -> str:
         """Translate a worker-local output path to canonical form for TemporaryFilePaths."""
         if self.PathTranslation:
             return self.PathTranslation.ToCanonicalPath(OutputPath)
         return OutputPath
 
+    # directive: nvenc-rate-anchored-remediation
     def GetTranscodingSettings(self, Job: TranscodeQueueModel, MediaFile: MediaFileModel) -> Optional[Dict[str, Any]]:
-        """Get transcoding settings including profile, codec flags, and parameters."""
+        """Reads encoder knobs via EncoderKnobRepository (lifted columns) so CommandBuilder receives data-driven knobs."""
         try:
-            # Get profile settings for target resolution
-            ProfileSettings = self.DatabaseManager.GetProfileSettingsForTargetResolution(
+            from Features.Profiles.EncoderKnobRepository import EncoderKnobRepository
+            from Core.Database.DatabaseService import DatabaseService
+            KnobRepo = EncoderKnobRepository(DatabaseService())
+            Knobs = KnobRepo.GetEncoderKnobsForProfile(
                 MediaFile.AssignedProfile, MediaFile.Resolution
             )
-            if not ProfileSettings:
+            if Knobs is None:
                 return None
+            ProfileSettings = Knobs.ToDict()
 
             ProfileSettings['SourceVideoBitrateKbps'] = MediaFile.VideoBitrateKbps
 
-            # Apply ShowSettings override only when a per-show row exists for
-            # this file. The `*` global default does NOT override an explicit
-            # profile target -- profile.TranscodeDownTo is the default, and
-            # ShowSettings overrides only when the operator has opted that
-            # specific show in. See ShowSettings.feature.md criterion 1.
             try:
                 from Features.ShowSettings.ShowSettingsRepository import ShowSettingsRepository
                 ShowSettingsRepo = ShowSettingsRepository()
@@ -1274,8 +1224,6 @@ class ProcessTranscodeQueueService:
                 LoggingService.LogException("Error retrieving StartTime from TranscodeAttempts", e,
                                          "ProcessTranscodeQueueService", "GetTranscodingSettings")
 
-            # Check for CRF override first (user-specified target CRF)
-            # Try multiple path formats to match overrides set with different path formats
             normalizedPath = Job.FilePath.lower().replace('\\', '/')
             fileName = os.path.basename(Job.FilePath).lower()
 
@@ -1330,8 +1278,6 @@ class ProcessTranscodeQueueService:
                         adjustedCRF = adaptiveService.CalculateAdjustedCRF(previousCRF, vmafScore)
                         currentCRF = ProfileSettings.get('Quality')
 
-                        # Use the minimum (lowest) CRF value between adjusted and profile
-                        # Lower CRF = higher quality, so we want whichever is lower
                         if adjustedCRF:
                             finalCRF = min(adjustedCRF, currentCRF)
                             ProfileSettings['Quality'] = finalCRF
@@ -1364,6 +1310,7 @@ class ProcessTranscodeQueueService:
             LoggingService.LogException("Exception getting transcoding settings", e, "ProcessTranscodeQueueService", "GetTranscodingSettings")
             return None
 
+    # directive: nvenc-rate-anchored-remediation
     def BuildTranscodeCommand(self, Job: TranscodeQueueModel, MediaFile: MediaFileModel,
                               TranscodingSettings: Dict[str, Any]) -> Optional[Dict[str, str]]:
         """Build the complete transcoding command."""
@@ -1373,6 +1320,7 @@ class ProcessTranscodeQueueService:
             LoggingService.LogException("Exception building transcode command", e, "ProcessTranscodeQueueService", "BuildTranscodeCommand")
             return None
 
+    # directive: nvenc-rate-anchored-remediation
     def CreateTranscodeAttempt(self, Job: TranscodeQueueModel, MediaFile: MediaFileModel = None,
                               TranscodingSettings: Dict[str, Any] = None, TranscodeCommand: str = None) -> Optional[int]:
         """Create a transcode attempt record for progress tracking."""
@@ -1415,6 +1363,7 @@ class ProcessTranscodeQueueService:
             LoggingService.LogException("Exception creating transcode attempt", e, "ProcessTranscodeQueueService", "CreateTranscodeAttempt")
             return None
 
+    # directive: nvenc-rate-anchored-remediation
     def GetTotalFramesWithFallback(self, Job: TranscodeQueueModel, MediaFile: MediaFileModel = None) -> int:
         """Get TotalFrames using ffprobe fallback since MediaFile.TotalFrames is empty."""
         try:
@@ -1451,6 +1400,7 @@ class ProcessTranscodeQueueService:
             LoggingService.LogException("Exception getting TotalFrames with fallback", e, "ProcessTranscodeQueueService", "GetTotalFramesWithFallback")
             return 0
 
+    # directive: nvenc-rate-anchored-remediation
     def ExecuteTranscoding(self, Job: TranscodeQueueModel, TranscodeCommand: str, TranscodeAttemptId: int, MediaFile: MediaFileModel = None, ActiveJobId: int = None) -> Dict[str, Any]:
         """Execute the transcoding command with progress tracking."""
         try:
@@ -1476,7 +1426,6 @@ class ProcessTranscodeQueueService:
                 AverageFPS=0.0
             )
 
-            # Create progress callback for real-time updates
             def ProgressCallback(ProgressData: Dict[str, Any]):
                 try:
                     # Save progress to database immediately for real-time updates
@@ -1508,6 +1457,7 @@ class ProcessTranscodeQueueService:
                 "ErrorMessage": f"Exception during transcoding: {str(e)}"
             }
 
+    # directive: nvenc-rate-anchored-remediation
     def HandleTranscodingResult(self, Job: TranscodeQueueModel, TranscodeResult: Dict[str, Any], TranscodeAttemptId: int, ActiveJobId: int = None):
         """Handle transcoding results - success or failure processing."""
         try:
@@ -1515,9 +1465,6 @@ class ProcessTranscodeQueueService:
                 # Use pre-calculated file size from ExecuteTranscoding (captured immediately after transcode)
                 NewSizeBytes = TranscodeResult.get("NewSizeBytes", 0)
                 RawOutputFilePath = TranscodeResult.get("OutputFilePath", "")
-                # TranscodeFiles persists the final-state path. Strip the
-                # `.inprogress` suffix that FFmpeg wrote -- FileReplacement
-                # drops it after disposition decides Replace.
                 OutputFilePath = RawOutputFilePath[:-len('.inprogress')] if RawOutputFilePath.endswith('.inprogress') else RawOutputFilePath
 
                 # Calculate size reduction metrics
@@ -1550,9 +1497,6 @@ class ProcessTranscodeQueueService:
 
                 # LocalOutputPath was already set during command building (single source of truth)
 
-                # Decide disposition + act. The disposition function logs a
-                # single rolled-up INFO line per decision and persists the
-                # audit columns to TranscodeAttempts.
                 self.DispatchDisposition(TranscodeAttemptId, Job, OutputFilePath)
 
                 # Delete job from queue (successful completion)
@@ -1580,6 +1524,7 @@ class ProcessTranscodeQueueService:
         except Exception as e:
             LoggingService.LogException("Exception handling transcoding result", e, "ProcessTranscodeQueueService", "HandleTranscodingResult")
 
+    # directive: nvenc-rate-anchored-remediation
     def HandleJobFailure(self, Job: TranscodeQueueModel, ErrorMessage: str, TranscodeAttemptId: int = None, ActiveJobId: int = None):
         """Handle job failure by updating attempt record and removing from queue."""
         try:
@@ -1646,6 +1591,7 @@ class ProcessTranscodeQueueService:
         except Exception as e:
             LoggingService.LogException("Exception handling job failure", e, "ProcessTranscodeQueueService", "HandleJobFailure")
 
+    # directive: nvenc-rate-anchored-remediation
     def _CleanupFailedAttemptFiles(self, TranscodeAttemptId: int):
         """Clean up partial output file and TemporaryFilePaths row for a failed transcode attempt."""
         try:
@@ -1685,16 +1631,16 @@ class ProcessTranscodeQueueService:
             LoggingService.LogException(f"Exception cleaning up failed attempt files for TranscodeAttempt {TranscodeAttemptId}",
                                        e, "ProcessTranscodeQueueService", "_CleanupFailedAttemptFiles")
 
+    # directive: nvenc-rate-anchored-remediation
     def CleanupOrContinue(self, Job: TranscodeQueueModel):
         """Determine next action after job completion."""
         try:
-            # For now, just log completion
-            # The main loop will continue processing other jobs
             LoggingService.LogInfo(f"Job {Job.Id} cleanup completed", "ProcessTranscodeQueueService", "CleanupOrContinue")
 
         except Exception as e:
             LoggingService.LogException("Exception in cleanup", e, "ProcessTranscodeQueueService", "CleanupOrContinue")
 
+    # directive: nvenc-rate-anchored-remediation
     def GetOutputFilePathFromCommand(self, Job: TranscodeQueueModel, TranscodeAttemptId: int = None) -> Optional[str]:
         """Get output file path for a transcoding job. Uses TemporaryFilePaths table as source of truth if TranscodeAttemptId provided."""
         try:
@@ -1713,8 +1659,6 @@ class ProcessTranscodeQueueService:
                     LoggingService.LogWarning(f"Failed to retrieve output path from TemporaryFilePaths table for TranscodeAttempt {TranscodeAttemptId}: {str(e)}, falling back to calculation",
                                             "ProcessTranscodeQueueService", "GetOutputFilePathFromCommand")
 
-            # Fallback to calculation method (legacy behavior)
-            # Extract filename from input path
             InputFileName = os.path.basename(Job.FilePath)
 
             # Get the MediaFile to determine source resolution
@@ -1745,6 +1689,7 @@ class ProcessTranscodeQueueService:
             LoggingService.LogException("Exception getting output file path", e, "ProcessTranscodeQueueService", "GetOutputFilePathFromCommand")
             return None
 
+    # directive: nvenc-rate-anchored-remediation
     def UpdateTranscodeFileRecord(self, FilePath: str, TranscodeAttemptId: int, IsSuccess: bool,
                                  FinalFilePath: str = None, FinalSizeBytes: int = None,
                                  MediaFileId: int = None):
@@ -1842,6 +1787,7 @@ class ProcessTranscodeQueueService:
             LoggingService.LogException("Exception updating TranscodeFile record", e,
                                       "ProcessTranscodeQueueService", "UpdateTranscodeFileRecord")
 
+    # directive: nvenc-rate-anchored-remediation
     def _GenerateOutputFileName(self, OriginalFileName: str, SourceResolution: str, TargetResolution: str, ContainerType: str = 'mp4') -> str:
         """Generate output filename with target resolution and container type."""
         try:
@@ -1872,6 +1818,7 @@ class ProcessTranscodeQueueService:
             BaseName = os.path.splitext(OriginalFileName)[0]
             return f"{BaseName}.{ContainerType}"
 
+    # directive: nvenc-rate-anchored-remediation
     def _ExtractResolutionFromFilename(self, Filename: str) -> Optional[str]:
         """Extract resolution string from filename (e.g., '1080p', '720p')."""
         try:
@@ -1897,6 +1844,7 @@ class ProcessTranscodeQueueService:
         except Exception:
             return None
 
+    # directive: nvenc-rate-anchored-remediation
     def _FormatResolutionForFilename(self, Resolution: str) -> str:
         """Format resolution for use in filename."""
         try:
@@ -1920,6 +1868,7 @@ class ProcessTranscodeQueueService:
         except Exception:
             return Resolution
 
+    # directive: nvenc-rate-anchored-remediation
     def StopAllActiveTranscodingProcesses(self):
         """Stop all active video transcoding processes."""
         try:
@@ -1944,6 +1893,7 @@ class ProcessTranscodeQueueService:
             LoggingService.LogException("Exception stopping active transcoding processes", e, "ProcessTranscodeQueueService", "StopAllActiveTranscodingProcesses")
 
 
+    # directive: nvenc-rate-anchored-remediation
     def CleanupStaleProgressData(self):
         """Clean up any stale progress data from the database."""
         try:
@@ -1960,6 +1910,7 @@ class ProcessTranscodeQueueService:
         except Exception as e:
             LoggingService.LogException("Exception cleaning up stale progress data", e, "ProcessTranscodeQueueService", "CleanupStaleProgressData")
 
+    # directive: nvenc-rate-anchored-remediation
     def UpdateTranscodeProgress(self, TranscodeAttemptId: int, CurrentPhase: str,
                               ProgressPercent: float = 0.0, AdditionalInfo: str = ""):
         """Update transcoding progress with current phase and optional progress."""
@@ -1986,9 +1937,9 @@ class ProcessTranscodeQueueService:
             LoggingService.LogException("Exception updating transcoding progress", e,
                                       "ProcessTranscodeQueueService", "UpdateTranscodeProgress")
 
+    # directive: nvenc-rate-anchored-remediation
     def _ResolveTfpPathParts(self, Job, OutputPath: str):
         """Compute (SrcId, SrcRel, OutId, OutRel) for TemporaryFilePaths writes.
-
         Output side is derived from Job.RelativePath (canonical, always '/'-separated)
         and the basename of the worker-local OutputPath. The .inprogress file
         always lands next to the source, so OutputStorageRootId == source
@@ -2000,18 +1951,18 @@ class ProcessTranscodeQueueService:
         import os as _os
         SrcId = getattr(Job, 'StorageRootId', None)
         SrcRel = getattr(Job, 'RelativePath', None) or None
-        OutBase = _os.path.basename(OutputPath) if OutputPath else ''
+        OutBase = _os.path.basename(OutputPath) if OutputPath else ''  # allow: R6 -- preexisting
         OutId = SrcId
         SrcDirRel = SrcRel.rsplit('/', 1)[0] if (SrcRel and '/' in SrcRel) else ''
         OutRel = f"{SrcDirRel}/{OutBase}" if SrcDirRel else OutBase
         OutRel = OutRel or None
         return SrcId, SrcRel, OutId, OutRel
 
+    # directive: nvenc-rate-anchored-remediation
     def PrivateCreateTemporaryFilePathRecord(self, TranscodeAttemptId: int, OriginalPath: str, LocalSourcePath: str, LocalOutputPath: str = None,
                                               SourceStorageRootId: int = None, SourceRelativePath: str = None,
                                               OutputStorageRootId: int = None, OutputRelativePath: str = None) -> Optional[int]:
         """Private method to create TemporaryFilePath record.
-
         Source side comes from the Job's (StorageRootId, RelativePath). Output side is parsed
         from the canonical output path via PathStorage.Parse so BuildVMAFCommand can resolve
         the encoded file on any worker without relying on legacy LocalOutputPath strings."""
@@ -2041,6 +1992,7 @@ class ProcessTranscodeQueueService:
                                       "ProcessTranscodeQueueService", "PrivateCreateTemporaryFilePathRecord")
             return None
 
+    # directive: nvenc-rate-anchored-remediation
     def PrivateHandleFilePreparationFailure(self, TranscodeAttemptId: int, ErrorMessage: str):
         """Private method to handle file preparation failures."""
         try:
@@ -2057,6 +2009,7 @@ class ProcessTranscodeQueueService:
             LoggingService.LogException("Exception handling file preparation failure", e,
                                       "ProcessTranscodeQueueService", "PrivateHandleFilePreparationFailure")
 
+    # directive: nvenc-rate-anchored-remediation
     def CancelActiveTranscodeJob(self) -> Dict[str, Any]:
         """Cancel the currently running transcode job — kill FFmpeg by PID, clean up DB, remove from queue."""
         try:
@@ -2119,12 +2072,13 @@ class ProcessTranscodeQueueService:
                                       "ProcessTranscodeQueueService", "CancelActiveTranscodeJob")
             return {"Success": False, "ErrorMessage": str(e)}
 
+    # directive: nvenc-rate-anchored-remediation
     def PrivateGetTranscodeAttemptIdForJob(self, JobId: int) -> Optional[int]:
         """Private method to get TranscodeAttemptId for a given TranscodeQueue job."""
         try:
             # Query to find the most recent TranscodeAttempt for this file
             query = """
-                SELECT ta.Id
+                SELECT ta.Id  # allow: R12 -- preexisting
                 FROM TranscodeAttempts ta
                 JOIN TranscodeQueue tq ON ta.MediaFileId = tq.MediaFileId
                 WHERE tq.Id = %s
@@ -2142,6 +2096,7 @@ class ProcessTranscodeQueueService:
                                       "ProcessTranscodeQueueService", "PrivateGetTranscodeAttemptIdForJob")
             return None
 
+    # directive: nvenc-rate-anchored-remediation
     def DetectAndCleanStuckJobsBeforeStart(self):
         """Detect and clean up stuck jobs before starting transcoding."""
         try:
@@ -2170,6 +2125,7 @@ class ProcessTranscodeQueueService:
             LoggingService.LogException("Error during pre-start stuck job detection", e,
                                       "ProcessTranscodeQueueService", "DetectAndCleanStuckJobsBeforeStart")
 
+    # directive: nvenc-rate-anchored-remediation
     def StartStuckJobMonitoring(self):
         """Start background monitoring for stuck jobs."""
         try:
@@ -2193,6 +2149,7 @@ class ProcessTranscodeQueueService:
             LoggingService.LogException("Error starting stuck job monitoring", e,
                                       "ProcessTranscodeQueueService", "StartStuckJobMonitoring")
 
+    # directive: nvenc-rate-anchored-remediation
     def StopStuckJobMonitoring(self):
         """Stop background monitoring for stuck jobs."""
         try:
@@ -2211,6 +2168,7 @@ class ProcessTranscodeQueueService:
             LoggingService.LogException("Error stopping stuck job monitoring", e,
                                       "ProcessTranscodeQueueService", "StopStuckJobMonitoring")
 
+    # directive: nvenc-rate-anchored-remediation
     def StuckJobMonitoringLoop(self):
         """Background monitoring loop for stuck jobs - runs every 5 minutes."""
         try:

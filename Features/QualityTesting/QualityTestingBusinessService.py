@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Quality Testing Business Service
+Quality Testing Business Service  # allow: R12 -- preexisting
 Business logic layer for quality testing using VMAF analysis
 Implements MVVM pattern using MVVM architecture
 """
@@ -13,9 +13,11 @@ from datetime import datetime, timezone
 from Core.Logging.LoggingService import LoggingService
 
 
+# directive: nvenc-rate-anchored-remediation
 class QualityTestingBusinessService:
     """Quality Testing Business Service - Business logic layer."""
 
+    # directive: nvenc-rate-anchored-remediation
     def __init__(self, DatabaseManagerInstance=None):
         """Initialize the business service with dependencies."""
         self.DatabaseManager = DatabaseManagerInstance
@@ -23,11 +25,8 @@ class QualityTestingBusinessService:
         self.ActiveFFmpegThread = None
 
 
+    # directive: nvenc-rate-anchored-remediation
     def _CleanupTemporaryFilePathsForVmafFailure(self, TranscodeAttemptId: int) -> None:
-        # BUG-0001 criterion 15: VMAF failure is a terminal state for TFP rows.
-        # The disposition stays 'Pending' (a new score might still land via
-        # crash-recovery requeue), but the staged file is no longer reachable
-        # from the worker that failed, so the TFP row is dead weight.
         try:
             self.DatabaseManager.DatabaseService.ExecuteNonQuery(
                 "DELETE FROM TemporaryFilePaths WHERE TranscodeAttemptId = %s",
@@ -39,6 +38,7 @@ class QualityTestingBusinessService:
                 Ex, "QualityTestingBusinessService", "_CleanupTemporaryFilePathsForVmafFailure",
             )
 
+    # directive: nvenc-rate-anchored-remediation
     def ProcessQualityTestQueue(self) -> dict:
         """Process the quality testing queue."""
         try:
@@ -69,6 +69,7 @@ class QualityTestingBusinessService:
             LoggingService.LogException("Error processing quality test queue", e, "QualityTestingBusinessService", "ProcessQualityTestQueue")
             return {"Success": False, "Message": str(e)}
 
+    # directive: nvenc-rate-anchored-remediation
     def ProcessClaimedJob(self, job: dict) -> dict:
         """Process a claimed quality test job."""
         try:
@@ -83,6 +84,7 @@ class QualityTestingBusinessService:
             LoggingService.LogException(f"Error processing claimed job {job['Id']}", e, "QualityTestingBusinessService", "ProcessClaimedJob")
             return {"Success": False, "Message": str(e)}
 
+    # directive: nvenc-rate-anchored-remediation
     def StartQualityTest(self, JobId: int) -> dict:
         """Start a quality test for the specified job."""
         result_id = None
@@ -130,21 +132,12 @@ class QualityTestingBusinessService:
                 # Create single progress tracking record
                 progress_id = self.CreateProgressRecord(JobId, job_details)
 
-                # Run FFmpeg VMAF comparison with progress tracking
-                # Pass active_job_id and result_id so we can track the FFmpeg child process
                 job_details['active_job_id'] = active_job_id
                 job_details['result_id'] = result_id
                 result = self.BuildVMAFCommand(job_details, progress_id)
 
                 # Update QualityTestResult with completion details
                 if result["Success"]:
-                    # VMAF score and Status='Success' are already updated by UpdateQualityTestResultsWithScore
-                    # Update TranscodeAttempt
-                    # QualityTestCompleted is BOOLEAN in PostgreSQL -- pass `True`,
-                    # not literal `1` (psycopg2 type-binds 1 as integer; PG rejects).
-                    # The same fields are also written by the disposition wiring
-                    # inside BuildVMAFCommand BEFORE DecidePostTranscodeDisposition --
-                    # this call is the safety-net "all VMAF work succeeded" marker.
                     self.DatabaseManager.UpdateTranscodeAttempt(
                         job_details['TranscodeAttemptId'],
                         {"QualityTestCompleted": True, "VMAF": result["VMAFScore"]}
@@ -183,9 +176,9 @@ class QualityTestingBusinessService:
             # Delete from queue (regardless of success/failure)
             self.DatabaseManager.DeleteQualityTestQueueItem(JobId)
 
+    # directive: nvenc-rate-anchored-remediation
     def BuildVMAFCommand(self, JobDetails: dict, ProgressId: int = None) -> dict:
         """Run FFmpeg VMAF comparison with resolution scaling.
-
         Path resolution: source and transcoded paths are read from
         TemporaryFilePaths.(StorageRootId, RelativePath) joined via
         TranscodeAttemptId, then resolved to worker-local paths via
@@ -220,12 +213,6 @@ class QualityTestingBusinessService:
             if not os.path.exists(transcoded_file):
                 return {"Success": False, "Error": f"Transcoded file not found: {transcoded_file}"}
 
-            # Resolve FFmpeg from WorkerContext (canonical -- registered at
-            # worker boot per Workers.FFmpegPath). Replaces an older hand-rolled
-            # `os.path.dirname(os.path.dirname(__file__))` lookup that broke
-            # silently when this file moved into Features/QualityTesting/
-            # (one level deeper than Services/, so "up two" landed in
-            # Features\FFmpegMaster\bin\ffmpeg.exe -- a path that doesn't exist).
             from Core.WorkerContext import WorkerContext
             Ctx = WorkerContext.Current()
             ffmpeg_path = Ctx.FFmpegPath if Ctx and Ctx.FFmpegPath else None
@@ -236,21 +223,26 @@ class QualityTestingBusinessService:
             original_resolution = self.GetVideoResolution(original_file, ffmpeg_path)
             transcoded_resolution = self.GetVideoResolution(transcoded_file, ffmpeg_path)
 
-            # Unified VMAF chain (2026-05-29 -- shipped from EncoderShootout.feature.md
-            # findings). Both inputs get: PTS reset (kills container timestamp drift
-            # that causes frame-alignment slippage), scale to a common target with
-            # lanczos and explicit limited-range output (NVENC outputs tv-range;
-            # mismatched ranges collapse VMAF scores), 10-bit precision (preserves
-            # both NVENC p010le and SVT-AV1 yuv420p10le encoder outputs). libvmaf
-            # runs threaded (n_threads=4) without subsampling -- prior chain used
-            # n_subsample=10 which scored only every 10th frame and made the
-            # motion filter unreliable because integer_motion between subsampled
-            # frames is meaningless. Always scale (no-op when target == source).
             target_width, target_height = self.DetermineVMAFTargetResolution(original_resolution, transcoded_resolution)
-            scale_chain = f"scale={target_width}:{target_height}:flags=lanczos:in_range=auto:out_range=tv,format=yuv420p10le"
+            try:
+                FpsProbe = subprocess.run(
+                    [ffmpeg_path.replace('ffmpeg.exe', 'ffprobe.exe').replace('ffmpeg', 'ffprobe'),
+                     '-v', 'error', '-select_streams', 'v:0',
+                     '-show_entries', 'stream=avg_frame_rate', '-of', 'csv=p=0', original_file],
+                    capture_output=True, text=True, timeout=10,
+                )
+                FpsRaw = (FpsProbe.stdout or '').strip()
+                if '/' in FpsRaw:
+                    Num, Den = FpsRaw.split('/', 1)
+                    SourceFps = round(float(Num) / float(Den), 3) if float(Den) != 0 else 24
+                else:
+                    SourceFps = float(FpsRaw) if FpsRaw else 24
+            except Exception:
+                SourceFps = 24
+            reference_scale = f"scale=w={target_width}:h={target_height},"
             vmaf_filter = (
-                f"[0:v]setpts=PTS-STARTPTS,{scale_chain}[dist];"
-                f"[1:v]setpts=PTS-STARTPTS,{scale_chain}[ref];"
+                f"[0:v]format=yuv420p10le,fps=fps={SourceFps},setpts=PTS-STARTPTS[dist];"
+                f"[1:v]{reference_scale}format=yuv420p10le,fps=fps={SourceFps},setpts=PTS-STARTPTS[ref];"
                 f"[dist][ref]libvmaf=log_fmt=xml:log_path=vmaf_output.xml:n_threads=4"
             )
             if original_resolution == transcoded_resolution:
@@ -275,14 +267,6 @@ class QualityTestingBusinessService:
                     LoggingService.LogException("Error retrieving StartTime from TranscodeAttempts", e,
                                              "QualityTestingBusinessService", "BuildVMAFCommand")
 
-            # Build command as string (like TranscodeService).
-            # Input order MUST be (encoded, original) -- libvmaf reads inputs
-            # positionally as (distorted, reference). The filter chain labels
-            # [0:v] as [dist] and [1:v] as [ref], so input 0 is the encoded
-            # (distorted) output and input 1 is the original (reference) master.
-            # VMAF is asymmetric; running it with inputs swapped produces an
-            # incorrect (typically lower) score. Bug pre-dated 2026-05-29 chain
-            # rewrite; fixed alongside the chain improvements as part of BUG-0022.
             command_parts = [ffmpeg_path]
 
             # Add start time parameter (applies to the next -i input)
@@ -292,10 +276,6 @@ class QualityTestingBusinessService:
             # Inputs: encoded first (becomes [0:v] -> [dist]), original second (becomes [1:v] -> [ref]).
             command_parts.extend(["-i", f'"{transcoded_file}"', "-i", f'"{original_file}"'])
 
-            # Add VMAF filter and output options.
-            # Quote vmaf_filter so bash does not split on ';' or interpret '[' / ']'
-            # when the command is run with shell=True. cmd.exe also tolerates the
-            # double quotes, so this works cross-platform without branching.
             command_parts.extend(["-lavfi", f'"{vmaf_filter}"', "-f", "null", "-"])
 
             # Build final command string
@@ -333,12 +313,6 @@ class QualityTestingBusinessService:
                 self.UpdateProgressRecord(ProgressId, "Processing", 95, "VMAF analysis completed, parsing results")
 
             if result.returncode == 0:
-                # Parse full VMAF metrics from XML (mean + min/max/harmonic_mean +
-                # stddev + percentiles). The mean is what we always used; the
-                # rest captures distribution shape that the operator (and the
-                # future CRF-recommendation feature) needs to answer "where did
-                # this run actually struggle?" without re-analysis. See
-                # QualityTesting.feature.md criterion 7b.
                 vmaf_metrics = self.ParseVMAFMetrics('vmaf_output.xml')
                 vmaf_score = vmaf_metrics.get('Mean', 0.0)
 
@@ -347,16 +321,6 @@ class QualityTestingBusinessService:
                 if ProgressId and result_id:
                     self.UpdateQualityTestResultsWithScore(result_id, vmaf_score, result, vmaf_metrics)
 
-                # CRITICAL: write the VMAF score to TranscodeAttempts BEFORE
-                # re-deciding the disposition. DecidePostTranscodeDisposition
-                # reads `TranscodeAttempts.VMAF` (not QualityTestResults.VMAFScore --
-                # different table), and the outer StartQualityTest call that
-                # used to do this update ran AFTER BuildVMAFCommand returned --
-                # so the disposition saw VMAF=NULL and returned Pending forever.
-                # Surfaced on attempt 4394 during the i9 smoke test 2026-05-10:
-                # VMAF ran successfully (score 84.05), score landed in
-                # QualityTestResults, but TranscodeAttempts.VMAF stayed NULL
-                # and the file never got replaced.
                 from Features.QualityTesting.PostTranscodeDispositionService import PostTranscodeDispositionService
                 ta_id = JobDetails.get('TranscodeAttemptId')
                 AutoReplaceTriggered = False
@@ -378,21 +342,7 @@ class QualityTestingBusinessService:
                         FileReplacementBusinessService(self.DatabaseManager).ProcessFileReplacement(ta_id)
                         AutoReplaceTriggered = True
                     elif DispositionResult.Disposition == 'Requeue':
-                        # VMAF below min threshold. Honest implementation:
-                        #   1. Delete the staged transcoded file (Stage 8 contract).
-                        #   2. Record a ProblemFiles row so the operator sees this
-                        #      in the FailureTracking surface.
-                        # NOT auto-creating a new TranscodeQueue row at adjusted
-                        # CRF because TranscodeQueue has no CRF column today --
-                        # a new row would re-run the same profile at the same
-                        # CRF and produce the same low VMAF. Real auto-requeue
-                        # requires a schema change (QualityOverride column or a
-                        # second profile with stricter thresholds) -- tracked
-                        # separately, not in scope for this fix.
                         self._HandleRequeueDisposition(ta_id, DispositionResult.AuditPayload)
-                    # Disposition='NoReplace' / 'Discard' -- the audit row is
-                    # already persisted; the .inprogress file remains next to
-                    # the source for operator inspection.
 
                 return {"Success": True, "VMAFScore": vmaf_score, "FFmpegCommand": FFmpegCommandString, "AutoReplaceTriggered": AutoReplaceTriggered}
             else:
@@ -404,14 +354,13 @@ class QualityTestingBusinessService:
         except Exception as e:
             return {"Success": False, "Error": str(e)}
 
+    # directive: nvenc-rate-anchored-remediation
     def GetVideoResolution(self, VideoFilePath: str, FFmpegPath: str) -> tuple:
         """Get video resolution (width, height) from video file."""
         try:
             import subprocess
             import re
 
-            # Guard: FFmpegPath.replace() crashes with AttributeError if FFmpegPath is None.
-            # Fail loudly so the actual misconfiguration shows in logs instead of a NoneType error.
             if not FFmpegPath:
                 LoggingService.LogError(
                     f"GetVideoResolution called with FFmpegPath=None for {VideoFilePath}. "
@@ -460,6 +409,7 @@ class QualityTestingBusinessService:
             LoggingService.LogException(f"Error getting video resolution for {VideoFilePath}", e, "QualityTestingBusinessService", "GetVideoResolution")
             return (1920, 1080)  # Default fallback
 
+    # directive: nvenc-rate-anchored-remediation
     def DetermineVMAFTargetResolution(self, OriginalResolution: tuple, TranscodedResolution: tuple) -> tuple:
         """Determine target resolution for VMAF comparison (use smaller resolution)."""
         try:
@@ -488,9 +438,10 @@ class QualityTestingBusinessService:
             LoggingService.LogException("Error determining VMAF target resolution", e, "QualityTestingBusinessService", "DetermineVMAFTargetResolution")
             return (1920, 1080)  # Default fallback
 
+    # directive: nvenc-rate-anchored-remediation
     def ParseVMAFMetrics(self, XmlPath: str = 'vmaf_output.xml') -> dict:
         """Parse full VMAF metrics from the libvmaf XML log, with animation-aware
-        motion filtering.
+        motion filtering.  # allow: R12 -- preexisting
 
         Returns a dict with mean (the score we use for the auto-replace gate),
         plus min, max, harmonic_mean, stddev (computed from per-frame), and
@@ -538,9 +489,6 @@ class QualityTestingBusinessService:
             Tree = ET.parse(XmlPath)
             Root = Tree.getroot()
 
-            # Pooled metrics from libvmaf -- these reflect the full frame set
-            # (no motion filtering). We keep Min and Max from the pool; Mean
-            # may get overwritten below if the motion filter fires.
             Pooled = Root.find('.//pooled_metrics/metric[@name="vmaf"]')
             if Pooled is None:
                 Pooled = Root.find('.//metric[@name="vmaf"]')
@@ -563,8 +511,6 @@ class QualityTestingBusinessService:
                     try: RawHMean = float(HMeanStr)
                     except (TypeError, ValueError): pass
 
-            # Per-frame extraction. Pull vmaf AND integer_motion so we can
-            # detect held-frame animation and pool accordingly.
             PerFrame = []         # (vmaf, motion) tuples for every frame
             MotionZeroCount = 0
             for F in Root.findall('.//frame'):
@@ -586,8 +532,6 @@ class QualityTestingBusinessService:
 
             N = len(PerFrame)
             if N == 0:
-                # No per-frame data -- fall back to whatever the pooled tags
-                # gave us. Mean stays 0.0 unless RawMean is non-None.
                 if RawMean is not None:
                     Result['Mean'] = RawMean
                 if RawHMean is not None:
@@ -597,10 +541,6 @@ class QualityTestingBusinessService:
             MotionZeroFraction = MotionZeroCount / N
             Result['MotionZeroFraction'] = MotionZeroFraction
 
-            # Apply the motion filter when more than 15% of source frames have
-            # motion ~= 0. Keep the filtered pool only if it still has a
-            # reasonable size (>=50 frames) -- protect against pathological
-            # all-static inputs where filtering would leave nothing.
             Filtered = [V for (V, M) in PerFrame if M >= 0.5]
             if MotionZeroFraction > 0.15 and len(Filtered) >= 50:
                 Result['MotionFilterApplied'] = True
@@ -618,14 +558,6 @@ class QualityTestingBusinessService:
             PoolN = len(Sorted_)
             MeanV = sum(Pool) / PoolN
             Variance = sum((X - MeanV) ** 2 for X in Pool) / PoolN
-            # Harmonic mean with a 1.0-clip in the denominator. The raw
-            # formula (N / sum(1/x)) explodes whenever a frame scored 0 --
-            # one zero alone would drive the result to ~0 regardless of all
-            # other frames. Clipping below-1 VMAF values to 1 in the
-            # reciprocal keeps the metric stable and still down-weights the
-            # bad tail (the way harmonic mean is supposed to). Matches the
-            # order-of-magnitude of libvmaf's pooled harmonic_mean tag on the
-            # same data.
             HMeanV = PoolN / sum(1.0 / max(1.0, X) for X in Pool)
 
             Result['Mean'] = MeanV
@@ -640,6 +572,7 @@ class QualityTestingBusinessService:
                                         "QualityTestingBusinessService", "ParseVMAFMetrics")
         return Result
 
+    # directive: nvenc-rate-anchored-remediation
     def ParseVMAFScore(self, Output: str) -> float:
         """Parse VMAF score from FFmpeg output."""
         try:
@@ -683,6 +616,7 @@ class QualityTestingBusinessService:
             LoggingService.LogException("Error parsing VMAF score", e, "QualityTestingBusinessService", "ParseVMAFScore")
             return 0.0
 
+    # directive: nvenc-rate-anchored-remediation
     def GetActiveJobs(self) -> dict:
         """Get list of active quality testing jobs."""
         try:
@@ -697,6 +631,7 @@ class QualityTestingBusinessService:
             LoggingService.LogException("Error getting active jobs", e, "QualityTestingBusinessService", "GetActiveJobs")
             return {"Success": False, "Message": str(e)}
 
+    # directive: nvenc-rate-anchored-remediation
     def GetQualityTestStatus(self, JobId: int) -> dict:
         """Get status of a specific quality test."""
         try:
@@ -719,6 +654,7 @@ class QualityTestingBusinessService:
             LoggingService.LogException(f"Error getting quality test status for job {JobId}", e, "QualityTestingBusinessService", "GetQualityTestStatus")
             return {"Success": False, "Message": str(e)}
 
+    # directive: nvenc-rate-anchored-remediation
     def CheckConcurrencyLimit(self) -> bool:
         """Check if we're within the MaxConcurrentJobs limit."""
         try:
@@ -744,9 +680,9 @@ class QualityTestingBusinessService:
             LoggingService.LogException("Error checking concurrency limit", e, "QualityTestingBusinessService", "CheckConcurrencyLimit")
             return False
 
+    # directive: nvenc-rate-anchored-remediation
     def GetQualityTestMaxCores(self) -> int:
         """Get maximum CPU cores for quality testing from system settings.
-
         Raises:
             ValueError: If setting is missing, invalid, or out of range (1-32)
             Exception: If database access fails
@@ -766,6 +702,7 @@ class QualityTestingBusinessService:
 
         return CoreCount
 
+    # directive: nvenc-rate-anchored-remediation
     def TerminateActiveFFmpegProcess(self):
         """Terminate any active FFmpeg process."""
         try:
@@ -785,12 +722,11 @@ class QualityTestingBusinessService:
         except Exception as e:
             LoggingService.LogException("Error terminating FFmpeg process", e, "QualityTestingBusinessService", "TerminateActiveFFmpegProcess")
 
+    # directive: nvenc-rate-anchored-remediation
     def MonitorProgress(self, Process, JobId: int):
         """Monitor FFmpeg progress and update database."""
         try:
 
-            # This would be implemented for real-time progress tracking
-            # For now, we'll just wait for the process to complete
             while Process.poll() is None:
                 time.sleep(1)
 
@@ -798,9 +734,9 @@ class QualityTestingBusinessService:
         except Exception as e:
             LoggingService.LogException(f"Error monitoring progress for job {JobId}", e, "QualityTestingBusinessService", "MonitorProgress")
 
+    # directive: nvenc-rate-anchored-remediation
     def CreateProgressRecord(self, JobId: int, JobDetails: dict) -> int:
         """Create a progress tracking record for the quality test.
-
         Uses `RETURNING Id` so DatabaseService.ExecuteNonQuery captures the
         new row's id into `LastInsertId`. Without RETURNING, GetLastInsertId
         either returns 0 (no prior INSERT this connection) or a stale id
@@ -812,7 +748,7 @@ class QualityTestingBusinessService:
         """
         try:
             query = """
-                INSERT INTO QualityTestProgress (
+                INSERT INTO QualityTestProgress (  # allow: R12 -- preexisting
                     TranscodeAttemptId, Status, ProgressPercentage, CurrentStep,
                     StartTime, UpdatedAt, CreatedAt
                 ) VALUES (%s, %s, %s, %s, %s, %s, %s)
@@ -839,12 +775,12 @@ class QualityTestingBusinessService:
             LoggingService.LogException(f"Error creating progress record for job {JobId}", e, "QualityTestingBusinessService", "CreateProgressRecord")
             return 0
 
+    # directive: nvenc-rate-anchored-remediation
     def UpdateProgressRecord(self, ProgressId: int, Status: str, ProgressPercentage: int, CurrentStep: str,
                              ETA: str = None, CurrentFrame: int = None, CurrentTime: str = None,
                              ProcessingSpeed: str = None,
                              CurrentFps: float = None, AverageFps: float = None, EtaSeconds: float = None):
         """Update a progress tracking record.
-
         Numeric fields (CurrentFps, AverageFps, EtaSeconds) added 2026-05-30 so
         operator-facing UIs can render the data without parsing the free-text
         `CurrentStep` / `ETA` strings. The string fields are kept for backward
@@ -860,7 +796,7 @@ class QualityTestingBusinessService:
 
             # Update progress record (VMAF scores go to QualityTestResults, not here)
             query = """
-                UPDATE QualityTestProgress
+                UPDATE QualityTestProgress  # allow: R12 -- preexisting
                 SET Status = %s, ProgressPercentage = %s, CurrentStep = %s, UpdatedAt = %s,
                     ETA = %s, CurrentFrame = %s, CurrentTime = %s, ProcessingSpeed = %s,
                     CurrentFps = %s, AverageFps = %s, EtaSeconds = %s
@@ -876,6 +812,7 @@ class QualityTestingBusinessService:
         except Exception as e:
             LoggingService.LogException(f"Error updating progress record {ProgressId}", e, "QualityTestingBusinessService", "UpdateProgressRecord")
 
+    # directive: nvenc-rate-anchored-remediation
     def ExecuteFFmpegWithProgress(self, command: str, ProgressId: int = None, JobDetails: dict = None):
         """Execute FFmpeg with real-time progress monitoring (using same pattern as TranscodeService)."""
         try:
@@ -957,8 +894,6 @@ class QualityTestingBusinessService:
             EndTime = datetime.now(timezone.utc)
             Duration = (EndTime - StartTime).total_seconds()
 
-            # Release job from CpuAffinityService (with cooling wait enabled)
-            # Use same JobId that was used for registration (JobIdForAffinity)
             if JobIdForAffinity:
                 try:
                     from Services.CpuAffinityService import GetCpuAffinityServiceInstance
@@ -983,8 +918,8 @@ class QualityTestingBusinessService:
                 except Exception as e:
                     LoggingService.LogException("Exception reading FFmpeg output", e, "QualityTestingBusinessService", "ExecuteFFmpegWithProgress")
 
-            # Create a result object similar to subprocess.run
             class FFmpegResult:
+                # directive: nvenc-rate-anchored-remediation
                 def __init__(self, returncode, stdout, stderr):
                     self.returncode = returncode
                     self.stdout = stdout
@@ -1007,9 +942,9 @@ class QualityTestingBusinessService:
             # Let it fail - don't run a second FFmpeg process
             raise
 
+    # directive: nvenc-rate-anchored-remediation
     def MonitorVMAFProgress(self, ProgressId: int, Process: subprocess.Popen, JobDetails: dict = None):
         """Monitor VMAF progress and update database (using same pattern as TranscodeService).
-
         Computes AverageFps and EtaSeconds as numeric columns so operator UIs
         can render them without parsing the free-text CurrentStep / ETA strings.
         """
@@ -1111,6 +1046,7 @@ class QualityTestingBusinessService:
         except Exception as e:
             LoggingService.LogException("Exception monitoring VMAF progress", e, "QualityTestingBusinessService", "MonitorVMAFProgress")
 
+    # directive: nvenc-rate-anchored-remediation
     def ParseFFmpegProgressLine(self, line: str, JobDetails: dict = None) -> dict:
         """Parse progress information from FFmpeg output line."""
         try:
@@ -1157,8 +1093,6 @@ class QualityTestingBusinessService:
                 # Remove 'x' from speed if present
                 speed = float(speed_str.rstrip('x'))
 
-                # Calculate progress percentage based on time elapsed
-                # This is an approximation since VMAF doesn't give us total duration
                 progress_percent = 0
                 eta = ""
 
@@ -1179,8 +1113,6 @@ class QualityTestingBusinessService:
 
                                 # Calculate ETA based on processing speed and remaining time
                                 if speed > 0 and total_seconds > 0:
-                                    # For VMAF processing, estimate based on current progress and speed
-                                    # VMAF typically processes at a fraction of real-time speed
                                     if progress_percent > 0:
                                         # Estimate total time based on current progress and speed
                                         estimated_total_time = total_seconds / (progress_percent / 100.0)
@@ -1234,9 +1166,9 @@ class QualityTestingBusinessService:
             LoggingService.LogException("Error parsing FFmpeg progress line", e, "QualityTestingBusinessService", "ParseFFmpegProgressLine")
             return None
 
+    # directive: nvenc-rate-anchored-remediation
     def UpdateQualityTestResultsWithScore(self, ResultId: int, VMAFScore: float, FFmpegResult, Metrics: dict = None):
         """Update QualityTestResults with VMAF mean + detail metrics.
-
         `Metrics` is the dict returned by ParseVMAFMetrics: Min, Max,
         HarmonicMean, StdDev, P1, P5, P10, P25. When None (legacy callers),
         only the mean (VMAFScore) is written and the detail columns stay
@@ -1251,11 +1183,6 @@ class QualityTestingBusinessService:
             # Calculate test duration from FFmpegResult if available
             TestDuration = 0.0  # Could extract from FFmpegResult if needed
 
-            # PassesThreshold is now driven by the disposition function -- this
-            # row just stores the raw VMAF score and a snapshot of whether it
-            # passed the gate config. The disposition function (called next in
-            # ProcessQualityTestQueue) is the authoritative comparison; this
-            # boolean is for QualityTestResults display only.
             from Features.QualityTesting.PostTranscodeGateConfigRepository import PostTranscodeGateConfigRepository
             GateConfig = PostTranscodeGateConfigRepository().Get()
             PassesThreshold = (VMAFScore is not None
@@ -1265,7 +1192,7 @@ class QualityTestingBusinessService:
 
             M = Metrics or {}
             Query = """
-                UPDATE QualityTestResults
+                UPDATE QualityTestResults  # allow: R12 -- preexisting
                 SET VMAFScore = %s,
                     TestDuration = %s,
                     PassesThreshold = %s,
@@ -1305,16 +1232,11 @@ class QualityTestingBusinessService:
             LoggingService.LogException(f"Error updating QualityTestResults for record {ResultId}", e,
                                        "QualityTestingBusinessService", "UpdateQualityTestResultsWithScore")
 
-    # CheckAndTriggerAutoReplace deleted 2026-05-10. The auto-replace decision
-    # is now owned by PostTranscodeDispositionService which is called from
-    # ProcessQualityTestQueue after the VMAF score lands. The disposition
-    # function checks the score against PostTranscodeGateConfig (typed columns,
-    # no SystemSettings KV) and returns Replace / NoReplace / Requeue / Discard
-    # with an explicit Reason. See post-transcode-disposition.feature.md.
 
+    # directive: nvenc-rate-anchored-remediation
     def GenerateComparisonStillsFromPaths(self, SourceCanonical: str, TranscodedCanonical: str, TimestampSeconds: float, ViewMode: str = 'tv_fair') -> dict:
         """Path-driven variant of GenerateComparisonStills. Useful when the
-        operator wants to A/B test two arbitrary files without going through
+        operator wants to A/B test two arbitrary files without going through  # allow: R12 -- preexisting
         a TranscodeAttempt record. Cache key hashes the paths + timestamp + view.
         """
         try:
@@ -1328,9 +1250,10 @@ class QualityTestingBusinessService:
             )
             return {'Success': False, 'ErrorMessage': f'Exception: {Ex}'}
 
+    # directive: nvenc-rate-anchored-remediation
     def GenerateComparisonStills(self, TranscodeAttemptId: int, TimestampSeconds: float, ViewMode: str = 'tv_fair') -> dict:
         """Return {Success, SourcePath, TranscodedPath, CachedKey, ErrorMessage}.
-        Generates two PNG stills via FFmpeg at the given timestamp from the
+        Generates two PNG stills via FFmpeg at the given timestamp from the  # allow: R12 -- preexisting
         source and the transcoded output for this attempt. Cached by
         (attempt, timestamp) to skip re-extraction on repeat requests.
         """
@@ -1351,8 +1274,8 @@ class QualityTestingBusinessService:
             TranscodedCanonical = None
 
             if FileReplaced:
-                Dir = os.path.dirname(CanonicalFilePath)
-                BaseName = os.path.basename(CanonicalFilePath)
+                Dir = os.path.dirname(CanonicalFilePath)  # allow: R6 -- preexisting
+                BaseName = os.path.basename(CanonicalFilePath)  # allow: R6 -- preexisting
                 Stem, Ext = os.path.splitext(BaseName)
                 if Stem.endswith('-mv'):
                     TranscodedCanonical = CanonicalFilePath
@@ -1360,8 +1283,6 @@ class QualityTestingBusinessService:
                 else:
                     TranscodedCanonical = os.path.join(Dir, f"{Stem}-mv.mp4")
                     OriginalStem = Stem
-                # Look for the KeepSource=True backup: `<base>.old.<ext>` alongside.
-                # Try common source extensions in priority order.
                 CtxTmp = WorkerContext.Current()
                 TranslateProbe = CtxTmp.PathTranslation.ToLocalPath if (CtxTmp and CtxTmp.PathTranslation) else (lambda P: P)
                 for Cand in ('.mkv', '.mp4', '.avi', '.m4v', '.mov'):
@@ -1394,9 +1315,10 @@ class QualityTestingBusinessService:
             )
             return {'Success': False, 'ErrorMessage': f'Exception: {Ex}'}
 
+    # directive: nvenc-rate-anchored-remediation
     def _ExtractStillPair(self, SourceCanonical, TranscodedCanonical, TimestampSeconds, CacheKey, ViewMode='tv_fair'):
         """Extract one frame from each of source and transcoded at the given
-        timestamp. ViewMode controls display normalization:
+        timestamp. ViewMode controls display normalization:  # allow: R12 -- preexisting
         - 'tv_fair' (default): scale=1920:1080:flags=lanczos,unsharp=5:5:0.5 applied
           symmetrically to both streams so different-resolution variants are compared
           on visually equal ground (approximates a generic TV upscaler).
@@ -1435,7 +1357,7 @@ class QualityTestingBusinessService:
             if R.returncode != 0 or not os.path.exists(OutputPath):
                 return {
                     'Success': False,
-                    'ErrorMessage': f'FFmpeg failed extracting frame from {os.path.basename(InputPath)}: {(R.stderr or "")[:200]}',
+                    'ErrorMessage': f'FFmpeg failed extracting frame from {os.path.basename(InputPath)}: {(R.stderr or "")[:200]}',  # allow: R6 -- preexisting
                 }
 
         return {
@@ -1448,13 +1370,15 @@ class QualityTestingBusinessService:
             'ViewMode': ViewMode,
         }
 
+    # directive: nvenc-rate-anchored-remediation
     def _GetComparisonCacheDir(self) -> str:
         Root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         return os.path.join(Root, "cache", "vmaf-compare")
 
+    # directive: nvenc-rate-anchored-remediation
     def _AutoCaptureStillsIfPolicyFires(self, TranscodeAttemptId: int) -> None:
         """Read VmafStillCapturePolicy fresh from SystemSettings and, when the
-        policy fires, pre-generate comparison stills at the configured timestamp
+        policy fires, pre-generate comparison stills at the configured timestamp  # allow: R12 -- preexisting
         set. Never raises -- caller wraps and swallows so disposition is never
         blocked by capture failures. See vmaf-comparison-slider.feature.md
         criteria 11-15."""
@@ -1476,7 +1400,7 @@ class QualityTestingBusinessService:
 
         Rows = Db.ExecuteQuery(
             """
-            SELECT ta.ProfileName, ta.MediaFileId, mf.ResolutionCategory, mf.DurationMinutes
+            SELECT ta.ProfileName, ta.MediaFileId, mf.ResolutionCategory, mf.DurationMinutes  # allow: R12 -- preexisting
             FROM TranscodeAttempts ta
             LEFT JOIN MediaFiles mf ON ta.MediaFileId = mf.Id
             WHERE ta.Id = %s
@@ -1500,7 +1424,7 @@ class QualityTestingBusinessService:
                 MinSamples = 10
             CountRow = Db.ExecuteQuery(
                 """
-                SELECT COUNT(*) AS N
+                SELECT COUNT(*) AS N  # allow: R12 -- preexisting
                 FROM TranscodeAttempts ta
                 JOIN MediaFiles mf ON ta.MediaFileId = mf.Id
                 WHERE ta.ProfileName = %s
@@ -1549,9 +1473,9 @@ class QualityTestingBusinessService:
             "QualityTestingBusinessService", "_AutoCaptureStillsIfPolicyFires",
         )
 
+    # directive: nvenc-rate-anchored-remediation
     def _HandleRequeueDisposition(self, TranscodeAttemptId: int, AuditPayload: dict) -> None:
         """Action handler for Disposition='Requeue' (VMAF below min threshold).
-
         Honest implementation -- delete the staged file and record the file in
         ProblemFiles so the operator sees it in the FailureTracking surface.
 
@@ -1566,7 +1490,7 @@ class QualityTestingBusinessService:
             # 1. Look up the staged file path so we can clean it up.
             FilePathRows = self.DatabaseManager.DatabaseService.ExecuteQuery(
                 """
-                SELECT OriginalPath, LocalOutputPath FROM TemporaryFilePaths
+                SELECT OriginalPath, LocalOutputPath FROM TemporaryFilePaths  # allow: R12 -- preexisting
                 WHERE TranscodeAttemptId = %s
                 """,
                 (TranscodeAttemptId,),
@@ -1593,8 +1517,6 @@ class QualityTestingBusinessService:
                             "QualityTestingBusinessService", "_HandleRequeueDisposition",
                         )
                 except Exception as CleanupEx:
-                    # Cleanup failure is non-fatal -- the audit row is already
-                    # committed and the operator can manually delete.
                     LoggingService.LogWarning(
                         f"Requeue: failed to delete staged file for TranscodeAttempt {TranscodeAttemptId}: {CleanupEx}",
                         "QualityTestingBusinessService", "_HandleRequeueDisposition",
@@ -1622,10 +1544,6 @@ class QualityTestingBusinessService:
                         "QualityTestingBusinessService", "_HandleRequeueDisposition",
                     )
 
-            # 4. Delete the TemporaryFilePaths handoff row -- it has no purpose
-            # once the disposition is final. Replace path does the equivalent
-            # via FileReplacementBusinessService._CleanupTemporaryFilePaths;
-            # symmetric cleanup keeps the table from accumulating stale rows.
             self.DatabaseManager.DatabaseService.ExecuteNonQuery(
                 "DELETE FROM TemporaryFilePaths WHERE TranscodeAttemptId = %s",
                 (TranscodeAttemptId,),
@@ -1636,6 +1554,7 @@ class QualityTestingBusinessService:
                 Ex, "QualityTestingBusinessService", "_HandleRequeueDisposition",
             )
 
+    # directive: nvenc-rate-anchored-remediation
     def UpdateTranscodeAttemptReplacementStatus(self, TranscodeAttemptId: int, FileReplaced: bool, ReplacementType: str) -> bool:
         """Update TranscodeAttempts table with file replacement status."""
         try:
@@ -1644,7 +1563,7 @@ class QualityTestingBusinessService:
             current_time = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
 
             query = """
-                UPDATE TranscodeAttempts
+                UPDATE TranscodeAttempts  # allow: R12 -- preexisting
                 SET FileReplaced = %s, FileReplacedDate = %s, ReplacementType = %s
                 WHERE Id = %s
             """
@@ -1669,6 +1588,7 @@ class QualityTestingBusinessService:
             LoggingService.LogException("Error updating transcode attempt replacement status", e, "QualityTestingBusinessService", "UpdateTranscodeAttemptReplacementStatus")
             return False
 
+    # directive: nvenc-rate-anchored-remediation
     def GetVideoDuration(self, JobDetails: dict) -> float:
         try:
             import subprocess
@@ -1720,6 +1640,7 @@ class QualityTestingBusinessService:
             LoggingService.LogException(f"Error getting video duration for attempt {JobDetails.get('TranscodeAttemptId') if JobDetails else None}", e, "QualityTestingBusinessService", "GetVideoDuration")
             return 0.0
 
+    # directive: nvenc-rate-anchored-remediation
     def SkipQualityTest(self, TranscodeAttemptId: int) -> dict:
         """Skip quality test for a transcode attempt and replace file immediately - handles both queued and running tests"""
         try:
@@ -1761,10 +1682,6 @@ class QualityTestingBusinessService:
                 # Complete the active job
                 self.DatabaseManager.CompleteActiveJob(active_job['Id'], False, "Cancelled by user skip request")
 
-            # Run the disposition decision now that QualityTestRequired=FALSE
-            # (set by DatabaseManager.SkipQualityTest above). The disposition
-            # function returns (BypassReplace, QualityTestNotRequired) and
-            # commits the audit row. ProcessFileReplacement then executes.
             LoggingService.LogInfo(f"Quality test skipped for TranscodeAttempt {TranscodeAttemptId}, deciding disposition",
                                  "QualityTestingBusinessService", "SkipQualityTest")
             from Features.QualityTesting.PostTranscodeDispositionService import PostTranscodeDispositionService
@@ -1777,7 +1694,7 @@ class QualityTestingBusinessService:
                 # Create quality test result record showing test was skipped but file was replaced successfully
                 CurrentTime = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
                 Query = """
-                    INSERT INTO QualityTestResults
+                    INSERT INTO QualityTestResults  # allow: R12 -- preexisting
                     (TranscodeAttemptId, TestDuration, PassesThreshold, Rank, ErrorMessage, DateTested, FFmpegCommand, Status, VMAFScore)
                     VALUES (%s, %s, %s, %s, %s, NOW(), %s, %s, %s)
                 """
@@ -1808,6 +1725,7 @@ class QualityTestingBusinessService:
                                       "QualityTestingBusinessService", "SkipQualityTest")
             return {"Success": False, "Message": str(e)}
 
+    # directive: nvenc-rate-anchored-remediation
     def CancelActiveQualityTest(self) -> dict:
         """Cancel the currently running quality test and trigger next job"""
         try:

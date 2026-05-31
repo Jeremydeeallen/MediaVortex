@@ -44,6 +44,7 @@ Judgment-call standards the hook cannot mechanically catch. These remain operato
 - Semantic doc accuracy (does the doc still describe reality after the code change)
 - Evidence-citation realism (R2 verifies the cited file exists and contains the literal; it cannot verify the cited file is REAL evidence vs. a doc Claude wrote to game the gate)
 - Naming quality (whether a function/class name is a useful grep anchor per the one-line code-anchor convention)
+- **No hardcoded values where DB-driven is possible** -- tunable encoder knobs / thresholds / policy values belong in `Profiles` / `ProfileThresholds` / `SystemSettings` / per-feature config tables. `CommandBuilder` and decision functions read; they do not decide. Adding a new encoder regime is a row insert, not a code change. Adjusting an existing regime is a SQL UPDATE, not a code change. Memory: `feedback_no_hardcoded_values.md`. Operationalized by the nvenc-rate-anchored-remediation directive (2026-05-31).
 
 ## How to add a rule
 

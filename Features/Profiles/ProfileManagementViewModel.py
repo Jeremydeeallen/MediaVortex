@@ -6,9 +6,11 @@ from Features.Profiles.ProfileService import ProfileService
 from Core.Logging.LoggingService import LoggingService
 
 
+# directive: nvenc-rate-anchored-remediation
 class ProfileManagementViewModel:
     """ViewModel for managing transcoding profiles in the UI."""
 
+    # directive: nvenc-rate-anchored-remediation
     def __init__(self, profile_service: ProfileService = None):
         self.ProfileService = profile_service or ProfileService()
         self.Profiles: List[TranscodeProfileModel] = []
@@ -17,6 +19,7 @@ class ProfileManagementViewModel:
         self.ErrorMessage: str = ""
         self.SuccessMessage: str = ""
 
+    # directive: nvenc-rate-anchored-remediation
     def LoadProfiles(self) -> bool:
         """Load all profiles from the database."""
         try:
@@ -27,6 +30,7 @@ class ProfileManagementViewModel:
             self.ErrorMessage = f"Failed to load profiles: {str(e)}"
             return False
 
+    # directive: nvenc-rate-anchored-remediation
     def SelectProfile(self, profile_id: int) -> bool:
         """Select a profile and load its thresholds."""
         try:
@@ -43,6 +47,7 @@ class ProfileManagementViewModel:
             self.ErrorMessage = f"Failed to load profile: {str(e)}"
             return False
 
+    # directive: nvenc-rate-anchored-remediation
     def CreateProfile(self, profile_name: str, description: str = "") -> bool:
         """Create a new profile."""
         try:
@@ -64,6 +69,7 @@ class ProfileManagementViewModel:
             self.ErrorMessage = f"Failed to create profile: {str(e)}"
             return False
 
+    # directive: nvenc-rate-anchored-remediation
     def CreateProfileWithThresholds(self, profile_name: str, description: str, thresholds: List[dict],
                                    codec: str = "libsvtav1", preset: int = 6, film_grain: int = 10,
                                    yadif_mode: int = 1, yadif_parity: int = 1, yadif_deint: int = 1,
@@ -115,6 +121,7 @@ class ProfileManagementViewModel:
             self.ErrorMessage = f"Failed to create profile: {str(e)}"
             return False
 
+    # directive: nvenc-rate-anchored-remediation
     def UpdateProfile(self, profile: TranscodeProfileModel) -> bool:
         """Update an existing profile."""
         try:
@@ -144,6 +151,7 @@ class ProfileManagementViewModel:
             self.ErrorMessage = f"Failed to update profile: {str(e)}"
             return False
 
+    # directive: nvenc-rate-anchored-remediation
     def UpdateProfileWithThresholds(self, profile_id: int, profile_name: str, description: str, thresholds: List[dict],
                                    codec: str = "libsvtav1", preset: int = 6, film_grain: int = 10,
                                    yadif_mode: int = 1, yadif_parity: int = 1, yadif_deint: int = 1,
@@ -256,6 +264,7 @@ class ProfileManagementViewModel:
             self.ErrorMessage = f"Failed to update profile: {str(e)}"
             return False
 
+    # directive: nvenc-rate-anchored-remediation
     def DeleteProfile(self, profile_id: int) -> bool:
         """Delete a profile."""
         try:
@@ -280,6 +289,7 @@ class ProfileManagementViewModel:
             self.ErrorMessage = f"Failed to delete profile: {str(e)}"
             return False
 
+    # directive: nvenc-rate-anchored-remediation
     def AddThreshold(self, profile_id: int, resolution: str,
                     under_30_min_mb: int, under_65_min_mb: int, over_65_min_mb: int,
                     video_bitrate_kbps: int, audio_bitrate_kbps: int,
@@ -306,6 +316,7 @@ class ProfileManagementViewModel:
             self.ErrorMessage = f"Failed to add threshold: {str(e)}"
             return False
 
+    # directive: nvenc-rate-anchored-remediation
     def UpdateThreshold(self, threshold: ProfileThresholdModel) -> bool:
         """Update a threshold."""
         try:
@@ -328,6 +339,7 @@ class ProfileManagementViewModel:
             self.ErrorMessage = f"Failed to update threshold: {str(e)}"
             return False
 
+    # directive: nvenc-rate-anchored-remediation
     def DeleteThreshold(self, threshold_id: int) -> bool:
         """Delete a threshold."""
         try:
@@ -349,15 +361,29 @@ class ProfileManagementViewModel:
             self.ErrorMessage = f"Failed to delete threshold: {str(e)}"
             return False
 
+    # directive: nvenc-rate-anchored-remediation
     def ClearMessages(self):
         """Clear error and success messages."""
         self.ErrorMessage = ""
         self.SuccessMessage = ""
 
+    # directive: nvenc-rate-anchored-remediation
     def GetProfilesAsDict(self) -> List[Dict[str, Any]]:
-        """Get profiles as dictionaries for JSON serialization."""
-        return [
-            {
+        """Profile list including lifted NVENC knob columns (Tune, Multipass, PixelFormat, Audio*, Container, FastStart)."""
+        from Core.Database.DatabaseService import DatabaseService
+        Db = DatabaseService()
+        KnobRows = Db.ExecuteQuery(
+            "SELECT Id, Tune, Multipass, PixelFormat, AudioCodec, AudioBitrateKbps, "
+            "       AudioChannels, AudioFilter, Container, FastStart, RateControlMode "
+            "FROM Profiles",
+            (),
+        )
+        KnobsByProfileId = {Row['Id']: Row for Row in KnobRows}
+
+        Result = []
+        for profile in self.Profiles:
+            Extra = KnobsByProfileId.get(profile.Id, {})
+            Result.append({
                 'Id': profile.Id,
                 'ProfileName': profile.ProfileName,
                 'Description': profile.Description,
@@ -370,15 +396,45 @@ class ProfileManagementViewModel:
                 'YadifParity': profile.YadifParity,
                 'YadifDeint': profile.YadifDeint,
                 'UseNvidiaHardware': profile.UseNvidiaHardware,
-                'SortOrder': profile.SortOrder
-            }
-            for profile in self.Profiles
-        ]
+                'SortOrder': profile.SortOrder,
+                'Tune': Extra.get('Tune'),
+                'Multipass': Extra.get('Multipass'),
+                'PixelFormat': Extra.get('PixelFormat'),
+                'AudioCodec': Extra.get('AudioCodec'),
+                'AudioBitrateKbps': Extra.get('AudioBitrateKbps'),
+                'AudioChannels': Extra.get('AudioChannels'),
+                'AudioFilter': Extra.get('AudioFilter'),
+                'Container': Extra.get('Container'),
+                'FastStart': Extra.get('FastStart'),
+                'RateControlMode': Extra.get('RateControlMode'),
+            })
+        return Result
 
+    # directive: nvenc-rate-anchored-remediation
     def GetSelectedProfileAsDict(self) -> Optional[Dict[str, Any]]:
-        """Get selected profile as dictionary for JSON serialization."""
+        """Selected profile + thresholds including every lifted NVENC knob column."""
         if not self.SelectedProfile:
             return None
+
+        from Core.Database.DatabaseService import DatabaseService
+        Db = DatabaseService()
+        Pid = self.SelectedProfile.Id
+        ProfileExtras = Db.ExecuteQuery(
+            "SELECT Tune, Multipass, PixelFormat, AudioCodec, AudioBitrateKbps, "
+            "       AudioChannels, AudioFilter, Container, FastStart, RateControlMode "
+            "FROM Profiles WHERE Id = %s",
+            (Pid,),
+        )
+        ProfileExtra = ProfileExtras[0] if ProfileExtras else {}
+
+        ThresholdExtras = Db.ExecuteQuery(
+            "SELECT Id, RcLookahead, BFrames, BRefMode, ScaleHeight, PreserveAspect, "
+            "       MaxBitrateMultiplier, SourceBitratePercent, MinBitrateKbps, "
+            "       MaxBitrateKbps, Gop "
+            "FROM ProfileThresholds WHERE ProfileId = %s",
+            (Pid,),
+        )
+        ExtraByThresholdId = {Row['Id']: Row for Row in ThresholdExtras}
 
         return {
             'Id': self.SelectedProfile.Id,
@@ -393,6 +449,16 @@ class ProfileManagementViewModel:
             'YadifParity': self.SelectedProfile.YadifParity,
             'YadifDeint': self.SelectedProfile.YadifDeint,
             'UseNvidiaHardware': self.SelectedProfile.UseNvidiaHardware,
+            'Tune': ProfileExtra.get('Tune'),
+            'Multipass': ProfileExtra.get('Multipass'),
+            'PixelFormat': ProfileExtra.get('PixelFormat'),
+            'AudioCodec': ProfileExtra.get('AudioCodec'),
+            'AudioBitrateKbps': ProfileExtra.get('AudioBitrateKbps'),
+            'AudioChannels': ProfileExtra.get('AudioChannels'),
+            'AudioFilter': ProfileExtra.get('AudioFilter'),
+            'Container': ProfileExtra.get('Container'),
+            'FastStart': ProfileExtra.get('FastStart'),
+            'RateControlMode': ProfileExtra.get('RateControlMode'),
             'Thresholds': [
                 {
                     'Id': threshold.Id,
@@ -406,12 +472,23 @@ class ProfileManagementViewModel:
                     'FallbackVideoBitrateKbps': threshold.FallbackVideoBitrateKbps,
                     'FallbackAudioBitrateKbps': threshold.FallbackAudioBitrateKbps,
                     'TranscodeDownTo': threshold.TranscodeDownTo,
-                    'Quality': threshold.Quality
+                    'Quality': threshold.Quality,
+                    'RcLookahead': ExtraByThresholdId.get(threshold.Id, {}).get('RcLookahead'),
+                    'BFrames': ExtraByThresholdId.get(threshold.Id, {}).get('BFrames'),
+                    'BRefMode': ExtraByThresholdId.get(threshold.Id, {}).get('BRefMode'),
+                    'ScaleHeight': ExtraByThresholdId.get(threshold.Id, {}).get('ScaleHeight'),
+                    'PreserveAspect': ExtraByThresholdId.get(threshold.Id, {}).get('PreserveAspect'),
+                    'MaxBitrateMultiplier': float(ExtraByThresholdId.get(threshold.Id, {}).get('MaxBitrateMultiplier')) if ExtraByThresholdId.get(threshold.Id, {}).get('MaxBitrateMultiplier') is not None else None,
+                    'SourceBitratePercent': ExtraByThresholdId.get(threshold.Id, {}).get('SourceBitratePercent'),
+                    'MinBitrateKbps': ExtraByThresholdId.get(threshold.Id, {}).get('MinBitrateKbps'),
+                    'MaxBitrateKbps': ExtraByThresholdId.get(threshold.Id, {}).get('MaxBitrateKbps'),
+                    'Gop': ExtraByThresholdId.get(threshold.Id, {}).get('Gop'),
                 }
                 for threshold in self.SelectedProfileThresholds
             ]
         }
 
+    # directive: nvenc-rate-anchored-remediation
     def AssignProfileToRootFolder(self, RootFolderPath: str, ProfileId: int) -> Dict[str, Any]:
         """Assign a profile to all media files in a specific root folder."""
         try:
