@@ -12,6 +12,7 @@ $OverrideLog = Join-Path $RepoRoot ".claude\.standards-overrides.log"
 $DirectiveFile = Join-Path $RepoRoot ".claude\directive.md"
 $RulesDir = Join-Path $RepoRoot ".claude\rules"
 $StandardsIndex = Join-Path $RepoRoot ".claude\standards\index.md"
+$RefusalStateFile = Join-Path $RepoRoot ".claude\.refusal-state.json"
 
 function Read-StdinJson {
     $Raw = [Console]::In.ReadToEnd()
@@ -48,6 +49,68 @@ function Emit-Ask {
 }
 
 function Emit-Allow { exit 0 }
+
+function Get-CurrentSessionStamp {
+    if (Test-Path $StateFile) {
+        try {
+            $S = Get-Content $StateFile -Raw | ConvertFrom-Json
+            return $S.session_started_at
+        } catch { }
+    }
+    return ""
+}
+
+function Increment-RefusalCount {
+    param([string]$RuleId, [string]$FilePath)
+    if (-not $RuleId -or -not $FilePath) { return 1 }
+    $CurrentStamp = Get-CurrentSessionStamp
+    $Counts = @{}
+    if (Test-Path $RefusalStateFile) {
+        try {
+            $Loaded = Get-Content $RefusalStateFile -Raw | ConvertFrom-Json
+            if ($Loaded.session_stamp -eq $CurrentStamp -and $Loaded.counts) {
+                foreach ($Prop in $Loaded.counts.PSObject.Properties) {
+                    $Counts[$Prop.Name] = [int]$Prop.Value
+                }
+            }
+        } catch { }
+    }
+    $Key = "$RuleId|$($FilePath.ToLower())"
+    if ($Counts.ContainsKey($Key)) { $Counts[$Key] = [int]$Counts[$Key] + 1 }
+    else { $Counts[$Key] = 1 }
+    $Out = @{ session_stamp = $CurrentStamp; counts = $Counts }
+    $Json = $Out | ConvertTo-Json -Compress
+    Set-Content -Path $RefusalStateFile -Value $Json -Encoding UTF8
+    return $Counts[$Key]
+}
+
+function Emit-DenyWithRepeatDetection {
+    param([string]$Reason, [string]$FilePath)
+    $RuleMatch = [regex]::Match($Reason, '^(R\d+|Phase\s+\S+)')
+    if ($RuleMatch.Success -and $FilePath) {
+        $RuleId = $RuleMatch.Groups[1].Value
+        $Count = Increment-RefusalCount $RuleId $FilePath
+        if ($Count -ge 2) {
+            $Ord = switch ($Count) { 1 {'1st'} 2 {'2nd'} 3 {'3rd'} default { "${Count}th" } }
+            $StoppedPreamble = @"
+STOPPED -- this is the $Ord refusal of $RuleId on this file in this session.
+
+The 'Path forward:' in the prescribed text below is the answer. Further variants of the workaround you keep trying will continue to be refused; iterating costs tokens without progress.
+
+Pivot to ONE of:
+  (a) Do the prescribed Path forward LITERALLY (no creative reinterpretation, no clever variant).
+  (b) Ask the operator to unblock with a one-sentence statement of why the prescribed path is unworkable.
+
+Do NOT open a follow-up directive to escape -- we are working on the CURRENT directive; pivoting out is itself a workaround pattern. Fix it here, not later.
+
+Original refusal follows:
+
+"@
+            $Reason = $StoppedPreamble + $Reason
+        }
+    }
+    Emit-Deny $Reason
+}
 
 function Get-SessionState {
     if (Test-Path $StateFile) {
@@ -498,13 +561,13 @@ if ($NormFP -match '/\.claude/(hooks|standards|directive\.md|directives/|rules/|
     # Phase gate still applies.
     $State = Get-SessionState
     $PhaseRefusal = Test-PhaseGate $State $ToolName $ToolInput
-    if ($PhaseRefusal) { Emit-Deny $PhaseRefusal }
+    if ($PhaseRefusal) { Emit-DenyWithRepeatDetection $PhaseRefusal $FilePath }
     Emit-Allow
 }
 
 $State = Get-SessionState
 $PhaseRefusal = Test-PhaseGate $State $ToolName $ToolInput
-if ($PhaseRefusal) { Emit-Deny $PhaseRefusal }
+if ($PhaseRefusal) { Emit-DenyWithRepeatDetection $PhaseRefusal $FilePath }
 
 $IsNew = -not (Test-Path $FilePath)
 $PostContent = Synthesize-PostEditContent $ToolName $ToolInput
@@ -532,7 +595,7 @@ $Rules = @(
 try {
     foreach ($R in $Rules) {
         $Refusal = & $R
-        if ($Refusal) { Emit-Deny $Refusal }
+        if ($Refusal) { Emit-DenyWithRepeatDetection $Refusal $FilePath }
     }
 } catch {
     Emit-Ask "Standards hook errored: $($_.Exception.Message). Asking for human review."
