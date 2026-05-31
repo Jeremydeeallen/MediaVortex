@@ -454,7 +454,7 @@ class ProfileManagementViewModel:
         ProfileExtra = ProfileExtras[0] if ProfileExtras else {}
 
         ThresholdExtras = Db.ExecuteQuery(
-            "SELECT Id, RcLookahead, BFrames, BRefMode, ScaleHeight, PreserveAspect, "
+            "SELECT Id, RcLookahead, BFrames, BRefMode, ScaleHeight, "
             "       MaxBitrateMultiplier, SourceBitratePercent, MinBitrateKbps, "
             "       MaxBitrateKbps, Gop "
             "FROM ProfileThresholds WHERE ProfileId = %s",
@@ -504,7 +504,6 @@ class ProfileManagementViewModel:
                     'BFrames': ExtraByThresholdId.get(threshold.Id, {}).get('BFrames'),
                     'BRefMode': ExtraByThresholdId.get(threshold.Id, {}).get('BRefMode'),
                     'ScaleHeight': ExtraByThresholdId.get(threshold.Id, {}).get('ScaleHeight'),
-                    'PreserveAspect': ExtraByThresholdId.get(threshold.Id, {}).get('PreserveAspect'),
                     'MaxBitrateMultiplier': float(ExtraByThresholdId.get(threshold.Id, {}).get('MaxBitrateMultiplier')) if ExtraByThresholdId.get(threshold.Id, {}).get('MaxBitrateMultiplier') is not None else None,
                     'SourceBitratePercent': ExtraByThresholdId.get(threshold.Id, {}).get('SourceBitratePercent'),
                     'MinBitrateKbps': ExtraByThresholdId.get(threshold.Id, {}).get('MinBitrateKbps'),

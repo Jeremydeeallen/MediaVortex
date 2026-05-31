@@ -43,7 +43,6 @@ class EncoderKnobs:
     BFrames: Optional[int]
     BRefMode: Optional[str]
     ScaleHeight: Optional[int]
-    PreserveAspect: Optional[bool]
 
     # directive: nvenc-rate-anchored-remediation
     def ToDict(self) -> Dict[str, Any]:
@@ -76,7 +75,7 @@ class EncoderKnobRepository(BaseRepository):
                 "       pt.SourceBitratePercent, pt.MinBitrateKbps, pt.MaxBitrateKbps, "
                 "       pt.MaxBitrateMultiplier, pt.Gop, "
                 "       pt.RcLookahead, pt.BFrames, pt.BRefMode, "
-                "       pt.ScaleHeight, pt.PreserveAspect "
+                "       pt.ScaleHeight "
                 "FROM Profiles p "
                 "JOIN ProfileThresholds pt ON pt.ProfileId = p.Id "
                 "WHERE p.ProfileName = %s AND pt.Resolution = %s "
@@ -126,7 +125,6 @@ class EncoderKnobRepository(BaseRepository):
                 BFrames=Row.get('BFrames'),
                 BRefMode=Row.get('BRefMode'),
                 ScaleHeight=Row.get('ScaleHeight'),
-                PreserveAspect=Row.get('PreserveAspect'),
             )
         except Exception as e:
             LoggingService.LogException(

@@ -142,8 +142,8 @@ class ProfileRepository(BaseRepository):
                 return None
             NewProfileId = Row[0]
             Cursor.execute(
-                "INSERT INTO ProfileThresholds (profileid, resolution, under30minmb, under65minmb, over65minmb, videobitratekbps, audiobitratekbps, fallbackvideobitratekbps, fallbackaudiobitratekbps, transcodedownto, quality, keepsource, containertype, sourcebitratepercent, minbitratekbps, maxbitratekbps, gop, rclookahead, bframes, brefmode, scaleheight, preserveaspect, maxbitratemultiplier) "
-                "SELECT %s, resolution, under30minmb, under65minmb, over65minmb, videobitratekbps, audiobitratekbps, fallbackvideobitratekbps, fallbackaudiobitratekbps, transcodedownto, quality, keepsource, containertype, sourcebitratepercent, minbitratekbps, maxbitratekbps, gop, rclookahead, bframes, brefmode, scaleheight, preserveaspect, maxbitratemultiplier "
+                "INSERT INTO ProfileThresholds (profileid, resolution, under30minmb, under65minmb, over65minmb, videobitratekbps, audiobitratekbps, fallbackvideobitratekbps, fallbackaudiobitratekbps, transcodedownto, quality, keepsource, containertype, sourcebitratepercent, minbitratekbps, maxbitratekbps, gop, rclookahead, bframes, brefmode, scaleheight, maxbitratemultiplier) "
+                "SELECT %s, resolution, under30minmb, under65minmb, over65minmb, videobitratekbps, audiobitratekbps, fallbackvideobitratekbps, fallbackaudiobitratekbps, transcodedownto, quality, keepsource, containertype, sourcebitratepercent, minbitratekbps, maxbitratekbps, gop, rclookahead, bframes, brefmode, scaleheight, maxbitratemultiplier "
                 "FROM ProfileThresholds WHERE ProfileId = %s",
                 (NewProfileId, SourceProfileId),
             )

@@ -194,7 +194,7 @@ class ProfileController:
                     'VideoBitrateKbps', 'AudioBitrateKbps',
                     'FallbackVideoBitrateKbps', 'FallbackAudioBitrateKbps',
                     'RcLookahead', 'BFrames', 'BRefMode',
-                    'ScaleHeight', 'PreserveAspect', 'MaxBitrateMultiplier',
+                    'ScaleHeight', 'MaxBitrateMultiplier',
                     'SourceBitratePercent', 'MinBitrateKbps', 'MaxBitrateKbps', 'Gop',
                 }
                 from Core.Database.DatabaseService import DatabaseService
