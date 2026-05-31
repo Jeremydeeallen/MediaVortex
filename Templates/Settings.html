@@ -999,6 +999,9 @@ function DisplayProfiles(Profiles) {
                             <button class="btn btn-outline-primary btn-sm me-1" onclick="ShowProfileKnobs(${Profile.Id})" title="Edit profile + thresholds">
                                 <i class="fas fa-edit"></i>
                             </button>
+                            <button class="btn btn-outline-secondary btn-sm me-1" onclick="CopyProfile(${Profile.Id}, '${SafeName}')" title="Copy profile + thresholds">
+                                <i class="fas fa-copy"></i>
+                            </button>
                             <button class="btn btn-outline-danger btn-sm" onclick="DeleteProfile(${Profile.Id}, '${SafeName}')">
                                 <i class="fas fa-trash"></i>
                             </button>
@@ -1080,6 +1083,31 @@ function SaveProfileOrder() {
 
 
 
+
+function CopyProfile(ProfileId, ProfileName) {
+    const NewName = prompt(`Copy "${ProfileName}" as:`, `${ProfileName} (copy)`);
+    if (!NewName || !NewName.trim()) {
+        return;
+    }
+    $.ajax({
+        url: `/api/profiles/${ProfileId}/copy`,
+        type: 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify({ NewName: NewName.trim() })
+    })
+    .done(function(Response) {
+        if (Response.success) {
+            ShowAlert(Response.message, 'success');
+            LoadProfiles();
+        } else {
+            ShowAlert('Failed to copy profile: ' + Response.error, 'danger');
+        }
+    })
+    .fail(function(XHR) {
+        const Err = (XHR.responseJSON && XHR.responseJSON.error) || 'Failed to copy profile';
+        ShowAlert(Err, 'danger');
+    });
+}
 
 function DeleteProfile(ProfileId, ProfileName) {
     if (!confirm(`Are you sure you want to delete the profile "${ProfileName}"? This will also delete all associated thresholds.`)) {

@@ -78,6 +78,10 @@ class ProfileService:
         """Delete a transcoding profile and all its associated thresholds."""
         return self.Repository.DeleteProfile(profile_id)
 
+    def CopyProfile(self, source_profile_id: int, new_name: str) -> Optional[int]:
+        """Duplicate a profile + all thresholds under a new name; returns the new profile id."""
+        return self.Repository.CopyProfile(source_profile_id, new_name)
+
     # directive: nvenc-rate-anchored-remediation
     def GetProfileThresholds(self, profile_id: int) -> List[ProfileThresholdModel]:
         """Get all thresholds for a specific profile."""

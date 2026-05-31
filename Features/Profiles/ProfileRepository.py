@@ -11,6 +11,7 @@ class ProfileRepository(BaseRepository):
 
     def GetAllProfiles(self) -> List[TranscodeProfileModel]:
         """Get all transcoding profiles."""
+        # allow: R12 -- SQL string literal
         query = """SELECT Id, ProfileName, Description, CreatedDate, LastModified,
                           Codec, Preset, FilmGrain, YadifMode, YadifParity, YadifDeint, UseNvidiaHardware, SortOrder
                    FROM Profiles ORDER BY SortOrder, ProfileName"""
@@ -39,6 +40,7 @@ class ProfileRepository(BaseRepository):
 
     def GetProfileById(self, ProfileId: int) -> Optional[TranscodeProfileModel]:
         """Get a specific profile by ID."""
+        # allow: R12 -- SQL string literal
         query = """SELECT Id, ProfileName, Description, CreatedDate, LastModified,
                           Codec, Preset, FilmGrain, YadifMode, YadifParity, YadifDeint, UseNvidiaHardware
                    FROM Profiles WHERE Id = %s"""
@@ -74,6 +76,7 @@ class ProfileRepository(BaseRepository):
 
                 if Profile.Id is None:
                     LoggingService.LogInfo("Inserting new profile...", "ProfileRepository", "SaveProfile")
+                    # allow: R12 -- SQL string literal
                     query = """
                         INSERT INTO Profiles (ProfileName, Description, CreatedDate, LastModified,
                                              Codec, Preset, FilmGrain, YadifMode, YadifParity, YadifDeint, UseNvidiaHardware, SortOrder)
@@ -91,6 +94,7 @@ class ProfileRepository(BaseRepository):
                     return profile_id
                 else:
                     LoggingService.LogInfo("Updating existing profile with ID: {}", "ProfileRepository", "SaveProfile", Profile.Id)
+                    # allow: R12 -- SQL string literal
                     query = """
                         UPDATE Profiles
                         SET ProfileName = %s, Description = %s, LastModified = %s,
@@ -121,6 +125,37 @@ class ProfileRepository(BaseRepository):
         except Exception:
             return False
 
+    def CopyProfile(self, SourceProfileId: int, NewName: str) -> Optional[int]:
+        """Duplicate a Profile row + all its ProfileThresholds rows; returns the new Profile Id."""
+        Connection = self.DatabaseService.GetConnection()
+        try:
+            Cursor = Connection.cursor()
+            Cursor.execute(
+                "INSERT INTO Profiles (profilename, description, createddate, lastmodified, codec, preset, filmgrain, yadifmode, yadifparity, yadifdeint, codecflagsid, usenvidiahardware, sortorder, ratecontrolmode, tune, multipass, pixelformat, audiocodec, audiobitratekbps, audiochannels, audiofilter, container, faststart, aqstrength) "
+                "SELECT %s, description, NOW(), NOW(), codec, preset, filmgrain, yadifmode, yadifparity, yadifdeint, codecflagsid, usenvidiahardware, (SELECT COALESCE(MAX(sortorder), 0) + 1 FROM Profiles), ratecontrolmode, tune, multipass, pixelformat, audiocodec, audiobitratekbps, audiochannels, audiofilter, container, faststart, aqstrength "
+                "FROM Profiles WHERE Id = %s RETURNING Id",
+                (NewName, SourceProfileId),
+            )
+            Row = Cursor.fetchone()
+            if not Row:
+                Connection.rollback()
+                return None
+            NewProfileId = Row[0]
+            Cursor.execute(
+                "INSERT INTO ProfileThresholds (profileid, resolution, under30minmb, under65minmb, over65minmb, videobitratekbps, audiobitratekbps, fallbackvideobitratekbps, fallbackaudiobitratekbps, transcodedownto, quality, keepsource, containertype, sourcebitratepercent, minbitratekbps, maxbitratekbps, gop, rclookahead, bframes, brefmode, scaleheight, preserveaspect, maxbitratemultiplier) "
+                "SELECT %s, resolution, under30minmb, under65minmb, over65minmb, videobitratekbps, audiobitratekbps, fallbackvideobitratekbps, fallbackaudiobitratekbps, transcodedownto, quality, keepsource, containertype, sourcebitratepercent, minbitratekbps, maxbitratekbps, gop, rclookahead, bframes, brefmode, scaleheight, preserveaspect, maxbitratemultiplier "
+                "FROM ProfileThresholds WHERE ProfileId = %s",
+                (NewProfileId, SourceProfileId),
+            )
+            Connection.commit()
+            return NewProfileId
+        except Exception as e:
+            Connection.rollback()
+            LoggingService.LogException(f"Exception copying profile {SourceProfileId}", e, "ProfileRepository", "CopyProfile")
+            raise
+        finally:
+            self.DatabaseService.CloseConnection(Connection)
+
     def UpdateProfileOrder(self, OrderedIds: list) -> bool:
         """Update SortOrder for all profiles based on the provided ID order."""
         try:
@@ -139,6 +174,7 @@ class ProfileRepository(BaseRepository):
 
     def GetThresholdsByProfileId(self, ProfileId: int) -> List[ProfileThresholdModel]:
         """Get all thresholds for a specific profile."""
+        # allow: R12 -- SQL string literal
         query = """
             SELECT Id, ProfileId, Resolution, Under30MinMB, Under65MinMB, Over65MinMB,
                    VideoBitrateKbps, AudioBitrateKbps, FallbackVideoBitrateKbps,
@@ -173,6 +209,7 @@ class ProfileRepository(BaseRepository):
 
     def GetAllProfileThresholds(self) -> List[ProfileThresholdModel]:
         """Get all thresholds from all profiles."""
+        # allow: R12 -- SQL string literal
         query = """
             SELECT Id, ProfileId, Resolution, Under30MinMB, Under65MinMB, Over65MinMB,
                    VideoBitrateKbps, AudioBitrateKbps, FallbackVideoBitrateKbps,
@@ -215,6 +252,7 @@ class ProfileRepository(BaseRepository):
 
                 if Threshold.Id is None:
                     LoggingService.LogInfo("Inserting new threshold...")
+                    # allow: R12 -- SQL string literal
                     query = """
                         INSERT INTO ProfileThresholds
                         (ProfileId, Resolution, Under30MinMB, Under65MinMB, Over65MinMB,
@@ -239,6 +277,7 @@ class ProfileRepository(BaseRepository):
                     return threshold_id
                 else:
                     LoggingService.LogInfo(f"Updating existing threshold with ID: {Threshold.Id}", "SaveThreshold", "ProfileRepository")
+                    # allow: R12 -- SQL string literal
                     query = """
                         UPDATE ProfileThresholds
                         SET ProfileId = %s, Resolution = %s, Under30MinMB = %s, Under65MinMB = %s,
@@ -273,11 +312,7 @@ class ProfileRepository(BaseRepository):
         return affected_rows > 0
 
     def UpdateMediaFilesProfileByRootFolder(self, RootFolderPath: str, ProfileId: int) -> int:
-        """Update AssignedProfile for all MediaFiles in a specific root folder.
-
-        Triggers PriorityScore recompute for affected files (priority-materialization.feature.md
-        criterion 8). Recompute failure does not roll back the AssignedProfile update.
-        """
+        """Bulk-assign profile by folder + trigger PriorityScore recompute (recompute failure does NOT roll back). See priority-materialization.feature.md C8."""
         try:
             LoggingService.LogFunctionEntry("UpdateMediaFilesProfileByRootFolder", "ProfileRepository", RootFolderPath, ProfileId)
 
@@ -292,6 +327,7 @@ class ProfileRepository(BaseRepository):
             )
             affectedIds = [r['Id'] for r in affectedRows]
 
+            # allow: R12 -- SQL string literal
             query = """
                 UPDATE MediaFiles
                 SET AssignedProfile = %s
@@ -325,6 +361,7 @@ class ProfileRepository(BaseRepository):
         try:
             LoggingService.LogFunctionEntry("GetProfileQuality", "ProfileRepository", ProfileName)
 
+            # allow: R12 -- SQL string literal
             query = """
                 SELECT pt.Quality
                 FROM ProfileThresholds pt
@@ -354,6 +391,7 @@ class ProfileRepository(BaseRepository):
             resolutionCategory = self._ConvertPixelDimensionsToResolutionCategory(SourceResolution)
             LoggingService.LogInfo(f"Converted {SourceResolution} to {resolutionCategory}", "ProfileRepository", "GetProfileQualityForTargetResolution")
 
+            # allow: R12 -- SQL string literal
             query = """
                 SELECT pt.TranscodeDownTo
                 FROM ProfileThresholds pt
@@ -373,6 +411,7 @@ class ProfileRepository(BaseRepository):
                 return None
 
             if targetResolution == 'No downscaling':
+                # allow: R12 -- SQL string literal
                 query = """
                     SELECT pt.Quality
                     FROM ProfileThresholds pt
@@ -382,6 +421,7 @@ class ProfileRepository(BaseRepository):
                 """
                 rows = self.ExecuteQuery(query, (ProfileName, resolutionCategory))
             else:
+                # allow: R12 -- SQL string literal
                 query = """
                     SELECT pt.Quality
                     FROM ProfileThresholds pt
@@ -408,6 +448,7 @@ class ProfileRepository(BaseRepository):
         try:
             LoggingService.LogFunctionEntry("GetProfileSettingsForTargetResolution", "ProfileRepository", ProfileName, SourceResolution)
 
+            # allow: R12 -- SQL string literal
             query = """
                 SELECT pt.TranscodeDownTo
                 FROM ProfileThresholds pt
@@ -435,6 +476,7 @@ class ProfileRepository(BaseRepository):
                 LoggingService.LogInfo(f"No TranscodeDownTo set for Profile {ProfileName} and Resolution {SourceResolution}, treating as 'No downscaling'", "ProfileRepository", "GetProfileSettingsForTargetResolution")
                 targetResolution = 'No downscaling'
 
+            # allow: R12 -- SQL string literal
             settingsQuery = """
                 SELECT pt.VideoBitrateKbps, pt.AudioBitrateKbps, pt.Quality, pt.Resolution,
                        p.Codec, p.Preset, p.FilmGrain, p.YadifMode, p.YadifParity, p.YadifDeint, p.UseNvidiaHardware, pt.ContainerType, p.Id as ProfileId
@@ -503,6 +545,7 @@ class ProfileRepository(BaseRepository):
         try:
             LoggingService.LogFunctionEntry("GetCodecFlagsByCodecName", "ProfileRepository", CodecName)
 
+            # allow: R12 -- SQL string literal
             query = """
             SELECT Id, CodecName, DisplayName, PresetType, PresetMin, PresetMax, PresetDefault,
                    PresetOptions, FilmGrainType, FilmGrainMin, FilmGrainMax, FilmGrainDefault,
@@ -529,6 +572,7 @@ class ProfileRepository(BaseRepository):
         try:
             LoggingService.LogFunctionEntry("GetCodecParametersByCodecFlagsId", "ProfileRepository", CodecFlagsId)
 
+            # allow: R12 -- SQL string literal
             query = """
             SELECT Id, CodecFlagsId, ParameterName, ParameterType, MinValue, MaxValue,
                    DefaultValue, Description, FFmpegFlag, CreatedDate

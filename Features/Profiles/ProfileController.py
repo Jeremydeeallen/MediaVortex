@@ -255,6 +255,21 @@ class ProfileController:
                     'error': f'Failed to delete profile: {str(e)}'
                 }), 500
 
+        @self.Blueprint.route('/profiles/<int:profile_id>/copy', methods=['POST'])
+        def copy_profile(profile_id):
+            """Duplicate a profile + thresholds under a new name."""
+            try:
+                data = request.get_json() or {}
+                new_name = (data.get('NewName') or '').strip()
+                if not new_name:
+                    return jsonify({'success': False, 'error': 'NewName is required'}), 400
+                result = self.ViewModel.CopyProfile(profile_id, new_name)
+                status = 200 if result.get('success') else 400
+                return jsonify(result), status
+            except Exception as e:
+                LoggingService.LogException("Failed to copy profile", e, "ProfileController", "copy_profile")
+                return jsonify({'success': False, 'error': f'Failed to copy profile: {str(e)}'}), 500
+
         @self.Blueprint.route('/profiles/reorder', methods=['POST'])
         # directive: unify-profile-editor
         def reorder_profiles():

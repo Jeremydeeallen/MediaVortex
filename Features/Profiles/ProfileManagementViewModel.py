@@ -265,6 +265,32 @@ class ProfileManagementViewModel:
             return False
 
     # directive: nvenc-rate-anchored-remediation
+    def CopyProfile(self, source_profile_id: int, new_name: str) -> Dict[str, Any]:
+        """Validate name uniqueness, delegate to service, refresh in-memory list."""
+        try:
+            new_name = (new_name or '').strip()
+            if not new_name:
+                self.ErrorMessage = "NewName is required"
+                return {'success': False, 'error': self.ErrorMessage}
+            source = next((p for p in self.Profiles if p.Id == source_profile_id), None)
+            if not source:
+                self.ErrorMessage = f"Source profile {source_profile_id} not found"
+                return {'success': False, 'error': self.ErrorMessage}
+            if any(p.ProfileName.lower() == new_name.lower() for p in self.Profiles):
+                self.ErrorMessage = f"Profile '{new_name}' already exists"
+                return {'success': False, 'error': self.ErrorMessage}
+            new_id = self.ProfileService.CopyProfile(source_profile_id, new_name)
+            if not new_id:
+                self.ErrorMessage = "Copy failed"
+                return {'success': False, 'error': self.ErrorMessage}
+            self.Profiles = self.ProfileService.GetAllProfiles()
+            self.SuccessMessage = f"Copied '{source.ProfileName}' to '{new_name}'"
+            self.ErrorMessage = ""
+            return {'success': True, 'message': self.SuccessMessage, 'NewProfileId': new_id}
+        except Exception as e:
+            self.ErrorMessage = f"Failed to copy profile: {str(e)}"
+            return {'success': False, 'error': self.ErrorMessage}
+
     def DeleteProfile(self, profile_id: int) -> bool:
         """Delete a profile."""
         try:

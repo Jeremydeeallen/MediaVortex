@@ -4,6 +4,20 @@
 
 Defines transcode encoding profiles with per-resolution thresholds. Each profile specifies codec, preset, quality settings, and resolution-specific CRF/bitrate targets. Users assign profiles to folders to control how files are transcoded.
 
+## Workflows
+
+| #  | User action | Surface element | Handler | Backing class.method |
+|----|-------------|-----------------|---------|----------------------|
+| W1 | View profile list | `/settings` page, Profiles section | GET `/api/profiles` | `ProfileController.get_profiles` -> `ProfileManagementViewModel.GetProfilesAsDict` |
+| W2 | Edit profile + thresholds | Cogs button on row -> `ShowProfileKnobs` modal | PATCH `/api/profiles/<id>/knobs` | `ProfileController.patch_profile_knobs` -> `ProfileRepository` (direct UPDATEs through allowlist) |
+| W3 | Copy profile (duplicate with new name) | Copy button on row -> `prompt()` for new name | POST `/api/profiles/<id>/copy` | `ProfileController.copy_profile` -> `ProfileManagementViewModel.CopyProfile` -> `ProfileService.CopyProfile` -> `ProfileRepository.CopyProfile` |
+| W4 | Delete profile | Trash button on row -> `confirm()` dialog | DELETE `/api/profiles/<id>` | `ProfileController.delete_profile` -> `ProfileManagementViewModel.DeleteProfile` -> `ProfileService.DeleteProfile` -> `ProfileRepository.DeleteProfile` |
+| W5 | Reorder profiles (drag-and-drop) | Drag handle on profile row | POST `/api/profiles/reorder` | `ProfileController.reorder_profiles` -> `ProfileRepository.UpdateProfileOrder` |
+| W6 | Add threshold to profile | Inside cogs modal: Add Threshold form | POST `/api/profiles/<id>/thresholds` | `ProfileController` (route handler) -> `ProfileService.AddThreshold` -> `ProfileRepository.SaveThreshold` |
+| W7 | Edit threshold | Inside cogs modal: per-resolution edit | PUT `/api/profiles/<id>/thresholds/<tid>` | `ProfileController` (route handler) -> `ProfileService` -> `ProfileRepository.SaveThreshold` |
+| W8 | Delete threshold | Inside cogs modal: per-resolution delete | DELETE `/api/profiles/<id>/thresholds/<tid>` | `ProfileController` (route handler) -> `ProfileRepository.DeleteThreshold` |
+| W9 | Assign profile to folder | Folder dropdown on Scanning page | POST `/api/profiles/assign-to-root-folder` | `ProfileController.assign_profile_to_root_folder` -> `ProfileRepository.UpdateMediaFilesProfileByRootFolder` |
+
 ## Success Criteria
 
 1. Profiles can be created (via SQL/migration), read, updated, and deleted via the /settings page.
