@@ -67,7 +67,7 @@ class CommandBuilder:
 
     # directive: commandbuilder-comment-promotion
     def _CalculateScaleFilter(self, SourceResolution: str, TargetResolution: str, MediaFile, ProfileSettings: Optional[Dict[str, Any]] = None) -> Optional[str]:
-        """Compute -vf scale filter. When ProfileSettings.PreserveAspect=TRUE, emits scale=w=<W>:h=-1; otherwise forced WxH."""
+        """Width-anchored scale: emits scale=w=<TierWidth>:h=-2 (letterbox-safe; codec-legal even height)."""
         try:
             if SourceResolution == TargetResolution:
                 return None
@@ -76,16 +76,10 @@ class CommandBuilder:
             StandardizedTarget = ResolutionServiceInstance.StandardizeResolution(TargetResolution)
             TargetHeight = self._ExtractHeightFromResolution(StandardizedTarget)
             StandardTargetHeight = ResolutionServiceInstance.GetStandardHeight(TargetHeight)
-            SourceWidth, SourceHeight = self._GetSourceDimensions(MediaFile)
-            if SourceHeight <= 0:
+            TierWidth = {2160: 3840, 1080: 1920, 720: 1280, 480: 854}.get(StandardTargetHeight)
+            if TierWidth is None:
                 return None
-            SourceAspectRatio = SourceWidth / SourceHeight
-            TargetWidth = self._CalculateWidthFromHeight(StandardTargetHeight, SourceAspectRatio)
-
-            PreserveAspect = bool(ProfileSettings.get('PreserveAspect')) if ProfileSettings else False
-            if PreserveAspect:
-                return f"scale=w={TargetWidth}:h=-1"
-            return f"scale={TargetWidth}:{StandardTargetHeight}"
+            return f"scale=w={TierWidth}:h=-2"
         except Exception as e:
             LoggingService.LogException(
                 "Exception calculating scale filter", e, "_CalculateScaleFilter", "CommandBuilder"

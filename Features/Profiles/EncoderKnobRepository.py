@@ -159,17 +159,17 @@ class EncoderKnobRepository(BaseRepository):
 
     # directive: nvenc-rate-anchored-remediation
     def _NormalizeResolution(self, Resolution: str) -> str:
-        """Convert pixel-dimension strings (e.g. '1920x1080') to category labels (e.g. '1080p')."""
+        """Bucket WIDTHxHEIGHT pixel strings to category labels by long-edge (letterbox-safe; portrait-safe)."""
         if not Resolution or 'x' not in Resolution:
             return Resolution
         Parts = Resolution.lower().split('x')
-        if len(Parts) != 2 or not Parts[1].isdigit():
+        if len(Parts) != 2 or not Parts[0].isdigit() or not Parts[1].isdigit():
             return Resolution
-        Height = int(Parts[1])
-        if Height >= 1900:
+        Tier = max(int(Parts[0]), int(Parts[1]))
+        if Tier >= 3840:
             return '2160p'
-        if Height >= 1000:
+        if Tier >= 1920:
             return '1080p'
-        if Height >= 700:
+        if Tier >= 1280:
             return '720p'
         return '480p'
