@@ -50,8 +50,15 @@ function Emit-Ask {
 function Emit-Allow { exit 0 }
 
 function Get-SessionState {
-    if (-not (Test-Path $StateFile)) { return $null }
-    try { return Get-Content $StateFile -Raw | ConvertFrom-Json } catch { return $null }
+    if (Test-Path $StateFile) {
+        try { return Get-Content $StateFile -Raw | ConvertFrom-Json } catch { }
+    }
+    $Slug = Get-DirectiveSlug
+    $Phase = Get-DirectivePhase
+    if ($Slug -and $Phase) {
+        return [PSCustomObject]@{ directive_slug = $Slug; phase = $Phase }
+    }
+    return $null
 }
 
 function Get-DirectiveSlug {
