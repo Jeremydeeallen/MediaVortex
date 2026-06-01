@@ -299,6 +299,81 @@ function Get-AddedLines {
     return @()
 }
 
+function Get-EditRegion {
+    # Returns @{ Mode = 'WholeFile' | 'EditRegion' | 'NoRegion'; Regions = @(@{start;end}, ...) }
+    # WholeFile: caller should treat all lines as in-region (Write tool, or defensive fallback).
+    # EditRegion: caller filters violations to lines inside Regions (Edit/MultiEdit with non-empty new_string).
+    # NoRegion: caller skips the check entirely (pure-deletion Edits author no new content).
+    # Line numbers are 1-based and reference the POST-edit content (the synthesized result).
+    param($ToolName, $ToolInput, $PostContent)
+    $PostLineCount = ($PostContent -split "`n").Count
+    if ($ToolName -eq 'Write') {
+        return @{ Mode = 'WholeFile'; Regions = @(@{ start = 1; end = $PostLineCount }) }
+    }
+    $Edits = @()
+    if ($ToolName -eq 'Edit') { $Edits = @($ToolInput) }
+    elseif ($ToolName -eq 'MultiEdit') { $Edits = @($ToolInput.edits) }
+    else {
+        return @{ Mode = 'WholeFile'; Regions = @(@{ start = 1; end = $PostLineCount }) }
+    }
+    $AllNewEmpty = $true
+    $Regions = @()
+    foreach ($E in $Edits) {
+        $New = if ($E.new_string) { [string]$E.new_string } else { '' }
+        if ($New -ne '') { $AllNewEmpty = $false }
+        if ($New -eq '') { continue }
+        # Locate new_string in post-content. Try exact match, then CRLF/LF normalized.
+        $Idx = $PostContent.IndexOf($New)
+        if ($Idx -lt 0) {
+            $PostNorm = $PostContent -replace "`r`n","`n"
+            $NewNorm = $New -replace "`r`n","`n"
+            $Idx2 = $PostNorm.IndexOf($NewNorm)
+            if ($Idx2 -lt 0) { continue }
+            $StartLine = ($PostNorm.Substring(0, $Idx2) -split "`n").Count
+            $LineCount = ($NewNorm -split "`n").Count
+        } else {
+            $StartLine = ($PostContent.Substring(0, $Idx) -split "`n").Count
+            $LineCount = ($New -split "`n").Count
+        }
+        $EndLine = $StartLine + $LineCount - 1
+        $Regions += @{ start = $StartLine; end = $EndLine }
+    }
+    if ($AllNewEmpty) {
+        return @{ Mode = 'NoRegion'; Regions = @() }
+    }
+    if ($Regions.Count -eq 0) {
+        # Defensive: new_strings were non-empty but couldn't be located. Fall back to whole-file
+        # rather than silently skipping checks.
+        return @{ Mode = 'WholeFile'; Regions = @(@{ start = 1; end = $PostLineCount }) }
+    }
+    return @{ Mode = 'EditRegion'; Regions = $Regions }
+}
+
+function Test-LineInEditRegion {
+    # 1-based line number; $EditRegion is the hashtable returned by Get-EditRegion.
+    # WholeFile -> always true. NoRegion -> always false. EditRegion -> true iff line falls in any range.
+    param([int]$LineNumber, $EditRegion)
+    if (-not $EditRegion) { return $true }
+    if ($EditRegion.Mode -eq 'WholeFile') { return $true }
+    if ($EditRegion.Mode -eq 'NoRegion') { return $false }
+    foreach ($R in $EditRegion.Regions) {
+        if ($LineNumber -ge $R.start -and $LineNumber -le $R.end) { return $true }
+    }
+    return $false
+}
+
+function Test-RangeOverlapsEditRegion {
+    # Returns true iff ANY line in [startLine, endLine] (1-based inclusive) is in the edit region.
+    param([int]$StartLine, [int]$EndLine, $EditRegion)
+    if (-not $EditRegion) { return $true }
+    if ($EditRegion.Mode -eq 'WholeFile') { return $true }
+    if ($EditRegion.Mode -eq 'NoRegion') { return $false }
+    foreach ($R in $EditRegion.Regions) {
+        if ($StartLine -le $R.end -and $EndLine -ge $R.start) { return $true }
+    }
+    return $false
+}
+
 function Test-AllowOverride {
     param([string]$Content, [int]$LineNumber, [string]$RuleId, [string]$FilePath)
     $Lines = $Content -split "`n"
@@ -712,7 +787,11 @@ function Test-R11-MigrationIdempotency {
 }
 
 function Test-R12-CommentVolume {
-    param($PostContent, $FilePath, $AllContent)
+    # $EditRegion may be $null (legacy callers) -> behaves as whole-file. WholeFile/EditRegion/NoRegion
+    # modes documented on Get-EditRegion. Each refusal point checks Test-RangeOverlapsEditRegion or
+    # Test-LineInEditRegion to filter preexisting violations outside the operator's edit scope
+    # per directive r12-edited-region-only (2026-06-01).
+    param($PostContent, $FilePath, $AllContent, $EditRegion)
     if ($FilePath -notmatch '\.py$') { return $null }
     $Lines = $PostContent -split "`n"
     $BlockStart = -1
@@ -720,8 +799,11 @@ function Test-R12-CommentVolume {
         if ($Lines[$I] -match '^\s*#') {
             if ($BlockStart -lt 0) { $BlockStart = $I }
             elseif (($I - $BlockStart) -ge 1) {
+                $BlockStartLine = $BlockStart + 1
+                $BlockEndLine = $I + 1
+                if (-not (Test-RangeOverlapsEditRegion $BlockStartLine $BlockEndLine $EditRegion)) { continue }
                 if (Test-AllowOverride $PostContent $I 'R12' $FilePath) { $BlockStart = -1; continue }
-                return "R12 Comment volume: $FilePath line $($BlockStart+1)-$($I+1) is a multi-line # comment block. One-line max; rationale belongs in the directive doc. See .claude/rules/ceo-mode.md#handling-preexisting-comment--doc-violations-encountered-mid-directive. Path forward: classify the block first -- (a) pure WHAT-redundancy: delete entirely; (b) permanent-invariant WHY (BUG-NNNN, hard-won constraint): MOVE the content to KNOWN-ISSUES.md or the appropriate *.feature.md, leave a single-line anchor in code ('# BUG-0005' or '# see worker-lifecycle.feature.md C6'); (c) active-directive WHY: put the content in the current directive doc, leave a '# directive: <slug>' anchor; (d) surprising WHY that fits nowhere: collapse to a single in-place comment line. If the scope is large (many blocks across many files), open a new directive ('<file>-comment-promotion') and do the classification there."
+                return "R12 Comment volume: $FilePath line $BlockStartLine-$BlockEndLine is a multi-line # comment block. One-line max; rationale belongs in the directive doc. See .claude/rules/ceo-mode.md#handling-preexisting-comment--doc-violations-encountered-mid-directive. Path forward: classify the block first -- (a) pure WHAT-redundancy: delete entirely; (b) permanent-invariant WHY (BUG-NNNN, hard-won constraint): MOVE the content to KNOWN-ISSUES.md or the appropriate *.feature.md, leave a single-line anchor in code ('# BUG-0005' or '# see worker-lifecycle.feature.md C6'); (c) active-directive WHY: put the content in the current directive doc, leave a '# directive: <slug>' anchor; (d) surprising WHY that fits nowhere: collapse to a single in-place comment line. If the scope is large (many blocks across many files), open a new directive ('<file>-comment-promotion') and do the classification there."
             }
         } else { $BlockStart = -1 }
     }
@@ -729,14 +811,12 @@ function Test-R12-CommentVolume {
     foreach ($DM in $DocMatches) {
         $Body = $DM.Groups[1].Value
         $Line = ($PostContent.Substring(0,$DM.Index) -split "`n").Length - 1
-        # SQL check FIRST (applies to single-line or multi-line triple-quoted SQL).
-        # Heuristic: uppercase SQL keywords adjacent to an identifier/wildcard -- distinguishes
-        # actual SQL from docstrings that merely mention the words.
+        $DocStartLine = $Line + 1
+        $DocEndLine = $DocStartLine + ($DM.Value -split "`n").Length - 1
         $IsSqlBlock = $Body -cmatch '\b(SELECT\s+[\*\w(]|INSERT\s+INTO\s+\w|UPDATE\s+\w+\s+SET|DELETE\s+FROM\s+\w|CREATE\s+(TABLE|INDEX|VIEW|UNIQUE)|DROP\s+(TABLE|INDEX|VIEW)|ALTER\s+TABLE\s+\w|WITH\s+\w+\s+AS\s*\()'
         if ($IsSqlBlock) {
+            if (-not (Test-RangeOverlapsEditRegion $DocStartLine $DocEndLine $EditRegion)) { continue }
             if (Test-AllowOverride $PostContent $Line 'R12' $FilePath) { continue }
-            # Placement scope: business-logic files require Repository placement.
-            # Exempt from placement (format rule still applies): Scripts/SQLScripts/, Tests/, Scripts/QueryDatabase.py.
             $NormFP = $FilePath -replace '\\','/'
             $PlacementExempt = ($NormFP -match '/Scripts/SQLScripts/') -or ($NormFP -match '/Tests/') -or ($NormFP -match '/Scripts/QueryDatabase\.py$') -or ($NormFP -match '/Repositories/')
             $PlacementClause = if ($PlacementExempt) {
@@ -747,11 +827,13 @@ function Test-R12-CommentVolume {
             return "R12 SQL string: $FilePath line $($Line+1) uses triple-quoted SQL. Two mandates, both required:`n(1) Format: convert to implicit string concatenation. Triple-quoted SQL is refused everywhere. Right shape:`n    Query = (`n        `"SELECT col1, col2 `"`n        `"FROM MediaFiles `"`n        `"WHERE Id = %s`"`n    )`n(2) $PlacementClause`nSee .claude/rules/sql-architecture.md."
         }
         if (($Body -split "`n").Length -gt 1) {
+            if (-not (Test-RangeOverlapsEditRegion $DocStartLine $DocEndLine $EditRegion)) { continue }
             if (Test-AllowOverride $PostContent $Line 'R12' $FilePath) { continue }
             return "R12 Comment volume: $FilePath line $($Line+1) has a multi-line docstring. Single-line max; rationale belongs in the directive doc. See .claude/rules/ceo-mode.md#handling-preexisting-comment--doc-violations-encountered-mid-directive. Path forward: classify the block first -- (a) pure WHAT-redundancy: delete entirely; (b) permanent-invariant WHY (BUG-NNNN, hard-won constraint): MOVE the content to KNOWN-ISSUES.md or the appropriate *.feature.md, leave a single-line anchor in code ('# BUG-0005' or '# see worker-lifecycle.feature.md C6'); (c) active-directive WHY: put the content in the current directive doc, leave a '# directive: <slug>' anchor; (d) surprising WHY that fits nowhere: collapse to a single in-place comment line. If the scope is large (many blocks across many files), open a new directive ('<file>-comment-promotion') and do the classification there."
         }
     }
     if ($PostContent -match '^\s*"""') {
+        if (-not (Test-LineInEditRegion 1 $EditRegion)) { return $null }
         if (-not (Test-AllowOverride $PostContent 0 'R12' $FilePath)) {
             return "R12 Comment volume: $FilePath has a module-level docstring. Documentation lives in the directive doc only. See .claude/rules/ceo-mode.md#handling-preexisting-comment--doc-violations-encountered-mid-directive. Path forward: classify the block first -- (a) pure WHAT-redundancy: delete entirely; (b) permanent-invariant WHY (BUG-NNNN, hard-won constraint): MOVE the content to KNOWN-ISSUES.md or the appropriate *.feature.md, leave a single-line anchor in code ('# BUG-0005' or '# see worker-lifecycle.feature.md C6'); (c) active-directive WHY: put the content in the current directive doc, leave a '# directive: <slug>' anchor; (d) surprising WHY that fits nowhere: collapse to a single in-place comment line. If the scope is large (many blocks across many files), open a new directive ('<file>-comment-promotion') and do the classification there."
         }
@@ -846,6 +928,7 @@ $IsNew = -not (Test-Path $FilePath)
 $PostContent = Synthesize-PostEditContent $ToolName $ToolInput
 $ReadFiles = Get-ReadFilesFromTranscript $TranscriptPath
 $DirectiveFiles = Get-DirectiveFiles
+$EditRegion = Get-EditRegion $ToolName $ToolInput $PostContent
 
 $Rules = @(
     { Test-R1-DocPreread $PostContent $FilePath $ReadFiles $PostContent },
@@ -859,7 +942,7 @@ $Rules = @(
     { Test-R9-LikeEscape $PostContent $FilePath $PostContent },
     { Test-R10-ClaimPredicate $PostContent $FilePath $PostContent },
     { Test-R11-MigrationIdempotency $PostContent $FilePath $PostContent },
-    { Test-R12-CommentVolume $PostContent $FilePath $PostContent },
+    { Test-R12-CommentVolume $PostContent $FilePath $PostContent $EditRegion },
     { Test-R13-NoNewFeatureDocs $PostContent $FilePath $PostContent $IsNew },
     { Test-R14-AnnotationDrift $PostContent $FilePath $ToolName $ToolInput $PostContent },
     { Test-R15-DirectiveAnchor $PostContent $FilePath $DirectiveFiles },

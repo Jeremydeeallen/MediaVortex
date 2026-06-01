@@ -38,9 +38,9 @@ WorkerEntry = RootDirectory / "WorkerService" / "Main.py"
 DefaultVenvPython = RootDirectory / "venv" / "Scripts" / "python.exe"
 
 NetworkDrives = [
-    {"Letter": "T", "UncPath": r"\\10.0.0.43\srv\nfs-media-_tv", "Required": True},
-    {"Letter": "M", "UncPath": r"\\10.0.0.61\volume1\_video\Adults\Movies", "Required": True},
-    {"Letter": "Z", "UncPath": r"\\10.0.0.61\volume2\XXX", "Required": True},
+    {"Letter": "T", "UncPath": r"\\10.0.0.43\TV", "Required": True},
+    {"Letter": "M", "UncPath": r"\\10.0.0.43\Movies", "Required": True},
+    {"Letter": "Z", "UncPath": r"\\10.0.0.43\XXX", "Required": True},
 ]
 
 

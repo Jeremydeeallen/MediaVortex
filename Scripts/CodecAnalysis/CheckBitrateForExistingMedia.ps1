@@ -1,6 +1,6 @@
 ﻿
 # 1. Set your file path here
-$SourceFile = "X:\Videos\4k\Anal-Angels.26.02.03.Molly.Cute.XXX.2160p.MP4-WRB.mp4"
+$SourceFile = "C:\MV\ATKGirlfriends.25.11.21.Compilation.XXX.2160p.MP4-WRB.mp4"
 $FFprobePath = "C:\Code\MediaVortex\FFmpegMaster\bin\ffprobe.exe"
 # 2. Get the real frame rate mathematically (avoids blank duration fields)
 $RawFPS = & $FFprobePath -v error -select_streams v:0 -show_entries stream=r_frame_rate -of csv=p=0 $SourceFile
