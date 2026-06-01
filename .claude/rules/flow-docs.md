@@ -2,6 +2,8 @@
 
 One pipeline per flow doc. Features reference flows, not the reverse.
 
+This is one tier of the three-tier doc model defined in `.claude/rules/doc-layering.md` -- flow docs own cross-stage seams (data crossing pipeline stage transitions); intra-feature seams live in `*.feature.md`; transient directive content lives in `.claude/directive.md`. Read `doc-layering.md` for the role / lifetime / seam-ownership split.
+
 ## Verified conventions
 - Flow docs are colocated `*.flow.md` next to the entry-point file they describe
 - Each flow doc has an entry point, stage overview, and per-stage detail

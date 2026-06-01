@@ -51,12 +51,14 @@ If `.claude/directive.md` is empty, fall back to task-delegation mode (scope-dis
 
 ## Documents first (read, plan, then update)
 
-Documentation lives only in the directive doc (`.claude/directive.md`, archived to `.claude/directives/closed/YYYY-MM-DD-<slug>.md`). Code carries one-line `# directive: <slug>` anchors above functions/classes in the directive's `## Files` list. Multi-line comments and module docstrings are mechanically forbidden by R12.
+The three-tier doc model is the keystone here -- see `.claude/rules/doc-layering.md` for the full role / lifetime / seam-ownership split. Summary: the directive doc is transient (the current CEO ask); `*.feature.md` files are the durable vertical contracts; `*.flow.md` files are the durable pipeline contracts. Content has exactly one tier-appropriate home at any time.
 
-1. **Before any code.** The PreToolUse hook gates Edit/Write behind `NEEDS_DOC_PREREAD`: any pre-existing `*.feature.md` / `*.flow.md` ancestor of the file being touched must be Read first. New `*.feature.md` / `*.flow.md` files are refused (R13) -- documentation goes in the directive doc.
-2. **At delivery, close the loop.** Update the directive doc's Status, Verification, and Files sections. If the directive removes capability described in an existing `*.feature.md` / `*.flow.md`, delete the obsolete section or delete the file entirely. Do not annotate. R14 refuses Edits that add `removed YYYY-MM-DD` / `deprecated` / `no longer used` / `previously` / `formerly` lines -- the hook forces deletion instead.
+During a directive, design content accretes in the directive doc. Code carries one-line `# directive: <slug>` anchors above functions/classes in the directive's `## Files` list. Multi-line comments and module docstrings are mechanically forbidden by R12.
 
-Docs are the cheapest path-to-truth for everyone who comes after, including Claude in the next session. The work isn't done until they match reality.
+1. **Before any code.** The PreToolUse hook gates Edit/Write behind `NEEDS_DOC_PREREAD`: any pre-existing `*.feature.md` / `*.flow.md` ancestor of the file being touched must be Read first. New `*.feature.md` / `*.flow.md` files are refused outside DELIVERING (R13) -- premature feature docs become aspirational and drift from the still-moving directive shape. Keep new documentation in the directive doc until DELIVERING.
+2. **At delivery, close the loop.** The directive doc's `### Promotions` section must be populated before the hook will allow Status `Active -- phase: DELIVERING` -> `Closed`. Each Promotions row moves durable content from the directive into its permanent home (existing or NEW `*.feature.md` / `*.flow.md` -- R13 relaxes at DELIVERING for exactly this case). If the directive removes capability described in an existing `*.feature.md` / `*.flow.md`, delete the obsolete section or delete the file entirely. Do not annotate. R14 refuses Edits that add `removed YYYY-MM-DD` / `deprecated` / `no longer used` / `previously` / `formerly` lines -- the hook forces deletion instead. The DELIVERING -> Closed gate also enforces an anti-drift size check: the directive must not grow beyond a 10% tolerance from the size snapshot taken at IMPLEMENTING -> DELIVERING transition. Growth means content was duplicated into the directive rather than promoted out.
+
+Docs are the cheapest path-to-truth for everyone who comes after, including Claude in the next session. The work isn't done until they match reality, AND the durable contracts (`*.feature.md` / `*.flow.md`) hold the durable content -- not the archive.
 
 ### Show the road, not the wall
 

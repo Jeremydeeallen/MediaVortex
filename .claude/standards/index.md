@@ -13,7 +13,7 @@ Override any single check with `# allow: <reason>` within 3 lines of the offendi
 | NEEDS_DOC_PREREAD | Read every `*.feature.md` / `*.flow.md` ancestor of files in plan `## Files` | + Write directive doc only |
 | IMPLEMENTING | All content rules pass per Edit/Write | All tools, gated by content rules |
 | VERIFYING | Verification section records evidence per criterion | Read / Grep / Bash; Edit directive doc only |
-| DELIVERING | Delivery report drafted in directive doc Status | All tools |
+| DELIVERING | Delivery report drafted in directive doc Status; `## Promotions` section populated; directive does not grow beyond snapshot taken at IMPLEMENTING -> DELIVERING transition | All tools, including new `*.feature.md` / `*.flow.md` creation (R13 relaxed at this phase) |
 
 ## Content rules
 
@@ -31,7 +31,7 @@ Override any single check with `# allow: <reason>` within 3 lines of the offendi
 | R10 | `Repositories/` functions starting with `Claim` must call `BuildClaimPredicate` | `.claude/rules/db-is-authority.md` (claim authority) | `Test-R10-ClaimPredicate` |
 | R11 | Migrations: `CREATE TABLE`/`CREATE INDEX` requires `IF NOT EXISTS`; `INSERT INTO` requires `ON CONFLICT` | `.claude/rules/data-integrity.md` (idempotent migrations) | `Test-R11-MigrationIdempotency` |
 | R12 | No consecutive `#` comment blocks > 1 line, no docstrings > 1 line, no module-level docstrings | `.claude/rules/ceo-mode.md` (single-line code anchor) | `Test-R12-CommentVolume` |
-| R13 | No new `*.feature.md` / `*.flow.md` files. New documentation lives in the directive doc only | This file + `.claude/rules/ceo-mode.md` | `Test-R13-NoNewFeatureDocs` |
+| R13 | No premature `*.feature.md` / `*.flow.md` files. Creation refused outside DELIVERING phase; at DELIVERING, creation is allowed so durable content can be promoted out of the directive doc into its permanent home | This file + `.claude/rules/doc-layering.md` + `.claude/rules/ceo-mode.md` | `Test-R13-NoNewFeatureDocs` |
 | R14 | Edits to existing `*.feature.md` / `*.flow.md` cannot add annotation lines (`removed YYYY-MM-DD` / `deprecated` / `no longer used` / `previously` / `formerly`). Delete sections instead | This file + `.claude/rules/ceo-mode.md` | `Test-R14-AnnotationDrift` |
 | R15 | Edits to functions/classes in the directive doc's `## Files` section require `# directive: <slug>` line directly above the `def` / `class` | This file | `Test-R15-DirectiveAnchor` |
 

@@ -113,13 +113,20 @@ Original refusal follows:
 }
 
 function Get-SessionState {
+    # Directive doc is authoritative for slug + phase (session-state may be stale within a session
+    # because SessionStart runs once at session boot and phase advances happen later via directive edits).
+    $DirSlug = Get-DirectiveSlug
+    $DirPhase = Get-DirectivePhase
     if (Test-Path $StateFile) {
-        try { return Get-Content $StateFile -Raw | ConvertFrom-Json } catch { }
+        try {
+            $S = Get-Content $StateFile -Raw | ConvertFrom-Json
+            if ($DirPhase) { $S.phase = $DirPhase }
+            if ($DirSlug) { $S.directive_slug = $DirSlug }
+            return $S
+        } catch { }
     }
-    $Slug = Get-DirectiveSlug
-    $Phase = Get-DirectivePhase
-    if ($Slug -and $Phase) {
-        return [PSCustomObject]@{ directive_slug = $Slug; phase = $Phase }
+    if ($DirSlug -and $DirPhase) {
+        return [PSCustomObject]@{ directive_slug = $DirSlug; phase = $DirPhase }
     }
     return $null
 }
@@ -261,6 +268,74 @@ function Test-PhaseGate {
         }
         'VERIFYING' {
             if (-not $IsDirectiveDoc) { return "Phase VERIFYING: only the directive doc may be edited. Record per-criterion evidence; do not edit code unless re-entering IMPLEMENTING. See .claude/rules/ceo-mode.md#phase-state-machine. Path forward: record per-criterion evidence in the directive Verification section; if more code work is needed, drop Status back to 'phase: IMPLEMENTING' first." }
+            return $null
+        }
+        'IMPLEMENTING' {
+            # Snapshot directive size at IMPLEMENTING -> DELIVERING transition.
+            # Snapshot is later used by the DELIVERING -> Closed gate to enforce anti-drift (directive must not grow during DELIVERING).
+            if ($IsDirectiveDoc) {
+                $PostContent = Synthesize-PostEditContent $ToolName $ToolInput
+                if ($PostContent -match '(?m)^\*\*Status:\*\*\s*Active\s*--\s*phase:\s*DELIVERING') {
+                    $SnapshotFile = Join-Path $RepoRoot ".claude\.delivering-snapshot.json"
+                    $Slug = Get-DirectiveSlug
+                    if ($Slug) {
+                        $Snap = @{
+                            slug = $Slug
+                            size_bytes = [Text.Encoding]::UTF8.GetByteCount($PostContent)
+                            timestamp = (Get-Date -Format "yyyy-MM-ddTHH:mm:ssZ")
+                        } | ConvertTo-Json -Compress
+                        Set-Content -Path $SnapshotFile -Value $Snap -Encoding UTF8
+                    }
+                }
+            }
+            return $null
+        }
+        'DELIVERING' {
+            if (-not $IsDirectiveDoc) { return $null }
+            # Gate the DELIVERING -> Closed transition: Promotions section must be non-empty;
+            # directive must not have grown beyond snapshot * tolerance during DELIVERING.
+            $PostContent = Synthesize-PostEditContent $ToolName $ToolInput
+            $IsClosing = $PostContent -match '(?m)^\*\*Status:\*\*\s*Closed'
+            if (-not $IsClosing) { return $null }
+            # Gate (a): Promotions section present + non-empty (ignoring template placeholder lines).
+            $PromoMatch = [regex]::Match($PostContent, '(?ms)###\s*Promotions\s*\r?\n(.*?)(?=\r?\n###\s|\r?\n##\s|\r?\n---|\Z)')
+            $HasPromoContent = $false
+            if ($PromoMatch.Success) {
+                $PromoBody = $PromoMatch.Groups[1].Value
+                foreach ($Line in ($PromoBody -split "`n")) {
+                    $T = $Line.Trim()
+                    if (-not $T) { continue }
+                    if ($T.StartsWith('(') -or $T.StartsWith('|') -or $T.StartsWith('Required ') -or $T.StartsWith('Each row ') -or $T.StartsWith('If a ') -or $T.StartsWith('The hook only ')) { continue }
+                    if ($T -match '^-\s' -or $T -match '^\*\s' -or $T -match '\S\s+\S') { $HasPromoContent = $true; break }
+                }
+                # Table rows with actual content (not the placeholder `<...>` row) also count.
+                if (-not $HasPromoContent) {
+                    foreach ($Line in ($PromoBody -split "`n")) {
+                        if ($Line -match '^\s*\|' -and $Line -notmatch '\|---' -and $Line -notmatch '`<' -and $Line.Trim() -ne '|') {
+                            $Cells = ($Line -split '\|') | Where-Object { $_.Trim() }
+                            if ($Cells.Count -ge 2) { $HasPromoContent = $true; break }
+                        }
+                    }
+                }
+            }
+            if (-not $HasPromoContent) {
+                return "Phase DELIVERING -> Closed: directive cannot close without a non-empty ### Promotions section. See .claude/rules/doc-layering.md (Lifecycle: directive -> features/flows) + .claude/directives/_template.md. Path forward: populate the ### Promotions table with one row per piece of durable content (source artifact -> target *.feature.md / *.flow.md file + commit SHA). If the directive has no durable content to promote (e.g. pure bugfix), add a single row 'no promotions | n/a | <reason>'. The hook only checks the section is non-empty."
+            }
+            # Gate (b): anti-drift size check against snapshot taken at IMPLEMENTING -> DELIVERING.
+            $SnapshotFile = Join-Path $RepoRoot ".claude\.delivering-snapshot.json"
+            if (Test-Path $SnapshotFile) {
+                try {
+                    $Snap = Get-Content $SnapshotFile -Raw | ConvertFrom-Json
+                    $CurrentSlug = Get-DirectiveSlug
+                    if ($Snap.slug -eq $CurrentSlug -and $Snap.size_bytes) {
+                        $CurrentBytes = [Text.Encoding]::UTF8.GetByteCount($PostContent)
+                        $MaxAllowed = [int]([double]$Snap.size_bytes * 1.10)
+                        if ($CurrentBytes -gt $MaxAllowed) {
+                            return "Phase DELIVERING -> Closed: directive grew from $($Snap.size_bytes) bytes (at IMPLEMENTING->DELIVERING) to $CurrentBytes bytes -- exceeds 10% tolerance ($MaxAllowed bytes max). Growth during DELIVERING means content was DUPLICATED into the directive rather than PROMOTED out to its permanent home. See .claude/rules/doc-layering.md. Path forward: move the new content INTO the target *.feature.md / *.flow.md listed in the Promotions table, then DELETE it from the directive doc. The directive's job at DELIVERING is to shrink as content moves to its permanent home, not grow."
+                        }
+                    }
+                } catch { }
+            }
             return $null
         }
         default { return $null }
@@ -496,10 +571,12 @@ function Test-R12-CommentVolume {
 function Test-R13-NoNewFeatureDocs {
     param($PostContent, $FilePath, $AllContent, $IsNew)
     if (-not $IsNew) { return $null }
-    if ($FilePath -match '\.(feature|flow)\.md$') {
-        return "R13 New feature/flow doc: $FilePath is a new *.feature.md / *.flow.md file. Documentation lives in the directive doc only -- update .claude/directive.md instead. See .claude/rules/ceo-mode.md#documents-first-read-plan-then-update. Path forward: put the new documentation in the active directive doc (.claude/directive.md). On directive close, content that became a permanent invariant gets promoted to the appropriate existing *.feature.md / *.flow.md; transient operational notes archive with the directive in .claude/directives/closed/."
-    }
-    return $null
+    if ($FilePath -notmatch '\.(feature|flow)\.md$') { return $null }
+    # Phase-aware: creation is allowed at DELIVERING (when durable content gets promoted out of the directive doc into its permanent home).
+    $CurrentState = Get-SessionState
+    if ($CurrentState -and $CurrentState.phase -eq 'DELIVERING') { return $null }
+    $PhaseName = if ($CurrentState -and $CurrentState.phase) { $CurrentState.phase } else { '<none>' }
+    return "R13 Premature feature/flow doc: $FilePath is a new *.feature.md / *.flow.md file but current phase is $PhaseName -- creation is only allowed at DELIVERING (when durable content gets promoted out of the directive doc into its permanent home). See .claude/rules/doc-layering.md + .claude/standards/index.md R13. Path forward: keep the new documentation in the active directive doc (.claude/directive.md) until phase advances to DELIVERING. At DELIVERING, create the *.feature.md / *.flow.md as part of the Promotions step and record the source -> target row in the directive's ### Promotions table."
 }
 
 function Test-R14-AnnotationDrift {

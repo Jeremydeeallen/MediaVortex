@@ -2,6 +2,8 @@
 
 Every feature has one feature doc that owns its contract. Feature docs are colocated `*.feature.md` next to the primary code.
 
+This is one tier of the three-tier doc model defined in `.claude/rules/doc-layering.md` -- feature docs own intra-feature seams (function-call, helper, feature-to-external-service); cross-stage pipeline seams live in `*.flow.md`; transient directive content lives in `.claude/directive.md`. Read `doc-layering.md` for the role / lifetime / seam-ownership split, and for the promotion lifecycle that brings durable content INTO a feature doc when a directive closes.
+
 ## Verified conventions
 
 - Feature docs are colocated `*.feature.md` next to the primary code they describe.
