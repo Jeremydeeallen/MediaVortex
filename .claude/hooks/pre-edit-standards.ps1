@@ -626,8 +626,25 @@ function Test-R12-CommentVolume {
     $DocMatches = [regex]::Matches($PostContent, '(?ms)"""(.*?)"""')
     foreach ($DM in $DocMatches) {
         $Body = $DM.Groups[1].Value
+        $Line = ($PostContent.Substring(0,$DM.Index) -split "`n").Length - 1
+        # SQL check FIRST (applies to single-line or multi-line triple-quoted SQL).
+        # Heuristic: uppercase SQL keywords adjacent to an identifier/wildcard -- distinguishes
+        # actual SQL from docstrings that merely mention the words.
+        $IsSqlBlock = $Body -cmatch '\b(SELECT\s+[\*\w(]|INSERT\s+INTO\s+\w|UPDATE\s+\w+\s+SET|DELETE\s+FROM\s+\w|CREATE\s+(TABLE|INDEX|VIEW|UNIQUE)|DROP\s+(TABLE|INDEX|VIEW)|ALTER\s+TABLE\s+\w|WITH\s+\w+\s+AS\s*\()'
+        if ($IsSqlBlock) {
+            if (Test-AllowOverride $PostContent $Line 'R12' $FilePath) { continue }
+            # Placement scope: business-logic files require Repository placement.
+            # Exempt from placement (format rule still applies): Scripts/SQLScripts/, Tests/, Scripts/QueryDatabase.py.
+            $NormFP = $FilePath -replace '\\','/'
+            $PlacementExempt = ($NormFP -match '/Scripts/SQLScripts/') -or ($NormFP -match '/Tests/') -or ($NormFP -match '/Scripts/QueryDatabase\.py$') -or ($NormFP -match '/Repositories/')
+            $PlacementClause = if ($PlacementExempt) {
+                "Placement: exempt for this path (Scripts/SQLScripts, Tests, QueryDatabase.py, Repositories/). Format rule still applies."
+            } else {
+                "Placement: business-logic SQL must move to a Repository method (Repositories/<X>Repository.py). Controllers/Services/ViewModels do not embed SQL."
+            }
+            return "R12 SQL string: $FilePath line $($Line+1) uses triple-quoted SQL. Two mandates, both required:`n(1) Format: convert to implicit string concatenation. Triple-quoted SQL is refused everywhere. Right shape:`n    Query = (`n        `"SELECT col1, col2 `"`n        `"FROM MediaFiles `"`n        `"WHERE Id = %s`"`n    )`n(2) $PlacementClause`nSee .claude/rules/sql-architecture.md."
+        }
         if (($Body -split "`n").Length -gt 1) {
-            $Line = ($PostContent.Substring(0,$DM.Index) -split "`n").Length - 1
             if (Test-AllowOverride $PostContent $Line 'R12' $FilePath) { continue }
             return "R12 Comment volume: $FilePath line $($Line+1) has a multi-line docstring. Single-line max; rationale belongs in the directive doc. See .claude/rules/ceo-mode.md#handling-preexisting-comment--doc-violations-encountered-mid-directive. Path forward: classify the block first -- (a) pure WHAT-redundancy: delete entirely; (b) permanent-invariant WHY (BUG-NNNN, hard-won constraint): MOVE the content to KNOWN-ISSUES.md or the appropriate *.feature.md, leave a single-line anchor in code ('# BUG-0005' or '# see worker-lifecycle.feature.md C6'); (c) active-directive WHY: put the content in the current directive doc, leave a '# directive: <slug>' anchor; (d) surprising WHY that fits nowhere: collapse to a single in-place comment line. If the scope is large (many blocks across many files), open a new directive ('<file>-comment-promotion') and do the classification there."
         }
