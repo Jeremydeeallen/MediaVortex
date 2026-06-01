@@ -2,6 +2,8 @@
 
 One pipeline per flow doc. Features reference flows, not the reverse. One tier of the doc-layering model (`.claude/rules/doc-layering.md`).
 
+**Flow doc is the navigation hub for pipeline-shaped code.** Stable `ST<N>` stage IDs + a complete `## Seams` table make a flow doc indexable: a code anchor `# see <flow-slug>.ST<N>` lets a reader navigate via a partial Read of the named stage section instead of full Reads of every colocated `*.feature.md`. R1 (`.claude/standards/index.md`) accepts this anchored partial Read as a substitute for colocated feature-md preread. R18 enforces partial-read discipline on `*.feature.md` (limit<=50).
+
 ## Required structure
 
 Every `*.flow.md` has:

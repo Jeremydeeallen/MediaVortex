@@ -74,21 +74,31 @@ The 2026-05-09 incident (FFmpeg truncated source via output==input collision) ca
 
 ## Stages
 
-| # | Stage | Code path | What changes in DB | Failure mode |
+| ID | Stage | Code path | What changes in DB | Failure mode |
 |---|-------|-----------|--------------------|--------------|
-| 1 | Claim | `DatabaseManager.ClaimNextPendingTranscodeJob` (atomic SELECT FOR UPDATE SKIP LOCKED) | `TranscodeQueue.Status='Running'`, `ClaimedBy=<worker>`, `ClaimedAt=NOW()` | Two workers can't claim same row (atomic claim) |
-| 2 | Dispatch | `ProcessJob` line 351 -> `if Job.IsRemux: ProcessRemuxJob` | (none) | If `ProcessingMode` is malformed or unknown, falls through to standard transcode path -- defensive but not ideal |
-| 3 | ActiveJob create | `CreateActiveJob(JobType='Remux', WorkerName, ProcessId, ThreadId)` | `ActiveJobs` row inserted | Failure aborts the job and resets the queue row to Pending |
-| 4 | Source pre-flight | `os.path.exists()` after `PathResolve(StorageRootId, RelativePath)` | -- | Missing source: `MediaFiles.FFprobeFailureCount` incremented, queue row deleted, ActiveJob deleted, no TranscodeAttempt created (`TranscodeJob.feature.md` criteria 17-18) |
-| 5 | TranscodeAttempt create | `CreateTranscodeAttempt(Job, ...)` | `TranscodeAttempts` row inserted with `Success=NULL` | Failure aborts; row marked failed |
-| 6 | File staging | `SetupFilePreparation` resolves the worker-local source path | -- | In-place; no copy step |
-| 7 | Command build | `CommandBuilder.BuildFFmpegCommand` (remux shape) | -- | Missing `FFmpegPath` raises `ValueError` -- aborts |
-| 8 | Execute | `ExecuteTranscoding(Job, RemuxCommand, ...)` -- spawns `ffmpeg` via `VideoTranscodingService.TranscodeVideo` | `ActiveJobs.FFmpegPid` recorded after `Popen`; `TranscodeProgress` rows update during the run | FFmpeg non-zero exit: `HandleJobFailure` marks the attempt failed; queue row reset to Pending for retry |
-| 9 | Result handling | `HandleRemuxResult` | `TranscodeAttempts.Success=true`, `QualityTestRequired=false`, `NewSizeBytes`, etc. | Continues even on size growth -- by design, remux is not aimed at disk savings |
-| 10 | Quality test bypass | Disposition routes directly to FileReplacement (no VMAF) | -- | -- |
-| 11 | File replacement | `FileReplacementBusinessService.ProcessFileReplacementWithVMAF` -- archive original, delete, move new file in, re-probe, update `MediaFiles` | `MediaFiles` (re-probed metadata, `TranscodedByMediaVortex=true`), `MediaFilesArchive`, `TranscodeAttempts.FileReplaced` | If `transcode-vs-remux-routing.feature.md` criterion 16 ships: post-flight gate is **skipped** for `Mode='Remux'` (audio re-encode may bump size by KB without semantic regression) |
-| 12 | Compliance recompute | `priority-materialization.feature.md` post-flight hook calls `RecomputeForFiles([MediaFileId])` | `MediaFiles.IsCompliant`, `RecommendedMode`, `PriorityScore`, `AssignedProfile` updated -- expected to flip to `IsCompliant=true` | Recompute failure logged but doesn't roll back replacement (file is already swapped) |
-| 13 | Cleanup | `DeleteTranscodeQueueItem(Job.Id)`, `DeleteTranscodeProgress`, `CompleteActiveJob` | TranscodeQueue row deleted, ActiveJobs marked Success=true | -- |
+| ST1 | Claim | `DatabaseManager.ClaimNextPendingTranscodeJob` (atomic SELECT FOR UPDATE SKIP LOCKED) | `TranscodeQueue.Status='Running'`, `ClaimedBy=<worker>`, `ClaimedAt=NOW()` | Two workers can't claim same row (atomic claim) |
+| ST2 | Dispatch | `ProcessJob` line 351 -> `if Job.IsRemux: ProcessRemuxJob` | (none) | If `ProcessingMode` is malformed or unknown, falls through to standard transcode path -- defensive but not ideal |
+| ST3 | ActiveJob create | `CreateActiveJob(JobType='Remux', WorkerName, ProcessId, ThreadId)` | `ActiveJobs` row inserted | Failure aborts the job and resets the queue row to Pending |
+| ST4 | Source pre-flight | `os.path.exists()` after `PathResolve(StorageRootId, RelativePath)` | -- | Missing source: `MediaFiles.FFprobeFailureCount` incremented, queue row deleted, ActiveJob deleted, no TranscodeAttempt created (`TranscodeJob.feature.md` criteria 17-18) |
+| ST5 | TranscodeAttempt create | `CreateTranscodeAttempt(Job, ...)` | `TranscodeAttempts` row inserted with `Success=NULL` | Failure aborts; row marked failed |
+| ST6 | File staging | `SetupFilePreparation` resolves the worker-local source path | -- | In-place; no copy step |
+| ST7 | Command build | `CommandBuilder.BuildFFmpegCommand` (remux shape) | -- | Missing `FFmpegPath` raises `ValueError` -- aborts |
+| ST8 | Execute | `ExecuteTranscoding(Job, RemuxCommand, ...)` -- spawns `ffmpeg` via `VideoTranscodingService.TranscodeVideo` | `ActiveJobs.FFmpegPid` recorded after `Popen`; `TranscodeProgress` rows update during the run | FFmpeg non-zero exit: `HandleJobFailure` marks the attempt failed; queue row reset to Pending for retry |
+| ST9 | Result handling | `HandleRemuxResult` | `TranscodeAttempts.Success=true`, `QualityTestRequired=false`, `NewSizeBytes`, etc. | Continues even on size growth -- by design, remux is not aimed at disk savings |
+| ST10 | Quality test bypass | Disposition routes directly to FileReplacement (no VMAF) | -- | -- |
+| ST11 | File replacement | `FileReplacementBusinessService.ProcessFileReplacementWithVMAF` -- archive original, delete, move new file in, re-probe, update `MediaFiles` | `MediaFiles` (re-probed metadata, `TranscodedByMediaVortex=true`), `MediaFilesArchive`, `TranscodeAttempts.FileReplaced` | If `transcode-vs-remux-routing.feature.md` criterion 16 ships: post-flight gate is **skipped** for `Mode='Remux'` (audio re-encode may bump size by KB without semantic regression) |
+| ST12 | Compliance recompute | `priority-materialization.feature.md` post-flight hook calls `RecomputeForFiles([MediaFileId])` | `MediaFiles.IsCompliant`, `RecommendedMode`, `PriorityScore`, `AssignedProfile` updated -- expected to flip to `IsCompliant=true` | Recompute failure logged but doesn't roll back replacement (file is already swapped) |
+| ST13 | Cleanup | `DeleteTranscodeQueueItem(Job.Id)`, `DeleteTranscodeProgress`, `CompleteActiveJob` | TranscodeQueue row deleted, ActiveJobs marked Success=true | -- |
+
+## Seams
+
+| ID | Transition | Producer (writer) | Wire shape | Consumer (reader) expects | Verification |
+|---|---|---|---|---|---|
+| S1 | `ST1` (claim) | `QueueManagementBusinessService.PopulateQueueForRemux` (legacy) + `SmartPopulate` AudioFix/Remux modes | `TranscodeQueue.(Status='Pending', ProcessingMode='Remux', MediaFileId)` | `DatabaseManager.ClaimNextPendingTranscodeJob` claims atomically | `SELECT COUNT(*) FROM TranscodeQueue WHERE Status='Pending' AND ProcessingMode='Remux'` decrements per claim |
+| S2 | `ST7 -> ST8` (command -> ffmpeg) | `CommandBuilder.BuildFFmpegCommand` (remux shape; reads `MediaFile.AudioComplete`) | argv: `[ffmpeg, -i <input.orig>, -c:v copy, -c:a copy|aac+loudnorm, -movflags +faststart, <output.mp4>]` | FFmpeg subprocess executes; `Popen.pid` captured | `SELECT FFpmpegCommand FROM TranscodeAttempts WHERE Id=<id>` contains `-c:v copy`; never contains an encoder name |
+| S3 | `ST11` (rename-before-encode safety) | `FileReplacementBusinessService.PrepareReplacement` renames source -> `.orig` BEFORE FFmpeg | On-disk: `<source>.orig` exists, freed path is FFmpeg target | FFmpeg output landing at freed path; verify step expects target present + non-zero | Manual: induce FFmpeg failure between PrepareReplacement and verify; observe `.orig` rollback restores source bit-identical |
+| S4 | `ST11 -> ST12` (post-replace -> recompute) | `FileReplacementBusinessService` writes `MediaFiles.(Resolution, Codec, ContainerFormat, AudioCodec, TranscodedByMediaVortex=TRUE)` + `MediaFilesArchive` snapshot | Re-probed metadata current | `RecomputeForFiles([id])` reads + writes `IsCompliant, RecommendedMode, PriorityScore` | After remux: `SELECT IsCompliant, RecommendedMode FROM MediaFiles WHERE Id=<id>` -> `TRUE, NULL` |
+| S5 | `ST11` AudioComplete post-flight | `FileReplacementBusinessService` checks `TranscodeAttempts.FFpmpegCommand ILIKE '%loudnorm%'`; calls `MarkAudioComplete` if true | `MediaFiles.(AudioComplete=TRUE, AudioCompletedAt=NOW(), AudioNormalizationMode IN ('linear','dynamic'))` | `audio-completion.flow.md::ST4` steady-state read | After: `SELECT AudioComplete, AudioCompletedAt FROM MediaFiles WHERE Id=<id>` -> TRUE + non-NULL |
 
 ## Output Location
 

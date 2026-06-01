@@ -17,14 +17,23 @@ How any worker turns a stored `(StorageRootId, RelativePath)` pair into a worker
 
 ## Steps
 
-| # | Step | Code | What it does |
+| ID | Step | Code | What it does |
 |---|---|---|---|
-| 1 | Caller has a DB row carrying `(StorageRootId, RelativePath)` | varies (MediaFiles, TemporaryFilePaths, etc.) | The row is the canonical source of truth; OS-independent |
-| 2 | Caller identifies the local worker | `Core.WorkerContext.WorkerContext.Current()` (`.WorkerName`) | Each worker process has one identity registered at boot |
-| 3 | Caller calls `Resolve` | `Core.PathStorage.Resolve(StorageRootId, RelativePath, WorkerName)` | The ONLY translation surface in the system |
-| 3a | Resolve queries `StorageRootResolutions` | SQL: `SELECT AbsolutePath FROM StorageRootResolutions WHERE StorageRootId=%s AND WorkerName=%s AND IsActive=TRUE LIMIT 1` | Per-worker absolute prefix |
-| 3b | Resolve joins prefix + RelativePath | `os.path.join(AbsolutePath, RelativePath)` | Single string operation, no regex |
-| 4 | Caller uses returned path for I/O | `os.path.exists(local)`, `subprocess.run([ffmpeg, '-i', local])`, `shutil.copy(local, ...)` | OS-native path; works on every platform that has a `StorageRootResolutions` row for the worker |
+| ST1 | Caller has a DB row carrying `(StorageRootId, RelativePath)` | varies (MediaFiles, TemporaryFilePaths, etc.) | The row is the canonical source of truth; OS-independent |
+| ST2 | Caller identifies the local worker | `Core.WorkerContext.WorkerContext.Current()` (`.WorkerName`) | Each worker process has one identity registered at boot |
+| ST3 | Caller calls `Resolve` | `Core.PathStorage.Resolve(StorageRootId, RelativePath, WorkerName)` | The ONLY translation surface in the system |
+| ST3a | Resolve queries `StorageRootResolutions` | SQL: `SELECT AbsolutePath FROM StorageRootResolutions WHERE StorageRootId=%s AND WorkerName=%s AND IsActive=TRUE LIMIT 1` | Per-worker absolute prefix |
+| ST3b | Resolve joins prefix + RelativePath | `os.path.join(AbsolutePath, RelativePath)` | Single string operation, no regex |
+| ST4 | Caller uses returned path for I/O | `os.path.exists(local)`, `subprocess.run([ffmpeg, '-i', local])`, `shutil.copy(local, ...)` | OS-native path; works on every platform that has a `StorageRootResolutions` row for the worker |
+
+## Seams
+
+| ID | Transition | Producer (writer) | Wire shape | Consumer (reader) expects | Verification |
+|---|---|---|---|---|---|
+| S1 | `ST3a` resolution lookup | `WorkerService.flow.md::S2` (env-var -> `StorageRootResolutions`) + `Scripts/SQLScripts/SetWindowsWorkerUncPaths.py` (Windows native) | `StorageRootResolutions.(Id, StorageRootId BIGINT, WorkerName TEXT, Platform TEXT IN ('linux','windows','mac'), AbsolutePath TEXT NOT NULL, IsActive BOOLEAN) UNIQUE(StorageRootId, WorkerName)` | `Core.PathStorage.Resolve` reads exactly one active row per `(StorageRootId, WorkerName)` | `SELECT COUNT(*) FROM StorageRootResolutions WHERE WorkerName=<host> AND IsActive=TRUE` >= 1 per intended root |
+| S2 | `ST3 -> ST4` (resolved path -> I/O) | `Resolve()` returns absolute local path | OS-native string (POSIX `/mnt/...` on Linux, UNC `\\<server>\<share>\...` on Windows, drive letter `T:\...` on legacy hosts) | `os.path.exists`, FFmpeg argv, `shutil.copy` -- all OS path APIs | A working file open of the resolved path for a known-present source row |
+| S3 | `ST1` invariant | Every canonical-table writer (`FileScanning`, `FileReplacement`, queue admission) | `MediaFiles.(StorageRootId BIGINT NOT NULL, RelativePath TEXT NOT NULL)` -- forward-slash form, no `..`, no drive letter prefix (CHECK constraint after Phase 4) | All readers rely on this shape | `\d MediaFiles` shows CHECK; `SELECT COUNT(*) FROM MediaFiles WHERE RelativePath ~ '^[A-Za-z]:' OR RelativePath LIKE '%..%'` -> 0 |
+| S4 | Windows UNC variant | `SetWindowsWorkerUncPaths.py` (sole writer) idempotent per `StartWorker.py` launch | `AbsolutePath` ends in trailing slash, uses UNC `\\<server>\<share>\` shape | `Resolve` joins prefix + RelativePath via `os.path.join` -- Windows-native; bypasses the per-logon drive-letter session mapping (BUG-0008 mitigation) | `SELECT AbsolutePath FROM StorageRootResolutions WHERE WorkerName=<windows-host> AND Platform='windows'` shows `\\` prefix |
 
 ## Failure Modes
 

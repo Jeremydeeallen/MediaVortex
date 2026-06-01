@@ -93,7 +93,7 @@ For any MediaFile that runs through a MediaVortex encode:
 
 ## Stage detail
 
-### Stage 1 -- ebur128 measurement
+### Stage 1 -- ebur128 measurement (`ST1`)
 
 Runs once per source file (re-runs on file replacement or mtime change).
 Captures four numbers from the Summary block of `ffmpeg -af
@@ -110,7 +110,7 @@ ebur128=peak=true` stderr:
 holds a stable short code on failure (see
 `LoudnessAnalysisService.MeasureLoudness` docstring).
 
-### Stage 2 -- Admission gate
+### Stage 2 -- Admission gate (`ST2`)
 
 When `_EvaluateCompliance` sees a file with `AudioComplete=false`,
 it requires only:
@@ -131,7 +131,7 @@ file is still a file we want to normalize -- holding it out of the
 queue just relocates the show-to-show loudness jump that the whole
 feature exists to prevent.
 
-### Stage 3 -- Command-build (linear or dynamic)
+### Stage 3 -- Command-build (linear or dynamic) (`ST3`)
 
 At build time, `BuildAudioFilters` computes:
 
@@ -171,7 +171,7 @@ AudioNormalizationMode` (`'linear'` or `'dynamic'`) by the post-flight
 hook. Activity surfaces both counts. Dynamic mode is the explicit
 correct tool for ungainable files, not a hidden fallback.
 
-### Stage 4 -- FFmpeg encode pass
+### Stage 4 -- FFmpeg encode pass (`ST4`)
 
 FFmpeg applies a fixed gain of `(TargetLoudness - measured_I)` to every
 sample of the decoded audio stream, re-encodes via `BuildAudioCodecArgs`,
@@ -179,7 +179,16 @@ and writes the output. No real-time loudness measurement, no compressor,
 no limiter (the TP ceiling is enforced by the pre-encode gate, not by a
 runtime limiter).
 
-### Stage 5 -- Post-flight
+### Stage 5 -- Post-flight (`ST5`)
+
+## Seams
+
+| ID | Transition | Producer (writer) | Wire shape | Consumer (reader) expects | Verification |
+|---|---|---|---|---|---|
+| S1 | `ST1 -> ST2` (measure -> admission) | `LoudnessAnalysisService.MeasureAndPersist` (called from `filescanning.flow.md::ST4` probe co-trigger) | `MediaFiles.(SourceIntegratedLufs, SourceLoudnessRangeLU, SourceTruePeakDbtp, SourceIntegratedThresholdLufs, LoudnessMeasuredAt)` all NOT NULL on success; `LoudnessMeasurementFailureReason TEXT` on failure | `QueueManagementBusinessService._EvaluateCompliance` requires `LoudnessMeasuredAt IS NOT NULL` + all four columns non-NULL | `SELECT COUNT(*) FROM MediaFiles WHERE AudioComplete=FALSE AND LoudnessMeasuredAt IS NULL` -> bucket size of held files |
+| S2 | `ST2 -> queue or defer` | `_EvaluateCompliance` writes deferral signal | `MediaFiles.AdmissionDeferReason='awaiting_loudness_measurement'` (or absent if admitted) | Queue admission path skips deferred rows | `SELECT COUNT(*) FROM MediaFiles WHERE AdmissionDeferReason='awaiting_loudness_measurement'` |
+| S3 | `ST3 -> ST4` (command -> ffmpeg) | `Models.CommandBuilder.BuildAudioFilters` | `loudnorm=I=...:LRA=...:TP=...:measured_I=...:measured_LRA=...:measured_TP=...:measured_thresh=...[:linear=true]` filter string embedded in `TranscodeAttempts.FFpmpegCommand` | FFmpeg subprocess executes the filter graph | `SELECT FFpmpegCommand FROM TranscodeAttempts WHERE Id=<attempt>` contains the literal `loudnorm=I=` substring |
+| S4 | `ST5 -> downstream` (post-flight -> steady-state) | `FileReplacementBusinessService` post-flight | `MediaFiles.(AudioComplete=TRUE, AudioCompletedAt=NOW(), AudioNormalizationMode IN ('linear','dynamic'))` | `audio-completion.flow.md::ST4` stream-copy steady state observed | `SELECT AudioNormalizationMode, COUNT(*) FROM MediaFiles WHERE AudioComplete=TRUE GROUP BY 1` -- non-empty linear + dynamic buckets |
 
 On successful replacement, `MarkAudioComplete` flips
 `MediaFiles.AudioComplete=true`. All future encodes for this file

@@ -29,7 +29,16 @@ When adding a new Linux worker host:
    - **Bare-metal**: `py infrastructure/terraform/mediavortex-bare-metal-bootstrap.py --host <friendly>` (idempotent: installs `nfs-common` + Docker CE, reconciles `/etc/fstab` managed block from `fstab_mounts`, creates `/opt/mediavortex` + mountpoints, runs `mount -a`).
 5. Run `py deploy/deploy-linux-worker.py <friendly>`.
 
-## Pre-Flight Checks
+## Pipeline Overview
+
+| ID | Stage | Owns |
+|---|---|---|
+| ST1 | Pre-Flight Checks | SSH reachability, Docker presence, DB reachability, mount non-empty, compose template existence |
+| ST2 | Build and Deploy | SyncSource -> `docker build --build-arg COMMIT_SHA=...` -> `docker compose up -d` -> cleanup |
+| ST3 | Post-Deploy Verification | Containers Up; `Workers` rows Online/Paused; `WorkerShareMappings` populated; version match assertion |
+| ST4 | Runtime Pipeline | Per-container startup -> `WorkerService.flow.md::ST0..ST13` ownership |
+
+## Pre-Flight Checks (`ST1`)
 
 The script runs these in order and exits non-zero on the first failure. Each check has a remediation hint in the failure message.
 
@@ -42,7 +51,7 @@ The script runs these in order and exits non-zero on the first failure. Each che
 | Required mounts non-empty | `ssh ... 'ls /mnt/media_tv \| head -1 && ls /mnt/movies \| head -1 && ls /mnt/xxx \| head -1'` | Each returns at least one filename | LXC: `terraform apply` re-renders the `pct set --mp<N>` lines from `inventory.toml`. Bare-metal: re-run `mediavortex-bare-metal-bootstrap.py --host <friendly>`. If `inventory.toml` is correct but the host hasn't picked it up, that's the script to run. Per `KNOWN-ISSUES.md` mount-validation entry: an empty mount is treated as a failure to avoid silent corruption. |
 | Compose template exists | `ls deploy/compose-templates/<friendly>.yml` | File present | Create the template from a sibling. |
 
-## Build and Deploy
+## Build and Deploy (`ST2`)
 
 Four steps. All happen via SSH from the dev workstation. The script streams output of each step.
 
@@ -68,7 +77,7 @@ For LXC hosts (Larry): `/opt/mediavortex/` already exists -- Terraform created i
 
 For code-only redeploys: same four steps. The FFmpeg static download is cached in a Docker build layer; only the `COPY . /app` layer rebuilds. Total time on a warm host: ~30-60 seconds.
 
-## Post-Deploy Verification
+## Post-Deploy Verification (`ST3`)
 
 The script polls the database for up to 90 seconds after step 3. Verification fails the deploy if any of these don't hold within the window.
 
@@ -188,7 +197,17 @@ Common causes:
 | Stale worker rows from prior naming | Old `client-XXX-NN` rows linger after a rename to friendly naming | Delete the stale rows: `DELETE FROM Workers WHERE WorkerName IN (...) AND LastHeartbeat < NOW() - INTERVAL '1 hour'`. |
 | Empty mount silently corrupts state | Worker claims jobs, hits per-file source-missing, deletes queue rows | Fixed by mount validation (worker-lifecycle criteria 20, 21). A worker now stays Paused and reports the offending mount. |
 
-## Runtime Pipeline (per container)
+## Seams
+
+| ID | Transition | Producer (writer) | Wire shape | Consumer (reader) expects | Verification |
+|---|---|---|---|---|---|
+| S1 | `ST2 -> ST3` (build -> running container) | `docker build --build-arg COMMIT_SHA=<dev HEAD>` + `docker compose up -d` | Docker image `mediavortex-worker:latest` with `/opt/mediavortex/VERSION` baked in by the Dockerfile | Container starts -> `WorkerService.flow.md::ST2` reads `VERSION` and UPSERTs `Workers.Version` | `ssh root@<ip> 'docker run --rm --entrypoint cat mediavortex-worker:latest /opt/mediavortex/VERSION'` matches dev `git rev-parse HEAD` |
+| S2 | `ST3` Workers row check | `WorkerService.flow.md::S1` (worker registration) | `Workers.(WorkerName, Status, FFmpegPath, Version)` | Deploy verification SQL within 90s window | `SELECT Status, FFmpegPath, SUBSTRING(Version,1,7) FROM Workers WHERE WorkerName LIKE '<friendly>-worker-%'` -- Online/Paused, non-NULL FFmpegPath, matching Ver |
+| S3 | `ST3` share mappings | `WorkerService.flow.md::S2` (env var -> WorkerShareMappings) | `WorkerShareMappings.(WorkerName, DriveLetter, LocalMountPrefix)` -- 3 rows per worker (T, M, Z) | Used by every read/write of paths inside the container | `SELECT COUNT(*) FROM WorkerShareMappings WHERE WorkerName LIKE '<friendly>-worker-%'` = N_workers * 3 |
+| S4 | host mount source-of-truth | Operator writes `infrastructure/terraform/inventory.toml` `bind_mounts` / `fstab_mounts` | TOML config consumed by Terraform module + bare-metal bootstrap script | Compose templates render mount points from inventory; never hardcoded | Diff `deploy/compose-templates/<friendly>.yml` against inventory entries -- mount paths match |
+| S5 | `ST3 -> ST4` (version assertion) | Deploy script | exit code 3 if `Workers.Version` (per worker) != stamped SHA from dev HEAD | Operator sees deploy failure; rolls back or retries | Console line `version=<sha7>` on success; exit 3 on mismatch |
+
+## Runtime Pipeline (per container) (`ST4`)
 
 The deploy verifies the worker reaches Online. The per-step behavior that produces Online is owned by `WorkerService/worker-lifecycle.feature.md` and `WorkerService/WorkerService.feature.md`:
 

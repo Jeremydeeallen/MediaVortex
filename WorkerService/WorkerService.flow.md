@@ -10,23 +10,35 @@ Replaces the former `TranscodeService/Main.py` + `QualityTestService/Main.py` du
 
 ## Startup Pipeline
 
-| Step | Function | What It Does |
-|------|----------|--------------|
-| 0. Path verification (Windows-only) | `_VerifyRequiredPaths()` | Reads distinct drive-letter prefixes from MediaFiles, verifies each is accessible via `os.path.exists()`. Hard-fails before any DB writes if a required drive isn't mounted. Linux containers skip this step (per-worker mount validation in step 7a handles them). |
-| 1. Identity | `WorkerServiceApp.__init__()` | `WorkerName = socket.gethostname()`, `WorkerPlatform = platform.system().lower()` |
-| 2. Register worker | `_RegisterAndLoadWorkerConfig()` | Resolves FFmpeg/FFprobe via `_ResolveBundledOrPathBinary()` (project-bundled `FFmpegMaster/bin/<binary>{.exe?}` first, then `shutil.which`). Raises `RuntimeError` if neither resolves -- previously this silently registered NULL on Windows hosts where FFmpeg isn't on PATH. UPSERTs Workers row (WorkerName, Platform, FFmpegPath, FFprobePath, Status=Online). Parses `MEDIAVORTEX_SHARE_MAPPINGS` env var and UPSERTs into WorkerShareMappings. Loads config (MaxConcurrentJobs, share mappings). |
-| 3. WorkerContext | `WorkerContext.Initialize()` | Singleton stores FFmpegPath, FFprobePath, ShareMappings. All services in the process resolve tool paths from WorkerContext. |
-| 4. Service status | `_EnsureServiceStatusExists()` | Ensures a ServiceStatus row exists for "WorkerService" |
-| 5. Crash recovery | `_RecoverFromCrash()` | CrashRecoveryService resets orphaned Running/Processing jobs for this worker |
-| 6. Stuck job cleanup | `_DetectAndCleanStuckJobs()` | StuckJobDetectionService cleans stuck transcode and quality test jobs |
-| 7. Load capabilities | `_LoadCapabilitiesFromDB()` | Reads TranscodeEnabled, QualityTestEnabled, ScanEnabled, Status from Workers row |
-| 7a. Mount validation | `_ValidateStorageMounts()` + `_ApplyMountValidationResult()` | Cross-platform. For each `StorageRootResolutions` row for this worker, checks the `AbsolutePath` is a directory, readable, and non-empty. Empty = local filesystem showing through where a share should be mounted. On failure: writes a single-line summary to `Workers.MountValidationError`, forces `Workers.Status='Paused'`, logs ERROR per mount, and capabilities never start. On success: clears `MountValidationError`. Re-runs on every Paused → Online transition in `_HandleStatusChange()`. |
-| 8. Mark Online | `DatabaseManager.UpdateWorkerStatus()` | Sets Workers.Status = 'Online' only if mount validation passed |
-| 9. Start health monitor | `_StartHealthMonitoring()` | Thread: updates Workers.LastHeartbeat every 30s |
-| 10. Start status polling | `_StartStatusPolling()` | Thread: reads Workers.Status every 5s, calls `_HandleStatusChange()` on transitions |
-| 11. Start capability polling | `_StartCapabilityPolling()` | Thread: reads capability flags and concurrency columns every N seconds (default 15, configurable via `SystemSettings.CapabilityPollingIntervalSec`), calls `_ApplyCapabilities()` on flag changes, `_ApplyConcurrencyChanges()` on concurrency changes |
-| 12. Apply capabilities | `_ApplyCapabilities()` | Starts/stops TranscodeService, QualityTestService, ContinuousScanService based on flags |
-| 13. Main loop | `_MainLoop()` | Blocks on ShutdownEvent, checking every 10s |
+| ID | Function | What It Does |
+|---|----------|--------------|
+| ST0 | `_VerifyRequiredPaths()` (Windows-only path verification) | Reads distinct drive-letter prefixes from MediaFiles, verifies each is accessible via `os.path.exists()`. Hard-fails before any DB writes if a required drive isn't mounted. Linux containers skip this step (per-worker mount validation in ST7a handles them). |
+| ST1 | `WorkerServiceApp.__init__()` (identity) | `WorkerName = socket.gethostname()`, `WorkerPlatform = platform.system().lower()` |
+| ST2 | `_RegisterAndLoadWorkerConfig()` (register worker) | Resolves FFmpeg/FFprobe via `_ResolveBundledOrPathBinary()` (project-bundled `FFmpegMaster/bin/<binary>{.exe?}` first, then `shutil.which`). Raises `RuntimeError` if neither resolves. UPSERTs Workers row (WorkerName, Platform, FFmpegPath, FFprobePath, Status=Online). Parses `MEDIAVORTEX_SHARE_MAPPINGS` env var and UPSERTs into WorkerShareMappings. Loads config (MaxConcurrentJobs, share mappings). |
+| ST3 | `WorkerContext.Initialize()` | Singleton stores FFmpegPath, FFprobePath, ShareMappings. All services in the process resolve tool paths from WorkerContext. |
+| ST4 | `_EnsureServiceStatusExists()` (service status) | Ensures a ServiceStatus row exists for "WorkerService" |
+| ST5 | `_RecoverFromCrash()` (crash recovery) | CrashRecoveryService resets orphaned Running/Processing jobs for this worker |
+| ST6 | `_DetectAndCleanStuckJobs()` (stuck job cleanup) | StuckJobDetectionService cleans stuck transcode and quality test jobs |
+| ST7 | `_LoadCapabilitiesFromDB()` (load capabilities) | Reads TranscodeEnabled, QualityTestEnabled, ScanEnabled, Status from Workers row |
+| ST7a | `_ValidateStorageMounts()` + `_ApplyMountValidationResult()` (mount validation) | Cross-platform. For each `StorageRootResolutions` row for this worker, checks the `AbsolutePath` is a directory, readable, and non-empty. Empty = local filesystem showing through where a share should be mounted. On failure: writes a single-line summary to `Workers.MountValidationError`, forces `Workers.Status='Paused'`, logs ERROR per mount, and capabilities never start. On success: clears `MountValidationError`. Re-runs on every Paused -> Online transition in `_HandleStatusChange()`. |
+| ST8 | `DatabaseManager.UpdateWorkerStatus()` (mark Online) | Sets Workers.Status = 'Online' only if mount validation passed |
+| ST9 | `_StartHealthMonitoring()` (start health monitor) | Thread: updates Workers.LastHeartbeat every 30s |
+| ST10 | `_StartStatusPolling()` (start status polling) | Thread: reads Workers.Status every 5s, calls `_HandleStatusChange()` on transitions |
+| ST11 | `_StartCapabilityPolling()` (start capability polling) | Thread: reads capability flags and concurrency columns every N seconds (default 15, configurable via `SystemSettings.CapabilityPollingIntervalSec`), calls `_ApplyCapabilities()` on flag changes, `_ApplyConcurrencyChanges()` on concurrency changes |
+| ST12 | `_ApplyCapabilities()` (apply capabilities) | Starts/stops TranscodeService, QualityTestService, ContinuousScanService based on flags |
+| ST13 | `_MainLoop()` (main loop) | Blocks on ShutdownEvent, checking every 10s |
+
+## Seams
+
+| ID | Transition | Producer (writer) | Wire shape | Consumer (reader) expects | Verification |
+|---|---|---|---|---|---|
+| S1 | `ST2` worker registration | `_RegisterAndLoadWorkerConfig()` | `Workers.(WorkerName TEXT PK, Platform TEXT, FFmpegPath TEXT NOT NULL, FFprobePath TEXT NOT NULL, Status, Version, BuildInfo)` UPSERT | `WorkerContext` + all downstream service constructors read from Workers row | `SELECT FFmpegPath, FFprobePath, Version FROM Workers WHERE WorkerName=<host>` -- non-NULL after a clean start |
+| S2 | `ST2` share mappings | Env var `MEDIAVORTEX_SHARE_MAPPINGS` parsed -> UPSERT into `WorkerShareMappings` + `StorageRootResolutions` | `StorageRootResolutions.(StorageRootId, WorkerName, Platform, AbsolutePath, IsActive=TRUE)` | `Core.PathStorage.Resolve` (`path-storage.flow.md::S1`) reads these rows | `SELECT AbsolutePath FROM StorageRootResolutions WHERE WorkerName=<host>` returns one row per mounted root |
+| S3 | `ST7a` mount validation | `_ValidateStorageMounts()` | `Workers.(MountValidationError TEXT NULL, Status='Paused' on failure)` | `_HandleStatusChange` blocks Paused -> Online unless `MountValidationError IS NULL` | `SELECT Status, MountValidationError FROM Workers WHERE WorkerName=<host>` -- both reflect the latest validation result |
+| S4 | `ST9` heartbeat | `_StartHealthMonitoring` thread | `Workers.LastHeartbeat=NOW()` every 30s | `teamstatus.flow.md::S2` consumer + `stuck-job-detection.flow.md::ST3` Tier 1 | `SELECT NOW() - LastHeartbeat FROM Workers WHERE WorkerName=<host>` < 60s |
+| S5 | `ST10` status polling | `_StartStatusPolling` thread reads | `Workers.Status` column | `_HandleStatusChange` triggers `_StopAllCapabilities` (Paused) / `_ApplyCapabilities` (Online) | UPDATE `Workers.Status='Paused'`; observe `_StopAllCapabilities` log within 5s |
+| S6 | `ST11` capability polling | `_StartCapabilityPolling` thread reads | `Workers.(TranscodeEnabled, QualityTestEnabled, ScanEnabled, RemuxEnabled, MaxConcurrent*Jobs)` | `_ApplyCapabilities` + `_ApplyConcurrencyChanges` start/stop services and rebind pool size | UPDATE `Workers.TranscodeEnabled=FALSE`; observe `_StopTranscodeCapability` within `CapabilityPollingIntervalSec` |
+| S7 | `ST12` queue producers/consumers | Services started here drive the seams in `transcode.flow.md::S1` and `remux.flow.md::S1` | per-capability claim queries | Pending rows in `TranscodeQueue` / `QualityTestingQueue` / `RootFolders` are consumed | The cross-flow verifications listed in those seams |
 
 ## Version
 

@@ -23,6 +23,8 @@ In the directive's `## Status` block (or task contract in task-delegation mode),
 
 Seam types: function-call, wire-format (JSON / SQL / file), state-store (DB row, file), UI (form -> API -> DB), process (queue rows, IPC).
 
+**Persistent seam SOT lives in the flow doc.** Once a pipeline has a `*.flow.md` with a populated `## Seams` table (`.claude/rules/flow-docs.md`), that table is the durable source of truth for the cross-stage seams the pipeline carries. Directive-time enumeration becomes optional when every seam the directive crosses is already covered by an existing flow-doc row -- the directive's table then only enumerates SEAMS THE DIRECTIVE ADDS OR CHANGES, and existing seams are referenced by `<flow-slug>.S<N>` without restating. VERIFYING still records evidence per crossed seam regardless of where it is documented.
+
 ## At VERIFYING: round-trip
 
 For each enumerated seam, record concrete evidence:

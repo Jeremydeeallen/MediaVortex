@@ -10,14 +10,22 @@ Also invoked manually from `Scripts/SQLScripts/BackfillContentSignals.py` for hi
 
 ## Pipeline
 
-| Stage | File | What It Does |
-|---|---|---|
-| 1. Probe completes | `MediaProbeBusinessService._ExecuteProbe` | Writes probe metadata, returns the MediaFile model with updated columns. |
-| 2. Signal-gate check | same | If `MediaFile.MotionFraction IS NOT NULL`, signals already computed -- skip. Otherwise proceed. |
-| 3. Path resolve | same | Translate canonical `(StorageRootId, RelativePath)` to local path via `Core.PathStorage.Resolve(WorkerName)`. Use `MediaFile.FilePath` as fallback if canonical pair is missing. |
-| 4. Compute signals | `ContentSignalsService.ComputeSignals(LocalPath)` | Runs `ffmpeg signalstats` (sampled per-frame YDIF + YLOW/YHIGH) and `PySceneDetect ContentDetector`. Aggregates into MotionFraction / SceneChangeRatePerMin / LumaVariance. Returns `ContentSignalsModel` or None on any failure. |
-| 5. Persist | `ContentSignalsRepository.WriteSignals(MediaFileId, Model)` | `UPDATE MediaFiles SET MotionFraction=%s, SceneChangeRatePerMin=%s, LumaVariance=%s WHERE Id = %s`. Single statement, ExecuteNonQuery, auto-commits. |
-| 6. Log | `LoggingService.LogInfo` | `"ContentSignals computed for MediaFileId N: motion=X scene_rate=Y luma_var=Z (took N.Ns)"`. One line per compute, no spam. |
+| ID | Stage | File | What It Does |
+|---|---|---|---|
+| ST1 | Probe completes | `MediaProbeBusinessService._ExecuteProbe` | Writes probe metadata, returns the MediaFile model with updated columns. |
+| ST2 | Signal-gate check | same | If `MediaFile.MotionFraction IS NOT NULL`, signals already computed -- skip. Otherwise proceed. |
+| ST3 | Path resolve | same | Translate canonical `(StorageRootId, RelativePath)` to local path via `Core.PathStorage.Resolve(WorkerName)`. Use `MediaFile.FilePath` as fallback if canonical pair is missing. |
+| ST4 | Compute signals | `ContentSignalsService.ComputeSignals(LocalPath)` | Runs `ffmpeg signalstats` (sampled per-frame YDIF + YLOW/YHIGH) and `PySceneDetect ContentDetector`. Aggregates into MotionFraction / SceneChangeRatePerMin / LumaVariance. Returns `ContentSignalsModel` or None on any failure. |
+| ST5 | Persist | `ContentSignalsRepository.WriteSignals(MediaFileId, Model)` | `UPDATE MediaFiles SET MotionFraction=%s, SceneChangeRatePerMin=%s, LumaVariance=%s WHERE Id = %s`. Single statement, ExecuteNonQuery, auto-commits. |
+| ST6 | Log | `LoggingService.LogInfo` | `"ContentSignals computed for MediaFileId N: motion=X scene_rate=Y luma_var=Z (took N.Ns)"`. One line per compute, no spam. |
+
+## Seams
+
+| ID | Transition | Producer (writer) | Wire shape | Consumer (reader) expects | Verification |
+|---|---|---|---|---|---|
+| S1 | `ST1 -> ST2` (probe write -> gate check) | `MediaProbeBusinessService._ExecuteProbe` | `MediaFiles.MotionFraction IS NULL` (signals not yet computed) | Gate skips when `MotionFraction IS NOT NULL` | `SELECT COUNT(*) FROM MediaFiles WHERE MotionFraction IS NULL` decrements per successful compute |
+| S2 | `ST3 -> ST4` (resolved path -> compute) | `Core.PathStorage.Resolve(StorageRootId, RelativePath, WorkerName)` (`path-storage.flow.md::ST1-ST4`) | Local filesystem path string; file readable | `ContentSignalsService.ComputeSignals(LocalPath)` opens the file via ffmpeg + PySceneDetect | A working `Get-ChildItem <LocalPath>` (or `os.path.exists`) for the resolved path |
+| S3 | `ST5 -> downstream` (persist -> classifier consumes) | `ContentSignalsRepository.WriteSignals` | `MediaFiles.(MotionFraction DOUBLE NULL, SceneChangeRatePerMin DOUBLE NULL, LumaVariance DOUBLE NULL)` | `ContentClassifierService.ClassifyAndAssign` reads all three; treats NULL as "fall back to bitrate + folder" | After a compute: `SELECT MotionFraction, SceneChangeRatePerMin, LumaVariance FROM MediaFiles WHERE Id=<id>` -- all three non-NULL |
 
 ## State Surface
 

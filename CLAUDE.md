@@ -67,7 +67,11 @@ Started/stopped via `ServiceLifecycleManager` from `StartMediaVortex.py`. Archit
 
 1. `.claude/rules/*.md` (auto-loaded — invariants)
 2. `.claude/directive.md` (the current ask)
-3. Colocated `*.feature.md` / `*.flow.md` for the file being edited
+3. Colocated `*.flow.md` first (nav hub) -> partial Read of the relevant `ST<N>` section; colocated `*.feature.md` only when stage scope is insufficient (R18 caps it at limit<=50)
 4. Source code (last resort, targeted reads)
+
+For pipeline-shaped code: add `# see <flow-slug>.ST<N>` anchor inline on the def/class line; R1 then accepts the partial flow-doc Read in lieu of colocated feature-md preread.
+
+When editing a `*.feature.md` that references `transcode.flow.md` stage labels (e.g. "Stage 5", "Stage 3.5"), migrate the prose to `ST<N>` form in the same commit. Discipline note from `flow-docs-as-hub` close: the dual-label coexistence is a transition tax that compounds; sweep opportunistically rather than en masse.
 
 For details on any rule: read the colocated `.claude/rules-details/<name>.md` on demand.

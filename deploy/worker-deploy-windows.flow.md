@@ -121,15 +121,26 @@ For Linux containerized workers (which scale via `docker compose`), use `worker-
 
 Run `deploy/deploy-windows-worker.py <target-ip>` from the dev workstation for the automated path. The script wraps every step below in order, idempotent. Manual sections in this doc remain canonical for one-off recovery and for understanding what the automation does.
 
-| # | Step | Where | Owner |
+| ID | Step | Where | Owner |
 |---|---|---|---|
-| 1 | Pre-flight checks (Python, sshd, NetworkCategory, port reachability) | Worker host (queried over SSH) | `deploy-windows-worker.py --check` |
-| 2 | scp the repo to `C:\Code\MediaVortex` | Dev workstation -> Worker | `scp -r ...` |
-| 3 | Recreate venv (the source venv's `pyvenv.cfg` paths don't translate) | Worker host | `py -m venv venv && pip install -r requirements.txt` |
-| 4 | Set `MEDIAVORTEX_DB_*` and `MEDIAVORTEX_*_PASSWORD` env vars at User scope | Worker host (creds piped via SSH stdin from dev-workstation vault) | `[Environment]::SetEnvironmentVariable(..., 'User')` |
-| 5 | Register the `MediaVortex Worker` Task Scheduler entry | Worker host | `deploy\Register-WorkerTask.ps1` |
-| 6 | Trigger the task once to validate; future runs fire on user logon | Worker host | `Start-ScheduledTask -TaskName 'MediaVortex Worker'` |
-| 7 | Verify the `Workers` row is Online with a recent heartbeat | Dev workstation (DB query) | `QueryDatabase.py sql ...` |
+| ST1 | Pre-flight checks (Python, sshd, NetworkCategory, port reachability) | Worker host (queried over SSH) | `deploy-windows-worker.py --check` |
+| ST2 | scp the repo to `C:\Code\MediaVortex` | Dev workstation -> Worker | `scp -r ...` |
+| ST3 | Recreate venv (the source venv's `pyvenv.cfg` paths don't translate) | Worker host | `py -m venv venv && pip install -r requirements.txt` |
+| ST4 | Set `MEDIAVORTEX_DB_*` and `MEDIAVORTEX_*_PASSWORD` env vars at User scope | Worker host (creds piped via SSH stdin from dev-workstation vault) | `[Environment]::SetEnvironmentVariable(..., 'User')` |
+| ST5 | Register the `MediaVortex Worker` Task Scheduler entry; stamp `VERSION` + `BUILD_INFO` | Worker host | `deploy\Register-WorkerTask.ps1` + `Scripts/StampVersion.py` |
+| ST6 | Trigger the task once to validate; future runs fire on user logon | Worker host | `Start-ScheduledTask -TaskName 'MediaVortex Worker'` |
+| ST7 | Verify the `Workers` row is Online with a recent heartbeat and matching `Version` | Dev workstation (DB query) | `QueryDatabase.py sql ...` |
+
+## Seams
+
+| ID | Transition | Producer (writer) | Wire shape | Consumer (reader) expects | Verification |
+|---|---|---|---|---|---|
+| S1 | `ST2 -> ST3` (scp -> venv) | `scp -r` from dev workstation | On-disk `C:\Code\MediaVortex\` matching dev tree (minus `venv/` directories which are unusable on the target) | `py -m venv venv && pip install -r requirements.txt` on the worker host | `ssh owner@<ip> 'C:\Code\MediaVortex\venv\Scripts\python.exe -c "import paramiko, psycopg2"'` rc 0 |
+| S2 | `ST4` env vars | `[Environment]::SetEnvironmentVariable(..., 'User')` | User-scope env var | `WorkerService/Main.py` bootstrap reads via `os.environ.get` (allowed per R4) | `ssh owner@<ip> 'powershell [Environment]::GetEnvironmentVariable("MEDIAVORTEX_DB_HOST","User")'` matches |
+| S3 | `ST5` version stamp | `Scripts/StampVersion.py` (also re-run by `StartWorker.py`) writes `VERSION` + `BUILD_INFO` to `C:\Code\MediaVortex\` | Text file containing dev-workstation `git rev-parse HEAD` (40-char) | `WorkerService.flow.md::S1` reads it at startup -> `Workers.Version` UPSERT | `ssh owner@<ip> 'type C:\Code\MediaVortex\VERSION'` matches dev HEAD |
+| S4 | `ST6 -> ST7` (task -> registration) | Task Scheduler runs `StartWorker.py` -> `WorkerService.flow.md::ST0..ST8` | `Workers.(WorkerName=<hostname>, Status='Online', Platform='windows', FFmpegPath populated, Version=<SHA7>, LastHeartbeat=NOW())` | Deploy verification SQL within 90s | `SELECT Status, FFmpegPath, SUBSTRING(Version,1,7), AGE(NOW(), LastHeartbeat) FROM Workers WHERE WorkerName=<hostname>` |
+| S5 | `ST5` UNC path resolutions | `Scripts/SQLScripts/SetWindowsWorkerUncPaths.py` -- sole writer | `StorageRootResolutions.(StorageRootId, WorkerName, Platform='windows', AbsolutePath=<UNC string>, IsActive=TRUE)` | `path-storage.flow.md::S1` `Resolve()` reads these rows for every I/O | `SELECT AbsolutePath FROM StorageRootResolutions WHERE WorkerName=<host>` -- one row per share (T, M, Z) with `\\<server>\<share>\` form |
+| S6 | hot-swap stale-cache risk | scp + Stop-Process + clear `__pycache__` | All MediaVortex-spawned `python.exe` PIDs killed; matching `*.pyc` removed | Next Start-ScheduledTask spawns fresh processes loading new bytecode | `(Get-Process python* \| Where CommandLine -like '*MediaVortex*').Count` -> 0 after Stop, then > 0 after Start |
 
 Expected timing on a host with a built venv and reachable network: full sequence completes in **~2-4 minutes**. Worker registration appears in the DB within **~10s** of triggering the task; first job claim within **~60s** of registration if the queue is non-empty.
 

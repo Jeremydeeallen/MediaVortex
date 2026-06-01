@@ -28,6 +28,15 @@ For any `MediaFile`:
 3. Audio that is in a codec MP4 cannot stream-copy (DTS, TrueHD, FLAC, PCM, Vorbis, Opus) is routed through the **same one-shot pass** as un-normalized AAC. The pass decodes audio, applies loudnorm, and re-encodes to a MP4-compat codec (`BuildAudioCodecArgs` already lands these on EAC3 with channel-aware bitrate). Post-flight `AudioComplete=true` -- subsequent encodes stream-copy the now-MP4-compat audio. These files are **not** suspect; they are just on the codec-conversion path.
 4. Audio that is missing entirely (zero audio streams on a video file) is flagged `AudioCorruptSuspect=true, AudioCorruptReason='no_audio_stream'`. Suspect is reserved for this case (and the rare undecodable exotic codec). It is intentionally a small population -- "Suspect ≠ Inconvenient."
 
+## Stage Overview
+
+| ID | Stage | Trigger |
+|---|---|---|
+| ST1 | PROBE COMPLETE -- entering the state machine | `MediaProbeBusinessService._ExecuteProbe` writes audio columns |
+| ST2 | CASCADE DECIDES -- branch on audio shape (no audio / below floor / needs norm / already done) | `MarkAudioComplete` post-flight + `BackfillAudioComplete` script |
+| ST3 | ONE-SHOT NORMALIZE -- run loudnorm + optional codec convert | First subsequent transcode or remux for files with `AudioComplete=false` |
+| ST4 | STREAM-COPY STEADY STATE -- `-c:a copy` on every subsequent pass | Command builders consult `AudioComplete=TRUE` |
+
 ## States and transitions
 
 ```
@@ -82,6 +91,15 @@ For any `MediaFile`:
   KNOWN-ISSUES / SELECT and decides remediation
   (re-import, audio-track repair, manual MarkComplete).
 ```
+
+## Seams
+
+| ID | Transition | Producer (writer) | Wire shape | Consumer (reader) expects | Verification |
+|---|---|---|---|---|---|
+| S1 | `ST1 -> ST2` (probe -> cascade) | `MediaProbeBusinessService._ExecuteProbe` | `MediaFiles.(AudioCodec TEXT, AudioBitrateKbps INT, AudioChannelCount INT, AudioLanguages TEXT)` populated | `QueueManagementBusinessService._EvaluateCompliance` reads these to decide eligible/below-floor/etc | Post-probe SQL: `SELECT AudioCodec, AudioBitrateKbps, AudioChannelCount FROM MediaFiles WHERE Id=<id>` -- all three non-NULL for any non-error probe |
+| S2 | `ST2 -> ST3` (cascade -> normalize) | Cascade decision (no DB row written -- decision lives in `BuildAudioCodecArgs` + command builder) | `MediaFiles.AudioComplete=FALSE` (or NULL) + audio not in MP4-compat set OR loudness mismatch | `Models.CommandBuilder.BuildCommand` / `BuildRemuxCommand` emit `loudnorm` filter chain | Inspect `TranscodeAttempts.FFpmpegCommand ILIKE '%loudnorm%'` for the next attempt of the file |
+| S3 | `ST3 -> ST4` (normalize -> steady-state) | `FileReplacementBusinessService` post-flight calls `AudioCompletionService.MarkAudioComplete` | `MediaFiles.AudioComplete=TRUE, AudioCompletedAt=NOW()` | All future command-builder invocations see `AudioComplete=TRUE` and emit `-c:a copy` | `SELECT AudioComplete, AudioCompletedAt FROM MediaFiles WHERE Id=<id>` -- TRUE + non-NULL timestamp after the next successful replacement carrying a loudnorm command |
+| S4 | `ST4 -> done` (steady-state -> no further normalize) | Command builders read `AudioComplete=TRUE` | `ffmpeg ... -c:a copy ...` (bit-identical audio passthrough) | Operator manual override via `POST /api/AudioCompletion/Reset` flips back to FALSE for a deliberate re-run | `SELECT COUNT(*) FROM TranscodeAttempts WHERE MediaFileId=<id> AND FFpmpegCommand ILIKE '%loudnorm%' AND CompletedDate > AudioCompletedAt` -> 0 |
 
 ## Failure modes
 

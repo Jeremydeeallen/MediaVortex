@@ -15,15 +15,23 @@ The classifier is the only writer of `AssignedProfile` with `AssignedProfileSour
 
 ## Pipeline
 
-| Stage | File | What It Does |
-|---|---|---|
-| 1. Probe + signal chain completes | `MediaProbeBusinessService._ExecuteProbe` | MediaFile row has populated probe metadata + (optionally) ContentSignals columns + PriorityScore. |
-| 2. Sticky-override gate | `ContentClassifierService.ClassifyAndAssign(Id)` | If `MediaFile.AssignedProfile IS NOT NULL`, classifier returns the existing value and does NOT write. Operator intent wins permanently. |
-| 3. Load rules fresh | `ContentClassifierRepository.GetActiveRules()` | `SELECT * FROM ContentClassificationRules WHERE IsActive=TRUE ORDER BY Priority ASC`. Fresh per call -- no caching. |
-| 4. Walk rules, first match wins | service-internal | For each rule in priority-ascending order: evaluate all non-NULL matchers; if ALL match the MediaFile row, this rule wins. If no rule matches, emit WARNING and leave AssignedProfile NULL. |
-| 5. Apply special sentinels | service-internal | `AssignProfileName='__skip__'` triggers the codec-skip path: write `AssignedProfile=NULL, AssignedProfileSource='classifier_skip_av1'`. Other sentinels reserved for future use. |
-| 6. Persist | `ContentClassifierRepository.WriteAssignment(Id, ProfileName, 'classifier')` | `UPDATE MediaFiles SET AssignedProfile=%s, AssignedProfileSource='classifier' WHERE Id=%s AND AssignedProfile IS NULL`. The `AND AssignedProfile IS NULL` guard prevents racing with a concurrent operator write. |
-| 7. Log | `LoggingService.LogInfo` | `"ContentClassifier: matched rule '<RuleName>' -> profile '<ProfileName>' for MediaFileId N"`. One line per assignment. |
+| ID | Stage | File | What It Does |
+|---|---|---|---|
+| ST1 | Probe + signal chain completes | `MediaProbeBusinessService._ExecuteProbe` | MediaFile row has populated probe metadata + (optionally) ContentSignals columns + PriorityScore. |
+| ST2 | Sticky-override gate | `ContentClassifierService.ClassifyAndAssign(Id)` | If `MediaFile.AssignedProfile IS NOT NULL`, classifier returns the existing value and does NOT write. Operator intent wins permanently. |
+| ST3 | Load rules fresh | `ContentClassifierRepository.GetActiveRules()` | `SELECT * FROM ContentClassificationRules WHERE IsActive=TRUE ORDER BY Priority ASC`. Fresh per call -- no caching. |
+| ST4 | Walk rules, first match wins | service-internal | For each rule in priority-ascending order: evaluate all non-NULL matchers; if ALL match the MediaFile row, this rule wins. If no rule matches, emit WARNING and leave AssignedProfile NULL. |
+| ST5 | Apply special sentinels | service-internal | `AssignProfileName='__skip__'` triggers the codec-skip path: write `AssignedProfile=NULL, AssignedProfileSource='classifier_skip_av1'`. Other sentinels reserved for future use. |
+| ST6 | Persist | `ContentClassifierRepository.WriteAssignment(Id, ProfileName, 'classifier')` | `UPDATE MediaFiles SET AssignedProfile=%s, AssignedProfileSource='classifier' WHERE Id=%s AND AssignedProfile IS NULL`. The `AND AssignedProfile IS NULL` guard prevents racing with a concurrent operator write. |
+| ST7 | Log | `LoggingService.LogInfo` | `"ContentClassifier: matched rule '<RuleName>' -> profile '<ProfileName>' for MediaFileId N"`. One line per assignment. |
+
+## Seams
+
+| ID | Transition | Producer (writer) | Wire shape | Consumer (reader) expects | Verification |
+|---|---|---|---|---|---|
+| S1 | `ST1 -> ST2` (probe completes -> classifier inputs ready) | `MediaProbeBusinessService._ExecuteProbe` (transcode.flow.md::ST2) + `ContentSignals` flow | `MediaFiles.(Codec, Resolution, VideoBitrateKbps, MotionFraction, SceneChangeRatePerMin, LumaVariance)` populated, plus `MediaFiles.AssignedProfile IS NULL` (sticky guard) | `ContentClassifierService.ClassifyAndAssign(Id)` reads the row | `SELECT COUNT(*) FROM MediaFiles WHERE AssignedProfile IS NULL AND Codec IS NOT NULL` -- non-zero before classifier runs, decremented after |
+| S2 | `ST3 -> ST4` (rules loaded -> matched) | Operator INSERT/UPDATE on `ContentClassificationRules` (no MediaVortex writer) | `ContentClassificationRules.(Priority INT UNIQUE, IsActive BOOLEAN, BitrateKbpsMin/Max, ResolutionCategory, CodecIn, MotionFractionMin/Max, SceneChangeRateMin/Max, LumaVarianceMin/Max, FolderPathPattern, AssignProfileName TEXT NOT NULL)` | Classifier iterates rule rows in priority order | `\d ContentClassificationRules` shows the schema; `SELECT COUNT(*) WHERE IsActive=TRUE` > 0 |
+| S3 | `ST6 -> downstream` (classifier write -> queue admission) | `ContentClassifierRepository.WriteAssignment` | `MediaFiles.(AssignedProfile TEXT, AssignedProfileSource TEXT)` -- single UPDATE statement | `QueueManagementBusinessService._EvaluateCompliance` reads `AssignedProfile`; emits cascade decision | `SELECT AssignedProfileSource, COUNT(*) FROM MediaFiles GROUP BY AssignedProfileSource` -- 'classifier' bucket non-zero after first probe pass |
 
 ## Failure Modes
 

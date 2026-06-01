@@ -164,6 +164,59 @@ function Get-DirectiveFiles {
     return $Files
 }
 
+function Get-R18Overrides {
+    if (-not (Test-Path $DirectiveFile)) { return @() }
+    $Text = Get-Content $DirectiveFile -Raw
+    $M = [regex]::Match($Text, '(?ms)###\s*R18\s+overrides\s*\r?\n(.*?)(?=\r?\n###\s|\r?\n##\s|\r?\n---|\Z)')
+    if (-not $M.Success) { return @() }
+    $Out = @()
+    foreach ($Line in ($M.Groups[1].Value -split "`n")) {
+        $T = $Line.Trim().TrimStart('-','*',' ','`t')
+        if (-not $T) { continue }
+        $Cell = ($T -split '\s+--\s+|\s+#\s+|\s+:\s+',2)[0].Trim()
+        if ($Cell) { $Out += ($Cell -replace '\\','/').ToLower() }
+    }
+    return $Out
+}
+
+function Test-R1FlowStubSatisfied {
+    param($PostContent, $FilePath, $ReadFiles)
+    # Returns $true when the code carries a `# see <flow-slug>.ST<N>` anchor,
+    # the named *.flow.md exists somewhere in the repo, and a Read covers the ST<N> line.
+    # In that case the colocated *.feature.md preread is waived (R1 criterion 6 extension).
+    if (-not $ReadFiles -or -not ($ReadFiles -is [hashtable]) -or $ReadFiles.Count -eq 0) { return $false }
+    $Anchors = @()
+    foreach ($M in [regex]::Matches($PostContent, '#\s*see\s+([a-z0-9-]+)\.(ST\d+)')) {
+        $Anchors += @{ slug = $M.Groups[1].Value.ToLower(); id = $M.Groups[2].Value }
+    }
+    if ($Anchors.Count -eq 0) { return $false }
+    $FlowDocs = Get-ChildItem -Path $RepoRoot -Filter '*.flow.md' -Recurse -File -ErrorAction SilentlyContinue
+    foreach ($A in $Anchors) {
+        foreach ($FD in $FlowDocs) {
+            $DocLower = $FD.FullName.ToLower()
+            if (-not $ReadFiles.ContainsKey($DocLower)) { continue }
+            $DocLines = $null
+            try { $DocLines = Get-Content $FD.FullName -Encoding UTF8 } catch { continue }
+            $Slug = $null
+            for ($I = 0; $I -lt [Math]::Min(15, $DocLines.Length); $I++) {
+                if ($DocLines[$I] -match '^\*\*Slug:\*\*\s*(\S+)') { $Slug = $Matches[1].ToLower(); break }
+            }
+            if ($Slug -ne $A.slug) { continue }
+            $SectionLine = 0
+            for ($I = 0; $I -lt $DocLines.Length; $I++) {
+                if ($DocLines[$I] -match "\b$([regex]::Escape($A.id))\b") { $SectionLine = $I + 1; break }
+            }
+            if ($SectionLine -eq 0) { continue }
+            foreach ($R in $ReadFiles[$DocLower]) {
+                $Start = if ($R.offset -gt 0) { $R.offset } else { 1 }
+                $End = if ($R.limit -gt 0) { $Start + $R.limit - 1 } else { $DocLines.Length }
+                if ($SectionLine -ge $Start -and $SectionLine -le $End) { return $true }
+            }
+        }
+    }
+    return $false
+}
+
 function Get-ReadFilesFromTranscript {
     param([string]$TranscriptPath)
     # Returns hashtable: { path_lowercase => array of @{ offset = int; limit = int } }.
@@ -198,10 +251,18 @@ function Synthesize-PostEditContent {
         $Old = $ToolInput.old_string
         $New = $ToolInput.new_string
         if ($ToolInput.replace_all) {
-            return $Current.Replace($Old, $New)
+            $Result = $Current.Replace($Old, $New)
+            if ($Result -ne $Current) { return $Result }
+            return $Current.Replace($Old.Replace("`r`n","`n"), $New).Replace($Old.Replace("`n","`r`n"), $New)
         } else {
             $Idx = $Current.IndexOf($Old)
-            if ($Idx -lt 0) { return $Current }
+            if ($Idx -lt 0) {
+                $CurNorm = $Current -replace "`r`n","`n"
+                $OldNorm = $Old -replace "`r`n","`n"
+                $Idx2 = $CurNorm.IndexOf($OldNorm)
+                if ($Idx2 -lt 0) { return $Current }
+                return $CurNorm.Substring(0, $Idx2) + $New + $CurNorm.Substring($Idx2 + $OldNorm.Length)
+            }
             return $Current.Substring(0, $Idx) + $New + $Current.Substring($Idx + $Old.Length)
         }
     }
@@ -211,7 +272,14 @@ function Synthesize-PostEditContent {
             if ($E.replace_all) { $Buf = $Buf.Replace($E.old_string, $E.new_string) }
             else {
                 $Idx = $Buf.IndexOf($E.old_string)
-                if ($Idx -ge 0) { $Buf = $Buf.Substring(0, $Idx) + $E.new_string + $Buf.Substring($Idx + $E.old_string.Length) }
+                if ($Idx -lt 0) {
+                    $BufNorm = $Buf -replace "`r`n","`n"
+                    $OldNorm = $E.old_string -replace "`r`n","`n"
+                    $Idx2 = $BufNorm.IndexOf($OldNorm)
+                    if ($Idx2 -ge 0) { $Buf = $BufNorm.Substring(0, $Idx2) + $E.new_string + $BufNorm.Substring($Idx2 + $OldNorm.Length) }
+                } else {
+                    $Buf = $Buf.Substring(0, $Idx) + $E.new_string + $Buf.Substring($Idx + $E.old_string.Length)
+                }
             }
         }
         return $Buf
@@ -359,6 +427,10 @@ function Test-R1-DocPreread {
     param($PostContent, $FilePath, $ReadFiles, $AllContent)
     # $ReadFiles is a hashtable from Get-ReadFilesFromTranscript: { path_lower => array of @{offset, limit} }.
     if ($FilePath -notmatch '\.(py|js|html|sql)$') { return $null }
+    # Flow-stub satisfaction (R1 extension per flow-docs-as-hub criterion 6):
+    # if the code carries `# see <flow-slug>.ST<N>` and the named *.flow.md has been Read
+    # covering the ST<N> section, colocated *.feature.md preread is waived.
+    if (Test-R1FlowStubSatisfied $PostContent $FilePath $ReadFiles) { return $null }
     $FileDir = Split-Path $FilePath -Parent
     if (-not $FileDir -or -not (Test-Path $FileDir)) { return $null }
     $Docs = @()
@@ -419,6 +491,36 @@ function Test-R1-DocPreread {
         }
     }
     return $null
+}
+
+function Test-R18-DocReadBudget {
+    param($ToolInput)
+    # Refuse Read calls on *.feature.md without a small limit (forces partial reads; full reads burn cache).
+    # Override: add a line under '### R18 overrides' in directive.md naming the path.
+    $FilePath = $ToolInput.file_path
+    if (-not $FilePath) { return $null }
+    if ($FilePath -notmatch '(?i)\.feature\.md$') { return $null }
+    $Limit = $null
+    if ($ToolInput.PSObject.Properties['limit']) {
+        try { $Limit = [int]$ToolInput.limit } catch { $Limit = $null }
+    }
+    if ($Limit -ne $null -and $Limit -gt 0 -and $Limit -le 50) { return $null }
+    $NormFP = ($FilePath -replace '\\','/').ToLower()
+    foreach ($O in (Get-R18Overrides)) {
+        if ($NormFP.EndsWith($O) -or $O.EndsWith($NormFP) -or $NormFP -like "*$O*") {
+            $Entry = @{
+                ts = (Get-Date -Format "yyyy-MM-ddTHH:mm:ssZ")
+                rule = 'R18'
+                file = $FilePath
+                line = 0
+                reason = "override matched directive R18 overrides line"
+            } | ConvertTo-Json -Compress
+            Add-Content -Path $OverrideLog -Value $Entry -Encoding UTF8
+            return $null
+        }
+    }
+    $LimitDisplay = if ($Limit -eq $null) { 'missing' } else { "$Limit" }
+    return "R18 Doc read budget: Read($FilePath) has limit=$LimitDisplay (>50). Full reads of *.feature.md burn prompt cache. Path forward: use Read($FilePath, limit=50) (or smaller) and pass offset to walk the doc; navigate via colocated *.flow.md anchors when stage-scoped context is enough. Override: add a one-line entry under '### R18 overrides' in .claude/directive.md naming this path, then retry."
 }
 
 function Test-R16-FeatureSlug {
@@ -715,6 +817,11 @@ $ToolName = $HookInput.tool_name
 $ToolInput = $HookInput.tool_input
 $TranscriptPath = $HookInput.transcript_path
 
+if ($ToolName -eq 'Read') {
+    $R18Refusal = Test-R18-DocReadBudget $ToolInput
+    if ($R18Refusal) { Emit-DenyWithRepeatDetection $R18Refusal $ToolInput.file_path }
+    Emit-Allow
+}
 if ($ToolName -notin @('Write','Edit','MultiEdit')) { Emit-Allow }
 if (-not $ToolInput.file_path) { Emit-Allow }
 

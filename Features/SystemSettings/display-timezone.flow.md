@@ -14,7 +14,7 @@ boundary, one fallback path.
 DB (UTC) -> Flask serialization -> JSON over HTTP -> JS parses Date -> formatTime() -> user sees TZ-local
 ```
 
-## Stage 1: Storage
+## ST1 -- Stage 1: Storage
 
 - All datetime columns in PostgreSQL hold UTC values.
 - Cluster `timezone = Etc/UTC` (verified by `SHOW timezone;`).
@@ -25,7 +25,7 @@ DB (UTC) -> Flask serialization -> JSON over HTTP -> JS parses Date -> formatTim
   matches; on non-UTC hosts it does not. Step 6 of the feature replaces these
   with `datetime.now(timezone.utc)` to make the source unambiguous.
 
-## Stage 2: Server-side serialization
+## ST2 -- Stage 2: Server-side serialization
 
 - `Core/Web/UtcJsonProvider.UtcJsonProvider` (subclass of Flask's
   `DefaultJSONProvider`) intercepts every datetime in any `jsonify(...)` call.
@@ -36,7 +36,7 @@ DB (UTC) -> Flask serialization -> JSON over HTTP -> JS parses Date -> formatTim
 - Wired in once during Flask app construction (`WebService/Main.py`). No
   endpoint code needs to know about timezones.
 
-## Stage 3: Template-render path (server-rendered HTML)
+## ST3 -- Stage 3: Template-render path (server-rendered HTML)
 
 - The Flask app registers a `context_processor` that loads
   `SystemSettings.DisplayTimezone` from the DB once per process and caches it
@@ -51,7 +51,7 @@ DB (UTC) -> Flask serialization -> JSON over HTTP -> JS parses Date -> formatTim
   data-fmt="...">UTC fallback</span>` element. The text content is the UTC
   fallback shown if JS fails to load.
 
-## Stage 4: Client-side JS
+## ST4 -- Stage 4: Client-side JS
 
 - `static/js/timezone.js` is loaded after the existing JS bundle in `Base.html`.
 - On `DOMContentLoaded`, `applyTimezoneSweep()` finds every `.js-tz` element,
@@ -62,7 +62,7 @@ DB (UTC) -> Flask serialization -> JSON over HTTP -> JS parses Date -> formatTim
 - Format presets: `full`, `datetime`, `date`, `time`, `short`, `relative`.
   Unknown format names fall back to `full`.
 
-## Stage 5: Dynamic content (AJAX-built rows)
+## ST5 -- Stage 5: Dynamic content (AJAX-built rows)
 
 - JS that builds tables/rows from JSON responses calls `formatTime(utcIso, fmt)`
   directly:
@@ -75,7 +75,7 @@ DB (UTC) -> Flask serialization -> JSON over HTTP -> JS parses Date -> formatTim
   computes against the browser's current time (UTC under the hood) and falls
   back to absolute date for ages older than 30 days.
 
-## Stage 6 (extension): Server-side date bucketing -- SQL aggregations
+## ST6 -- Stage 6 (extension): Server-side date bucketing -- SQL aggregations
 
 Endpoints that return rows bucketed by day, hour, or any time period must
 do the bucketing in the user's configured display timezone, not in UTC.
@@ -104,7 +104,7 @@ server-bucketing and the axis-label rendering agree.
 Audit at 2026-05-08 found exactly one endpoint of this kind:
 `Features/TeamStatus/TeamStatusController.py:193` `GetSavingsByDay`.
 
-## Stage 7 (extension): Date-input filter inputs
+## ST7 -- Stage 7 (extension): Date-input filter inputs
 
 `<input type="datetime-local">` reads a wall-clock value with no timezone.
 When the user picks "2026-05-08 09:00" in their Chicago browser, the value
@@ -121,7 +121,17 @@ function localToUtcIso(localValue, tz) {
 
 (Helper to be added in `static/js/timezone.js` -- see audit feature doc.)
 
-## Stage 8: Configuration changes
+## ST8 -- Stage 8: Configuration changes
+
+## Seams
+
+| ID | Transition | Producer (writer) | Wire shape | Consumer (reader) expects | Verification |
+|---|---|---|---|---|---|
+| S1 | `ST1 -> ST2` (DB -> serializer) | Any code writing `TIMESTAMP WITHOUT TIME ZONE` columns; convention requires UTC values | Naive UTC datetime | `Core/Web/UtcJsonProvider` reinterprets naive as UTC | `SHOW timezone;` -> `Etc/UTC`; any sampled `NOW()` matches `\timing` server clock |
+| S2 | `ST2 -> ST3/ST4` (server -> browser) | `UtcJsonProvider.dumps()` | ISO-8601 with trailing `Z` (e.g. `2026-05-08T22:11:19.123456Z`) | JS `new Date(s)` parses as UTC instant | Open any JSON-returning endpoint in DevTools; every `datetime` field ends in `Z` |
+| S3 | `ST3 -> ST4` (template -> sweep) | Templates emit `<span class="js-tz" data-utc="..." data-fmt="...">UTC fallback</span>` | DOM element with `data-utc` attribute | `static/js/timezone.js::applyTimezoneSweep()` rewrites `textContent` in `window.MV_TIMEZONE` | DevTools: element's title attribute holds the UTC ISO, textContent shows TZ-local |
+| S4 | `ST6` SQL bucketing | Endpoint reads `SystemSettings.DisplayTimezone` and passes to SQL | `DATE(col AT TIME ZONE 'UTC' AT TIME ZONE %s)` | Chart on client uses same TZ for axis labels via `formatTime` | Pick a record at 23:30 local time, observe chart bucket = local day (not UTC day) |
+| S5 | `ST8 -> session` (config change) | `POST /api/SystemSettings/DisplayTimezone` writes row + bumps cache | `SystemSettings.(Key='DisplayTimezone', Value=<IANA name>)` | `WebServiceApp._CachedDisplayTimezone` read once per process; needs WebService restart to pick up | After restart: `SELECT Value FROM SystemSettings WHERE Key='DisplayTimezone'` matches `window.MV_TIMEZONE` in browser console |
 
 - Operator hits `POST /api/SystemSettings/DisplayTimezone {"Value": "..."}` or
   edits the value via the new Display Timezone card on `/settings` (commit

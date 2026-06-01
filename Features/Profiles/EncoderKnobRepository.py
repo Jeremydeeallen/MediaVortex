@@ -7,7 +7,7 @@ from Core.Logging.LoggingService import LoggingService
 
 @dataclass
 # directive: nvenc-rate-anchored-remediation
-class EncoderKnobs:
+class EncoderKnobs:  # see transcode.ST6
     """Every column CommandBuilder reads to emit an ffmpeg command. Read fresh per call."""
 
     ProfileId: int

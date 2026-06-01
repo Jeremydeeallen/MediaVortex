@@ -38,13 +38,23 @@ Fix tab is reserved for files where audio is the *only* concern.
 
 ## Stages
 
-| # | Stage | Code path | What changes |
+| ID | Stage | Code path | What changes |
 |---|-------|-----------|---|
-| 1 | Tab render | `TranscodeQueueController.GetTranscodeQueue()` accepts `?mode=Transcode|Remux|AudioFix`; returns rows filtered to that mode plus counts for the other tabs (so the tab badges show pending counts) | -- |
-| 2 | Row selection | Operator clicks rows or "Select All in folder" | client-side selection state |
-| 3 | Reprioritize (Audio Fix tab only) | Operator types/picks a folder name; click "Move to top" | `TranscodeQueue.Priority` updated for matching rows; SmartPopulate hint persisted to a new `AudioFixPriorityHints` table (or ShowSettings extension) so future cascade decisions for that folder land at the top |
-| 4 | Queue execution | WorkerService claims `Status='Pending'` rows in `Priority DESC` order, respecting per-mode concurrency limits | TranscodeQueue.Status -> Running -> deleted on success |
-| 5 | Post-flight | Standard FileReplacement + RecomputeForFiles. Re-probe + re-measure loudness so the row drops out of the tab automatically | MediaFiles.AudioComplete, SourceIntegratedLufs, IsCompliant, RecommendedMode all updated |
+| ST1 | Tab render | `TranscodeQueueController.GetTranscodeQueue()` accepts `?mode=Transcode|Remux|AudioFix`; returns rows filtered to that mode plus counts for the other tabs (so the tab badges show pending counts) | -- |
+| ST2 | Row selection | Operator clicks rows or "Select All in folder" | client-side selection state |
+| ST3 | Reprioritize (Audio Fix tab only) | Operator types/picks a folder name; click "Move to top" | `TranscodeQueue.Priority` updated for matching rows; SmartPopulate hint persisted to a new `AudioFixPriorityHints` table (or ShowSettings extension) so future cascade decisions for that folder land at the top |
+| ST4 | Queue execution | WorkerService claims `Status='Pending'` rows in `Priority DESC` order, respecting per-mode concurrency limits | TranscodeQueue.Status -> Running -> deleted on success |
+| ST5 | Post-flight | Standard FileReplacement + RecomputeForFiles. Re-probe + re-measure loudness so the row drops out of the tab automatically | MediaFiles.AudioComplete, SourceIntegratedLufs, IsCompliant, RecommendedMode all updated |
+
+## Seams
+
+| ID | Transition | Producer (writer) | Wire shape | Consumer (reader) expects | Verification |
+|---|---|---|---|---|---|
+| S1 | `ST1` cascade -> tab | `QueueManagementBusinessService._EvaluateCompliance` (per `transcode-vs-remux-routing.feature.md`) | `MediaFiles.(IsCompliant BOOLEAN, RecommendedMode TEXT IN ('Transcode','Remux','AudioFix',NULL))` | `TranscodeQueueController.GetTranscodeQueue()` filters by mode | `SELECT RecommendedMode, COUNT(*) FROM MediaFiles WHERE TranscodedByMediaVortex IS NOT TRUE GROUP BY 1` matches the tab badge counts |
+| S2 | `ST3` reprioritize | UI POST -> backend `UPDATE TranscodeQueue SET Priority=...` | `TranscodeQueue.(Id, Priority INT)` -- writable mid-flight | Workers re-read Priority on next claim (`transcode.flow.md::S1` ORDER BY Priority DESC) | `SELECT Priority FROM TranscodeQueue WHERE FilePath LIKE '%Westworld%'` reflects the bump |
+| S3 | `ST3` persistent hints | New `AudioFixPriorityHints` table | `AudioFixPriorityHints.(FolderPath TEXT UNIQUE, BoostBy INT, CreatedAt TIMESTAMP)` | SmartPopulate / cascade ranking consult on future inserts | `\d AudioFixPriorityHints` shows the schema after migration |
+| S4 | `ST4 -> transcode.S1` (claim) | Worker | `TranscodeQueue.Status='Pending', ProcessingMode IN ('Transcode','Remux','AudioFix')` | `DatabaseManager.ClaimNextPendingTranscodeJob` reads ProcessingMode + dispatches to `BuildCommand` (Transcode) or `BuildRemuxCommand` (Remux/AudioFix) | `SELECT FFpmpegCommand FROM TranscodeAttempts WHERE Id=<id>` shape matches the mode (no `-c:v <encoder>` for Remux/AudioFix; `-c:a copy` for Remux when AudioComplete=TRUE) |
+| S5 | `ST5` post-flight `RecomputeForFiles` | `FileReplacementBusinessService` calls `QueueManagementBusinessService.RecomputeForFiles([id])` | `MediaFiles.(IsCompliant, RecommendedMode, AudioComplete, AudioCompletedAt, LoudnessMeasuredAt)` all refreshed | Tab badge counts decrement on next refresh | After the row completes, `SELECT RecommendedMode FROM MediaFiles WHERE Id=<id>` -> NULL |
 
 ## Cascade -> Tab mapping
 

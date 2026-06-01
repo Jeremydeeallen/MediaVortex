@@ -7,14 +7,16 @@ Entry point: `StartMediaVortex.py` (all services) or individual service scripts.
 ## Stage Overview
 
 ```
-SCAN -> PROBE -> ASSIGN -> PRIORITY -> QUEUE -> TRANSCODE -> QUALITY -> REPLACE
- (1)     (2)      (3)       (3.5)      (4)       (5)          (6)       (7)
+SCAN -> PROBE -> ASSIGN -> RECOMPUTE -> QUEUE -> TRANSCODE -> DISPOSITION -> VMAF -> ACTION
+ ST1     ST2      ST3        ST4         ST5       ST6          ST7         ST8     ST9
 ```
 
-Stages 1-4 require user action. Stages 5-7 are automatic once WorkerService is running:
-- QUEUE -> TRANSCODE: automatic (service polls for Pending items)
-- TRANSCODE -> QUALITY or REPLACE: ShouldQualityTestService.ProcessTranscodedFile is the bridge. It checks QualityTestRequired on the TranscodeAttempt: when False, skips directly to FileReplacement; when True, queues a quality test. If quality testing is paused, it also skips directly to replacement.
-- QUALITY -> REPLACE: automatic if VMAF is within threshold range (default 80-100)
+ST<N> stage IDs are stable; never renumbered (`.claude/rules/flow-docs.md`). The detailed stage headings below carry both the historical "Stage N" label and the ST<N> ID so existing references in feature docs ("Stage 6", "Stage 3.5") still resolve. New code anchors use `# see transcode.ST<N>`.
+
+Stages ST1-ST5 require user action. Stages ST6-ST9 are automatic once WorkerService is running:
+- QUEUE -> TRANSCODE (ST5 -> ST6): automatic (service polls for Pending items)
+- TRANSCODE -> DISPOSITION -> VMAF or ACTION (ST6 -> ST7 -> ST8 or ST9): `ShouldQualityTestService.ProcessTranscodedFile` is the bridge. It checks QualityTestRequired on the TranscodeAttempt: when False, skips directly to FileReplacement (ST9); when True, queues a quality test (ST8). If quality testing is paused, it also skips directly to ST9.
+- VMAF -> ACTION (ST8 -> ST9): automatic if VMAF is within threshold range (default 80-100)
 
 **Service dependency model:** Both services communicate exclusively via PostgreSQL. No HTTP calls between them. Each polls the database for its own work. FileReplacement is a library (not a service) that runs in whatever process calls it -- WorkerService when QualityTest=OFF, WorkerService's quality test loop when QualityTest=ON, WebService for manual replacement.
 
@@ -24,16 +26,17 @@ Stages 1-4 require user action. Stages 5-7 are automatic once WorkerService is r
 
 Stage-transition data contracts. See `Features/TranscodeJob/TranscodeJob.feature.md` and `Features/FileReplacement/FileReplacement.feature.md` for intra-feature seams.
 
-| Transition | Producer (writer) | Wire shape | Consumer (reader) expects | Verification |
-|---|---|---|---|---|
-| QUEUE → TRANSCODE (4→5) | `QueueManagementBusinessService` | `TranscodeQueue.(Id BIGINT, StorageRootId BIGINT, RelativePath TEXT, AssignedProfile TEXT, ProcessingMode TEXT, AcceptsInterlaced BOOLEAN) Status='Pending'` | `DatabaseManager.ClaimNextPendingTranscodeJob` — atomic claim via `FOR UPDATE OF tq SKIP LOCKED`; NVENC profiles additionally require `Workers.nvenccapable=TRUE` | `SELECT COUNT(*) FROM TranscodeQueue WHERE Status='Pending'` decrements by 1 per claim |
-| TRANSCODE → VMAF or REPLACE (5→6 or 5→7) | `ProcessTranscodeQueueService` (on encode success) | `TranscodeAttempts.(Id BIGINT, Success=NULL, QualityTestRequired BOOLEAN)` + `TemporaryFilePaths.(TranscodeAttemptId, OriginalPath TEXT, LocalOutputPath TEXT, OutputStorageRootId BIGINT, OutputRelativePath TEXT)` in canonical DB form. In-place output: `LocalOutputPath` ends in `-mv.mp4.inprogress` adjacent to source on shared mount | `ShouldQualityTest.ProcessTranscodedFile(AttemptId)` reads `QualityTestRequired`; dispatches to `QualityTestQueueService.AddToQualityTestQueue` or `FileReplacementBusinessService.ProcessFileReplacement` | `SELECT COUNT(*) FROM TemporaryFilePaths WHERE TranscodeAttemptId IN (SELECT Id FROM TranscodeAttempts WHERE Success IS NULL)` → in-flight count |
-| VMAF → REPLACE (6→7) | `QualityTestingBusinessService` | `TranscodeAttempts.vmaf DOUBLE PRECISION NOT NULL, QualityTestCompleted=TRUE`; `ForceDisposition TEXT NULL` (operator override) | `PostTranscodeDispositionService._DecideFromInputs` — Replace when `VMAF >= 80.0` and `ForceDisposition IS NULL`; operator `ForceDisposition` bypasses the threshold | `SELECT COUNT(*) FROM TranscodeAttempts WHERE QualityTestCompleted=TRUE AND VMAF IS NULL` → 0 |
-| REPLACE → done (7→end) | `FileReplacementBusinessService._ProcessCompleteFileReplacement` | `MediaFiles.(FilePath, Codec, Resolution, SizeMB, TranscodedByMediaVortex=TRUE, etc.)` updated; `MediaFilesArchive` row written; `TranscodeAttempts.FileReplaced=TRUE`; `TemporaryFilePaths` row deleted | `MediaFiles` is the authoritative post-replacement record; `MediaFilesArchive` has the pre-replacement snapshot | `SELECT COUNT(*) FROM TemporaryFilePaths tfp JOIN TranscodeAttempts ta ON ta.Id = tfp.TranscodeAttemptId WHERE ta.FileReplaced=TRUE` → 0 (no orphaned TFP after successful replace) |
+| ID | Transition | Producer (writer) | Wire shape | Consumer (reader) expects | Verification |
+|---|---|---|---|---|---|
+| S1 | `ST5 -> ST6` (QUEUE -> TRANSCODE) | `QueueManagementBusinessService` | `TranscodeQueue.(Id BIGINT, StorageRootId BIGINT, RelativePath TEXT, AssignedProfile TEXT, ProcessingMode TEXT, AcceptsInterlaced BOOLEAN) Status='Pending'` | `DatabaseManager.ClaimNextPendingTranscodeJob` -- atomic claim via `FOR UPDATE OF tq SKIP LOCKED`; NVENC profiles additionally require `Workers.nvenccapable=TRUE` | `SELECT COUNT(*) FROM TranscodeQueue WHERE Status='Pending'` decrements by 1 per claim |
+| S2 | `ST6 -> ST7` (TRANSCODE -> DISPOSITION) | `ProcessTranscodeQueueService` (on encode success) | `TranscodeAttempts.(Id BIGINT, Success=NULL, QualityTestRequired BOOLEAN)` + `TemporaryFilePaths.(TranscodeAttemptId, OriginalPath TEXT, LocalOutputPath TEXT, OutputStorageRootId BIGINT, OutputRelativePath TEXT)` in canonical DB form. In-place output: `LocalOutputPath` ends in `-mv.mp4.inprogress` adjacent to source on shared mount | `ShouldQualityTest.ProcessTranscodedFile(AttemptId)` reads `QualityTestRequired`; dispatches to `QualityTestQueueService.AddToQualityTestQueue` (ST8) or `FileReplacementBusinessService.ProcessFileReplacement` (ST9) | `SELECT COUNT(*) FROM TemporaryFilePaths WHERE TranscodeAttemptId IN (SELECT Id FROM TranscodeAttempts WHERE Success IS NULL)` -> in-flight count |
+| S3 | `ST7 -> ST8` (DISPOSITION -> VMAF) | `ShouldQualityTestService` when `QualityTestRequired=TRUE` | `QualityTestingQueue.(Id BIGINT, TranscodeAttemptId BIGINT) Status='Pending'`; `TranscodeAttempts.ForceDisposition IS NULL` | `DatabaseManager.ClaimQualityTestJob` -- atomic claim; `QualityTestingBusinessService.ExecuteVMAF` reads source+output paths from `TemporaryFilePaths` | `SELECT COUNT(*) FROM QualityTestingQueue WHERE Status='Pending'` decrements by 1 per claim |
+| S4 | `ST8 -> ST9` (VMAF -> ACTION) | `QualityTestingBusinessService` | `TranscodeAttempts.vmaf DOUBLE PRECISION NOT NULL, QualityTestCompleted=TRUE`; `ForceDisposition TEXT NULL` (operator override) | `PostTranscodeDispositionService._DecideFromInputs` -- Replace when `VMAF >= 80.0` and `ForceDisposition IS NULL`; operator `ForceDisposition` bypasses the threshold | `SELECT COUNT(*) FROM TranscodeAttempts WHERE QualityTestCompleted=TRUE AND VMAF IS NULL` -> 0 |
+| S5 | `ST9 -> done` (ACTION -> end) | `FileReplacementBusinessService._ProcessCompleteFileReplacement` | `MediaFiles.(FilePath, Codec, Resolution, SizeMB, TranscodedByMediaVortex=TRUE, etc.)` updated; `MediaFilesArchive` row written; `TranscodeAttempts.FileReplaced=TRUE`; `TemporaryFilePaths` row deleted | `MediaFiles` is the authoritative post-replacement record; `MediaFilesArchive` has the pre-replacement snapshot | `SELECT COUNT(*) FROM TemporaryFilePaths tfp JOIN TranscodeAttempts ta ON ta.Id = tfp.TranscodeAttemptId WHERE ta.FileReplaced=TRUE` -> 0 (no orphaned TFP after successful replace) |
 
 ---
 
-## Stage 1: SCAN -- File Discovery
+## Stage 1: SCAN -- File Discovery (`ST1`)
 
 **Trigger:** User clicks scan or calls `POST /api/Scan/Start`
 
@@ -52,7 +55,7 @@ Stage-transition data contracts. See `Features/TranscodeJob/TranscodeJob.feature
 
 ---
 
-## Stage 2: PROBE -- FFprobe Metadata Extraction
+## Stage 2: PROBE -- FFprobe Metadata Extraction (`ST2`)
 
 **Trigger:** Two paths:
 1. **Automatic after scan** -- `FileScanningBusinessService.PerformScan()` Step 7 calls `MediaProbeService.ProbeFilesNeedingMetadata(RootFolderId)` at the end of every scan. This is the primary path -- every scanned file is probed in the same operation.
@@ -75,7 +78,7 @@ Stage-transition data contracts. See `Features/TranscodeJob/TranscodeJob.feature
 
 ---
 
-## Stage 3: ASSIGN -- Profile Assignment
+## Stage 3: ASSIGN -- Profile Assignment (`ST3`)
 
 **Trigger:** User assigns profiles in UI
 
@@ -90,7 +93,7 @@ Stage-transition data contracts. See `Features/TranscodeJob/TranscodeJob.feature
 
 ---
 
-## Stage 3.5: RECOMPUTE -- Priority, Compliance, and Routing Materialization
+## Stage 3.5: RECOMPUTE -- Priority, Compliance, and Routing Materialization (`ST4`)
 
 **What it computes:** A single function (`RecomputeForFiles`) updates four cached columns on `MediaFiles` in one pass per row:
 
@@ -143,7 +146,7 @@ See `Features/TranscodeQueue/priority-materialization.feature.md` and `Features/
 
 ---
 
-## Stage 4: QUEUE -- TranscodeQueue Population
+## Stage 4: QUEUE -- TranscodeQueue Population (`ST5`)
 
 **Trigger:** Multiple paths to queue files:
 
@@ -221,7 +224,7 @@ Rationale: ordering by raw size (the legacy behavior) put already-efficient AV1 
 
 ---
 
-## Stage 5: TRANSCODE -- FFmpeg Job Execution
+## Stage 5: TRANSCODE -- FFmpeg Job Execution (`ST6`)
 
 **Trigger:** WorkerService running with TranscodeEnabled=TRUE (started via `StartMediaVortex.py` or per-worker Online status)
 
@@ -279,7 +282,7 @@ Rationale: ordering by raw size (the legacy behavior) put already-efficient AV1 
 
 ---
 
-## Stage 6: DISPOSITION -- Post-Transcode Decision
+## Stage 6: DISPOSITION -- Post-Transcode Decision (`ST7`)
 
 **Trigger:** Worker calls `DecidePostTranscodeDisposition(TranscodeAttemptId)` immediately after a successful transcode (TranscodeAttempt.Success=true). Single function, single call site, single return.
 
@@ -347,7 +350,7 @@ ORDER BY DispositionDecidedAt DESC;
 
 ---
 
-## Stage 7: VMAF -- Quality Test Execution (when Disposition='Pending' on first decision)
+## Stage 7: VMAF -- Quality Test Execution (when Disposition='Pending' on first decision) (`ST8`)
 
 **Trigger:** Stage 6 enqueued a row to `QualityTestingQueue` with `Status='Pending'`. Two consumers can resolve the row:
 
@@ -378,7 +381,7 @@ ORDER BY DispositionDecidedAt DESC;
 
 ---
 
-## Stage 8: ACTION -- Execute the Disposition
+## Stage 8: ACTION -- Execute the Disposition (`ST9`)
 
 **Trigger:** Disposition committed (anything other than `Pending`).
 

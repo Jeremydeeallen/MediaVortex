@@ -25,6 +25,8 @@ Criteria pass the five litmus tests (`.claude/rules/feature-criteria.md`): renam
 
 Code anchors: `# see <slug>.<ID>` (e.g. `# see transcode-queue.S2`). Enables R1 partial-read awareness -- a Read of just the anchor's section satisfies the doc-preread requirement.
 
+**Entry-point precedence (pipeline vs. non-pipeline).** For pipeline-shaped code -- code participating in a multi-stage data flow -- the colocated `*.flow.md` is the primary navigation entry (`.claude/rules/flow-docs.md`). The `*.feature.md` documents the contract; the flow doc indexes the seams. For non-pipeline UI surfaces (Settings, ClipBuilder, SQLQueries, /Activity), the `*.feature.md` remains the direct entry. Use the flow-stub `# see <flow-slug>.ST<N>` anchor in pipeline-shaped code so R1 accepts the partial Read of the flow doc and waives colocated `*.feature.md` preread.
+
 ## Workflows table shape
 
 | #  | User action | Surface element | Handler | Backing class.method |

@@ -19,7 +19,7 @@ Override any single check with `# allow: <reason>` within 3 lines of the offendi
 
 | ID | Description | Source | Hook function |
 |---|---|---|---|
-| R1 | Edit/Write to code requires prior Read of any same-directory `*.feature.md` / `*.flow.md`. Same-directory only -- no walk-up | `.claude/rules/ceo-mode.md` (Documents first) | `Test-R1-DocPreread` |
+| R1 | Edit/Write to code requires prior Read of any same-directory `*.feature.md` / `*.flow.md`. Same-directory only -- no walk-up. **Flow-stub extension:** when the code carries `# see <flow-slug>.ST<N>`, a partial Read of the named `*.flow.md` covering ST<N> satisfies R1 instead -- the colocated `*.feature.md` preread is waived | `.claude/rules/ceo-mode.md` (Documents first) + `.claude/rules/flow-docs.md` (nav hub) | `Test-R1-DocPreread` + `Test-R1FlowStubSatisfied` |
 | R2 | Seed scripts (`Scripts/SQLScripts/Add*.py`): INSERT numeric literals require `# from: <path>` citation; cited path must exist and contain the literal | `.claude/rules/db-is-authority.md` + directive doc criteria 11-12 from prior nvenc-rate-anchored work | `Test-R2-SeedEvidence` |
 | R3 | No `self._cached_*` / `self._*_settings` / `self._config_snapshot` in `__init__` of Services / Repositories | `.claude/rules/db-is-authority.md` | `Test-R3-NoCachedSettings` |
 | R4 | No `os.environ.get(` / `os.getenv(` outside `Core/Database/DatabaseService.py`, `StartMediaVortex.py`, `StopMediaVortex.py`, `WebService/Main.py` bootstrap, worker `Main.py` bootstrap | `.claude/rules/db-is-authority.md` (data-driven) | `Test-R4-NoEnvVars` |
@@ -35,6 +35,7 @@ Override any single check with `# allow: <reason>` within 3 lines of the offendi
 | R14 | Edits to existing `*.feature.md` / `*.flow.md` cannot add annotation lines (`removed YYYY-MM-DD` / `deprecated` / `no longer used` / `previously` / `formerly`). Delete sections instead | This file + `.claude/rules/ceo-mode.md` | `Test-R14-AnnotationDrift` |
 | R15 | Edits to functions/classes in the directive doc's `## Files` section require `# directive: <slug>` line directly above the `def` / `class` | This file | `Test-R15-DirectiveAnchor` |
 | R16 | Every `*.feature.md` / `*.flow.md` Edit/Write produces a file with `**Slug:** <slug>` in the first 15 lines | `.claude/rules/feature-docs.md` + `.claude/rules/flow-docs.md` + `.claude/rules/doc-layering.md` | `Test-R16-FeatureSlug` |
+| R18 | Read tool gate: `Read(*.feature.md)` requires `limit<=50`. Full reads burn prompt cache. Override: add a line under `### R18 overrides` in `.claude/directive.md` naming the path | `.claude/rules/flow-docs.md` (nav hub) + `.claude/rules/doc-layering.md` (cache discipline) | `Test-R18-DocReadBudget` |
 
 ## What is NOT gated
 

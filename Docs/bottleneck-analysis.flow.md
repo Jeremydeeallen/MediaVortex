@@ -9,10 +9,10 @@ Operator observes lower-than-expected throughput (FPS, jobs/hour, or wall-clock 
 ## Stage Overview
 
 ```
-1. MEASURE   -- Collect baseline: current FPS, job duration, file size, worker concurrency
-2. CLASSIFY  -- Determine bottleneck category: CPU, Network I/O, Disk I/O, or Memory
-3. VALIDATE  -- Confirm with targeted test (single-variable change)
-4. REMEDIATE -- Apply fix and re-measure
+ST1: MEASURE   -- Collect baseline: current FPS, job duration, file size, worker concurrency
+ST2: CLASSIFY  -- Determine bottleneck category: CPU, Network I/O, Disk I/O, or Memory
+ST3: VALIDATE  -- Confirm with targeted test (single-variable change)
+ST4: REMEDIATE -- Apply fix and re-measure
 ```
 
 ## Bottleneck Categories
@@ -24,7 +24,7 @@ Operator observes lower-than-expected throughput (FPS, jobs/hour, or wall-clock 
 | **Disk I/O** | Same as network I/O but on local storage; queue depth high | Disk queue length > 2; high iowait (Linux) or disk latency > 10ms |
 | **Memory** | OOM kills or swap usage during quality testing (VMAF reads entire file into memory) | Available memory near zero during peak concurrency |
 
-## Stage 1: MEASURE -- Baseline Collection
+## ST1 -- MEASURE -- Baseline Collection
 
 ### Data sources already available
 
@@ -63,7 +63,7 @@ ORDER BY ta.WorkerName;
 - **SMB latency**: `Get-SmbConnection` / `Get-SmbMultichannelConnection` (Windows)
 - **Disk latency**: `Get-PhysicalDisk | Get-StorageReliabilityCounter` (Windows), `iostat -x` (Linux)
 
-## Stage 2: CLASSIFY -- Decision Tree
+## ST2 -- CLASSIFY -- Decision Tree
 
 ```
 Is the source file on a network share (SMB/NFS)?
@@ -145,7 +145,7 @@ iostat -x 1 5  # watch %util and await columns
 - OOM-killer logs: `dmesg | grep -i oom` (Linux containers)
 - `MaxConcurrentQualityTestJobs` vs available RAM per worker
 
-## Stage 3: VALIDATE -- Confirm with Single-Variable Test
+## ST3 -- VALIDATE -- Confirm with Single-Variable Test
 
 Change only one variable and re-measure:
 
@@ -156,7 +156,22 @@ Change only one variable and re-measure:
 | Disk I/O | Move scratch to SSD/NVMe, re-run same job |
 | Memory | Lower quality test concurrency to 1, confirm no OOM |
 
-## Stage 4: REMEDIATE
+## ST4 -- REMEDIATE
+
+## Seams
+
+This is a read-only diagnostic flow -- no writes to durable state. The "seam" rows enumerate the data sources read at each stage so a change to producer schemas is visible here.
+
+| ID | Transition | Producer (writer) | Wire shape | Consumer (reader) expects | Verification |
+|---|---|---|---|---|---|
+| S1 | `ST1` reads `TranscodeAttempts` | `ProcessTranscodeQueueService` (in `transcode.ST6`) | `TranscodeAttempts.(WorkerName TEXT NOT NULL, TranscodeDurationSeconds INT, OldSizeBytes BIGINT, NewSizeBytes BIGINT, CompletedDate TIMESTAMP, Success BOOLEAN)` | Per-worker throughput SQL (Stage 1 baseline query) | Stage-1 SQL returns a non-empty result set for any 7-day window with completed transcodes |
+| S2 | `ST1` reads `TranscodeProgress` | `ProcessTranscodeQueueService` heartbeat | `TranscodeProgress.(TranscodeAttemptId, CurrentFPS, AverageFPS, LastUpdate TIMESTAMP)` | Operator sees real-time FPS via /Activity | Manual probe: pick an active job, confirm CurrentFPS is non-NULL |
+| S3 | `ST2` reads `Workers` | `WorkerService` registration + capability poller | `Workers.(WorkerName, MaxConcurrentTranscodeJobs, MaxConcurrentRemuxJobs, MaxConcurrentQualityTestJobs)` | Concurrency reasoning at Stage 2 | `\d Workers` shows all three columns; both polling loops apply them per `WorkerService.flow.md::ST11` |
+| S4 | `ST4 -> done` (remediation closes the loop) | Operator action (no MediaVortex write) | External (NIC config, disk swap, concurrency UPDATE) | Re-run of S1 query confirms improvement | Compare Stage 1 baseline query result before and after remediation |
+| S5 | `ST1` reads `SystemMonitoringService` | `SystemMonitoringService` (psutil daemon on WebService host only) | `/api/SystemResources` returns `{cpu_percent, memory_percent, disk_io, cpu_temperature_per_core}` -- WebService process scope, not per-worker | Operator interprets as CPU-bound vs memory-bound. **Non-obvious limitation:** these numbers are the WebService host (I9-2024 by default), NOT the remote Linux workers. Bottleneck classification for larry/wakko/dot workers requires SSH-collected metrics per Stage 2 (`Get-NetAdapter` / `ethtool`). Confusing this scope -> mis-classifying a remote worker's bottleneck against I9's psutil numbers | `curl /api/SystemResources` from any worker host returns the WebService host's psutil values, not the target worker's |
+| S6 | `ST3` validation requires capability-flag mutation | `Features/ServiceControl/capability-control-plane.flow.md::ST3` consumer pattern | Operator UPDATEs `Workers.MaxConcurrentTranscodeJobs` mid-flight; capability poller picks up next cycle (default 15s) | Confirming a CPU-bound hypothesis (Stage 2B) by lowering concurrency to 1 is a LIVE production change, not a sandbox test | After test: restore prior concurrency value. **Non-obvious risk:** forgetting to restore leaves the worker single-threaded indefinitely (no auto-revert). Per `feedback_coordinate_live_worker_writes.md`, coordinate with the operator before mutation |
+| S7 | `ST3` baseline-vs-validation comparison | `TranscodeAttempts` (S1 producer) | Same wire shape as S1; relies on a "post-change" window of completed attempts | A validation test needs at least one full transcode after the change to populate `TranscodeDurationSeconds`. For long files (4K SVT-AV1) the window is hours, not minutes | Time the test against typical job duration before declaring validated; `SELECT CompletedDate FROM TranscodeAttempts WHERE WorkerName=<x> ORDER BY 1 DESC LIMIT 1` must be AFTER the change timestamp |
+
 
 | Bottleneck | Remediation options |
 |------------|-------------------|
