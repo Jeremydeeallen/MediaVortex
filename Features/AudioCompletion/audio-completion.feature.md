@@ -1,4 +1,6 @@
-# Audio Completion -- one-shot normalize, then forever stream-copy
+﻿# Audio Completion -- one-shot normalize, then forever stream-copy
+
+**Slug:** audio-completion
 
 ## What It Does
 

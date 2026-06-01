@@ -1,4 +1,6 @@
-# Display Timezone
+﻿# Display Timezone
+
+**Slug:** display-timezone
 
 ## What It Does
 

@@ -1,7 +1,8 @@
 # Current Directive
 
 **Set:** YYYY-MM-DD
-**Status:** Active
+**Status:** Active -- phase: NEEDS_STANDARDS_REVIEW
+**Slug:** <slug>
 **Replaces:** `directives/closed/<previous-slug>.md` (closed Success | Partial | Abandoned)
 
 ## Outcome
@@ -34,40 +35,79 @@ One paragraph describing the operator-observable end state. What is true after t
 
 ## Status
 
-Active YYYY-MM-DD -- next step.
+Active YYYY-MM-DD -- phase: NEEDS_STANDARDS_REVIEW -- next step.
+
+Phases advance by editing this Status line: `**Status:** Active -- phase: <NEXT>`. The PreToolUse hook reads this line to gate tool calls. See `.claude/standards/index.md` for the phase machine.
+
+### Files
+
+```
+path/to/file1.py    -- EDIT: one-line reason
+path/to/file2.py    -- CREATE: one-line reason
+```
+
+### Promotions
+
+Required when phase advances to DELIVERING. The hook refuses Status `Active -- phase: DELIVERING` -> `Closed` if this section is empty.
+
+Each row promotes durable content out of this directive into its permanent home (feature/flow doc). On close, the archive keeps only the pointer table -- the design content lives in the target file.
+
+| Source artifact | Target file | Commit |
+|---|---|---|
+| `<what content / decision>` | `<path/to/target.feature.md or .flow.md>` | `<sha or "TBD until close">` |
+
+If a row's content is "new vertical entirely" or "new pipeline entirely," the Target is a NEW `*.feature.md` / `*.flow.md` -- R13 allows creation during DELIVERING for exactly this case (`.claude/rules/doc-layering.md`).
+
+If a directive has no durable content to promote (e.g. pure bugfix, no contract change), list one row: `no promotions | n/a | <reason>`. The hook only checks the section is non-empty.
+
+### Verification
+
+Required when phase advances to VERIFYING. One entry per acceptance criterion. Concrete evidence (command output, SQL result, file path) -- not "tested it works."
+
+- **Criterion 1:** `<evidence>`
+- **Criterion 2:** `<evidence>`
+
+### Decisions Made
+
+Engineering calls made under ambiguity during execution. These live with the directive (not with features/flows) because they describe THIS directive's reasoning, not the vertical's contract.
+
+- `<decision + one-line rationale>`
 
 ---
 
-## Closure (fill in when transitioning to closed)
+## Closure (thin-pointer archive shape)
 
-Closure is gated on the doc supersession sweep. Do not close without completing it.
+When this directive is ready to close:
 
-### 1. Doc supersession sweep (required)
+1. **Confirm Promotions table is complete.** Every piece of durable content from this directive has a row pointing at its permanent home. The hook will refuse the close otherwise.
+2. **Confirm directive did not grow during DELIVERING.** The hook recorded a size snapshot at IMPLEMENTING -> DELIVERING transition; the close is refused if the directive grew by more than the configured tolerance (default 10%). Growth during DELIVERING means content was DUPLICATED into the directive rather than PROMOTED out -- fix by moving the content to its target file and shrinking the directive.
+3. **Update Promotions table with commit SHAs** (the commits where each promotion landed).
+4. **Change `Status: Active -- phase: DELIVERING` -> `Status: Closed -- Success | Partial | Abandoned`.** Add a `**Closed:** YYYY-MM-DD` line under Set.
+5. **Archive:**
 
-For every doc the directive changed behavior in, walk it through the three-state decision:
+   ```powershell
+   git mv .claude/directive.md .claude/directives/closed/YYYY-MM-DD-<slug>.md
+   Copy-Item .claude/directives/_template.md .claude/directive.md
+   ```
 
-| State | Action |
+   The renamed file becomes the archived record; `git log --follow` traces it.
+
+The archived directive holds these sections only:
+
+| Section | Content |
 |---|---|
-| Doc describes behavior the directive CHANGED | Update in place. Stale text = future cost. |
-| Doc describes a feature the directive SUPERSEDED in part | Add a `> **Superseded in part by `<new-doc-path>`** (YYYY-MM-DD): <one-line what changed>` block at the top. Keep the original as historical record; readers see what's no longer true. |
-| Doc describes something now fully REMOVED | Delete the file after `grep -r '<old-doc-basename>'` returns zero matches outside the file itself. |
+| Outcome | (restated; what was true at the start of the ask) |
+| Acceptance Criteria | (restated; the contract that gated success) |
+| Promotions | (the pointer table -- source artifacts and where they live now) |
+| Verification | (per-criterion evidence) |
+| Decisions Made | (engineering calls made under ambiguity) |
 
-Concrete sweep commands (adjust to the directive's blast radius):
-```bash
-# Find docs that mention the feature areas this directive touched
-grep -rln "<keyword>" --include="*.feature.md" --include="*.flow.md" --include="*.md"
-# For each hit: classify (update | mark superseded | delete) and act.
-```
+The archive does NOT hold:
 
-Record the sweep outcome in the directive's Status block (which docs were updated, marked superseded, or deleted). This is the audit trail.
+- Design content that lives in a feature/flow doc (read the target file instead -- this is the whole point of promotion)
+- In-flight planning notes or transient operational state (these served their purpose during execution; they don't belong in the historical record)
+- Re-derivations of standards or rules (those live in `.claude/rules/`)
 
-### 2. Mark closed + archive
+If a future reader wants to know what a vertical does, they read its feature doc. If they want to know why a directive made the choices it made, they read the archived directive's Decisions Made and Verification sections. If they want to know what was promoted, they follow the pointers in the Promotions table.
 
-Change `Status: Active` -> `Status: Closed -- Success | Partial | Abandoned`. Add a `**Closed:** YYYY-MM-DD` line under Set. Then:
-
-```bash
-git mv .claude/directive.md .claude/directives/closed/YYYY-MM-DD-<slug>.md
-cp .claude/directives/_template.md .claude/directive.md
-```
-
-Edit the new `.claude/directive.md` with the next directive. The renamed file becomes the archived record; `git log --follow` traces it.
+This shape is governed by `.claude/rules/doc-layering.md` (the three-tier model) and `.claude/rules/ceo-mode.md` (the directive lifecycle).

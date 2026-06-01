@@ -1,78 +1,41 @@
 # Doc Layering
 
-Three documentation tiers. Non-overlapping roles. Each tier owns a distinct kind of content and a distinct lifetime. Lower rule docs (`ceo-mode.md`, `feature-docs.md`, `flow-docs.md`) reference this one instead of re-deriving the boundaries.
+Three documentation tiers. Non-overlapping roles. Each tier owns a distinct kind of content and a distinct lifetime.
 
 ## The three tiers
 
 | Tier | File | Lifetime | Owns | Seam scope |
 |---|---|---|---|---|
-| Directive | `.claude/directive.md` (active) -> `.claude/directives/closed/YYYY-MM-DD-<slug>.md` (archived) | Transient -- opens, runs, archives | The current CEO ask: outcome, acceptance criteria, plan, in-flight state, verification evidence, engineering decisions | Enumerated in the Status block before IMPLEMENTING (per `.claude/rules/seam-verification.md`); promoted to feature/flow docs at DELIVERING |
-| Feature | `*.feature.md` colocated with primary code | Durable -- one per vertical, lives as long as the vertical does | What a vertical DOES + its operator-visible Workflows + its intra-feature seams | Intra-feature (function-call, helper, vertical-to-external-service) -- per `.claude/rules/feature-docs.md` |
-| Flow | `*.flow.md` colocated with pipeline entry point | Durable -- one per pipeline, lives as long as the pipeline does | What the pipeline DOES + stage-by-stage detail + cross-stage seams | Cross-stage (the data crossing each stage transition in the pipeline) -- per `.claude/rules/flow-docs.md` |
+| Directive | `.claude/directive.md` -> `.claude/directives/closed/YYYY-MM-DD-<slug>.md` | Transient | The current CEO ask: outcome, criteria, plan, in-flight state, verification, decisions | Enumerated before IMPLEMENTING; promoted to feature/flow docs at DELIVERING |
+| Feature | `*.feature.md` colocated with code | Durable | What a vertical DOES + Workflows + intra-feature seams | Intra-feature: function-call, helper, vertical-to-external-service |
+| Flow | `*.flow.md` colocated with pipeline entry | Durable | What the pipeline DOES + stages + cross-stage seams | Cross-stage: data crossing each stage transition |
 
-The three tiers do not overlap. A piece of content lives in exactly one tier at any time:
+Content has exactly one tier-appropriate home at any time. The directive is the ASK, not the contract. Features and flows are the CONTRACTS.
 
-- "We are about to do X" -> directive (transient ask)
-- "This vertical does X, and you call it via these workflows, and these are its seams" -> feature doc (durable contract)
-- "This pipeline runs stages A -> B -> C, and these are the wire-shape contracts between them" -> flow doc (durable contract)
+## Required at directive close (mechanically enforced)
 
-## Why three tiers
+The hook refuses `Active -- phase: DELIVERING` -> `Closed` unless:
 
-The split exists because the content has three different lifetimes:
+1. `### Promotions` section in the directive is non-empty. Each row: `<source artifact in directive> -> <target *.feature.md / *.flow.md>`. New feature/flow files allowed at DELIVERING (R13 relaxes here for promotion).
+2. Directive size <= 110% of snapshot taken at IMPLEMENTING -> DELIVERING transition. Growth means content was duplicated into the directive rather than promoted out.
 
-- **Directives** are short-lived. They open with an ask, close with a delivery, and archive. Re-reading old directives tells you WHY code was changed at a point in time.
-- **Feature docs** are long-lived. The vertical they describe persists across many directives. Re-reading a feature doc tells you WHAT a vertical does today.
-- **Flow docs** are long-lived but shaped differently. They describe the pipeline -- the rails the verticals plug into. Re-reading a flow doc tells you HOW data crosses the system today.
+R14 refuses annotation lines (`removed YYYY-MM-DD` / `deprecated` / `no longer used`) in feature/flow docs. Delete obsolete sections instead.
 
-Without the layering, content collapses into whichever tier is most convenient at the moment -- typically the directive (because it's open and being edited) -- and the durable contracts decay. The "documentation lives only in the directive doc" rule from `ceo-mode.md` is correct DURING a directive; the missing half is what happens at the close, and that's what the Promotions section in the directive template enforces.
+## Cache discipline (token-cost invariant)
 
-## Lifecycle: directive -> features/flows (promotion)
+Always-loaded content (`.claude/rules/*.md`, `CLAUDE.md`, `MEMORY.md`, the active directive doc) is prompt-cache sensitive. Every byte counts per session, every change invalidates cache. Discipline:
 
-During a directive, design content accretes in the directive doc. At DELIVERING, durable content is PROMOTED to its permanent home:
-
-| Source content in directive | Target home | Rationale |
-|---|---|---|
-| Seam enumeration that named cross-stage contracts | The relevant `*.flow.md`'s `## Seams` section | Cross-stage seams are flow-scope; flow doc is the durable home |
-| Seam enumeration that named intra-feature contracts | The relevant `*.feature.md`'s `## Seams` section | Intra-feature seams are feature-scope |
-| New operator-facing capability | The relevant `*.feature.md`'s `## Workflows` row | Workflows table is the operator-visible capability contract |
-| New vertical entirely | A NEW `*.feature.md` (allowed at DELIVERING by R13) | New vertical needs a permanent home; created at DELIVERING because the shape is now known |
-| New pipeline or major stage addition | A NEW `*.flow.md` (allowed at DELIVERING by R13) OR new stage rows in an existing flow doc | Same as above |
-| Engineering decision made under directive ambiguity | Decisions-Made section of the archived directive | Decisions are about THIS directive's ask; they don't belong to a vertical |
-| Operational rationale for THIS directive's choices | Stays in the archived directive | It is the historical record of the ask |
-
-The PreToolUse hook gates this: closing a directive (Status `Active -- phase: DELIVERING` -> `Closed`) requires a non-empty `## Promotions` section listing the source -> target rows. Without promotion, content rots in the archive and the durable docs drift.
-
-## Lifecycle: feature/flow content removal (deletion, not annotation)
-
-When a directive removes a capability described in an existing `*.feature.md` / `*.flow.md`, R14 refuses annotation lines like `removed YYYY-MM-DD` / `deprecated` / `no longer used`. The obsolete section is deleted entirely. Rationale: the directive's archive carries the reason for removal, so the doc itself has no remaining job for the deleted section. Two homes for "why this was removed" creates drift.
-
-## Archived directive shape (thin pointer)
-
-A closed directive is a historical record, not a duplicate home for durable content. After promotion, the archive holds:
-
-1. **Outcome** (restated)
-2. **Criteria** (restated, with verification result per criterion)
-3. **Promotions** (table of source -> target file -- the pointer set)
-4. **Verification** (per-criterion evidence)
-5. **Decisions-Made** (engineering calls made under ambiguity)
-
-The archive does NOT hold design content that lives in a feature/flow doc. If a future reader wants to know what the vertical does, they read the feature doc. If they want to know why the directive made the choices it made, they read the archive.
-
-This shape is enforced by the directive template (`.claude/directives/_template.md`) and gated by the hook (anti-drift size check: the directive must not grow during DELIVERING -- growth means content was duplicated rather than promoted).
-
-## Common mistakes
-
-- Writing a new `*.feature.md` mid-directive to "establish the vertical early" -- R13 refuses this outside DELIVERING. Reason: premature feature docs become aspirational and drift from the still-moving directive shape.
-- Closing a directive without a `## Promotions` section -- the close is refused. Reason: without promotion, durable content stays buried in the archive and the feature/flow docs drift.
-- Adding a `removed YYYY-MM-DD` annotation to a feature doc -- R14 refuses. Reason: annotations duplicate the directive's reason-for-removal; delete the obsolete section instead.
-- Documenting a cross-stage seam in a `*.feature.md` -- belongs in the relevant `*.flow.md` per the seam-scope split. Reason: cross-stage seams describe pipeline contracts, which are flow-scope.
-- Documenting an intra-feature seam in a `*.flow.md` -- belongs in the relevant `*.feature.md`. Reason: function-call seams to helpers are feature-scope.
-- Treating the directive doc as a feature doc ("this directive describes how the X vertical works") -- the directive is the ASK, not the contract. The contract goes in the feature doc at promotion.
+- New rules land in `.claude/rules-details/` first. They graduate to `.claude/rules/` only when proven invariant.
+- Invariant files are tight (target < 1500 bytes each). Detailed prose, examples, common-mistakes, and prescriptive how-to live in the colocated `.claude/rules-details/<name>.md`.
+- Hook output is deterministic (no timestamps in stable text, stable row order in `standards/index.md`, no cosmetic churn).
+- Refactor that doesn't change meaning is forbidden in always-loaded files.
 
 ## Cross-references
 
-- `.claude/rules/ceo-mode.md` -- Documents-first discipline, R13 / R14 enforcement, phase machine, Promotions gate
-- `.claude/rules/feature-docs.md` -- feature doc shape, Workflows section, intra-feature Seams section
-- `.claude/rules/flow-docs.md` -- flow doc shape, cross-stage Seams section
-- `.claude/rules/seam-verification.md` -- seam enumeration discipline (which feeds the Promotions table at directive close)
-- `.claude/standards/index.md` -- mechanically gated rules R13 (no-premature-docs) + R14 (no-annotation-drift) + DELIVERING phase gate
+- `ceo-mode.md` -- directive lifecycle, R13 / R14, phase machine
+- `feature-docs.md` -- feature doc shape, Workflows, intra-feature Seams, Slug + IDs
+- `flow-docs.md` -- flow doc shape, cross-stage Seams, Slug + IDs
+- `seam-verification.md` -- seam enumeration discipline
+- `standards/index.md` -- R13, R14, R16, DELIVERING gate
+
+**Details, common mistakes, examples:** see `.claude/rules-details/doc-layering.md`.

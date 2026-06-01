@@ -1,4 +1,6 @@
-# Feature: Transcoded Output Placement (side-by-side + `-mv` suffix)
+﻿# Feature: Transcoded Output Placement (side-by-side + `-mv` suffix)
+
+**Slug:** transcoded-output-placement
 
 ## What It Does
 

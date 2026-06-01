@@ -1,4 +1,6 @@
-# Flow: File Scanning
+﻿# Flow: File Scanning
+
+**Slug:** filescanning
 
 ## Entry Point
 

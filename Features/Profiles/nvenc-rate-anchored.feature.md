@@ -1,4 +1,6 @@
-# NVENC AV1 Rate-Anchored Mode + Anime Profile
+﻿# NVENC AV1 Rate-Anchored Mode + Anime Profile
+
+**Slug:** nvenc-rate-anchored
 
 ## Reference canary command (operator-validated, verbatim)
 

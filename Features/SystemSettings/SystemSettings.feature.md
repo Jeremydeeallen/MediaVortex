@@ -1,4 +1,6 @@
-# System Settings
+﻿# System Settings
+
+**Slug:** systemsettings
 
 ## What It Does
 

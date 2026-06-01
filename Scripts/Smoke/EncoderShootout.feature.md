@@ -1,4 +1,6 @@
-# Encoder Shootout Harness
+﻿# Encoder Shootout Harness
+
+**Slug:** encodershootout
 
 ## What It Does
 

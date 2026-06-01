@@ -1,4 +1,6 @@
-# Worker Status Model -- Online / Paused / Draining + heartbeat liveness
+﻿# Worker Status Model -- Online / Paused / Draining + heartbeat liveness
+
+**Slug:** worker-status-model
 
 ## Summary
 

@@ -1,4 +1,6 @@
-# Feature: Manual Override Replace (force-replace a Requeue'd attempt with statistics)
+﻿# Feature: Manual Override Replace (force-replace a Requeue'd attempt with statistics)
+
+**Slug:** manual-override-replace
 
 ## What It Does
 

@@ -1,4 +1,6 @@
-# TranscodeJob Feature
+﻿# TranscodeJob Feature
+
+**Slug:** transcodejob
 
 Executes FFmpeg transcode jobs from the queue, tracks progress, and handles results.
 

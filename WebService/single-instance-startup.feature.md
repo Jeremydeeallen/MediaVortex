@@ -1,4 +1,6 @@
-# Single-Instance WebService Startup
+﻿# Single-Instance WebService Startup
+
+**Slug:** single-instance-startup
 
 ## What It Does
 

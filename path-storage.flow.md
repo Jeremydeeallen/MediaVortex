@@ -1,4 +1,6 @@
-# Flow: Path Resolution at I/O Time
+﻿# Flow: Path Resolution at I/O Time
+
+**Slug:** path-storage
 
 How any worker turns a stored `(StorageRootId, RelativePath)` pair into a worker-local absolute path immediately before file-system I/O. This is the single canonical resolution path used by every transcode, VMAF, file-replacement, and probe operation in the system after the Phase 4 read-switch.
 

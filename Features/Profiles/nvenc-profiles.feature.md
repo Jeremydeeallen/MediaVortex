@@ -1,4 +1,6 @@
-# NVENC AV1 Production Profiles
+﻿# NVENC AV1 Production Profiles
+
+**Slug:** nvenc-profiles
 
 ## What It Does
 

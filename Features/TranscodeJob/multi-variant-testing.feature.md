@@ -1,4 +1,6 @@
-# Feature: Multi-Variant Transcode Testing
+﻿# Feature: Multi-Variant Transcode Testing
+
+**Slug:** multi-variant-testing
 
 ## What It Does
 

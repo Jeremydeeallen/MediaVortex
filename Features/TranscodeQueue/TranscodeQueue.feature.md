@@ -1,4 +1,6 @@
-# Transcode Queue
+﻿# Transcode Queue
+
+**Slug:** transcodequeue
 
 ## What It Does
 

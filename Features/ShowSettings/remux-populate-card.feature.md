@@ -1,4 +1,6 @@
-# Remux Populate Card -- sibling card on /ShowSettings for the Remux queue
+﻿# Remux Populate Card -- sibling card on /ShowSettings for the Remux queue
+
+**Slug:** remux-populate-card
 
 ## What It Does
 

@@ -1,4 +1,6 @@
-# Queue Priority -- impact-based scoring with manual override window
+﻿# Queue Priority -- impact-based scoring with manual override window
+
+**Slug:** queue-priority
 
 ## What It Does
 

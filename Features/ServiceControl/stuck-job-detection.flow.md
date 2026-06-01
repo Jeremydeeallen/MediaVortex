@@ -1,4 +1,6 @@
-# Flow: Stuck Job Detection
+﻿# Flow: Stuck Job Detection
+
+**Slug:** stuck-job-detection
 
 ## Entry Point
 

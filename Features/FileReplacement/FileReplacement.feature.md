@@ -1,4 +1,6 @@
-# File Replacement
+﻿# File Replacement
+
+**Slug:** filereplacement
 
 ## What It Does
 

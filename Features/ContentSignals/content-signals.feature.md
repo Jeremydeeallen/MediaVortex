@@ -1,4 +1,6 @@
-# Content Signals -- Probe-Time Content Characterization
+﻿# Content Signals -- Probe-Time Content Characterization
+
+**Slug:** content-signals
 
 ## What It Does
 

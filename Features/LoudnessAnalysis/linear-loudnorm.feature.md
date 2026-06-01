@@ -1,4 +1,6 @@
-# Linear Loudnorm -- measure once, apply as fixed gain, never silently degrade
+﻿# Linear Loudnorm -- measure once, apply as fixed gain, never silently degrade
+
+**Slug:** linear-loudnorm
 
 ## Interrupts: scan-drives
 

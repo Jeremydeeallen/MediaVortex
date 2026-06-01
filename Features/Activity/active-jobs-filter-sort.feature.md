@@ -1,4 +1,6 @@
-# Active Jobs Table -- Filter and Sort
+﻿# Active Jobs Table -- Filter and Sort
+
+**Slug:** active-jobs-filter-sort
 
 ## What It Does
 

@@ -1,4 +1,6 @@
-# Jellyfin Optimization
+﻿# Jellyfin Optimization
+
+**Slug:** optimization
 
 ## What It Does
 

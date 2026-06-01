@@ -1,4 +1,6 @@
-# Priority Materialization -- denormalized PriorityScore on MediaFiles
+﻿# Priority Materialization -- denormalized PriorityScore on MediaFiles
+
+**Slug:** priority-materialization
 
 ## What It Does
 

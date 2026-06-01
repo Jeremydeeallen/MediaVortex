@@ -1,4 +1,6 @@
-# Graceful Drain on Shutdown + Deploy
+﻿# Graceful Drain on Shutdown + Deploy
+
+**Slug:** graceful-drain
 
 ## What It Does
 

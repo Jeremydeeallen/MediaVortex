@@ -1,4 +1,6 @@
-# Activity Dashboard -- worker visibility, lifecycle, and active-job summary fixes
+﻿# Activity Dashboard -- worker visibility, lifecycle, and active-job summary fixes
+
+**Slug:** activity-dashboard-improvements
 
 ## What It Does
 

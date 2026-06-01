@@ -1,4 +1,6 @@
-# Feature: Windows Worker UNC Path Translation
+﻿# Feature: Windows Worker UNC Path Translation
+
+**Slug:** windows-unc-path-translation
 
 ## What It Does
 

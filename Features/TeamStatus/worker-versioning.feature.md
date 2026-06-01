@@ -1,4 +1,6 @@
-# Worker Versioning -- know what code each worker is running
+﻿# Worker Versioning -- know what code each worker is running
+
+**Slug:** worker-versioning
 
 > **Superseded in part by `deploy/version-on-deploy.feature.md`** (2026-05-27):
 > - Tier 2 of the resolver (`git rev-parse HEAD` in the worker process) removed; the worker now reads only `<repo>/VERSION` and returns `"unknown"` if missing. Criterion 4 below describes the original 3-tier shape; current behavior is 2-state (file or unknown).

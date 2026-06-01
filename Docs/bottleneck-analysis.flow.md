@@ -1,4 +1,6 @@
-# Bottleneck Analysis Flow -- per-worker diagnostic process
+﻿# Bottleneck Analysis Flow -- per-worker diagnostic process
+
+**Slug:** bottleneck-analysis
 
 ## Entry Point
 

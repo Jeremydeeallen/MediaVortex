@@ -1,4 +1,6 @@
-# Ad-hoc Drive Scans
+﻿# Ad-hoc Drive Scans
+
+**Slug:** ad-hoc-drive-scans
 
 ## Interrupts: media-tabs-and-loudness
 

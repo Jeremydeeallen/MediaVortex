@@ -1,4 +1,6 @@
-# Feature: OS-Independent Path Storage (canonical `(RootId, RelativePath)`)
+﻿# Feature: OS-Independent Path Storage (canonical `(RootId, RelativePath)`)
+
+**Slug:** path-storage
 
 ## What It Does
 

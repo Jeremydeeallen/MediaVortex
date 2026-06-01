@@ -1,4 +1,6 @@
-# Media Page Feature
+﻿# Media Page Feature
+
+**Slug:** showsettings
 
 ## Purpose
 

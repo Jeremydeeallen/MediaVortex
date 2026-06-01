@@ -1,4 +1,6 @@
-# Stats Page Flow
+﻿# Stats Page Flow
+
+**Slug:** teamstatus
 
 Entry point: `GET /Stats` (renders `Templates/Status.html`)
 

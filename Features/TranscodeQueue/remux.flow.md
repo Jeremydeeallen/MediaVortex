@@ -1,4 +1,6 @@
-# Flow: Remux (audio normalize + container fix, no video re-encode)
+﻿# Flow: Remux (audio normalize + container fix, no video re-encode)
+
+**Slug:** remux
 
 ## Entry Point
 

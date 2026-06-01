@@ -1,4 +1,6 @@
-# Repository Split: Feature-Vertical Migration of `DatabaseManager.py`
+﻿# Repository Split: Feature-Vertical Migration of `DatabaseManager.py`
+
+**Slug:** repository-split
 
 ## Status
 

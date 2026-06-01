@@ -1,4 +1,6 @@
-# Post-Transcode Pipeline Consistency
+﻿# Post-Transcode Pipeline Consistency
+
+**Slug:** post-transcode-pipeline
 
 ## What It Does
 

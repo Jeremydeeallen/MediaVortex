@@ -1,4 +1,6 @@
-# Feature: Jellyfin Push Notifications on File Mutations
+﻿# Feature: Jellyfin Push Notifications on File Mutations
+
+**Slug:** jellyfin-push-notify
 
 ## What It Does
 

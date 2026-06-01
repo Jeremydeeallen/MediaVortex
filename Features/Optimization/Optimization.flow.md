@@ -1,4 +1,6 @@
-# Jellyfin Optimization Flow
+﻿# Jellyfin Optimization Flow
+
+**Slug:** optimization
 
 Pipeline that pulls FFmpeg operation logs from a running Jellyfin server over SSH, parses them, persists them to the local DB, and surfaces aggregated stats on `/Optimization`.
 

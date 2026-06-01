@@ -1,4 +1,6 @@
-# Flow: Content Classifier
+﻿# Flow: Content Classifier
+
+**Slug:** content-classifier
 
 ## Entry Point
 

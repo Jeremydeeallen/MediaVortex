@@ -1,4 +1,6 @@
-# QualityTestingQueue Visibility + Operator Override
+﻿# QualityTestingQueue Visibility + Operator Override
+
+**Slug:** qt-queue-visibility-and-override
 
 ## What It Does
 

@@ -1,4 +1,6 @@
-# Flow: Linux Worker Deploy (Docker)
+﻿# Flow: Linux Worker Deploy (Docker)
+
+**Slug:** worker-deploy-linux
 
 Deploys a MediaVortex `WorkerService` container fleet to any Linux host -- LXC (Larry) or bare-metal (Wakko, dot). Same pipeline; per-host differences (hostnames, cpuset) live in `deploy/compose-templates/<name>.yml`. Counterpart to `worker-deploy-windows.flow.md` (Task Scheduler + SMB on Windows).
 

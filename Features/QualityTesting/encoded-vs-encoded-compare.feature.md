@@ -1,4 +1,6 @@
-# Feature: Encoded-vs-Encoded Slider Comparison
+﻿# Feature: Encoded-vs-Encoded Slider Comparison
+
+**Slug:** encoded-vs-encoded-compare
 
 ## What It Does
 

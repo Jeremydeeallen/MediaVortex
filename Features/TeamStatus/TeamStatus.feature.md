@@ -1,4 +1,6 @@
-# Stats Page: Worker-Aware Status
+﻿# Stats Page: Worker-Aware Status
+
+**Slug:** teamstatus
 
 ## What It Does
 

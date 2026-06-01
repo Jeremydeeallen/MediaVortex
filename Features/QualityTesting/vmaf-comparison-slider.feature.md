@@ -1,4 +1,6 @@
-# Feature: VMAF Comparison Slider (operator visual A/B viewer)
+﻿# Feature: VMAF Comparison Slider (operator visual A/B viewer)
+
+**Slug:** vmaf-comparison-slider
 
 ## What It Does
 

@@ -1,4 +1,6 @@
-# Clip Builder
+﻿# Clip Builder
+
+**Slug:** clipbuilder
 
 ## What It Does
 

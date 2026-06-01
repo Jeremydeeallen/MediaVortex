@@ -1,4 +1,6 @@
-# Compliance-Gated Rename
+﻿# Compliance-Gated Rename
+
+**Slug:** compliance-gated-rename
 
 ## Interrupts: pipeline-test-harness
 

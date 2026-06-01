@@ -1,4 +1,6 @@
-# Bottleneck Analysis -- per-worker throughput diagnostics
+﻿# Bottleneck Analysis -- per-worker throughput diagnostics
+
+**Slug:** bottleneck-analysis
 
 ## What It Does
 

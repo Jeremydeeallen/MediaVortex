@@ -1,4 +1,6 @@
-# MediaFile Persistence: No Drift
+﻿# MediaFile Persistence: No Drift
+
+**Slug:** mediafile-persistence-no-drift
 
 ## SUPERSEDED 2026-05-27
 

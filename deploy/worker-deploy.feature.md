@@ -1,4 +1,6 @@
-# Feature: Worker Deploy
+﻿# Feature: Worker Deploy
+
+**Slug:** worker-deploy
 
 ## What It Does
 

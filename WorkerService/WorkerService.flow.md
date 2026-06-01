@@ -1,4 +1,6 @@
-# Flow: WorkerService -- Unified Worker Lifecycle
+﻿# Flow: WorkerService -- Unified Worker Lifecycle
+
+**Slug:** workerservice
 
 ## Entry Point
 

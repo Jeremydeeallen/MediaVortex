@@ -1,4 +1,6 @@
-# Feature: Capability Control Plane (single gate per worker capability)
+﻿# Feature: Capability Control Plane (single gate per worker capability)
+
+**Slug:** capability-control-plane
 
 ## What It Does
 

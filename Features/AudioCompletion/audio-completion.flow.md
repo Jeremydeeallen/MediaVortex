@@ -1,4 +1,6 @@
-# Flow: Audio Completion (one-shot normalize, then forever stream-copy)
+﻿# Flow: Audio Completion (one-shot normalize, then forever stream-copy)
+
+**Slug:** audio-completion
 
 ## Entry Point
 

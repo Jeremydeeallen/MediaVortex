@@ -1,4 +1,6 @@
-# Worker Routing -- tag-based affinity for queue claim
+﻿# Worker Routing -- tag-based affinity for queue claim
+
+**Slug:** worker-routing
 
 ## What It Does
 

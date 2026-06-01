@@ -1,4 +1,6 @@
-# SQL Queries
+﻿# SQL Queries
+
+**Slug:** sqlqueries
 
 ## What It Does
 

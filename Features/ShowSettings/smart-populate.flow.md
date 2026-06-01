@@ -1,4 +1,6 @@
-# Flow: Smart Populate Next Batch (/ShowSettings)
+﻿# Flow: Smart Populate Next Batch (/ShowSettings)
+
+**Slug:** smart-populate
 
 ## Entry Point
 

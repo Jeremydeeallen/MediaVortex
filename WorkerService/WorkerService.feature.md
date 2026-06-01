@@ -1,4 +1,6 @@
-# WorkerService - Unified Worker
+﻿# WorkerService - Unified Worker
+
+**Slug:** workerservice
 
 ## Summary
 

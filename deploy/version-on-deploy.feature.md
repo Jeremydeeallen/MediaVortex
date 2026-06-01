@@ -1,4 +1,6 @@
-# Feature: Version on Deploy
+﻿# Feature: Version on Deploy
+
+**Slug:** version-on-deploy
 
 ## What It Does
 

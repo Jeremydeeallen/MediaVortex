@@ -1,4 +1,6 @@
-# Profile Management
+﻿# Profile Management
+
+**Slug:** profiles
 
 ## What It Does
 

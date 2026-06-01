@@ -1,4 +1,6 @@
-# Stuck Job Detection -- recurring scheduler, correct kill target, host-locality guard
+﻿# Stuck Job Detection -- recurring scheduler, correct kill target, host-locality guard
+
+**Slug:** stuck-job-detection
 
 ## What It Does
 

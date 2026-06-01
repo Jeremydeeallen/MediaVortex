@@ -1,4 +1,6 @@
-# Flow: Linear Loudnorm (measure once, apply with fixed gain)
+﻿# Flow: Linear Loudnorm (measure once, apply with fixed gain)
+
+**Slug:** linear-loudnorm
 
 ## Entry Point
 

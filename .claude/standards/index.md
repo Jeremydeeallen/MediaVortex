@@ -34,6 +34,7 @@ Override any single check with `# allow: <reason>` within 3 lines of the offendi
 | R13 | No premature `*.feature.md` / `*.flow.md` files. Creation refused outside DELIVERING phase; at DELIVERING, creation is allowed so durable content can be promoted out of the directive doc into its permanent home | This file + `.claude/rules/doc-layering.md` + `.claude/rules/ceo-mode.md` | `Test-R13-NoNewFeatureDocs` |
 | R14 | Edits to existing `*.feature.md` / `*.flow.md` cannot add annotation lines (`removed YYYY-MM-DD` / `deprecated` / `no longer used` / `previously` / `formerly`). Delete sections instead | This file + `.claude/rules/ceo-mode.md` | `Test-R14-AnnotationDrift` |
 | R15 | Edits to functions/classes in the directive doc's `## Files` section require `# directive: <slug>` line directly above the `def` / `class` | This file | `Test-R15-DirectiveAnchor` |
+| R16 | Every `*.feature.md` / `*.flow.md` Edit/Write produces a file with `**Slug:** <slug>` in the first 15 lines | `.claude/rules/feature-docs.md` + `.claude/rules/flow-docs.md` + `.claude/rules/doc-layering.md` | `Test-R16-FeatureSlug` |
 
 ## What is NOT gated
 

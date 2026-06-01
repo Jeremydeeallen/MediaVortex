@@ -1,4 +1,6 @@
-# Transcode vs Remux Routing -- compliance-driven pipeline selection
+﻿# Transcode vs Remux Routing -- compliance-driven pipeline selection
+
+**Slug:** transcode-vs-remux-routing
 
 ## What It Does
 

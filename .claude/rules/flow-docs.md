@@ -1,33 +1,33 @@
 # Flow Docs
 
-One pipeline per flow doc. Features reference flows, not the reverse.
+One pipeline per flow doc. Features reference flows, not the reverse. One tier of the doc-layering model (`.claude/rules/doc-layering.md`).
 
-This is one tier of the three-tier doc model defined in `.claude/rules/doc-layering.md` -- flow docs own cross-stage seams (data crossing pipeline stage transitions); intra-feature seams live in `*.feature.md`; transient directive content lives in `.claude/directive.md`. Read `doc-layering.md` for the role / lifetime / seam-ownership split.
+## Required structure
 
-## Verified conventions
-- Flow docs are colocated `*.flow.md` next to the entry-point file they describe
-- Each flow doc has an entry point, stage overview, and per-stage detail
-- Feature docs reference flow docs for pipeline context; flow docs do not reference feature docs
-- Flow docs describe what the system DOES, not what it SHOULD do (that belongs in feature docs)
+Every `*.flow.md` has:
 
-## Required: `## Seams` section per flow
+- `**Slug:** <slug>` directly under the title -- top-level addressing primitive (R16 enforced). Slug = lowercase filename without `.flow.md` extension.
+- Entry point and stage overview
+- Per-stage detail with stable IDs (`ST1, ST2, ...`)
+- `## Seams` table with stable IDs (`S1, S2, ...`); cross-stage seams (data crossing each stage transition)
 
-Every flow doc has a `## Seams` section that enumerates the data crossing each stage transition. For a flow with stages A -> B -> C, the section lists:
+Flow docs describe what the system DOES, not what it SHOULD do (that belongs in feature docs or directives). Flow docs do NOT reference feature doc criteria -- that creates circular dependency.
 
-| Transition | Producer (writer) | Wire shape | Consumer (reader) expects | Verification |
-|---|---|---|---|---|
-| A -> B | `<code path / DB row written>` | `<row schema + nullability + semantic meaning>` | `<code path / DB read query>` | `<test / contract that catches drift>` |
-| B -> C | ... | ... | ... | ... |
+## Required IDs
 
-Why: when someone modifies stage B's output, the flow doc tells them what stage C expects -- they can't accidentally break the downstream consumer without seeing the contract first. This is the pipeline-granularity application of `.claude/rules/seam-verification.md`; intra-feature seams live in `*.feature.md` `## Seams` sections instead.
+| Prefix | What it identifies | Example |
+|---|---|---|
+| `ST1, ST2, ...` | Pipeline stages | `ST3 Probe metadata` |
+| `S1, S2, ...` | Cross-stage seams (transitions) | `S2 ST3 -> ST4: MediaFiles.Resolution NOT NULL` |
 
-Seam attributes per row:
+Code anchors: `# see <slug>.<ID>` (e.g. `# see transcode.ST5`). Enables R1 partial-read awareness.
 
-- **Wire shape** must name the actual data shape, not the semantic intent. `Workers.NvencCapable BOOLEAN, NULL means false` is a wire shape; "the worker can do NVENC" is the semantic intent (belongs in the description). The seam-verification rule fails most often on wire-shape mismatches, so be explicit.
-- **Verification** must point at something runnable: a contract test, a SQL audit query, a smoke-test script. "Eyeball the row" is not verification.
+## Seams table shape
 
-## Common mistakes
-- Putting multiple unrelated pipelines in one flow doc
-- Flow docs that describe aspirational behavior instead of current behavior
-- Feature docs that duplicate flow doc content instead of referencing it
-- Flow docs that reference feature doc criteria (creates circular dependency)
+| ID | Transition | Producer (writer) | Wire shape | Consumer (reader) expects | Verification |
+|---|---|---|---|---|---|
+| S1 | `ST1 -> ST2` | `<code path / DB row written>` | `<row schema + nullability + semantic meaning>` | `<code path / DB read query>` | `<test / contract>` |
+
+Wire shape must name the actual data shape, not semantic intent. Verification must point at something runnable (contract test, SQL audit query, smoke-test script).
+
+**Details, common mistakes, examples:** see `.claude/rules-details/flow-docs.md`.

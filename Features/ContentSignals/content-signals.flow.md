@@ -1,4 +1,6 @@
-# Flow: Content Signals
+﻿# Flow: Content Signals
+
+**Slug:** content-signals
 
 ## Entry Point
 

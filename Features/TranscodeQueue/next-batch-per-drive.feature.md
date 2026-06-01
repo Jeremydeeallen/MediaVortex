@@ -1,4 +1,6 @@
-# Feature: Next Batch -- Per-Drive Cards (TV + Movies)
+﻿# Feature: Next Batch -- Per-Drive Cards (TV + Movies)
+
+**Slug:** next-batch-per-drive
 
 ## What It Does
 

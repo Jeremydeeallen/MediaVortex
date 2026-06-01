@@ -1,4 +1,6 @@
-# Command Builder -- One Function, One Decision Tree
+﻿# Command Builder -- One Function, One Decision Tree
+
+**Slug:** command-builder
 
 ## What It Does
 

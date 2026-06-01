@@ -1,4 +1,6 @@
-# Smart Populate Next Batch -- priority-ranked suggestion review
+﻿# Smart Populate Next Batch -- priority-ranked suggestion review
+
+**Slug:** smart-populate
 
 ## What It Does
 

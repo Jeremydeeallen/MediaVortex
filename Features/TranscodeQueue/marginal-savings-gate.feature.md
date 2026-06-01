@@ -1,4 +1,6 @@
-# Feature: Marginal-Savings Gate (Queue Admission)
+﻿# Feature: Marginal-Savings Gate (Queue Admission)
+
+**Slug:** marginal-savings-gate
 
 ## What It Does
 

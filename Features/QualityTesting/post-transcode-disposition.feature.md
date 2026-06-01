@@ -1,4 +1,6 @@
-# Feature: Post-Transcode Disposition (unified, data-driven, auditable)
+﻿# Feature: Post-Transcode Disposition (unified, data-driven, auditable)
+
+**Slug:** post-transcode-disposition
 
 ## What It Does
 

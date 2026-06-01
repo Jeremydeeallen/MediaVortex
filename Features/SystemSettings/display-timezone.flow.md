@@ -1,4 +1,6 @@
-# Flow: Display Timezone
+﻿# Flow: Display Timezone
+
+**Slug:** display-timezone
 
 ## What this flow describes
 

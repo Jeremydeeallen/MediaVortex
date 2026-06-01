@@ -1,4 +1,6 @@
-# Transcode Flow
+﻿# Transcode Flow
+
+**Slug:** transcode
 
 Entry point: `StartMediaVortex.py` (all services) or individual service scripts.
 

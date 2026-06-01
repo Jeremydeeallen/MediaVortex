@@ -1,4 +1,6 @@
-# Service Control
+﻿# Service Control
+
+**Slug:** servicecontrol
 
 ## What It Does
 

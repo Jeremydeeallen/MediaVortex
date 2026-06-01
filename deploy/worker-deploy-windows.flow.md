@@ -1,4 +1,6 @@
-# Flow: Windows Worker Deploy
+﻿# Flow: Windows Worker Deploy
+
+**Slug:** worker-deploy-windows
 
 Deploys a MediaVortex `WorkerService` instance natively on a Windows host (not Docker). Counterpart to `worker-deploy-linux.flow.md` (Docker on Linux -- covers LXC and bare-metal). Both deployment models coexist; this flow covers the Windows-native path used by I9-2024.
 

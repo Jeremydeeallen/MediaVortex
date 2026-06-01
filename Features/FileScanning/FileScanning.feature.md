@@ -1,4 +1,6 @@
-# File Scanning
+﻿# File Scanning
+
+**Slug:** filescanning
 
 ## What It Does
 

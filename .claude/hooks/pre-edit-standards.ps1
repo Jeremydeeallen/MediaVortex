@@ -166,16 +166,25 @@ function Get-DirectiveFiles {
 
 function Get-ReadFilesFromTranscript {
     param([string]$TranscriptPath)
-    if (-not $TranscriptPath -or -not (Test-Path $TranscriptPath)) { return @() }
+    # Returns hashtable: { path_lowercase => array of @{ offset = int; limit = int } }.
+    # offset defaults to 1 (start), limit 0 means whole-file. Multiple Reads accumulate.
+    if (-not $TranscriptPath -or -not (Test-Path $TranscriptPath)) { return @{} }
     $Files = @{}
     foreach ($Line in (Get-Content $TranscriptPath)) {
-        $Matches = [regex]::Matches($Line, '"name"\s*:\s*"Read"[^}]*?"file_path"\s*:\s*"([^"]+)"')
-        foreach ($M in $Matches) {
-            $P = $M.Groups[1].Value -replace '\\\\', '\'
-            $Files[$P.ToLower()] = $true
+        foreach ($M in [regex]::Matches($Line, '"name"\s*:\s*"Read"[^}]*?"input"\s*:\s*\{([^}]*)\}')) {
+            $Inner = $M.Groups[1].Value
+            $PathM = [regex]::Match($Inner, '"file_path"\s*:\s*"([^"]+)"')
+            if (-not $PathM.Success) { continue }
+            $P = ($PathM.Groups[1].Value -replace '\\\\', '\').ToLower()
+            $OffsetM = [regex]::Match($Inner, '"offset"\s*:\s*(\d+)')
+            $LimitM = [regex]::Match($Inner, '"limit"\s*:\s*(\d+)')
+            $Offset = if ($OffsetM.Success) { [int]$OffsetM.Groups[1].Value } else { 1 }
+            $Limit = if ($LimitM.Success) { [int]$LimitM.Groups[1].Value } else { 0 }
+            if (-not $Files.ContainsKey($P)) { $Files[$P] = @() }
+            $Files[$P] += @{ offset = $Offset; limit = $Limit }
         }
     }
-    return @($Files.Keys)
+    return $Files
 }
 
 function Synthesize-PostEditContent {
@@ -256,7 +265,9 @@ function Test-PhaseGate {
     $IsDirectiveDoc = $FilePath -and ((Resolve-Path $FilePath -ErrorAction SilentlyContinue).Path -eq (Resolve-Path $DirectiveFile -ErrorAction SilentlyContinue).Path)
     switch ($Phase) {
         'NEEDS_STANDARDS_REVIEW' {
-            return "Phase NEEDS_STANDARDS_REVIEW: Read every file under .claude/rules/ and .claude/standards/index.md before any Write/Edit. Then advance the directive doc Status line to 'phase: NEEDS_PLAN'. See .claude/rules/ceo-mode.md#phase-state-machine. Path forward: read every file under .claude/rules/ and .claude/standards/index.md, then advance the directive doc Status line to 'phase: NEEDS_PLAN'."
+            # Allow edits to the directive doc itself -- the operator needs to edit it to advance phase.
+            if ($IsDirectiveDoc) { return $null }
+            return "Phase NEEDS_STANDARDS_REVIEW: Read every file under .claude/rules/ and .claude/standards/index.md before any Write/Edit. Then advance the directive doc Status line to 'phase: NEEDS_PLAN'. See .claude/rules/ceo-mode.md (Phase state machine section). Path forward: read every file under .claude/rules/ and .claude/standards/index.md, then advance the directive doc Status line to 'phase: NEEDS_PLAN'."
         }
         'NEEDS_PLAN' {
             if (-not $IsDirectiveDoc) { return "Phase NEEDS_PLAN: only the directive doc ($DirectiveFile) may be edited until the plan is committed and phase advances to NEEDS_DOC_PREREAD. See .claude/rules/ceo-mode.md#phase-state-machine. Path forward: finish drafting acceptance criteria + Files list in the directive doc, then advance Status to 'phase: NEEDS_DOC_PREREAD'." }
@@ -346,18 +357,79 @@ function Test-PhaseGate {
 
 function Test-R1-DocPreread {
     param($PostContent, $FilePath, $ReadFiles, $AllContent)
+    # $ReadFiles is a hashtable from Get-ReadFilesFromTranscript: { path_lower => array of @{offset, limit} }.
     if ($FilePath -notmatch '\.(py|js|html|sql)$') { return $null }
     $FileDir = Split-Path $FilePath -Parent
     if (-not $FileDir -or -not (Test-Path $FileDir)) { return $null }
     $Docs = @()
     $Docs += Get-ChildItem -Path $FileDir -Filter '*.feature.md' -File -ErrorAction SilentlyContinue
     $Docs += Get-ChildItem -Path $FileDir -Filter '*.flow.md' -File -ErrorAction SilentlyContinue
+    if (-not $Docs) { return $null }
+    # Extract anchors from code: # see <slug>.<W|S|C|ST><N>
+    $AnchorRefs = @()
+    foreach ($M in [regex]::Matches($PostContent, '#\s*see\s+([a-z0-9-]+)\.((?:W|S|C|ST)\d+)')) {
+        $AnchorRefs += @{ slug = $M.Groups[1].Value.ToLower(); id = $M.Groups[2].Value }
+    }
     foreach ($D in $Docs) {
-        if ($ReadFiles -notcontains $D.FullName.ToLower()) {
-            return "R1 Doc preread: $FilePath has colocated doc $($D.FullName) which has not been Read this session. Read it before Edit/Write. See .claude/rules/ceo-mode.md#documents-first-read-plan-then-update. Path forward: Read the named colocated *.feature.md / *.flow.md file before editing the code -- it owns the contract this code implements."
+        $DocLower = $D.FullName.ToLower()
+        $Reads = if ($ReadFiles -is [hashtable] -and $ReadFiles.ContainsKey($DocLower)) { $ReadFiles[$DocLower] } else { @() }
+        # Full-file read (no offset, no limit) satisfies unconditionally.
+        $HasFullRead = $false
+        foreach ($R in $Reads) { if ($R.offset -le 1 -and $R.limit -eq 0) { $HasFullRead = $true; break } }
+        if ($HasFullRead) { continue }
+        # Parse doc to find slug + section line numbers (only if partial reads exist or no reads).
+        $DocLines = @()
+        $DocSlug = $null
+        try {
+            $DocLines = Get-Content $D.FullName -Encoding UTF8
+            for ($I = 0; $I -lt [Math]::Min(15, $DocLines.Length); $I++) {
+                if ($DocLines[$I] -match '^\*\*Slug:\*\*\s*(\S+)') { $DocSlug = $Matches[1].ToLower(); break }
+            }
+        } catch {}
+        $MatchingAnchors = @($AnchorRefs | Where-Object { $_.slug -eq $DocSlug })
+        if ($MatchingAnchors.Count -eq 0) {
+            # No anchor refs to this doc.
+            if (-not $Reads -or $Reads.Count -eq 0) {
+                return "R1 Doc preread: $FilePath has colocated doc $($D.FullName) which has not been Read this session. Read it before Edit/Write. See .claude/rules/feature-docs.md / .claude/rules/doc-layering.md. Path forward: Read the named colocated *.feature.md / *.flow.md file -- full read, OR partial read covering the relevant section if you add a '# see $DocSlug.<S|W|C|ST><N>' anchor in the code (the hook will then validate the anchored section is in your Read window)."
+            }
+            # Partial read present, no anchor: today's lenient behavior. Continue.
+            continue
+        }
+        # Anchored: each anchor's section line must fall in some Read window.
+        $UncoveredAnchors = @()
+        foreach ($A in $MatchingAnchors) {
+            $SectionLine = 0
+            for ($I = 0; $I -lt $DocLines.Length; $I++) {
+                if ($DocLines[$I] -match "\b$([regex]::Escape($A.id))\b") { $SectionLine = $I + 1; break }
+            }
+            if ($SectionLine -eq 0) {
+                $UncoveredAnchors += "$($A.slug).$($A.id) [section ID not found in $($D.Name)]"
+                continue
+            }
+            $Covered = $false
+            foreach ($R in $Reads) {
+                $Start = if ($R.offset -gt 0) { $R.offset } else { 1 }
+                $End = if ($R.limit -gt 0) { $Start + $R.limit - 1 } else { $DocLines.Length }
+                if ($SectionLine -ge $Start -and $SectionLine -le $End) { $Covered = $true; break }
+            }
+            if (-not $Covered) { $UncoveredAnchors += "$($A.slug).$($A.id) at line $SectionLine" }
+        }
+        if ($UncoveredAnchors.Count -gt 0) {
+            return "R1 Doc preread (anchored section not covered): code in $FilePath references doc $($D.FullName) but Read windows did not cover: $($UncoveredAnchors -join '; '). Path forward: Read $($D.Name) again with offset/limit covering the named section line(s). Or do a full Read if you need wider context."
         }
     }
     return $null
+}
+
+function Test-R16-FeatureSlug {
+    param($PostContent, $FilePath, $AllContent)
+    if ($FilePath -notmatch '\.(feature|flow)\.md$') { return $null }
+    $Lines = $PostContent -split "`n"
+    for ($I = 0; $I -lt [Math]::Min(15, $Lines.Length); $I++) {
+        if ($Lines[$I] -match '^\*\*Slug:\*\*\s*\S') { return $null }
+    }
+    if (Test-AllowOverride $PostContent 0 'R16' $FilePath) { return $null }
+    return "R16 Missing Slug: $FilePath has no '**Slug:**' field in the first 15 lines. Every *.feature.md / *.flow.md requires a top-level slug per .claude/rules/feature-docs.md (or flow-docs.md). Slug = lowercase filename without the .feature.md / .flow.md extension. Path forward: add '**Slug:** <slug>' on its own line directly under the H1 header. For bulk backfill of legacy docs, run: powershell -File Scripts/Maintenance/AddSlugsToFeatureDocs.ps1"
 }
 
 function Test-R2-SeedEvidence {
@@ -666,7 +738,8 @@ $Rules = @(
     { Test-R12-CommentVolume $PostContent $FilePath $PostContent },
     { Test-R13-NoNewFeatureDocs $PostContent $FilePath $PostContent $IsNew },
     { Test-R14-AnnotationDrift $PostContent $FilePath $ToolName $ToolInput $PostContent },
-    { Test-R15-DirectiveAnchor $PostContent $FilePath $DirectiveFiles }
+    { Test-R15-DirectiveAnchor $PostContent $FilePath $DirectiveFiles },
+    { Test-R16-FeatureSlug $PostContent $FilePath $PostContent }
 )
 
 try {

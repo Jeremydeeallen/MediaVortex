@@ -1,4 +1,6 @@
-# Worker Lifecycle Simplification
+﻿# Worker Lifecycle Simplification
+
+**Slug:** worker-lifecycle
 
 ## Summary
 

@@ -1,4 +1,6 @@
-# WebService Startup Flow
+﻿# WebService Startup Flow
+
+**Slug:** startup
 
 Entry point: `WebService/Main.py:Main()` -> `WebServiceApp.__init__()`.
 

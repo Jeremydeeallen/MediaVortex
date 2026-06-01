@@ -1,4 +1,6 @@
-# Quality Testing
+﻿# Quality Testing
+
+**Slug:** qualitytesting
 
 ## What It Does
 

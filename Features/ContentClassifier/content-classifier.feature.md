@@ -1,4 +1,6 @@
-# Content Classifier -- Auto-Assign Profile by Rules
+﻿# Content Classifier -- Auto-Assign Profile by Rules
+
+**Slug:** content-classifier
 
 ## What It Does
 

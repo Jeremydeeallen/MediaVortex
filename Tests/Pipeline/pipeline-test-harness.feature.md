@@ -1,4 +1,6 @@
-# Pipeline Test Harness -- end-to-end verification of Quick Fix + Transcode
+﻿# Pipeline Test Harness -- end-to-end verification of Quick Fix + Transcode
+
+**Slug:** pipeline-test-harness
 
 ## Interrupts: linear-loudnorm
 

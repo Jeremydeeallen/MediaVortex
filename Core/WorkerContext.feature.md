@@ -1,4 +1,6 @@
-# WorkerContext
+﻿# WorkerContext
+
+**Slug:** workercontext
 
 Process-level singleton providing per-worker configuration to all services in the process.
 

@@ -1,4 +1,6 @@
-# Database Architecture
+﻿# Database Architecture
+
+**Slug:** database-architecture
 
 ## What It Does
 

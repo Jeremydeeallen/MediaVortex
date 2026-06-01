@@ -1,4 +1,6 @@
-# Flow: Media Queue tabs (Transcode / Remux / Audio Fix)
+﻿# Flow: Media Queue tabs (Transcode / Remux / Audio Fix)
+
+**Slug:** media-tabs
 
 ## Entry Point
 

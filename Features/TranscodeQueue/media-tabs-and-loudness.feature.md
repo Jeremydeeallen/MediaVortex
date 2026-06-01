@@ -1,4 +1,6 @@
-# Media Tabs and Loudness Analysis
+﻿# Media Tabs and Loudness Analysis
+
+**Slug:** media-tabs-and-loudness
 
 ## What It Does
 

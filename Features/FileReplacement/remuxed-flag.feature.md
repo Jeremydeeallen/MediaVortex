@@ -1,4 +1,6 @@
-# Feature: RemuxedByMediaVortex Flag
+﻿# Feature: RemuxedByMediaVortex Flag
+
+**Slug:** remuxed-flag
 
 ## What It Does
 
