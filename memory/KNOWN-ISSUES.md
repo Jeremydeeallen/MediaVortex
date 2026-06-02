@@ -90,7 +90,7 @@ Each has a video stream (HEVC) but no audio stream at all. The 16-file NULL-code
 
 ---
 
-### [BUG] TranscodeAttempts failure rows lack ProfileName -- operator cannot tell what KIND of job failed from the row alone
+### [BUG-0029] TranscodeAttempts failure rows lack ProfileName -- operator cannot tell what KIND of job failed from the row alone
 **Date:** 2026-05-16
 
 **What breaks:** When a remux or transcode job fails early (pre-flight, pre-FFmpeg), the resulting `TranscodeAttempts` row has `Success=False` and `ErrorMessage` populated (loud failure IS in the DB), but `ProfileName=NULL`. The queue row was DELETEd by the failure handler so its `ProcessingMode` context is gone. Operator looking at the row can see "this attempt failed with this error" but not "this was a Remux job" vs "this was an SVT-AV1 transcode." They must join `MediaFiles` via `MediaFileId` to recover even partial context.
@@ -107,7 +107,7 @@ Confirmed against attempts 16240-16243 on 2026-05-16: 4 remux jobs failed with `
 
 ---
 
-### [BUG] FindFuzzyFileMatch is O(N x M) -- reloads + regex-parses all RootFolder rows per new file
+### [BUG-0024] FindFuzzyFileMatch is O(N x M) -- reloads + regex-parses all RootFolder rows per new file
 **Date:** 2026-05-15
 
 **What breaks:** Every NEW file the scanner discovers triggers `FindFuzzyFileMatch`, which:
@@ -135,7 +135,7 @@ Same anti-pattern family as criterion 23 (per-file work that should be precomput
 
 ---
 
-### [BUG] ScanJobs NewFiles / UpdatedFiles / DeletedFiles counters stay at zero
+### [BUG-0024] ScanJobs NewFiles / UpdatedFiles / DeletedFiles counters stay at zero
 **Date:** 2026-05-15
 
 **What breaks:** A scan in progress writes `ScanJobs.NewFiles=0, UpdatedFiles=0, DeletedFiles=0` even when MediaFiles rows are being inserted, updated, or deleted. Confirmed mid-scan on 2026-05-15 against I9-2024 scan #64925: the heartbeat showed all three counters stuck at 0 while `SELECT * FROM MediaFiles WHERE LastScannedDate > NOW() - INTERVAL '3 minutes'` returned freshly-inserted rows (IDs 622023-622032 against `T:\The Graham Norton Show\Season 20`). The total-files counter (`ProcessedFiles`) climbs correctly thanks to the criterion 17 heartbeat fix, but the per-disposition breakdown the operator needs to answer "what changed?" is not produced.
@@ -156,7 +156,7 @@ Same anti-pattern family as criterion 23 (per-file work that should be precomput
 
 ---
 
-### [BUG] Scan triple-stats DB rows over NFS and runs the existence checks single-threaded
+### [BUG-0024] Scan triple-stats DB rows over NFS and runs the existence checks single-threaded
 **Date:** 2026-05-15
 
 **What breaks:** A continuous-scan iteration on a Windows or Linux worker does the following for every RootFolder:
@@ -181,7 +181,7 @@ Worker process memory is fine (~279 MB). The bottleneck is wall-clock from seque
 
 ---
 
-### [BUG] Scan progress writer is silent -- ScanJobs counters and CurrentDirectory don't advance mid-walk
+### [BUG-0024] Scan progress writer is silent -- ScanJobs counters and CurrentDirectory don't advance mid-walk
 **Date:** 2026-05-15
 
 **What breaks:** A scan triggered via `ContinuousScanService` (or manual `POST /api/FileScanning/Scan/Start`) walks the filesystem but does not update `ScanJobs.ProcessedFiles`, `CurrentDirectory`, or `LastUpdated` until the scan ends. Confirmed against I9-2024 on 2026-05-15: M:\ scan #64919 ran 75s and T:\ scan #64920 ran 4+ minutes, both over NFS (89ms/dir for M:\, 18ms/dir for T:\), and both reported `ProcessedFiles=0`, `CurrentDirectory=NULL`, `LastUpdated=StartTime` for the entire run. From the operator's view, a healthy running scan and a hung scan look identical -- the only safety net is `StuckJobDetectionService` at the 15-minute threshold, which is well past the point where a real hang is impacting throughput.
@@ -194,7 +194,7 @@ Worker process memory is fine (~279 MB). The bottleneck is wall-clock from seque
 
 ---
 
-### [BUG] Worker status model is overcomplicated -- Draining state is broken, invisible, and unnecessary
+### [BUG-0025] Worker status model is overcomplicated -- Draining state is broken, invisible, and unnecessary
 **Date:** 2026-05-14
 
 **What breaks:** Three related problems in the worker status/capability system:
@@ -224,7 +224,7 @@ Worker process memory is fine (~279 MB). The bottleneck is wall-clock from seque
 
 ---
 
-### [BUG] Per-capability concurrency is not data-driven -- requires worker restart to take effect
+### [BUG-0025] Per-capability concurrency is not data-driven -- requires worker restart to take effect
 **Date:** 2026-05-13
 
 **What breaks:** Changing `MaxConcurrentTranscodeJobs`, `MaxConcurrentQualityTestJobs`, or `MaxConcurrentRemuxJobs` in the Workers table does not take effect until the worker process is restarted. The concurrency value is read once during `_StartXxxCapability()` and passed to `Run(MaxConcurrentJobs=N)`. The capability polling loop (60s) checks enabled/disabled flags but never re-reads the concurrency columns. This violates the "data-driven" contract: if the max is raised from 1 to 2, the worker should spin up an additional thread on its next poll without restart.
@@ -235,7 +235,7 @@ Worker process memory is fine (~279 MB). The bottleneck is wall-clock from seque
 
 ---
 
-### [BUG] Status page "Possibly Corrupt" count has no drill-down to see which files are affected
+### [BUG-0030] Status page "Possibly Corrupt" count has no drill-down to see which files are affected
 **Date:** 2026-05-13
 
 **What breaks:** The `/Status` page shows "Possibly Corrupt: N" (files with `FFProbeFailureCount >= 3`) as a static number with no click-through. The operator sees there ARE corrupt files but cannot see WHICH ones without navigating to `/Scanning` and opening the Corrupt Files modal. The API endpoint (`GET /api/FileScanning/MediaFiles/Corrupt`) and the detail modal (`Templates/FileScanning.html#CorruptFilesModal`) already exist -- the Status page just doesn't use them.
@@ -248,7 +248,7 @@ Worker process memory is fine (~279 MB). The bottleneck is wall-clock from seque
 
 ---
 
-### [BUG] Next Remux Batch table shows files with no audio stream that silently fail when queued
+### [BUG-0031] Next Remux Batch table shows files with no audio stream that silently fail when queued
 **Date:** 2026-05-14
 
 **What breaks:** The "Next Remux Batch" card on the ShowSettings page calls `/api/ShowSettings/SmartPopulate` with `Mode='Remux'`. The SmartPopulate query filters by `HasExplicitEnglishAudio IS NULL OR HasExplicitEnglishAudio = true`, but files that have never been probed with audio-aware code have `HasExplicitEnglishAudio = NULL` -- which passes the filter. These video-only files (e.g. Survivor S43E01, S45E02) get displayed as candidates, queued by the user, then fail with "Transcoding failed with return code 4294967274" because the remux command maps `0:a:0` which doesn't exist.
@@ -261,7 +261,7 @@ Worker process memory is fine (~279 MB). The bottleneck is wall-clock from seque
 
 ---
 
-### [BUG] Stale .orig files from remux re-queue loop -- 205 files affected, 14 at risk of data loss
+### [BUG-0032] Stale .orig files from remux re-queue loop -- 205 files affected, 14 at risk of data loss
 **Date:** 2026-05-14
 
 **Root cause:** `RecomputeForFiles` was never called from `FileReplacementBusinessService._ProcessCompleteFileReplacement`. After a successful remux, `RecommendedMode` stayed `'Remux'` and `IsCompliant` stayed `False` because the cached compliance columns were never refreshed. Queue population re-queued these already-remuxed MP4 files. Each re-queue cycle called `PrepareReplacement` (renaming `.mp4` to `.mp4.orig`), ran FFmpeg to write a new `.mp4`, and may or may not have completed. The `.orig` from the first re-queue was never cleaned up, so every subsequent attempt hit the safety guard: "Pre-existing .orig backup -- refusing to overwrite."
@@ -301,7 +301,7 @@ Worker process memory is fine (~279 MB). The bottleneck is wall-clock from seque
 
 ---
 
-### [BUG] Linux worker deploy flow doc incomplete -- no post-deploy verification, FFmpeg path troubleshooting, or automation parity with Windows
+### [BUG-0033] Linux worker deploy flow doc incomplete -- no post-deploy verification, FFmpeg path troubleshooting, or automation parity with Windows
 **Date:** 2026-05-13
 
 **What breaks:** `deploy/worker-deploy.flow.md` ends at `docker compose up -d` with only an optional SVT-AV1 encoder check and a Workers table query. Does not document: post-deploy health checks confirming FFmpeg/FFprobe paths resolve inside the container, the full container-started-to-operational sequence, troubleshooting when FFmpeg path resolution fails, or what additional operator actions differ between first deploy vs code-only redeploy. An operator following this doc alone would not know how to diagnose "worker registered but can't find FFmpeg" without reading source code. The Windows deploy path (`deploy/windows-worker.flow.md` + `deploy-windows-worker.py`) has full post-deploy verification and single-command automation; Linux has neither.
@@ -314,7 +314,7 @@ Worker process memory is fine (~279 MB). The bottleneck is wall-clock from seque
 
 ---
 
-### [BUG] Terminology inconsistency: "quality test" (what) and "VMAF" (how) used interchangeably
+### [BUG-0034] Terminology inconsistency: "quality test" (what) and "VMAF" (how) used interchangeably
 **Date:** 2026-05-12
 
 **What breaks:** Code, DB columns, settings keys, log messages, and UI labels mix the policy term ("quality test" -- the decision to accept/requeue/discard a transcode) with the specific implementation term ("VMAF" -- one numeric metric). Examples: `QualityTestEnabled` (policy flag) coexists with `VMAFAutoReplaceMinThreshold` (metric-specific); `QualityTestProgress` table updated by `MonitorVMAFProgress` function; `QualityTestingBusinessService.BuildVMAFCommand`. The mixing bakes the current metric choice into surfaces that should be metric-agnostic and makes a future SSIMU2/PSNR/visual-comparison alternative awkward to add.
@@ -327,7 +327,7 @@ Worker process memory is fine (~279 MB). The bottleneck is wall-clock from seque
 
 ---
 
-### [BUG - PARTIAL FIX 2026-05-16] VMAF distribution becomes bimodal on held-frame content -- mean/HMean/P5 unreliable until motion-filter applied
+### [BUG-0026 - PARTIAL FIX 2026-05-16] VMAF distribution becomes bimodal on held-frame content -- mean/HMean/P5 unreliable until motion-filter applied
 **Date:** 2026-05-10 | **Investigated + partial fix:** 2026-05-16
 
 **Re-classified 2026-05-16:** the original framing pinned this on MKV containers, but a controlled experiment ruled the container out. The real cause is libvmaf mis-scoring held-frame animation (animation-on-2s/3s). The fix is motion-filtered pooling, not a filter-chain change.
@@ -384,7 +384,7 @@ Minnie's metrics with the fix:
 
 ---
 
-### [BUG] `MonitorVMAFProgress` stops emitting updates ~25% before FFmpeg exits
+### [BUG-0026] `MonitorVMAFProgress` stops emitting updates ~25% before FFmpeg exits
 **Date:** 2026-05-10
 
 **What breaks:** On attempt 4396 (Steven Universe S05E14, 16,080 frames), the progress log went silent at frame 12,000 (74.6%) and then `Process completed return code: 0` appeared ~25 seconds later. No exception was thrown; no error in the Logs table for that window. Same monitor failure leaves `QualityTestProgress.Status` stuck at `'Processing'` (or `'Started'` with pre-`RETURNING Id` worker code) and `ProgressPercentage` stuck wherever the last successful poll landed -- so the Activity UI shows a phantom "running" row forever even though the VMAF actually finished.
@@ -401,7 +401,7 @@ Minnie's metrics with the fix:
 
 ---
 
-### [BUG] env-driven config in singleton `__new__` never fires; operator-controllable knobs scattered across env / KV / fossilized rows
+### [BUG-0035] env-driven config in singleton `__new__` never fires; operator-controllable knobs scattered across env / KV / fossilized rows
 **Date:** 2026-05-10
 
 **Today's specific instance (fixed in commit `e291ca4`):** `Core/Logging/LoggingService.py` read its verbosity flags inside `__new__`, but every callsite in the codebase uses the `@classmethod` form (`LoggingService.LogInfo(...)`) without instantiating -- so `__new__` never executed and `_InfoEnabled` stayed `False` regardless of the `MEDIAVORTEX_LOG_INFO` env var. WorkerService produced zero INFO logs anywhere (terminal or DB) for the entire post-disposition feature work. Discovered during the i9 smoke test when no QT-loop diagnostics were visible. The fix moved env reads to class-attribute initialization (runs at import) and split `LogInfo` so the DB audit write is unconditional while only the terminal print stays gated.
@@ -416,7 +416,7 @@ Minnie's metrics with the fix:
 
 ---
 
-### [BUG - CRITICAL - WORKAROUND IN PLACE] Canonical path storage is OS-coupled
+### [BUG-0027 - CRITICAL - WORKAROUND IN PLACE] Canonical path storage is OS-coupled
 **Date:** 2026-05-10
 **Single source of truth for this issue.** Every other doc that touches path translation, share mappings, drive letters, or platform-specific path handling MUST link to this entry rather than re-describing the problem. If you find a duplicate description in any feature/flow doc, replace it with a link to here.
 
@@ -454,7 +454,7 @@ Minnie's metrics with the fix:
 
 ---
 
-### [BUG - CRITICAL] Profile-less savings estimate uses misleading `SizeMB * 0.5` proxy
+### [BUG-0036 - CRITICAL] Profile-less savings estimate uses misleading `SizeMB * 0.5` proxy
 **Date:** 2026-05-10
 **Affects:** `Features/TranscodeQueue/QueueManagementBusinessService.py:CalculatePriority` (size*0.5 fallback at line 1032), `_EvaluateCompliance` (returns undecidable when profile missing), `EstimateTargetSizeMB` (returns None when profile missing).
 
@@ -472,7 +472,7 @@ When a `MediaFile` has no `AssignedProfile` (and the profile cascade doesn't res
 
 ---
 
-### [BUG] QueueManagementBusinessService.py Cursor-era cleanup backlog
+### [BUG-0028] QueueManagementBusinessService.py Cursor-era cleanup backlog
 **Date:** 2026-05-10
 **Affects:** `Features/TranscodeQueue/QueueManagementBusinessService.py` (2,064 LOC, 35 methods)
 
@@ -491,7 +491,7 @@ Pre-claude-rails (Cursor-written) patterns that the marginal-savings-gate featur
 
 ---
 
-### [TECH DEBT] Activity page conflates worker liveness and operational state
+### [TECH DEBT BUG-0037] Activity page conflates worker liveness and operational state
 **Date:** 2026-05-08
 **Affects:** Templates/Activity.html (worker tag display), API endpoints that return worker status
 
@@ -563,7 +563,7 @@ Phase 1 (commit 6bf51b2) addressed the four highest-risk silent swallows that hi
 
 ---
 
-### [BUG] Worker capability flags not editable from the UI
+### [BUG-0025] Worker capability flags not editable from the UI
 **Date:** 2026-05-08
 **Affects:** WorkerService.feature.md (criterion 14), Activity page, Settings page, `Features/TeamStatus/TeamStatusController.py`
 
@@ -577,7 +577,7 @@ Phase 1 (commit 6bf51b2) addressed the four highest-risk silent swallows that hi
 
 ---
 
-### [BUG] SystemSettings not normalized; /settings page does not show every row
+### [BUG-0038] SystemSettings not normalized; /settings page does not show every row
 **Date:** 2026-05-08
 **Affects:** SystemSettings.feature.md (criteria 11, 12), `Features/SystemSettings/SystemSettingsRepository.py`, `Templates/Settings.html`
 
@@ -591,23 +591,7 @@ DB state: no UNIQUE on `SettingKey` (duplicates exist: ContinuousScanEnabled x2,
 
 ---
 
-### [BUG] Workers attempt jobs for MediaFiles entries whose source file no longer exists on disk
-**Date:** 2026-05-08
-**Affects:** TranscodeJob feature (ProcessTranscodeQueueService, FFprobe build step), TranscodeQueue feature (queue population)
-**Criterion violated:** Worker should refuse to claim a job whose source path is unreadable. The pipeline must distinguish "file gone -- mark MediaFile missing, drop from queue, do not retry" from "file unreadable transiently -- retry."
-
-Observed: Bachelor in Paradise S10E01 was successfully transcoded earlier today, but file replacement lost both the original (`T:\Bachelor in Paradise\Season 10\Bachelor in Paradise - S10E01 - Week 1 HDTV-720p.mkv`) and the new file. MediaFiles row 41437 still has the original FilePath, hevc codec, and TranscodedByMediaVortex=NULL. Queue items for it keep being created (Id 76218 most recent). Worker claims the queue item, calls FFprobe to build the command, FFprobe fails with "No such file or directory", attempt fails, and the queue item is removed -- but a new one will appear on the next queue population because the MediaFiles row is unchanged. No pre-flight check verifies the source file exists before claiming/probing/building.
-
-**Look first:**
-- `Features/TranscodeJob/ProcessTranscodeQueueService.py` -- ProcessJob entry, where to add `os.path.exists(LocalSourcePath)` check after `SetupFilePreparation` returns the InPlace path. Failing here should set MediaFiles.LastFFprobeError = "Source file missing" + LastFFprobeAttemptDate, optionally bump FFprobeFailureCount, and DELETE the queue item without creating a TranscodeAttempt row.
-- Queue-population caller (likely `Features/TranscodeQueue/QueueManagementBusinessService.py`) -- should skip MediaFiles where FFprobeFailureCount >= 3 (existing safety guard per CLAUDE.md). Verify it actually does for the "missing file" case.
-- `Features/FileReplacement/FileReplacementBusinessService.py` -- the move-then-update sequence that lost Bachelor S10E01 in the first place. Need atomic semantics so a failed re-probe does not leave the original deleted and the new file in an unknown state.
-
-**Fix with:** `/t` -- single-feature work, scope is clear
-
----
-
-### [BUG] Second concurrent job shows first job's progress
+### [BUG-0040] Second concurrent job shows first job's progress
 **Date:** 2026-05-05
 **Affects:** TranscodeJob feature -- concurrent job progress tracking
 **Criterion violated:** TranscodeJob.feature.md -- each running job must report independent progress
@@ -620,7 +604,7 @@ When MaxConcurrentJobs > 1 and a second job starts while the first is still runn
 
 ---
 
-### [BUG] DatabaseManager.py monolith -- dual database access paths
+### [BUG-0028] DatabaseManager.py monolith -- dual database access paths
 **Date:** 2026-05-07
 **Affects:** All features that still import from Repositories/DatabaseManager.py instead of their own Repository
 **Criterion violated:** Feature vertical isolation -- each feature should access the database exclusively through its own Repository
@@ -633,7 +617,7 @@ When MaxConcurrentJobs > 1 and a second job starts while the first is still runn
 
 ---
 
-### [BUG] Feature vertical boundaries do not match governed code
+### [BUG-0028] Feature vertical boundaries do not match governed code
 **Date:** 2026-05-07
 **Affects:** TranscodeJob.feature.md, FileReplacement.feature.md, Services/CommandBuilderService.py, Services/FFmpegAnalysisService.py, Core/Services/PathTranslationService.py
 **Criterion violated:** TranscodeJob.feature.md scope/criteria mismatch; FileReplacement.feature.md cross-feature dependency
@@ -646,7 +630,7 @@ TranscodeJob.feature.md declares scope `Features/TranscodeJob/**` + `WorkerServi
 
 ---
 
-### [BUG] FilePath used as denormalized natural key across 6+ tables
+### [BUG-0027] FilePath used as denormalized natural key across 6+ tables
 **Date:** 2026-05-05
 **Affects:** Schema-wide -- MediaFiles, TranscodeAttempts, TranscodeFiles, TranscodeQueue, CompliantFiles, ProblemFiles
 **Criterion violated:** Data normalization -- same filepath (with platform-specific drive letter prefix) stored redundantly across tables instead of referencing MediaFiles.Id as a foreign key.
@@ -673,7 +657,7 @@ Full Windows paths (e.g., `T:\Shows\file.mkv`) are stored as natural keys in at 
 
 ---
 
-### [BUG] Workers in broken canonical state silently fail scanning; no multi-drive scanning workflow
+### [BUG-0027] Workers in broken canonical state silently fail scanning; no multi-drive scanning workflow
 **Date:** 2026-05-13
 
 **What breaks:** Two related gaps in the scanning pipeline:
@@ -685,17 +669,6 @@ Full Windows paths (e.g., `T:\Shows\file.mkv`) are stored as natural keys in at 
 **Violates:** `Features/FileScanning/FileScanning.feature.md` criteria 20, 21 (added with this entry). `WorkerService/WorkerService.feature.md` criterion 19 (added with this entry).
 
 **Look first:** `Features/FileScanning/ContinuousScanService.py` `_ExecuteScan` -- where pre-scan path validation should fire. `Features/FileScanning/FileScanningBusinessService.py` `_ToLocalPath` -- the translation call that should be validated. `Services/PathTranslationService.py` -- the translation layer. `Templates/Settings.html` or `Templates/FileScanning.html` -- where a "add drive" UI would live. `Repositories/DatabaseManager.py:RegisterWorkerShareMappings` -- the current seeding path for share mappings. Related: `KNOWN-ISSUES.md` canonical path storage entry (the root cause); `path-storage.feature.md` (the long-term fix).
-
----
-
-### [BUG] QueryDatabase.py truncates long text columns at 60 chars -- error messages unreadable
-**Date:** 2026-05-13
-
-**What breaks:** `Scripts/SQLScripts/QueryDatabase.py` hardcodes `max_col_width=60` in `print_table()` with no CLI override. Long values -- `errormessage`, `ffpmpegcommand`, `filepath` -- are silently cut to 57 chars + `...`. The operator cannot read error messages from `TranscodeAttempts` without dropping into raw Python to query the DB directly. Discovered when diagnosing a remux failure: the `PrepareReplacement failed: Pre-existing .orig backup at /...` message was truncated, hiding the actual file path needed to resolve it.
-
-**Violates:** `Features/SQLQueries/SQLQueries.feature.md` criterion 6 (added with this entry).
-
-**Look first:** `Scripts/SQLScripts/QueryDatabase.py` lines 47-74 (`print_table` and `truncate`). Add a `--width N` CLI flag (default unlimited or large); pass through to `max_col_width`.
 
 ---
 

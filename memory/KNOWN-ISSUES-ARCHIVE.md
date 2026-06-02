@@ -774,3 +774,35 @@ Verification: running the exact failing command with `-f mp4` added produces a s
 
 ---
 
+
+### --- BUG-0039 mint+close 2026-06-02 ---
+
+### [BUG-0039 - RESOLVED 2026-06-02] Workers attempt jobs for MediaFiles entries whose source file no longer exists on disk | resolved: 2026-06-02 (source-existence pre-flight + FFprobeFailureCount guard + mount validation (ProcessTranscodeQueueService.py:370/539/813))
+**Date:** 2026-05-08
+**Affects:** TranscodeJob feature (ProcessTranscodeQueueService, FFprobe build step), TranscodeQueue feature (queue population)
+**Criterion violated:** Worker should refuse to claim a job whose source path is unreadable. The pipeline must distinguish "file gone -- mark MediaFile missing, drop from queue, do not retry" from "file unreadable transiently -- retry."
+
+Observed: Bachelor in Paradise S10E01 was successfully transcoded earlier today, but file replacement lost both the original (`T:\Bachelor in Paradise\Season 10\Bachelor in Paradise - S10E01 - Week 1 HDTV-720p.mkv`) and the new file. MediaFiles row 41437 still has the original FilePath, hevc codec, and TranscodedByMediaVortex=NULL. Queue items for it keep being created (Id 76218 most recent). Worker claims the queue item, calls FFprobe to build the command, FFprobe fails with "No such file or directory", attempt fails, and the queue item is removed -- but a new one will appear on the next queue population because the MediaFiles row is unchanged. No pre-flight check verifies the source file exists before claiming/probing/building.
+
+**Look first:**
+- `Features/TranscodeJob/ProcessTranscodeQueueService.py` -- ProcessJob entry, where to add `os.path.exists(LocalSourcePath)` check after `SetupFilePreparation` returns the InPlace path. Failing here should set MediaFiles.LastFFprobeError = "Source file missing" + LastFFprobeAttemptDate, optionally bump FFprobeFailureCount, and DELETE the queue item without creating a TranscodeAttempt row.
+- Queue-population caller (likely `Features/TranscodeQueue/QueueManagementBusinessService.py`) -- should skip MediaFiles where FFprobeFailureCount >= 3 (existing safety guard per CLAUDE.md). Verify it actually does for the "missing file" case.
+- `Features/FileReplacement/FileReplacementBusinessService.py` -- the move-then-update sequence that lost Bachelor S10E01 in the first place. Need atomic semantics so a failed re-probe does not leave the original deleted and the new file in an unknown state.
+
+**Fix with:** `/t` -- single-feature work, scope is clear
+
+---
+
+### --- BUG-0041 mint+close 2026-06-02 ---
+
+### [BUG-0041 - RESOLVED 2026-06-02] QueryDatabase.py truncates long text columns at 60 chars -- error messages unreadable | resolved: 2026-06-02 (print_table no longer truncates (QueryDatabase.py:48))
+**Date:** 2026-05-13
+
+**What breaks:** `Scripts/SQLScripts/QueryDatabase.py` hardcodes `max_col_width=60` in `print_table()` with no CLI override. Long values -- `errormessage`, `ffpmpegcommand`, `filepath` -- are silently cut to 57 chars + `...`. The operator cannot read error messages from `TranscodeAttempts` without dropping into raw Python to query the DB directly. Discovered when diagnosing a remux failure: the `PrepareReplacement failed: Pre-existing .orig backup at /...` message was truncated, hiding the actual file path needed to resolve it.
+
+**Violates:** `Features/SQLQueries/SQLQueries.feature.md` criterion 6 (added with this entry).
+
+**Look first:** `Scripts/SQLScripts/QueryDatabase.py` lines 47-74 (`print_table` and `truncate`). Add a `--width N` CLI flag (default unlimited or large); pass through to `max_col_width`.
+
+---
+
