@@ -19,11 +19,14 @@ from Core.Database.DatabaseService import DatabaseService
 from Core.Logging.LoggingService import LoggingService
 
 
+# directive: bug-0020-worker-ownership
 class OrphanCleanupService:
 
+    # directive: bug-0020-worker-ownership
     def __init__(self, DatabaseServiceInstance=None):
         self.DatabaseService = DatabaseServiceInstance or DatabaseService()
 
+    # directive: bug-0020-worker-ownership
     def SweepOrphans(self) -> dict:
         TfpSwept = self._SweepTemporaryFilePaths()
         TranscodeAjSwept = self._SweepActiveJobs(
@@ -55,6 +58,7 @@ class OrphanCleanupService:
             "QualityTestProgress": QtProgressSwept,
         }
 
+    # directive: bug-0020-worker-ownership
     def _SweepTemporaryFilePaths(self) -> int:
         # 2026-05-25: TFP sweep disabled pending BUG-0018 redesign. The legacy
         # `Success IS NOT NULL` predicate and the first-attempt tighter predicate
@@ -74,17 +78,29 @@ class OrphanCleanupService:
         )
         return 0
 
+    # directive: bug-0020-worker-ownership
     def _SweepActiveJobs(self, ServiceName: str, QueueTable: str) -> int:
+        SelectSql = (  # allow: R12 -- preexisting placement; format normalized
+            "SELECT aj.Id, aj.QueueId, aj.WorkerName "
+            "FROM ActiveJobs aj "
+            f"LEFT JOIN {QueueTable} q ON q.Id = aj.QueueId "
+            "WHERE aj.ServiceName = %s AND q.Id IS NULL "
+            "  AND aj.WorkerName NOT IN ("
+            "    SELECT WorkerName FROM Workers "
+            "    WHERE LastHeartbeat > NOW() - INTERVAL '5 minutes'"
+            "  )"
+        )
+        DeleteSql = (  # allow: R12 -- preexisting placement; format normalized
+            "DELETE FROM ActiveJobs "
+            "WHERE ServiceName = %s "
+            f"  AND QueueId NOT IN (SELECT Id FROM {QueueTable}) "
+            "  AND WorkerName NOT IN ("
+            "    SELECT WorkerName FROM Workers "
+            "    WHERE LastHeartbeat > NOW() - INTERVAL '5 minutes'"
+            "  )"
+        )
         try:
-            Orphans = self.DatabaseService.ExecuteQuery(
-                f"""
-                SELECT aj.Id, aj.QueueId, aj.WorkerName
-                FROM ActiveJobs aj
-                LEFT JOIN {QueueTable} q ON q.Id = aj.QueueId
-                WHERE aj.ServiceName = %s AND q.Id IS NULL
-                """,
-                (ServiceName,),
-            )
+            Orphans = self.DatabaseService.ExecuteQuery(SelectSql, (ServiceName,))
             if not Orphans:
                 return 0
             for Row in Orphans:
@@ -92,18 +108,10 @@ class OrphanCleanupService:
                     f"OrphanCleanup removing ActiveJobs row "
                     f"Id={Row.get('Id')} QueueId={Row.get('QueueId')} "
                     f"WorkerName={Row.get('WorkerName')} ServiceName={ServiceName} "
-                    f"-- parent {QueueTable} row is gone, the queue-delete caller "
-                    f"that produced this leak did not clean up the ActiveJobs row.",
+                    f"-- parent {QueueTable} row is gone AND owning worker is offline.",
                     "OrphanCleanupService", "_SweepActiveJobs",
                 )
-            self.DatabaseService.ExecuteNonQuery(
-                f"""
-                DELETE FROM ActiveJobs
-                WHERE ServiceName = %s
-                  AND QueueId NOT IN (SELECT Id FROM {QueueTable})
-                """,
-                (ServiceName,),
-            )
+            self.DatabaseService.ExecuteNonQuery(DeleteSql, (ServiceName,))
             return len(Orphans)
         except Exception as Ex:
             LoggingService.LogException(
@@ -112,6 +120,7 @@ class OrphanCleanupService:
             )
             return 0
 
+    # directive: bug-0020-worker-ownership
     def _SweepStaleQualityTestingQueue(self) -> int:
         try:
             Stale = self.DatabaseService.ExecuteQuery(
@@ -151,6 +160,7 @@ class OrphanCleanupService:
             )
             return 0
 
+    # directive: bug-0020-worker-ownership
     def _SweepOrphanedTranscodeProgress(self) -> int:
         try:
             Removed = self.DatabaseService.ExecuteNonQuery(
@@ -171,6 +181,7 @@ class OrphanCleanupService:
             )
             return 0
 
+    # directive: bug-0020-worker-ownership
     def _SweepOrphanedQualityTestProgress(self) -> int:
         try:
             Removed = self.DatabaseService.ExecuteNonQuery(
