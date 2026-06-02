@@ -52,23 +52,6 @@ This regression is downstream of the post-BUG-0008 SMB cutover and the windows-u
 
 ---
 
-### [BUG-0011] JellyfinNotify gets HTTP 500 from Jellyfin, WARNING does not log the offending payload
-**Date:** 2026-05-22 | **Area:** jellyfin-notify
-
-**What breaks:** `WARNING: JellyfinNotify: non-2xx status=500 for 2 update(s); body='Error processing request.'` fires from `Services/JellyfinNotifyService.py:169-173`. Jellyfin's 500 body is a generic ASP.NET error string -- no path, no library name, no plugin trace. The WARNING logs only count + body slice, so neither MediaVortex nor the operator can tell which translated path Jellyfin choked on. Likely causes (per the `reference_jellyfin_notify_api` memory and prior post-mortems): a path that doesn't resolve to any configured Jellyfin library root, a separator/case mismatch between MediaVortex-translated and Jellyfin-configured library paths, or a plugin-side bug that wraps a downstream exception as 500 instead of 4xx.
-
-**Repro:** Run any file-mutation choke point (file replace, scan-detected new file, etc.) and wait for the WARNING to fire. There is no way today to map the warning back to a path without code change.
-
-**Evidence:** Live worker log 2026-05-22 -- "non-2xx status=500 for 2 update(s); body='Error processing request.'". Same notification path produces 204 for the vast majority of mutations, so this isn't a global config failure -- it's path-specific.
-
-**Violates:** `jellyfin-push-notify.feature.md` criterion 10 (added with this bug).
-
-**Look first:** `Services/JellyfinNotifyService.py:154-180`. Add `Translated` (or at minimum the first entry's `Path` + `UpdateType`) to the non-2xx WARNING. While debugging the eventual fix, also check Jellyfin's own log (`/var/log/jellyfin/` on the Jellyfin host) at the timestamps -- ASP.NET 500 usually corresponds to a stack trace in the server log that names the offending library/plugin.
-
-**Fix with:** `/t BUG-0011`.
-
----
-
 ### [BUG-0007] Worker capability toggle does not refresh UI until modal is closed and reopened
 **Date:** 2026-05-22 | **Area:** activity-page
 

@@ -132,7 +132,7 @@ decision.
    but the log shape MUST be greppable for later metric extraction
    (e.g. consistent prefix `JellyfinNotify:`).
 
-10. [BUG-0011] **Failure WARNINGs include enough context to diagnose
+10. **Failure WARNINGs include enough context to diagnose
     server-side 5xx responses.** Today the non-2xx WARNING at
     `Services/JellyfinNotifyService.py:169-173` logs only the status code,
     update count, and a 200-char body slice -- not the translated paths
