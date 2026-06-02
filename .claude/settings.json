@@ -20,6 +20,16 @@
           }
         ]
       }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File .claude/hooks/user-prompt-submit.ps1"
+          }
+        ]
+      }
     ]
   },
   "enabledPlugins": {

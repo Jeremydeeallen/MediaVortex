@@ -6,7 +6,8 @@ MediaVortex: Python/Flask media transcoding system. Scans files, runs FFmpeg, in
 
 - **Framework rules:** `.claude/rules/*.md` (auto-loaded; invariants only — details in `.claude/rules-details/`)
 - **Mechanically enforced standards:** `.claude/standards/index.md` (phase gates + R-rules)
-- **Current directive:** `.claude/directive.md` (auto-loaded; empty = task-delegation mode)
+- **Current directive:** `.claude/directive.md` (auto-loaded; empty + no marker = hook refuses code edits)
+- **Task-delegation opt-in:** `.claude/.task-delegation-on` (presence = task-delegation mode enabled for no-directive sessions; operator-only — `New-Item` to enable, `Remove-Item` to disable; warning prepended to every assistant response while active)
 - **Feature contracts:** colocated `*.feature.md` next to primary code
 - **Pipeline contracts:** colocated `*.flow.md` next to entry-point files
 - **Known issues:** `KNOWN-ISSUES.md`

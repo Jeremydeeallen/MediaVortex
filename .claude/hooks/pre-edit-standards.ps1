@@ -399,6 +399,24 @@ function Test-AllowOverride {
     return $false
 }
 
+# ============ Task-delegation opt-in gate ============
+# directive: task-delegation-opt-in
+function Test-TaskDelegationGate {
+    param($State, $ToolName, $ToolInput)
+    $FilePath = $ToolInput.file_path
+    if (-not $FilePath) { return $null }
+    $NormFP = ($FilePath -replace '\\','/').ToLower()
+    $MarkerPath = Join-Path $RepoRoot ".claude\.task-delegation-on"
+    $NormMarker = (($MarkerPath -replace '\\','/').ToLower())
+    if ($NormFP -eq $NormMarker) {
+        return "Operator-only file: .claude/.task-delegation-on is a manual opt-in toggle for task-delegation mode. The operator must create/delete this file directly (New-Item / Remove-Item). Claude cannot toggle task-delegation. See .claude/rules/ceo-mode.md (Task-delegation mode is operator opt-in)."
+    }
+    if ($State -and $State.phase) { return $null }
+    if (Test-Path $MarkerPath) { return $null }
+    if ($NormFP -match '/\.claude/directive\.md$') { return $null }
+    return "No active directive AND .claude/.task-delegation-on marker absent. Two paths forward: (1) run /n <slug> to scaffold a directive, OR (2) ask the operator to create .claude/.task-delegation-on (e.g. 'New-Item .claude/.task-delegation-on -ItemType File') to enable task-delegation mode for this session. See .claude/rules/ceo-mode.md (Task-delegation mode is operator opt-in)."
+}
+
 # ============ Phase gate ============
 function Test-PhaseGate {
     param($State, $ToolName, $ToolInput)
@@ -909,18 +927,22 @@ if (-not $ToolInput.file_path) { Emit-Allow }
 
 $FilePath = $ToolInput.file_path
 
+# Task-delegation gate: when no active directive AND no opt-in marker, refuse code edits.
+# Applies universally (including hook/standards/rule edits). Operator-only toggle.
+$State = Get-SessionState
+$TaskDelegationRefusal = Test-TaskDelegationGate $State $ToolName $ToolInput
+if ($TaskDelegationRefusal) { Emit-DenyWithRepeatDetection $TaskDelegationRefusal $FilePath }
+
 # Skip enforcement for hook scripts themselves and directive maintenance
 $NormFP = $FilePath -replace '\\','/'
 if ($NormFP -match '/\.claude/(hooks|standards|directive\.md|directives/|rules/|plans/)') {
     # Hook + standards files are exempt from R1-R15 (they ARE the standards layer).
     # Phase gate still applies.
-    $State = Get-SessionState
     $PhaseRefusal = Test-PhaseGate $State $ToolName $ToolInput
     if ($PhaseRefusal) { Emit-DenyWithRepeatDetection $PhaseRefusal $FilePath }
     Emit-Allow
 }
 
-$State = Get-SessionState
 $PhaseRefusal = Test-PhaseGate $State $ToolName $ToolInput
 if ($PhaseRefusal) { Emit-DenyWithRepeatDetection $PhaseRefusal $FilePath }
 

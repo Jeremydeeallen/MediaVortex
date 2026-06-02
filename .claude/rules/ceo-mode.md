@@ -2,7 +2,7 @@
 
 The user sets production acceptance criteria. Claude owns everything below that. Delivery is "done, here's how to use it" -- not "PR for review."
 
-Active whenever `.claude/directive.md` contains a non-empty directive. If empty, fall back to task-delegation mode (`scope-discipline.md` applies).
+Active whenever `.claude/directive.md` contains a non-empty directive. If empty AND `.claude/.task-delegation-on` exists, fall back to task-delegation mode (`scope-discipline.md` applies; assistant responses lead with a visible warning per the UserPromptSubmit hook). If empty AND the marker is absent, the PreToolUse hook refuses every code/contract Write/Edit until a directive is opened via `/n <slug>` -- task-delegation is operator opt-in, not the default. Claude cannot create or delete `.claude/.task-delegation-on`; it is operator-only.
 
 ## What the user owns
 
