@@ -6,20 +6,20 @@ from Models.MediaFileModel import MediaFileModel
 from Features.AudioCompletion.AudioCompletionService import AudioCompletionService
 
 
-# directive: commandbuilder-comment-promotion
+# directive: mv-suffix-greedy-collapse
 class CommandBuilder:
     """Pure data transformation model for building FFmpeg transcoding commands."""
 
     @staticmethod
-    # directive: commandbuilder-comment-promotion
+    # directive: mv-suffix-greedy-collapse
     def _CollapseMvSuffix(BaseName: str) -> str:
-        """Strip trailing `-mv` so re-transcoding a `<name>-mv.<ext>` source produces `<name>-mv.<output-ext>` not `<name>-mv-mv.<...>`. BUG-0020 / compliance-gated-rename.feature.md C7."""
-        if BaseName and BaseName.lower().endswith('-mv'):
-            return BaseName[:-3]
+        """Strip ALL trailing `-mv` segments greedily so any depth of `<name>-mv...-mv.<ext>` source produces `<name>-mv.<output-ext>`. compliance-gated-rename.feature.md C7."""
+        while BaseName and BaseName.lower().endswith('-mv'):
+            BaseName = BaseName[:-3]
         return BaseName
 
     @staticmethod
-    # directive: commandbuilder-comment-promotion
+    # directive: mv-suffix-greedy-collapse
     def _NormalizeFfmpegPath(Path: Optional[str]) -> str:
         r"""Collapse mixed `\` and `/` separators -- some Windows FFmpeg builds reject the mix with AVERROR(EINVAL) = -22; pure transformation, no filesystem touch."""
         if not Path:
@@ -27,7 +27,7 @@ class CommandBuilder:
         return os.path.normpath(Path.strip().strip('"'))
 
     @classmethod
-    # directive: commandbuilder-comment-promotion
+    # directive: mv-suffix-greedy-collapse
     def BuildFFmpegCommand(cls, MediaFile, Job, Context: Dict[str, Any]) -> Optional[Dict[str, str]]:
         """Single public entry point. Cascade: Job.IsSubtitleFix -> subtitle-fix; Job.IsRemux -> remux; else Transcode. See command-builder.feature.md C2. Returns {Command, OutputPath} or None."""
         if not MediaFile or not Job:
@@ -46,7 +46,7 @@ class CommandBuilder:
             )
             return None
 
-    # directive: commandbuilder-comment-promotion
+    # directive: mv-suffix-greedy-collapse
     def _RunFFprobeAnalysis(self, InputPath: str, FFprobePath: Optional[str]):
         """Pre-flight FFprobe (header-only) for remux/subtitle-fix stream detection. Returns analysis object or None on failure."""
         try:
@@ -60,12 +60,12 @@ class CommandBuilder:
             )
             return None
 
-    # directive: commandbuilder-comment-promotion
+    # directive: mv-suffix-greedy-collapse
     def _CalculateTargetResolution(self, ProfileSettings: Dict[str, Any], SourceResolution: str) -> str:
         Target = ProfileSettings.get('TargetResolution')
         return Target if Target else SourceResolution
 
-    # directive: commandbuilder-comment-promotion
+    # directive: mv-suffix-greedy-collapse
     def _CalculateScaleFilter(self, SourceResolution: str, TargetResolution: str, MediaFile, ProfileSettings: Optional[Dict[str, Any]] = None) -> Optional[str]:
         """Width-anchored scale: emits scale=w=<TierWidth>:h=-2 (letterbox-safe; codec-legal even height)."""
         try:
@@ -86,7 +86,7 @@ class CommandBuilder:
             )
             return None
 
-    # directive: commandbuilder-comment-promotion
+    # directive: mv-suffix-greedy-collapse
     def _ExtractHeightFromResolution(self, Resolution: str) -> int:
         try:
             if Resolution.endswith('p'):
@@ -97,7 +97,7 @@ class CommandBuilder:
         except (ValueError, IndexError):
             return 720
 
-    # directive: commandbuilder-comment-promotion
+    # directive: mv-suffix-greedy-collapse
     def _GetSourceDimensions(self, MediaFile) -> tuple:
         try:
             if not MediaFile or not getattr(MediaFile, 'Resolution', None):
@@ -122,7 +122,7 @@ class CommandBuilder:
         except Exception:
             return (1920, 1080)
 
-    # directive: commandbuilder-comment-promotion
+    # directive: mv-suffix-greedy-collapse
     def _CalculateWidthFromHeight(self, Height: int, AspectRatio: Optional[float] = None) -> int:
         try:
             if AspectRatio:
@@ -140,7 +140,7 @@ class CommandBuilder:
         except Exception:
             return 1280
 
-    # directive: commandbuilder-comment-promotion
+    # directive: mv-suffix-greedy-collapse
     def _BuildTranscodeShape(self, MediaFile, Job, Context: Dict[str, Any]) -> Optional[Dict[str, str]]:
         """Transcode shape: video re-encode + audio (branch on AudioComplete) + container. Heaviest path -- subsumes remux + audio as side-effects of one FFmpeg pass."""
         try:
@@ -283,7 +283,7 @@ class CommandBuilder:
             )
             return None
 
-    # directive: commandbuilder-comment-promotion
+    # directive: mv-suffix-greedy-collapse
     def AddCodecParameters(self, CommandParts: list, CodecParameters: list, ProfileSettings: Dict[str, Any]) -> None:
         """NVENC knobs read from ProfileSettings per directive (no literals)."""
         try:
@@ -387,7 +387,7 @@ class CommandBuilder:
                 e, "AddCodecParameters", "CommandBuilder"
             )
     
-    # directive: commandbuilder-comment-promotion
+    # directive: mv-suffix-greedy-collapse
     def AddFilmGrainParameter(self, CommandParts: list, CodecParameters: list, ProfileSettings: Dict[str, Any]) -> None:
         """Add film grain parameter for SVT-AV1 (skip for NVIDIA hardware acceleration)."""
         try:
@@ -415,7 +415,7 @@ class CommandBuilder:
                 e, "AddFilmGrainParameter", "CommandBuilder"
             )
     
-    # directive: commandbuilder-comment-promotion
+    # directive: mv-suffix-greedy-collapse
     def AddPixelFormatParameter(self, CommandParts: list, CodecParameters: list, ProfileSettings: Dict[str, Any]) -> None:
         """Emit `-pix_fmt <Profiles.PixelFormat>` -- NVENC AV1 wants p010le, SVT-AV1 wants yuv420p10le; mismatch routes through filter-graph autoconvert and can drift color-range handling."""
         try:
@@ -429,7 +429,7 @@ class CommandBuilder:
                 e, "AddPixelFormatParameter", "CommandBuilder"
             )
 
-    # directive: commandbuilder-comment-promotion
+    # directive: mv-suffix-greedy-collapse
     def GenerateOutputFileName(self, OriginalFileName: str, SourceResolution: str, TargetResolution: str, ContainerType: str = 'mp4', CrfValue: int = None) -> str:
         """Generate `<basename>[-resolution]-mv.<ext>.inprogress` -- canonical MediaVortex output marker per worker-lifecycle.feature.md C6. CrfValue kept for back-compat but no longer embedded in name."""
         try:
@@ -458,7 +458,7 @@ class CommandBuilder:
             BaseName = self._CollapseMvSuffix(BaseName)
             return f"{BaseName}-mv.{ContainerType}.inprogress"
     
-    # directive: commandbuilder-comment-promotion
+    # directive: mv-suffix-greedy-collapse
     def ExtractResolutionFromFilename(self, Filename: str) -> Optional[str]:
         """Extract resolution string from filename (e.g., '1080p', '720p')."""
         try:
@@ -484,7 +484,7 @@ class CommandBuilder:
         except Exception:
             return None
     
-    # directive: commandbuilder-comment-promotion
+    # directive: mv-suffix-greedy-collapse
     def FormatResolutionForFilename(self, Resolution: str) -> str:
         """Format resolution for use in filename."""
         try:
@@ -508,7 +508,7 @@ class CommandBuilder:
         except Exception:
             return Resolution
     
-    # directive: commandbuilder-comment-promotion
+    # directive: mv-suffix-greedy-collapse
     def BuildAudioFilters(self, MediaFile) -> Optional[str]:
         """Build the linear-loudnorm audio filter per linear-loudnorm.feature.md. Returns None when AudioNormalizationEnabled is off; raises RuntimeError when measurements missing (defense in depth -- the queue admission gate should have held the file)."""
         from Repositories.DatabaseManager import DatabaseManager
@@ -585,7 +585,7 @@ class CommandBuilder:
 
         return Filter
 
-    # directive: commandbuilder-comment-promotion
+    # directive: mv-suffix-greedy-collapse
     def BuildVideoFilters(self, ProfileSettings: Dict[str, Any], ScaleFilter: Optional[str], IsInterlaced: bool = False) -> Optional[str]:
         """Build video filter string. Yadif applied only when source is interlaced."""
         Filters = []
@@ -610,7 +610,7 @@ class CommandBuilder:
     }
 
     @classmethod
-    # directive: commandbuilder-comment-promotion
+    # directive: mv-suffix-greedy-collapse
     def _DefaultAudioBitrateForChannels(cls, Channels: Optional[int]) -> int:
         if not Channels or Channels < 1:
             return 128
@@ -620,7 +620,7 @@ class CommandBuilder:
                 return cls._AUDIO_DEFAULT_BITRATE_BY_CHANNELS[Threshold]
         return 384
 
-    # directive: commandbuilder-comment-promotion
+    # directive: mv-suffix-greedy-collapse
     def BuildAudioCodecArgs(self, MediaFile, ProfileBitrate: Optional[int]) -> list:
         """Resolve `-c:a / -b:a` args per the audio re-encode policy in command-builder.feature.md (Audio re-encode policy section). MP4-compat source codec -> same codec preserving channels+bitrate; mp3 -> aac; anything else -> eac3."""
         SourceCodec = (getattr(MediaFile, 'AudioCodec', None) or '').lower()
@@ -643,7 +643,7 @@ class CommandBuilder:
         Bitrate = ProfileBitrate if OperatorOverride else self._DefaultAudioBitrateForChannels(SourceChannels)
         return ['-c:a', 'eac3', '-b:a', f'{Bitrate}k']
 
-    # directive: commandbuilder-comment-promotion
+    # directive: mv-suffix-greedy-collapse
     def _BuildRemuxShape(self, MediaFile, Job, Context: Dict[str, Any]) -> Optional[Dict[str, str]]:
         """Remux shape: -c:v copy + audio (branch on AudioComplete) + container. Output ends `.inprogress` per worker-lifecycle.feature.md C6. Refuses if OutputPath would collide with InputPath (collision = -y overwrite risk)."""
         try:
@@ -746,7 +746,7 @@ class CommandBuilder:
             )
             return None
 
-    # directive: commandbuilder-comment-promotion
+    # directive: mv-suffix-greedy-collapse
     def _BuildSubtitleFixShape(self, MediaFile, Job, Context: Dict[str, Any]) -> Optional[Dict[str, str]]:
         """Subtitle-fix shape: -c:v copy + audio (branch on AudioComplete) + ASS/SSA -> mov_text + container. Output ends `<basename>-mv.mp4.inprogress` per worker-lifecycle.feature.md C6."""
         try:
@@ -835,7 +835,7 @@ class CommandBuilder:
             )
             return None
 
-    # directive: commandbuilder-comment-promotion
+    # directive: mv-suffix-greedy-collapse
     def GetMaxCpuThreads(self) -> int:
         """Get maximum CPU threads from system settings or use default."""
         try:
