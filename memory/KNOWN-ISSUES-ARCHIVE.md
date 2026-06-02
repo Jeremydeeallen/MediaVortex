@@ -686,3 +686,91 @@ To diagnose: grep WorkerService log for `FileReplacementBusinessService` ERROR/W
 
 ---
 
+
+### --- BUG-0012 close 2026-06-02 (fixed in 29e3e36) ---
+
+### [BUG-0012 - RESOLVED 2026-06-02] Quick Fix batch rows have blank Title for files whose FilePath is a UNC path | resolved: 2026-06-02 (commit 29e3e36)
+**Date:** 2026-05-22 | **Area:** show-settings
+
+**What breaks:** On `/ShowSettings#quickfix` (the Next Quick Fix Batch card), several rows render with no value in the Title column. The Title is populated from `Suggestion.ShowName`. `ShowName` is built in `Features/TranscodeQueue/QueueManagementBusinessService.py:372-374` as `Parts = FilePath.replace('\\', '/').split('/'); ShowName = Parts[1] if len(Parts) >= 2 else 'Unknown'`. For drive-letter FilePaths (`T:\Show\file.mp4`) Parts[1] is the show folder. For UNC FilePaths (`\\10.0.0.43\nfs-media-_tv\Show\file.mp4`) the leading double backslash becomes `//` after replace, so `split('/')` puts empty strings in Parts[0] and Parts[1] -- the show folder lands at Parts[4], not Parts[1].
+
+This regression is downstream of the post-BUG-0008 SMB cutover and the windows-unc-path-translation work that started storing UNC paths in `MediaFiles.FilePath` for Windows-worker-claimed rows.
+
+**Repro:** Open `http://10.0.0.7:5000/ShowSettings#quickfix`. Observe the Next Quick Fix Batch table. Several rows show blank Title. Cross-check via SQL: `SELECT FilePath FROM MediaFiles WHERE FilePath LIKE '\\\\%' LIMIT 5` -- rows whose FilePath starts with `\\` are the affected ones.
+
+**Evidence:** Direct code inspection -- the parse takes Parts[1] unconditionally. No UNC-aware branch.
+
+**Violates:** `Features/ShowSettings/smart-populate.feature.md` criterion 20 (added with this bug).
+
+**Look first:** `Features/TranscodeQueue/QueueManagementBusinessService.py:372-374`. Fix options: (a) detect UNC prefix (`FilePath.startswith('\\\\')`) and skip the empty-leading segments, taking Parts[4] instead of Parts[1]; (b) better, use a normalize step that returns the show folder for any path shape -- both UNC and drive-letter paths have the show folder two segments below the share/drive root. The same parsing pattern may exist in other SmartPopulate consumers and the show-grouping query at `Features/ShowSettings/ShowSettingsRepository.py:153` which uses `split_part(replace(mf.FilePath, '\\', '/'), '/', 2)` -- check whether the show-list itself also drops UNC titles.
+
+**Fix with:** `/t BUG-0012`.
+
+---
+
+### --- BUG-0006 close 2026-06-02 (fixed in 833fedf) ---
+
+### [BUG-0006 - RESOLVED 2026-06-02] Quick / AudioFix ProcessingMode rows routed to Transcode capability poller | resolved: 2026-06-02 (commit 833fedf)
+**Date:** 2026-05-18
+
+**What breaks:** `Repositories/DatabaseManager.ClaimNextPendingTranscodeJob` filters `(ProcessingMode IS NULL OR ProcessingMode != 'Remux')`. Anything that isn't literally `'Remux'` -- including the new `'Quick'` mode (post-2026-05-17 Remux+AudioFix collapse), the legacy `'AudioFix'`, and `'SubtitleFix'` -- gets claimed by the Transcode-side poller, which is gated on `Workers.TranscodeEnabled`. `ClaimNextPendingRemuxJob` filters `ProcessingMode = 'Remux'` (literal) and never claims any of them. Result: a Quick Fix queue row CANNOT be claimed by a worker that has `RemuxEnabled=true, TranscodeEnabled=false`. The operator must turn on TranscodeEnabled to drain the Quick queue, defeating the whole point of separating Quick from Transcode.
+
+Operator confirmed 2026-05-18: enabled TranscodeEnabled on I9 to get a Quick row processed; until then RemuxEnabled=true alone left it sitting in Pending.
+
+**Violates:** `Features/TranscodeQueue/media-tabs-and-loudness.feature.md` criterion 19 (Quick Fix card is claim-eligible via RemuxEnabled), and the implicit contract behind separating Quick from Transcode.
+
+**Look first:** `Repositories/DatabaseManager.py:1682` `ClaimNextPendingTranscodeJob` filters at lines 1701 and 1718. `ClaimNextPendingRemuxJob` at 1756 (filter at line 1771). Both queries need their ProcessingMode predicate updated to keep Quick-class jobs on the Remux capability side. `TranscodeQueueModel.IsRemux` already returns True for `'Quick'/'Remux'/'AudioFix'` (commit f56d444, then 6c30c60). The DB-level claim filter is the missing piece.
+
+**Fix with:** `/t BUG-0006`.
+
+---
+
+### --- BUG-0005 close 2026-06-02 (fixed in 833fedf) ---
+
+### [BUG-0005 - RESOLVED 2026-06-02] FFmpeg muxer auto-detect fails on `.mp4.inprogress` output filename | resolved: 2026-06-02 (commit 833fedf)
+**Date:** 2026-05-18
+
+**What breaks:** `BuildRemuxCommand` (and `BuildSubtitleFixCommand`, and the transcode path) write to a `<basename>-mv.mp4.inprogress` filename per `worker-lifecycle.feature.md` criterion 6. FFmpeg reads the LAST extension (`.inprogress`) to pick a muxer, can't find one, exits with `AVERROR(EINVAL) = -22` and the stderr message `"Unable to choose an output format for '...'; use a standard extension for the filename or specify the format manually."`. The intermediate `.mp4` is ignored by FFmpeg's extension-based muxer detection. Confirmed 2026-05-18 against TranscodeAttempts 16550, 16551, 16552 -- three consecutive failures even after AudioComplete-aware command and clean Windows separators.
+
+Verification: running the exact failing command with `-f mp4` added produces a successful 3.3 GB transcode in 2:43 (16.2x realtime), zero errors. Without `-f mp4`, same command fails at muxer init.
+
+**Violates:** `Features/TranscodeQueue/remux.flow.md` Stage 7 (Command build promises a valid command that runs to completion when inputs are healthy). Also blocks `media-tabs-and-loudness.feature.md` criterion 17 verifiability.
+
+**Look first:** `Models/CommandBuilder.py` `BuildRemuxCommand` (line 485), `BuildSubtitleFixCommand` (line 626), and `BuildCommand` (line 28 onwards for the transcode path). Each needs `'-f', 'mp4'` appended to CommandParts before the output filename. Already has `-movflags +faststart` for MP4, but `-movflags` doesn't imply muxer selection.
+
+**Fix with:** `/t BUG-0005`.
+
+---
+
+### --- BUG-0003 close 2026-06-02 (fixed in 48555ba) ---
+
+### [BUG-0003 - RESOLVED 2026-06-02] Remux profile re-encodes audio and applies dynamics processing -- PENDING OPERATOR VERIFICATION | resolved: 2026-06-02 (commit 48555ba)
+**Date:** 2026-05-16 (filed) / 2026-05-17 (implementation landed)
+
+**What broke:** The `Remux` profile built an FFmpeg command that re-encoded audio to AAC and applied `acompressor=threshold=-15dB:ratio=3:attack=0.01:release=0.1:makeup=3dB` followed by `loudnorm=I=-23:LRA=7:TP=-2` on every pass. The same chain ran against 10,270 historical Remux attempts -- compounding generational loss and audibly damaging sources at the AAC quality floor (≤96 kbps WEBRip/SDTV).
+
+**Fix landed in `Features/AudioCompletion/`** -- a per-file `MediaFiles.AudioComplete` flag drives a one-shot pass model:
+- One-shot normalization on first encode (when `AudioComplete=false`); post-flight flips the flag to true.
+- `-c:a copy` on every subsequent encode (when `AudioComplete=true`).
+- Files at or below the channel-aware bitrate floor (`QueueAdmissionConfig.MinAudioBitrateKbps{Mono,Stereo,Surround}` = 64/96/128) are marked complete during backfill so they never run through the loudnorm chain.
+- Suspect-only-on-no-audio-stream model: DTS/TrueHD/FLAC/PCM/Vorbis/Opus take the one-shot codec-convert path (BuildAudioCodecArgs lands on EAC3), not the suspect bucket.
+
+**Implementation evidence (verified 2026-05-17):**
+- Backfill: 17,973 rows AudioComplete=true / 32,999 AudioComplete=false / 2,097 Suspect (no_audio_stream) / 5,726 unprobed -- idempotent re-run reports 0 row changes.
+- Command-shape live verify on row 124 (30 Rock S06E19 Bluray-480p, MP4/HEVC/AAC 124 kbps stereo):
+  - AudioComplete=true -> remux command emits `-c:a copy`, no `loudnorm`.
+  - After Reset (AudioComplete=false) -> remux emits `loudnorm` + `acompressor`, no `-c:a copy`.
+  - After MarkComplete (AudioComplete=true) -> back to `-c:a copy`, cascade returns IsCompliant=true, RecommendedMode=NULL.
+- Cascade live verify on representative rows: Suspect -> IsCompliant=NULL; sub-floor stereo -> IsCompliant=true (Transcode short-circuited by floor guard); Opus 84 kbps -> Remux (one-shot codec convert path); MKV AAC AudioComplete=true -> Remux for container fix.
+- `_LoadAudioNormalizedSet` removed -- compliance cascade reads `AudioComplete` column directly.
+
+**Pending operator smoke test (workers required, currently paused):**
+1. Start workers.
+2. Re-queue file Id=124 (or any AudioComplete=true MP4 file) as Remux. Watch `TranscodeAttempts.FFpmpegCommand` -- must contain `-c:a copy` and must NOT contain `loudnorm`.
+3. After successful Remux, compute `ffmpeg -i <source.orig> -map 0:a -c copy -f data - | sha256sum` and the same against the remuxed output. **Hashes must match** -- the criterion-26 byte-identical contract.
+4. Re-queue any AudioComplete=false file as Remux. Watch the command contains `loudnorm`. Post-flight, query the row -- `AudioComplete` must be flipped to `true`, `AudioCompletedAt` set.
+
+**Files:** `Features/AudioCompletion/`, `Models/CommandBuilder.py`, `Features/FileReplacement/FileReplacementBusinessService.py`, `Features/TranscodeQueue/QueueManagementBusinessService.py`, `Scripts/SQLScripts/{AddAudioCompletionColumns,AddAudioBitrateFloorConfig,BackfillAudioComplete}.py`. Once the operator smoke test passes, move this entry to `memory/KNOWN-ISSUES-ARCHIVE.md`.
+
+---
+

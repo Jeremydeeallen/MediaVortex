@@ -157,7 +157,7 @@ failure modes. Criteria below are numbered to map to flow stages.
     under 400ms for the Search path. Verifiable: time 100 sequential
     requests of each shape, take the 95th percentile.
 
-20. [BUG-0012] **`ShowName` is derived from `FilePath` in a separator-
+20. **`ShowName` is derived from `FilePath` in a separator-
     safe way that works for both drive-letter and UNC source paths.**
     Today `QueueManagementBusinessService.SmartPopulateQueue` builds
     `ShowName` via `Parts = FilePath.replace('\\','/').split('/'); ShowName = Parts[1]`.
