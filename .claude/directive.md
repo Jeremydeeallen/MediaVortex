@@ -1,68 +1,113 @@
 # Current Directive
 
-**Set:** 2026-06-01
-**Closed:** 2026-06-01
-**Status:** Closed -- Success
-**Slug:** mv-suffix-greedy-collapse
-**Replaces:** none (independent slice)
+**Set:** YYYY-MM-DD
+**Status:** Active -- phase: NEEDS_STANDARDS_REVIEW
+**Slug:** <slug>
+**Replaces:** `directives/closed/<previous-slug>.md` (closed Success | Partial | Abandoned)
 
 ## Outcome
 
-Re-transcoding any `<name>-mv...-mv.<ext>` source -- any depth of stacked `-mv` suffixes -- produces exactly `<name>-mv.<output-ext>`. The collapse logic strips ALL trailing `-mv` segments greedily, not just one. Closes the production gap that produced 3 new `-mv-mv` artifacts post-compliance-gated-rename deploy (Evil S02E04 2026-06-01 21:50, Love Death Robots S01E07 2026-06-01 07:09, Westworld S02E01 2026-05-31 23:26).
+One paragraph describing the operator-observable end state. What is true after this directive is done that wasn't true before.
 
 ## Acceptance Criteria
 
-1. `Models.CommandBuilder._CollapseMvSuffix` returns `'foo'` for inputs `'foo'`, `'foo-mv'`, `'foo-mv-mv'`, `'foo-mv-mv-mv'`. Case-insensitive on the suffix. Verifiable: `py -c "from Models.CommandBuilder import CommandBuilder as C; assert C._CollapseMvSuffix('foo-mv-mv-mv') == 'foo' and C._CollapseMvSuffix('FOO-MV') == 'FOO'"`.
+1. ...
+2. ...
 
-2. The function does not mangle names that lack a trailing `-mv` token. `'foo-mv-bar'` returns `'foo-mv-bar'`, `'archive'` returns `'archive'`, `''` returns `''`. Verifiable: same direct-call assertions.
-
-3. All three output-filename call sites (`GenerateOutputFileName` two branches + `BuildCommand` BaseName path + `BuildSubtitleFixCommand` BaseName path) produce `<name>-mv.<ext>.inprogress` for sources of any `-mv` depth. Verifiable by code review of the call sites (no signature change) plus the next post-deploy `-mv-mv` source observed in production producing a `-mv.<ext>` output, not `-mv-mv.<ext>`.
+(Each criterion: observable behavior, verifiable in SQL or by a single command. Rename-test, outsider-test, rewrite-test, negation-test, stability-test per `.claude/rules/feature-criteria.md`.)
 
 ## Out of Scope
 
-- Cleanup of the 51 pre-existing on-disk `-mv-mv` files (BUG-0016 / `CleanupOrphanMvPairs.py` lane).
-- Cleanup of the 414 zombie `-mv-mv` DB rows.
-- Closure of `compliance-gated-rename` (separate slice; this directive unblocks its C5 closure but does not finish it).
+- ...
 
 ## Constraints
 
-- R12: docstring stays one line.
-- R15: anchor on `_CollapseMvSuffix` updates to `# directive: mv-suffix-greedy-collapse`.
-- No new tests required (function is pure; criteria 1-2 are direct-call assertions).
+- ...
 
 ## Escalation Defaults
 
-- Tradeoff between strict-token-match and pattern-match -> strict-token-match (`endswith('-mv')` + while loop, no regex).
-- Risk tolerance: low (one-line behavioral change in a hot path).
+- Tradeoff between A and B -> B
+- Risk tolerance: low | medium | high
 
 ## Engineering Calls Already Made
 
-- Use `while` loop, not regex, for greedy strip. Same readability as the prior single-strip form; no `re` import.
+- ...
 
 ## Status
 
-Active 2026-06-01 -- phase: NEEDS_PLAN -- plan complete; advancing to NEEDS_DOC_PREREAD next.
+Active YYYY-MM-DD -- phase: NEEDS_STANDARDS_REVIEW -- next step.
+
+Phases advance by editing this Status line: `**Status:** Active -- phase: <NEXT>`. The PreToolUse hook reads this line to gate tool calls. See `.claude/standards/index.md` for the phase machine.
 
 ### Files
 
 ```
-Models/CommandBuilder.py    -- EDIT: _CollapseMvSuffix becomes while-loop strip; directive anchor updates to mv-suffix-greedy-collapse
+path/to/file1.py    -- EDIT: one-line reason
+path/to/file2.py    -- CREATE: one-line reason
 ```
 
 ### Promotions
 
+Required when phase advances to DELIVERING. The hook refuses Status `Active -- phase: DELIVERING` -> `Closed` if this section is empty.
+
+Each row promotes durable content out of this directive into its permanent home (feature/flow doc). On close, the archive keeps only the pointer table -- the design content lives in the target file.
+
 | Source artifact | Target file | Commit |
 |---|---|---|
-| Greedy-collapse fix + C7 multi-depth coverage | `compliance-gated-rename.feature.md` C7 progress entry | TBD until close |
+| `<what content / decision>` | `<path/to/target.feature.md or .flow.md>` | `<sha or "TBD until close">` |
+
+If a row's content is "new vertical entirely" or "new pipeline entirely," the Target is a NEW `*.feature.md` / `*.flow.md` -- R13 allows creation during DELIVERING for exactly this case (`.claude/rules/doc-layering.md`).
+
+If a directive has no durable content to promote (e.g. pure bugfix, no contract change), list one row: `no promotions | n/a | <reason>`. The hook only checks the section is non-empty.
 
 ### Verification
 
-- **Criterion 1:** 10/10 direct-call assertions PASS. `('foo-mv-mv-mv'->'foo'), ('FOO-MV'->'FOO'), ('Foo-Mv-Mv'->'Foo'), ('foo-mv'->'foo'), ('foo'->'foo')`. Verified 2026-06-01 via temp script under `PYTHONPATH=.`.
-- **Criterion 2:** Same suite covers non-mangling: `('foo-mv-bar'->'foo-mv-bar'), ('archive'->'archive'), (''->''), ('-mv'->'')`. All PASS.
-- **Criterion 3:** Three call sites confirmed unchanged in signature -- `Models/CommandBuilder.py:439, 452, 458` (GenerateOutputFileName branches) and `:665, 771` (BuildCommand / BuildSubtitleFixCommand BaseName paths). Behavior on single-`-mv` sources identical to pre-fix (one-strip); multi-depth now collapses to clean base. Live-load arm pending next deploy + observation of an organic `-mv-mv` source transcoded post-deploy producing `-mv.<ext>` output.
+Required when phase advances to VERIFYING. One entry per acceptance criterion. Concrete evidence (command output, SQL result, file path) -- not "tested it works."
+
+- **Criterion 1:** `<evidence>`
+- **Criterion 2:** `<evidence>`
 
 ### Decisions Made
 
-- Greedy strip via `while`-loop, not regex. Same readability as prior single-strip; no `re` import; explicit token boundary preserved.
-- Anchor on all 24 def/class in `CommandBuilder.py` rotated from `commandbuilder-comment-promotion` to `mv-suffix-greedy-collapse`. R15 is whole-file when the file is in `## Files`; bulk rotation is mechanical, not a refactor.
-- No new test file. `_CollapseMvSuffix` is pure; the direct-call suite above is the contract. Adding `Tests/Unit/TestCommandBuilder.py` for one function would create a new test file (R8 placement OK but scope-discipline pushback for one function with no callers outside the same class).
+Engineering calls made under ambiguity during execution. These live with the directive (not with features/flows) because they describe THIS directive's reasoning, not the vertical's contract.
+
+- `<decision + one-line rationale>`
+
+---
+
+## Closure (thin-pointer archive shape)
+
+When this directive is ready to close:
+
+1. **Confirm Promotions table is complete.** Every piece of durable content from this directive has a row pointing at its permanent home. The hook will refuse the close otherwise.
+2. **Confirm directive did not grow during DELIVERING.** The hook recorded a size snapshot at IMPLEMENTING -> DELIVERING transition; the close is refused if the directive grew by more than the configured tolerance (default 10%). Growth during DELIVERING means content was DUPLICATED into the directive rather than PROMOTED out -- fix by moving the content to its target file and shrinking the directive.
+3. **Update Promotions table with commit SHAs** (the commits where each promotion landed).
+4. **Change `Status: Active -- phase: DELIVERING` -> `Status: Closed -- Success | Partial | Abandoned`.** Add a `**Closed:** YYYY-MM-DD` line under Set.
+5. **Archive:**
+
+   ```powershell
+   git mv .claude/directive.md .claude/directives/closed/YYYY-MM-DD-<slug>.md
+   Copy-Item .claude/directives/_template.md .claude/directive.md
+   ```
+
+   The renamed file becomes the archived record; `git log --follow` traces it.
+
+The archived directive holds these sections only:
+
+| Section | Content |
+|---|---|
+| Outcome | (restated; what was true at the start of the ask) |
+| Acceptance Criteria | (restated; the contract that gated success) |
+| Promotions | (the pointer table -- source artifacts and where they live now) |
+| Verification | (per-criterion evidence) |
+| Decisions Made | (engineering calls made under ambiguity) |
+
+The archive does NOT hold:
+
+- Design content that lives in a feature/flow doc (read the target file instead -- this is the whole point of promotion)
+- In-flight planning notes or transient operational state (these served their purpose during execution; they don't belong in the historical record)
+- Re-derivations of standards or rules (those live in `.claude/rules/`)
+
+If a future reader wants to know what a vertical does, they read its feature doc. If they want to know why a directive made the choices it made, they read the archived directive's Decisions Made and Verification sections. If they want to know what was promoted, they follow the pointers in the Promotions table.
+
+This shape is governed by `.claude/rules/doc-layering.md` (the three-tier model) and `.claude/rules/ceo-mode.md` (the directive lifecycle).
