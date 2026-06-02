@@ -1,4 +1,4 @@
----
+﻿---
 description: "Expert error troubleshooting skill. Always moves forward. Never repeats failed attempts. Use for deep debugging with retry tracking."
 agent: "agent"
 argument-hint: "<error-description>"
@@ -8,7 +8,7 @@ argument-hint: "<error-description>"
 Expert error troubleshooting. Always moves forward. Never repeats failed attempts.
 
 ## If no description provided -- show bug list:
-1. Read KNOWN-ISSUES.md
+1. Read memory/KNOWN-ISSUES.md
 2. Present bugs grouped by severity (HIGH, MEDIUM, LOW)
 3. User picks one to investigate
 4. Proceed below
@@ -23,7 +23,7 @@ Expert error troubleshooting. Always moves forward. Never repeats failed attempt
 
 ### Step 2: Check Docs First
 1. Feature doc (*.feature.md near the code)
-2. KNOWN-ISSUES.md for known gotchas
+2. memory/KNOWN-ISSUES.md for known gotchas
 3. Flow docs (*.flow.md near entry points)
 4. Previous failure patterns
 - If a fix was already tried and failed, DO NOT try it again

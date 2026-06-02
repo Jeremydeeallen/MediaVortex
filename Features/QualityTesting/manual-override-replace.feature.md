@@ -10,7 +10,7 @@ Every override is recorded in a new `ManualOverrideEvents` audit table so trendi
 
 ## Concern
 
-The bimodal VMAF bug (`KNOWN-ISSUES.md`) means VMAF score is unreliable for MKV sources. Operator visually verifies via the comparison slider, judges "this looks fine, keep it", and currently has no way to force the replacement. Today the only path is to re-queue with a different CRF, hoping for a higher score. With the override action, the operator can act on visual evidence directly.
+The bimodal VMAF bug (`memory/KNOWN-ISSUES.md`) means VMAF score is unreliable for MKV sources. Operator visually verifies via the comparison slider, judges "this looks fine, keep it", and currently has no way to force the replacement. Today the only path is to re-queue with a different CRF, hoping for a higher score. With the override action, the operator can act on visual evidence directly.
 
 Without trend statistics, repeated overrides become a tribal-knowledge problem -- nobody can answer "how often do we override?" or "which shows trigger the most overrides?" The audit table makes the trend a first-class operator surface.
 

@@ -1,4 +1,4 @@
-# Seam Verification
+﻿# Seam Verification
 
 When you modify any component, every directional boundary that crosses into or out of it gets enumerated and verified. Seams hide silent compensations (type coercions, defensive defaults, workaround logic); changes that don't account for them re-introduce bugs the previous code was quietly masking.
 
@@ -53,7 +53,7 @@ If you can't tell which bucket, read the producer or consumer first.
 |---|---|
 | Cross-stage pipeline seam | The relevant `*.flow.md`'s `## Seams` section |
 | Intra-feature component seam | The relevant `*.feature.md`'s `## Seams` section |
-| Wire-format coercion masking a schema quirk | `KNOWN-ISSUES.md` under a `BUG-NNNN`, OR permanent design section of the relevant `*.feature.md` |
+| Wire-format coercion masking a schema quirk | `memory/KNOWN-ISSUES.md` under a `BUG-NNNN`, OR permanent design section of the relevant `*.feature.md` |
 | Function-call contract | Function signature + type hints; one-line docstring pointer if non-obvious |
 
 **Details, examples (UseNvidiaHardware case), and caveats:** see `.claude/rules-details/seam-verification.md`.

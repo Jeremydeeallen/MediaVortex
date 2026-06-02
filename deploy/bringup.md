@@ -1,4 +1,4 @@
-# Bring up a new MediaVortex worker
+﻿# Bring up a new MediaVortex worker
 
 Pick the OS family, check prerequisites, run one command, verify.
 
@@ -50,4 +50,4 @@ The script names the failing check and a one-line remediation hint. Don't retry 
 - Flows: `deploy/worker-deploy-{linux,windows}.flow.md`
 - Inventory: `infrastructure/terraform/inventory.toml`
 - Vault: `infrastructure/terraform/secrets.py`
-- Known issues: `KNOWN-ISSUES.md`
+- Known issues: `memory/KNOWN-ISSUES.md`

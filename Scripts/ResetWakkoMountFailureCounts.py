@@ -1,4 +1,4 @@
-"""One-shot remediation: reset FFprobeFailureCount on MediaFiles that wakko-worker-1
+﻿"""One-shot remediation: reset FFprobeFailureCount on MediaFiles that wakko-worker-1
 falsely flagged as source-missing during the 2026-05-14 broken-NFS incident.
 
 Background: wakko-worker-1 came up with /mnt/media_tv pointing at the local NVMe
@@ -6,7 +6,7 @@ instead of the NAS NFS share. For ~4.5 hours it claimed queue items, found the
 "source file missing" (the share wasn't mounted), bumped FFprobeFailureCount,
 and deleted the queue items. 154 MediaFiles ended up with FFprobeFailureCount >= 2
 and LastFFprobeError starting with "Source file missing on disk:" -- all in a
-narrow window on 2026-05-14. See KNOWN-ISSUES.md:109.
+narrow window on 2026-05-14. See memory/KNOWN-ISSUES.md:109.
 
 The mount-validation fix in WorkerService/Main.py (worker-lifecycle criteria 20, 21,
 shipped 2026-05-15) prevents recurrence. This script unwinds the historical damage.

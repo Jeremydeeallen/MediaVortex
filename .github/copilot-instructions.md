@@ -1,4 +1,4 @@
-# Project Guidelines
+﻿# Project Guidelines
 
 MediaVortex is a media transcoding and management system built with Python/Flask. It scans media files, assigns transcode profiles, queues and executes FFmpeg transcoding jobs, and integrates with Jellyfin for playback optimization.
 
@@ -167,7 +167,7 @@ Bootstrap 5 + jQuery + Chart.js, served via Jinja2 templates in `Templates/`.
 
 - Feature docs: colocated `*.feature.md` next to primary code
 - Flow docs: colocated `*.flow.md` next to entry-point files
-- Known issues: `KNOWN-ISSUES.md`
+- Known issues: `memory/KNOWN-ISSUES.md`
 - Detailed docs: `Docs/` folder
 
 ## Conventions

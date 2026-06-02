@@ -1,4 +1,4 @@
----
+﻿---
 description: Deploy a MediaVortex WorkerService. Two scripts -- one for Linux (LXC or bare-metal Docker) and one for Windows (Task Scheduler + SMB). See deploy/bringup.md for shape selection.
 argument-hint: <linux|windows> <target-host-or-ip>
 ---
@@ -36,4 +36,4 @@ Deploy a MediaVortex worker. Do NOT improvise -- the deploy steps live in the fl
 - Feature doc (success criteria, status, progress): `deploy/worker-deploy.feature.md`
 - Linux flow (LXC + bare-metal): `deploy/worker-deploy-linux.flow.md`
 - Windows flow: `deploy/worker-deploy-windows.flow.md`
-- Known issues that touch deploy: `KNOWN-ISSUES.md` (search for "path storage", "FFmpeg path")
+- Known issues that touch deploy: `memory/KNOWN-ISSUES.md` (search for "path storage", "FFmpeg path")

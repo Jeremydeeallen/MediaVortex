@@ -1,4 +1,4 @@
----
+﻿---
 description: "Start a new feature. Creates flow doc (if user-facing), feature doc with criteria, and progress checklist. No code until criteria are approved."
 agent: "agent"
 argument-hint: "<feature-name>"
@@ -7,7 +7,7 @@ New feature: {{input}}
 
 Follow these steps in order. Do not skip steps or begin implementation before step 12.
 
-1. Read the project's issues tracker (KNOWN-ISSUES.md) for related bugs or prior work on this topic.
+1. Read the project's issues tracker (memory/KNOWN-ISSUES.md) for related bugs or prior work on this topic.
 
 2. Decide: does this feature have a user-visible surface (CLI, UI, API humans call, error message, docs page)? If NO, skip to step 5.
 
@@ -27,6 +27,6 @@ Follow these steps in order. Do not skip steps or begin implementation before st
 
 10. Fill doc gaps in the same pass: additional flow docs if the feature spans multiple pipelines.
 
-11. If new issues surface during this process: record them in KNOWN-ISSUES.md. Do NOT expand the scope of this feature.
+11. If new issues surface during this process: record them in memory/KNOWN-ISSUES.md. Do NOT expand the scope of this feature.
 
 12. Report the feature doc as ready for review. NO code until criteria are explicitly approved.

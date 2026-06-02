@@ -129,4 +129,4 @@ The `infrastructure` repo (`https://github.com/TheAdroitDBA/infrastructure`) is 
 - `infrastructure/terraform/mediavortex-workers/` -- LXC provisioning for Larry CT 218 (reads `bind_mounts` from `inventory.toml`)
 - `infrastructure/terraform/mediavortex-bare-metal-bootstrap.py` -- bare-metal prereq script (nfs-common + Docker CE + fstab managed block); reads `fstab_mounts` from `inventory.toml`
 - `infrastructure/terraform/secrets.py` -- Vaultwarden access for SMB/NFS/DB credentials
-- `KNOWN-ISSUES.md` -- search for "Linux worker deploy flow doc incomplete" (criterion 11 closes this) and "OS-coupled path storage" (orthogonal but relevant to share mappings)
+- `memory/KNOWN-ISSUES.md` -- search for "Linux worker deploy flow doc incomplete" (criterion 11 closes this) and "OS-coupled path storage" (orthogonal but relevant to share mappings)

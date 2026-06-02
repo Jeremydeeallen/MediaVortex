@@ -46,7 +46,7 @@ DRAFTED -- awaiting operator approval. No code written.
 
 ### Progress
 
-- [x] 1. Read `KNOWN-ISSUES.md` and existing FileScanning feature/flow docs
+- [x] 1. Read `memory/KNOWN-ISSUES.md` and existing FileScanning feature/flow docs
 - [x] 2. Confirm pivot: paused parent `media-tabs-and-loudness`; pause snapshot committed (ed97c4d)
 - [x] 3. Identify companion: `scanning-on-activity-page.feature.md` already drafted; pulled into this feature's release scope via criterion 9
 - [x] 4. Draft this doc with criteria

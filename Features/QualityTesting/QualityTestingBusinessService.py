@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """
 Quality Testing Business Service  # allow: R12 -- preexisting
 Business logic layer for quality testing using VMAF analysis
@@ -448,7 +448,7 @@ class QualityTestingBusinessService:
         percentiles 1/5/10/25 -- distribution shape useful for "where did this
         run actually struggle?" queries.
 
-        **Animation-aware filtering (KNOWN-ISSUES.md "VMAF distribution becomes
+        **Animation-aware filtering (memory/KNOWN-ISSUES.md "VMAF distribution becomes
         bimodal on MKV-source transcodes"):** libvmaf's `motion` elementary
         feature is the temporal absolute difference between consecutive
         reference frames. When the source uses held-frame animation

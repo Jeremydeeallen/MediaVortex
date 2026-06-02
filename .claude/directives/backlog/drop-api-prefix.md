@@ -1,4 +1,4 @@
-# Backlog Directive: Drop /api URL Prefix
+﻿# Backlog Directive: Drop /api URL Prefix
 
 **Filed:** 2026-06-01 (paused mid-IMPLEMENTING when audit revealed near-universal triple-quoted SQL in controllers; pivoted to `flow-docs-as-hub` + `sql-to-repository` chain first)
 **Status:** Backlog -- not yet started (carried-forward planning + carved Files list intact from session 2)
@@ -8,7 +8,7 @@
 
 ## Outcome
 
-The `/api` URL prefix is gone from MediaVortex. Every Flask blueprint mounts at the root, every HTML template and client-side fetch/ajax/href targets a root path, and a new rule forbids re-introducing `/api/` anywhere. Operator-observable end state: `/Scanning` loads the scanning page directly; the Stats page "Manage" button works without modification; every existing JSON endpoint resolves at its new root-relative path with the same JSON contract; grep for `/api/` across `WebService/`, `Features/`, `Templates/`, `Core/`, `Repositories/`, `Scripts/`, `*.feature.md`, `*.flow.md`, `.claude/rules/`, `CLAUDE.md`, `KNOWN-ISSUES.md` returns zero matches outside of historical archives (`.claude/directives/closed/`, `MEMORY.md` history snapshots).
+The `/api` URL prefix is gone from MediaVortex. Every Flask blueprint mounts at the root, every HTML template and client-side fetch/ajax/href targets a root path, and a new rule forbids re-introducing `/api/` anywhere. Operator-observable end state: `/Scanning` loads the scanning page directly; the Stats page "Manage" button works without modification; every existing JSON endpoint resolves at its new root-relative path with the same JSON contract; grep for `/api/` across `WebService/`, `Features/`, `Templates/`, `Core/`, `Repositories/`, `Scripts/`, `*.feature.md`, `*.flow.md`, `.claude/rules/`, `CLAUDE.md`, `memory/KNOWN-ISSUES.md` returns zero matches outside of historical archives (`.claude/directives/closed/`, `MEMORY.md` history snapshots).
 
 ## Acceptance Criteria
 
@@ -26,7 +26,7 @@ The deferred endpoints set is:
 
 1. **No `/api` route registrations** outside the deferred set. `Grep` for `url_prefix=['\"]/api` across `WebService/Main.py`, in-scope `Features/*/Controller*.py`, `Core/`, `Repositories/`, `Scripts/` returns matches ONLY for the 5 deferred controllers. Verified: a grep-based audit script enumerates each match and validates it belongs to the deferred set.
 
-2. **No `/api/` literal strings in in-scope code or templates.** `Grep` for `/api/` across the in-scope file set returns only references to the 5 deferred endpoint prefixes. References to `/api/Activity/`, `/api/AudioFixPriorityHints/`, `/api/ClipBuilder/`, `/api/MediaProbe/`, `/api/TeamStatus/` may remain because their backing controllers are deferred. All other `/api/` strings are removed. Historical mentions in `.claude/directives/closed/`, `KNOWN-ISSUES.md` Resolved sections, and memory snapshots are allowed.
+2. **No `/api/` literal strings in in-scope code or templates.** `Grep` for `/api/` across the in-scope file set returns only references to the 5 deferred endpoint prefixes. References to `/api/Activity/`, `/api/AudioFixPriorityHints/`, `/api/ClipBuilder/`, `/api/MediaProbe/`, `/api/TeamStatus/` may remain because their backing controllers are deferred. All other `/api/` strings are removed. Historical mentions in `.claude/directives/closed/`, `memory/KNOWN-ISSUES.md` Resolved sections, and memory snapshots are allowed.
 
 3. **Stats page Manage button reaches the Scanning page.** Operator opens `http://10.0.0.7:5000/Stats`, clicks "Manage" in the Continuous File Scanning card, and lands on the scanning page with HTTP 200. No 404, no redirect chain. (`FileScanningController` is in scope.)
 

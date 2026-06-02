@@ -122,7 +122,7 @@ Features/TranscodeJob/multi-variant-testing.feature.md      -- this doc
 
 ## Out of Scope (deferred to v2)
 
-- **Pre-encode remux of MKV sources**: the bimodal VMAF bug (KNOWN-ISSUES.md) makes MKV-source test data unreliable. v1 deliberately stays on clean MP4 sources (the 4K test corpus). Pre-encode remux is a candidate mitigation in the bug entry and will be addressed as part of the bug fix, not this feature.
+- **Pre-encode remux of MKV sources**: the bimodal VMAF bug (memory/KNOWN-ISSUES.md) makes MKV-source test data unreliable. v1 deliberately stays on clean MP4 sources (the 4K test corpus). Pre-encode remux is a candidate mitigation in the bug entry and will be addressed as part of the bug fix, not this feature.
 - **Variant set editor UI**: operator manages variant sets via SQL for v1. Editor UI is v2.
 - **Cross-variant statistical analysis**: comparison trends across many test rows (per-FG median VMAF, etc.) is a v2 reporting surface, not this feature.
 - **Parallel variant execution across workers**: v1 runs variants sequentially within one queue row on one worker. Multi-worker parallelism per test set is v2.

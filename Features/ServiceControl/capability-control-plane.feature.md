@@ -73,7 +73,7 @@ Context: original doc enumerated three capabilities (Transcode, QualityTest, Sca
 - [x] 5. Delete the `ServiceStatus` gate read in `ProcessQualityTestQueueService.ProcessQueueLoop`
 - [x] 6. Delete the symmetric `ServiceStatus` gate read in `ProcessTranscodeQueueService.ProcessQueueLoop`
 - [x] 7. Update `transcode.flow.md` Stage 2 (transcode claim) and Stage 7 (VMAF execution) to drop any reference to `ServiceStatus.<X>Service` as a gate
-- [x] 8. Update `KNOWN-ISSUES.md` to note the symmetric retirement and link to this feature doc
+- [x] 8. Update `memory/KNOWN-ISSUES.md` to note the symmetric retirement and link to this feature doc
 - [x] 9. Live verification on i9: with the new code, restart the worker; observe the QT loop claims `QualityTestingQueue` row 893 within seconds (the row that motivated this feature)
 
 ### Progress (Amendment 2026-05-18)
@@ -94,7 +94,7 @@ Context: original doc enumerated three capabilities (Transcode, QualityTest, Sca
 Features/QualityTesting/ProcessQualityTestQueueService.py
 Features/TranscodeJob/ProcessTranscodeQueueService.py
 transcode.flow.md
-KNOWN-ISSUES.md
+memory/KNOWN-ISSUES.md
 ```
 
 ## Files
@@ -104,7 +104,7 @@ KNOWN-ISSUES.md
 | `Features/QualityTesting/ProcessQualityTestQueueService.py` | `ProcessQueueLoop` -- delete the `GetServiceStatus("QualityTestService")` gate (lines 131-143) |
 | `Features/TranscodeJob/ProcessTranscodeQueueService.py` | `ProcessQueueLoop` -- delete the `GetServiceStatus("TranscodeService")` gate (lines 285-295) |
 | `transcode.flow.md` | Drop `ServiceStatus.<X>Service` references from Stage 2 / Stage 7 inputs and gate descriptions |
-| `KNOWN-ISSUES.md` | Update the env-driven-config entry to note this feature retires `ServiceStatus`-as-gate as part of the broader pattern cleanup |
+| `memory/KNOWN-ISSUES.md` | Update the env-driven-config entry to note this feature retires `ServiceStatus`-as-gate as part of the broader pattern cleanup |
 
 ## Deviation from conventions
 

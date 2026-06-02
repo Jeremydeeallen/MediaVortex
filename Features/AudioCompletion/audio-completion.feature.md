@@ -231,11 +231,11 @@ File: `Features/AudioCompletion/AudioCompletionController.py` (NEW).
 3. **Exit**: `curl -X POST http://localhost:5000/api/AudioCompletion/Reset -H 'Content-Type: application/json' -d '{"MediaFileIds":[12345]}'` returns `{"Success":true,"RowsAffected":1}`; row visibly flipped. Same for MarkComplete. Empty-body POST returns 400.
 
 ### Step 8 -- Cross-feature doc updates
-Files: `Features/TranscodeQueue/transcode-vs-remux-routing.feature.md`, `Features/TranscodeQueue/remux.flow.md`, `transcode.flow.md`, `KNOWN-ISSUES.md`.
+Files: `Features/TranscodeQueue/transcode-vs-remux-routing.feature.md`, `Features/TranscodeQueue/remux.flow.md`, `transcode.flow.md`, `memory/KNOWN-ISSUES.md`.
 1. `transcode-vs-remux-routing.feature.md`: amend criteria 11 (cascade reads AudioComplete), 13 (AudioComplete is source of truth), 26 (byte-identical when AudioComplete=true), 27 (silent-output guard reframe), 28 (reference floor config). Add a "Defers to" pointer to this feature.
 2. `remux.flow.md`: rewrite the "Audio Filter Chain Applied During Remux" section to describe AudioComplete-aware behavior.
 3. `transcode.flow.md`: update Stage 5 note re: AudioComplete-aware audio args.
-4. `KNOWN-ISSUES.md`: move BUG-0003 from Open to Resolved (or to archive once Step 9 verifies), citing this feature.
+4. `memory/KNOWN-ISSUES.md`: move BUG-0003 from Open to Resolved (or to archive once Step 9 verifies), citing this feature.
 5. **Exit**: each amended doc grep-clean for the legacy NormalizedIds / loudnorm-on-every-pass language.
 
 ### Step 9 -- Live verify
@@ -247,7 +247,7 @@ Files: `Features/TranscodeQueue/transcode-vs-remux-routing.feature.md`, `Feature
 6. **Exit**: both hashes match; both stream counts match.
 
 ### Step 10 -- Close out
-1. Update KNOWN-ISSUES.md: move BUG-0003 to Resolved with a brief one-line note citing the verify hashes. Archive after a week of green.
+1. Update memory/KNOWN-ISSUES.md: move BUG-0003 to Resolved with a brief one-line note citing the verify hashes. Archive after a week of green.
 2. Update Status above to COMPLETE.
 3. Activity panel Audio sub-section remains DEFERRED; parent panel ships separately.
 
@@ -270,7 +270,7 @@ Scripts/SQLScripts/BackfillAudioComplete.py                     -- (NEW)
 Features/TranscodeQueue/transcode-vs-remux-routing.feature.md   -- criteria 11, 13, 26-28 amended
 Features/TranscodeQueue/remux.flow.md                           -- Audio Filter Chain section
 transcode.flow.md                                                -- Stage 5 audio args note
-KNOWN-ISSUES.md                                                 -- BUG-0003 forward-link to this feature
+memory/KNOWN-ISSUES.md                                                 -- BUG-0003 forward-link to this feature
 ```
 
 ## Files

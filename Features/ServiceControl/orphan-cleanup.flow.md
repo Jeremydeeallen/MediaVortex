@@ -12,7 +12,7 @@ because they share the "operational hygiene" concern but have different
 kill semantics).
 
 This flow is the safety net for the four-table leak documented in
-`KNOWN-ISSUES.md` BUG-0001. Steady-state writers (the disposition
+`memory/KNOWN-ISSUES.md` BUG-0001. Steady-state writers (the disposition
 service, `HandleJobFailure`, the queue-delete callers) are responsible
 for cleanup in the normal path. This sweep catches three classes of
 regression: a future code path that forgets to clean up, a crash that

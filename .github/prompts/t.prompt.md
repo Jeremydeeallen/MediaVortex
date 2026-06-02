@@ -1,4 +1,4 @@
----
+﻿---
 description: "Troubleshoot and fix a bug. Doc-first: ensures feature and flow docs exist before touching code so the fix is verifiable."
 agent: "agent"
 argument-hint: "<bug-description>"
@@ -7,13 +7,13 @@ Troubleshoot: {{input}}
 
 Follow doc-first order. Do not read source code until step 5.
 
-1. Read KNOWN-ISSUES.md. Match to an existing entry. If no entry exists, record it first (what breaks, which feature, what file to look at), then resume here.
+1. Read memory/KNOWN-ISSUES.md. Match to an existing entry. If no entry exists, record it first (what breaks, which feature, what file to look at), then resume here.
 
 2. Read the feature doc for the affected feature. If no criterion matches this bug, add a [BUG] criterion before proceeding -- the fix is not verifiable without one.
 
 3. Read the flow doc for the affected pipeline. If no flow doc exists, create it before proceeding. The flow doc traces entry points, data steps, and failure modes so the next session does not start from zero.
 
-4. Read relevant docs (KNOWN-ISSUES.md, architecture docs) for prior known state.
+4. Read relevant docs (memory/KNOWN-ISSUES.md, architecture docs) for prior known state.
 
 5. Source code LAST -- only after docs exist and have been read.
 

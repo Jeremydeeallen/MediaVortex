@@ -128,7 +128,7 @@ Features/QualityTesting/QualityTestingBusinessService.py
 WorkerService/windows-unc-path-translation.feature.md
 ```
 
-`deploy/BUG-0008-i9-nfs-einval.troubleshooting.md` and `KNOWN-ISSUES.md` are touched only to update status, not to add new content.
+`deploy/BUG-0008-i9-nfs-einval.troubleshooting.md` and `memory/KNOWN-ISSUES.md` are touched only to update status, not to add new content.
 
 ## Follow-ups (known debt, deferred deliberately)
 

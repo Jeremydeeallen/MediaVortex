@@ -312,7 +312,7 @@ pipeline.
 
 22. Grep audit: `rg -F 'I=-23|LRA=7|TP=-2|acompressor' --type md`
     returns matches only in: this feature doc, this flow doc,
-    `KNOWN-ISSUES.md` (historical bug entries), the
+    `memory/KNOWN-ISSUES.md` (historical bug entries), the
     `KNOWN-ISSUES-ARCHIVE.md` memory file, and the
     `mediavortex-analyze-transcode` skill if it references them for
     diagnostic reasons. No other live doc names the parameters.

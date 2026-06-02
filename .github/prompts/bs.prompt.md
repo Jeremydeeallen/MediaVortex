@@ -1,4 +1,4 @@
----
+﻿---
 description: "Bug success -- cleanup and commit after a bug fix is verified. Moves [BUG] entries to Resolved, cleans up failed fix attempts, and commits."
 agent: "agent"
 ---
@@ -6,7 +6,7 @@ Bug success -- close out the fix cleanly:
 
 1. Remove the [BUG] tag from the feature doc criterion. Keep the criterion text as a normal passing criterion so the fix is permanently testable.
 
-2. Move the bug entry from **Open** to **Resolved** in KNOWN-ISSUES.md. Annotate the entry with `[BUG - FIXED <today's date>]` and append the resolution summary. Do NOT delete it.
+2. Move the bug entry from **Open** to **Resolved** in memory/KNOWN-ISSUES.md. Annotate the entry with `[BUG - FIXED <today's date>]` and append the resolution summary. Do NOT delete it.
 
 3. If the **Resolved** section has more than 10 entries, move the oldest resolved entries to `memory/KNOWN-ISSUES-ARCHIVE.md` (create the archive file if it does not exist).
 

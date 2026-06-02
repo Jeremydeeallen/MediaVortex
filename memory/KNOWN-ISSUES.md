@@ -1,6 +1,10 @@
 # Known Issues
 
-## Open
+## Active
+
+### uncategorized
+
+*Per-entry area subsection assignment deferred to follow-up directive `migrate-bugs-compliance-deep`. Consult `memory/BUG-INDEX.md` for per-bug area metadata and the operationally-correct active/resolved classification (several entries below still bear `RESOLVED`/`FIXED` annotations in their headers despite living under `## Active`; the INDEX classifies them correctly).*
 
 ### [BUG-0023 - RESOLVED 2026-05-31] Legacy ProfileManagementModal silently corrupted NVENC profiles' Codec column
 **Date:** 2026-05-31 | **Area:** ui / profiles | **Closed by:** `directives/closed/2026-05-31-unify-profile-editor.md`

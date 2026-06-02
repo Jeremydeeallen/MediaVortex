@@ -36,7 +36,7 @@ Features/FileReplacement/FileReplacementBusinessService.py   (post-replacement a
 Features/MediaProbe/MediaProbeBusinessService.py    (probe assignment site -- read-only proof of round-trip)
 Features/FileScanning/FileScanningRepository.py     (scan assignment site -- read-only proof of round-trip)
 Tests/Contract/TestMediaFilePersistence.py          (new -- round-trip + drift test)
-KNOWN-ISSUES.md                                     (mark BUG-0017/0019/0021 closed on ship)
+memory/KNOWN-ISSUES.md                                     (mark BUG-0017/0019/0021 closed on ship)
 ```
 
 Explicitly OUT OF SCOPE: changes to `MediaFiles` schema columns themselves (column adds/removes are the operator's data-model decision; this feature only ensures the existing surface persists correctly). Changes to other models' Save methods (this feature is `MediaFile`-scoped; the same class likely exists for `TranscodeAttempt`, `Workers`, etc. -- separate features if/when those bugs surface).
@@ -57,7 +57,7 @@ Explicitly OUT OF SCOPE: changes to `MediaFiles` schema columns themselves (colu
 
 7. **No live regression during cutover.** Existing callers (`_UpdateMediaFilesAfterReplacement`, scan path's MediaFile save, probe path's MediaFile save) continue to work without code change OR are migrated as part of the feature. Verifiable: contract tests for FileReplacement, MediaProbe, and FileScanning all pass after the cutover; canary 2 (Brooklyn Nine-Nine 38571 from compliance-gated-rename) re-run lands with all metadata fresh in the DB.
 
-8. **BUG-0017, BUG-0019, BUG-0021 marked Resolved in `KNOWN-ISSUES.md`** on ship, with the cutover date and link to this feature. BUG-0017's "Resolution" stays as the historical 6-column patch (it shipped); the new entries explain the architectural fix that closes the class.
+8. **BUG-0017, BUG-0019, BUG-0021 marked Resolved in `memory/KNOWN-ISSUES.md`** on ship, with the cutover date and link to this feature. BUG-0017's "Resolution" stays as the historical 6-column patch (it shipped); the new entries explain the architectural fix that closes the class.
 
 ## Status
 
@@ -74,7 +74,7 @@ DRAFT -- criteria not yet approved.
 - [ ] Implement the chosen mechanism. Replace SaveMediaFile's UPDATE/INSERT bodies. Preserve COALESCE protection per criterion 4 via a declared subset.
 - [ ] Contract tests: round-trip (criterion 1), drift detection (criterion 2), single-source add (criterion 3), COALESCE preservation (criterion 4), enumerated column closure (criterion 5).
 - [ ] Re-run canary 2 (Brooklyn Nine-Nine 38571) to verify criterion 7 cutover health on a live transcode.
-- [ ] Mark BUG-0017/0019/0021 Resolved in KNOWN-ISSUES.md with the architectural fix described.
+- [ ] Mark BUG-0017/0019/0021 Resolved in memory/KNOWN-ISSUES.md with the architectural fix described.
 - [ ] Update FileReplacement.feature.md criterion 14 (BUG-0021 tag) and any sibling tags (BUG-0019 in linear-loudnorm.feature.md) to IMPLEMENTED.
 
 ## Files
@@ -87,6 +87,6 @@ DRAFT -- criteria not yet approved.
 | Features/MediaProbe/MediaProbeBusinessService.py | `_ExecuteProbe` -- read-only proof of round-trip via probe contract test. |
 | Features/FileScanning/FileScanningRepository.py | `SaveMediaFile` callers in scan path -- read-only proof of round-trip via scan contract test. |
 | Tests/Contract/TestMediaFilePersistence.py | New contract test suite -- round-trip, drift, single-source-add, COALESCE preservation. |
-| KNOWN-ISSUES.md | BUG-0017/0019/0021 moved to Resolved with the architectural cutover date. |
+| memory/KNOWN-ISSUES.md | BUG-0017/0019/0021 moved to Resolved with the architectural cutover date. |
 | Features/FileReplacement/FileReplacement.feature.md | Criterion 14 (BUG-0021) marked IMPLEMENTED on ship. |
 | Features/LoudnessAnalysis/linear-loudnorm.feature.md | Criterion 14 (BUG-0019, AudioNormalizationMode) marked IMPLEMENTED on ship. |

@@ -1,4 +1,4 @@
-# Program: DB Authority + Vertical Ownership
+﻿# Program: DB Authority + Vertical Ownership
 
 ## For the next session (read this first)
 
@@ -106,7 +106,7 @@ Original B+ raised to A-. Structural fix is solid; tests cover all three claim p
   - [ ] P3.B5 — QualityTesting*.
   - [ ] P3.B6 — TranscodeQueue / TranscodeAttempts / TemporaryFilePaths.
   - [ ] P3.B7 — MediaFiles (touches everything; last and most carefully).
-- [ ] P3.C — DatabaseManager file deletion. Top-of-file `# THIS FILE IS DELETED` marker on the placeholder; KNOWN-ISSUES.md update retires the monolith bug entry.
+- [ ] P3.C — DatabaseManager file deletion. Top-of-file `# THIS FILE IS DELETED` marker on the placeholder; memory/KNOWN-ISSUES.md update retires the monolith bug entry.
 - [ ] P3.D — Write `.claude/rules/vertical-ownership.md`.
 - [ ] P3.E — docs-audit sweep across all `Features/*/*.feature.md` and `*.flow.md` for stale references.
 

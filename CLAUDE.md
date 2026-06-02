@@ -1,4 +1,4 @@
-# CLAUDE.md
+﻿# CLAUDE.md
 
 MediaVortex: Python/Flask media transcoding system. Scans files, runs FFmpeg, integrates with Jellyfin.
 
@@ -10,7 +10,7 @@ MediaVortex: Python/Flask media transcoding system. Scans files, runs FFmpeg, in
 - **Task-delegation opt-in:** `.claude/.task-delegation-on` (presence = task-delegation mode enabled for no-directive sessions; operator-only — `New-Item` to enable, `Remove-Item` to disable; warning prepended to every assistant response while active)
 - **Feature contracts:** colocated `*.feature.md` next to primary code
 - **Pipeline contracts:** colocated `*.flow.md` next to entry-point files
-- **Known issues:** `KNOWN-ISSUES.md`
+- **Known issues:** `memory/KNOWN-ISSUES.md`
 
 ## Commands
 

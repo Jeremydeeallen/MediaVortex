@@ -10,7 +10,7 @@ Today's schema stores Windows-shaped paths (`T:\Show\file.mkv`) as the canonical
 
 ## Concern
 
-See `KNOWN-ISSUES.md` — single source of truth for the diagnosis, the current workaround, and the symptoms (271+ "Path does not exist, cannot normalize" log hits, 80+ FFprobe-failed hits, 3 "/bin/sh: 1: C:CodeAutomation..." Linux failures, 439 "FFmpeg path from settings not found" hits, plus the tonight-of-2026-05-11 discoveries: Z:\Videos prefix mismatch, LocalSourcePath/LocalOutputPath misnamed columns storing canonical values, malformed `\staging\<worker>\T:\…` paths in legacy attempts). Do not re-describe the problem here.
+See `memory/KNOWN-ISSUES.md` — single source of truth for the diagnosis, the current workaround, and the symptoms (271+ "Path does not exist, cannot normalize" log hits, 80+ FFprobe-failed hits, 3 "/bin/sh: 1: C:CodeAutomation..." Linux failures, 439 "FFmpeg path from settings not found" hits, plus the tonight-of-2026-05-11 discoveries: Z:\Videos prefix mismatch, LocalSourcePath/LocalOutputPath misnamed columns storing canonical values, malformed `\staging\<worker>\T:\…` paths in legacy attempts). Do not re-describe the problem here.
 
 ## Target Schema
 
@@ -94,9 +94,9 @@ Each phase merges separately. Each phase has its own validation criterion. Phase
 
 12. **No backslashes anywhere in `RelativePath`**. Even on Windows. Even in display. The canonical form uses forward slashes; OS-specific separators only appear in resolved absolute paths at I/O time. Verifiable: `SELECT COUNT(*) FROM MediaFiles WHERE RelativePath LIKE '%\\\\%'` returns 0; same for every other path-bearing table.
 
-13. **The KNOWN-ISSUES entry is marked RESOLVED at end of Phase 5**. The entry moves from `## Open` to `## Resolved` with a date and a one-line summary of the resolution. Verifiable: read `KNOWN-ISSUES.md` after Phase 5 merges.
+13. **The KNOWN-ISSUES entry is marked RESOLVED at end of Phase 5**. The entry moves from `## Open` to `## Resolved` with a date and a one-line summary of the resolution. Verifiable: read `memory/KNOWN-ISSUES.md` after Phase 5 merges.
 
-14. **No legacy path-translation references survive in code or docs.** Searching the entire repo for `Workers.ShareCanonicalPrefix`, `Workers.ShareMountPrefix`, `WorkerShareMappings`, `MEDIAVORTEX_SHARE_MAPPINGS`, `PathTranslationService`, `LocalMountPrefix`, `Drive Letter`, and `ShareCanonicalPrefix` returns hits only in: (a) this feature doc, (b) `KNOWN-ISSUES.md`'s resolved entry, (c) git history. No commented-out code blocks referencing the legacy system. No historical strings in feature/flow docs that aren't explicitly tagged as historical. Verifiable: `grep -rn` the patterns above against `Features/`, `Services/`, `Repositories/`, `Core/`, `WorkerService/`, `Templates/`, `Scripts/`, `deploy/`, and root-level docs; expected match count is 0 outside the allowlist.
+14. **No legacy path-translation references survive in code or docs.** Searching the entire repo for `Workers.ShareCanonicalPrefix`, `Workers.ShareMountPrefix`, `WorkerShareMappings`, `MEDIAVORTEX_SHARE_MAPPINGS`, `PathTranslationService`, `LocalMountPrefix`, `Drive Letter`, and `ShareCanonicalPrefix` returns hits only in: (a) this feature doc, (b) `memory/KNOWN-ISSUES.md`'s resolved entry, (c) git history. No commented-out code blocks referencing the legacy system. No historical strings in feature/flow docs that aren't explicitly tagged as historical. Verifiable: `grep -rn` the patterns above against `Features/`, `Services/`, `Repositories/`, `Core/`, `WorkerService/`, `Templates/`, `Scripts/`, `deploy/`, and root-level docs; expected match count is 0 outside the allowlist.
 
 15. **DB is backed up before any destructive migration step (Phase 5).** `pg_dump` snapshot stored at a durable location (Larry filesystem outside the LXC, or another machine), timestamped, kept for at least 30 days. Phase 5 migration script refuses to run without verifying the backup file exists and is newer than 24 hours old. Verifiable: backup file exists at `/mnt/pve/Media/MediaVortex/backups/pre-phase5-<timestamp>.sql.gz` (or equivalent) with a manifest listing schema + row counts; restoring it on a sandbox produces a working pre-Phase-5 DB.
 
@@ -163,7 +163,7 @@ through 2026-05-15 despite migration running months earlier — fixed inline.
 ### Progress
 
 - [x] 1. Diagnose OS coupling in canonical path storage (KNOWN-ISSUES single source of truth)
-- [x] 2. Record critical bug + workaround in KNOWN-ISSUES.md
+- [x] 2. Record critical bug + workaround in memory/KNOWN-ISSUES.md
 - [x] 3. Create stub with [BUG] criterion (criterion 1)
 - [x] 4. Point existing related docs at the source of truth
 - [x] 5. `/n` design pass: StorageRootResolutions schema, 5-phase migration, code touch list, backfill strategy, validation criteria — THIS DOC
@@ -227,7 +227,7 @@ WorkerService/Main.py                               (boot path -- load RootFolde
 Tests/Contract/                                     (fixture + assertion updates)
 
 path-storage.feature.md                             (this doc)
-KNOWN-ISSUES.md                                     (entry moves to Resolved post-Phase 5)
+memory/KNOWN-ISSUES.md                                     (entry moves to Resolved post-Phase 5)
 Core/WorkerContext.feature.md                       (doc update)
 deploy/worker-deploy.feature.md                     (doc update -- no env var)
 deploy/worker-deploy-linux.flow.md                        (step 11b retired)
@@ -239,7 +239,7 @@ CLAUDE.md                                           (canonical-format paragraph)
 | File | Role |
 |---|---|
 | `path-storage.feature.md` | This doc — design + criteria + phase plan |
-| `KNOWN-ISSUES.md` | Source of truth for the bug being fixed; moves to Resolved post-Phase 5 |
+| `memory/KNOWN-ISSUES.md` | Source of truth for the bug being fixed; moves to Resolved post-Phase 5 |
 | `Scripts/SQLScripts/AddPathStorageColumns.py` | Phase 1 schema migration |
 | `Scripts/SQLScripts/SeedRootFolderResolutions.py` | Phase 1 seed from existing `WorkerShareMappings` |
 | `Scripts/SQLScripts/BackfillPathStorage.py` | Phase 2 row-by-row backfill + orphan report |

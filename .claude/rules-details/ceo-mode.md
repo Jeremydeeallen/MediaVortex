@@ -1,4 +1,4 @@
-# CEO Mode -- Details
+﻿# CEO Mode -- Details
 
 > Invariant: `.claude/rules/ceo-mode.md`.
 
@@ -39,7 +39,7 @@ When you touch a file and the hook flags a preexisting R12, R6, or similar legac
 |---|---|---|
 | **Pure WHAT-redundancy** | Comment restates the code | Delete entirely. |
 | **Active-directive WHY** | Rationale that emerged during THIS directive | Put in current `.claude/directive.md`; leave `# directive: <slug>` anchor in code. |
-| **Permanent-invariant WHY** | BUG refs, hard-won constraints | Open a new directive; **MOVE** content to permanent home (`KNOWN-ISSUES.md` under BUG-NNNN, or relevant `*.feature.md`); leave single-line anchor in code. |
+| **Permanent-invariant WHY** | BUG refs, hard-won constraints | Open a new directive; **MOVE** content to permanent home (`memory/KNOWN-ISSUES.md` under BUG-NNNN, or relevant `*.feature.md`); leave single-line anchor in code. |
 | **Surprising WHY that fits nowhere** | A genuine "this code looks weird because..." note | Collapse to single-line comment. R12 allows one line. |
 
 **Step 2: scope decision.** If many blocks across many sections (5+ blocks, or all in one subsystem), classification IS its own directive. Open `<file>-comment-promotion`.

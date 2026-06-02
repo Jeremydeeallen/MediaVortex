@@ -105,7 +105,7 @@ beat the auto-set values.
        still receive the `SizeMB * 0.5` last-resort estimate so the
        queue keeps populating during partial-probe windows.
 
-   Owns the `KNOWN-ISSUES.md` "Profile-less savings estimate uses
+   Owns the `memory/KNOWN-ISSUES.md` "Profile-less savings estimate uses
    misleading SizeMB * 0.5 proxy" entry recorded 2026-05-10.
 
 ### B. Manual override window

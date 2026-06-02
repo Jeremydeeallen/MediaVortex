@@ -1,4 +1,4 @@
-"""
+﻿"""
 StuckJobDetectionService
 Detects and cleans up stuck transcode jobs where FFmpeg processes have died but database status remains "Running".
 """
@@ -884,7 +884,7 @@ class StuckJobDetectionService:
         (`IsScanRunningForRootFolder`) only blocks Pending/Running rows.
 
         Owns FileScanning.feature.md criterion 18 stuck-scan side and the
-        [BUG] entry in KNOWN-ISSUES.md.
+        [BUG] entry in memory/KNOWN-ISSUES.md.
         """
         try:
             LoggingService.LogFunctionEntry("DetectAndCleanStuckScanJobs", "StuckJobDetectionService")

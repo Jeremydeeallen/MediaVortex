@@ -1,7 +1,7 @@
-"""Dedupe MediaFiles rows that share (StorageRootId, LOWER(RelativePath)) but
+﻿"""Dedupe MediaFiles rows that share (StorageRootId, LOWER(RelativePath)) but
 differ in FilePath escaping (e.g. 'T:\\Show\\f.mkv' vs 'T:\\\\Show\\f.mkv').
 
-Backs FileScanning.feature.md criterion 27 and the KNOWN-ISSUES.md entry of
+Backs FileScanning.feature.md criterion 27 and the memory/KNOWN-ISSUES.md entry of
 2026-05-16. The existing idx_mediafiles_filepath_unique keys on the raw
 LOWER(FilePath) string, so escape variants slip through as distinct paths;
 RelativePath (forward-slash form) is identical between the variants but has

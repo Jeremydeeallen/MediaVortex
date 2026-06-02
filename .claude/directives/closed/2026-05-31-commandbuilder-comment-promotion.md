@@ -1,4 +1,4 @@
-# Current Directive
+﻿# Current Directive
 
 **Set:** 2026-05-31
 **Status:** Closed -- Success
@@ -8,7 +8,7 @@
 
 ## Outcome
 
-`Models/CommandBuilder.py` carries no preexisting multi-line docstrings or `#` comment blocks. Every multi-line block has been classified per `.claude/rules/ceo-mode.md#handling-preexisting-comment--doc-violations-encountered-mid-directive` (redundancy / active-directive WHY / permanent-invariant WHY / surprising WHY) and either deleted, moved to the appropriate permanent home (`KNOWN-ISSUES.md` / `Features/CommandBuilder/command-builder.feature.md` / `worker-lifecycle.feature.md`), or collapsed to a single line. All `# allow: R12 -- preexisting` overrides removed. The hook no longer flags any R12 violation in `CommandBuilder.py`. Once clean, finish the deferred criterion-11 lifts from the parent directive: `Profiles.AqStrength` integration in `AddCodecParameters`, and replace `'mp4'` / `'+faststart'` literals with reads from `ProfileSettings.Container` / `ProfileSettings.FastStart`.
+`Models/CommandBuilder.py` carries no preexisting multi-line docstrings or `#` comment blocks. Every multi-line block has been classified per `.claude/rules/ceo-mode.md#handling-preexisting-comment--doc-violations-encountered-mid-directive` (redundancy / active-directive WHY / permanent-invariant WHY / surprising WHY) and either deleted, moved to the appropriate permanent home (`memory/KNOWN-ISSUES.md` / `Features/CommandBuilder/command-builder.feature.md` / `worker-lifecycle.feature.md`), or collapsed to a single line. All `# allow: R12 -- preexisting` overrides removed. The hook no longer flags any R12 violation in `CommandBuilder.py`. Once clean, finish the deferred criterion-11 lifts from the parent directive: `Profiles.AqStrength` integration in `AddCodecParameters`, and replace `'mp4'` / `'+faststart'` literals with reads from `ProfileSettings.Container` / `ProfileSettings.FastStart`.
 
 ## Acceptance Criteria
 
@@ -36,7 +36,7 @@ Active 2026-05-31 -- phase: IMPLEMENTING.
 ```
 Models/CommandBuilder.py                                       -- EDIT: classify + dispose of every multi-line comment / docstring; lift remaining literals
 Features/CommandBuilder/command-builder.feature.md             -- EDIT: receive permanent-invariant content moved from CommandBuilder.py
-KNOWN-ISSUES.md                                                -- EDIT: receive BUG-NNNN references if any moved here
+memory/KNOWN-ISSUES.md                                                -- EDIT: receive BUG-NNNN references if any moved here
 WorkerService/worker-lifecycle.feature.md                      -- EDIT (if needed): receive BUG-0005 muxer-detection content if it lands here
 ```
 

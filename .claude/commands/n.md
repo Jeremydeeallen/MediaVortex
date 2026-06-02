@@ -1,4 +1,4 @@
----
+﻿---
 description: Start a new CEO directive. Discovers related context, pauses any active directive, scaffolds the directive doc with Outcome + Acceptance Criteria. No code until criteria approved.
 argument-hint: <directive-slug or outcome description>
 ---
@@ -7,7 +7,7 @@ New directive: $ARGUMENTS
 
 Follow in order. Do not write code before step 9.
 
-1. **Discovery.** Read CLAUDE.md, the project's issue tracker (path discovered from CLAUDE.md; fallback `KNOWN-ISSUES.md`), and `~/.claude/projects/<repo>/memory/MEMORY.md` for context on `$ARGUMENTS`. Scan `.claude/directives/closed/` for closed directives whose slug or outcome overlap; cite any that are relevant.
+1. **Discovery.** Read CLAUDE.md, the project's issue tracker (path discovered from CLAUDE.md; fallback `memory/KNOWN-ISSUES.md`), and `~/.claude/projects/<repo>/memory/MEMORY.md` for context on `$ARGUMENTS`. Scan `.claude/directives/closed/` for closed directives whose slug or outcome overlap; cite any that are relevant.
 
 2. **Slug shape.** If `$ARGUMENTS` is a descriptive sentence rather than a kebab-case slug, propose a short kebab-case slug derived from the outcome (e.g. "fix library compliance as a whole" -> `library-compliance-completeness`). Surface the proposed slug to the operator; use it for the rest of the steps.
 

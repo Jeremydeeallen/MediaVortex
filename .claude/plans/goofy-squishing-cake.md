@@ -1,4 +1,4 @@
-# MediaVortex Architecture Redesign
+﻿# MediaVortex Architecture Redesign
 
 ## Context
 
@@ -127,7 +127,7 @@ All `JOIN ... ON filepath = filepath` become `JOIN ... ON MediaFileId = Id`. All
 - Remove FFprobePath threading from Phase 1 partial fix (ShouldQualityTestService, FileReplacementBusinessService constructors) -- WorkerContext makes it redundant
 - Deprecate TranscodeService/Main.py and QualityTestService/Main.py
 - Drop filepath columns from child tables
-- Update KNOWN-ISSUES.md: mark path resolution bug and filepath natural key bug as FIXED
+- Update memory/KNOWN-ISSUES.md: mark path resolution bug and filepath natural key bug as FIXED
 
 ## Rollback Strategy
 

@@ -76,7 +76,7 @@ Operator reported (2026-05-09) that "Stop After This Job" did nothing -- it wrot
     - Status changes block (line 38) updates transitions: `Online -> Stopped`, `Draining -> Stopped` (auto on drain completion -- new), `Stopped -> Online` re-applies capabilities.
     - One sentence noting "Offline" is now a UI/connectivity term meaning "process unreachable", derived from `LastHeartbeat`, not a `Workers.Status` value.
 
-17. `KNOWN-ISSUES.md` `[TECH DEBT] Activity page conflates worker liveness and operational state` entry is annotated with `[MERGED INTO Features/Activity/activity-dashboard-improvements.feature.md 2026-05-09]` and moved to the Resolved section once this feature ships.
+17. `memory/KNOWN-ISSUES.md` `[TECH DEBT] Activity page conflates worker liveness and operational state` entry is annotated with `[MERGED INTO Features/Activity/activity-dashboard-improvements.feature.md 2026-05-09]` and moved to the Resolved section once this feature ships.
 
 18. **[BUG-0007] Toggling a worker capability on the Activity page updates the rendered state immediately, without requiring the operator to close and reopen the modal.** Today after clicking a capability switch (TranscodeEnabled / QualityTestEnabled / ScanEnabled / RemuxEnabled), the `POST /api/TeamStatus/Workers/<name>/<Capability>` request succeeds and the DB row updates, but the on-screen toggle and any derived UI (status badge, capability row, action-button enable state) keep showing the pre-click value until the operator closes the worker modal and reopens it (or reloads the page). Fixed means: after the API call returns Success, the worker's tile / modal re-renders from the fresh server payload so the operator sees the new state without navigating. Verifiable: click TranscodeEnabled from on to off on a worker; without closing the modal, observe the toggle is now off and the capability-row indicator reflects the new value within one poll tick (or immediately if the handler refetches inline).
 
@@ -86,7 +86,7 @@ DRAFTED -- awaiting operator approval.
 
 ### Progress
 
-- [x] Read prior issues (`KNOWN-ISSUES.md`, `WorkerService.flow.md`)
+- [x] Read prior issues (`memory/KNOWN-ISSUES.md`, `WorkerService.flow.md`)
 - [x] Surveyed Activity page UI + JS
 - [x] First draft -- main asks captured
 - [x] Folded all six "other weaknesses" into criteria (operator approved 2026-05-09)
@@ -114,7 +114,7 @@ Features/ServiceControl/ServiceStatusHelperService.py         -- delete SetTrans
 WorkerService/Main.py                                         -- _HandleStatusChange branch rename Offline -> Stopped; _DrainAndStop writes Workers.Status='Stopped' on completion
 Scripts/SQLScripts/RenameWorkerStatusOfflineToStopped.py      -- NEW. Idempotent UPDATE Workers SET Status='Stopped' WHERE Status='Offline'
 WorkerService/WorkerService.flow.md                           -- Per-Worker Status Control section updates per G16
-KNOWN-ISSUES.md                                               -- annotate prior [TECH DEBT] entry as merged per G17
+memory/KNOWN-ISSUES.md                                               -- annotate prior [TECH DEBT] entry as merged per G17
 SystemSettings table (no migration file)                      -- new row HeartbeatStaleThresholdSec=300 inserted by RenameWorkerStatusOfflineToStopped.py same script (or a sibling) so the deploy is one shot
 ```
 
@@ -129,7 +129,7 @@ SystemSettings table (no migration file)                      -- new row Heartbe
 | `WorkerService/Main.py` | `_HandleStatusChange` branch `"Offline"` renamed to `"Stopped"` (line 520). `_DrainAndStop` (line 528) calls `DatabaseManager.UpdateWorkerStatus(self.WorkerName, 'Stopped')` after the join completes. |
 | `Scripts/SQLScripts/RenameWorkerStatusOfflineToStopped.py` | NEW. Idempotent `UPDATE Workers SET Status='Stopped' WHERE Status='Offline'`; INSERT `HeartbeatStaleThresholdSec=300` into SystemSettings ON CONFLICT DO NOTHING |
 | `WorkerService/WorkerService.flow.md` | Status table + transition list updated per G16 |
-| `KNOWN-ISSUES.md` | Prior `[TECH DEBT]` entry annotated as merged per G17 |
+| `memory/KNOWN-ISSUES.md` | Prior `[TECH DEBT]` entry annotated as merged per G17 |
 
 ## Deviation from conventions
 

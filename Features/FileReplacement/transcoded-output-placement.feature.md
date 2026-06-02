@@ -11,7 +11,7 @@ Standardizes where MediaVortex writes transcoded output and what it names the fi
 
 Together these fix three problems with one change:
 - **Cross-worker hand-off.** Per-worker scratch dirs were container-local; any other worker that claimed the VMAF row got "file not found". Side-by-side eliminates the inconsistency by writing next to the source on the shared NFS mount.
-- **Same-name collision.** The 2026-05-09 `BuildRemuxCommand` bug (KNOWN-ISSUES.md:104) destroyed source files when input ext == output ext and OutputPath == InputPath. A permanent `-mv` suffix on the final filename means source and output are structurally distinct on disk regardless of any future code regression.
+- **Same-name collision.** The 2026-05-09 `BuildRemuxCommand` bug (memory/KNOWN-ISSUES.md:104) destroyed source files when input ext == output ext and OutputPath == InputPath. A permanent `-mv` suffix on the final filename means source and output are structurally distinct on disk regardless of any future code regression.
 - **On-disk audit gap.** Today only `MediaFiles.TranscodedByMediaVortex` knows which files MediaVortex produced. With `-mv` the filesystem itself is self-describing -- an operator browsing the share in Explorer / `ls` can tell at a glance.
 
 ## Concern
@@ -102,7 +102,7 @@ transcode.flow.md
 | `Models/CommandBuilder.py` | `BuildTranscodeCommand` / `BuildRemuxCommand` / `BuildSubtitleFixCommand` -- output paths land side-by-side; staging suffix unchanged (`_transcoded.mp4` / `_remuxed.mp4` / `_subfix.mp4` during the encode) |
 | `Scripts/SQLScripts/drop_local_staging_2026_05_21.py` | One-shot, idempotent column drop |
 | `transcode.flow.md` | Stage 6 inputs table loses `StagingDirectory`; Stage 8 Action describes `-mv` rename and `KeepSource` settle |
-| `KNOWN-ISSUES.md` | Cross-worker hand-off (Risk 5 in 2026-05-10 sight pass) closed by criterion 3 |
+| `memory/KNOWN-ISSUES.md` | Cross-worker hand-off (Risk 5 in 2026-05-10 sight pass) closed by criterion 3 |
 
 ## Deviation from conventions
 

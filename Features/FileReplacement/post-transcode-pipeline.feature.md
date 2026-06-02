@@ -83,7 +83,7 @@ COMPLETE 2026-05-17 -- all 18 criteria implemented and live-verified.
 - [x] Verify on primary Windows machine: I9 completed DxD S04E01 end-to-end (Success=True, FileReplaced=True, TranscodedByMediaVortex=True, Codec=av1)
 - [x] Verify on Linux worker: Larry workers completed transcode + file replacement, MediaFiles updated correctly
 - [x] Update transcode.flow.md to remove [BUG] annotation and document the corrected bridge behavior
-- [x] Update KNOWN-ISSUES.md to mark the post-transcode pipeline bug as FIXED
+- [x] Update memory/KNOWN-ISSUES.md to mark the post-transcode pipeline bug as FIXED
 
 ## Scope
 

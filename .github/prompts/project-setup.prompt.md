@@ -1,4 +1,4 @@
----
+﻿---
 description: "Set up or audit a project's documentation and enforcement structure. Checks orientation questions, identifies gaps, and scaffolds missing pieces."
 agent: "agent"
 ---
@@ -8,7 +8,7 @@ Audit the project's documentation and structure for orientation gaps.
 
 ## Step 1: Load existing state
 
-Read: copilot-instructions.md (or CLAUDE.md), README.md, KNOWN-ISSUES.md, and top-level directory listing.
+Read: copilot-instructions.md (or CLAUDE.md), README.md, memory/KNOWN-ISSUES.md, and top-level directory listing.
 
 ## Step 2: Orientation audit
 

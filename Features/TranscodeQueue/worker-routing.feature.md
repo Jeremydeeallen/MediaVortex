@@ -90,7 +90,7 @@ DRAFTED -- awaiting operator approval.
 
 ### Progress
 
-- [x] Read prior issues (`KNOWN-ISSUES.md` -- no related entry)
+- [x] Read prior issues (`memory/KNOWN-ISSUES.md` -- no related entry)
 - [x] Surveyed existing claim path (`DatabaseManager.ClaimNextPendingTranscodeJob`, `transcode.flow.md` Stage 2.2)
 - [x] Confirmed activity-dashboard-improvements covers the worker-tile surface so this feature only needs to slot tags onto an already-redesigned tile
 - [x] Drafted feature doc (this file)

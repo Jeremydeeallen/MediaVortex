@@ -1,4 +1,4 @@
-# Current Directive
+﻿# Current Directive
 
 **Set:** 2026-05-31
 **Status:** Closed -- Success
@@ -30,7 +30,7 @@ This operationalizes the new policy `.claude/rules/ceo-mode.md#one-editor-per-co
 
 8. **No silent codec corruption possible.** Verifiable: open `NVENC AV1 P7 CANARY VBR -720p` -> change Description only -> save -> `SELECT Codec FROM Profiles WHERE Id=39` still returns `av1_nvenc`. The pre-fix behavior would have written `libsvtav1`.
 
-9. **BUG-NNNN entry filed** in `KNOWN-ISSUES.md` documenting the legacy-modal Codec-corruption footgun and naming this directive as the close.
+9. **BUG-NNNN entry filed** in `memory/KNOWN-ISSUES.md` documenting the legacy-modal Codec-corruption footgun and naming this directive as the close.
 
 10. **Both smoke paths still green** -- canary command + legacy CQ32 command from the parent directive still emit unchanged ffmpeg invocations. The unification is UI-only; CommandBuilder behavior unchanged.
 
@@ -60,7 +60,7 @@ Active 2026-05-31 -- phase: IMPLEMENTING.
 ```
 Templates/Settings.html                                   -- EDIT: delete legacy modal block, extend cogs modal, repoint Edit button
 Features/Profiles/ProfileController.py                    -- EDIT: extend PATCH /knobs allowlist
-KNOWN-ISSUES.md                                           -- EDIT: file BUG-NNNN for legacy modal Codec corruption
+memory/KNOWN-ISSUES.md                                           -- EDIT: file BUG-NNNN for legacy modal Codec corruption
 ```
 
 ### Verification
@@ -73,7 +73,7 @@ KNOWN-ISSUES.md                                           -- EDIT: file BUG-NNNN
 6. Codec dropdown options: `['libsvtav1','av1_nvenc']`. Live API confirms `GET /api/profiles/39` returns `Codec='av1_nvenc'`. PASS.
 7. `PATCH /api/profiles/<id>/knobs` allowlist (`PROFILE_COLS` + `THRESHOLD_COLS`) covers every column in criteria 4 + 5. Live verified: PATCH succeeded with all field updates. PASS.
 8. **Corruption-fix smoke test passed:** PATCH `{"Profile": {"Description": "..."}, "Thresholds": []}` against profile Id=39 (canary). Post-PATCH SELECT: `Codec='av1_nvenc'` (unchanged), all other fields intact. Pre-fix legacy modal behavior would have overwritten `Codec='libsvtav1'`. PASS.
-9. BUG-0023 filed in `KNOWN-ISSUES.md` with full footgun description, audit query, and resolution attribution. PASS.
+9. BUG-0023 filed in `memory/KNOWN-ISSUES.md` with full footgun description, audit query, and resolution attribution. PASS.
 10. Canary + legacy CQ32 smoke tests run via `/tmp/smoke_canary.py` and `/tmp/smoke_legacy.py` after the edits -- both still produce expected ffmpeg invocations (canary matches NvidiaOptimization1.ps1, legacy CQ32 byte-identical to pre-cleanup). PASS.
 
 ## Delivery Report
@@ -86,7 +86,7 @@ WHAT SHIPPED:
 - `Templates/Settings.html`: legacy `ProfileManagementModal` HTML deleted (411 lines), dead JS deleted (`EditProfile`, `ShowCreateProfileModal`, `SaveProfile`, `GenerateProfileName`, `PopulateProfileForm`, `ClearProfileForm`, `CopyProfile`, `ApplyTranscodeDownTo`, `UpdateBitrateFieldsState` -- 161 more lines), `+ New profile` button removed, `Copy` button removed from profile cards. Edit (pencil) button now opens the cogs modal which is the canonical editor.
 - Cogs modal `ShowProfileKnobs`: extended with grouped Profile fields (Identity / Codec / NVENC / Deinterlace / Audio / Output) and full ProfileThresholds row matrix. Codec dropdown includes `av1_nvenc`.
 - `Features/Profiles/ProfileController.py`: PATCH `/api/profiles/<id>/knobs` allowlist expanded to 20 Profile cols + 20 ProfileThresholds cols.
-- `KNOWN-ISSUES.md`: BUG-0023 filed for the historical Codec-corruption footgun with audit query.
+- `memory/KNOWN-ISSUES.md`: BUG-0023 filed for the historical Codec-corruption footgun with audit query.
 
 DECISIONS I MADE:
 - Profile CREATION via UI dropped entirely (the `+ New profile` button is gone). Creation is SQL/migration-only until a future directive ships create-in-modal. Reason: the legacy create flow had the same Codec dropdown footgun as Edit; keeping it would defeat the corruption-fix work.

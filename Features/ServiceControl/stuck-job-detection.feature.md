@@ -66,7 +66,7 @@ COMPLETE -- I9 self-kill fix verified 2026-05-09. Two enhancement items (D10 per
 
 ### Progress
 
-- [x] Read prior issues (no related entry in `KNOWN-ISSUES.md`)
+- [x] Read prior issues (no related entry in `memory/KNOWN-ISSUES.md`)
 - [x] Surveyed existing `StuckJobDetectionService` and called sites
 - [x] Feature doc updated with both incidents
 - [x] Flow doc created: `Features/ServiceControl/stuck-job-detection.flow.md`

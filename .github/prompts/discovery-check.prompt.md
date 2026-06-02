@@ -1,4 +1,4 @@
----
+﻿---
 description: "Verifies the discovery cost of the current repo by answering four orient questions (what is this, what's done, what's broken, what's next) from docs alone."
 agent: "agent"
 ---
@@ -20,7 +20,7 @@ Bulleted. Features or capabilities currently working. Source: feature docs marke
 
 ### 3. What is broken?
 
-Bulleted. Real known issues. Check KNOWN-ISSUES.md and feature docs for [BUG] criteria.
+Bulleted. Real known issues. Check memory/KNOWN-ISSUES.md and feature docs for [BUG] criteria.
 
 If no tracker exists, report: "No broken-items tracker discovered; absence is a finding."
 

@@ -65,7 +65,7 @@ against live fleet state. Implementation in commit `89c8ab2`.
 
 ### Progress
 
-- [x] Read prior issues (no related entry in `KNOWN-ISSUES.md`)
+- [x] Read prior issues (no related entry in `memory/KNOWN-ISSUES.md`)
 - [x] Read existing deploy flow (`deploy/worker-deploy-linux.flow.md`)
 - [x] Drafted feature doc (this file)
 - [x] Operator approval (2026-05-16 "Let's add b right above our current work")

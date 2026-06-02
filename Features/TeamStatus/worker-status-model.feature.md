@@ -10,7 +10,7 @@ Replaces the current Online/Draining/Offline status enum with Online/Paused/Drai
 
 The Activity page conflates two independent axes -- "is the container alive?" and "should the worker accept jobs?" -- into one badge. Clicking Offline sets `Workers.Status='Offline'` in the DB, but the API returns status derived from heartbeat freshness, ignoring the DB value. Workers that restart also forced themselves Online, overriding operator intent. The startup-override bug is already fixed; this feature completes the model by fixing the API, UI, and state machine.
 
-References: KNOWN-ISSUES.md line 393 "[TECH DEBT] Activity page conflates worker liveness and operational state"
+References: memory/KNOWN-ISSUES.md line 393 "[TECH DEBT] Activity page conflates worker liveness and operational state"
 
 ## Surface
 

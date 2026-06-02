@@ -1,4 +1,4 @@
----
+﻿---
 description: "Review recently changed code for quality, reuse opportunities, and efficiency. Simplifies changed files and reports findings."
 agent: "agent"
 ---
@@ -10,4 +10,4 @@ Review the changed code:
 
 3. Check for quality and efficiency: missing error handling, performance issues obvious from reading.
 
-4. Fix any issues found, or record them in KNOWN-ISSUES.md if they are out of scope for this session.
+4. Fix any issues found, or record them in memory/KNOWN-ISSUES.md if they are out of scope for this session.
