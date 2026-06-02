@@ -1,72 +1,113 @@
 # Current Directive
 
-**Set:** 2026-06-02
-**Status:** Active -- phase: DELIVERING
-**Slug:** version-on-deploy-doc-catchup
-**Replaces:** none (doc-catchup for commit 2b69d30)
+**Set:** YYYY-MM-DD
+**Status:** (no active directive -- task-delegation mode)
+**Slug:** <previous-slug>
+**Replaces:** `directives/closed/<previous-slug>.md` (closed Success | Partial | Abandoned)
 
 ## Outcome
 
-`deploy/version-on-deploy.feature.md` reflects the actual VERSION + BUILD_INFO shape that shipped in commit `2b69d30`. The doc currently specifies bare SHA in VERSION and exactly-three-line BUILD_INFO; the shipped code optionally appends `(ahead N)` / `(behind N)` / `(ahead N, behind M)` to VERSION and an optional `relative_to_main=<state>` line to BUILD_INFO when local HEAD diverges from `origin/main`. The doc gets updated to match reality; the latent regression in deploy strict-equality verification (criterion 5) is acknowledged in the doc as Known Gap with the deferred fix named, not silently left for the next remote Windows deploy to discover.
+One paragraph describing the operator-observable end state. What is true after this directive is done that wasn't true before.
 
 ## Acceptance Criteria
 
-1. **Criterion 4 (BUILD_INFO format) reflects the new optional line.** `deploy/version-on-deploy.feature.md` criterion 4 names BUILD_INFO as having `commit=<sha>`, `built_at=<UTC ISO>`, `built_by=<host>` as required lines AND an optional `relative_to_main=<state>` line where `<state>` is one of `ahead N`, `behind N`, `ahead N, behind M`. Verifiable: grep the doc for `relative_to_main` returns at least one hit naming the format and the three allowed states.
+1. ...
+2. ...
 
-2. **VERSION shape clause reflects the new optional suffix.** The doc explicitly names that VERSION is `<sha>` when local HEAD matches `origin/main`, OR `<sha> (<state>)` when divergent (same `<state>` vocabulary as criterion 4). Verifiable: grep the doc for `(ahead` or `(behind` returns hits documenting the suffix.
-
-3. **Criterion 5 latent-regression callout.** A new sub-bullet or paragraph under criterion 5 names that the deploy scripts' strict-equality check (`Workers.Version == ExpectedSha`) will fail when the dev workstation is ahead of `origin/main` at deploy time AND the target is a remote Windows worker (Linux containers bake VERSION at build via `--build-arg COMMIT_SHA` and don't re-stamp, so they're unaffected). The doc names the deferred fix (compare on bare-SHA prefix in `deploy-windows-worker.py`) and assigns it to a follow-up directive. Verifiable: grep the doc for "strict equality" OR "bare-SHA" returns hits naming the gap and the deferred fix.
-
-4. **No behavior change shipped from this directive.** The shipped code (`Scripts/StampVersion.py`, `StartWorker.py`, `WorkerService/Main.py`) is NOT edited. Verifiable: `git diff main -- Scripts/ StartWorker.py WorkerService/ deploy/*.py` returns empty after this directive's commit.
+(Each criterion: observable behavior, verifiable in SQL or by a single command. Rename-test, outsider-test, rewrite-test, negation-test, stability-test per `.claude/rules/feature-criteria.md`.)
 
 ## Out of Scope
 
-- The actual fix for criterion 5's strict-equality regression (separate directive).
-- Updating `WorkerService.flow.md` or other flow docs that reference VERSION shape — none confirmed via grep at start of this directive; if discovered during implementation, narrow this directive OR park as follow-up.
-- Revising `2b69d30`'s commit message or amending the commit.
+- ...
 
 ## Constraints
 
-- Pure documentation change. No code, no schema, no settings.
-- R14: don't add annotation lines (`deprecated`, `removed YYYY-MM-DD`, `previously`). Replace prose in place.
+- ...
 
 ## Escalation Defaults
 
-- Tradeoff: acknowledge gap vs. fix gap -> acknowledge. Reason: operator asked for doc catch-up; fix is a separate decision.
-- Risk tolerance: low. Documentation only.
+- Tradeoff between A and B -> B
+- Risk tolerance: low | medium | high
 
 ## Engineering Calls Already Made
 
-- Documentation-only update. The strict-equality verification regression is latent (only fires when a remote Windows worker is deployed from a dev workstation ahead of main; there are zero remote Windows workers today). Calling it out in the doc is sufficient until someone wants to deploy REMINGTON.
-- No promotion target outside the feature doc itself; this directive's content lives in `version-on-deploy.feature.md`.
+- ...
 
 ## Status
 
-Active 2026-06-02 -- phase: IMPLEMENTING -- standards already reviewed earlier this session; advancing straight to IMPLEMENTING (no new ancestor docs to read for the single file in scope).
+Active YYYY-MM-DD -- phase: NEEDS_STANDARDS_REVIEW -- next step.
 
-Phases advance by editing this Status line: `**Status:** Active -- phase: <NEXT>`. The PreToolUse hook reads this line to gate tool calls.
+Phases advance by editing this Status line: `**Status:** Active -- phase: <NEXT>`. The PreToolUse hook reads this line to gate tool calls. See `.claude/standards/index.md` for the phase machine.
 
 ### Files
 
 ```
-deploy/version-on-deploy.feature.md   -- EDIT: criterion 4 + 5 + VERSION shape clause to match shipped 2b69d30 behavior
+path/to/file1.py    -- EDIT: one-line reason
+path/to/file2.py    -- CREATE: one-line reason
 ```
 
 ### Promotions
 
+Required when phase advances to DELIVERING. The hook refuses Status `Active -- phase: DELIVERING` -> `Closed` if this section is empty.
+
+Each row promotes durable content out of this directive into its permanent home (feature/flow doc). On close, the archive keeps only the pointer table -- the design content lives in the target file.
+
 | Source artifact | Target file | Commit |
 |---|---|---|
-| Doc catch-up content for 2b69d30 | `deploy/version-on-deploy.feature.md` (the doc itself) | TBD until close |
+| `<what content / decision>` | `<path/to/target.feature.md or .flow.md>` | `<sha or "TBD until close">` |
+
+If a row's content is "new vertical entirely" or "new pipeline entirely," the Target is a NEW `*.feature.md` / `*.flow.md` -- R13 allows creation during DELIVERING for exactly this case (`.claude/rules/doc-layering.md`).
+
+If a directive has no durable content to promote (e.g. pure bugfix, no contract change), list one row: `no promotions | n/a | <reason>`. The hook only checks the section is non-empty.
 
 ### Verification
 
-- **Criterion 1:** `grep -n 'relative_to_main' deploy/version-on-deploy.feature.md` returns one hit at line 44 naming the optional fourth line and the three allowed states.
-- **Criterion 2:** `grep -nE '\(ahead|\(behind' deploy/version-on-deploy.feature.md` returns line 44 with literal examples `1073b8d (ahead 2)`, `2b69d30 (behind 5)`, `d7f993b (ahead 1, behind 3)`.
-- **Criterion 3:** `grep -nE 'Known gap|bare-SHA' deploy/version-on-deploy.feature.md` returns line 48 naming both deploy scripts' line numbers (`deploy-windows-worker.py:422`, `deploy-linux-worker.py:358`), the latent-trigger conditions, and the deferred fix path (`Workers.Version.split()[0] == ExpectedSha`).
-- **Criterion 4:** `git diff 2b69d30 -- Scripts/ StartWorker.py WorkerService/ deploy/deploy-linux-worker.py deploy/deploy-windows-worker.py | wc -l` returns 0 -- no code changes since commit 2b69d30.
+Required when phase advances to VERIFYING. One entry per acceptance criterion. Concrete evidence (command output, SQL result, file path) -- not "tested it works."
+
+- **Criterion 1:** `<evidence>`
+- **Criterion 2:** `<evidence>`
 
 ### Decisions Made
 
-- Included literal SHA examples in criterion 4 (`1073b8d (ahead 2)`, etc.) to make C2's grep verification actually match. Without concrete examples the doc only described the suffix abstractly via `(<state>)` placeholders and the grep returned empty.
-- Latent-regression callout placed inline under criterion 5 (sub-paragraph) rather than as a new criterion. Reason: scope is doc catch-up for 2b69d30; promoting "fix the strict-equality check" to criterion-9 would conflate doc-catchup with future-fix authoring.
-- Used backticks around concrete commit SHAs in the callout so grep + future readers can trace which commit introduced the gap.
+Engineering calls made under ambiguity during execution. These live with the directive (not with features/flows) because they describe THIS directive's reasoning, not the vertical's contract.
+
+- `<decision + one-line rationale>`
+
+---
+
+## Closure (thin-pointer archive shape)
+
+When this directive is ready to close:
+
+1. **Confirm Promotions table is complete.** Every piece of durable content from this directive has a row pointing at its permanent home. The hook will refuse the close otherwise.
+2. **Confirm directive did not grow during DELIVERING.** The hook recorded a size snapshot at IMPLEMENTING -> DELIVERING transition; the close is refused if the directive grew by more than the configured tolerance (default 10%). Growth during DELIVERING means content was DUPLICATED into the directive rather than PROMOTED out -- fix by moving the content to its target file and shrinking the directive.
+3. **Update Promotions table with commit SHAs** (the commits where each promotion landed).
+4. **Change `Status: Active -- phase: DELIVERING` -> `Status: Closed -- Success | Partial | Abandoned`.** Add a `**Closed:** YYYY-MM-DD` line under Set.
+5. **Archive:**
+
+   ```powershell
+   git mv .claude/directive.md .claude/directives/closed/YYYY-MM-DD-<slug>.md
+   Copy-Item .claude/directives/_template.md .claude/directive.md
+   ```
+
+   The renamed file becomes the archived record; `git log --follow` traces it.
+
+The archived directive holds these sections only:
+
+| Section | Content |
+|---|---|
+| Outcome | (restated; what was true at the start of the ask) |
+| Acceptance Criteria | (restated; the contract that gated success) |
+| Promotions | (the pointer table -- source artifacts and where they live now) |
+| Verification | (per-criterion evidence) |
+| Decisions Made | (engineering calls made under ambiguity) |
+
+The archive does NOT hold:
+
+- Design content that lives in a feature/flow doc (read the target file instead -- this is the whole point of promotion)
+- In-flight planning notes or transient operational state (these served their purpose during execution; they don't belong in the historical record)
+- Re-derivations of standards or rules (those live in `.claude/rules/`)
+
+If a future reader wants to know what a vertical does, they read its feature doc. If they want to know why a directive made the choices it made, they read the archived directive's Decisions Made and Verification sections. If they want to know what was promoted, they follow the pointers in the Promotions table.
+
+This shape is governed by `.claude/rules/doc-layering.md` (the three-tier model) and `.claude/rules/ceo-mode.md` (the directive lifecycle).
