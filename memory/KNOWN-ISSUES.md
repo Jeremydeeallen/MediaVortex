@@ -261,46 +261,6 @@ Worker process memory is fine (~279 MB). The bottleneck is wall-clock from seque
 
 ---
 
-### [BUG-0032] Stale .orig files from remux re-queue loop -- 205 files affected, 14 at risk of data loss
-**Date:** 2026-05-14
-
-**Root cause:** `RecomputeForFiles` was never called from `FileReplacementBusinessService._ProcessCompleteFileReplacement`. After a successful remux, `RecommendedMode` stayed `'Remux'` and `IsCompliant` stayed `False` because the cached compliance columns were never refreshed. Queue population re-queued these already-remuxed MP4 files. Each re-queue cycle called `PrepareReplacement` (renaming `.mp4` to `.mp4.orig`), ran FFmpeg to write a new `.mp4`, and may or may not have completed. The `.orig` from the first re-queue was never cleaned up, so every subsequent attempt hit the safety guard: "Pre-existing .orig backup -- refusing to overwrite."
-
-**What breaks:**
-
-1. **593 wasted TranscodeAttempts** across all workers from `.orig` collision errors alone.
-2. **11,068 MP4 files** still have stale `RecommendedMode = 'Remux'` in MediaFiles. Any future queue populate will re-queue them all again.
-3. **137 files** have both the `.mp4` and `.mp4.orig` on disk. Of these, **123 had a prior successful remux** -- the `.mp4` is the good file and the `.orig` is safe to delete. **14 never had a successful remux** -- the first attempt's FFmpeg died mid-write, so the `.mp4` at the DB path is partial/corrupt and the `.orig` is the only intact copy.
-4. **61 files** have only the `.mp4` on disk (`.orig` already cleaned up or never created). These just need `RecomputeForFiles`.
-5. **7 files** have neither the `.mp4` nor `.orig` on disk -- DB points to a missing file.
-6. Every file with a stale `.orig` blocks the worker indefinitely on that queue item (claims it, fails instantly, releases, re-claims on next cycle).
-
-**Damage assessment by category:**
-
-| Category | Count | Risk | Recovery action |
-|----------|-------|------|-----------------|
-| Both exist, had successful remux | 123 | Low -- `.mp4` is valid | Delete `.orig`, run `RecomputeForFiles` |
-| Both exist, NEVER succeeded | 14 | **DATA LOSS** -- `.mp4` is partial | Restore `.orig` to original path, delete corrupt `.mp4`, run `RecomputeForFiles` |
-| MP4 only, no `.orig` | 61 | None -- already clean | Run `RecomputeForFiles` only |
-| Neither file exists | 7 | Orphan DB row | Flag for manual investigation |
-
-**Fix (code -- already applied, not yet committed):** Wired `RecomputeForFiles([MediaFileId])` into `_ProcessCompleteFileReplacement` after the DB update succeeds. Verified: 4 files remuxed after the fix show `RecommendedMode = None`, `IsCompliant = True`. Fix prevents future re-queue loops.
-
-**Recovery (data -- requires cleanup script):**
-1. Pause all workers to stop churn.
-2. For the 14 never-succeeded files: rename `.orig` back to its pre-remux path, delete the corrupt `.mp4`.
-3. For the 123 safe files: delete the `.orig`.
-4. Run `RecomputeForFiles` on all 11,068 stale MP4 files to clear `RecommendedMode = 'Remux'`.
-5. Delete all remux queue items whose MediaFile is already MP4 and compliant after recompute.
-6. Investigate the 7 neither-exists files separately.
-7. Unpause workers.
-
-**Design decision (2026-05-14): stop renaming originals.** The `.orig` rename pattern is fundamentally wrong -- it mutates the source file before the new output is confirmed good. Every crash/kill during the transcode window leaves the original in an unrecoverable state. The correct approach: write the FFmpeg output to `<filename>.inprogress` (or similar suffix) at the destination. The original file is never touched. On success, delete the original and rename `.inprogress` to the final name. On failure or crash, the `.inprogress` file is just garbage to clean up -- the original is intact. Crash recovery becomes trivial: find and delete `.inprogress` files. This eliminates the entire class of `.orig` data loss bugs.
-
-**Look first:** `Scripts/OrigDamageAssessment.py` (assessment script already written), `Features/FileReplacement/FileReplacementBusinessService.py` (the code fix + the PrepareReplacement method that does the dangerous `.orig` rename), `Features/TranscodeQueue/QueueManagementBusinessService.py` (`RecomputeForFiles`).
-
----
-
 ### [BUG-0033] Linux worker deploy flow doc incomplete -- no post-deploy verification, FFmpeg path troubleshooting, or automation parity with Windows
 **Date:** 2026-05-13
 

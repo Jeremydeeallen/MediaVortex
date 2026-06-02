@@ -13,7 +13,6 @@ Entry shape: `- BUG-NNNN | <active|resolved> | <area> | <desc> | <created>[ -> <
 - BUG-0029 | active | transcode-job | TranscodeAttempts failure rows lack ProfileName | 2026-05-16
 - BUG-0030 | active | file-scanning | Status page Possibly Corrupt count has no drill-down | 2026-05-13
 - BUG-0031 | active | show-settings | Next Remux Batch shows files with no audio stream | 2026-05-14
-- BUG-0032 | active | file-replacement | Stale .orig recovery for 14 at-risk files (data-loss class) | 2026-05-14
 - BUG-0033 | active | deploy | Linux worker deploy flow doc incomplete (no post-deploy verification or troubleshooting) | 2026-05-13
 - BUG-0034 | active | quality-testing | Terminology inconsistency: quality test (policy) vs VMAF (metric) | 2026-05-12
 - BUG-0035 | active | config | env-driven config singleton __new__ never fires; knobs scattered | 2026-05-10
@@ -28,6 +27,7 @@ Entry shape: `- BUG-NNNN | <active|resolved> | <area> | <desc> | <created>[ -> <
 
 ## Recently Resolved (last 10)
 
+- BUG-0032 | resolved | file-replacement | Stale .orig recovery for at-risk files | 2026-05-14 -> 2026-06-02
 - BUG-0041 | resolved | sql-queries | QueryDatabase.py truncates long text columns at 60 chars | 2026-05-13 -> 2026-06-02
 - BUG-0039 | resolved | transcode-job | Workers attempt jobs for missing source files | 2026-05-08 -> 2026-06-02
 - BUG-0012 | resolved | show-settings | Quick Fix batch rows blank Title for UNC paths | 2026-05-22 -> 2026-06-02
@@ -37,4 +37,3 @@ Entry shape: `- BUG-NNNN | <active|resolved> | <area> | <desc> | <created>[ -> <
 - BUG-0004 | resolved | worker-lifecycle | Workers.Status=Paused does not gate capability claiming | 2026-05-18 -> 2026-06-02
 - BUG-0011 | resolved | jellyfin-notify | JellyfinNotify HTTP 500, WARNING does not log payload | 2026-05-22 -> 2026-06-02
 - BUG-0018 | resolved | orphan-cleanup | OrphanCleanupService races FileReplacement during VMAF window (rolled into BUG-0020) | 2026-05-25 -> 2026-06-02
-- BUG-0015 | resolved | file-replacement | Orphan -mv.mp4 disk files without MediaFiles row (rolled into BUG-0020) | 2026-05-24 -> 2026-06-02
