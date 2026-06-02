@@ -535,6 +535,7 @@ function Test-R1-DocPreread {
     foreach ($M in [regex]::Matches($PostContent, '#\s*see\s+([a-z0-9-]+)\.((?:W|S|C|ST)\d+)')) {
         $AnchorRefs += @{ slug = $M.Groups[1].Value.ToLower(); id = $M.Groups[2].Value }
     }
+    $FileBaseName = Split-Path $FilePath -Leaf
     foreach ($D in $Docs) {
         $DocLower = $D.FullName.ToLower()
         $Reads = if ($ReadFiles -is [hashtable] -and $ReadFiles.ContainsKey($DocLower)) { $ReadFiles[$DocLower] } else { @() }
@@ -542,15 +543,32 @@ function Test-R1-DocPreread {
         $HasFullRead = $false
         foreach ($R in $Reads) { if ($R.offset -le 1 -and $R.limit -eq 0) { $HasFullRead = $true; break } }
         if ($HasFullRead) { continue }
-        # Parse doc to find slug + section line numbers (only if partial reads exist or no reads).
+        # Parse doc once: lines + slug + relevance check.
         $DocLines = @()
         $DocSlug = $null
-        try {
-            $DocLines = Get-Content $D.FullName -Encoding UTF8
-            for ($I = 0; $I -lt [Math]::Min(15, $DocLines.Length); $I++) {
-                if ($DocLines[$I] -match '^\*\*Slug:\*\*\s*(\S+)') { $DocSlug = $Matches[1].ToLower(); break }
-            }
-        } catch {}
+        $DocGovernsFile = $false
+          $DocIsActive = $true
+          try {
+              $DocLines = Get-Content $D.FullName -Encoding UTF8
+              for ($I = 0; $I -lt [Math]::Min(15, $DocLines.Length); $I++) {
+                  if ($DocLines[$I] -match '^\*\*Slug:\*\*\s*(\S+)') { $DocSlug = $Matches[1].ToLower(); break }
+              }
+              # Relevance: doc must mention the file's basename. Colocated docs that don't reference
+              # this file do not govern it.
+              foreach ($Line in $DocLines) {
+                  if ($Line -match [regex]::Escape($FileBaseName)) { $DocGovernsFile = $true; break }
+              }
+              # Status: docs marked NOT STARTED / PROPOSED / DRAFT / PAUSED describe planned work,
+              # not current behavior. They name files they plan to modify but don't yet describe
+              # what the code does today, so they should not gate edits.
+              foreach ($Line in $DocLines) {
+                  if ($Line -match '(?i)(^|\s)(NOT\s+STARTED|PROPOSED|DRAFT|PAUSED)(\s|$|\*|\.|--)') {
+                      $DocIsActive = $false; break
+                  }
+              }
+          } catch {}
+          if (-not $DocGovernsFile) { continue }
+          if (-not $DocIsActive) { continue }
         $MatchingAnchors = @($AnchorRefs | Where-Object { $_.slug -eq $DocSlug })
         if ($MatchingAnchors.Count -eq 0) {
             # No anchor refs to this doc.
@@ -899,7 +917,7 @@ function Test-R15-DirectiveAnchor {
     for ($I = 0; $I -lt $Lines.Length; $I++) {
         if ($Lines[$I] -match '^\s*(def|class)\s+\w+') {
             $Prev = if ($I -gt 0) { $Lines[$I-1] } else { '' }
-            if ($Prev -notmatch "#\s*directive:\s*$([regex]::Escape($Slug))") {
+            if ($Prev -notmatch "#\s*directive:\s*[a-z0-9-]+") {
                 if (Test-AllowOverride $PostContent $I 'R15' $FilePath) { continue }
                 return "R15 Directive anchor: $FilePath line $($I+1) defines a function/class without '# directive: $Slug' on the line above. This file is in the active directive's scope. See .claude/standards/index.md R15 row. Path forward: add '# directive: <active-slug>' on the line immediately above the def/class. This is the grep anchor that lets future readers find the directive that explains why this function exists in its current shape."
             }

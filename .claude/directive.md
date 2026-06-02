@@ -1,113 +1,74 @@
 # Current Directive
 
-**Set:** YYYY-MM-DD
-**Status:** (no active directive -- task-delegation mode)
-**Slug:** <previous-slug>
-**Replaces:** `directives/closed/<previous-slug>.md` (closed Success | Partial | Abandoned)
+**Set:** 2026-06-02
+**Status:** Active -- phase: IMPLEMENTING -- end-to-end worker ownership.
+**Slug:** bug-0020-worker-ownership
+**Replaces:** (none -- continuation of BUG-0020 after Slice 1 compliance-gate landed in d26f77e)
 
 ## Outcome
 
-One paragraph describing the operator-observable end state. What is true after this directive is done that wasn't true before.
+A worker process owns the terminal state of every `.inprogress` it creates and every TFP/MediaFile row that belongs to one of its attempts. No sibling service (OrphanCleanupService, scan adoption, manual scripts) deletes a `.inprogress` for a live worker; no sibling sweeps a TFP row for an attempt whose owning worker is alive. Crash recovery on worker startup is the only safety net, and it operates only on rows owned by the restarting worker. The five operator-run cleanup scripts find zero candidates on a fresh fleet pass.
 
 ## Acceptance Criteria
 
-1. ...
-2. ...
-
-(Each criterion: observable behavior, verifiable in SQL or by a single command. Rename-test, outsider-test, rewrite-test, negation-test, stability-test per `.claude/rules/feature-criteria.md`.)
+1. Every worker entry point (`ProcessTranscodeQueueService.ProcessJob`, `ProcessRemuxQueueService.ProcessJob`, and any other ProcessJob equivalents) wraps the encode + post-flight chain in `try/finally`. On any exception or early return, the `finally` block deletes the `.inprogress` file produced by this attempt (if any) and emits a non-success disposition with an audit trail. Verifiable: induce a forced failure mid-encode and observe no `.inprogress` file remains on disk after `ProcessJob` returns.
+2. `OrphanCleanupService._SweepInProgressFiles` (if it exists) refuses to delete a `.inprogress` whose parent attempt has `WorkerName` matching an `ActiveJobs` row -- live owner means the worker still owns the file. Verifiable: insert a synthetic `.inprogress` plus a fresh `ActiveJobs` row, run the sweep, observe the file untouched.
+3. Worker-side TFP cleanup happens before the worker returns control. `ProcessJob` deletes the TFP row for the attempt in its `finally` (after disposition is committed). `OrphanCleanupService._SweepTemporaryFilePaths` runs only as a safety net and skips rows whose parent attempt's `WorkerName` still has an `ActiveJobs` row. Verifiable: run a full encode, observe the TFP row deleted by the time `ProcessJob` returns.
+4. Crash recovery (`WorkerService/Main.py` startup) operates only on attempts where `TranscodeAttempts.WorkerName = self.WorkerName`. No worker touches another worker's in-flight rows. Verifiable: synthetic attempts owned by worker A are not touched when worker B starts.
+5. After the fix, running each of `CleanupSourceFileOrphans.py`, `CleanupStaleInProgressFiles.py`, `CleanupGenerationalGhostRows.py`, `CleanupOrphanMvPairs.py`, `CleanupTemporaryFilePathsOrphans.py` (whichever exist) on a fresh fleet pass reports zero candidates. Verifiable: each script's dry-run output shows zero candidates.
 
 ## Out of Scope
 
-- ...
+- Re-introducing the `.orig` rename pattern (correctly retired).
+- Restructuring `OrphanCleanupService` away from its sweep architecture -- keep it as the safety net, just gate its writes on liveness.
+- Changing the `ActiveJobs` polymorphic schema (BUG-0001 covered the polymorphic FK question; we use it as-is).
 
 ## Constraints
 
-- ...
+- Sweep services keep running -- they become safety nets, not primary cleanup paths.
+- All cleanup gates query `ActiveJobs` for liveness; no in-memory worker registry.
+- One commit per criterion slice; do not bundle all changes into one mega-commit.
 
 ## Escalation Defaults
 
-- Tradeoff between A and B -> B
-- Risk tolerance: low | medium | high
+- Risk tolerance: medium (touches the worker hot path).
 
 ## Engineering Calls Already Made
 
-- ...
+- Slice 1 (compliance-gated rename, BUG-0020 C3) shipped in d26f77e + ca19ad3.
+- BUG-0001 chokepoint pattern (`_CommitDisposition` deletes TFP on non-Replace dispositions) is the foundation for criterion 3; this directive completes the success-path side.
 
 ## Status
 
-Active YYYY-MM-DD -- phase: NEEDS_STANDARDS_REVIEW -- next step.
-
-Phases advance by editing this Status line: `**Status:** Active -- phase: <NEXT>`. The PreToolUse hook reads this line to gate tool calls. See `.claude/standards/index.md` for the phase machine.
+Active -- phase: IMPLEMENTING.
 
 ### Files
 
 ```
-path/to/file1.py    -- EDIT: one-line reason
-path/to/file2.py    -- CREATE: one-line reason
+Features/TranscodeJob/ProcessTranscodeQueueService.py    -- EDIT: try/finally + .inprogress cleanup (C1)
+Features/TranscodeJob/ProcessRemuxQueueService.py        -- EDIT: try/finally + .inprogress cleanup (C1)
+Features/ServiceControl/OrphanCleanupService.py          -- EDIT: liveness gate before delete (C2, C3)
+Features/QualityTesting/PostTranscodeDispositionService.py -- EDIT: success-path TFP cleanup (C3)
+Features/FileReplacement/FileReplacementBusinessService.py -- EDIT: TFP cleanup chokepoint (C3)
+WorkerService/Main.py                                    -- EDIT: crash recovery scoped to self.WorkerName (C4)
+WorkerService/worker-lifecycle.feature.md                -- EDIT: update C8-C13 to reflect ownership rules
 ```
 
 ### Promotions
 
-Required when phase advances to DELIVERING. The hook refuses Status `Active -- phase: DELIVERING` -> `Closed` if this section is empty.
-
-Each row promotes durable content out of this directive into its permanent home (feature/flow doc). On close, the archive keeps only the pointer table -- the design content lives in the target file.
-
 | Source artifact | Target file | Commit |
 |---|---|---|
-| `<what content / decision>` | `<path/to/target.feature.md or .flow.md>` | `<sha or "TBD until close">` |
-
-If a row's content is "new vertical entirely" or "new pipeline entirely," the Target is a NEW `*.feature.md` / `*.flow.md` -- R13 allows creation during DELIVERING for exactly this case (`.claude/rules/doc-layering.md`).
-
-If a directive has no durable content to promote (e.g. pure bugfix, no contract change), list one row: `no promotions | n/a | <reason>`. The hook only checks the section is non-empty.
+| Ownership rules (worker owns .inprogress + TFP terminal state) | `WorkerService/worker-lifecycle.feature.md` | TBD |
+| Liveness-gated sweep predicate | `Features/ServiceControl/orphan-cleanup.flow.md` | TBD |
 
 ### Verification
 
-Required when phase advances to VERIFYING. One entry per acceptance criterion. Concrete evidence (command output, SQL result, file path) -- not "tested it works."
-
-- **Criterion 1:** `<evidence>`
-- **Criterion 2:** `<evidence>`
+- **Criterion 1:** TBD at VERIFYING
+- **Criterion 2:** TBD at VERIFYING
+- **Criterion 3:** TBD at VERIFYING
+- **Criterion 4:** TBD at VERIFYING
+- **Criterion 5:** TBD at VERIFYING
 
 ### Decisions Made
 
-Engineering calls made under ambiguity during execution. These live with the directive (not with features/flows) because they describe THIS directive's reasoning, not the vertical's contract.
-
-- `<decision + one-line rationale>`
-
----
-
-## Closure (thin-pointer archive shape)
-
-When this directive is ready to close:
-
-1. **Confirm Promotions table is complete.** Every piece of durable content from this directive has a row pointing at its permanent home. The hook will refuse the close otherwise.
-2. **Confirm directive did not grow during DELIVERING.** The hook recorded a size snapshot at IMPLEMENTING -> DELIVERING transition; the close is refused if the directive grew by more than the configured tolerance (default 10%). Growth during DELIVERING means content was DUPLICATED into the directive rather than PROMOTED out -- fix by moving the content to its target file and shrinking the directive.
-3. **Update Promotions table with commit SHAs** (the commits where each promotion landed).
-4. **Change `Status: Active -- phase: DELIVERING` -> `Status: Closed -- Success | Partial | Abandoned`.** Add a `**Closed:** YYYY-MM-DD` line under Set.
-5. **Archive:**
-
-   ```powershell
-   git mv .claude/directive.md .claude/directives/closed/YYYY-MM-DD-<slug>.md
-   Copy-Item .claude/directives/_template.md .claude/directive.md
-   ```
-
-   The renamed file becomes the archived record; `git log --follow` traces it.
-
-The archived directive holds these sections only:
-
-| Section | Content |
-|---|---|
-| Outcome | (restated; what was true at the start of the ask) |
-| Acceptance Criteria | (restated; the contract that gated success) |
-| Promotions | (the pointer table -- source artifacts and where they live now) |
-| Verification | (per-criterion evidence) |
-| Decisions Made | (engineering calls made under ambiguity) |
-
-The archive does NOT hold:
-
-- Design content that lives in a feature/flow doc (read the target file instead -- this is the whole point of promotion)
-- In-flight planning notes or transient operational state (these served their purpose during execution; they don't belong in the historical record)
-- Re-derivations of standards or rules (those live in `.claude/rules/`)
-
-If a future reader wants to know what a vertical does, they read its feature doc. If they want to know why a directive made the choices it made, they read the archived directive's Decisions Made and Verification sections. If they want to know what was promoted, they follow the pointers in the Promotions table.
-
-This shape is governed by `.claude/rules/doc-layering.md` (the three-tier model) and `.claude/rules/ceo-mode.md` (the directive lifecycle).
+- TBD during execution

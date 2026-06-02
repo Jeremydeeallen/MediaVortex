@@ -322,7 +322,7 @@ class ProcessTranscodeQueueService:
             LoggingService.LogException("Exception getting next job", e, "ProcessTranscodeQueueService", "GetNextJob")
             return None
 
-    # directive: nvenc-rate-anchored-remediation
+    # directive: bug-0020-worker-ownership
     def ProcessJob(self, Job: TranscodeQueueModel):
         """Process a single transcoding job through the complete workflow."""
         # Branch on processing mode
@@ -336,7 +336,11 @@ class ProcessTranscodeQueueService:
             self.ProcessTestVariantJob(Job)
             return
 
-        ActiveJobId = None  # Initialize for error handling
+        ActiveJobId = None
+        OutputPath = None
+        TemporaryFilePathId = None
+        TranscodeAttemptId = None
+        OwnershipTransferred = False
         try:
             LoggingService.LogInfo(f"Starting job processing for job ID: {Job.Id}", "ProcessTranscodeQueueService", "ProcessJob")
 
@@ -478,6 +482,8 @@ class ProcessTranscodeQueueService:
             # Phase 7: Finalizing
             self.UpdateTranscodeProgress(TranscodeAttemptId, "Finalizing", 0.0, "Processing results and cleanup...")
 
+            # Ownership transfers to downstream (VMAF / FileReplacement) once HandleTranscodingResult fires.
+            OwnershipTransferred = True
             # Step g: Handle transcoding result
             self.HandleTranscodingResult(Job, TranscodeResult, TranscodeAttemptId, ActiveJobId)
 
@@ -488,7 +494,19 @@ class ProcessTranscodeQueueService:
 
         except Exception as e:
             LoggingService.LogException(f"Exception processing job {Job.Id}", e, "ProcessTranscodeQueueService", "ProcessJob")
-            self.HandleJobFailure(Job, f"Exception during processing: {str(e)}")
+            self.HandleJobFailure(Job, f"Exception during processing: {str(e)}", TranscodeAttemptId, ActiveJobId)
+        finally:
+            if not OwnershipTransferred:
+                if OutputPath:
+                    try:
+                        self._DeleteInProgressFile(OutputPath)
+                    except Exception as CleanupEx:
+                        LoggingService.LogException(f"Worker-owned .inprogress cleanup failed for job {Job.Id}", CleanupEx, "ProcessTranscodeQueueService", "ProcessJob")
+                if TemporaryFilePathId and TranscodeAttemptId:
+                    try:
+                        self.DatabaseManager.DeleteTemporaryFilePath(TranscodeAttemptId)
+                    except Exception as TfpEx:
+                        LoggingService.LogException(f"Worker-owned TFP cleanup failed for job {Job.Id}", TfpEx, "ProcessTranscodeQueueService", "ProcessJob")
 
     # directive: nvenc-rate-anchored-remediation
     def ProcessTestVariantJob(self, Job: TranscodeQueueModel):
@@ -767,7 +785,7 @@ class ProcessTranscodeQueueService:
             except Exception:
                 pass
 
-    # directive: nvenc-rate-anchored-remediation
+    # directive: bug-0020-worker-ownership
     def ProcessRemuxJob(self, Job: TranscodeQueueModel):
         """Process a remux job using the `.inprogress` output pattern.
         Sequence:
@@ -784,6 +802,9 @@ class ProcessTranscodeQueueService:
         """
         ActiveJobId = None
         TranscodeAttemptId = None
+        TargetLocalPath = None
+        TemporaryFilePathId = None
+        OwnershipTransferred = False
         try:
             LoggingService.LogInfo(f"Starting remux job processing for job ID: {Job.Id}", "ProcessTranscodeQueueService", "ProcessRemuxJob")
 
@@ -900,16 +921,28 @@ class ProcessTranscodeQueueService:
 
             # Handle result - skip quality testing for remux
             self.UpdateTranscodeProgress(TranscodeAttemptId, "Finalizing", 0.0, "Finalizing remux...")
+            # Ownership transfers to FileReplacement once HandleRemuxResult fires.
+            OwnershipTransferred = True
             self.HandleRemuxResult(Job, TranscodeResult, TranscodeAttemptId, ActiveJobId, OutputPath)
             self.CleanupOrContinue(Job)
 
             LoggingService.LogInfo(f"Completed remux job processing for job ID: {Job.Id}", "ProcessTranscodeQueueService", "ProcessRemuxJob")
 
         except Exception as e:
-            if 'TargetLocalPath' in dir():
-                self._DeleteInProgressFile(TargetLocalPath)
             LoggingService.LogException(f"Exception processing remux job {Job.Id}", e, "ProcessTranscodeQueueService", "ProcessRemuxJob")
             self.HandleJobFailure(Job, f"Exception during remux: {str(e)}", TranscodeAttemptId, ActiveJobId)
+        finally:
+            if not OwnershipTransferred:
+                if TargetLocalPath:
+                    try:
+                        self._DeleteInProgressFile(TargetLocalPath)
+                    except Exception as CleanupEx:
+                        LoggingService.LogException(f"Worker-owned .inprogress cleanup failed for remux job {Job.Id}", CleanupEx, "ProcessTranscodeQueueService", "ProcessRemuxJob")
+                if TemporaryFilePathId and TranscodeAttemptId:
+                    try:
+                        self.DatabaseManager.DeleteTemporaryFilePath(TranscodeAttemptId)
+                    except Exception as TfpEx:
+                        LoggingService.LogException(f"Worker-owned TFP cleanup failed for remux job {Job.Id}", TfpEx, "ProcessTranscodeQueueService", "ProcessRemuxJob")
 
     # directive: nvenc-rate-anchored-remediation
     def ProcessSubtitleFixJob(self, Job: TranscodeQueueModel):
@@ -1426,6 +1459,7 @@ class ProcessTranscodeQueueService:
                 AverageFPS=0.0
             )
 
+            # directive: nvenc-rate-anchored-remediation
             def ProgressCallback(ProgressData: Dict[str, Any]):
                 try:
                     # Save progress to database immediately for real-time updates
