@@ -48,7 +48,37 @@ def _ResolveHead(SourceRoot: Path) -> str:
     return ""
 
 
-def Stamp(TargetRoot: Path, Sha: str, BuiltBy: str | None = None) -> tuple[Path, Path]:
+def _ResolveDeltaFromMain(SourceRoot: Path) -> str | None:
+    """Fetch origin/main and return 'ahead N' / 'behind N' / 'ahead N, behind M' / None (in sync or unresolvable)."""
+    try:
+        Fetch = subprocess.run(
+            ["git", "-C", str(SourceRoot), "fetch", "origin", "main", "--quiet"],
+            capture_output=True, text=True, timeout=15,
+        )
+        if Fetch.returncode != 0:
+            return None
+        R = subprocess.run(
+            ["git", "-C", str(SourceRoot), "rev-list", "--left-right", "--count", "HEAD...origin/main"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if R.returncode != 0:
+            return None
+        Parts = (R.stdout or "").strip().split()
+        if len(Parts) != 2:
+            return None
+        Ahead, Behind = int(Parts[0]), int(Parts[1])
+        if Ahead == 0 and Behind == 0:
+            return None
+        if Ahead > 0 and Behind > 0:
+            return f"ahead {Ahead}, behind {Behind}"
+        if Ahead > 0:
+            return f"ahead {Ahead}"
+        return f"behind {Behind}"
+    except Exception:
+        return None
+
+
+def Stamp(TargetRoot: Path, Sha: str, BuiltBy: str | None = None, Delta: str | None = None) -> tuple[Path, Path]:
     """Write VERSION + BUILD_INFO to TargetRoot. Returns (version_path, build_info_path).
 
     Raises if Sha is empty -- never write an empty/garbage version.
@@ -63,11 +93,12 @@ def Stamp(TargetRoot: Path, Sha: str, BuiltBy: str | None = None) -> tuple[Path,
     Now = _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     Host = BuiltBy or socket.gethostname()
 
-    VersionPath.write_text(Sha + "\n", encoding="utf-8")
-    BuildInfoPath.write_text(
-        f"commit={Sha}\nbuilt_at={Now}\nbuilt_by={Host}\n",
-        encoding="utf-8",
-    )
+    VersionText = f"{Sha} ({Delta})" if Delta else Sha
+    VersionPath.write_text(VersionText + "\n", encoding="utf-8")
+    BuildInfoBody = f"commit={Sha}\nbuilt_at={Now}\nbuilt_by={Host}\n"
+    if Delta:
+        BuildInfoBody += f"relative_to_main={Delta}\n"
+    BuildInfoPath.write_text(BuildInfoBody, encoding="utf-8")
     return VersionPath, BuildInfoPath
 
 
@@ -105,14 +136,17 @@ def Main(Argv: list | None = None) -> int:
               file=sys.stderr)
         return 1
 
+    Delta = _ResolveDeltaFromMain(Path(Args.source))
+
     try:
-        VPath, BPath = Stamp(Path(Args.target), Sha, BuiltBy=Args.built_by)
+        VPath, BPath = Stamp(Path(Args.target), Sha, BuiltBy=Args.built_by, Delta=Delta)
     except ValueError as Ex:
         print(f"[FAIL] {Ex}", file=sys.stderr)
         return 1
 
     if not Args.quiet:
-        print(f"stamped {VPath} ({Sha[:7]})")
+        Suffix = f" ({Delta})" if Delta else ""
+        print(f"stamped {VPath} ({Sha[:7]}{Suffix})")
         print(f"stamped {BPath}")
     return 0
 

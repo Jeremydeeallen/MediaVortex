@@ -155,7 +155,7 @@ def _StampVersion():
         return
     PythonExe = _ResolveWorkerPython()
     try:
-        subprocess.run([PythonExe, str(Script), "--quiet"], cwd=str(RootDirectory), timeout=10)
+        subprocess.run([PythonExe, str(Script), "--quiet"], cwd=str(RootDirectory), timeout=30)
     except subprocess.TimeoutExpired:
         print("  [WARN] StampVersion.py timed out; leaving existing VERSION as-is")
 
@@ -192,6 +192,7 @@ def main():
 
     print("=" * 50)
     print("MediaVortex Worker Launcher")
+    # allow: StartWorker.py is a worker bootstrap script (Windows analog of StartMediaVortex.py); COMPUTERNAME is a display-only Windows-provided value
     print(f"Host: {os.environ.get('COMPUTERNAME', '<unknown>')}")
     print("=" * 50)
 
