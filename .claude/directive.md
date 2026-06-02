@@ -69,6 +69,10 @@ WorkerService/worker-lifecycle.feature.md                -- EDIT: update C8-C13 
 - **Criterion 4:** TBD at VERIFYING
 - **Criterion 5:** TBD at VERIFYING
 
+### R18 overrides
+
+- Features/FileReplacement/FileReplacement.feature.md (95 lines; anchored partial-read not being recognized by hook, full read needed for C12 context)
+
 ### Decisions Made
 
 - TBD during execution
