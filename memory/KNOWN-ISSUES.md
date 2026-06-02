@@ -6,108 +6,6 @@
 
 *Per-entry area subsection assignment deferred to follow-up directive `migrate-bugs-compliance-deep`. Consult `memory/BUG-INDEX.md` for per-bug area metadata and the operationally-correct active/resolved classification (several entries below still bear `RESOLVED`/`FIXED` annotations in their headers despite living under `## Active`; the INDEX classifies them correctly).*
 
-### [BUG-0023 - RESOLVED 2026-05-31] Legacy ProfileManagementModal silently corrupted NVENC profiles' Codec column
-**Date:** 2026-05-31 | **Area:** ui / profiles | **Closed by:** `directives/closed/2026-05-31-unify-profile-editor.md`
-
-**The footgun:** Opening an NVENC profile (Codec='av1_nvenc') in the legacy `ProfileManagementModal` Edit dialog silently coerced the Codec dropdown to `libsvtav1`. The dropdown's `<select>` options were `libsvtav1 / libx265 / libx264 / libvpx-vp9` -- no `av1_nvenc` option existed -- so `$('#ProfileCodec').val('av1_nvenc')` silently failed and the dropdown defaulted to the first available option (`libsvtav1`). The operator saw "AV1 (libsvtav1)" in the dropdown without realizing it was wrong. On Save, the PUT `/api/profiles/<id>` endpoint posted `Codec='libsvtav1'`, overwriting the DB column. The NVENC profile then routed to `libsvtav1` encoding instead of NVENC -- breaking the queue's worker-capability filter (`Workers.nvenccapable`) and the CommandBuilder NVENC branch.
-
-**Caught:** during `unify-profile-editor` close-out discussion (operator asked "is the NVENC codec set in the DB but just not exposed in the GUI?"). The legacy modal's Codec dropdown HTML (`Templates/Settings.html:560-565` before retirement) had only `libsvtav1` as the enabled option, with three other codecs marked `disabled` as "Not Implemented Yet" placeholders -- but `av1_nvenc` was never in the list at all even after the NVENC adoption shipped.
-
-**Resolution:** Legacy `ProfileManagementModal` removed entirely; the cogs/knob modal is now the canonical Profile + ProfileThresholds editor. Codec dropdown in the unified editor includes `av1_nvenc` + `libsvtav1`. PATCH `/api/profiles/<id>/knobs` allowlists every editable column. Verified: opening `NVENC AV1 P7 CANARY VBR -720p` in the new editor shows Codec=`av1_nvenc` correctly; saving any unrelated field leaves Codec='av1_nvenc' unchanged.
-
-**Historical data:** if any NVENC profile in the wild had its Codec silently overwritten to `libsvtav1` before this fix, audit via `SELECT ProfileName, Codec, UseNvidiaHardware FROM Profiles WHERE UseNvidiaHardware = 1 AND Codec != 'av1_nvenc';` -- any rows returned are corruption survivors that need manual `UPDATE Profiles SET Codec='av1_nvenc'`.
-
----
-
-### [BUG-0022 - RESOLVED 2026-05-29] VMAF not working properly; transcoding using NVIDIA (NVENC) enhancements
-**Date:** 2026-05-28 | **Area:** quality-testing / nvenc-evaluation
-
-**Resolution 2026-05-29 (VMAF measurement arm):** Three production-VMAF fixes in `Features/QualityTesting/QualityTestingBusinessService.BuildVMAFCommand`:
-
-1. **Input order corrected.** Production had `-i original -i transcoded` with the filter mapping `[0:v]->[dist]` and `[1:v]->[ref]`. libvmaf reads positionally as (distorted, reference), so production was treating the ORIGINAL as the distorted input and the TRANSCODED as the reference -- backwards. VMAF model is asymmetric; the wrong direction produces content-dependent inverted scores. This bug pre-dated the chain rewrite and is the most likely root cause of historically inconsistent VMAF readings. Found during the 2026-05-29 canary on Cheers S03E03 where the corrected chain initially produced VMAF=67.40 (wrong direction). Fixed by swapping the ffmpeg input order; the filter pad labels stay the same.
-
-2. **Chain modernized** to match the production-decision shootout: PTS reset on both inputs (kills container timestamp drift causing frame-alignment slippage), unified scale-to-target with lanczos + `in_range=auto:out_range=tv` color-range pinning (NVENC outputs limited range -- mismatches collapsed scores), 10-bit precision (`yuv420p10le`), libvmaf with explicit `log_fmt=xml` + `n_threads=4`.
-
-3. **`n_subsample=10` removed.** Old chain scored only every 10th frame, which made the held-frame motion-filter unreliable (integer_motion between non-consecutive frames is meaningless) and lost tail-of-distribution detail that the percentile metrics (P1/P5/P10/P25) depend on.
-
-**Historical impact:** `TranscodeAttempts.VMAF` values from before 2026-05-29 are inverted-direction measurements. They remain valid for relative comparisons within the same content/profile pair (the bug was systematic) but the absolute number is not what libvmaf normally reports. Auto-replace thresholds (`VMAFAutoReplaceMinThreshold=88`) were calibrated against inverted readings and may need re-tuning -- track that as a separate follow-up once enough new (correct-direction) scores accumulate.
-
-Motion-filter threshold recalibration (the `integer_motion < 0.5` cutoff over-triggers on plain low-motion live action -- 2026-05-28 shootout data shows 32-60% MotionZeroFraction across sitcom + drama, not just held-frame animation as the 15% trigger was tuned for) deferred to a separate follow-up; needs per-frame XML data captured under the new chain to calibrate, and the three fixes above already address the user-reported "wildly inconsistent" VMAF symptom independently.
-
-**Resolution 2026-05-28 (NVENC adoption arm):** NVENC AV1 evaluation complete. Shootout matrix tested SVT-AV1 P6 FG8 CRF26 (production-dominant) vs 7 NVENC variants across 4 content types (anime held-frame, anime action, sitcom, drama). Winner: NVENC av1_nvenc p7 tune=uhq multipass=fullres rc=vbr+cq aq-strength=15 rc-lookahead=32 bf=7 (`nv_cq32_sink` in matrix). Median: -14% size vs SVT reference at -0.47 VMAF Mean, ~1.6x faster wall encode. Within the operator's "closish quality at sameish size" criterion on every source.
-
-Production wiring shipped: `Features/Profiles/nvenc-profiles.feature.md`. Two new Profiles in DB (`NVENC AV1 P7 UHQ CQ32 -480p`, `NVENC AV1 P7 UHQ CQ32 -720p`); CommandBuilder NVENC branch updated to emit the full quality knob set + p010le pix_fmt; `Workers.nvenccapable` column added with I9-2024 marked capable; queue claim filter routes NVENC jobs to capable workers only.
-
-**Still open (VMAF measurement arm):** The "VMAF not working properly" framing remains a latent concern -- the shootout used the production-equivalent motion-filter pooling and saw motion-filter trigger on live-action sitcom and drama (not just held-frame animation, where it was designed to). The 15% motion-zero threshold may be miscalibrated for non-anime content. Track that as a separate VMAF measurement bug if it surfaces in production VMAF scores diverging from operator perception. Not gating NVENC rollout -- the shootout's relative comparison is valid even if absolute VMAF numbers are content-quirky.
-
-**Original report below.**
-
-
-
-**Reported as (verbatim):** "vmaf not working properly and transcoding using nvidia enhancements."
-
-**Context not yet investigated.** Captured at record time; do not infer beyond this until `/t BUG-0022`.
-
-**Repro:** TBD -- operator to narrow during `/t`. Two distinct concerns conflated in the report:
-1. VMAF measurement / scoring is producing wrong or unexpected results in some scenario (encoder choice? hardware path? content type? threshold gate?).
-2. Transcoding is using or should use NVIDIA hardware enhancements (NVENC encoder, CUDA scaling, NPP filters, hardware decode). MediaVortex's documented encoder is `libsvtav1` (CPU). It is unclear whether (a) NVENC was switched in somewhere and is producing the VMAF issue, (b) NVENC is being evaluated as an upgrade path and the comparison harness is producing the VMAF issue, or (c) the two are independent and should be split into separate bugs.
-
-**Evidence:**
-- Untracked PowerShell harnesses live under `Scripts/CodecAnalysis/`: `NvidiaVariableRunsAddScale.ps1` (on disk 2026-05-28); git status also shows `NvidiaVariableRuns.ps1` and `Nvidia full quality vs MV.ps1` as untracked (not present on disk at record time -- may have been deleted, renamed, or live elsewhere). These suggest an in-flight NVENC vs MediaVortex (libsvtav1) comparison effort.
-- Existing related (NOT this bug, do not auto-merge):
-  - BUG (line 668, PARTIAL FIX 2026-05-16): held-frame content bimodal VMAF -- motion-filtered pooling shipped, residual threshold-gate gap.
-  - BUG (line 725): MonitorVMAFProgress stops emitting updates ~25% before FFmpeg exits -- cosmetic, score integrity OK.
-  - BUG (line 832, RESOLVED 2026-05-16): QualityTestEnabled flip mid-run missed by transcode producer.
-
-**Look first:**
-- `Scripts/CodecAnalysis/NvidiaVariableRunsAddScale.ps1` -- recent harness, likely the source of the "not working properly" observation.
-- `Features/QualityTesting/QualityTestingBusinessService.py` `BuildVMAFCommand` / `ParseVMAFMetrics` -- VMAF filter chain and metric pooling. Confirm the chain matches reference parameters when source vs encoded differ in pixel format / color range / scale (NVENC commonly emits limited-range NV12; libvmaf wants matched ranges or the score collapses).
-- `Features/CommandBuilder/CommandBuilderService.py` -- confirm whether any NVENC path exists; if not, the "nvidia enhancements" arm is an open question, not a current code path.
-- `Models/CommandBuilder.py` BuildAudioFilters / BuildVideoFilters -- scale/format insertion that NVENC vs CPU paths would differ on.
-
-**Violates:** `Features/QualityTesting/QualityTesting.feature.md` criterion 2 (VMAF produces a meaningful 0-100 score) and `Features/TranscodeJob/TranscodeJob.feature.md` (encoder selection contract). [BUG-0022] criterion added to both.
-
-**Flow doc:** Affected pipeline is the post-transcode quality test path in `Features/QualityTesting/QualityTesting.feature.md` -- no dedicated `*.flow.md` exists for the VMAF dispatch + scoring pipeline. `/t` should create it before fixing.
-
-**Fix with:** `/t BUG-0022` -- first action is to ask the operator to split (a) the VMAF measurement failure and (b) the NVENC evaluation/adoption into separate bugs if they are independent, then proceed.
-
-**Update 2026-05-28 (NVENC arm):** Test harness built and ready to run on I9. See `Scripts/Smoke/EncoderShootout.feature.md`. Matrix: 6 sources (Black Butler S01E05, One Piece S14E03, New Girl S01E03 + S07E01, Curb Your Enthusiasm S04E08, Cheers S01E07) x 4 variants (SVT-AV1 P6 FG8 CRF26 production-reference + NVENC av1_nvenc p7 hq fullres at CQ 28/32/36), all encoded at 854x480 to match the production-dominant >480p downscale path. Run: `py Scripts/Smoke/EncoderShootout.py --matrix Scripts/Smoke/NvencVsSvtAv1.matrix.json`. VMAF chain uses the production motion-filter pooling (held-frame fix), 10-bit precision, PTS+color-range alignment. Operator decision rule: NVENC wins if any CQ rung lands within 2.0 VMAF Mean points of SVT AND within 15% of SVT size, OR if speed savings outweigh a larger gap. Result sidecar will be `Scripts/Smoke/NvencVsSvtAv1-1080pTo480p-2026-05-28.shootout.json`.
-
----
-
-### [BUG-0021 - RESOLVED 2026-05-27] Codec/AudioCodec/AudioComplete stale on MediaFiles row after seemingly successful replacement
-**Date:** 2026-05-27 | **Area:** file-replacement / mediafile-persistence
-
-**Resolution 2026-05-27:** Closed by `.claude/directive.md` (clean-happy-path-transcode) criterion 2, verified live on canary 3 (MediaFile 6490, Steven Universe S01E37). The criterion requires every probe-populated MediaFiles column to match a fresh re-probe of the new file on disk -- including `Codec`, `AudioCodec`, `AudioComplete`, `AudioNormalizationMode`. Verified end-to-end: all columns refreshed, no orphan state.
-
-The originally-cited evidence file (MediaFile 683466) was the residue of a 2026-05-22 attempt (TranscodeAttempt 22587 on dot-worker-4, before any of this directive's fixes shipped). Its stale row is historical, not from a current code defect. Today's code (commits d93c485 + 464d9f7 + supporting) does not reproduce the failure on healthy transcodes.
-
-The originally-feared "re-probe miss + FileReplaced=true commits anyway" failure path was not observed and is exotic by nature -- on a just-finished FFmpeg encode that emitted a valid output, FFprobe failure requires either path-translation bug, filesystem-mount transient (more likely on Linux NFS clients), or codec/container Jellyfin can't read (basically never for AV1/HEVC/H264 in mp4/mkv). If it surfaces, file a new bug with the worker's `_UpdateMediaFilesAfterReplacement` warning line as evidence.
-
-**What was originally reported (incorrect diagnosis -- preserved for context):** `Features/FileReplacement/FileReplacementBusinessService._UpdateMediaFilesAfterReplacement` assigns `Codec`, `AudioCodec`, and `AudioComplete` on the MediaFile model from the post-replacement FFprobe pass and calls `SaveMediaFile`. `Repositories/DatabaseManager.SaveMediaFile` does NOT include these three columns in its UPDATE statement, so they are silently dropped. (Audit on 2026-05-27 showed Codec and AudioCodec ARE in both UPDATE branches; the original diagnosis was wrong on those two columns. Only AudioNormalizationMode was missing -- separately resolved as BUG-0019.) Operator-visible Library Compliance tallies (e.g. AudioFix routing decisions, codec-distribution counts) misreport the affected files as still being the source codec until the next probe pass refreshes them.
-
-**Same shape as BUG-0017** (resolved 2026-05-25 by adding 6 columns: FileSize, LastModifiedDate, ResolutionCategory, IsInterlaced, AudioLanguages, HasExplicitEnglishAudio). The pattern is: hand-maintained UPDATE column list in SaveMediaFile drifts out of sync with model attributes assigned by callers; any column not in the list is silently dropped. The BUG-0017 fix patched 6 columns but did not address the architectural cause -- so the next column class (Codec/AudioCodec/AudioComplete) repeats the failure.
-
-**Repro:** Queue any `-mv.mp4` HEVC source for re-encode through the compliance-gated-rename slice (commit d26f77e or later). After successful encode + replacement (FileReplaced=true, file visibly AV1 on disk):
-```sql
-SELECT Id, FilePath, Codec, AudioCodec, AudioComplete, LastScannedDate FROM MediaFiles WHERE Id=<id>;
-```
-Codec returns the pre-replacement value (e.g. `'hevc'` for an AV1 file on disk); AudioCodec returns the pre-replacement value; AudioComplete returns NULL.
-
-**Evidence:** Canary 3 of compliance-gated-rename slice on 2026-05-27. MediaFile 683466 (So I'm a Spider S01E16): pre-encode HEVC/AAC, post-encode visually verified 720p AV1 with normalized audio, FileReplaced=true, but DB row shows Codec='hevc', AudioCodec='aac', AudioComplete=NULL, LastScannedDate from 2026-05-23.
-
-**Workaround:** Trigger a library-wide reprobe via `UPDATE MediaFiles SET NeedsReprobe=TRUE` then run the probe pass. Resets all stale columns from on-disk FFprobe.
-
-**Look first:** `Repositories/DatabaseManager.SaveMediaFile` UPDATE SET clause. Confirm Codec/AudioCodec/AudioComplete absent. Immediate patch: add the three columns (matching the BUG-0017 pattern -- use COALESCE on the UPDATE so legacy SELECT paths that don't load these columns can't blank existing values). Then audit every other column on MediaFiles model against the UPDATE list -- there may be more dropped columns lurking that nobody has hit yet.
-
-**Real fix is architectural:** new feature `mediafile-persistence-no-drift` -- replace the hand-maintained UPDATE column list with one of: (1) generate UPDATE from model fields (`dataclasses.fields()` or pydantic), (2) single canonical `MEDIAFILE_PERSISTENT_COLUMNS` constant referenced by model + repository + migration, (3) runtime drift check at startup that ERRORs when model attributes don't match UPDATE list. Pick one and prevent the recurring class.
-
-**Violates:** `Features/FileReplacement/FileReplacement.feature.md` criterion 3 ("After replacement, the new file is re-probed and all MediaFiles columns are updated with fresh metadata") and criterion 14 (added with this bug).
-
-**Fix with:** `/t BUG-0021` for the immediate patch (3 columns). Architectural fix lives in the new `mediafile-persistence-no-drift` feature.
-
----
-
 ### [BUG-0020] Workers must own their processes end-to-end, and `-mv` must only be appended when the output is actually compliant
 **Date:** 2026-05-26 | **Area:** worker-lifecycle / file-replacement
 
@@ -135,27 +33,6 @@ Codec returns the pre-replacement value (e.g. `'hevc'` for an AV1 file on disk);
 
 ---
 
-### [BUG-0019 - RESOLVED 2026-05-27] MediaFiles.AudioNormalizationMode stays NULL after encode that ran loudnorm
-**Date:** 2026-05-25 | **Area:** linear-loudnorm / file-replacement
-
-**Resolution 2026-05-27:** Two-gap fix.
-1. `Repositories/DatabaseManager.SaveMediaFile` did not list `AudioNormalizationMode` in either UPDATE statement (duplicate-path or by-Id) or in the INSERT. Added in all three with COALESCE protection on the UPDATEs so partial-load callers cannot blank an existing mode.
-2. `Features/FileReplacement/FileReplacementBusinessService._UpdateMediaFilesAfterReplacement` did not derive the mode from the just-run FFmpeg command. Now accepts an optional `FFmpegCommand` parameter and calls `AudioCompletionService.DetectNormalizationMode` (new helper) to set `media_file.AudioNormalizationMode` before `SaveMediaFile`. `'linear'` if the command contains `linear=true`, `'dynamic'` if it contains `loudnorm` without `linear=true`, `None` otherwise. `_ProcessCompleteFileReplacement` passes its own `FFmpegCommand` through. `FinalizePartialReplacement` (crash-recovery path) leaves `FFmpegCommand=None`; the column stays untouched since crash-recovery doesn't know which mode ran.
-
-Round-trip and COALESCE protection verified via `Tests/Contract/TestMediaFilePersistence.py` (covers directive `.claude/directive.md` criterion 2). Next live transcode populates the column.
-
-**Original report below.**
-
-**What breaks:** Per `linear-loudnorm.feature.md` criterion 14 the column should record `'linear' | 'dynamic' | NULL` based on the mode that BuildAudioFilters selected. Doctor Who S06E04 canary v5 ran with predicted_peak=+2.8 dBTP (forcing dynamic mode) and the emitted ffmpeg command confirms the dynamic-mode loudnorm+alimiter chain ran. Post-replacement `MediaFiles.AudioNormalizationMode = NULL`. Pipeline impact: none -- the column is only read by the Library Compliance tally SQL (linear/dynamic counts) for operator visibility. Files transcode, replace, and serve correctly.
-
-**Repro:** queue any dynamic-mode-eligible source (`SourceIntegratedLufs <= -28 AND SourceTruePeakDbtp >= -3`) through the Transcode path; after FileReplacement, `SELECT AudioNormalizationMode FROM MediaFiles WHERE Id = ...` returns NULL despite the TranscodeAttempts.FfpmpegCommand showing the loudnorm filter ran.
-
-**Look first:** `Models/CommandBuilder.BuildAudioFilters` returns the filter string but does not write the mode anywhere. Either (a) BuildAudioFilters needs to write `AudioNormalizationMode` directly when it picks linear vs dynamic, or (b) FileReplacement / disposition needs to parse the recorded FfpmpegCommand and derive the mode at replacement time. Owner contract per linear-loudnorm.feature.md C14.
-
-**Violates:** `Features/LoudnessAnalysis/linear-loudnorm.feature.md` criterion 14 (mode tally column populated for every encode that ran loudnorm).
-
----
-
 ### [BUG-0018] OrphanCleanupService._SweepTemporaryFilePaths races FileReplacement during the VMAF window
 **Date:** 2026-05-25 | **Area:** orphan-cleanup / file-replacement
 
@@ -177,27 +54,6 @@ Round-trip and COALESCE protection verified via `Tests/Contract/TestMediaFilePer
 3. The sweep logs the attempt IDs it touches on each non-zero run (`OrphanCleanup deleted TFP for TranscodeAttemptIds=[...]`) so any future race is diagnosable from logs alone, not from inference.
 
 **Violates:** `transcode.flow.md` Stage 7 (FileReplacement must complete for any Disposition in {Replace, BypassReplace}).
-
----
-
-### [BUG-0017 - RESOLVED 2026-05-25] MediaFiles.FileSize NULL on most rows despite recent transcodes that should populate it
-**Date:** 2026-05-24 | **Area:** file-replacement
-
-**Resolution 2026-05-25:** Root cause confirmed -- `Repositories/DatabaseManager.SaveMediaFile` UPDATE and INSERT both omitted `FileSize` from their column lists. Same omission silently dropped 5 sibling columns assigned by `FileReplacementBusinessService._UpdateMediaFilesAfterReplacement`: `LastModifiedDate`, `ResolutionCategory`, `IsInterlaced`, `AudioLanguages`, `HasExplicitEnglishAudio`. Fix adds all 6 columns to both UPDATE branches and the INSERT. UPDATEs use `COALESCE(%s, ColumnName)` so callers that fetched a model via legacy SELECT paths (which still don't load these columns) cannot blank existing DB values. INSERT is direct since new rows have no prior state. Round-trip verified on Id=7323.
-
-**Original report below.**
-
-**What breaks:** `FileReplacementBusinessService._UpdateMediaFilesAfterReplacement` sets `media_file.FileSize = os.path.getsize(LocalNewFilePath)` and then calls `SaveMediaFile`. Per `Repositories/DatabaseManager.SaveMediaFile`, the column SHOULD be persisted. In practice many MediaFiles rows have `FileSize IS NULL` even when their corresponding TranscodeAttempts shows a successful post-flight replacement. The downstream impact: queue inserts that read `MediaFiles.FileSize` and propagate it to `TranscodeQueue.SizeBytes` and then `TranscodeAttempts.OldSizeBytes` end up with 0 -- the post-transcode defense-in-depth check at `FileReplacementBusinessService.py:196-208` then refuses with `NewSize >= OldSize=0`, even though a successful encode just happened.
-
-**Repro:**
-1. `SELECT Id, FilePath, FileSize, SizeMB FROM MediaFiles WHERE Id = 26621` -- observe `FileSize=None` despite SizeMB being populated and a successful TranscodeAttempts row existing for this file with recent FileReplacedDate.
-2. Broader: `SELECT COUNT(*) FROM MediaFiles WHERE FileSize IS NULL` -- expect a large fraction of the library.
-
-**Evidence:**
-- Direct observation via pipeline-test-harness step 10 against MediaFile 26621: SaveMediaFile called with FileSize set, post-call DB row still shows NULL.
-- Triggered the defense-in-depth refusal in the second harness test case, blocking the Transcode step.
-
-**Look first:** `Repositories/DatabaseManager.SaveMediaFile` UPDATE SET clause -- is `FileSize` actually in the column list, or is it being silently dropped? Compare to the INSERT path. If the column is in both paths, check whether some caller is overwriting with None on a later UPDATE.
 
 ---
 
@@ -252,41 +108,6 @@ Returns matched pairs. Pipeline runs on any source_id will hit the constraint.
 **Look first:** Crash-recovery in `FileReplacementBusinessService`. The `.inprogress` rename is the worker-lifecycle.feature.md atomic pattern, but on worker crash mid-encode the orphan survives until the next OrphanCleanup sweep. For `-mv.mp4` finals: probably from FileReplacement's "rename succeeded but DB update failed" path (e.g. BUG-0016) which logs a warning, returns Success=True, but leaves the file at the target name without the corresponding DB transition.
 
 **Fix with:** `/t BUG-0015`.
-
----
-
-### [BUG-0014 - RESOLVED 2026-05-26] Linear-loudnorm overshoots TargetTruePeak in dynamic-mode fallback
-**Date:** 2026-05-24 | **Area:** linear-loudnorm
-
-**Resolution 2026-05-26 (v2, verified on real-world content):** `Models/CommandBuilder.BuildAudioFilters` appends `,alimiter=limit=<linear>:attack=1:level=0` after `loudnorm=...` ONLY when dynamic mode fires (linear mode untouched -- it hits TP precisely on its own). The alimiter ceiling is set **2 dB under** `TargetTruePeak` (default -2 -> alimiter at -4 dBFS sample-peak, linear amplitude 0.6310) and `attack=1` (1ms, down from the 5ms default) so transient peaks get clamped before they leak through the attack window. `level=0` disables alimiter's auto-leveling so loudnorm's integrated loudness target survives unchanged. The chain is transparent on quiet content (no clamping below the ceiling).
-
-**v1 (-3 dBFS / default 5ms attack) failed in production:** Doctor Who S06E04 canary 2026-05-25 18:42 measured **-1.6 dBTP** post-encode -- alimiter clamped sample peaks but the 5ms attack let individual transients ride 1.4 dB above the threshold into the inter-sample-peak region. v2 tightens both limit and attack.
-
-**v2 verification (2026-05-26 04:13):** Doctor Who S03E10 (Blink) Bluray-720p, source measured I=-28.0 LUFS, TP=-0.8 dBTP, predicted_peak=+4.2 dBTP -> dynamic mode fires. Post-encode ebur128: I=-22.3 LUFS, **Peak=-2.6 dBFS**. Criterion 26 passes with 0.6 dB margin. Audio path command captured in TranscodeAttempts.FfpmpegCommand: `loudnorm=I=-23:LRA=...:TP=-2:measured_I=-28.00:...,alimiter=limit=0.6310:attack=1:level=0`.
-
-**Original report below.**
-
-**What breaks:** Per `linear-loudnorm.feature.md` criterion 12 the loudnorm filter is supposed to honor `TargetTruePeak` (default -2 dBTP) in both linear and dynamic modes. In practice, dynamic-mode fallback (triggered when predicted_peak > TP at gate time -- criterion 10) produces output that exceeds the TP target by 1-3 dBTP. FFmpeg loudnorm's internal limiter is not enforcing TP=-2 reliably; output peak can ride well above 0 dBTP, causing audible clipping on downstream playback.
-
-**Repro:**
-1. Pick a source file with `SourceTruePeakDbtp >= -3` AND `SourceIntegratedLufs <= -28` (hot peaks + quiet integrated -- forces dynamic mode at the gate per criterion 10).
-2. Run Quick Fix via the pipeline-test-harness or by re-queueing.
-3. `ffmpeg -i <output> -af ebur128=peak=true -f null -` -- inspect the Summary `Peak:` line. Expected: <= -2 dBTP. Actual: ~+1 to +2 dBTP.
-
-**Evidence:**
-- Pipeline-test-harness step 10 against MediaFile 683333 (HIMYM S06E08, source was a `-mv.mp4` with hot peaks): post-Quick-Fix output measured **+1.70 dBTP**, far above the -2 dBTP ceiling.
-
-**Look first:**
-1. The `loudnorm` command emitted by `Models/CommandBuilder.BuildAudioFilters` for the dynamic-mode branch -- does it omit `linear=true` correctly? Capture from a recent TranscodeAttempts.FFpmpegCommand.
-2. FFmpeg/libavfilter version behavior -- loudnorm's dynamic-mode limiter has had bugs in older builds. Verify `ffmpeg -version` matches a known-good build.
-3. The `TP` parameter passed to loudnorm: confirm it's `-2` (not `-2.0` rejected) and that nothing later in the filter chain (no `acompressor` post-removal, but check) is raising the level.
-
-**Possible fix paths:**
-- Append a downstream true-peak limiter (`alimiter=limit=-2dB`) when dynamic mode fires
-- Tighten the gate predicate to refuse the encode rather than fall back to dynamic when overshoot is likely > N dBTP
-- Use a lower `TargetLoudness` for ungainable files (compute the max integrated that keeps peak <= -2)
-
-**Violates:** `Features/LoudnessAnalysis/linear-loudnorm.feature.md` criterion 26 (output TP at or below TargetTruePeak).
 
 ---
 
@@ -902,30 +723,6 @@ Pre-claude-rails (Cursor-written) patterns that the marginal-savings-gate featur
 
 ---
 
-### [BUG - RESOLVED 2026-05-16] QualityTestEnabled flip mid-run does not reach the transcode producer; in-flight job replaces file with no VMAF
-**Date:** 2026-05-09 | **Resolved:** 2026-05-16
-**Affects:** WorkerService.feature.md (criterion 2, criterion 15), `Features/TranscodeJob/ProcessTranscodeQueueService.py:100-101, 885-900, 1329`, `Features/QualityTesting/ShouldQualityTestService.py:34-57`
-
-**Resolution:** The producer-side cache was already removed during the post-transcode disposition rewrite (see `ProcessTranscodeQueueService.py:101` comment "Per-worker QualityTestEnabled is no longer cached on this service instance"). The disposition function (`PostTranscodeDispositionService._DecideFromInputs`) now reads gate state fresh per call. The remaining operator pain -- no global UI lever to bypass VMAF for everything -- is addressed by `post-transcode-disposition.feature.md` criterion 26 (2026-05-16): new `PostTranscodeGateConfig.QualityTestEnabled` column + checkbox on `/settings` Post-Transcode card. When OFF, every successful transcode emits `Disposition='BypassReplace', DispositionReason='QualityTestingGloballyDisabled'` and goes straight to FileReplacement. Mid-flight toggle is safe (no caching).
-
----
-
-### [BUG - HISTORICAL] QualityTestEnabled flip mid-run does not reach the transcode producer; in-flight job replaces file with no VMAF (original report)
-**Date:** 2026-05-09
-**Affects:** WorkerService.feature.md (criterion 2, criterion 15), `Features/TranscodeJob/ProcessTranscodeQueueService.py:100-101, 885-900, 1329`, `Features/QualityTesting/ShouldQualityTestService.py:34-57`
-
-`ProcessTranscodeQueueService` caches `WorkerQualityTestEnabled` from the `WorkerConfig` dict at construction time. `WorkerConfig` is loaded once in `WorkerService._RegisterAndLoadWorkerConfig` at process startup and never refreshed, so toggling `Workers.QualityTestEnabled` mid-run does not change `IsQualityTestEnabled()` for the producer side. The capability poller does flip the *consumer* (start/stop QualityTestService), but the producer keeps writing `TranscodeAttempts.QualityTestRequired=False`. `ShouldQualityTestService` reads that False and calls `_ReplaceFileDirectly` (BypassVMAFCheck=True) -- original deleted, transcoded moved in, next job starts. Observed today on i9: VMAF was added mid-job, the in-flight transcode finished, file got replaced without VMAF, and the worker picked up the next job. Repro by starting a worker with `QualityTestEnabled=False`, queuing a job, flipping the flag (or the global) while the job runs, watching the post-success path skip the quality queue.
-
-Secondary trap at line 100-101: `Config.get('QualityTestEnabled') or Config.get('qualitytestenabled')` silently treats a stored `False` the same as an explicit override (cached as False, shadows global), but a missing key collapses to None and falls through to global. The two paths should not behave differently.
-
-**Violates:** WorkerService.feature.md criterion 2 ("Changing a capability flag in the Workers table takes effect within 60 seconds without restarting the process") -- the contract holds for the capability lifecycle but not for the transcode producer's QualityTestEnabled gate.
-
-**Look first:** `Features/TranscodeJob/ProcessTranscodeQueueService.py:885-900` (`IsQualityTestEnabled` -- read live from DB instead of cached snapshot), lines 100-101 (tri-state load, drop the `or` collapse), line 1329 (the call site that stamps `QualityTestRequired` onto the success row), and `WorkerService/Main.py:88-145` (`_RegisterAndLoadWorkerConfig` is the cached snapshot source -- decide whether to refresh it on the capability poll or bypass it for read-mostly settings). Principle going forward: do not cache DB-backed settings on long-lived service instances; read fresh.
-
-**Fix with:** `/t`
-
----
-
 ### [TECH DEBT] Activity page conflates worker liveness and operational state
 **Date:** 2026-05-08
 **Affects:** Templates/Activity.html (worker tag display), API endpoints that return worker status
@@ -1131,25 +928,6 @@ Full Windows paths (e.g., `T:\Shows\file.mkv`) are stored as natural keys in at 
 **Violates:** `Features/SQLQueries/SQLQueries.feature.md` criterion 6 (added with this entry).
 
 **Look first:** `Scripts/SQLScripts/QueryDatabase.py` lines 47-74 (`print_table` and `truncate`). Add a `--width N` CLI flag (default unlimited or large); pass through to `max_col_width`.
-
----
-
-### [BUG - FIXED 2026-05-21] Bare-metal Linux host bootstrap not codified -- manual SSH steps required before deploy-linux-worker.py
-**Date:** 2026-05-16 (opened); 2026-05-21 (closed)
-
-**Resolution:** `infrastructure/terraform/mediavortex-bare-metal-bootstrap.py` lands the canonical bootstrap. Reads `fstab_mounts` from `infrastructure/terraform/inventory.toml` (new field on `vm_type = "bare-metal"` entries), idempotently installs `nfs-common` + Docker CE, applies a managed block in `/etc/fstab`, creates `/opt/mediavortex` + every mountpoint, runs `mount -a`. New bare-metal bringup: `py infrastructure/terraform/mediavortex-bare-metal-bootstrap.py --host <friendly>` then `py deploy/deploy-linux-worker.py <friendly>`. Verifiable: re-running the bootstrap on a clean host is a no-op (managed-block sed delete + re-append yields identical fstab; package + dir checks short-circuit). See `infrastructure/docs/features/linux-worker-deploy.md` criterion 10 (also marked resolved 2026-05-21) for the host-side acceptance test. This entry should be moved to the Resolved section with a `BUG-NNNN` ID on the next housekeeping pass.
-
-**What breaks:** Adding a new bare-metal Linux worker host today requires manual SSH steps before `deploy/deploy-linux-worker.py` will pass its pre-flight check: install Docker CE, install nfs-common, append three NFS entries to `/etc/fstab` (Brain media_tv, Synology movies, Synology xxx), `mount -a`, and `mkdir /opt/mediavortex`. LXC has the equivalent codified at `infrastructure/terraform/mediavortex-workers/setup.sh`. Bare-metal has nothing.
-
-Done manually for dot on 2026-05-16 -- worked in ~5 minutes -- but the manual steps undermine the "one command from fresh" experience that the worker-deploy feature promises for already-provisioned hosts. The exact commands run on dot are visible in the conversation transcript and on dot itself via `/etc/fstab` + apt history.
-
-**Violates:** `infrastructure/docs/features/linux-worker-deploy.md` criterion 10 (added with this entry). Does NOT violate `deploy/worker-deploy.feature.md` -- that feature's scope explicitly excludes host provisioning; criterion 5 (fail-fast pre-flight) is satisfied today because the script correctly reports the missing prereqs.
-
-**What "fixed" looks like:** A script at `infrastructure/terraform/mediavortex-bare-metal-bootstrap.sh` (or similar) that takes a target hostname/IP from `inventory.toml`, idempotently installs Docker CE + nfs-common, configures fstab from a canonical mount template, runs `mount -a`, and creates the required directories. After it runs, `deploy/bringup.md` bare-metal prerequisites collapse from a checklist to "run the bootstrap script first." Verifiable: on a host with only base Ubuntu + SSH, running the bootstrap script followed by `deploy-linux-worker.py <friendly>` brings the host to `Workers.Status='Online'` with zero manual steps in between.
-
-**Look first:** `infrastructure/terraform/mediavortex-workers/setup.sh` (LXC equivalent, ~lines 1-100 -- the AppArmor purge is LXC-specific and should NOT carry over to bare-metal); `deploy/bringup.md` (current manual prereq section for bare-metal Linux); `infrastructure/terraform/inventory.toml` (canonical source for friendly name -> IP and ssh_user lookup); the NFS fstab entries that worked on dot 2026-05-16 are the same three lines used on Wakko (Brain `10.0.0.40:/mnt/pve/Media/_tv` nfs4, Synology `10.0.0.61:/volume1/_video` nfs vers=3, Synology `10.0.0.61:/volume2/XXX` nfs vers=3, all with `_netdev,nofail`).
-
-**Fix with:** `/t`.
 
 ---
 
