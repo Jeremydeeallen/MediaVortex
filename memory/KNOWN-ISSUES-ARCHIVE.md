@@ -1,4 +1,4 @@
-# Known Issues Archive
+﻿# Known Issues Archive
 
 Resolved entries moved from KNOWN-ISSUES.md to keep the tracker manageable. Oldest entries first.
 
@@ -546,6 +546,105 @@ Returns matched pairs. Pipeline runs on any source_id will hit the constraint.
 **Look first:** Where does the orphan get created? Suspect either (a) a manual Quick Fix that succeeded enough to create a new MediaFiles row but didn't archive/delete the original, or (b) the SmartPopulate / Scan path discovering both files as separate MediaFiles. Run the repro SQL to count -- if large, a cleanup migration is the first move.
 
 **Fix with:** `/t BUG-0016`.
+
+---
+
+
+### --- BUG-0018 rolled into BUG-0020 (close) 2026-06-02 ---
+
+### [BUG-0018 - RESOLVED 2026-06-02 ROLLED INTO BUG-0020] OrphanCleanupService._SweepTemporaryFilePaths races FileReplacement during the VMAF window
+**Date:** 2026-05-25 | **Area:** orphan-cleanup / file-replacement
+
+**Status:** **Mitigated, not fixed.** Sweep is disabled (`return 0`) in `Features/ServiceControl/OrphanCleanupService.py` pending the redesign below. Operator-cleanable TFP accumulation is the accepted trade until the proper fix ships.
+
+**Related: [BUG-0015]** is the disk-side companion to this DB-side hole. Both are symptoms of the same architectural gap: nothing reconciles disk `.inprogress` / `-mv.mp4` orphans against `TemporaryFilePaths` + `TranscodeAttempts` state. Fix them together as a single "TFP/disk lifecycle" feature pass, otherwise the disk-orphan sweep and DB-orphan sweep will keep racing each other and the live pipeline.
+
+**Reproduced twice on Doctor Who S06E04:**
+- *Canary v2* (legacy predicate `Success IS NOT NULL`): encode 16:32-16:48 -> VMAF -> Disposition=Replace+VmafPassed, FileReplaced=FALSE, `.inprogress` (297 MB) stranded.
+- *Canary v3* (tightened predicate `Success=FALSE OR FileReplaced=TRUE OR Disposition IN ('Discard','NoReplace','Requeue')`): same outcome. OrphanCleanup logged `removed 1 TemporaryFilePaths rows` at 23:15:26 UTC while attempt 25927 was `Success=TRUE, Disposition=Pending` -- a state that should NOT match the tightened predicate. Predicate-tightening is the wrong gate either way; investigation halted at the user's request to avoid further token spend.
+
+**What breaks:** Encode finishes -> `Success=TRUE` committed -> file sits in QualityTestingQueue for 5-15 min while VMAF runs -> OrphanCleanup sweeps every ~120s on each of 4 worker containers. The TFP row gets deleted somewhere in that window. When VMAF lands and disposition flips to Replace, `FileReplacementBusinessService.ProcessFileReplacement` reads SourceStorageRootId/SourceRelativePath from TFP, finds nothing, bails silently. `.inprogress` stays on disk, MediaFiles row never updates, no audit trail beyond `_AutoCaptureStillsIfPolicyFires` warnings logged after VMAF score lands.
+
+**Why predicate-tightening is the wrong approach:** "Orphan" is being inferred from columns on the parent attempt (Success/Disposition/FileReplaced). The actual orphan signal is *no live owner has work in progress* -- and during the VMAF window the live owner is the QualityTesting worker, whose presence is recorded in `QualityTestingQueue` + `ActiveJobs`, not in `TranscodeAttempts`. The sweep can't see liveness from the columns it's checking.
+
+**Success criteria for the real fix:**
+1. `_SweepTemporaryFilePaths` deletes a TFP row only when **all three** are true: (a) no `QualityTestingQueue` row exists for the parent TranscodeAttemptId; (b) no `ActiveJobs` row exists for that attempt (across both `Transcode` and `QualityTest` ServiceNames); (c) the parent attempt's terminal state is recorded (`Success=FALSE` OR `FileReplaced=TRUE` OR `Disposition IN ('Discard','NoReplace','Requeue')`).
+2. After re-enabling, a 4-file Transcode+VMAF canary across larry-worker-1..4 must produce zero `.inprogress` files stranded; every attempt either reaches FileReplaced=TRUE or records a non-Replace disposition with TFP cleaned by the disposition owner.
+3. The sweep logs the attempt IDs it touches on each non-zero run (`OrphanCleanup deleted TFP for TranscodeAttemptIds=[...]`) so any future race is diagnosable from logs alone, not from inference.
+
+**Violates:** `transcode.flow.md` Stage 7 (FileReplacement must complete for any Disposition in {Replace, BypassReplace}).
+
+---
+
+### --- BUG-0015 rolled into BUG-0020 (close) 2026-06-02 ---
+
+### [BUG-0015 - RESOLVED 2026-06-02 ROLLED INTO BUG-0020] Orphan `-mv.mp4` files on disk without corresponding MediaFiles row
+**Date:** 2026-05-24 | **Area:** file-replacement
+
+**Related: [BUG-0018]** is the DB-side companion to this disk-side hole. Both are symptoms of the same architectural gap: nothing reconciles disk `.inprogress` / `-mv.mp4` orphans against `TemporaryFilePaths` + `TranscodeAttempts` state. Fix them together as a single "TFP/disk lifecycle" feature pass -- piecemeal fixes will keep racing each other and the live pipeline.
+
+**What breaks:** Filesystem directories accumulate `-mv.mp4` (and `-mv.mp4.inprogress`) files with no DB row pointing at them. When the pipeline runs a Quick Fix on a sibling source, `_ProcessCompleteFileReplacement` at line 425 refuses with `"Refusing to overwrite existing file at target"`. Encode aborts before any state change.
+
+**Repro:**
+1. Pick any directory with a recently-attempted Quick Fix.
+2. `ls *-mv*` -- common to see one or more `.mp4` files that match no MediaFiles row.
+3. Run Quick Fix again on the source `.mkv` -- pipeline refuses.
+
+**Evidence:**
+- Bluey Minisodes S01E09 dir had `-mv.mp4`, `-mv-mv.mp4`, `-mv-mv-thumb.jpg`, `-mv.mp4.inprogress` siblings of the original `.mkv` source, none referenced by any MediaFiles row -- left behind by interrupted Quick Fix runs (likely the BUG-0013 generational-stacking cycle plus crashed attempts).
+- Ren & Stimpy S03E03 dir same pattern.
+- Pipeline-test-harness step 10 surfaced both via the "Refusing to overwrite" path.
+
+**Look first:** Crash-recovery in `FileReplacementBusinessService`. The `.inprogress` rename is the worker-lifecycle.feature.md atomic pattern, but on worker crash mid-encode the orphan survives until the next OrphanCleanup sweep. For `-mv.mp4` finals: probably from FileReplacement's "rename succeeded but DB update failed" path (e.g. BUG-0016) which logs a warning, returns Success=True, but leaves the file at the target name without the corresponding DB transition.
+
+**Fix with:** `/t BUG-0015`.
+
+---
+
+### --- BUG-0010 rolled into BUG-0020 (close) 2026-06-02 ---
+
+### [BUG-0010 - RESOLVED 2026-06-02 ROLLED INTO BUG-0020] TemporaryFilePaths cleanup runs only on FileReplacement success, leaks on all other return paths
+**Date:** 2026-05-22 | **Area:** file-replacement
+
+**What breaks:** `FileReplacementBusinessService.ProcessFileReplacement` only calls `_CleanupTemporaryFilePaths` inside the `if replacement_result.get('Success', False):` branch at line 217-225. Every other terminal return -- transcode_attempt None (165-166), transcoded file missing on disk (185-189), defense-in-depth size guard (196-208), archive failure (210), and the `else` branch where `_ProcessCompleteFileReplacement` returns Success=false -- exits without removing the TFP row. Because `TranscodeAttempts.Success` is already set by then, the OrphanCleanup safety-net sweep removes them ~every 2 minutes and emits a WARNING.
+
+This is the structural sibling of BUG-0009. BUG-0009 is "why are replacements failing in the first place"; BUG-0010 is "even if replacements never failed, future failure modes will leak again until cleanup is moved off the success-only branch."
+
+**Repro:** Force any non-success branch (e.g. delete the transcoded file from `LocalOutputPath` between transcode-finish and replacement-start) and observe the TFP row remains until the next OrphanCleanup sweep.
+
+**Evidence:** Code inspection at `FileReplacementBusinessService.py:160-232`. The chokepoint comment in `PostTranscodeDispositionService._CommitDisposition` (line 295-298) explicitly states FileReplacement owns its own TFP cleanup on success; nothing claims it on failure.
+
+**Violates:** `Features/FileReplacement/FileReplacement.feature.md` criterion 12 (added with this bug).
+
+**Look first:** Two viable fixes -- (a) put `_CleanupTemporaryFilePaths` in a `finally` block scoped to the function so every terminal return cleans up, OR (b) route any failure return through `PostTranscodeDispositionService._CommitDisposition` with a non-success Disposition (Requeue/Discard) so the existing chokepoint owns cleanup for both success and failure paths. (b) is cleaner architecturally because it keeps cleanup centralized in `_CommitDisposition`, but (a) is a smaller surgical change.
+
+**Fix with:** `/t BUG-0010`.
+
+---
+
+### --- BUG-0009 rolled into BUG-0020 (close) 2026-06-02 ---
+
+### [BUG-0009 - RESOLVED 2026-06-02 ROLLED INTO BUG-0020] FileReplacement returns Success=false for some attempts, leaving orphaned TemporaryFilePaths rows
+**Date:** 2026-05-22 | **Area:** file-replacement
+
+**What breaks:** `OrphanCleanup` logs `OrphanCleanup removed N TemporaryFilePaths rows for finished TranscodeAttempts -- a terminal-state cleanup path is leaking, investigate.` at small but recurring counts (1-3 per sweep, ~every 2 minutes). The trigger is `TranscodeAttempts.Success=true` (transcode succeeded) AND a `TemporaryFilePaths` row still exists for that attempt -- which means `FileReplacementBusinessService.ProcessFileReplacement` reached the attempt but bailed out of the success branch at `FileReplacementBusinessService.py:217`. The actual failure reason is not visible in the OrphanCleanup warning -- only the count.
+
+**Repro:** Watch WorkerService logs over a 10-minute window. The OrphanCleanup TFP-orphan WARN fires repeatedly with non-zero counts. Cross-reference TranscodeAttempts where `Success=true AND Disposition IN ('Replace','BypassReplace')` and look for ones with no corresponding `FileReplaced=true`.
+
+**Evidence:** Confirmed 2026-05-22 from live worker logs -- four consecutive OrphanCleanup sweeps removed 2, 2, 3, 1 TFP rows respectively. OrphanCleanupService.\_SweepTemporaryFilePaths is doing its safety-net job; the upstream `FileReplacement` chokepoint is the actual leak source.
+
+**Violates:** `Features/FileReplacement/FileReplacement.feature.md` criterion 11 (added with this bug).
+
+**Look first:** `Features/FileReplacement/FileReplacementBusinessService.py:160-225`. Every return path that does NOT reach `_CleanupTemporaryFilePaths` (line 225) is a candidate:
+- line 165-166: `GetTranscodeAttemptById` returned None
+- line 185-189: `ValidateFileExists(LocalTranscodedPath)` false (transcoded output missing on local mount)
+- line 196-208: defense-in-depth size guard (`NewSize >= OldSize` for non-Remux)
+- line 217 `else`: `_ProcessCompleteFileReplacement` returned Success=false
+- archive failure inside `_ArchiveOriginalFileDetails` (line 210)
+
+To diagnose: grep WorkerService log for `FileReplacementBusinessService` ERROR/WARNING lines immediately preceding each OrphanCleanup TFP warning. The function already logs its specific error -- pull those lines into a count by reason. Most likely candidates given recent operational state: missing-output-file (post-2026-05-22 SMB cutover staging path drift) or size-guard (non-Remux profiles producing larger output on certain content).
+
+**Fix with:** `/t BUG-0009`.
 
 ---
 
