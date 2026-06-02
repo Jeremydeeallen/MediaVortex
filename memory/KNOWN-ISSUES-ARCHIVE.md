@@ -668,3 +668,21 @@ To diagnose: grep WorkerService log for `FileReplacementBusinessService` ERROR/W
 
 ---
 
+
+### --- BUG-0004 close 2026-06-02 (fixed in 908a148; reinforced by ffe1b84 shared claim helper + 5483e58 sync StopRequested) ---
+
+### [BUG-0004 - RESOLVED 2026-06-02] Workers.Status='Paused' does not gate capability claiming | resolved: 2026-06-02
+**Date:** 2026-05-18
+
+**What breaks:** Setting `Workers.Status='Paused'` via the Activity page UI Pause button is purely cosmetic. The worker daemon continues to claim and process jobs as long as the individual capability flags (`TranscodeEnabled`, `RemuxEnabled`, `QualityTestEnabled`, `ScanEnabled`) are TRUE. Confirmed 2026-05-18: larry-worker-8 with `Status='Paused'`, `RemuxEnabled=false`, `TranscodeEnabled=true` claimed and ran a Transcode job (`TranscodeAttempts.Id=16549`, Real Housewives S01E15 downscale to 480p). Operator had clicked Pause on the worker tile and expected NO claiming; the worker ran anyway because TranscodeEnabled stayed true.
+
+**Violates:** `Features/TeamStatus/worker-status-model.feature.md` criterion 9 (added with this bug); also `Features/ServiceControl/capability-control-plane.feature.md` criterion 8 (Status='Online' must be a hard precondition for every capability, added 2026-05-18 amendment).
+
+**Look first:** `WorkerService/Main.py:711` `_ApplyCapabilities` -- only checks `self.TranscodeEnabled / self.RemuxEnabled / self.QualityTestEnabled / self.ScanEnabled`; `self.WorkerStatus` is loaded from DB (line 311) but never consulted. The fix is to wrap or extend `_ApplyCapabilities` so any non-Online status short-circuits to "stop all capabilities" regardless of the individual flags. Draining state has its own rules (cf. worker-status-model.feature.md criterion 3) -- finish in-flight jobs but don't claim new ones; Paused stops immediately.
+
+**Flow doc:** `Features/TeamStatus/worker-status-model.feature.md` describes the state model but no separate flow doc exists for capability-vs-status interplay; `/t` should either extend the existing feature doc's narrative or add a small flow doc.
+
+**Fix with:** `/t BUG-0004`.
+
+---
+
