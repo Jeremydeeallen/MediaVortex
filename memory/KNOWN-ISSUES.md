@@ -57,37 +57,6 @@
 
 ---
 
-### [BUG-0016 - MOSTLY RESOLVED 2026-05-25] Orphan MediaFiles rows for `-mv.mp4` paths cause idx_mediafiles_filepath_unique violations on subsequent encodes
-
-**Resolution 2026-05-25:** `Scripts/SQLScripts/CleanupOrphanMvPairs.py` resolved 1,425 of 1,506 detected coexistence pairs. The audit gate (TranscodeAttempts with Success=true AND FileReplaced=true AND command references the -mv.mp4 output) classified 1,423 as RETIRE-eligible. RETIRE preserves the audit trail by re-parenting `TranscodeAttempts` (and downstream `MediaFilesArchive` + `TemporaryFilePaths`) from the source row to the surviving -mv.mp4 row before deleting the source MediaFiles row. **No disk files were deleted** -- spot-checks revealed many -mv.mp4 outputs from BUG-0013-era runs have wrong audio (Pokemon S04E20 at -18.2 LUFS + clipping; Office S07E05 at -32.5 LUFS), so the .mkv source remains as the safe master pending a future LUFS-verified retire script. The remaining 81 KEEP_BOTH pairs (no audit trail proving the -mv.mp4 came from a clean pipeline run) were parked with `AdmissionDeferReason='manual_review_pair_conflict'`, `RecommendedMode=NULL`, `NeedsQuick/NeedsTranscode=FALSE` to keep them out of the queue until operator triage. Find them via `SELECT Id, FilePath FROM MediaFiles WHERE AdmissionDeferReason='manual_review_pair_conflict'`.
-
-**Below:** original entry preserved for context.
-
----
-
-**Date:** 2026-05-24 | **Area:** file-replacement
-
-**What breaks:** Some MediaFiles rows reference paths like `T:\Show\ep-mv.mp4` while a separate MediaFiles row for the original `T:\Show\ep.mkv` also exists. When the pipeline runs a Quick Fix on the `.mkv` row, FileReplacement produces `ep-mv.mp4` and calls `SaveMediaFile` with the new path -- which violates `idx_mediafiles_filepath_unique` because the orphan row already claims that path. Result: rename succeeded on disk, DB update failed, the file is in an inconsistent state.
-
-**Repro:**
-```sql
-SELECT m1.Id AS source_id, m1.FilePath AS source_path,
-       m2.Id AS orphan_id, m2.FilePath AS orphan_path
-FROM MediaFiles m1
-JOIN MediaFiles m2 ON LOWER(m2.FilePath) = LOWER(REPLACE(m1.FilePath, '.mkv', '-mv.mp4'))
-WHERE m1.FilePath ILIKE '%.mkv' LIMIT 10;
-```
-Returns matched pairs. Pipeline runs on any source_id will hit the constraint.
-
-**Evidence:**
-- Pipeline-test-harness step 10 against MediaFile 18045 (Ren & Stimpy S03E03): orphan row 683391 pointed at the `-mv.mp4` path, FileReplacement failed with `UniqueViolation: duplicate key value violates unique constraint "idx_mediafiles_filepath_unique"`.
-
-**Look first:** Where does the orphan get created? Suspect either (a) a manual Quick Fix that succeeded enough to create a new MediaFiles row but didn't archive/delete the original, or (b) the SmartPopulate / Scan path discovering both files as separate MediaFiles. Run the repro SQL to count -- if large, a cleanup migration is the first move.
-
-**Fix with:** `/t BUG-0016`.
-
----
-
 ### [BUG-0015] Orphan `-mv.mp4` files on disk without corresponding MediaFiles row
 **Date:** 2026-05-24 | **Area:** file-replacement
 

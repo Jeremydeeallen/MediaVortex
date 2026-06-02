@@ -1,4 +1,4 @@
-# Bug Index
+﻿# Bug Index
 
 Terse one-line-per-bug index. Drill into `memory/KNOWN-ISSUES.md` for full detail.
 Entry shape: `- BUG-NNNN | <active|resolved> | <area> | <desc> | <created>[ -> <resolved>]`
@@ -16,12 +16,12 @@ Entry shape: `- BUG-NNNN | <active|resolved> | <area> | <desc> | <created>[ -> <
 - BUG-0011 | active | jellyfin-notify | JellyfinNotify HTTP 500, WARNING does not log payload | 2026-05-22
 - BUG-0012 | active | show-settings | Quick Fix batch rows blank Title for UNC paths | 2026-05-22
 - BUG-0015 | active | file-replacement | Orphan -mv.mp4 disk files without MediaFiles row | 2026-05-24
-- BUG-0016 | active | file-replacement | Orphan -mv.mp4 MediaFiles cause unique violations (MOSTLY RESOLVED; 81 KEEP_BOTH pending) | 2026-05-24
 - BUG-0018 | active | orphan-cleanup | OrphanCleanupService races FileReplacement during VMAF window | 2026-05-25
 - BUG-0020 | active | worker-lifecycle | Workers must own processes end-to-end; -mv only when compliant | 2026-05-26
 
 ## Recently Resolved (last 10)
 
+- BUG-0016 | resolved | file-replacement | Orphan -mv.mp4 MediaFiles cause unique violations | 2026-05-24 -> 2026-06-02
 - BUG-0023 | resolved | profiles | Legacy ProfileManagementModal corrupted NVENC Codec column | 2026-05-31 -> 2026-05-31
 - BUG-0022 | resolved | quality-testing | VMAF measurement + NVENC adoption | 2026-05-28 -> 2026-05-29
 - BUG-0021 | resolved | file-replacement | Codec/AudioCodec/AudioComplete stale on MediaFiles | 2026-05-27 -> 2026-05-27
