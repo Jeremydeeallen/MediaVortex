@@ -1,8 +1,8 @@
 # Current Directive
 
 **Set:** YYYY-MM-DD
-**Status:** Active -- phase: NEEDS_STANDARDS_REVIEW
-**Slug:** <slug>
+**Status:** (no active directive -- task-delegation mode)
+**Slug:** <previous-slug>
 **Replaces:** `directives/closed/<previous-slug>.md` (closed Success | Partial | Abandoned)
 
 ## Outcome
