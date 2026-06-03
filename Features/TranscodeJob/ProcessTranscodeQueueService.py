@@ -1367,7 +1367,7 @@ class ProcessTranscodeQueueService:
             ProfileSettings = TranscodingSettings.get('ProfileSettings', {})
             CodecFlags = TranscodingSettings.get('CodecFlags', {})
 
-            # see per-profile-vmaf-skip.C3
+            # see post-transcode-disposition.C30 | see post-transcode-disposition.S1
             ProfileName = MediaFile.AssignedProfile if hasattr(MediaFile, 'AssignedProfile') else None
             QualityTestRequiredForProfile = True
             if ProfileName:
