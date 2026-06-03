@@ -1,0 +1,18 @@
+{
+  "_comment": "Monotone-decrease invariants for in-flight migrations. Files named here must not grow past their baseline. Lower the integer as the migration progresses; never raise. Read by /mediavortex-check-baselines.",
+  "baselines": [
+    {
+      "file": "Repositories/DatabaseManager.py",
+      "metric": "line_count",
+      "baseline": 5850,
+      "feature_doc": "Core/Database/repository-split.feature.md"
+    },
+    {
+      "file": "Repositories/DatabaseManager.py",
+      "metric": "import_count",
+      "import_module": "Repositories.DatabaseManager",
+      "baseline": 123,
+      "feature_doc": "Core/Database/repository-split.feature.md"
+    }
+  ]
+}

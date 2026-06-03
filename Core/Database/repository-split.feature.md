@@ -28,6 +28,19 @@ The architectural payoff is reviewability and drift resistance. Per-aggregate mo
 
 This is a pure refactor. No behavior change. No new functionality. No performance work.
 
+## Perfect End State
+
+This is the synopsis the R19 steering-hook refusal cites. Details live in the `## Success Criteria` table below; this section answers "what does the final shape look like" in one read.
+
+- **No `Repositories/` directory.** `Repositories/DatabaseManager.py` is deleted; the directory is removed. Every aggregate has migrated to its per-feature home.
+- **One repository per aggregate, colocated with the feature.** Each persistence module lives at `Features/<X>/<X>Repository.py` (e.g. `Features/MediaFiles/MediaFilesRepository.py`, `Features/TranscodeJob/TranscodeJobRepository.py`, `Features/QualityTesting/QualityTestRepository.py`). Aggregate boundaries are the set of tables that write together transactionally for one logical entity (MediaFiles + MediaFilesArchive; TranscodeAttempts + TranscodeFiles + TranscodeProgress).
+- **Repositories compose `DatabaseService`; no inheritance.** No `BaseRepository` superclass, no `Repository`-to-`Repository` inheritance hierarchy. Each repository takes a `DatabaseService` in its constructor and calls `ExecuteQuery` / `ExecuteNonQuery` on it. Cross-aggregate behavior lives in a feature service that composes multiple repositories, not in a shared base class.
+- **Shared helpers live under `Core/Database/`.** `Core/Database/PathNormalizer.py` (for `PrivateNormalizeFilePath` / `PrivateNormalizePathToFilesystemCase`), `Core/Database/SqlEscape.py` (for `EscapeLikePattern`), and the existing `Core/Database/WorkerCapabilityPredicate.py` (for `BuildClaimPredicate`) are the only cross-aggregate helpers. Each helper has exactly one definition site.
+- **One contract test file per repository.** `Tests/Contract/Test<X>Repository.py` exists per repository, hits the live database, and is updated to the new import path in the same commit that moves its aggregate.
+- **Per-repository size under 800 lines.** Sustainable cohesion threshold; over-size means the aggregate needs splitting further or the move was wrong-grained.
+
+Aggregate-to-target mapping for steering refusals is data-driven in `.claude/standards/database-manager-aggregates.json` -- adding a new aggregate is one row, not a code change.
+
 ## Scope
 
 ```

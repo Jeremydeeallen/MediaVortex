@@ -86,7 +86,17 @@ function Increment-RefusalCount {
 
 function Emit-DenyWithRepeatDetection {
     param([string]$Reason, [string]$FilePath)
-    $RuleMatch = [regex]::Match($Reason, '^(R\d+|Phase\s+\S+)')
+    # directive: hook-honesty-fence -- agent-stop header on every refusal.
+    # Fires on the FIRST refusal too, not just on repeats. Prior design only
+    # warned after token waste was already in flight.
+    $StopHeader = @'
+STOP. Do not search for a workaround. The Path forward below is the only acceptable answer.
+Variants -- clever or otherwise -- will be refused. Iterating costs tokens and produces nothing.
+If the Path forward is genuinely unworkable, ask the operator with a one-sentence reason instead of trying again.
+
+'@
+    $Reason = $StopHeader + $Reason
+    $RuleMatch = [regex]::Match($Reason, '(?m)^(R\d+|Phase\s+\S+)')
     if ($RuleMatch.Success -and $FilePath) {
         $RuleId = $RuleMatch.Groups[1].Value
         $Count = Increment-RefusalCount $RuleId $FilePath
@@ -490,6 +500,19 @@ function Test-PhaseGate {
                     }
                 }
             }
+            # directive: hook-honesty-fence -- tighten "no promotions" escape.
+            # When the directive's ### Files block names a schema migration
+            # (Scripts/SQLScripts/Add*.py), refuse a "no promotions" row. A
+            # migration is always a contract change.
+            if ($HasPromoContent) {
+                $PromoLooksEmpty = $PromoMatch.Groups[1].Value -match '(?i)no\s+promotions\s*\|'
+                if ($PromoLooksEmpty) {
+                    $FilesMatch = [regex]::Match($PostContent, '(?ms)###\s*Files\s*\r?\n.*?```(.*?)```')
+                    if ($FilesMatch.Success -and $FilesMatch.Groups[1].Value -match '(?i)Scripts[\\/]SQLScripts[\\/]Add[^\s]+\.py') {
+                        return "Phase DELIVERING -> Closed: directive's ### Files block names a schema migration (Scripts/SQLScripts/Add*.py) but the Promotions table is 'no promotions'. A migration is always a contract change. Path forward: name the *.feature.md / *.flow.md that captures the new schema's contract, edit that doc in this directive's scope, and put a real row in Promotions pointing at it."
+                    }
+                }
+            }
             if (-not $HasPromoContent) {
                 return "Phase DELIVERING -> Closed: directive cannot close without a non-empty ### Promotions section. See .claude/rules/doc-layering.md (Lifecycle: directive -> features/flows) + .claude/directives/_template.md. Path forward: populate the ### Promotions table with one row per piece of durable content (source artifact -> target *.feature.md / *.flow.md file + commit SHA). If the directive has no durable content to promote (e.g. pure bugfix), add a single row 'no promotions | n/a | <reason>'. The hook only checks the section is non-empty."
             }
@@ -733,6 +756,9 @@ function Test-R5-ExecuteQueryMisuse {
 function Test-R6-PathShape {
     param($PostContent, $FilePath, $AllContent)
     if ($FilePath -notmatch '\.py$') { return $null }
+    # directive: db-monolith-steering-hook -- per-file R6 suppression on the monolith being migrated; see Core/Database/repository-split.feature.md#perfect-end-state. Running R6 on this file charges rent against preexisting os.path sites without producing forward progress. New methods get steered to per-aggregate repos by R19 where R6 still fires normally.
+    $NormR6 = $FilePath -replace '\\','/'
+    if ($NormR6 -match '/Repositories/DatabaseManager\.py$') { return $null }
     $Lines = $PostContent -split "`n"
     for ($I = 0; $I -lt $Lines.Length; $I++) {
         if ($Lines[$I] -match '(?i)\b(\w*(?:path|filepath)\w*)\s*\.\s*replace\s*\([^)]*\)\s*\.\s*split\s*\(') {
@@ -902,7 +928,7 @@ function Test-R14-AnnotationDrift {
 }
 
 function Test-R15-DirectiveAnchor {
-    param($PostContent, $FilePath, $DirectiveFiles)
+    param($PostContent, $FilePath, $DirectiveFiles, $EditRegion)
     if ($FilePath -notmatch '\.py$') { return $null }
     $Slug = Get-DirectiveSlug
     if (-not $Slug) { return $null }
@@ -922,6 +948,66 @@ function Test-R15-DirectiveAnchor {
                 return "R15 Directive anchor: $FilePath line $($I+1) defines a function/class without '# directive: $Slug' on the line above. This file is in the active directive's scope. See .claude/standards/index.md R15 row. Path forward: add '# directive: <active-slug>' on the line immediately above the def/class. This is the grep anchor that lets future readers find the directive that explains why this function exists in its current shape."
             }
         }
+    }
+    # directive: hook-honesty-fence -- companion # see anchor required alongside # directive:.
+    # Directives are transient; feature/flow docs are durable. Every def/class
+    # with a # directive: anchor must also have a # see <feature-or-flow-slug>.<ID>
+    # anchor somewhere in its scope. Edited-region-only to avoid firing on legacy.
+    for ($I = 0; $I -lt $Lines.Length; $I++) {
+        if ($Lines[$I] -match '^\s*(def|class)\s+\w+') {
+            $Prev = if ($I -gt 0) { $Lines[$I-1] } else { '' }
+            if ($Prev -match "#\s*directive:\s*[a-z0-9-]+") {
+                $StartIndent = ($Lines[$I] -replace '^(\s*).*$','$1').Length
+                $EndIdx = $Lines.Length - 1
+                for ($J = $I + 1; $J -lt $Lines.Length; $J++) {
+                    if ($Lines[$J] -match '^\s*(def|class)\s+' -and (($Lines[$J] -replace '^(\s*).*$','$1').Length -le $StartIndent)) { $EndIdx = $J - 1; break }
+                }
+                $Scope = ($Lines[$I..$EndIdx] -join "`n") + "`n" + $Prev
+                if ($Scope -notmatch "#\s*see\s+[a-z0-9-]+\.(S|W|C|ST)\d+") {
+                    if (-not (Test-LineInEditRegion ($I+1) $EditRegion)) { continue }
+                    if (Test-AllowOverride $PostContent $I 'R15' $FilePath) { continue }
+                    return "R15 Companion see anchor: $FilePath line $($I+1) has '# directive: <slug>' but no '# see <feature-or-flow-slug>.<ID>' in scope. Directives are transient; feature/flow docs are durable. Path forward: add '# see <feature-or-flow-slug>.<criterion-or-seam-id>' somewhere in the function/class body (or on the directive anchor line, pipe-separated). For new contracts, this means writing the feature/flow doc edit FIRST and citing it."
+                }
+            }
+        }
+    }
+    return $null
+}
+
+function Test-R19-DatabaseManagerSteering {
+    # directive: db-monolith-steering-hook -- steers new/modified methods on Repositories/DatabaseManager.py to their per-aggregate repo home; see Core/Database/repository-split.feature.md#perfect-end-state and .claude/standards/database-manager-aggregates.json.
+    param($PostContent, $FilePath, $ToolName, $ToolInput, $EditRegion, $AllContent)
+    $NormR19 = $FilePath -replace '\\','/'
+    if ($NormR19 -notmatch '/Repositories/DatabaseManager\.py$') { return $null }
+    if ($EditRegion -and $EditRegion.Mode -eq 'NoRegion') { return $null }
+    $MapPath = Join-Path $RepoRoot ".claude\standards\database-manager-aggregates.json"
+    if (-not (Test-Path $MapPath)) { return $null }
+    $Map = $null
+    try { $Map = Get-Content $MapPath -Raw -Encoding UTF8 | ConvertFrom-Json } catch { return $null }
+    if (-not $Map -or -not $Map.prefixes) { return $null }
+    $Prefixes = @($Map.prefixes | Sort-Object { -($_.match.Length) })
+    $Anchor = if ($Map.feature_doc_anchor) { $Map.feature_doc_anchor } else { 'Core/Database/repository-split.feature.md#perfect-end-state' }
+    $Lines = $PostContent -split "`n"
+    for ($I = 0; $I -lt $Lines.Length; $I++) {
+        $LineMatch = [regex]::Match($Lines[$I], '^(\s*)def\s+(\w+)\s*\(')
+        if (-not $LineMatch.Success) { continue }
+        $Indent = $LineMatch.Groups[1].Value.Length
+        $MethodName = $LineMatch.Groups[2].Value
+        $EndIdx = $Lines.Length - 1
+        for ($J = $I + 1; $J -lt $Lines.Length; $J++) {
+            $InnerMatch = [regex]::Match($Lines[$J], '^(\s*)(def|class)\s+\w+')
+            if ($InnerMatch.Success -and $InnerMatch.Groups[1].Value.Length -le $Indent) { $EndIdx = $J - 1; break }
+        }
+        $StartLine = $I + 1
+        $EndLine = $EndIdx + 1
+        if (-not (Test-RangeOverlapsEditRegion $StartLine $EndLine $EditRegion)) { continue }
+        if (Test-AllowOverride $PostContent $I 'R19' $FilePath) { continue }
+        $Target = $null
+        foreach ($P in $Prefixes) { if ($MethodName.StartsWith($P.match)) { $Target = $P.target; break } }
+        if (-not $Target) {
+            return "R19 DatabaseManagerSteering: $FilePath line $StartLine introduces or modifies method '$MethodName'. No prefix in .claude/standards/database-manager-aggregates.json matches this name -- the hook will not guess the target aggregate. See $Anchor for the end-state shape. Path forward: add a row to .claude/standards/database-manager-aggregates.json mapping a prefix of '$MethodName' to its target Features/<Aggregate>/<Aggregate>Repository.py, then put the method in that file rather than the monolith. Pure deletions do not require a map entry."
+        }
+        return "R19 DatabaseManagerSteering: $FilePath is the monolith being migrated. New/modified method '$MethodName' (line $StartLine) belongs in $Target per $Anchor. Pure deletions of methods from this file pass silently. Path forward: write the method body in $Target instead and update callers' imports in the same commit. If this is a deliberate one-line bugfix landing in the monolith, override with '# allow: one-line bugfix for <reason>' within 3 lines of the def."
     }
     return $null
 }
@@ -985,8 +1071,9 @@ $Rules = @(
     { Test-R12-CommentVolume $PostContent $FilePath $PostContent $EditRegion },
     { Test-R13-NoNewFeatureDocs $PostContent $FilePath $PostContent $IsNew },
     { Test-R14-AnnotationDrift $PostContent $FilePath $ToolName $ToolInput $PostContent },
-    { Test-R15-DirectiveAnchor $PostContent $FilePath $DirectiveFiles },
-    { Test-R16-FeatureSlug $PostContent $FilePath $PostContent }
+    { Test-R15-DirectiveAnchor $PostContent $FilePath $DirectiveFiles $EditRegion },
+    { Test-R16-FeatureSlug $PostContent $FilePath $PostContent },
+    { Test-R19-DatabaseManagerSteering $PostContent $FilePath $ToolName $ToolInput $EditRegion $PostContent }
 )
 
 try {
