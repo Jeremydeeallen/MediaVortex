@@ -416,9 +416,9 @@ class CrashRecoveryService:
 
                 if FinalExists and OriginalExists and CanonicalOriginal:
                     try:
-                        from Features.FileReplacement.FileReplacementBusinessService import FileReplacementBusinessService
-                        Frb = FileReplacementBusinessService(self.DatabaseManager, WorkerName=self.WorkerName)
-                        FinalizeResult = Frb.FinalizePartialReplacement(
+                        from Features.FileReplacement.TranscodedOutputPlacement import TranscodedOutputPlacement
+                        Top = TranscodedOutputPlacement(self.DatabaseManager, WorkerName=self.WorkerName)
+                        FinalizeResult = Top.FinalizePartialReplacement(
                             OriginalLocalPath=LocalSource,
                             FinalLocalPath=FinalPath,
                             CanonicalOriginalPath=CanonicalOriginal,

@@ -23,7 +23,7 @@ Entry shape: `- BUG-NNNN | <active|resolved> | <area> | <desc> | <created>[ -> <
 
 - BUG-0002 | active | file-replacement | Silent-output Remux MediaFiles purge | 2026-05-16
 - BUG-0007 | active | activity-page | Worker capability toggle no UI refresh | 2026-05-22
-- BUG-0020 | active | worker-lifecycle | Workers must own processes end-to-end; -mv only when compliant | 2026-05-26
+- BUG-0020 | active | worker-lifecycle | Workers must own processes end-to-end; -mv only when compliant (C3 FR-internal TFP leak absorbed by filereplacement-decompose 2026-06-02; C5 operator zero-candidate fleet pass remains) | 2026-05-26
 
 ## Recently Resolved (last 10)
 

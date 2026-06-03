@@ -976,7 +976,7 @@ $Rules = @(
     { Test-R3-NoCachedSettings $PostContent $FilePath $PostContent },
     { Test-R4-NoEnvVars $PostContent $FilePath $PostContent },
     { Test-R5-ExecuteQueryMisuse $PostContent $FilePath $PostContent },
-    { Test-R6-PathShape $PostContent $FilePath $PostContent },
+    { Test-R6-PathShape $PostContent $FilePath $PostContent $EditRegion },
     { Test-R7-PolymorphicCascade $PostContent $FilePath $PostContent },
     { Test-R8-TestPlacement $PostContent $FilePath $PostContent $IsNew },
     { Test-R9-LikeEscape $PostContent $FilePath $PostContent },

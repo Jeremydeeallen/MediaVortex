@@ -1,23 +1,3 @@
-"""PostTranscodeDispositionService.
-
-The single decision function for the post-transcode pipeline. Replaces the
-five split decision sites listed in `post-transcode-disposition.feature.md`:
-
-  - ShouldQualityTestService.ProcessTranscodedFile
-  - ShouldQualityTestService._ReplaceFileDirectly
-  - QualityTestingBusinessService.CheckAndTriggerAutoReplace
-  - FileReplacementBusinessService.ProcessFileReplacement (BypassVMAFCheck branch)
-  - FileReplacementBusinessService.ProcessFileReplacementWithVMAF
-
-`DecidePostTranscodeDisposition(TranscodeAttemptId)` is the only entry point.
-Returns `(Disposition, Reason, AuditPayload)` and persists the decision to
-TranscodeAttempts.Disposition / DispositionReason / DispositionDecidedAt.
-
-The decision table is canonical in `transcode.flow.md` Stage 6. The branches
-in `_DecideFromInputs` MUST mirror the rows in that table 1:1 -- if you add a
-row to one, add it to the other in the same PR.
-"""
-
 import json
 from datetime import datetime, timezone
 from typing import Optional, Tuple
@@ -31,10 +11,8 @@ from Features.QualityTesting.PostTranscodeGateConfigRepository import (
 from Features.QualityTesting.Models.DispositionResult import DispositionResult
 
 
-# Allowed values -- enforced by the TranscodeAttempts.Disposition CHECK constraint.
 DISPOSITIONS = ('Pending', 'Replace', 'BypassReplace', 'NoReplace', 'Requeue', 'Discard')
 
-# Closed reason vocabulary -- per feature criterion 10.
 REASONS = (
     'TranscodeFailed',
     'NoSavings',
@@ -43,43 +21,33 @@ REASONS = (
     'VmafBelowMin',
     'VmafPassed',
     'VmafAboveMax',
-    'VmafServicePaused',           # legacy -- pre-2026-05-29; not emitted by new decisions
-    'VmafServicePausedBypassed',   # legacy -- pre-2026-05-29; not emitted by new decisions
-    'VmafCapabilityNotConfigured', # legacy
+    'VmafServicePaused',
+    'VmafServicePausedBypassed',
+    'VmafCapabilityNotConfigured',
     'QualityTestingGloballyDisabled',
-    'OperatorForcedReplace',       # operator override via /api/QualityTest/Override
-    'OperatorDiscarded',           # operator override via /api/QualityTest/Override
+    'OperatorForcedReplace',
+    'OperatorDiscarded',
     'TestMode',
-    # compliance-gated-rename.feature.md criterion 2 (BUG-0020 Slice 1).
-    # Reached when FileReplacement's pre-rename compliance gate refuses
-    # a Replace/BypassReplace disposition. Cascade reason lives in
-    # TranscodeAttempts.ErrorMessage (cascade vocabulary, not free text).
     'ComplianceGateFailed',
 )
 
 
+# directive: filereplacement-decompose | see post-transcode-disposition.feature.md
 class PostTranscodeDispositionService:
-    """The single decision function for post-transcode disposition."""
+    """Single decision function for post-transcode disposition; see post-transcode-disposition.feature.md."""
 
+    # directive: filereplacement-decompose
     def __init__(self, DatabaseManagerInstance: DatabaseManager = None,
                  GateConfigRepoInstance: PostTranscodeGateConfigRepository = None):
         self.DatabaseManager = DatabaseManagerInstance or DatabaseManager()
         self.GateConfigRepo = GateConfigRepoInstance or PostTranscodeGateConfigRepository()
 
+    # directive: filereplacement-decompose | see post-transcode-disposition.C1, C2
     def DecidePostTranscodeDisposition(self, TranscodeAttemptId: int) -> DispositionResult:
-        """Decide the disposition for a transcode attempt.
-
-        Idempotent: if the row already has a non-Pending Disposition, returns
-        that decision unchanged with no side effects (no second log line, no
-        second DB write). The first commit of a final disposition is the
-        authoritative one; the worker may call this multiple times safely
-        (e.g. once after transcode, once after VMAF lands).
-        """
+        """Decide disposition for an attempt; idempotent on non-Pending; see post-transcode-disposition.C1, C2."""
         try:
-            # Pull all inputs in one query to avoid TranscodeAttemptModel coupling.
-            # The model doesn't yet carry the Disposition columns; this keeps the
-            # disposition service independent of model evolution.
             Db = DatabaseService()
+            # allow: R12 SQL preexisting; relocate to TranscodeAttemptsRepository in follow-up
             Rows = Db.ExecuteQuery(
                 """
                 SELECT Success, OldSizeBytes, NewSizeBytes, QualityTestRequired, VMAF,
@@ -97,8 +65,6 @@ class PostTranscodeDispositionService:
                                          AuditPayload={'error': 'attempt_not_found'})
             Row = Rows[0]
 
-            # Idempotency guard: if a final disposition is already committed,
-            # return it unchanged. Pending re-decides as more inputs arrive.
             ExistingDisposition = Row.get('Disposition')
             ExistingReason = Row.get('DispositionReason')
             if ExistingDisposition and ExistingDisposition != 'Pending':
@@ -113,9 +79,6 @@ class PostTranscodeDispositionService:
                     AuditPayload={'cached': True},
                 )
 
-            # Test-mode short-circuit: test attempts must NEVER replace the source.
-            # First check after idempotency guard so it overrides every other input.
-            # See Features/TranscodeJob/multi-variant-testing.feature.md criterion 7.
             TestVariantSetId = Row.get('TestVariantSetId')
             if TestVariantSetId is not None:
                 self._CommitDisposition(TranscodeAttemptId, 'NoReplace', 'TestMode')
@@ -130,19 +93,13 @@ class PostTranscodeDispositionService:
                     AuditPayload={'TranscodeAttemptId': TranscodeAttemptId, 'TestVariantSetId': TestVariantSetId, 'shortCircuit': True},
                 )
 
-            # Gather inputs.
             Success = bool(Row.get('Success'))
             OldSize = Row.get('OldSizeBytes') or 0
             NewSize = Row.get('NewSizeBytes') or 0
             QualityTestRequired = bool(Row.get('QualityTestRequired'))
             VmafScore = Row.get('VMAF')
 
-            # "Is VMAF operationally available?" -- replaces the legacy
-            # ServiceStatus.QualityTestService gate, which was a fossil row
-            # last written by the retired QualityTestService process in
-            # January 2026 and never updated by the unified WorkerService.
-            # The new gate is computed: any worker with the capability flag
-            # ON, status Online, and a fresh heartbeat counts as "available".
+            # allow: R12 SQL preexisting; relocate to WorkersRepository in follow-up
             CapableRows = DatabaseService().ExecuteQuery(
                 """
                 SELECT 1 FROM Workers
@@ -170,7 +127,6 @@ class PostTranscodeDispositionService:
                 'QualityTestEnabled': bool(getattr(GateConfig, 'QualityTestEnabled', True)),
             }
 
-            # Apply the decision table.
             Disposition, Reason = self._DecideFromInputs(
                 Success=Success,
                 OldSize=OldSize,
@@ -181,10 +137,8 @@ class PostTranscodeDispositionService:
                 GateConfig=GateConfig,
             )
 
-            # Commit the decision (Pending too -- so subsequent re-decides see it).
             self._CommitDisposition(TranscodeAttemptId, Disposition, Reason)
 
-            # Single rolled-up INFO line per decision (criterion 12).
             LoggingService.LogInfo(
                 f"Disposition for TranscodeAttempt {TranscodeAttemptId}: {Disposition} "
                 f"(Reason={Reason}) inputs={json.dumps(AuditPayload, default=str)}",
@@ -204,44 +158,22 @@ class PostTranscodeDispositionService:
             )
             return DispositionResult(Disposition='Pending', Reason='', AuditPayload={'error': str(Ex)})
 
+    # directive: filereplacement-decompose | see transcode.ST6
     def _DecideFromInputs(self, Success, OldSize, NewSize, QualityTestRequired,
                           VmafScore, VmafCapableWorkerOnline, GateConfig) -> Tuple[str, str]:
-        """The decision table from `transcode.flow.md` Stage 6, encoded.
-
-        Order matches the table top-to-bottom -- first match wins. Adding /
-        removing / changing a branch here MUST be accompanied by the matching
-        flow-doc edit in the same PR (criterion 4).
-
-        `VmafCapableWorkerOnline` is computed by the caller from the live
-        `Workers` table (capability flag ON + status Online + fresh heartbeat),
-        not from the legacy ServiceStatus.QualityTestService row.
-        """
-        # Row 1: transcode failed -> always Discard.
+        """Decision table from transcode.flow.md ST6 encoded; see transcode.ST6."""
         if not Success:
             return ('Discard', 'TranscodeFailed')
 
-        # Row 1.5: operator master switch is OFF -> bypass VMAF entirely.
-        # Owner: post-transcode-disposition.feature.md criterion 26.
-        # MUST precede the NoSavings gate for the same reason Row 2 does:
-        # when the operator has globally disabled VMAF, the disk-savings
-        # decision belongs to FileReplacement / archive policy, not here.
-        # Read fresh per call (no caching) so mid-flight toggle is safe.
         if not getattr(GateConfig, 'QualityTestEnabled', True):
             return ('BypassReplace', 'QualityTestingGloballyDisabled')
 
-        # Row 2: quality testing not required -> bypass-replace by design.
-        # This MUST precede the NoSavings gate because remux jobs set
-        # QualityTestRequired=false and are not aimed at disk savings --
-        # audio re-encode may produce a marginally larger output (see
-        # transcode-vs-remux-routing.feature.md criterion 16).
         if not QualityTestRequired:
             return ('BypassReplace', 'QualityTestNotRequired')
 
-        # Row 3: transcode succeeded but produced no savings.
         if NewSize and OldSize and NewSize >= OldSize:
             return ('Discard', 'NoSavings')
 
-        # Rows 5-7: VMAF score available -> compare to thresholds.
         if VmafScore is not None:
             try:
                 Score = float(VmafScore)
@@ -254,16 +186,11 @@ class PostTranscodeDispositionService:
                     return ('Replace', 'VmafPassed')
                 return ('NoReplace', 'VmafAboveMax')
 
-        # Row 4 (rewritten 2026-05-29): VMAF required, no score yet -> always
-        # Pending/AwaitingVmaf. The QualityTestingQueue row is created by the
-        # dispatcher regardless of whether a capable worker is online; the
-        # operator either brings one online OR overrides the queue row via
-        # the WebService endpoint. The legacy VmafServicePaused / Bypassed
-        # branches are retired -- see qt-queue-visibility-and-override.feature.md.
         return ('Pending', 'AwaitingVmaf')
 
+    # directive: filereplacement-decompose
     def _CommitDisposition(self, TranscodeAttemptId: int, Disposition: str, Reason: str) -> None:
-        """Write the audit columns. Single UPDATE per disposition decision."""
+        """Write audit columns and TFP cleanup chokepoint; see post-transcode-pipeline.C15."""
         if Disposition not in DISPOSITIONS:
             LoggingService.LogError(
                 f"Refusing to commit invalid Disposition={Disposition!r} for attempt {TranscodeAttemptId}",
@@ -277,6 +204,7 @@ class PostTranscodeDispositionService:
             )
             return
         try:
+            # allow: R12 SQL preexisting; relocate to TranscodeAttemptsRepository in follow-up
             DatabaseService().ExecuteNonQuery(
                 """
                 UPDATE TranscodeAttempts
@@ -294,44 +222,29 @@ class PostTranscodeDispositionService:
             )
             return
 
-        # TFP cleanup at the disposition chokepoint (BUG-0001 criterion 15).
-        # Replace/BypassReplace still need the canonical paths for the
-        # downstream ProcessFileReplacement call, which owns its own TFP cleanup
-        # on success. Discard/NoReplace/Requeue are terminal here -- delete now.
+        # see post-transcode-pipeline.C15
         if Disposition in ('Discard', 'NoReplace', 'Requeue'):
-            try:
-                DatabaseService().ExecuteNonQuery(
-                    "DELETE FROM TemporaryFilePaths WHERE TranscodeAttemptId = %s",
-                    (TranscodeAttemptId,),
-                )
-            except Exception as Ex:
-                LoggingService.LogException(
-                    f"_CommitDisposition TFP cleanup failed for attempt {TranscodeAttemptId}",
-                    Ex, "PostTranscodeDispositionService", "_CommitDisposition",
-                )
+            self.CleanupTemporaryFilePaths(TranscodeAttemptId)
 
-    def RecordComplianceGateFailure(self, TranscodeAttemptId: int, CascadeReason: str) -> None:
-        """Override a previously-committed Replace / BypassReplace disposition
-        with `NoReplace` / `ComplianceGateFailed`, writing the specific cascade
-        reason to `TranscodeAttempts.ErrorMessage` as the audit payload.
-
-        Owns `compliance-gated-rename.feature.md` criterion 2. The idempotency
-        guard in `DecidePostTranscodeDisposition` would normally block a
-        re-decide, but the compliance gate is a post-decision check that runs
-        at FileReplacement time -- the disposition WAS valid when first
-        decided (VMAF passed); the rename refused for a separate reason.
-        This method bypasses the guard intentionally and flips the disposition.
-
-        Side effects:
-          - UPDATE TranscodeAttempts SET Disposition='NoReplace',
-            DispositionReason='ComplianceGateFailed',
-            DispositionDecidedAt=NOW(),
-            ErrorMessage='ComplianceGateFailed: <CascadeReason>'.
-          - DELETE FROM TemporaryFilePaths WHERE TranscodeAttemptId=%s
-            (NoReplace is in the cleanup set in _CommitDisposition; this is
-            the criterion 3 TFP-cleanup path).
-        """
+    # directive: filereplacement-decompose | see post-transcode-pipeline.C15
+    def CleanupTemporaryFilePaths(self, TranscodeAttemptId: int) -> None:
+        """Delete TFP row; chokepoint for every non-Pending terminal exit; see post-transcode-pipeline.C15."""
         try:
+            DatabaseService().ExecuteNonQuery(
+                "DELETE FROM TemporaryFilePaths WHERE TranscodeAttemptId = %s",
+                (TranscodeAttemptId,),
+            )
+        except Exception as Ex:
+            LoggingService.LogException(
+                f"CleanupTemporaryFilePaths failed for attempt {TranscodeAttemptId}",
+                Ex, "PostTranscodeDispositionService", "CleanupTemporaryFilePaths",
+            )
+
+    # directive: filereplacement-decompose | see compliance-gated-rename.C2
+    def RecordComplianceGateFailure(self, TranscodeAttemptId: int, CascadeReason: str) -> None:
+        """Override Replace/BypassReplace -> NoReplace/ComplianceGateFailed; see compliance-gated-rename.C2."""
+        try:
+            # allow: R12 SQL preexisting; relocate to TranscodeAttemptsRepository in follow-up
             DatabaseService().ExecuteNonQuery(
                 """
                 UPDATE TranscodeAttempts
@@ -345,7 +258,6 @@ class PostTranscodeDispositionService:
                 f"RecordComplianceGateFailure: failed to write ErrorMessage for attempt {TranscodeAttemptId}",
                 Ex, "PostTranscodeDispositionService", "RecordComplianceGateFailure",
             )
-        # _CommitDisposition handles the audit columns + TFP cleanup.
         self._CommitDisposition(TranscodeAttemptId, 'NoReplace', 'ComplianceGateFailed')
         LoggingService.LogInfo(
             f"Disposition overridden for TranscodeAttempt {TranscodeAttemptId}: "
