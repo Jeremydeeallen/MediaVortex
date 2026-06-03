@@ -26,12 +26,12 @@ The mop-up script `Scripts/FixFalseTranscodeFlags.py` existed but only cleared t
 
 ### Writer behavior
 
-4. After file replacement, `FileReplacementBusinessService._UpdateMediaFilesAfterReplacement` sets:
+4. After file replacement, `TranscodedOutputPlacement._UpdateMediaFilesAfterReplacement` sets (extracted from `FileReplacementBusinessService` 2026-06-02 via `filereplacement-decompose`):
    - `TranscodedByMediaVortex=TRUE` (and leaves `RemuxedByMediaVortex` untouched) when the originating job's `Mode='Transcode'`.
    - `RemuxedByMediaVortex=TRUE`, `RemuxedByMediaVortexDate=NOW()` (and leaves `TranscodedByMediaVortex` untouched) when the originating job's `Mode in ('Remux', 'SubtitleFix', 'AudioFix', 'Quick')`.
    - Never sets both TRUE for the same row in the same replacement. Verifiable: induce one of each mode against test files, observe each row has exactly one flag flipped.
 
-5. Mode is derived from the `TranscodeAttempts.ProfileName` of the just-finished replacement. ProfileName values `'Remux'` and `'SubtitleFix'` route to the remux branch; any other ProfileName routes to the transcode branch. The same rule already used for the `isRemux` defense-in-depth check at line 272 -- reused, not redefined. Verifiable: grep the writer for the routing condition; matches the existing isRemux check.
+5. Mode is derived from the `TranscodeAttempts.ProfileName` of the just-finished replacement and threaded through `TranscodedOutputPlacement.Execute(..., Mode=...)`. ProfileName values `'Remux'` and `'SubtitleFix'` route to the remux branch; any other ProfileName routes to the transcode branch. Verifiable: grep `TranscodedOutputPlacement._UpdateMediaFilesAfterReplacement` for the `Mode in ('Remux', 'SubtitleFix', 'AudioFix', 'Quick')` routing condition.
 
 ### Retro-fix
 

@@ -96,13 +96,22 @@ transcode.flow.md
 | File | Role |
 |---|---|
 | `Features/TranscodeJob/ProcessTranscodeQueueService.py` | Compute staging path side-by-side; stop reading `Workers.StagingDirectory` |
-| `Features/FileReplacement/FileReplacementBusinessService.py` | `_ProcessCompleteFileReplacement` final `TargetPath` becomes `<basename>-mv.<ext>` |
+| `Features/FileReplacement/TranscodedOutputPlacement.py` | `Execute` (renamed from `_ProcessCompleteFileReplacement`) -- owns the `.inprogress` -> `<basename>-mv.<ext>` rename, the MediaFiles re-probe, and the original-source delete. Extracted from FileReplacementBusinessService 2026-06-02 (`filereplacement-decompose` directive). |
+| `Features/FileReplacement/FileReplacementBusinessService.py` | Orchestration only -- `ProcessFileReplacement` validates disposition + dispatches to `TranscodedOutputPlacement.Execute`. |
 | `Features/FileScanning/FileScanningBusinessService.py` | Skip `.old.<ext>` artifacts; do not insert them into `MediaFiles` |
 | `Features/TranscodeQueue/QueueManagementBusinessService.py` | Refuse to admit queue rows whose source ends in `-mv.<ext>` |
 | `Models/CommandBuilder.py` | `BuildTranscodeCommand` / `BuildRemuxCommand` / `BuildSubtitleFixCommand` -- output paths land side-by-side; staging suffix unchanged (`_transcoded.mp4` / `_remuxed.mp4` / `_subfix.mp4` during the encode) |
 | `Scripts/SQLScripts/drop_local_staging_2026_05_21.py` | One-shot, idempotent column drop |
 | `transcode.flow.md` | Stage 6 inputs table loses `StagingDirectory`; Stage 8 Action describes `-mv` rename and `KeepSource` settle |
 | `memory/KNOWN-ISSUES.md` | Cross-worker hand-off (Risk 5 in 2026-05-10 sight pass) closed by criterion 3 |
+
+## Seams
+
+| ID | Seam | Producer | Wire shape | Consumer expects | Verification |
+|---|---|---|---|---|---|
+| S1 | `FileReplacementBusinessService.ProcessFileReplacement -> TranscodedOutputPlacement.Execute` | Orchestrator dispatches after disposition is validated + archive snapshot taken | `(OriginalFilePath, TranscodedFilePath, NetworkOriginalPath, FFmpegCommand, SourceMediaFileId, Mode)` all canonical | `Execute` returns `{Success, StepsCompleted, ErrorMessage, CanonicalOriginalPath, CanonicalNewPath, ComplianceGateRefused?, CascadeReason?}` | Canary attempt 27614 (Impractical Jokers S07E11) 2026-06-03: dot-worker-1 executed end-to-end, source `.mkv` (756.0 MB) -> `-mv.mp4` (205.4 MB, 72.8% reduction); MediaFiles re-probed to `Codec='av1'`; TFP row deleted by dispositioner chokepoint. |
+| S2 | `TranscodedOutputPlacement.Execute -> ComplianceGate.Evaluate` | Execute calls the gate before the rename step | `(LocalStagedPath, SourceMediaFileId, FFmpegCommand)` | `{Compliant, RefusalReason}` per `compliance-gated-rename.feature.md` | `Tests/Contract/TestComplianceGate.py` (planned) |
+| S3 | `TranscodedOutputPlacement.FinalizePartialReplacement <- CrashRecoveryService` | CrashRecoveryService is the sole external caller (post-2026-06-02 extraction) | `(OriginalLocalPath, FinalLocalPath, CanonicalOriginalPath)` | `Execute`-compatible result dict; idempotent if either source file is missing | CrashRecoveryService import grep: 1 hit at the FinalizePartialReplacement call site |
 
 ## Deviation from conventions
 

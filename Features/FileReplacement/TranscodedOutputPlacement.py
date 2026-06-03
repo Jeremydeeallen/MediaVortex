@@ -42,7 +42,7 @@ class TranscodedOutputPlacement:
             )
             return CanonicalPath
 
-    # directive: filereplacement-decompose | see transcoded-output-placement.C4
+    # directive: filereplacement-decompose | see transcoded-output-placement.C4 | see transcoded-output-placement.S1
     def Execute(self, OriginalFilePath: str, TranscodedFilePath: str, NetworkOriginalPath: str = None,
                 FFmpegCommand: Optional[str] = None, SourceMediaFileId: Optional[int] = None,
                 Mode: str = 'Transcode') -> Dict[str, Any]:
