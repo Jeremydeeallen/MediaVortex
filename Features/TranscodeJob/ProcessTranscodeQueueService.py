@@ -1367,24 +1367,35 @@ class ProcessTranscodeQueueService:
             ProfileSettings = TranscodingSettings.get('ProfileSettings', {})
             CodecFlags = TranscodingSettings.get('CodecFlags', {})
 
-            # Create attempt record
+            # see per-profile-vmaf-skip.C3
+            ProfileName = MediaFile.AssignedProfile if hasattr(MediaFile, 'AssignedProfile') else None
+            QualityTestRequiredForProfile = True
+            if ProfileName:
+                # allow: R12 SQL preexisting; relocate to ProfilesRepository in follow-up
+                ProfileRow = self.DatabaseManager.DatabaseService.ExecuteQuery(
+                    "SELECT qualitytestrequired FROM profiles WHERE profilename = %s LIMIT 1",
+                    (ProfileName,),
+                )
+                if ProfileRow:
+                    QualityTestRequiredForProfile = bool(ProfileRow[0].get('QualityTestRequired'))
+
             Attempt = TranscodeAttemptModel(
                 FilePath=Job.FilePath,
                 AttemptDate=datetime.now(timezone.utc),
                 Quality=ProfileSettings.get('Quality', 0),
                 OldSizeBytes=Job.SizeBytes,
-                NewSizeBytes=0,  # Will be updated after transcoding
-                Success=None,  # Will be updated after transcoding
-                SizeReductionBytes=0,  # Will be calculated after transcoding
-                SizeReductionPercent=0.0,  # Will be calculated after transcoding
+                NewSizeBytes=0,
+                Success=None,
+                SizeReductionBytes=0,
+                SizeReductionPercent=0.0,
                 ErrorMessage=None,
-                TranscodeDurationSeconds=0.0,  # Will be updated after transcoding
+                TranscodeDurationSeconds=0.0,
                 FfpmpegCommand=TranscodeCommand,
                 AudioBitrateKbps=ProfileSettings.get('AudioBitrateKbps'),
                 VideoBitrateKbps=ProfileSettings.get('VideoBitrateKbps'),
-                ProfileName=MediaFile.AssignedProfile if hasattr(MediaFile, 'AssignedProfile') else None,
-                VMAF=None,  # Will be set after VMAF analysis
-                QualityTestRequired=True,  # Disposition function decides if VMAF actually runs based on ServiceStatus + gate config
+                ProfileName=ProfileName,
+                VMAF=None,
+                QualityTestRequired=QualityTestRequiredForProfile,
                 QualityTestCompleted=False,
                 StartTime=TranscodingSettings.get('StartTime') if TranscodingSettings else None,
                 WorkerName=self.WorkerName
