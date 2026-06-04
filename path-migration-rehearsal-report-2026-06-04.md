@@ -1,44 +1,31 @@
 # Path Migration Rehearsal Report
 
-**Generated:** 2026-06-04 18:36:59 UTC
-**Runtime:** 1.66s
+**Generated:** 2026-06-04 18:53:17 UTC
+**Runtime:** 1.56s
 **StorageRoots loaded:** 3
 
 ## Per-(table, column) summary
 
 | Source | Total | NULL | Parsed | NoPrefix | ValidationReject | Unexpected | CaseDrift | ContentDrift | FailureRate |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| MediaFiles.FilePath | 50089 | 0 | 50088 | 1 | 0 | 0 | 0 | 1 | 0.0020% |
-| MediaFilesArchive.FilePath | 22853 | 0 | 22853 | 0 | 0 | 0 | 49 | 5 | 0.0000% |
-| TranscodeQueue.FilePath | 854 | 0 | 854 | 0 | 0 | 0 | 0 | 0 | 0.0000% |
-| TranscodeAttempts.FilePath | 26710 | 1656 | 25054 | 0 | 0 | 0 | 0 | 0 | 0.0000% |
+| MediaFiles.FilePath | 50089 | 0 | 50089 | 0 | 0 | 0 | 0 | 0 | 0.0000% |
+| MediaFilesArchive.FilePath | 22860 | 0 | 22860 | 0 | 0 | 0 | 49 | 5 | 0.0000% |
+| TranscodeQueue.FilePath | 862 | 0 | 862 | 0 | 0 | 0 | 0 | 0 | 0.0000% |
+| TranscodeAttempts.FilePath | 26717 | 1656 | 25061 | 0 | 0 | 0 | 0 | 0 | 0.0000% |
 | ShowSettings.ShowFolder | 6 | 0 | 6 | 0 | 0 | 0 | 0 | 0 | 0.0000% |
 | TemporaryFilePaths.OriginalPath | 281 | 0 | 281 | 0 | 0 | 0 | 0 | 0 | 0.0000% |
 | TemporaryFilePaths.LocalSourcePath | 281 | 0 | 281 | 0 | 0 | 0 | 0 | 0 | 0.0000% |
 | TemporaryFilePaths.LocalOutputPath | 281 | 0 | 281 | 0 | 0 | 0 | 0 | 0 | 0.0000% |
-| **TOTAL** | **101355** | -- | -- | -- | -- | -- | **49** | **6** | **0.0010%** |
+| **TOTAL** | **101377** | -- | -- | -- | -- | -- | **49** | **5** | **0.0000%** |
 
 ## Verdict
 
-- Overall parse-failure rate: **0.0010%** (target < 0.1%)
-- Content drift: **6** (target 0 -- legacy and typed pair represent different files)
+- Overall parse-failure rate: **0.0000%** (target < 0.1%)
+- Content drift: **5** (target 0 -- legacy and typed pair represent different files)
 - Case-only drift: **49** (informational -- expected per D2/D10; scanner canonicalizes case at ingest, FromLegacyString preserves legacy case)
 - Verdict: **INVESTIGATE**
 
 ## Failure samples
-
-### MediaFiles.FilePath
-
-**no_prefix_match** (1 sample):
-
-- id=687504: `'mnt\\media_tv\\The Boroughs\\Season 1\\The Boroughs - S01E04 - Forbidden Fruit WEBDL-1080p-mv.mp4'`
-  - error: FromLegacyString: no matching prefix for 'mnt\\media_tv\\The Boroughs\\Season 1\\The Boroughs - S01E04 - Forbidden Fruit WEBDL-1080p-mv.mp4'
-
-**cross_check_drift_content** (1 sample):
-
-- id=22899: `'T:\\The Real Housewives of Salt Lake City\\Season 1\\The Real Housewives of Salt Lake City - S01E09 - Hip Hop and Heartbreak SDTV-mv.mp4'`
-  - reparsed: (1, 'The Real Housewives of Salt Lake City/Season 1/The Real Housewives of Salt Lake City - S01E09 - Hip Hop and Heartbreak SDTV-mv.mp4')
-  - stored:   (1, 'The Real Housewives of Salt Lake City/Season 1/The Real Housewives of Salt Lake City - S01E09 - Hip Hop and Heartbreak SDTV.avi')
 
 ### MediaFilesArchive.FilePath
 
