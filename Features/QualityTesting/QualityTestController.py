@@ -3,13 +3,14 @@ QualityTestController - Simple controller for quality testing operations
 Implements MVVM pattern using MVVM architecture
 """
 
+import ntpath
 import os
 import json
 from flask import Blueprint, request, jsonify
 from Repositories.DatabaseManager import DatabaseManager
 from Features.QualityTesting.QualityTestRepository import QualityTestRepository
 from Core.Logging.LoggingService import LoggingService
-from Core.PathStorage import LastSegment, ParentDir
+from Core.Path import Path, Worker, PathError
 from Services.QualityTestQueueService import QualityTestQueueService
 
 QualityTestBlueprint = Blueprint('QualityTest', __name__)
@@ -630,8 +631,8 @@ def QueueTestRun():
                         MfStorageRootId,
                         MfRelativePath,
                         Path_,
-                        LastSegment(Path_),
-                        ParentDir(Path_),
+                        ntpath.basename(Path_),
+                        ntpath.dirname(Path_),
                         int((Mf.get('SizeMB') or 0) * 1024 * 1024),
                         Mf.get('SizeMB') or 0,
                         50,
@@ -1035,13 +1036,11 @@ def OverrideQualityTest():
         DeletedPath = None
         if TfpRows:
             try:
-                from Core.PathStorage import Resolve
-                from Core.WorkerContext import WorkerContext
-                Ctx = WorkerContext.Current()
-                WorkerName = Ctx.WorkerName if Ctx and Ctx.WorkerName else None
-                if WorkerName and TfpRows[0].get('OutputStorageRootId'):
-                    LocalOut = Resolve(TfpRows[0]['OutputStorageRootId'], TfpRows[0]['OutputRelativePath'], WorkerName)
-                    if LocalOut and os.path.exists(LocalOut):
+                Wk = Worker.FromWorkerContext()
+                OutPath = Path.FromRow(TfpRows[0], Prefix="Output")
+                if OutPath is not None:
+                    LocalOut = OutPath.Resolve(Wk)
+                    if LocalOut and OutPath.Exists(Wk):
                         os.remove(LocalOut)
                         DeletedPath = LocalOut
             except Exception as DelEx:

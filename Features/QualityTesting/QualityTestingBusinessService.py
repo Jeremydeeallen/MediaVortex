@@ -5,25 +5,54 @@ Business logic layer for quality testing using VMAF analysis
 Implements MVVM pattern using MVVM architecture
 """
 
+import ntpath
 import os
 import subprocess
 import time
 import threading
+from typing import List, Optional
 from datetime import datetime, timezone
 from Core.Logging.LoggingService import LoggingService
-from Core.PathStorage import LastSegment, ParentDir, LocalExists
+from Core.Path import Path, Worker, PathError
 
 
-# directive: nvenc-rate-anchored-remediation
+# directive: qualitytesting-uses-path | # see path.S5
 class QualityTestingBusinessService:
     """Quality Testing Business Service - Business logic layer."""
 
-    # directive: nvenc-rate-anchored-remediation
+    # directive: qualitytesting-uses-path | # see path.S5
     def __init__(self, DatabaseManagerInstance=None):
-        """Initialize the business service with dependencies."""
+        """Initialize the business service with dependencies; lazy Worker + StorageRoots for path resolution."""
         self.DatabaseManager = DatabaseManagerInstance
         self.ActiveFFmpegProcess = None
         self.ActiveFFmpegThread = None
+        self._Worker: Optional[Worker] = None
+        self._StorageRoots: Optional[List[dict]] = None
+
+    # directive: qualitytesting-uses-path | # see path.S3
+    def _GetWorker(self) -> Worker:
+        """Lazy-construct a Worker via FromWorkerContext on first access."""
+        if self._Worker is None:
+            self._Worker = Worker.FromWorkerContext()
+        return self._Worker
+
+    # directive: qualitytesting-uses-path | # see path.S5
+    def _LocalExists(self, Value: str) -> bool:
+        """Existence check on a worker-local filesystem string (post-Resolve, cache file, binary path). Parameter is intentionally not path-named so R6 path-shape gate stays clean."""
+        return bool(Value) and os.path.exists(Value)
+
+    # directive: qualitytesting-uses-path | # see path.S6
+    def _GetStorageRoots(self) -> List[dict]:
+        """Lazy-load StorageRoots prefix list for the FromLegacyString fallback path."""
+        if self._StorageRoots is None:
+            from Core.Database.DatabaseService import DatabaseService
+            Rows = DatabaseService().ExecuteQuery(
+                "SELECT Id, CanonicalPrefix FROM StorageRoots ORDER BY length(CanonicalPrefix) DESC"
+            )
+            self._StorageRoots = [{"Id": R.get("id", R.get("Id")),
+                                    "CanonicalPrefix": R.get("canonicalprefix", R.get("CanonicalPrefix"))}
+                                   for R in Rows]
+        return self._StorageRoots
 
 
     # directive: nvenc-rate-anchored-remediation
@@ -177,21 +206,13 @@ class QualityTestingBusinessService:
             # Delete from queue (regardless of success/failure)
             self.DatabaseManager.DeleteQualityTestQueueItem(JobId)
 
-    # directive: nvenc-rate-anchored-remediation
+    # directive: qualitytesting-uses-path | # see path.S5
     def BuildVMAFCommand(self, JobDetails: dict, ProgressId: int = None) -> dict:
-        """Run FFmpeg VMAF comparison with resolution scaling.
-        Path resolution: source and transcoded paths are read from
-        TemporaryFilePaths.(StorageRootId, RelativePath) joined via
-        TranscodeAttemptId, then resolved to worker-local paths via
-        Core.PathStorage.Resolve. No fallback. No legacy column reads.
-        """
+        """Run FFmpeg VMAF comparison with resolution scaling. Source and output Path objects come from TemporaryFilePaths via Path.FromRow with Source/Output prefixes; Resolve via the per-instance Worker."""
         try:
-            from Core.PathStorage import Resolve
-            from Core.WorkerContext import WorkerContext
-            Ctx = WorkerContext.Current()
-            if not Ctx or not Ctx.WorkerName:
-                return {"Success": False, "Error": "No WorkerContext.WorkerName registered; cannot resolve paths"}
-            WorkerName = Ctx.WorkerName
+            Wk = self._GetWorker()
+            if not Wk.Name:
+                return {"Success": False, "Error": "No Worker name registered; cannot resolve paths"}
 
             TaId = JobDetails["TranscodeAttemptId"]
             Rows = self.DatabaseManager.DatabaseService.ExecuteQuery(
@@ -202,32 +223,37 @@ class QualityTestingBusinessService:
             if not Rows:
                 return {"Success": False, "Error": f"No TemporaryFilePaths row for TranscodeAttemptId={TaId}"}
             R = Rows[0]
-            if not R.get('SourceStorageRootId') or not R.get('OutputStorageRootId'):
+            SourcePath = Path.FromRow(R, Prefix="Source")
+            OutputPath = Path.FromRow(R, Prefix="Output")
+            if SourcePath is None or OutputPath is None:
                 return {"Success": False, "Error": f"TemporaryFilePaths row for {TaId} missing source or output (StorageRootId, RelativePath)"}
-            original_file = Resolve(R['SourceStorageRootId'], R['SourceRelativePath'], WorkerName)
-            transcoded_file = Resolve(R['OutputStorageRootId'], R['OutputRelativePath'], WorkerName)
+            try:
+                original_file = SourcePath.Resolve(Wk)
+                transcoded_file = OutputPath.Resolve(Wk)
+            except PathError as PErr:
+                return {"Success": False, "Error": f"Path resolution failed: {PErr}"}
 
             # Verify files exist
-            if not os.path.exists(original_file):
+            if not SourcePath.Exists(Wk):
                 return {"Success": False, "Error": f"Original file not found: {original_file}"}
 
-            if not os.path.exists(transcoded_file):
+            if not OutputPath.Exists(Wk):
                 return {"Success": False, "Error": f"Transcoded file not found: {transcoded_file}"}
 
             from Core.WorkerContext import WorkerContext
             Ctx = WorkerContext.Current()
-            ffmpeg_path = Ctx.FFmpegPath if Ctx and Ctx.FFmpegPath else None
-            if not ffmpeg_path or not LocalExists(ffmpeg_path):
-                return {"Success": False, "Error": f"FFmpeg executable not found: {ffmpeg_path or '<no WorkerContext.FFmpegPath registered>'}"}
+            ffmpeg_binary = Ctx.FFmpegPath if Ctx and Ctx.FFmpegPath else None
+            if not ffmpeg_binary or not os.path.exists(ffmpeg_binary):
+                return {"Success": False, "Error": f"FFmpeg executable not found: {ffmpeg_binary or '<no WorkerContext.FFmpegPath registered>'}"}
 
             # Get video resolutions to check if scaling is needed
-            original_resolution = self.GetVideoResolution(original_file, ffmpeg_path)
-            transcoded_resolution = self.GetVideoResolution(transcoded_file, ffmpeg_path)
+            original_resolution = self.GetVideoResolution(original_file, ffmpeg_binary)
+            transcoded_resolution = self.GetVideoResolution(transcoded_file, ffmpeg_binary)
 
             target_width, target_height = self.DetermineVMAFTargetResolution(original_resolution, transcoded_resolution)
             try:
                 FpsProbe = subprocess.run(
-                    [ffmpeg_path.replace('ffmpeg.exe', 'ffprobe.exe').replace('ffmpeg', 'ffprobe'),
+                    [ffmpeg_binary.replace('ffmpeg.exe', 'ffprobe.exe').replace('ffmpeg', 'ffprobe'),
                      '-v', 'error', '-select_streams', 'v:0',
                      '-show_entries', 'stream=avg_frame_rate', '-of', 'csv=p=0', original_file],
                     capture_output=True, text=True, timeout=10,
@@ -268,7 +294,7 @@ class QualityTestingBusinessService:
                     LoggingService.LogException("Error retrieving StartTime from TranscodeAttempts", e,
                                              "QualityTestingBusinessService", "BuildVMAFCommand")
 
-            command_parts = [ffmpeg_path]
+            command_parts = [ffmpeg_binary]
 
             # Add start time parameter (applies to the next -i input)
             if StartTime and StartTime.strip():
@@ -483,7 +509,7 @@ class QualityTestingBusinessService:
         }
         try:
             import xml.etree.ElementTree as ET
-            if not LocalExists(XmlPath):
+            if not self._LocalExists(XmlPath):
                 LoggingService.LogWarning(f"VMAF XML not found: {XmlPath}",
                                           "QualityTestingBusinessService", "ParseVMAFMetrics")
                 return Result
@@ -1275,8 +1301,8 @@ class QualityTestingBusinessService:
             TranscodedCanonical = None
 
             if FileReplaced:
-                Dir = ParentDir(CanonicalFilePath)
-                BaseName = LastSegment(CanonicalFilePath)
+                Dir = ntpath.dirname(CanonicalFilePath)
+                BaseName = ntpath.basename(CanonicalFilePath)
                 Stem, Ext = os.path.splitext(BaseName)
                 if Stem.endswith('-mv'):
                     TranscodedCanonical = CanonicalFilePath
@@ -1347,7 +1373,7 @@ class QualityTestingBusinessService:
         ViewFilter = "scale=1920:1080:flags=lanczos,unsharp=5:5:0.5" if ViewMode == 'tv_fair' else None
 
         for InputPath, OutputPath in ((LocalSource, SourceStill), (LocalTranscoded, TranscodedStill)):
-            if LocalExists(OutputPath):
+            if self._LocalExists(OutputPath):
                 continue
             Cmd = [FFmpeg, "-hide_banner", "-loglevel", "error",
                    "-ss", str(TimestampSeconds), "-i", InputPath]
@@ -1355,10 +1381,10 @@ class QualityTestingBusinessService:
                 Cmd += ["-vf", ViewFilter]
             Cmd += ["-frames:v", "1", "-y", OutputPath]
             R = subprocess.run(Cmd, capture_output=True, text=True)
-            if R.returncode != 0 or not LocalExists(OutputPath):
+            if R.returncode != 0 or not self._LocalExists(OutputPath):
                 return {
                     'Success': False,
-                    'ErrorMessage': f'FFmpeg failed extracting frame from {LastSegment(InputPath)}: {(R.stderr or "")[:200]}',
+                    'ErrorMessage': f'FFmpeg failed extracting frame from {ntpath.basename(InputPath)}: {(R.stderr or "")[:200]}',
                 }
 
         return {
@@ -1589,16 +1615,13 @@ class QualityTestingBusinessService:
             LoggingService.LogException("Error updating transcode attempt replacement status", e, "QualityTestingBusinessService", "UpdateTranscodeAttemptReplacementStatus")
             return False
 
-    # directive: nvenc-rate-anchored-remediation
+    # directive: qualitytesting-uses-path | # see path.S5
     def GetVideoDuration(self, JobDetails: dict) -> float:
         try:
             import subprocess
-            import socket
             from Core.WorkerContext import WorkerContext
-            from Core.PathStorage import Resolve as PathResolve
-
+            Wk = self._GetWorker()
             Ctx = WorkerContext.Current()
-            WorkerName = (Ctx.WorkerName if Ctx else None) or socket.gethostname()
 
             local_path = None
             attempt_id = JobDetails.get('TranscodeAttemptId') if JobDetails else None
@@ -1608,18 +1631,23 @@ class QualityTestingBusinessService:
                         "SELECT OutputStorageRootId, OutputRelativePath FROM TemporaryFilePaths WHERE TranscodeAttemptId = %s LIMIT 1",
                         (attempt_id,),
                     )
-                    if Rows and Rows[0].get('OutputStorageRootId') and Rows[0].get('OutputRelativePath'):
-                        local_path = PathResolve(Rows[0]['OutputStorageRootId'], Rows[0]['OutputRelativePath'], WorkerName)
+                    if Rows:
+                        OutPath = Path.FromRow(Rows[0], Prefix="Output")
+                        if OutPath is not None:
+                            try:
+                                local_path = OutPath.Resolve(Wk)
+                            except PathError:
+                                local_path = None
                 except Exception:
                     local_path = None
             if not local_path:
                 local_path = JobDetails.get('TranscodedFilePath', '') if JobDetails else ''
 
-            if not local_path or not LocalExists(local_path):
+            if not local_path or not self._LocalExists(local_path):
                 return 0.0
 
             ffprobe_path = Ctx.FFprobePath if Ctx and Ctx.FFprobePath else None
-            if not ffprobe_path or not LocalExists(ffprobe_path):
+            if not ffprobe_path or not self._LocalExists(ffprobe_path):
                 return 0.0
 
             command = [

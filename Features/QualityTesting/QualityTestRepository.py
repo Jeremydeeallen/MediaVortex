@@ -1,8 +1,8 @@
+import ntpath
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timezone
 from Core.Database.BaseRepository import BaseRepository
 from Core.Logging.LoggingService import LoggingService
-from Core.PathStorage import LastSegment
 from Features.QualityTesting.Models.QualityTestResultModel import QualityTestResultModel
 
 
@@ -249,7 +249,7 @@ class QualityTestRepository(BaseRepository):
             Results = []
             for Row in Rows:
                 TranscodedFilePath = Row["TranscodedFilePath"]
-                TranscodedFileName = LastSegment(TranscodedFilePath) if TranscodedFilePath else None
+                TranscodedFileName = ntpath.basename(TranscodedFilePath.replace("/", "\\")) if TranscodedFilePath else None
 
                 Results.append({
                     "Id": Row["Id"],
@@ -382,7 +382,7 @@ class QualityTestRepository(BaseRepository):
             Results = []
             for Row in Rows or []:
                 OriginalPath = Row.get("OriginalFilePath") or Row.get("TaFilePath")
-                FileName = LastSegment(OriginalPath) if OriginalPath else f"TranscodeAttempt_{Row['TranscodeAttemptId']}"
+                FileName = ntpath.basename(OriginalPath.replace("/", "\\")) if OriginalPath else f"TranscodeAttempt_{Row['TranscodeAttemptId']}"
                 Results.append({
                     "Id": Row.get("Id"),
                     "TranscodeAttemptId": Row["TranscodeAttemptId"],
