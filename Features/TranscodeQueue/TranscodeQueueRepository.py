@@ -87,14 +87,19 @@ class TranscodeQueueRepository(BaseRepository):
             connection = self.DatabaseService.GetConnection()
             try:
                 cursor = connection.cursor()
-                # Path-storage: if (StorageRootId, RelativePath) not yet set on the model, derive from FilePath
+                # Path-storage: if (StorageRootId, RelativePath) not yet set on the model, derive from FilePath via v2 FromLegacyString
                 if QueueItem.StorageRootId is None or not QueueItem.RelativePath:
                     try:
-                        from Core.PathStorage import LoadStorageRoots, Parse as PathParse
-                        SrId, Rel = PathParse(QueueItem.FilePath, LoadStorageRoots(self.DatabaseService))
-                        if SrId is not None:
-                            QueueItem.StorageRootId = SrId
-                            QueueItem.RelativePath = Rel or ''
+                        from Core.Path import Path as _Path
+                        _SrRows = self.DatabaseService.ExecuteQuery(
+                            "SELECT Id, CanonicalPrefix FROM StorageRoots ORDER BY length(CanonicalPrefix) DESC"
+                        )
+                        _SrList = [{"Id": R.get("id", R.get("Id")),
+                                    "CanonicalPrefix": R.get("canonicalprefix", R.get("CanonicalPrefix"))}
+                                   for R in _SrRows]
+                        _P = _Path.FromLegacyString(QueueItem.FilePath, _SrList)
+                        QueueItem.StorageRootId = _P.StorageRootId
+                        QueueItem.RelativePath = _P.RelativePath
                     except Exception as PathEx:
                         LoggingService.LogException(
                             f"Failed to derive StorageRootId/RelativePath for {QueueItem.FilePath!r}",
@@ -153,19 +158,23 @@ class TranscodeQueueRepository(BaseRepository):
         if not QueueItems:
             return 0
         try:
-            from Core.PathStorage import LoadStorageRoots, Parse as PathParse
+            from Core.Path import Path as _Path
             from psycopg2.extras import execute_values
 
-            StorageRoots = LoadStorageRoots(self.DatabaseService)
+            _SrRows = self.DatabaseService.ExecuteQuery(
+                "SELECT Id, CanonicalPrefix FROM StorageRoots ORDER BY length(CanonicalPrefix) DESC"
+            )
+            StorageRoots = [{"Id": R.get("id", R.get("Id")),
+                              "CanonicalPrefix": R.get("canonicalprefix", R.get("CanonicalPrefix"))}
+                             for R in _SrRows]
 
             # Pre-resolve StorageRootId/RelativePath in Python (no DB round-trip per row)
             for Item in QueueItems:
                 if Item.StorageRootId is None or not Item.RelativePath:
                     try:
-                        SrId, Rel = PathParse(Item.FilePath, StorageRoots)
-                        if SrId is not None:
-                            Item.StorageRootId = SrId
-                            Item.RelativePath = Rel or ''
+                        _P = _Path.FromLegacyString(Item.FilePath, StorageRoots)
+                        Item.StorageRootId = _P.StorageRootId
+                        Item.RelativePath = _P.RelativePath
                     except Exception:
                         pass
 

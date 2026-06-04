@@ -25,19 +25,22 @@ class TranscodeQueueModel:
     DateStarted: Optional[datetime] = None
     TestVariantSetId: Optional[int] = None  # FK to TestVariantSets.Id; NULL = normal production transcode
 
+    # directive: transcodequeue-uses-path | # see path.S8
     def __post_init__(self):
         if self.DateAdded is None:
             self.DateAdded = datetime.now(timezone.utc)
         if not self.FilePath and self.StorageRootId is not None and self.RelativePath:
             try:
-                from Core.PathStorage import CanonicalFor
-                self.FilePath = CanonicalFor(self.StorageRootId, self.RelativePath)
-                if not self.FileName:
-                    import os as _os
-                    self.FileName = _os.path.basename(self.FilePath)
-                if not self.Directory:
-                    import os as _os
-                    self.Directory = _os.path.dirname(self.FilePath)
+                import ntpath as _ntpath
+                from Core.Database.DatabaseService import DatabaseService as _Db
+                _Rows = _Db().ExecuteQuery("SELECT CanonicalPrefix FROM StorageRoots WHERE Id = %s", (self.StorageRootId,))
+                if _Rows:
+                    _Prefix = _Rows[0].get("CanonicalPrefix") or _Rows[0].get("canonicalprefix") or ""
+                    self.FilePath = _Prefix + (self.RelativePath or "").replace("/", "\\")
+                    if not self.FileName:
+                        self.FileName = _ntpath.basename(self.FilePath)
+                    if not self.Directory:
+                        self.Directory = _ntpath.dirname(self.FilePath)
             except Exception:
                 pass
 

@@ -1,5 +1,6 @@
 from typing import List, Optional, Dict, Any, Tuple
 from datetime import datetime, timezone
+import ntpath
 import os
 from Features.TranscodeQueue.Models.TranscodeQueueModel import TranscodeQueueModel
 from Core.Models.MediaFileModel import MediaFileModel
@@ -11,9 +12,26 @@ from Features.TranscodeQueue.QueueAdmissionConfigRepository import QueueAdmissio
 from Features.TranscodeQueue.CodecCompatibilityRepository import CodecCompatibilityRepository
 from Core.Logging.LoggingService import LoggingService
 from Core.PathNormalize import ExtractShowFolder
-from Core.PathStorage import LastSegment, ParentDir, LocalExists
 from Services.FileManagerService import FileManagerService
 from Repositories.DatabaseManager import DatabaseManager
+
+
+# directive: transcodequeue-uses-path | # see path.S5
+def _LocalExists(Value: str) -> bool:
+    """Module-level helper: existence check on a worker-local string."""
+    return bool(Value) and os.path.exists(Value)
+
+
+# directive: transcodequeue-uses-path | # see path.S5
+def _LastSegment(Value: str) -> str:
+    """Module-level helper: filename component of a canonical Windows-shape path."""
+    return ntpath.basename(Value or "")
+
+
+# directive: transcodequeue-uses-path | # see path.S5
+def _ParentDir(Value: str) -> str:
+    """Module-level helper: parent directory component of a canonical Windows-shape path."""
+    return ntpath.dirname(Value or "")
 
 
 class QueueManagementBusinessService:
@@ -910,8 +928,8 @@ class QueueManagementBusinessService:
             fileName = MediaFile.FileName or ""
 
             if filePath:
-                directory = ParentDir(filePath).replace("\\", "/")
-                fileName = LastSegment(filePath) or fileName
+                directory = _ParentDir(filePath).replace("\\", "/")
+                fileName = _LastSegment(filePath) or fileName
 
             queueItem = TranscodeQueueModel(
                 FilePath=filePath,
@@ -1060,8 +1078,8 @@ class QueueManagementBusinessService:
             fileName = MediaFile.FileName or ""
 
             if filePath:
-                directory = ParentDir(filePath).replace("\\", "/")
-                fileName = LastSegment(filePath) or fileName
+                directory = _ParentDir(filePath).replace("\\", "/")
+                fileName = _LastSegment(filePath) or fileName
 
             queueItem = TranscodeQueueModel(
                 FilePath=filePath,
@@ -1196,8 +1214,8 @@ class QueueManagementBusinessService:
             fileName = MediaFile.FileName or ""
 
             if filePath:
-                directory = ParentDir(filePath).replace("\\", "/")
-                fileName = LastSegment(filePath) or fileName
+                directory = _ParentDir(filePath).replace("\\", "/")
+                fileName = _LastSegment(filePath) or fileName
 
             queueItem = TranscodeQueueModel(
                 FilePath=filePath,
@@ -2426,7 +2444,7 @@ class QueueManagementBusinessService:
         Returns True if resolution was successfully obtained, False otherwise."""
         try:
             FilePath = MediaFile.FilePath or ""
-            if not FilePath or not LocalExists(FilePath):
+            if not FilePath or not _LocalExists(FilePath):
                 LoggingService.LogWarning(f"Cannot probe {MediaFile.FileName}: file not found at {FilePath}", "QueueManagementBusinessService", "ProbeAndUpdateMissingMetadata")
                 return False
 
