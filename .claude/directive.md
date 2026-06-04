@@ -59,6 +59,8 @@ A ratified `path.feature.md` capturing the full `Path` class design for v2: surf
 
 Active 2026-06-04 -- phase: NEEDS_STANDARDS_REVIEW -- ready for next session.
 
+**First action next session:** invoke `superpowers:brainstorming` before writing any of the feature doc. The skill's description: "You MUST use this before any creative work -- creating features, building components, adding functionality, or modifying behavior. Explores user intent, requirements and design before implementation." This directive IS creative work (designing a new aggregate's full surface), so the brainstorm loop is mandatory by the skill's own contract. Use it to surface edge cases (null StorageRoot, deleted StorageRoot, JSON round-trip, repr shape, equality across shape variants) BEFORE attempting prose. Operator stress-tests the design during the brainstorm; doc-writing comes after.
+
 ### Files
 
 ```
