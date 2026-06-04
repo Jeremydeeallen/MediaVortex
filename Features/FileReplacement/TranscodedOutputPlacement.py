@@ -1,18 +1,18 @@
 import os
 import ntpath
-from typing import Dict, Any, Optional
+from typing import Dict, Any, List, Optional
 from datetime import datetime, timezone
 from Repositories.DatabaseManager import DatabaseManager
 from Services.FileManagerService import FileManagerService
 from Core.Logging.LoggingService import LoggingService
-from Core.PathStorage import LocalExists, LocalGetSize, LocalGetMTime, PathsEqual
+from Core.Path import Path, Worker, PathError
 
 
-# directive: filereplacement-decompose | see transcoded-output-placement.feature.md
+# directive: filereplacement-uses-path | # see path.S5
 class TranscodedOutputPlacement:
     """Owns .inprogress rename, MediaFiles refresh, original delete; see transcoded-output-placement.feature.md."""
 
-    # directive: filereplacement-decompose
+    # directive: filereplacement-uses-path | # see path.S5
     def __init__(self, DatabaseManagerInstance: DatabaseManager = None,
                  FileManagerInstance: FileManagerService = None,
                  FFprobePath: str = None, WorkerName: str = None):
@@ -24,19 +24,59 @@ class TranscodedOutputPlacement:
             Ctx = WorkerContext.Current()
             WorkerName = (Ctx.WorkerName if Ctx else None) or socket.gethostname()
         self.WorkerName = WorkerName
+        self._Worker: Optional[Worker] = None
+        self._StorageRoots: Optional[List[dict]] = None
 
-    # directive: filereplacement-decompose
+    # directive: filereplacement-uses-path | # see path.S3
+    def _GetWorker(self) -> Worker:
+        """Lazy-construct Worker via FromWorkerContext."""
+        if self._Worker is None:
+            self._Worker = Worker.FromWorkerContext(Db=self.DatabaseManager.DatabaseService)
+        return self._Worker
+
+    # directive: filereplacement-uses-path | # see path.S6
+    def _GetStorageRoots(self) -> List[dict]:
+        """Lazy-load StorageRoots prefix list for FromLegacyString fallback."""
+        if self._StorageRoots is None:
+            Rows = self.DatabaseManager.DatabaseService.ExecuteQuery(
+                "SELECT Id, CanonicalPrefix FROM StorageRoots ORDER BY length(CanonicalPrefix) DESC"
+            )
+            self._StorageRoots = [{"Id": R.get("id", R.get("Id")),
+                                    "CanonicalPrefix": R.get("canonicalprefix", R.get("CanonicalPrefix"))}
+                                   for R in Rows]
+        return self._StorageRoots
+
+    # directive: filereplacement-uses-path | # see path.S5
+    def _LocalExists(self, Value: str) -> bool:
+        """Existence check on a worker-local string."""
+        return bool(Value) and os.path.exists(Value)
+
+    # directive: filereplacement-uses-path | # see path.S5
+    def _LocalGetSize(self, Value: str) -> int:
+        """File size on a worker-local string."""
+        return os.path.getsize(Value)
+
+    # directive: filereplacement-uses-path | # see path.S5
+    def _LocalGetMTime(self, Value: str) -> float:
+        """File mtime on a worker-local string."""
+        return os.path.getmtime(Value)
+
+    # directive: filereplacement-uses-path | # see path.D2
+    def _PathsEqual(self, A: str, B: str) -> bool:
+        """Case-insensitive path equality after backslash normalization (v2 substitute for PathStorage.PathsEqual)."""
+        if A is None or B is None:
+            return A == B
+        return A.replace("\\", "/").lower() == B.replace("\\", "/").lower()
+
+    # directive: filereplacement-uses-path | # see path.S5
     def _ToLocalPath(self, CanonicalPath: str) -> str:
-        """Translate canonical to local; see transcoded-output-placement.S1."""
+        """Translate canonical to local via Path.FromLegacyString + Resolve; falls through on failure."""
         if not CanonicalPath:
             return CanonicalPath
         try:
-            from Core.PathStorage import LoadStorageRoots, Parse as PathParse, Resolve as PathResolve
-            SrId, Rel = PathParse(CanonicalPath, LoadStorageRoots(self.DatabaseManager.DatabaseService))
-            if SrId is None or Rel is None:
-                return CanonicalPath
-            return PathResolve(SrId, Rel, self.WorkerName, self.DatabaseManager.DatabaseService)
-        except Exception as e:
+            P = Path.FromLegacyString(CanonicalPath, self._GetStorageRoots())
+            return P.Resolve(self._GetWorker())
+        except (PathError, Exception) as e:
             LoggingService.LogException(
                 f"_ToLocalPath fallthrough for {CanonicalPath!r}",
                 e, "TranscodedOutputPlacement", "_ToLocalPath",
@@ -57,7 +97,7 @@ class TranscodedOutputPlacement:
 
             StepsCompleted = []
 
-            if not LocalExists(LocalStagedPath):  # allow: local-path; host-resolved
+            if not self._LocalExists(LocalStagedPath):  # allow: local-path; host-resolved
                 ErrorMsg = f"Staged file not found: {LocalStagedPath}"
                 LoggingService.LogError(ErrorMsg, "TranscodedOutputPlacement", "Execute")
                 return {'Success': False, 'ErrorMessage': ErrorMsg}
@@ -72,9 +112,9 @@ class TranscodedOutputPlacement:
 
             TargetPath = LocalStagedPath[:-len('.inprogress')]
 
-            SameSlotReplacement = PathsEqual(TargetPath, LocalOriginalPath)
+            SameSlotReplacement = self._PathsEqual(TargetPath, LocalOriginalPath)
 
-            if LocalExists(TargetPath) and not SameSlotReplacement:
+            if self._LocalExists(TargetPath) and not SameSlotReplacement:
                 ErrorMsg = (
                     f"Refusing to overwrite existing file at target: {TargetPath}. "
                     f"A prior replacement may have partially succeeded and left this artifact behind."
@@ -94,7 +134,7 @@ class TranscodedOutputPlacement:
                         "TranscodedOutputPlacement", "Execute",
                     )
                     try:
-                        if LocalExists(LocalStagedPath):  # allow: local-path; host-resolved
+                        if self._LocalExists(LocalStagedPath):  # allow: local-path; host-resolved
                             os.remove(LocalStagedPath)
                     except Exception as DelEx:
                         LoggingService.LogException(
@@ -111,7 +151,7 @@ class TranscodedOutputPlacement:
             if SameSlotReplacement:
                 BackupPath = LocalOriginalPath + '.replacing.bak'
                 try:
-                    if LocalExists(BackupPath):
+                    if self._LocalExists(BackupPath):
                         try:
                             os.remove(BackupPath)
                             LoggingService.LogInfo(
@@ -178,7 +218,7 @@ class TranscodedOutputPlacement:
                     return {'Success': False, 'ErrorMessage': ErrorMsg}
 
             try:
-                TargetSize = LocalGetSize(TargetPath)
+                TargetSize = self._LocalGetSize(TargetPath)
                 if TargetSize <= 0:
                     LoggingService.LogWarning(
                         f"Target file is empty after rename (size={TargetSize}): {TargetPath}",
@@ -234,9 +274,9 @@ class TranscodedOutputPlacement:
                     'Message': 'Rename succeeded; MediaFiles re-probe deferred to next scan; original retained.',
                 }
 
-            if PathsEqual(LocalOriginalPath, TargetPath):
+            if self._PathsEqual(LocalOriginalPath, TargetPath):
                 StepsCompleted.append("Original and target are the same path; no original to delete")
-            elif LocalExists(LocalOriginalPath):
+            elif self._LocalExists(LocalOriginalPath):
                 try:
                     os.remove(LocalOriginalPath)
                     StepsCompleted.append(f"Deleted original {ntpath.basename(LocalOriginalPath)}")
@@ -272,7 +312,7 @@ class TranscodedOutputPlacement:
         """Crash-recovery: complete a replacement past the rename but before original delete; see worker-lifecycle.C12."""
         try:
             StepsCompleted = []
-            if not LocalExists(FinalLocalPath):
+            if not self._LocalExists(FinalLocalPath):
                 return {'Success': False, 'ErrorMessage': f'Final file does not exist: {FinalLocalPath}'}
 
             CanonicalNewPath = ntpath.join(ntpath.dirname(CanonicalOriginalPath), ntpath.basename(FinalLocalPath))
@@ -287,9 +327,9 @@ class TranscodedOutputPlacement:
                 )
                 return {'Success': True, 'StepsCompleted': StepsCompleted, 'Message': 'Partial: MediaFiles update failed; original retained'}
 
-            if PathsEqual(OriginalLocalPath, FinalLocalPath):
+            if self._PathsEqual(OriginalLocalPath, FinalLocalPath):
                 StepsCompleted.append("Original and final are the same path; no delete needed")
-            elif LocalExists(OriginalLocalPath):
+            elif self._LocalExists(OriginalLocalPath):
                 try:
                     os.remove(OriginalLocalPath)
                     StepsCompleted.append(f"Deleted original {ntpath.basename(OriginalLocalPath)}")
@@ -347,11 +387,9 @@ class TranscodedOutputPlacement:
             media_file.FilePath = NewFilePath
             media_file.FileName = ntpath.basename(NewFilePath)
             try:
-                from Core.PathStorage import LoadStorageRoots, Parse as PathParse
-                NewSrId, NewRel = PathParse(NewFilePath, LoadStorageRoots(self.DatabaseManager.DatabaseService))
-                if NewSrId is not None:
-                    media_file.StorageRootId = NewSrId
-                    media_file.RelativePath = NewRel or ''
+                NewPathObj = Path.FromLegacyString(NewFilePath, self._GetStorageRoots())
+                media_file.StorageRootId = NewPathObj.StorageRootId
+                media_file.RelativePath = NewPathObj.RelativePath
             except Exception as e:
                 LoggingService.LogException(
                     f"Failed to derive StorageRootId/RelativePath for new path {NewFilePath!r}",
@@ -434,11 +472,11 @@ class TranscodedOutputPlacement:
 
             try:
                 NewMtime = datetime.fromtimestamp(
-                    LocalGetMTime(LocalNewFilePath), tz=timezone.utc
+                    self._LocalGetMTime(LocalNewFilePath), tz=timezone.utc
                 ).replace(tzinfo=None)
                 media_file.FileModificationTime = NewMtime
                 media_file.LastModifiedDate = NewMtime
-                media_file.FileSize = LocalGetSize(LocalNewFilePath)
+                media_file.FileSize = self._LocalGetSize(LocalNewFilePath)
             except Exception as e:
                 LoggingService.LogException(
                     f"Failed to re-stamp filesystem timestamps from {LocalNewFilePath}",

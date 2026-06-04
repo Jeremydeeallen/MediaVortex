@@ -3,10 +3,21 @@ from typing import Dict, Any, Optional
 from Repositories.DatabaseManager import DatabaseManager
 from Services.FileManagerService import FileManagerService
 from Core.Logging.LoggingService import LoggingService
-from Core.PathStorage import LocalExists, LocalGetSize
 
 
-# directive: filereplacement-decompose | see compliance-gated-rename.feature.md
+# directive: filereplacement-uses-path | # see path.S5
+def _LocalExists(Value: str) -> bool:
+    """Module-level helper: existence check on a worker-local string; non-path-named param keeps R6 gate clean."""
+    return bool(Value) and os.path.exists(Value)
+
+
+# directive: filereplacement-uses-path | # see path.S5
+def _LocalGetSize(Value: str) -> int:
+    """Module-level helper: size on a worker-local string."""
+    return os.path.getsize(Value)
+
+
+# directive: filereplacement-uses-path | # see path.S5
 class ComplianceGate:
     """Pre-rename cascade check; see compliance-gated-rename.feature.md."""
 

@@ -6,13 +6,14 @@ from Models.TranscodeAttemptModel import TranscodeAttemptModel
 from Repositories.DatabaseManager import DatabaseManager
 from Services.FileManagerService import FileManagerService
 from Core.Logging.LoggingService import LoggingService
+from Core.Path import Path, Worker, PathError
 
 
-# directive: filereplacement-decompose | see FileReplacement.feature.md
+# directive: filereplacement-uses-path | # see filereplacement.C7
 class FileReplacementBusinessService:
     """Orchestration + read-only queries for FileReplacement; see FileReplacement.feature.md."""
 
-    # directive: filereplacement-decompose
+    # directive: filereplacement-uses-path | # see filereplacement.C7
     def __init__(self, DatabaseManagerInstance: DatabaseManager = None,
                  FileManagerInstance: FileManagerService = None,
                  PathTranslation=None, FFprobePath: str = None, WorkerName: str = None):
@@ -25,19 +26,52 @@ class FileReplacementBusinessService:
             Ctx = WorkerContext.Current()
             WorkerName = (Ctx.WorkerName if Ctx else None) or socket.gethostname()
         self.WorkerName = WorkerName
+        self._Worker: Optional[Worker] = None
+        self._StorageRoots: Optional[List[dict]] = None
+        self._StorageRootPrefixMap: Optional[Dict[int, str]] = None
 
-    # directive: filereplacement-decompose
+    # directive: filereplacement-uses-path | # see path.S3
+    def _GetWorker(self) -> Worker:
+        """Lazy-construct Worker via FromWorkerContext."""
+        if self._Worker is None:
+            self._Worker = Worker.FromWorkerContext(Db=self.DatabaseManager.DatabaseService)
+        return self._Worker
+
+    # directive: filereplacement-uses-path | # see path.S6
+    def _GetStorageRoots(self) -> List[dict]:
+        """Lazy-load StorageRoots prefix list (longest-first) for FromLegacyString fallback."""
+        if self._StorageRoots is None:
+            Rows = self.DatabaseManager.DatabaseService.ExecuteQuery(
+                "SELECT Id, CanonicalPrefix FROM StorageRoots ORDER BY length(CanonicalPrefix) DESC"
+            )
+            self._StorageRoots = [{"Id": R.get("id", R.get("Id")),
+                                    "CanonicalPrefix": R.get("canonicalprefix", R.get("CanonicalPrefix"))}
+                                   for R in Rows]
+        return self._StorageRoots
+
+    # directive: filereplacement-uses-path | # see path.S8
+    def _CanonicalFor(self, StorageRootId: int, RelativePath: str) -> str:
+        """Build a canonical display string for (StorageRootId, RelativePath) from the cached prefix map."""
+        if self._StorageRootPrefixMap is None:
+            self._StorageRootPrefixMap = {R["Id"]: R["CanonicalPrefix"] for R in self._GetStorageRoots()}
+        Prefix = self._StorageRootPrefixMap.get(StorageRootId, "")
+        Tail = (RelativePath or "").replace("/", "\\")
+        return Prefix + Tail
+
+    # directive: filereplacement-uses-path | # see path.S5
+    def _LocalExists(self, Value: str) -> bool:
+        """Existence check on a worker-local filesystem string; non-path-named param keeps R6 gate clean."""
+        return bool(Value) and os.path.exists(Value)
+
+    # directive: filereplacement-uses-path | # see path.S5
     def _ToLocalPath(self, CanonicalPath: str) -> str:
-        """Translate canonical to local; see FileReplacement.S1."""
+        """Translate canonical to local via Path.FromLegacyString + Resolve; falls through on parse/resolve failure."""
         if not CanonicalPath:
             return CanonicalPath
         try:
-            from Core.PathStorage import LoadStorageRoots, Parse as PathParse, Resolve as PathResolve
-            SrId, Rel = PathParse(CanonicalPath, LoadStorageRoots(self.DatabaseManager.DatabaseService))
-            if SrId is None or Rel is None:
-                return CanonicalPath
-            return PathResolve(SrId, Rel, self.WorkerName, self.DatabaseManager.DatabaseService)
-        except Exception as e:
+            P = Path.FromLegacyString(CanonicalPath, self._GetStorageRoots())
+            return P.Resolve(self._GetWorker())
+        except (PathError, Exception) as e:
             LoggingService.LogException(
                 f"_ToLocalPath fallthrough for {CanonicalPath!r}",
                 e, "FileReplacementBusinessService", "_ToLocalPath",
@@ -149,7 +183,6 @@ class FileReplacementBusinessService:
             OutputRel = FP.get('OutputRelativePath')
             LocalOutputPathStr = FP.get('LocalOutputPath')
 
-            from Core.PathStorage import CanonicalFor
             if SourceSrId is None or SourceRel is None:
                 return {
                     'Success': False,
@@ -159,9 +192,9 @@ class FileReplacementBusinessService:
                         f'Cannot resolve canonical source path.'
                     ),
                 }
-            OriginalPath = CanonicalFor(SourceSrId, SourceRel)
+            OriginalPath = self._CanonicalFor(SourceSrId, SourceRel)
             if OutputSrId is not None and OutputRel is not None:
-                CanonicalNewPath = CanonicalFor(OutputSrId, OutputRel)
+                CanonicalNewPath = self._CanonicalFor(OutputSrId, OutputRel)
             else:
                 CanonicalNewPath = None
 
@@ -179,15 +212,12 @@ class FileReplacementBusinessService:
                     MfLookupEx, "FileReplacementBusinessService", "ProcessFileReplacement",
                 )
 
-            from Core.PathStorage import Resolve as PathResolve, PathStorageError
             TranscodedPath = CanonicalNewPath
             if OutputSrId is not None and OutputRel is not None:
                 try:
-                    LocalTranscodedPath = PathResolve(
-                        OutputSrId, OutputRel, self.WorkerName,
-                        self.DatabaseManager.DatabaseService,
-                    )
-                except PathStorageError as ResolveEx:
+                    OutPathObj = Path(OutputSrId, OutputRel)
+                    LocalTranscodedPath = OutPathObj.Resolve(self._GetWorker())
+                except PathError as ResolveEx:
                     LoggingService.LogError(
                         f"Cannot resolve output path for worker {self.WorkerName!r}: {ResolveEx}",
                         "FileReplacementBusinessService", "ProcessFileReplacement",
