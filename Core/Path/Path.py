@@ -25,6 +25,14 @@ _DOTDOT_RX = re.compile(r"(?:^|/)\.\.(?:$|/)")
 _DRIVE_PREFIX_RX = re.compile(r"^[A-Za-z]:")
 _BACKSLASH_TO_FORWARD = str.maketrans("\\", "/")
 _FORWARD_TO_BACKSLASH = str.maketrans("/", "\\")
+_CONTROL_CHARS_RX = re.compile(r"[\x00-\x1f\x7f]")
+_WIN32_NAMESPACE_RX = re.compile(r"^[\\/][\\/][?.][\\/]")
+_UNC_PREFIX_RX = re.compile(r"^[\\/][\\/]")
+_DOS_DEVICE_NAMES = frozenset({
+    "CON", "PRN", "AUX", "NUL",
+    "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+    "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+})
 
 
 @dataclass(frozen=True)
@@ -35,7 +43,7 @@ class Path:
     StorageRootId: int
     RelativePath: str
 
-    # directive: path-property-and-fuzz | # see path.C4
+    # directive: path-security-audit | # see path.C4
     def __post_init__(self):
         """Validate constructor inputs and normalize RelativePath per D9."""
         Sid = self.StorageRootId
@@ -46,6 +54,12 @@ class Path:
             raise PathError(f"RelativePath must be str, got {type(Rel).__name__}: {Rel!r}")
         if Rel == "":
             return
+        if _CONTROL_CHARS_RX.search(Rel):
+            raise PathError(f"RelativePath contains NUL or control character: {Rel!r}")
+        if _WIN32_NAMESPACE_RX.match(Rel):
+            raise PathError(f"RelativePath uses Win32 device namespace prefix: {Rel!r}")
+        if _UNC_PREFIX_RX.match(Rel):
+            raise PathError(f"RelativePath must not start with separator: {Rel!r}")
         if Rel[0] in ("/", "\\"):
             raise PathError(f"RelativePath must not start with separator: {Rel!r}")
         if _DRIVE_PREFIX_RX.match(Rel):
@@ -186,9 +200,26 @@ class Path:
             return Path(self.StorageRootId, Norm)
         return Path(self.StorageRootId, self.RelativePath + "/" + Norm)
 
-    # directive: path-class-implementation | # see path.C8
+    # directive: path-security-audit | # see path.C7
+    def _RejectWindowsHazards(self) -> None:
+        """Raise PathError if RelativePath contains a Windows-worker hazard (DOS name, trailing dot/space, mid-segment colon)."""
+        if self.RelativePath == "":
+            return
+        for Seg in self.RelativePath.split("/"):
+            if Seg == "":
+                continue
+            DotIdx = Seg.rfind(".")
+            Stem = Seg[:DotIdx] if DotIdx > 0 else Seg
+            if Stem.upper() in _DOS_DEVICE_NAMES:
+                raise PathError(f"Resolve: segment matches Windows DOS device name: {Seg!r} (in {self.RelativePath!r})")
+            if Seg.endswith(".") or Seg.endswith(" "):
+                raise PathError(f"Resolve: segment has trailing dot or space (unsafe on Windows): {Seg!r}")
+            if ":" in Seg:
+                raise PathError(f"Resolve: segment contains colon (NTFS alternate data stream marker): {Seg!r}")
+
+    # directive: path-security-audit | # see path.C8
     def Resolve(self, Worker) -> str:
-        """Worker-local absolute path string; raises PathError when StorageRoot is orphaned (C9, D4)."""
+        """Worker-local absolute path string; raises PathError when StorageRoot is orphaned (C9, D4) or platform hazards present (C7-C9)."""
         Prefix = Worker.ResolveStorageRoot(self.StorageRootId)
         if Prefix is None:
             raise PathError(
@@ -196,6 +227,7 @@ class Path:
             )
         Platform = getattr(Worker, "Platform", "")
         if Platform == "windows":
+            self._RejectWindowsHazards()
             Tail = self.RelativePath.translate(_FORWARD_TO_BACKSLASH)
             Sep = "\\"
         else:
