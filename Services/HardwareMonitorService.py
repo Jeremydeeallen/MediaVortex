@@ -7,6 +7,7 @@ import sys
 import os
 from typing import Dict, Any, Optional, List
 from Services.LoggingService import LoggingService
+from Core.PathStorage import LocalExists
 
 class HardwareMonitorService:
     """Service for monitoring hardware using LibreHardwareMonitorLib.dll via pythonnet."""
@@ -32,7 +33,7 @@ class HardwareMonitorService:
             
             dll_found = False
             for dll_path in dll_paths:
-                if os.path.exists(dll_path):
+                if LocalExists(dll_path):
                     clr.AddReference(dll_path)
                     dll_found = True
                     LoggingService.LogInfo(f"Loaded LibreHardwareMonitorLib.dll from: {dll_path}", "HardwareMonitorService", "_Initialize")

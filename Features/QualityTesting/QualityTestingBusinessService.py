@@ -11,6 +11,7 @@ import time
 import threading
 from datetime import datetime, timezone
 from Core.Logging.LoggingService import LoggingService
+from Core.PathStorage import LastSegment, ParentDir, LocalExists
 
 
 # directive: nvenc-rate-anchored-remediation
@@ -216,7 +217,7 @@ class QualityTestingBusinessService:
             from Core.WorkerContext import WorkerContext
             Ctx = WorkerContext.Current()
             ffmpeg_path = Ctx.FFmpegPath if Ctx and Ctx.FFmpegPath else None
-            if not ffmpeg_path or not os.path.exists(ffmpeg_path):
+            if not ffmpeg_path or not LocalExists(ffmpeg_path):
                 return {"Success": False, "Error": f"FFmpeg executable not found: {ffmpeg_path or '<no WorkerContext.FFmpegPath registered>'}"}
 
             # Get video resolutions to check if scaling is needed
@@ -482,7 +483,7 @@ class QualityTestingBusinessService:
         }
         try:
             import xml.etree.ElementTree as ET
-            if not os.path.exists(XmlPath):
+            if not LocalExists(XmlPath):
                 LoggingService.LogWarning(f"VMAF XML not found: {XmlPath}",
                                           "QualityTestingBusinessService", "ParseVMAFMetrics")
                 return Result
@@ -1274,8 +1275,8 @@ class QualityTestingBusinessService:
             TranscodedCanonical = None
 
             if FileReplaced:
-                Dir = os.path.dirname(CanonicalFilePath)  # allow: R6 -- preexisting
-                BaseName = os.path.basename(CanonicalFilePath)  # allow: R6 -- preexisting
+                Dir = ParentDir(CanonicalFilePath)
+                BaseName = LastSegment(CanonicalFilePath)
                 Stem, Ext = os.path.splitext(BaseName)
                 if Stem.endswith('-mv'):
                     TranscodedCanonical = CanonicalFilePath
@@ -1346,7 +1347,7 @@ class QualityTestingBusinessService:
         ViewFilter = "scale=1920:1080:flags=lanczos,unsharp=5:5:0.5" if ViewMode == 'tv_fair' else None
 
         for InputPath, OutputPath in ((LocalSource, SourceStill), (LocalTranscoded, TranscodedStill)):
-            if os.path.exists(OutputPath):
+            if LocalExists(OutputPath):
                 continue
             Cmd = [FFmpeg, "-hide_banner", "-loglevel", "error",
                    "-ss", str(TimestampSeconds), "-i", InputPath]
@@ -1354,10 +1355,10 @@ class QualityTestingBusinessService:
                 Cmd += ["-vf", ViewFilter]
             Cmd += ["-frames:v", "1", "-y", OutputPath]
             R = subprocess.run(Cmd, capture_output=True, text=True)
-            if R.returncode != 0 or not os.path.exists(OutputPath):
+            if R.returncode != 0 or not LocalExists(OutputPath):
                 return {
                     'Success': False,
-                    'ErrorMessage': f'FFmpeg failed extracting frame from {os.path.basename(InputPath)}: {(R.stderr or "")[:200]}',  # allow: R6 -- preexisting
+                    'ErrorMessage': f'FFmpeg failed extracting frame from {LastSegment(InputPath)}: {(R.stderr or "")[:200]}',
                 }
 
         return {
@@ -1614,11 +1615,11 @@ class QualityTestingBusinessService:
             if not local_path:
                 local_path = JobDetails.get('TranscodedFilePath', '') if JobDetails else ''
 
-            if not local_path or not os.path.exists(local_path):
+            if not local_path or not LocalExists(local_path):
                 return 0.0
 
             ffprobe_path = Ctx.FFprobePath if Ctx and Ctx.FFprobePath else None
-            if not ffprobe_path or not os.path.exists(ffprobe_path):
+            if not ffprobe_path or not LocalExists(ffprobe_path):
                 return 0.0
 
             command = [

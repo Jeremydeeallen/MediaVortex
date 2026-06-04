@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from Repositories.DatabaseManager import DatabaseManager
 from Services.FileManagerService import FileManagerService
 from Core.Logging.LoggingService import LoggingService
+from Core.PathStorage import LocalExists, LocalGetSize, LocalGetMTime
 
 
 # directive: filereplacement-decompose | see transcoded-output-placement.feature.md
@@ -56,7 +57,7 @@ class TranscodedOutputPlacement:
 
             StepsCompleted = []
 
-            if not os.path.exists(LocalStagedPath):  # allow: local-path; host-resolved
+            if not LocalExists(LocalStagedPath):  # allow: local-path; host-resolved
                 ErrorMsg = f"Staged file not found: {LocalStagedPath}"
                 LoggingService.LogError(ErrorMsg, "TranscodedOutputPlacement", "Execute")
                 return {'Success': False, 'ErrorMessage': ErrorMsg}
@@ -76,7 +77,7 @@ class TranscodedOutputPlacement:
                 == os.path.normcase(os.path.normpath(LocalOriginalPath))  # allow: local-path comparison; both host-resolved
             )
 
-            if os.path.exists(TargetPath) and not SameSlotReplacement:  # allow: local-path; host-resolved
+            if LocalExists(TargetPath) and not SameSlotReplacement:
                 ErrorMsg = (
                     f"Refusing to overwrite existing file at target: {TargetPath}. "
                     f"A prior replacement may have partially succeeded and left this artifact behind."
@@ -96,7 +97,7 @@ class TranscodedOutputPlacement:
                         "TranscodedOutputPlacement", "Execute",
                     )
                     try:
-                        if os.path.exists(LocalStagedPath):  # allow: local-path; host-resolved
+                        if LocalExists(LocalStagedPath):  # allow: local-path; host-resolved
                             os.remove(LocalStagedPath)
                     except Exception as DelEx:
                         LoggingService.LogException(
@@ -113,7 +114,7 @@ class TranscodedOutputPlacement:
             if SameSlotReplacement:
                 BackupPath = LocalOriginalPath + '.replacing.bak'
                 try:
-                    if os.path.exists(BackupPath):  # allow: local-path; host-resolved
+                    if LocalExists(BackupPath):
                         try:
                             os.remove(BackupPath)
                             LoggingService.LogInfo(
@@ -180,7 +181,7 @@ class TranscodedOutputPlacement:
                     return {'Success': False, 'ErrorMessage': ErrorMsg}
 
             try:
-                TargetSize = os.path.getsize(TargetPath)  # allow: local-path; host-resolved
+                TargetSize = LocalGetSize(TargetPath)
                 if TargetSize <= 0:
                     LoggingService.LogWarning(
                         f"Target file is empty after rename (size={TargetSize}): {TargetPath}",
@@ -238,7 +239,7 @@ class TranscodedOutputPlacement:
 
             if os.path.normpath(LocalOriginalPath) == os.path.normpath(TargetPath):  # allow: local-path comparison; both host-resolved
                 StepsCompleted.append("Original and target are the same path; no original to delete")
-            elif os.path.exists(LocalOriginalPath):  # allow: local-path; host-resolved
+            elif LocalExists(LocalOriginalPath):
                 try:
                     os.remove(LocalOriginalPath)
                     StepsCompleted.append(f"Deleted original {ntpath.basename(LocalOriginalPath)}")
@@ -274,7 +275,7 @@ class TranscodedOutputPlacement:
         """Crash-recovery: complete a replacement past the rename but before original delete; see worker-lifecycle.C12."""
         try:
             StepsCompleted = []
-            if not os.path.exists(FinalLocalPath):  # allow: local-path; host-resolved
+            if not LocalExists(FinalLocalPath):
                 return {'Success': False, 'ErrorMessage': f'Final file does not exist: {FinalLocalPath}'}
 
             CanonicalNewPath = ntpath.join(ntpath.dirname(CanonicalOriginalPath), ntpath.basename(FinalLocalPath))
@@ -291,7 +292,7 @@ class TranscodedOutputPlacement:
 
             if os.path.normpath(OriginalLocalPath) == os.path.normpath(FinalLocalPath):  # allow: local-path comparison; both host-resolved
                 StepsCompleted.append("Original and final are the same path; no delete needed")
-            elif os.path.exists(OriginalLocalPath):  # allow: local-path; host-resolved
+            elif LocalExists(OriginalLocalPath):
                 try:
                     os.remove(OriginalLocalPath)
                     StepsCompleted.append(f"Deleted original {ntpath.basename(OriginalLocalPath)}")
@@ -436,11 +437,11 @@ class TranscodedOutputPlacement:
 
             try:
                 NewMtime = datetime.fromtimestamp(
-                    os.path.getmtime(LocalNewFilePath), tz=timezone.utc  # allow: local-path; host-resolved
+                    LocalGetMTime(LocalNewFilePath), tz=timezone.utc
                 ).replace(tzinfo=None)
                 media_file.FileModificationTime = NewMtime
                 media_file.LastModifiedDate = NewMtime
-                media_file.FileSize = os.path.getsize(LocalNewFilePath)  # allow: local-path; host-resolved
+                media_file.FileSize = LocalGetSize(LocalNewFilePath)
             except Exception as e:
                 LoggingService.LogException(
                     f"Failed to re-stamp filesystem timestamps from {LocalNewFilePath}",

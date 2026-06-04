@@ -14,6 +14,10 @@ from Features.TranscodeJob.VideoTranscodingService import VideoTranscodingServic
 from Services.QueueManagementService import QueueManagementService
 from Features.QualityTesting.PostTranscodeDispositionService import PostTranscodeDispositionService
 from Core.Logging.LoggingService import LoggingService
+from Core.PathStorage import (
+    LastSegment, ParentDir, Join, SplitExt,
+    LocalExists,
+)
 
 
 from Core.DateTimeHelpers import ToUtcIsoZ
@@ -371,7 +375,7 @@ class ProcessTranscodeQueueService:
 
             from Core.PathStorage import Resolve as PathResolve
             LocalSourcePath = PathResolve(MediaFile.StorageRootId, MediaFile.RelativePath, self.WorkerName, self.DatabaseManager.DatabaseService)
-            if not os.path.exists(LocalSourcePath):
+            if not LocalExists(LocalSourcePath):
                 ErrMsg = f"Source file missing on disk: {LocalSourcePath}"
                 LoggingService.LogWarning(ErrMsg, "ProcessTranscodeQueueService", "ProcessJob")
                 self._MarkMediaFileSourceMissing(MediaFile.Id, ErrMsg)
@@ -554,7 +558,7 @@ class ProcessTranscodeQueueService:
 
             from Core.PathStorage import Resolve as PathResolve
             LocalSourcePath = PathResolve(MediaFile.StorageRootId, MediaFile.RelativePath, self.WorkerName, self.DatabaseManager.DatabaseService)
-            if not os.path.exists(LocalSourcePath):
+            if not LocalExists(LocalSourcePath):
                 ErrMsg = f"Source file missing on disk: {LocalSourcePath}"
                 LoggingService.LogWarning(ErrMsg, "ProcessTranscodeQueueService", "ProcessTestVariantJob")
                 self._MarkMediaFileSourceMissing(MediaFile.Id, ErrMsg)
@@ -707,7 +711,7 @@ class ProcessTranscodeQueueService:
         """FFprobe a freshly-written `.inprogress` file to confirm it is a valid
         media file. Owns worker-lifecycle.feature.md criterion 7."""  # allow: R12 -- preexisting
         try:
-            if not os.path.exists(LocalInProgressPath):
+            if not LocalExists(LocalInProgressPath):
                 LoggingService.LogError(
                     f"FFprobe verify failed: .inprogress file not found at {LocalInProgressPath}",
                     "ProcessTranscodeQueueService", "_VerifyInProgressFile"
@@ -744,7 +748,7 @@ class ProcessTranscodeQueueService:
             )
             return
         try:
-            if os.path.exists(LocalInProgressPath):
+            if LocalExists(LocalInProgressPath):
                 os.remove(LocalInProgressPath)
                 LoggingService.LogInfo(
                     f"Deleted .inprogress artifact: {LocalInProgressPath}",
@@ -762,10 +766,10 @@ class ProcessTranscodeQueueService:
         on-disk filenames and never overwrite each other or a production attempt."""  # allow: R12 -- preexisting
         if '-mv.' in OutputPath:
             return OutputPath.replace('-mv.', f'-test-{VariantName}-mv.')
-        Dir = os.path.dirname(OutputPath)  # allow: R6 -- preexisting
-        Base = os.path.basename(OutputPath)  # allow: R6 -- preexisting
-        Stem, Ext = os.path.splitext(Base)
-        return os.path.join(Dir, f"{Stem}-test-{VariantName}{Ext}")
+        Dir = ParentDir(OutputPath)
+        Base = LastSegment(OutputPath)
+        Stem, Ext = SplitExt(Base)
+        return Join(Dir, f"{Stem}-test-{VariantName}{Ext}")
 
     # directive: nvenc-rate-anchored-remediation
     def _CleanupTestQueueRow(self, Job: TranscodeQueueModel, ActiveJobId: Optional[int]) -> None:
@@ -831,7 +835,7 @@ class ProcessTranscodeQueueService:
 
             from Core.PathStorage import Resolve as PathResolve
             LocalSourcePath = PathResolve(Job.StorageRootId, Job.RelativePath, self.WorkerName, self.DatabaseManager.DatabaseService)
-            if not os.path.exists(LocalSourcePath):
+            if not LocalExists(LocalSourcePath):
                 ErrMsg = f"Source file missing on disk: {LocalSourcePath}"
                 LoggingService.LogWarning(ErrMsg, "ProcessTranscodeQueueService", "ProcessRemuxJob")
                 self._MarkMediaFileSourceMissing(MediaFile.Id, ErrMsg)
@@ -863,9 +867,8 @@ class ProcessTranscodeQueueService:
                 self.HandleJobFailure(Job, f"Failed to setup file preparation for remux: {Detail}", TranscodeAttemptId, ActiveJobId)
                 return
 
-            import os as _os
-            BaseName, _ = _os.path.splitext(_os.path.basename(EffectiveInputPath))  # allow: R6 -- preexisting
-            TargetLocalPath = _os.path.join(_os.path.dirname(EffectiveInputPath), BaseName + '-mv.mp4.inprogress')  # allow: R6 -- preexisting
+            BaseName, _ = SplitExt(LastSegment(EffectiveInputPath))
+            TargetLocalPath = Join(ParentDir(EffectiveInputPath), BaseName + '-mv.mp4.inprogress')
 
             self.UpdateTranscodeProgress(TranscodeAttemptId, "Building Command", 0.0, "Building remux command...")
             CommandResult = self.CommandBuilder.BuildFFmpegCommand(
@@ -875,7 +878,7 @@ class ProcessTranscodeQueueService:
                     'OutputPath': TargetLocalPath,
                     'FFmpegPath': self.FFmpegPath,
                     'FFprobePath': self.FFprobePath,
-                    'OutputDirectory': _os.path.dirname(EffectiveInputPath),  # allow: R6 -- preexisting
+                    'OutputDirectory': ParentDir(EffectiveInputPath),
                 },
             )
             if not CommandResult:
@@ -993,14 +996,13 @@ class ProcessTranscodeQueueService:
 
             # Build subtitle fix command (pass effective input path)
             self.UpdateTranscodeProgress(TranscodeAttemptId, "Building Command", 0.0, "Building subtitle fix command...")
-            import os as _os
             CommandResult = self.CommandBuilder.BuildFFmpegCommand(
                 MediaFile, Job,
                 Context={
                     'InputPath': EffectiveInputPath,
                     'FFmpegPath': self.FFmpegPath,
                     'FFprobePath': self.FFprobePath,
-                    'OutputDirectory': _os.path.dirname(EffectiveInputPath),  # allow: R6 -- preexisting
+                    'OutputDirectory': ParentDir(EffectiveInputPath),
                 },
             )
             if not CommandResult:
@@ -1258,7 +1260,7 @@ class ProcessTranscodeQueueService:
                                          "ProcessTranscodeQueueService", "GetTranscodingSettings")
 
             normalizedPath = Job.FilePath.lower().replace('\\', '/')
-            fileName = os.path.basename(Job.FilePath).lower()
+            fileName = LastSegment(Job.FilePath).lower()
 
             # Try full path first
             overrideKey = f"CRFOverride_{normalizedPath}"
@@ -1654,7 +1656,7 @@ class ProcessTranscodeQueueService:
                     if self.PathTranslation:
                         ActualPath = self.PathTranslation.ToLocalPath(LocalOutputPath)
 
-                    if os.path.exists(ActualPath):
+                    if LocalExists(ActualPath):
                         try:
                             os.remove(ActualPath)
                             LoggingService.LogInfo(f"Deleted partial output file: {ActualPath}",
@@ -1704,19 +1706,19 @@ class ProcessTranscodeQueueService:
                     LoggingService.LogWarning(f"Failed to retrieve output path from TemporaryFilePaths table for TranscodeAttempt {TranscodeAttemptId}: {str(e)}, falling back to calculation",
                                             "ProcessTranscodeQueueService", "GetOutputFilePathFromCommand")
 
-            InputFileName = os.path.basename(Job.FilePath)
+            InputFileName = LastSegment(Job.FilePath)
 
             # Get the MediaFile to determine source resolution
             MediaFile = self.DatabaseManager.GetMediaFileByPath(Job.FilePath)
             if not MediaFile:
                 LoggingService.LogWarning(f"Could not get MediaFile for {Job.FilePath}", "ProcessTranscodeQueueService", "GetOutputFilePathFromCommand")
-                return os.path.join("C:\\MediaVortex", InputFileName)
+                return Join("C:\\MediaVortex", InputFileName)
 
             # Get transcoding settings to determine target resolution
             TranscodingSettings = self.GetTranscodingSettings(Job, MediaFile)
             if not TranscodingSettings:
                 LoggingService.LogWarning(f"Could not get transcoding settings for {Job.FilePath}", "ProcessTranscodeQueueService", "GetOutputFilePathFromCommand")
-                return os.path.join("C:\\MediaVortex", InputFileName)
+                return Join("C:\\MediaVortex", InputFileName)
 
             # Generate output filename with target resolution and container type
             ProfileSettings = TranscodingSettings.get('ProfileSettings', {})
@@ -1725,7 +1727,7 @@ class ProcessTranscodeQueueService:
             ContainerType = ProfileSettings.get('ContainerType', 'mp4')
 
             OutputFileName = self._GenerateOutputFileName(InputFileName, SourceResolution, TargetResolution, ContainerType)
-            OutputFilePath = os.path.join("C:\\MediaVortex", OutputFileName)
+            OutputFilePath = Join("C:\\MediaVortex", OutputFileName)
 
             LoggingService.LogInfo(f"Calculated output path (fallback): {OutputFilePath}", "ProcessTranscodeQueueService", "GetOutputFilePathFromCommand")
             return OutputFilePath
@@ -1837,7 +1839,7 @@ class ProcessTranscodeQueueService:
         """Generate output filename with target resolution and container type."""
         try:
             # Get the base filename without extension
-            BaseName = os.path.splitext(OriginalFileName)[0]
+            BaseName = SplitExt(OriginalFileName)[0]
 
             # If resolutions are the same, just change extension
             if SourceResolution == TargetResolution:
@@ -1853,14 +1855,14 @@ class ProcessTranscodeQueueService:
             # Replace source resolution with target resolution
             TargetResolutionStr = self._FormatResolutionForFilename(TargetResolution)
             NewBaseName = OriginalFileName.replace(SourceResolutionStr, TargetResolutionStr)
-            NewBaseName = os.path.splitext(NewBaseName)[0]  # Remove old extension
+            NewBaseName = SplitExt(NewBaseName)[0]  # Remove old extension
 
             # Add container type extension
             return f"{NewBaseName}.{ContainerType}"
 
         except Exception:
             # If anything goes wrong, return original filename with container extension
-            BaseName = os.path.splitext(OriginalFileName)[0]
+            BaseName = SplitExt(OriginalFileName)[0]
             return f"{BaseName}.{ContainerType}"
 
     # directive: nvenc-rate-anchored-remediation
@@ -1993,10 +1995,9 @@ class ProcessTranscodeQueueService:
         (Linux os.path.basename on a Windows-shaped canonical string returned
         the whole string, polluting the stored relative path with 'T:/'
         fragments)."""
-        import os as _os
         SrcId = getattr(Job, 'StorageRootId', None)
         SrcRel = getattr(Job, 'RelativePath', None) or None
-        OutBase = _os.path.basename(OutputPath) if OutputPath else ''  # allow: R6 -- preexisting
+        OutBase = LastSegment(OutputPath) if OutputPath else ''
         OutId = SrcId
         SrcDirRel = SrcRel.rsplit('/', 1)[0] if (SrcRel and '/' in SrcRel) else ''
         OutRel = f"{SrcDirRel}/{OutBase}" if SrcDirRel else OutBase

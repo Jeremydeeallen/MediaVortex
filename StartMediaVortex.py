@@ -10,6 +10,7 @@ Mapped with /persistent:yes so they survive reboots.
 import os
 import sys
 import subprocess
+from Core.PathStorage import LocalExists
 
 RootDirectory = os.path.dirname(os.path.abspath(__file__))
 
@@ -70,7 +71,7 @@ def main():
     DrivesNeeded = []
     for Drive in NetworkDrives:
         DrivePath = f"{Drive['Letter']}:\\"
-        if os.path.exists(DrivePath):
+        if LocalExists(DrivePath):
             print(f"  [OK]   {DrivePath} already mounted")
         else:
             DrivesNeeded.append(Drive)
@@ -82,10 +83,10 @@ def main():
     # Verify required drives are accessible
     for Drive in NetworkDrives:
         DrivePath = f"{Drive['Letter']}:\\"
-        if Drive.get("Required", True) and not os.path.exists(DrivePath):
+        if Drive.get("Required", True) and not LocalExists(DrivePath):
             print(f"  [FAIL] Required drive {DrivePath} is not accessible")
             sys.exit(1)
-        elif not os.path.exists(DrivePath):
+        elif not LocalExists(DrivePath):
             print(f"  [WARN] Optional drive {DrivePath} is not accessible")
 
     # Validate all services before launching

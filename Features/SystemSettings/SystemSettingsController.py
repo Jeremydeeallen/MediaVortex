@@ -5,6 +5,7 @@ SystemSettingsController.py - Controller for managing system settings
 
 from flask import Blueprint, request, jsonify
 from Core.Logging.LoggingService import LoggingService
+from Core.PathStorage import LocalExists
 from Features.SystemSettings.SystemSettingsRepository import SystemSettingsRepository
 
 
@@ -372,8 +373,8 @@ class SystemSettingsController:
                 FFmpegAbsolutePath = os.path.join(ProjectRoot, FFmpegPath)
                 FFprobeAbsolutePath = os.path.join(ProjectRoot, FFprobePath)
 
-                FFmpegExists = os.path.exists(FFmpegAbsolutePath)
-                FFprobeExists = os.path.exists(FFprobeAbsolutePath)
+                FFmpegExists = LocalExists(FFmpegAbsolutePath)
+                FFprobeExists = LocalExists(FFprobeAbsolutePath)
 
                 if not FFmpegExists:
                     return jsonify({

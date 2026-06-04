@@ -14,6 +14,7 @@ from Models.TranscodeFileModel import TranscodeFileModel
 from Services.DatabaseService import DatabaseService
 from Services.LoggingService import LoggingService
 from Core.Database.DatabaseService import EscapeLikePattern
+from Core.PathStorage import LastSegment, ParentDir, Join, LocalExists, LocalGetSize, LocalIsDir
 
 
 class DatabaseManager:
@@ -4343,9 +4344,7 @@ class DatabaseManager:
                 TranscodedFilePath = row["TranscodedFilePath"]
                 TranscodedFileName = None
                 if TranscodedFilePath:
-                    # Extract just the filename from the full path
-                    import os
-                    TranscodedFileName = os.path.basename(TranscodedFilePath)
+                    TranscodedFileName = LastSegment(TranscodedFilePath)
                 
                 results.append({
                     "Id": row["Id"],
@@ -4843,7 +4842,7 @@ class DatabaseManager:
             LocalProbePath = Translator.ToLocalPath(Path) if Translator else Path
             normalized_path = os.path.normpath(LocalProbePath)
 
-            if not os.path.exists(normalized_path):
+            if not LocalExists(normalized_path):
                 LoggingService.LogWarning(f"Path does not exist, cannot normalize: {Path}",
                                          "DatabaseManager", "PrivateNormalizePathToFilesystemCase")
                 # Return canonical form unchanged -- caller stores it as-is.
@@ -4891,29 +4890,24 @@ class DatabaseManager:
                     continue
                 
                 try:
-                    # List directory contents to find actual case
-                    if os.path.isdir(current_path):
+                    if LocalIsDir(current_path):
                         dir_contents = os.listdir(current_path)
-                        # Find matching directory (case-insensitive comparison)
                         actual_name = None
                         for item in dir_contents:
                             if item.upper() == part.upper():
                                 actual_name = item
                                 break
-                        
+
                         if actual_name:
-                            current_path = os.path.join(current_path, actual_name)
+                            current_path = Join(current_path, actual_name)
                         else:
-                            # If not found in listing, use original (might be a file)
-                            current_path = os.path.join(current_path, part)
+                            current_path = Join(current_path, part)
                     else:
-                        # Not a directory, just append
-                        current_path = os.path.join(current_path, part)
+                        current_path = Join(current_path, part)
                 except Exception as e:
-                    # If we can't list directory, just use original part
                     LoggingService.LogWarning(f"Could not list directory '{current_path}' to get actual case, using: {part}",
                                              "DatabaseManager", "PrivateNormalizePathToFilesystemCase")
-                    current_path = os.path.join(current_path, part)
+                    current_path = Join(current_path, part)
             
             # Translate the local-form, case-corrected path back to canonical
             # (T:\... shape) so the caller stores the same form they passed in.
@@ -5403,18 +5397,15 @@ class DatabaseManager:
         """
         try:
             LoggingService.LogFunctionEntry("AddProblemFile", "DatabaseManager", FilePath, ErrorType)
-            
-            # Extract file name and directory from file path
-            import os
-            FileName = os.path.basename(FilePath)
-            Directory = os.path.dirname(FilePath)
-            
-            # Get file size if file exists
+
+            FileName = LastSegment(FilePath)
+            Directory = ParentDir(FilePath)
+
             SizeBytes = 0
             SizeMB = 0.0
-            if os.path.exists(FilePath):
+            if LocalExists(FilePath):
                 try:
-                    SizeBytes = os.path.getsize(FilePath)
+                    SizeBytes = LocalGetSize(FilePath)
                     SizeMB = SizeBytes / (1024 * 1024)
                 except Exception as e:
                     LoggingService.LogException(

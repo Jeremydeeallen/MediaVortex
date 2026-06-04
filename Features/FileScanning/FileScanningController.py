@@ -2,6 +2,7 @@ from flask import Blueprint, request, jsonify, render_template
 from typing import Dict, Any
 from Features.FileScanning.FileScanningViewModel import FileScanningViewModel
 from Core.Logging.LoggingService import LoggingService
+from Core.PathStorage import LocalExists, LocalIsDir
 
 
 class FileScanningController:
@@ -62,11 +63,11 @@ class FileScanningController:
                             except Exception as e:
                                 LoggingService.LogError(f"Cannot list Z: drive contents: {str(e)}", "FileScanningController", "StartScan")
 
-                        PathExists = os.path.exists(NormalizedPath)
-                        LoggingService.LogInfo(f"Controller os.path.exists: {PathExists}", "FileScanningController", "StartScan")
+                        PathExists = LocalExists(NormalizedPath)
+                        LoggingService.LogInfo(f"Controller LocalExists: {PathExists}", "FileScanningController", "StartScan")
 
-                        IsDirectory = os.path.isdir(NormalizedPath)
-                        LoggingService.LogInfo(f"Controller os.path.isdir: {IsDirectory}", "FileScanningController", "StartScan")
+                        IsDirectory = LocalIsDir(NormalizedPath)
+                        LoggingService.LogInfo(f"Controller LocalIsDir: {IsDirectory}", "FileScanningController", "StartScan")
 
                     except Exception as e:
                         LoggingService.LogException(f"Controller path validation error: {str(e)}", e, "FileScanningController", "StartScan")

@@ -1,6 +1,7 @@
 import os
 from typing import List, Optional
 from pathlib import Path
+from Core.PathStorage import LastSegment, ParentDir
 from Models.FFmpegScreenshotModel import FFmpegScreenshotModel, FFmpegScreenshotBatchModel
 from Services.FFmpegService import FFmpegService
 from Services.LoggingService import LoggingService
@@ -23,18 +24,18 @@ class FFmpegScreenshotService:
             # Create screenshot model
             ScreenshotModel = FFmpegScreenshotModel()
             ScreenshotModel.SourceFilePath = SourceFilePath
-            ScreenshotModel.SourceFileName = os.path.basename(SourceFilePath)
+            ScreenshotModel.SourceFileName = LastSegment(SourceFilePath)
             ScreenshotModel.TimestampSeconds = TimestampSeconds
             ScreenshotModel.Format = Format
             
             # Generate output path if not provided
             if not OutputPath:
-                SourceDir = os.path.dirname(SourceFilePath)
+                SourceDir = ParentDir(SourceFilePath)
                 SourceName = Path(SourceFilePath).stem
                 OutputPath = os.path.join(SourceDir, f"{SourceName}_screenshot_{TimestampSeconds:.1f}s.{Format}")
-            
+
             ScreenshotModel.ScreenshotPath = OutputPath
-            ScreenshotModel.ScreenshotFileName = os.path.basename(OutputPath)
+            ScreenshotModel.ScreenshotFileName = LastSegment(OutputPath)
             
             # Build FFmpeg arguments
             Arguments = [
@@ -88,8 +89,8 @@ class FFmpegScreenshotService:
             # Create batch model
             BatchModel = FFmpegScreenshotBatchModel()
             BatchModel.SourceFilePath = SourceFilePath
-            BatchModel.SourceFileName = os.path.basename(SourceFilePath)
-            
+            BatchModel.SourceFileName = LastSegment(SourceFilePath)
+
             # Get video duration first
             DurationResult = self.GetVideoDuration(SourceFilePath)
             if not DurationResult['Success']:
@@ -107,21 +108,21 @@ class FFmpegScreenshotService:
             
             # Generate output directory if not provided
             if not OutputDirectory:
-                SourceDir = os.path.dirname(SourceFilePath)
+                SourceDir = ParentDir(SourceFilePath)
                 SourceName = Path(SourceFilePath).stem
                 OutputDirectory = os.path.join(SourceDir, f"{SourceName}_screenshots")
                 os.makedirs(OutputDirectory, exist_ok=True)
-            
+
             # Generate screenshots
             for i, Timestamp in enumerate(Timestamps):
                 OutputPath = os.path.join(OutputDirectory, f"screenshot_{i+1:03d}_{Timestamp:.1f}s.{Format}")
-                
+
                 Screenshot = self.GenerateScreenshot(
                     SourceFilePath, Timestamp, OutputPath, Width, Height, Format
                 )
-                
+
                 BatchModel.AddScreenshot(Screenshot)
-            
+
             BatchModel.Success = True
             LoggingService.LogInfo(f"Generated {BatchModel.SuccessfulScreenshots} screenshots for {SourceFilePath}", 'GenerateScreenshotsAtIntervals', 'FFmpegScreenshotService')
             
@@ -146,11 +147,11 @@ class FFmpegScreenshotService:
             # Create batch model
             BatchModel = FFmpegScreenshotBatchModel()
             BatchModel.SourceFilePath = SourceFilePath
-            BatchModel.SourceFileName = os.path.basename(SourceFilePath)
-            
+            BatchModel.SourceFileName = LastSegment(SourceFilePath)
+
             # Generate output directory if not provided
             if not OutputDirectory:
-                SourceDir = os.path.dirname(SourceFilePath)
+                SourceDir = ParentDir(SourceFilePath)
                 SourceName = Path(SourceFilePath).stem
                 OutputDirectory = os.path.join(SourceDir, f"{SourceName}_screenshots")
                 os.makedirs(OutputDirectory, exist_ok=True)

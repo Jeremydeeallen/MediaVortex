@@ -2,6 +2,7 @@ import os
 import subprocess
 import tempfile
 from Core.Logging.LoggingService import LoggingService
+from Core.PathStorage import LocalExists
 from Core.WorkerContext import WorkerContext
 
 
@@ -96,7 +97,7 @@ class ClipBuilderBusinessService:
                 # Clean up half clips
                 for ClipPath in HalfClips:
                     try:
-                        if os.path.exists(ClipPath):
+                        if LocalExists(ClipPath):
                             os.remove(ClipPath)
                     except Exception:
                         pass
@@ -107,7 +108,7 @@ class ClipBuilderBusinessService:
             # Clean up temp files
             for ClipPath in PrimaryClips:
                 try:
-                    if os.path.exists(ClipPath):
+                    if LocalExists(ClipPath):
                         os.remove(ClipPath)
                 except Exception:
                     pass

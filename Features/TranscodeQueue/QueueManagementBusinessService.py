@@ -11,6 +11,7 @@ from Features.TranscodeQueue.QueueAdmissionConfigRepository import QueueAdmissio
 from Features.TranscodeQueue.CodecCompatibilityRepository import CodecCompatibilityRepository
 from Core.Logging.LoggingService import LoggingService
 from Core.PathNormalize import ExtractShowFolder
+from Core.PathStorage import LastSegment, ParentDir, LocalExists
 from Services.FileManagerService import FileManagerService
 from Repositories.DatabaseManager import DatabaseManager
 
@@ -909,10 +910,8 @@ class QueueManagementBusinessService:
             fileName = MediaFile.FileName or ""
 
             if filePath:
-                pathParts = filePath.replace("\\", "/").split("/")
-                if len(pathParts) > 1:
-                    directory = "/".join(pathParts[:-1])
-                fileName = pathParts[-1] if pathParts else ""
+                directory = ParentDir(filePath).replace("\\", "/")
+                fileName = LastSegment(filePath) or fileName
 
             queueItem = TranscodeQueueModel(
                 FilePath=filePath,
@@ -1061,10 +1060,8 @@ class QueueManagementBusinessService:
             fileName = MediaFile.FileName or ""
 
             if filePath:
-                pathParts = filePath.replace("\\", "/").split("/")
-                if len(pathParts) > 1:
-                    directory = "/".join(pathParts[:-1])
-                fileName = pathParts[-1] if pathParts else ""
+                directory = ParentDir(filePath).replace("\\", "/")
+                fileName = LastSegment(filePath) or fileName
 
             queueItem = TranscodeQueueModel(
                 FilePath=filePath,
@@ -1199,10 +1196,8 @@ class QueueManagementBusinessService:
             fileName = MediaFile.FileName or ""
 
             if filePath:
-                pathParts = filePath.replace("\\", "/").split("/")
-                if len(pathParts) > 1:
-                    directory = "/".join(pathParts[:-1])
-                fileName = pathParts[-1] if pathParts else ""
+                directory = ParentDir(filePath).replace("\\", "/")
+                fileName = LastSegment(filePath) or fileName
 
             queueItem = TranscodeQueueModel(
                 FilePath=filePath,
@@ -2431,7 +2426,7 @@ class QueueManagementBusinessService:
         Returns True if resolution was successfully obtained, False otherwise."""
         try:
             FilePath = MediaFile.FilePath or ""
-            if not FilePath or not os.path.exists(FilePath):
+            if not FilePath or not LocalExists(FilePath):
                 LoggingService.LogWarning(f"Cannot probe {MediaFile.FileName}: file not found at {FilePath}", "QueueManagementBusinessService", "ProbeAndUpdateMissingMetadata")
                 return False
 

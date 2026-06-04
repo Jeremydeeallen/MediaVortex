@@ -11,6 +11,7 @@ from typing import Dict, List, Optional
 from datetime import datetime, timezone
 from Core.Logging.LoggingService import LoggingService
 from Core.DateTimeHelpers import ToUtcIsoZ
+from Core.PathStorage import LocalExists
 from Services.ProcessManagementService import ProcessManagementService
 
 
@@ -410,9 +411,9 @@ class CrashRecoveryService:
                 else:
                     FinalPath = LocalOutput
 
-                FinalExists = os.path.exists(FinalPath)
-                OriginalExists = LocalSource and os.path.exists(LocalSource)
-                InProgressExists = LocalOutput.endswith('.inprogress') and os.path.exists(LocalOutput)
+                FinalExists = LocalExists(FinalPath)
+                OriginalExists = LocalSource and LocalExists(LocalSource)
+                InProgressExists = LocalOutput.endswith('.inprogress') and LocalExists(LocalOutput)
 
                 if FinalExists and OriginalExists and CanonicalOriginal:
                     try:

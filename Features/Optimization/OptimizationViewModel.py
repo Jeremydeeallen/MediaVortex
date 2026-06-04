@@ -4,6 +4,7 @@ from Repositories.DatabaseManager import DatabaseManager
 from Features.Optimization.JellyfinService import JellyfinService
 from Core.Logging.LoggingService import LoggingService
 from Services.FileManagerService import FileManagerService
+from Core.PathStorage import LastSegment, LocalExists, LocalGetSize
 
 
 class OptimizationViewModel:
@@ -151,7 +152,7 @@ class OptimizationViewModel:
                 return {"Success": False, "ErrorMessage": f"File not found in MediaVortex DB: {diskFileName}"}
 
             filePath = mediaFile.FilePath
-            if not os.path.exists(filePath):
+            if not LocalExists(filePath):
                 return {"Success": False, "ErrorMessage": f"File not found on disk: {filePath}"}
 
             # Run ffprobe via FileManagerService
@@ -162,8 +163,8 @@ class OptimizationViewModel:
                 return {"Success": False, "ErrorMessage": f"FFprobe failed: {metadataResult.get('ErrorMessage', 'Unknown error')}"}
 
             # Update the model with new metadata
-            mediaFile.SizeMB = os.path.getsize(filePath) / (1024 * 1024)
-            mediaFile.FileName = os.path.basename(filePath)
+            mediaFile.SizeMB = LocalGetSize(filePath) / (1024 * 1024)
+            mediaFile.FileName = LastSegment(filePath)
             mediaFile.Codec = metadataResult.get('VideoCodec')
             mediaFile.AudioCodec = metadataResult.get('AudioCodec')
             mediaFile.ContainerFormat = metadataResult.get('ContainerFormat')
@@ -552,7 +553,7 @@ class OptimizationViewModel:
         """Run ffprobe on a fuzzy-matched file and update DB. Returns refreshed summary dict."""
         try:
             dbFilePath = mediaFileSummary.get("FilePath", "")
-            if not dbFilePath or not os.path.exists(dbFilePath):
+            if not dbFilePath or not LocalExists(dbFilePath):
                 return None
 
             fileManager = FileManagerService()
@@ -576,7 +577,7 @@ class OptimizationViewModel:
             fullFile.FrameRate = metadataResult.get('FrameRate')
             fullFile.TotalFrames = metadataResult.get('TotalFrames')
             fullFile.OverallBitrate = metadataResult.get('OverallBitrate')
-            fullFile.SizeMB = os.path.getsize(dbFilePath) / (1024 * 1024)
+            fullFile.SizeMB = LocalGetSize(dbFilePath) / (1024 * 1024)
             self.DatabaseManager.SaveMediaFile(fullFile)
 
             # Return refreshed summary

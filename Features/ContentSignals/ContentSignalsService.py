@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from Core.Logging.LoggingService import LoggingService
+from Core.PathStorage import Join, LocalExists, ParentDir
 from Features.ContentSignals.Models.ContentSignalsModel import ContentSignalsModel
 
 
@@ -27,16 +28,16 @@ def _GetFfmpegPath() -> Optional[str]:
     try:
         from Core.WorkerContext import WorkerContext
         Ctx = WorkerContext.Current()
-        if Ctx and Ctx.FFmpegPath and os.path.exists(Ctx.FFmpegPath):
+        if Ctx and Ctx.FFmpegPath and LocalExists(Ctx.FFmpegPath):
             return Ctx.FFmpegPath
     except Exception:
         pass
     for Candidate in (
-        os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "FFmpegMaster", "bin", "ffmpeg.exe"),
+        Join(Join(ParentDir(ParentDir(ParentDir(__file__))), "FFmpegMaster"), Join("bin", "ffmpeg.exe")),
         "/usr/bin/ffmpeg",
         "/usr/local/bin/ffmpeg",
     ):
-        if Candidate and os.path.exists(Candidate):
+        if Candidate and LocalExists(Candidate):
             return Candidate
     return None
 
@@ -148,7 +149,7 @@ def _RunScenedetect(LocalFilePath: str) -> Optional[float]:
 class ContentSignalsService:
     @staticmethod
     def ComputeSignals(LocalFilePath: str) -> Optional[ContentSignalsModel]:
-        if not LocalFilePath or not os.path.exists(LocalFilePath):
+        if not LocalFilePath or not LocalExists(LocalFilePath):
             LoggingService.LogWarning(
                 f"ComputeSignals: file not found at {LocalFilePath}",
                 "ContentSignalsService", "ComputeSignals",

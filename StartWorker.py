@@ -31,6 +31,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from Core.PathStorage import LocalExists
 
 RootDirectory = Path(__file__).resolve().parent
 
@@ -97,7 +98,7 @@ def _VerifyDrives():
     Missing = []
     for Drive in NetworkDrives:
         DrivePath = f"{Drive['Letter']}:\\"
-        if os.path.exists(DrivePath):
+        if LocalExists(DrivePath):
             print(f"  [OK]   {DrivePath} accessible")
             continue
         Tag = "[FAIL]" if Drive.get("Required") else "[WARN]"

@@ -1,6 +1,7 @@
 import os
 from typing import Dict, Any, Optional
 from Core.Logging.LoggingService import LoggingService
+from Core.PathStorage import ParentDir
 from Models.TranscodeQueueModel import TranscodeQueueModel
 from Models.MediaFileModel import MediaFileModel
 from Features.AudioCompletion.AudioCompletionService import AudioCompletionService
@@ -172,7 +173,7 @@ class CommandBuilder:
             OutputFileName = self.GenerateOutputFileName(MediaFile.FileName, SourceResolution, TargetResolution, ContainerType, CrfValue)
 
             # In-place output: put encoded file next to the source.
-            OutputDirectory = os.path.dirname(InputPath)  # allow: R6 -- preexisting
+            OutputDirectory = ParentDir(InputPath)
             OutputPath = self._NormalizeFfmpegPath(os.path.join(OutputDirectory, OutputFileName))
 
             FFmpegPath = CommandData.get('FFmpegPath')
@@ -669,7 +670,7 @@ class CommandBuilder:
                 OutputPath = self._NormalizeFfmpegPath(ExplicitOutputPath)
             else:
                 OutputFileName = BaseName + "-mv.mp4.inprogress"
-                OutputDirectory = os.path.dirname(InputPath)  # allow: R6 -- preexisting
+                OutputDirectory = ParentDir(InputPath)
                 OutputPath = self._NormalizeFfmpegPath(os.path.join(OutputDirectory, OutputFileName))
 
             if os.path.normcase(OutputPath) == os.path.normcase(InputPath):
@@ -775,7 +776,7 @@ class CommandBuilder:
                 OutputPath = self._NormalizeFfmpegPath(ExplicitOutputPath)
             else:
                 OutputFileName = BaseName + "-mv.mp4.inprogress"
-                OutputDirectory = os.path.dirname(InputPath)  # allow: R6 -- preexisting
+                OutputDirectory = ParentDir(InputPath)
                 OutputPath = self._NormalizeFfmpegPath(os.path.join(OutputDirectory, OutputFileName))
 
             if os.path.normcase(OutputPath) == os.path.normcase(InputPath):

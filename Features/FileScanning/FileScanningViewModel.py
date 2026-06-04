@@ -7,6 +7,7 @@ from Features.FileScanning.Models.SeasonModel import SeasonModel
 from Features.FileScanning.Models.FileScanResultModel import FileScanResultModel
 from Features.FileScanning.FileScanningBusinessService import FileScanningBusinessService
 from Core.Logging.LoggingService import LoggingService
+from Core.PathStorage import ParentDir
 
 
 class FileScanningViewModel:
@@ -390,7 +391,7 @@ class FileScanningViewModel:
             DisplayFiles = []
             for row in result['Rows']:
                 FilePath = row['FilePath'] or ''
-                Directory = os.path.dirname(FilePath) if FilePath else ''
+                Directory = ParentDir(FilePath) if FilePath else ''
                 SizeMB = row['SizeMB']
                 DurationMinutes = row['DurationMinutes']
                 LastScannedDate = row['LastScannedDate']

@@ -3,6 +3,7 @@ from typing import Dict, Any, Optional
 from Repositories.DatabaseManager import DatabaseManager
 from Services.FileManagerService import FileManagerService
 from Core.Logging.LoggingService import LoggingService
+from Core.PathStorage import LocalExists, LocalGetSize
 
 
 # directive: filereplacement-decompose | see compliance-gated-rename.feature.md
@@ -23,7 +24,7 @@ class ComplianceGate:
         try:
             from Features.TranscodeQueue.QueueManagementBusinessService import QueueManagementBusinessService
 
-            if not os.path.exists(LocalStagedPath):  # allow: local-path; host-resolved staged file
+            if not LocalExists(LocalStagedPath):
                 return {'Compliant': False, 'RefusalReason': 'staged_file_missing'}
 
             ProbeResult = self.FileManager.ExtractMediaMetadata(LocalStagedPath)
@@ -66,7 +67,7 @@ class ComplianceGate:
                 pass
 
             try:
-                SizeMB = os.path.getsize(LocalStagedPath) / (1024.0 * 1024.0)  # allow: local-path; host-resolved staged file
+                SizeMB = LocalGetSize(LocalStagedPath) / (1024.0 * 1024.0)
             except Exception:
                 SizeMB = 0
 

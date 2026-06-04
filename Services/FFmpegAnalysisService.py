@@ -5,6 +5,7 @@ import uuid
 from typing import Dict, Any, Optional
 from datetime import datetime, timezone
 from pathlib import Path
+from Core.PathStorage import LastSegment, LocalExists, LocalGetSize
 from Models.FFmpegAnalysisModel import FFmpegAnalysisModel
 from Services.FFmpegService import FFmpegService
 from Services.LoggingService import LoggingService
@@ -25,12 +26,12 @@ class FFmpegAnalysisService:
             # Create analysis model
             AnalysisModel = FFmpegAnalysisModel()
             AnalysisModel.FilePath = FilePath
-            AnalysisModel.FileName = os.path.basename(FilePath)
+            AnalysisModel.FileName = LastSegment(FilePath)
             AnalysisModel.FileExtension = Path(FilePath).suffix.lower()
-            
+
             # Get file size
-            if os.path.exists(FilePath):
-                AnalysisModel.FileSizeMB = os.path.getsize(FilePath) / (1024 * 1024)
+            if LocalExists(FilePath):
+                AnalysisModel.FileSizeMB = LocalGetSize(FilePath) / (1024 * 1024)
             
             # Execute FFprobe analysis. ExecuteFFprobe is responsible for logging the
             # subprocess failure (with stderr/stdout/command) -- don't double-log here,

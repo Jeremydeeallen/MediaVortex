@@ -104,3 +104,128 @@ def CanonicalFor(StorageRootId: int, RelativePath: str, Db=None) -> str:
     Prefix = _PREFIX_BY_ID_CACHE[StorageRootId]
     Rel = (RelativePath or '').replace('/', '\\').lstrip('\\')
     return Prefix + Rel
+
+
+# directive: paths-canonical-completion  # see path-storage.C4
+def LastSegment(PathValue):
+    """Trailing path segment (filename) for any shape: UNC, Windows-drive, POSIX."""
+    if not PathValue:
+        return ""
+    Idx = max(PathValue.rfind('/'), PathValue.rfind('\\'))
+    return PathValue[Idx + 1:] if Idx >= 0 else PathValue
+
+
+# directive: paths-canonical-completion  # see path-storage.C4
+def ParentDir(PathValue):
+    """Everything before the last separator; shape-preserving. Empty if no separator."""
+    if not PathValue:
+        return ""
+    Idx = max(PathValue.rfind('/'), PathValue.rfind('\\'))
+    return PathValue[:Idx] if Idx >= 0 else ""
+
+
+# directive: paths-canonical-completion  # see path-storage.C4
+def Join(BasePath, ChildSegment):
+    """Append child segment to base path; preserves base's separator shape (defaults to '/')."""
+    if not BasePath:
+        return ChildSegment or ""
+    if not ChildSegment:
+        return BasePath
+    LastFwd = BasePath.rfind('/')
+    LastBack = BasePath.rfind('\\')
+    if LastFwd < 0 and LastBack < 0:
+        Sep = '\\' if (len(BasePath) >= 2 and BasePath[1] == ':') else '/'
+    elif LastFwd > LastBack:
+        Sep = '/'
+    else:
+        Sep = '\\'
+    return BasePath.rstrip('/\\') + Sep + ChildSegment.lstrip('/\\')
+
+
+# directive: paths-canonical-completion  # see path-storage.C4
+def SplitExt(PathValue):
+    """Return (root, ext) where ext starts with '.'. Shape-preserving on root."""
+    if not PathValue:
+        return ("", "")
+    SepIdx = max(PathValue.rfind('/'), PathValue.rfind('\\'))
+    DotIdx = PathValue.rfind('.')
+    if DotIdx <= SepIdx or DotIdx < 0:
+        return (PathValue, "")
+    return (PathValue[:DotIdx], PathValue[DotIdx:])
+
+
+# directive: paths-canonical-completion  # see path-storage.C4
+def ToLocal(CanonicalPath, WorkerName, Db=None):
+    """Parse canonical path -> resolve to worker-local absolute path string."""
+    if not CanonicalPath:
+        return ""
+    StorageRoots = LoadStorageRoots(Db)
+    StorageRootId, RelativePath = Parse(CanonicalPath, StorageRoots)
+    if StorageRootId is None:
+        return CanonicalPath
+    return Resolve(StorageRootId, RelativePath, WorkerName, Db)
+
+
+# directive: paths-canonical-completion  # see path-storage.C4
+def Exists(CanonicalPath, WorkerName, Db=None):
+    """True iff the canonical path resolves to an existing local path on WorkerName."""
+    Local = ToLocal(CanonicalPath, WorkerName, Db)
+    return os.path.exists(Local) if Local else False
+
+
+# directive: paths-canonical-completion  # see path-storage.C4
+def IsFile(CanonicalPath, WorkerName, Db=None):
+    """True iff the canonical path resolves to an existing local file on WorkerName."""
+    Local = ToLocal(CanonicalPath, WorkerName, Db)
+    return os.path.isfile(Local) if Local else False
+
+
+# directive: paths-canonical-completion  # see path-storage.C4
+def IsDir(CanonicalPath, WorkerName, Db=None):
+    """True iff the canonical path resolves to an existing local directory on WorkerName."""
+    Local = ToLocal(CanonicalPath, WorkerName, Db)
+    return os.path.isdir(Local) if Local else False
+
+
+# directive: paths-canonical-completion  # see path-storage.C4
+def GetSize(CanonicalPath, WorkerName, Db=None):
+    """File size in bytes; raises FileNotFoundError if missing."""
+    Local = ToLocal(CanonicalPath, WorkerName, Db)
+    return os.path.getsize(Local)
+
+
+# directive: paths-canonical-completion  # see path-storage.C4
+def GetMTime(CanonicalPath, WorkerName, Db=None):
+    """Modification time as POSIX timestamp; raises FileNotFoundError if missing."""
+    Local = ToLocal(CanonicalPath, WorkerName, Db)
+    return os.path.getmtime(Local)
+
+
+# directive: paths-canonical-completion  # see path-storage.C4
+def LocalExists(LocalPath):
+    """True iff the local-machine path exists. Caller asserts path is local, not canonical."""
+    return os.path.exists(LocalPath) if LocalPath else False
+
+
+# directive: paths-canonical-completion  # see path-storage.C4
+def LocalIsFile(LocalPath):
+    """True iff the local-machine path is an existing file."""
+    return os.path.isfile(LocalPath) if LocalPath else False
+
+
+# directive: paths-canonical-completion  # see path-storage.C4
+def LocalIsDir(LocalPath):
+    """True iff the local-machine path is an existing directory."""
+    return os.path.isdir(LocalPath) if LocalPath else False
+
+
+# directive: paths-canonical-completion  # see path-storage.C4
+def LocalGetSize(LocalPath):
+    """File size of a local-machine path; raises FileNotFoundError if missing."""
+    return os.path.getsize(LocalPath)
+
+
+# directive: paths-canonical-completion  # see path-storage.C4
+def LocalGetMTime(LocalPath):
+    """Modification time of a local-machine path; raises FileNotFoundError if missing."""
+    return os.path.getmtime(LocalPath)

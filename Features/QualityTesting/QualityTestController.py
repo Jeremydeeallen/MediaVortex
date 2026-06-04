@@ -9,6 +9,7 @@ from flask import Blueprint, request, jsonify
 from Repositories.DatabaseManager import DatabaseManager
 from Features.QualityTesting.QualityTestRepository import QualityTestRepository
 from Core.Logging.LoggingService import LoggingService
+from Core.PathStorage import LastSegment, ParentDir
 from Services.QualityTestQueueService import QualityTestQueueService
 
 QualityTestBlueprint = Blueprint('QualityTest', __name__)
@@ -629,8 +630,8 @@ def QueueTestRun():
                         MfStorageRootId,
                         MfRelativePath,
                         Path_,
-                        os.path.basename(Path_),  # allow: preexisting path-shape debt, BUG-0042 blast-radius cap
-                        os.path.dirname(Path_),
+                        LastSegment(Path_),
+                        ParentDir(Path_),
                         int((Mf.get('SizeMB') or 0) * 1024 * 1024),
                         Mf.get('SizeMB') or 0,
                         50,

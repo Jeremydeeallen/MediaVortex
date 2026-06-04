@@ -26,6 +26,8 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from Services.LoggingService import LoggingService
 from Repositories.DatabaseManager import DatabaseManager
+from Core.Database.DatabaseService import EscapeLikePattern
+from Core.PathStorage import LocalExists, LocalIsDir
 
 
 class WorkerServiceApp:
@@ -132,8 +134,8 @@ class WorkerServiceApp:
                 # Find all existing workers with this prefix
                 Cur.execute(
                     "SELECT WorkerName, LastHeartbeat FROM Workers "
-                    "WHERE WorkerName LIKE %s ORDER BY WorkerName",
-                    (Prefix + '-%',)
+                    "WHERE WorkerName LIKE %s ESCAPE '!' ORDER BY WorkerName",
+                    (EscapeLikePattern(Prefix) + '-%',)
                 )
                 Existing = {Row[0]: Row[1] for Row in Cur.fetchall()}
 
@@ -514,7 +516,7 @@ class WorkerServiceApp:
             Path = Row.get('AbsolutePath') or Row.get('absolutepath')
             if not Path:
                 continue
-            if not os.path.isdir(Path):
+            if not LocalIsDir(Path):
                 Failures.append((Path, "mount point does not exist or is not a directory"))
                 continue
             try:
@@ -1221,7 +1223,7 @@ def _VerifyRequiredPaths():
             Name = Row.get('ShareName') or Row.get('sharename')
             if not Path:
                 continue
-            if not os.path.exists(Path):
+            if not LocalExists(Path):
                 Missing.append(f"{Name} ({Path})")
 
         if Missing:

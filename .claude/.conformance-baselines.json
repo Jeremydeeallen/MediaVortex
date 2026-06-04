@@ -13,6 +13,34 @@
       "import_module": "Repositories.DatabaseManager",
       "baseline": 123,
       "feature_doc": "Core/Database/repository-split.feature.md"
+    },
+    {
+      "scope": "production_code",
+      "metric": "os_path_on_pathvar_count",
+      "regex": "(?i)os\\.path\\.(basename|dirname|join|split|splitext|exists|isfile|isdir|getsize|getmtime|abspath|realpath)\\s*\\(\\s*\\w*(?:path|filepath)\\w*",
+      "paths": ["Features/", "Services/", "Repositories/", "Core/", "Models/", "WebService/", "WorkerService/", "StartMediaVortex.py", "StartWorker.py"],
+      "exclude_files": ["Core/PathStorage.py"],
+      "baseline": 0,
+      "feature_doc": "path-storage.feature.md",
+      "directive": "paths-canonical-completion"
+    },
+    {
+      "scope": "production_code",
+      "metric": "pathvar_replace_split_count",
+      "regex": "(?i)\\b\\w*(?:path|filepath)\\w*\\s*\\.\\s*replace\\s*\\([^)]*\\)\\s*\\.\\s*split\\s*\\(",
+      "paths": ["Features/", "Services/", "Repositories/", "Core/", "Models/", "WebService/", "WorkerService/", "StartMediaVortex.py", "StartWorker.py"],
+      "baseline": 0,
+      "feature_doc": "path-storage.feature.md",
+      "directive": "paths-canonical-completion"
+    },
+    {
+      "scope": "production_code",
+      "metric": "allow_r6_annotation_count",
+      "regex": "# allow:.*R6",
+      "paths": ["Features/", "Services/", "Repositories/", "Core/", "Models/", "WebService/", "WorkerService/", "StartMediaVortex.py", "StartWorker.py"],
+      "baseline": 0,
+      "feature_doc": "path-storage.feature.md",
+      "directive": "paths-canonical-completion"
     }
   ]
 }

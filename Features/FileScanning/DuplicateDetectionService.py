@@ -3,6 +3,7 @@ from typing import List, Dict, Any
 from Services.FileManagerService import FileManagerService
 from Features.FileScanning.FileScanningRepository import FileScanningRepository
 from Core.Logging.LoggingService import LoggingService
+from Core.PathStorage import LastSegment, LocalGetSize
 
 
 class DuplicateDetectionService:
@@ -31,7 +32,7 @@ class DuplicateDetectionService:
             SizeGroups = {}
             for FilePath in FoundFiles:
                 try:
-                    FileSize = os.path.getsize(FilePath)
+                    FileSize = LocalGetSize(FilePath)
                     if FileSize not in SizeGroups:
                         SizeGroups[FileSize] = []
                     SizeGroups[FileSize].append(FilePath)
@@ -143,7 +144,7 @@ class DuplicateDetectionService:
             BestScore = 0
 
             for FilePath in Files:
-                FileName = os.path.basename(FilePath).lower()
+                FileName = LastSegment(FilePath).lower()
                 Score = 0
 
                 # Check for quality indicators

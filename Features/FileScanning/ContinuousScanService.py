@@ -5,6 +5,7 @@ from typing import Dict, Any, List
 from datetime import datetime, timezone
 from Core.Logging.LoggingService import LoggingService
 from Core.DateTimeHelpers import AsAwareUtc, ToUtcIsoZ
+from Core.PathStorage import LocalIsDir
 
 
 class ContinuousScanService:
@@ -338,7 +339,7 @@ class ContinuousScanService:
                     #   - directory is empty (local FS showing through where a
                     #     mounted share should be -- the wakko 2026-05-14 bug)
                     ValidationError = None
-                    if not os.path.isdir(LocalRootPath):
+                    if not LocalIsDir(LocalRootPath):
                         ValidationError = "not a directory"
                     else:
                         try:

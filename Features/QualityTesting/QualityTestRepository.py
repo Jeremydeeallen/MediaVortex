@@ -2,20 +2,11 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime, timezone
 from Core.Database.BaseRepository import BaseRepository
 from Core.Logging.LoggingService import LoggingService
+from Core.PathStorage import LastSegment
 from Features.QualityTesting.Models.QualityTestResultModel import QualityTestResultModel
 
 
-def _LastPathSegment(PathValue):
-    """Trailing path segment from a string of unknown shape (UNC/drive/POSIX)."""
-    if not PathValue:
-        return ""
-    Normalized = PathValue.replace('\\', '/').rstrip('/')
-    Idx = Normalized.rfind('/')
-    if Idx < 0:
-        return Normalized
-    return Normalized[Idx + 1:]
-
-
+# directive: paths-canonical-completion | see qualitytesting.C1
 class QualityTestRepository(BaseRepository):
     """Repository for quality test CRUD operations."""
 
@@ -258,7 +249,7 @@ class QualityTestRepository(BaseRepository):
             Results = []
             for Row in Rows:
                 TranscodedFilePath = Row["TranscodedFilePath"]
-                TranscodedFileName = _LastPathSegment(TranscodedFilePath) if TranscodedFilePath else None
+                TranscodedFileName = LastSegment(TranscodedFilePath) if TranscodedFilePath else None
 
                 Results.append({
                     "Id": Row["Id"],
@@ -391,7 +382,7 @@ class QualityTestRepository(BaseRepository):
             Results = []
             for Row in Rows or []:
                 OriginalPath = Row.get("OriginalFilePath") or Row.get("TaFilePath")
-                FileName = _LastPathSegment(OriginalPath) if OriginalPath else f"TranscodeAttempt_{Row['TranscodeAttemptId']}"
+                FileName = LastSegment(OriginalPath) if OriginalPath else f"TranscodeAttempt_{Row['TranscodeAttemptId']}"
                 Results.append({
                     "Id": Row.get("Id"),
                     "TranscodeAttemptId": Row["TranscodeAttemptId"],

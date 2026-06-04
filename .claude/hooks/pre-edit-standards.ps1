@@ -756,18 +756,34 @@ function Test-R5-ExecuteQueryMisuse {
 function Test-R6-PathShape {
     param($PostContent, $FilePath, $AllContent)
     if ($FilePath -notmatch '\.py$') { return $null }
-    # directive: db-monolith-steering-hook -- per-file R6 suppression on the monolith being migrated; see Core/Database/repository-split.feature.md#perfect-end-state. Running R6 on this file charges rent against preexisting os.path sites without producing forward progress. New methods get steered to per-aggregate repos by R19 where R6 still fires normally.
+    # directive: paths-canonical-completion -- Core/PathStorage.py IS the canonical home; its own os.path uses are correct and exempt.
     $NormR6 = $FilePath -replace '\\','/'
-    if ($NormR6 -match '/Repositories/DatabaseManager\.py$') { return $null }
+    if ($NormR6 -match '/Core/PathStorage\.py$') { return $null }
     $Lines = $PostContent -split "`n"
     for ($I = 0; $I -lt $Lines.Length; $I++) {
         if ($Lines[$I] -match '(?i)\b(\w*(?:path|filepath)\w*)\s*\.\s*replace\s*\([^)]*\)\s*\.\s*split\s*\(') {
             if (Test-AllowOverride $PostContent $I 'R6' $FilePath) { continue }
-            return "R6 Path shape: $FilePath line $($I+1) does .replace().split() on a path-named variable. FilePath is a mix of UNC, drive-letter, and POSIX shapes; use shape-explicit path libs. See .claude/rules/ceo-mode.md#handling-preexisting-comment--doc-violations-encountered-mid-directive. Path forward: for new code, use PathTranslationService for canonical<->local translation, or ntpath / PurePosixPath for shape-explicit string ops. For preexisting code outside this directive's surface, open a new directive (e.g. 'path-shape-migration-<file>') and do the migration there; do not expand the current directive's blast radius."
+            return "R6 Path shape: $FilePath line $($I+1) does .replace().split() on a path-named variable. FilePath is a mix of UNC, drive-letter, and POSIX shapes. Path forward: use Core.PathStorage.LastSegment(path) for filename, Core.PathStorage.ParentDir(path) for directory -- both shape-preserving for UNC/drive/POSIX. See path-storage.feature.md."
         }
-        if ($Lines[$I] -match '(?i)os\.path\.(dirname|basename|join|split)\s*\(\s*\w*(?:path|filepath)\w*') {
+        if ($Lines[$I] -match '(?i)os\.path\.(dirname|basename|join|split|splitext|exists|isfile|isdir|getsize|getmtime|abspath|realpath)\s*\(\s*\w*(?:path|filepath)\w*') {
             if (Test-AllowOverride $PostContent $I 'R6' $FilePath) { continue }
-            return "R6 Path shape: $FilePath line $($I+1) uses os.path on a path-named variable. os.path is platform-relative; MediaFiles.FilePath shapes are not. See .claude/rules/ceo-mode.md#handling-preexisting-comment--doc-violations-encountered-mid-directive. Path forward: for new code, use PathTranslationService for canonical<->local translation, or ntpath / PurePosixPath for shape-explicit string ops. For preexisting code outside this directive's surface, open a new directive (e.g. 'path-shape-migration-<file>') and do the migration there; do not expand the current directive's blast radius."
+            $Op = $Matches[1]
+            $Map = @{
+                'dirname'  = 'Core.PathStorage.ParentDir(path)  -- shape-preserving'
+                'basename' = 'Core.PathStorage.LastSegment(path)  -- shape-preserving'
+                'join'     = 'Core.PathStorage.Join(base, child)  -- preserves base shape'
+                'split'    = 'Core.PathStorage.SplitExt(path) or LastSegment+ParentDir'
+                'splitext' = 'Core.PathStorage.SplitExt(path)'
+                'exists'   = 'Core.PathStorage.Exists(canonical, worker)  OR  Core.PathStorage.LocalExists(local_path)'
+                'isfile'   = 'Core.PathStorage.IsFile(canonical, worker)  OR  Core.PathStorage.LocalIsFile(local_path)'
+                'isdir'    = 'Core.PathStorage.IsDir(canonical, worker)  OR  Core.PathStorage.LocalIsDir(local_path)'
+                'getsize'  = 'Core.PathStorage.GetSize(canonical, worker)  OR  Core.PathStorage.LocalGetSize(local_path)'
+                'getmtime' = 'Core.PathStorage.GetMTime(canonical, worker)  OR  Core.PathStorage.LocalGetMTime(local_path)'
+                'abspath'  = 'Core.PathStorage.ToLocal(canonical, worker) if you need a local-absolute path'
+                'realpath' = 'Core.PathStorage.ToLocal(canonical, worker) if you need a local-absolute path'
+            }
+            $Suggest = $Map[$Op.ToLower()]
+            return "R6 Path shape: $FilePath line $($I+1) uses os.path.$Op on a path-named variable. os.path is platform-relative; MediaFiles.FilePath shapes are mixed (UNC / Windows-drive / POSIX). Path forward: $Suggest. For canonical vs local FS-op decision: canonical = path from DB column (needs worker translation); local = path already worker-resolved (ffmpeg binary, temp file, post-Resolve path). See path-storage.feature.md and Core/PathStorage.py."
         }
     }
     return $null
@@ -939,11 +955,16 @@ function Test-R15-DirectiveAnchor {
         if ($Norm -like "*$DFNorm" -or $Norm -like "*/$DFNorm") { $InScope = $true; break }
     }
     if (-not $InScope) { return $null }
+    # directive: r15-edited-region-only -- only check defs whose def-line falls in
+    # the current edit region. Parallels R12 (r12-edited-region-only 2026-06-01)
+    # and R6 (filereplacement-decompose 2026-06-02). Untouched legacy defs in a
+    # monolith being migrated must not block small per-method edits.
     $Lines = $PostContent -split "`n"
     for ($I = 0; $I -lt $Lines.Length; $I++) {
         if ($Lines[$I] -match '^\s*(def|class)\s+\w+') {
             $Prev = if ($I -gt 0) { $Lines[$I-1] } else { '' }
             if ($Prev -notmatch "#\s*directive:\s*[a-z0-9-]+") {
+                if (-not (Test-LineInEditRegion ($I+1) $EditRegion)) { continue }
                 if (Test-AllowOverride $PostContent $I 'R15' $FilePath) { continue }
                 return "R15 Directive anchor: $FilePath line $($I+1) defines a function/class without '# directive: $Slug' on the line above. This file is in the active directive's scope. See .claude/standards/index.md R15 row. Path forward: add '# directive: <active-slug>' on the line immediately above the def/class. This is the grep anchor that lets future readers find the directive that explains why this function exists in its current shape."
             }

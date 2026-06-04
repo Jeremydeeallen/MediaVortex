@@ -15,12 +15,33 @@ from Services.FileManagerService import FileManagerService
 from Features.FileScanning.FileScanningRepository import FileScanningRepository
 from Features.MediaProbe.MediaProbeBusinessService import MediaProbeBusinessService
 from Core.Logging.LoggingService import LoggingService
+from Core.PathStorage import (
+    LastSegment, ParentDir, Join, SplitExt,
+    Exists, IsFile, IsDir, GetSize, GetMTime, ToLocal,
+    LocalExists, LocalIsFile, LocalIsDir, LocalGetSize, LocalGetMTime,
+)
 
 
+# directive: paths-canonical-completion
+def _CurrentWorkerName():
+    # see filescanning.ST1
+    """Resolve the active WorkerName from WorkerContext (None if not set)."""
+    try:
+        from Core.WorkerContext import WorkerContext
+        Ctx = WorkerContext.Current()
+        return Ctx.WorkerName if Ctx and Ctx.WorkerName else None
+    except Exception:
+        return None
+
+
+# directive: paths-canonical-completion
 class FileScanningBusinessService:
     """Orchestrates the file scanning process and coordinates between services."""
+    # see filescanning.ST1
 
+    # directive: paths-canonical-completion
     def __init__(self, RepositoryInstance=None, FileManagerInstance=None):
+        # see filescanning.ST1
         self.Repository = RepositoryInstance or FileScanningRepository()
         self.FileManager = FileManagerInstance or FileManagerService()
         self.MediaProbeService = MediaProbeBusinessService()
@@ -83,12 +104,10 @@ class FileScanningBusinessService:
             pass
         return LocalPath
 
+    # directive: paths-canonical-completion
     def StartScanning(self, RootFolderPath: str, Recursive: bool = True, SkipDuplicateCleanup: bool = False, WorkerName: Optional[str] = None) -> Dict[str, Any]:
-        """Start scanning a root folder for media files directly in the main process.
-
-        WorkerName is recorded on the ScanJobs row for observability and used by the
-        per-rootfolder duplicate guard. When None, falls back to WorkerContext.Current().
-        """
+        # see filescanning.ST1
+        """Start scanning a root folder; see filescanning.ST1 for stage detail."""
         try:
             LoggingService.LogFunctionEntry("StartScanning", 'FileScanningBusinessService', RootFolderPath, Recursive=Recursive)
 
@@ -135,7 +154,7 @@ class FileScanningBusinessService:
             LoggingService.LogInfo(f"Normalized local path: '{NormalizedPath}' (canonical: '{RootFolderPath}')", 'FileScanningBusinessService', 'StartScanning')
 
             # Check if path exists
-            PathExists = os.path.exists(NormalizedPath)
+            PathExists = LocalExists(NormalizedPath)
 
             if not PathExists:
                 LoggingService.LogError(f"Path does not exist: local='{NormalizedPath}', canonical='{RootFolderPath}'", 'FileScanningBusinessService', 'StartScanning')
@@ -153,7 +172,7 @@ class FileScanningBusinessService:
                         'Error': 'InvalidPath'
                     }
 
-            if not os.path.isdir(NormalizedPath):
+            if not LocalIsDir(NormalizedPath):
                 return {
                     'Success': False,
                     'Message': f'Path is not a directory: {RootFolderPath}',
@@ -450,7 +469,9 @@ class FileScanningBusinessService:
         self._HeartbeatStopEvent = None
         self._HeartbeatThread = None
 
+    # directive: paths-canonical-completion
     def _RunSizeSurvey(self, LocalRootPath: str, CanonicalRootPath: str, RootFolder: RootFolderModel):
+        # see filescanning.ST2
         """Directive 2026-05-27 (scan -- largest files first), criteria 1-5.
 
         Stat-only recursive enumeration of media files under LocalRootPath.
@@ -499,7 +520,7 @@ class FileScanningBusinessService:
                                     continue
                                 _WalkSurvey(Entry.path)
                             elif Entry.is_file(follow_symlinks=False):
-                                Ext = os.path.splitext(Entry.name)[1].lower()
+                                Ext = SplitExt(Entry.name)[1].lower()
                                 if Ext not in MediaExts:
                                     continue
                                 St = Entry.stat(follow_symlinks=False)
@@ -533,7 +554,7 @@ class FileScanningBusinessService:
         for SizeBytes, Mtime, LocalPath in TopList:
             try:
                 CanonicalPath = self._ToCanonicalPath(LocalPath)
-                FileName = os.path.basename(LocalPath)
+                FileName = LastSegment(LocalPath)
                 SizeMB = round(SizeBytes / (1024 * 1024), 2)
                 MtimeDt = datetime.fromtimestamp(Mtime, tz=timezone.utc).replace(tzinfo=None)
                 StorageRootId, RelativePath = PathParse(CanonicalPath, Roots)
@@ -809,7 +830,9 @@ class FileScanningBusinessService:
             }
 
 
+    # directive: paths-canonical-completion
     def GetOrCreateRootFolder(self, RootFolderPath: str, TotalSizeGB: float) -> RootFolderModel:
+        # see filescanning.ST6
         """Get existing root folder or create a new one.
 
         RootFolderPath is canonical (Windows-style). On Windows we walk the
@@ -832,7 +855,7 @@ class FileScanningBusinessService:
             for Folder in ExistingFolders:
                 try:
                     if UseFsCanonicalization:
-                        if os.path.exists(Folder.RootFolder):
+                        if Exists(Folder.RootFolder, _CurrentWorkerName()):
                             ExistingCanonical = self.GetCanonicalPathFromFilesystem(Folder.RootFolder)
                             if ExistingCanonical == CanonicalPath:
                                 Folder.RootFolder = CanonicalPath
@@ -868,7 +891,9 @@ class FileScanningBusinessService:
             LoggingService.LogException("Error managing root folder", e)
             raise
 
+    # directive: paths-canonical-completion
     def GetCanonicalPathFromFilesystem(self, Path: str) -> str:
+        # see filescanning.ST1
         """Get the actual case-sensitive path as it exists on the filesystem."""
         try:
             if not Path:
@@ -878,7 +903,7 @@ class FileScanningBusinessService:
             normalized_path = os.path.normpath(Path)
 
             # Check if path exists
-            if not os.path.exists(normalized_path):
+            if not LocalExists(normalized_path):
                 LoggingService.LogWarning(f"Path does not exist, cannot get canonical case: {Path}",
                                          'GetCanonicalPathFromFilesystem', 'FileScanningBusinessService')
                 return normalized_path
@@ -909,7 +934,7 @@ class FileScanningBusinessService:
 
                 try:
                     # List directory contents to find actual case
-                    if os.path.isdir(current_path):
+                    if LocalIsDir(current_path):
                         dir_contents = os.listdir(current_path)
                         # Find matching directory (case-insensitive comparison)
                         actual_name = None
@@ -919,18 +944,18 @@ class FileScanningBusinessService:
                                 break
 
                         if actual_name:
-                            current_path = os.path.join(current_path, actual_name)
+                            current_path = Join(current_path, actual_name)
                         else:
                             # If not found in listing, use original (might be a file)
-                            current_path = os.path.join(current_path, part)
+                            current_path = Join(current_path, part)
                     else:
                         # Not a directory, just append
-                        current_path = os.path.join(current_path, part)
+                        current_path = Join(current_path, part)
                 except Exception as e:
                     # If we can't list directory, just use original part
                     LoggingService.LogWarning(f"Could not list directory '{current_path}' to get actual case, using: {part}",
                                              'GetCanonicalPathFromFilesystem', 'FileScanningBusinessService')
-                    current_path = os.path.join(current_path, part)
+                    current_path = Join(current_path, part)
 
             # Log if case changed
             if current_path != normalized_path:
@@ -1072,7 +1097,9 @@ class FileScanningBusinessService:
             LoggingService.LogException("Error building show/episode index", e, 'FileScanningBusinessService', '_BuildShowEpisodeIndex')
         return Index
 
+    # directive: paths-canonical-completion
     def FindFuzzyFileMatch(self, FilePath: str, FileName: str, FileSizeMB: float, RootFolderId: int) -> Optional[MediaFileModel]:
+        # see filescanning.ST5
         """Find a fuzzy match for a file in the database. When a per-scan
         show/episode index is set on `self._ShowEpisodeIndex` (criterion 25),
         candidate lookup is O(1); otherwise falls back to the legacy O(N)
@@ -1098,7 +1125,7 @@ class FileScanningBusinessService:
                     if abs((FileSizeMB or 0) - (DbFile.SizeMB or 0)) >= 1.0:
                         continue
 
-                if not os.path.exists(self._ToLocalPath(DbFile.FilePath)):
+                if not Exists(DbFile.FilePath, _CurrentWorkerName()):
                     return DbFile
                 else:
                     return None
@@ -1109,7 +1136,9 @@ class FileScanningBusinessService:
             LoggingService.LogException("Error in fuzzy file matching", e)
             return None
 
+    # directive: paths-canonical-completion
     def ProcessSingleMediaFile(self, FilePath: str, RootFolderId: Optional[int], RootFolderPath: str = "", ExtractMetadata: bool = True):
+        # see filescanning.ST4
         """Process a single media file with fuzzy matching and optional metadata extraction.
 
         FilePath is the canonical (Windows-style) path stored in the DB. On Linux
@@ -1122,7 +1151,7 @@ class FileScanningBusinessService:
             LocalPath = self._ToLocalPath(FilePath)
 
             # Existence check uses the translated local path.
-            if not os.path.exists(LocalPath):
+            if not LocalExists(LocalPath):
                 LoggingService.LogWarning(f"File does not exist on disk: {FilePath} (local: {LocalPath})", 'ProcessSingleMediaFile', 'FileScanningBusinessService')
 
                 ExistingFile = self.Repository.GetMediaFileByPath(FilePath)
@@ -1140,7 +1169,7 @@ class FileScanningBusinessService:
             FileModificationTime = self.GetFileModificationTime(LocalPath)
 
             try:
-                FileSize = os.path.getsize(LocalPath)
+                FileSize = LocalGetSize(LocalPath)
             except Exception:
                 FileSize = int(FileSizeMB * 1024 * 1024) if FileSizeMB else 0
 
@@ -1461,7 +1490,9 @@ class FileScanningBusinessService:
         # Clean up old completed jobs
         self.CleanupCompletedJobs()
 
+    # directive: paths-canonical-completion
     def ShouldExtractMetadata(self, MediaFile: MediaFileModel) -> bool:
+        # see filescanning.ST4
         """Determine if metadata should be extracted for a media file based on change detection."""
         try:
             # Don't extract if media analysis is not available
@@ -1499,8 +1530,9 @@ class FileScanningBusinessService:
             # Check if file has changed (size or name)
             # Get current file information to compare
             try:
-                if os.path.exists(MediaFile.FilePath):
-                    CurrentSizeMB = os.path.getsize(MediaFile.FilePath) / (1024 * 1024)
+                WorkerName = _CurrentWorkerName()
+                if Exists(MediaFile.FilePath, WorkerName):
+                    CurrentSizeMB = GetSize(MediaFile.FilePath, WorkerName) / (1024 * 1024)
                     CurrentFileName = ntpath.basename(MediaFile.FilePath)
                     CurrentModificationTime = self.GetFileModificationTime(MediaFile.FilePath)
 
@@ -1522,7 +1554,9 @@ class FileScanningBusinessService:
             LoggingService.LogException("Error determining if metadata should be extracted", e, 'ShouldExtractMetadata', 'FileScanningBusinessService')
             return False
 
+    # directive: paths-canonical-completion
     def GetFileModificationTime(self, FilePath: str) -> datetime:
+        # see filescanning.ST4
         """Return the file modification time as a NAIVE datetime in UTC.
         Owns FileScanning.feature.md criterion 26 (cross-worker mtime
         consistency). The DB column is `timestamp without time zone`; if
@@ -1535,7 +1569,7 @@ class FileScanningBusinessService:
         worker-independent.
         """
         try:
-            ModificationTime = os.path.getmtime(FilePath)
+            ModificationTime = LocalGetMTime(FilePath)
             # Windows datetime.fromtimestamp() cannot handle negative timestamps (pre-1970 dates)
             if ModificationTime < 0:
                 ModificationTime = 0
@@ -1578,16 +1612,17 @@ class FileScanningBusinessService:
             # If we can't check, assume it changed to be safe
             return True
 
+    # directive: paths-canonical-completion
     def IsSameFile(self, DbFile: MediaFileModel, FilePath: str) -> bool:
+        # see filescanning.ST5
         """Check if a file at a given path is the same as a database file record."""
         try:
-            if not os.path.exists(FilePath):
+            if not LocalExists(FilePath):
                 return False
 
-            # Get current file information. mtime in UTC (criterion 26) so the
-            # comparison against a stored mtime is timezone-independent.
-            CurrentSize = os.path.getsize(FilePath) / (1024 * 1024)  # MB
-            CurrentModTime = datetime.fromtimestamp(os.path.getmtime(FilePath), tz=timezone.utc).replace(tzinfo=None)
+            # mtime in UTC: see FileScanning.feature.md C26 for cross-worker invariant.
+            CurrentSize = LocalGetSize(FilePath) / (1024 * 1024)  # MB
+            CurrentModTime = datetime.fromtimestamp(LocalGetMTime(FilePath), tz=timezone.utc).replace(tzinfo=None)
 
             # Allow 1MB size difference (to account for transcoding compression)
             SizeMatch = abs(CurrentSize - DbFile.SizeMB) < 1.0
@@ -1701,7 +1736,9 @@ class FileScanningBusinessService:
             MediaFile.LastFFprobeError = str(e)
             MediaFile.LastFFprobeAttemptDate = datetime.now(timezone.utc)
 
+    # directive: paths-canonical-completion
     def ReconcileWithDisk(self, MediaFiles: List[str], RootFolderId: int) -> Dict[str, Any]:
+        # see filescanning.ST5
         """Single-pass merge of move-detection and missing-file cleanup against
         the disk file list already produced by `FileManager.ScanDirectory`.
         Owns FileScanning.feature.md criterion 23 (throughput dimension) and
@@ -1753,7 +1790,7 @@ class FileScanningBusinessService:
                     UnparseableCount += 1
                     continue
                 DiskSet.add((Sid, Rel.lower()))
-                Basename = os.path.basename(CanonicalPath).lower()
+                Basename = LastSegment(CanonicalPath).lower()
                 DiskByBasenameLower.setdefault(Basename, []).append((CanonicalPath, Sid, Rel))
             if UnparseableCount > 0:
                 LoggingService.LogWarning(
@@ -1858,7 +1895,9 @@ class FileScanningBusinessService:
             LoggingService.LogException("Error in ReconcileWithDisk", e, 'ReconcileWithDisk', 'FileScanningBusinessService')
             return {'Success': False, 'ErrorMessage': str(e)}
 
+    # directive: paths-canonical-completion
     def CleanupMissingFiles(self, RootFolderId: Optional[int] = None):
+        # see filescanning.ST5
         """Remove database records for files that no longer exist on disk."""
         try:
             LoggingService.LogInfo("=== CLEANUP MISSING FILES STARTED ===", 'CleanupMissingFiles', 'FileScanningBusinessService')
@@ -1882,7 +1921,7 @@ class FileScanningBusinessService:
             # Translate canonical (Windows-style) DB path to local for the fs check.
             DeletedCount = 0
             for DbFile in DatabaseFiles:
-                if not os.path.exists(self._ToLocalPath(DbFile.FilePath)):
+                if not Exists(DbFile.FilePath, _CurrentWorkerName()):
                     LoggingService.LogInfo(f"FILE NOT FOUND ON DISK - DELETING FROM DATABASE: {DbFile.FilePath}", 'CleanupMissingFiles', 'FileScanningBusinessService')
 
                     # Delete directly using the database service
@@ -1904,7 +1943,9 @@ class FileScanningBusinessService:
         except Exception as e:
             LoggingService.LogException("CRITICAL ERROR in CleanupMissingFiles", e, 'CleanupMissingFiles', 'FileScanningBusinessService')
 
+    # directive: paths-canonical-completion
     def FindMovedFile(self, DbFile: MediaFileModel) -> Optional[Dict[str, str]]:
+        # see filescanning.ST5
         """Try to find a moved file by searching all root folders."""
         try:
             LoggingService.LogDebug(f"Searching for moved file: {DbFile.FileName}", 'FindMovedFile', 'FileScanningBusinessService')
@@ -1920,7 +1961,7 @@ class FileScanningBusinessService:
             # local path back to canonical before returning so DB stays portable.
             for RootFolder in AllRootFolders:
                 LocalRoot = self._ToLocalPath(RootFolder.RootFolder)
-                if not os.path.exists(LocalRoot):
+                if not LocalExists(LocalRoot):
                     LoggingService.LogDebug(f"Root folder does not exist (local: {LocalRoot}): {RootFolder.RootFolder}", 'FindMovedFile', 'FileScanningBusinessService')
                     continue
 
@@ -1928,7 +1969,7 @@ class FileScanningBusinessService:
                     for root, dirs, files in os.walk(LocalRoot):
                         for file in files:
                             if file == SearchFileName:
-                                FoundLocalPath = os.path.join(root, file)
+                                FoundLocalPath = Join(root, file)
                                 FoundCanonicalPath = self._ToCanonicalPath(FoundLocalPath)
 
                                 # Skip if this is the original path (not moved)
@@ -1970,7 +2011,9 @@ class FileScanningBusinessService:
             LoggingService.LogException("Error reading MoveDetectionMaxFiles, using default", e, 'FileScanningBusinessService', '_GetMoveDetectionMaxFiles')
         return Default
 
+    # directive: paths-canonical-completion
     def DetectMovedFiles(self, RootFolderId: Optional[int] = None) -> Dict[str, Any]:
+        # see filescanning.ST5
         """Detect files that have been moved and update their paths."""
         try:
             LoggingService.LogInfo("=== DETECT MOVED FILES STARTED ===", 'DetectMovedFiles', 'FileScanningBusinessService')
@@ -2007,7 +2050,7 @@ class FileScanningBusinessService:
 
             # Check each file for moves (translate canonical -> local for fs check)
             for DbFile in DatabaseFiles:
-                if not os.path.exists(self._ToLocalPath(DbFile.FilePath)):
+                if not Exists(DbFile.FilePath, _CurrentWorkerName()):
                     # File missing - try to find it
                     MovedFile = self.FindMovedFile(DbFile)
 
@@ -2050,7 +2093,9 @@ class FileScanningBusinessService:
                 'DeletedFiles': 0
             }
 
+    # directive: paths-canonical-completion
     def ProcessMediaFilesWithMetadata(self, MediaFiles: List[str], RootFolderId: Optional[int], RootFolderPath: str = "", ExtractMetadata: bool = True):
+        # see filescanning.ST4
         """Process media files with optional metadata extraction using parallel processing."""
         try:
             LoggingService.LogFunctionEntry("ProcessMediaFilesWithMetadata", 'FileScanningBusinessService', f"Processing {len(MediaFiles)} files, ExtractMetadata: {ExtractMetadata}")
@@ -2098,7 +2143,7 @@ class FileScanningBusinessService:
                         Progress = 30.0 + (60.0 * ProcessedCount / TotalFiles)
                         self.ScanProgress = Progress
                         self.ScanResults.TotalFilesProcessed = ProcessedCount
-                        self.CurrentScanDirectory = os.path.dirname(FilePath)
+                        self.CurrentScanDirectory = ParentDir(FilePath)
 
                     return {'Success': True, 'FilePath': FilePath}
                 except Exception as e:

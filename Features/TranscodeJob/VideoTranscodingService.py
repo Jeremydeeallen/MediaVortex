@@ -6,6 +6,7 @@ import time
 from typing import Dict, Any, Optional, Callable
 from datetime import datetime, timezone
 from Core.Logging.LoggingService import LoggingService
+from Core.PathStorage import LocalExists, LocalGetSize
 
 
 from Core.DateTimeHelpers import ToUtcIsoZ
@@ -181,8 +182,8 @@ class VideoTranscodingService:
                 OutputFilePath = self.ExtractOutputPathFromCommand(TranscodeCommand)
                 NewSizeBytes = 0
 
-                if OutputFilePath and os.path.exists(OutputFilePath):
-                    NewSizeBytes = os.path.getsize(OutputFilePath)
+                if OutputFilePath and LocalExists(OutputFilePath):
+                    NewSizeBytes = LocalGetSize(OutputFilePath)
                     LoggingService.LogInfo(f"Captured file size immediately after transcode: {NewSizeBytes} bytes",
                                          "VideoTranscodingService", "TranscodeVideo")
                 else:
@@ -193,8 +194,8 @@ class VideoTranscodingService:
 
                     for attempt in range(3):  # Try 3 times
                         time.sleep(0.1)  # Wait 100ms between attempts
-                        if OutputFilePath and os.path.exists(OutputFilePath):
-                            NewSizeBytes = os.path.getsize(OutputFilePath)
+                        if OutputFilePath and LocalExists(OutputFilePath):
+                            NewSizeBytes = LocalGetSize(OutputFilePath)
                             LoggingService.LogInfo(f"Captured file size after retry {attempt + 1}: {NewSizeBytes} bytes",
                                                  "VideoTranscodingService", "TranscodeVideo")
                             break

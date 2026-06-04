@@ -5,6 +5,7 @@ from Core.Database.BaseRepository import BaseRepository
 from Core.Database.DatabaseService import EscapeLikePattern
 from Core.Logging.LoggingService import LoggingService
 from Core.Models.MediaFileModel import MediaFileModel
+from Core.PathStorage import Join, SplitExt, LocalExists, LocalIsDir
 from Features.FileScanning.Models.RootFolderModel import RootFolderModel
 from Features.FileScanning.Models.SeasonModel import SeasonModel
 
@@ -907,7 +908,7 @@ class FileScanningRepository(BaseRepository):
             if not Path:
                 return Path
             normalized_path = os.path.normpath(Path)
-            if not os.path.exists(normalized_path):
+            if not LocalExists(normalized_path):
                 LoggingService.LogWarning(f"Path does not exist, cannot normalize: {Path}", "FileScanningRepository", "NormalizePathToFilesystemCase")
                 return normalized_path
             if len(normalized_path) >= 2 and normalized_path[1] == ':':
@@ -927,7 +928,7 @@ class FileScanningRepository(BaseRepository):
                 if not part:
                     continue
                 try:
-                    if os.path.isdir(current_path):
+                    if LocalIsDir(current_path):
                         dir_contents = os.listdir(current_path)
                         actual_name = None
                         for item in dir_contents:
@@ -935,14 +936,14 @@ class FileScanningRepository(BaseRepository):
                                 actual_name = item
                                 break
                         if actual_name:
-                            current_path = os.path.join(current_path, actual_name)
+                            current_path = Join(current_path, actual_name)
                         else:
-                            current_path = os.path.join(current_path, part)
+                            current_path = Join(current_path, part)
                     else:
-                        current_path = os.path.join(current_path, part)
+                        current_path = Join(current_path, part)
                 except Exception as e:
                     LoggingService.LogWarning(f"Could not list directory '{current_path}' to get actual case, using: {part}", "FileScanningRepository", "NormalizePathToFilesystemCase")
-                    current_path = os.path.join(current_path, part)
+                    current_path = Join(current_path, part)
             if current_path != normalized_path:
                 LoggingService.LogInfo(f"Normalized path case: '{normalized_path}' -> '{current_path}'", "FileScanningRepository", "NormalizePathToFilesystemCase")
             return current_path
@@ -964,7 +965,7 @@ class FileScanningRepository(BaseRepository):
                 return self._MapMediaFileSummaryRow(rows[0], "exact")
 
             # 2. Match without extension (handles container change: .mkv -> .mp4)
-            nameNoExt = os.path.splitext(FileName)[0]
+            nameNoExt = SplitExt(FileName)[0]
             query = f"SELECT {selectCols} FROM MediaFiles WHERE LOWER(FileName) LIKE LOWER(%s) ESCAPE '!' LIMIT 1"
             rows = self.ExecuteQuery(query, (nameNoExt + '%',))
             if rows:
@@ -992,7 +993,7 @@ class FileScanningRepository(BaseRepository):
 
             # 2. Match without extension (handles container change: .mkv -> .mp4)
             if not rows:
-                nameNoExt = os.path.splitext(FileName)[0]
+                nameNoExt = SplitExt(FileName)[0]
                 likeQuery = f"SELECT {self._MEDIA_FILE_SELECT_COLS} FROM MediaFiles WHERE LOWER(FileName) LIKE LOWER(%s) ESCAPE '!' LIMIT 1"
                 rows = self.ExecuteQuery(likeQuery, (EscapeLikePattern(nameNoExt) + '%',))
 

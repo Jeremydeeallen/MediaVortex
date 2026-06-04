@@ -5,6 +5,7 @@ from Core.Models.MediaFileModel import MediaFileModel
 from Features.MediaProbe.MediaProbeRepository import MediaProbeRepository
 from Services.FileManagerService import FileManagerService
 from Core.Logging.LoggingService import LoggingService
+from Core.PathStorage import LocalExists
 
 
 class MediaProbeBusinessService:
@@ -62,7 +63,7 @@ class MediaProbeBusinessService:
         except Exception:
             LocalPath = FilePath
         try:
-            if not os.path.exists(LocalPath):
+            if not LocalExists(LocalPath):
                 ErrorMsg = f"File does not exist on disk: {FilePath} (local: {LocalPath})"
                 LoggingService.LogWarning(ErrorMsg, "MediaProbeBusinessService", "_ExecuteProbe")
                 self.Repository.RecordProbeFailure(MediaFile.Id, ErrorMsg)

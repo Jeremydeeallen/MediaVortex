@@ -19,6 +19,7 @@ ProjectRoot = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ProjectRoot)
 
 from Services.LoggingService import LoggingService
+from Core.PathStorage import Join, LocalExists, LocalGetSize
 
 
 class NetworkDriveValidator:
@@ -102,9 +103,9 @@ class NetworkDriveValidator:
             total_size = 0
             for dirpath, dirnames, filenames in os.walk(self.TestPath):
                 for filename in filenames:
-                    filepath = os.path.join(dirpath, filename)
-                    if os.path.exists(filepath):
-                        total_size += os.path.getsize(filepath)
+                    filepath = Join(dirpath, filename)
+                    if LocalExists(filepath):
+                        total_size += LocalGetSize(filepath)
             return total_size >= 0
         except Exception as e:
             raise e

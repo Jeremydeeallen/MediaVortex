@@ -8,6 +8,7 @@ from flask import Blueprint, request, jsonify, Response, send_file
 from Features.ClipBuilder.ClipBuilderBusinessService import ClipBuilderBusinessService, _ResolveFFmpegPath
 from Repositories.DatabaseManager import DatabaseManager
 from Core.Logging.LoggingService import LoggingService
+from Core.PathStorage import LastSegment, ParentDir, SplitExt, LocalExists, LocalIsDir, LocalGetSize
 
 ClipBuilderBlueprint = Blueprint('ClipBuilder', __name__, url_prefix='/api/ClipBuilder')
 
@@ -81,11 +82,11 @@ def StreamVideo():
         elif not FilePath:
             return jsonify({"Success": False, "ErrorMessage": "FileId or FilePath is required"}), 400
 
-        if not FilePath or not os.path.exists(FilePath):
+        if not FilePath or not LocalExists(FilePath):
             return jsonify({"Success": False, "ErrorMessage": f"File not accessible: {FilePath}"}), 404
 
-        FileSize = os.path.getsize(FilePath)
-        Ext = os.path.splitext(FilePath)[1].lower()
+        FileSize = LocalGetSize(FilePath)
+        Ext = SplitExt(FilePath)[1].lower()
         MimeMap = {'.mp4': 'video/mp4', '.mkv': 'video/x-matroska', '.avi': 'video/x-msvideo', '.webm': 'video/webm', '.mov': 'video/quicktime'}
         MimeType = MimeMap.get(Ext, 'video/mp4')
 
@@ -184,9 +185,9 @@ def Export():
             FileName = Rows[0]['filename']
         else:
             FilePath = DirectPath
-            FileName = os.path.basename(DirectPath)
+            FileName = LastSegment(DirectPath)
 
-        if not FilePath or not os.path.exists(FilePath):
+        if not FilePath or not LocalExists(FilePath):
             return jsonify({"Success": False, "ErrorMessage": f"File not accessible: {FilePath}"}), 404
 
         OutputName = os.path.splitext(FileName)[0] if FileName else "clip"
@@ -372,7 +373,7 @@ def Waveform():
         else:
             return jsonify({"Success": False, "ErrorMessage": "FileId or FilePath required"}), 400
 
-        if not FilePath or not os.path.exists(FilePath):
+        if not FilePath or not LocalExists(FilePath):
             return jsonify({"Success": False, "ErrorMessage": f"File not accessible: {FilePath}"}), 404
 
         # Check cache
@@ -380,7 +381,7 @@ def Waveform():
         PathHash = hashlib.md5(FilePath.encode()).hexdigest()
         CachePath = os.path.join(WAVEFORM_CACHE_DIR, f"{PathHash}.png")
 
-        if not os.path.exists(CachePath):
+        if not LocalExists(CachePath):
             Cmd = [
                 _ResolveFFmpegPath(),
                 "-i", FilePath,
@@ -424,14 +425,14 @@ def Thumbnail():
         else:
             return jsonify({"Success": False, "ErrorMessage": "FileId or FilePath required"}), 400
 
-        if not FilePath or not os.path.exists(FilePath):
+        if not FilePath or not LocalExists(FilePath):
             return jsonify({"Success": False, "ErrorMessage": f"File not accessible: {FilePath}"}), 404
 
         os.makedirs(THUMBNAIL_CACHE_DIR, exist_ok=True)
         CacheKey = hashlib.md5(f"{FilePath}@{Time}".encode()).hexdigest()
         CachePath = os.path.join(THUMBNAIL_CACHE_DIR, f"{CacheKey}.jpg")
 
-        if not os.path.exists(CachePath):
+        if not LocalExists(CachePath):
             Cmd = [
                 _ResolveFFmpegPath(),
                 "-ss", str(Time),
@@ -533,11 +534,11 @@ def Browse():
             Drives = []
             for Letter in string.ascii_uppercase:
                 DrivePath = f"{Letter}:\\"
-                if os.path.exists(DrivePath):
+                if LocalExists(DrivePath):
                     Drives.append({"Name": DrivePath, "Path": DrivePath, "Type": "folder"})
             return jsonify({"Success": True, "Path": "", "Items": Drives}), 200
 
-        if not os.path.isdir(Path):
+        if not LocalIsDir(Path):
             return jsonify({"Success": False, "ErrorMessage": f"Not a directory: {Path}"}), 400
 
         Items = []
@@ -554,7 +555,7 @@ def Browse():
                         continue
                     FullPath = os.path.join(Root, FileName)
                     try:
-                        SizeMB = round(os.path.getsize(FullPath) / (1024 * 1024), 1)
+                        SizeMB = round(LocalGetSize(FullPath) / (1024 * 1024), 1)
                     except OSError:
                         SizeMB = 0
                     Items.append({"Name": FileName, "Path": FullPath, "Type": "file", "SizeMB": SizeMB,
@@ -585,7 +586,7 @@ def Browse():
                 except (PermissionError, OSError):
                     continue
 
-        return jsonify({"Success": True, "Path": Path, "Parent": os.path.dirname(Path), "Items": Items}), 200
+        return jsonify({"Success": True, "Path": Path, "Parent": ParentDir(Path), "Items": Items}), 200
     except Exception as Ex:
         LoggingService.LogException("Error browsing", Ex, "ClipBuilderController", "Browse")
         return jsonify({"Success": False, "ErrorMessage": str(Ex)}), 500
