@@ -57,7 +57,7 @@ Per criterion 16: each I/O entry point above names the actual `Resolve` call sit
 
 ## Out of Scope
 
-- Path NORMALIZATION (collapsing `//`, removing trailing slash, etc.) -- handled by the underlying OS during I/O; Resolve does not normalize.
+- Path NORMALIZATION inside `Resolve` -- `Resolve` is shape-agnostic and does not normalize its return value. When callers need normalization for comparison or deduplication (e.g. excluded-dir matching, self-overwrite checks), they call `Core.PathStorage.Normalize(path)` (shape-preserving; collapses `//`, `..`, `.`) or `Core.PathStorage.PathsEqual(a, b, case_insensitive=None)` (equality after `Normalize`; auto-detects case-sensitivity from UNC/Windows-drive/POSIX shape). OS-level normalization on real I/O still happens at the kernel.
 - Cross-share moves (e.g. moving a file from `media_tv` to `movies`) -- requires explicit `UPDATE` of `(StorageRootId, RelativePath)` and a physical file move.
 - Symlink resolution -- callers that need to follow symlinks use `os.path.realpath` on the Resolved path, not inside Resolve itself.
 - Per-worker mount-point overrides via env var -- replaced by `StorageRootResolutions` rows.

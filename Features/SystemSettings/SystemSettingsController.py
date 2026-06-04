@@ -5,7 +5,7 @@ SystemSettingsController.py - Controller for managing system settings
 
 from flask import Blueprint, request, jsonify
 from Core.Logging.LoggingService import LoggingService
-from Core.PathStorage import LocalExists
+from Core.PathStorage import LocalExists, Normalize, PathsEqual
 from Features.SystemSettings.SystemSettingsRepository import SystemSettingsRepository
 
 
@@ -466,8 +466,8 @@ class SystemSettingsController:
                 ExcludedDirsSetting = self.Repository.GetSystemSetting('ExcludedDirectories')
                 ExcludedDirs = [d.strip() for d in ExcludedDirsSetting.split(',') if d.strip()] if ExcludedDirsSetting else []
 
-                NormalizedNewDir = os.path.normpath(Directory)
-                if any(os.path.normpath(d) == NormalizedNewDir for d in ExcludedDirs):
+                NormalizedNewDir = Normalize(Directory)
+                if any(PathsEqual(d, NormalizedNewDir) for d in ExcludedDirs):
                     return jsonify({'Success': False, 'ErrorMessage': 'Directory is already excluded'}), 400
 
                 ExcludedDirs.append(Directory)
@@ -501,9 +501,9 @@ class SystemSettingsController:
                     return jsonify({'Success': False, 'ErrorMessage': 'No excluded directories configured'}), 400
 
                 ExcludedDirs = [d.strip() for d in ExcludedDirsSetting.split(',') if d.strip()]
-                NormalizedDir = os.path.normpath(Directory)
+                NormalizedDir = Normalize(Directory)
                 OriginalCount = len(ExcludedDirs)
-                ExcludedDirs = [d for d in ExcludedDirs if os.path.normpath(d) != NormalizedDir]
+                ExcludedDirs = [d for d in ExcludedDirs if not PathsEqual(d, NormalizedDir)]
 
                 if len(ExcludedDirs) == OriginalCount:
                     return jsonify({'Success': False, 'ErrorMessage': 'Directory not found in exclusion list'}), 404

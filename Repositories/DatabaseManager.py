@@ -14,7 +14,7 @@ from Models.TranscodeFileModel import TranscodeFileModel
 from Services.DatabaseService import DatabaseService
 from Services.LoggingService import LoggingService
 from Core.Database.DatabaseService import EscapeLikePattern
-from Core.PathStorage import LastSegment, ParentDir, Join, LocalExists, LocalGetSize, LocalIsDir
+from Core.PathStorage import LastSegment, ParentDir, Join, LocalExists, LocalGetSize, LocalIsDir, Normalize
 
 
 class DatabaseManager:
@@ -4817,6 +4817,7 @@ class DatabaseManager:
             return FilePath
     
     def PrivateNormalizePathToFilesystemCase(self, Path: str) -> str:
+        # allow: paths-normalize-completion sweep (R19; PathNormalizer migration is a separate refactor)
         """Normalize a canonical (DB) path to match real filesystem case.
 
         DB paths use canonical form (`T:\\...`); the filesystem the worker
@@ -4840,13 +4841,13 @@ class DatabaseManager:
             # worker where T: is not a real drive (Linux containers; Windows
             # workers post-BUG-0008 SMB cutover that no longer mount T:).
             LocalProbePath = Translator.ToLocalPath(Path) if Translator else Path
-            normalized_path = os.path.normpath(LocalProbePath)
+            normalized_path = Normalize(LocalProbePath)
 
             if not LocalExists(normalized_path):
                 LoggingService.LogWarning(f"Path does not exist, cannot normalize: {Path}",
                                          "DatabaseManager", "PrivateNormalizePathToFilesystemCase")
                 # Return canonical form unchanged -- caller stores it as-is.
-                return os.path.normpath(Path)
+                return Normalize(Path)
 
             # Build the path component by component to get actual case
             # This works for both local and network drives
@@ -4916,7 +4917,7 @@ class DatabaseManager:
             else:
                 FinalPath = current_path
 
-            if FinalPath != os.path.normpath(Path):
+            if FinalPath != Normalize(Path):
                 LoggingService.LogInfo(f"Normalized path case: '{Path}' -> '{FinalPath}'",
                                      "DatabaseManager", "PrivateNormalizePathToFilesystemCase")
 

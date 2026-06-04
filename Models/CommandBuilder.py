@@ -1,7 +1,7 @@
 import os
 from typing import Dict, Any, Optional
 from Core.Logging.LoggingService import LoggingService
-from Core.PathStorage import ParentDir
+from Core.PathStorage import ParentDir, Normalize, PathsEqual
 from Models.TranscodeQueueModel import TranscodeQueueModel
 from Models.MediaFileModel import MediaFileModel
 from Features.AudioCompletion.AudioCompletionService import AudioCompletionService
@@ -25,7 +25,7 @@ class CommandBuilder:
         r"""Collapse mixed `\` and `/` separators -- some Windows FFmpeg builds reject the mix with AVERROR(EINVAL) = -22; pure transformation, no filesystem touch."""
         if not Path:
             return Path
-        return os.path.normpath(Path.strip().strip('"'))
+        return Normalize(Path.strip().strip('"'))
 
     @classmethod
     # directive: mv-suffix-greedy-collapse
@@ -673,7 +673,7 @@ class CommandBuilder:
                 OutputDirectory = ParentDir(InputPath)
                 OutputPath = self._NormalizeFfmpegPath(os.path.join(OutputDirectory, OutputFileName))
 
-            if os.path.normcase(OutputPath) == os.path.normcase(InputPath):
+            if PathsEqual(OutputPath, InputPath):
                 LoggingService.LogError(
                     f"_BuildRemuxShape: OutputPath equals InputPath ({InputPath}). "
                     f"OutputPath must be a `.inprogress` side-by-side file.",
@@ -779,7 +779,7 @@ class CommandBuilder:
                 OutputDirectory = ParentDir(InputPath)
                 OutputPath = self._NormalizeFfmpegPath(os.path.join(OutputDirectory, OutputFileName))
 
-            if os.path.normcase(OutputPath) == os.path.normcase(InputPath):
+            if PathsEqual(OutputPath, InputPath):
                 LoggingService.LogError(
                     f"_BuildSubtitleFixShape: OutputPath equals InputPath ({InputPath}). "
                     f"OutputPath must be a `.inprogress` side-by-side file.",

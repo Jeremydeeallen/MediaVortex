@@ -5,7 +5,7 @@ from Core.Database.BaseRepository import BaseRepository
 from Core.Database.DatabaseService import EscapeLikePattern
 from Core.Logging.LoggingService import LoggingService
 from Core.Models.MediaFileModel import MediaFileModel
-from Core.PathStorage import Join, SplitExt, LocalExists, LocalIsDir
+from Core.PathStorage import Join, SplitExt, LocalExists, LocalIsDir, Normalize
 from Features.FileScanning.Models.RootFolderModel import RootFolderModel
 from Features.FileScanning.Models.SeasonModel import SeasonModel
 
@@ -907,7 +907,7 @@ class FileScanningRepository(BaseRepository):
         try:
             if not Path:
                 return Path
-            normalized_path = os.path.normpath(Path)
+            normalized_path = Normalize(Path)
             if not LocalExists(normalized_path):
                 LoggingService.LogWarning(f"Path does not exist, cannot normalize: {Path}", "FileScanningRepository", "NormalizePathToFilesystemCase")
                 return normalized_path

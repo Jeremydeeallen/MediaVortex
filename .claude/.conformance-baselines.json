@@ -17,12 +17,12 @@
     {
       "scope": "production_code",
       "metric": "os_path_on_pathvar_count",
-      "regex": "(?i)os\\.path\\.(basename|dirname|join|split|splitext|exists|isfile|isdir|getsize|getmtime|abspath|realpath)\\s*\\(\\s*\\w*(?:path|filepath)\\w*",
+      "regex": "(?i)os\\.path\\.(basename|dirname|join|split|splitext|exists|isfile|isdir|getsize|getmtime|abspath|realpath|normpath|normcase)\\s*\\(\\s*\\w*(?:path|filepath)\\w*",
       "paths": ["Features/", "Services/", "Repositories/", "Core/", "Models/", "WebService/", "WorkerService/", "StartMediaVortex.py", "StartWorker.py"],
       "exclude_files": ["Core/PathStorage.py"],
       "baseline": 0,
       "feature_doc": "path-storage.feature.md",
-      "directive": "paths-canonical-completion"
+      "directive": "paths-canonical-completion + paths-normalize-completion"
     },
     {
       "scope": "production_code",

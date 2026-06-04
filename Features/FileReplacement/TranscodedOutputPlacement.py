@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from Repositories.DatabaseManager import DatabaseManager
 from Services.FileManagerService import FileManagerService
 from Core.Logging.LoggingService import LoggingService
-from Core.PathStorage import LocalExists, LocalGetSize, LocalGetMTime
+from Core.PathStorage import LocalExists, LocalGetSize, LocalGetMTime, PathsEqual
 
 
 # directive: filereplacement-decompose | see transcoded-output-placement.feature.md
@@ -72,10 +72,7 @@ class TranscodedOutputPlacement:
 
             TargetPath = LocalStagedPath[:-len('.inprogress')]
 
-            SameSlotReplacement = (
-                os.path.normcase(os.path.normpath(TargetPath))  # allow: local-path comparison; both host-resolved
-                == os.path.normcase(os.path.normpath(LocalOriginalPath))  # allow: local-path comparison; both host-resolved
-            )
+            SameSlotReplacement = PathsEqual(TargetPath, LocalOriginalPath)
 
             if LocalExists(TargetPath) and not SameSlotReplacement:
                 ErrorMsg = (
@@ -237,7 +234,7 @@ class TranscodedOutputPlacement:
                     'Message': 'Rename succeeded; MediaFiles re-probe deferred to next scan; original retained.',
                 }
 
-            if os.path.normpath(LocalOriginalPath) == os.path.normpath(TargetPath):  # allow: local-path comparison; both host-resolved
+            if PathsEqual(LocalOriginalPath, TargetPath):
                 StepsCompleted.append("Original and target are the same path; no original to delete")
             elif LocalExists(LocalOriginalPath):
                 try:
@@ -290,7 +287,7 @@ class TranscodedOutputPlacement:
                 )
                 return {'Success': True, 'StepsCompleted': StepsCompleted, 'Message': 'Partial: MediaFiles update failed; original retained'}
 
-            if os.path.normpath(OriginalLocalPath) == os.path.normpath(FinalLocalPath):  # allow: local-path comparison; both host-resolved
+            if PathsEqual(OriginalLocalPath, FinalLocalPath):
                 StepsCompleted.append("Original and final are the same path; no delete needed")
             elif LocalExists(OriginalLocalPath):
                 try:

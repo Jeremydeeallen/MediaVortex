@@ -12,6 +12,8 @@ from Core.PathStorage import (
     LocalIsFile,
     LocalIsDir,
     LocalGetSize,
+    Normalize,
+    PathsEqual,
 )
 
 
@@ -42,7 +44,7 @@ class FileManagerService:
 
             if excluded_setting:
                 # Split by comma and normalize paths
-                excluded = [os.path.normpath(d.strip()) for d in excluded_setting.split(',') if d.strip()]
+                excluded = [Normalize(d.strip()) for d in excluded_setting.split(',') if d.strip()]
                 LoggingService.LogInfo(f"Loaded {len(excluded)} excluded directories", 'FileManagerService', '_LoadExcludedDirectories')
                 return excluded
             else:
@@ -50,7 +52,7 @@ class FileManagerService:
                 default_excluded = 'Z:\\Videos\\downloads'
                 db_manager.AddOrUpdateSystemSetting('ExcludedDirectories', default_excluded, 'Comma-separated list of directories to exclude from scanning', 'text')
                 LoggingService.LogInfo(f"Created ExcludedDirectories setting with default: {default_excluded}", 'FileManagerService', '_LoadExcludedDirectories')
-                return [os.path.normpath(default_excluded)]
+                return [Normalize(default_excluded)]
 
         except Exception as e:
             LoggingService.LogException("Error loading excluded directories", e, 'FileManagerService', '_LoadExcludedDirectories')
@@ -59,11 +61,11 @@ class FileManagerService:
     def ShouldExcludeDirectory(self, directory_path: str) -> bool:
         """Check if a directory should be excluded from scanning."""
         try:
-            normalized_path = os.path.normpath(directory_path)
+            normalized_path = Normalize(directory_path)
 
             for excluded in self.ExcludedDirectories:
                 # Check exact match or if directory is subdirectory of excluded path
-                if normalized_path == excluded or normalized_path.startswith(excluded + os.sep):
+                if PathsEqual(normalized_path, excluded) or normalized_path.startswith(excluded + os.sep):
                     LoggingService.LogDebug(f"Excluding directory: {directory_path}", 'ShouldExcludeDirectory', 'FileManagerService')
                     return True
 

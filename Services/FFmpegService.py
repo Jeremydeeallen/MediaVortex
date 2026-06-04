@@ -6,7 +6,7 @@ from typing import Optional, Dict, Any, List
 from pathlib import Path
 from Services.LoggingService import LoggingService
 from Repositories.DatabaseManager import DatabaseManager
-from Core.PathStorage import LocalExists
+from Core.PathStorage import LocalExists, Normalize
 
 
 class FFmpegService:
@@ -155,7 +155,7 @@ class FFmpegService:
             
             # Build argument list -- no shell=True, so $, %, _ etc. in paths
             # are passed verbatim without shell interpretation.
-            NormalizedPath = os.path.normpath(FilePath)
+            NormalizedPath = Normalize(FilePath)
             CommandList = [self.FFprobePath] + Arguments + [NormalizedPath]
             # Keep a display string for logging / error messages
             CommandString = ' '.join(f'"{A}"' if ' ' in A or '$' in A else A for A in CommandList)

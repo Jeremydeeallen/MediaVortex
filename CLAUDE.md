@@ -51,6 +51,10 @@ LoggingService.LogException("msg", exception, "ClassName", "MethodName")
 # DB ops
 DatabaseService.ExecuteQuery(...)       # SELECT, returns list[CaseInsensitiveDict]
 DatabaseService.ExecuteNonQuery(...)    # INSERT/UPDATE/DELETE, auto-commits
+
+# Paths -- never os.path on a path-named variable; use Core.PathStorage
+from Core.PathStorage import ParentDir, LastSegment, Join, Normalize, PathsEqual, Exists, LocalExists, Resolve
+# Run /mediavortex-paths for the full lookup (os.path.* -> canonical mapping + canonical-vs-local decision).
 ```
 
 ## Two microservices

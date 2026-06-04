@@ -19,6 +19,7 @@ from Core.PathStorage import (
     LastSegment, ParentDir, Join, SplitExt,
     Exists, IsFile, IsDir, GetSize, GetMTime, ToLocal,
     LocalExists, LocalIsFile, LocalIsDir, LocalGetSize, LocalGetMTime,
+    Normalize,
 )
 
 
@@ -150,7 +151,7 @@ class FileScanningBusinessService:
             # the validation path uses the translated form. On Windows or
             # without share mappings, this is a no-op.
             LocalPath = self._ToLocalPath(RootFolderPath)
-            NormalizedPath = os.path.normpath(LocalPath)
+            NormalizedPath = Normalize(LocalPath)
             LoggingService.LogInfo(f"Normalized local path: '{NormalizedPath}' (canonical: '{RootFolderPath}')", 'FileScanningBusinessService', 'StartScanning')
 
             # Check if path exists
@@ -899,8 +900,7 @@ class FileScanningBusinessService:
             if not Path:
                 return Path
 
-            import os
-            normalized_path = os.path.normpath(Path)
+            normalized_path = Normalize(Path)
 
             # Check if path exists
             if not LocalExists(normalized_path):
@@ -1147,7 +1147,7 @@ class FileScanningBusinessService:
         """
         try:
             # Canonicalize path string for DB consistency (lookups vs inserts).
-            FilePath = os.path.normpath(FilePath)
+            FilePath = Normalize(FilePath)
             LocalPath = self._ToLocalPath(FilePath)
 
             # Existence check uses the translated local path.

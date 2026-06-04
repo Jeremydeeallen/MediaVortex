@@ -2,8 +2,8 @@
 
 **Set:** YYYY-MM-DD
 **Status:** (no active directive -- task-delegation mode)
-**Slug:** <previous-slug>
-**Replaces:** `directives/closed/<previous-slug>.md` (closed Success | Partial | Abandoned)
+**Slug:** paths-canonical-completion
+**Replaces:** `directives/closed/2026-06-03-paths-canonical-completion.md` (closed Success | Partial | Abandoned)
 
 ## Outcome
 

@@ -19,7 +19,7 @@ ProjectRoot = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ProjectRoot)
 
 from Services.LoggingService import LoggingService
-from Core.PathStorage import Join, LocalExists, LocalGetSize
+from Core.PathStorage import Join, LocalExists, LocalGetSize, Normalize
 
 
 class NetworkDriveValidator:
@@ -39,9 +39,9 @@ class NetworkDriveValidator:
         # Test 2: os.path.isdir
         self.TestMethod("os.path.isdir", lambda: os.path.isdir(self.TestPath))
         
-        # Test 3: os.path.normpath + exists
-        normalized = os.path.normpath(self.TestPath)
-        self.TestMethod("os.path.normpath + exists", lambda: os.path.exists(normalized))
+        # Test 3: Normalize + exists
+        normalized = Normalize(self.TestPath)
+        self.TestMethod("Normalize + exists", lambda: os.path.exists(normalized))
         
         # Test 4: os.listdir (more reliable for network drives)
         self.TestMethod("os.listdir", self.TestListDir)
@@ -112,7 +112,7 @@ class NetworkDriveValidator:
     
     def TestIsNetworkDrive(self):
         """Test if path is a network drive."""
-        normalized = os.path.normpath(self.TestPath)
+        normalized = Normalize(self.TestPath)
         return len(normalized) >= 2 and normalized[1] == ':' and normalized[0].isalpha()
     
     def TestAbspath(self):

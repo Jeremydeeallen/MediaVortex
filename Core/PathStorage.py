@@ -10,6 +10,8 @@ Keep it small. Resolve and Parse are the entire surface.
 """
 
 import os
+import posixpath
+import ntpath
 import re
 from typing import Optional
 
@@ -229,3 +231,42 @@ def LocalGetSize(LocalPath):
 def LocalGetMTime(LocalPath):
     """Modification time of a local-machine path; raises FileNotFoundError if missing."""
     return os.path.getmtime(LocalPath)
+
+
+_WIN_DRIVE_RX = re.compile(r'^[A-Za-z]:')
+
+
+# directive: paths-normalize-completion  # see path-storage.C4
+def _PickPathFlavor(PathValue):
+    """Return ntpath for UNC/Windows-drive/backslash-only inputs, posixpath otherwise."""
+    if not PathValue:
+        return posixpath
+    if PathValue.startswith('\\\\') or PathValue.startswith('//'):
+        return ntpath
+    if _WIN_DRIVE_RX.match(PathValue):
+        return ntpath
+    if '\\' in PathValue and '/' not in PathValue:
+        return ntpath
+    return posixpath
+
+
+# directive: paths-normalize-completion  # see path-storage.C4
+def Normalize(PathValue):
+    """Shape-preserving normalization: collapses //, .., .; keeps UNC \\\\server\\share root; does not lowercase."""
+    if not PathValue:
+        return PathValue or ""
+    Flavor = _PickPathFlavor(PathValue)
+    return Flavor.normpath(PathValue)
+
+
+# directive: paths-normalize-completion  # see path-storage.C4
+def PathsEqual(A, B, case_insensitive=None):
+    """Path equality after Normalize; case sensitivity auto-detects from shape (UNC/Windows-drive => True, POSIX => False) unless overridden."""
+    NormA = Normalize(A or "")
+    NormB = Normalize(B or "")
+    if case_insensitive is None:
+        Flavor = _PickPathFlavor(A or B or "")
+        case_insensitive = (Flavor is ntpath)
+    if case_insensitive:
+        return NormA.lower() == NormB.lower()
+    return NormA == NormB

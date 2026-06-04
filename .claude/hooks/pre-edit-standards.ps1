@@ -763,9 +763,9 @@ function Test-R6-PathShape {
     for ($I = 0; $I -lt $Lines.Length; $I++) {
         if ($Lines[$I] -match '(?i)\b(\w*(?:path|filepath)\w*)\s*\.\s*replace\s*\([^)]*\)\s*\.\s*split\s*\(') {
             if (Test-AllowOverride $PostContent $I 'R6' $FilePath) { continue }
-            return "R6 Path shape: $FilePath line $($I+1) does .replace().split() on a path-named variable. FilePath is a mix of UNC, drive-letter, and POSIX shapes. Path forward: use Core.PathStorage.LastSegment(path) for filename, Core.PathStorage.ParentDir(path) for directory -- both shape-preserving for UNC/drive/POSIX. See path-storage.feature.md."
+            return "R6 Path shape: $FilePath line $($I+1) does .replace().split() on a path-named variable. FilePath is a mix of UNC, drive-letter, and POSIX shapes. Path forward: use Core.PathStorage.LastSegment(path) for filename, Core.PathStorage.ParentDir(path) for directory -- both shape-preserving for UNC/drive/POSIX. Run ``/mediavortex-paths`` for the full lookup + canonical-vs-local decision before retrying. See path-storage.feature.md."
         }
-        if ($Lines[$I] -match '(?i)os\.path\.(dirname|basename|join|split|splitext|exists|isfile|isdir|getsize|getmtime|abspath|realpath)\s*\(\s*\w*(?:path|filepath)\w*') {
+        if ($Lines[$I] -match '(?i)os\.path\.(dirname|basename|join|split|splitext|exists|isfile|isdir|getsize|getmtime|abspath|realpath|normpath|normcase)\s*\(\s*\w*(?:path|filepath)\w*') {
             if (Test-AllowOverride $PostContent $I 'R6' $FilePath) { continue }
             $Op = $Matches[1]
             $Map = @{
@@ -781,9 +781,11 @@ function Test-R6-PathShape {
                 'getmtime' = 'Core.PathStorage.GetMTime(canonical, worker)  OR  Core.PathStorage.LocalGetMTime(local_path)'
                 'abspath'  = 'Core.PathStorage.ToLocal(canonical, worker) if you need a local-absolute path'
                 'realpath' = 'Core.PathStorage.ToLocal(canonical, worker) if you need a local-absolute path'
+                'normpath' = 'Core.PathStorage.Normalize(path)  -- shape-preserving (picks ntpath/posixpath by input shape)'
+                'normcase' = 'Core.PathStorage.PathsEqual(a, b)  -- equality after Normalize; auto-detects case sensitivity from shape'
             }
             $Suggest = $Map[$Op.ToLower()]
-            return "R6 Path shape: $FilePath line $($I+1) uses os.path.$Op on a path-named variable. os.path is platform-relative; MediaFiles.FilePath shapes are mixed (UNC / Windows-drive / POSIX). Path forward: $Suggest. For canonical vs local FS-op decision: canonical = path from DB column (needs worker translation); local = path already worker-resolved (ffmpeg binary, temp file, post-Resolve path). See path-storage.feature.md and Core/PathStorage.py."
+            return "R6 Path shape: $FilePath line $($I+1) uses os.path.$Op on a path-named variable. os.path is platform-relative; MediaFiles.FilePath shapes are mixed (UNC / Windows-drive / POSIX). Path forward: $Suggest. For canonical vs local FS-op decision: canonical = path from DB column (needs worker translation); local = path already worker-resolved (ffmpeg binary, temp file, post-Resolve path). Run ``/mediavortex-paths`` for the full lookup + canonical-vs-local decision before retrying. See path-storage.feature.md and Core/PathStorage.py."
         }
     }
     return $null
