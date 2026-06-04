@@ -84,6 +84,8 @@ Operator dogfood -- 2026-05-09. Today's claim model treats all workers as interc
 
 14. `transcode.flow.md` Stage 2.2 ("Claim job atomically") is updated to reflect the new ORDER BY structure. The doc shows the routing-aware ORDER BY clause and a one-paragraph note: "Workers and profiles can carry tags; required tags filter rows out of a worker's view, preferred tags reorder them. Untagged everywhere = today's behavior." Verifiable: `git diff transcode.flow.md` shows the Stage 2.2 row updated.
 
+15. **[BUG-0043] An NVENC-capable worker (e.g. i9 with `nvenccapable=TRUE`) does not claim CPU-only profile jobs (`Profiles.usenvidiahardware=0`) when a CPU profile would otherwise be the next-eligible row.** Today the claim ordering is strictly `Priority DESC, DateAdded ASC` with no codec-awareness, so the moment a CPU-profile row reaches the top of the queue, an NVENC worker grabs it and burns 20+ minutes of GPU-worker compute on a job the CPU-only workers (wakko / dot) could have done. Fixed (via C1–C6) means: tag i9 with `nvenc` (or similar), set the SVT-AV1 P6 FG8 CRF36 >720p profile's `PreferredWorkerTags=cpu` (or `RequiredWorkerTags=cpu`), and confirm via a synthetic test queue holding only one CPU-profile row that wakko (or dot) claims it within one poll tick while i9 sits idle if no NVENC work is pending. The interim operator workaround until this ships: queue CPU jobs at a lower `Priority` than NVENC jobs so the i9 exhausts NVENC work first.
+
 ## Status
 
 DRAFTED -- awaiting operator approval.
