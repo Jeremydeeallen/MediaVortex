@@ -1,113 +1,99 @@
 # Current Directive
 
-**Set:** YYYY-MM-DD
-**Status:** (no active directive -- task-delegation mode)
-**Slug:** <previous-slug>
-**Replaces:** `directives/closed/<previous-slug>.md` (closed Success | Partial | Abandoned)
+**Set:** 2026-06-04
+**Status:** Active -- phase: NEEDS_STANDARDS_REVIEW
+**Slug:** path-class-design
+**Replaces:** `.claude/directives/closed/2026-06-04-v1-vs-v2-cost-pricing.md` (closed Success -- Option C / Hybrid extraction → v2 selected)
 
 ## Outcome
 
-One paragraph describing the operator-observable end state. What is true after this directive is done that wasn't true before.
+A ratified `path.feature.md` capturing the full `Path` class design for v2: surface, semantics, equality, hashing, serialization, resolution to worker-local string, repr, and edge-case behavior (NULL StorageRoot, deleted storage root, round-trip through Jellyfin's API). Operator stress-tests the design as prose before any code touches it. After this directive, every subsequent v2 extraction directive can depend on `Path` as the canonical path representation.
 
 ## Acceptance Criteria
 
-1. ...
-2. ...
+1. **`path.feature.md` exists** at a colocated v2 location (proposed: `Core/Path/path.feature.md` -- the v2 home for this aggregate). Has stable IDs (W1..Wn for workflows, C1..Cn for criteria, S1..Sn for seams) per `.claude/rules/feature-docs.md`. Passes the five litmus tests in `.claude/rules/feature-criteria.md` (rename / outsider / rewrite / negation / stability).
 
-(Each criterion: observable behavior, verifiable in SQL or by a single command. Rename-test, outsider-test, rewrite-test, negation-test, stability-test per `.claude/rules/feature-criteria.md`.)
+2. **Class surface is fully enumerated.** The doc lists every public method/property the `Path` class will expose, with input types, return types, and one-line semantics each. No "TBD" entries. Methods include at minimum: construction (`FromPair`, `FromCanonicalString` validated, optional `FromLocalString` for migration), resolution (`Resolve(Worker) -> str`), structural ops (`ParentDir() -> Path`, `LastSegment() -> str`, `SplitExt() -> tuple[Path, str]`, `Join(child: str) -> Path`), filesystem ops (`Exists(Worker) -> bool`, `IsFile(Worker) -> bool`, `IsDir(Worker) -> bool`, `GetSize(Worker) -> int`, `GetMTime(Worker) -> float`), equality (`__eq__`), hashing (`__hash__`), repr (`__repr__`), serialization (`ToJsonDict()`, `FromJsonDict()`, `__str__`).
+
+3. **Semantic decisions are explicit.** The doc names the answer for every non-obvious case: equality across shape variants (UNC vs drive-letter representing the same canonical pair → equal? Decision required.), case sensitivity policy (canonical paths case-insensitive across all shapes? Or shape-dependent?), null `StorageRoot` handling, behavior when a referenced `StorageRoot` row is deleted from the DB, behavior under SQLAlchemy/psycopg2 round-trip, JSON serialization shape for API responses, repr shape for logs.
+
+4. **Seams enumerated.** The `## Seams` table lists every cross-component boundary the class crosses: producer (the `Path` constructor / repository read), wire shape (canonical string or typed pair), consumer expectations (every site that reads a `MediaFiles.FilePath` or similar). At minimum: DB-row → `Path` (via repository), `Path` → JSON (API response), `Path` → worker (via `Resolve`), `Path` → log line (via `__repr__`), `Path` → ffmpeg argv (via `Resolve` then string).
+
+5. **Test plan named.** The doc's `## Verification` section names the unit tests that will exist when the class ships: shape parsing (UNC, Windows-drive, POSIX), equality across shapes, round-trip via JSON, resolution against a mock Worker, behavior under deleted StorageRoot, behavior under null StorageRoot. Names tests, doesn't write them -- that's the next directive.
+
+6. **No production code touched.** This directive produces a feature doc and nothing else. v2 lives in a future commit; this is the design contract.
+
+7. **One session.** Wall clock: this directive opens and closes in the same operator session. If it can't, the design isn't tractable as written and the directive's scope is wrong.
 
 ## Out of Scope
 
-- ...
+- Writing `Core/PathStorage/Path.py` or any production code. That's the next directive (`path-class-implementation`).
+- Migrating any v1 caller to use `Path`. Migration is N directives away; v2 callers use it from day 1.
+- DB column migration (`MediaFiles.FilePath: str` → `(StorageRootId, RelativePath)`). The `Path` class is designed to work both with the legacy single-column read AND the typed-pair read; the migration is later.
+- Changes to v1 -- v1 keeps its current `Core.PathStorage` surface unchanged. This directive does not touch v1 production code, v1 hooks, v1 baselines, or v1 R-rules.
+- Designing `Capability`, `EncodePlan`, `Disposition`, `QualityPolicy`, or any other v2 substrate type. Those are separate directives in the phased plan (`.claude/programs/v2-decision.md`).
+- Picking the v2 deployment shape, packaging, dependency injection strategy, or test framework. Those are part of `v2-substrate-buildout` later.
 
 ## Constraints
 
-- ...
+- `path.feature.md` is the only writable artifact this directive produces.
+- The class design must be compatible with the v2 substrate decisions in `.claude/programs/v2-decision.md` (typed pair `(StorageRootId, RelativePath)` as the backing store; resolution is the only `str`-returning boundary; equality is shape-aware by design).
+- The design must handle the three v1 path shapes (UNC, Windows-drive, POSIX) without requiring callers to know which one is in hand. Shape is an internal implementation detail.
+- The design must be implementable in one session of code-writing once approved (i.e., not so ambitious that the next directive can't finish it). Target: ~200 LOC for the production class.
 
 ## Escalation Defaults
 
-- Tradeoff between A and B -> B
-- Risk tolerance: low | medium | high
+- Equality / case-sensitivity / NULL-StorageRoot decisions where multiple defensible answers exist → state the recommendation in the doc and surface as a Decision Point in the directive's Status block. Operator approves or redirects.
+- Backward-compatibility tension (v2-clean design vs. v1 migration ergonomics) → choose v2-clean. v1 migration is fixed by adapter functions later, not by polluting the v2 class design.
+- Risk tolerance: low. This is the foundation every other v2 directive sits on. Take time to get it right rather than ship a design that has to be revisited.
 
 ## Engineering Calls Already Made
 
-- ...
+- **Class is named `Path`.** Not `CanonicalPath`, not `PathResolver`, not `MediaPath`. Per operator decision earlier this session: the path IS canonical; "canonical" is not a label, it's the definition.
+- **Backed by typed pair `(StorageRootId: int, RelativePath: str)`.** Resolution to a worker-local string is via `.Resolve(Worker)`. No string-flavored canonical paths in the public surface.
+- **Lives in `Core/Path/`** (v2 location). v1 `Core/PathStorage/` stays untouched. v2 picks the cleaner name.
+- **Frozen / immutable.** `Path` instances are value objects; structural ops return new instances rather than mutating.
+- **Equality is by typed pair, not by string representation.** Two `Path` instances representing the same `(StorageRootId, RelativePath)` are equal regardless of how they were constructed.
 
 ## Status
 
-Active YYYY-MM-DD -- phase: NEEDS_STANDARDS_REVIEW -- next step.
-
-Phases advance by editing this Status line: `**Status:** Active -- phase: <NEXT>`. The PreToolUse hook reads this line to gate tool calls. See `.claude/standards/index.md` for the phase machine.
+Active 2026-06-04 -- phase: NEEDS_STANDARDS_REVIEW -- ready for next session.
 
 ### Files
 
 ```
-path/to/file1.py    -- EDIT: one-line reason
-path/to/file2.py    -- CREATE: one-line reason
+Core/Path/path.feature.md    -- CREATE: v2 feature doc; the design contract
 ```
+
+(Zero production code touched. R13 relaxes for new feature docs at DELIVERING; the design directive lives entirely in the doc.)
 
 ### Promotions
 
-Required when phase advances to DELIVERING. The hook refuses Status `Active -- phase: DELIVERING` -> `Closed` if this section is empty.
-
-Each row promotes durable content out of this directive into its permanent home (feature/flow doc). On close, the archive keeps only the pointer table -- the design content lives in the target file.
+Populated at DELIVERING. Anticipated:
 
 | Source artifact | Target file | Commit |
 |---|---|---|
-| `<what content / decision>` | `<path/to/target.feature.md or .flow.md>` | `<sha or "TBD until close">` |
-
-If a row's content is "new vertical entirely" or "new pipeline entirely," the Target is a NEW `*.feature.md` / `*.flow.md` -- R13 allows creation during DELIVERING for exactly this case (`.claude/rules/doc-layering.md`).
-
-If a directive has no durable content to promote (e.g. pure bugfix, no contract change), list one row: `no promotions | n/a | <reason>`. The hook only checks the section is non-empty.
+| `Path` class surface + semantics + seams + test plan | `Core/Path/path.feature.md` (new) | TBD |
+| (any v2-shape decisions that affect future directives) | `.claude/programs/v2-decision.md` (update) | TBD |
 
 ### Verification
 
-Required when phase advances to VERIFYING. One entry per acceptance criterion. Concrete evidence (command output, SQL result, file path) -- not "tested it works."
+Populated at VERIFYING. One entry per acceptance criterion.
 
-- **Criterion 1:** `<evidence>`
-- **Criterion 2:** `<evidence>`
+- **Criterion 1:** Path to `Core/Path/path.feature.md` + grep for stable IDs (W*, C*, S*).
+- **Criterion 2:** Enumeration of methods + their type signatures (point to doc section).
+- **Criterion 3:** Enumeration of named semantic decisions (point to doc section).
+- **Criterion 4:** Seams table content (point to doc section).
+- **Criterion 5:** Test plan section content (point to doc section).
+- **Criterion 6:** `git diff` on production code = empty.
+- **Criterion 7:** Session timestamp from open to close.
 
 ### Decisions Made
 
-Engineering calls made under ambiguity during execution. These live with the directive (not with features/flows) because they describe THIS directive's reasoning, not the vertical's contract.
-
-- `<decision + one-line rationale>`
-
----
-
-## Closure (thin-pointer archive shape)
-
-When this directive is ready to close:
-
-1. **Confirm Promotions table is complete.** Every piece of durable content from this directive has a row pointing at its permanent home. The hook will refuse the close otherwise.
-2. **Confirm directive did not grow during DELIVERING.** The hook recorded a size snapshot at IMPLEMENTING -> DELIVERING transition; the close is refused if the directive grew by more than the configured tolerance (default 10%). Growth during DELIVERING means content was DUPLICATED into the directive rather than PROMOTED out -- fix by moving the content to its target file and shrinking the directive.
-3. **Update Promotions table with commit SHAs** (the commits where each promotion landed).
-4. **Change `Status: Active -- phase: DELIVERING` -> `Status: Closed -- Success | Partial | Abandoned`.** Add a `**Closed:** YYYY-MM-DD` line under Set.
-5. **Archive:**
-
-   ```powershell
-   git mv .claude/directive.md .claude/directives/closed/YYYY-MM-DD-<slug>.md
-   Copy-Item .claude/directives/_template.md .claude/directive.md
-   ```
-
-   The renamed file becomes the archived record; `git log --follow` traces it.
-
-The archived directive holds these sections only:
-
-| Section | Content |
-|---|---|
-| Outcome | (restated; what was true at the start of the ask) |
-| Acceptance Criteria | (restated; the contract that gated success) |
-| Promotions | (the pointer table -- source artifacts and where they live now) |
-| Verification | (per-criterion evidence) |
-| Decisions Made | (engineering calls made under ambiguity) |
-
-The archive does NOT hold:
-
-- Design content that lives in a feature/flow doc (read the target file instead -- this is the whole point of promotion)
-- In-flight planning notes or transient operational state (these served their purpose during execution; they don't belong in the historical record)
-- Re-derivations of standards or rules (those live in `.claude/rules/`)
-
-If a future reader wants to know what a vertical does, they read its feature doc. If they want to know why a directive made the choices it made, they read the archived directive's Decisions Made and Verification sections. If they want to know what was promoted, they follow the pointers in the Promotions table.
-
-This shape is governed by `.claude/rules/doc-layering.md` (the three-tier model) and `.claude/rules/ceo-mode.md` (the directive lifecycle).
+Populated as design decisions land during writing. Anticipated decision points:
+- Equality semantics across shape representations.
+- Case sensitivity policy.
+- NULL / deleted StorageRoot behavior.
+- JSON serialization shape for API.
+- `__repr__` shape for logs.
+- Migration adapter surface (`FromCanonicalString` validation rules).

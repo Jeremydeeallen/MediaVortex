@@ -41,6 +41,16 @@
       "baseline": 0,
       "feature_doc": "path-storage.feature.md",
       "directive": "paths-canonical-completion"
+    },
+    {
+      "scope": "production_code",
+      "metric": "pathstorage_private_import_count",
+      "regex": "from Core\\.PathStorage import\\s+_",
+      "paths": ["Features/", "Services/", "Repositories/", "Core/", "Models/", "WebService/", "WorkerService/", "Scripts/", "Tests/", "StartMediaVortex.py", "StartWorker.py"],
+      "exclude_files": ["Core/PathStorage.py"],
+      "baseline": 0,
+      "feature_doc": "path-storage.feature.md",
+      "directive": "paths-canonical-completion -- skill's public-surface boundary; the leading underscore is the contract"
     }
   ]
 }

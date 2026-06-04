@@ -18,7 +18,13 @@ grow above their declared baseline. Tracks migration progress in a way
 
 If the file does not exist, SKIP with a one-line note. The file is opt-in.
 
-The shape is `{ "baselines": [ { "file": ..., "metric": ..., "baseline": ..., "import_module": ..., "feature_doc": ... } ] }`. `metric` is one of `line_count` or `import_count`. `import_module` is required when `metric = "import_count"` (the dotted path that must appear after `from ` in import statements). `feature_doc` is optional and points at the `*.feature.md` driving the migration.
+The shape is `{ "baselines": [ { ...entry-specific keys... } ] }`. There are two entry shapes:
+
+**File-scoped entry** -- has `file` and `metric` in (`line_count`, `import_count`). `import_module` is required when `metric = "import_count"` (the dotted path that must appear after `from ` in import statements).
+
+**Scope-scoped entry** -- has `scope` (informational tag, e.g. `"production_code"`), `metric` (free-form identifier), `regex` (the pattern to count), `paths` (array of path prefixes / files to scan), optional `exclude_files` (array of repo-relative paths to skip even if matched by `paths`). Used for project-wide anti-pattern counters such as `os_path_on_pathvar_count`, `pathvar_replace_split_count`, `allow_r6_annotation_count`, `pathstorage_private_import_count`.
+
+`feature_doc` is optional on either shape and points at the `*.feature.md` driving the migration.
 
 ### Step 2 -- compute current values
 
@@ -26,8 +32,11 @@ For each entry:
 
 - `metric = "line_count"` -- count newlines in `file`. On Windows use `(Get-Content -Path $f).Count`; on POSIX use `wc -l`. If `file` does not exist, treat `current = 0` (migration complete).
 - `metric = "import_count"` -- across all `*.py` in the repo, count lines matching `from {import_module} import\b` (any line; indented imports count). Exclude paths under `.claude/`, `venv/`, `WebService/venv/`, and `__pycache__/`.
+- **scope-scoped entry with `regex`** -- for each path in `paths`, run `Grep(pattern=<regex>, path=<path>, type='py', output_mode='count', head_limit=0)`. If the path ends with `.py` it is a single file (Grep handles it). Sum the per-file counts. Drop any file listed in `exclude_files` (compare repo-relative path). The total across all paths is `current`.
 
-Use the Grep tool (NOT `grep`/`rg`) for the import_count metric. Example: `Grep(pattern='from Repositories.DatabaseManager import', type='py', output_mode='count', head_limit=0)` then sum the per-file counts after excluding the directory list above.
+Use the Grep tool (NOT `grep`/`rg`) for any metric. Example for the regex case: `Grep(pattern='os\\.path\\.(basename|dirname|join)\\s*\\(\\s*\\w*(?:path|filepath)\\w*', path='Features/', type='py', output_mode='count', head_limit=0)`.
+
+For regex-based entries, when `current > 0` AND the count is small (<= 25), also run `output_mode='content'` with `-n` against the same paths and include the offending `file:line:match` rows in the failure report. This makes the regression actionable without spending tokens on the happy path.
 
 ### Step 3 -- compare and report
 
@@ -45,12 +54,18 @@ Print a summary table:
 ```
 MediaVortex baselines check
 ===========================
-  file                                     metric            baseline   current   status
-  Repositories/DatabaseManager.py          line_count        <N>        <M>       PASS/FAIL
-  Repositories.DatabaseManager (imports)   import_count      <N>        <M>       PASS/FAIL
+  target                                   metric                              baseline   current   status
+  Repositories/DatabaseManager.py          line_count                          <N>        <M>       PASS/FAIL
+  Repositories.DatabaseManager (imports)   import_count                        <N>        <M>       PASS/FAIL
+  production_code                          os_path_on_pathvar_count            0          <M>       PASS/FAIL
+  production_code                          pathvar_replace_split_count         0          <M>       PASS/FAIL
+  production_code                          allow_r6_annotation_count           0          <M>       PASS/FAIL
+  production_code                          pathstorage_private_import_count    0          <M>       PASS/FAIL
 
 Overall: PASS | FAIL
 ```
+
+For scope-scoped entries the `target` column shows the `scope` field (e.g. `production_code`).
 
 Exit non-zero if FAIL.
 
