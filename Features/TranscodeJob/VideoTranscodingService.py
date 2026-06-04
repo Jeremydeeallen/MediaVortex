@@ -6,17 +6,33 @@ import time
 from typing import Dict, Any, Optional, Callable
 from datetime import datetime, timezone
 from Core.Logging.LoggingService import LoggingService
-from Core.PathStorage import LocalExists, LocalGetSize
+
+
+# directive: transcodejob-uses-path | # see path.S5
+def _LocalExists(Value: str) -> bool:
+    """Module-level helper: existence check on a worker-local string."""
+    return bool(Value) and os.path.exists(Value)
+
+
+# directive: transcodejob-uses-path | # see path.S5
+def _LocalGetSize(Value: str) -> int:
+    """Module-level helper: file size on a worker-local string."""
+    return os.path.getsize(Value)
 
 
 from Core.DateTimeHelpers import ToUtcIsoZ
+
+
+# directive: transcodejob-uses-path | # see path.S5
 class VideoTranscodingService:
     """Tool-agnostic video transcoding service that executes transcoding commands with progress tracking."""
 
+    # directive: transcodejob-uses-path | # see path.S5
     def __init__(self):
         self.ActiveProcesses = {}
         self.ProcessThreads = {}
 
+    # directive: transcodejob-uses-path | # see path.S5
     def TranscodeVideo(self, JobId: int, TranscodeCommand: str,
                       ProgressCallback: Optional[Callable] = None, TotalFramesFromMediaFile: int = 0,
                       ActiveJobId: int = None, DatabaseManager = None,
@@ -182,8 +198,8 @@ class VideoTranscodingService:
                 OutputFilePath = self.ExtractOutputPathFromCommand(TranscodeCommand)
                 NewSizeBytes = 0
 
-                if OutputFilePath and LocalExists(OutputFilePath):
-                    NewSizeBytes = LocalGetSize(OutputFilePath)
+                if OutputFilePath and _LocalExists(OutputFilePath):
+                    NewSizeBytes = _LocalGetSize(OutputFilePath)
                     LoggingService.LogInfo(f"Captured file size immediately after transcode: {NewSizeBytes} bytes",
                                          "VideoTranscodingService", "TranscodeVideo")
                 else:
@@ -194,8 +210,8 @@ class VideoTranscodingService:
 
                     for attempt in range(3):  # Try 3 times
                         time.sleep(0.1)  # Wait 100ms between attempts
-                        if OutputFilePath and LocalExists(OutputFilePath):
-                            NewSizeBytes = LocalGetSize(OutputFilePath)
+                        if OutputFilePath and _LocalExists(OutputFilePath):
+                            NewSizeBytes = _LocalGetSize(OutputFilePath)
                             LoggingService.LogInfo(f"Captured file size after retry {attempt + 1}: {NewSizeBytes} bytes",
                                                  "VideoTranscodingService", "TranscodeVideo")
                             break
