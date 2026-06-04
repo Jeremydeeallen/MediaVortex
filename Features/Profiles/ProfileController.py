@@ -187,6 +187,7 @@ class ProfileController:
                     'Tune', 'Multipass', 'PixelFormat',
                     'AudioCodec', 'AudioBitrateKbps', 'AudioChannels', 'AudioFilter',
                     'Container', 'FastStart', 'RateControlMode', 'AqStrength',
+                    'QualityTestRequired',
                 }
                 THRESHOLD_COLS = {
                     'Resolution', 'TranscodeDownTo', 'Quality', 'ContainerType',

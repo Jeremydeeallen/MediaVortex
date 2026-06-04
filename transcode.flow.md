@@ -292,7 +292,7 @@ The disposition decision is **the only post-transcode branch point**. It reads f
 
 | Input | Source |
 |---|---|
-| `TranscodeAttempt.QualityTestRequired` | per-attempt flag, set at attempt creation from `Workers.QualityTestEnabled` |
+| `TranscodeAttempt.QualityTestRequired` | per-attempt flag, set at attempt creation from `Profiles.QualityTestRequired` (per-profile column, editable on `/settings` profile cogs modal). When the profile's flag is FALSE, every attempt for that profile skips VMAF. |
 | `TranscodeAttempt.NewSizeBytes` vs `OldSizeBytes` | post-flight savings gate |
 | `QualityTestResults.VMAFScore` | populated by VMAF run, NULL when no test ran |
 | `VmafCapableWorkerOnline` (computed) | `SELECT 1 FROM Workers WHERE QualityTestEnabled=TRUE AND Status='Online' AND LastHeartbeat > NOW() - INTERVAL '90 seconds'`. Replaces the legacy `ServiceStatus.QualityTestService` row, which was a fossil written only by the retired QualityTestService process. |

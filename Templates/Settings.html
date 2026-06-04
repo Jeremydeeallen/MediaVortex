@@ -805,6 +805,7 @@ function ShowProfileKnobs(ProfileId) {
             {name: 'AudioFilter', kind: 'text', group: 'Audio'},
             {name: 'Container', kind: 'text', group: 'Output'},
             {name: 'FastStart', kind: 'bool', group: 'Output'},
+            {name: 'QualityTestRequired', kind: 'bool', group: 'Quality Test'},
         ];
         const ThresholdEditable = [
             {name: 'TranscodeDownTo', kind: 'text'},
@@ -865,7 +866,7 @@ function ShowProfileKnobs(ProfileId) {
             const G = Col.group || 'Other';
             (Groups[G] = Groups[G] || []).push(Col);
         });
-        const GroupOrder = ['Identity', 'Codec', 'NVENC', 'Deinterlace', 'Audio', 'Output'];
+        const GroupOrder = ['Identity', 'Codec', 'NVENC', 'Deinterlace', 'Audio', 'Output', 'Quality Test'];
         Body += '<table class="table table-sm table-bordered mb-3"><tbody>';
         GroupOrder.forEach(function(G) {
             if (!Groups[G]) return;

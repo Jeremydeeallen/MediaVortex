@@ -447,7 +447,8 @@ class ProfileManagementViewModel:
         Pid = self.SelectedProfile.Id
         ProfileExtras = Db.ExecuteQuery(
             "SELECT Tune, Multipass, PixelFormat, AudioCodec, AudioBitrateKbps, "
-            "       AudioChannels, AudioFilter, Container, FastStart, RateControlMode "
+            "       AudioChannels, AudioFilter, Container, FastStart, RateControlMode, "
+            "       QualityTestRequired "
             "FROM Profiles WHERE Id = %s",
             (Pid,),
         )
@@ -485,6 +486,7 @@ class ProfileManagementViewModel:
             'Container': ProfileExtra.get('Container'),
             'FastStart': ProfileExtra.get('FastStart'),
             'RateControlMode': ProfileExtra.get('RateControlMode'),
+            'QualityTestRequired': ProfileExtra.get('QualityTestRequired'),
             'Thresholds': [
                 {
                     'Id': threshold.Id,
