@@ -2,6 +2,6 @@
 
 (none -- task-delegation mode active per `.claude/.task-delegation-on` marker)
 
-Last closed: `path-worker-class` (2026-06-04 -- Closed Success). Archived at `.claude/directives/closed/2026-06-04-path-worker-class.md`. **Substrate prerequisite to Phase 7 shipped.** Concrete `Worker` class at `Core/Path/Worker.py` satisfies the structural Worker Protocol; 13 unit + 4 live-DB contract tests pass; Phase 4 perf budget preserved via per-instance cache. Phase 7 callers can now do `from Core.Path import Path, Worker` and pass `Worker.FromWorkerContext()` to `Path.Resolve(worker)`.
+Last closed: `mediaprobe-uses-path` (2026-06-04 -- Closed Success, Phase 7 pathfinder). Archived at `.claude/directives/closed/2026-06-04-mediaprobe-uses-path.md`. **Phase 7 pattern established.** MediaProbe now consumes paths via `Core.Path` (Path + Worker + PathError); zero `Core.PathStorage` references in the migrated vertical. `## Migration Pattern (Phase 7 caller verticals)` section in `Core/Path/path.feature.md` is the canonical recipe for the remaining 6 verticals.
 
-**Next:** start Phase 7 pathfinder with `/n mediaprobe-uses-path`, then survey + parallel batch the remaining 6 verticals.
+**Next:** survey the remaining 6 verticals (FileScanning, FileReplacement, TranscodeJob, QualityTesting, TranscodeQueue, Activity) via parallel Explore agents, then batch-implement 3 at a time using worktree-isolated agents. Test count: 201 passed, 2 skipped.

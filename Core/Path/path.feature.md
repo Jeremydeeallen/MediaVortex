@@ -101,6 +101,74 @@ What gets accepted byte-wise at construction (no normalization, no scrubbing): U
 
 **Memory budget.** `@dataclass(frozen=True, slots=True)` keeps each Path at 48 bytes (vs. 344 bytes with `__dict__`). At 50K instances this saves ~14.8 MB. Required: any new instance attribute must be declared as a field; ad-hoc `setattr` will fail at runtime against the slots constraint.
 
+## Migration Pattern (Phase 7 caller verticals)
+
+Each v1 vertical migrates by removing `Core.PathStorage` imports and routing path consumption through `Path` + `Worker`. The pattern established by the pathfinder (`mediaprobe-uses-path`, closed 2026-06-04) is the canonical recipe for the remaining six verticals: FileScanning, FileReplacement, TranscodeJob, QualityTesting, TranscodeQueue, Activity.
+
+**Imports:** swap `from Core.PathStorage import Resolve as PathResolve, LocalExists` (or any subset) for `from Core.Path import Path, Worker, PathError`.
+
+**Worker as lazy instance state:**
+
+```python
+class FeatureBusinessService:
+    def __init__(self, ...):
+        ...
+        self._Worker: Optional[Worker] = None
+        self._StorageRoots: Optional[List[dict]] = None
+
+    def _GetWorker(self) -> Worker:
+        if self._Worker is None:
+            self._Worker = Worker.FromWorkerContext()
+        return self._Worker
+```
+
+The `Worker` instance carries the per-instance StorageRootResolutions cache (Phase 4 budget). One service instance == one Worker == one cache. Long-running batches benefit; per-request services pay the cache cost per request.
+
+**Path resolution with FromLegacyString fallback:**
+
+```python
+def _ResolveWorkerLocal(self, MediaFile, FallbackFilePath):
+    """Returns (local_path_str, Path_obj_or_None)."""
+    if MediaFile.StorageRootId is not None and MediaFile.RelativePath:
+        try:
+            P = Path(MediaFile.StorageRootId, MediaFile.RelativePath)
+            return (P.Resolve(self._GetWorker()), P)
+        except PathError:
+            pass
+    if FallbackFilePath:
+        try:
+            P = Path.FromLegacyString(FallbackFilePath, self._GetStorageRoots())
+            return (P.Resolve(self._GetWorker()), P)
+        except PathError:
+            pass
+    return (FallbackFilePath, None)
+```
+
+Three-stage fallback: typed pair (canonical), `FromLegacyString` parse of the legacy `FilePath` column (handles unmigrated rows + orphan StorageRoot), raw string (logging-only sentinel). Each vertical adopts this verbatim; the only adaptation is which DB columns the row model exposes.
+
+**Existence checks via `Path.Exists(worker)`:** when you have a `Path` object, use `P.Exists(worker)` rather than `os.path.exists(local_str)`. R6 path-shape hook fires on the latter for path-named variables. The `Path.Exists` method internally does the os.path.exists call but at a documented boundary (S5 seam).
+
+**StorageRoots loader:** cache the StorageRoots prefix list per-instance for the `FromLegacyString` fallback path:
+
+```python
+def _GetStorageRoots(self) -> List[dict]:
+    if self._StorageRoots is None:
+        from Core.Database.DatabaseService import DatabaseService
+        Rows = DatabaseService().ExecuteQuery(
+            "SELECT Id, CanonicalPrefix FROM StorageRoots ORDER BY length(CanonicalPrefix) DESC"
+        )
+        self._StorageRoots = [{"Id": R.get("id", R.get("Id")),
+                               "CanonicalPrefix": R.get("canonicalprefix", R.get("CanonicalPrefix"))}
+                              for R in Rows]
+    return self._StorageRoots
+```
+
+Per-instance cache; constructed on first miss; operator restart required to refresh (matches Worker semantics per D14).
+
+**Test shape:** mock-DB unit tests cover the four `_ResolveWorkerLocal` branches (typed-pair / legacy-fallback / orphan-fallback / final-None). One live-DB smoke contract test confirms an actual MediaFile resolves to an on-disk-existing path on the operator's I9 / Larry workers.
+
+**What stays the same:** operator-facing log messages (the existing `f"File does not exist on disk: {FilePath} (local: {LocalPath})"` shape is preserved verbatim), failure-tracking semantics (probe failures recorded the same way), downstream service signatures (`FileManager.ExtractMediaMetadata` still takes a `str` path -- it's at an I/O boundary). Migration is surgical, not architectural.
+
 ## Class Surface
 
 ### Construction

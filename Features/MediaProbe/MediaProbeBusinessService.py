@@ -5,17 +5,61 @@ from Core.Models.MediaFileModel import MediaFileModel
 from Features.MediaProbe.MediaProbeRepository import MediaProbeRepository
 from Services.FileManagerService import FileManagerService
 from Core.Logging.LoggingService import LoggingService
-from Core.PathStorage import LocalExists
+from Core.Path import Path, Worker, PathError
 
 
+# directive: mediaprobe-uses-path | # see path.S3
 class MediaProbeBusinessService:
     """Orchestrates FFprobe metadata extraction with failure tracking."""
 
     MaxFFprobeFailures = 3  # Files exceeding this are skipped until manually reset
 
+    # directive: mediaprobe-uses-path | # see path.S3
     def __init__(self, RepositoryInstance=None, FileManagerInstance=None):
         self.Repository = RepositoryInstance or MediaProbeRepository()
         self.FileManager = FileManagerInstance or FileManagerService()
+        self._Worker: Optional[Worker] = None
+        self._StorageRoots: Optional[List[dict]] = None
+
+    # directive: mediaprobe-uses-path | # see path.S3
+    def _GetWorker(self) -> Worker:
+        """Lazy-construct a Worker via FromWorkerContext on first access; same instance reused for batch probes."""
+        if self._Worker is None:
+            self._Worker = Worker.FromWorkerContext()
+        return self._Worker
+
+    # directive: mediaprobe-uses-path | # see path.S6
+    def _GetStorageRoots(self) -> List[dict]:
+        """Lazy-load StorageRoots prefix list sorted longest-first; used by the FromLegacyString fallback when typed pair is unmigrated or orphan."""
+        if self._StorageRoots is None:
+            from Core.Database.DatabaseService import DatabaseService
+            Db = DatabaseService()
+            Rows = Db.ExecuteQuery(
+                "SELECT Id, CanonicalPrefix FROM StorageRoots ORDER BY length(CanonicalPrefix) DESC"
+            )
+            self._StorageRoots = [
+                {"Id": R.get("id", R.get("Id")), "CanonicalPrefix": R.get("canonicalprefix", R.get("CanonicalPrefix"))}
+                for R in Rows
+            ]
+        return self._StorageRoots
+
+    # directive: mediaprobe-uses-path | # see path.S5
+    def _ResolveWorkerLocal(self, MediaFile: MediaFileModel, FallbackFilePath: str):
+        """Return (local_path_str, Path_obj_or_None). Prefers the typed pair; falls back to FromLegacyString parsing of FallbackFilePath; final-fallback returns the raw string with None for logging when both attempts fail."""
+        Wk = self._GetWorker()
+        if MediaFile.StorageRootId is not None and MediaFile.RelativePath:
+            try:
+                P = Path(MediaFile.StorageRootId, MediaFile.RelativePath)
+                return (P.Resolve(Wk), P)
+            except PathError:
+                pass
+        if FallbackFilePath:
+            try:
+                P = Path.FromLegacyString(FallbackFilePath, self._GetStorageRoots())
+                return (P.Resolve(Wk), P)
+            except PathError:
+                pass
+        return (FallbackFilePath, None)
 
     # ─── Single File Probe ─────────────────────────────────────────────
 
@@ -40,30 +84,14 @@ class MediaProbeBusinessService:
             LoggingService.LogException(f"Error probing file ID {MediaFileId}", Ex, "MediaProbeBusinessService", "ProbeFile")
             return {'Success': False, 'Message': f'Error: {str(Ex)}'}
 
+    # directive: mediaprobe-uses-path | # see path.S5
     def _ExecuteProbe(self, MediaFile: MediaFileModel) -> Dict[str, Any]:
-        """Execute FFprobe against a media file and update the database.
-
-        MediaFile.FilePath is the canonical (Windows-style) DB path. On Linux
-        workers we translate to the local mount before any fs op (existence
-        check, ffprobe invocation). The MediaFile row stays canonical.
-        """
+        """Execute FFprobe against a media file and update the database. Worker-local path via Path/Worker; FromLegacyString fallback for unmigrated typed pair or orphan-StorageRoot edge cases."""
         FilePath = MediaFile.FilePath
-        # Canonical -> worker-local via PathStorage.Resolve when the model has
-        # (StorageRootId, RelativePath); otherwise fall back to FilePath as-is.
+        LocalPath, PathObj = self._ResolveWorkerLocal(MediaFile, FilePath)
+        Exists = PathObj.Exists(self._GetWorker()) if PathObj is not None else False
         try:
-            import socket
-            from Core.WorkerContext import WorkerContext
-            from Core.PathStorage import Resolve as PathResolve
-            _Ctx = WorkerContext.Current()
-            _WorkerName = (_Ctx.WorkerName if _Ctx else None) or socket.gethostname()
-            if MediaFile.StorageRootId is not None and MediaFile.RelativePath:
-                LocalPath = PathResolve(MediaFile.StorageRootId, MediaFile.RelativePath, _WorkerName)
-            else:
-                LocalPath = FilePath
-        except Exception:
-            LocalPath = FilePath
-        try:
-            if not LocalExists(LocalPath):
+            if not Exists:
                 ErrorMsg = f"File does not exist on disk: {FilePath} (local: {LocalPath})"
                 LoggingService.LogWarning(ErrorMsg, "MediaProbeBusinessService", "_ExecuteProbe")
                 self.Repository.RecordProbeFailure(MediaFile.Id, ErrorMsg)
