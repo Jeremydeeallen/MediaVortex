@@ -17,6 +17,55 @@ Two corollaries follow:
 
 What gets accepted byte-wise at construction (no normalization, no scrubbing): Unicode in any encoding (D2 commits Path to byte equality; D13 confirms no normalization), mid-segment colons on non-Windows workers, anything else not in the rejection lists above. Normalization and adversarial scrubbing are scanner / ingest-layer concerns. The type mirrors what is in the DB.
 
+## Threat Model
+
+**Asset.** A `Path` instance is the canonical identity of a media file. It is consumed at three boundaries: (a) DB row read/write, (b) JSON API payloads, (c) worker-local I/O (`subprocess`, `os.open`, `ffmpeg` argv).
+
+**Attacker goals.**
+
+- **G1 Path traversal:** read or write a file outside any `StorageRoot`.
+- **G2 Device open / DoS:** cause a Windows worker to open a kernel-object path (`\\.\COM1`, `CON`) instead of a file, hanging the worker or returning garbage.
+- **G3 Alternate Data Stream exfiltration:** address an NTFS ADS (`file:secret`) via a path field on a Windows worker.
+- **G4 Phantom-equality bug:** insert two `RelativePath` values that visually compare equal but byte-compare unequal (NFC/NFD twins, trailing dot/space on Windows), confusing dedup logic.
+- **G5 C-string injection:** smuggle a NUL byte into a Resolved path so that `subprocess` argv receives only the prefix, opening a different file than the path claims.
+- **G6 Log / terminal injection:** pass control characters that escape ANSI sequences in operator-facing logs.
+
+**Attacker capabilities (in-scope).**
+
+- **A1:** Controls full request body of an HTTP API endpoint that accepts a path (`StorageRootId`, `RelativePath`, or a canonical string). Highest-trust threat -- attacker writes arbitrary bytes into Path-bound fields.
+- **A2:** Controls a canonical string fed to `Path.FromLegacyString` (e.g., a migration tool reads a file the attacker can write).
+- **A3:** Controls filenames on a Linux/NFS share that a scanner ingests (attacker has filesystem write on a non-Windows source disk).
+
+**Attacker capabilities (out of scope -- defense lives upstream).**
+
+- Direct DB writes (requires PostgreSQL credentials; perimeter compromise).
+- Modification of the `StorageRoots` table (same; the `FromLegacyString` prefix list is loaded from this table -- trust posture: prefix-list integrity == DB integrity).
+- `MEDIAVORTEX_DB_HOST` / other env-var manipulation (process-spawn compromise).
+- TOCTOU file-swap between `Exists(worker)` check and downstream `open()` -- racey by design; caller responsibility.
+- Symlinks that point out of a StorageRoot -- filesystem-level concern; caller responsibility.
+
+**Trust boundaries.**
+
+- HTTP API surface -> `Path(...)` constructor: Path enforces what construction promises. Authentication / authorization happens upstream (Flask middleware).
+- DB column -> `Path.FromRow(row)`: trusted (operator-only write authority).
+- `Path.Resolve(worker)` output -> `subprocess` / `os.open`: this is the highest-risk boundary. Resolve-time platform-aware checks live here.
+
+**Mapping goals to mitigations.**
+
+| Goal | Mitigation |
+|---|---|
+| G1 path traversal | `..`-segment rejection + leading-separator rejection at construction (D9) |
+| G2 device open | DOS device name rejection at `Resolve(worker)` when `worker.Platform == 'windows'` (D14) |
+| G3 ADS exfiltration | Mid-segment colon rejection at `Resolve(worker)` when `worker.Platform == 'windows'` (D14) |
+| G4 phantom equality | Trailing dot/space rejection at Resolve on Windows (D14); D2 + D13 commit Path to byte equality so NFC/NFD twins compare unequal at identity level |
+| G5 NUL injection | NUL byte rejection at construction (D9 / D14) |
+| G6 log injection | Control char (`\x00-\x1f`, `\x7f`) rejection at construction (D9 / D14) |
+
+**Residual risks accepted.**
+
+- An attacker with DB write authority can insert arbitrary `RelativePath` bytes that the Path constructor accepts. Mitigation: DB write authority is already a high trust grant; defense lives at the perimeter, not the type.
+- An attacker controlling the on-disk filesystem of a source share can plant filenames that Resolve will reject on Windows workers. Defense in depth: the file simply will not transcode; this is a denial-of-service against that one file, not a path-traversal vulnerability.
+
 ## Workflows
 
 | # | Consumer pattern | Surface | Backing class.method |
