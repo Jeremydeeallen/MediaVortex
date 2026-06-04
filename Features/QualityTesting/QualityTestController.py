@@ -7,6 +7,7 @@ import os
 import json
 from flask import Blueprint, request, jsonify
 from Repositories.DatabaseManager import DatabaseManager
+from Features.QualityTesting.QualityTestRepository import QualityTestRepository
 from Core.Logging.LoggingService import LoggingService
 from Services.QualityTestQueueService import QualityTestQueueService
 
@@ -17,6 +18,7 @@ class QualityTestController:
         self.DatabaseManager = DatabaseManager()
         self.LoggingService = LoggingService()
         self.QualityTestQueueService = QualityTestQueueService(self.DatabaseManager)
+        self.QualityTestRepository = QualityTestRepository(self.DatabaseManager.DatabaseService)
 
     def StartQualityTest(self, JobId: int) -> dict:
         """Trigger quality test processing - the job is already in the queue, just verify it exists."""
@@ -169,7 +171,7 @@ class QualityTestController:
                                       reads `Data.Progress.ProgressPercentage`).
         """
         try:
-            Jobs = self.DatabaseManager.GetRunningQualityTestProgress() or []
+            Jobs = self.QualityTestRepository.GetRunningQualityTestProgress() or []  # see activity-dashboard-improvements.C19
             First = Jobs[0] if Jobs else None
             return {
                 "Success": True,
@@ -627,7 +629,7 @@ def QueueTestRun():
                         MfStorageRootId,
                         MfRelativePath,
                         Path_,
-                        os.path.basename(Path_),
+                        os.path.basename(Path_),  # allow: preexisting path-shape debt, BUG-0042 blast-radius cap
                         os.path.dirname(Path_),
                         int((Mf.get('SizeMB') or 0) * 1024 * 1024),
                         Mf.get('SizeMB') or 0,

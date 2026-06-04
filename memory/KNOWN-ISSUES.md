@@ -33,6 +33,34 @@
 
 ---
 
+### [BUG-0043] TranscodeQueue claim has no codec-affinity preference -- NVENC-capable workers grab CPU-profile jobs and burn GPU-worker compute
+**Date:** 2026-06-03 | **Area:** transcode-queue
+
+**What breaks:** `DatabaseManager.ClaimNextPendingTranscodeJob` orders strictly by `Priority DESC, DateAdded ASC`. A worker with `nvenccapable=TRUE` (e.g. i9) is eligible to claim both NVENC-profile (`Profiles.usenvidiahardware=1`) and CPU-profile (`usenvidiahardware=0`) rows. The CPU-side EXISTS-gate only blocks CPU workers from grabbing NVENC profiles -- nothing blocks NVENC workers from grabbing CPU profiles. So the moment a CPU profile row reaches the top of priority/date order, the i9 claims it and spends 20+ minutes of GPU-worker time running a CPU encode (~6x slower than NVENC for the same job).
+
+**Operational repro:** Queue any show under `SVT-AV1 P6 FG8 CRF36 >720p` while i9 has spare claim slots and the NVENC queue happens to be drained or lower-priority. i9 will claim the SVT row; check `TranscodeAttempts.workername='I9-2024' AND profilename LIKE 'SVT-AV1%'` after one full claim cycle and you will see the misroute. The intended split is i9 -> NVENC profiles only, wakko/dot -> CPU profiles only.
+
+**Why this surfaced today:** Operator was about to queue SVT-AV1 CRF36 work for wakko/dot's CPU encoding and asked "i9 will ignore the SVT jobs unless the NVENC queue is empty, right?" The answer is no -- there is no codec-tiebreaker in claim ordering. The fix is the unimplemented `worker-routing.feature.md` (DRAFTED) which adds `Workers.Tags`, `Profiles.{Preferred,Required}WorkerTags`, and a routing-aware ORDER BY clause.
+
+**Interim workaround (no code change):** Queue CPU-profile jobs at a lower `Priority` value than NVENC-profile jobs. Since the ORDER BY is `Priority DESC, DateAdded ASC`, i9 will exhaust all NVENC work before touching the low-priority SVT rows. wakko/dot still see them at their priority and consume them normally. Operator tested pattern:
+```sql
+UPDATE TranscodeQueue SET Priority = -10
+WHERE Status='queued' AND MediaFileId IN (... the SVT batch ...);
+```
+
+**Violates:** `Features/TranscodeQueue/worker-routing.feature.md` criterion 15 (added with this bug). The feature itself is DRAFTED but unimplemented; this bug captures the first concrete operational case demanding it ship.
+
+**Look first:**
+1. `Repositories/DatabaseManager.ClaimNextPendingTranscodeJob` -- the ORDER BY clause and the NVENC EXISTS-gate. Note the asymmetry: gate blocks CPU workers from NVENC jobs, but not NVENC workers from CPU jobs.
+2. `Features/TranscodeQueue/worker-routing.feature.md` C4 -- pseudocode for the routing-aware ORDER BY that resolves this.
+3. `transcode.flow.md` Stage 2.2 -- documents the current (non-routing-aware) claim path; needs update per worker-routing.feature.md C14.
+
+**Flow doc:** `transcode.flow.md` exists and covers the claim path at Stage 2.2 but does not reflect routing yet. `/t` should update Stage 2.2 alongside implementing the feature.
+
+**Fix with:** `/t BUG-0043` (likely promotes `worker-routing.feature.md` from DRAFTED to in-flight; not a one-line patch).
+
+---
+
 ### [BUG-0007] Worker capability toggle does not refresh UI until modal is closed and reopened
 **Date:** 2026-05-22 | **Area:** activity-page
 
@@ -634,4 +662,11 @@ Full Windows paths (e.g., `T:\Shows\file.mkv`) are stored as natural keys in at 
 
 ## Resolved
 
-*(none recently -- closed entries are swept to `memory/KNOWN-ISSUES-ARCHIVE.md`)*
+### [BUG-0042] Active Jobs list view omits VMAF runs while header badge counts them -- operator misreads as "stuck", kills workers, orphans claimed rows
+**Date:** 2026-06-03 -> 2026-06-03 | **Area:** activity-page
+
+**Resolution:** `GetRunningQualityTestProgress` rewritten to drive from `ActiveJobs WHERE ServiceName='QualityTestService'` LEFT JOIN `QualityTestProgress`/`QualityTestingQueue`/`TranscodeAttempts`, returning one row per claim (with NULL progress fields when no `QualityTestProgress` row exists). `Templates/Activity.html` `RenderActiveJobs` renders NULL-progress rows with a yellow stale-claim badge + human-readable claim age via a new `FormatClaimAge` helper. Method migrated from `Repositories/DatabaseManager.py` to `Features/QualityTesting/QualityTestRepository.py` (per `database-manager-aggregates.json`); `QualityTestController.GetQualityTestProgress` now routes through the repository. Live canary against 12 orphan QualityTestService claims: `/api/QualityTesting/Progress` returned `Jobs.Count=12` matching `/api/SQLQueries/GetActiveJobs` `QualityTestService=12`.
+
+**Out of scope (still active):** worker-side claim release on graceful shutdown/SIGTERM, and any orphan-cleanup sweep that automatically releases stale `ActiveJobs` rows. This fix is the display layer only; producer-side gaps are tracked separately.
+
+---

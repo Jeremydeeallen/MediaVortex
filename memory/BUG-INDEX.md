@@ -20,6 +20,7 @@ Entry shape: `- BUG-NNNN | <active|resolved> | <area> | <desc> | <created>[ -> <
 - BUG-0037 | active | activity-page | TECH DEBT -- Activity page conflates worker liveness and operational state | 2026-05-08
 - BUG-0038 | active | system-settings | SystemSettings not normalized; /settings page does not show every row | 2026-05-08
 - BUG-0040 | active | transcode-job | Second concurrent job shows first job's progress | 2026-05-05
+- BUG-0043 | active | transcode-queue | TranscodeQueue claim has no codec affinity; NVENC workers grab CPU-profile jobs and burn GPU compute; fix path = worker-routing.feature.md (DRAFTED) | 2026-06-03
 
 - BUG-0002 | active | file-replacement | Silent-output Remux MediaFiles purge | 2026-05-16
 - BUG-0007 | active | activity-page | Worker capability toggle no UI refresh | 2026-05-22
@@ -27,6 +28,7 @@ Entry shape: `- BUG-NNNN | <active|resolved> | <area> | <desc> | <created>[ -> <
 
 ## Recently Resolved (last 10)
 
+- BUG-0042 | resolved | activity-page | Active Jobs list omits VMAF runs while badge counts them; operator kills workers thinking they are hung, orphaning claimed rows | 2026-06-03 -> 2026-06-03
 - BUG-0032 | resolved | file-replacement | Stale .orig recovery for at-risk files | 2026-05-14 -> 2026-06-02
 - BUG-0041 | resolved | sql-queries | QueryDatabase.py truncates long text columns at 60 chars | 2026-05-13 -> 2026-06-02
 - BUG-0039 | resolved | transcode-job | Workers attempt jobs for missing source files | 2026-05-08 -> 2026-06-02
