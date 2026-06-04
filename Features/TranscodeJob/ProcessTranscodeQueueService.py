@@ -13,10 +13,29 @@ from Models.CommandBuilder import CommandBuilder
 from Features.TranscodeJob.VideoTranscodingService import VideoTranscodingService
 from Services.QueueManagementService import QueueManagementService
 from Features.QualityTesting.PostTranscodeDispositionService import PostTranscodeDispositionService
-import ntpath
 import os as _os
 from Core.Logging.LoggingService import LoggingService
 from Core.Path import Path, Worker, PathError
+
+
+_TJ_STORAGE_ROOTS_CACHE: dict = {"_StorageRoots": None, "_PrefixMap": None}
+
+
+# directive: transcodejob-uses-path | # see path.S6
+def _GetStorageRoots() -> list:
+    """Lazy StorageRoots prefix list for FromLegacyString."""
+    if _TJ_STORAGE_ROOTS_CACHE["_StorageRoots"] is None:
+        from Core.Database.DatabaseService import DatabaseService
+        Rows = DatabaseService().ExecuteQuery(
+            "SELECT Id, CanonicalPrefix FROM StorageRoots ORDER BY length(CanonicalPrefix) DESC"
+        )
+        _TJ_STORAGE_ROOTS_CACHE["_StorageRoots"] = [
+            {"Id": R.get("id", R.get("Id")),
+             "CanonicalPrefix": R.get("canonicalprefix", R.get("CanonicalPrefix"))}
+            for R in Rows
+        ]
+        _TJ_STORAGE_ROOTS_CACHE["_PrefixMap"] = {Sr["Id"]: Sr["CanonicalPrefix"] for Sr in _TJ_STORAGE_ROOTS_CACHE["_StorageRoots"]}
+    return _TJ_STORAGE_ROOTS_CACHE["_StorageRoots"]
 
 
 # directive: transcodejob-uses-path | # see path.S5
@@ -27,26 +46,70 @@ def _LocalExists(Value: str) -> bool:
 
 # directive: transcodejob-uses-path | # see path.S5
 def _LastSegment(Value: str) -> str:
-    """Module-level helper: basename for canonical Windows-shape paths."""
-    return ntpath.basename(Value or "")
+    """Shape-agnostic filename via Path.FromLegacyString.LastSegment; falls through on parse failure."""
+    if not Value:
+        return ""
+    try:
+        return Path.FromLegacyString(Value, _GetStorageRoots()).LastSegment()
+    except PathError:
+        return Value.replace("\\", "/").rsplit("/", 1)[-1]
 
 
 # directive: transcodejob-uses-path | # see path.S5
 def _ParentDir(Value: str) -> str:
-    """Module-level helper: dirname for canonical Windows-shape paths."""
-    return ntpath.dirname(Value or "")
+    """Shape-agnostic parent directory via Path.FromLegacyString.ParentDir.CanonicalDisplay; falls through on parse failure."""
+    if not Value:
+        return ""
+    try:
+        _GetStorageRoots()
+        P = Path.FromLegacyString(Value, _TJ_STORAGE_ROOTS_CACHE["_StorageRoots"])
+        return P.ParentDir().CanonicalDisplay(_TJ_STORAGE_ROOTS_CACHE["_PrefixMap"])
+    except PathError:
+        Norm = Value.replace("\\", "/")
+        Idx = Norm.rfind("/")
+        return Value[: Idx] if Idx >= 0 else ""
 
 
 # directive: transcodejob-uses-path | # see path.S5
 def _Join(Base: str, *Children: str) -> str:
-    """Module-level helper: ntpath.join for canonical Windows-shape paths."""
-    return ntpath.join(Base, *Children)
+    """Shape-agnostic join via Path.FromLegacyString.Join chained per child; falls through on parse failure."""
+    if not Base:
+        return Base or ""
+    try:
+        _GetStorageRoots()
+        P = Path.FromLegacyString(Base, _TJ_STORAGE_ROOTS_CACHE["_StorageRoots"])
+        for Child in Children:
+            if Child:
+                P = P.Join(Child.replace("\\", "/").strip("/"))
+        return P.CanonicalDisplay(_TJ_STORAGE_ROOTS_CACHE["_PrefixMap"])
+    except PathError:
+        BackslashJoin = Base
+        for Child in Children:
+            if Child:
+                if not BackslashJoin.endswith("\\") and not BackslashJoin.endswith("/"):
+                    BackslashJoin += "\\"
+                BackslashJoin += Child.replace("/", "\\").lstrip("\\")
+        return BackslashJoin
 
 
 # directive: transcodejob-uses-path | # see path.S5
 def _SplitExt(Value: str) -> tuple:
-    """Module-level helper: splitext for canonical Windows-shape paths."""
-    return ntpath.splitext(Value or "")
+    """Shape-agnostic split via Path.FromLegacyString.SplitExt; falls through on parse failure."""
+    if not Value:
+        return ("", "")
+    try:
+        _GetStorageRoots()
+        P = Path.FromLegacyString(Value, _TJ_STORAGE_ROOTS_CACHE["_StorageRoots"])
+        Base, Ext = P.SplitExt()
+        BaseDisplay = Base.CanonicalDisplay(_TJ_STORAGE_ROOTS_CACHE["_PrefixMap"])
+        return (BaseDisplay, Ext)
+    except PathError:
+        Norm = Value.replace("/", "\\")
+        Idx = Norm.rfind(".")
+        SepIdx = Norm.rfind("\\")
+        if Idx <= SepIdx or Idx == SepIdx + 1:
+            return (Value, "")
+        return (Value[:Idx], Value[Idx:])
 
 
 from Core.DateTimeHelpers import ToUtcIsoZ
@@ -402,7 +465,7 @@ class ProcessTranscodeQueueService:
                 self.HandleJobFailure(Job, "Failed to get media file data", FallbackAttemptId, ActiveJobId)
                 return
 
-            LocalSourcePath = Path(MediaFile.StorageRootId, MediaFile.RelativePath).Resolve(Worker(Name=self.WorkerName, Platform="windows", Db=self.DatabaseManager.DatabaseService))
+            LocalSourcePath = Path(MediaFile.StorageRootId, MediaFile.RelativePath).Resolve(Worker.FromWorkerContext(Db=self.DatabaseManager.DatabaseService))
             if not _LocalExists(LocalSourcePath):
                 ErrMsg = f"Source file missing on disk: {LocalSourcePath}"
                 LoggingService.LogWarning(ErrMsg, "ProcessTranscodeQueueService", "ProcessJob")
@@ -584,7 +647,7 @@ class ProcessTranscodeQueueService:
                 self.HandleJobFailure(Job, "Failed to get media file data (test mode)", None, ActiveJobId)
                 return
 
-            LocalSourcePath = Path(MediaFile.StorageRootId, MediaFile.RelativePath).Resolve(Worker(Name=self.WorkerName, Platform="windows", Db=self.DatabaseManager.DatabaseService))
+            LocalSourcePath = Path(MediaFile.StorageRootId, MediaFile.RelativePath).Resolve(Worker.FromWorkerContext(Db=self.DatabaseManager.DatabaseService))
             if not _LocalExists(LocalSourcePath):
                 ErrMsg = f"Source file missing on disk: {LocalSourcePath}"
                 LoggingService.LogWarning(ErrMsg, "ProcessTranscodeQueueService", "ProcessTestVariantJob")
@@ -860,7 +923,7 @@ class ProcessTranscodeQueueService:
                 self.HandleJobFailure(Job, "Failed to get media file data for remux", None, ActiveJobId)
                 return
 
-            LocalSourcePath = Path(Job.StorageRootId, Job.RelativePath).Resolve(Worker(Name=self.WorkerName, Platform="windows", Db=self.DatabaseManager.DatabaseService))
+            LocalSourcePath = Path(Job.StorageRootId, Job.RelativePath).Resolve(Worker.FromWorkerContext(Db=self.DatabaseManager.DatabaseService))
             if not _LocalExists(LocalSourcePath):
                 ErrMsg = f"Source file missing on disk: {LocalSourcePath}"
                 LoggingService.LogWarning(ErrMsg, "ProcessTranscodeQueueService", "ProcessRemuxJob")
@@ -1208,7 +1271,7 @@ class ProcessTranscodeQueueService:
         the source directly from the NFS/SMB mount; no copy step.  # allow: R12 -- preexisting
         Returns the effective input path, or None on failure."""
         try:
-            SourcePath = Path(Job.StorageRootId, Job.RelativePath).Resolve(Worker(Name=self.WorkerName, Platform="windows", Db=self.DatabaseManager.DatabaseService))
+            SourcePath = Path(Job.StorageRootId, Job.RelativePath).Resolve(Worker.FromWorkerContext(Db=self.DatabaseManager.DatabaseService))
             LoggingService.LogInfo(f"Resolved source path: {SourcePath}", "ProcessTranscodeQueueService", "SetupFilePreparation")
             return SourcePath
 

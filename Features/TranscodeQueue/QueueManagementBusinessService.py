@@ -1,6 +1,5 @@
 from typing import List, Optional, Dict, Any, Tuple
 from datetime import datetime, timezone
-import ntpath
 import os
 from Features.TranscodeQueue.Models.TranscodeQueueModel import TranscodeQueueModel
 from Core.Models.MediaFileModel import MediaFileModel
@@ -12,8 +11,28 @@ from Features.TranscodeQueue.QueueAdmissionConfigRepository import QueueAdmissio
 from Features.TranscodeQueue.CodecCompatibilityRepository import CodecCompatibilityRepository
 from Core.Logging.LoggingService import LoggingService
 from Core.PathNormalize import ExtractShowFolder
+from Core.Path import Path, PathError
 from Services.FileManagerService import FileManagerService
 from Repositories.DatabaseManager import DatabaseManager
+
+
+_TQ_STORAGE_ROOTS_CACHE: dict = {"_StorageRoots": None}
+
+
+# directive: transcodequeue-uses-path | # see path.S6
+def _GetStorageRoots() -> List[dict]:
+    """Lazy StorageRoots prefix list for FromLegacyString (shape-agnostic path parsing)."""
+    if _TQ_STORAGE_ROOTS_CACHE["_StorageRoots"] is None:
+        from Core.Database.DatabaseService import DatabaseService
+        Rows = DatabaseService().ExecuteQuery(
+            "SELECT Id, CanonicalPrefix FROM StorageRoots ORDER BY length(CanonicalPrefix) DESC"
+        )
+        _TQ_STORAGE_ROOTS_CACHE["_StorageRoots"] = [
+            {"Id": R.get("id", R.get("Id")),
+             "CanonicalPrefix": R.get("canonicalprefix", R.get("CanonicalPrefix"))}
+            for R in Rows
+        ]
+    return _TQ_STORAGE_ROOTS_CACHE["_StorageRoots"]
 
 
 # directive: transcodequeue-uses-path | # see path.S5
@@ -24,14 +43,30 @@ def _LocalExists(Value: str) -> bool:
 
 # directive: transcodequeue-uses-path | # see path.S5
 def _LastSegment(Value: str) -> str:
-    """Module-level helper: filename component of a canonical Windows-shape path."""
-    return ntpath.basename(Value or "")
+    """Shape-agnostic filename component via Path.FromLegacyString.LastSegment; falls through to raw tail on parse failure."""
+    if not Value:
+        return ""
+    try:
+        return Path.FromLegacyString(Value, _GetStorageRoots()).LastSegment()
+    except PathError:
+        Norm = Value.replace("\\", "/")
+        return Norm.rsplit("/", 1)[-1]
 
 
 # directive: transcodequeue-uses-path | # see path.S5
 def _ParentDir(Value: str) -> str:
-    """Module-level helper: parent directory component of a canonical Windows-shape path."""
-    return ntpath.dirname(Value or "")
+    """Shape-agnostic parent directory via Path.FromLegacyString.ParentDir.CanonicalDisplay; falls through on parse failure."""
+    if not Value:
+        return ""
+    try:
+        P = Path.FromLegacyString(Value, _GetStorageRoots())
+        Prefixes = {Sr["Id"]: Sr["CanonicalPrefix"] for Sr in _GetStorageRoots()}
+        ParentPath = P.ParentDir()
+        return ParentPath.CanonicalDisplay(Prefixes)
+    except PathError:
+        Norm = Value.replace("\\", "/")
+        Idx = Norm.rfind("/")
+        return Value[: Idx] if Idx >= 0 else ""
 
 
 class QueueManagementBusinessService:

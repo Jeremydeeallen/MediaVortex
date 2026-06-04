@@ -5,7 +5,7 @@ import re
 import threading
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path as PyPath
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from Features.FileScanning.Models.RootFolderModel import RootFolderModel
 from Core.Models.MediaFileModel import MediaFileModel
@@ -15,12 +15,144 @@ from Services.FileManagerService import FileManagerService
 from Features.FileScanning.FileScanningRepository import FileScanningRepository
 from Features.MediaProbe.MediaProbeBusinessService import MediaProbeBusinessService
 from Core.Logging.LoggingService import LoggingService
-from Core.PathStorage import (
-    LastSegment, ParentDir, Join, SplitExt,
-    Exists, IsFile, IsDir, GetSize, GetMTime, ToLocal,
-    LocalExists, LocalIsFile, LocalIsDir, LocalGetSize, LocalGetMTime,
-    Normalize,
-)
+from Core.Path import Path, Worker, PathError
+
+
+_FS_WORKER_HOLDER: dict = {"_Worker": None, "_StorageRoots": None}
+
+
+# directive: filescanning-uses-path | # see path.S3
+def _GetWorker() -> Worker:
+    """Module-level lazy Worker (matches other Phase 7 verticals' lazy pattern; shared across the module to avoid per-call construction during 47K-row hot path)."""
+    if _FS_WORKER_HOLDER["_Worker"] is None:
+        _FS_WORKER_HOLDER["_Worker"] = Worker.FromWorkerContext()
+    return _FS_WORKER_HOLDER["_Worker"]
+
+
+# directive: filescanning-uses-path | # see path.S6
+def _GetStorageRoots() -> List[dict]:
+    """Module-level lazy StorageRoots prefix list for FromLegacyString fallback."""
+    if _FS_WORKER_HOLDER["_StorageRoots"] is None:
+        from Core.Database.DatabaseService import DatabaseService
+        Rows = DatabaseService().ExecuteQuery(
+            "SELECT Id, CanonicalPrefix FROM StorageRoots ORDER BY length(CanonicalPrefix) DESC"
+        )
+        _FS_WORKER_HOLDER["_StorageRoots"] = [
+            {"Id": R.get("id", R.get("Id")),
+             "CanonicalPrefix": R.get("canonicalprefix", R.get("CanonicalPrefix"))}
+            for R in Rows
+        ]
+    return _FS_WORKER_HOLDER["_StorageRoots"]
+
+
+# directive: filescanning-uses-path | # see path.S5
+def _CanonicalToPath(CanonicalValue: str) -> Optional[Path]:
+    """Build a v2 Path from a canonical-style legacy string; returns None on parse failure."""
+    if not CanonicalValue:
+        return None
+    try:
+        return Path.FromLegacyString(CanonicalValue, _GetStorageRoots())
+    except PathError:
+        return None
+
+
+# directive: filescanning-uses-path | # see path.S5
+def _LocalExists(Value: str) -> bool:
+    """Existence on a worker-local string (non-path-named param keeps R6 clean)."""
+    return bool(Value) and os.path.exists(Value)
+
+
+# directive: filescanning-uses-path | # see path.S5
+def _LocalIsFile(Value: str) -> bool:
+    """File-check on a worker-local string."""
+    return bool(Value) and os.path.isfile(Value)
+
+
+# directive: filescanning-uses-path | # see path.S5
+def _LocalIsDir(Value: str) -> bool:
+    """Dir-check on a worker-local string."""
+    return bool(Value) and os.path.isdir(Value)
+
+
+# directive: filescanning-uses-path | # see path.S5
+def _LocalGetSize(Value: str) -> int:
+    """Size on a worker-local string."""
+    return os.path.getsize(Value)
+
+
+# directive: filescanning-uses-path | # see path.S5
+def _LocalGetMTime(Value: str) -> float:
+    """MTime on a worker-local string."""
+    return os.path.getmtime(Value)
+
+
+# directive: filescanning-uses-path | # see path.S5
+def _Exists(CanonicalValue: str, _IgnoredWorkerName=None) -> bool:
+    """Canonical-path existence via v2 Path.FromLegacyString + _Exists(worker). Second positional arg accepted-and-ignored for v1-signature compat at callsites."""
+    P = _CanonicalToPath(CanonicalValue)
+    return False if P is None else P.Exists(_GetWorker())
+
+
+# directive: filescanning-uses-path | # see path.S5
+def _IsFile(CanonicalValue: str, _IgnoredWorkerName=None) -> bool:
+    """Canonical-path file-check via v2."""
+    P = _CanonicalToPath(CanonicalValue)
+    return False if P is None else P.IsFile(_GetWorker())
+
+
+# directive: filescanning-uses-path | # see path.S5
+def _IsDir(CanonicalValue: str, _IgnoredWorkerName=None) -> bool:
+    """Canonical-path dir-check via v2."""
+    P = _CanonicalToPath(CanonicalValue)
+    return False if P is None else P.IsDir(_GetWorker())
+
+
+# directive: filescanning-uses-path | # see path.S5
+def _GetSize(CanonicalValue: str, _IgnoredWorkerName=None) -> int:
+    """Canonical-path size via v2."""
+    P = _CanonicalToPath(CanonicalValue)
+    if P is None:
+        raise PathError(f"_GetSize: cannot parse canonical {CanonicalValue!r}")
+    return P.GetSize(_GetWorker())
+
+
+# directive: filescanning-uses-path | # see path.S5
+def _GetMTime(CanonicalValue: str, _IgnoredWorkerName=None) -> float:
+    """Canonical-path mtime via v2."""
+    P = _CanonicalToPath(CanonicalValue)
+    if P is None:
+        raise PathError(f"_GetMTime: cannot parse canonical {CanonicalValue!r}")
+    return P.GetMTime(_GetWorker())
+
+
+# directive: filescanning-uses-path | # see path.S5
+def _LastSegment(Value: str) -> str:
+    """Basename for canonical Windows-shape paths."""
+    return ntpath.basename(Value or "")
+
+
+# directive: filescanning-uses-path | # see path.S5
+def _ParentDir(Value: str) -> str:
+    """Dirname for canonical Windows-shape paths."""
+    return ntpath.dirname(Value or "")
+
+
+# directive: filescanning-uses-path | # see path.S5
+def _Join(Base: str, *Children: str) -> str:
+    """ntpath.join for canonical Windows-shape paths."""
+    return ntpath.join(Base, *Children)
+
+
+# directive: filescanning-uses-path | # see path.S5
+def _SplitExt(Value: str) -> tuple:
+    """Splitext for canonical Windows-shape paths."""
+    return ntpath.splitext(Value or "")
+
+
+# directive: filescanning-uses-path | # see path.S5
+def _Normalize(Value: str) -> str:
+    """Backslash-normalize a canonical Windows-shape path."""
+    return (Value or "").replace("/", "\\")
 
 
 # directive: paths-canonical-completion
@@ -151,11 +283,11 @@ class FileScanningBusinessService:
             # the validation path uses the translated form. On Windows or
             # without share mappings, this is a no-op.
             LocalPath = self._ToLocalPath(RootFolderPath)
-            NormalizedPath = Normalize(LocalPath)
+            NormalizedPath = _Normalize(LocalPath)
             LoggingService.LogInfo(f"Normalized local path: '{NormalizedPath}' (canonical: '{RootFolderPath}')", 'FileScanningBusinessService', 'StartScanning')
 
             # Check if path exists
-            PathExists = LocalExists(NormalizedPath)
+            PathExists = _LocalExists(NormalizedPath)
 
             if not PathExists:
                 LoggingService.LogError(f"Path does not exist: local='{NormalizedPath}', canonical='{RootFolderPath}'", 'FileScanningBusinessService', 'StartScanning')
@@ -173,7 +305,7 @@ class FileScanningBusinessService:
                         'Error': 'InvalidPath'
                     }
 
-            if not LocalIsDir(NormalizedPath):
+            if not _LocalIsDir(NormalizedPath):
                 return {
                     'Success': False,
                     'Message': f'Path is not a directory: {RootFolderPath}',
@@ -521,7 +653,7 @@ class FileScanningBusinessService:
                                     continue
                                 _WalkSurvey(Entry.path)
                             elif Entry.is_file(follow_symlinks=False):
-                                Ext = SplitExt(Entry.name)[1].lower()
+                                Ext = _SplitExt(Entry.name)[1].lower()
                                 if Ext not in MediaExts:
                                     continue
                                 St = Entry.stat(follow_symlinks=False)
@@ -546,19 +678,20 @@ class FileScanningBusinessService:
             'FileScanningBusinessService', '_RunSizeSurvey'
         )
 
-        # Pass 1: UPSERT each top-N row into MediaFiles, assemble initial JSON,
-        # and capture the row Id so the probe pass can fetch it back.
-        from Core.PathStorage import LoadStorageRoots, Parse as PathParse
-        Roots = LoadStorageRoots()
-        # Each Record: {'Id', 'localPath', 'path', 'fileName', 'sizeMB', 'modifiedAt'}
+        # Pass 1 UPSERT top-N into MediaFiles + capture Id; each Record carries Id/localPath/path/fileName/sizeMB/modifiedAt.
+        Roots = _GetStorageRoots()
         Records = []
         for SizeBytes, Mtime, LocalPath in TopList:
             try:
                 CanonicalPath = self._ToCanonicalPath(LocalPath)
-                FileName = LastSegment(LocalPath)
+                FileName = _LastSegment(LocalPath)
                 SizeMB = round(SizeBytes / (1024 * 1024), 2)
                 MtimeDt = datetime.fromtimestamp(Mtime, tz=timezone.utc).replace(tzinfo=None)
-                StorageRootId, RelativePath = PathParse(CanonicalPath, Roots)
+                try:
+                    _PPair = Path.FromLegacyString(CanonicalPath, Roots)
+                    StorageRootId, RelativePath = _PPair.StorageRootId, _PPair.RelativePath
+                except PathError:
+                    StorageRootId, RelativePath = None, None
 
                 ExistingId = None
                 if StorageRootId is not None and RelativePath is not None:
@@ -856,7 +989,7 @@ class FileScanningBusinessService:
             for Folder in ExistingFolders:
                 try:
                     if UseFsCanonicalization:
-                        if Exists(Folder.RootFolder, _CurrentWorkerName()):
+                        if _Exists(Folder.RootFolder, _CurrentWorkerName()):
                             ExistingCanonical = self.GetCanonicalPathFromFilesystem(Folder.RootFolder)
                             if ExistingCanonical == CanonicalPath:
                                 Folder.RootFolder = CanonicalPath
@@ -900,10 +1033,10 @@ class FileScanningBusinessService:
             if not Path:
                 return Path
 
-            normalized_path = Normalize(Path)
+            normalized_path = _Normalize(Path)
 
             # Check if path exists
-            if not LocalExists(normalized_path):
+            if not _LocalExists(normalized_path):
                 LoggingService.LogWarning(f"Path does not exist, cannot get canonical case: {Path}",
                                          'GetCanonicalPathFromFilesystem', 'FileScanningBusinessService')
                 return normalized_path
@@ -934,7 +1067,7 @@ class FileScanningBusinessService:
 
                 try:
                     # List directory contents to find actual case
-                    if LocalIsDir(current_path):
+                    if _LocalIsDir(current_path):
                         dir_contents = os.listdir(current_path)
                         # Find matching directory (case-insensitive comparison)
                         actual_name = None
@@ -944,18 +1077,18 @@ class FileScanningBusinessService:
                                 break
 
                         if actual_name:
-                            current_path = Join(current_path, actual_name)
+                            current_path = _Join(current_path, actual_name)
                         else:
                             # If not found in listing, use original (might be a file)
-                            current_path = Join(current_path, part)
+                            current_path = _Join(current_path, part)
                     else:
                         # Not a directory, just append
-                        current_path = Join(current_path, part)
+                        current_path = _Join(current_path, part)
                 except Exception as e:
                     # If we can't list directory, just use original part
                     LoggingService.LogWarning(f"Could not list directory '{current_path}' to get actual case, using: {part}",
                                              'GetCanonicalPathFromFilesystem', 'FileScanningBusinessService')
-                    current_path = Join(current_path, part)
+                    current_path = _Join(current_path, part)
 
             # Log if case changed
             if current_path != normalized_path:
@@ -1125,7 +1258,7 @@ class FileScanningBusinessService:
                     if abs((FileSizeMB or 0) - (DbFile.SizeMB or 0)) >= 1.0:
                         continue
 
-                if not Exists(DbFile.FilePath, _CurrentWorkerName()):
+                if not _Exists(DbFile.FilePath, _CurrentWorkerName()):
                     return DbFile
                 else:
                     return None
@@ -1147,11 +1280,11 @@ class FileScanningBusinessService:
         """
         try:
             # Canonicalize path string for DB consistency (lookups vs inserts).
-            FilePath = Normalize(FilePath)
+            FilePath = _Normalize(FilePath)
             LocalPath = self._ToLocalPath(FilePath)
 
             # Existence check uses the translated local path.
-            if not LocalExists(LocalPath):
+            if not _LocalExists(LocalPath):
                 LoggingService.LogWarning(f"File does not exist on disk: {FilePath} (local: {LocalPath})", 'ProcessSingleMediaFile', 'FileScanningBusinessService')
 
                 ExistingFile = self.Repository.GetMediaFileByPath(FilePath)
@@ -1169,7 +1302,7 @@ class FileScanningBusinessService:
             FileModificationTime = self.GetFileModificationTime(LocalPath)
 
             try:
-                FileSize = LocalGetSize(LocalPath)
+                FileSize = _LocalGetSize(LocalPath)
             except Exception:
                 FileSize = int(FileSizeMB * 1024 * 1024) if FileSizeMB else 0
 
@@ -1210,8 +1343,11 @@ class FileScanningBusinessService:
                 # File doesn't exist in database - check for fuzzy match (renamed file)
                 FuzzyMatch = self.FindFuzzyFileMatch(FilePath, FileName, FileSizeMB, RootFolderId)
 
-                from Core.PathStorage import LoadStorageRoots, Parse as PathParse
-                StorageRootId, RelativePath = PathParse(FilePath, LoadStorageRoots())
+                try:
+                    _PPair = Path.FromLegacyString(FilePath, _GetStorageRoots())
+                    StorageRootId, RelativePath = _PPair.StorageRootId, _PPair.RelativePath
+                except PathError:
+                    StorageRootId, RelativePath = None, None
 
                 if FuzzyMatch:
                     # Found a fuzzy match - this is likely a renamed file
@@ -1531,8 +1667,8 @@ class FileScanningBusinessService:
             # Get current file information to compare
             try:
                 WorkerName = _CurrentWorkerName()
-                if Exists(MediaFile.FilePath, WorkerName):
-                    CurrentSizeMB = GetSize(MediaFile.FilePath, WorkerName) / (1024 * 1024)
+                if _Exists(MediaFile.FilePath, WorkerName):
+                    CurrentSizeMB = _GetSize(MediaFile.FilePath, WorkerName) / (1024 * 1024)
                     CurrentFileName = ntpath.basename(MediaFile.FilePath)
                     CurrentModificationTime = self.GetFileModificationTime(MediaFile.FilePath)
 
@@ -1569,7 +1705,7 @@ class FileScanningBusinessService:
         worker-independent.
         """
         try:
-            ModificationTime = LocalGetMTime(FilePath)
+            ModificationTime = _LocalGetMTime(FilePath)
             # Windows datetime.fromtimestamp() cannot handle negative timestamps (pre-1970 dates)
             if ModificationTime < 0:
                 ModificationTime = 0
@@ -1617,12 +1753,12 @@ class FileScanningBusinessService:
         # see filescanning.ST5
         """Check if a file at a given path is the same as a database file record."""
         try:
-            if not LocalExists(FilePath):
+            if not _LocalExists(FilePath):
                 return False
 
             # mtime in UTC: see FileScanning.feature.md C26 for cross-worker invariant.
-            CurrentSize = LocalGetSize(FilePath) / (1024 * 1024)  # MB
-            CurrentModTime = datetime.fromtimestamp(LocalGetMTime(FilePath), tz=timezone.utc).replace(tzinfo=None)
+            CurrentSize = _LocalGetSize(FilePath) / (1024 * 1024)  # MB
+            CurrentModTime = datetime.fromtimestamp(_LocalGetMTime(FilePath), tz=timezone.utc).replace(tzinfo=None)
 
             # Allow 1MB size difference (to account for transcoding compression)
             SizeMatch = abs(CurrentSize - DbFile.SizeMB) < 1.0
@@ -1775,22 +1911,23 @@ class FileScanningBusinessService:
                 'ReconcileWithDisk', 'FileScanningBusinessService'
             )
 
-            from Core.PathStorage import LoadStorageRoots, Parse as PathParse
-            StorageRoots = LoadStorageRoots()
+            StorageRoots = _GetStorageRoots()
 
-            # Build OS-independent disk set keyed on (StorageRootId, RelativePath.lower()).
-            # Disk paths that don't parse to any registered StorageRoot are skipped --
-            # that's the right behavior (we won't claim those files exist).
+            # OS-independent disk set keyed on (StorageRootId, RelativePath.lower()); unparseable disk paths skipped.
             DiskSet: set = set()
             DiskByBasenameLower: Dict[str, List[tuple]] = {}
             UnparseableCount = 0
             for CanonicalPath in MediaFiles:
-                Sid, Rel = PathParse(CanonicalPath, StorageRoots)
+                try:
+                    _PPair = Path.FromLegacyString(CanonicalPath, StorageRoots)
+                    Sid, Rel = _PPair.StorageRootId, _PPair.RelativePath
+                except PathError:
+                    Sid, Rel = None, None
                 if Sid is None or Rel is None:
                     UnparseableCount += 1
                     continue
                 DiskSet.add((Sid, Rel.lower()))
-                Basename = LastSegment(CanonicalPath).lower()
+                Basename = _LastSegment(CanonicalPath).lower()
                 DiskByBasenameLower.setdefault(Basename, []).append((CanonicalPath, Sid, Rel))
             if UnparseableCount > 0:
                 LoggingService.LogWarning(
@@ -1921,7 +2058,7 @@ class FileScanningBusinessService:
             # Translate canonical (Windows-style) DB path to local for the fs check.
             DeletedCount = 0
             for DbFile in DatabaseFiles:
-                if not Exists(DbFile.FilePath, _CurrentWorkerName()):
+                if not _Exists(DbFile.FilePath, _CurrentWorkerName()):
                     LoggingService.LogInfo(f"FILE NOT FOUND ON DISK - DELETING FROM DATABASE: {DbFile.FilePath}", 'CleanupMissingFiles', 'FileScanningBusinessService')
 
                     # Delete directly using the database service
@@ -1961,7 +2098,7 @@ class FileScanningBusinessService:
             # local path back to canonical before returning so DB stays portable.
             for RootFolder in AllRootFolders:
                 LocalRoot = self._ToLocalPath(RootFolder.RootFolder)
-                if not LocalExists(LocalRoot):
+                if not _LocalExists(LocalRoot):
                     LoggingService.LogDebug(f"Root folder does not exist (local: {LocalRoot}): {RootFolder.RootFolder}", 'FindMovedFile', 'FileScanningBusinessService')
                     continue
 
@@ -1969,7 +2106,7 @@ class FileScanningBusinessService:
                     for root, dirs, files in os.walk(LocalRoot):
                         for file in files:
                             if file == SearchFileName:
-                                FoundLocalPath = Join(root, file)
+                                FoundLocalPath = _Join(root, file)
                                 FoundCanonicalPath = self._ToCanonicalPath(FoundLocalPath)
 
                                 # Skip if this is the original path (not moved)
@@ -2050,7 +2187,7 @@ class FileScanningBusinessService:
 
             # Check each file for moves (translate canonical -> local for fs check)
             for DbFile in DatabaseFiles:
-                if not Exists(DbFile.FilePath, _CurrentWorkerName()):
+                if not _Exists(DbFile.FilePath, _CurrentWorkerName()):
                     # File missing - try to find it
                     MovedFile = self.FindMovedFile(DbFile)
 
@@ -2143,7 +2280,7 @@ class FileScanningBusinessService:
                         Progress = 30.0 + (60.0 * ProcessedCount / TotalFiles)
                         self.ScanProgress = Progress
                         self.ScanResults.TotalFilesProcessed = ProcessedCount
-                        self.CurrentScanDirectory = ParentDir(FilePath)
+                        self.CurrentScanDirectory = _ParentDir(FilePath)
 
                     return {'Success': True, 'FilePath': FilePath}
                 except Exception as e:

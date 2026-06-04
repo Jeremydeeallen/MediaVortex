@@ -3,7 +3,7 @@ from typing import List, Dict, Any
 from Services.FileManagerService import FileManagerService
 from Features.FileScanning.FileScanningRepository import FileScanningRepository
 from Core.Logging.LoggingService import LoggingService
-from Core.PathStorage import LastSegment, LocalGetSize
+from Features.FileScanning.FileScanningBusinessService import _LastSegment as LastSegment, _LocalGetSize as LocalGetSize
 
 
 class DuplicateDetectionService:

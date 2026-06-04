@@ -2,7 +2,7 @@ from flask import Blueprint, request, jsonify, render_template
 from typing import Dict, Any
 from Features.FileScanning.FileScanningViewModel import FileScanningViewModel
 from Core.Logging.LoggingService import LoggingService
-from Core.PathStorage import LocalExists, LocalIsDir, Normalize
+from Features.FileScanning.FileScanningBusinessService import _LocalExists, _LocalIsDir, _Normalize
 
 
 class FileScanningController:
@@ -48,7 +48,7 @@ class FileScanningController:
                         except Exception as e:
                             LoggingService.LogWarning(f"Could not list drives: {str(e)}", "FileScanningController", "StartScan")
 
-                        NormalizedPath = Normalize(RootFolderPath)
+                        NormalizedPath = _Normalize(RootFolderPath)
                         LoggingService.LogInfo(f"Controller normalized path: '{NormalizedPath}'", "FileScanningController", "StartScan")
 
                         # Test if Z: drive is accessible
@@ -63,10 +63,10 @@ class FileScanningController:
                             except Exception as e:
                                 LoggingService.LogError(f"Cannot list Z: drive contents: {str(e)}", "FileScanningController", "StartScan")
 
-                        PathExists = LocalExists(NormalizedPath)
+                        PathExists = _LocalExists(NormalizedPath)
                         LoggingService.LogInfo(f"Controller LocalExists: {PathExists}", "FileScanningController", "StartScan")
 
-                        IsDirectory = LocalIsDir(NormalizedPath)
+                        IsDirectory = _LocalIsDir(NormalizedPath)
                         LoggingService.LogInfo(f"Controller LocalIsDir: {IsDirectory}", "FileScanningController", "StartScan")
 
                     except Exception as e:

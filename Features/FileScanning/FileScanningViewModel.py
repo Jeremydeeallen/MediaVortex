@@ -7,7 +7,7 @@ from Features.FileScanning.Models.SeasonModel import SeasonModel
 from Features.FileScanning.Models.FileScanResultModel import FileScanResultModel
 from Features.FileScanning.FileScanningBusinessService import FileScanningBusinessService
 from Core.Logging.LoggingService import LoggingService
-from Core.PathStorage import ParentDir
+from Features.FileScanning.FileScanningBusinessService import _ParentDir, _Exists
 
 
 class FileScanningViewModel:
@@ -391,7 +391,7 @@ class FileScanningViewModel:
             DisplayFiles = []
             for row in result['Rows']:
                 FilePath = row['FilePath'] or ''
-                Directory = ParentDir(FilePath) if FilePath else ''
+                Directory = _ParentDir(FilePath) if FilePath else ''
                 SizeMB = row['SizeMB']
                 DurationMinutes = row['DurationMinutes']
                 LastScannedDate = row['LastScannedDate']
@@ -431,7 +431,7 @@ class FileScanningViewModel:
                 return {'Success': False, 'Message': 'Media file not found'}
 
             # Step 1: Check if exact file still exists
-            if os.path.exists(MediaFile.FilePath):
+            if _Exists(MediaFile.FilePath):
                 # File exists - refresh it directly
                 self.BusinessService.ProcessSingleMediaFile(
                     FilePath=MediaFile.FilePath,

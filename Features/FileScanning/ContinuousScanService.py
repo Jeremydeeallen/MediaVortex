@@ -5,7 +5,7 @@ from typing import Dict, Any, List
 from datetime import datetime, timezone
 from Core.Logging.LoggingService import LoggingService
 from Core.DateTimeHelpers import AsAwareUtc, ToUtcIsoZ
-from Core.PathStorage import LocalIsDir
+from Features.FileScanning.FileScanningBusinessService import _LocalIsDir as LocalIsDir
 
 
 class ContinuousScanService:

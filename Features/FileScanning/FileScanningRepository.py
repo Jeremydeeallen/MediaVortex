@@ -1,3 +1,4 @@
+import ntpath
 import os
 import re
 from typing import Optional, List, Dict, Any
@@ -5,9 +6,84 @@ from Core.Database.BaseRepository import BaseRepository
 from Core.Database.DatabaseService import EscapeLikePattern
 from Core.Logging.LoggingService import LoggingService
 from Core.Models.MediaFileModel import MediaFileModel
-from Core.PathStorage import Join, SplitExt, LocalExists, LocalIsDir, Normalize
+from Core.Path import Path, PathError
 from Features.FileScanning.Models.RootFolderModel import RootFolderModel
 from Features.FileScanning.Models.SeasonModel import SeasonModel
+
+
+_FSR_STORAGE_ROOTS_CACHE: dict = {"_StorageRoots": None, "_PrefixMap": None}
+
+
+# directive: filescanning-uses-path | # see path.S6
+def _GetStorageRoots(Db) -> list:
+    """Lazy StorageRoots prefix list for shape-agnostic path parsing."""
+    if _FSR_STORAGE_ROOTS_CACHE["_StorageRoots"] is None:
+        Rows = Db.ExecuteQuery(
+            "SELECT Id, CanonicalPrefix FROM StorageRoots ORDER BY length(CanonicalPrefix) DESC"
+        )
+        _FSR_STORAGE_ROOTS_CACHE["_StorageRoots"] = [
+            {"Id": R.get("id", R.get("Id")),
+             "CanonicalPrefix": R.get("canonicalprefix", R.get("CanonicalPrefix"))}
+            for R in Rows
+        ]
+        _FSR_STORAGE_ROOTS_CACHE["_PrefixMap"] = {Sr["Id"]: Sr["CanonicalPrefix"] for Sr in _FSR_STORAGE_ROOTS_CACHE["_StorageRoots"]}
+    return _FSR_STORAGE_ROOTS_CACHE["_StorageRoots"]
+
+
+# directive: filescanning-uses-path | # see path.S5
+def _LocalExists(Value: str) -> bool:
+    """Existence on a worker-local string."""
+    return bool(Value) and os.path.exists(Value)
+
+
+# directive: filescanning-uses-path | # see path.S5
+def _LocalIsDir(Value: str) -> bool:
+    """Dir-check on a worker-local string."""
+    return bool(Value) and os.path.isdir(Value)
+
+
+# directive: filescanning-uses-path | # see path.S5
+def _Normalize(Value: str) -> str:
+    """Backslash normalization for canonical Windows-shape paths."""
+    return (Value or "").replace("/", "\\")
+
+
+# directive: filescanning-uses-path | # see path.S5
+def _Join(Base: str, *Children: str) -> str:
+    """Shape-agnostic join via Path.Join chained; falls through to ntpath on parse failure."""
+    if not Base:
+        return Base or ""
+    try:
+        from Core.Database.DatabaseService import DatabaseService
+        _GetStorageRoots(DatabaseService())
+        P = Path.FromLegacyString(Base, _FSR_STORAGE_ROOTS_CACHE["_StorageRoots"])
+        for Child in Children:
+            if Child:
+                P = P.Join(Child.replace("\\", "/").strip("/"))
+        return P.CanonicalDisplay(_FSR_STORAGE_ROOTS_CACHE["_PrefixMap"])
+    except Exception:
+        BackslashJoin = Base
+        for Child in Children:
+            if Child:
+                if not BackslashJoin.endswith("\\") and not BackslashJoin.endswith("/"):
+                    BackslashJoin += "\\"
+                BackslashJoin += Child.replace("/", "\\").lstrip("\\")
+        return BackslashJoin
+
+
+# directive: filescanning-uses-path | # see path.S5
+def _SplitExt(Value: str) -> tuple:
+    """Shape-agnostic splitext; falls through on parse failure."""
+    if not Value:
+        return ("", "")
+    try:
+        from Core.Database.DatabaseService import DatabaseService
+        _GetStorageRoots(DatabaseService())
+        P = Path.FromLegacyString(Value, _FSR_STORAGE_ROOTS_CACHE["_StorageRoots"])
+        Base, Ext = P.SplitExt()
+        return (Base.CanonicalDisplay(_FSR_STORAGE_ROOTS_CACHE["_PrefixMap"]), Ext)
+    except Exception:
+        return ntpath.splitext(Value or "")
 
 
 class FileScanningRepository(BaseRepository):
@@ -907,8 +983,8 @@ class FileScanningRepository(BaseRepository):
         try:
             if not Path:
                 return Path
-            normalized_path = Normalize(Path)
-            if not LocalExists(normalized_path):
+            normalized_path = _Normalize(Path)
+            if not _LocalExists(normalized_path):
                 LoggingService.LogWarning(f"Path does not exist, cannot normalize: {Path}", "FileScanningRepository", "NormalizePathToFilesystemCase")
                 return normalized_path
             if len(normalized_path) >= 2 and normalized_path[1] == ':':
@@ -928,7 +1004,7 @@ class FileScanningRepository(BaseRepository):
                 if not part:
                     continue
                 try:
-                    if LocalIsDir(current_path):
+                    if _LocalIsDir(current_path):
                         dir_contents = os.listdir(current_path)
                         actual_name = None
                         for item in dir_contents:
@@ -936,14 +1012,14 @@ class FileScanningRepository(BaseRepository):
                                 actual_name = item
                                 break
                         if actual_name:
-                            current_path = Join(current_path, actual_name)
+                            current_path = _Join(current_path, actual_name)
                         else:
-                            current_path = Join(current_path, part)
+                            current_path = _Join(current_path, part)
                     else:
-                        current_path = Join(current_path, part)
+                        current_path = _Join(current_path, part)
                 except Exception as e:
                     LoggingService.LogWarning(f"Could not list directory '{current_path}' to get actual case, using: {part}", "FileScanningRepository", "NormalizePathToFilesystemCase")
-                    current_path = Join(current_path, part)
+                    current_path = _Join(current_path, part)
             if current_path != normalized_path:
                 LoggingService.LogInfo(f"Normalized path case: '{normalized_path}' -> '{current_path}'", "FileScanningRepository", "NormalizePathToFilesystemCase")
             return current_path
@@ -965,7 +1041,7 @@ class FileScanningRepository(BaseRepository):
                 return self._MapMediaFileSummaryRow(rows[0], "exact")
 
             # 2. Match without extension (handles container change: .mkv -> .mp4)
-            nameNoExt = SplitExt(FileName)[0]
+            nameNoExt = _SplitExt(FileName)[0]
             query = f"SELECT {selectCols} FROM MediaFiles WHERE LOWER(FileName) LIKE LOWER(%s) ESCAPE '!' LIMIT 1"
             rows = self.ExecuteQuery(query, (nameNoExt + '%',))
             if rows:
@@ -993,7 +1069,7 @@ class FileScanningRepository(BaseRepository):
 
             # 2. Match without extension (handles container change: .mkv -> .mp4)
             if not rows:
-                nameNoExt = SplitExt(FileName)[0]
+                nameNoExt = _SplitExt(FileName)[0]
                 likeQuery = f"SELECT {self._MEDIA_FILE_SELECT_COLS} FROM MediaFiles WHERE LOWER(FileName) LIKE LOWER(%s) ESCAPE '!' LIMIT 1"
                 rows = self.ExecuteQuery(likeQuery, (EscapeLikePattern(nameNoExt) + '%',))
 
