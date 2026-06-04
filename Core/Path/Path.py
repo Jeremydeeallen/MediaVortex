@@ -35,8 +35,8 @@ _DOS_DEVICE_NAMES = frozenset({
 })
 
 
-@dataclass(frozen=True)
-# directive: path-class-implementation | # see path.C1
+@dataclass(frozen=True, slots=True)
+# directive: path-performance-budget | # see path.C1
 class Path:
     """Canonical typed path for MediaVortex v2; see Core/Path/path.feature.md."""
 

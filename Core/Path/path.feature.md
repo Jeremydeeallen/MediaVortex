@@ -78,6 +78,29 @@ What gets accepted byte-wise at construction (no normalization, no scrubbing): U
 | W6 | Migration tool parses legacy canonical -> typed pair | `BackfillStorageColumns.PopulateRow(canonical_str, roots)` | `Path.FromLegacyString(canonical, roots) -> Path` |
 | W7 | Operator UI shows canonical display in tables | `/Queue/{id}` view -> renders `T:\Show\file.mkv` | `Path.CanonicalDisplay(prefixes) -> str` |
 
+## Performance Budget
+
+`Path` is allocated at high frequency (FileScanning ingests 47K+ rows per pass) and called even more frequently (identity, hash, repr at log lines, JSON round-trips at API responses). Per-method budgets below are durable contract -- regressions catch via `py -m pytest Tests\Unit\test_path_performance.py -m perf`.
+
+| Method | Budget (p99) | Measured (p99, I9 dev) | Notes |
+|---|---:|---:|---|
+| `__eq__` | < 10 us | 200 ns | tuple compare |
+| `__hash__` | < 10 us | 200 ns | tuple hash |
+| `__repr__` | < 10 us | 300 ns | f-string format |
+| `__str__` | < 10 us | 200 ns | delegates to __repr__ |
+| `ToJsonDict` | < 10 us | 100 ns | dict literal |
+| `Path(...)` construction | < 100 us | 2.4 us | includes all D9/D14 regex checks |
+| `Resolve(worker)` | < 1 ms | 200 ns | cached `worker.ResolveStorageRoot` |
+| 50K consecutive constructions | < 5 s | 0.129 s | FileScanning batch projection |
+| 10K consecutive Resolve calls | < 10 s | 0.001 s | transcode worker projection |
+| `sys.getsizeof(Path)` | < 200 bytes | 48 bytes | `slots=True`, no `__dict__` |
+
+**I/O-free invariant.** `__eq__`, `__hash__`, `__repr__`, `__str__`, `ToJsonDict`, and `FromJsonDict` do not touch the filesystem. Verified by `test_identity_methods_do_not_touch_filesystem` which patches `os.path.exists/isfile/isdir/getsize/getmtime` and `os.stat` with raising mocks during execution.
+
+**Construction order matters.** `__post_init__` runs the security checks in a defined order: NUL/control chars first, then leading-marker / drive-letter / Win32-namespace / UNC, then backslash normalization, then `..`-segment check on the normalized form. Adding a new check at the wrong position can produce a false-accept; new D-decisions must specify their ordering relative to existing checks.
+
+**Memory budget.** `@dataclass(frozen=True, slots=True)` keeps each Path at 48 bytes (vs. 344 bytes with `__dict__`). At 50K instances this saves ~14.8 MB. Required: any new instance attribute must be declared as a field; ad-hoc `setattr` will fail at runtime against the slots constraint.
+
 ## Class Surface
 
 ### Construction

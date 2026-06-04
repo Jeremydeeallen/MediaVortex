@@ -13,3 +13,9 @@ settings.register_profile(
     ],
 )
 settings.register_profile("dev", max_examples=200, deadline=None)
+
+
+# directive: path-performance-budget | # see path.C1
+def pytest_configure(config):
+    """Register the 'perf' marker so @pytest.mark.perf does not emit unknown-mark warnings."""
+    config.addinivalue_line("markers", "perf: opt-in performance benchmark; run with -m perf")
