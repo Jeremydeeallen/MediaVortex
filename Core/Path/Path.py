@@ -35,7 +35,7 @@ class Path:
     StorageRootId: int
     RelativePath: str
 
-    # directive: path-class-implementation | # see path.C4
+    # directive: path-property-and-fuzz | # see path.C4
     def __post_init__(self):
         """Validate constructor inputs and normalize RelativePath per D9."""
         Sid = self.StorageRootId
@@ -48,6 +48,8 @@ class Path:
             return
         if Rel[0] in ("/", "\\"):
             raise PathError(f"RelativePath must not start with separator: {Rel!r}")
+        if _DRIVE_PREFIX_RX.match(Rel):
+            raise PathError(f"RelativePath must not start with drive-letter prefix: {Rel!r}")
         Norm = Rel.translate(_BACKSLASH_TO_FORWARD)
         if _DOTDOT_RX.search(Norm):
             raise PathError(f"RelativePath must not contain '..' segments: {Rel!r}")

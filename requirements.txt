@@ -23,6 +23,7 @@ paramiko>=3.0.0
 
 # Development tools
 pytest
+hypothesis>=6.0.0
 black
 flake8
 
