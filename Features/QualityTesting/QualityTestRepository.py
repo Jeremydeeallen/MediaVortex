@@ -370,7 +370,7 @@ class QualityTestRepository(BaseRepository):
         try:
             Query = (
                 "SELECT "
-                "aj.QueueId AS TranscodeAttemptId, "
+                "qtq.TranscodeAttemptId AS TranscodeAttemptId, "
                 "aj.WorkerName, "
                 "aj.StartedAt AS ClaimedAt, "
                 "EXTRACT(EPOCH FROM (NOW() - aj.StartedAt))::int AS ClaimAgeSec, "
@@ -380,10 +380,10 @@ class QualityTestRepository(BaseRepository):
                 "qtq.OriginalFilePath, qtq.TranscodedFilePath, qtq.LocalSourcePath, "
                 "ta.FilePath AS TaFilePath, ta.OldSizeBytes, ta.NewSizeBytes "
                 "FROM ActiveJobs aj "
+                "LEFT JOIN QualityTestingQueue qtq ON qtq.Id = aj.QueueId "
                 "LEFT JOIN QualityTestProgress qtp "
-                "ON qtp.TranscodeAttemptId = aj.QueueId AND qtp.Status = 'Processing' "
-                "LEFT JOIN QualityTestingQueue qtq ON qtq.TranscodeAttemptId = aj.QueueId "
-                "LEFT JOIN TranscodeAttempts ta ON ta.Id = aj.QueueId "
+                "ON qtp.TranscodeAttemptId = qtq.TranscodeAttemptId AND qtp.Status = 'Processing' "
+                "LEFT JOIN TranscodeAttempts ta ON ta.Id = qtq.TranscodeAttemptId "
                 "WHERE aj.ServiceName = 'QualityTestService' "
                 "ORDER BY aj.StartedAt DESC"
             )
