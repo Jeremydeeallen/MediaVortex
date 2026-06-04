@@ -111,7 +111,7 @@ Explicit answers to every non-obvious case the design surfaced.
 | C1 | `Path(7, "Show/file.mkv") == Path(7, "Show/file.mkv")` is True; both placed in a `set` collapse to one member. |
 | C2 | `Path(7, "Show/file.mkv") != Path(7, "show/FILE.MKV")`. Case-sensitive identity (D2). |
 | C3 | `Path(7, "Show/file.mkv") != Path(8, "Show/file.mkv")`. StorageRoot is part of identity. |
-| C4 | `Path(None, "x")`, `Path(7, "")`, `Path(7, None)`, `Path(7, "/abs/path")`, `Path(7, "../escape")` each raise `PathError` at construction. |
+| C4 | `Path(None, "x")`, `Path(7, None)`, `Path(7, "/abs/path")`, `Path(7, "../escape")` each raise `PathError` at construction. (Empty `RelativePath` is the root per C13, not rejected.) |
 | C5 | `Path.FromRow({"StorageRootId": None, "RelativePath": "x"})` returns `None`. `Path.FromRow({"StorageRootId": 7, "RelativePath": "Show/file.mkv"})` returns the expected Path. |
 | C6 | `Path.FromLegacyString("T:\\Show\\file.mkv", [{"Id": 1, "CanonicalPrefix": "T:\\"}]).RelativePath == "Show/file.mkv"`. UNC, Windows-drive, and POSIX inputs all parse against a matching prefix. |
 | C7 | `Path.FromJsonDict(p.ToJsonDict()) == p` for any constructed Path. |
