@@ -9,12 +9,15 @@ from Tests.Pipeline.Harness.Invocation import _EnsureWorkerContext
 _EnsureWorkerContext('I9-2024')
 
 from Core.Database.DatabaseService import DatabaseService
-from Core.PathStorage import LoadStorageRoots, Parse as PathParse, Resolve as PathResolve
+from Core.Path.Path import Path, PathError
+from Core.Path.PathStorageRoots import GetStorageRoots
+from Core.Path.Worker import Worker
 from Core.WorkerContext import WorkerContext
 
 Db = DatabaseService()
 ctx = WorkerContext.Current()
-roots = LoadStorageRoots(Db)
+roots = GetStorageRoots()
+W = Worker(Name=ctx.WorkerName, Platform=getattr(ctx, 'Platform', 'windows'), Db=Db)
 
 rows = Db.ExecuteQuery(r"""
     SELECT a.Id AS AId, a.FilePath AS APath,
@@ -43,8 +46,11 @@ RE_I = re.compile(r'I:\s+(-?\d+(?:\.\d+)?)\s+LUFS')
 RE_P = re.compile(r'Peak:\s+(-?\d+(?:\.\d+)?)\s+dBFS')
 
 for r in rows:
-    sr, rel = PathParse(r['BPath'], roots)
-    blocal = PathResolve(sr, rel, ctx.WorkerName, Db) if sr and rel else None
+    try:
+        BP = Path.FromLegacyString(r['BPath'], roots)
+        blocal = BP.Resolve(W)
+    except PathError:
+        blocal = None
     print(f"A(.mkv) = {r['AId']} {os.path.basename(r['APath'])}")
     print(f"B(-mv)  = {r['BId']} {os.path.basename(r['BPath'])}")
     if not blocal or not os.path.exists(blocal):

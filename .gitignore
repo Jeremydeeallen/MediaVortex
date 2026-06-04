@@ -97,3 +97,9 @@ Scripts/Smoke/*.png
 # Deploy-stamped version artifacts (written by deploy scripts onto targets, not committed)
 /VERSION
 /BUILD_INFO
+
+# path-schema-migration backups (local-only)
+.backups/
+
+# auto-loaded session state (not source)
+.claude/.refusal-state.json

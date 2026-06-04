@@ -28,12 +28,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
-from Core.Database.DatabaseService import DatabaseService
+from Core.Database.DatabaseService import DatabaseService, EscapeLikePattern
 from Core.Database.WorkerCapabilityPredicate import BuildClaimPredicate, _ALLOWED_CAPABILITIES
 from Repositories.DatabaseManager import DatabaseManager
 
 
 SENTINEL_WORKER = "_test-claim-authority-worker"
+SENTINEL_STORAGE_ROOT_ID = 1
 
 
 # ---------------------------------------------------------------------------
@@ -195,8 +196,8 @@ class TestTranscodeClaimAuthority(unittest.TestCase):
     def tearDownClass(cls):
         cls.Db.ExecuteNonQuery("DELETE FROM Workers WHERE WorkerName = %s", (SENTINEL_WORKER,))
         cls.Db.ExecuteNonQuery(
-            "DELETE FROM TranscodeQueue WHERE FilePath LIKE %s",
-            ("_test-claim-authority-%",),
+            "DELETE FROM TranscodeQueue WHERE RelativePath LIKE %s ESCAPE '!'",
+            (EscapeLikePattern("_test-claim-authority-") + "%",),
         )
 
     def setUp(self):
@@ -206,19 +207,19 @@ class TestTranscodeClaimAuthority(unittest.TestCase):
         )
         # Clear any stale sentinel rows from a prior failed run.
         self.Db.ExecuteNonQuery(
-            "DELETE FROM TranscodeQueue WHERE FilePath = %s", (SENTINEL_FILE_TRANSCODE,),
+            "DELETE FROM TranscodeQueue WHERE StorageRootId = %s AND RelativePath = %s",
+            (SENTINEL_STORAGE_ROOT_ID, SENTINEL_FILE_TRANSCODE),
         )
-        # Insert the test queue row at lowest priority so any real production
-        # worker (if running) doesn't accidentally claim it before our test.
         self.Db.ExecuteNonQuery(
-            """INSERT INTO TranscodeQueue
-                  (FilePath, FileName, Directory, SizeBytes, SizeMB,
-                   Priority, Status, ProcessingMode, MediaFileId, DateAdded)
-               VALUES (%s, '_test.mkv', '_test', 1, 1.0, -1000, 'Pending', 'Transcode', NULL, NOW())""",
-            (SENTINEL_FILE_TRANSCODE,),
+            "INSERT INTO TranscodeQueue "
+            "(StorageRootId, RelativePath, FileName, Directory, SizeBytes, SizeMB, "
+            "Priority, Status, ProcessingMode, MediaFileId, DateAdded) "
+            "VALUES (%s, %s, '_test.mkv', '_test', 1, 1.0, -1000, 'Pending', 'Transcode', NULL, NOW())",
+            (SENTINEL_STORAGE_ROOT_ID, SENTINEL_FILE_TRANSCODE),
         )
         Rows = self.Db.ExecuteQuery(
-            "SELECT Id FROM TranscodeQueue WHERE FilePath = %s", (SENTINEL_FILE_TRANSCODE,),
+            "SELECT Id FROM TranscodeQueue WHERE StorageRootId = %s AND RelativePath = %s",
+            (SENTINEL_STORAGE_ROOT_ID, SENTINEL_FILE_TRANSCODE),
         )
         self.QueueId = Rows[0]["Id"]
 
@@ -289,8 +290,8 @@ class TestRemuxClaimAuthority(unittest.TestCase):
     def tearDownClass(cls):
         cls.Db.ExecuteNonQuery("DELETE FROM Workers WHERE WorkerName = %s", (SENTINEL_WORKER,))
         cls.Db.ExecuteNonQuery(
-            "DELETE FROM TranscodeQueue WHERE FilePath LIKE %s",
-            ("_test-claim-authority-%",),
+            "DELETE FROM TranscodeQueue WHERE RelativePath LIKE %s ESCAPE '!'",
+            (EscapeLikePattern("_test-claim-authority-") + "%",),
         )
 
     def setUp(self):
@@ -299,17 +300,19 @@ class TestRemuxClaimAuthority(unittest.TestCase):
             (SENTINEL_WORKER,),
         )
         self.Db.ExecuteNonQuery(
-            "DELETE FROM TranscodeQueue WHERE FilePath = %s", (SENTINEL_FILE_REMUX,),
+            "DELETE FROM TranscodeQueue WHERE StorageRootId = %s AND RelativePath = %s",
+            (SENTINEL_STORAGE_ROOT_ID, SENTINEL_FILE_REMUX),
         )
         self.Db.ExecuteNonQuery(
-            """INSERT INTO TranscodeQueue
-                  (FilePath, FileName, Directory, SizeBytes, SizeMB,
-                   Priority, Status, ProcessingMode, MediaFileId, DateAdded)
-               VALUES (%s, '_test.mkv', '_test', 1, 1.0, -1000, 'Pending', 'Remux', NULL, NOW())""",
-            (SENTINEL_FILE_REMUX,),
+            "INSERT INTO TranscodeQueue "
+            "(StorageRootId, RelativePath, FileName, Directory, SizeBytes, SizeMB, "
+            "Priority, Status, ProcessingMode, MediaFileId, DateAdded) "
+            "VALUES (%s, %s, '_test.mkv', '_test', 1, 1.0, -1000, 'Pending', 'Remux', NULL, NOW())",
+            (SENTINEL_STORAGE_ROOT_ID, SENTINEL_FILE_REMUX),
         )
         Rows = self.Db.ExecuteQuery(
-            "SELECT Id FROM TranscodeQueue WHERE FilePath = %s", (SENTINEL_FILE_REMUX,),
+            "SELECT Id FROM TranscodeQueue WHERE StorageRootId = %s AND RelativePath = %s",
+            (SENTINEL_STORAGE_ROOT_ID, SENTINEL_FILE_REMUX),
         )
         self.QueueId = Rows[0]["Id"]
 

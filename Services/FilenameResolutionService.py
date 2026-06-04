@@ -1,9 +1,9 @@
 import os
 import re
+import ntpath
 from typing import Optional, Dict, Any
 from pathlib import Path
 from Services.LoggingService import LoggingService
-from Core.PathStorage import LastSegment
 
 
 class FilenameResolutionService:
@@ -85,27 +85,24 @@ class FilenameResolutionService:
             filePath = Path(OriginalFileName)
             return f"{filePath.stem}-{TargetResolution}.{ContainerType}"
     
+    # directive: path-schema-migration | # see path.S8
     def GenerateOutputFilePath(self, OriginalFilePath: str, OutputDirectory: str, TargetResolution: str = "720p", ContainerType: str = "mp4") -> str:
         """Generate complete output file path with resolution-based naming."""
         try:
             LoggingService.LogFunctionEntry("GenerateOutputFilePath", 'FilenameResolutionService', OriginalFilePath, OutputDirectory, TargetResolution)
-            
-            # Get original filename
-            originalFileName = LastSegment(OriginalFilePath)
-            
-            # Generate new filename
+
+            originalFileName = ntpath.basename(OriginalFilePath)
+
             newFileName = self.GenerateOutputFilename(originalFileName, TargetResolution, ContainerType)
-            
-            # Construct full output path
+
             outputFilePath = os.path.join(OutputDirectory, newFileName)
-            
+
             LoggingService.LogInfo(f"Generated output file path: {outputFilePath}", 'GenerateOutputFilePath', 'FilenameResolutionService')
             return outputFilePath
-            
+
         except Exception as e:
             LoggingService.LogException("Error generating output file path", e, 'GenerateOutputFilePath', 'FilenameResolutionService')
-            # Fallback: use original filename in output directory
-            originalFileName = LastSegment(OriginalFilePath)
+            originalFileName = ntpath.basename(OriginalFilePath)
             return os.path.join(OutputDirectory, originalFileName)
     
     def DetermineTargetResolution(self, OriginalResolution: str, TranscodeProfile: str = None) -> str:

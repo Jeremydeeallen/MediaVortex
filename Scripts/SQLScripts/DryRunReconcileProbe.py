@@ -18,7 +18,8 @@ import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
-from Core.PathStorage import LoadStorageRoots, Parse as PathParse
+from Core.Path.Path import Path, PathError
+from Core.Path.PathStorageRoots import GetStorageRoots
 from Features.FileScanning.FileScanningRepository import FileScanningRepository
 from Services.FileManagerService import FileManagerService
 
@@ -30,11 +31,14 @@ def Run(RootFolderCanonical: str):
     FileMgr = FileManagerService()
 
     # Translate canonical -> local for the disk walk.
-    StorageRoots = LoadStorageRoots()
-    RootSid, RootRel = PathParse(RootFolderCanonical, StorageRoots)
-    if RootSid is None:
-        print(f"FAIL: '{RootFolderCanonical}' does not match any registered StorageRoot prefix.")
+    StorageRoots = GetStorageRoots()
+    try:
+        RootP = Path.FromLegacyString(RootFolderCanonical, StorageRoots)
+    except PathError as Ex:
+        print(f"FAIL: '{RootFolderCanonical}' does not match any registered StorageRoot prefix: {Ex}")
         sys.exit(2)
+    RootSid = RootP.StorageRootId
+    RootRel = RootP.RelativePath
 
     # Find the local AbsolutePath for this StorageRoot on this worker.
     import socket

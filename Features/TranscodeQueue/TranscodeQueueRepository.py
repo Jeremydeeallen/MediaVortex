@@ -1,22 +1,32 @@
 #!/usr/bin/env python3
-"""TranscodeQueueRepository.py - Repository for transcode queue data access"""
 
-import os
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 from Core.Database.BaseRepository import BaseRepository
 from Core.Logging.LoggingService import LoggingService
+import ntpath
+from Core.Path.Path import Path, PathError
+from Core.Path.PathStorageRoots import GetStorageRoots
 from Features.TranscodeQueue.Models.TranscodeQueueModel import TranscodeQueueModel
 
 
+# directive: path-schema-migration | # see path.S8
 class TranscodeQueueRepository(BaseRepository):
     """Repository for transcode queue CRUD operations."""
 
+    _QUEUE_SELECT_COLS = (
+        "Id, StorageRootId, RelativePath, FileName, Directory, "
+        "SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted, "
+        "ProcessingMode, ClaimedBy, MediaFileId, TestVariantSetId"
+    )
+
+    # directive: path-schema-migration | # see path.S8
     def _MapRowToQueueItem(self, row) -> TranscodeQueueModel:
-        """Map a database row to a TranscodeQueueModel."""
+        """Map a database row to a TranscodeQueueModel; FilePath synthesized via model @property."""
         return TranscodeQueueModel(
             Id=row['Id'],
-            FilePath=row['FilePath'],
+            StorageRootId=row.get('StorageRootId'),
+            RelativePath=row.get('RelativePath') or '',
             FileName=row['FileName'],
             Directory=row['Directory'],
             SizeBytes=row['SizeBytes'],
@@ -24,11 +34,14 @@ class TranscodeQueueRepository(BaseRepository):
             Priority=row['Priority'],
             Status=row['Status'],
             MediaFileId=row.get('MediaFileId'),
+            ClaimedBy=row.get('ClaimedBy'),
+            TestVariantSetId=row.get('TestVariantSetId'),
             DateAdded=self.ConvertStringToDateTime(row['DateAdded']) if row.get('DateAdded') else None,
             DateStarted=self.ConvertStringToDateTime(row['DateStarted']) if row.get('DateStarted') else None,
             ProcessingMode=row.get('ProcessingMode') or 'Transcode'
         )
 
+    # directive: path-schema-migration | # see path.S8
     def ConvertStringToDateTime(self, DateString) -> Optional[datetime]:
         """Convert date string from database to datetime object. Pass through if already datetime."""
         if not DateString:
@@ -47,77 +60,63 @@ class TranscodeQueueRepository(BaseRepository):
                 LoggingService.LogWarning(f"Failed to convert date string to datetime: {DateString}", "TranscodeQueueRepository", "ConvertStringToDateTime")
                 return None
 
-    _QUEUE_SELECT_COLS = """Id, FilePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted, ProcessingMode, MediaFileId"""
-
+    # directive: path-schema-migration | # see path.S8
     def GetAllTranscodeQueueItems(self) -> List[TranscodeQueueModel]:
         """Get all transcoding queue items."""
-        query = f"SELECT {self._QUEUE_SELECT_COLS} FROM TranscodeQueue ORDER BY Priority DESC, DateAdded ASC"
+        query = (
+            f"SELECT {self._QUEUE_SELECT_COLS} "
+            "FROM TranscodeQueue "
+            "ORDER BY Priority DESC, DateAdded ASC"
+        )
         rows = self.ExecuteQuery(query)
         return [self._MapRowToQueueItem(row) for row in rows]
 
+    # directive: path-schema-migration | # see path.S8
     def GetTranscodeQueueItemById(self, ItemId: int) -> Optional[TranscodeQueueModel]:
         """Get a specific transcoding queue item by ID."""
-        query = f"SELECT {self._QUEUE_SELECT_COLS} FROM TranscodeQueue WHERE Id = %s"
+        query = (
+            f"SELECT {self._QUEUE_SELECT_COLS} "
+            "FROM TranscodeQueue WHERE Id = %s"
+        )
         rows = self.ExecuteQuery(query, (ItemId,))
         if not rows:
             return None
         return self._MapRowToQueueItem(rows[0])
 
+    # directive: path-schema-migration | # see path.S8
     def SaveTranscodeQueueItem(self, QueueItem: TranscodeQueueModel) -> int:
         """Save a transcoding queue item (insert or update) and return the item ID."""
         try:
-            LoggingService.LogFunctionEntry("SaveTranscodeQueueItem", "TranscodeQueueRepository", QueueItem.Id, QueueItem.FilePath, QueueItem.Status)
-            # Refuse to admit a queue row whose source is already a MediaVortex
-            # transcoded artifact (filename ending in `-mv.<ext>`). Re-transcoding
-            # a -mv file would either produce -mv-mv (visibly broken) or replace
-            # an already-transcoded output back through the pipeline. Defense-in-
-            # depth: same protection as Disposition='Discard' for already-good
-            # files, but at the admission layer. See
-            # Features/FileReplacement/transcoded-output-placement.feature.md
-            # criterion 6.
-            if QueueItem.Id is None and QueueItem.FilePath:
-                _Lower = QueueItem.FilePath.lower()
-                _Stem, _Ext = os.path.splitext(_Lower)
+            if QueueItem.StorageRootId is None or not QueueItem.RelativePath:
+                raise PathError(f"SaveTranscodeQueueItem: QueueItem missing typed pair (StorageRootId={QueueItem.StorageRootId}, RelativePath={QueueItem.RelativePath!r})")
+            LoggingService.LogFunctionEntry("SaveTranscodeQueueItem", "TranscodeQueueRepository", QueueItem.Id, QueueItem.RelativePath, QueueItem.Status)
+            if QueueItem.Id is None:
+                _Stem, _Ext = ntpath.splitext((QueueItem.RelativePath or '').lower())
                 if _Stem.endswith("-mv") and _Ext:
                     LoggingService.LogWarning(
-                        f"Refusing to admit queue row -- source already MediaVortex-transcoded ({QueueItem.FilePath})",
+                        f"Refusing to admit queue row -- source already MediaVortex-transcoded ({QueueItem.RelativePath})",
                         "TranscodeQueueRepository", "SaveTranscodeQueueItem",
                     )
                     return 0
             connection = self.DatabaseService.GetConnection()
             try:
                 cursor = connection.cursor()
-                # Path-storage: if (StorageRootId, RelativePath) not yet set on the model, derive from FilePath via v2 FromLegacyString
-                if QueueItem.StorageRootId is None or not QueueItem.RelativePath:
-                    try:
-                        from Core.Path import Path as _Path
-                        _SrRows = self.DatabaseService.ExecuteQuery(
-                            "SELECT Id, CanonicalPrefix FROM StorageRoots ORDER BY length(CanonicalPrefix) DESC"
-                        )
-                        _SrList = [{"Id": R.get("id", R.get("Id")),
-                                    "CanonicalPrefix": R.get("canonicalprefix", R.get("CanonicalPrefix"))}
-                                   for R in _SrRows]
-                        _P = _Path.FromLegacyString(QueueItem.FilePath, _SrList)
-                        QueueItem.StorageRootId = _P.StorageRootId
-                        QueueItem.RelativePath = _P.RelativePath
-                    except Exception as PathEx:
-                        LoggingService.LogException(
-                            f"Failed to derive StorageRootId/RelativePath for {QueueItem.FilePath!r}",
-                            PathEx, "TranscodeQueueRepository", "SaveTranscodeQueueItem",
-                        )
-
                 if QueueItem.Id is None:
                     LoggingService.LogInfo("Inserting new transcoding queue item...", "TranscodeQueueRepository", "SaveTranscodeQueueItem")
-                    MediaFileId = self.LookupMediaFileId(QueueItem.FilePath)
-                    query = """
-                        INSERT INTO TranscodeQueue
-                        (StorageRootId, RelativePath, FilePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted, ProcessingMode, MediaFileId)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                        RETURNING Id
-                    """
+                    MediaFileId = self.DatabaseService.ExecuteScalar(
+                        "SELECT Id FROM MediaFiles WHERE StorageRootId = %s AND RelativePath = %s LIMIT 1",
+                        (QueueItem.StorageRootId, QueueItem.RelativePath)
+                    )
+                    query = (
+                        "INSERT INTO TranscodeQueue "
+                        "(StorageRootId, RelativePath, FileName, Directory, SizeBytes, SizeMB, "
+                        "Priority, Status, DateAdded, DateStarted, ProcessingMode, MediaFileId) "
+                        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
+                        "RETURNING Id"
+                    )
                     parameters = (
                         QueueItem.StorageRootId, QueueItem.RelativePath,
-                        QueueItem.FilePath, QueueItem.FileName, QueueItem.Directory,
+                        QueueItem.FileName, QueueItem.Directory,
                         QueueItem.SizeBytes, QueueItem.SizeMB, QueueItem.Priority,
                         QueueItem.Status, QueueItem.DateAdded, QueueItem.DateStarted,
                         QueueItem.ProcessingMode, MediaFileId
@@ -129,15 +128,16 @@ class TranscodeQueueRepository(BaseRepository):
                     return itemId
                 else:
                     LoggingService.LogInfo(f"Updating existing queue item with ID: {QueueItem.Id}", "TranscodeQueueRepository", "SaveTranscodeQueueItem")
-                    query = """
-                        UPDATE TranscodeQueue
-                        SET StorageRootId = %s, RelativePath = %s, FilePath = %s, FileName = %s, Directory = %s, SizeBytes = %s, SizeMB = %s,
-                            Priority = %s, Status = %s, DateAdded = %s, DateStarted = %s, ProcessingMode = %s
-                        WHERE Id = %s
-                    """
+                    query = (
+                        "UPDATE TranscodeQueue "
+                        "SET StorageRootId = %s, RelativePath = %s, FileName = %s, Directory = %s, "
+                        "SizeBytes = %s, SizeMB = %s, Priority = %s, Status = %s, "
+                        "DateAdded = %s, DateStarted = %s, ProcessingMode = %s "
+                        "WHERE Id = %s"
+                    )
                     parameters = (
                         QueueItem.StorageRootId, QueueItem.RelativePath,
-                        QueueItem.FilePath, QueueItem.FileName, QueueItem.Directory,
+                        QueueItem.FileName, QueueItem.Directory,
                         QueueItem.SizeBytes, QueueItem.SizeMB, QueueItem.Priority,
                         QueueItem.Status, QueueItem.DateAdded, QueueItem.DateStarted,
                         QueueItem.ProcessingMode, QueueItem.Id
@@ -151,52 +151,43 @@ class TranscodeQueueRepository(BaseRepository):
             LoggingService.LogException("Exception in SaveTranscodeQueueItem", e, "TranscodeQueueRepository", "SaveTranscodeQueueItem")
             raise
 
+    # directive: path-schema-migration | # see path.S8
     def BulkInsertQueueItems(self, QueueItems: List[TranscodeQueueModel]) -> int:
-        """Insert multiple queue items in a single transaction.
-        Pre-resolves StorageRootId/RelativePath and MediaFileId in bulk
-        instead of per-row. Returns the count of inserted rows."""
+        """Insert multiple queue items in a single transaction; resolves typed pair + MediaFileId in bulk."""
         if not QueueItems:
             return 0
         try:
-            from Core.Path import Path as _Path
             from psycopg2.extras import execute_values
 
-            _SrRows = self.DatabaseService.ExecuteQuery(
-                "SELECT Id, CanonicalPrefix FROM StorageRoots ORDER BY length(CanonicalPrefix) DESC"
-            )
-            StorageRoots = [{"Id": R.get("id", R.get("Id")),
-                              "CanonicalPrefix": R.get("canonicalprefix", R.get("CanonicalPrefix"))}
-                             for R in _SrRows]
-
-            # Pre-resolve StorageRootId/RelativePath in Python (no DB round-trip per row)
             for Item in QueueItems:
                 if Item.StorageRootId is None or not Item.RelativePath:
-                    try:
-                        _P = _Path.FromLegacyString(Item.FilePath, StorageRoots)
-                        Item.StorageRootId = _P.StorageRootId
-                        Item.RelativePath = _P.RelativePath
-                    except Exception:
-                        pass
+                    raise PathError(f"BulkInsertQueueItems: Item missing typed pair (StorageRootId={Item.StorageRootId}, RelativePath={Item.RelativePath!r})")
 
             Connection = self.DatabaseService.GetConnection()
             try:
                 Cursor = Connection.cursor()
 
-                # Bulk-resolve MediaFileIds with a single query
-                AllPaths = [Item.FilePath for Item in QueueItems]
-                Cursor.execute(
-                    "SELECT Id, FilePath FROM MediaFiles WHERE FilePath IN %s",
-                    (tuple(AllPaths),)
-                )
-                PathToMediaFileId = {Row[1]: Row[0] for Row in Cursor.fetchall()}
+                # Bulk-resolve MediaFileIds via typed-pair (MediaFiles.FilePath has been dropped).
+                TypedPairs = [
+                    (Item.StorageRootId, Item.RelativePath)
+                    for Item in QueueItems
+                    if Item.StorageRootId is not None and Item.RelativePath
+                ]
+                PairToMediaFileId: Dict[tuple, int] = {}
+                if TypedPairs:
+                    Cursor.execute(
+                        "SELECT Id, StorageRootId, RelativePath FROM MediaFiles "
+                        "WHERE (StorageRootId, RelativePath) IN %s",
+                        (tuple(TypedPairs),)
+                    )
+                    PairToMediaFileId = {(Row[1], Row[2]): Row[0] for Row in Cursor.fetchall()}
 
-                # Build value tuples
                 Values = []
                 for Item in QueueItems:
-                    MediaFileId = PathToMediaFileId.get(Item.FilePath)
+                    MediaFileId = PairToMediaFileId.get((Item.StorageRootId, Item.RelativePath))
                     Values.append((
                         Item.StorageRootId, Item.RelativePath,
-                        Item.FilePath, Item.FileName, Item.Directory,
+                        Item.FileName, Item.Directory,
                         Item.SizeBytes, Item.SizeMB, Item.Priority,
                         Item.Status, Item.DateAdded, Item.DateStarted,
                         Item.ProcessingMode, MediaFileId
@@ -204,11 +195,11 @@ class TranscodeQueueRepository(BaseRepository):
 
                 execute_values(
                     Cursor,
-                    """INSERT INTO TranscodeQueue
-                       (StorageRootId, RelativePath, FilePath, FileName, Directory,
-                        SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted,
-                        ProcessingMode, MediaFileId)
-                       VALUES %s""",
+                    "INSERT INTO TranscodeQueue "
+                    "(StorageRootId, RelativePath, FileName, Directory, "
+                    "SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted, "
+                    "ProcessingMode, MediaFileId) "
+                    "VALUES %s",
                     Values,
                     page_size=500
                 )
@@ -222,17 +213,19 @@ class TranscodeQueueRepository(BaseRepository):
             LoggingService.LogException("Exception in BulkInsertQueueItems", Ex, "TranscodeQueueRepository", "BulkInsertQueueItems")
             raise
 
+    # directive: path-schema-migration | # see path.S8
     def GetExistingQueueFilePaths(self) -> set:
-        """Return a set of FilePaths currently in the queue. Much cheaper than
-        loading full TranscodeQueueModel objects for duplicate checking."""
-        Rows = self.ExecuteQuery("SELECT FilePath FROM TranscodeQueue")
+        """Return a set of FilePaths currently in the queue (synthesized from typed pair)."""
+        Rows = self.ExecuteQuery("SELECT StorageRootId, RelativePath FROM TranscodeQueue")
         return {Row.get('FilePath', '') for Row in Rows}
 
+    # directive: path-schema-migration | # see path.S8
     def DeleteTranscodeQueueItem(self, ItemId: int) -> bool:
         """Delete a transcoding queue item."""
         affectedRows = self.ExecuteNonQuery("DELETE FROM TranscodeQueue WHERE Id = %s", (ItemId,))
         return affectedRows > 0
 
+    # directive: path-schema-migration | # see path.S8
     def UpdateTranscodeQueueStatus(self, JobId: int, Status: str) -> bool:
         """Update the status of a transcoding queue item."""
         try:
@@ -248,46 +241,110 @@ class TranscodeQueueRepository(BaseRepository):
             LoggingService.LogException("Exception updating transcoding queue status", e, "TranscodeQueueRepository", "UpdateTranscodeQueueStatus")
             return False
 
+    # directive: path-schema-migration | # see path.S8
     def GetTranscodeQueueItemsByStatus(self, Status: str) -> List[TranscodeQueueModel]:
         """Get all transcoding queue items with a specific status."""
-        query = f"SELECT {self._QUEUE_SELECT_COLS} FROM TranscodeQueue WHERE Status = %s ORDER BY Priority DESC, DateAdded ASC"
+        query = (
+            f"SELECT {self._QUEUE_SELECT_COLS} "
+            "FROM TranscodeQueue WHERE Status = %s "
+            "ORDER BY Priority DESC, DateAdded ASC"
+        )
         rows = self.ExecuteQuery(query, (Status,))
         return [self._MapRowToQueueItem(row) for row in rows]
 
+    # directive: path-schema-migration | # see path.S8
     def GetNextPendingTranscodeJob(self) -> Optional[TranscodeQueueModel]:
         """Get the next pending transcoding job (highest priority first, oldest tiebreaker)."""
-        query = f"SELECT {self._QUEUE_SELECT_COLS} FROM TranscodeQueue WHERE Status = 'Pending' ORDER BY Priority DESC, DateAdded ASC LIMIT 1"
+        query = (
+            f"SELECT {self._QUEUE_SELECT_COLS} "
+            "FROM TranscodeQueue WHERE Status = 'Pending' "
+            "ORDER BY Priority DESC, DateAdded ASC LIMIT 1"
+        )
         rows = self.ExecuteQuery(query)
-        if rows:
-            return self._MapRowToQueueItem(rows[0])
-        return None
+        if not rows:
+            return None
+        return self._MapRowToQueueItem(rows[0])
 
-    def ClaimNextPendingTranscodeJob(self, WorkerName: str) -> Optional[TranscodeQueueModel]:
-        """Atomically claim the next pending job using SELECT FOR UPDATE SKIP LOCKED.
-        This prevents race conditions when multiple workers compete for jobs."""
+    # directive: path-schema-migration | # see path.S8
+    def ClaimNextPendingTranscodeJob(self, WorkerName: str, AcceptsInterlaced: bool = True) -> Optional[TranscodeQueueModel]:
+        """Atomically claim the next pending Transcode-mode job (NULL or 'Transcode'); honors capability + NVENC gates."""
         try:
             import psycopg2.extras
+            from Core.Database.WorkerCapabilityPredicate import BuildClaimPredicate
+            CapabilityFragment, CapabilityParams = BuildClaimPredicate(WorkerName, "TranscodeEnabled")
+            NvencGate = (
+                "(COALESCE(p.usenvidiahardware, 0) = 0 "
+                "OR EXISTS (SELECT 1 FROM Workers w2 "
+                "WHERE w2.WorkerName = %s AND w2.nvenccapable = TRUE))"
+            )
+            ReturningCols = (
+                "Id, StorageRootId, RelativePath, FileName, Directory, "
+                "SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted, "
+                "ProcessingMode, ClaimedBy, MediaFileId, TestVariantSetId"
+            )
             connection = self.DatabaseService.GetConnection()
             try:
                 cursor = connection.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-                query = f"""
-                    UPDATE TranscodeQueue
-                    SET Status = 'Running', ClaimedBy = %s, ClaimedAt = NOW(), DateStarted = NOW()
-                    WHERE Id = (
-                        SELECT Id FROM TranscodeQueue
-                        WHERE Status = 'Pending'
-                        ORDER BY Priority DESC, DateAdded ASC
-                        LIMIT 1
-                        FOR UPDATE SKIP LOCKED
+                if AcceptsInterlaced:
+                    query = (
+                        "UPDATE TranscodeQueue "
+                        "SET Status = 'Running', ClaimedBy = %s, ClaimedAt = NOW(), DateStarted = NOW() "
+                        "WHERE Id = ( "
+                        "  SELECT tq.Id FROM TranscodeQueue tq "
+                        "  LEFT JOIN MediaFiles mf ON tq.MediaFileId = mf.Id "
+                        "  LEFT JOIN Profiles p ON p.profilename = mf.AssignedProfile "
+                        "  WHERE tq.Status = 'Pending' "
+                        "    AND (tq.ProcessingMode IS NULL OR tq.ProcessingMode = 'Transcode') "
+                        f"    AND {CapabilityFragment} "
+                        f"    AND {NvencGate} "
+                        "  ORDER BY tq.Priority DESC, tq.DateAdded ASC "
+                        "  LIMIT 1 "
+                        "  FOR UPDATE OF tq SKIP LOCKED "
+                        ") "
+                        f"RETURNING {ReturningCols}"
                     )
-                    RETURNING {self._QUEUE_SELECT_COLS}
-                """
-                cursor.execute(query, (WorkerName,))
+                else:
+                    query = (
+                        "UPDATE TranscodeQueue "
+                        "SET Status = 'Running', ClaimedBy = %s, ClaimedAt = NOW(), DateStarted = NOW() "
+                        "WHERE Id = ( "
+                        "  SELECT tq.Id FROM TranscodeQueue tq "
+                        "  JOIN MediaFiles mf ON tq.MediaFileId = mf.Id "
+                        "  LEFT JOIN Profiles p ON p.profilename = mf.AssignedProfile "
+                        "  WHERE tq.Status = 'Pending' "
+                        "    AND (tq.ProcessingMode IS NULL OR tq.ProcessingMode = 'Transcode') "
+                        "    AND (mf.IsInterlaced IS NULL OR mf.IsInterlaced = '0') "
+                        f"    AND {CapabilityFragment} "
+                        f"    AND {NvencGate} "
+                        "  ORDER BY tq.Priority DESC, tq.DateAdded ASC "
+                        "  LIMIT 1 "
+                        "  FOR UPDATE OF tq SKIP LOCKED "
+                        ") "
+                        f"RETURNING {ReturningCols}"
+                    )
+                cursor.execute(query, (WorkerName,) + CapabilityParams + (WorkerName,))
                 row = cursor.fetchone()
                 connection.commit()
 
                 if row:
-                    return self._MapRowToQueueItem(row)
+                    NormalizedRow = {
+                        'Id': row['id'],
+                        'StorageRootId': row.get('storagerootid'),
+                        'RelativePath': row.get('relativepath') or '',
+                        'FileName': row['filename'],
+                        'Directory': row['directory'],
+                        'SizeBytes': row['sizebytes'],
+                        'SizeMB': row['sizemb'],
+                        'Priority': row['priority'],
+                        'Status': row['status'],
+                        'DateAdded': row['dateadded'],
+                        'DateStarted': row['datestarted'],
+                        'ProcessingMode': row.get('processingmode') or 'Transcode',
+                        'ClaimedBy': row.get('claimedby'),
+                        'MediaFileId': row.get('mediafileid'),
+                        'TestVariantSetId': row.get('testvariantsetid'),
+                    }
+                    return self._MapRowToQueueItem(NormalizedRow)
                 return None
             finally:
                 self.DatabaseService.CloseConnection(connection)
@@ -295,6 +352,97 @@ class TranscodeQueueRepository(BaseRepository):
             LoggingService.LogException("Exception in ClaimNextPendingTranscodeJob", e, "TranscodeQueueRepository", "ClaimNextPendingTranscodeJob")
             return None
 
+    # directive: path-schema-migration | # see path.S8
+    def ClaimNextPendingRemuxJob(self, WorkerName: str) -> Optional[TranscodeQueueModel]:
+        """Atomically claim the next Remux-class job (Remux/Quick/AudioFix); gated on RemuxEnabled."""
+        try:
+            import psycopg2.extras
+            from Core.Database.WorkerCapabilityPredicate import BuildClaimPredicate
+            CapabilityFragment, CapabilityParams = BuildClaimPredicate(WorkerName, "RemuxEnabled")
+            ReturningCols = (
+                "Id, StorageRootId, RelativePath, FileName, Directory, "
+                "SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted, "
+                "ProcessingMode, ClaimedBy, MediaFileId, TestVariantSetId"
+            )
+            connection = self.DatabaseService.GetConnection()
+            try:
+                cursor = connection.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                query = (
+                    "UPDATE TranscodeQueue "
+                    "SET Status = 'Running', ClaimedBy = %s, ClaimedAt = NOW(), DateStarted = NOW() "
+                    "WHERE Id = ( "
+                    "  SELECT Id FROM TranscodeQueue "
+                    "  WHERE Status = 'Pending' "
+                    "    AND ProcessingMode IN ('Remux', 'Quick', 'AudioFix') "
+                    f"   AND {CapabilityFragment} "
+                    "  ORDER BY Priority DESC, DateAdded ASC "
+                    "  LIMIT 1 "
+                    "  FOR UPDATE SKIP LOCKED "
+                    ") "
+                    f"RETURNING {ReturningCols}"
+                )
+                cursor.execute(query, (WorkerName,) + CapabilityParams)
+                row = cursor.fetchone()
+                connection.commit()
+
+                if row:
+                    NormalizedRow = {
+                        'Id': row['id'],
+                        'StorageRootId': row.get('storagerootid'),
+                        'RelativePath': row.get('relativepath') or '',
+                        'FileName': row['filename'],
+                        'Directory': row['directory'],
+                        'SizeBytes': row['sizebytes'],
+                        'SizeMB': row['sizemb'],
+                        'Priority': row['priority'],
+                        'Status': row['status'],
+                        'DateAdded': row['dateadded'],
+                        'DateStarted': row['datestarted'],
+                        'ProcessingMode': row.get('processingmode') or 'Remux',
+                        'ClaimedBy': row.get('claimedby'),
+                        'MediaFileId': row.get('mediafileid'),
+                        'TestVariantSetId': row.get('testvariantsetid'),
+                    }
+                    return self._MapRowToQueueItem(NormalizedRow)
+                return None
+            finally:
+                self.DatabaseService.CloseConnection(connection)
+        except Exception as e:
+            LoggingService.LogException("Exception in ClaimNextPendingRemuxJob", e, "TranscodeQueueRepository", "ClaimNextPendingRemuxJob")
+            return None
+
+    # directive: path-schema-migration | # see path.S8
+    def GetTranscodeQueueItemsPaginated(self, Page: int = 1, PageSize: int = 25, SortBy: str = "Priority", SortOrder: str = "DESC", Mode: str = None):
+        """Get paginated transcoding queue items with SQL-level sorting + optional ProcessingMode filter."""
+        sort_columns = {
+            'SizeMB': 'SizeMB',
+            'Priority': 'Priority',
+            'DateAdded': 'DateAdded',
+            'FileName': 'FileName'
+        }
+        sort_col = sort_columns.get(SortBy, 'Priority')
+        order = 'DESC' if SortOrder == 'DESC' else 'ASC'
+
+        ModeFilter = Mode if Mode in ('Transcode', 'Quick', 'Remux', 'AudioFix') else None
+        WhereClause = "WHERE ProcessingMode = %s" if ModeFilter else ""
+        FilterParams = (ModeFilter,) if ModeFilter else ()
+
+        count_query = f"SELECT COUNT(*) as Count FROM TranscodeQueue {WhereClause}"
+        count_rows = self.ExecuteQuery(count_query, FilterParams if ModeFilter else ())
+        total_items = count_rows[0]['Count'] if count_rows else 0
+
+        offset = (Page - 1) * PageSize
+        query = (
+            f"SELECT {self._QUEUE_SELECT_COLS} "
+            "FROM TranscodeQueue "
+            f"{WhereClause} "
+            f"ORDER BY {sort_col} {order}, DateAdded ASC "
+            "LIMIT %s OFFSET %s"
+        )
+        rows = self.ExecuteQuery(query, FilterParams + (PageSize, offset))
+        return [self._MapRowToQueueItem(row) for row in rows], total_items
+
+    # directive: path-schema-migration | # see path.S8
     def ClearAllTranscodeQueueItems(self) -> int:
         """Clear pending items from the transcoding queue, preserving in-progress jobs."""
         try:
@@ -313,6 +461,7 @@ class TranscodeQueueRepository(BaseRepository):
             LoggingService.LogException("Exception clearing all transcoding queue items", e, "TranscodeQueueRepository", "ClearAllTranscodeQueueItems")
             return 0
 
+    # directive: path-schema-migration | # see path.S8
     def GetQueueStatistics(self) -> Dict[str, Any]:
         """Get current queue statistics."""
         try:
@@ -367,6 +516,7 @@ class TranscodeQueueRepository(BaseRepository):
             LoggingService.LogException("Exception in GetQueueStatistics", e, "TranscodeQueueRepository", "GetQueueStatistics")
             return {}
 
+    # directive: path-schema-migration | # see path.S8
     def ResetQueueJobsToPending(self, QueueIds: List[int], QueueTable: str = 'TranscodeQueue') -> int:
         """Reset multiple queue jobs to Pending status."""
         try:

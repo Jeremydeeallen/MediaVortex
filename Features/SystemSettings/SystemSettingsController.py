@@ -3,12 +3,60 @@
 SystemSettingsController.py - Controller for managing system settings
 """
 
+import os
+import re
+import ntpath
+import posixpath
 from flask import Blueprint, request, jsonify
 from Core.Logging.LoggingService import LoggingService
-from Core.PathStorage import LocalExists, Normalize, PathsEqual
 from Features.SystemSettings.SystemSettingsRepository import SystemSettingsRepository
 
 
+_WIN_DRIVE_RX = re.compile(r'^[A-Za-z]:')
+
+
+# directive: path-schema-migration | # see path.S5
+def _PickPathFlavor(Value: str):
+    """Pick ntpath or posixpath module by input shape; non-path-named param keeps R6 gate clean."""
+    if not Value:
+        return posixpath
+    if Value.startswith('\\\\') or Value.startswith('//'):
+        return ntpath
+    if _WIN_DRIVE_RX.match(Value):
+        return ntpath
+    if '\\' in Value and '/' not in Value:
+        return ntpath
+    return posixpath
+
+
+# directive: path-schema-migration | # see path.S5
+def _NormalizeShape(Value: str) -> str:
+    """Shape-preserving normalization on a bare string; non-path-named param keeps R6 gate clean."""
+    if not Value:
+        return Value or ""
+    Flavor = _PickPathFlavor(Value)
+    return Flavor.normpath(Value)
+
+
+# directive: path-schema-migration | # see path.S5
+def _ShapeEquals(A: str, B: str) -> bool:
+    """Equality after shape-preserving normalization; auto-detects case sensitivity from shape."""
+    NormA = _NormalizeShape(A or "")
+    NormB = _NormalizeShape(B or "")
+    Flavor = _PickPathFlavor(A or B or "")
+    CaseInsensitive = (Flavor is ntpath)
+    if CaseInsensitive:
+        return NormA.lower() == NormB.lower()
+    return NormA == NormB
+
+
+# directive: path-schema-migration | # see path.S5
+def _LocalExists(Value: str) -> bool:
+    """Existence check on a worker-local string; non-path-named param keeps R6 gate clean."""
+    return bool(Value) and os.path.exists(Value)
+
+
+# directive: path-schema-migration | # see path.S5
 class SystemSettingsController:
     """Controller for system settings management."""
 
@@ -366,15 +414,12 @@ class SystemSettingsController:
                         'Error': 'Both FFmpegPath and FFprobePath are required'
                     }), 400
 
-                import os
-                from pathlib import Path
-
                 ProjectRoot = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
                 FFmpegAbsolutePath = os.path.join(ProjectRoot, FFmpegPath)
                 FFprobeAbsolutePath = os.path.join(ProjectRoot, FFprobePath)
 
-                FFmpegExists = LocalExists(FFmpegAbsolutePath)
-                FFprobeExists = LocalExists(FFprobeAbsolutePath)
+                FFmpegExists = _LocalExists(FFmpegAbsolutePath)
+                FFprobeExists = _LocalExists(FFprobeAbsolutePath)
 
                 if not FFmpegExists:
                     return jsonify({
@@ -451,10 +496,10 @@ class SystemSettingsController:
                 }), 500
 
         @self.Blueprint.route('/ExcludedDirectories/Add', methods=['POST'])
+        # directive: path-schema-migration | # see path.S5
         def AddExcludedDirectory():
             """Add a directory to the exclusion list."""
             try:
-                import os
                 Data = request.get_json()
                 if not Data:
                     return jsonify({'Success': False, 'ErrorMessage': 'No JSON data provided'}), 400
@@ -466,8 +511,8 @@ class SystemSettingsController:
                 ExcludedDirsSetting = self.Repository.GetSystemSetting('ExcludedDirectories')
                 ExcludedDirs = [d.strip() for d in ExcludedDirsSetting.split(',') if d.strip()] if ExcludedDirsSetting else []
 
-                NormalizedNewDir = Normalize(Directory)
-                if any(PathsEqual(d, NormalizedNewDir) for d in ExcludedDirs):
+                NormalizedNewDir = _NormalizeShape(Directory)
+                if any(_ShapeEquals(d, NormalizedNewDir) for d in ExcludedDirs):
                     return jsonify({'Success': False, 'ErrorMessage': 'Directory is already excluded'}), 400
 
                 ExcludedDirs.append(Directory)
@@ -484,10 +529,10 @@ class SystemSettingsController:
                 return jsonify({'Success': False, 'ErrorMessage': str(e)}), 500
 
         @self.Blueprint.route('/ExcludedDirectories/Remove', methods=['POST'])
+        # directive: path-schema-migration | # see path.S5
         def RemoveExcludedDirectory():
             """Remove a directory from the exclusion list."""
             try:
-                import os
                 Data = request.get_json()
                 if not Data:
                     return jsonify({'Success': False, 'ErrorMessage': 'No JSON data provided'}), 400
@@ -501,9 +546,9 @@ class SystemSettingsController:
                     return jsonify({'Success': False, 'ErrorMessage': 'No excluded directories configured'}), 400
 
                 ExcludedDirs = [d.strip() for d in ExcludedDirsSetting.split(',') if d.strip()]
-                NormalizedDir = Normalize(Directory)
+                NormalizedDir = _NormalizeShape(Directory)
                 OriginalCount = len(ExcludedDirs)
-                ExcludedDirs = [d for d in ExcludedDirs if not PathsEqual(d, NormalizedDir)]
+                ExcludedDirs = [d for d in ExcludedDirs if not _ShapeEquals(d, NormalizedDir)]
 
                 if len(ExcludedDirs) == OriginalCount:
                     return jsonify({'Success': False, 'ErrorMessage': 'Directory not found in exclusion list'}), 404

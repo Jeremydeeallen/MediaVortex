@@ -527,14 +527,10 @@ class ProcessTranscodeQueueService:
             TranscodeCommand = CommandResult['Command']
             OutputPath = CommandResult['OutputPath']
 
-            # Create TemporaryFilePaths record with CANONICAL paths (so VMAF/FileReplacement on any machine can find files)
-            CanonicalSourcePath = Job.FilePath  # Already canonical
-            CanonicalOutputPath = self.ComputeCanonicalOutputPath(OutputPath)
+            # directive: path-schema-migration | # see path.S8
             SrcId, SrcRel, OutId, OutRel = self._ResolveTfpPathParts(Job, OutputPath)
             TemporaryFilePathId = self.PrivateCreateTemporaryFilePathRecord(
-                TranscodeAttemptId, Job.FilePath, CanonicalSourcePath, CanonicalOutputPath,
-                SourceStorageRootId=SrcId, SourceRelativePath=SrcRel,
-                OutputStorageRootId=OutId, OutputRelativePath=OutRel)
+                TranscodeAttemptId, SrcId, SrcRel, OutId, OutRel)
             if not TemporaryFilePathId:
                 LoggingService.LogWarning(f"Failed to create TemporaryFilePath record for TranscodeAttempt {TranscodeAttemptId}, but file preparation succeeded",
                                         "ProcessTranscodeQueueService", "ProcessJob")
@@ -755,13 +751,10 @@ class ProcessTranscodeQueueService:
         TranscodeCommand = CommandResult['Command']
         OutputPath = CommandResult['OutputPath']
 
-        CanonicalSourcePath = Job.FilePath
-        CanonicalOutputPath = self.ComputeCanonicalOutputPath(OutputPath)
+        # directive: path-schema-migration | # see path.S8
         SrcId, SrcRel, OutId, OutRel = self._ResolveTfpPathParts(Job, OutputPath)
         self.PrivateCreateTemporaryFilePathRecord(
-            TranscodeAttemptId, Job.FilePath, CanonicalSourcePath, CanonicalOutputPath,
-            SourceStorageRootId=SrcId, SourceRelativePath=SrcRel,
-            OutputStorageRootId=OutId, OutputRelativePath=OutRel)
+            TranscodeAttemptId, SrcId, SrcRel, OutId, OutRel)
 
         self.DatabaseManager.UpdateTranscodeAttempt(TranscodeAttemptId, {
             'FilePath': Job.FilePath,
@@ -977,13 +970,10 @@ class ProcessTranscodeQueueService:
             RemuxCommand = CommandResult['Command']
             OutputPath = CommandResult['OutputPath']
 
-            # Create TemporaryFilePaths record with canonical paths
-            CanonicalOutputPath = self.ComputeCanonicalOutputPath(OutputPath)
+            # directive: path-schema-migration | # see path.S8
             SrcId, SrcRel, OutId, OutRel = self._ResolveTfpPathParts(Job, OutputPath)
             TemporaryFilePathId = self.PrivateCreateTemporaryFilePathRecord(
-                TranscodeAttemptId, Job.FilePath, Job.FilePath, CanonicalOutputPath,
-                SourceStorageRootId=SrcId, SourceRelativePath=SrcRel,
-                OutputStorageRootId=OutId, OutputRelativePath=OutRel)
+                TranscodeAttemptId, SrcId, SrcRel, OutId, OutRel)
 
             # Update attempt record (keep Success=None to indicate in-progress)
             self.DatabaseManager.UpdateTranscodeAttempt(TranscodeAttemptId, {
@@ -1101,13 +1091,10 @@ class ProcessTranscodeQueueService:
             SubFixCommand = CommandResult['Command']
             OutputPath = CommandResult['OutputPath']
 
-            # Create TemporaryFilePaths record with canonical paths
-            CanonicalOutputPath = self.ComputeCanonicalOutputPath(OutputPath)
+            # directive: path-schema-migration | # see path.S8
             SrcId, SrcRel, OutId, OutRel = self._ResolveTfpPathParts(Job, OutputPath)
             TemporaryFilePathId = self.PrivateCreateTemporaryFilePathRecord(
-                TranscodeAttemptId, Job.FilePath, Job.FilePath, CanonicalOutputPath,
-                SourceStorageRootId=SrcId, SourceRelativePath=SrcRel,
-                OutputStorageRootId=OutId, OutputRelativePath=OutRel)
+                TranscodeAttemptId, SrcId, SrcRel, OutId, OutRel)
 
             # Update attempt record (keep Success=None to indicate in-progress)
             self.DatabaseManager.UpdateTranscodeAttempt(TranscodeAttemptId, {
@@ -1733,7 +1720,9 @@ class ProcessTranscodeQueueService:
             LoggingService.LogInfo(f"Cleaning up files for failed TranscodeAttempt {TranscodeAttemptId}",
                                  "ProcessTranscodeQueueService", "_CleanupFailedAttemptFiles")
 
-            TemporaryFilePathRecord = self.DatabaseManager.GetTemporaryFilePath(TranscodeAttemptId)
+            # directive: path-schema-migration | # see path.S8
+            from Features.QualityTesting.QualityTestRepository import QualityTestRepository
+            TemporaryFilePathRecord = QualityTestRepository(self.DatabaseManager.DatabaseService).GetTemporaryFilePath(TranscodeAttemptId)
 
             if TemporaryFilePathRecord:
                 # Delete partial output file from disk if it exists
@@ -1782,7 +1771,9 @@ class ProcessTranscodeQueueService:
             # If TranscodeAttemptId is provided, try to get the actual output path from TemporaryFilePaths table first
             if TranscodeAttemptId:
                 try:
-                    TemporaryFilePathRecord = self.DatabaseManager.GetTemporaryFilePath(TranscodeAttemptId)
+                    # directive: path-schema-migration | # see path.S8
+                    from Features.QualityTesting.QualityTestRepository import QualityTestRepository
+                    TemporaryFilePathRecord = QualityTestRepository(self.DatabaseManager.DatabaseService).GetTemporaryFilePath(TranscodeAttemptId)
                     if TemporaryFilePathRecord and TemporaryFilePathRecord.get('LocalOutputPath'):
                         OutputPath = TemporaryFilePathRecord['LocalOutputPath']
                         LoggingService.LogInfo(f"Retrieved output path from TemporaryFilePaths table: {OutputPath}", "ProcessTranscodeQueueService", "GetOutputFilePathFromCommand")
@@ -2092,24 +2083,22 @@ class ProcessTranscodeQueueService:
         OutRel = OutRel or None
         return SrcId, SrcRel, OutId, OutRel
 
-    # directive: nvenc-rate-anchored-remediation
-    def PrivateCreateTemporaryFilePathRecord(self, TranscodeAttemptId: int, OriginalPath: str, LocalSourcePath: str, LocalOutputPath: str = None,
-                                              SourceStorageRootId: int = None, SourceRelativePath: str = None,
-                                              OutputStorageRootId: int = None, OutputRelativePath: str = None) -> Optional[int]:
-        """Private method to create TemporaryFilePath record.
-        Source side comes from the Job's (StorageRootId, RelativePath). Output side is parsed
-        from the canonical output path via PathStorage.Parse so BuildVMAFCommand can resolve
-        the encoded file on any worker without relying on legacy LocalOutputPath strings."""
+    # directive: path-schema-migration | # see path.S8
+    def PrivateCreateTemporaryFilePathRecord(self, TranscodeAttemptId: int,
+                                              SourceStorageRootId: int, SourceRelativePath: str,
+                                              OutputStorageRootId: Optional[int] = None,
+                                              OutputRelativePath: Optional[str] = None) -> Optional[int]:
+        """Route TemporaryFilePaths insert through QualityTestRepository using typed pairs only."""
         try:
             LoggingService.LogFunctionEntry("PrivateCreateTemporaryFilePathRecord", "ProcessTranscodeQueueService",
-                                          TranscodeAttemptId, OriginalPath, LocalSourcePath, LocalOutputPath,
-                                          SourceStorageRootId, SourceRelativePath,
+                                          TranscodeAttemptId, SourceStorageRootId, SourceRelativePath,
                                           OutputStorageRootId, OutputRelativePath)
 
-            TemporaryFilePathId = self.DatabaseManager.CreateTemporaryFilePath(
-                TranscodeAttemptId, OriginalPath, LocalSourcePath, LocalOutputPath,
-                SourceStorageRootId=SourceStorageRootId, SourceRelativePath=SourceRelativePath,
-                OutputStorageRootId=OutputStorageRootId, OutputRelativePath=OutputRelativePath,
+            from Features.QualityTesting.QualityTestRepository import QualityTestRepository
+            _Repo = QualityTestRepository(self.DatabaseManager.DatabaseService)
+            TemporaryFilePathId = _Repo.CreateTemporaryFilePath(
+                TranscodeAttemptId, SourceStorageRootId, SourceRelativePath,
+                OutputStorageRootId, OutputRelativePath,
             )
 
             if TemporaryFilePathId:

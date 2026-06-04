@@ -114,11 +114,13 @@ def _InsertQueueRow(MediaFileId: int, ProcessingMode: str) -> int:
     SizeBytes = int(M.get('SizeBytes') or 0)
     if SizeBytes <= 0:
         try:
-            from Core.PathStorage import LoadStorageRoots, Parse as PathParse, Resolve as PathResolve
+            # directive: path-schema-migration | # see path.S8
+            from Core.Path.Path import Path
+            from Core.Path.PathStorageRoots import GetStorageRoots
             from Core.WorkerContext import WorkerContext
-            SrId, Rel = PathParse(M.get('FilePath') or '', LoadStorageRoots(Db))
+            P = Path.FromLegacyString(M.get('FilePath') or '', GetStorageRoots())
             Ctx = WorkerContext.Current()
-            LocalP = PathResolve(SrId, Rel, Ctx.WorkerName, Db) if Ctx else None
+            LocalP = P.Resolve(Ctx) if Ctx else None
             if LocalP and os.path.exists(LocalP):
                 SizeBytes = os.path.getsize(LocalP)
         except Exception:
@@ -161,12 +163,13 @@ def _InsertQueueRow(MediaFileId: int, ProcessingMode: str) -> int:
     return QueueId
 
 
+# directive: path-schema-migration | # see path.S8
 def _LoadQueueModel(QueueId: int):
     """Load the TranscodeQueueModel for a freshly-inserted row."""
     from Features.TranscodeQueue.Models.TranscodeQueueModel import TranscodeQueueModel
     Db = DatabaseService()
     Rows = Db.ExecuteQuery(
-        "SELECT q.Id, q.StorageRootId, q.RelativePath, q.FilePath, q.FileName, q.Directory, "
+        "SELECT q.Id, q.StorageRootId, q.RelativePath, q.FileName, q.Directory, "
         "q.SizeBytes, q.SizeMB, q.Priority, q.Status, m.AssignedProfile, q.ProcessingMode, "
         "q.MediaFileId, q.DateAdded, q.DateStarted "
         "FROM TranscodeQueue q LEFT JOIN MediaFiles m ON m.Id = q.MediaFileId "
@@ -175,12 +178,11 @@ def _LoadQueueModel(QueueId: int):
     )
     if not Rows:
         raise RuntimeError(f"Queue row {QueueId} disappeared after insert")
-    R = Rows[0]  # CaseInsensitiveDict
+    R = Rows[0]
     return TranscodeQueueModel(
         Id=R.get('Id'),
         StorageRootId=R.get('StorageRootId'),
         RelativePath=R.get('RelativePath') or '',
-        FilePath=R.get('FilePath') or '',
         FileName=R.get('FileName') or '',
         Directory=R.get('Directory') or '',
         SizeBytes=R.get('SizeBytes') or 0,

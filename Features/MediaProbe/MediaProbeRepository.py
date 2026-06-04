@@ -19,13 +19,13 @@ class MediaProbeRepository(BaseRepository):
                    FFprobeFailureCount, LastFFprobeError, LastFFprobeAttemptDate,
                    NeedsQuick, NeedsTranscode"""
 
+    # directive: path-schema-migration | # see path.S8
     def _MapRowToMediaFile(self, Row) -> MediaFileModel:
-        """Map a database row to a MediaFileModel instance."""
+        """Map a database row to a MediaFileModel; FilePath is a derived property, never a constructor kwarg."""
         return MediaFileModel(
             Id=Row['Id'], SeasonId=Row['SeasonId'],
             StorageRootId=Row.get('StorageRootId'),
             RelativePath=Row.get('RelativePath') or '',
-            FilePath=Row['FilePath'],
             FileName=Row['FileName'], SizeMB=Row['SizeMB'],
             VideoBitrateKbps=Row['VideoBitrateKbps'], AudioBitrateKbps=Row['AudioBitrateKbps'],
             Resolution=Row['Resolution'], Codec=Row['Codec'],

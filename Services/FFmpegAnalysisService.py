@@ -1,14 +1,22 @@
 import os
+import ntpath
 import json
 import re
 import uuid
 from typing import Dict, Any, Optional
 from datetime import datetime, timezone
 from pathlib import Path
-from Core.PathStorage import LastSegment, LocalExists, LocalGetSize
 from Models.FFmpegAnalysisModel import FFmpegAnalysisModel
 from Services.FFmpegService import FFmpegService
 from Services.LoggingService import LoggingService
+
+
+# directive: path-schema-migration | # see path.S8
+def _LocalExists(Value): return bool(Value) and os.path.exists(Value)
+
+
+# directive: path-schema-migration | # see path.S8
+def _LocalGetSize(Value): return os.path.getsize(Value)
 
 
 class FFmpegAnalysisService:
@@ -18,20 +26,21 @@ class FFmpegAnalysisService:
         self.FFmpegService = FFmpegServiceInstance or FFmpegService(FFprobePath=FFprobePath)
         self.DatabaseService = DatabaseService
     
+    # directive: path-schema-migration | # see path.S8
     def AnalyzeMediaFile(self, FilePath: str) -> FFmpegAnalysisModel:
         """Analyze a media file and return comprehensive metadata."""
         try:
             LoggingService.LogFunctionEntry("AnalyzeMediaFile", 'FFmpegAnalysisService', FilePath)
-            
+
             # Create analysis model
             AnalysisModel = FFmpegAnalysisModel()
             AnalysisModel.FilePath = FilePath
-            AnalysisModel.FileName = LastSegment(FilePath)
+            AnalysisModel.FileName = ntpath.basename(FilePath)
             AnalysisModel.FileExtension = Path(FilePath).suffix.lower()
 
             # Get file size
-            if LocalExists(FilePath):
-                AnalysisModel.FileSizeMB = LocalGetSize(FilePath) / (1024 * 1024)
+            if _LocalExists(FilePath):
+                AnalysisModel.FileSizeMB = _LocalGetSize(FilePath) / (1024 * 1024)
             
             # Execute FFprobe analysis. ExecuteFFprobe is responsible for logging the
             # subprocess failure (with stderr/stdout/command) -- don't double-log here,

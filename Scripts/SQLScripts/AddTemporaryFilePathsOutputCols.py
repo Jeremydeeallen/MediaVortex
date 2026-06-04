@@ -29,7 +29,8 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT))
 
 from Core.Database.DatabaseService import DatabaseService
-from Core.PathStorage import Parse, LoadStorageRoots
+from Core.Path.Path import Path, PathError
+from Core.Path.PathStorageRoots import GetStorageRoots
 
 
 def ColumnExists(Cur, Table, Col):
@@ -75,9 +76,8 @@ def Main():
         else:
             print("  EXISTS  TemporaryFilePaths.OutputRelativePath")
 
-        # Backfill OutputStorageRootId+OutputRelativePath from LocalOutputPath
-        # using normal Parse(). Wonky staging paths will end up NULL.
-        StorageRoots = LoadStorageRoots(Db)
+        # Backfill OutputStorageRootId+OutputRelativePath via Path.FromLegacyString (wonky staging paths end NULL).
+        StorageRoots = GetStorageRoots()
         Cur.execute(
             "SELECT Id, LocalOutputPath FROM TemporaryFilePaths WHERE OutputStorageRootId IS NULL AND LocalOutputPath IS NOT NULL"
         )
@@ -87,15 +87,16 @@ def Main():
         Orphan = 0
         Samples = []
         for RowId, LocalOutputPath in Rows:
-            SrId, Rel = Parse(LocalOutputPath, StorageRoots)
-            if SrId is None:
+            try:
+                P = Path.FromLegacyString(LocalOutputPath, StorageRoots)
+            except PathError:
                 Orphan += 1
                 if len(Samples) < 5:
                     Samples.append((RowId, LocalOutputPath))
                 continue
             Cur.execute(
                 "UPDATE TemporaryFilePaths SET OutputStorageRootId = %s, OutputRelativePath = %s WHERE Id = %s",
-                (SrId, Rel, RowId),
+                (P.StorageRootId, P.RelativePath, RowId),
             )
             Matched += 1
         Conn.commit()

@@ -1,7 +1,25 @@
 import os
 from typing import Dict, Any, Optional
 from Core.Logging.LoggingService import LoggingService
-from Core.PathStorage import ParentDir, Normalize, PathsEqual
+import ntpath
+
+
+# directive: path-schema-migration | # see path.S8
+def ParentDir(Value):
+    """ntpath.dirname for canonical Windows-shape paths."""
+    return ntpath.dirname(Value or "")
+
+
+# directive: path-schema-migration | # see path.S8
+def Normalize(Value):
+    """Backslash-normalize a canonical Windows-shape path."""
+    return (Value or "").replace("/", "\\")
+
+
+# directive: path-schema-migration | # see path.S8
+def PathsEqual(A, B):
+    """Compare two paths case-insensitively after backslash normalization."""
+    return Normalize(A).lower() == Normalize(B).lower()
 from Models.TranscodeQueueModel import TranscodeQueueModel
 from Models.MediaFileModel import MediaFileModel
 from Features.AudioCompletion.AudioCompletionService import AudioCompletionService

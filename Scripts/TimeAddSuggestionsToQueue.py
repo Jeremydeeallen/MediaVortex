@@ -1,10 +1,14 @@
-"""Time AddSuggestionsToQueue end-to-end with real data, NO INSERTS (rolled back)."""
+# Time AddSuggestionsToQueue end-to-end with real data, NO INSERTS (rolled back).
 import sys
 sys.path.insert(0, '.')
 import time
 from Core.Database.DatabaseService import DatabaseService
+from Core.Path.Path import Path, PathError
+from Core.Path.PathStorageRoots import GetPrefixMap, GetStorageRoots
 
 DB = DatabaseService()
+_StorageRoots = GetStorageRoots()
+_PrefixMap = GetPrefixMap()
 
 # Step 1: Get 250 candidate items the way SmartPopulate does
 t0 = time.time()
@@ -58,9 +62,17 @@ for Item in Items:
         continue
     Mf = MediaFileMap.get(Item['MediaFileId'])
     SizeMB = float(Item.get('SizeMB', 0))
-    PathParts = FilePath.replace("\\", "/").split("/")
-    Directory = "/".join(PathParts[:-1]) if len(PathParts) > 1 else ""
-    FileName = PathParts[-1]
+    try:
+        _P = Path.FromLegacyString(FilePath, _StorageRoots)
+        FileName = _P.LastSegment()
+        try:
+            _Parent = _P.ParentDir()
+            Directory = _Parent.CanonicalDisplay(_PrefixMap)
+        except PathError:
+            Directory = ""
+    except PathError:
+        FileName = FilePath
+        Directory = ""
     # Build a minimal MediaFileModel-shaped object for CalculatePriority
     from Core.Models.MediaFileModel import MediaFileModel
     MfModel = MediaFileModel(Id=Mf['Id'], FilePath=Mf['FilePath'], FileName=Mf['FileName'], SizeMB=Mf['SizeMB'] or 0.0, DurationMinutes=Mf.get('DurationMinutes'), Resolution=Mf.get('Resolution'), AssignedProfile=Mf.get('AssignedProfile'))
@@ -76,23 +88,21 @@ t1 = time.time()
 print(f"[4] Build {len(PendingInserts)} TranscodeQueueModels + priority: {t1-t0:.3f}s")
 
 # Step 5: Time BulkInsertQueueItems WITHOUT actually committing -- use a savepoint
-from Core.PathStorage import LoadStorageRoots, Parse as PathParse
 from psycopg2.extras import execute_values
 
 t0 = time.time()
-StorageRoots = LoadStorageRoots(DB)
+StorageRoots = _StorageRoots
 t1 = time.time()
-print(f"[5a] LoadStorageRoots: {t1-t0:.3f}s")
+print(f"[5a] GetStorageRoots: {t1-t0:.3f}s")
 
 t0 = time.time()
 for Item in PendingInserts:
     if Item.StorageRootId is None or not Item.RelativePath:
         try:
-            SrId, Rel = PathParse(Item.FilePath, StorageRoots)
-            if SrId is not None:
-                Item.StorageRootId = SrId
-                Item.RelativePath = Rel or ''
-        except Exception:
+            P = Path.FromLegacyString(Item.FilePath, StorageRoots)
+            Item.StorageRootId = P.StorageRootId
+            Item.RelativePath = P.RelativePath
+        except PathError:
             pass
 t1 = time.time()
 print(f"[5b] Pre-resolve StorageRootId/RelativePath in Python ({len(PendingInserts)}): {t1-t0:.3f}s")

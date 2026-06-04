@@ -19,23 +19,24 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from Core.Database.DatabaseService import DatabaseService
 from Core.Logging.LoggingService import LoggingService
+from Core.Path.Path import Path, PathError
+from Core.Path.Worker import Worker
 
 
-def _ResolveLocalPath(Row, WorkerName: str) -> str:
-    try:
-        from Core.PathStorage import Resolve as PathResolve
-        Srid = Row.get("StorageRootId")
-        Rel = Row.get("RelativePath")
-        if Srid is not None and Rel:
-            return PathResolve(Srid, Rel, WorkerName)
-    except Exception:
-        pass
-    return Row.get("FilePath") or ""
+def _ResolveLocalPath(Row, W: Worker) -> str:
+    Srid = Row.get("StorageRootId")
+    Rel = Row.get("RelativePath")
+    if Srid is None or Rel is None:
+        raise PathError(f"Row missing typed pair: Id={Row.get('Id')}")
+    P = Path(Srid, Rel)
+    return P.Resolve(W)
 
 
 def Run(DryRun: bool = False, Limit: int = 0, BatchSize: int = 100) -> int:
     Db = DatabaseService()
     WorkerName = socket.gethostname()
+    import sys as _Sys
+    W = Worker(Name=WorkerName, Platform=('windows' if _Sys.platform == 'win32' else _Sys.platform), Db=Db)
 
     BaseQuery = (
         "SELECT Id, FilePath, StorageRootId, RelativePath "
@@ -81,7 +82,7 @@ def Run(DryRun: bool = False, Limit: int = 0, BatchSize: int = 100) -> int:
             break
         for R in Rows:
             MfId = R.get("Id")
-            LocalPath = _ResolveLocalPath(R, WorkerName)
+            LocalPath = _ResolveLocalPath(R, W)
             Signals = ContentSignalsService.ComputeSignals(LocalPath)
             if Signals is None:
                 Failed += 1

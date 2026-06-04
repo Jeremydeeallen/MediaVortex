@@ -2,36 +2,73 @@ from typing import List, Optional, Dict, Any
 from Core.Database.BaseRepository import BaseRepository
 from Core.Database.DatabaseService import EscapeLikePattern
 from Core.Logging.LoggingService import LoggingService
+from Core.Path.Path import Path, PathError
+from Core.Path.PathStorageRoots import GetStorageRoots, GetPrefixMap
+
+
+# directive: path-schema-migration | # see path.S8
+def _LookupTypedPair(CanonicalString: str):
+    """Parse a legacy FilePath into (StorageRootId, RelativePath); returns (None, None) on parse failure."""
+    if not CanonicalString:
+        return (None, None)
+    try:
+        P = Path.FromLegacyString(CanonicalString, GetStorageRoots())
+        return (P.StorageRootId, P.RelativePath)
+    except PathError:
+        return (None, None)
+
+
+# directive: path-schema-migration | # see path.S8
+def _SynthesizeFilePath(StorageRootId, RelativePath) -> str:
+    """Render canonical FilePath via Path.CanonicalDisplay."""
+    if StorageRootId is None:
+        return ""
+    try:
+        return Path(StorageRootId, RelativePath or "").CanonicalDisplay(GetPrefixMap())
+    except PathError:
+        return ""
+
+
+# directive: path-schema-migration | # see path.S8
+def PrefixMap():
+    """Alias for the cached storage-root-id to canonical-prefix mapping."""
+    return GetPrefixMap()
 from Features.ShowSettings.Models.ShowSettingModel import ShowSettingModel
 
 
 class ShowSettingsRepository(BaseRepository):
+    # directive: path-schema-migration | # see path.S8
     """Repository for ShowSettings table operations."""
 
+    # directive: path-schema-migration | # see path.S8
     def GetAllShowSettings(self) -> List[ShowSettingModel]:
-        """Get all show settings ordered by ShowFolder."""
+        """Get all show settings ordered by typed-pair."""
         try:
-            query = """
-                SELECT Id, ShowFolder, TargetResolution, CreatedDate, LastModifiedDate
-                FROM ShowSettings
-                ORDER BY ShowFolder
-            """
+            query = (
+                "SELECT Id, StorageRootId, RelativePath, TargetResolution, CreatedDate, LastModifiedDate "
+                "FROM ShowSettings "
+                "ORDER BY StorageRootId, RelativePath"
+            )
             Rows = self.ExecuteQuery(query)
             return [self._MapRowToModel(Row) for Row in Rows]
         except Exception as Ex:
             LoggingService.LogException("Exception getting all show settings", Ex, "ShowSettingsRepository", "GetAllShowSettings")
             return []
 
+    # directive: path-schema-migration | # see path.S8
     def GetShowSettingByFolder(self, ShowFolder: str) -> Optional[ShowSettingModel]:
-        """Get show setting for a specific folder."""
+        """Get show setting for a specific folder via typed-pair lookup."""
         try:
-            query = """
-                SELECT Id, ShowFolder, TargetResolution, CreatedDate, LastModifiedDate
-                FROM ShowSettings
-                WHERE ShowFolder = %s
-                LIMIT 1
-            """
-            Rows = self.ExecuteQuery(query, (ShowFolder,))
+            Sid, Rel = _LookupTypedPair(ShowFolder)
+            if Sid is None or Rel is None:
+                return None
+            query = (
+                "SELECT Id, StorageRootId, RelativePath, TargetResolution, CreatedDate, LastModifiedDate "
+                "FROM ShowSettings "
+                "WHERE StorageRootId = %s AND RelativePath = %s "
+                "LIMIT 1"
+            )
+            Rows = self.ExecuteQuery(query, (Sid, Rel))
             if Rows:
                 return self._MapRowToModel(Rows[0])
             return None
@@ -39,54 +76,65 @@ class ShowSettingsRepository(BaseRepository):
             LoggingService.LogException("Exception getting show setting by folder", Ex, "ShowSettingsRepository", "GetShowSettingByFolder")
             return None
 
+    # directive: path-schema-migration | # see path.S8
     def SaveShowSetting(self, Setting: ShowSettingModel) -> int:
-        """Insert or update a show setting. Returns the Id."""
+        """Insert or update a show setting via typed-pair. Returns the Id."""
         try:
+            Sid, Rel = _LookupTypedPair(Setting.ShowFolder)
+            if Sid is None or Rel is None:
+                LoggingService.LogException(
+                    f"Cannot resolve ShowFolder to typed pair: {Setting.ShowFolder!r}",
+                    Exception("LookupTypedPair returned None"),
+                    "ShowSettingsRepository", "SaveShowSetting",
+                )
+                return 0
             Existing = self.GetShowSettingByFolder(Setting.ShowFolder)
             if Existing:
-                query = """
-                    UPDATE ShowSettings
-                    SET TargetResolution = %s, LastModifiedDate = NOW()
-                    WHERE ShowFolder = %s
-                    RETURNING Id
-                """
-                self.ExecuteNonQuery(query, (Setting.TargetResolution, Setting.ShowFolder))
+                query = (
+                    "UPDATE ShowSettings "
+                    "SET TargetResolution = %s, LastModifiedDate = NOW() "
+                    "WHERE StorageRootId = %s AND RelativePath = %s "
+                    "RETURNING Id"
+                )
+                self.ExecuteNonQuery(query, (Setting.TargetResolution, Sid, Rel))
                 return Existing.Id
             else:
-                query = """
-                    INSERT INTO ShowSettings (ShowFolder, TargetResolution, CreatedDate, LastModifiedDate)
-                    VALUES (%s, %s, NOW(), NOW())
-                    RETURNING Id
-                """
-                self.ExecuteNonQuery(query, (Setting.ShowFolder, Setting.TargetResolution))
+                query = (
+                    "INSERT INTO ShowSettings (StorageRootId, RelativePath, TargetResolution, CreatedDate, LastModifiedDate) "
+                    "VALUES (%s, %s, %s, NOW(), NOW()) "
+                    "RETURNING Id"
+                )
+                self.ExecuteNonQuery(query, (Sid, Rel, Setting.TargetResolution))
                 return self.GetLastInsertId()
         except Exception as Ex:
             LoggingService.LogException("Exception saving show setting", Ex, "ShowSettingsRepository", "SaveShowSetting")
             return 0
 
+    # directive: path-schema-migration | # see path.S8
     def SetSeriesAssignedProfile(self, ShowFolder: str, AssignedProfile: Optional[str]) -> int:
-        """Set or clear the per-show AssignedProfile.
-
-        Owns: transcode-vs-remux-routing.feature.md (per-show profile override).
-        AssignedProfile=None clears the override; the show then inherits
-        SystemSettings.DefaultProfileName via _GetEffectiveProfile.
-        Caller is responsible for validating AssignedProfile against Profiles.
-        Returns the Id of the affected ShowSettings row.
-        """
+        """Set or clear the per-show AssignedProfile via typed-pair WHERE."""
         try:
+            Sid, Rel = _LookupTypedPair(ShowFolder)
+            if Sid is None or Rel is None:
+                LoggingService.LogException(
+                    f"Cannot resolve ShowFolder to typed pair: {ShowFolder!r}",
+                    Exception("LookupTypedPair returned None"),
+                    "ShowSettingsRepository", "SetSeriesAssignedProfile",
+                )
+                return 0
             Existing = self.GetShowSettingByFolder(ShowFolder)
             if Existing:
                 self.ExecuteNonQuery(
-                    """UPDATE ShowSettings
-                       SET AssignedProfile = %s, LastModifiedDate = NOW()
-                       WHERE ShowFolder = %s""",
-                    (AssignedProfile, ShowFolder),
+                    "UPDATE ShowSettings "
+                    "SET AssignedProfile = %s, LastModifiedDate = NOW() "
+                    "WHERE StorageRootId = %s AND RelativePath = %s",
+                    (AssignedProfile, Sid, Rel),
                 )
                 return Existing.Id
             self.ExecuteNonQuery(
-                """INSERT INTO ShowSettings (ShowFolder, TargetResolution, AssignedProfile, CreatedDate, LastModifiedDate)
-                   VALUES (%s, '', %s, NOW(), NOW())""",
-                (ShowFolder, AssignedProfile),
+                "INSERT INTO ShowSettings (StorageRootId, RelativePath, TargetResolution, AssignedProfile, CreatedDate, LastModifiedDate) "
+                "VALUES (%s, %s, '', %s, NOW(), NOW())",
+                (Sid, Rel, AssignedProfile),
             )
             return self.GetLastInsertId()
         except Exception as Ex:
@@ -97,6 +145,7 @@ class ShowSettingsRepository(BaseRepository):
             return 0
 
     def BulkUpdateTargetResolution(self, ShowFolders: List[str], TargetResolution: str) -> int:
+        # directive: path-schema-migration | # see path.S8
         """Update target resolution for multiple shows at once. Creates settings for shows that don't have one."""
         try:
             Updated = 0
@@ -110,22 +159,23 @@ class ShowSettingsRepository(BaseRepository):
             LoggingService.LogException("Exception bulk updating target resolution", Ex, "ShowSettingsRepository", "BulkUpdateTargetResolution")
             return 0
 
+    # directive: path-schema-migration | # see path.S8
     def DeleteShowSetting(self, ShowFolder: str) -> bool:
-        """Delete a show setting (reverts to default)."""
+        """Delete a show setting via typed-pair WHERE (reverts to default)."""
         try:
-            query = "DELETE FROM ShowSettings WHERE ShowFolder = %s"
-            AffectedRows = self.ExecuteNonQuery(query, (ShowFolder,))
+            Sid, Rel = _LookupTypedPair(ShowFolder)
+            if Sid is None or Rel is None:
+                return False
+            query = "DELETE FROM ShowSettings WHERE StorageRootId = %s AND RelativePath = %s"
+            AffectedRows = self.ExecuteNonQuery(query, (Sid, Rel))
             return AffectedRows > 0
         except Exception as Ex:
             LoggingService.LogException("Exception deleting show setting", Ex, "ShowSettingsRepository", "DeleteShowSetting")
             return False
 
+    # directive: path-schema-migration | # see path.S8
     def GetTargetResolutionForFile(self, FilePath: str) -> Optional[str]:
-        """Per-show target resolution override, or None when no show row exists.
-
-        Profile.TranscodeDownTo drives the default; ShowSettings overrides only
-        when the operator has explicitly opted a specific show in.
-        """
+        """Per-show target resolution override, or None when no show row exists."""
         try:
             ShowFolder = self._ExtractShowFolder(FilePath)
             if not ShowFolder:
@@ -139,38 +189,69 @@ class ShowSettingsRepository(BaseRepository):
             )
             return None
 
+    # directive: path-schema-migration | # see path.S8
     def GetShowsWithStats(self, RootDrive: str = None) -> List[Dict[str, Any]]:
-        """Get all unique shows from MediaFiles with file count, total size, and current settings."""
+        """Get all unique shows from MediaFiles via typed-pair grouping; synthesizes ShowFolder display string."""
         try:
             DriveFilter = ""
             Params = ()
             if RootDrive:
-                DriveFilter = "WHERE mf.FilePath LIKE %s"
-                Params = (RootDrive + '%',)
+                StorageRootId = self._ResolveRootDriveToStorageRootId(RootDrive)
+                if StorageRootId is not None:
+                    DriveFilter = "WHERE mf.StorageRootId = %s"
+                    Params = (StorageRootId,)
 
-            query = f"""
-                SELECT
-                    split_part(regexp_replace(replace(mf.FilePath, '\\', '/'), '/+', '/', 'g'), '/', 2) as ShowName,
-                    MIN(split_part(mf.FilePath, '\\', 1) || '\\' || split_part(regexp_replace(replace(mf.FilePath, '\\', '/'), '/+', '/', 'g'), '/', 2)) as ShowFolder,
-                    COUNT(*) as FileCount,
-                    ROUND(SUM(mf.SizeMB)::numeric / 1024, 1) as TotalGB,
-                    MODE() WITHIN GROUP (ORDER BY mf.ResolutionCategory) as CommonResolution,
-                    MODE() WITHIN GROUP (ORDER BY mf.Codec) as CommonCodec,
-                    ss.TargetResolution as TargetResolution,
-                    ss.AssignedProfile as AssignedProfile,
-                    SUM(CASE WHEN mf.TranscodedByMediaVortex = true THEN 1 ELSE 0 END) as TranscodedCount
-                FROM MediaFiles mf
-                LEFT JOIN ShowSettings ss ON ss.ShowFolder = split_part(mf.FilePath, '\\', 1) || '\\' || split_part(regexp_replace(replace(mf.FilePath, '\\', '/'), '/+', '/', 'g'), '/', 2)
-                {DriveFilter}
-                GROUP BY ShowName, ss.TargetResolution, ss.AssignedProfile
-                HAVING COUNT(*) > 0
-                ORDER BY SUM(mf.SizeMB) DESC
-            """
-            return self.ExecuteQuery(query, Params)
+            query = (
+                "SELECT "
+                "    mf.StorageRootId as StorageRootId, "
+                "    split_part(mf.RelativePath, '/', 1) as RelativePath, "
+                "    split_part(mf.RelativePath, '/', 1) as ShowName, "
+                "    COUNT(*) as FileCount, "
+                "    ROUND(SUM(mf.SizeMB)::numeric / 1024, 1) as TotalGB, "
+                "    MODE() WITHIN GROUP (ORDER BY mf.ResolutionCategory) as CommonResolution, "
+                "    MODE() WITHIN GROUP (ORDER BY mf.Codec) as CommonCodec, "
+                "    ss.TargetResolution as TargetResolution, "
+                "    ss.AssignedProfile as AssignedProfile, "
+                "    SUM(CASE WHEN mf.TranscodedByMediaVortex = true THEN 1 ELSE 0 END) as TranscodedCount "
+                "FROM MediaFiles mf "
+                "LEFT JOIN ShowSettings ss "
+                "    ON ss.StorageRootId = mf.StorageRootId "
+                "   AND ss.RelativePath = split_part(mf.RelativePath, '/', 1) "
+                f"{DriveFilter} "
+                "GROUP BY mf.StorageRootId, split_part(mf.RelativePath, '/', 1), ss.TargetResolution, ss.AssignedProfile "
+                "HAVING COUNT(*) > 0 "
+                "ORDER BY SUM(mf.SizeMB) DESC"
+            )
+            Rows = self.ExecuteQuery(query, Params)
+            Pm = PrefixMap()
+            for R in Rows:
+                Sid = R.get("storagerootid") if "storagerootid" in R else R.get("StorageRootId")
+                Rel = R.get("relativepath") if "relativepath" in R else R.get("RelativePath")
+                Prefix = Pm.get(Sid, "") if Sid is not None else ""
+                Display = (Prefix + Rel.replace("/", "\\")) if (Prefix and Rel) else ""
+                R["ShowFolder"] = Display
+                R["showfolder"] = Display
+            return Rows
         except Exception as Ex:
             LoggingService.LogException("Exception getting shows with stats", Ex, "ShowSettingsRepository", "GetShowsWithStats")
             return []
 
+    # directive: path-schema-migration | # see path.S8
+    def _ResolveRootDriveToStorageRootId(self, RootDrive: str) -> Optional[int]:
+        """Map a bare drive prefix like 'Z:' or 'T:\\' to a StorageRootId by CanonicalPrefix match."""
+        if not RootDrive:
+            return None
+        Needle = RootDrive.upper().rstrip("\\").rstrip("/")
+        for Sid, Prefix in PrefixMap().items():
+            Hay = (Prefix or "").upper().rstrip("\\").rstrip("/")
+            if Hay == Needle:
+                return Sid
+        for Sid, Prefix in PrefixMap().items():
+            if (Prefix or "").upper().startswith(Needle):
+                return Sid
+        return None
+
+    # directive: path-schema-migration | # see path.S8
     def _ExtractShowFolder(self, FilePath: str) -> Optional[str]:
         """Extract show folder from a file path. E.g., 'T:\\House\\Season 1\\ep.mp4' -> 'T:\\House'"""
         try:
@@ -188,11 +269,17 @@ class ShowSettingsRepository(BaseRepository):
         except Exception:
             return None
 
+    # directive: path-schema-migration | # see path.S8
     def _MapRowToModel(self, Row) -> ShowSettingModel:
-        """Map a database row to a ShowSettingModel."""
+        """Map a database row to a ShowSettingModel; synthesizes ShowFolder from typed pair."""
+        Sid = Row.get('StorageRootId') if hasattr(Row, 'get') else Row['StorageRootId']
+        Rel = Row.get('RelativePath') if hasattr(Row, 'get') else Row['RelativePath']
+        ShowFolder = _SynthesizeFilePath(Sid, Rel) if (Sid is not None and Rel) else ""
         return ShowSettingModel(
             Id=Row['Id'],
-            ShowFolder=Row['ShowFolder'],
+            StorageRootId=Sid,
+            RelativePath=Rel or "",
+            ShowFolder=ShowFolder,
             TargetResolution=Row['TargetResolution'],
             CreatedDate=Row.get('CreatedDate'),
             LastModifiedDate=Row.get('LastModifiedDate')

@@ -6,9 +6,39 @@ from Core.Database.BaseRepository import BaseRepository
 from Core.Database.DatabaseService import EscapeLikePattern
 from Core.Logging.LoggingService import LoggingService
 from Core.Models.MediaFileModel import MediaFileModel
-from Core.Path import Path, PathError
+from Core.Path.Path import Path, PathError
+from Core.Path.PathStorageRoots import GetStorageRoots, GetPrefixMap
 from Features.FileScanning.Models.RootFolderModel import RootFolderModel
 from Features.FileScanning.Models.SeasonModel import SeasonModel
+
+
+# directive: path-schema-migration | # see path.S8
+def LookupTypedPair(CanonicalString: str):
+    """Parse a legacy FilePath into (StorageRootId, RelativePath); returns (None, None) on failure."""
+    if not CanonicalString:
+        return (None, None)
+    try:
+        P = Path.FromLegacyString(CanonicalString, GetStorageRoots())
+        return (P.StorageRootId, P.RelativePath)
+    except PathError:
+        return (None, None)
+
+
+# directive: path-schema-migration | # see path.S8
+def SynthesizeFilePath(StorageRootId, RelativePath) -> str:
+    """Render canonical FilePath via Path.CanonicalDisplay."""
+    if StorageRootId is None:
+        return ""
+    try:
+        return Path(StorageRootId, RelativePath or "").CanonicalDisplay(GetPrefixMap())
+    except PathError:
+        return ""
+
+
+# directive: path-schema-migration | # see path.S8
+def SynthesizeFilePathInRows(Rows):
+    """No-op kept for migration transition; models compute FilePath via @property."""
+    return Rows
 
 
 _FSR_STORAGE_ROOTS_CACHE: dict = {"_StorageRoots": None, "_PrefixMap": None}
@@ -199,29 +229,51 @@ class FileScanningRepository(BaseRepository):
             LoggingService.LogException("Exception in SaveRootFolder", e, "FileScanningRepository", "SaveRootFolder")
             raise
 
+    # directive: path-schema-migration | # see path.S7
     def DeleteRootFolder(self, RootFolderId: int) -> bool:
         try:
             rfRows = self.ExecuteQuery("SELECT RootFolder FROM RootFolders WHERE Id = %s", (RootFolderId,))
             if rfRows:
-                escapedPath = EscapeLikePattern(rfRows[0]['RootFolder'])
-                self.ExecuteNonQuery("DELETE FROM MediaFiles WHERE LOWER(FilePath) LIKE LOWER(%s) || '%%' ESCAPE '!'", (escapedPath,))
+                Sid, RelPrefix = LookupTypedPair(rfRows[0]['RootFolder'])
+                if Sid is not None:
+                    # Delete the root entry itself (exact RelativePath match) plus everything beneath it
+                    EscapedPrefix = EscapeLikePattern((RelPrefix or '').rstrip('/') + '/')
+                    self.ExecuteNonQuery(
+                        "DELETE FROM MediaFiles WHERE StorageRootId = %s "
+                        "AND (LOWER(RelativePath) = LOWER(%s) "
+                        "OR LOWER(RelativePath) LIKE LOWER(%s) || '%%' ESCAPE '!')",
+                        (Sid, RelPrefix, EscapedPrefix)
+                    )
+                else:
+                    LoggingService.LogWarning(
+                        f"DeleteRootFolder: could not parse RootFolder to typed pair: {rfRows[0]['RootFolder']}",
+                        "FileScanningRepository", "DeleteRootFolder"
+                    )
             affectedRows = self.ExecuteNonQuery("DELETE FROM RootFolders WHERE Id = %s", (RootFolderId,))
             return affectedRows > 0
         except Exception:
             return False
 
+    # directive: path-schema-migration | # see path.S8
     def GetSubfoldersByRootFolder(self, RootFolderPath: str, Page: int = 1, PageSize: int = 25,
                                   Search: str = '', SortColumn: str = 'TotalSizeMB',
                                   SortOrder: str = 'DESC', ExcludedDirectories: List[str] = None) -> Dict[str, Any]:
-        """Get subfolders under a root folder with aggregated stats from MediaFiles, with SQL-level pagination."""
+        """Subfolders under a root folder with aggregated stats; operates on typed pair (StorageRootId, RelativePath)."""
         valid_sort = {'SubfolderName': 'SubfolderName', 'TotalSizeMB': 'TotalSizeMB',
                       'FileCount': 'FileCount', 'MkvCount': 'MkvCount'}
         sort_col = valid_sort.get(SortColumn, 'TotalSizeMB')
         order = 'DESC' if SortOrder.upper() == 'DESC' else 'ASC'
 
-        # Ensure trailing backslash for prefix matching
-        root = RootFolderPath.rstrip('\\') + '\\'
-        root_len = len(root)
+        # Parse the canonical Windows-shape root path to typed pair.
+        Sid, RelRoot = LookupTypedPair(RootFolderPath)
+        if Sid is None:
+            return {'Subfolders': [], 'TotalCount': 0, 'TotalPages': 0}
+        # RelativePath stored with forward slashes; ensure trailing '/' for prefix matching.
+        rel_prefix = (RelRoot or '').rstrip('/') + '/'
+        rel_prefix_len = len(rel_prefix)
+
+        # For SubfolderPath display, keep the canonical Windows-shape display root with trailing backslash.
+        root_display = RootFolderPath.rstrip('\\') + '\\'
 
         # Search filter on subfolder name
         search_condition = ""
@@ -230,22 +282,22 @@ class FileScanningRepository(BaseRepository):
             search_condition = "AND LOWER(SubfolderName) LIKE LOWER(%s)"
             search_params = [f"%{Search}%"]
 
-        # CTE uses LEFT() for prefix matching instead of LIKE (avoids backslash escape issues)
-        # SPLIT_PART extracts the first path component after the root prefix
-        cte = """
-            WITH subfolders AS (
-                SELECT
-                    SPLIT_PART(SUBSTRING(mf.FilePath FROM %s + 1), chr(92), 1) AS SubfolderName,
-                    COUNT(*) AS FileCount,
-                    ROUND(SUM(mf.SizeMB)::numeric, 2) AS TotalSizeMB,
-                    SUM(CASE WHEN LOWER(mf.FileName) LIKE '%%.mkv' THEN 1 ELSE 0 END) AS MkvCount
-                FROM MediaFiles mf
-                WHERE LEFT(mf.FilePath, %s) = %s
-                  AND LENGTH(mf.FilePath) > %s
-                GROUP BY SPLIT_PART(SUBSTRING(mf.FilePath FROM %s + 1), chr(92), 1)
-            )
-        """
-        cte_params = [root_len, root_len, root, root_len, root_len]
+        # CTE walks RelativePath using forward-slash split for subfolder extraction.
+        cte = (
+            "WITH subfolders AS ( "
+            "    SELECT "
+            "        SPLIT_PART(SUBSTRING(mf.RelativePath FROM %s + 1), '/', 1) AS SubfolderName, "
+            "        COUNT(*) AS FileCount, "
+            "        ROUND(SUM(mf.SizeMB)::numeric, 2) AS TotalSizeMB, "
+            "        SUM(CASE WHEN LOWER(mf.FileName) LIKE '%%.mkv' THEN 1 ELSE 0 END) AS MkvCount "
+            "    FROM MediaFiles mf "
+            "    WHERE mf.StorageRootId = %s "
+            "      AND LEFT(mf.RelativePath, %s) = %s "
+            "      AND LENGTH(mf.RelativePath) > %s "
+            "    GROUP BY SPLIT_PART(SUBSTRING(mf.RelativePath FROM %s + 1), '/', 1) "
+            ") "
+        )
+        cte_params = [rel_prefix_len, Sid, rel_prefix_len, rel_prefix, rel_prefix_len, rel_prefix_len]
 
         # Count query
         count_query = cte + f"SELECT COUNT(*) AS Count FROM subfolders WHERE SubfolderName != '' {search_condition}"
@@ -254,21 +306,21 @@ class FileScanningRepository(BaseRepository):
 
         # Data query
         offset = (Page - 1) * PageSize
-        data_query = cte + f"""
-            SELECT SubfolderName, FileCount, TotalSizeMB, MkvCount
-            FROM subfolders
-            WHERE SubfolderName != ''
-            {search_condition}
-            ORDER BY {sort_col} {order}
-            LIMIT %s OFFSET %s
-        """
+        data_query = cte + (
+            "SELECT SubfolderName, FileCount, TotalSizeMB, MkvCount "
+            "FROM subfolders "
+            "WHERE SubfolderName != '' "
+            f"{search_condition} "
+            f"ORDER BY {sort_col} {order} "
+            "LIMIT %s OFFSET %s"
+        )
         rows = self.ExecuteQuery(data_query, tuple(cte_params + search_params + [PageSize, offset]))
 
         subfolders = []
         for row in rows:
             subfolders.append({
                 'SubfolderName': row['SubfolderName'],
-                'SubfolderPath': root + row['SubfolderName'],
+                'SubfolderPath': root_display + row['SubfolderName'],
                 'FileCount': row['FileCount'],
                 'TotalSizeMB': float(row['TotalSizeMB']),
                 'MkvCount': row['MkvCount']
@@ -322,30 +374,40 @@ class FileScanningRepository(BaseRepository):
             'TotalPages': (total_count + PageSize - 1) // PageSize
         }
 
+    # directive: path-schema-migration | # see path.S7
     def GetMkvCountsByRootFolder(self) -> Dict[str, int]:
-        """Get MKV file counts per root folder using SQL aggregation."""
+        """MKV file counts per root folder; joins via typed pair (StorageRootId, RelativePath prefix)."""
         try:
-            query = """
-                SELECT rf.RootFolder, COUNT(mf.Id) as MkvCount
-                FROM RootFolders rf
-                LEFT JOIN MediaFiles mf ON LOWER(mf.FilePath) LIKE LOWER(rf.RootFolder || '%%')
-                    AND LOWER(mf.FileName) LIKE '%%.mkv'
-                GROUP BY rf.RootFolder
-            """
-            rows = self.ExecuteQuery(query)
-            counts = {}
-            for row in rows:
-                folder = row['RootFolder'].replace('/', '\\').rstrip('\\').lower()
-                counts[folder] = row['MkvCount']
+            # directive: path-schema-migration -- RootFolders has no StorageRootId; resolve per row in Python.
+            RfRows = self.ExecuteQuery("SELECT RootFolder FROM RootFolders")
+            counts: Dict[str, int] = {}
+            for RfRow in RfRows:
+                RootFolderStr = RfRow['RootFolder']
+                Sid, RelRoot = LookupTypedPair(RootFolderStr)
+                folder_key = RootFolderStr.replace('/', '\\').rstrip('\\').lower()
+                if Sid is None:
+                    counts[folder_key] = 0
+                    continue
+                RelPrefix = (RelRoot or '').rstrip('/') + '/'
+                EscapedPrefix = EscapeLikePattern(RelPrefix)
+                Rows = self.ExecuteQuery(
+                    "SELECT COUNT(Id) AS MkvCount FROM MediaFiles "
+                    "WHERE StorageRootId = %s "
+                    "AND LOWER(RelativePath) LIKE LOWER(%s) || '%%' ESCAPE '!' "
+                    "AND LOWER(FileName) LIKE '%%.mkv'",
+                    (Sid, EscapedPrefix)
+                )
+                counts[folder_key] = Rows[0]['MkvCount'] if Rows else 0
             return counts
         except Exception as e:
             LoggingService.LogException("Error getting MKV counts", e, "FileScanningRepository", "GetMkvCountsByRootFolder")
             return {}
 
+    # directive: path-schema-migration | # see path.S8
     def GetMediaFilesPaginated(self, Page: int, PageSize: int, Search: str = '',
                                RootFolderPath: str = '', SortBy: str = 'SizeMB',
                                SortOrder: str = 'DESC') -> Dict[str, Any]:
-        """Get media files with SQL-level pagination, filtering, and sorting."""
+        """Paginated media files; root-folder filter uses typed pair; rows post-processed to attach synthesized FilePath."""
         valid_sort_columns = {
             'SizeMB': 'SizeMB', 'FileName': 'FileName',
             'LastScannedDate': 'LastScannedDate', 'Codec': 'Codec',
@@ -357,10 +419,17 @@ class FileScanningRepository(BaseRepository):
         conditions = []
         params = []
 
-        # Root folder filter
+        # Root folder filter via typed pair.
         if RootFolderPath:
-            conditions.append("LOWER(FilePath) LIKE LOWER(%s)")
-            params.append(f"{RootFolderPath}%")
+            Sid, RelRoot = LookupTypedPair(RootFolderPath)
+            if Sid is None:
+                return {'Rows': [], 'TotalCount': 0, 'TotalPages': 0}
+            RelPrefix = (RelRoot or '').rstrip('/') + '/' if RelRoot else ''
+            conditions.append("StorageRootId = %s")
+            params.append(Sid)
+            if RelPrefix:
+                conditions.append("LOWER(RelativePath) LIKE LOWER(%s) ESCAPE '!'")
+                params.append(f"{EscapeLikePattern(RelPrefix)}%")
 
         # Search filter (supports negative filter with ! prefix)
         if Search:
@@ -384,13 +453,16 @@ class FileScanningRepository(BaseRepository):
 
         # Get paginated results - only select columns needed for display
         offset = (Page - 1) * PageSize
-        display_cols = "Id, FileName, FilePath, SizeMB, LastScannedDate, Codec, Resolution, DurationMinutes, AssignedProfile"
-        data_query = f"""SELECT {display_cols}
-                         FROM MediaFiles {where_clause}
-                         ORDER BY {sort_col} {order} NULLS LAST
-                         LIMIT %s OFFSET %s"""
+        display_cols = "Id, StorageRootId, RelativePath, FileName, SizeMB, LastScannedDate, Codec, Resolution, DurationMinutes, AssignedProfile"
+        data_query = (
+            f"SELECT {display_cols} "
+            f"FROM MediaFiles {where_clause} "
+            f"ORDER BY {sort_col} {order} NULLS LAST "
+            "LIMIT %s OFFSET %s"
+        )
         data_params = params + [PageSize, offset]
         rows = self.ExecuteQuery(data_query, tuple(data_params))
+        SynthesizeFilePathInRows(rows)
 
         return {
             'Rows': rows,
@@ -400,262 +472,13 @@ class FileScanningRepository(BaseRepository):
 
     # ─── Media File Methods ────────────────────────────────────────────
 
-    def _MapRowToMediaFile(self, row) -> MediaFileModel:
-        """Map a database row to a MediaFileModel instance."""
-        return MediaFileModel(
-            Id=row['Id'], SeasonId=row['SeasonId'],
-            StorageRootId=row.get('StorageRootId'), RelativePath=row.get('RelativePath') or '',
-            FilePath=row['FilePath'],
-            FileName=row['FileName'], SizeMB=row['SizeMB'],
-            VideoBitrateKbps=row['VideoBitrateKbps'], AudioBitrateKbps=row['AudioBitrateKbps'],
-            Resolution=row['Resolution'], Codec=row['Codec'],
-            DurationMinutes=row['DurationMinutes'], FrameRate=row['FrameRate'],
-            LastScannedDate=row['LastScannedDate'], CompressionPotential=row['CompressionPotential'],
-            AssignedProfile=row['AssignedProfile'], IsInterlaced=row['IsInterlaced'],
-            ResolutionCategory=row['ResolutionCategory'], FileModificationTime=row['FileModificationTime'],
-            TotalFrames=row['TotalFrames'], CodecProfile=row['CodecProfile'],
-            ColorRange=row['ColorRange'], FieldOrder=row['FieldOrder'],
-            HasBFrames=row['HasBFrames'], RefFrames=row['RefFrames'],
-            PixelFormat=row['PixelFormat'], Level=row['Level'],
-            AudioChannels=row['AudioChannels'], AudioSampleRate=row['AudioSampleRate'],
-            AudioSampleFormat=row['AudioSampleFormat'], AudioChannelLayout=row['AudioChannelLayout'],
-            AudioCodec=row['AudioCodec'], SubtitleFormats=row['SubtitleFormats'],
-            ContainerFormat=row['ContainerFormat'], OverallBitrate=row['OverallBitrate'],
-            TranscodedByMediaVortex=row['TranscodedByMediaVortex'],
-            FFprobeFailureCount=row.get('FFprobeFailureCount', 0),
-            LastFFprobeError=row.get('LastFFprobeError'),
-            LastFFprobeAttemptDate=row.get('LastFFprobeAttemptDate')
-        )
-
-    _MEDIA_FILE_SELECT_COLS = """Id, SeasonId, StorageRootId, RelativePath, FilePath, FileName, SizeMB, VideoBitrateKbps, AudioBitrateKbps,
-                   Resolution, Codec, DurationMinutes, FrameRate, LastScannedDate,
-                   CompressionPotential, AssignedProfile, IsInterlaced, ResolutionCategory,
-                   FileModificationTime, TotalFrames, CodecProfile, ColorRange, FieldOrder,
-                   HasBFrames, RefFrames, PixelFormat, Level, AudioChannels, AudioSampleRate,
-                   AudioSampleFormat, AudioChannelLayout, AudioCodec, SubtitleFormats,
-                   ContainerFormat, OverallBitrate, TranscodedByMediaVortex,
-                   FFprobeFailureCount, LastFFprobeError, LastFFprobeAttemptDate"""
-
-    def GetAllMediaFiles(self) -> List[MediaFileModel]:
-        query = f"SELECT {self._MEDIA_FILE_SELECT_COLS} FROM MediaFiles"
-        rows = self.ExecuteQuery(query)
-        return [self._MapRowToMediaFile(row) for row in rows]
-
-    def GetMediaFileById(self, MediaFileId: int) -> Optional[MediaFileModel]:
-        query = f"SELECT {self._MEDIA_FILE_SELECT_COLS} FROM MediaFiles WHERE Id = %s"
-        rows = self.ExecuteQuery(query, (MediaFileId,))
-        if not rows:
-            return None
-        return self._MapRowToMediaFile(rows[0])
-
-    def GetMediaFileByPath(self, FilePath: str) -> Optional[MediaFileModel]:
-        query = f"SELECT {self._MEDIA_FILE_SELECT_COLS} FROM MediaFiles WHERE LOWER(FilePath) = LOWER(%s)"
-        rows = self.ExecuteQuery(query, (FilePath,))
-        if not rows:
-            return None
-        return self._MapRowToMediaFile(rows[0])
-
-    def GetMediaFilesByRootFolder(self, RootFolderPath: str) -> List[MediaFileModel]:
-        query = f"SELECT {self._MEDIA_FILE_SELECT_COLS} FROM MediaFiles WHERE LOWER(FilePath) LIKE LOWER(%s) ESCAPE '!'"
-        rows = self.ExecuteQuery(query, (f"{EscapeLikePattern(RootFolderPath)}%",))
-        return [self._MapRowToMediaFile(row) for row in rows]
-
-    def GetMediaFilesByRootFolderId(self, RootFolderId: int) -> List[MediaFileModel]:
-        rootFolder = self.GetRootFolderById(RootFolderId)
-        if not rootFolder:
-            return []
-        return self.GetMediaFilesByRootFolder(rootFolder.RootFolder)
-
-    def SaveMediaFile(self, MediaFile: MediaFileModel) -> int:
-        try:
-            from Core.PathNormalize import NormalizeCanonical
-            MediaFile.FilePath = NormalizeCanonical(MediaFile.FilePath)
-            MediaFile.FilePath = self.NormalizePathToFilesystemCase(MediaFile.FilePath)
-            LoggingService.LogFunctionEntry("SaveMediaFile", 'FileScanningRepository', f"File: {MediaFile.FileName}, Path: {MediaFile.FilePath}")
-            connection = self.DatabaseService.GetConnection()
-            try:
-                cursor = connection.cursor()
-                if MediaFile.Id is None:
-                    if MediaFile.StorageRootId is not None and MediaFile.RelativePath is not None:
-                        checkQuery = "SELECT Id FROM MediaFiles WHERE StorageRootId = %s AND LOWER(RelativePath) = LOWER(%s)"
-                        cursor.execute(checkQuery, (MediaFile.StorageRootId, MediaFile.RelativePath))
-                    else:
-                        checkQuery = "SELECT Id FROM MediaFiles WHERE LOWER(FilePath) = LOWER(%s)"
-                        cursor.execute(checkQuery, (MediaFile.FilePath,))
-                    existingRow = cursor.fetchone()
-                    if existingRow:
-                        MediaFile.Id = existingRow['Id']
-                        LoggingService.LogInfo(f"Duplicate prevented: file already exists with ID {MediaFile.Id}, converting to update: {MediaFile.FilePath}", "FileScanningRepository", "SaveMediaFile")
-                        # Fall through to update branch
-                    else:
-                        # Insert
-                        query = """INSERT INTO MediaFiles (SeasonId, StorageRootId, RelativePath, FilePath, FileName, SizeMB, VideoBitrateKbps, AudioBitrateKbps, Resolution, Codec, DurationMinutes, FrameRate, LastScannedDate, CompressionPotential, AssignedProfile, FileModificationTime, TotalFrames, CodecProfile, ColorRange, FieldOrder, HasBFrames, RefFrames, PixelFormat, Level, AudioChannels, AudioSampleRate, AudioSampleFormat, AudioChannelLayout, AudioCodec, SubtitleFormats, ContainerFormat, OverallBitrate, TranscodedByMediaVortex, FFprobeFailureCount, LastFFprobeError, LastFFprobeAttemptDate) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING Id"""
-                        parameters = (MediaFile.SeasonId, MediaFile.StorageRootId, MediaFile.RelativePath, MediaFile.FilePath, MediaFile.FileName, MediaFile.SizeMB, MediaFile.VideoBitrateKbps, MediaFile.AudioBitrateKbps, MediaFile.Resolution, MediaFile.Codec, MediaFile.DurationMinutes, MediaFile.FrameRate, MediaFile.LastScannedDate, MediaFile.CompressionPotential, MediaFile.AssignedProfile, MediaFile.FileModificationTime, MediaFile.TotalFrames, MediaFile.CodecProfile, MediaFile.ColorRange, MediaFile.FieldOrder, MediaFile.HasBFrames, MediaFile.RefFrames, MediaFile.PixelFormat, MediaFile.Level, MediaFile.AudioChannels, MediaFile.AudioSampleRate, MediaFile.AudioSampleFormat, MediaFile.AudioChannelLayout, MediaFile.AudioCodec, MediaFile.SubtitleFormats, MediaFile.ContainerFormat, MediaFile.OverallBitrate, MediaFile.TranscodedByMediaVortex, MediaFile.FFprobeFailureCount, MediaFile.LastFFprobeError, MediaFile.LastFFprobeAttemptDate)
-                        cursor.execute(query, parameters)
-                        mediaFileId = cursor.fetchone()[0]
-                        connection.commit()
-                        return mediaFileId
-                # Update (either explicit update or duplicate converted to update)
-                if MediaFile.Id is not None:
-                    query = """UPDATE MediaFiles SET SeasonId = %s, StorageRootId = %s, RelativePath = %s, FilePath = %s, FileName = %s, SizeMB = %s, VideoBitrateKbps = %s, AudioBitrateKbps = %s, Resolution = %s, Codec = %s, DurationMinutes = %s, FrameRate = %s, LastScannedDate = %s, CompressionPotential = %s, AssignedProfile = %s, FileModificationTime = %s, TotalFrames = %s, CodecProfile = %s, ColorRange = %s, FieldOrder = %s, HasBFrames = %s, RefFrames = %s, PixelFormat = %s, Level = %s, AudioChannels = %s, AudioSampleRate = %s, AudioSampleFormat = %s, AudioChannelLayout = %s, AudioCodec = %s, SubtitleFormats = %s, ContainerFormat = %s, OverallBitrate = %s, TranscodedByMediaVortex = %s, FFprobeFailureCount = %s, LastFFprobeError = %s, LastFFprobeAttemptDate = %s WHERE Id = %s"""
-                    parameters = (MediaFile.SeasonId, MediaFile.StorageRootId, MediaFile.RelativePath, MediaFile.FilePath, MediaFile.FileName, MediaFile.SizeMB, MediaFile.VideoBitrateKbps, MediaFile.AudioBitrateKbps, MediaFile.Resolution, MediaFile.Codec, MediaFile.DurationMinutes, MediaFile.FrameRate, MediaFile.LastScannedDate, MediaFile.CompressionPotential, MediaFile.AssignedProfile, MediaFile.FileModificationTime, MediaFile.TotalFrames, MediaFile.CodecProfile, MediaFile.ColorRange, MediaFile.FieldOrder, MediaFile.HasBFrames, MediaFile.RefFrames, MediaFile.PixelFormat, MediaFile.Level, MediaFile.AudioChannels, MediaFile.AudioSampleRate, MediaFile.AudioSampleFormat, MediaFile.AudioChannelLayout, MediaFile.AudioCodec, MediaFile.SubtitleFormats, MediaFile.ContainerFormat, MediaFile.OverallBitrate, MediaFile.TranscodedByMediaVortex, MediaFile.FFprobeFailureCount, MediaFile.LastFFprobeError, MediaFile.LastFFprobeAttemptDate, MediaFile.Id)
-                    cursor.execute(query, parameters)
-                    connection.commit()
-                    return MediaFile.Id
-            finally:
-                self.DatabaseService.CloseConnection(connection)
-        except Exception as e:
-            LoggingService.LogException("Exception in SaveMediaFile", e, "FileScanningRepository", "SaveMediaFile")
-            raise
-
-    def DeleteMediaFile(self, MediaFileId: int) -> bool:
-        affectedRows = self.ExecuteNonQuery("DELETE FROM MediaFiles WHERE Id = %s", (MediaFileId,))
-        return affectedRows > 0
-
-    def DeleteMediaFileByPath(self, FilePath: str) -> bool:
-        affectedRows = self.ExecuteNonQuery("DELETE FROM MediaFiles WHERE LOWER(FilePath) = LOWER(%s)", (FilePath,))
-        return affectedRows > 0
-
+    # directive: path-schema-migration | # see path.S8
     def GetTotalMediaFileCount(self) -> int:
         query = "SELECT COUNT(*) as Count FROM MediaFiles"
         rows = self.ExecuteQuery(query)
         return rows[0]['Count'] if rows else 0
 
-    def CleanupDuplicateMediaFiles(self) -> Dict[str, Any]:
-        """Remove duplicate MediaFiles rows, keeping the best record for each FilePath.
-
-        Selection priority (highest to lowest):
-        1. Has a matching TranscodeAttempts record (linked to transcode history)
-        2. Most recent LastScannedDate (reflects current file state post-transcode)
-        3. Most non-NULL metadata columns (most complete probe data)
-
-        Updates MediaFilesArchive references to point to the kept record before
-        deleting duplicates.
-        """
-        try:
-            connection = self.DatabaseService.GetConnection()
-            try:
-                import psycopg2.extras
-                cursor = connection.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-
-                # Find all duplicate groups (FilePaths with more than one record)
-                cursor.execute("""
-                    SELECT LOWER(FilePath) as normalizedpath, COUNT(*) as cnt
-                    FROM MediaFiles
-                    GROUP BY LOWER(FilePath)
-                    HAVING COUNT(*) > 1
-                """)
-                DuplicateGroups = cursor.fetchall()
-
-                if not DuplicateGroups:
-                    LoggingService.LogInfo("No duplicate media files found", "FileScanningRepository", "CleanupDuplicateMediaFiles")
-                    return {
-                        'Success': True,
-                        'DuplicatesRemoved': 0,
-                        'Message': 'No duplicates found'
-                    }
-
-                # Build a set of MediaFileIds that have TranscodeAttempts records
-                cursor.execute("SELECT DISTINCT MediaFileId FROM TranscodeAttempts WHERE MediaFileId IS NOT NULL")
-                TranscodedMediaFileIds = {row['mediafileid'] for row in cursor.fetchall()}
-
-                MetadataColumns = [
-                    'SeasonId', 'SizeMB', 'VideoBitrateKbps', 'AudioBitrateKbps',
-                    'Resolution', 'Codec', 'DurationMinutes', 'FrameRate',
-                    'CompressionPotential', 'AssignedProfile', 'TotalFrames',
-                    'CodecProfile', 'ColorRange', 'FieldOrder', 'HasBFrames',
-                    'RefFrames', 'PixelFormat', 'Level', 'AudioChannels',
-                    'AudioSampleRate', 'AudioSampleFormat', 'AudioChannelLayout',
-                    'ContainerFormat', 'OverallBitrate'
-                ]
-
-                TotalRemoved = 0
-
-                for group in DuplicateGroups:
-                    NormalizedPath = group['normalizedpath']
-
-                    # Get all records for this path
-                    cursor.execute("""
-                        SELECT * FROM MediaFiles WHERE LOWER(FilePath) = %s
-                        ORDER BY Id
-                    """, (NormalizedPath,))
-                    Records = cursor.fetchall()
-
-                    if len(Records) < 2:
-                        continue
-
-                    # Score each record with a tuple for natural ordering:
-                    # (has_transcode_link, scan_date, metadata_completeness)
-                    BestRecord = None
-                    BestKey = None
-
-                    for record in Records:
-                        HasTranscodeLink = 1 if record['id'] in TranscodedMediaFileIds else 0
-                        ScanDate = record['lastscanneddate'] or ''
-                        MetadataScore = sum(1 for col in MetadataColumns if record.get(col.lower()) is not None)
-
-                        Key = (HasTranscodeLink, ScanDate, MetadataScore)
-
-                        if BestKey is None or Key > BestKey:
-                            BestKey = Key
-                            BestRecord = record
-
-                    KeptId = BestRecord['id']
-                    DeleteIds = [r['id'] for r in Records if r['id'] != KeptId]
-
-                    if not DeleteIds:
-                        continue
-
-                    # Update MediaFilesArchive: reassign any references from deleted IDs to kept ID
-                    Placeholders = ','.join(['%s'] * len(DeleteIds))
-                    cursor.execute(f"""
-                        UPDATE MediaFilesArchive
-                        SET Id = %s
-                        WHERE Id IN ({Placeholders})
-                    """, [KeptId] + DeleteIds)
-
-                    # Delete the duplicate records
-                    cursor.execute(f"""
-                        DELETE FROM MediaFiles WHERE Id IN ({Placeholders})
-                    """, DeleteIds)
-
-                    TotalRemoved += len(DeleteIds)
-
-                connection.commit()
-                LoggingService.LogInfo(
-                    f"Cleaned up {TotalRemoved} duplicate media file records across {len(DuplicateGroups)} groups",
-                    "FileScanningRepository", "CleanupDuplicateMediaFiles"
-                )
-
-                # Create unique index to prevent future duplicates
-                try:
-                    cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_mediafiles_filepath_unique ON MediaFiles (LOWER(FilePath))")
-                    connection.commit()
-                    LoggingService.LogInfo("Created unique index on MediaFiles.FilePath", "FileScanningRepository", "CleanupDuplicateMediaFiles")
-                except Exception as IndexError:
-                    LoggingService.LogWarning(
-                        f"Could not create unique index (may already exist or duplicates remain): {str(IndexError)}",
-                        "FileScanningRepository", "CleanupDuplicateMediaFiles"
-                    )
-
-                return {
-                    'Success': True,
-                    'DuplicatesRemoved': TotalRemoved,
-                    'DuplicateGroups': len(DuplicateGroups),
-                    'Message': f'Removed {TotalRemoved} duplicate records from {len(DuplicateGroups)} groups'
-                }
-            finally:
-                self.DatabaseService.CloseConnection(connection)
-        except Exception as e:
-            LoggingService.LogException("Error cleaning up duplicate media files", e, "FileScanningRepository", "CleanupDuplicateMediaFiles")
-            return {
-                'Success': False,
-                'DuplicatesRemoved': 0,
-                'Message': f'Error: {str(e)}'
-            }
-
-    # ─── Transcode Candidates Methods ─────────────────────────────────
-
+    # directive: path-schema-migration | # see path.S7
     def GetHistoricalReductionRates(self) -> Dict[str, float]:
         """Get average size reduction percentages grouped by source codec + resolution category.
         Returns dict like {("h264", "1080p"): 93.5, ...}"""
@@ -677,18 +500,23 @@ class FileScanningRepository(BaseRepository):
             LoggingService.LogException("Error getting historical reduction rates", e, "FileScanningRepository", "GetHistoricalReductionRates")
             return {}
 
+    # directive: path-schema-migration | # see path.S8
     def GetTranscodeCandidatesByRootFolder(self, RootFolderPath: str, Page: int = 1, PageSize: int = 25,
                                             Search: str = '', SortColumn: str = 'EstimatedSavingsMB',
                                             SortOrder: str = 'DESC') -> Dict[str, Any]:
-        """Get subfolders with untranscoded files, aggregated with codec/resolution breakdowns and estimated savings."""
+        """Subfolders with untranscoded files; operates on typed pair (StorageRootId, RelativePath)."""
         valid_sort = {'SubfolderName': 'SubfolderName', 'TotalSizeMB': 'TotalSizeMB',
                       'FileCount': 'FileCount', 'EstimatedSavingsMB': 'EstimatedSavingsMB',
                       'AvgBitrateKbps': 'AvgBitrateKbps'}
         sort_col = valid_sort.get(SortColumn, 'EstimatedSavingsMB')
         order = 'DESC' if SortOrder.upper() == 'DESC' else 'ASC'
 
-        root = RootFolderPath.rstrip('\\') + '\\'
-        root_len = len(root)
+        Sid, RelRoot = LookupTypedPair(RootFolderPath)
+        if Sid is None:
+            return {'Subfolders': [], 'TotalCount': 0, 'TotalPages': 0}
+        rel_prefix = (RelRoot or '').rstrip('/') + '/'
+        rel_prefix_len = len(rel_prefix)
+        root_display = RootFolderPath.rstrip('\\') + '\\'
 
         search_condition = ""
         search_params = []
@@ -698,61 +526,61 @@ class FileScanningRepository(BaseRepository):
 
         # Get historical reduction rates for estimation
         reduction_rates = self.GetHistoricalReductionRates()
-        # Calculate global average fallback
         if reduction_rates:
             global_avg = sum(reduction_rates.values()) / len(reduction_rates)
         else:
             global_avg = 85.0
 
-        cte = """
-            WITH candidates AS (
-                SELECT
-                    SPLIT_PART(SUBSTRING(mf.FilePath FROM %s + 1), chr(92), 1) AS SubfolderName,
-                    mf.SizeMB,
-                    COALESCE(mf.VideoBitrateKbps, 0) AS VideoBitrateKbps,
-                    LOWER(COALESCE(mf.Codec, 'unknown')) AS Codec,
-                    LOWER(COALESCE(mf.ResolutionCategory, 'unknown')) AS ResolutionCategory
-                FROM MediaFiles mf
-                WHERE LEFT(mf.FilePath, %s) = %s
-                  AND LENGTH(mf.FilePath) > %s
-                  AND (mf.TranscodedByMediaVortex IS DISTINCT FROM true)
-                  AND LOWER(COALESCE(mf.Codec, '')) NOT IN ('hevc', 'av1', 'h265')
-            ),
-            subfolder_stats AS (
-                SELECT
-                    SubfolderName,
-                    COUNT(*) AS FileCount,
-                    ROUND(SUM(SizeMB)::numeric, 2) AS TotalSizeMB,
-                    ROUND(AVG(NULLIF(VideoBitrateKbps, 0))::numeric, 0) AS AvgBitrateKbps,
-                    STRING_AGG(Codec || ':' || SizeMB::text || ':' || ResolutionCategory, '|') AS FileDetails
-                FROM candidates
-                WHERE SubfolderName != ''
-                GROUP BY SubfolderName
-            )
-        """
-        cte_params = [root_len, root_len, root, root_len]
+        cte = (
+            "WITH candidates AS ( "
+            "    SELECT "
+            "        SPLIT_PART(SUBSTRING(mf.RelativePath FROM %s + 1), '/', 1) AS SubfolderName, "
+            "        mf.SizeMB, "
+            "        COALESCE(mf.VideoBitrateKbps, 0) AS VideoBitrateKbps, "
+            "        LOWER(COALESCE(mf.Codec, 'unknown')) AS Codec, "
+            "        LOWER(COALESCE(mf.ResolutionCategory, 'unknown')) AS ResolutionCategory "
+            "    FROM MediaFiles mf "
+            "    WHERE mf.StorageRootId = %s "
+            "      AND LEFT(mf.RelativePath, %s) = %s "
+            "      AND LENGTH(mf.RelativePath) > %s "
+            "      AND (mf.TranscodedByMediaVortex IS DISTINCT FROM true) "
+            "      AND LOWER(COALESCE(mf.Codec, '')) NOT IN ('hevc', 'av1', 'h265') "
+            "), "
+            "subfolder_stats AS ( "
+            "    SELECT "
+            "        SubfolderName, "
+            "        COUNT(*) AS FileCount, "
+            "        ROUND(SUM(SizeMB)::numeric, 2) AS TotalSizeMB, "
+            "        ROUND(AVG(NULLIF(VideoBitrateKbps, 0))::numeric, 0) AS AvgBitrateKbps, "
+            "        STRING_AGG(Codec || ':' || SizeMB::text || ':' || ResolutionCategory, '|') AS FileDetails "
+            "    FROM candidates "
+            "    WHERE SubfolderName != '' "
+            "    GROUP BY SubfolderName "
+            ") "
+        )
+        cte_params = [rel_prefix_len, Sid, rel_prefix_len, rel_prefix, rel_prefix_len]
 
         # Count query
         count_query = cte + f"SELECT COUNT(*) AS Count FROM subfolder_stats WHERE 1=1 {search_condition}"
         count_rows = self.ExecuteQuery(count_query, tuple(cte_params + search_params))
         total_count = count_rows[0]['Count'] if count_rows else 0
 
-        # SQL-sortable columns can paginate at DB level; Python-computed columns need all rows
+        # SQL-sortable columns can paginate at DB level; Python-computed columns need all rows.
         sql_sortable = ('SubfolderName', 'FileCount', 'TotalSizeMB', 'AvgBitrateKbps')
-        data_query = cte + f"""
-            SELECT SubfolderName, FileCount, TotalSizeMB, AvgBitrateKbps, FileDetails
-            FROM subfolder_stats
-            WHERE 1=1
-            {search_condition}
-            ORDER BY {sort_col if sort_col in sql_sortable else 'TotalSizeMB'} {order if sort_col in sql_sortable else 'DESC'}
-        """
+        data_query = cte + (
+            "SELECT SubfolderName, FileCount, TotalSizeMB, AvgBitrateKbps, FileDetails "
+            "FROM subfolder_stats "
+            "WHERE 1=1 "
+            f"{search_condition} "
+            f"ORDER BY {sort_col if sort_col in sql_sortable else 'TotalSizeMB'} {order if sort_col in sql_sortable else 'DESC'} "
+        )
 
         if sort_col in sql_sortable:
             paginated_query = data_query + " LIMIT %s OFFSET %s"
             offset = (Page - 1) * PageSize
             all_rows = self.ExecuteQuery(paginated_query, tuple(cte_params + search_params + [PageSize, offset]))
         else:
-            # EstimatedSavingsMB is computed in Python, so fetch all and sort/paginate below
+            # EstimatedSavingsMB is computed in Python; fetch all and sort/paginate below.
             all_rows = self.ExecuteQuery(data_query, tuple(cte_params + search_params))
 
         subfolders = []
@@ -773,7 +601,6 @@ class FileScanningRepository(BaseRepository):
                         codec_breakdown[codec] = codec_breakdown.get(codec, 0) + 1
                         resolution_breakdown[res_cat] = resolution_breakdown.get(res_cat, 0) + 1
 
-                        # Calculate estimated savings for this file
                         rate = reduction_rates.get((codec, res_cat))
                         if rate is None:
                             rate = reduction_rates.get((codec, 'unknown'), global_avg)
@@ -781,7 +608,7 @@ class FileScanningRepository(BaseRepository):
 
             subfolders.append({
                 'SubfolderName': row['subfoldername'],
-                'SubfolderPath': root + row['subfoldername'],
+                'SubfolderPath': root_display + row['subfoldername'],
                 'FileCount': row['filecount'],
                 'TotalSizeMB': float(row['totalsizemb']),
                 'AvgBitrateKbps': int(row['avgbitratekbps']) if row['avgbitratekbps'] else 0,
@@ -803,15 +630,20 @@ class FileScanningRepository(BaseRepository):
             'TotalPages': (total_count + PageSize - 1) // PageSize
         }
 
+    # directive: path-schema-migration | # see path.S8
     def GetTranscodeCandidateFiles(self, SubfolderPath: str, Page: int = 1, PageSize: int = 25) -> Dict[str, Any]:
-        """Get individual untranscoded files in a subfolder for drill-down view."""
+        """Individual untranscoded files in a subfolder; typed-pair prefix match."""
+        Sid, RelRoot = LookupTypedPair(SubfolderPath)
+        if Sid is None:
+            return {'Files': [], 'TotalCount': 0, 'TotalPages': 0}
+        rel_prefix = (RelRoot or '').rstrip('/') + '/'
         conditions = [
-            "LEFT(mf.FilePath, %s) = %s",
+            "mf.StorageRootId = %s",
+            "LEFT(mf.RelativePath, %s) = %s",
             "(mf.TranscodedByMediaVortex IS DISTINCT FROM true)",
             "LOWER(COALESCE(mf.Codec, '')) NOT IN ('hevc', 'av1', 'h265')"
         ]
-        prefix = SubfolderPath.rstrip('\\') + '\\'
-        params = [len(prefix), prefix]
+        params = [Sid, len(rel_prefix), rel_prefix]
 
         where_clause = "WHERE " + " AND ".join(conditions)
 
@@ -822,13 +654,13 @@ class FileScanningRepository(BaseRepository):
 
         # Data
         offset = (Page - 1) * PageSize
-        data_query = f"""
-            SELECT mf.Id, mf.FileName, mf.SizeMB, mf.Codec, mf.ResolutionCategory, mf.AssignedProfile
-            FROM MediaFiles mf
-            {where_clause}
-            ORDER BY mf.SizeMB DESC NULLS LAST
-            LIMIT %s OFFSET %s
-        """
+        data_query = (
+            "SELECT mf.Id, mf.FileName, mf.SizeMB, mf.Codec, mf.ResolutionCategory, mf.AssignedProfile "
+            "FROM MediaFiles mf "
+            f"{where_clause} "
+            "ORDER BY mf.SizeMB DESC NULLS LAST "
+            "LIMIT %s OFFSET %s"
+        )
         rows = self.ExecuteQuery(data_query, tuple(params + [PageSize, offset]))
 
         files = []
@@ -848,10 +680,11 @@ class FileScanningRepository(BaseRepository):
             'TotalPages': (total_count + PageSize - 1) // PageSize
         }
 
+    # directive: path-schema-migration | # see path.S8
     def GetAllTranscodeCandidateFiles(self, RootFolderPath: str, Page: int = 1, PageSize: int = 25,
                                        Search: str = '', SortColumn: str = 'VideoBitrateKbps',
                                        SortOrder: str = 'DESC') -> Dict[str, Any]:
-        """Get individual untranscoded files across the entire root folder, sortable by bitrate."""
+        """Individual untranscoded files under a root; typed-pair prefix match; folder name derived from RelativePath."""
         ValidSortColumns = {
             'FileName': 'mf.FileName',
             'SizeMB': 'mf.SizeMB',
@@ -862,13 +695,17 @@ class FileScanningRepository(BaseRepository):
         SortCol = ValidSortColumns.get(SortColumn, 'mf.VideoBitrateKbps')
         Order = 'DESC' if SortOrder.upper() == 'DESC' else 'ASC'
 
-        Prefix = RootFolderPath.rstrip('\\') + '\\'
+        Sid, RelRoot = LookupTypedPair(RootFolderPath)
+        if Sid is None:
+            return {'Files': [], 'TotalCount': 0, 'TotalPages': 0}
+        RelPrefix = (RelRoot or '').rstrip('/') + '/'
         Conditions = [
-            "LEFT(mf.FilePath, %s) = %s",
+            "mf.StorageRootId = %s",
+            "LEFT(mf.RelativePath, %s) = %s",
             "(mf.TranscodedByMediaVortex IS DISTINCT FROM true)",
             "LOWER(COALESCE(mf.Codec, '')) NOT IN ('hevc', 'av1', 'h265')"
         ]
-        Params = [len(Prefix), Prefix]
+        Params = [Sid, len(RelPrefix), RelPrefix]
 
         if Search:
             Conditions.append("LOWER(mf.FileName) LIKE LOWER(%s) ESCAPE '!'")
@@ -881,24 +718,24 @@ class FileScanningRepository(BaseRepository):
         TotalCount = CountRows[0]['Count'] if CountRows else 0
 
         Offset = (Page - 1) * PageSize
-        DataQuery = f"""
-            SELECT mf.Id, mf.FileName, mf.FilePath, mf.SizeMB, mf.Codec,
-                   mf.ResolutionCategory, mf.VideoBitrateKbps, mf.AssignedProfile,
-                   mf.AudioLanguages, mf.HasExplicitEnglishAudio
-            FROM MediaFiles mf
-            {WhereClause}
-            ORDER BY {SortCol} {Order} NULLS LAST
-            LIMIT %s OFFSET %s
-        """
+        DataQuery = (
+            "SELECT mf.Id, mf.FileName, mf.RelativePath, mf.SizeMB, mf.Codec, "
+            "       mf.ResolutionCategory, mf.VideoBitrateKbps, mf.AssignedProfile, "
+            "       mf.AudioLanguages, mf.HasExplicitEnglishAudio "
+            "FROM MediaFiles mf "
+            f"{WhereClause} "
+            f"ORDER BY {SortCol} {Order} NULLS LAST "
+            "LIMIT %s OFFSET %s"
+        )
         Rows = self.ExecuteQuery(DataQuery, tuple(Params + [PageSize, Offset]))
 
         Files = []
         for Row in Rows:
-            # Extract subfolder name from path
-            FilePath = Row['filepath'] or ''
-            RelativePath = FilePath[len(Prefix):] if FilePath.startswith(Prefix) else FilePath
-            FolderParts = RelativePath.rsplit('\\', 1)
-            FolderName = FolderParts[0] if len(FolderParts) > 1 else ''
+            # Folder name extracted from RelativePath after the root prefix; '/' separator stays in stored form.
+            Rel = Row['relativepath'] or ''
+            Trail = Rel[len(RelPrefix):] if Rel.startswith(RelPrefix) else Rel
+            FolderParts = Trail.rsplit('/', 1)
+            FolderName = FolderParts[0].replace('/', '\\') if len(FolderParts) > 1 else ''
 
             Files.append({
                 'Id': Row['id'],
@@ -920,63 +757,6 @@ class FileScanningRepository(BaseRepository):
         }
 
     # ─── Season Methods ────────────────────────────────────────────────
-
-    def GetAllSeasons(self) -> List[SeasonModel]:
-        query = "SELECT Id, RootFolderId, SeasonName FROM Seasons ORDER BY RootFolderId, SeasonName"
-        rows = self.ExecuteQuery(query)
-        seasons = []
-        for row in rows:
-            season = SeasonModel(Id=row['Id'], RootFolderId=row['RootFolderId'], SeasonName=row['SeasonName'])
-            seasons.append(season)
-        return seasons
-
-    def GetSeasonById(self, SeasonId: int) -> Optional[SeasonModel]:
-        query = "SELECT Id, RootFolderId, SeasonName FROM Seasons WHERE Id = %s"
-        rows = self.ExecuteQuery(query, (SeasonId,))
-        if not rows:
-            return None
-        row = rows[0]
-        return SeasonModel(Id=row['Id'], RootFolderId=row['RootFolderId'], SeasonName=row['SeasonName'])
-
-    def SaveSeason(self, Season: SeasonModel) -> int:
-        try:
-            LoggingService.LogFunctionEntry("SaveSeason", 'FileScanningRepository', f"Season: {Season.SeasonName}, RootFolderId: {Season.RootFolderId}")
-            connection = self.DatabaseService.GetConnection()
-            try:
-                cursor = connection.cursor()
-                if Season.Id is None:
-                    query = """INSERT INTO Seasons (RootFolderId, SeasonName) VALUES (%s, %s) RETURNING Id"""
-                    parameters = (Season.RootFolderId, Season.SeasonName)
-                    cursor.execute(query, parameters)
-                    seasonId = cursor.fetchone()[0]
-                    connection.commit()
-                    return seasonId
-                else:
-                    query = """UPDATE Seasons SET RootFolderId = %s, SeasonName = %s WHERE Id = %s"""
-                    parameters = (Season.RootFolderId, Season.SeasonName, Season.Id)
-                    cursor.execute(query, parameters)
-                    connection.commit()
-                    return Season.Id
-            finally:
-                self.DatabaseService.CloseConnection(connection)
-        except Exception as e:
-            LoggingService.LogException("Exception in SaveSeason", e, "FileScanningRepository", "SaveSeason")
-            raise
-
-    def DeleteSeason(self, SeasonId: int) -> bool:
-        affectedRows = self.ExecuteNonQuery("DELETE FROM Seasons WHERE Id = %s", (SeasonId,))
-        return affectedRows > 0
-
-    def GetSeasonsByRootFolder(self, RootFolderId: int) -> List[SeasonModel]:
-        query = "SELECT Id, RootFolderId, SeasonName FROM Seasons WHERE RootFolderId = %s ORDER BY SeasonName"
-        rows = self.ExecuteQuery(query, (RootFolderId,))
-        seasons = []
-        for row in rows:
-            season = SeasonModel(Id=row['Id'], RootFolderId=row['RootFolderId'], SeasonName=row['SeasonName'])
-            seasons.append(season)
-        return seasons
-
-    # ─── Helper Methods ────────────────────────────────────────────────
 
     def NormalizePathToFilesystemCase(self, Path: str) -> str:
         """Walk path components using os.listdir to find actual filesystem case."""
@@ -1027,17 +807,17 @@ class FileScanningRepository(BaseRepository):
             LoggingService.LogException("Error normalizing path to filesystem case", e, "FileScanningRepository", "NormalizePathToFilesystemCase")
             return Path
 
+    # directive: path-schema-migration | # see path.S8
     def GetMediaFileByFileName(self, FileName: str) -> Optional[Dict[str, Any]]:
-        """Look up a MediaFile by filename (case-insensitive) for mitigation checking.
-        Tries exact match first, then fuzzy match by episode prefix if not found.
-        Returns dict with MatchType: 'exact', 'no_ext', or 'fuzzy'."""
+        """Look up a MediaFile by filename for mitigation; FilePath synthesized from typed pair."""
         try:
-            selectCols = "Id, FileName, FilePath, ContainerFormat, Codec, AudioCodec, TranscodedByMediaVortex, SubtitleFormats"
+            selectCols = "Id, StorageRootId, RelativePath, FileName, ContainerFormat, Codec, AudioCodec, TranscodedByMediaVortex, SubtitleFormats"
 
             # 1. Exact match
             query = f"SELECT {selectCols} FROM MediaFiles WHERE LOWER(FileName) = LOWER(%s) LIMIT 1"
             rows = self.ExecuteQuery(query, (FileName,))
             if rows:
+                SynthesizeFilePathInRows(rows)
                 return self._MapMediaFileSummaryRow(rows[0], "exact")
 
             # 2. Match without extension (handles container change: .mkv -> .mp4)
@@ -1045,6 +825,7 @@ class FileScanningRepository(BaseRepository):
             query = f"SELECT {selectCols} FROM MediaFiles WHERE LOWER(FileName) LIKE LOWER(%s) ESCAPE '!' LIMIT 1"
             rows = self.ExecuteQuery(query, (nameNoExt + '%',))
             if rows:
+                SynthesizeFilePathInRows(rows)
                 return self._MapMediaFileSummaryRow(rows[0], "no_ext")
 
             # 3. Fuzzy match by episode prefix (handles resolution/quality change)
@@ -1052,6 +833,7 @@ class FileScanningRepository(BaseRepository):
             if episodePrefix and episodePrefix != nameNoExt:
                 rows = self.ExecuteQuery(query, (episodePrefix + '%',))
                 if rows:
+                    SynthesizeFilePathInRows(rows)
                     return self._MapMediaFileSummaryRow(rows[0], "fuzzy")
 
             return None
@@ -1110,30 +892,31 @@ class FileScanningRepository(BaseRepository):
             return match.group(1).strip(' -_.')
         return None
 
+    # directive: path-schema-migration | # see path.S7
     def SaveMediaFileArchive(self, MediaFileId: int, TranscodeAttemptId: int) -> int:
-        """Archive original file details using INSERT SELECT from MediaFiles table."""
+        """Archive original file details via INSERT SELECT; typed pair only (FilePath dropped)."""
         try:
             LoggingService.LogFunctionEntry("SaveMediaFileArchive", "FileScanningRepository", MediaFileId, TranscodeAttemptId)
 
-            query = """
-                INSERT INTO MediaFilesArchive
-                (Id, SeasonId, FilePath, FileName, SizeMB, VideoBitrateKbps, AudioBitrateKbps,
-                 Resolution, Codec, DurationMinutes, FrameRate, LastScannedDate,
-                 CompressionPotential, AssignedProfile, IsInterlaced, ResolutionCategory,
-                 FileModificationTime, KeepSource, TotalFrames, CodecProfile, ColorRange,
-                 FieldOrder, HasBFrames, RefFrames, PixelFormat, Level, AudioChannels,
-                 AudioSampleRate, AudioSampleFormat, AudioChannelLayout, ContainerFormat,
-                 OverallBitrate, TranscodedByMediaVortex, ArchiveDate, TranscodeAttemptId)
-                SELECT Id, SeasonId, FilePath, FileName, SizeMB, VideoBitrateKbps, AudioBitrateKbps,
-                       Resolution, Codec, DurationMinutes, FrameRate, LastScannedDate,
-                       CompressionPotential, AssignedProfile, IsInterlaced, ResolutionCategory,
-                       FileModificationTime, KeepSource, TotalFrames, CodecProfile, ColorRange,
-                       FieldOrder, HasBFrames, RefFrames, PixelFormat, Level, AudioChannels,
-                       AudioSampleRate, AudioSampleFormat, AudioChannelLayout, ContainerFormat,
-                       OverallBitrate, TranscodedByMediaVortex, NOW(), %s
-                FROM MediaFiles
-                WHERE Id = %s
-            """
+            query = (
+                "INSERT INTO MediaFilesArchive "
+                "(Id, SeasonId, StorageRootId, RelativePath, FileName, SizeMB, VideoBitrateKbps, AudioBitrateKbps, "
+                " Resolution, Codec, DurationMinutes, FrameRate, LastScannedDate, "
+                " CompressionPotential, AssignedProfile, IsInterlaced, ResolutionCategory, "
+                " FileModificationTime, KeepSource, TotalFrames, CodecProfile, ColorRange, "
+                " FieldOrder, HasBFrames, RefFrames, PixelFormat, Level, AudioChannels, "
+                " AudioSampleRate, AudioSampleFormat, AudioChannelLayout, ContainerFormat, "
+                " OverallBitrate, TranscodedByMediaVortex, ArchiveDate, TranscodeAttemptId) "
+                "SELECT Id, SeasonId, StorageRootId, RelativePath, FileName, SizeMB, VideoBitrateKbps, AudioBitrateKbps, "
+                "       Resolution, Codec, DurationMinutes, FrameRate, LastScannedDate, "
+                "       CompressionPotential, AssignedProfile, IsInterlaced, ResolutionCategory, "
+                "       FileModificationTime, KeepSource, TotalFrames, CodecProfile, ColorRange, "
+                "       FieldOrder, HasBFrames, RefFrames, PixelFormat, Level, AudioChannels, "
+                "       AudioSampleRate, AudioSampleFormat, AudioChannelLayout, ContainerFormat, "
+                "       OverallBitrate, TranscodedByMediaVortex, NOW(), %s "
+                "FROM MediaFiles "
+                "WHERE Id = %s"
+            )
 
             parameters = (TranscodeAttemptId, MediaFileId)
 

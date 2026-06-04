@@ -43,13 +43,16 @@ class TestTranscodingWorkflow(unittest.TestCase):
         with open(self.TestFilePath, 'w') as f:
             f.write("dummy video content")
         
-        # Sample queue item
+        # directive: path-schema-migration | # see path.S8
+        self.TestStorageRootId = 1
+        self.TestRelativePath = "Source/TestMovie - 1080p BluRay.mkv"
         self.QueueItem = TranscodeQueueModel(
             Id=1,
-            FilePath=self.TestFilePath,
+            StorageRootId=self.TestStorageRootId,
+            RelativePath=self.TestRelativePath,
             FileName=self.TestFileName,
             Directory=self.SourceDir,
-            SizeBytes=1500000000,  # 1.5GB
+            SizeBytes=1500000000,
             SizeMB=1500.0,
             Priority=1,
             Status="pending",
@@ -289,10 +292,11 @@ class TestTranscodingWorkflow(unittest.TestCase):
             self.assertTrue(result['Success'])
             MockDatabase.SaveTranscodeAttempt.assert_called()
             
-            # Verify TranscodeAttempt was created with correct data
+            # directive: path-schema-migration | # see path.S8
             call_args = MockDatabase.SaveTranscodeAttempt.call_args[0][0]
             self.assertIsInstance(call_args, TranscodeAttemptModel)
-            self.assertEqual(call_args.FilePath, self.TestFilePath)
+            self.assertEqual(call_args.StorageRootId, self.TestStorageRootId)
+            self.assertEqual(call_args.RelativePath, self.TestRelativePath)
             self.assertTrue(call_args.Success)
             self.assertEqual(call_args.VMAF, 95.2)
     

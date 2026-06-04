@@ -38,42 +38,42 @@ class TestPathDbRoundTrip(unittest.TestCase):
         self.RelativePathValue = f"{SENTINEL_PREFIX}/{Ts}_{Uniq}.mp4"
         self.SentinelFilePath = "M:\\" + self.RelativePathValue.replace("/", "\\")
 
-    # directive: path-class-implementation | # see path.S7
+    # directive: path-schema-migration | # see path.S8
     def tearDown(self):
-        """Delete the sentinel row by FilePath."""
+        """Delete the sentinel row by typed pair (FilePath column is gone)."""
         self.Db.ExecuteNonQuery(
-            "DELETE FROM MediaFiles WHERE FilePath = %s",
-            (self.SentinelFilePath,),
+            "DELETE FROM MediaFiles WHERE StorageRootId = %s AND RelativePath = %s",
+            (self.StorageRootId, self.RelativePathValue),
         )
 
-    # directive: path-class-implementation | # see path.S7
+    # directive: path-schema-migration | # see path.S8
     def test_typed_columns_round_trip_through_path_class(self):
         """S7: INSERT (StorageRootId, RelativePath) -> SELECT -> Path.FromRow -> equal Path."""
         SentinelPath = Path(self.StorageRootId, self.RelativePathValue)
         self.Db.ExecuteNonQuery(
-            "INSERT INTO MediaFiles (FilePath, StorageRootId, RelativePath) VALUES (%s, %s, %s)",
-            (self.SentinelFilePath, SentinelPath.StorageRootId, SentinelPath.RelativePath),
+            "INSERT INTO MediaFiles (StorageRootId, RelativePath) VALUES (%s, %s)",
+            (SentinelPath.StorageRootId, SentinelPath.RelativePath),
         )
         Rows = self.Db.ExecuteQuery(
-            "SELECT StorageRootId, RelativePath FROM MediaFiles WHERE FilePath = %s",
-            (self.SentinelFilePath,),
+            "SELECT StorageRootId, RelativePath FROM MediaFiles WHERE StorageRootId = %s AND RelativePath = %s",
+            (SentinelPath.StorageRootId, SentinelPath.RelativePath),
         )
         self.assertEqual(len(Rows), 1, "expected one round-tripped row")
         Roundtripped = Path.FromRow(Rows[0])
         self.assertIsNotNone(Roundtripped)
         self.assertEqual(Roundtripped, SentinelPath)
 
-    # directive: path-class-implementation | # see path.C7
+    # directive: path-schema-migration | # see path.S8
     def test_json_dict_round_trip_with_db_row(self):
         """S2 / C7: Path.ToJsonDict from a DB-sourced Path round-trips through FromJsonDict."""
         SentinelPath = Path(self.StorageRootId, self.RelativePathValue)
         self.Db.ExecuteNonQuery(
-            "INSERT INTO MediaFiles (FilePath, StorageRootId, RelativePath) VALUES (%s, %s, %s)",
-            (self.SentinelFilePath, SentinelPath.StorageRootId, SentinelPath.RelativePath),
+            "INSERT INTO MediaFiles (StorageRootId, RelativePath) VALUES (%s, %s)",
+            (SentinelPath.StorageRootId, SentinelPath.RelativePath),
         )
         Rows = self.Db.ExecuteQuery(
-            "SELECT StorageRootId, RelativePath FROM MediaFiles WHERE FilePath = %s",
-            (self.SentinelFilePath,),
+            "SELECT StorageRootId, RelativePath FROM MediaFiles WHERE StorageRootId = %s AND RelativePath = %s",
+            (SentinelPath.StorageRootId, SentinelPath.RelativePath),
         )
         FromDb = Path.FromRow(Rows[0])
         JsonRoundTrip = Path.FromJsonDict(FromDb.ToJsonDict())

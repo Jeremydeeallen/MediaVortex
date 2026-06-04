@@ -49,33 +49,20 @@ def _Sentinel(Suffix: str = "mp4") -> str:
     return f"{SENTINEL_PREFIX}/{Ts}_{Uniq}.{Suffix}"
 
 
-# directive: path-db-roundtrip-live | # see path.S7
-def _SentinelLegacyForm(Rel: str) -> str:
-    """Convert sentinel RelativePath to a Windows-style legacy filepath for tables requiring filepath."""
-    return "M:\\" + Rel.replace("/", "\\")
-
-
 @pytest.fixture
-# directive: path-db-roundtrip-live | # see path.S7
+# directive: path-schema-migration | # see path.S8
 def CleanupSentinels(Db):
-    """Per-test cleanup: deletes any rows matching the sentinel LIKE prefix across the 6 tables."""
+    """Per-test cleanup: delete sentinel rows by typed-pair RelativePath across the 6 tables."""
     yield
     LikePattern = EscapeLikePattern(SENTINEL_PREFIX) + "%"
-    Tables = [
-        ("MediaFiles", "RelativePath", "FilePath"),
-        ("MediaFilesArchive", "RelativePath", "FilePath"),
-        ("TranscodeQueue", "RelativePath", "FilePath"),
-        ("TranscodeAttempts", "RelativePath", "FilePath"),
-        ("ShowSettings", "RelativePath", "ShowFolder"),
-    ]
-    for Table, RelCol, LegacyCol in Tables:
+    for Table in ("MediaFiles", "MediaFilesArchive", "TranscodeQueue", "TranscodeAttempts", "ShowSettings"):
         Db.ExecuteNonQuery(
-            f"DELETE FROM {Table} WHERE {RelCol} LIKE %s ESCAPE '!' OR {LegacyCol} LIKE %s ESCAPE '!'",
-            (LikePattern, LikePattern),
+            f"DELETE FROM {Table} WHERE RelativePath LIKE %s ESCAPE '!'",
+            (LikePattern,),
         )
     Db.ExecuteNonQuery(
-        "DELETE FROM TemporaryFilePaths WHERE SourceRelativePath LIKE %s ESCAPE '!' OR OutputRelativePath LIKE %s ESCAPE '!' OR OriginalPath LIKE %s ESCAPE '!'",
-        (LikePattern, LikePattern, LikePattern),
+        "DELETE FROM TemporaryFilePaths WHERE SourceRelativePath LIKE %s ESCAPE '!' OR OutputRelativePath LIKE %s ESCAPE '!'",
+        (LikePattern, LikePattern),
     )
 
 
@@ -85,8 +72,8 @@ def test_mediafiles_round_trip(Db, StorageRootId, CleanupSentinels):
     Rel = _Sentinel("mp4")
     Sentinel = Path(StorageRootId, Rel)
     Db.ExecuteNonQuery(
-        "INSERT INTO MediaFiles (FilePath, StorageRootId, RelativePath) VALUES (%s, %s, %s)",
-        (_SentinelLegacyForm(Rel), Sentinel.StorageRootId, Sentinel.RelativePath),
+        "INSERT INTO MediaFiles (StorageRootId, RelativePath) VALUES (%s, %s)",
+        (Sentinel.StorageRootId, Sentinel.RelativePath),
     )
     Rows = Db.ExecuteQuery(
         "SELECT StorageRootId, RelativePath FROM MediaFiles WHERE RelativePath = %s",
@@ -96,15 +83,15 @@ def test_mediafiles_round_trip(Db, StorageRootId, CleanupSentinels):
     assert Path.FromRow(Rows[0]) == Sentinel
 
 
-# directive: path-db-roundtrip-live | # see path.S7
+# directive: path-schema-migration | # see path.S8
 def test_mediafilesarchive_round_trip(Db, StorageRootId, CleanupSentinels):
     """C3: MediaFilesArchive INSERT -> SELECT -> Path.FromRow -> equal."""
     Rel = _Sentinel("mkv")
     Sentinel = Path(StorageRootId, Rel)
     ArchiveId = 9_000_000_000 + int(uuid.uuid4().int % 1_000_000_000)
     Db.ExecuteNonQuery(
-        "INSERT INTO MediaFilesArchive (Id, FilePath, StorageRootId, RelativePath) VALUES (%s, %s, %s, %s)",
-        (ArchiveId, _SentinelLegacyForm(Rel), Sentinel.StorageRootId, Sentinel.RelativePath),
+        "INSERT INTO MediaFilesArchive (Id, StorageRootId, RelativePath) VALUES (%s, %s, %s)",
+        (ArchiveId, Sentinel.StorageRootId, Sentinel.RelativePath),
     )
     Rows = Db.ExecuteQuery(
         "SELECT StorageRootId, RelativePath FROM MediaFilesArchive WHERE Id = %s",
@@ -119,12 +106,11 @@ def test_transcodequeue_round_trip(Db, StorageRootId, CleanupSentinels):
     """C4: TranscodeQueue INSERT -> SELECT -> Path.FromRow -> equal."""
     Rel = _Sentinel("mp4")
     Sentinel = Path(StorageRootId, Rel)
-    LegacyForm = _SentinelLegacyForm(Rel)
     Filename = Rel.rsplit("/", 1)[-1]
-    Directory = LegacyForm.rsplit("\\", 1)[0]
+    Directory = Rel.rsplit("/", 1)[0] if "/" in Rel else ""
     Db.ExecuteNonQuery(
-        "INSERT INTO TranscodeQueue (FilePath, Filename, Directory, SizeBytes, SizeMB, StorageRootId, RelativePath, Status) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
-        (LegacyForm, Filename, Directory, 0, 0.0, Sentinel.StorageRootId, Sentinel.RelativePath, "SentinelTest"),
+        "INSERT INTO TranscodeQueue (Filename, Directory, SizeBytes, SizeMB, StorageRootId, RelativePath, Status) VALUES (%s, %s, %s, %s, %s, %s, %s)",
+        (Filename, Directory, 0, 0.0, Sentinel.StorageRootId, Sentinel.RelativePath, "SentinelTest"),
     )
     Rows = Db.ExecuteQuery(
         "SELECT StorageRootId, RelativePath FROM TranscodeQueue WHERE RelativePath = %s",
@@ -140,8 +126,8 @@ def test_transcodeattempts_round_trip(Db, StorageRootId, CleanupSentinels):
     Rel = _Sentinel("mp4")
     Sentinel = Path(StorageRootId, Rel)
     Db.ExecuteNonQuery(
-        "INSERT INTO TranscodeAttempts (FilePath, StorageRootId, RelativePath) VALUES (%s, %s, %s)",
-        (_SentinelLegacyForm(Rel), Sentinel.StorageRootId, Sentinel.RelativePath),
+        "INSERT INTO TranscodeAttempts (StorageRootId, RelativePath) VALUES (%s, %s)",
+        (Sentinel.StorageRootId, Sentinel.RelativePath),
     )
     Rows = Db.ExecuteQuery(
         "SELECT StorageRootId, RelativePath FROM TranscodeAttempts WHERE RelativePath = %s",
@@ -191,8 +177,8 @@ def test_showsettings_round_trip(Db, StorageRootId, CleanupSentinels):
     Rel = _Sentinel("folder")
     Sentinel = Path(StorageRootId, Rel)
     Db.ExecuteNonQuery(
-        "INSERT INTO ShowSettings (ShowFolder, TargetResolution, StorageRootId, RelativePath) VALUES (%s, %s, %s, %s)",
-        (_SentinelLegacyForm(Rel), "1080p", Sentinel.StorageRootId, Sentinel.RelativePath),
+        "INSERT INTO ShowSettings (TargetResolution, StorageRootId, RelativePath) VALUES (%s, %s, %s)",
+        ("1080p", Sentinel.StorageRootId, Sentinel.RelativePath),
     )
     Rows = Db.ExecuteQuery(
         "SELECT StorageRootId, RelativePath FROM ShowSettings WHERE RelativePath = %s",
@@ -202,31 +188,33 @@ def test_showsettings_round_trip(Db, StorageRootId, CleanupSentinels):
     assert Path.FromRow(Rows[0]) == Sentinel
 
 
-# directive: path-db-roundtrip-live | # see path.D3
-def test_null_typed_pair_returns_none_via_fromrow(Db, CleanupSentinels):
-    """C9 / D3: a row with NULL typed-pair columns yields None from FromRow."""
-    LegacyForm = _SentinelLegacyForm(_Sentinel("null"))
+# directive: path-schema-migration | # see path.S8
+def test_null_typed_pair_returns_none_via_fromrow(Db, StorageRootId, CleanupSentinels):
+    """C9 / D3: a row with NULL typed-pair columns yields None from FromRow. Test row keyed by FileName since FilePath column is gone."""
+    Uniq = uuid.uuid4().hex[:8]
+    FileNameSentinel = f"__mvtest_path_roundtrip_null__{Uniq}.null"
     Db.ExecuteNonQuery(
-        "INSERT INTO MediaFiles (FilePath, StorageRootId, RelativePath) VALUES (%s, NULL, NULL)",
-        (LegacyForm,),
+        "INSERT INTO MediaFiles (FileName, StorageRootId, RelativePath) VALUES (%s, NULL, NULL)",
+        (FileNameSentinel,),
     )
     Rows = Db.ExecuteQuery(
-        "SELECT StorageRootId, RelativePath FROM MediaFiles WHERE FilePath = %s",
-        (LegacyForm,),
+        "SELECT StorageRootId, RelativePath FROM MediaFiles WHERE FileName = %s",
+        (FileNameSentinel,),
     )
     assert len(Rows) == 1
     assert Path.FromRow(Rows[0]) is None
+    Db.ExecuteNonQuery("DELETE FROM MediaFiles WHERE FileName = %s", (FileNameSentinel,))
 
 
-# directive: path-db-roundtrip-live | # see path.C10
+# directive: path-schema-migration | # see path.S8
 def test_utf8_round_trip(Db, StorageRootId, CleanupSentinels):
     """C10: a UTF-8 RelativePath with multi-byte chars survives DB round-trip byte-equal."""
     Uniq = uuid.uuid4().hex[:8]
     Rel = f"{SENTINEL_PREFIX}/Cosmos Çafé - Épisode {Uniq} Â.mkv"
     Sentinel = Path(StorageRootId, Rel)
     Db.ExecuteNonQuery(
-        "INSERT INTO MediaFiles (FilePath, StorageRootId, RelativePath) VALUES (%s, %s, %s)",
-        (_SentinelLegacyForm(Rel), Sentinel.StorageRootId, Sentinel.RelativePath),
+        "INSERT INTO MediaFiles (StorageRootId, RelativePath) VALUES (%s, %s)",
+        (Sentinel.StorageRootId, Sentinel.RelativePath),
     )
     Rows = Db.ExecuteQuery(
         "SELECT StorageRootId, RelativePath FROM MediaFiles WHERE RelativePath = %s",

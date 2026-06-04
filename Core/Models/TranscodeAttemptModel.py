@@ -3,14 +3,14 @@ from datetime import datetime, timezone
 from typing import Optional
 
 
+# directive: path-schema-migration | # see path.S8
 @dataclass
 class TranscodeAttemptModel:
-    """Represents individual transcoding attempts using TranscodeAttempts table."""
-    
+    """Single transcode attempt; typed pair (StorageRootId, RelativePath) is the canonical identity."""
+
     Id: Optional[int] = None
     StorageRootId: Optional[int] = None
     RelativePath: str = ""
-    FilePath: str = ""  # Legacy column; populated via Resolve at construction for worker I/O. Dropped in Phase F.
     AttemptDate: Optional[datetime] = None
     Quality: int = 0
     OldSizeBytes: int = 0
@@ -25,81 +25,83 @@ class TranscodeAttemptModel:
     VideoBitrateKbps: Optional[int] = None
     ProfileName: Optional[str] = None
     VMAF: Optional[float] = None
-    QualityTestRequired: int = 1  # Default to 1 (required)
-    QualityTestCompleted: int = 0  # Default to 0 (not completed)
+    QualityTestRequired: int = 1
+    QualityTestCompleted: int = 0
     FileReplaced: bool = False
     FileReplacedDate: Optional[datetime] = None
     ReplacementType: Optional[str] = None
-    CompletedDate: Optional[datetime] = None  # Timestamp when the transcode job finished (success or failure)
-    StartTime: Optional[str] = None  # Start time offset in HH:MM:SS format or seconds
-    PreferredAttempt: bool = False  # Whether this attempt is preferred and should prevent further retranscoding
-    WorkerName: Optional[str] = None  # Name of the worker that executed this transcode
+    CompletedDate: Optional[datetime] = None
+    StartTime: Optional[str] = None
+    PreferredAttempt: bool = False
+    WorkerName: Optional[str] = None
 
+    # directive: path-schema-migration | # see path.S8
     def __post_init__(self):
         if self.AttemptDate is None:
             self.AttemptDate = datetime.now(timezone.utc)
-        if not self.FilePath and self.StorageRootId is not None and self.RelativePath:
-            try:
-                from Core.PathStorage import CanonicalFor
-                self.FilePath = CanonicalFor(self.StorageRootId, self.RelativePath)
-            except Exception:
-                pass
-    
+
+    @property
+    # directive: path-schema-migration | # see path.S8
+    def PathObj(self):
+        """Path object for the typed pair; raises PathError on invalid state."""
+        from Core.Path.Path import Path
+        return Path(self.StorageRootId, self.RelativePath or "")
+
+    @property
+    # directive: path-schema-migration | # see path.S8
+    def FilePath(self) -> str:
+        """Canonical display string; computed from typed pair via PathStorageRoots singleton."""
+        if self.StorageRootId is None:
+            return ""
+        from Core.Path.Path import Path
+        from Core.Path.PathStorageRoots import GetPrefixMap
+        return Path(self.StorageRootId, self.RelativePath or "").CanonicalDisplay(GetPrefixMap())
+
     @property
     def OldSizeMB(self) -> float:
-        """Get original file size in MB."""
         return self.OldSizeBytes / (1024 * 1024) if self.OldSizeBytes > 0 else 0.0
-    
+
     @property
     def NewSizeMB(self) -> float:
-        """Get transcoded file size in MB."""
         return self.NewSizeBytes / (1024 * 1024) if self.NewSizeBytes > 0 else 0.0
-    
+
     @property
     def OldSizeGB(self) -> float:
-        """Get original file size in GB."""
         return self.OldSizeBytes / (1024 * 1024 * 1024) if self.OldSizeBytes > 0 else 0.0
-    
+
     @property
     def NewSizeGB(self) -> float:
-        """Get transcoded file size in GB."""
         return self.NewSizeBytes / (1024 * 1024 * 1024) if self.NewSizeBytes > 0 else 0.0
-    
+
     @property
     def CompressionRatio(self) -> float:
-        """Calculate compression ratio (original/new)."""
         if self.NewSizeBytes > 0 and self.OldSizeBytes > 0:
             return self.OldSizeBytes / self.NewSizeBytes
         return 0.0
-    
+
     @property
     def IsCompressed(self) -> bool:
-        """Check if file was compressed (smaller than original)."""
         return self.NewSizeBytes < self.OldSizeBytes
-    
+
     @property
     def TranscodeDurationMinutes(self) -> float:
-        """Get transcoding duration in minutes."""
         return self.TranscodeDurationSeconds / 60.0 if self.TranscodeDurationSeconds > 0 else 0.0
-    
+
     @property
     def VMAFQualityRating(self) -> str:
-        """Get VMAF quality rating as a descriptive string."""
         if self.VMAF is None:
             return "Not measured"
-        elif self.VMAF >= 90:
+        if self.VMAF >= 90:
             return "Excellent"
-        elif self.VMAF >= 80:
+        if self.VMAF >= 80:
             return "Good"
-        elif self.VMAF >= 70:
+        if self.VMAF >= 70:
             return "Fair"
-        elif self.VMAF >= 60:
+        if self.VMAF >= 60:
             return "Poor"
-        else:
-            return "Very Poor"
-    
+        return "Very Poor"
+
     def CalculateSizeReduction(self):
-        """Calculate size reduction metrics."""
         if self.OldSizeBytes > 0 and self.NewSizeBytes > 0:
             self.SizeReductionBytes = self.OldSizeBytes - self.NewSizeBytes
             self.SizeReductionPercent = (self.SizeReductionBytes / self.OldSizeBytes) * 100.0

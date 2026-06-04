@@ -29,16 +29,16 @@ from Tests.Pipeline.Harness.Invocation import _EnsureWorkerContext
 _EnsureWorkerContext('I9-2024')
 
 from Core.Database.DatabaseService import DatabaseService
-from Core.PathStorage import LoadStorageRoots, Parse as PathParse, Resolve as PathResolve
+from Core.Path.Path import Path as MvPath, PathError
+from Core.Path.PathStorageRoots import GetStorageRoots
+from Core.Path.Worker import Worker
 from Core.WorkerContext import WorkerContext
 
 
 SOURCE_VIDEO_EXTS = {'.mkv', '.mp4', '.avi', '.m4v', '.mov', '.wmv', '.ts', '.mpg', '.mpeg'}
 SIDECAR_SUFFIXES = ('.nfo', '.srt', '.idx', '.sub', '.ssa', '.ass', '.vtt')
 SIDECAR_TOKENS = ('-thumb.', '-poster.', '-fanart.', '-banner.', '-clearart.', '-landscape.')
-# Filenames matching these substrings (case-insensitive) are preserved
-# regardless of whether a MediaFile row references them. These are
-# pre-MediaVortex assets the operator keeps for separate reasons.
+# Pre-MediaVortex assets the operator keeps; filenames containing these substrings (case-insensitive) are preserved.
 KEEP_TOKENS = ('optimized',)
 
 # Strip one-or-more "-mv" repetitions just before ".mp4"
@@ -64,31 +64,30 @@ def Main():
 
     Db = DatabaseService()
     Ctx = WorkerContext.Current()
-    Roots = LoadStorageRoots(Db)
+    Roots = GetStorageRoots()
+    W = Worker(Name=Ctx.WorkerName, Platform=getattr(Ctx, 'Platform', 'windows'), Db=Db)
 
-    # Index every known MediaFile path (lowercased local path) so we can
-    # cheaply test "is this file referenced anywhere in the DB?"
+    # Index every known MediaFile (StorageRootId, RelativePath) lowercase tuple for "is this file referenced?" lookups.
     print('Loading MediaFile index ...')
     AllMf = Db.ExecuteQuery('SELECT StorageRootId, RelativePath, FilePath FROM MediaFiles')
     Referenced = set()
     for R in AllMf:
-        Local = None
-        if R.get('StorageRootId') and R.get('RelativePath') is not None:
-            Local = PathResolve(R['StorageRootId'], R['RelativePath'] or '', Ctx.WorkerName, Db)
-        if not Local and R.get('FilePath'):
+        Mp = None
+        if R.get('StorageRootId') is not None and R.get('RelativePath') is not None:
             try:
-                Sr, Rel = PathParse(R['FilePath'], Roots)
-                if Sr is not None:
-                    Local = PathResolve(Sr, Rel or '', Ctx.WorkerName, Db)
-            except Exception:
-                pass
-        if Local:
-            Referenced.add(os.path.normcase(Local))
+                Mp = MvPath(R['StorageRootId'], R['RelativePath'] or '')
+            except PathError:
+                Mp = None
+        if Mp is None and R.get('FilePath'):
+            try:
+                Mp = MvPath.FromLegacyString(R['FilePath'], Roots)
+            except PathError:
+                Mp = None
+        if Mp is not None:
+            Referenced.add((Mp.StorageRootId, Mp.RelativePath.lower()))
     print(f'  Indexed {len(Referenced)} MediaFile paths')
 
-    # Canonical -mv*.mp4 rows: each one tells us a directory + basename to check.
-    # Use parameter binding -- psycopg2 treats bare % in a SQL string as a
-    # format placeholder.
+    # Canonical -mv*.mp4 rows: each names a directory + basename to scan. Use param binding (psycopg2 reserves %).
     Canonicals = Db.ExecuteQuery(
         "SELECT Id, StorageRootId, RelativePath, FilePath FROM MediaFiles "
         "WHERE FilePath ILIKE %s",
@@ -96,24 +95,34 @@ def Main():
     )
     print(f'Found {len(Canonicals)} canonical -mv*.mp4 MediaFile rows')
 
-    # Group canonicals by directory so we list each dir once
-    ByDir = defaultdict(list)
+    # Group leaf names by parent canonical Path (key = (sid, parent rel)) so each dir is scanned once.
+    ByParent = defaultdict(list)
     for R in Canonicals:
-        Local = None
-        if R.get('StorageRootId') and R.get('RelativePath') is not None:
-            Local = PathResolve(R['StorageRootId'], R['RelativePath'] or '', Ctx.WorkerName, Db)
-        if not Local:
+        if R.get('StorageRootId') is None or R.get('RelativePath') is None:
             continue
-        ByDir[os.path.dirname(Local)].append(os.path.basename(Local))
+        try:
+            CanonPath = MvPath(R['StorageRootId'], R['RelativePath'] or '')
+            ParentPath = CanonPath.ParentDir()
+            LeafName = CanonPath.LastSegment()
+        except PathError:
+            continue
+        ByParent[(ParentPath.StorageRootId, ParentPath.RelativePath)].append((ParentPath, LeafName))
 
-    print(f'Scanning {len(ByDir)} directories ...')
+    print(f'Scanning {len(ByParent)} directories ...')
 
     Orphans = []  # (LocalPath, SizeBytes)
     DirsScanned = 0
-    for DirPath, Canons in ByDir.items():
+    for Key, Items in ByParent.items():
         DirsScanned += 1
         if DirsScanned % 200 == 0:
-            print(f'  ... {DirsScanned}/{len(ByDir)} dirs, {len(Orphans)} orphans so far')
+            print(f'  ... {DirsScanned}/{len(ByParent)} dirs, {len(Orphans)} orphans so far')
+        ParentPath = Items[0][0]
+        Canons = [Leaf for _Parent, Leaf in Items]
+        try:
+            DirLocal = ParentPath.Resolve(W)
+        except PathError as Ex:
+            print(f'  WARN: cannot resolve parent {ParentPath!r}: {Ex}')
+            continue
         # Compute the set of "basenames after -mv strip" we care about in this dir
         Bases = set()
         CanonLowerNames = set()
@@ -123,9 +132,9 @@ def Main():
                 Bases.add(Base.lower())
             CanonLowerNames.add(Cn.lower())
         try:
-            Entries = os.listdir(DirPath)
+            Entries = os.listdir(DirLocal)
         except Exception as Ex:
-            print(f'  WARN: cannot list {DirPath}: {Ex}')
+            print(f'  WARN: cannot list {DirLocal}: {Ex}')
             continue
         for Entry in Entries:
             EL = Entry.lower()
@@ -143,23 +152,24 @@ def Main():
                     break
             if not MatchedBase:
                 continue
-            # The remainder after the base must be either a source-ext or a -mv*.mp4 chain.
-            # Match remainder directly against SOURCE_VIDEO_EXTS (`os.path.splitext('.mkv')`
-            # returns `('.mkv', '')`, which would never match -- a leading-dot file is
-            # treated as having no extension).
+            # Remainder after base must match SOURCE_VIDEO_EXTS or a -mv*.mp4 chain.
             Remainder = EL[len(MatchedBase):]
             IsVideoSrc = (Remainder in SOURCE_VIDEO_EXTS)
             IsMvGen = bool(MV_GEN_RE.search(Remainder))
             if not (IsVideoSrc or IsMvGen):
                 continue
-            # Confirm it's not referenced anywhere in the DB
-            FullPath = os.path.join(DirPath, Entry)
-            if os.path.normcase(FullPath) in Referenced:
+            # Build canonical Path for the entry; check referenced set by typed-pair key, then resolve + stat.
+            try:
+                EntryPath = ParentPath.Join(Entry)
+            except PathError:
+                continue
+            if (EntryPath.StorageRootId, EntryPath.RelativePath.lower()) in Referenced:
                 continue
             try:
-                SizeBytes = os.path.getsize(FullPath)
-            except Exception:
-                SizeBytes = 0
+                FullPath = EntryPath.Resolve(W)
+                SizeBytes = EntryPath.GetSize(W)
+            except (PathError, OSError, FileNotFoundError):
+                continue
             Orphans.append((FullPath, SizeBytes))
             if Args.limit and len(Orphans) >= Args.limit:
                 break

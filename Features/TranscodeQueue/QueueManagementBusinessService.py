@@ -528,28 +528,28 @@ class QueueManagementBusinessService:
                     (ProfileName, NormalizedIds, ProfileName)
                 )
 
-            InsertSql = r"""
-                INSERT INTO TranscodeQueue
-                    (StorageRootId, RelativePath, FilePath, FileName, Directory,
-                     SizeBytes, SizeMB, Priority, Status, DateAdded,
-                     ProcessingMode, MediaFileId)
-                SELECT m.StorageRootId,
-                       COALESCE(m.RelativePath, ''),
-                       m.FilePath,
-                       m.FileName,
-                       regexp_replace(replace(m.FilePath, E'\\', '/'), '/[^/]+$', ''),
-                       (m.SizeMB * 1024 * 1024)::bigint,
-                       m.SizeMB,
-                       COALESCE(m.PriorityScore, """ + self._SIZE_PRIORITY_SQL + r"""),
-                       'Pending',
-                       NOW() AT TIME ZONE 'UTC',
-                       %s,
-                       m.Id
-                FROM MediaFiles m
-                WHERE m.Id = ANY(%s)
-                  AND m.SizeMB > 0
-                  AND NOT EXISTS (SELECT 1 FROM TranscodeQueue tq WHERE tq.FilePath = m.FilePath)
-            """
+            InsertSql = (
+                "INSERT INTO TranscodeQueue "
+                "(StorageRootId, RelativePath, FilePath, FileName, Directory, "
+                "SizeBytes, SizeMB, Priority, Status, DateAdded, "
+                "ProcessingMode, MediaFileId) "
+                "SELECT m.StorageRootId, "
+                "COALESCE(m.RelativePath, ''), "
+                "m.FilePath, "
+                "m.FileName, "
+                "regexp_replace(replace(m.FilePath, E'\\\\', '/'), '/[^/]+$', ''), "
+                "(m.SizeMB * 1024 * 1024)::bigint, "
+                "m.SizeMB, "
+                "COALESCE(m.PriorityScore, " + self._SIZE_PRIORITY_SQL + "), "
+                "'Pending', "
+                "NOW() AT TIME ZONE 'UTC', "
+                "%s, "
+                "m.Id "
+                "FROM MediaFiles m "
+                "WHERE m.Id = ANY(%s) "
+                "AND m.SizeMB > 0 "
+                "AND NOT EXISTS (SELECT 1 FROM TranscodeQueue tq WHERE tq.StorageRootId = m.StorageRootId AND tq.RelativePath = m.RelativePath)"
+            )
 
             Connection = Db.GetConnection()
             try:
@@ -589,13 +589,13 @@ class QueueManagementBusinessService:
             from Core.Database.DatabaseService import DatabaseService, EscapeLikePattern
 
             Params: list = [Mode, Mode]  # ProcessingMode in SELECT, RecommendedMode in WHERE
-            WhereSql = """
-                WHERE m.TranscodedByMediaVortex IS NOT TRUE
-                  AND m.SizeMB > 0
-                  AND (m.HasExplicitEnglishAudio IS NULL OR m.HasExplicitEnglishAudio = true)
-                  AND m.RecommendedMode = %s
-                  AND NOT EXISTS (SELECT 1 FROM TranscodeQueue tq WHERE tq.FilePath = m.FilePath)
-            """
+            WhereSql = (
+                " WHERE m.TranscodedByMediaVortex IS NOT TRUE "
+                "AND m.SizeMB > 0 "
+                "AND (m.HasExplicitEnglishAudio IS NULL OR m.HasExplicitEnglishAudio = true) "
+                "AND m.RecommendedMode = %s "
+                "AND NOT EXISTS (SELECT 1 FROM TranscodeQueue tq WHERE tq.StorageRootId = m.StorageRootId AND tq.RelativePath = m.RelativePath)"
+            )
 
             if Drive:
                 DrivePrefix = Drive.rstrip(':\\/') + ':'
@@ -611,25 +611,25 @@ class QueueManagementBusinessService:
                 Params.append(Term)
                 Params.append(Term)
 
-            InsertSql = r"""
-                INSERT INTO TranscodeQueue
-                    (StorageRootId, RelativePath, FilePath, FileName, Directory,
-                     SizeBytes, SizeMB, Priority, Status, DateAdded,
-                     ProcessingMode, MediaFileId)
-                SELECT m.StorageRootId,
-                       COALESCE(m.RelativePath, ''),
-                       m.FilePath,
-                       m.FileName,
-                       regexp_replace(replace(m.FilePath, E'\\', '/'), '/[^/]+$', ''),
-                       (m.SizeMB * 1024 * 1024)::bigint,
-                       m.SizeMB,
-                       COALESCE(m.PriorityScore, """ + self._SIZE_PRIORITY_SQL + r"""),
-                       'Pending',
-                       NOW() AT TIME ZONE 'UTC',
-                       %s,
-                       m.Id
-                FROM MediaFiles m
-            """ + WhereSql
+            InsertSql = (
+                "INSERT INTO TranscodeQueue "
+                "(StorageRootId, RelativePath, FilePath, FileName, Directory, "
+                "SizeBytes, SizeMB, Priority, Status, DateAdded, "
+                "ProcessingMode, MediaFileId) "
+                "SELECT m.StorageRootId, "
+                "COALESCE(m.RelativePath, ''), "
+                "m.FilePath, "
+                "m.FileName, "
+                "regexp_replace(replace(m.FilePath, E'\\\\', '/'), '/[^/]+$', ''), "
+                "(m.SizeMB * 1024 * 1024)::bigint, "
+                "m.SizeMB, "
+                "COALESCE(m.PriorityScore, " + self._SIZE_PRIORITY_SQL + "), "
+                "'Pending', "
+                "NOW() AT TIME ZONE 'UTC', "
+                "%s, "
+                "m.Id "
+                "FROM MediaFiles m"
+            ) + WhereSql
 
             Db = DatabaseService()
             Connection = Db.GetConnection()
@@ -691,7 +691,6 @@ class QueueManagementBusinessService:
                     SeasonId=Row.get('SeasonId'),
                     StorageRootId=Row.get('StorageRootId'),
                     RelativePath=Row.get('RelativePath') or '',
-                    FilePath=Row.get('FilePath', ''),
                     FileName=Row.get('FileName', ''),
                     SizeMB=Row.get('SizeMB') or 0.0,
                     VideoBitrateKbps=Row.get('VideoBitrateKbps'),
@@ -904,16 +903,21 @@ class QueueManagementBusinessService:
             LoggingService.LogException("Exception getting media files by folder with resolution filter using assigned profiles", e, "QueueManagementBusinessService", "GetMediaFilesByFolderWithResolutionFilterUsingAssignedProfiles")
             return []
 
+    # directive: path-schema-migration | # see path.S8
     def CreateQueueItemFromMediaFileSimple(self, MediaFile: MediaFileModel) -> Optional[TranscodeQueueModel]:
-        """Create a queue item directly from a media file without threshold matching."""
+        """Create a queue item directly from a media file without threshold matching; typed pair is canonical identity."""
         try:
             LoggingService.LogFunctionEntry("CreateQueueItemFromMediaFileSimple", "QueueManagementBusinessService", MediaFile.FileName)
 
-            # Create queue item with basic information
+            # Compute Directory from the source MediaFile's typed pair (R6: no os.path on path-named var)
+            _DirCanonical = _ParentDir(MediaFile.FilePath) if MediaFile.FilePath else ''
+
+            # Create queue item from the typed pair; FilePath is a derived property
             queueItem = TranscodeQueueModel(
-                FilePath=MediaFile.FilePath,
+                StorageRootId=MediaFile.StorageRootId,
+                RelativePath=MediaFile.RelativePath or '',
                 FileName=MediaFile.FileName,
-                Directory=os.path.dirname(MediaFile.FilePath) if MediaFile.FilePath else '',
+                Directory=_DirCanonical,
                 SizeBytes=int((MediaFile.SizeMB or 0) * 1024 * 1024),
                 SizeMB=MediaFile.SizeMB or 0,
                 Priority=self.CalculatePriority(MediaFile),
@@ -928,8 +932,9 @@ class QueueManagementBusinessService:
             LoggingService.LogException("Exception creating simple queue item", e, "QueueManagementBusinessService", "CreateQueueItemFromMediaFileSimple")
             return None
 
+    # directive: path-schema-migration | # see path.S8
     def CreateQueueItemFromMediaFileWithProfile(self, MediaFile: MediaFileModel) -> Optional[TranscodeQueueModel]:
-        """Create a queue item from a media file that already has an assigned profile."""
+        """Create a queue item from a media file that already has an assigned profile; typed pair is canonical identity."""
         try:
             LoggingService.LogFunctionEntry("CreateQueueItemFromMediaFileWithProfile", "QueueManagementBusinessService", MediaFile.FileName, MediaFile.AssignedProfile)
 
@@ -967,7 +972,8 @@ class QueueManagementBusinessService:
                 fileName = _LastSegment(filePath) or fileName
 
             queueItem = TranscodeQueueModel(
-                FilePath=filePath,
+                StorageRootId=MediaFile.StorageRootId,
+                RelativePath=MediaFile.RelativePath or '',
                 FileName=fileName,
                 Directory=directory,
                 SizeBytes=int((MediaFile.SizeMB or 0) * 1024 * 1024),
@@ -1088,7 +1094,6 @@ class QueueManagementBusinessService:
                     Id=Row.get('Id'),
                     StorageRootId=Row.get('StorageRootId'),
                     RelativePath=Row.get('RelativePath') or '',
-                    FilePath=Row.get('FilePath', ''),
                     FileName=Row.get('FileName', ''),
                     SizeMB=Row.get('SizeMB') or 0.0,
                     DurationMinutes=Row.get('DurationMinutes'),
@@ -1105,8 +1110,9 @@ class QueueManagementBusinessService:
             LoggingService.LogException("Exception getting MKV files for remux", e, "QueueManagementBusinessService", "GetMkvFilesForRemux")
             return []
 
+    # directive: path-schema-migration | # see path.S8
     def CreateRemuxQueueItem(self, MediaFile: MediaFileModel) -> Optional[TranscodeQueueModel]:
-        """Create a queue item for remuxing (container change only)."""
+        """Create a queue item for remuxing (container change only); typed pair is canonical identity."""
         try:
             filePath = MediaFile.FilePath or ""
             directory = ""
@@ -1117,7 +1123,8 @@ class QueueManagementBusinessService:
                 fileName = _LastSegment(filePath) or fileName
 
             queueItem = TranscodeQueueModel(
-                FilePath=filePath,
+                StorageRootId=MediaFile.StorageRootId,
+                RelativePath=MediaFile.RelativePath or '',
                 FileName=fileName,
                 Directory=directory,
                 SizeBytes=int((MediaFile.SizeMB or 0) * 1024 * 1024),
@@ -1230,8 +1237,9 @@ class QueueManagementBusinessService:
             LoggingService.LogException("Exception evaluating threshold criteria", e, "QueueManagementBusinessService", "EvaluateThresholdCriteria")
             return False
 
+    # directive: path-schema-migration | # see path.S8
     def CreateQueueItemFromMediaFile(self, MediaFile: MediaFileModel, Threshold: ProfileThresholdModel) -> Optional[TranscodeQueueModel]:
-        """Create a queue item from a media file and threshold."""
+        """Create a queue item from a media file and threshold; typed pair is canonical identity."""
         try:
             LoggingService.LogFunctionEntry("CreateQueueItemFromMediaFile", "QueueManagementBusinessService", MediaFile.FileName, Threshold.ProfileId)
 
@@ -1253,7 +1261,8 @@ class QueueManagementBusinessService:
                 fileName = _LastSegment(filePath) or fileName
 
             queueItem = TranscodeQueueModel(
-                FilePath=filePath,
+                StorageRootId=MediaFile.StorageRootId,
+                RelativePath=MediaFile.RelativePath or '',
                 FileName=fileName,
                 Directory=directory,
                 SizeBytes=int((MediaFile.SizeMB or 0) * 1024 * 1024),
@@ -2151,8 +2160,9 @@ class QueueManagementBusinessService:
         """
         return self.RecomputeForFiles(MediaFileIds)
 
+    # directive: path-schema-migration | # see path.S8
     def AddJobToQueue(self, MediaFileId: int, Priority: int = None, ProfileId: int = None, StartTime: str = None, ForceAdd: bool = False) -> Dict[str, Any]:
-        """Add a specific media file to the transcoding queue. Simple logic: if it has a profile or user selects one, add it."""
+        """Add a specific media file to the transcoding queue; dedupe via typed-pair identity."""
         try:
             LoggingService.LogFunctionEntry("AddJobToQueue", "QueueManagementBusinessService", MediaFileId, Priority)
 
@@ -2163,9 +2173,9 @@ class QueueManagementBusinessService:
                 LoggingService.LogError(errorMsg, "QueueManagementBusinessService", "AddJobToQueue")
                 return {"Success": False, "ErrorMessage": errorMsg}
 
-            # Check if already in queue
+            # Check if already in queue by typed-pair identity
             existingQueueItems = self.Repository.GetAllTranscodeQueueItems()
-            if any(item.FilePath == mediaFile.FilePath for item in existingQueueItems):
+            if any(item.StorageRootId == mediaFile.StorageRootId and item.RelativePath == mediaFile.RelativePath for item in existingQueueItems):
                 errorMsg = f"File {mediaFile.FileName} is already in the transcoding queue"
                 LoggingService.LogWarning(errorMsg, "QueueManagementBusinessService", "AddJobToQueue")
                 return {"Success": False, "ErrorMessage": errorMsg}
@@ -2544,9 +2554,9 @@ class QueueManagementBusinessService:
             LoggingService.LogException("Exception getting MKV file count", e, "QueueManagementBusinessService", "GetMkvFileCount")
             return 0
 
+    # directive: path-schema-migration | # see path.S8
     def PopulateQueueForSubtitleFix(self, FileIds: list = None) -> Dict[str, Any]:
-        """Queue specific files (by MediaFile ID) or all eligible files for subtitle fix processing.
-        Eligible = has ASS/SSA subtitle formats and is not already in queue."""
+        """Queue specific or all eligible files for subtitle fix processing; typed pair is canonical identity."""
         try:
             LoggingService.LogFunctionEntry("PopulateQueueForSubtitleFix", "QueueManagementBusinessService", FileIds)
 
@@ -2564,22 +2574,24 @@ class QueueManagementBusinessService:
             if not mediaFiles:
                 return {"Success": False, "ErrorMessage": "No eligible files found for subtitle fix.", "ItemsAdded": 0}
 
-            # Get existing queue items to avoid duplicates
+            # Get existing queue items to avoid duplicates (by typed-pair identity)
             existingQueueItems = self.Repository.GetAllTranscodeQueueItems()
-            existingFilePaths = {item.FilePath for item in existingQueueItems}
+            existingPairs = {(item.StorageRootId, item.RelativePath or '') for item in existingQueueItems}
 
             itemsAdded = 0
             itemsSkipped = 0
 
             for mediaFile in mediaFiles:
-                if mediaFile.FilePath in existingFilePaths:
+                if (mediaFile.StorageRootId, mediaFile.RelativePath or '') in existingPairs:
                     itemsSkipped += 1
                     continue
 
+                _DirCanonical = _ParentDir(mediaFile.FilePath) if mediaFile.FilePath else ''
                 queueItem = TranscodeQueueModel(
-                    FilePath=mediaFile.FilePath,
+                    StorageRootId=mediaFile.StorageRootId,
+                    RelativePath=mediaFile.RelativePath or '',
                     FileName=mediaFile.FileName,
-                    Directory=os.path.dirname(mediaFile.FilePath) if mediaFile.FilePath else '',
+                    Directory=_DirCanonical,
                     SizeBytes=int((mediaFile.SizeMB or 0) * 1024 * 1024),
                     SizeMB=mediaFile.SizeMB or 0.0,
                     Priority=self.CalculatePriority(mediaFile),

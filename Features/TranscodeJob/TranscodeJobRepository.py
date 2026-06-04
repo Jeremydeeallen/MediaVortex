@@ -5,6 +5,9 @@ from Core.Logging.LoggingService import LoggingService
 from Core.Models.TranscodeAttemptModel import TranscodeAttemptModel
 from Core.Models.TranscodeFileModel import TranscodeFileModel
 from Features.TranscodeJob.Models.TranscodeProgressModel import TranscodeProgressModel
+# directive: path-schema-migration | # see path.S8
+from Core.Path.Path import Path, PathError
+from Core.Path.PathStorageRoots import GetStorageRoots
 
 
 class TranscodeJobRepository(BaseRepository):
@@ -12,11 +15,13 @@ class TranscodeJobRepository(BaseRepository):
 
     # region Helper Methods
 
+    # directive: path-schema-migration | # see path.S8
     def _MapRowToAttempt(self, row) -> TranscodeAttemptModel:
         """Map a database row to a TranscodeAttemptModel."""
         return TranscodeAttemptModel(
             Id=row['Id'],
-            FilePath=row['FilePath'],
+            StorageRootId=row.get('StorageRootId'),
+            RelativePath=row.get('RelativePath') or '',
             AttemptDate=row['AttemptDate'],
             Quality=row['Quality'],
             OldSizeBytes=row['OldSizeBytes'],
@@ -78,72 +83,67 @@ class TranscodeJobRepository(BaseRepository):
 
     # region TranscodeAttempts Methods
 
-    _ATTEMPT_SELECT_COLUMNS = """
-        Id, FilePath, AttemptDate, Quality, OldSizeBytes, NewSizeBytes, Success,
-        SizeReductionBytes, SizeReductionPercent, ErrorMessage, TranscodeDurationSeconds,
-        FfpmpegCommand, AudioBitrateKbps, VideoBitrateKbps, ProfileName, VMAF,
-        FileReplaced, FileReplacedDate, ReplacementType, StartTime, PreferredAttempt,
-        WorkerName
-    """
+    # directive: path-schema-migration | # see path.S8
+    _ATTEMPT_SELECT_COLUMNS = (
+        "Id, StorageRootId, RelativePath, AttemptDate, Quality, OldSizeBytes, NewSizeBytes, Success, "
+        "SizeReductionBytes, SizeReductionPercent, ErrorMessage, TranscodeDurationSeconds, "
+        "FfpmpegCommand, AudioBitrateKbps, VideoBitrateKbps, ProfileName, VMAF, "
+        "FileReplaced, FileReplacedDate, ReplacementType, StartTime, PreferredAttempt, "
+        "WorkerName"
+    )
 
+    # directive: path-schema-migration | # see path.S8
     def GetAllTranscodeAttempts(self) -> List[TranscodeAttemptModel]:
         """Get all transcoding attempts."""
-        query = f"""
-            SELECT {self._ATTEMPT_SELECT_COLUMNS}
-            FROM TranscodeAttempts
-            ORDER BY AttemptDate DESC
-        """
+        query = (
+            f"SELECT {self._ATTEMPT_SELECT_COLUMNS} "
+            "FROM TranscodeAttempts "
+            "ORDER BY AttemptDate DESC"
+        )
         rows = self.DatabaseService.ExecuteQuery(query)
         return [self._MapRowToAttempt(row) for row in rows]
 
+    # directive: path-schema-migration | # see path.S8
     def GetTranscodeAttemptById(self, AttemptId: int) -> Optional[TranscodeAttemptModel]:
         """Get a specific transcoding attempt by ID."""
-        query = f"""
-            SELECT {self._ATTEMPT_SELECT_COLUMNS}
-            FROM TranscodeAttempts
-            WHERE Id = %s
-        """
+        query = (
+            f"SELECT {self._ATTEMPT_SELECT_COLUMNS} "
+            "FROM TranscodeAttempts "
+            "WHERE Id = %s"
+        )
         rows = self.DatabaseService.ExecuteQuery(query, (AttemptId,))
         if rows:
             return self._MapRowToAttempt(rows[0])
         return None
 
+    # directive: path-schema-migration | # see path.S8
     def GetTranscodeAttemptsByMediaFileId(self, MediaFileId: int) -> List[TranscodeAttemptModel]:
         """Get all transcoding attempts for a specific media file by ID."""
-        query = f"""
-            SELECT {self._ATTEMPT_SELECT_COLUMNS}
-            FROM TranscodeAttempts
-            WHERE MediaFileId = %s
-            ORDER BY PreferredAttempt DESC, AttemptDate DESC
-        """
+        query = (
+            f"SELECT {self._ATTEMPT_SELECT_COLUMNS} "
+            "FROM TranscodeAttempts "
+            "WHERE MediaFileId = %s "
+            "ORDER BY PreferredAttempt DESC, AttemptDate DESC"
+        )
         rows = self.DatabaseService.ExecuteQuery(query, (MediaFileId,))
         return [self._MapRowToAttempt(row) for row in rows]
 
+    # directive: path-schema-migration | # see path.S8
     def GetLatestTranscodeAttemptWithVMAF(self, MediaFileId: int) -> Optional[Dict[str, Any]]:
-        """
-        Get the most recent transcode attempt with VMAF score for a media file.
-        Prioritizes preferred attempts if they exist.
-
-        Args:
-            MediaFileId: ID of the media file to check
-
-        Returns:
-            Dict with Quality (CRF), VMAF, ProfileName, AttemptDate, Success, PreferredAttempt, or None if no attempts
-        """
+        """Get the most recent transcode attempt with VMAF score; prioritizes preferred attempts."""
         try:
             LoggingService.LogFunctionEntry("GetLatestTranscodeAttemptWithVMAF", "TranscodeJobRepository", MediaFileId)
 
-            # First check for preferred attempts
-            preferred_query = """
-                SELECT Quality, VMAF, ProfileName, AttemptDate, Success, PreferredAttempt
-                FROM TranscodeAttempts
-                WHERE MediaFileId = %s
-                  AND VMAF IS NOT NULL
-                  AND Success = TRUE
-                  AND PreferredAttempt = TRUE
-                ORDER BY AttemptDate DESC
-                LIMIT 1
-            """
+            preferred_query = (
+                "SELECT Quality, VMAF, ProfileName, AttemptDate, Success, PreferredAttempt "
+                "FROM TranscodeAttempts "
+                "WHERE MediaFileId = %s "
+                "  AND VMAF IS NOT NULL "
+                "  AND Success = TRUE "
+                "  AND PreferredAttempt = TRUE "
+                "ORDER BY AttemptDate DESC "
+                "LIMIT 1"
+            )
 
             rows = self.DatabaseService.ExecuteQuery(preferred_query, (MediaFileId,))
 
@@ -153,16 +153,15 @@ class TranscodeJobRepository(BaseRepository):
                                      "TranscodeJobRepository", "GetLatestTranscodeAttemptWithVMAF")
                 return result
 
-            # If no preferred attempt, get the most recent one
-            query = """
-                SELECT Quality, VMAF, ProfileName, AttemptDate, Success, PreferredAttempt
-                FROM TranscodeAttempts
-                WHERE MediaFileId = %s
-                  AND VMAF IS NOT NULL
-                  AND Success = TRUE
-                ORDER BY AttemptDate DESC
-                LIMIT 1
-            """
+            query = (
+                "SELECT Quality, VMAF, ProfileName, AttemptDate, Success, PreferredAttempt "
+                "FROM TranscodeAttempts "
+                "WHERE MediaFileId = %s "
+                "  AND VMAF IS NOT NULL "
+                "  AND Success = TRUE "
+                "ORDER BY AttemptDate DESC "
+                "LIMIT 1"
+            )
 
             rows = self.DatabaseService.ExecuteQuery(query, (MediaFileId,))
 
@@ -180,30 +179,38 @@ class TranscodeJobRepository(BaseRepository):
             LoggingService.LogException("Exception getting latest transcode attempt with VMAF", e, "TranscodeJobRepository", "GetLatestTranscodeAttemptWithVMAF")
             return None
 
+    # directive: path-schema-migration | # see path.S8
     def SaveTranscodeAttempt(self, Attempt: TranscodeAttemptModel) -> int:
         """Save a transcoding attempt (insert or update) and return the attempt ID."""
         try:
-            LoggingService.LogFunctionEntry("SaveTranscodeAttempt", "TranscodeJobRepository", Attempt.Id, Attempt.FilePath, Attempt.Success)
+            if Attempt.StorageRootId is None or not Attempt.RelativePath:
+                raise PathError(f"SaveTranscodeAttempt: Attempt missing typed pair (StorageRootId={Attempt.StorageRootId}, RelativePath={Attempt.RelativePath!r})")
+            LoggingService.LogFunctionEntry("SaveTranscodeAttempt", "TranscodeJobRepository", Attempt.Id, Attempt.RelativePath, Attempt.Success)
 
             connection = self.DatabaseService.GetConnection()
             try:
                 cursor = connection.cursor()
 
                 if Attempt.Id is None:
-                    # Insert new attempt
                     LoggingService.LogInfo("Inserting new transcoding attempt...", "TranscodeJobRepository", "SaveTranscodeAttempt")
-                    MediaFileId = self.LookupMediaFileId(Attempt.FilePath)
-                    query = """
-                        INSERT INTO TranscodeAttempts
-                        (AttemptDate, Quality, OldSizeBytes, NewSizeBytes, Success,
-                         SizeReductionBytes, SizeReductionPercent, ErrorMessage, TranscodeDurationSeconds,
-                         FfpmpegCommand, AudioBitrateKbps, VideoBitrateKbps, ProfileName, VMAF,
-                         FileReplaced, FileReplacedDate, ReplacementType, StartTime, PreferredAttempt,
-                         WorkerName, MediaFileId)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                        RETURNING Id
-                    """
+                    MediaFileId = self.DatabaseService.ExecuteScalar(
+                        "SELECT Id FROM MediaFiles WHERE StorageRootId = %s AND RelativePath = %s LIMIT 1",
+                        (Attempt.StorageRootId, Attempt.RelativePath)
+                    )
+                    Sid = Attempt.StorageRootId
+                    Rel = Attempt.RelativePath
+                    query = (
+                        "INSERT INTO TranscodeAttempts "
+                        "(StorageRootId, RelativePath, AttemptDate, Quality, OldSizeBytes, NewSizeBytes, Success, "
+                        " SizeReductionBytes, SizeReductionPercent, ErrorMessage, TranscodeDurationSeconds, "
+                        " FfpmpegCommand, AudioBitrateKbps, VideoBitrateKbps, ProfileName, VMAF, "
+                        " FileReplaced, FileReplacedDate, ReplacementType, StartTime, PreferredAttempt, "
+                        " WorkerName, MediaFileId) "
+                        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
+                        "RETURNING Id"
+                    )
                     parameters = (
+                        Sid, Rel,
                         Attempt.AttemptDate, Attempt.Quality,
                         Attempt.OldSizeBytes, Attempt.NewSizeBytes, Attempt.Success,
                         Attempt.SizeReductionBytes, Attempt.SizeReductionPercent, Attempt.ErrorMessage,
@@ -221,17 +228,16 @@ class TranscodeJobRepository(BaseRepository):
                     LoggingService.LogInfo(f"Attempt inserted with ID: {attemptId}", "TranscodeJobRepository", "SaveTranscodeAttempt")
                     return attemptId
                 else:
-                    # Update existing attempt
                     LoggingService.LogInfo(f"Updating existing attempt with ID: {Attempt.Id}", "TranscodeJobRepository", "SaveTranscodeAttempt")
-                    query = """
-                        UPDATE TranscodeAttempts
-                        SET AttemptDate = %s, Quality = %s, OldSizeBytes = %s, NewSizeBytes = %s,
-                            Success = %s, SizeReductionBytes = %s, SizeReductionPercent = %s, ErrorMessage = %s,
-                            TranscodeDurationSeconds = %s, FfpmpegCommand = %s, AudioBitrateKbps = %s,
-                            VideoBitrateKbps = %s, ProfileName = %s, VMAF = %s,
-                            FileReplaced = %s, FileReplacedDate = %s, ReplacementType = %s, PreferredAttempt = %s
-                        WHERE Id = %s
-                    """
+                    query = (
+                        "UPDATE TranscodeAttempts "
+                        "SET AttemptDate = %s, Quality = %s, OldSizeBytes = %s, NewSizeBytes = %s, "
+                        "    Success = %s, SizeReductionBytes = %s, SizeReductionPercent = %s, ErrorMessage = %s, "
+                        "    TranscodeDurationSeconds = %s, FfpmpegCommand = %s, AudioBitrateKbps = %s, "
+                        "    VideoBitrateKbps = %s, ProfileName = %s, VMAF = %s, "
+                        "    FileReplaced = %s, FileReplacedDate = %s, ReplacementType = %s, PreferredAttempt = %s "
+                        "WHERE Id = %s"
+                    )
                     parameters = (
                         Attempt.AttemptDate, Attempt.Quality,
                         Attempt.OldSizeBytes, Attempt.NewSizeBytes, Attempt.Success,
@@ -253,34 +259,43 @@ class TranscodeJobRepository(BaseRepository):
             LoggingService.LogException("Exception in SaveTranscodeAttempt", e, "TranscodeJobRepository", "SaveTranscodeAttempt")
             raise
 
+    # directive: path-schema-migration | # see path.S8
     def UpdateTranscodeAttempt(self, AttemptId: int, Updates: Dict[str, Any]) -> bool:
         """Update specific fields of a transcoding attempt."""
         try:
             LoggingService.LogFunctionEntry("UpdateTranscodeAttempt", "TranscodeJobRepository", AttemptId, Updates)
 
-            # Define all valid fields from TranscodeAttemptModel (excluding Id which is the key)
             valid_fields = [
+                'StorageRootId', 'RelativePath',
                 'AttemptDate', 'Quality', 'OldSizeBytes', 'NewSizeBytes',
                 'Success', 'SizeReductionBytes', 'SizeReductionPercent', 'ErrorMessage',
                 'TranscodeDurationSeconds', 'FfpmpegCommand', 'AudioBitrateKbps',
                 'VideoBitrateKbps', 'ProfileName', 'VMAF', 'FileReplaced', 'FileReplacedDate',
-                'ReplacementType', 'StartTime', 'PreferredAttempt', 'WorkerName'
+                'ReplacementType', 'StartTime', 'PreferredAttempt', 'WorkerName',
+                'CompletedDate', 'QualityTestRequired', 'QualityTestCompleted',
+                'TestVariantSetId', 'TestVariantName'
             ]
 
-            # Build dynamic UPDATE query based on provided fields
             set_clauses = []
             parameters = []
 
             for field, value in Updates.items():
-                if field in valid_fields:
+                if field == 'FilePath':
+                    try:
+                        _P = Path.FromLegacyString(value, GetStorageRoots()) if value else None
+                    except PathError:
+                        _P = None
+                    set_clauses.append("StorageRootId = %s")
+                    parameters.append(_P.StorageRootId if _P else None)
+                    set_clauses.append("RelativePath = %s")
+                    parameters.append(_P.RelativePath if _P else '')
+                elif field in valid_fields:
                     set_clauses.append(f"{field} = %s")
                     parameters.append(value)
                 elif field == 'FFmpegOutput':
-                    # Map FFmpegOutput to FfpmpegCommand (correct column name) - legacy support
                     set_clauses.append("FfpmpegCommand = %s")
                     parameters.append(value)
                 elif field == 'FFmpegError':
-                    # Map FFmpegError to ErrorMessage (closest equivalent) - legacy support
                     set_clauses.append("ErrorMessage = %s")
                     parameters.append(value)
                 else:
@@ -310,19 +325,9 @@ class TranscodeJobRepository(BaseRepository):
             LoggingService.LogException("Exception in UpdateTranscodeAttempt", e, "TranscodeJobRepository", "UpdateTranscodeAttempt")
             return False
 
+    # directive: path-schema-migration | # see path.S8
     def SetPreferredAttempt(self, AttemptId: int, MediaFileId: int, IsPreferred: bool = True) -> bool:
-        """
-        Set or unset a transcode attempt as preferred for a file.
-        When setting an attempt as preferred, all other attempts for the same file are unset.
-
-        Args:
-            AttemptId: ID of the attempt to set as preferred
-            MediaFileId: ID of the media file (to unset other attempts)
-            IsPreferred: True to set as preferred, False to unset
-
-        Returns:
-            True if successful, False otherwise
-        """
+        """Set/unset a transcode attempt as preferred; when setting, unsets all others for the same file."""
         try:
             LoggingService.LogFunctionEntry("SetPreferredAttempt", "TranscodeJobRepository", AttemptId, MediaFileId, IsPreferred)
 
@@ -331,33 +336,30 @@ class TranscodeJobRepository(BaseRepository):
                 cursor = connection.cursor()
 
                 if IsPreferred:
-                    # First, unset all other preferred attempts for this file
-                    unset_query = """
-                        UPDATE TranscodeAttempts
-                        SET PreferredAttempt = FALSE
-                        WHERE MediaFileId = %s
-                          AND Id != %s
-                    """
+                    unset_query = (
+                        "UPDATE TranscodeAttempts "
+                        "SET PreferredAttempt = FALSE "
+                        "WHERE MediaFileId = %s "
+                        "  AND Id != %s"
+                    )
                     cursor.execute(unset_query, (MediaFileId, AttemptId))
 
-                    # Then set this attempt as preferred
-                    set_query = """
-                        UPDATE TranscodeAttempts
-                        SET PreferredAttempt = TRUE
-                        WHERE Id = %s
-                    """
+                    set_query = (
+                        "UPDATE TranscodeAttempts "
+                        "SET PreferredAttempt = TRUE "
+                        "WHERE Id = %s"
+                    )
                     cursor.execute(set_query, (AttemptId,))
                     connection.commit()
 
                     LoggingService.LogInfo(f"Set attempt {AttemptId} as preferred for MediaFileId {MediaFileId}",
                                          "TranscodeJobRepository", "SetPreferredAttempt")
                 else:
-                    # Unset this attempt
-                    unset_query = """
-                        UPDATE TranscodeAttempts
-                        SET PreferredAttempt = FALSE
-                        WHERE Id = %s
-                    """
+                    unset_query = (
+                        "UPDATE TranscodeAttempts "
+                        "SET PreferredAttempt = FALSE "
+                        "WHERE Id = %s"
+                    )
                     cursor.execute(unset_query, (AttemptId,))
                     connection.commit()
 
@@ -377,29 +379,31 @@ class TranscodeJobRepository(BaseRepository):
 
     # region TranscodeFiles Methods
 
-    _TRANSCODE_FILE_SELECT_COLUMNS = """
-        Id, FilePath, AllQualitiesFailed, SuccessfullyTranscoded, FirstAttemptDate,
-        LastAttemptDate, SuccessDate, FinalQuality, FinalSizeBytes, TotalAttempts,
-        OriginalFilePath, FinalFilePath
-    """
+    _TRANSCODE_FILE_SELECT_COLUMNS = (
+        "Id, FilePath, AllQualitiesFailed, SuccessfullyTranscoded, FirstAttemptDate, "
+        "LastAttemptDate, SuccessDate, FinalQuality, FinalSizeBytes, TotalAttempts, "
+        "OriginalFilePath, FinalFilePath"
+    )
 
+    # directive: path-schema-migration | # see path.S8
     def GetAllTranscodeFiles(self) -> List[TranscodeFileModel]:
         """Get all transcoding file records."""
-        query = f"""
-            SELECT {self._TRANSCODE_FILE_SELECT_COLUMNS}
-            FROM TranscodeFiles
-            ORDER BY FirstAttemptDate DESC
-        """
+        query = (
+            f"SELECT {self._TRANSCODE_FILE_SELECT_COLUMNS} "
+            "FROM TranscodeFiles "
+            "ORDER BY FirstAttemptDate DESC"
+        )
         rows = self.DatabaseService.ExecuteQuery(query)
         return [self._MapRowToTranscodeFile(row) for row in rows]
 
+    # directive: path-schema-migration | # see path.S8
     def GetTranscodeFileByMediaFileId(self, MediaFileId: int) -> Optional[TranscodeFileModel]:
         """Get transcoding file record by media file ID."""
-        query = f"""
-            SELECT {self._TRANSCODE_FILE_SELECT_COLUMNS}
-            FROM TranscodeFiles
-            WHERE MediaFileId = %s
-        """
+        query = (
+            f"SELECT {self._TRANSCODE_FILE_SELECT_COLUMNS} "
+            "FROM TranscodeFiles "
+            "WHERE MediaFileId = %s"
+        )
         rows = self.DatabaseService.ExecuteQuery(query, (MediaFileId,))
         if not rows:
             return None

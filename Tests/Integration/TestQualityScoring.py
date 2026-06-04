@@ -42,13 +42,14 @@ class TestQualityScoring(unittest.TestCase):
         with open(self.TranscodedFilePath, 'w') as f:
             f.write("transcoded video content")
         
-        # Sample transcoding attempt
+        # directive: path-schema-migration | # see path.S8
         self.TranscodeAttempt = TranscodeAttemptModel(
             Id=1,
-            FilePath=self.OriginalFilePath,
+            StorageRootId=1,
+            RelativePath="Source/TestMovie - 1080p BluRay.mkv",
             Quality=22,
-            OldSizeBytes=1500000000,  # 1.5GB
-            NewSizeBytes=800000000,   # 800MB
+            OldSizeBytes=1500000000,
+            NewSizeBytes=800000000,
             Success=True,
             ProfileName="HighQuality"
         )

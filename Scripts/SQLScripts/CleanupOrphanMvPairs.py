@@ -86,56 +86,60 @@ def _InitWorkerContext(WorkerName: str) -> None:
 
 
 def _ResolveLocal(CanonicalPath: str) -> Optional[str]:
-    try:
-        from Core.PathStorage import LoadStorageRoots, Parse as PathParse, Resolve as PathResolve
-        from Core.WorkerContext import WorkerContext
-        Db = DatabaseService()
-        SrId, Rel = PathParse(CanonicalPath, LoadStorageRoots(Db))
-        Ctx = WorkerContext.Current()
-        if SrId is not None and Rel is not None and Ctx is not None:
-            return PathResolve(SrId, Rel, Ctx.WorkerName, Db)
-    except Exception:
+    from Core.Path.Path import Path, PathError
+    from Core.Path.PathStorageRoots import GetStorageRoots
+    from Core.Path.Worker import Worker
+    from Core.WorkerContext import WorkerContext
+    Ctx = WorkerContext.Current()
+    if Ctx is None:
         return None
-    return None
+    try:
+        P = Path.FromLegacyString(CanonicalPath, GetStorageRoots())
+        W = Worker(Name=Ctx.WorkerName, Platform=getattr(Ctx, 'Platform', 'windows'), Db=DatabaseService())
+        return P.Resolve(W)
+    except PathError:
+        return None
 
 
 def _FetchPairs(Db: DatabaseService, Limit: Optional[int]) -> list:
     """Pairs where A is the non-mp4 source and B is the -mv.mp4 variant."""
-    Limit_clause = f"LIMIT {int(Limit)}" if Limit else ""
-    Rows = Db.ExecuteQuery(
-        f"""
-        SELECT a.Id AS AId, a.FilePath AS APath,
-               b.Id AS BId, b.FilePath AS BPath
-        FROM MediaFiles a
-        JOIN MediaFiles b ON LOWER(b.FilePath) = LOWER(
-            SUBSTRING(a.FilePath FROM 1 FOR LENGTH(a.FilePath) - LENGTH(
-                SUBSTRING(a.FilePath FROM E'\\.[^.\\\\/]+$')
-            )) || '-mv.mp4'
-        )
-        WHERE a.Id != b.Id
-          AND a.FilePath NOT LIKE %s
-          AND a.FilePath NOT LIKE %s
-        ORDER BY a.Id
-        {Limit_clause}
-        """,
-        ('%-mv.mp4', '%-mv-mv.mp4'),
+    LimitClause = f"LIMIT {int(Limit)}" if Limit else ""
+    Sql = (
+        "SELECT a.Id AS AId, a.FilePath AS APath, "
+        "       b.Id AS BId, b.FilePath AS BPath "
+        "FROM MediaFiles a "
+        "JOIN MediaFiles b ON LOWER(b.FilePath) = LOWER( "
+        "    SUBSTRING(a.FilePath FROM 1 FOR LENGTH(a.FilePath) - LENGTH( "
+        "        SUBSTRING(a.FilePath FROM E'\\.[^.\\\\/]+$') "
+        "    )) || '-mv.mp4' "
+        ") "
+        "WHERE a.Id != b.Id "
+        "  AND a.FilePath NOT LIKE %s "
+        "  AND a.FilePath NOT LIKE %s "
+        "ORDER BY a.Id " + LimitClause
     )
+    Rows = Db.ExecuteQuery(Sql, ('%-mv.mp4', '%-mv-mv.mp4'))
     return [(int(R['AId']), R['APath'], int(R['BId']), R['BPath']) for R in Rows]
 
 
 def _AuditPair(Db: DatabaseService, AId: int, APath: str, BPath: str,
                ALocal: Optional[str], BLocal: Optional[str]) -> Tuple[str, str]:
     """Run the 4-criterion audit. Return (decision, reason)."""
-    # Gate 1: source has a non-mp4 extension (.mkv, .avi, etc.) -- if A
-    # is itself an .mp4, the pair is less clear (could be a transcode
-    # output that's already canonical), skip with KEEP_BOTH.
-    AExt = os.path.splitext(APath)[1].lower()
+    from Core.Path.Path import Path, PathError
+    from Core.Path.PathStorageRoots import GetStorageRoots
+    # Gate 1: source has a non-mp4 extension (Path.SplitExt handles mixed shapes; R6).
+    try:
+        APathObj = Path.FromLegacyString(APath, GetStorageRoots())
+        _, AExt = APathObj.SplitExt()
+        AExt = AExt.lower()
+    except PathError:
+        AExt = ''
     if AExt == '.mp4':
         return ('KEEP_BOTH', 'A is .mp4, not a clear source-vs-output pair')
 
     # Gate 2: -mv.mp4 file actually on disk, non-zero
     if not BLocal:
-        return ('KEEP_BOTH', 'B path does not resolve via PathStorage for this worker')
+        return ('KEEP_BOTH', 'B path does not resolve via Path for this worker')
     if not os.path.exists(BLocal):
         return ('KEEP_BOTH', f'B file not present on disk: {BLocal}')
     try:
@@ -155,9 +159,12 @@ def _AuditPair(Db: DatabaseService, AId: int, APath: str, BPath: str,
         return ('KEEP_BOTH',
                 'no TranscodeAttempts row with Success=true AND FileReplaced=true for A')
 
-    # Gate 4: at least one of those rows references the -mv.mp4 output
-    # filename in its FFmpeg command (proves the attempt produced THIS file)
-    BBasename = os.path.basename(BPath)
+    # Gate 4: at least one of those rows references the -mv.mp4 output filename in FfpmpegCommand.
+    try:
+        BPathObj = Path.FromLegacyString(BPath, GetStorageRoots())
+        BBasename = BPathObj.LastSegment()
+    except PathError:
+        BBasename = ''
     Matched = any(
         R.get('FfpmpegCommand') and BBasename in (R.get('FfpmpegCommand') or '')
         for R in AuditRows

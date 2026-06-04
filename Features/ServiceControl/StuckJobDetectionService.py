@@ -251,21 +251,20 @@ class StuckJobDetectionService:
                                      "StuckJobDetectionService", "_IsWorkerOffline")
             return False, f"Error checking heartbeat: {str(e)}"
 
+    # directive: path-schema-migration | # see path.S1
     def _IsJobFrozen(self, Job) -> tuple[bool, str]:
-        """Check if a job's FFmpeg process is alive but not making progress (frozen/hung).
-        Uses LastFrameAdvance (only updates when CurrentFrame changes) instead of LastProgressUpdate
-        to detect hung FFmpeg processes that keep emitting identical status lines."""
+        """Frozen-progress check using LastFrameAdvance on the in-flight TranscodeAttempt."""
         try:
-            # Get the latest TranscodeProgress record for this job's file
-            query = """
-                SELECT tp.LastFrameAdvance, tp.LastProgressUpdate, tp.ProgressPercent, tp.CurrentFPS
-                FROM TranscodeProgress tp
-                INNER JOIN TranscodeAttempts ta ON tp.TranscodeAttemptId = ta.Id
-                WHERE LOWER(ta.FilePath) = LOWER(%s) AND ta.Success IS NULL
-                ORDER BY tp.LastProgressUpdate DESC
-                LIMIT 1
-            """
-            rows = self.DatabaseManager.DatabaseService.ExecuteQuery(query, (Job.FilePath,))
+            # Join TranscodeProgress -> TranscodeAttempts on typed-pair (StorageRootId, RelativePath)
+            query = (
+                "SELECT tp.LastFrameAdvance, tp.LastProgressUpdate, tp.ProgressPercent, tp.CurrentFPS "
+                "FROM TranscodeProgress tp "
+                "INNER JOIN TranscodeAttempts ta ON tp.TranscodeAttemptId = ta.Id "
+                "WHERE ta.StorageRootId = %s AND ta.RelativePath = %s AND ta.Success IS NULL "
+                "ORDER BY tp.LastProgressUpdate DESC "
+                "LIMIT 1"
+            )
+            rows = self.DatabaseManager.DatabaseService.ExecuteQuery(query, (Job.StorageRootId, Job.RelativePath))
 
             if not rows:
                 # No progress records yet - job may still be starting up, not frozen

@@ -7,7 +7,12 @@ import sys
 import os
 from typing import Dict, Any, Optional, List
 from Services.LoggingService import LoggingService
-from Core.PathStorage import LocalExists
+
+
+# directive: path-schema-migration | # see path.S8
+def _LocalExists(Value) -> bool:
+    """Local filesystem existence check for a worker-resolved string value."""
+    return bool(Value) and os.path.exists(Value)
 
 class HardwareMonitorService:
     """Service for monitoring hardware using LibreHardwareMonitorLib.dll via pythonnet."""
@@ -33,7 +38,7 @@ class HardwareMonitorService:
             
             dll_found = False
             for dll_path in dll_paths:
-                if LocalExists(dll_path):
+                if _LocalExists(dll_path):
                     clr.AddReference(dll_path)
                     dll_found = True
                     LoggingService.LogInfo(f"Loaded LibreHardwareMonitorLib.dll from: {dll_path}", "HardwareMonitorService", "_Initialize")

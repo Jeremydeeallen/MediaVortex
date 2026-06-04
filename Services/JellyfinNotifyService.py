@@ -60,21 +60,23 @@ def _ReadSetting(SettingKey: str) -> str:
         return ''
 
 
+# directive: path-schema-migration | # see path.S8
 def TranslateForJellyfin(CanonicalPath: str, Db=None) -> Optional[str]:
-    """Translate a canonical (Windows-shaped) DB path to the path Jellyfin
-    sees on its own host. Returns None when the path does not match any
-    StorageRoot or no `__jellyfin__` resolution exists for that root
-    (caller should log + skip, never raise)."""
+    """Translate a canonical (Windows-shaped) DB path to the Jellyfin-host path via the synthetic `__jellyfin__` Worker. Returns None on no match / no resolution (caller logs + skips, never raises)."""
     if not CanonicalPath:
         return None
     try:
-        from Core.PathStorage import LoadStorageRoots, Parse as PathParse, Resolve as PathResolve, PathStorageError
-        SrId, Rel = PathParse(CanonicalPath, LoadStorageRoots(Db))
-        if SrId is None:
-            return None
+        from Core.Path.Path import Path, PathError
+        from Core.Path.Worker import Worker
+        from Core.Path.PathStorageRoots import GetStorageRoots
         try:
-            return PathResolve(SrId, Rel or '', _JELLYFIN_WORKER_NAME, Db)
-        except PathStorageError:
+            Parsed = Path.FromLegacyString(CanonicalPath, GetStorageRoots())
+        except PathError:
+            return None
+        JellyfinWorker = Worker(Name=_JELLYFIN_WORKER_NAME, Platform="linux", Db=Db)
+        try:
+            return Parsed.Resolve(JellyfinWorker)
+        except PathError:
             return None
     except Exception as Ex:
         LoggingService.LogException(

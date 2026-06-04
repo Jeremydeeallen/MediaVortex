@@ -3,75 +3,72 @@ from datetime import datetime, timezone
 from typing import Optional
 
 
+# directive: path-schema-migration | # see path.S8
 @dataclass
 class TranscodeQueueModel:
-    """Represents a single transcoding job using TranscodeQueue table."""
+    """Single transcode-queue row; typed pair (StorageRootId, RelativePath) is the canonical identity."""
 
     Id: Optional[int] = None
     StorageRootId: Optional[int] = None
     RelativePath: str = ""
-    FilePath: str = ""  # Legacy column; populated via Resolve at construction. Dropped in Phase F.
     FileName: str = ""
     Directory: str = ""
     SizeBytes: int = 0
     SizeMB: float = 0.0
     Priority: int = 0
-    Status: str = "Pending"  # Pending, Running, Completed, Failed, Cancelled
-    AssignedProfile: str = ""  # Profile assigned for transcoding
-    ProcessingMode: str = "Transcode"  # "Transcode" or "Remux"
-    ClaimedBy: Optional[str] = None  # Worker hostname that claimed this job
-    MediaFileId: Optional[int] = None  # FK to MediaFiles.Id
+    Status: str = "Pending"
+    AssignedProfile: str = ""
+    ProcessingMode: str = "Transcode"
+    ClaimedBy: Optional[str] = None
+    MediaFileId: Optional[int] = None
     DateAdded: Optional[datetime] = None
     DateStarted: Optional[datetime] = None
-    TestVariantSetId: Optional[int] = None  # FK to TestVariantSets.Id; NULL = normal production transcode
+    TestVariantSetId: Optional[int] = None
 
-    # directive: transcodequeue-uses-path | # see path.S8
+    # directive: path-schema-migration | # see path.S8
     def __post_init__(self):
         if self.DateAdded is None:
             self.DateAdded = datetime.now(timezone.utc)
-        if not self.FilePath and self.StorageRootId is not None and self.RelativePath:
-            try:
-                import ntpath as _ntpath
-                from Core.Database.DatabaseService import DatabaseService as _Db
-                _Rows = _Db().ExecuteQuery("SELECT CanonicalPrefix FROM StorageRoots WHERE Id = %s", (self.StorageRootId,))
-                if _Rows:
-                    _Prefix = _Rows[0].get("CanonicalPrefix") or _Rows[0].get("canonicalprefix") or ""
-                    self.FilePath = _Prefix + (self.RelativePath or "").replace("/", "\\")
-                    if not self.FileName:
-                        self.FileName = _ntpath.basename(self.FilePath)
-                    if not self.Directory:
-                        self.Directory = _ntpath.dirname(self.FilePath)
-            except Exception:
-                pass
+
+    @property
+    # directive: path-schema-migration | # see path.S8
+    def PathObj(self):
+        """Path object for the typed pair; raises PathError on invalid state."""
+        from Core.Path.Path import Path
+        return Path(self.StorageRootId, self.RelativePath or "")
+
+    @property
+    # directive: path-schema-migration | # see path.S8
+    def FilePath(self) -> str:
+        """Canonical display string; computed from typed pair via PathStorageRoots singleton."""
+        if self.StorageRootId is None:
+            return ""
+        from Core.Path.Path import Path
+        from Core.Path.PathStorageRoots import GetPrefixMap
+        return Path(self.StorageRootId, self.RelativePath or "").CanonicalDisplay(GetPrefixMap())
 
     @property
     def IsCompleted(self) -> bool:
-        """Check if job is completed successfully."""
         return self.Status == "Completed"
 
     @property
     def IsFailed(self) -> bool:
-        """Check if job has failed."""
         return self.Status == "Failed"
 
     @property
     def IsRunning(self) -> bool:
-        """Check if job is currently running."""
         return self.Status == "Running"
 
     @property
     def IsPending(self) -> bool:
-        """Check if job is pending execution."""
         return self.Status == "Pending"
 
     @property
     def IsCancelled(self) -> bool:
-        """Check if job is cancelled."""
         return self.Status == "Cancelled"
 
     @property
     def DurationMinutes(self) -> Optional[float]:
-        """Calculate job duration in minutes."""
         if self.DateStarted and self.IsCompleted:
             from Core.DateTimeHelpers import AsAwareUtc
             duration = datetime.now(timezone.utc) - AsAwareUtc(self.DateStarted)
@@ -80,26 +77,16 @@ class TranscodeQueueModel:
 
     @property
     def IsRemux(self) -> bool:
-        """Check if this is a remux-class job.
-
-        The post-2026-05-17 routing model collapses Remux + AudioFix into a
-        single 'Quick' mode (see media-tabs-and-loudness.feature.md C15-C17,
-        revised). Legacy 'Remux' and 'AudioFix' rows still dispatch through
-        the same code path for in-flight backward compatibility.
-        """
         return self.ProcessingMode in ("Quick", "Remux", "AudioFix")
 
     @property
     def IsSubtitleFix(self) -> bool:
-        """Check if this is a subtitle fix job (ASS/SSA -> SRT conversion)."""
         return self.ProcessingMode == "SubtitleFix"
 
     @property
     def IsTestMode(self) -> bool:
-        """Check if this row should run as a multi-variant test (does not replace source)."""
         return self.TestVariantSetId is not None
 
     @property
     def SizeGB(self) -> float:
-        """Get file size in GB."""
         return self.SizeMB / 1024.0 if self.SizeMB > 0 else 0.0

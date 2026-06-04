@@ -8,7 +8,57 @@ from flask import Blueprint, request, jsonify, Response, send_file
 from Features.ClipBuilder.ClipBuilderBusinessService import ClipBuilderBusinessService, _ResolveFFmpegPath
 from Repositories.DatabaseManager import DatabaseManager
 from Core.Logging.LoggingService import LoggingService
-from Core.PathStorage import LastSegment, ParentDir, SplitExt, LocalExists, LocalIsDir, LocalGetSize
+import ntpath
+# directive: path-schema-migration | # see path.S8
+from Core.Path.Path import Path, PathError
+from Core.Path.PathStorageRoots import GetPrefixMap
+
+
+# directive: path-schema-migration | # see path.S8
+def LastSegment(Value):
+    """ntpath.basename for canonical Windows-shape paths."""
+    return ntpath.basename(Value or "")
+
+
+# directive: path-schema-migration | # see path.S8
+def ParentDir(Value):
+    """ntpath.dirname for canonical Windows-shape paths."""
+    return ntpath.dirname(Value or "")
+
+
+# directive: path-schema-migration | # see path.S8
+def SplitExt(Value):
+    """ntpath.splitext for canonical Windows-shape paths."""
+    return ntpath.splitext(Value or "")
+
+
+# directive: path-schema-migration | # see path.S8
+def LocalExists(Value):
+    """Existence on a worker-local string."""
+    return bool(Value) and os.path.exists(Value)
+
+
+# directive: path-schema-migration | # see path.S8
+def LocalIsDir(Value):
+    """Dir-check on a worker-local string."""
+    return bool(Value) and os.path.isdir(Value)
+
+
+# directive: path-schema-migration | # see path.S8
+def LocalGetSize(Value):
+    """Size on a worker-local string."""
+    return os.path.getsize(Value)
+
+
+# directive: path-schema-migration | # see path.S8
+def SynthesizeFilePath(StorageRootId, RelativePath):
+    """Render canonical FilePath via Path.CanonicalDisplay."""
+    if StorageRootId is None:
+        return ""
+    try:
+        return Path(StorageRootId, RelativePath or "").CanonicalDisplay(GetPrefixMap())
+    except PathError:
+        return ""
 
 ClipBuilderBlueprint = Blueprint('ClipBuilder', __name__, url_prefix='/api/ClipBuilder')
 
@@ -71,14 +121,15 @@ def StreamVideo():
         FileId = request.args.get('FileId')
         FilePath = request.args.get('FilePath')
 
+        # directive: path-schema-migration | # see path.S8
         if FileId:
             Db = DatabaseManager()
             Rows = Db.DatabaseService.ExecuteQuery(
-                "SELECT FilePath FROM MediaFiles WHERE Id = %s", (int(FileId),)
+                "SELECT StorageRootId, RelativePath FROM MediaFiles WHERE Id = %s", (int(FileId),)
             )
             if not Rows:
                 return jsonify({"Success": False, "ErrorMessage": "File not found"}), 404
-            FilePath = Rows[0]['filepath']
+            FilePath = SynthesizeFilePath(Rows[0].get('storagerootid'), Rows[0].get('relativepath'))
         elif not FilePath:
             return jsonify({"Success": False, "ErrorMessage": "FileId or FilePath is required"}), 400
 
@@ -173,16 +224,16 @@ def Export():
             if not re.match(r'^(\d+:)?\d{1,2}:\d{2}(\.\d+)?$', str(St)) and not re.match(r'^\d+(\.\d+)?$', str(St)):
                 return jsonify({"Success": False, "ErrorMessage": f"Invalid start time format: {St}"}), 400
 
-        # Resolve file path — DB lookup or direct path
+        # directive: path-schema-migration | # see path.S8
         if FileId:
             Db = DatabaseManager()
             Rows = Db.DatabaseService.ExecuteQuery(
-                "SELECT FilePath, FileName FROM MediaFiles WHERE Id = %s", (int(FileId),)
+                "SELECT StorageRootId, RelativePath, FileName FROM MediaFiles WHERE Id = %s", (int(FileId),)
             )
             if not Rows:
                 return jsonify({"Success": False, "ErrorMessage": "File not found"}), 404
-            FilePath = Rows[0]['filepath']
-            FileName = Rows[0]['filename']
+            FilePath = SynthesizeFilePath(Rows[0].get('storagerootid'), Rows[0].get('relativepath'))
+            FileName = Rows[0].get('filename')
         else:
             FilePath = DirectPath
             FileName = LastSegment(DirectPath)
@@ -360,14 +411,15 @@ def Waveform():
         FileId = request.args.get('FileId')
         DirectPath = request.args.get('FilePath')
 
+        # directive: path-schema-migration | # see path.S8
         if FileId:
             Db = DatabaseManager()
             Rows = Db.DatabaseService.ExecuteQuery(
-                "SELECT FilePath FROM MediaFiles WHERE Id = %s", (int(FileId),)
+                "SELECT StorageRootId, RelativePath FROM MediaFiles WHERE Id = %s", (int(FileId),)
             )
             if not Rows:
                 return jsonify({"Success": False, "ErrorMessage": "File not found"}), 404
-            FilePath = Rows[0]['filepath']
+            FilePath = SynthesizeFilePath(Rows[0].get('storagerootid'), Rows[0].get('relativepath'))
         elif DirectPath:
             FilePath = DirectPath
         else:
@@ -412,14 +464,15 @@ def Thumbnail():
         DirectPath = request.args.get('FilePath')
         Time = request.args.get('Time', '0')
 
+        # directive: path-schema-migration | # see path.S8
         if FileId:
             Db = DatabaseManager()
             Rows = Db.DatabaseService.ExecuteQuery(
-                "SELECT FilePath FROM MediaFiles WHERE Id = %s", (int(FileId),)
+                "SELECT StorageRootId, RelativePath FROM MediaFiles WHERE Id = %s", (int(FileId),)
             )
             if not Rows:
                 return jsonify({"Success": False, "ErrorMessage": "File not found"}), 404
-            FilePath = Rows[0]['filepath']
+            FilePath = SynthesizeFilePath(Rows[0].get('storagerootid'), Rows[0].get('relativepath'))
         elif DirectPath:
             FilePath = DirectPath
         else:

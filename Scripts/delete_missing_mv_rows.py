@@ -25,7 +25,9 @@ from Tests.Pipeline.Harness.Invocation import _EnsureWorkerContext
 _EnsureWorkerContext('I9-2024')
 
 from Core.Database.DatabaseService import DatabaseService
-from Core.PathStorage import LoadStorageRoots, Parse as PathParse, Resolve as PathResolve
+from Core.Path.Path import Path, PathError
+from Core.Path.PathStorageRoots import GetStorageRoots
+from Core.Path.Worker import Worker
 from Core.WorkerContext import WorkerContext
 
 SHOWS = [
@@ -38,14 +40,19 @@ SHOWS = [
 
 Db = DatabaseService()
 ctx = WorkerContext.Current()
-roots = LoadStorageRoots(Db)
+roots = GetStorageRoots()
+W = Worker(Name=ctx.WorkerName, Platform=getattr(ctx, 'Platform', 'windows'), Db=Db)
 
 
 def resolve(canonical):
-    sr, rel = PathParse(canonical, roots)
-    if sr is None or rel is None:
+    try:
+        P = Path.FromLegacyString(canonical, roots)
+    except PathError:
         return None
-    return PathResolve(sr, rel, ctx.WorkerName, Db)
+    try:
+        return P.Resolve(W)
+    except PathError:
+        return None
 
 
 def cascade_delete(mediafile_id):

@@ -10,7 +10,12 @@ Mapped with /persistent:yes so they survive reboots.
 import os
 import sys
 import subprocess
-from Core.PathStorage import LocalExists
+
+
+# directive: path-schema-migration | # see transcode.ST1
+def LocalExists(Value):
+    """Existence on a worker-local string."""
+    return bool(Value) and os.path.exists(Value)
 
 RootDirectory = os.path.dirname(os.path.abspath(__file__))
 

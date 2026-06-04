@@ -6,7 +6,10 @@ from typing import Optional, Dict, Any, List
 from pathlib import Path
 from Services.LoggingService import LoggingService
 from Repositories.DatabaseManager import DatabaseManager
-from Core.PathStorage import LocalExists, Normalize
+
+
+# directive: path-schema-migration | # see path.S8
+def _LocalExists(Value): return bool(Value) and os.path.exists(Value)
 
 
 class FFmpegService:
@@ -53,12 +56,13 @@ class FFmpegService:
             
             FFmpegService._logged_initialization = True
     
+    # directive: path-schema-migration | # see path.S8
     def FindFFmpegPath(self) -> Optional[str]:
         """Find FFmpeg executable path."""
         try:
             # Use local project FFmpeg from FFmpegMaster\bin folder
             ProjectFFmpegPath = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'FFmpegMaster', 'bin', 'ffmpeg.exe')
-            if LocalExists(ProjectFFmpegPath):
+            if _LocalExists(ProjectFFmpegPath):
                 return ProjectFFmpegPath
             # Fallback: check system PATH (Linux containers, etc.)
             SystemPath = shutil.which('ffmpeg')
@@ -71,12 +75,13 @@ class FFmpegService:
             LoggingService.LogException("Error finding FFmpeg path", e, 'FindFFmpegPath', 'FFmpegService')
             return None
     
+    # directive: path-schema-migration | # see path.S8
     def FindFFprobePath(self) -> Optional[str]:
         """Find FFprobe executable path."""
         try:
             # Use local project FFprobe from FFmpegMaster\bin folder
             ProjectFFprobePath = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'FFmpegMaster', 'bin', 'ffprobe.exe')
-            if LocalExists(ProjectFFprobePath):
+            if _LocalExists(ProjectFFprobePath):
                 return ProjectFFprobePath
             # Fallback: check system PATH (Linux containers, etc.)
             SystemPath = shutil.which('ffprobe')
@@ -89,19 +94,20 @@ class FFmpegService:
             LoggingService.LogException("Error finding FFprobe path", e, 'FindFFprobePath', 'FFmpegService')
             return None
     
+    # directive: path-schema-migration | # see path.S8
     def GetFFmpegPathFromSettings(self) -> Optional[str]:
         """Get FFmpeg path from database settings."""
         try:
             DatabaseManagerInstance = DatabaseManager()
             SettingValue = DatabaseManagerInstance.GetSystemSetting('FFmpegPath')
-            
+
             if SettingValue:
                 # Convert relative path to absolute path
                 RelativePath = SettingValue
                 ProjectRoot = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
                 AbsolutePath = os.path.join(ProjectRoot, RelativePath)
-                
-                if LocalExists(AbsolutePath):
+
+                if _LocalExists(AbsolutePath):
                     return AbsolutePath
                 else:
                     LoggingService.LogError(f"FFmpeg path from settings not found: {AbsolutePath}", 'GetFFmpegPathFromSettings', 'FFmpegService')
@@ -114,19 +120,20 @@ class FFmpegService:
             LoggingService.LogException("Error getting FFmpeg path from settings", e, 'GetFFmpegPathFromSettings', 'FFmpegService')
             return self.FindFFmpegPath()
     
+    # directive: path-schema-migration | # see path.S8
     def GetFFprobePathFromSettings(self) -> Optional[str]:
         """Get FFprobe path from database settings."""
         try:
             DatabaseManagerInstance = DatabaseManager()
             SettingValue = DatabaseManagerInstance.GetSystemSetting('FFprobePath')
-            
+
             if SettingValue:
                 # Convert relative path to absolute path
                 RelativePath = SettingValue
                 ProjectRoot = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
                 AbsolutePath = os.path.join(ProjectRoot, RelativePath)
-                
-                if LocalExists(AbsolutePath):
+
+                if _LocalExists(AbsolutePath):
                     return AbsolutePath
                 else:
                     LoggingService.LogError(f"FFprobe path from settings not found: {AbsolutePath}", 'GetFFprobePathFromSettings', 'FFmpegService')
@@ -139,6 +146,7 @@ class FFmpegService:
             LoggingService.LogException("Error getting FFprobe path from settings", e, 'GetFFprobePathFromSettings', 'FFmpegService')
             return self.FindFFprobePath()
     
+    # directive: path-schema-migration | # see path.S8
     def ExecuteFFprobe(self, FilePath: str, Arguments: List[str] = None) -> Dict[str, Any]:
         """Execute FFprobe command and return results."""
         try:
@@ -149,13 +157,12 @@ class FFmpegService:
                     'Output': '',
                     'Error': ''
                 }
-            
+
             if Arguments is None:
                 Arguments = ['-v', 'error', '-print_format', 'json', '-show_format', '-show_streams']
-            
-            # Build argument list -- no shell=True, so $, %, _ etc. in paths
-            # are passed verbatim without shell interpretation.
-            NormalizedPath = Normalize(FilePath)
+
+            # No shell=True: $/%/_ in paths pass verbatim.
+            NormalizedPath = (FilePath or "").replace("/", "\\")
             CommandList = [self.FFprobePath] + Arguments + [NormalizedPath]
             # Keep a display string for logging / error messages
             CommandString = ' '.join(f'"{A}"' if ' ' in A or '$' in A else A for A in CommandList)

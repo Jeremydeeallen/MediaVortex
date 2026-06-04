@@ -4,14 +4,29 @@ from datetime import datetime, timezone
 from Core.Database.BaseRepository import BaseRepository
 from Core.Logging.LoggingService import LoggingService
 from Features.QualityTesting.Models.QualityTestResultModel import QualityTestResultModel
+# directive: path-schema-migration | # see path.S8
+from Core.Path.Path import Path, PathError
+from Core.Path.PathStorageRoots import GetStorageRoots, GetPrefixMap
 
 
-# directive: paths-canonical-completion | see qualitytesting.C1
+# directive: path-schema-migration | # see path.S8
+def _SynthesizeFilePath(StorageRootId, RelativePath) -> str:
+    """Render a canonical FilePath from typed pair via Path.CanonicalDisplay."""
+    if StorageRootId is None:
+        return ""
+    try:
+        return Path(StorageRootId, RelativePath or "").CanonicalDisplay(GetPrefixMap())
+    except PathError:
+        return ""
+
+
+# directive: path-schema-migration | # see path.S8
 class QualityTestRepository(BaseRepository):
     """Repository for quality test CRUD operations."""
 
     # ─── QualityTestingQueue Methods ───────────────────────────────────────
 
+    # directive: path-schema-migration | # see path.S8
     def GetQualityTestJob(self, JobId: int) -> Optional[Dict[str, Any]]:
         """Get a quality test job by ID."""
         try:
@@ -40,6 +55,7 @@ class QualityTestRepository(BaseRepository):
             LoggingService.LogException("Exception getting quality test job", e, "QualityTestRepository", "GetQualityTestJob")
             return None
 
+    # directive: path-schema-migration | # see path.S8
     def GetQualityTestQueue(self) -> List[Dict[str, Any]]:
         """Get all quality test jobs in queue ordered by date."""
         try:
@@ -56,8 +72,9 @@ class QualityTestRepository(BaseRepository):
             LoggingService.LogException("Exception getting quality test queue", e, "QualityTestRepository", "GetQualityTestQueue")
             return []
 
+    # directive: path-schema-migration | # see path.S8
     def CreateQualityTestQueueEntry(self, TranscodeAttemptId: int, OriginalFilePath: str, LocalSourcePath: str, TranscodedFilePath: str) -> Optional[int]:
-        """Create a new quality test queue entry."""
+        """Create a new quality test queue entry. QualityTestingQueue path columns are NOT in the drop list."""
         try:
             LoggingService.LogFunctionEntry("CreateQualityTestQueueEntry", "QualityTestRepository",
                                           TranscodeAttemptId, OriginalFilePath, LocalSourcePath, TranscodedFilePath)
@@ -95,6 +112,7 @@ class QualityTestRepository(BaseRepository):
             LoggingService.LogException("Exception creating quality test queue entry", e, "QualityTestRepository", "CreateQualityTestQueueEntry")
             return None
 
+    # directive: path-schema-migration | # see path.S8
     def DeleteQualityTestQueueItem(self, JobId: int) -> bool:
         """Delete a job from the quality testing queue."""
         try:
@@ -116,6 +134,7 @@ class QualityTestRepository(BaseRepository):
                                        "QualityTestRepository", "DeleteQualityTestQueueItem")
             return False
 
+    # directive: path-schema-migration | # see path.S8
     def RemoveFromQualityTestQueue(self, JobId: int) -> bool:
         """Remove completed job from QualityTestingQueue (revolving door)."""
         try:
@@ -134,6 +153,7 @@ class QualityTestRepository(BaseRepository):
 
     # ─── QualityTestResults Methods ────────────────────────────────────────
 
+    # directive: path-schema-migration | # see path.S8
     def CreateQualityTestResult(self, TranscodeAttemptId: int, Status: str = "Running", TestDate: datetime = None) -> int:
         """Create a quality test result record at the start of testing."""
         try:
@@ -203,6 +223,7 @@ class QualityTestRepository(BaseRepository):
                                        "QualityTestRepository", "CreateQualityTestResult")
             return 0
 
+    # directive: path-schema-migration | # see path.S8
     def UpdateQualityTestResultFailure(self, ResultId: int, ErrorMessage: str) -> bool:
         """Update a quality test result with failure details."""
         try:
@@ -224,6 +245,7 @@ class QualityTestRepository(BaseRepository):
                                        "QualityTestRepository", "UpdateQualityTestResultFailure")
             return False
 
+    # directive: path-schema-migration | # see path.S8
     def GetQualityTestResults(self, Limit: int = 10, Offset: int = 0) -> List[Dict[str, Any]]:
         """Get recent quality test results joined with TranscodeAttempts."""
         try:
@@ -232,12 +254,13 @@ class QualityTestRepository(BaseRepository):
                 "qtr.Id, qtr.TranscodeAttemptId, qtr.VMAFScore, "
                 "qtr.TestDuration, qtr.PassesThreshold, qtr.Rank, qtr.ErrorMessage, qtr.DateTested, "
                 "qtr.FFmpegCommand, qtr.Status, "
-                "ta.ProfileName, ta.FilePath, ta.OldSizeBytes, ta.NewSizeBytes, ta.SizeReductionBytes, "
+                "ta.ProfileName, ta.StorageRootId AS TaStorageRootId, ta.RelativePath AS TaRelativePath, "
+                "ta.OldSizeBytes, ta.NewSizeBytes, ta.SizeReductionBytes, "
                 "ta.SizeReductionPercent, ta.TranscodeDurationSeconds, ta.ProfileName as TranscodeProfileName, "
                 "ta.Quality, ta.AttemptDate, ta.NewSizeBytes as FileSize, "
                 "ta.FileReplaced, ta.FileReplacedDate, ta.ReplacementType, "
-                "tfp.LocalOutputPath as TranscodedFilePath, "
-                "tfp.LocalSourcePath "
+                "tfp.SourceStorageRootId, tfp.SourceRelativePath, "
+                "tfp.OutputStorageRootId, tfp.OutputRelativePath "
                 "FROM QualityTestResults qtr "
                 "LEFT JOIN TranscodeAttempts ta ON qtr.TranscodeAttemptId = ta.Id "
                 "LEFT JOIN TemporaryFilePaths tfp ON qtr.TranscodeAttemptId = tfp.TranscodeAttemptId "
@@ -248,8 +271,10 @@ class QualityTestRepository(BaseRepository):
 
             Results = []
             for Row in Rows:
-                TranscodedFilePath = Row["TranscodedFilePath"]
-                TranscodedFileName = ntpath.basename(TranscodedFilePath.replace("/", "\\")) if TranscodedFilePath else None
+                FilePath = _SynthesizeFilePath(Row.get("TaStorageRootId"), Row.get("TaRelativePath"))
+                TranscodedFilePath = _SynthesizeFilePath(Row.get("OutputStorageRootId"), Row.get("OutputRelativePath"))
+                LocalSourcePath = _SynthesizeFilePath(Row.get("SourceStorageRootId"), Row.get("SourceRelativePath"))
+                TranscodedFileName = ntpath.basename(TranscodedFilePath) if TranscodedFilePath else None
 
                 Results.append({
                     "Id": Row["Id"],
@@ -264,9 +289,10 @@ class QualityTestRepository(BaseRepository):
                     "DateTested": Row["DateTested"],
                     "FFmpegCommand": Row["FFmpegCommand"],
                     "Status": Row["Status"],
-                    "FilePath": Row["FilePath"],
+                    "FilePath": FilePath,
                     "TranscodedFilePath": TranscodedFilePath,
                     "TranscodedFileName": TranscodedFileName,
+                    "LocalSourcePath": LocalSourcePath,
                     "OldSizeBytes": Row["OldSizeBytes"],
                     "NewSizeBytes": Row["NewSizeBytes"],
                     "SizeReductionBytes": Row["SizeReductionBytes"],
@@ -286,6 +312,7 @@ class QualityTestRepository(BaseRepository):
             LoggingService.LogException("Exception getting quality test results", e, "QualityTestRepository", "GetQualityTestResults")
             return []
 
+    # directive: path-schema-migration | # see path.S8
     def GetQualityTestResultsCount(self) -> int:
         """Get total count of quality test results."""
         try:
@@ -302,6 +329,7 @@ class QualityTestRepository(BaseRepository):
 
     # ─── QualityTestProgress Methods ───────────────────────────────────────
 
+    # directive: path-schema-migration | # see path.S8
     def SaveQualityTestProgress(self, TranscodeAttemptId: int, ProgressData: Dict[str, Any]) -> bool:
         """Save quality test progress - updates existing record or creates new one."""
         try:
@@ -354,7 +382,7 @@ class QualityTestRepository(BaseRepository):
             LoggingService.LogException("Exception saving quality test progress", e, "QualityTestRepository", "SaveQualityTestProgress")
             return False
 
-    # directive: bug-0042-activity-vmaf-list-source
+    # directive: path-schema-migration | # see path.S8
     def GetRunningQualityTestProgress(self) -> list:
         """One row per QualityTestService claim in ActiveJobs; orphan claims carry NULL progress fields."""
         # see activity-dashboard-improvements.C19
@@ -369,7 +397,8 @@ class QualityTestRepository(BaseRepository):
                 "qtp.CurrentTime, qtp.ProcessingSpeed, qtp.ETA, qtp.StartTime, qtp.UpdatedAt, "
                 "qtp.CurrentFps, qtp.AverageFps, qtp.EtaSeconds, "
                 "qtq.OriginalFilePath, qtq.TranscodedFilePath, qtq.LocalSourcePath, "
-                "ta.FilePath AS TaFilePath, ta.OldSizeBytes, ta.NewSizeBytes "
+                "ta.StorageRootId AS TaStorageRootId, ta.RelativePath AS TaRelativePath, "
+                "ta.OldSizeBytes, ta.NewSizeBytes "
                 "FROM ActiveJobs aj "
                 "LEFT JOIN QualityTestingQueue qtq ON qtq.Id = aj.QueueId "
                 "LEFT JOIN QualityTestProgress qtp "
@@ -381,8 +410,9 @@ class QualityTestRepository(BaseRepository):
             Rows = self.ExecuteQuery(Query)
             Results = []
             for Row in Rows or []:
-                OriginalPath = Row.get("OriginalFilePath") or Row.get("TaFilePath")
-                FileName = ntpath.basename(OriginalPath.replace("/", "\\")) if OriginalPath else f"TranscodeAttempt_{Row['TranscodeAttemptId']}"
+                TaFilePath = _SynthesizeFilePath(Row.get("TaStorageRootId"), Row.get("TaRelativePath"))
+                OriginalPath = Row.get("OriginalFilePath") or TaFilePath
+                FileName = ntpath.basename(OriginalPath) if OriginalPath else f"TranscodeAttempt_{Row['TranscodeAttemptId']}"
                 Results.append({
                     "Id": Row.get("Id"),
                     "TranscodeAttemptId": Row["TranscodeAttemptId"],
@@ -419,6 +449,7 @@ class QualityTestRepository(BaseRepository):
 
     # ─── Cleanup / Deletion Methods ────────────────────────────────────────
 
+    # directive: path-schema-migration | # see path.S8
     def DeleteQualityTestRecordsByAttemptId(self, TranscodeAttemptId: int) -> bool:
         """Delete existing quality test records for a specific transcode attempt."""
         try:
@@ -448,6 +479,7 @@ class QualityTestRepository(BaseRepository):
 
     # ─── TranscodeAttempt Quality Test Methods ─────────────────────────────
 
+    # directive: path-schema-migration | # see path.S8
     def MarkQualityTestCompleted(self, TranscodeAttemptId: int) -> bool:
         """Mark quality test as completed in TranscodeAttempts."""
         try:
@@ -463,6 +495,7 @@ class QualityTestRepository(BaseRepository):
             LoggingService.LogException("Exception marking quality test completed", e, "QualityTestRepository", "MarkQualityTestCompleted")
             return False
 
+    # directive: path-schema-migration | # see path.S8
     def SkipQualityTest(self, TranscodeAttemptId: int) -> bool:
         """Skip quality test for a transcode attempt - marks QualityTestRequired = 0."""
         try:
@@ -480,20 +513,22 @@ class QualityTestRepository(BaseRepository):
 
     # ─── Missed / Recovery Methods ─────────────────────────────────────────
 
+    # directive: path-schema-migration | # see path.S8
     def GetMissedQualityTests(self, Limit: int = 100) -> List[Dict[str, Any]]:
         """Get successful transcode attempts that need quality testing but don't have successful quality test results."""
         try:
             LoggingService.LogFunctionEntry("GetMissedQualityTests", "QualityTestRepository", Limit)
 
             Query = (
-                "SELECT ta.Id, ta.FilePath, "
-                "tfp.LocalSourcePath, tfp.LocalOutputPath "
+                "SELECT ta.Id, ta.StorageRootId AS TaStorageRootId, ta.RelativePath AS TaRelativePath, "
+                "tfp.SourceStorageRootId, tfp.SourceRelativePath, "
+                "tfp.OutputStorageRootId, tfp.OutputRelativePath "
                 "FROM TranscodeAttempts ta "
                 "INNER JOIN TemporaryFilePaths tfp ON ta.Id = tfp.TranscodeAttemptId "
                 "WHERE ta.Success = TRUE "
                 "AND ta.QualityTestRequired = TRUE "
                 "AND ta.QualityTestCompleted = FALSE "
-                "AND tfp.LocalOutputPath IS NOT NULL "
+                "AND tfp.OutputRelativePath IS NOT NULL "
                 "AND ta.Id NOT IN ("
                 "SELECT TranscodeAttemptId "
                 "FROM QualityTestResults "
@@ -510,9 +545,13 @@ class QualityTestRepository(BaseRepository):
             for Row in Rows:
                 Results.append({
                     "Id": Row["Id"],
-                    "FilePath": Row["FilePath"],
-                    "LocalSourcePath": Row["LocalSourcePath"],
-                    "LocalOutputPath": Row["LocalOutputPath"]
+                    "FilePath": _SynthesizeFilePath(Row.get("TaStorageRootId"), Row.get("TaRelativePath")),
+                    "SourceStorageRootId": Row.get("SourceStorageRootId"),
+                    "SourceRelativePath": Row.get("SourceRelativePath"),
+                    "OutputStorageRootId": Row.get("OutputStorageRootId"),
+                    "OutputRelativePath": Row.get("OutputRelativePath"),
+                    "LocalSourcePath": _SynthesizeFilePath(Row.get("SourceStorageRootId"), Row.get("SourceRelativePath")),
+                    "LocalOutputPath": _SynthesizeFilePath(Row.get("OutputStorageRootId"), Row.get("OutputRelativePath"))
                 })
 
             LoggingService.LogInfo(f"Found {len(Results)} missed quality tests", "QualityTestRepository", "GetMissedQualityTests")
@@ -522,6 +561,7 @@ class QualityTestRepository(BaseRepository):
             LoggingService.LogException("Exception getting missed quality tests", e, "QualityTestRepository", "GetMissedQualityTests")
             return []
 
+    # directive: path-schema-migration | # see path.S8
     def ResetFailedQualityTestResultsForRetry(self) -> int:
         """Reset failed quality test results for interrupted tests so they can be retried."""
         try:
@@ -536,7 +576,7 @@ class QualityTestRepository(BaseRepository):
                 "WHERE ta.Success = TRUE "
                 "AND ta.QualityTestRequired = TRUE "
                 "AND ta.QualityTestCompleted = FALSE "
-                "AND tfp.LocalOutputPath IS NOT NULL "
+                "AND tfp.OutputRelativePath IS NOT NULL "
                 "AND ta.Id NOT IN ("
                 "SELECT TranscodeAttemptId "
                 "FROM QualityTestResults "
@@ -562,6 +602,7 @@ class QualityTestRepository(BaseRepository):
 
     # ─── Active Job Methods ────────────────────────────────────────────────
 
+    # directive: path-schema-migration | # see path.S8
     def GetActiveQualityTestJob(self) -> Optional[Dict[str, Any]]:
         """Get the currently running quality test job details."""
         try:
@@ -585,6 +626,7 @@ class QualityTestRepository(BaseRepository):
             LoggingService.LogException("Exception getting active quality test job", e, "QualityTestRepository", "GetActiveQualityTestJob")
             return None
 
+    # directive: path-schema-migration | # see path.S8
     def KillActiveQualityTestProcess(self, ActiveJobId: int) -> bool:
         """Terminate FFmpeg process by PID from ActiveJobs table."""
         try:
@@ -625,3 +667,235 @@ class QualityTestRepository(BaseRepository):
         except Exception as e:
             LoggingService.LogException("Exception killing active quality test process", e, "QualityTestRepository", "KillActiveQualityTestProcess")
             return False
+
+    # ─── TranscodeAttempts VMAF Method (DatabaseManager port) ──────────────
+
+    # directive: path-schema-migration | # see path.S8
+    def UpdateTranscodeAttemptVMAF(self, TranscodeAttemptId: int, VMAFScore: float) -> bool:
+        """Update TranscodeAttempts with VMAF score."""
+        try:
+            Query = (
+                "UPDATE TranscodeAttempts "
+                "SET VMAF = %s "
+                "WHERE Id = %s"
+            )
+            RowsAffected = self.ExecuteNonQuery(Query, (VMAFScore, TranscodeAttemptId))
+            return RowsAffected > 0
+
+        except Exception as e:
+            LoggingService.LogException("Exception updating TranscodeAttempt VMAF", e, "QualityTestRepository", "UpdateTranscodeAttemptVMAF")
+            return False
+
+    # ─── TemporaryFilePaths Methods (DatabaseManager port + Phase 8 typed-pair) ────
+
+    # directive: path-schema-migration | # see path.S8
+    def CreateTemporaryFilePath(self,
+                                TranscodeAttemptId: int,
+                                SourceStorageRootId: int,
+                                SourceRelativePath: str,
+                                OutputStorageRootId: Optional[int] = None,
+                                OutputRelativePath: Optional[str] = None) -> Optional[int]:
+        """Create a TemporaryFilePaths row using typed-pair source + optional typed-pair output (Phase 8 schema)."""
+        try:
+            LoggingService.LogFunctionEntry("CreateTemporaryFilePath", "QualityTestRepository",
+                                          TranscodeAttemptId, SourceStorageRootId, SourceRelativePath,
+                                          OutputStorageRootId, OutputRelativePath)
+
+            if not self.PrivateValidateTranscodeAttemptId(TranscodeAttemptId):
+                LoggingService.LogError(f"Invalid TranscodeAttemptId: {TranscodeAttemptId}", "QualityTestRepository", "CreateTemporaryFilePath")
+                return None
+
+            if OutputStorageRootId is not None and OutputRelativePath:
+                Query = (
+                    "INSERT INTO TemporaryFilePaths ("
+                    "TranscodeAttemptId, "
+                    "SourceStorageRootId, SourceRelativePath, "
+                    "OutputStorageRootId, OutputRelativePath, "
+                    "CreatedDate"
+                    ") VALUES (%s, %s, %s, %s, %s, NOW()) "
+                    "RETURNING Id"
+                )
+                Params = (TranscodeAttemptId,
+                          SourceStorageRootId, SourceRelativePath,
+                          OutputStorageRootId, OutputRelativePath)
+            else:
+                Query = (
+                    "INSERT INTO TemporaryFilePaths ("
+                    "TranscodeAttemptId, "
+                    "SourceStorageRootId, SourceRelativePath, "
+                    "CreatedDate"
+                    ") VALUES (%s, %s, %s, NOW()) "
+                    "RETURNING Id"
+                )
+                Params = (TranscodeAttemptId, SourceStorageRootId, SourceRelativePath)
+
+            RowsAffected = self.ExecuteNonQuery(Query, Params)
+
+            if RowsAffected > 0:
+                RecordId = self.GetLastInsertId()
+                LoggingService.LogInfo(f"Created TemporaryFilePaths row {RecordId} for TranscodeAttempt {TranscodeAttemptId}",
+                                     "QualityTestRepository", "CreateTemporaryFilePath")
+                self.PrivateLogTemporaryFilePathOperation("CREATE", TranscodeAttemptId, RecordId, "SUCCESS")
+                return RecordId
+            else:
+                LoggingService.LogError(f"Failed to create TemporaryFilePaths row for TranscodeAttempt {TranscodeAttemptId}",
+                                      "QualityTestRepository", "CreateTemporaryFilePath")
+                self.PrivateLogTemporaryFilePathOperation("CREATE", TranscodeAttemptId, None, "FAILED")
+                return None
+
+        except Exception as e:
+            LoggingService.LogException("Exception creating temporary file path record", e, "QualityTestRepository", "CreateTemporaryFilePath")
+            self.PrivateLogTemporaryFilePathOperation("CREATE", TranscodeAttemptId, None, "EXCEPTION", str(e))
+            return None
+
+    # directive: path-schema-migration | # see path.S8
+    def UpdateTemporaryFilePath(self,
+                                TranscodeAttemptId: int,
+                                OutputStorageRootId: int,
+                                OutputRelativePath: str) -> bool:
+        """Update TemporaryFilePaths row with typed-pair output columns (Phase 8 schema)."""
+        try:
+            LoggingService.LogFunctionEntry("UpdateTemporaryFilePath", "QualityTestRepository",
+                                          TranscodeAttemptId, OutputStorageRootId, OutputRelativePath)
+
+            if not self.PrivateValidateTranscodeAttemptId(TranscodeAttemptId):
+                LoggingService.LogError(f"Invalid TranscodeAttemptId: {TranscodeAttemptId}", "QualityTestRepository", "UpdateTemporaryFilePath")
+                return False
+
+            Query = (
+                "UPDATE TemporaryFilePaths "
+                "SET OutputStorageRootId = %s, OutputRelativePath = %s "
+                "WHERE TranscodeAttemptId = %s"
+            )
+            Params = (OutputStorageRootId, OutputRelativePath, TranscodeAttemptId)
+            RowsAffected = self.ExecuteNonQuery(Query, Params)
+
+            if RowsAffected > 0:
+                LoggingService.LogInfo(f"Updated TemporaryFilePaths row for TranscodeAttempt {TranscodeAttemptId} with output typed pair ({OutputStorageRootId}, {OutputRelativePath})",
+                                     "QualityTestRepository", "UpdateTemporaryFilePath")
+                self.PrivateLogTemporaryFilePathOperation("UPDATE", TranscodeAttemptId, None, "SUCCESS")
+                return True
+            else:
+                LoggingService.LogWarning(f"No TemporaryFilePaths row found for TranscodeAttempt {TranscodeAttemptId}",
+                                        "QualityTestRepository", "UpdateTemporaryFilePath")
+                self.PrivateLogTemporaryFilePathOperation("UPDATE", TranscodeAttemptId, None, "NOT_FOUND")
+                return False
+
+        except Exception as e:
+            LoggingService.LogException("Exception updating temporary file path record", e, "QualityTestRepository", "UpdateTemporaryFilePath")
+            self.PrivateLogTemporaryFilePathOperation("UPDATE", TranscodeAttemptId, None, "EXCEPTION", str(e))
+            return False
+
+    # directive: path-schema-migration | # see path.S8
+    def GetTemporaryFilePath(self, TranscodeAttemptId: int) -> Optional[Dict[str, Any]]:
+        """Get TemporaryFilePaths row by TranscodeAttemptId. Returns typed-pair columns plus synthesized canonical legacy keys (OriginalPath, LocalSourcePath, LocalOutputPath) for back-compat readers."""
+        try:
+            LoggingService.LogFunctionEntry("GetTemporaryFilePath", "QualityTestRepository", TranscodeAttemptId)
+
+            Query = (
+                "SELECT Id, TranscodeAttemptId, "
+                "SourceStorageRootId, SourceRelativePath, "
+                "OutputStorageRootId, OutputRelativePath, "
+                "CreatedDate "
+                "FROM TemporaryFilePaths "
+                "WHERE TranscodeAttemptId = %s"
+            )
+            Results = self.ExecuteQuery(Query, (TranscodeAttemptId,))
+
+            if Results:
+                Row = Results[0]
+                SrcId = Row.get("SourceStorageRootId") if "SourceStorageRootId" in Row else Row.get("sourcestoragerootid")
+                SrcRel = Row.get("SourceRelativePath") if "SourceRelativePath" in Row else Row.get("sourcerelativepath")
+                OutId = Row.get("OutputStorageRootId") if "OutputStorageRootId" in Row else Row.get("outputstoragerootid")
+                OutRel = Row.get("OutputRelativePath") if "OutputRelativePath" in Row else Row.get("outputrelativepath")
+
+                SynthesizedSource = _SynthesizeFilePath(SrcId, SrcRel)
+                SynthesizedOutput = _SynthesizeFilePath(OutId, OutRel)
+
+                Record = {
+                    "Id": Row.get("Id") if "Id" in Row else Row.get("id"),
+                    "TranscodeAttemptId": Row.get("TranscodeAttemptId") if "TranscodeAttemptId" in Row else Row.get("transcodeattemptid"),
+                    "SourceStorageRootId": SrcId,
+                    "SourceRelativePath": SrcRel,
+                    "OutputStorageRootId": OutId,
+                    "OutputRelativePath": OutRel,
+                    "CreatedDate": Row.get("CreatedDate") if "CreatedDate" in Row else Row.get("createddate"),
+                    "OriginalPath": SynthesizedSource,
+                    "LocalSourcePath": SynthesizedSource,
+                    "LocalOutputPath": SynthesizedOutput,
+                }
+                LoggingService.LogInfo(f"Retrieved temporary file path record for TranscodeAttempt {TranscodeAttemptId}",
+                                     "QualityTestRepository", "GetTemporaryFilePath")
+                self.PrivateLogTemporaryFilePathOperation("SELECT", TranscodeAttemptId, Record.get("Id"), "SUCCESS")
+                return Record
+            else:
+                LoggingService.LogWarning(f"No temporary file path record found for TranscodeAttempt {TranscodeAttemptId}",
+                                        "QualityTestRepository", "GetTemporaryFilePath")
+                self.PrivateLogTemporaryFilePathOperation("SELECT", TranscodeAttemptId, None, "NOT_FOUND")
+                return None
+
+        except Exception as e:
+            LoggingService.LogException("Exception getting temporary file path record", e, "QualityTestRepository", "GetTemporaryFilePath")
+            self.PrivateLogTemporaryFilePathOperation("SELECT", TranscodeAttemptId, None, "EXCEPTION", str(e))
+            return None
+
+    # directive: path-schema-migration | # see path.S8
+    def DeleteTemporaryFilePath(self, TranscodeAttemptId: int) -> bool:
+        """Delete TemporaryFilePaths row by TranscodeAttemptId."""
+        try:
+            LoggingService.LogFunctionEntry("DeleteTemporaryFilePath", "QualityTestRepository", TranscodeAttemptId)
+
+            Query = (
+                "DELETE FROM TemporaryFilePaths "
+                "WHERE TranscodeAttemptId = %s"
+            )
+            RowsAffected = self.ExecuteNonQuery(Query, (TranscodeAttemptId,))
+
+            if RowsAffected > 0:
+                LoggingService.LogInfo(f"Deleted temporary file path record for TranscodeAttempt {TranscodeAttemptId}",
+                                     "QualityTestRepository", "DeleteTemporaryFilePath")
+                self.PrivateLogTemporaryFilePathOperation("DELETE", TranscodeAttemptId, None, "SUCCESS")
+                return True
+            else:
+                LoggingService.LogWarning(f"No temporary file path record found to delete for TranscodeAttempt {TranscodeAttemptId}",
+                                        "QualityTestRepository", "DeleteTemporaryFilePath")
+                self.PrivateLogTemporaryFilePathOperation("DELETE", TranscodeAttemptId, None, "NOT_FOUND")
+                return False
+
+        except Exception as e:
+            LoggingService.LogException("Exception deleting temporary file path record", e, "QualityTestRepository", "DeleteTemporaryFilePath")
+            self.PrivateLogTemporaryFilePathOperation("DELETE", TranscodeAttemptId, None, "EXCEPTION", str(e))
+            return False
+
+    # directive: path-schema-migration | # see path.S8
+    def PrivateValidateTranscodeAttemptId(self, TranscodeAttemptId: int) -> bool:
+        """Verify TranscodeAttemptId exists in TranscodeAttempts."""
+        try:
+            Query = "SELECT COUNT(*) as Count FROM TranscodeAttempts WHERE Id = %s"
+            Results = self.ExecuteQuery(Query, (TranscodeAttemptId,))
+            if not Results:
+                return False
+            Row = Results[0]
+            Count = Row.get("Count") if "Count" in Row else Row.get("count")
+            return (Count or 0) > 0
+        except Exception as e:
+            LoggingService.LogException("Exception validating TranscodeAttemptId", e, "QualityTestRepository", "PrivateValidateTranscodeAttemptId")
+            return False
+
+    # directive: path-schema-migration | # see path.S8
+    def PrivateLogTemporaryFilePathOperation(self, Operation: str, TranscodeAttemptId: int, RecordId: Optional[int], Status: str, ErrorMessage: str = None):
+        """Log a TemporaryFilePaths CRUD operation for audit."""
+        try:
+            Message = f"TemporaryFilePath {Operation} - TranscodeAttemptId: {TranscodeAttemptId}"
+            if RecordId:
+                Message += f", RecordId: {RecordId}"
+            Message += f", Status: {Status}"
+            if ErrorMessage:
+                Message += f", Error: {ErrorMessage}"
+
+            if Status in ("FAILED", "EXCEPTION"):
+                LoggingService.LogError(Message, "QualityTestRepository", "PrivateLogTemporaryFilePathOperation")
+            else:
+                LoggingService.LogInfo(Message, "QualityTestRepository", "PrivateLogTemporaryFilePathOperation")
+        except Exception as e:
+            LoggingService.LogException("Exception logging temporary file path operation", e, "QualityTestRepository", "PrivateLogTemporaryFilePathOperation")

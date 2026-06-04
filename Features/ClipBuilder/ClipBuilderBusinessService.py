@@ -2,8 +2,13 @@ import os
 import subprocess
 import tempfile
 from Core.Logging.LoggingService import LoggingService
-from Core.PathStorage import LocalExists
 from Core.WorkerContext import WorkerContext
+
+
+# directive: path-schema-migration | # see path.S8
+def LocalExists(Value):
+    """Existence on a worker-local string."""
+    return bool(Value) and os.path.exists(Value)
 
 
 def _ResolveFFmpegPath():

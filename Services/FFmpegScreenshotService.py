@@ -1,7 +1,7 @@
 import os
+import ntpath
 from typing import List, Optional
 from pathlib import Path
-from Core.PathStorage import LastSegment, ParentDir
 from Models.FFmpegScreenshotModel import FFmpegScreenshotModel, FFmpegScreenshotBatchModel
 from Services.FFmpegService import FFmpegService
 from Services.LoggingService import LoggingService
@@ -13,29 +13,30 @@ class FFmpegScreenshotService:
     def __init__(self, FFmpegServiceInstance: FFmpegService = None):
         self.FFmpegService = FFmpegServiceInstance or FFmpegService()
     
-    def GenerateScreenshot(self, SourceFilePath: str, TimestampSeconds: float, 
+    # directive: path-schema-migration | # see path.S8
+    def GenerateScreenshot(self, SourceFilePath: str, TimestampSeconds: float,
                           OutputPath: str = None, Width: int = None, Height: int = None,
                           Format: str = "jpg") -> FFmpegScreenshotModel:
         """Generate a single screenshot from a video file."""
         try:
-            LoggingService.LogFunctionEntry("GenerateScreenshot", 'FFmpegScreenshotService', 
+            LoggingService.LogFunctionEntry("GenerateScreenshot", 'FFmpegScreenshotService',
                                           f"Source: {SourceFilePath}, Timestamp: {TimestampSeconds}")
-            
+
             # Create screenshot model
             ScreenshotModel = FFmpegScreenshotModel()
             ScreenshotModel.SourceFilePath = SourceFilePath
-            ScreenshotModel.SourceFileName = LastSegment(SourceFilePath)
+            ScreenshotModel.SourceFileName = ntpath.basename(SourceFilePath)
             ScreenshotModel.TimestampSeconds = TimestampSeconds
             ScreenshotModel.Format = Format
-            
+
             # Generate output path if not provided
             if not OutputPath:
-                SourceDir = ParentDir(SourceFilePath)
+                SourceDir = ntpath.dirname(SourceFilePath)
                 SourceName = Path(SourceFilePath).stem
                 OutputPath = os.path.join(SourceDir, f"{SourceName}_screenshot_{TimestampSeconds:.1f}s.{Format}")
 
             ScreenshotModel.ScreenshotPath = OutputPath
-            ScreenshotModel.ScreenshotFileName = LastSegment(OutputPath)
+            ScreenshotModel.ScreenshotFileName = ntpath.basename(OutputPath)
             
             # Build FFmpeg arguments
             Arguments = [
@@ -78,37 +79,38 @@ class FFmpegScreenshotService:
             ScreenshotModel.ErrorMessage = f"Screenshot generation error: {str(e)}"
             return ScreenshotModel
     
+    # directive: path-schema-migration | # see path.S8
     def GenerateScreenshotsAtIntervals(self, SourceFilePath: str, IntervalSeconds: float = 60.0,
                                      MaxScreenshots: int = 10, OutputDirectory: str = None,
                                      Width: int = None, Height: int = None, Format: str = "jpg") -> FFmpegScreenshotBatchModel:
         """Generate multiple screenshots at regular intervals."""
         try:
-            LoggingService.LogFunctionEntry("GenerateScreenshotsAtIntervals", 'FFmpegScreenshotService', 
+            LoggingService.LogFunctionEntry("GenerateScreenshotsAtIntervals", 'FFmpegScreenshotService',
                                           f"Source: {SourceFilePath}, Interval: {IntervalSeconds}s, Max: {MaxScreenshots}")
-            
+
             # Create batch model
             BatchModel = FFmpegScreenshotBatchModel()
             BatchModel.SourceFilePath = SourceFilePath
-            BatchModel.SourceFileName = LastSegment(SourceFilePath)
+            BatchModel.SourceFileName = ntpath.basename(SourceFilePath)
 
             # Get video duration first
             DurationResult = self.GetVideoDuration(SourceFilePath)
             if not DurationResult['Success']:
                 BatchModel.ErrorMessage = f"Failed to get video duration: {DurationResult.get('ErrorMessage', 'Unknown error')}"
                 return BatchModel
-            
+
             DurationSeconds = DurationResult['Duration']
-            
+
             # Calculate screenshot timestamps
             Timestamps = []
             CurrentTime = IntervalSeconds
             while CurrentTime < DurationSeconds and len(Timestamps) < MaxScreenshots:
                 Timestamps.append(CurrentTime)
                 CurrentTime += IntervalSeconds
-            
+
             # Generate output directory if not provided
             if not OutputDirectory:
-                SourceDir = ParentDir(SourceFilePath)
+                SourceDir = ntpath.dirname(SourceFilePath)
                 SourceName = Path(SourceFilePath).stem
                 OutputDirectory = os.path.join(SourceDir, f"{SourceName}_screenshots")
                 os.makedirs(OutputDirectory, exist_ok=True)
@@ -136,22 +138,23 @@ class FFmpegScreenshotService:
             BatchModel.ErrorMessage = f"Screenshot batch generation error: {str(e)}"
             return BatchModel
     
+    # directive: path-schema-migration | # see path.S8
     def GenerateScreenshotsAtSpecificTimes(self, SourceFilePath: str, Timestamps: List[float],
-                                         OutputDirectory: str = None, Width: int = None, 
+                                         OutputDirectory: str = None, Width: int = None,
                                          Height: int = None, Format: str = "jpg") -> FFmpegScreenshotBatchModel:
         """Generate screenshots at specific timestamps."""
         try:
-            LoggingService.LogFunctionEntry("GenerateScreenshotsAtSpecificTimes", 'FFmpegScreenshotService', 
+            LoggingService.LogFunctionEntry("GenerateScreenshotsAtSpecificTimes", 'FFmpegScreenshotService',
                                           f"Source: {SourceFilePath}, Timestamps: {len(Timestamps)}")
-            
+
             # Create batch model
             BatchModel = FFmpegScreenshotBatchModel()
             BatchModel.SourceFilePath = SourceFilePath
-            BatchModel.SourceFileName = LastSegment(SourceFilePath)
+            BatchModel.SourceFileName = ntpath.basename(SourceFilePath)
 
             # Generate output directory if not provided
             if not OutputDirectory:
-                SourceDir = ParentDir(SourceFilePath)
+                SourceDir = ntpath.dirname(SourceFilePath)
                 SourceName = Path(SourceFilePath).stem
                 OutputDirectory = os.path.join(SourceDir, f"{SourceName}_screenshots")
                 os.makedirs(OutputDirectory, exist_ok=True)

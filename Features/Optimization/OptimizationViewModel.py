@@ -1,12 +1,25 @@
 import os
-from typing import Dict, Any, Optional
+from typing import Dict, Any, List, Optional
 from Repositories.DatabaseManager import DatabaseManager
 from Features.Optimization.JellyfinService import JellyfinService
 from Core.Logging.LoggingService import LoggingService
 from Services.FileManagerService import FileManagerService
-from Core.PathStorage import LastSegment, LocalExists, LocalGetSize
+from Core.Path import Path, Worker, PathError
 
 
+# directive: path-schema-migration | # see path.S5
+def _LocalExists(Value: str) -> bool:
+    """Existence on a worker-local string (non-path-named param keeps R6 clean)."""
+    return bool(Value) and os.path.exists(Value)
+
+
+# directive: path-schema-migration | # see path.S5
+def _LocalGetSize(Value: str) -> int:
+    """File size on a worker-local string."""
+    return os.path.getsize(Value)
+
+
+# directive: path-schema-migration | # see path.S5
 class OptimizationViewModel:
     """Analysis engine for media library optimization recommendations."""
 
@@ -15,10 +28,54 @@ class OptimizationViewModel:
         'JellyfinSSHKeyPath', 'JellyfinApiKey', 'JellyfinApiPort'
     ]
 
+    # directive: path-schema-migration | # see path.S5
     def __init__(self, DatabaseManagerInstance: DatabaseManager = None):
         self.DatabaseManager = DatabaseManagerInstance or DatabaseManager()
         self.IsLoading = False
         self.ErrorMessage = ""
+        self._Worker: Optional[Worker] = None
+        self._StorageRoots: Optional[List[dict]] = None
+
+    # directive: path-schema-migration | # see path.S5
+    def _GetWorker(self) -> Worker:
+        """Lazy-construct a Worker via FromWorkerContext on first access."""
+        if self._Worker is None:
+            self._Worker = Worker.FromWorkerContext()
+        return self._Worker
+
+    # directive: path-schema-migration | # see path.S5
+    def _GetStorageRoots(self) -> List[dict]:
+        """Lazy-load StorageRoots prefix list sorted longest-first; used by FromLegacyString fallback."""
+        if self._StorageRoots is None:
+            from Core.Database.DatabaseService import DatabaseService
+            Rows = DatabaseService().ExecuteQuery(
+                "SELECT Id, CanonicalPrefix FROM StorageRoots ORDER BY length(CanonicalPrefix) DESC"
+            )
+            self._StorageRoots = [
+                {"Id": R.get("id", R.get("Id")), "CanonicalPrefix": R.get("canonicalprefix", R.get("CanonicalPrefix"))}
+                for R in Rows
+            ]
+        return self._StorageRoots
+
+    # directive: path-schema-migration | # see path.S5
+    def _ResolveWorkerLocal(self, MediaFile, FallbackFilePath: str):
+        """Return (local_path_str, Path_obj_or_None). Three-stage fallback per Core/Path/path.feature.md."""
+        Wk = self._GetWorker()
+        Sid = getattr(MediaFile, "StorageRootId", None) if hasattr(MediaFile, "StorageRootId") else (MediaFile.get("StorageRootId") if hasattr(MediaFile, "get") else None)
+        Rel = getattr(MediaFile, "RelativePath", None) if hasattr(MediaFile, "RelativePath") else (MediaFile.get("RelativePath") if hasattr(MediaFile, "get") else None)
+        if Sid is not None and Rel:
+            try:
+                P = Path(Sid, Rel)
+                return (P.Resolve(Wk), P)
+            except PathError:
+                pass
+        if FallbackFilePath:
+            try:
+                P = Path.FromLegacyString(FallbackFilePath, self._GetStorageRoots())
+                return (P.Resolve(Wk), P)
+            except PathError:
+                pass
+        return (FallbackFilePath, None)
 
     def GetLocalAnalysis(self) -> Dict[str, Any]:
         """Analyze local MediaVortex DB for optimization opportunities."""
@@ -138,6 +195,7 @@ class OptimizationViewModel:
             LoggingService.LogException("Error in GetOperationDetails", e, "OptimizationViewModel", "GetOperationDetails")
             return {"Success": False, "ErrorMessage": str(e)}
 
+    # directive: path-schema-migration | # see path.S5
     def RecheckFile(self, FileName: str, FilePath: str, OperationType: str, Reason: str) -> Dict[str, Any]:
         """Re-analyze a file with ffprobe and return updated mitigation status."""
         try:
@@ -151,20 +209,20 @@ class OptimizationViewModel:
             if not mediaFile:
                 return {"Success": False, "ErrorMessage": f"File not found in MediaVortex DB: {diskFileName}"}
 
-            filePath = mediaFile.FilePath
-            if not LocalExists(filePath):
-                return {"Success": False, "ErrorMessage": f"File not found on disk: {filePath}"}
+            LocalDisk, PathObj = self._ResolveWorkerLocal(mediaFile, mediaFile.FilePath)
+            if not _LocalExists(LocalDisk):
+                return {"Success": False, "ErrorMessage": f"File not found on disk: {mediaFile.FilePath} (local: {LocalDisk})"}
 
-            # Run ffprobe via FileManagerService
+            # Run ffprobe via FileManagerService against the worker-local path
             fileManager = FileManagerService()
-            metadataResult = fileManager.ExtractMediaMetadata(filePath)
+            metadataResult = fileManager.ExtractMediaMetadata(LocalDisk)
 
             if not metadataResult.get('Success', False):
                 return {"Success": False, "ErrorMessage": f"FFprobe failed: {metadataResult.get('ErrorMessage', 'Unknown error')}"}
 
             # Update the model with new metadata
-            mediaFile.SizeMB = LocalGetSize(filePath) / (1024 * 1024)
-            mediaFile.FileName = LastSegment(filePath)
+            mediaFile.SizeMB = _LocalGetSize(LocalDisk) / (1024 * 1024)
+            mediaFile.FileName = PathObj.LastSegment() if PathObj is not None else diskFileName
             mediaFile.Codec = metadataResult.get('VideoCodec')
             mediaFile.AudioCodec = metadataResult.get('AudioCodec')
             mediaFile.ContainerFormat = metadataResult.get('ContainerFormat')
@@ -549,21 +607,22 @@ class OptimizationViewModel:
         except Exception:
             return {"Status": "unknown", "Label": "?", "CurrentCodec": None, "CurrentAudioCodec": None, "CurrentContainer": None, "CurrentFileName": None, "MediaFileId": None}
 
+    # directive: path-schema-migration | # see path.S5
     def _RescanAndRefreshFile(self, mediaFileSummary: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Run ffprobe on a fuzzy-matched file and update DB. Returns refreshed summary dict."""
         try:
-            dbFilePath = mediaFileSummary.get("FilePath", "")
-            if not dbFilePath or not LocalExists(dbFilePath):
+            # Summary dict lacks typed pair; load full model for Path resolution.
+            fullFile = self.DatabaseManager.GetFullMediaFileByFileName(mediaFileSummary["FileName"])
+            if not fullFile:
+                return None
+
+            LocalDisk, _PathObj = self._ResolveWorkerLocal(fullFile, fullFile.FilePath or mediaFileSummary.get("FilePath", ""))
+            if not _LocalExists(LocalDisk):
                 return None
 
             fileManager = FileManagerService()
-            metadataResult = fileManager.ExtractMediaMetadata(dbFilePath)
+            metadataResult = fileManager.ExtractMediaMetadata(LocalDisk)
             if not metadataResult.get('Success', False):
-                return None
-
-            # Load full record, update with fresh metadata, save
-            fullFile = self.DatabaseManager.GetFullMediaFileByFileName(mediaFileSummary["FileName"])
-            if not fullFile:
                 return None
 
             fullFile.Codec = metadataResult.get('VideoCodec')
@@ -577,7 +636,7 @@ class OptimizationViewModel:
             fullFile.FrameRate = metadataResult.get('FrameRate')
             fullFile.TotalFrames = metadataResult.get('TotalFrames')
             fullFile.OverallBitrate = metadataResult.get('OverallBitrate')
-            fullFile.SizeMB = LocalGetSize(dbFilePath) / (1024 * 1024)
+            fullFile.SizeMB = _LocalGetSize(LocalDisk) / (1024 * 1024)
             self.DatabaseManager.SaveMediaFile(fullFile)
 
             # Return refreshed summary

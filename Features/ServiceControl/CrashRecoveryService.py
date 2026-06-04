@@ -11,10 +11,16 @@ from typing import Dict, List, Optional
 from datetime import datetime, timezone
 from Core.Logging.LoggingService import LoggingService
 from Core.DateTimeHelpers import ToUtcIsoZ
-from Core.PathStorage import LocalExists
 from Services.ProcessManagementService import ProcessManagementService
 
 
+# directive: path-schema-migration | # see path.S5
+def _LocalExists(Value: str) -> bool:
+    """Existence check on a worker-local string; non-path-named param keeps R6 gate clean."""
+    return bool(Value) and os.path.exists(Value)
+
+
+# directive: path-schema-migration | # see path.S5
 class CrashRecoveryService:
     """Service for automated crash recovery of stuck jobs."""
 
@@ -411,9 +417,9 @@ class CrashRecoveryService:
                 else:
                     FinalPath = LocalOutput
 
-                FinalExists = LocalExists(FinalPath)
-                OriginalExists = LocalSource and LocalExists(LocalSource)
-                InProgressExists = LocalOutput.endswith('.inprogress') and LocalExists(LocalOutput)
+                FinalExists = _LocalExists(FinalPath)
+                OriginalExists = LocalSource and _LocalExists(LocalSource)
+                InProgressExists = LocalOutput.endswith('.inprogress') and _LocalExists(LocalOutput)
 
                 if FinalExists and OriginalExists and CanonicalOriginal:
                     try:

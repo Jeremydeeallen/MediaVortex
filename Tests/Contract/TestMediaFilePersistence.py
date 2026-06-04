@@ -44,33 +44,40 @@ PROBE_COLUMNS = [
 class TestMediaFilePersistenceRoundTrip(unittest.TestCase):
     """Save -> reload -> compare for every directive-criterion-2 column."""
 
-    TEST_PATH_PREFIX = r'C:\__mvtest__\persistence-roundtrip'
+    # directive: path-schema-migration | # see path.S8
+    TEST_STORAGE_ROOT_ID = 1
+    TEST_REL_PREFIX = '__mvtest__/persistence-roundtrip'
 
     @classmethod
     def setUpClass(cls):
         cls.Db = DatabaseManager()
 
+    # directive: path-schema-migration | # see path.S8
     def setUp(self):
-        # Unique path per test so concurrent / sequential tests do not collide
-        # on the unique FilePath index in MediaFiles.
-        self.TestPath = (
-            f"{self.TEST_PATH_PREFIX}\\"
+        # Unique per-test RelativePath under the typed-pair identity.
+        self.TestRelativePath = (
+            f"{self.TEST_REL_PREFIX}/"
             f"{self._testMethodName}-"
             f"{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S%f')}.mp4"
         )
 
+    # directive: path-schema-migration | # see path.S8
     def tearDown(self):
         try:
             self.Db.DatabaseService.ExecuteNonQuery(
-                "DELETE FROM MediaFiles WHERE FilePath = %s", (self.TestPath,)
+                "DELETE FROM MediaFiles "
+                "WHERE StorageRootId = %s AND RelativePath = %s",
+                (self.TEST_STORAGE_ROOT_ID, self.TestRelativePath),
             )
         except Exception:
             pass
 
+    # directive: path-schema-migration | # see path.S8
     def _BuildBaseRow(self):
         """Insert a baseline row -- every column at its column default."""
         Mf = MediaFileModel(
-            FilePath=self.TestPath,
+            StorageRootId=self.TEST_STORAGE_ROOT_ID,
+            RelativePath=self.TestRelativePath,
             FileName='roundtrip.mp4',
             SizeMB=1.0,
             LastScannedDate=datetime(2026, 1, 1, 0, 0, 0),
@@ -142,25 +149,21 @@ class TestMediaFilePersistenceRoundTrip(unittest.TestCase):
             "(directive criterion 2 violation):\n  " + "\n  ".join(Dropped),
         )
 
+    # directive: path-schema-migration | # see path.S8
     def test_audio_normalization_mode_coalesce_protects_unset(self):
-        """Criterion 2 + design-input criterion 4: a partial-load caller that
-        leaves AudioNormalizationMode at None must NOT blank an existing
-        non-None value in the DB."""
+        """Criterion 2 + design-input criterion 4: partial-load caller must NOT blank existing non-None value."""
         Mf = self._BuildBaseRow()
         Mf.AudioNormalizationMode = 'dynamic'
         self.Db.SaveMediaFile(Mf)
 
-        # Simulate a partial-load caller: build a new model with only the
-        # required fields, AudioNormalizationMode=None (the default). Use the
-        # same FilePath so the duplicate-check path in SaveMediaFile resolves
-        # to the existing row.
+        # Partial-load caller: typed pair matches existing row.
         Partial = MediaFileModel(
             Id=Mf.Id,
-            FilePath=self.TestPath,
+            StorageRootId=self.TEST_STORAGE_ROOT_ID,
+            RelativePath=self.TestRelativePath,
             FileName='roundtrip.mp4',
             SizeMB=1.0,
         )
-        # AudioNormalizationMode left at default (None)
         self.Db.SaveMediaFile(Partial)
 
         Reloaded = self.Db.GetMediaFileById(Mf.Id)

@@ -602,7 +602,7 @@ class FileScanningBusinessService:
         self._HeartbeatStopEvent = None
         self._HeartbeatThread = None
 
-    # directive: paths-canonical-completion
+    # directive: path-schema-migration | # see path.S8
     def _RunSizeSurvey(self, LocalRootPath: str, CanonicalRootPath: str, RootFolder: RootFolderModel):
         # see filescanning.ST2
         """Directive 2026-05-27 (scan -- largest files first), criteria 1-5.
@@ -723,7 +723,6 @@ class FileScanningBusinessService:
                         SeasonId=None,
                         StorageRootId=StorageRootId,
                         RelativePath=RelativePath or '',
-                        FilePath=CanonicalPath,
                         FileName=FileName,
                         SizeMB=SizeMB,
                         FileModificationTime=MtimeDt,
@@ -1269,15 +1268,9 @@ class FileScanningBusinessService:
             LoggingService.LogException("Error in fuzzy file matching", e)
             return None
 
-    # directive: paths-canonical-completion
+    # directive: path-schema-migration | # see path.S8
     def ProcessSingleMediaFile(self, FilePath: str, RootFolderId: Optional[int], RootFolderPath: str = "", ExtractMetadata: bool = True):
-        # see filescanning.ST4
-        """Process a single media file with fuzzy matching and optional metadata extraction.
-
-        FilePath is the canonical (Windows-style) path stored in the DB. On Linux
-        containers, fs ops use LocalPath (translated via WorkerContext); DB lookups
-        and inserts use the canonical FilePath so MediaFiles rows stay portable.
-        """
+        """Process a single media file with fuzzy matching and optional metadata extraction; FilePath param is the canonical path string."""
         try:
             # Canonicalize path string for DB consistency (lookups vs inserts).
             FilePath = _Normalize(FilePath)
@@ -1350,8 +1343,7 @@ class FileScanningBusinessService:
                     StorageRootId, RelativePath = None, None
 
                 if FuzzyMatch:
-                    # Found a fuzzy match - this is likely a renamed file
-                    FuzzyMatch.FilePath = FilePath  # Update to new path
+                    # Found a fuzzy match - this is likely a renamed file; typed pair drives FilePath display
                     FuzzyMatch.StorageRootId = StorageRootId
                     FuzzyMatch.RelativePath = RelativePath or ''
                     FuzzyMatch.FileName = FileName  # Update to new filename
@@ -1377,7 +1369,6 @@ class FileScanningBusinessService:
                         SeasonId=None,  # Season functionality disabled
                         StorageRootId=StorageRootId,
                         RelativePath=RelativePath or '',
-                        FilePath=FilePath,
                         FileName=FileName,
                         SizeMB=FileSizeMB,
                         FileModificationTime=FileModificationTime,
@@ -1872,7 +1863,7 @@ class FileScanningBusinessService:
             MediaFile.LastFFprobeError = str(e)
             MediaFile.LastFFprobeAttemptDate = datetime.now(timezone.utc)
 
-    # directive: paths-canonical-completion
+    # directive: path-schema-migration | # see path.S8
     def ReconcileWithDisk(self, MediaFiles: List[str], RootFolderId: int) -> Dict[str, Any]:
         # see filescanning.ST5
         """Single-pass merge of move-detection and missing-file cleanup against
@@ -2006,7 +1997,6 @@ class FileScanningBusinessService:
                     f"Reassigning moved file: {DbFile.FilePath} -> {CandidateCanonical}",
                     'ReconcileWithDisk', 'FileScanningBusinessService'
                 )
-                DbFile.FilePath = CandidateCanonical
                 DbFile.FileName = ntpath.basename(CandidateCanonical)
                 DbFile.StorageRootId = CandidateSid
                 DbFile.RelativePath = CandidateRel
@@ -2148,7 +2138,7 @@ class FileScanningBusinessService:
             LoggingService.LogException("Error reading MoveDetectionMaxFiles, using default", e, 'FileScanningBusinessService', '_GetMoveDetectionMaxFiles')
         return Default
 
-    # directive: paths-canonical-completion
+    # directive: path-schema-migration | # see path.S8
     def DetectMovedFiles(self, RootFolderId: Optional[int] = None) -> Dict[str, Any]:
         # see filescanning.ST5
         """Detect files that have been moved and update their paths."""
@@ -2192,9 +2182,11 @@ class FileScanningBusinessService:
                     MovedFile = self.FindMovedFile(DbFile)
 
                     if MovedFile:
-                        # File was moved, update path
+                        # File was moved, update typed-pair identity (FilePath is derived)
                         LoggingService.LogInfo(f"Updating moved file: {MovedFile['OldPath']} -> {MovedFile['NewPath']}", 'DetectMovedFiles', 'FileScanningBusinessService')
-                        DbFile.FilePath = MovedFile['NewPath']
+                        _P = Path.FromLegacyString(MovedFile['NewPath'], _GetStorageRoots())
+                        DbFile.StorageRootId = _P.StorageRootId
+                        DbFile.RelativePath = _P.RelativePath
                         DbFile.FileName = ntpath.basename(MovedFile['NewPath'])
                         DbFile.LastScannedDate = datetime.now(timezone.utc)
                         self.Repository.SaveMediaFile(DbFile)

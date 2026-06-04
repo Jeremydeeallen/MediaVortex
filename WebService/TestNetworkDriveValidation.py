@@ -11,15 +11,32 @@ Usage:
 
 import os
 import sys
+import ntpath
 import argparse
 from pathlib import Path
 
-# Add project root to path
 ProjectRoot = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ProjectRoot)
 
 from Services.LoggingService import LoggingService
-from Core.PathStorage import Join, LocalExists, LocalGetSize, Normalize
+
+
+# directive: path-schema-migration | # see path.S8
+def _LocalExists(Value) -> bool:
+    """Local filesystem existence check for a worker-resolved string value."""
+    return bool(Value) and os.path.exists(Value)
+
+
+# directive: path-schema-migration | # see path.S8
+def _LocalGetSize(Value) -> int:
+    """Local filesystem getsize for a worker-resolved string value."""
+    return os.path.getsize(Value)
+
+
+# directive: path-schema-migration | # see path.S8
+def _NormalizeValue(Value) -> str:
+    """Forward-slash to backslash normalization for a worker-resolved string value."""
+    return (Value or "").replace("/", "\\")
 
 
 class NetworkDriveValidator:
@@ -39,9 +56,8 @@ class NetworkDriveValidator:
         # Test 2: os.path.isdir
         self.TestMethod("os.path.isdir", lambda: os.path.isdir(self.TestPath))
         
-        # Test 3: Normalize + exists
-        normalized = Normalize(self.TestPath)
-        self.TestMethod("Normalize + exists", lambda: os.path.exists(normalized))
+        normalized = _NormalizeValue(self.TestPath)
+        self.TestMethod("Normalize + exists", lambda: _LocalExists(normalized))
         
         # Test 4: os.listdir (more reliable for network drives)
         self.TestMethod("os.listdir", self.TestListDir)
@@ -97,22 +113,24 @@ class NetworkDriveValidator:
         except Exception as e:
             raise e
     
+    # directive: path-schema-migration | # see path.S8
     def TestGetDirSize(self):
         """Test getting directory size."""
         try:
             total_size = 0
             for dirpath, dirnames, filenames in os.walk(self.TestPath):
                 for filename in filenames:
-                    filepath = Join(dirpath, filename)
-                    if LocalExists(filepath):
-                        total_size += LocalGetSize(filepath)
+                    filepath = ntpath.join(dirpath, filename)
+                    if _LocalExists(filepath):
+                        total_size += _LocalGetSize(filepath)
             return total_size >= 0
         except Exception as e:
             raise e
-    
+
+    # directive: path-schema-migration | # see path.S8
     def TestIsNetworkDrive(self):
         """Test if path is a network drive."""
-        normalized = Normalize(self.TestPath)
+        normalized = _NormalizeValue(self.TestPath)
         return len(normalized) >= 2 and normalized[1] == ':' and normalized[0].isalpha()
     
     def TestAbspath(self):

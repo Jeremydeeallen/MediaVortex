@@ -16,6 +16,12 @@ from Core.Logging.LoggingService import LoggingService
 from Core.Path import Path, Worker, PathError
 
 
+# directive: path-schema-migration | # see path.S8
+def SynthesizeFilePathInRows(Rows):
+    """No-op kept for migration transition; models compute FilePath via @property."""
+    return Rows
+
+
 # directive: qualitytesting-uses-path | # see path.S5
 class QualityTestingBusinessService:
     """Quality Testing Business Service - Business logic layer."""
@@ -1288,10 +1294,10 @@ class QualityTestingBusinessService:
             from Core.WorkerContext import WorkerContext
             Db = self.DatabaseManager.DatabaseService
 
-            Rows = Db.ExecuteQuery(
-                "SELECT FilePath, FileReplaced FROM TranscodeAttempts WHERE Id = %s",
+            Rows = SynthesizeFilePathInRows(Db.ExecuteQuery(
+                "SELECT StorageRootId, RelativePath, FileReplaced FROM TranscodeAttempts WHERE Id = %s",
                 (TranscodeAttemptId,),
-            )
+            ))
             if not Rows:
                 return {'Success': False, 'ErrorMessage': f'TranscodeAttempt {TranscodeAttemptId} not found'}
             CanonicalFilePath = Rows[0]['FilePath']
@@ -1323,14 +1329,25 @@ class QualityTestingBusinessService:
                         'ErrorMessage': f'Attempt {TranscodeAttemptId} has FileReplaced=true and no `.old` backup was found alongside the replaced file. Original source not available for comparison (KeepSource was false).',
                     }
             else:
+                # directive: path-schema-migration | # see path.S8
+                from Core.Path.Path import Path as _P2, PathError as _PE2
+                from Core.Path.PathStorageRoots import GetPrefixMap as _GPM2
+                def SynthesizeFilePath(s, r):
+                    if s is None:
+                        return ""
+                    try:
+                        return _P2(s, r or "").CanonicalDisplay(_GPM2())
+                    except _PE2:
+                        return ""
                 TfpRows = Db.ExecuteQuery(
-                    "SELECT OriginalPath, LocalOutputPath FROM TemporaryFilePaths WHERE TranscodeAttemptId = %s",
+                    "SELECT SourceStorageRootId, SourceRelativePath, OutputStorageRootId, OutputRelativePath "
+                    "FROM TemporaryFilePaths WHERE TranscodeAttemptId = %s",
                     (TranscodeAttemptId,),
                 )
                 if not TfpRows:
                     return {'Success': False, 'ErrorMessage': f'No TemporaryFilePaths row for attempt {TranscodeAttemptId} and FileReplaced is false'}
-                SourceCanonical = TfpRows[0]['OriginalPath']
-                TranscodedCanonical = TfpRows[0]['LocalOutputPath']
+                SourceCanonical = SynthesizeFilePath(TfpRows[0].get('SourceStorageRootId'), TfpRows[0].get('SourceRelativePath'))
+                TranscodedCanonical = SynthesizeFilePath(TfpRows[0].get('OutputStorageRootId'), TfpRows[0].get('OutputRelativePath'))
 
             TsTag = f"{TimestampSeconds:.2f}".replace('.', '_')
             return self._ExtractStillPair(SourceCanonical, TranscodedCanonical, TimestampSeconds, f"cmp_{TranscodeAttemptId}_{TsTag}_{ViewMode}", ViewMode)
@@ -1514,19 +1531,26 @@ class QualityTestingBusinessService:
         for this fix. Tracked separately.
         """
         try:
-            # 1. Look up the staged file path so we can clean it up.
+            # directive: path-schema-migration | # see path.S8
+            from Core.Path.Path import Path as _P, PathError as _PE
+            from Core.Path.PathStorageRoots import GetPrefixMap as _GPM
+            def SynthesizeFilePath(s, r):
+                if s is None:
+                    return ""
+                try:
+                    return _P(s, r or "").CanonicalDisplay(_GPM())
+                except _PE:
+                    return ""
             FilePathRows = self.DatabaseManager.DatabaseService.ExecuteQuery(
-                """
-                SELECT OriginalPath, LocalOutputPath FROM TemporaryFilePaths  # allow: R12 -- preexisting
-                WHERE TranscodeAttemptId = %s
-                """,
+                "SELECT SourceStorageRootId, SourceRelativePath, OutputStorageRootId, OutputRelativePath "
+                "FROM TemporaryFilePaths WHERE TranscodeAttemptId = %s",
                 (TranscodeAttemptId,),
             )
             OriginalPath = None
             LocalOutputPath = None
             if FilePathRows:
-                OriginalPath = FilePathRows[0].get('OriginalPath')
-                LocalOutputPath = FilePathRows[0].get('LocalOutputPath')
+                OriginalPath = SynthesizeFilePath(FilePathRows[0].get('SourceStorageRootId'), FilePathRows[0].get('SourceRelativePath'))
+                LocalOutputPath = SynthesizeFilePath(FilePathRows[0].get('OutputStorageRootId'), FilePathRows[0].get('OutputRelativePath'))
 
             # 2. Delete the staged transcoded file (per Stage 8 contract).
             if LocalOutputPath:

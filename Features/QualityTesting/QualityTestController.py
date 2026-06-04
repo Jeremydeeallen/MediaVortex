@@ -594,9 +594,23 @@ def QueueTestRun():
             Path_ = (Raw or '').strip()
             if not Path_:
                 continue
+            # directive: path-schema-migration | # see path.S8
+            from Core.Path.Path import Path, PathError
+            from Core.Path.PathStorageRoots import GetStorageRoots
+            def LookupTypedPair(c):
+                if not c: return (None, None)
+                try:
+                    P = Path.FromLegacyString(c, GetStorageRoots())
+                    return (P.StorageRootId, P.RelativePath)
+                except PathError:
+                    return (None, None)
+            _Sid, _Rel = LookupTypedPair(Path_)
+            if _Sid is None or _Rel is None:
+                Rejected.append({'FilePath': Path_, 'Reason': 'FilePath did not match any StorageRoots prefix'})
+                continue
             MfRows = Db.ExecuteQuery(
-                "SELECT Id, AssignedProfile, SizeMB, StorageRootId, RelativePath FROM MediaFiles WHERE FilePath = %s",
-                (Path_,),
+                "SELECT Id, AssignedProfile, SizeMB, StorageRootId, RelativePath FROM MediaFiles WHERE StorageRootId = %s AND RelativePath = %s",
+                (_Sid, _Rel),
             )
             if not MfRows:
                 Rejected.append({'FilePath': Path_, 'Reason': 'MediaFiles row not found (file may not be scanned)'})

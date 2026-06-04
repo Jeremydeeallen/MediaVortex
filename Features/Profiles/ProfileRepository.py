@@ -319,21 +319,36 @@ class ProfileRepository(BaseRepository):
             profile = self.GetProfileById(ProfileId)
             profileName = profile.ProfileName if profile else f"ProfileId_{ProfileId}"
 
-            # First, capture the IDs that will be affected (so we can recompute their priority).
-            escapedPath = EscapeLikePattern(RootFolderPath)
+            # directive: path-schema-migration | # see path.S8 | # see profiles.W9
+            from Core.Path.Path import Path, PathError
+            from Core.Path.PathStorageRoots import GetStorageRoots
+            def LookupTypedPair(c):
+                if not c: return (None, None)
+                try:
+                    P = Path.FromLegacyString(c, GetStorageRoots())
+                    return (P.StorageRootId, P.RelativePath)
+                except PathError:
+                    return (None, None)
+            Sid, RelPrefix = LookupTypedPair(RootFolderPath)
+            if Sid is None or RelPrefix is None:
+                LoggingService.LogError(
+                    f"UpdateMediaFilesProfileByRootFolder: RootFolderPath {RootFolderPath!r} did not match any StorageRoots prefix",
+                    "ProfileRepository", "UpdateMediaFilesProfileByRootFolder"
+                )
+                return 0
+            escapedRel = EscapeLikePattern(RelPrefix)
             affectedRows = self.ExecuteQuery(
-                "SELECT Id FROM MediaFiles WHERE LOWER(FilePath) LIKE LOWER(%s) || '%%' ESCAPE '!'",
-                (escapedPath,)
+                "SELECT Id FROM MediaFiles WHERE StorageRootId = %s AND RelativePath LIKE %s || '%%' ESCAPE '!'",
+                (Sid, escapedRel)
             )
             affectedIds = [r['Id'] for r in affectedRows]
 
-            # allow: R12 -- SQL string literal
-            query = """
-                UPDATE MediaFiles
-                SET AssignedProfile = %s
-                WHERE LOWER(FilePath) LIKE LOWER(%s) || '%%' ESCAPE '!'
-            """
-            filesUpdated = self.ExecuteNonQuery(query, (profileName, escapedPath))
+            query = (
+                "UPDATE MediaFiles "
+                "SET AssignedProfile = %s "
+                "WHERE StorageRootId = %s AND RelativePath LIKE %s || '%%' ESCAPE '!'"
+            )
+            filesUpdated = self.ExecuteNonQuery(query, (profileName, Sid, escapedRel))
             LoggingService.LogInfo(f"Updated {filesUpdated} media files in root folder '{RootFolderPath}' to use profile '{profileName}'", "ProfileRepository", "UpdateMediaFilesProfileByRootFolder")
 
             if affectedIds:

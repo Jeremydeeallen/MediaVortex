@@ -27,7 +27,19 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from Services.LoggingService import LoggingService
 from Repositories.DatabaseManager import DatabaseManager
 from Core.Database.DatabaseService import EscapeLikePattern
-from Core.PathStorage import LocalExists, LocalIsDir
+import os as _os_path_for_v2_helpers
+
+
+# directive: path-schema-migration | # see path.S8
+def LocalExists(Value):
+    """Existence on a worker-local string."""
+    return bool(Value) and _os_path_for_v2_helpers.path.exists(Value)
+
+
+# directive: path-schema-migration | # see path.S8
+def LocalIsDir(Value):
+    """Dir-check on a worker-local string."""
+    return bool(Value) and _os_path_for_v2_helpers.path.isdir(Value)
 
 
 class WorkerServiceApp:
@@ -1237,13 +1249,11 @@ def _VerifyRequiredPaths():
             sys.exit(1)
         return
 
-    # Legacy fallback: no StorageRootResolutions rows for this worker. Use the
-    # original drive-letter prefix scan of MediaFiles. Keeps a pre-BUG-0008-fix
-    # I9 startup working until the data migration is applied.
+    # directive: path-schema-migration | # see path.S8 -- legacy fallback now sources drive letters from StorageRoots.CanonicalPrefix
     try:
         Rows = Db.ExecuteQuery(
-            "SELECT DISTINCT UPPER(LEFT(FilePath, 2)) AS DriveLetter "
-            "FROM MediaFiles WHERE FilePath ~ '^[A-Za-z]:'"
+            "SELECT DISTINCT UPPER(LEFT(CanonicalPrefix, 2)) AS DriveLetter "
+            "FROM StorageRoots WHERE CanonicalPrefix ~ '^[A-Za-z]:'"
         )
     except Exception as Ex:
         print(f"[FATAL] Could not read MediaFiles to verify required drives: {Ex}", flush=True)

@@ -384,17 +384,11 @@ class TranscodedOutputPlacement:
                     'CanonicalNewFilePath': NewFilePath,
                 }
 
-            media_file.FilePath = NewFilePath
+            # directive: path-schema-migration | # see path.S8
+            _P = Path.FromLegacyString(NewFilePath, self._GetStorageRoots())
+            media_file.StorageRootId = _P.StorageRootId
+            media_file.RelativePath = _P.RelativePath
             media_file.FileName = ntpath.basename(NewFilePath)
-            try:
-                NewPathObj = Path.FromLegacyString(NewFilePath, self._GetStorageRoots())
-                media_file.StorageRootId = NewPathObj.StorageRootId
-                media_file.RelativePath = NewPathObj.RelativePath
-            except Exception as e:
-                LoggingService.LogException(
-                    f"Failed to derive StorageRootId/RelativePath for new path {NewFilePath!r}",
-                    e, "TranscodedOutputPlacement", "_UpdateMediaFilesAfterReplacement",
-                )
 
             media_file.SizeMB = metadata.get('FileSizeMB', media_file.SizeMB)
             media_file.VideoBitrateKbps = metadata.get('VideoBitrateKbps')
