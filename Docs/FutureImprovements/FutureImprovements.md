@@ -101,4 +101,31 @@ Refactor profile system to be more semantic and easier to manage. Currently prof
 - Would require database schema changes to Profiles and ProfileThresholds tables
 - CRF would be calculated dynamically based on quality tier + adaptive adjustments
 - Migration script needed to convert existing profiles to new structure
-- UI changes required for new profile selection interface 
+- UI changes required for new profile selection interface
+
+## Replace Directory Walk with `zfs diff` on Porky (2026-06-04)
+
+Today MediaVortex walks directories on Porky (R740xd, 65.5 T `tank`, ZFS) to detect new / moved / renamed media. Walking a multi-TB tree to find a handful of changes is the wrong shape — the filesystem already knows what changed. Switch the scanner to consume `zfs diff` between periodic snapshots and ffprobe only the delta.
+
+**How it works:**
+- Take periodic snapshots of `tank` (or the specific media datasets) via `sanoid` — e.g. 12 × 5-min, 24 × hourly, 7 × daily.
+- Run `zfs diff <prev-snap> <curr-snap>` against the last-processed snapshot. Output is metadata-only and scales with churn, not pool size — single-digit seconds on a 65 T pool with normal ingest churn.
+- Parse the four prefixes:
+  - `+ F <path>` — new file → enqueue for ffprobe + DB insert
+  - `- F <path>` — deleted → soft-delete in DB
+  - `R F <old> -> <new>` — rename (single correlated line) → row update, no re-probe
+  - `M F <path>` — modified → re-probe (rare for finished media; common during write-in-progress)
+- Persist `last_processed_snapshot` so the next run resumes from there.
+
+**Wins:**
+- Walk cost goes from O(tree size) to O(changes).
+- Renames stop being a costly "find by inode" or "match by hash" — `zfs diff` emits the pair directly.
+- ffprobe load drops to just the files that actually changed.
+
+**Gotchas to design for:**
+- **Catch-up after downtime**: if `last_processed_snapshot` got pruned by sanoid retention, fall back to an older retained snapshot or a one-time full walk. Retention policy and "last seen" state must align.
+- **Where ffprobe runs**: `zfs diff` happens on Porky, but MediaVortex lives elsewhere. Either reuse the existing NFS/SMB mount path or run a tiny probe-agent on Porky that returns ffprobe JSON over HTTP/SSH.
+- **Write-in-progress files**: a `+ F` event can fire before the file is fully written. Either wait for `M F` to stop firing for N seconds (quiescence), or check size-stability before probing.
+- **Datasets vs filesystem-root paths**: `zfs diff` paths are dataset-relative; need a small mapping layer to translate to MediaVortex's logical paths.
+
+**Status:** Parked — MediaVortex is mid-database-overhaul. Revisit once the DB layer stabilizes. Infrastructure side (sanoid retention on `tank`) can be set up independently and is value-positive even without MediaVortex consuming it. 
