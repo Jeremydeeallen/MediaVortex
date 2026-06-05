@@ -232,7 +232,10 @@ def QueueByFolder():
             Params.append(EscapeLikePattern(_P.RelativePath) + '%')
 
         if not FolderConditions:
-            return jsonify({'Success': False, 'Message': 'None of the provided ShowFolders matched a StorageRoot prefix'}), 400
+            # directive: path-class-perfection | # see path.C22
+            from Core.Path.PathStorageRoots import GetPrefixMap as _GPMSS
+            _Available = list(_GPMSS().values())
+            return jsonify({'Success': False, 'Message': f'None of the provided ShowFolders matched a StorageRoot prefix. Inputs: {ShowFolders!r}. AvailableRoots: {_Available}'}), 400
 
         FolderWhere = ' OR '.join(FolderConditions)
 

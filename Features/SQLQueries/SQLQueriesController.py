@@ -383,7 +383,10 @@ def GetMediaFileComparison():
                 OriginalQuery = OriginalQueryHead + "StorageRootId = %s AND RelativePath = %s"
                 OriginalParams = (_MCP.StorageRootId, _MCP.RelativePath)
             except _PEMC:
-                return jsonify({"Success": False, "ErrorMessage": f"FilePath could not be parsed against StorageRoots: {FilePath!r}"}), 400
+                # directive: path-class-perfection | # see path.C22
+                from Core.Path.PathStorageRoots import GetPrefixMap as _GPMMC2
+                _Available = list(_GPMMC2().values())
+                return jsonify({"Success": False, "ErrorMessage": f"FilePath could not be parsed against StorageRoots: {FilePath!r}. AvailableRoots: {_Available}"}), 400
 
         OriginalResults = SharedDatabaseManager.DatabaseService.ExecuteQuery(OriginalQuery, OriginalParams)
         if OriginalResults:

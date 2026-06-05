@@ -50,16 +50,17 @@ def _ResolveMediaFileIds(Data: dict) -> Tuple[List[int], Optional[str]]:
             return ([], "MediaFileIds must be a list of integers")
         return (ParsedIds, None)
 
-    # directive: path-schema-migration | # see audio-completion.C19
+    # directive: path-class-perfection | # see path.C22
     from Core.Path.Path import Path as _PathAC, PathError as _PEAC
-    from Core.Path.PathStorageRoots import GetStorageRoots as _GSRAC
+    from Core.Path.PathStorageRoots import GetStorageRoots as _GSRAC, GetPrefixMap as _GPMAC
     Filters = []
     Params: List = []
     if ShowFolder:
         try:
             Parsed = _PathAC.FromLegacyString(ShowFolder, _GSRAC())
         except _PEAC:
-            return ([], f"ShowFolder did not match any StorageRoot prefix: {ShowFolder!r}")
+            _Available = list(_GPMAC().values())
+            return ([], f"ShowFolder did not match any StorageRoot prefix: {ShowFolder!r}. AvailableRoots: {_Available}")
         Filters.append("(StorageRootId = %s AND RelativePath LIKE %s ESCAPE '!')")
         Params.append(Parsed.StorageRootId)
         Params.append(EscapeLikePattern(Parsed.RelativePath) + "%")

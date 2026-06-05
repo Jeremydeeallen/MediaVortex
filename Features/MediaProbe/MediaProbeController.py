@@ -36,7 +36,10 @@ def _BuildReprobeWhere(Data: dict) -> Tuple[Optional[str], list, Optional[str]]:
         try:
             Parsed = Path.FromLegacyString(ShowFolder, GetStorageRoots())
         except PathError:
-            return None, [], 'ShowFolder did not match any StorageRoot prefix; expected canonical-shaped path (e.g. T:\\Show)'
+            # directive: path-class-perfection | # see path.C22
+            from Core.Path.PathStorageRoots import GetPrefixMap as _GPMMP
+            _Available = list(_GPMMP().values())
+            return None, [], f"ShowFolder did not match any StorageRoot prefix: {ShowFolder!r}. AvailableRoots: {_Available}"
         Clauses.append("StorageRootId = %s AND RelativePath LIKE %s ESCAPE '!'")
         Params.append(Parsed.StorageRootId)
         Params.append(EscapeLikePattern(Parsed.RelativePath) + '%')
