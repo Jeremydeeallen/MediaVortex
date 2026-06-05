@@ -776,13 +776,13 @@ class QualityTestingBusinessService:
         filters on Status='Processing') saw nothing. Surfaced 2026-05-10.
         """
         try:
-            query = """
-                INSERT INTO QualityTestProgress (  # allow: R12 -- preexisting
-                    TranscodeAttemptId, Status, ProgressPercentage, CurrentStep,
-                    StartTime, UpdatedAt, CreatedAt
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s)
-                RETURNING Id
-            """
+            query = (
+                "INSERT INTO QualityTestProgress ("
+                "TranscodeAttemptId, Status, ProgressPercentage, CurrentStep, "
+                "StartTime, UpdatedAt, CreatedAt"
+                ") VALUES (%s, %s, %s, %s, %s, %s, %s) "
+                "RETURNING Id"
+            )
 
             current_time = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
             transcode_attempt_id = JobDetails.get('TranscodeAttemptId', 0)
