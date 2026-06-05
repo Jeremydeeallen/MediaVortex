@@ -276,6 +276,8 @@ Explicit answers to every non-obvious case the design surfaced.
 | C13 | `Path(7, "")` is the root; `p.ParentDir()` raises `PathError` on root. |
 | C14 | `Path(7, "Show/file.mkv").SplitExt() == (Path(7, "Show/file"), ".mkv")`. SplitExt on extensionless input returns `(self, "")`. |
 | C15 | Attempting `path.RelativePath = "x"` raises (frozen). |
+| C16 | No `# allow:` annotation appears inside any SQL string literal in production code (`Core/`, `Features/`, `Services/`, `Repositories/`, `Models/`, `WebService/`, `WorkerService/`, `Scripts/`). PostgreSQL treats `#` as a syntax error so a baked-in annotation is a latent bug. Enforced by `Tests/Unit/test_no_sql_string_annotations.py`. |
+| C17 | `Path.FromLegacyString(p.CanonicalDisplay(prefix_map), sorted_roots) == p` for every constructed `p` whose `StorageRootId` is in the prefix map; `Path.FromJsonDict(p.ToJsonDict()) == p`; `Path.FromRow({StorageRootId, RelativePath}) == p`. Round-trips hold over 1000+ hypothesis-generated examples per property. Verified by `Tests/Unit/test_path_fuzz.py`. |
 
 ## Seams
 
@@ -328,6 +330,11 @@ Unit tests that will exist when the class ships. Names only; bodies belong to th
 | `test_path_immutability.py::test_setattr_raises` | C15, D12. |
 | `test_path_display.py::test_resolved_prefix` | S8 happy path. |
 | `test_path_display.py::test_orphan_marker` | S8 orphan branch. |
+| `test_no_sql_string_annotations.py::test_no_allow_annotation_in_sql_strings` | C16 -- tree scan finds no SQL-string-baked annotations. |
+| `test_no_sql_string_annotations.py::test_gate_catches_deliberate_violation` | C16 -- self-check; gate trips on a deliberate bad string. |
+| `test_path_fuzz.py::test_round_trip_canonical_display_to_legacy_string` | C17 -- CanonicalDisplay/FromLegacyString round-trip property. |
+| `test_path_fuzz.py::test_round_trip_json_dict` | C17 -- ToJsonDict/FromJsonDict round-trip property. |
+| `test_path_fuzz.py::test_round_trip_from_row` | C17 -- ToJsonDict/FromRow round-trip property. |
 
 All unit tests live under `Tests/Unit/`. `TestPathDbRoundTrip.py` is a contract test under `Tests/Contract/`.
 
