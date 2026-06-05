@@ -2,9 +2,9 @@ from datetime import datetime, timezone
 from typing import Optional
 
 
-# directive: path-perfect-implementation | # see path-storage.S1
+# directive: path-class-perfection | # see path.C23
 class RootFolderModel:
-    # directive: path-perfect-implementation | # see path-storage.S1
+    # directive: path-class-perfection | # see path.C23
     def __init__(self, Id: Optional[int] = None, RootFolder: str = "",
                  LastScannedDate: Optional[datetime] = None,
                  TotalSizeGB: float = 0.0,
@@ -29,26 +29,28 @@ class RootFolderModel:
             except PathError:
                 pass
 
-    # directive: path-perfect-implementation | # see path-storage.S1
+    # directive: path-class-perfection | # see path.C23
+    @property
+    def Path(self):
+        from Core.Path.Path import Path as _Path
+        if self.StorageRootId is None:
+            return None
+        return _Path(self.StorageRootId, self.RelativePath or "")
+
+    # directive: path-class-perfection | # see path.C23
     @property
     def RootFolder(self) -> str:
-        if self.StorageRootId is None:
-            return ""
-        from Core.Path.Path import Path, PathError
-        from Core.Path.PathStorageRoots import GetPrefixMap
-        try:
-            return Path(self.StorageRootId, self.RelativePath or "").CanonicalDisplay(GetPrefixMap())
-        except PathError:
-            return ""
+        P = self.Path
+        return str(P) if P is not None else ""
 
-    # directive: path-perfect-implementation | # see path-storage.S1
+    # directive: path-class-perfection | # see path.C23
     @RootFolder.setter
     def RootFolder(self, Value: str) -> None:
         if Value:
-            from Core.Path.Path import Path, PathError
+            from Core.Path.Path import Path as _Path, PathError
             from Core.Path.PathStorageRoots import GetStorageRoots
             try:
-                Parsed = Path.FromLegacyString(Value, GetStorageRoots())
+                Parsed = _Path.FromLegacyString(Value, GetStorageRoots())
                 self.StorageRootId = Parsed.StorageRootId
                 self.RelativePath = Parsed.RelativePath
             except PathError:

@@ -328,16 +328,13 @@ class ContinuousScanService:
                     LoggingService.LogInfo("Stop event received during scan, aborting", 'ContinuousScanService', '_ExecuteScan')
                     break
 
+                # directive: path-class-perfection | # see path.C23
+                _RfDisplay = RootFolder.RootFolder
                 try:
                     try:
-                        LocalRootPath = _PathCS.FromLegacyString(RootFolder.RootFolder, _SrsCS).Resolve(_WkCS)
+                        LocalRootPath = _PathCS.FromLegacyString(_RfDisplay, _SrsCS).Resolve(_WkCS)
                     except _PECS:
-                        LocalRootPath = RootFolder.RootFolder
-                    # Criterion 20 gate. Three states fail validation:
-                    #   - resolved path is not a directory (missing / file)
-                    #   - directory unreadable
-                    #   - directory is empty (local FS showing through where a
-                    #     mounted share should be -- the wakko 2026-05-14 bug)
+                        LocalRootPath = _RfDisplay
                     ValidationError = None
                     if not LocalIsDir(LocalRootPath):
                         ValidationError = "not a directory"
@@ -348,42 +345,33 @@ class ContinuousScanService:
                         except OSError as ListErr:
                             ValidationError = f"unreadable: {ListErr}"
                     if ValidationError:
-                        ErrorMsg = f"Path not accessible: {RootFolder.RootFolder} -> {LocalRootPath} ({ValidationError})"
+                        ErrorMsg = f"Path not accessible: {_RfDisplay} -> {LocalRootPath} ({ValidationError})"
                         LoggingService.LogWarning(f"Pre-scan validation failed, recording ScanJobs failure: {ErrorMsg}", 'ContinuousScanService', '_ExecuteScan')
-                        self._RecordPathValidationFailure(RootFolder.RootFolder, ThisWorkerName, ErrorMsg)
+                        self._RecordPathValidationFailure(_RfDisplay, ThisWorkerName, ErrorMsg)
                         continue
 
-                    # Import FileScanningBusinessService to trigger scan
                     if not self.FileScanningService:
                         from Features.FileScanning.FileScanningBusinessService import FileScanningBusinessService
                         self.FileScanningService = FileScanningBusinessService()
 
-                    # Per-rootfolder claim guard (criterion 11) inside StartScanning
-                    # is the only concurrency check now. The global cap was retired
-                    # with criterion 18c -- it contradicted per-rootfolder claim
-                    # semantics on multi-worker setups.
+                    LoggingService.LogInfo(f"Starting scan for root folder: {_RfDisplay}", 'ContinuousScanService', '_ExecuteScan')
 
-                    LoggingService.LogInfo(f"Starting scan for root folder: {RootFolder.RootFolder}", 'ContinuousScanService', '_ExecuteScan')
-
-                    # Trigger scan for this root folder (skip duplicate cleanup - already ran once above).
-                    # WorkerName is recorded on the ScanJobs row and used by the per-rootfolder duplicate guard.
                     ScanResult = self.FileScanningService.StartScanning(
-                        RootFolder.RootFolder,
+                        _RfDisplay,
                         Recursive=True,
                         SkipDuplicateCleanup=True,
                         WorkerName=ThisWorkerName,
                     )
 
                     if ScanResult.get('Success'):
-                        LoggingService.LogInfo(f"Scan completed successfully for: {RootFolder.RootFolder}", 'ContinuousScanService', '_ExecuteScan')
+                        LoggingService.LogInfo(f"Scan completed successfully for: {_RfDisplay}", 'ContinuousScanService', '_ExecuteScan')
                     elif ScanResult.get('Error') == 'ScanAlreadyRunning':
-                        # Another worker beat us to this rootfolder this tick. Expected with multiple ScanEnabled workers.
-                        LoggingService.LogInfo(f"Skipping {RootFolder.RootFolder}: scan already running on another worker", 'ContinuousScanService', '_ExecuteScan')
+                        LoggingService.LogInfo(f"Skipping {_RfDisplay}: scan already running on another worker", 'ContinuousScanService', '_ExecuteScan')
                     else:
-                        LoggingService.LogError(f"Scan failed for {RootFolder.RootFolder}: {ScanResult.get('Message') or ScanResult.get('ErrorMessage')}", 'ContinuousScanService', '_ExecuteScan')
+                        LoggingService.LogError(f"Scan failed for {_RfDisplay}: {ScanResult.get('Message') or ScanResult.get('ErrorMessage')}", 'ContinuousScanService', '_ExecuteScan')
 
                 except Exception as e:
-                    LoggingService.LogException(f"Error scanning root folder: {RootFolder.RootFolder}", e, 'ContinuousScanService', '_ExecuteScan')
+                    LoggingService.LogException(f"Error scanning root folder: {_RfDisplay}", e, 'ContinuousScanService', '_ExecuteScan')
                     continue
 
             # Update scan statistics
