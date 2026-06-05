@@ -25,27 +25,17 @@ class FileReplacementBusinessService:
             WorkerName = (Ctx.WorkerName if Ctx else None) or socket.gethostname()
         self.WorkerName = WorkerName
         self._Worker: Optional[Worker] = None
-        self._StorageRoots: Optional[List[dict]] = None
-        self._StorageRootPrefixMap: Optional[Dict[int, str]] = None
 
-    # directive: filereplacement-uses-path | # see path.S3
+    # directive: path-class-perfection | # see path.C21
     def _GetWorker(self) -> Worker:
-        """Lazy-construct Worker via FromWorkerContext."""
         if self._Worker is None:
             self._Worker = Worker.FromWorkerContext(Db=self.DatabaseManager.DatabaseService)
         return self._Worker
 
-    # directive: filereplacement-uses-path | # see path.S6
+    # directive: path-class-perfection | # see path.C18
     def _GetStorageRoots(self) -> List[dict]:
-        """Lazy-load StorageRoots prefix list (longest-first) for FromLegacyString fallback."""
-        if self._StorageRoots is None:
-            Rows = self.DatabaseManager.DatabaseService.ExecuteQuery(
-                "SELECT Id, CanonicalPrefix FROM StorageRoots ORDER BY length(CanonicalPrefix) DESC"
-            )
-            self._StorageRoots = [{"Id": R.get("id", R.get("Id")),
-                                    "CanonicalPrefix": R.get("canonicalprefix", R.get("CanonicalPrefix"))}
-                                   for R in Rows]
-        return self._StorageRoots
+        from Core.Path.PathStorageRoots import GetStorageRoots
+        return GetStorageRoots()
 
     # directive: path-schema-migration | # see path.S8
     def _GetPrefixMap(self) -> Dict[int, str]:

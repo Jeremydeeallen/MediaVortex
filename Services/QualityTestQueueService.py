@@ -16,29 +16,17 @@ class QualityTestQueueService:
         """Initialize the service with dependencies."""
         self.DatabaseManager = DatabaseManagerInstance or DatabaseManager()
         self._Worker: Optional[Worker] = None
-        self._StorageRoots: Optional[List[dict]] = None
-        self._PrefixMap: Optional[dict] = None
 
-    # directive: path-schema-migration | # see path.S3
+    # directive: path-class-perfection | # see path.C21
     def _GetWorker(self) -> Worker:
         if self._Worker is None:
             self._Worker = Worker.FromWorkerContext()
         return self._Worker
 
-    # directive: path-schema-migration | # see path.S8
+    # directive: path-class-perfection | # see path.C18
     def _GetPrefixMap(self) -> dict:
-        if self._PrefixMap is None:
-            from Core.Database.DatabaseService import DatabaseService
-            Rows = DatabaseService().ExecuteQuery(
-                "SELECT Id, CanonicalPrefix FROM StorageRoots ORDER BY length(CanonicalPrefix) DESC"
-            )
-            self._StorageRoots = [
-                {"Id": R.get("id", R.get("Id")),
-                 "CanonicalPrefix": R.get("canonicalprefix", R.get("CanonicalPrefix"))}
-                for R in Rows
-            ]
-            self._PrefixMap = {Sr["Id"]: Sr["CanonicalPrefix"] for Sr in self._StorageRoots}
-        return self._PrefixMap
+        from Core.Path.PathStorageRoots import GetPrefixMap
+        return GetPrefixMap()
     
     # directive: path-schema-migration | # see path.S1
     def AddToQualityTestQueue(self, TranscodeAttemptId: int) -> Optional[int]:

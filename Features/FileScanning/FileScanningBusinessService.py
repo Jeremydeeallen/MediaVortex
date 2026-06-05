@@ -22,31 +22,22 @@ from Core.Path.LocalPath import (
 )
 
 
-_FS_WORKER_HOLDER: dict = {"_Worker": None, "_StorageRoots": None}
+# directive: path-class-perfection | # see path.C21
+_FS_WORKER_HOLDER: dict = {"_Worker": None}
 
 
-# directive: filescanning-uses-path | # see path.S3
 def _GetWorker() -> Worker:
-    """Module-level lazy Worker (matches other Phase 7 verticals' lazy pattern; shared across the module to avoid per-call construction during 47K-row hot path)."""
+    """Module-level lazy Worker. Worker holds only Name + Platform from the process-singleton WorkerContext; no DB read at construction; per-call resolves go through Worker.ResolveStorageRoot which is DB-fresh."""
     if _FS_WORKER_HOLDER["_Worker"] is None:
         _FS_WORKER_HOLDER["_Worker"] = Worker.FromWorkerContext()
     return _FS_WORKER_HOLDER["_Worker"]
 
 
-# directive: filescanning-uses-path | # see path.S6
+# directive: path-class-perfection | # see path.C18
 def _GetStorageRoots() -> List[dict]:
-    """Module-level lazy StorageRoots prefix list for FromLegacyString fallback."""
-    if _FS_WORKER_HOLDER["_StorageRoots"] is None:
-        from Core.Database.DatabaseService import DatabaseService
-        Rows = DatabaseService().ExecuteQuery(
-            "SELECT Id, CanonicalPrefix FROM StorageRoots ORDER BY length(CanonicalPrefix) DESC"
-        )
-        _FS_WORKER_HOLDER["_StorageRoots"] = [
-            {"Id": R.get("id", R.get("Id")),
-             "CanonicalPrefix": R.get("canonicalprefix", R.get("CanonicalPrefix"))}
-            for R in Rows
-        ]
-    return _FS_WORKER_HOLDER["_StorageRoots"]
+    """Fresh-per-call StorageRoots prefix list; delegates to Core.Path.PathStorageRoots (no module cache; db-is-authority)."""
+    from Core.Path.PathStorageRoots import GetStorageRoots
+    return GetStorageRoots()
 
 
 # directive: filescanning-uses-path | # see path.S5

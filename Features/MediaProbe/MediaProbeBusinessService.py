@@ -19,29 +19,17 @@ class MediaProbeBusinessService:
         self.Repository = RepositoryInstance or MediaProbeRepository()
         self.FileManager = FileManagerInstance or FileManagerService()
         self._Worker: Optional[Worker] = None
-        self._StorageRoots: Optional[List[dict]] = None
 
-    # directive: mediaprobe-uses-path | # see path.S3
+    # directive: path-class-perfection | # see path.C21
     def _GetWorker(self) -> Worker:
-        """Lazy-construct a Worker via FromWorkerContext on first access; same instance reused for batch probes."""
         if self._Worker is None:
             self._Worker = Worker.FromWorkerContext()
         return self._Worker
 
-    # directive: mediaprobe-uses-path | # see path.S6
+    # directive: path-class-perfection | # see path.C18
     def _GetStorageRoots(self) -> List[dict]:
-        """Lazy-load StorageRoots prefix list sorted longest-first; used by the FromLegacyString fallback when typed pair is unmigrated or orphan."""
-        if self._StorageRoots is None:
-            from Core.Database.DatabaseService import DatabaseService
-            Db = DatabaseService()
-            Rows = Db.ExecuteQuery(
-                "SELECT Id, CanonicalPrefix FROM StorageRoots ORDER BY length(CanonicalPrefix) DESC"
-            )
-            self._StorageRoots = [
-                {"Id": R.get("id", R.get("Id")), "CanonicalPrefix": R.get("canonicalprefix", R.get("CanonicalPrefix"))}
-                for R in Rows
-            ]
-        return self._StorageRoots
+        from Core.Path.PathStorageRoots import GetStorageRoots
+        return GetStorageRoots()
 
     # directive: mediaprobe-uses-path | # see path.S5
     def _ResolveWorkerLocal(self, MediaFile: MediaFileModel, FallbackFilePath: str):
@@ -51,14 +39,15 @@ class MediaProbeBusinessService:
             try:
                 P = Path(MediaFile.StorageRootId, MediaFile.RelativePath)
                 return (P.Resolve(Wk), P)
-            except PathError:
-                pass
+            except PathError as PErr:
+                # directive: path-class-perfection | # see path.C22
+                LoggingService.LogWarning(f"MediaProbeBusinessService._ResolveWorkerLocal: typed-pair ({MediaFile.StorageRootId},{MediaFile.RelativePath!r}) failed to Resolve: {PErr}", 'MediaProbeBusinessService', '_ResolveWorkerLocal')
         if FallbackFilePath:
             try:
                 P = Path.FromLegacyString(FallbackFilePath, self._GetStorageRoots())
                 return (P.Resolve(Wk), P)
-            except PathError:
-                pass
+            except PathError as PErr2:
+                LoggingService.LogWarning(f"MediaProbeBusinessService._ResolveWorkerLocal: legacy FallbackFilePath {FallbackFilePath!r} did not match any StorageRoot prefix: {PErr2}", 'MediaProbeBusinessService', '_ResolveWorkerLocal')
         return (FallbackFilePath, None)
 
     # ─── Single File Probe ─────────────────────────────────────────────

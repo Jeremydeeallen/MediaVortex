@@ -42,23 +42,11 @@ def SynthesizeFilePathInRows(Rows):
     return Rows
 
 
-_FSR_STORAGE_ROOTS_CACHE: dict = {"_StorageRoots": None, "_PrefixMap": None}
-
-
-# directive: filescanning-uses-path | # see path.S6
-def _GetStorageRoots(Db) -> list:
-    """Lazy StorageRoots prefix list for shape-agnostic path parsing."""
-    if _FSR_STORAGE_ROOTS_CACHE["_StorageRoots"] is None:
-        Rows = Db.ExecuteQuery(
-            "SELECT Id, CanonicalPrefix FROM StorageRoots ORDER BY length(CanonicalPrefix) DESC"
-        )
-        _FSR_STORAGE_ROOTS_CACHE["_StorageRoots"] = [
-            {"Id": R.get("id", R.get("Id")),
-             "CanonicalPrefix": R.get("canonicalprefix", R.get("CanonicalPrefix"))}
-            for R in Rows
-        ]
-        _FSR_STORAGE_ROOTS_CACHE["_PrefixMap"] = {Sr["Id"]: Sr["CanonicalPrefix"] for Sr in _FSR_STORAGE_ROOTS_CACHE["_StorageRoots"]}
-    return _FSR_STORAGE_ROOTS_CACHE["_StorageRoots"]
+# directive: path-class-perfection | # see path.C18
+def _GetStorageRoots(Db=None) -> list:
+    """Fresh-per-call StorageRoots prefix list; delegates to Core.Path.PathStorageRoots (Db arg ignored; kept for back-compat with existing call sites; no module cache; db-is-authority)."""
+    from Core.Path.PathStorageRoots import GetStorageRoots
+    return GetStorageRoots()
 
 
 class FileScanningRepository(BaseRepository):

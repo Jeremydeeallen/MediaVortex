@@ -34,27 +34,17 @@ class QualityTestingBusinessService:
         self.ActiveFFmpegProcess = None
         self.ActiveFFmpegThread = None
         self._Worker: Optional[Worker] = None
-        self._StorageRoots: Optional[List[dict]] = None
 
-    # directive: qualitytesting-uses-path | # see path.S3
+    # directive: path-class-perfection | # see path.C21
     def _GetWorker(self) -> Worker:
-        """Lazy-construct a Worker via FromWorkerContext on first access."""
         if self._Worker is None:
             self._Worker = Worker.FromWorkerContext()
         return self._Worker
 
-    # directive: qualitytesting-uses-path | # see path.S6
+    # directive: path-class-perfection | # see path.C18
     def _GetStorageRoots(self) -> List[dict]:
-        """Lazy-load StorageRoots prefix list for the FromLegacyString fallback path."""
-        if self._StorageRoots is None:
-            from Core.Database.DatabaseService import DatabaseService
-            Rows = DatabaseService().ExecuteQuery(
-                "SELECT Id, CanonicalPrefix FROM StorageRoots ORDER BY length(CanonicalPrefix) DESC"
-            )
-            self._StorageRoots = [{"Id": R.get("id", R.get("Id")),
-                                    "CanonicalPrefix": R.get("canonicalprefix", R.get("CanonicalPrefix"))}
-                                   for R in Rows]
-        return self._StorageRoots
+        from Core.Path.PathStorageRoots import GetStorageRoots
+        return GetStorageRoots()
 
 
     # directive: nvenc-rate-anchored-remediation

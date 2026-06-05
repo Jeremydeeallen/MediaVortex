@@ -18,23 +18,11 @@ from Services.FileManagerService import FileManagerService
 from Repositories.DatabaseManager import DatabaseManager
 
 
-_TQ_STORAGE_ROOTS_CACHE: dict = {"_StorageRoots": None}
-
-
-# directive: transcodequeue-uses-path | # see path.S6
+# directive: path-class-perfection | # see path.C18
 def _GetStorageRoots() -> List[dict]:
-    """Lazy StorageRoots prefix list for FromLegacyString (shape-agnostic path parsing)."""
-    if _TQ_STORAGE_ROOTS_CACHE["_StorageRoots"] is None:
-        from Core.Database.DatabaseService import DatabaseService
-        Rows = DatabaseService().ExecuteQuery(
-            "SELECT Id, CanonicalPrefix FROM StorageRoots ORDER BY length(CanonicalPrefix) DESC"
-        )
-        _TQ_STORAGE_ROOTS_CACHE["_StorageRoots"] = [
-            {"Id": R.get("id", R.get("Id")),
-             "CanonicalPrefix": R.get("canonicalprefix", R.get("CanonicalPrefix"))}
-            for R in Rows
-        ]
-    return _TQ_STORAGE_ROOTS_CACHE["_StorageRoots"]
+    """Fresh-per-call StorageRoots prefix list; delegates to Core.Path.PathStorageRoots (no module cache; db-is-authority)."""
+    from Core.Path.PathStorageRoots import GetStorageRoots
+    return GetStorageRoots()
 
 
 # directive: path-schema-migration | # see path.S8

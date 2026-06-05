@@ -22,28 +22,17 @@ class OptimizationViewModel:
         self.IsLoading = False
         self.ErrorMessage = ""
         self._Worker: Optional[Worker] = None
-        self._StorageRoots: Optional[List[dict]] = None
 
-    # directive: path-schema-migration | # see path.S5
+    # directive: path-class-perfection | # see path.C21
     def _GetWorker(self) -> Worker:
-        """Lazy-construct a Worker via FromWorkerContext on first access."""
         if self._Worker is None:
             self._Worker = Worker.FromWorkerContext()
         return self._Worker
 
-    # directive: path-schema-migration | # see path.S5
+    # directive: path-class-perfection | # see path.C18
     def _GetStorageRoots(self) -> List[dict]:
-        """Lazy-load StorageRoots prefix list sorted longest-first; used by FromLegacyString fallback."""
-        if self._StorageRoots is None:
-            from Core.Database.DatabaseService import DatabaseService
-            Rows = DatabaseService().ExecuteQuery(
-                "SELECT Id, CanonicalPrefix FROM StorageRoots ORDER BY length(CanonicalPrefix) DESC"
-            )
-            self._StorageRoots = [
-                {"Id": R.get("id", R.get("Id")), "CanonicalPrefix": R.get("canonicalprefix", R.get("CanonicalPrefix"))}
-                for R in Rows
-            ]
-        return self._StorageRoots
+        from Core.Path.PathStorageRoots import GetStorageRoots
+        return GetStorageRoots()
 
     # directive: path-schema-migration | # see path.S5
     def _ResolveWorkerLocal(self, MediaFile, FallbackFilePath: str):
@@ -55,14 +44,15 @@ class OptimizationViewModel:
             try:
                 P = Path(Sid, Rel)
                 return (P.Resolve(Wk), P)
-            except PathError:
-                pass
+            except PathError as PErr:
+                # directive: path-class-perfection | # see path.C22
+                LoggingService.LogWarning(f"OptimizationViewModel._ResolveLocalAndPath: typed-pair ({Sid},{Rel!r}) failed to Resolve: {PErr}", 'OptimizationViewModel', '_ResolveLocalAndPath')
         if FallbackFilePath:
             try:
                 P = Path.FromLegacyString(FallbackFilePath, self._GetStorageRoots())
                 return (P.Resolve(Wk), P)
-            except PathError:
-                pass
+            except PathError as PErr2:
+                LoggingService.LogWarning(f"OptimizationViewModel._ResolveLocalAndPath: legacy FallbackFilePath {FallbackFilePath!r} did not match any StorageRoot prefix: {PErr2}", 'OptimizationViewModel', '_ResolveLocalAndPath')
         return (FallbackFilePath, None)
 
     def GetLocalAnalysis(self) -> Dict[str, Any]:
