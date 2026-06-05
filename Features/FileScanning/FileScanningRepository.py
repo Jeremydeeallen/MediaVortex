@@ -8,7 +8,7 @@ from Core.Logging.LoggingService import LoggingService
 from Core.Models.MediaFileModel import MediaFileModel
 from Core.Path.Path import Path, PathError
 from Core.Path.PathStorageRoots import GetStorageRoots, GetPrefixMap
-from Core.Path.LocalPath import LocalSplitExt
+from Core.Path.LocalPath import LocalSplitExt, LocalExists, LocalIsDir
 from Features.FileScanning.Models.RootFolderModel import RootFolderModel
 from Features.FileScanning.Models.SeasonModel import SeasonModel
 
@@ -59,53 +59,6 @@ def _GetStorageRoots(Db) -> list:
         ]
         _FSR_STORAGE_ROOTS_CACHE["_PrefixMap"] = {Sr["Id"]: Sr["CanonicalPrefix"] for Sr in _FSR_STORAGE_ROOTS_CACHE["_StorageRoots"]}
     return _FSR_STORAGE_ROOTS_CACHE["_StorageRoots"]
-
-
-# directive: filescanning-uses-path | # see path.S5
-def _LocalExists(Value: str) -> bool:
-    """Existence on a worker-local string."""
-    return bool(Value) and os.path.exists(Value)
-
-
-# directive: filescanning-uses-path | # see path.S5
-def _LocalIsDir(Value: str) -> bool:
-    """Dir-check on a worker-local string."""
-    return bool(Value) and os.path.isdir(Value)
-
-
-# directive: filescanning-uses-path | # see path.S5
-def _Normalize(Value: str) -> str:
-    """Backslash normalization for canonical Windows-shape paths."""
-    return (Value or "").replace("/", "\\")
-
-
-# directive: filescanning-uses-path | # see path.S5
-def _Join(Base: str, *Children: str) -> str:
-    """Shape-agnostic join via Path.Join chained; falls through to ntpath on parse failure."""
-    if not Base:
-        return Base or ""
-    try:
-        from Core.Database.DatabaseService import DatabaseService
-        _GetStorageRoots(DatabaseService())
-        P = Path.FromLegacyString(Base, _FSR_STORAGE_ROOTS_CACHE["_StorageRoots"])
-        for Child in Children:
-            if Child:
-                P = P.Join(Child.replace("\\", "/").strip("/"))
-        return P.CanonicalDisplay(_FSR_STORAGE_ROOTS_CACHE["_PrefixMap"])
-    except Exception:
-        BackslashJoin = Base
-        for Child in Children:
-            if Child:
-                if not BackslashJoin.endswith("\\") and not BackslashJoin.endswith("/"):
-                    BackslashJoin += "\\"
-                BackslashJoin += Child.replace("/", "\\").lstrip("\\")
-        return BackslashJoin
-
-
-# directive: path-schema-migration | # see path.S5
-def _SplitExt(Value: str) -> tuple:
-    """Splitext for worker-local paths (LocalPath = host-OS shape)."""
-    return LocalSplitExt(Value)
 
 
 class FileScanningRepository(BaseRepository):
@@ -778,8 +731,8 @@ class FileScanningRepository(BaseRepository):
         try:
             if not Path:
                 return Path
-            normalized_path = _Normalize(Path)
-            if not _LocalExists(normalized_path):
+            normalized_path = ntpath.normpath(Path or "")
+            if not LocalExists(normalized_path):
                 LoggingService.LogWarning(f"Path does not exist, cannot normalize: {Path}", "FileScanningRepository", "NormalizePathToFilesystemCase")
                 return normalized_path
             # normalized_path is canonical display (Windows backslash) -- literal "\\" + ntpath.join so splitting works on Linux too
@@ -800,7 +753,7 @@ class FileScanningRepository(BaseRepository):
                 if not part:
                     continue
                 try:
-                    if _LocalIsDir(current_path):
+                    if LocalIsDir(current_path):
                         dir_contents = os.listdir(current_path)
                         actual_name = None
                         for item in dir_contents:
@@ -837,7 +790,7 @@ class FileScanningRepository(BaseRepository):
                 return self._MapMediaFileSummaryRow(rows[0], "exact")
 
             # 2. Match without extension (handles container change: .mkv -> .mp4)
-            nameNoExt = _SplitExt(FileName)[0]
+            nameNoExt = LocalSplitExt(FileName)[0]
             query = f"SELECT {selectCols} FROM MediaFiles WHERE LOWER(FileName) LIKE LOWER(%s) ESCAPE '!' LIMIT 1"
             rows = self.ExecuteQuery(query, (nameNoExt + '%',))
             if rows:
@@ -867,7 +820,7 @@ class FileScanningRepository(BaseRepository):
 
             # 2. Match without extension (handles container change: .mkv -> .mp4)
             if not rows:
-                nameNoExt = _SplitExt(FileName)[0]
+                nameNoExt = LocalSplitExt(FileName)[0]
                 likeQuery = f"SELECT {self._MEDIA_FILE_SELECT_COLS} FROM MediaFiles WHERE LOWER(FileName) LIKE LOWER(%s) ESCAPE '!' LIMIT 1"
                 rows = self.ExecuteQuery(likeQuery, (EscapeLikePattern(nameNoExt) + '%',))
 
