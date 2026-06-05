@@ -6,10 +6,7 @@ from typing import Optional, Dict, Any, List
 from pathlib import Path
 from Services.LoggingService import LoggingService
 from Repositories.DatabaseManager import DatabaseManager
-
-
-# directive: path-schema-migration | # see path.S8
-def _LocalExists(Value): return bool(Value) and os.path.exists(Value)
+from Core.Path.LocalPath import LocalExists
 
 
 class FFmpegService:
@@ -62,7 +59,7 @@ class FFmpegService:
         try:
             # Use local project FFmpeg from FFmpegMaster\bin folder
             ProjectFFmpegPath = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'FFmpegMaster', 'bin', 'ffmpeg.exe')
-            if _LocalExists(ProjectFFmpegPath):
+            if LocalExists(ProjectFFmpegPath):
                 return ProjectFFmpegPath
             # Fallback: check system PATH (Linux containers, etc.)
             SystemPath = shutil.which('ffmpeg')
@@ -81,7 +78,7 @@ class FFmpegService:
         try:
             # Use local project FFprobe from FFmpegMaster\bin folder
             ProjectFFprobePath = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'FFmpegMaster', 'bin', 'ffprobe.exe')
-            if _LocalExists(ProjectFFprobePath):
+            if LocalExists(ProjectFFprobePath):
                 return ProjectFFprobePath
             # Fallback: check system PATH (Linux containers, etc.)
             SystemPath = shutil.which('ffprobe')
@@ -107,7 +104,7 @@ class FFmpegService:
                 ProjectRoot = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
                 AbsolutePath = os.path.join(ProjectRoot, RelativePath)
 
-                if _LocalExists(AbsolutePath):
+                if LocalExists(AbsolutePath):
                     return AbsolutePath
                 else:
                     LoggingService.LogError(f"FFmpeg path from settings not found: {AbsolutePath}", 'GetFFmpegPathFromSettings', 'FFmpegService')
@@ -133,7 +130,7 @@ class FFmpegService:
                 ProjectRoot = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
                 AbsolutePath = os.path.join(ProjectRoot, RelativePath)
 
-                if _LocalExists(AbsolutePath):
+                if LocalExists(AbsolutePath):
                     return AbsolutePath
                 else:
                     LoggingService.LogError(f"FFprobe path from settings not found: {AbsolutePath}", 'GetFFprobePathFromSettings', 'FFmpegService')
