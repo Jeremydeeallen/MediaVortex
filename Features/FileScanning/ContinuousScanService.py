@@ -316,19 +316,21 @@ class ContinuousScanService:
             except Exception as e:
                 LoggingService.LogException("Error during pre-scan duplicate cleanup", e, 'ContinuousScanService', '_ExecuteScan')
 
-            # Scan each eligible root folder
+            # directive: path-class-perfection | # see path.C18
+            from Core.Path.Path import Path as _PathCS, PathError as _PECS
+            from Core.Path.PathStorageRoots import GetStorageRoots as _GSRCS
+            from Core.Path.Worker import Worker as _WCS
+            _SrsCS = _GSRCS()
+            _WkCS = _WCS.FromWorkerContext()
+
             for RootFolder in EligibleFolders:
                 if self.StopEvent.is_set():
                     LoggingService.LogInfo("Stop event received during scan, aborting", 'ContinuousScanService', '_ExecuteScan')
                     break
 
                 try:
-                    # directive: path-perfect-implementation | # see path.S11
-                    from Core.Path.Path import Path as _PathCS, PathError as _PECS
-                    from Core.Path.PathStorageRoots import GetStorageRoots as _GSRCS
-                    from Core.Path.Worker import Worker as _WCS
                     try:
-                        LocalRootPath = _PathCS.FromLegacyString(RootFolder.RootFolder, _GSRCS()).Resolve(_WCS.FromWorkerContext())
+                        LocalRootPath = _PathCS.FromLegacyString(RootFolder.RootFolder, _SrsCS).Resolve(_WkCS)
                     except _PECS:
                         LocalRootPath = RootFolder.RootFolder
                     # Criterion 20 gate. Three states fail validation:

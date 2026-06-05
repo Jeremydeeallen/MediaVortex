@@ -1339,14 +1339,15 @@ class QualityTestingBusinessService:
                         'ErrorMessage': f'Attempt {TranscodeAttemptId} has FileReplaced=true and no `.old` backup was found alongside the replaced file. Original source not available for comparison (KeepSource was false).',
                     }
             else:
-                # directive: path-schema-migration | # see path.S8
+                # directive: path-class-perfection | # see path.C18
                 from Core.Path.Path import Path as _P2, PathError as _PE2
                 from Core.Path.PathStorageRoots import GetPrefixMap as _GPM2
+                _Pm2 = _GPM2()
                 def SynthesizeFilePath(s, r):
                     if s is None:
                         return ""
                     try:
-                        return _P2(s, r or "").CanonicalDisplay(_GPM2())
+                        return _P2(s, r or "").CanonicalDisplay(_Pm2)
                     except _PE2:
                         return ""
                 TfpRows = Db.ExecuteQuery(
@@ -1549,14 +1550,15 @@ class QualityTestingBusinessService:
         for this fix. Tracked separately.
         """
         try:
-            # directive: path-schema-migration | # see path.S8
+            # directive: path-class-perfection | # see path.C18
             from Core.Path.Path import Path as _P, PathError as _PE
             from Core.Path.PathStorageRoots import GetPrefixMap as _GPM
+            _Pm = _GPM()
             def SynthesizeFilePath(s, r):
                 if s is None:
                     return ""
                 try:
-                    return _P(s, r or "").CanonicalDisplay(_GPM())
+                    return _P(s, r or "").CanonicalDisplay(_Pm)
                 except _PE:
                     return ""
             FilePathRows = self.DatabaseManager.DatabaseService.ExecuteQuery(

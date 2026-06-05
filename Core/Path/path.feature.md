@@ -278,6 +278,7 @@ Explicit answers to every non-obvious case the design surfaced.
 | C15 | Attempting `path.RelativePath = "x"` raises (frozen). |
 | C16 | No `# allow:` annotation appears inside any SQL string literal in production code (`Core/`, `Features/`, `Services/`, `Repositories/`, `Models/`, `WebService/`, `WorkerService/`, `Scripts/`). PostgreSQL treats `#` as a syntax error so a baked-in annotation is a latent bug. Enforced by `Tests/Unit/test_no_sql_string_annotations.py`. |
 | C17 | `Path.FromLegacyString(p.CanonicalDisplay(prefix_map), sorted_roots) == p` for every constructed `p` whose `StorageRootId` is in the prefix map; `Path.FromJsonDict(p.ToJsonDict()) == p`; `Path.FromRow({StorageRootId, RelativePath}) == p`. Round-trips hold over 1000+ hypothesis-generated examples per property. Verified by `Tests/Unit/test_path_fuzz.py`. |
+| C18 | `Core/Path/PathStorageRoots.GetStorageRoots()` and `GetPrefixMap()` read PostgreSQL fresh per call. No module-level cache, no singleton, no `Invalidate()`. Mid-flight edits to the `StorageRoots` table are observed by the next call (per `.claude/rules/db-is-authority.md`). Hot-path callers (per-row loops, per-iteration closures) MUST hoist the call out of the inner scope; verified per site in the AC #2 commit. |
 
 ## Seams
 
