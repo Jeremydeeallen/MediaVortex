@@ -154,19 +154,25 @@ class FileScanningRepository(BaseRepository):
 
     # ─── Root Folder Methods ───────────────────────────────────────────
 
+    # directive: path-perfect-implementation | # see path-storage.S1
     def GetAllRootFolders(self, SortColumn='RootFolder', SortOrder='ASC') -> List[RootFolderModel]:
         ValidColumns = ['Id', 'RootFolder', 'LastScannedDate', 'TotalSizeGB', 'PreferredWorkerName']
         if SortColumn not in ValidColumns:
             SortColumn = 'RootFolder'
         if SortOrder.upper() not in ['ASC', 'DESC']:
             SortOrder = 'ASC'
-        query = f"SELECT Id, RootFolder, LastScannedDate, TotalSizeGB, PreferredWorkerName FROM RootFolders ORDER BY {SortColumn} {SortOrder.upper()}"
+        query = (
+            "SELECT Id, RootFolder, StorageRootId, RelativePath, LastScannedDate, TotalSizeGB, PreferredWorkerName "
+            f"FROM RootFolders ORDER BY {SortColumn} {SortOrder.upper()}"
+        )
         rows = self.ExecuteQuery(query)
         rootFolders = []
         for row in rows:
             rootFolder = RootFolderModel(
                 Id=row['Id'],
                 RootFolder=row['RootFolder'],
+                StorageRootId=row.get('StorageRootId'),
+                RelativePath=row.get('RelativePath') or '',
                 LastScannedDate=row['LastScannedDate'],
                 TotalSizeGB=row['TotalSizeGB'],
                 PreferredWorkerName=row.get('PreferredWorkerName'),
@@ -174,8 +180,12 @@ class FileScanningRepository(BaseRepository):
             rootFolders.append(rootFolder)
         return rootFolders
 
+    # directive: path-perfect-implementation | # see path-storage.S1
     def GetRootFolderById(self, RootFolderId: int) -> Optional[RootFolderModel]:
-        query = "SELECT Id, RootFolder, LastScannedDate, TotalSizeGB, PreferredWorkerName FROM RootFolders WHERE Id = %s"
+        query = (
+            "SELECT Id, RootFolder, StorageRootId, RelativePath, LastScannedDate, TotalSizeGB, PreferredWorkerName "
+            "FROM RootFolders WHERE Id = %s"
+        )
         rows = self.ExecuteQuery(query, (RootFolderId,))
         if not rows:
             return None
@@ -183,23 +193,30 @@ class FileScanningRepository(BaseRepository):
         return RootFolderModel(
             Id=row['Id'],
             RootFolder=row['RootFolder'],
+            StorageRootId=row.get('StorageRootId'),
+            RelativePath=row.get('RelativePath') or '',
             LastScannedDate=row['LastScannedDate'],
             TotalSizeGB=row['TotalSizeGB'],
             PreferredWorkerName=row.get('PreferredWorkerName'),
         )
 
+    # directive: path-perfect-implementation | # see path-storage.S1
     def SaveRootFolder(self, RootFolder: RootFolderModel) -> int:
         try:
             RootFolder.RootFolder = self.NormalizePathToFilesystemCase(RootFolder.RootFolder)
+            if RootFolder.StorageRootId is None:
+                raise ValueError(f"SaveRootFolder: RootFolder {RootFolder.RootFolder!r} did not parse to a StorageRoot prefix")
             LoggingService.LogFunctionEntry("SaveRootFolder", 'FileScanningRepository', f"RootFolder: {RootFolder.RootFolder}, Size: {RootFolder.TotalSizeGB}GB")
             connection = self.DatabaseService.GetConnection()
             try:
                 cursor = connection.cursor()
                 if RootFolder.Id is None:
                     LoggingService.LogInfo("Inserting new root folder...")
-                    query = """INSERT INTO RootFolders (RootFolder, LastScannedDate, TotalSizeGB) VALUES (%s, %s, %s) RETURNING Id"""
-                    parameters = (RootFolder.RootFolder, RootFolder.LastScannedDate, RootFolder.TotalSizeGB)
-                    LoggingService.LogInfo("Insert root folder parameters: {}", "FileScanningRepository", "SaveRootFolder", parameters)
+                    query = (
+                        "INSERT INTO RootFolders (RootFolder, StorageRootId, RelativePath, LastScannedDate, TotalSizeGB) "
+                        "VALUES (%s, %s, %s, %s, %s) RETURNING Id"
+                    )
+                    parameters = (RootFolder.RootFolder, RootFolder.StorageRootId, RootFolder.RelativePath, RootFolder.LastScannedDate, RootFolder.TotalSizeGB)
                     cursor.execute(query, parameters)
                     rootFolderId = cursor.fetchone()[0]
                     connection.commit()
@@ -207,9 +224,12 @@ class FileScanningRepository(BaseRepository):
                     return rootFolderId
                 else:
                     LoggingService.LogInfo("Updating existing root folder with ID: {}", "FileScanningRepository", "SaveRootFolder", RootFolder.Id)
-                    query = """UPDATE RootFolders SET RootFolder = %s, LastScannedDate = %s, TotalSizeGB = %s WHERE Id = %s"""
-                    parameters = (RootFolder.RootFolder, RootFolder.LastScannedDate, RootFolder.TotalSizeGB, RootFolder.Id)
-                    LoggingService.LogInfo(f"Update root folder parameters: {parameters}", "FileScanningRepository", "SaveRootFolder")
+                    query = (
+                        "UPDATE RootFolders "
+                        "SET RootFolder = %s, StorageRootId = %s, RelativePath = %s, LastScannedDate = %s, TotalSizeGB = %s "
+                        "WHERE Id = %s"
+                    )
+                    parameters = (RootFolder.RootFolder, RootFolder.StorageRootId, RootFolder.RelativePath, RootFolder.LastScannedDate, RootFolder.TotalSizeGB, RootFolder.Id)
                     cursor.execute(query, parameters)
                     connection.commit()
                     affectedRows = cursor.rowcount
@@ -344,12 +364,13 @@ class FileScanningRepository(BaseRepository):
         count_rows = self.ExecuteQuery(count_query, tuple(params) if params else None)
         total_count = count_rows[0]['Count'] if count_rows else 0
 
-        # Get paginated results
         offset = (Page - 1) * PageSize
-        data_query = f"""SELECT Id, RootFolder, LastScannedDate, TotalSizeGB
-                         FROM RootFolders {where_clause}
-                         ORDER BY {SortColumn} {SortOrder.upper()}
-                         LIMIT %s OFFSET %s"""
+        data_query = (
+            "SELECT Id, RootFolder, StorageRootId, RelativePath, LastScannedDate, TotalSizeGB "
+            f"FROM RootFolders {where_clause} "
+            f"ORDER BY {SortColumn} {SortOrder.upper()} "
+            "LIMIT %s OFFSET %s"
+        )
         data_params = params + [PageSize, offset]
         rows = self.ExecuteQuery(data_query, tuple(data_params))
 
@@ -357,7 +378,9 @@ class FileScanningRepository(BaseRepository):
         for row in rows:
             root_folders.append(RootFolderModel(
                 Id=row['Id'], RootFolder=row['RootFolder'],
-                LastScannedDate=row['LastScannedDate'], TotalSizeGB=row['TotalSizeGB']
+                StorageRootId=row.get('StorageRootId'),
+                RelativePath=row.get('RelativePath') or '',
+                LastScannedDate=row['LastScannedDate'], TotalSizeGB=row['TotalSizeGB'],
             ))
 
         return {

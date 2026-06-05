@@ -564,26 +564,31 @@ class FFmpegAnalysisService:
         """Check if FFprobe is available for analysis."""
         return self.FFmpegService.IsFFprobeAvailable()
     
+    # directive: path-perfect-implementation | # see filescanning.S1
     def CreateFFprobeScanJob(self, JobId: str, RootFolderPath: str, Recursive: bool):
-        """Create a new FFprobe scan job record in the database."""
         try:
+            from Core.Path.Path import Path, PathError
+            from Core.Path.PathStorageRoots import GetStorageRoots
             LoggingService.LogInfo(f"Creating FFprobe scan job {JobId} for {RootFolderPath}, Recursive: {Recursive}", 'FFmpegAnalysisService', 'CreateFFprobeScanJob')
-            
-            Query = """
-            INSERT INTO ScanJobs (JobId, RootFolderPath, Recursive, Status, StartTime, LastUpdated, ScanType)
-            VALUES (%s, %s, %s, 'Pending', %s, %s, 'FFprobe')
-            """
+            try:
+                Parsed = Path.FromLegacyString(RootFolderPath, GetStorageRoots())
+                Sid, Rel = Parsed.StorageRootId, Parsed.RelativePath
+            except PathError:
+                Sid, Rel = None, None
+            Query = (
+                "INSERT INTO ScanJobs (JobId, RootFolderPath, StorageRootId, RelativePath, Recursive, Status, StartTime, LastUpdated, ScanType) "
+                "VALUES (%s, %s, %s, %s, %s, 'Pending', %s, %s, 'FFprobe')"
+            )
             Now = datetime.now(timezone.utc)
-            LoggingService.LogInfo(f"Executing FFprobe query with params: JobId={JobId}, RootFolderPath={RootFolderPath}, Recursive={Recursive}, Now={Now}")
-            
+
             if self.DatabaseService:
-                self.DatabaseService.ExecuteNonQuery(Query, (JobId, RootFolderPath, Recursive, Now, Now))
+                self.DatabaseService.ExecuteNonQuery(Query, (JobId, RootFolderPath, Sid, Rel, Recursive, Now, Now))
             else:
                 LoggingService.LogWarning("DatabaseService not available", 'CreateFFprobeScanJob', 'FFmpegAnalysisService')
                 return
-            
+
             LoggingService.LogInfo(f"Successfully created FFprobe scan job {JobId} for {RootFolderPath}")
-            
+
         except Exception as e:
             LoggingService.LogException(f"Error creating FFprobe scan job {JobId}", e, 'CreateFFprobeScanJob', 'FFmpegAnalysisService')
             raise

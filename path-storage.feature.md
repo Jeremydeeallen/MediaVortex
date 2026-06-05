@@ -172,6 +172,19 @@ operator-data cleanup. Legacy columns (`RootFolders.RootFolder`,
 `ScanJobs.RootFolderPath`) stay populated; dual-write lands in Step 2; legacy
 column drop lands in Step 6.
 
+**PATH-PERFECT-IMPLEMENTATION STEP 2 COMPLETE (2026-06-05).** Models + repositories
+dual-write. `RootFolderModel` now carries `StorageRootId: int` + `RelativePath: str`
+as the canonical identity; the legacy `RootFolder` is a `@property` synthesized via
+`Path(Sid, Rel).CanonicalDisplay(GetPrefixMap())` so templates and existing
+consumers keep binding to it. `FileScanningRepository.GetAllRootFolders`,
+`GetRootFolderById`, `GetRootFoldersPaginated`, `SaveRootFolder` all SELECT both
+columns + INSERT/UPDATE both columns. Every ScanJobs INSERT site
+(`FileScanningBusinessService.CreateScanJob`, `ContinuousScanService._RecordPathValidationFailure`,
+`FFmpegAnalysisService.CreateFFprobeScanJob`) parses the canonical string via
+`Path.FromLegacyString` and writes `(StorageRootId, RelativePath)` alongside the
+legacy column. `SaveRootFolder` rejects rows whose canonical does not parse to
+a known StorageRoot, preventing dual-write drift.
+
 ### Progress
 
 - [x] 1. Diagnose OS coupling in canonical path storage (KNOWN-ISSUES single source of truth)

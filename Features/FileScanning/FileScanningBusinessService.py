@@ -367,15 +367,22 @@ class FileScanningBusinessService:
                 'Error': 'ScanError'
             }
 
+    # directive: path-perfect-implementation | # see filescanning.S1
     def CreateScanJob(self, JobId: str, RootFolderPath: str, Recursive: bool, WorkerName: Optional[str] = None):
-        """Create a new scan job record in the database."""
         try:
-            Query = """
-            INSERT INTO ScanJobs (JobId, RootFolderPath, Recursive, Status, StartTime, LastUpdated, ScanType, WorkerName)
-            VALUES (%s, %s, %s, 'Running', %s, %s, 'File', %s)
-            """
+            from Core.Path.Path import Path, PathError
+            from Core.Path.PathStorageRoots import GetStorageRoots
+            try:
+                Parsed = Path.FromLegacyString(RootFolderPath, GetStorageRoots())
+                Sid, Rel = Parsed.StorageRootId, Parsed.RelativePath
+            except PathError:
+                Sid, Rel = None, None
+            Query = (
+                "INSERT INTO ScanJobs (JobId, RootFolderPath, StorageRootId, RelativePath, Recursive, Status, StartTime, LastUpdated, ScanType, WorkerName) "
+                "VALUES (%s, %s, %s, %s, %s, 'Running', %s, %s, 'File', %s)"
+            )
             Now = datetime.now(timezone.utc)
-            self.Repository.DatabaseService.ExecuteNonQuery(Query, (JobId, RootFolderPath, Recursive, Now, Now, WorkerName))
+            self.Repository.DatabaseService.ExecuteNonQuery(Query, (JobId, RootFolderPath, Sid, Rel, Recursive, Now, Now, WorkerName))
 
         except Exception as e:
             LoggingService.LogException(f"Error creating scan job {JobId}", e, 'FileScanningBusinessService', 'CreateScanJob')

@@ -437,15 +437,23 @@ class ContinuousScanService:
         try:
             import uuid
             from Core.Database.DatabaseService import DatabaseService
+            from Core.Path.Path import Path, PathError
+            from Core.Path.PathStorageRoots import GetStorageRoots
             Db = DatabaseService()
             Now = datetime.now(timezone.utc)
             JobId = str(uuid.uuid4())
-            Query = """
-                INSERT INTO ScanJobs (JobId, RootFolderPath, Recursive, Status, StartTime, EndTime,
-                                      LastUpdated, ScanType, WorkerName, ErrorMessage)
-                VALUES (%s, %s, TRUE, 'Failed', %s, %s, %s, 'File', %s, %s)
-            """
-            Db.ExecuteNonQuery(Query, (JobId, RootFolderPath, Now, Now, Now, WorkerName, ErrorMessage))
+            try:
+                Parsed = Path.FromLegacyString(RootFolderPath, GetStorageRoots())
+                Sid, Rel = Parsed.StorageRootId, Parsed.RelativePath
+            except PathError:
+                Sid, Rel = None, None
+            # directive: path-perfect-implementation | # see filescanning.S1
+            Query = (
+                "INSERT INTO ScanJobs (JobId, RootFolderPath, StorageRootId, RelativePath, Recursive, Status, StartTime, EndTime, "
+                "LastUpdated, ScanType, WorkerName, ErrorMessage) "
+                "VALUES (%s, %s, %s, %s, TRUE, 'Failed', %s, %s, %s, 'File', %s, %s)"
+            )
+            Db.ExecuteNonQuery(Query, (JobId, RootFolderPath, Sid, Rel, Now, Now, Now, WorkerName, ErrorMessage))
         except Exception as e:
             LoggingService.LogException("Error recording path validation failure", e, 'ContinuousScanService', '_RecordPathValidationFailure')
 
