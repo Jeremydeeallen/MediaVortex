@@ -4,46 +4,15 @@ from typing import List, Optional, Tuple, Dict, Any
 from pathlib import Path
 from Services.LoggingService import LoggingService
 from Services.FFmpegAnalysisService import FFmpegAnalysisService
-# directive: path-schema-migration | # see path.S8
-from Core.Path.LocalPath import LocalBasename, LocalDirname, LocalJoin
+# directive: path-schema-migration | # see path.S9
+from Core.Path.LocalPath import (
+    LocalBasename, LocalDirname, LocalJoin,
+    LocalExists, LocalIsFile, LocalIsDir, LocalGetSize,
+    LocalNormCase, LocalSamePath,
+)
 
 
-# directive: path-schema-migration | # see path.S8
-def _LocalExists(Value) -> bool:
-    """Local filesystem existence check for a worker-resolved string value."""
-    return bool(Value) and os.path.exists(Value)
-
-
-# directive: path-schema-migration | # see path.S8
-def _LocalIsFile(Value) -> bool:
-    """Local filesystem isfile check for a worker-resolved string value."""
-    return bool(Value) and os.path.isfile(Value)
-
-
-# directive: path-schema-migration | # see path.S8
-def _LocalIsDir(Value) -> bool:
-    """Local filesystem isdir check for a worker-resolved string value."""
-    return bool(Value) and os.path.isdir(Value)
-
-
-# directive: path-schema-migration | # see path.S8
-def _LocalGetSize(Value) -> int:
-    """Local filesystem getsize for a worker-resolved string value."""
-    return os.path.getsize(Value)
-
-
-# directive: path-schema-migration | # see path.S8
-def _NormalizeValue(Value) -> str:
-    """Forward-slash to backslash normalization for a worker-resolved string value."""
-    return (Value or "").replace("/", "\\")
-
-
-# directive: path-schema-migration | # see path.S8
-def _ValuesEqual(A, B) -> bool:
-    """Case-insensitive equality after backslash normalization (Windows-shape semantics)."""
-    return _NormalizeValue(A).lower() == _NormalizeValue(B).lower()
-
-
+# directive: path-schema-migration | # see path.S9
 class FileManagerService:
     """Handles file system operations and metadata extraction with Unicode character support."""
     
@@ -70,14 +39,14 @@ class FileManagerService:
             excluded_setting = db_manager.GetSystemSetting('ExcludedDirectories')
 
             if excluded_setting:
-                excluded = [_NormalizeValue(d.strip()) for d in excluded_setting.split(',') if d.strip()]
+                excluded = [LocalNormCase(d.strip()) for d in excluded_setting.split(',') if d.strip()]
                 LoggingService.LogInfo(f"Loaded {len(excluded)} excluded directories", 'FileManagerService', '_LoadExcludedDirectories')
                 return excluded
             else:
                 default_excluded = 'Z:\\Videos\\downloads'
                 db_manager.AddOrUpdateSystemSetting('ExcludedDirectories', default_excluded, 'Comma-separated list of directories to exclude from scanning', 'text')
                 LoggingService.LogInfo(f"Created ExcludedDirectories setting with default: {default_excluded}", 'FileManagerService', '_LoadExcludedDirectories')
-                return [_NormalizeValue(default_excluded)]
+                return [LocalNormCase(default_excluded)]
 
         except Exception as e:
             LoggingService.LogException("Error loading excluded directories", e, 'FileManagerService', '_LoadExcludedDirectories')
@@ -87,10 +56,10 @@ class FileManagerService:
     def ShouldExcludeDirectory(self, directory_path: str) -> bool:
         """Check if a directory should be excluded from scanning."""
         try:
-            normalized_path = _NormalizeValue(directory_path)
+            normalized_path = LocalNormCase(directory_path)
 
             for excluded in self.ExcludedDirectories:
-                if _ValuesEqual(normalized_path, excluded) or normalized_path.lower().startswith(excluded.lower() + os.sep):
+                if LocalSamePath(normalized_path, excluded) or normalized_path.lower().startswith(excluded.lower() + os.sep):
                     LoggingService.LogDebug(f"Excluding directory: {directory_path}", 'ShouldExcludeDirectory', 'FileManagerService')
                     return True
 
@@ -163,8 +132,8 @@ class FileManagerService:
                 LoggingService.LogDebug(f"Unicode validation failed for path: {filePath}", 'GetFileSizeMB', 'FileManagerService')
                 self.EncodingErrors.append(f"Unicode issue: {filePath}")
             
-            if _LocalExists(filePath):
-                sizeBytes = _LocalGetSize(filePath)
+            if LocalExists(filePath):
+                sizeBytes = LocalGetSize(filePath)
                 return sizeBytes / (1024 * 1024)
             else:
                 LoggingService.LogWarning(f"File not found: {filePath}", 'GetFileSizeMB', 'FileManagerService')
@@ -188,11 +157,11 @@ class FileManagerService:
                 LoggingService.LogDebug(f"Unicode validation failed for directory: {directoryPath}", 'ScanDirectory', 'FileManagerService')
                 self.EncodingErrors.append(f"Unicode issue: {directoryPath}")
             
-            if not _LocalExists(directoryPath):
+            if not LocalExists(directoryPath):
                 LoggingService.LogWarning(f"Directory does not exist: {directoryPath}", 'ScanDirectory', 'FileManagerService')
                 return mediaFiles
 
-            if not _LocalIsDir(directoryPath):
+            if not LocalIsDir(directoryPath):
                 LoggingService.LogWarning(f"Path is not a directory: {directoryPath}", 'ScanDirectory', 'FileManagerService')
                 return mediaFiles
             
@@ -231,7 +200,7 @@ class FileManagerService:
                         try:
                             filePath = LocalJoin(directoryPath, file)
 
-                            if _LocalIsFile(filePath):
+                            if LocalIsFile(filePath):
                                 # Validate each file path
                                 fileIsValid, validatedFilePath = self.ValidateUnicodePath(filePath)
                                 
@@ -275,7 +244,7 @@ class FileManagerService:
                 LoggingService.LogDebug(f"Unicode validation failed for directory: {directoryPath}", 'CalculateDirectorySize', 'FileManagerService')
                 self.EncodingErrors.append(f"Unicode issue: {directoryPath}")
             
-            if not _LocalExists(directoryPath) or not _LocalIsDir(directoryPath):
+            if not LocalExists(directoryPath) or not LocalIsDir(directoryPath):
                 LoggingService.LogWarning(f"Directory does not exist or is not a directory: {directoryPath}", 'CalculateDirectorySize', 'FileManagerService')
                 return 0.0
             
@@ -292,8 +261,8 @@ class FileManagerService:
                             LoggingService.LogDebug(f"Unicode validation failed for file: {filePath}", 'CalculateDirectorySize', 'FileManagerService')
                             self.EncodingErrors.append(f"Unicode issue: {filePath}")
                         
-                        if _LocalExists(filePath):
-                            totalSizeBytes += _LocalGetSize(filePath)
+                        if LocalExists(filePath):
+                            totalSizeBytes += LocalGetSize(filePath)
                             
                     except Exception as e:
                         LoggingService.LogException("Error calculating file size", e, 'CalculateDirectorySize', 'FileManagerService')
@@ -402,7 +371,7 @@ class FileManagerService:
             LoggingService.LogInfo(f"File copy {fileName} to {DestinationPath} started", "FileManagerService", "CopyFile")
 
             destDir = LocalDirname(DestinationPath)
-            if destDir and not _LocalExists(destDir):
+            if destDir and not LocalExists(destDir):
                 os.makedirs(destDir, exist_ok=True)
             
             # Copy the file
@@ -645,8 +614,8 @@ class FileManagerService:
                 LoggingService.LogDebug(f"Unicode validation failed for directory: {DirectoryPath}", 'EnsureDirectoryExists', 'FileManagerService')
                 self.EncodingErrors.append(f"Unicode issue: {DirectoryPath}")
             
-            if _LocalExists(DirectoryPath):
-                if _LocalIsDir(DirectoryPath):
+            if LocalExists(DirectoryPath):
+                if LocalIsDir(DirectoryPath):
                     LoggingService.LogDebug(f"Directory already exists: {DirectoryPath}", 'EnsureDirectoryExists', 'FileManagerService')
                     return True
                 else:
@@ -727,7 +696,7 @@ class FileManagerService:
                 LoggingService.LogDebug(f"Unicode validation failed for path: {FilePath}", 'ValidateFileExists', 'FileManagerService')
                 self.EncodingErrors.append(f"Unicode issue: {FilePath}")
             
-            fileExists = _LocalExists(FilePath)
+            fileExists = LocalExists(FilePath)
             
             if not fileExists:
                 LoggingService.LogDebug(f"File does not exist: {FilePath}", 'ValidateFileExists', 'FileManagerService')
@@ -781,13 +750,13 @@ class FileManagerService:
         try:
             LoggingService.LogFunctionEntry("CopyFile", "FileManagerService", SourceFilePath, DestinationFilePath)
             
-            if not _LocalExists(SourceFilePath):
+            if not LocalExists(SourceFilePath):
                 errorMsg = f"Source file does not exist: {SourceFilePath}"
                 LoggingService.LogError(errorMsg, "FileManagerService", "CopyFile")
                 return {'Success': False, 'ErrorMessage': errorMsg}
 
             destinationDir = LocalDirname(DestinationFilePath)
-            if destinationDir and not _LocalExists(destinationDir):
+            if destinationDir and not LocalExists(destinationDir):
                 os.makedirs(destinationDir, exist_ok=True)
                 LoggingService.LogInfo(f"Created destination directory: {destinationDir}", "FileManagerService", "CopyFile")
             
@@ -808,7 +777,7 @@ class FileManagerService:
         try:
             LoggingService.LogFunctionEntry("ReplaceFile", "FileManagerService", OriginalFilePath, NewFilePath)
             
-            if not _LocalExists(NewFilePath):
+            if not LocalExists(NewFilePath):
                 errorMsg = f"New file does not exist: {NewFilePath}"
                 LoggingService.LogError(errorMsg, "FileManagerService", "ReplaceFile")
                 return {'Success': False, 'ErrorMessage': errorMsg}
