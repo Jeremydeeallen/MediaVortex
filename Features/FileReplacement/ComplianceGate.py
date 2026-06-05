@@ -1,25 +1,13 @@
-import os
 from typing import Dict, Any, Optional
 from Repositories.DatabaseManager import DatabaseManager
 from Services.FileManagerService import FileManagerService
 from Core.Logging.LoggingService import LoggingService
 from Core.Path.Path import Path, PathError
 from Core.Path.PathStorageRoots import GetPrefixMap
+from Core.Path.LocalPath import LocalExists
 
 
-# directive: filereplacement-uses-path | # see path.S5
-def _LocalExists(Value: str) -> bool:
-    """Module-level helper: existence check on a worker-local string; non-path-named param keeps R6 gate clean."""
-    return bool(Value) and os.path.exists(Value)
-
-
-# directive: filereplacement-uses-path | # see path.S5
-def _LocalGetSize(Value: str) -> int:
-    """Module-level helper: size on a worker-local string."""
-    return os.path.getsize(Value)
-
-
-# directive: filereplacement-uses-path | # see path.S5
+# directive: path-schema-migration | # see path.S9
 class ComplianceGate:
     """Pre-rename cascade check; see compliance-gated-rename.feature.md."""
 
@@ -46,7 +34,7 @@ class ComplianceGate:
                 except PathError:
                     return ""
 
-            if not _LocalExists(LocalStagedPath):
+            if not LocalExists(LocalStagedPath):
                 return {'Compliant': False, 'RefusalReason': 'staged_file_missing'}
 
             ProbeResult = self.FileManager.ExtractMediaMetadata(LocalStagedPath)
