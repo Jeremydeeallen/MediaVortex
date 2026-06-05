@@ -1,25 +1,12 @@
-import os
 from typing import Optional
 from Core.Database.DatabaseService import DatabaseService
 # directive: path-schema-migration | # see path.S8
 from Core.Path.Path import Path, PathError
 from Core.Path.PathStorageRoots import GetStorageRoots
-from Core.Path.LocalPath import LocalBasename, LocalDirname
+from Core.Path.LocalPath import LocalBasename, LocalDirname, LocalExists, LocalGetSize
 
 
-# directive: path-schema-migration | # see path.S8
-def _LocalExists(Value):
-    """Existence on a worker-local string; non-path-named param keeps R6 happy."""
-    return bool(Value) and os.path.exists(Value)
-
-
-# directive: path-schema-migration | # see path.S8
-def _LocalGetSize(Value):
-    """Size on a worker-local string."""
-    return os.path.getsize(Value)
-
-
-# directive: path-schema-migration | # see path.S8
+# directive: path-schema-migration | # see path.S9
 class BaseRepository:
     """Base class for all feature repositories."""
 
@@ -63,9 +50,9 @@ class BaseRepository:
         Directory = LocalDirname(FilePath)
         SizeBytes = 0
         SizeMB = 0.0
-        if _LocalExists(FilePath):
+        if LocalExists(FilePath):
             try:
-                SizeBytes = _LocalGetSize(FilePath)
+                SizeBytes = LocalGetSize(FilePath)
                 SizeMB = SizeBytes / (1024 * 1024)
             except OSError:
                 pass
