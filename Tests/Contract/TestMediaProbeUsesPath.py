@@ -50,7 +50,8 @@ def test_resolve_worker_local_against_live_row(ProbableMediaFile):
     Mf.StorageRootId = Row["StorageRootId" if "StorageRootId" in Row else "storagerootid"]
     Mf.RelativePath = Row["RelativePath" if "RelativePath" in Row else "relativepath"]
     Mf.FilePath = Row["FilePath" if "FilePath" in Row else "filepath"]
+    from Core.Path.PathFs import Exists as _PathFsExists
     LocalPath, PathObj = Svc._ResolveWorkerLocal(Mf, Mf.FilePath)
     assert PathObj is not None
-    assert PathObj.Exists(Svc._GetWorker())
+    assert _PathFsExists(PathObj, Svc._GetWorker())
     assert isinstance(LocalPath, str) and len(LocalPath) > 0

@@ -89,7 +89,8 @@ class MediaProbeBusinessService:
         """Execute FFprobe against a media file and update the database. Worker-local path via Path/Worker; FromLegacyString fallback for unmigrated typed pair or orphan-StorageRoot edge cases."""
         FilePath = MediaFile.FilePath
         LocalPath, PathObj = self._ResolveWorkerLocal(MediaFile, FilePath)
-        Exists = PathObj.Exists(self._GetWorker()) if PathObj is not None else False
+        from Core.Path.PathFs import Exists as _PathFsExists
+        Exists = _PathFsExists(PathObj, self._GetWorker())
         try:
             if not Exists:
                 ErrorMsg = f"File does not exist on disk: {FilePath} (local: {LocalPath})"
