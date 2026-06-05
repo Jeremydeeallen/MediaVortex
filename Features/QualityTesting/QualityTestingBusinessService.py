@@ -14,6 +14,7 @@ from typing import List, Optional
 from datetime import datetime, timezone
 from Core.Logging.LoggingService import LoggingService
 from Core.Path import Path, Worker, PathError
+from Core.Path.LocalPath import LocalExists
 
 
 # directive: path-schema-migration | # see path.S8
@@ -41,11 +42,6 @@ class QualityTestingBusinessService:
         if self._Worker is None:
             self._Worker = Worker.FromWorkerContext()
         return self._Worker
-
-    # directive: qualitytesting-uses-path | # see path.S5
-    def _LocalExists(self, Value: str) -> bool:
-        """Existence check on a worker-local filesystem string (post-Resolve, cache file, binary path). Parameter is intentionally not path-named so R6 path-shape gate stays clean."""
-        return bool(Value) and os.path.exists(Value)
 
     # directive: qualitytesting-uses-path | # see path.S6
     def _GetStorageRoots(self) -> List[dict]:
@@ -515,7 +511,7 @@ class QualityTestingBusinessService:
         }
         try:
             import xml.etree.ElementTree as ET
-            if not self._LocalExists(XmlPath):
+            if not LocalExists(XmlPath):
                 LoggingService.LogWarning(f"VMAF XML not found: {XmlPath}",
                                           "QualityTestingBusinessService", "ParseVMAFMetrics")
                 return Result
@@ -1411,7 +1407,7 @@ class QualityTestingBusinessService:
         ViewFilter = "scale=1920:1080:flags=lanczos,unsharp=5:5:0.5" if ViewMode == 'tv_fair' else None
 
         for InputPath, OutputPath in ((LocalSource, SourceStill), (LocalTranscoded, TranscodedStill)):
-            if self._LocalExists(OutputPath):
+            if LocalExists(OutputPath):
                 continue
             Cmd = [FFmpeg, "-hide_banner", "-loglevel", "error",
                    "-ss", str(TimestampSeconds), "-i", InputPath]
@@ -1419,7 +1415,7 @@ class QualityTestingBusinessService:
                 Cmd += ["-vf", ViewFilter]
             Cmd += ["-frames:v", "1", "-y", OutputPath]
             R = subprocess.run(Cmd, capture_output=True, text=True)
-            if R.returncode != 0 or not self._LocalExists(OutputPath):
+            if R.returncode != 0 or not LocalExists(OutputPath):
                 return {
                     'Success': False,
                     'ErrorMessage': f'FFmpeg failed extracting frame from {ntpath.basename(InputPath)}: {(R.stderr or "")[:200]}',
@@ -1690,11 +1686,11 @@ class QualityTestingBusinessService:
             if not local_path:
                 local_path = JobDetails.get('TranscodedFilePath', '') if JobDetails else ''
 
-            if not local_path or not self._LocalExists(local_path):
+            if not local_path or not LocalExists(local_path):
                 return 0.0
 
             ffprobe_path = Ctx.FFprobePath if Ctx and Ctx.FFprobePath else None
-            if not ffprobe_path or not self._LocalExists(ffprobe_path):
+            if not ffprobe_path or not LocalExists(ffprobe_path):
                 return 0.0
 
             command = [
