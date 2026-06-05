@@ -160,7 +160,17 @@ is the source of truth for the cutover that landed 2026-06-04. Legacy columns
 were renamed in PostgreSQL to `_legacy_<col>`; production code reads/writes only
 `(StorageRootId, RelativePath)`. Display uses `Path.CanonicalDisplay(GetPrefixMap())`;
 worker-local I/O uses `Path.Resolve(Worker)`. `Services/PathTranslationService.py`
-remains in use by a few legacy verticals; full deprecation deferred to Phase 9.
+remains in use by a few legacy verticals; full deprecation runs in
+`path-perfect-implementation` Step 3.
+
+**PATH-PERFECT-IMPLEMENTATION STEP 1 COMPLETE (2026-06-05).** Schema extended:
+`RootFolders` + `ScanJobs` both gained `StorageRootId BIGINT REFERENCES StorageRoots(Id)`
++ `RelativePath TEXT` columns. Backfill via `Path.FromLegacyString`: 538/538
+RootFolders + 73,180/73,180 ScanJobs carry the typed pair. Two malformed historical
+ScanJobs rows (terminal status, wrong-separator legacy strings) were deleted as
+operator-data cleanup. Legacy columns (`RootFolders.RootFolder`,
+`ScanJobs.RootFolderPath`) stay populated; dual-write lands in Step 2; legacy
+column drop lands in Step 6.
 
 ### Progress
 
