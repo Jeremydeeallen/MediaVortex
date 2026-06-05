@@ -63,7 +63,28 @@ WorkerService/**
 
 | File | Role |
 |------|------|
-| Features/QualityTesting/QualityTestingController.py | Flask Blueprint -- quality test endpoints |
-| Features/QualityTesting/QualityTestingBusinessService.py | VMAF execution, scoring logic |
-| Features/QualityTesting/QualityTestingRepository.py | Quality test queue and results queries |
-| WorkerService/Main.py | Unified worker entry point (runs quality testing when QualityTestEnabled=TRUE) |
+| Features/QualityTesting/QualityTestController.py | Flask Blueprint -- quality test endpoints |
+| Features/QualityTesting/QualityTestingBusinessService.py | VMAF execution, scoring logic; `BuildVMAFCommand` reads typed pair from TemporaryFilePaths via `Path.FromRow(R, Prefix='Source'/'Output')` and resolves to worker-native via `Path.Resolve(Worker)` per `path.S5`; existence checks via `PathFs.Exists(P, Worker)` per `path.S10`. |
+| Features/QualityTesting/QualityTestRepository.py | Quality test queue + results queries; `_SafeCanonical(Sid, Rel)` synthesizes display via `Path.CanonicalDisplay(GetPrefixMap())` per `path.S8`. |
+| Features/QualityTesting/PostTranscodeDispositionService.py | Single decision function; called both immediately after transcode (returns `Pending`/`AwaitingVmaf` to dispatch VMAF) and after VMAF score lands (returns `Replace`/`NoReplace`/`Requeue`). See `post-transcode-disposition.feature.md`. |
+| Features/QualityTesting/ProcessQualityTestQueueService.py | Worker-side claim loop; calls `DatabaseManager.ClaimQualityTestJob` (typed-pair-aware, capability-gated) and dispatches to `QualityTestingBusinessService.ProcessClaimedJob`. |
+| WorkerService/Main.py | Unified worker entry point (runs quality testing when QualityTestEnabled=TRUE). |
+
+## VMAF claim-to-completion chain (path-class anchors)
+
+Restored 2026-06-05 by `vmaf-restoration` directive after the path-perfect-implementation cutover removed `Path.Exists` / `Path.IsFile` / `Path.IsDir` / `Path.GetSize` / `Path.GetMTime` instance methods (Step 7) -- callers now use `Core.Path.PathFs.<Op>(P, Worker)`. Two failure modes blocked the chain pre-restoration: (1) `# allow: R12 -- preexisting` Python comment annotations baked inside triple-quoted SQL strings caused `psycopg2.errors.SyntaxError: syntax error at or near "#"` at `CreateProgressRecord`, `UpdateProgressRecord`, and 19 other SQL sites across `QualityTestingBusinessService` + `ProcessTranscodeQueueService` (the `#` is not a SQL comment; only `--` and `/* */` are); (2) the Step-7 removal of `Path.Exists` instance methods left `SourcePath.Exists(Wk)` / `OutputPath.Exists(Wk)` calls in `BuildVMAFCommand` raising `AttributeError`. Both fixed in commit `86a0c0b`.
+
+| Step | Code site | Path-class operation |
+|---|---|---|
+| Claim | `Repositories/DatabaseManager.ClaimQualityTestJob` | Atomic UPDATE on `QualityTestingQueue` gated by `Workers.QualityTestEnabled=TRUE AND Status='Online'` via `WorkerCapabilityPredicate.BuildClaimPredicate`. |
+| Worker resolution | `QualityTestingBusinessService._GetWorker` -> `Core.Path.Worker.FromWorkerContext` | Per-instance `Worker` reads `StorageRootResolutions` via `Worker.ResolveStorageRoot` (`path.S11`). |
+| TFP read | `BuildVMAFCommand:224-228` | SELECTs `SourceStorageRootId, SourceRelativePath, OutputStorageRootId, OutputRelativePath` typed-pair only. |
+| Path construction | `Path.FromRow(R, Prefix='Source')` + `Path.FromRow(R, Prefix='Output')` | `path.S1`. |
+| Worker-native string | `SourcePath.Resolve(Wk)` -> `original_file` / `OutputPath.Resolve(Wk)` -> `transcoded_file` | `path.S5` -- POSIX on Linux, Windows on i9. |
+| Existence check | `PathFs.Exists(SourcePath, Wk)` + `PathFs.Exists(OutputPath, Wk)` | `path.S10` -- delegates to `LocalExists(P.Resolve(W))`. |
+| ffmpeg invocation | `command = [ffmpeg_binary, '-i', transcoded_file, '-i', original_file, '-lavfi', vmaf_filter, '-f', 'null', '-']` | Worker-native strings, no separator normalization. |
+| Score parse + DB write | `ParseVMAFMetrics` + `UpdateQualityTestResultsWithScore` -> `UPDATE TranscodeAttempts SET VMAF=%s, QualityTestCompleted=TRUE` + `INSERT INTO QualityTestResults` | Typed pair untouched. |
+| Re-decide | `PostTranscodeDispositionService.Decide` re-called after score lands | Closed-vocabulary reason; persists to `TranscodeAttempts.Disposition/DispositionReason/DispositionDecidedAt`. |
+| Lifecycle close | `QualityTestingQueue` row removed via `DeleteQualityTestQueueItem` in `StartQualityTest`'s `finally` (revolving-door pattern; see `Features/QualityTesting/qt-queue-visibility-and-override.feature.md` for the surface that makes queue history visible). | Worker-side. |
+
+Verified end-to-end 2026-06-05: i9 NVENC transcode 29484 -> dot-worker-1 claim 1405 -> VMAF=96.25 -> `Disposition=NoReplace/VmafAboveMax`. Parallel: larry-worker-2 claim 1408 + dot-worker-1 claim 1409 processed concurrently. All paths POSIX on Linux workers; identity typed pair throughout.
