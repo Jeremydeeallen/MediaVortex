@@ -8,16 +8,8 @@ from pathlib import Path
 from Models.FFmpegAnalysisModel import FFmpegAnalysisModel
 from Services.FFmpegService import FFmpegService
 from Services.LoggingService import LoggingService
-# directive: path-schema-migration | # see path.S8
-from Core.Path.LocalPath import LocalBasename
-
-
-# directive: path-schema-migration | # see path.S8
-def _LocalExists(Value): return bool(Value) and os.path.exists(Value)
-
-
-# directive: path-schema-migration | # see path.S8
-def _LocalGetSize(Value): return os.path.getsize(Value)
+# directive: path-schema-migration | # see path.S9
+from Core.Path.LocalPath import LocalBasename, LocalExists, LocalGetSize
 
 
 class FFmpegAnalysisService:
@@ -40,8 +32,8 @@ class FFmpegAnalysisService:
             AnalysisModel.FileExtension = Path(FilePath).suffix.lower()
 
             # Get file size
-            if _LocalExists(FilePath):
-                AnalysisModel.FileSizeMB = _LocalGetSize(FilePath) / (1024 * 1024)
+            if LocalExists(FilePath):
+                AnalysisModel.FileSizeMB = LocalGetSize(FilePath) / (1024 * 1024)
             
             # Execute FFprobe analysis. ExecuteFFprobe is responsible for logging the
             # subprocess failure (with stderr/stdout/command) -- don't double-log here,
