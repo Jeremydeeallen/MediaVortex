@@ -6,20 +6,7 @@ import time
 from typing import Dict, Any, Optional, Callable
 from datetime import datetime, timezone
 from Core.Logging.LoggingService import LoggingService
-
-
-# directive: transcodejob-uses-path | # see path.S5
-def _LocalExists(Value: str) -> bool:
-    """Module-level helper: existence check on a worker-local string."""
-    return bool(Value) and os.path.exists(Value)
-
-
-# directive: transcodejob-uses-path | # see path.S5
-def _LocalGetSize(Value: str) -> int:
-    """Module-level helper: file size on a worker-local string."""
-    return os.path.getsize(Value)
-
-
+from Core.Path.LocalPath import LocalExists, LocalGetSize
 from Core.DateTimeHelpers import ToUtcIsoZ
 
 
@@ -198,8 +185,8 @@ class VideoTranscodingService:
                 OutputFilePath = self.ExtractOutputPathFromCommand(TranscodeCommand)
                 NewSizeBytes = 0
 
-                if OutputFilePath and _LocalExists(OutputFilePath):
-                    NewSizeBytes = _LocalGetSize(OutputFilePath)
+                if OutputFilePath and LocalExists(OutputFilePath):
+                    NewSizeBytes = LocalGetSize(OutputFilePath)
                     LoggingService.LogInfo(f"Captured file size immediately after transcode: {NewSizeBytes} bytes",
                                          "VideoTranscodingService", "TranscodeVideo")
                 else:
@@ -210,8 +197,8 @@ class VideoTranscodingService:
 
                     for attempt in range(3):  # Try 3 times
                         time.sleep(0.1)  # Wait 100ms between attempts
-                        if OutputFilePath and _LocalExists(OutputFilePath):
-                            NewSizeBytes = _LocalGetSize(OutputFilePath)
+                        if OutputFilePath and LocalExists(OutputFilePath):
+                            NewSizeBytes = LocalGetSize(OutputFilePath)
                             LoggingService.LogInfo(f"Captured file size after retry {attempt + 1}: {NewSizeBytes} bytes",
                                                  "VideoTranscodingService", "TranscodeVideo")
                             break
