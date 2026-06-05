@@ -161,9 +161,8 @@ class FFmpegService:
             if Arguments is None:
                 Arguments = ['-v', 'error', '-print_format', 'json', '-show_format', '-show_streams']
 
-            # No shell=True: $/%/_ in paths pass verbatim.
-            NormalizedPath = (FilePath or "").replace("/", "\\")
-            CommandList = [self.FFprobePath] + Arguments + [NormalizedPath]
+            # No shell=True: $/%/_ in paths pass verbatim. FilePath is already worker-native (Path.Resolve output).
+            CommandList = [self.FFprobePath] + Arguments + [FilePath or ""]
             # Keep a display string for logging / error messages
             CommandString = ' '.join(f'"{A}"' if ' ' in A or '$' in A else A for A in CommandList)
             

@@ -46,7 +46,7 @@ class ComplianceGate:
                 except PathError:
                     return ""
 
-            if not LocalExists(LocalStagedPath):
+            if not _LocalExists(LocalStagedPath):
                 return {'Compliant': False, 'RefusalReason': 'staged_file_missing'}
 
             ProbeResult = self.FileManager.ExtractMediaMetadata(LocalStagedPath)
