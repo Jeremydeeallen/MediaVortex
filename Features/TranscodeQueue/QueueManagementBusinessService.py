@@ -13,6 +13,7 @@ from Features.TranscodeQueue.CodecCompatibilityRepository import CodecCompatibil
 from Core.Logging.LoggingService import LoggingService
 from Core.PathNormalize import ExtractShowFolder
 from Core.Path import Path, PathError
+from Core.Path.LocalPath import LocalExists
 from Services.FileManagerService import FileManagerService
 from Repositories.DatabaseManager import DatabaseManager
 
@@ -34,12 +35,6 @@ def _GetStorageRoots() -> List[dict]:
             for R in Rows
         ]
     return _TQ_STORAGE_ROOTS_CACHE["_StorageRoots"]
-
-
-# directive: transcodequeue-uses-path | # see path.S5
-def _LocalExists(Value: str) -> bool:
-    """Module-level helper: existence check on a worker-local string."""
-    return bool(Value) and os.path.exists(Value)
 
 
 # directive: path-schema-migration | # see path.S8
@@ -65,34 +60,6 @@ def _ResolveStorageRootIdForDrivePrefixFn(DrivePrefix: str) -> Optional[int]:
         if Prefix and Prefix == Needle:
             return Sr.get("Id")
     return None
-
-
-# directive: transcodequeue-uses-path | # see path.S5
-def _LastSegment(Value: str) -> str:
-    """Shape-agnostic filename component via Path.FromLegacyString.LastSegment; falls through to raw tail on parse failure."""
-    if not Value:
-        return ""
-    try:
-        return Path.FromLegacyString(Value, _GetStorageRoots()).LastSegment()
-    except PathError:
-        Norm = Value.replace("\\", "/")
-        return Norm.rsplit("/", 1)[-1]
-
-
-# directive: transcodequeue-uses-path | # see path.S5
-def _ParentDir(Value: str) -> str:
-    """Shape-agnostic parent directory via Path.FromLegacyString.ParentDir.CanonicalDisplay; falls through on parse failure."""
-    if not Value:
-        return ""
-    try:
-        P = Path.FromLegacyString(Value, _GetStorageRoots())
-        Prefixes = {Sr["Id"]: Sr["CanonicalPrefix"] for Sr in _GetStorageRoots()}
-        ParentPath = P.ParentDir()
-        return ParentPath.CanonicalDisplay(Prefixes)
-    except PathError:
-        Norm = Value.replace("\\", "/")
-        Idx = Norm.rfind("/")
-        return Value[: Idx] if Idx >= 0 else ""
 
 
 class QueueManagementBusinessService:
@@ -954,7 +921,7 @@ class QueueManagementBusinessService:
             LoggingService.LogFunctionEntry("CreateQueueItemFromMediaFileSimple", "QueueManagementBusinessService", MediaFile.FileName)
 
             # Compute Directory from the source MediaFile's typed pair (R6: no os.path on path-named var)
-            _DirCanonical = _ParentDir(MediaFile.FilePath) if MediaFile.FilePath else ''
+            _DirCanonical = ntpath.dirname(MediaFile.FilePath or "") if MediaFile.FilePath else ''
 
             # Create queue item from the typed pair; FilePath is a derived property
             queueItem = TranscodeQueueModel(
@@ -1012,8 +979,8 @@ class QueueManagementBusinessService:
             fileName = MediaFile.FileName or ""
 
             if filePath:
-                directory = _ParentDir(filePath).replace("\\", "/")
-                fileName = _LastSegment(filePath) or fileName
+                directory = ntpath.dirname(filePath or "")
+                fileName = ntpath.basename(filePath or "") or fileName
 
             queueItem = TranscodeQueueModel(
                 StorageRootId=MediaFile.StorageRootId,
@@ -1173,8 +1140,8 @@ class QueueManagementBusinessService:
             fileName = MediaFile.FileName or ""
 
             if filePath:
-                directory = _ParentDir(filePath).replace("\\", "/")
-                fileName = _LastSegment(filePath) or fileName
+                directory = ntpath.dirname(filePath or "")
+                fileName = ntpath.basename(filePath or "") or fileName
 
             queueItem = TranscodeQueueModel(
                 StorageRootId=MediaFile.StorageRootId,
@@ -1311,8 +1278,8 @@ class QueueManagementBusinessService:
             fileName = MediaFile.FileName or ""
 
             if filePath:
-                directory = _ParentDir(filePath).replace("\\", "/")
-                fileName = _LastSegment(filePath) or fileName
+                directory = ntpath.dirname(filePath or "")
+                fileName = ntpath.basename(filePath or "") or fileName
 
             queueItem = TranscodeQueueModel(
                 StorageRootId=MediaFile.StorageRootId,
@@ -2563,7 +2530,7 @@ class QueueManagementBusinessService:
         Returns True if resolution was successfully obtained, False otherwise."""
         try:
             FilePath = MediaFile.FilePath or ""
-            if not FilePath or not _LocalExists(FilePath):
+            if not FilePath or not LocalExists(FilePath):
                 LoggingService.LogWarning(f"Cannot probe {MediaFile.FileName}: file not found at {FilePath}", "QueueManagementBusinessService", "ProbeAndUpdateMissingMetadata")
                 return False
 
@@ -2660,7 +2627,7 @@ class QueueManagementBusinessService:
                     itemsSkipped += 1
                     continue
 
-                _DirCanonical = _ParentDir(mediaFile.FilePath) if mediaFile.FilePath else ''
+                _DirCanonical = ntpath.dirname(mediaFile.FilePath or "") if mediaFile.FilePath else ''
                 queueItem = TranscodeQueueModel(
                     StorageRootId=mediaFile.StorageRootId,
                     RelativePath=mediaFile.RelativePath or '',
