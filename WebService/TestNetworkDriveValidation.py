@@ -19,24 +19,7 @@ ProjectRoot = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ProjectRoot)
 
 from Services.LoggingService import LoggingService
-
-
-# directive: path-schema-migration | # see path.S8
-def _LocalExists(Value) -> bool:
-    """Local filesystem existence check for a worker-resolved string value."""
-    return bool(Value) and os.path.exists(Value)
-
-
-# directive: path-schema-migration | # see path.S8
-def _LocalGetSize(Value) -> int:
-    """Local filesystem getsize for a worker-resolved string value."""
-    return os.path.getsize(Value)
-
-
-# directive: path-schema-migration | # see path.S8
-def _NormalizeValue(Value) -> str:
-    """Forward-slash to backslash normalization for a worker-resolved string value."""
-    return (Value or "").replace("/", "\\")
+from Core.Path.LocalPath import LocalExists, LocalGetSize, LocalNormCase
 
 
 class NetworkDriveValidator:
@@ -56,8 +39,8 @@ class NetworkDriveValidator:
         # Test 2: os.path.isdir
         self.TestMethod("os.path.isdir", lambda: os.path.isdir(self.TestPath))
         
-        normalized = _NormalizeValue(self.TestPath)
-        self.TestMethod("Normalize + exists", lambda: _LocalExists(normalized))
+        normalized = LocalNormCase(self.TestPath)
+        self.TestMethod("Normalize + exists", lambda: LocalExists(normalized))
         
         # Test 4: os.listdir (more reliable for network drives)
         self.TestMethod("os.listdir", self.TestListDir)
@@ -121,8 +104,8 @@ class NetworkDriveValidator:
             for dirpath, dirnames, filenames in os.walk(self.TestPath):
                 for filename in filenames:
                     filepath = ntpath.join(dirpath, filename)
-                    if _LocalExists(filepath):
-                        total_size += _LocalGetSize(filepath)
+                    if LocalExists(filepath):
+                        total_size += LocalGetSize(filepath)
             return total_size >= 0
         except Exception as e:
             raise e
@@ -130,7 +113,7 @@ class NetworkDriveValidator:
     # directive: path-schema-migration | # see path.S8
     def TestIsNetworkDrive(self):
         """Test if path is a network drive."""
-        normalized = _NormalizeValue(self.TestPath)
+        normalized = LocalNormCase(self.TestPath)
         return len(normalized) >= 2 and normalized[1] == ':' and normalized[0].isalpha()
     
     def TestAbspath(self):
