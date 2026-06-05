@@ -6,6 +6,7 @@ from Repositories.DatabaseManager import DatabaseManager
 from Services.FileManagerService import FileManagerService
 from Core.Logging.LoggingService import LoggingService
 from Core.Path import Path, Worker, PathError
+from Core.Path.LocalPath import LocalBasename
 
 
 # directive: filereplacement-uses-path | # see path.S5
@@ -168,11 +169,11 @@ class TranscodedOutputPlacement:
 
                     os.rename(LocalOriginalPath, BackupPath)
                     StepsCompleted.append(
-                        f"Same-slot replacement: backed up source to {ntpath.basename(BackupPath)}"
+                        f"Same-slot replacement: backed up source to {LocalBasename(BackupPath)}"
                     )
                     try:
                         os.rename(LocalStagedPath, TargetPath)
-                        StepsCompleted.append(f"Renamed {ntpath.basename(LocalStagedPath)} -> {ntpath.basename(TargetPath)}")
+                        StepsCompleted.append(f"Renamed {LocalBasename(LocalStagedPath)} -> {LocalBasename(TargetPath)}")
                         LoggingService.LogInfo(
                             f"Same-slot replacement: dropped .inprogress suffix: {LocalStagedPath} -> {TargetPath}",
                             "TranscodedOutputPlacement", "Execute"
@@ -196,7 +197,7 @@ class TranscodedOutputPlacement:
 
                     try:
                         os.remove(BackupPath)
-                        StepsCompleted.append(f"Removed backup {ntpath.basename(BackupPath)}")
+                        StepsCompleted.append(f"Removed backup {LocalBasename(BackupPath)}")
                     except Exception as DelBakEx:
                         LoggingService.LogWarning(
                             f"Same-slot replacement: backup {BackupPath} could not be deleted (operator cleanup): {str(DelBakEx)}",
@@ -209,7 +210,7 @@ class TranscodedOutputPlacement:
             else:
                 try:
                     os.rename(LocalStagedPath, TargetPath)
-                    StepsCompleted.append(f"Renamed {ntpath.basename(LocalStagedPath)} -> {ntpath.basename(TargetPath)}")
+                    StepsCompleted.append(f"Renamed {LocalBasename(LocalStagedPath)} -> {LocalBasename(TargetPath)}")
                     LoggingService.LogInfo(f"Dropped .inprogress suffix: {LocalStagedPath} -> {TargetPath}",
                                          "TranscodedOutputPlacement", "Execute")
                 except Exception as e:
@@ -233,7 +234,8 @@ class TranscodedOutputPlacement:
                 )
 
             CanonicalOriginal = NetworkOriginalPath or OriginalFilePath
-            CanonicalNewPath = ntpath.join(ntpath.dirname(CanonicalOriginal), ntpath.basename(TargetPath))
+            # canonical dirname (ntpath) + worker-local TargetPath basename (LocalBasename)
+            CanonicalNewPath = ntpath.join(ntpath.dirname(CanonicalOriginal), LocalBasename(TargetPath))
             UpdateResult = self._UpdateMediaFilesAfterReplacement(CanonicalOriginal, CanonicalNewPath,
                                                                    FFmpegCommand=FFmpegCommand,
                                                                    Mode=Mode)
@@ -279,7 +281,7 @@ class TranscodedOutputPlacement:
             elif self._LocalExists(LocalOriginalPath):
                 try:
                     os.remove(LocalOriginalPath)
-                    StepsCompleted.append(f"Deleted original {ntpath.basename(LocalOriginalPath)}")
+                    StepsCompleted.append(f"Deleted original {LocalBasename(LocalOriginalPath)}")
                     LoggingService.LogInfo(f"Deleted original source file: {LocalOriginalPath}",
                                          "TranscodedOutputPlacement", "Execute")
                 except Exception as e:
@@ -315,7 +317,8 @@ class TranscodedOutputPlacement:
             if not self._LocalExists(FinalLocalPath):
                 return {'Success': False, 'ErrorMessage': f'Final file does not exist: {FinalLocalPath}'}
 
-            CanonicalNewPath = ntpath.join(ntpath.dirname(CanonicalOriginalPath), ntpath.basename(FinalLocalPath))
+            # canonical dirname (ntpath) + worker-local FinalLocalPath basename (LocalBasename)
+            CanonicalNewPath = ntpath.join(ntpath.dirname(CanonicalOriginalPath), LocalBasename(FinalLocalPath))
             UpdateResult = self._UpdateMediaFilesAfterReplacement(CanonicalOriginalPath, CanonicalNewPath)
             if UpdateResult.get('Success', False):
                 StepsCompleted.append("Updated MediaFiles table")
@@ -332,7 +335,7 @@ class TranscodedOutputPlacement:
             elif self._LocalExists(OriginalLocalPath):
                 try:
                     os.remove(OriginalLocalPath)
-                    StepsCompleted.append(f"Deleted original {ntpath.basename(OriginalLocalPath)}")
+                    StepsCompleted.append(f"Deleted original {LocalBasename(OriginalLocalPath)}")
                     LoggingService.LogInfo(f"FinalizePartialReplacement: deleted original {OriginalLocalPath}",
                                          "TranscodedOutputPlacement", "FinalizePartialReplacement")
                 except Exception as e:
@@ -388,7 +391,7 @@ class TranscodedOutputPlacement:
             _P = Path.FromLegacyString(NewFilePath, self._GetStorageRoots())
             media_file.StorageRootId = _P.StorageRootId
             media_file.RelativePath = _P.RelativePath
-            media_file.FileName = ntpath.basename(NewFilePath)
+            media_file.FileName = ntpath.basename(NewFilePath)  # canonical display (Windows shape)
 
             media_file.SizeMB = metadata.get('FileSizeMB', media_file.SizeMB)
             media_file.VideoBitrateKbps = metadata.get('VideoBitrateKbps')

@@ -735,6 +735,7 @@ class FileScanningController:
         def GetCorruptFiles():
             """Get media files that failed FFprobe 3+ times (possibly corrupt)."""
             try:
+                import ntpath
                 from Core.Database.DatabaseService import DatabaseService
                 from Core.Path.Path import Path
                 from Core.Path.PathStorageRoots import GetPrefixMap
@@ -746,7 +747,8 @@ class FileScanningController:
                     Sid = r.get('StorageRootId')
                     Rel = r.get('RelativePath') or ''
                     DisplayPath = Path(Sid, Rel).CanonicalDisplay(PrefixMap) if Sid is not None else ''
-                    Files.append({'Id': r['Id'], 'FilePath': DisplayPath, 'FileName': r['FileName'],
+                    Directory = ntpath.dirname(DisplayPath) if DisplayPath else ''
+                    Files.append({'Id': r['Id'], 'FilePath': DisplayPath, 'Directory': Directory, 'FileName': r['FileName'],
                                   'SizeMB': float(r['SizeMB']) if r['SizeMB'] else 0,
                                   'FailCount': r['FFProbeFailureCount'],
                                   'Error': r.get('LastFFprobeError', '')})

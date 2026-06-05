@@ -8,6 +8,7 @@ from Core.Logging.LoggingService import LoggingService
 from Core.Models.MediaFileModel import MediaFileModel
 from Core.Path.Path import Path, PathError
 from Core.Path.PathStorageRoots import GetStorageRoots, GetPrefixMap
+from Core.Path.LocalPath import LocalSplitExt
 from Features.FileScanning.Models.RootFolderModel import RootFolderModel
 from Features.FileScanning.Models.SeasonModel import SeasonModel
 
@@ -101,19 +102,10 @@ def _Join(Base: str, *Children: str) -> str:
         return BackslashJoin
 
 
-# directive: filescanning-uses-path | # see path.S5
+# directive: path-schema-migration | # see path.S5
 def _SplitExt(Value: str) -> tuple:
-    """Shape-agnostic splitext; falls through on parse failure."""
-    if not Value:
-        return ("", "")
-    try:
-        from Core.Database.DatabaseService import DatabaseService
-        _GetStorageRoots(DatabaseService())
-        P = Path.FromLegacyString(Value, _FSR_STORAGE_ROOTS_CACHE["_StorageRoots"])
-        Base, Ext = P.SplitExt()
-        return (Base.CanonicalDisplay(_FSR_STORAGE_ROOTS_CACHE["_PrefixMap"]), Ext)
-    except Exception:
-        return ntpath.splitext(Value or "")
+    """Splitext for worker-local paths (LocalPath = host-OS shape)."""
+    return LocalSplitExt(Value)
 
 
 class FileScanningRepository(BaseRepository):
@@ -767,16 +759,17 @@ class FileScanningRepository(BaseRepository):
             if not _LocalExists(normalized_path):
                 LoggingService.LogWarning(f"Path does not exist, cannot normalize: {Path}", "FileScanningRepository", "NormalizePathToFilesystemCase")
                 return normalized_path
+            # normalized_path is canonical display (Windows backslash) -- literal "\\" + ntpath.join so splitting works on Linux too
             if len(normalized_path) >= 2 and normalized_path[1] == ':':
                 drive = normalized_path[0:2]
-                remainder = normalized_path[2:].lstrip(os.sep)
-                result_path = drive + os.sep
+                remainder = normalized_path[2:].lstrip("\\")
+                result_path = drive + "\\"
                 if remainder:
-                    parts = remainder.split(os.sep)
+                    parts = remainder.split("\\")
                 else:
                     parts = []
             else:
-                parts = normalized_path.split(os.sep)
+                parts = normalized_path.split("\\")
                 result_path = parts[0] if parts else ''
                 parts = parts[1:] if parts else []
             current_path = result_path
@@ -792,14 +785,14 @@ class FileScanningRepository(BaseRepository):
                                 actual_name = item
                                 break
                         if actual_name:
-                            current_path = _Join(current_path, actual_name)
+                            current_path = ntpath.join(current_path, actual_name)
                         else:
-                            current_path = _Join(current_path, part)
+                            current_path = ntpath.join(current_path, part)
                     else:
-                        current_path = _Join(current_path, part)
+                        current_path = ntpath.join(current_path, part)
                 except Exception as e:
                     LoggingService.LogWarning(f"Could not list directory '{current_path}' to get actual case, using: {part}", "FileScanningRepository", "NormalizePathToFilesystemCase")
-                    current_path = _Join(current_path, part)
+                    current_path = ntpath.join(current_path, part)
             if current_path != normalized_path:
                 LoggingService.LogInfo(f"Normalized path case: '{normalized_path}' -> '{current_path}'", "FileScanningRepository", "NormalizePathToFilesystemCase")
             return current_path

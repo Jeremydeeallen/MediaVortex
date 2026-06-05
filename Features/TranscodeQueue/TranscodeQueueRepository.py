@@ -4,9 +4,10 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime
 from Core.Database.BaseRepository import BaseRepository
 from Core.Logging.LoggingService import LoggingService
-import ntpath
 from Core.Path.Path import Path, PathError
 from Core.Path.PathStorageRoots import GetStorageRoots
+# directive: path-schema-migration | # see path.S8
+from Core.Path.LocalPath import LocalSplitExt
 from Features.TranscodeQueue.Models.TranscodeQueueModel import TranscodeQueueModel
 
 
@@ -91,7 +92,7 @@ class TranscodeQueueRepository(BaseRepository):
                 raise PathError(f"SaveTranscodeQueueItem: QueueItem missing typed pair (StorageRootId={QueueItem.StorageRootId}, RelativePath={QueueItem.RelativePath!r})")
             LoggingService.LogFunctionEntry("SaveTranscodeQueueItem", "TranscodeQueueRepository", QueueItem.Id, QueueItem.RelativePath, QueueItem.Status)
             if QueueItem.Id is None:
-                _Stem, _Ext = ntpath.splitext((QueueItem.RelativePath or '').lower())
+                _Stem, _Ext = LocalSplitExt((QueueItem.RelativePath or '').lower())
                 if _Stem.endswith("-mv") and _Ext:
                     LoggingService.LogWarning(
                         f"Refusing to admit queue row -- source already MediaVortex-transcoded ({QueueItem.RelativePath})",

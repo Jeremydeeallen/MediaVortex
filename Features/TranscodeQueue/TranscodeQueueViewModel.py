@@ -1,5 +1,6 @@
 from typing import List, Optional, Dict, Any
 from datetime import datetime
+import ntpath
 from Features.TranscodeQueue.Models.TranscodeQueueModel import TranscodeQueueModel
 from Features.TranscodeQueue.QueueManagementBusinessService import QueueManagementBusinessService
 from ViewModels.TranscodingViewModel import TranscodingViewModel
@@ -309,7 +310,7 @@ class TranscodeQueueViewModel:
                 "Id": QueueItem.Id,
                 "FilePath": QueueItem.FilePath,
                 "FileName": QueueItem.FileName,
-                "Directory": QueueItem.Directory,
+                "Directory": ntpath.dirname(QueueItem.FilePath or ""),  # canonical display
                 "SizeBytes": QueueItem.SizeBytes,
                 "SizeMB": QueueItem.SizeMB,
                 "SizeGB": QueueItem.SizeGB,

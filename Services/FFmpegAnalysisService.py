@@ -1,5 +1,4 @@
 import os
-import ntpath
 import json
 import re
 import uuid
@@ -9,6 +8,8 @@ from pathlib import Path
 from Models.FFmpegAnalysisModel import FFmpegAnalysisModel
 from Services.FFmpegService import FFmpegService
 from Services.LoggingService import LoggingService
+# directive: path-schema-migration | # see path.S8
+from Core.Path.LocalPath import LocalBasename
 
 
 # directive: path-schema-migration | # see path.S8
@@ -35,7 +36,7 @@ class FFmpegAnalysisService:
             # Create analysis model
             AnalysisModel = FFmpegAnalysisModel()
             AnalysisModel.FilePath = FilePath
-            AnalysisModel.FileName = ntpath.basename(FilePath)
+            AnalysisModel.FileName = LocalBasename(FilePath)
             AnalysisModel.FileExtension = Path(FilePath).suffix.lower()
 
             # Get file size

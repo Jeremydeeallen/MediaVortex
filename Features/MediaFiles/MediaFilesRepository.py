@@ -1,4 +1,3 @@
-import ntpath
 import re
 from typing import Optional, List, Dict, Any
 from Core.Database.BaseRepository import BaseRepository
@@ -6,6 +5,8 @@ from Core.Database.DatabaseService import EscapeLikePattern
 from Core.Logging.LoggingService import LoggingService
 from Core.Path.Path import Path, PathError
 from Core.Path.PathStorageRoots import GetStorageRoots, GetPrefixMap
+# directive: path-schema-migration | # see path.S8
+from Core.Path.LocalPath import LocalSplitExt
 from Models.MediaFileModel import MediaFileModel
 from Models.SeasonModel import SeasonModel
 
@@ -380,7 +381,7 @@ class MediaFilesRepository(BaseRepository):
         )
         if rows:
             return self._MapSummaryRow(rows[0], "exact")
-        nameNoExt = ntpath.splitext(FileName)[0]
+        nameNoExt = LocalSplitExt(FileName)[0]
         likeSql = (
             f"SELECT {cols} FROM MediaFiles "
             "WHERE LOWER(FileName) LIKE LOWER(%s) ESCAPE '!' LIMIT 1"
@@ -439,7 +440,7 @@ class MediaFilesRepository(BaseRepository):
             f"SELECT {cols} FROM MediaFiles WHERE LOWER(FileName) = LOWER(%s) LIMIT 1", (FileName,)
         )
         if not rows:
-            nameNoExt = ntpath.splitext(FileName)[0]
+            nameNoExt = LocalSplitExt(FileName)[0]
             likeSql = (
                 f"SELECT {cols} FROM MediaFiles "
                 "WHERE LOWER(FileName) LIKE LOWER(%s) ESCAPE '!' LIMIT 1"

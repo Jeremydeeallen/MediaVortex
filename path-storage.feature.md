@@ -126,7 +126,7 @@ Readers (consume paths from DB rows):
 | Site | What reads today | Phase 4 change |
 |---|---|---|
 | `Features/TranscodeJob/ProcessTranscodeQueueService.py:GetMediaFileData` | reads `MediaFile.FilePath` | reads `(RootId, RelativePath)` + calls `Resolve` |
-| `Features/QualityTesting/QualityTestingBusinessService.py:BuildVMAFCommand` | reads `JobDetails["LocalSourcePath"]` directly | reads `(RootId, RelativePath)` + Resolve |
+| `Features/QualityTesting/QualityTestingBusinessService.py:BuildVMAFCommand` | reads `(SourceStorageRootId, SourceRelativePath)` + `(OutputStorageRootId, OutputRelativePath)` from `TemporaryFilePaths`, constructs `Path` instances, calls `Path.Resolve(Worker)` for the local strings handed to ffmpeg | unchanged -- the typed-pair -> Resolve chain is the steady state |
 | `Features/FileReplacement/FileReplacementBusinessService.py` | path lookups for source/encoded/archive | Resolve at each I/O |
 | `Features/MediaProbe/MediaProbeBusinessService.py:_ExecuteProbe` | reads `MediaFile.FilePath` for FFprobe | Resolve before FFprobe call |
 | `Features/QualityTesting/QualityTestController.py:CompareStills` (+ batch + test bench) | path lookups for slider stills | Resolve before FFmpeg extract |
@@ -154,11 +154,13 @@ The orphan list is the operator's signal: add a new RootFolders entry covering t
 
 ## Status
 
-**PHASE 3 IN PROGRESS** — verified 2026-05-15. Phases 1 (schema + seed) and 2
-(backfill) shipped to production; Phase 3 (dual-write) confirmed in the
-FileScanning vertical, remaining writer verticals require an audit. Phase 4
-(read switch) and Phase 5 (cleanup) not started. Doc Status was "NOT STARTED"
-through 2026-05-15 despite migration running months earlier — fixed inline.
+**PHASE 8 COMPLETE (column rename cutover).** The `path-schema-migration` directive
+is the source of truth for the cutover that landed 2026-06-04. Legacy columns
+(`FilePath`, `OriginalPath`, `LocalSourcePath`, `LocalOutputPath`, `ShowFolder`)
+were renamed in PostgreSQL to `_legacy_<col>`; production code reads/writes only
+`(StorageRootId, RelativePath)`. Display uses `Path.CanonicalDisplay(GetPrefixMap())`;
+worker-local I/O uses `Path.Resolve(Worker)`. `Services/PathTranslationService.py`
+remains in use by a few legacy verticals; full deprecation deferred to Phase 9.
 
 ### Progress
 
@@ -220,7 +222,7 @@ Templates/                                          (display layer)
 
 Repositories/DatabaseManager.py                     (helpers)
 Models/CommandBuilder.py                            (output filename)
-Services/PathTranslationService.py                  (shrunk or deleted in Phase 5)
+Services/PathTranslationService.py                  (still in use; full deprecation deferred to Phase 9)
 Core/WorkerContext.py                               (PathTranslation singleton -> Resolve wrapper)
 WorkerService/Main.py                               (boot path -- load RootFolderResolutions)
 

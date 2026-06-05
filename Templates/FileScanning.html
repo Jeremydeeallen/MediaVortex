@@ -740,7 +740,7 @@ class FileScanningManager {
 
             const tbody = document.getElementById('CorruptFilesTableBody');
             tbody.innerHTML = data.Files.map(f => {
-                const dir = f.FilePath.substring(0, f.FilePath.length - f.FileName.length).replace(/[\\/]+$/, '');
+                const dir = f.Directory || '';
                 const escapedDir = dir.replace(/'/g, "\\'");
                 const sizeMB = f.SizeMB >= 1024 ? (f.SizeMB / 1024).toFixed(1) + ' GB' : f.SizeMB.toFixed(0) + ' MB';
                 const errorTrunc = (f.Error || '').length > 40 ? f.Error.substring(0, 40) + '...' : (f.Error || '-');

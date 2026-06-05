@@ -1,9 +1,10 @@
 import os
 import re
-import ntpath
 from typing import Optional, Dict, Any
 from pathlib import Path
 from Services.LoggingService import LoggingService
+# directive: path-schema-migration | # see path.S8
+from Core.Path.LocalPath import LocalBasename
 
 
 class FilenameResolutionService:
@@ -91,7 +92,7 @@ class FilenameResolutionService:
         try:
             LoggingService.LogFunctionEntry("GenerateOutputFilePath", 'FilenameResolutionService', OriginalFilePath, OutputDirectory, TargetResolution)
 
-            originalFileName = ntpath.basename(OriginalFilePath)
+            originalFileName = LocalBasename(OriginalFilePath)
 
             newFileName = self.GenerateOutputFilename(originalFileName, TargetResolution, ContainerType)
 
@@ -102,7 +103,7 @@ class FilenameResolutionService:
 
         except Exception as e:
             LoggingService.LogException("Error generating output file path", e, 'GenerateOutputFilePath', 'FilenameResolutionService')
-            originalFileName = ntpath.basename(OriginalFilePath)
+            originalFileName = LocalBasename(OriginalFilePath)
             return os.path.join(OutputDirectory, originalFileName)
     
     def DetermineTargetResolution(self, OriginalResolution: str, TranscodeProfile: str = None) -> str:

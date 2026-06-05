@@ -8,7 +8,7 @@ Resolves [BUG-0008]. The Windows WorkerService translates DB-stored drive-letter
 
 Linux workers are unaffected -- their translator path is unchanged.
 
-The translation is **data-driven**: the per-share UNC strings come from `Workers.ShareMappings` (or the equivalent `WorkerShareMappings` table) in the DB, populated at worker registration. No code constants. If an operator needs to change a UNC for a worker, they edit the DB row (or the corresponding UI surface) and restart the worker -- no code change required.
+The translation is **data-driven**: the per-share UNC strings come from `StorageRootResolutions` in the DB, populated at worker registration. No code constants. If an operator needs to change a UNC for a worker, they edit the SRR row (or the corresponding UI surface) and restart the worker -- no code change required.
 
 ## Surface
 

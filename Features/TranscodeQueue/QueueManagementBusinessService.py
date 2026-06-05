@@ -1,6 +1,7 @@
 from typing import List, Optional, Dict, Any, Tuple
 from datetime import datetime, timezone
 import os
+import ntpath
 from Features.TranscodeQueue.Models.TranscodeQueueModel import TranscodeQueueModel
 from Core.Models.MediaFileModel import MediaFileModel
 from Features.Profiles.Models.ProfileThresholdModel import ProfileThresholdModel
@@ -208,7 +209,7 @@ class QueueManagementBusinessService:
                                 errorMsg = f"Cannot adjust CRF further for {mediaFile.FileName}: Previous CRF={previousCRF}, VMAF={vmafScore:.2f}, Adjusted CRF={adjustedCRF} would be below minimum {minCRF}"
 
                                 # Extract directory for ProblemFiles
-                                directory = os.path.dirname(mediaFile.FilePath)
+                                directory = ntpath.dirname(mediaFile.FilePath)  # canonical display
 
                                 # Log to ProblemFiles
                                 problemFileId = self.Repository.AddProblemFile(
@@ -2319,8 +2320,7 @@ class QueueManagementBusinessService:
                         errorMsg = f"Cannot adjust CRF further for {mediaFile.FileName}: Previous CRF={previousCRF}, VMAF={vmafScore:.2f}, Adjusted CRF={adjustedCRF} would be below minimum {minCRF}"
 
                         # Extract directory for ProblemFiles
-                        import os
-                        directory = os.path.dirname(mediaFile.FilePath)
+                        directory = ntpath.dirname(mediaFile.FilePath)  # canonical display
 
                         # Log to ProblemFiles
                         problemFileId = self.Repository.AddProblemFile(

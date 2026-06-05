@@ -1,10 +1,11 @@
 import os
 import sys
-import ntpath
 from typing import List, Optional, Tuple, Dict, Any
 from pathlib import Path
 from Services.LoggingService import LoggingService
 from Services.FFmpegAnalysisService import FFmpegAnalysisService
+# directive: path-schema-migration | # see path.S8
+from Core.Path.LocalPath import LocalBasename, LocalDirname, LocalJoin
 
 
 # directive: path-schema-migration | # see path.S8
@@ -228,7 +229,7 @@ class FileManagerService:
                     files = os.listdir(directoryPath)
                     for file in files:
                         try:
-                            filePath = ntpath.join(directoryPath, file)
+                            filePath = LocalJoin(directoryPath, file)
 
                             if _LocalIsFile(filePath):
                                 # Validate each file path
@@ -397,10 +398,10 @@ class FileManagerService:
             import shutil
             from Services.LoggingService import LoggingService
             
-            fileName = ntpath.basename(SourcePath)
+            fileName = LocalBasename(SourcePath)
             LoggingService.LogInfo(f"File copy {fileName} to {DestinationPath} started", "FileManagerService", "CopyFile")
 
-            destDir = ntpath.dirname(DestinationPath)
+            destDir = LocalDirname(DestinationPath)
             if destDir and not _LocalExists(destDir):
                 os.makedirs(destDir, exist_ok=True)
             
@@ -785,7 +786,7 @@ class FileManagerService:
                 LoggingService.LogError(errorMsg, "FileManagerService", "CopyFile")
                 return {'Success': False, 'ErrorMessage': errorMsg}
 
-            destinationDir = ntpath.dirname(DestinationFilePath)
+            destinationDir = LocalDirname(DestinationFilePath)
             if destinationDir and not _LocalExists(destinationDir):
                 os.makedirs(destinationDir, exist_ok=True)
                 LoggingService.LogInfo(f"Created destination directory: {destinationDir}", "FileManagerService", "CopyFile")

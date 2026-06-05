@@ -291,6 +291,7 @@ Intra-feature seams the class participates in.
 | S6 | Legacy canonical str -> Path | `Path.FromLegacyString(canonical, roots)` | UNC `\\host\share\...`, Windows `T:\...`, POSIX `/mnt/.../...` | Migration script reads canonical column, constructs Path, writes typed columns | `Tests/Unit/test_path_legacy.py` (parameterized over the three shapes) |
 | S7 | Path -> DB row | Repository INSERT / UPDATE | `INSERT (..., StorageRootId, RelativePath) VALUES (..., %s, %s)` with `(p.StorageRootId, p.RelativePath)` | DB row written; next `FromRow` round-trips | `Tests/Contract/TestPathDbRoundTrip.py` (insert + select against test schema) |
 | S8 | Path -> canonical display | `Path.CanonicalDisplay({1: "T:\\", 2: "\\\\10.0.0.61\\xxx\\"})` | backslash-joined absolute display string | UI tables / log lines render verbatim; orphan id renders as `[orphan #<id>] <relpath>` | `Tests/Unit/test_path_display.py` (asserts resolved vs orphan branches) |
+| S9 | `Path.Resolve` output -> `Core/Path/LocalPath.py` helpers | worker-resolved local paths (output of `Path.Resolve(Worker)`) | local OS-native string (Windows backslash or POSIX forward slash, per worker platform) | code needing `basename` / `dirname` / `exists` / `join` on those local strings; `LocalPath` wraps `os.path` so the worker OS owns the separator (ntpath on Windows, posixpath on Linux) | import + invoke `Core.Path.LocalPath` helpers on Windows or Linux container; ntpath/posixpath semantics derive from local OS automatically (no platform branching in caller code) |
 
 ## Verification (Test Plan)
 

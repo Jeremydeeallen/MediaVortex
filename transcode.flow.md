@@ -29,7 +29,7 @@ Stage-transition data contracts. See `Features/TranscodeJob/TranscodeJob.feature
 | ID | Transition | Producer (writer) | Wire shape | Consumer (reader) expects | Verification |
 |---|---|---|---|---|---|
 | S1 | `ST5 -> ST6` (QUEUE -> TRANSCODE) | `QueueManagementBusinessService` | `TranscodeQueue.(Id BIGINT, StorageRootId BIGINT, RelativePath TEXT, AssignedProfile TEXT, ProcessingMode TEXT, AcceptsInterlaced BOOLEAN) Status='Pending'` | `DatabaseManager.ClaimNextPendingTranscodeJob` -- atomic claim via `FOR UPDATE OF tq SKIP LOCKED`; NVENC profiles additionally require `Workers.nvenccapable=TRUE` | `SELECT COUNT(*) FROM TranscodeQueue WHERE Status='Pending'` decrements by 1 per claim |
-| S2 | `ST6 -> ST7` (TRANSCODE -> DISPOSITION) | `ProcessTranscodeQueueService` (on encode success) | `TranscodeAttempts.(Id BIGINT, Success=NULL, QualityTestRequired BOOLEAN)` + `TemporaryFilePaths.(TranscodeAttemptId, OriginalPath TEXT, LocalOutputPath TEXT, OutputStorageRootId BIGINT, OutputRelativePath TEXT)` in canonical DB form. In-place output: `LocalOutputPath` ends in `-mv.mp4.inprogress` adjacent to source on shared mount | `ShouldQualityTest.ProcessTranscodedFile(AttemptId)` reads `QualityTestRequired`; dispatches to `QualityTestQueueService.AddToQualityTestQueue` (ST8) or `FileReplacementBusinessService.ProcessFileReplacement` (ST9) | `SELECT COUNT(*) FROM TemporaryFilePaths WHERE TranscodeAttemptId IN (SELECT Id FROM TranscodeAttempts WHERE Success IS NULL)` -> in-flight count |
+| S2 | `ST6 -> ST7` (TRANSCODE -> DISPOSITION) | `ProcessTranscodeQueueService` (on encode success) | `TranscodeAttempts.(Id BIGINT, Success=NULL, QualityTestRequired BOOLEAN)` + `TemporaryFilePaths.(TranscodeAttemptId, SourceStorageRootId BIGINT, SourceRelativePath TEXT, OutputStorageRootId BIGINT, OutputRelativePath TEXT)`. Paths stored as typed pair `(StorageRootId, RelativePath)`. Worker resolves to local via `Path.Resolve(Worker)`; UI/logs use `Path.CanonicalDisplay(GetPrefixMap())`. In-place output: resolved output path ends in `-mv.mp4.inprogress` adjacent to source on shared mount | `ShouldQualityTest.ProcessTranscodedFile(AttemptId)` reads `QualityTestRequired`; dispatches to `QualityTestQueueService.AddToQualityTestQueue` (ST8) or `FileReplacementBusinessService.ProcessFileReplacement` (ST9) | `SELECT COUNT(*) FROM TemporaryFilePaths WHERE TranscodeAttemptId IN (SELECT Id FROM TranscodeAttempts WHERE Success IS NULL)` -> in-flight count |
 | S3 | `ST7 -> ST8` (DISPOSITION -> VMAF) | `ShouldQualityTestService` when `QualityTestRequired=TRUE` | `QualityTestingQueue.(Id BIGINT, TranscodeAttemptId BIGINT) Status='Pending'`; `TranscodeAttempts.ForceDisposition IS NULL` | `DatabaseManager.ClaimQualityTestJob` -- atomic claim; `QualityTestingBusinessService.ExecuteVMAF` reads source+output paths from `TemporaryFilePaths` | `SELECT COUNT(*) FROM QualityTestingQueue WHERE Status='Pending'` decrements by 1 per claim |
 | S4 | `ST8 -> ST9` (VMAF -> ACTION) | `QualityTestingBusinessService` | `TranscodeAttempts.vmaf DOUBLE PRECISION NOT NULL, QualityTestCompleted=TRUE`; `ForceDisposition TEXT NULL` (operator override) | `PostTranscodeDispositionService._DecideFromInputs` -- Replace when `VMAF >= 80.0` and `ForceDisposition IS NULL`; operator `ForceDisposition` bypasses the threshold | `SELECT COUNT(*) FROM TranscodeAttempts WHERE QualityTestCompleted=TRUE AND VMAF IS NULL` -> 0 |
 | S5 | `ST9 -> done` (ACTION -> end) | `FileReplacementBusinessService._ProcessCompleteFileReplacement` | `MediaFiles.(FilePath, Codec, Resolution, SizeMB, TranscodedByMediaVortex=TRUE, etc.)` updated; `MediaFilesArchive` row written; `TranscodeAttempts.FileReplaced=TRUE`; `TemporaryFilePaths` row deleted | `MediaFiles` is the authoritative post-replacement record; `MediaFilesArchive` has the pre-replacement snapshot | `SELECT COUNT(*) FROM TemporaryFilePaths tfp JOIN TranscodeAttempts ta ON ta.Id = tfp.TranscodeAttemptId WHERE ta.FileReplaced=TRUE` -> 0 (no orphaned TFP after successful replace) |
@@ -53,6 +53,8 @@ Stage-transition data contracts. See `Features/TranscodeJob/TranscodeJob.feature
 
 **Output:** MediaFiles rows with basic file info (no metadata yet)
 
+**Orphan-profile claim guard (2026-06-04):** `DatabaseManager.ClaimNextPendingTranscodeJob` joins `TranscodeQueue` to `Profiles` on `AssignedProfile = profilename` and requires `Profiles.profilename IS NOT NULL`. Queue rows whose `AssignedProfile` does not match any current `Profiles.profilename` (renamed, deleted, typo) stay `Pending` -- they are not claimed and are not silently failed. Operator action: fix the queue row's `AssignedProfile` to a live profile name (or update the profile to match), then the worker picks it up on the next poll.
+
 ---
 
 ## Stage 2: PROBE -- FFprobe Metadata Extraction (`ST2`)
@@ -75,6 +77,8 @@ Stage-transition data contracts. See `Features/TranscodeJob/TranscodeJob.feature
 - Recompute failure does NOT roll back the probe -- metadata is always saved.
 
 **Output:** MediaFiles rows with full metadata and computed routing fields. `HasExplicitEnglishAudio` is the critical field for queue safety. `RecommendedMode` determines whether the file enters the Transcode or Remux pipeline.
+
+**Path handling note:** `FFmpegService.ExecuteFFprobe` is handed a worker-native path string (the output of `Path.Resolve(Worker)`); it performs no separator translation. The worker OS owns the separator. `ParentDir` / `Normalize` helpers in `Core/Path/LocalPath.py` delegate to `os.path` and do not rewrite separators across platforms.
 
 ---
 
@@ -250,16 +254,17 @@ Rationale: ordering by raw size (the legacy behavior) put already-efficient AV1 
 - No worker-local scratch dir, no `StagingDirectory` column, no copy-back step. See `Features/FileReplacement/transcoded-output-placement.feature.md` for the contract.
 
 **Path handling for distributed workers:**
-- DB stores all paths in canonical (Windows) format: `T:\ShowName\file.mkv`
-- `PathTranslationService` converts canonical <-> local using `ShareMountPrefix` / `ShareCanonicalPrefix` from Workers + WorkerShareMappings rows
-- Input paths: translated FROM canonical TO local before FFmpeg reads them
-- Output paths: translated FROM local BACK TO canonical before storing in `TemporaryFilePaths`
-- This ensures VMAF and FileReplacement on any worker can always find files via the canonical `T:\` path
+- DB stores paths as typed pair `(StorageRootId BIGINT, RelativePath TEXT)`. No drive letter, no UNC, no platform separator in the canonical form.
+- `Path.Resolve(Worker)` joins the worker-local prefix (from `StorageRootResolutions.AbsolutePath`) with `RelativePath` using the worker-platform separator. Returns a worker-native string suitable for ffmpeg / `os.open`.
+- `Path.CanonicalDisplay(GetPrefixMap())` renders Windows-shaped display (`T:\Show\file.mkv`) for UI / logs regardless of worker OS.
+- Worker passes the resolved string straight to ffmpeg. `CommandBuilder._NormalizeFfmpegPath` does NOT rewrite separators; the worker OS owns them.
 
 **Key files for file staging:**
-- `Features/TranscodeJob/ProcessTranscodeQueueService.py` -- `SetupFilePreparation()` resolves the worker-local source path
-- `Models/CommandBuilder.py` -- `BuildFFmpegCommand` places the `.inprogress` output next to the source
-- `Core/Services/PathTranslationService.py` -- `ToLocalPath()` / `ToCanonicalPath()` for cross-platform translation
+- `Features/TranscodeJob/ProcessTranscodeQueueService.py` -- `SetupFilePreparation()` resolves the worker-local source path via `Path.Resolve(Worker)`
+- `Models/CommandBuilder.py` -- `BuildFFmpegCommand` places the `.inprogress` output next to the source; `_NormalizeFfmpegPath` performs no cross-platform separator rewrites
+- `Core/Path/Path.py` -- `Resolve(Worker)` / `CanonicalDisplay(prefixes)` -- the only path-shape boundary
+- `Core/Path/LocalPath.py` -- `os.path` wrapper for worker-local operations (basename / dirname / exists / join) on the output of `Resolve`
+- `Services/PathTranslationService.py` -- still in use by a few legacy verticals; full deprecation deferred to Phase 9
 
 **FFmpeg command structure:**
 - Executable: from `Workers.FFmpegPath` (falls back to `FFmpegMaster\bin\ffmpeg.exe`)
@@ -604,7 +609,7 @@ End-to-end trace from worker installation through finished product. Every functi
 | 3.5 | Translate input path | `SetupFilePreparation(Job, MediaFile, AttemptId)` | -- | `PathTranslation.ToLocalPath(Job.FilePath)` converts `T:\...` to `/mnt/media/...` on Linux |
 | 3.6 | Setup staging dir | `TranscodingFileManagerService.SetupTranscodingDirectories(OutputDirectory)` | -- | Creates staging dir if needed |
 | 3.7 | Build FFmpeg command | `BuildTranscodeCommand()` -> `CommandBuilderService.BuildCommand()` -> `CommandBuilder.BuildCommand()` | -- | Reads `FFmpegPath` and `OutputDirectory` from CommandData (with `or` fallback to defaults) |
-| 3.8 | Store canonical paths | `PrivateCreateTemporaryFilePathRecord(AttemptId, OrigPath, CanonicalSource, CanonicalOutput)` | `INSERT INTO TemporaryFilePaths (TranscodeAttemptId, OriginalPath, LocalSourcePath, LocalOutputPath)` | All paths stored as canonical `T:\...` format (via `PathTranslation.ToCanonicalPath()`) |
+| 3.8 | Store typed-pair paths | `PrivateCreateTemporaryFilePathRecord(AttemptId, SourcePath, OutputPath)` | `INSERT INTO TemporaryFilePaths (TranscodeAttemptId, SourceStorageRootId, SourceRelativePath, OutputStorageRootId, OutputRelativePath)` | Paths stored as typed pair `(StorageRootId, RelativePath)`. Worker resolves to local via `Path.Resolve(Worker)`; UI/logs use `Path.CanonicalDisplay(GetPrefixMap())`. |
 | 3.9 | Update attempt with command | `DatabaseManager.UpdateTranscodeAttempt()` | `UPDATE TranscodeAttempts SET FfpmpegCommand=%s, ...` | -- |
 
 ### Phase 4: FFmpeg Execution
@@ -633,7 +638,7 @@ End-to-end trace from worker installation through finished product. Every functi
 | Step | Action | Function | DB Call | Status Change |
 |------|--------|----------|---------|---------------|
 | 6.1 | Claim quality job | WorkerService quality test loop polls | `SELECT FROM QualityTestQueue WHERE Status='Pending'` | QualityTestQueue.Status = `Running` |
-| 6.2 | Read paths from DB | Reads TemporaryFilePaths | `SELECT OriginalPath, LocalOutputPath FROM TemporaryFilePaths WHERE TranscodeAttemptId = %s` | Paths are canonical `T:\...` -- accessible from primary machine |
+| 6.2 | Read paths from DB | Reads TemporaryFilePaths | `SELECT SourceStorageRootId, SourceRelativePath, OutputStorageRootId, OutputRelativePath FROM TemporaryFilePaths WHERE TranscodeAttemptId = %s` | Paths stored as typed pair `(StorageRootId, RelativePath)`. Worker resolves to local via `Path.Resolve(Worker)`; UI/logs use `Path.CanonicalDisplay(GetPrefixMap())`. |
 | 6.3 | Run VMAF | FFmpeg VMAF comparison (original vs transcoded) | -- | Both files read from network share via canonical paths |
 | 6.4 | Store VMAF score | `UpdateTranscodeAttempt()` | `UPDATE TranscodeAttempts SET VMAF = %s, QualityTestCompleted = True` | VMAF score recorded |
 | 6.5 | Decide: pass/fail | VMAF >= 80 = pass | -- | -- |
@@ -643,7 +648,7 @@ End-to-end trace from worker installation through finished product. Every functi
 | Step | Action | Function | DB Call | Status Change |
 |------|--------|----------|---------|---------------|
 | 7.1 | Trigger replacement | `FileReplacementBusinessService.ProcessFileReplacement(AttemptId, BypassVMAFCheck)` | -- | PathTranslation passed from caller |
-| 7.2 | Read file paths | from TemporaryFilePaths | `SELECT OriginalPath, LocalOutputPath FROM TemporaryFilePaths WHERE TranscodeAttemptId = %s` | Canonical paths: `T:\...\output.mkv` and `T:\...\original.mkv` |
+| 7.2 | Read file paths | from TemporaryFilePaths | `SELECT SourceStorageRootId, SourceRelativePath, OutputStorageRootId, OutputRelativePath FROM TemporaryFilePaths WHERE TranscodeAttemptId = %s` | Paths stored as typed pair `(StorageRootId, RelativePath)`. Worker resolves to local via `Path.Resolve(Worker)`; UI/logs use `Path.CanonicalDisplay(GetPrefixMap())`. |
 | 7.3 | Archive original metadata | `_ArchiveOriginalFileDetails()` | `INSERT INTO MediaFilesArchive (...)` | Snapshot before destructive ops |
 | 7.4 | Delete original (or rename if KeepSource) | `_ProcessCompleteFileReplacement()` translates canonical paths via `PathTranslation.ToLocalPath()` | -- | `os.remove(LocalOriginalPath)` or `os.rename(..., .old)` |
 | 7.5 | Move output if needed | InPlace: skip (already in correct dir). Staged: `shutil.move()` | -- | `os.path.normpath` comparison decides |
@@ -667,14 +672,13 @@ End-to-end trace from worker installation through finished product. Every functi
 
 | Context | Path Format | Example |
 |---------|-------------|---------|
-| Database (canonical) | Windows backslash | `T:\Shows\Show Name\S01E01.mkv` |
-| Linux worker local | Forward slash, mount prefix | `/mnt/media/Shows/Show Name/S01E01.mkv` |
-| Windows worker local | Same as canonical | `T:\Shows\Show Name\S01E01.mkv` |
-| TemporaryFilePaths (DB) | Always canonical | `T:\MediaVortex\Staging\S01E01.mkv` |
-| FFmpeg command (local) | Worker's native format | `/mnt/media/MediaVortex/Staging/S01E01.mkv` |
+| Database (typed pair) | `(StorageRootId BIGINT, RelativePath TEXT)`; forward slashes, no leading slash, no drive letter | `(1, "Shows/Show Name/S01E01.mkv")` |
+| Display (UI / logs) | `Path.CanonicalDisplay(GetPrefixMap())` -- Windows-shaped regardless of worker OS | `T:\Shows\Show Name\S01E01.mkv` |
+| Linux worker local | `Path.Resolve(Worker)` joins worker prefix + RelativePath, forward slashes | `/mnt/media/Shows/Show Name/S01E01.mkv` |
+| Windows worker local | `Path.Resolve(Worker)` joins worker prefix + RelativePath, backslashes | `T:\Shows\Show Name\S01E01.mkv` |
+| TemporaryFilePaths (DB) | Always typed pair `(StorageRootId, RelativePath)`. Display via `Path.CanonicalDisplay`. Worker-local via `Path.Resolve(Worker)`. | `(1, "MediaVortex/Staging/S01E01.mkv")` |
+| FFmpeg command (local) | Worker's native format, output of `Path.Resolve(Worker)` -- no separator rewriting downstream | `/mnt/media/MediaVortex/Staging/S01E01.mkv` |
 
-Translation happens at two points:
-1. **Input**: `SetupFilePreparation()` calls `PathTranslation.ToLocalPath()` before FFmpeg reads
-2. **Output**: `PrivateCreateTemporaryFilePathRecord()` calls `PathTranslation.ToCanonicalPath()` before writing to DB
+Resolution happens at one point: `Path.Resolve(Worker)` joins the worker-local prefix from `StorageRootResolutions.AbsolutePath` with `RelativePath` using the worker-platform separator. Writers store `(StorageRootId, RelativePath)`; readers resolve via `Path.Resolve(Worker)` for I/O and `Path.CanonicalDisplay(GetPrefixMap())` for display.
 
 This ensures any machine (VMAF on primary, FileReplacement on primary) can always find both files via canonical paths on the shared network drive.

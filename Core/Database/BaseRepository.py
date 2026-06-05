@@ -1,10 +1,10 @@
-import ntpath
 import os
 from typing import Optional
 from Core.Database.DatabaseService import DatabaseService
 # directive: path-schema-migration | # see path.S8
 from Core.Path.Path import Path, PathError
 from Core.Path.PathStorageRoots import GetStorageRoots
+from Core.Path.LocalPath import LocalBasename, LocalDirname
 
 
 # directive: path-schema-migration | # see path.S8
@@ -59,8 +59,8 @@ class BaseRepository:
     # directive: path-schema-migration | # see path.S8
     def AddProblemFile(self, FilePath: str, ErrorType: str, ErrorMessage: str) -> Optional[int]:
         """Record a problem file row; FilePath parsed at the boundary into FileName + Directory + typed pair."""
-        FileName = ntpath.basename(FilePath or "")
-        Directory = ntpath.dirname(FilePath or "")
+        FileName = LocalBasename(FilePath)
+        Directory = LocalDirname(FilePath)
         SizeBytes = 0
         SizeMB = 0.0
         if _LocalExists(FilePath):

@@ -1,10 +1,11 @@
 import os
-import ntpath
 from typing import List, Optional
 from pathlib import Path
 from Models.FFmpegScreenshotModel import FFmpegScreenshotModel, FFmpegScreenshotBatchModel
 from Services.FFmpegService import FFmpegService
 from Services.LoggingService import LoggingService
+# directive: path-schema-migration | # see path.S8
+from Core.Path.LocalPath import LocalBasename, LocalDirname
 
 
 class FFmpegScreenshotService:
@@ -25,18 +26,18 @@ class FFmpegScreenshotService:
             # Create screenshot model
             ScreenshotModel = FFmpegScreenshotModel()
             ScreenshotModel.SourceFilePath = SourceFilePath
-            ScreenshotModel.SourceFileName = ntpath.basename(SourceFilePath)
+            ScreenshotModel.SourceFileName = LocalBasename(SourceFilePath)
             ScreenshotModel.TimestampSeconds = TimestampSeconds
             ScreenshotModel.Format = Format
 
             # Generate output path if not provided
             if not OutputPath:
-                SourceDir = ntpath.dirname(SourceFilePath)
+                SourceDir = LocalDirname(SourceFilePath)
                 SourceName = Path(SourceFilePath).stem
                 OutputPath = os.path.join(SourceDir, f"{SourceName}_screenshot_{TimestampSeconds:.1f}s.{Format}")
 
             ScreenshotModel.ScreenshotPath = OutputPath
-            ScreenshotModel.ScreenshotFileName = ntpath.basename(OutputPath)
+            ScreenshotModel.ScreenshotFileName = LocalBasename(OutputPath)
             
             # Build FFmpeg arguments
             Arguments = [
@@ -91,7 +92,7 @@ class FFmpegScreenshotService:
             # Create batch model
             BatchModel = FFmpegScreenshotBatchModel()
             BatchModel.SourceFilePath = SourceFilePath
-            BatchModel.SourceFileName = ntpath.basename(SourceFilePath)
+            BatchModel.SourceFileName = LocalBasename(SourceFilePath)
 
             # Get video duration first
             DurationResult = self.GetVideoDuration(SourceFilePath)
@@ -110,7 +111,7 @@ class FFmpegScreenshotService:
 
             # Generate output directory if not provided
             if not OutputDirectory:
-                SourceDir = ntpath.dirname(SourceFilePath)
+                SourceDir = LocalDirname(SourceFilePath)
                 SourceName = Path(SourceFilePath).stem
                 OutputDirectory = os.path.join(SourceDir, f"{SourceName}_screenshots")
                 os.makedirs(OutputDirectory, exist_ok=True)
@@ -150,11 +151,11 @@ class FFmpegScreenshotService:
             # Create batch model
             BatchModel = FFmpegScreenshotBatchModel()
             BatchModel.SourceFilePath = SourceFilePath
-            BatchModel.SourceFileName = ntpath.basename(SourceFilePath)
+            BatchModel.SourceFileName = LocalBasename(SourceFilePath)
 
             # Generate output directory if not provided
             if not OutputDirectory:
-                SourceDir = ntpath.dirname(SourceFilePath)
+                SourceDir = LocalDirname(SourceFilePath)
                 SourceName = Path(SourceFilePath).stem
                 OutputDirectory = os.path.join(SourceDir, f"{SourceName}_screenshots")
                 os.makedirs(OutputDirectory, exist_ok=True)

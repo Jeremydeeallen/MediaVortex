@@ -16,6 +16,7 @@ from Features.FileScanning.FileScanningRepository import FileScanningRepository
 from Features.MediaProbe.MediaProbeBusinessService import MediaProbeBusinessService
 from Core.Logging.LoggingService import LoggingService
 from Core.Path import Path, Worker, PathError
+from Core.Path.LocalPath import LocalBasename, LocalDirname, LocalSplitExt, LocalJoin
 
 
 _FS_WORKER_HOLDER: dict = {"_Worker": None, "_StorageRoots": None}
@@ -125,28 +126,28 @@ def _GetMTime(CanonicalValue: str, _IgnoredWorkerName=None) -> float:
     return P.GetMTime(_GetWorker())
 
 
-# directive: filescanning-uses-path | # see path.S5
+# directive: path-schema-migration | # see path.S5
 def _LastSegment(Value: str) -> str:
-    """Basename for canonical Windows-shape paths."""
-    return ntpath.basename(Value or "")
+    """Basename for worker-local paths (LocalPath = host-OS shape)."""
+    return LocalBasename(Value)
 
 
-# directive: filescanning-uses-path | # see path.S5
+# directive: path-schema-migration | # see path.S5
 def _ParentDir(Value: str) -> str:
-    """Dirname for canonical Windows-shape paths."""
-    return ntpath.dirname(Value or "")
+    """Dirname for worker-local paths (LocalPath = host-OS shape)."""
+    return LocalDirname(Value)
 
 
-# directive: filescanning-uses-path | # see path.S5
+# directive: path-schema-migration | # see path.S5
 def _Join(Base: str, *Children: str) -> str:
-    """ntpath.join for canonical Windows-shape paths."""
-    return ntpath.join(Base, *Children)
+    """Join for worker-local paths (LocalPath = host-OS shape)."""
+    return LocalJoin(Base, *Children)
 
 
-# directive: filescanning-uses-path | # see path.S5
+# directive: path-schema-migration | # see path.S5
 def _SplitExt(Value: str) -> tuple:
-    """Splitext for canonical Windows-shape paths."""
-    return ntpath.splitext(Value or "")
+    """Splitext for worker-local paths (LocalPath = host-OS shape)."""
+    return LocalSplitExt(Value)
 
 
 # directive: filescanning-uses-path | # see path.S5
@@ -1042,21 +1043,17 @@ class FileScanningBusinessService:
                                          'GetCanonicalPathFromFilesystem', 'FileScanningBusinessService')
                 return normalized_path
 
-            # Build the path component by component to get actual case
-            # This works for both local and network drives
-            # Handle Windows drive letter paths properly (e.g., "Z:\Videos")
+            # normalized_path is canonical display (Windows backslash) -- literal "\\" keeps splitting correct on Linux workers
             if len(normalized_path) >= 2 and normalized_path[1] == ':':
-                # Windows drive letter path - split at the drive letter
-                drive = normalized_path[0:2]  # e.g., "Z:"
-                remainder = normalized_path[2:].lstrip(os.sep)  # e.g., "Videos" (without leading \)
-                result_path = drive + os.sep  # e.g., "Z:\" - ensure we have the backslash
+                drive = normalized_path[0:2]
+                remainder = normalized_path[2:].lstrip("\\")
+                result_path = drive + "\\"
                 if remainder:
-                    parts = remainder.split(os.sep)
+                    parts = remainder.split("\\")
                 else:
                     parts = []
             else:
-                # Unix-style path or UNC path
-                parts = normalized_path.split(os.sep)
+                parts = normalized_path.split("\\")
                 result_path = parts[0] if parts else ''
                 parts = parts[1:] if parts else []
 
@@ -1067,10 +1064,9 @@ class FileScanningBusinessService:
                     continue
 
                 try:
-                    # List directory contents to find actual case
+                    # current_path stays canonical display through the walk -- use ntpath.join, not LocalJoin
                     if _LocalIsDir(current_path):
                         dir_contents = os.listdir(current_path)
-                        # Find matching directory (case-insensitive comparison)
                         actual_name = None
                         for item in dir_contents:
                             if item.upper() == part.upper():
@@ -1078,18 +1074,15 @@ class FileScanningBusinessService:
                                 break
 
                         if actual_name:
-                            current_path = _Join(current_path, actual_name)
+                            current_path = ntpath.join(current_path, actual_name)
                         else:
-                            # If not found in listing, use original (might be a file)
-                            current_path = _Join(current_path, part)
+                            current_path = ntpath.join(current_path, part)
                     else:
-                        # Not a directory, just append
-                        current_path = _Join(current_path, part)
+                        current_path = ntpath.join(current_path, part)
                 except Exception as e:
-                    # If we can't list directory, just use original part
                     LoggingService.LogWarning(f"Could not list directory '{current_path}' to get actual case, using: {part}",
                                              'GetCanonicalPathFromFilesystem', 'FileScanningBusinessService')
-                    current_path = _Join(current_path, part)
+                    current_path = ntpath.join(current_path, part)
 
             # Log if case changed
             if current_path != normalized_path:
@@ -1662,7 +1655,7 @@ class FileScanningBusinessService:
                 WorkerName = _CurrentWorkerName()
                 if _Exists(MediaFile.FilePath, WorkerName):
                     CurrentSizeMB = _GetSize(MediaFile.FilePath, WorkerName) / (1024 * 1024)
-                    CurrentFileName = ntpath.basename(MediaFile.FilePath)
+                    CurrentFileName = ntpath.basename(MediaFile.FilePath)  # canonical display
                     CurrentModificationTime = self.GetFileModificationTime(MediaFile.FilePath)
 
                     if self.HasFileChanged(MediaFile, CurrentSizeMB, CurrentFileName, CurrentModificationTime):
@@ -1920,7 +1913,7 @@ class FileScanningBusinessService:
                     UnparseableCount += 1
                     continue
                 DiskSet.add((Sid, Rel.lower()))
-                Basename = _LastSegment(CanonicalPath).lower()
+                Basename = ntpath.basename(CanonicalPath).lower()  # canonical display
                 DiskByBasenameLower.setdefault(Basename, []).append((CanonicalPath, Sid, Rel))
             if UnparseableCount > 0:
                 LoggingService.LogWarning(
@@ -1999,7 +1992,7 @@ class FileScanningBusinessService:
                     f"Reassigning moved file: {DbFile.FilePath} -> {CandidateCanonical}",
                     'ReconcileWithDisk', 'FileScanningBusinessService'
                 )
-                DbFile.FileName = ntpath.basename(CandidateCanonical)
+                DbFile.FileName = ntpath.basename(CandidateCanonical)  # canonical display
                 DbFile.StorageRootId = CandidateSid
                 DbFile.RelativePath = CandidateRel
                 DbFile.LastScannedDate = datetime.now(timezone.utc)
@@ -2189,7 +2182,7 @@ class FileScanningBusinessService:
                         _P = Path.FromLegacyString(MovedFile['NewPath'], _GetStorageRoots())
                         DbFile.StorageRootId = _P.StorageRootId
                         DbFile.RelativePath = _P.RelativePath
-                        DbFile.FileName = ntpath.basename(MovedFile['NewPath'])
+                        DbFile.FileName = ntpath.basename(MovedFile['NewPath'])  # canonical display
                         DbFile.LastScannedDate = datetime.now(timezone.utc)
                         self.Repository.SaveMediaFile(DbFile)
                         MovedFiles.append({
@@ -2274,7 +2267,7 @@ class FileScanningBusinessService:
                         Progress = 30.0 + (60.0 * ProcessedCount / TotalFiles)
                         self.ScanProgress = Progress
                         self.ScanResults.TotalFilesProcessed = ProcessedCount
-                        self.CurrentScanDirectory = _ParentDir(FilePath)
+                        self.CurrentScanDirectory = ntpath.dirname(FilePath)  # canonical display
 
                     return {'Success': True, 'FilePath': FilePath}
                 except Exception as e:
