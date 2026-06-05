@@ -66,13 +66,28 @@ class ContentClassifierRepository:
             )
             return False
 
+    # directive: path-schema-migration | # see content-classifier.C5 -- typed-pair SELECT; FilePath synthesized for FolderPathPattern matching
     def GetMediaFileForClassification(self, MediaFileId: int) -> Optional[dict]:
+        """Return row dict for the classifier; FilePath is computed via PathStorageRoots, not the renamed column."""
         Rows = self.Db.ExecuteQuery(
-            "SELECT Id, FilePath, Codec, ResolutionCategory, VideoBitrateKbps, "
+            "SELECT Id, StorageRootId, RelativePath, Codec, ResolutionCategory, VideoBitrateKbps, "
             "       MotionFraction, SceneChangeRatePerMin, LumaVariance, AssignedProfile "
             "FROM MediaFiles WHERE Id = %s",
             (MediaFileId,),
         )
         if not Rows:
             return None
-        return dict(Rows[0])
+        from Core.Path.Path import Path as _PathCC, PathError as _PECC
+        from Core.Path.PathStorageRoots import GetPrefixMap as _GPMCC
+        _PmCC = _GPMCC()
+        Row = dict(Rows[0])
+        Sid = Row.get('StorageRootId') or Row.get('storagerootid')
+        Rel = Row.get('RelativePath') or Row.get('relativepath') or ''
+        FilePath = ''
+        if Sid is not None:
+            try:
+                FilePath = _PathCC(Sid, Rel).CanonicalDisplay(_PmCC)
+            except _PECC:
+                FilePath = ''
+        Row['FilePath'] = FilePath
+        return Row

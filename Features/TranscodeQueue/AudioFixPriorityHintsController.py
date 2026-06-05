@@ -118,27 +118,22 @@ def RemovePin(HintId):
 
 
 @AudioFixPriorityHintsBlueprint.route('/ApplyAll', methods=['POST'])
+# directive: path-schema-migration | # see path.S8
 def ApplyAll():
-    """Re-apply all pins to existing TranscodeQueue rows.
-
-    Useful after adding/removing pins to backfill the priority boost on
-    rows that were inserted before the pin was added. UPDATE only touches
-    rows with ProcessingMode='AudioFix' whose FilePath matches a pin.
-    """
+    """Re-apply all pins to existing TranscodeQueue rows; substring-matches the canonical FilePath synthesized from (StorageRootId, RelativePath)."""
     try:
         Db = DatabaseService()
         Conn = Db.GetConnection()
         try:
             Cur = Conn.cursor()
             Cur.execute(
-                """
-                UPDATE TranscodeQueue tq
-                SET Priority = h.BoostedPriority
-                FROM AudioFixPriorityHints h
-                WHERE tq.ProcessingMode = 'AudioFix'
-                  AND POSITION(h.FolderPattern IN tq.FilePath) > 0
-                  AND tq.Priority < h.BoostedPriority
-                """
+                "UPDATE TranscodeQueue tq "
+                "SET Priority = h.BoostedPriority "
+                "FROM AudioFixPriorityHints h, StorageRoots sr "
+                "WHERE tq.ProcessingMode = 'AudioFix' "
+                "  AND sr.Id = tq.StorageRootId "
+                "  AND POSITION(h.FolderPattern IN (sr.CanonicalPrefix || COALESCE(tq.RelativePath, ''))) > 0 "
+                "  AND tq.Priority < h.BoostedPriority"
             )
             Boosted = Cur.rowcount
             Conn.commit()

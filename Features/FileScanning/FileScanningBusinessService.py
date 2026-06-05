@@ -703,19 +703,19 @@ class FileScanningBusinessService:
                         ExistingId = Found[0].get('Id') or Found[0].get('id')
 
                 if ExistingId is not None:
+                    # directive: path-schema-migration | # see path.S8 -- update typed pair, FileName, and core metadata; FilePath is computed display
                     self.Repository.DatabaseService.ExecuteNonQuery(
-                        """
-                        UPDATE MediaFiles
-                        SET SizeMB = %s,
-                            FileSize = %s,
-                            FileModificationTime = %s,
-                            LastModifiedDate = %s,
-                            LastScannedDate = %s,
-                            FilePath = %s,
-                            FileName = %s
-                        WHERE Id = %s
-                        """,
-                        (SizeMB, SizeBytes, MtimeDt, MtimeDt, datetime.now(timezone.utc), CanonicalPath, FileName, ExistingId),
+                        "UPDATE MediaFiles "
+                        "SET SizeMB = %s, "
+                        "    FileSize = %s, "
+                        "    FileModificationTime = %s, "
+                        "    LastModifiedDate = %s, "
+                        "    LastScannedDate = %s, "
+                        "    StorageRootId = %s, "
+                        "    RelativePath = %s, "
+                        "    FileName = %s "
+                        "WHERE Id = %s",
+                        (SizeMB, SizeBytes, MtimeDt, MtimeDt, datetime.now(timezone.utc), StorageRootId, RelativePath, FileName, ExistingId),
                     )
                     RowId = ExistingId
                 else:

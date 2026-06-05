@@ -22,6 +22,7 @@ from Features.TranscodeJob.TranscodeJobRepository import TranscodeJobRepository
 from Features.QualityTesting.QualityTestRepository import QualityTestRepository
 from Features.ShowSettings.ShowSettingsRepository import ShowSettingsRepository
 from Features.FileScanning.FileScanningRepository import FileScanningRepository
+from Features.Activity.ActivityRepository import ActivityRepository
 
 
 # directive: path-schema-migration | # see path.S8
@@ -32,6 +33,7 @@ class DatabaseManager(
     QualityTestRepository,
     ShowSettingsRepository,
     FileScanningRepository,
+    ActivityRepository,
 ):
     """Facade aggregating per-aggregate Repositories; legacy callers use this; per-aggregate code should use the specific Repository."""
     
@@ -408,130 +410,6 @@ class DatabaseManager(
         return affected_rows > 0
     
     # Root Folder Management Methods
-    def GetContainerFormatCounts(self) -> List[Dict[str, Any]]:
-        """Get file counts grouped by container format."""
-        query = """
-            SELECT COALESCE(ContainerFormat, 'unknown') as Format, COUNT(*) as Count
-            FROM MediaFiles GROUP BY ContainerFormat ORDER BY Count DESC
-        """
-        rows = self.DatabaseService.ExecuteQuery(query)
-        return [{'Format': row['Format'], 'Count': row['Count']} for row in rows]
-
-    def GetAudioCodecCounts(self) -> List[Dict[str, Any]]:
-        """Get file counts grouped by audio codec."""
-        query = """
-            SELECT COALESCE(AudioCodec, 'unknown') as Codec, COUNT(*) as Count
-            FROM MediaFiles GROUP BY AudioCodec ORDER BY Count DESC
-        """
-        rows = self.DatabaseService.ExecuteQuery(query)
-        return [{'Codec': row['Codec'], 'Count': row['Count']} for row in rows]
-
-    def GetSubtitleFormatCounts(self) -> List[Dict[str, Any]]:
-        """Get file counts grouped by subtitle formats."""
-        query = """
-            SELECT COALESCE(SubtitleFormats, 'none') as Formats, COUNT(*) as Count
-            FROM MediaFiles GROUP BY SubtitleFormats ORDER BY Count DESC
-        """
-        rows = self.DatabaseService.ExecuteQuery(query)
-        return [{'Formats': row['Formats'], 'Count': row['Count']} for row in rows]
-
-    def GetMkvFileCount(self) -> int:
-        """Get count of MKV files (remux candidates)."""
-        query = "SELECT COUNT(*) as Count FROM MediaFiles WHERE LOWER(ContainerFormat) LIKE '%%matroska%%'"
-        rows = self.DatabaseService.ExecuteQuery(query)
-        return rows[0]['Count'] if rows else 0
-
-    def GetTotalMediaFileCount(self) -> int:
-        """Get total count of all media files."""
-        query = "SELECT COUNT(*) as Count FROM MediaFiles"
-        rows = self.DatabaseService.ExecuteQuery(query)
-        return rows[0]['Count'] if rows else 0
-
-    def GetLegacyCodecFiles(self, Limit: int = 100) -> List[Dict[str, Any]]:
-        """Get files with legacy codecs that need full transcode."""
-        query = """
-            SELECT Id, FilePath, FileName, Codec, ContainerFormat, SizeMB, Resolution
-            FROM MediaFiles
-            WHERE LOWER(Codec) IN ('mpeg4', 'msmpeg4v3', 'msmpeg4v2', 'mpeg2video', 'wmv3', 'wmv2', 'wmv1', 'rv40', 'rv30', 'vp6f')
-            ORDER BY SizeMB DESC
-            LIMIT %s
-        """
-        rows = self.DatabaseService.ExecuteQuery(query, (Limit,))
-        return [{'Id': r['Id'], 'FilePath': r['FilePath'], 'FileName': r['FileName'],
-                 'Codec': r['Codec'], 'ContainerFormat': r['ContainerFormat'],
-                 'SizeMB': r['SizeMB'], 'Resolution': r['Resolution']} for r in rows]
-
-    def GetLegacyCodecCount(self) -> int:
-        """Get count of files with legacy codecs."""
-        query = """
-            SELECT COUNT(*) as Count FROM MediaFiles
-            WHERE LOWER(Codec) IN ('mpeg4', 'msmpeg4v3', 'msmpeg4v2', 'mpeg2video', 'wmv3', 'wmv2', 'wmv1', 'rv40', 'rv30', 'vp6f')
-        """
-        rows = self.DatabaseService.ExecuteQuery(query)
-        return rows[0]['Count'] if rows else 0
-
-    def GetIncompatibleAudioFiles(self, Limit: int = 100) -> List[Dict[str, Any]]:
-        """Get files with audio codecs that may cause transcoding on playback."""
-        query = """
-            SELECT Id, FilePath, FileName, AudioCodec, ContainerFormat, SizeMB, Resolution
-            FROM MediaFiles
-            WHERE LOWER(AudioCodec) IN ('dts', 'truehd', 'flac', 'pcm_s16le', 'pcm_s24le', 'pcm_s32le', 'pcm_f32le')
-            ORDER BY SizeMB DESC
-            LIMIT %s
-        """
-        rows = self.DatabaseService.ExecuteQuery(query, (Limit,))
-        return [{'Id': r['Id'], 'FilePath': r['FilePath'], 'FileName': r['FileName'],
-                 'AudioCodec': r['AudioCodec'], 'ContainerFormat': r['ContainerFormat'],
-                 'SizeMB': r['SizeMB'], 'Resolution': r['Resolution']} for r in rows]
-
-    def GetIncompatibleAudioCount(self) -> int:
-        """Get count of files with incompatible audio codecs."""
-        query = """
-            SELECT COUNT(*) as Count FROM MediaFiles
-            WHERE LOWER(AudioCodec) IN ('dts', 'truehd', 'flac', 'pcm_s16le', 'pcm_s24le', 'pcm_s32le', 'pcm_f32le')
-        """
-        rows = self.DatabaseService.ExecuteQuery(query)
-        return rows[0]['Count'] if rows else 0
-
-    def GetProblematicSubtitleFiles(self, Limit: int = 100) -> List[Dict[str, Any]]:
-        """Get files with subtitle formats that force burn-in transcoding."""
-        query = """
-            SELECT Id, FilePath, FileName, SubtitleFormats, ContainerFormat, SizeMB, Resolution
-            FROM MediaFiles
-            WHERE SubtitleFormats IS NOT NULL AND SubtitleFormats != ''
-              AND (LOWER(SubtitleFormats) LIKE '%%ass%%' OR LOWER(SubtitleFormats) LIKE '%%ssa%%'
-                   OR LOWER(SubtitleFormats) LIKE '%%hdmv_pgs%%' OR LOWER(SubtitleFormats) LIKE '%%pgssub%%'
-                   OR LOWER(SubtitleFormats) LIKE '%%dvd_subtitle%%' OR LOWER(SubtitleFormats) LIKE '%%dvdsub%%')
-            ORDER BY SizeMB DESC
-            LIMIT %s
-        """
-        rows = self.DatabaseService.ExecuteQuery(query, (Limit,))
-        return [{'Id': r['Id'], 'FilePath': r['FilePath'], 'FileName': r['FileName'],
-                 'SubtitleFormats': r['SubtitleFormats'], 'ContainerFormat': r['ContainerFormat'],
-                 'SizeMB': r['SizeMB'], 'Resolution': r['Resolution']} for r in rows]
-
-    def GetProblematicSubtitleCount(self) -> int:
-        """Get count of files with problematic subtitle formats."""
-        query = """
-            SELECT COUNT(*) as Count FROM MediaFiles
-            WHERE SubtitleFormats IS NOT NULL AND SubtitleFormats != ''
-              AND (LOWER(SubtitleFormats) LIKE '%%ass%%' OR LOWER(SubtitleFormats) LIKE '%%ssa%%'
-                   OR LOWER(SubtitleFormats) LIKE '%%hdmv_pgs%%' OR LOWER(SubtitleFormats) LIKE '%%pgssub%%'
-                   OR LOWER(SubtitleFormats) LIKE '%%dvd_subtitle%%' OR LOWER(SubtitleFormats) LIKE '%%dvdsub%%')
-        """
-        rows = self.DatabaseService.ExecuteQuery(query)
-        return rows[0]['Count'] if rows else 0
-
-    def GetVideoCodecCounts(self) -> List[Dict[str, Any]]:
-        """Get file counts grouped by video codec."""
-        query = """
-            SELECT COALESCE(Codec, 'unknown') as Codec, COUNT(*) as Count
-            FROM MediaFiles GROUP BY Codec ORDER BY Count DESC
-        """
-        rows = self.DatabaseService.ExecuteQuery(query)
-        return [{'Codec': row['Codec'], 'Count': row['Count']} for row in rows]
-
-    # System Settings Management Methods
     def GetSystemSetting(self, SettingKey: str) -> Optional[str]:
         """Get a system setting value by key."""
         query = "SELECT SettingValue FROM SystemSettings WHERE SettingKey = %s"
@@ -812,29 +690,6 @@ class DatabaseManager(
             LoggingService.LogException("Exception in SetWorkerMountValidationError", e, "DatabaseManager", "SetWorkerMountValidationError")
             return False
     
-    def GetJobCounts(self) -> Dict[str, int]:
-        """Get job counts by status."""
-        try:
-            LoggingService.LogFunctionEntry("GetJobCounts", "DatabaseManager")
-            
-            query = """
-                SELECT Status, COUNT(*) as Count
-                FROM TranscodeQueue 
-                GROUP BY Status
-            """
-            rows = self.DatabaseService.ExecuteQuery(query)
-            
-            counts = {}
-            for row in rows:
-                counts[row['Status']] = row['Count']
-            
-            LoggingService.LogInfo(f"Job counts: {counts}", "DatabaseManager", "GetJobCounts")
-            return counts
-            
-        except Exception as e:
-            LoggingService.LogException("Exception in GetJobCounts", e, "DatabaseManager", "GetJobCounts")
-            return {}
-    
     def GetProfileQuality(self, ProfileName: str) -> Optional[int]:
         """Get the Quality value from ProfileThresholds for a given profile name."""
         try:
@@ -1066,85 +921,6 @@ class DatabaseManager(
         except (ValueError, IndexError):
             return PixelDimensions
     
-    def GetAllCurrentTranscodeProgress(self) -> list:
-        """Get progress for ALL active transcoding jobs (supports concurrent transcoding)."""
-        try:
-            LoggingService.LogFunctionEntry("GetAllCurrentTranscodeProgress", "DatabaseManager")
-
-            query = """
-                SELECT tp.TranscodeAttemptId, tp.CurrentPhase, tp.ProgressPercent, tp.CurrentFrame,
-                       tp.TotalFrames, tp.CurrentFPS, tp.AverageFPS, tp.CurrentBitrate,
-                       tp.CurrentTime, tp.CurrentSpeed, tp.ETA, tp.PassDuration,
-                       tp.LastProgressUpdate, ta.FilePath, ta.Quality, ta.ProfileName, ta.AttemptDate,
-                       mf.TotalFrames as MediaFileTotalFrames, ta.FfpmpegCommand
-                FROM TranscodeProgress tp
-                INNER JOIN TranscodeAttempts ta ON tp.TranscodeAttemptId = ta.Id
-                LEFT JOIN MediaFiles mf ON ta.MediaFileId = mf.Id
-                WHERE ta.Success IS NULL
-                ORDER BY tp.LastProgressUpdate DESC
-            """
-
-            results = self.DatabaseService.ExecuteQuery(query)
-
-            if not results:
-                LoggingService.LogDebug("No active transcoding progress found", "DatabaseManager", "GetAllCurrentTranscodeProgress")
-                return []
-
-            ProgressList = []
-            SeenAttempts = set()
-            for row in results:
-                AttemptId = row['transcodeattemptid']
-                # The query may return multiple phases per attempt; take the most recent (already ordered by LastProgressUpdate DESC)
-                if AttemptId in SeenAttempts:
-                    continue
-                SeenAttempts.add(AttemptId)
-
-                FilePath = row['filepath']
-                FileName = FilePath.split('\\')[-1] if FilePath else "Unknown"
-
-                MediaFileTotalFrames = row.get('mediafiletotalframes')
-                ProgressTotalFrames = row['totalframes']
-                ActualTotalFrames = MediaFileTotalFrames if MediaFileTotalFrames else ProgressTotalFrames
-
-                CurrentFrame = row['currentframe']
-                RecalculatedProgress = 0.0
-                if ActualTotalFrames and ActualTotalFrames > 0 and CurrentFrame > 0:
-                    RecalculatedProgress = min((CurrentFrame / ActualTotalFrames) * 100, 95.0)
-
-                ProgressList.append({
-                    'Success': True,
-                    'AttemptId': AttemptId,
-                    'TranscodeAttemptId': AttemptId,
-                    'CurrentPhase': row['currentphase'],
-                    'ProgressPercent': RecalculatedProgress if RecalculatedProgress > 0 else row['progresspercent'],
-                    'CurrentFrame': CurrentFrame,
-                    'TotalFrames': ActualTotalFrames,
-                    'CurrentFPS': row['currentfps'],
-                    'AverageFPS': row['averagefps'],
-                    'CurrentBitrate': row['currentbitrate'],
-                    'CurrentTime': row['currenttime'],
-                    'CurrentSpeed': row['currentspeed'],
-                    'ETA': row['eta'],
-                    'PassDuration': row['passduration'],
-                    'LastUpdate': row['lastprogressupdate'],
-                    'LastProgressUpdate': row['lastprogressupdate'],
-                    'FilePath': FilePath,
-                    'FileName': FileName,
-                    'StartTime': row['attemptdate'],
-                    'Quality': row['quality'],
-                    'ProfileName': row['profilename'],
-                    'MediaFileTotalFrames': MediaFileTotalFrames,
-                    'RecalculatedProgress': RecalculatedProgress > 0,
-                    'Command': row.get('ffpmpegcommand')
-                })
-
-            LoggingService.LogDebug(f"Found progress for {len(ProgressList)} active jobs", "DatabaseManager", "GetAllCurrentTranscodeProgress")
-            return ProgressList
-
-        except Exception as e:
-            LoggingService.LogException("Exception getting all current transcode progress", e, "DatabaseManager", "GetAllCurrentTranscodeProgress")
-            return []
-
     def CleanupOldLogs(self, DaysToKeep: int = 30) -> int:
         """Clean up old log entries to prevent database bloat."""
         try:
@@ -2001,50 +1777,6 @@ class DatabaseManager(
                                        "DatabaseManager", "UpdateActiveJobProcessId")
             return False
     
-    def GetFailedFileReplacements(self, Limit: int = 20) -> List[Dict[str, Any]]:
-        """Get transcoded files that passed VMAF but may have failed file replacement."""
-        try:
-            LoggingService.LogFunctionEntry("GetFailedFileReplacements", "DatabaseManager", Limit)
-            
-            query = """
-                SELECT ta.Id, ta.FilePath, ta.VMAF, ta.AttemptDate, ta.Success,
-                       tfp.LocalOutputPath as TranscodedFilePath,
-                       qtr.Status as VMAFStatus
-                FROM TranscodeAttempts ta
-                INNER JOIN TemporaryFilePaths tfp ON ta.Id = tfp.TranscodeAttemptId
-                INNER JOIN QualityTestResults qtr ON ta.Id = qtr.TranscodeAttemptId
-                WHERE ta.VMAF IS NOT NULL 
-                AND ta.VMAF >= 90
-                AND ta.Success = TRUE
-                AND tfp.LocalOutputPath IS NOT NULL
-                AND qtr.Status = 'Success'
-                AND ta.QualityTestRequired = TRUE
-                AND qtr.DateTested IS NOT NULL
-                ORDER BY ta.AttemptDate DESC
-                LIMIT %s
-            """
-            
-            Rows = self.DatabaseService.ExecuteQuery(query, (Limit,))
-            
-            Results = []
-            for Row in Rows:
-                Results.append({
-                    "Id": Row["Id"],
-                    "FilePath": Row["FilePath"],
-                    "VMAF": Row["VMAF"],
-                    "AttemptDate": Row["AttemptDate"],
-                    "Success": Row["Success"],
-                    "TranscodedFilePath": Row["TranscodedFilePath"],
-                    "VMAFStatus": Row["VMAFStatus"]
-                })
-            
-            LoggingService.LogInfo(f"Found {len(Results)} failed file replacements", "DatabaseManager", "GetFailedFileReplacements")
-            return Results
-            
-        except Exception as e:
-            LoggingService.LogException("Exception getting failed file replacements", e, "DatabaseManager", "GetFailedFileReplacements")
-            return []
-    
     def InsertJellyfinOperation(self, LogFileName: str, OperationType: str, FilePath: str,
                                  FileName: str, VideoCodec: str, AudioCodec: str,
                                  Container: str, Resolution: str, SubtitleCodecs: str,
@@ -2256,120 +1988,4 @@ class DatabaseManager(
             LoggingService.LogException("Error getting transcode destination summary", e, "DatabaseManager", "GetTranscodeDestinationSummary")
             return {"Success": False, "ErrorMessage": str(e)}
 
-    def GetMediaFileByFileName(self, FileName: str) -> Optional[Dict[str, Any]]:
-        """Look up a MediaFile by filename (case-insensitive) for mitigation checking.
-        Tries exact match first, then fuzzy match by episode prefix if not found.
-        Returns dict with MatchType: 'exact', 'no_ext', or 'fuzzy'."""
-        try:
-            selectCols = "Id, FileName, FilePath, ContainerFormat, Codec, AudioCodec, TranscodedByMediaVortex, SubtitleFormats"
-
-            # 1. Exact match
-            query = f"SELECT {selectCols} FROM MediaFiles WHERE LOWER(FileName) = LOWER(%s) LIMIT 1"
-            rows = self.DatabaseService.ExecuteQuery(query, (FileName,))
-            if rows:
-                return self._MapMediaFileSummaryRow(rows[0], "exact")
-
-            # 2. Match without extension (handles container change: .mkv -> .mp4)
-            import os
-            nameNoExt = os.path.splitext(FileName)[0]
-            query = f"SELECT {selectCols} FROM MediaFiles WHERE LOWER(FileName) LIKE LOWER(%s) ESCAPE '!' LIMIT 1"
-            rows = self.DatabaseService.ExecuteQuery(query, (EscapeLikePattern(nameNoExt) + '%',))
-            if rows:
-                return self._MapMediaFileSummaryRow(rows[0], "no_ext")
-
-            # 3. Fuzzy match by episode prefix (handles resolution/quality change)
-            episodePrefix = self._ExtractEpisodePrefix(FileName)
-            if episodePrefix and episodePrefix != nameNoExt:
-                rows = self.DatabaseService.ExecuteQuery(query, (EscapeLikePattern(episodePrefix) + '%',))
-                if rows:
-                    return self._MapMediaFileSummaryRow(rows[0], "fuzzy")
-
-            return None
-        except Exception as e:
-            LoggingService.LogException("Error getting media file by filename", e, "DatabaseManager", "GetMediaFileByFileName")
-            return None
-
-    def _MapMediaFileSummaryRow(self, row, matchType: str = "exact") -> Dict[str, Any]:
-        """Map a summary row to a dict for mitigation checking."""
-        return {
-            "Id": row['id'],
-            "FileName": row['filename'],
-            "FilePath": row['filepath'],
-            "ContainerFormat": row['containerformat'],
-            "Codec": row['codec'],
-            "AudioCodec": row['audiocodec'],
-            "TranscodedByMediaVortex": row['transcodedbymediavortex'],
-            "SubtitleFormats": row['subtitleformats'],
-            "MatchType": matchType
-        }
-
-    def _ExtractEpisodePrefix(self, FileName: str) -> Optional[str]:
-        """Extract the show name + episode identifier from a filename for fuzzy matching.
-        E.g. 'Psych - S06E01 - Shawn Rescues Darth Vader WEBRip-480p.mkv'
-          -> 'Psych - S06E01'
-        """
-        import re
-        # Match patterns like S01E05, S1E5, s01e05
-        match = re.search(r'(.*%sS\d{1,2}E\d{1,2})', FileName, re.IGNORECASE)
-        if match:
-            return match.group(1).strip(' -_.')
-        # Match patterns like "1x05", "01x05"
-        match = re.search(r'(.*%s\d{1,2}x\d{2})', FileName, re.IGNORECASE)
-        if match:
-            return match.group(1).strip(' -_.')
-        return None
-
-    def GetFullMediaFileByFileName(self, FileName: str) -> Optional[MediaFileModel]:
-        """Get full MediaFile model by filename (case-insensitive) for re-analysis.
-        Uses same 3-tier fuzzy matching as GetMediaFileByFileName."""
-        try:
-            import os
-            selectCols = """Id, SeasonId, StorageRootId, RelativePath, FilePath, FileName, SizeMB, VideoBitrateKbps, AudioBitrateKbps,
-                       Resolution, Codec, DurationMinutes, FrameRate, LastScannedDate,
-                       CompressionPotential, AssignedProfile, IsInterlaced, ResolutionCategory,
-                       FileModificationTime, TotalFrames, CodecProfile, ColorRange, FieldOrder,
-                       HasBFrames, RefFrames, PixelFormat, Level, AudioChannels, AudioSampleRate,
-                       AudioSampleFormat, AudioChannelLayout, AudioCodec, SubtitleFormats,
-                       ContainerFormat, OverallBitrate, TranscodedByMediaVortex"""
-
-            # 1. Exact match
-            query = f"SELECT {selectCols} FROM MediaFiles WHERE LOWER(FileName) = LOWER(%s) LIMIT 1"
-            rows = self.DatabaseService.ExecuteQuery(query, (FileName,))
-
-            # 2. Match without extension (handles container change: .mkv -> .mp4)
-            if not rows:
-                nameNoExt = os.path.splitext(FileName)[0]
-                likeQuery = f"SELECT {selectCols} FROM MediaFiles WHERE LOWER(FileName) LIKE LOWER(%s) ESCAPE '!' LIMIT 1"
-                rows = self.DatabaseService.ExecuteQuery(likeQuery, (EscapeLikePattern(nameNoExt) + '%',))
-
-                # 3. Fuzzy match by episode prefix (handles resolution/quality change)
-                if not rows:
-                    episodePrefix = self._ExtractEpisodePrefix(FileName)
-                    if episodePrefix and episodePrefix != nameNoExt:
-                        rows = self.DatabaseService.ExecuteQuery(likeQuery, (EscapeLikePattern(episodePrefix) + '%',))
-
-            if not rows:
-                return None
-            row = rows[0]
-            return MediaFileModel(
-                Id=row['Id'], SeasonId=row['SeasonId'], FilePath=row['FilePath'],
-                FileName=row['FileName'], SizeMB=row['SizeMB'],
-                VideoBitrateKbps=row['VideoBitrateKbps'], AudioBitrateKbps=row['AudioBitrateKbps'],
-                Resolution=row['Resolution'], Codec=row['Codec'],
-                DurationMinutes=row['DurationMinutes'], FrameRate=row['FrameRate'],
-                LastScannedDate=row['LastScannedDate'], CompressionPotential=row['CompressionPotential'],
-                AssignedProfile=row['AssignedProfile'], IsInterlaced=row['IsInterlaced'],
-                ResolutionCategory=row['ResolutionCategory'], FileModificationTime=row['FileModificationTime'],
-                TotalFrames=row['TotalFrames'], CodecProfile=row['CodecProfile'],
-                ColorRange=row['ColorRange'], FieldOrder=row['FieldOrder'],
-                HasBFrames=row['HasBFrames'], RefFrames=row['RefFrames'],
-                PixelFormat=row['PixelFormat'], Level=row['Level'],
-                AudioChannels=row['AudioChannels'], AudioSampleRate=row['AudioSampleRate'],
-                AudioSampleFormat=row['AudioSampleFormat'], AudioChannelLayout=row['AudioChannelLayout'],
-                AudioCodec=row['AudioCodec'], SubtitleFormats=row['SubtitleFormats'],
-                ContainerFormat=row['ContainerFormat'], OverallBitrate=row['OverallBitrate'],
-                TranscodedByMediaVortex=row['TranscodedByMediaVortex']
-            )
-        except Exception as e:
-            LoggingService.LogException("Error getting full media file by filename", e, "DatabaseManager", "GetFullMediaFileByFileName")
             return None

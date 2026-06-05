@@ -665,29 +665,41 @@ class TranscodeJobRepository(BaseRepository):
         try:
             LoggingService.LogFunctionEntry("GetCurrentTranscodeProgress", "TranscodeJobRepository")
 
-            # Get progress only from currently active (in-progress) transcoding attempts
-            query = """
-                SELECT tp.TranscodeAttemptId, tp.CurrentPhase, tp.ProgressPercent, tp.CurrentFrame,
-                       tp.TotalFrames, tp.CurrentFPS, tp.AverageFPS, tp.CurrentBitrate,
-                       tp.CurrentTime, tp.CurrentSpeed, tp.ETA, tp.PassDuration,
-                       tp.LastProgressUpdate, ta.FilePath, ta.Quality, ta.ProfileName, ta.AttemptDate,
-                       mf.TotalFrames as MediaFileTotalFrames, ta.FfpmpegCommand
-                FROM TranscodeProgress tp
-                INNER JOIN TranscodeAttempts ta ON tp.TranscodeAttemptId = ta.Id
-                INNER JOIN TranscodeQueue tq ON ta.MediaFileId = tq.MediaFileId AND tq.Status = 'Running'
-                LEFT JOIN MediaFiles mf ON ta.MediaFileId = mf.Id
-                WHERE ta.Success IS NULL
-                ORDER BY tp.LastProgressUpdate DESC
-                LIMIT 1
-            """
+            # directive: path-schema-migration | # see path.S8
+            from Core.Path.Path import Path as _PathGCTP, PathError as _PEGCTP
+            from Core.Path.PathStorageRoots import GetPrefixMap as _GPMGCTP
+            import ntpath as _ntpathGCTP
+            _PmGCTP = _GPMGCTP()
+            query = (
+                "SELECT tp.TranscodeAttemptId, tp.CurrentPhase, tp.ProgressPercent, tp.CurrentFrame, "
+                "tp.TotalFrames, tp.CurrentFPS, tp.AverageFPS, tp.CurrentBitrate, "
+                "tp.CurrentTime, tp.CurrentSpeed, tp.ETA, tp.PassDuration, "
+                "tp.LastProgressUpdate, "
+                "ta.StorageRootId AS TaStorageRootId, ta.RelativePath AS TaRelativePath, "
+                "ta.Quality, ta.ProfileName, ta.AttemptDate, "
+                "mf.TotalFrames as MediaFileTotalFrames, ta.FfpmpegCommand "
+                "FROM TranscodeProgress tp "
+                "INNER JOIN TranscodeAttempts ta ON tp.TranscodeAttemptId = ta.Id "
+                "INNER JOIN TranscodeQueue tq ON ta.MediaFileId = tq.MediaFileId AND tq.Status = 'Running' "
+                "LEFT JOIN MediaFiles mf ON ta.MediaFileId = mf.Id "
+                "WHERE ta.Success IS NULL "
+                "ORDER BY tp.LastProgressUpdate DESC "
+                "LIMIT 1"
+            )
 
             result = self.DatabaseService.ExecuteQuery(query)
 
             if result and len(result) > 0:
                 row = result[0]
-                # Extract filename from filepath
-                FilePath = row['filepath']
-                FileName = FilePath.split('\\')[-1] if FilePath else "Unknown"
+                _Sid = row.get('tastoragerootid')
+                _Rel = row.get('tarelativepath')
+                FilePath = ''
+                if _Sid is not None:
+                    try:
+                        FilePath = _PathGCTP(_Sid, _Rel or '').CanonicalDisplay(_PmGCTP)
+                    except _PEGCTP:
+                        FilePath = ''
+                FileName = _ntpathGCTP.basename(FilePath) if FilePath else "Unknown"
 
                 # Use MediaFiles TotalFrames if available, fallback to TranscodeProgress TotalFrames
                 MediaFileTotalFrames = row.get('mediafiletotalframes')
@@ -736,6 +748,85 @@ class TranscodeJobRepository(BaseRepository):
         except Exception as e:
             LoggingService.LogException("Exception getting current transcode progress", e, "TranscodeJobRepository", "GetCurrentTranscodeProgress")
             return None
+
+    # directive: path-schema-migration | # see path.S8
+    def GetAllCurrentTranscodeProgress(self) -> list:
+        """Progress for ALL active transcoding jobs; typed-pair SELECT, Python-synthesized FilePath."""
+        try:
+            from Core.Path.Path import Path as _PathACTP, PathError as _PEACTP
+            from Core.Path.PathStorageRoots import GetPrefixMap as _GPMACTP
+            import ntpath as _ntpathACTP
+            _PmACTP = _GPMACTP()
+            query = (
+                "SELECT tp.TranscodeAttemptId, tp.CurrentPhase, tp.ProgressPercent, tp.CurrentFrame, "
+                "tp.TotalFrames, tp.CurrentFPS, tp.AverageFPS, tp.CurrentBitrate, "
+                "tp.CurrentTime, tp.CurrentSpeed, tp.ETA, tp.PassDuration, "
+                "tp.LastProgressUpdate, "
+                "ta.StorageRootId AS TaStorageRootId, ta.RelativePath AS TaRelativePath, "
+                "ta.Quality, ta.ProfileName, ta.AttemptDate, "
+                "mf.TotalFrames as MediaFileTotalFrames, ta.FfpmpegCommand "
+                "FROM TranscodeProgress tp "
+                "INNER JOIN TranscodeAttempts ta ON tp.TranscodeAttemptId = ta.Id "
+                "LEFT JOIN MediaFiles mf ON ta.MediaFileId = mf.Id "
+                "WHERE ta.Success IS NULL "
+                "ORDER BY tp.LastProgressUpdate DESC"
+            )
+            results = self.DatabaseService.ExecuteQuery(query)
+            if not results:
+                return []
+            ProgressList = []
+            SeenAttempts = set()
+            for row in results:
+                AttemptId = row['transcodeattemptid']
+                if AttemptId in SeenAttempts:
+                    continue
+                SeenAttempts.add(AttemptId)
+                _Sid = row.get('tastoragerootid')
+                _Rel = row.get('tarelativepath')
+                FilePath = ''
+                if _Sid is not None:
+                    try:
+                        FilePath = _PathACTP(_Sid, _Rel or '').CanonicalDisplay(_PmACTP)
+                    except _PEACTP:
+                        FilePath = ''
+                FileName = _ntpathACTP.basename(FilePath) if FilePath else "Unknown"
+                MediaFileTotalFrames = row.get('mediafiletotalframes')
+                ProgressTotalFrames = row['totalframes']
+                ActualTotalFrames = MediaFileTotalFrames if MediaFileTotalFrames else ProgressTotalFrames
+                CurrentFrame = row['currentframe']
+                RecalculatedProgress = 0.0
+                if ActualTotalFrames and ActualTotalFrames > 0 and CurrentFrame > 0:
+                    RecalculatedProgress = min((CurrentFrame / ActualTotalFrames) * 100, 95.0)
+                ProgressList.append({
+                    'Success': True,
+                    'AttemptId': AttemptId,
+                    'TranscodeAttemptId': AttemptId,
+                    'CurrentPhase': row['currentphase'],
+                    'ProgressPercent': RecalculatedProgress if RecalculatedProgress > 0 else row['progresspercent'],
+                    'CurrentFrame': CurrentFrame,
+                    'TotalFrames': ActualTotalFrames,
+                    'CurrentFPS': row['currentfps'],
+                    'AverageFPS': row['averagefps'],
+                    'CurrentBitrate': row['currentbitrate'],
+                    'CurrentTime': row['currenttime'],
+                    'CurrentSpeed': row['currentspeed'],
+                    'ETA': row['eta'],
+                    'PassDuration': row['passduration'],
+                    'LastUpdate': row['lastprogressupdate'],
+                    'LastProgressUpdate': row['lastprogressupdate'],
+                    'FilePath': FilePath,
+                    'FileName': FileName,
+                    'StartTime': row['attemptdate'],
+                    'Quality': row['quality'],
+                    'ProfileName': row['profilename'],
+                    'MediaFileTotalFrames': MediaFileTotalFrames,
+                    'RecalculatedProgress': RecalculatedProgress > 0,
+                    'Command': row.get('ffpmpegcommand')
+                })
+            return ProgressList
+        except Exception as e:
+            LoggingService.LogException("Exception getting all current transcode progress", e, "TranscodeJobRepository", "GetAllCurrentTranscodeProgress")
+            return []
 
     def DeleteTranscodeProgress(self, TranscodeAttemptId: int) -> bool:
         """Delete all progress records for a specific transcoding attempt."""
@@ -796,46 +887,3 @@ class TranscodeJobRepository(BaseRepository):
                                       "TranscodeJobRepository", "GetKeepSourceSetting")
             return None
 
-    def SaveMediaFileArchive(self, MediaFileId: int, TranscodeAttemptId: int) -> int:
-        """Archive original file details using INSERT SELECT from MediaFiles table."""
-        try:
-            LoggingService.LogFunctionEntry("SaveMediaFileArchive", "TranscodeJobRepository", MediaFileId, TranscodeAttemptId)
-
-            query = """
-                INSERT INTO MediaFilesArchive
-                (Id, SeasonId, FilePath, FileName, SizeMB, VideoBitrateKbps, AudioBitrateKbps,
-                 Resolution, Codec, DurationMinutes, FrameRate, LastScannedDate,
-                 CompressionPotential, AssignedProfile, IsInterlaced, ResolutionCategory,
-                 FileModificationTime, KeepSource, TotalFrames, CodecProfile, ColorRange,
-                 FieldOrder, HasBFrames, RefFrames, PixelFormat, Level, AudioChannels,
-                 AudioSampleRate, AudioSampleFormat, AudioChannelLayout, ContainerFormat,
-                 OverallBitrate, TranscodedByMediaVortex, ArchiveDate, TranscodeAttemptId)
-                SELECT Id, SeasonId, FilePath, FileName, SizeMB, VideoBitrateKbps, AudioBitrateKbps,
-                       Resolution, Codec, DurationMinutes, FrameRate, LastScannedDate,
-                       CompressionPotential, AssignedProfile, IsInterlaced, ResolutionCategory,
-                       FileModificationTime, KeepSource, TotalFrames, CodecProfile, ColorRange,
-                       FieldOrder, HasBFrames, RefFrames, PixelFormat, Level, AudioChannels,
-                       AudioSampleRate, AudioSampleFormat, AudioChannelLayout, ContainerFormat,
-                       OverallBitrate, TranscodedByMediaVortex, NOW(), %s
-                FROM MediaFiles
-                WHERE Id = %s
-            """
-
-            parameters = (TranscodeAttemptId, MediaFileId)
-
-            result = self.DatabaseService.ExecuteNonQuery(query, parameters)
-
-            if result:
-                LoggingService.LogInfo(f"Successfully archived original file details for MediaFile {MediaFileId}, Archive ID: {result}",
-                                     "TranscodeJobRepository", "SaveMediaFileArchive")
-                return result
-            else:
-                LoggingService.LogError(f"Failed to archive original file details for MediaFile {MediaFileId}",
-                                      "TranscodeJobRepository", "SaveMediaFileArchive")
-                return 0
-
-        except Exception as e:
-            LoggingService.LogException("Exception saving media file archive", e, "TranscodeJobRepository", "SaveMediaFileArchive")
-            return 0
-
-    # endregion

@@ -1457,7 +1457,8 @@ class ProcessTranscodeQueueService:
                     QualityTestRequiredForProfile = bool(ProfileRow[0].get('QualityTestRequired'))
 
             Attempt = TranscodeAttemptModel(
-                FilePath=Job.FilePath,
+                StorageRootId=Job.StorageRootId,
+                RelativePath=Job.RelativePath,
                 AttemptDate=datetime.now(timezone.utc),
                 Quality=ProfileSettings.get('Quality', 0),
                 OldSizeBytes=Job.SizeBytes,
@@ -1661,9 +1662,9 @@ class ProcessTranscodeQueueService:
                 # Update TranscodeFiles record for overall file status (failure)
                 self.UpdateTranscodeFileRecord(Job.FilePath, TranscodeAttemptId, False, MediaFileId=Job.MediaFileId)
             else:
-                # Create new attempt record for investigation (fallback case)
                 Attempt = TranscodeAttemptModel(
-                    FilePath=Job.FilePath,
+                    StorageRootId=Job.StorageRootId,
+                    RelativePath=Job.RelativePath,
                     AttemptDate=datetime.now(timezone.utc),
                     Quality=0,  # Will be set properly when we have profile info
                     OldSizeBytes=Job.SizeBytes,

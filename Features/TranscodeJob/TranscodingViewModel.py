@@ -4,6 +4,8 @@ from Features.TranscodeJob.ProcessTranscodeQueueService import ProcessTranscodeQ
 from Features.TranscodeJob.VideoTranscodingService import VideoTranscodingService
 from Repositories.DatabaseManager import DatabaseManager
 from Core.Logging.LoggingService import LoggingService
+from Core.Path.Path import Path, PathError
+from Core.Path.PathStorageRoots import GetPrefixMap
 
 
 from Core.DateTimeHelpers import ToUtcIsoZ
@@ -106,29 +108,40 @@ class TranscodingViewModel:
                 "ErrorMessage": errorMsg
             }
 
+    # directive: path-schema-migration | # see path.S8
     def GetTranscodingHistory(self, Limit: int = 50) -> Dict[str, Any]:
         """Get successful transcoding history from database."""
         try:
             LoggingService.LogFunctionEntry("GetTranscodingHistory", "TranscodingViewModel", Limit)
 
-            # Get recent successful transcoding attempts only
-            query = """
-                SELECT ta.Id, ta.FilePath, ta.AttemptDate, ta.CompletedDate, ta.TranscodeDurationSeconds,
-                       ta.Success, ta.ErrorMessage, ta.Quality, ta.ProfileName,
-                       ta.OldSizeBytes, ta.NewSizeBytes, ta.SizeReductionPercent, ta.VMAF
-                FROM TranscodeAttempts ta
-                WHERE ta.Success = TRUE
-                ORDER BY COALESCE(ta.CompletedDate, ta.AttemptDate) DESC
-                LIMIT %s
-            """
+            # Typed-pair SELECT; FilePath synthesized below via Path.CanonicalDisplay.
+            query = (
+                "SELECT ta.Id, ta.StorageRootId, ta.RelativePath, "
+                "ta.AttemptDate, ta.CompletedDate, ta.TranscodeDurationSeconds, "
+                "ta.Success, ta.ErrorMessage, ta.Quality, ta.ProfileName, "
+                "ta.OldSizeBytes, ta.NewSizeBytes, ta.SizeReductionPercent, ta.VMAF "
+                "FROM TranscodeAttempts ta "
+                "WHERE ta.Success = TRUE "
+                "ORDER BY COALESCE(ta.CompletedDate, ta.AttemptDate) DESC "
+                "LIMIT %s"
+            )
 
             rows = self.DatabaseManager.DatabaseService.ExecuteQuery(query, (Limit,))
 
+            Prefixes = GetPrefixMap()
             history = []
             for row in rows:
+                Sid = row.get('StorageRootId')
+                Rel = row.get('RelativePath')
+                FilePath = ''
+                if Sid is not None:
+                    try:
+                        FilePath = Path(Sid, Rel or '').CanonicalDisplay(Prefixes)
+                    except PathError:
+                        FilePath = ''
                 historyItem = {
                     'Id': row['Id'],
-                    'FilePath': row['FilePath'],
+                    'FilePath': FilePath,
                     'AttemptDate': row['AttemptDate'],
                     'CompletedDate': row['CompletedDate'],
                     'Duration': row['TranscodeDurationSeconds'],

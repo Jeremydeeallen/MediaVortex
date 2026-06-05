@@ -389,15 +389,20 @@ class CrashRecoveryService:
         if not self.WorkerName:
             return 0, 0
         try:
-            Query = """
-                SELECT tfp.Id AS tfp_id,
-                       tfp.LocalSourcePath AS local_source,
-                       tfp.LocalOutputPath AS local_output,
-                       tfp.OriginalPath AS canonical_original
-                FROM TemporaryFilePaths tfp
-                JOIN TranscodeAttempts ta ON ta.Id = tfp.TranscodeAttemptId
-                WHERE ta.WorkerName = %s
-            """
+            # directive: path-schema-migration | # see path.S8
+            from Core.Path.Path import Path as _PathCR, PathError as _PECR
+            from Core.Path.PathStorageRoots import GetPrefixMap as _GPMCR
+            from Core.WorkerContext import WorkerContext as _WCCR
+            _PmCR = _GPMCR()
+            _CtxCR = _WCCR.Current()
+            Query = (
+                "SELECT tfp.Id AS tfp_id, "
+                "tfp.SourceStorageRootId AS src_sid, tfp.SourceRelativePath AS src_rel, "
+                "tfp.OutputStorageRootId AS out_sid, tfp.OutputRelativePath AS out_rel "
+                "FROM TemporaryFilePaths tfp "
+                "JOIN TranscodeAttempts ta ON ta.Id = tfp.TranscodeAttemptId "
+                "WHERE ta.WorkerName = %s"
+            )
             Rows = self.DatabaseManager.DatabaseService.ExecuteQuery(Query, (self.WorkerName,))
             if not Rows:
                 return 0, 0
@@ -406,20 +411,33 @@ class CrashRecoveryService:
             PartialCompleted = 0
 
             for Row in Rows:
-                LocalSource = Row.get('local_source') or ''
-                LocalOutput = Row.get('local_output') or ''
-                CanonicalOriginal = Row.get('canonical_original') or ''
+                SrcSid = Row.get('src_sid')
+                SrcRel = Row.get('src_rel')
+                OutSid = Row.get('out_sid')
+                OutRel = Row.get('out_rel')
+                LocalSource = ''
+                LocalOutput = ''
+                CanonicalOriginal = ''
+                try:
+                    if SrcSid is not None and SrcRel is not None and _CtxCR is not None:
+                        _SrcP = _PathCR(SrcSid, SrcRel)
+                        LocalSource = _SrcP.Resolve(_CtxCR)
+                        CanonicalOriginal = _SrcP.CanonicalDisplay(_PmCR)
+                    if OutSid is not None and OutRel is not None and _CtxCR is not None:
+                        _OutP = _PathCR(OutSid, OutRel)
+                        LocalOutput = _OutP.Resolve(_CtxCR)
+                except _PECR:
+                    continue
                 if not LocalOutput:
                     continue
 
-                if LocalOutput.endswith('.inprogress'):
-                    FinalPath = LocalOutput[:-len('.inprogress')]
-                else:
-                    FinalPath = LocalOutput
+                # OutputRelativePath stores the final path; the .inprogress variant lives next to it on disk during encode.
+                FinalPath = LocalOutput[:-len('.inprogress')] if LocalOutput.endswith('.inprogress') else LocalOutput
+                InProgressPath = FinalPath + '.inprogress'
 
                 FinalExists = _LocalExists(FinalPath)
-                OriginalExists = LocalSource and _LocalExists(LocalSource)
-                InProgressExists = LocalOutput.endswith('.inprogress') and _LocalExists(LocalOutput)
+                OriginalExists = bool(LocalSource) and _LocalExists(LocalSource)
+                InProgressExists = _LocalExists(InProgressPath)
 
                 if FinalExists and OriginalExists and CanonicalOriginal:
                     try:
@@ -444,15 +462,15 @@ class CrashRecoveryService:
 
                 if InProgressExists:
                     try:
-                        os.remove(LocalOutput)
+                        os.remove(InProgressPath)
                         InProgressDeleted += 1
                         LoggingService.LogWarning(
-                            f"Crash recovery: deleted orphaned .inprogress file {LocalOutput}",
+                            f"Crash recovery: deleted orphaned .inprogress file {InProgressPath}",
                             "CrashRecoveryService", "_RecoverInProgressArtifacts"
                         )
                     except Exception as RmEx:
                         LoggingService.LogException(
-                            f"Crash recovery: could not delete .inprogress {LocalOutput}",
+                            f"Crash recovery: could not delete .inprogress {InProgressPath}",
                             RmEx, "CrashRecoveryService", "_RecoverInProgressArtifacts"
                         )
 
