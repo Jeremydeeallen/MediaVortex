@@ -13,13 +13,12 @@ from Core.Path import Path, Worker, PathError
 class FileReplacementBusinessService:
     """Orchestration + read-only queries for FileReplacement; see FileReplacement.feature.md."""
 
-    # directive: filereplacement-uses-path | # see filereplacement.C7
+    # directive: path-perfect-implementation | # see path.S11
     def __init__(self, DatabaseManagerInstance: DatabaseManager = None,
                  FileManagerInstance: FileManagerService = None,
-                 PathTranslation=None, FFprobePath: str = None, WorkerName: str = None):
+                 FFprobePath: str = None, WorkerName: str = None):
         self.DatabaseManager = DatabaseManagerInstance or DatabaseManager()
         self.FileManager = FileManagerInstance or FileManagerService(FFprobePath=FFprobePath)
-        self.PathTranslation = PathTranslation
         if WorkerName is None:
             import socket
             from Core.WorkerContext import WorkerContext

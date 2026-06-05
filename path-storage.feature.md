@@ -185,6 +185,18 @@ columns + INSERT/UPDATE both columns. Every ScanJobs INSERT site
 legacy column. `SaveRootFolder` rejects rows whose canonical does not parse to
 a known StorageRoot, preventing dual-write drift.
 
+**PATH-PERFECT-IMPLEMENTATION STEP 3 COMPLETE (2026-06-05).**
+`Core/Services/PathTranslationService.py` DELETED. `WorkerContext.PathTranslation`
+attribute removed; `WorkerContext.Initialize` no longer accepts `ShareMappings`.
+All 22 production call sites swapped to either
+`Path.FromLegacyString(canonical, GetStorageRoots()).Resolve(Worker.FromWorkerContext())`
+(canonical -> local) or `Worker.LocalToPath(local).CanonicalDisplay(GetPrefixMap())`
+(local -> canonical). New `Worker.LocalToPath(local_path) -> Optional[Path]` method
+does longest-prefix match against `StorageRootResolutions`. `_RefreshShareMappings`
+removed from `ContinuousScanService` (operator can re-deploy or restart for a
+StorageRootResolutions change; the loop no longer caches a stale map). 12 modules
+import clean. `grep -rn PathTranslation` returns 0 production hits.
+
 ### Progress
 
 - [x] 1. Diagnose OS coupling in canonical path storage (KNOWN-ISSUES single source of truth)

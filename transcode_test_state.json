@@ -1,0 +1,10 @@
+{
+  "qid": 130107,
+  "mfid": 632,
+  "original_assigned_profile": "NVENC AV1 P7 CANARY VBR -720p",
+  "test_assigned_profile": "SVT-AV1 P6 FG0 >720p",
+  "version_deployed": "1274b74",
+  "test_started_iso": "2026-06-04T-pending",
+  "predecessor_qid_deleted": 128276,
+  "predecessor_attempt": 29077
+}

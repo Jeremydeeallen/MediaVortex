@@ -61,11 +61,10 @@ def Run() -> int:
             "INSERT INTO ProfileThresholds "
             "(ProfileId, Resolution, TranscodeDownTo, Quality, ContainerType, "
             " SourceBitratePercent, MinBitrateKbps, MaxBitrateKbps, MaxBitrateMultiplier, "
-            " RcLookahead, BFrames, BRefMode, ScaleHeight, PreserveAspect) "
-            # from: Scripts/CodecAnalysis/NvidiaOptimization1.ps1 (lines 81-95 + lines 131-133)
+            " RcLookahead, BFrames, BRefMode, ScaleHeight) "
             "VALUES (%s, %s, %s, NULL, 'mp4', "
             "        30, 350, 600, 2.0, "
-            "        20, 4, 'middle', %s, TRUE)",
+            "        20, 4, 'middle', %s)",
             (ProfileId, Res, TranscodeDownTo, ScaleHeight),
         )
 
@@ -77,7 +76,7 @@ def Run() -> int:
         "       p.Container, p.FastStart, "
         "       pt.Resolution, pt.SourceBitratePercent, pt.MinBitrateKbps, "
         "       pt.MaxBitrateKbps, pt.MaxBitrateMultiplier, pt.RcLookahead, "
-        "       pt.BFrames, pt.BRefMode, pt.ScaleHeight, pt.PreserveAspect "
+        "       pt.BFrames, pt.BRefMode, pt.ScaleHeight "
         "FROM Profiles p JOIN ProfileThresholds pt ON pt.ProfileId = p.Id "
         "WHERE p.ProfileName = %s ORDER BY pt.Resolution",
         (PROFILE_NAME,),
@@ -86,7 +85,7 @@ def Run() -> int:
         print(f"  {R.get('resolution')}: bitrate={R.get('sourcebitratepercent')}%/"
               f"[{R.get('minbitratekbps')},{R.get('maxbitratekbps')}]k x{R.get('maxbitratemultiplier')}, "
               f"la={R.get('rclookahead')} bf={R.get('bframes')} brm={R.get('brefmode')}, "
-              f"scale={R.get('scaleheight')} preserve={R.get('preserveaspect')}")
+              f"scale={R.get('scaleheight')}")
 
     return 0
 

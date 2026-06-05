@@ -1320,8 +1320,17 @@ class QualityTestingBusinessService:
                 else:
                     TranscodedCanonical = os.path.join(Dir, f"{Stem}-mv.mp4")
                     OriginalStem = Stem
-                CtxTmp = WorkerContext.Current()
-                TranslateProbe = CtxTmp.PathTranslation.ToLocalPath if (CtxTmp and CtxTmp.PathTranslation) else (lambda P: P)
+                # directive: path-perfect-implementation | # see path.S11
+                from Core.Path.Path import Path as _PathQT, PathError as _PEQT
+                from Core.Path.PathStorageRoots import GetStorageRoots as _GSRQT
+                from Core.Path.Worker import Worker as _WQT
+                _WkQT = _WQT.FromWorkerContext()
+                _SrsQT = _GSRQT()
+                def TranslateProbe(P):
+                    try:
+                        return _PathQT.FromLegacyString(P, _SrsQT).Resolve(_WkQT)
+                    except _PEQT:
+                        return P
                 for Cand in ('.mkv', '.mp4', '.avi', '.m4v', '.mov'):
                     Try = os.path.join(Dir, f"{OriginalStem}.old{Cand}")
                     if os.path.exists(TranslateProbe(Try)):
@@ -1373,9 +1382,17 @@ class QualityTestingBusinessService:
         - 'native': no filter; PNGs are at the file's native dimensions.
         Cache key MUST include ViewMode so the two views cache independently.
         """
-        from Core.WorkerContext import WorkerContext
-        Ctx = WorkerContext.Current()
-        Translate = Ctx.PathTranslation.ToLocalPath if (Ctx and Ctx.PathTranslation) else (lambda P: P)
+        # directive: path-perfect-implementation | # see path.S11
+        from Core.Path.Path import Path as _PathCS, PathError as _PECS
+        from Core.Path.PathStorageRoots import GetStorageRoots as _GSRCS
+        from Core.Path.Worker import Worker as _WCS
+        _WkCS = _WCS.FromWorkerContext()
+        _SrsCS = _GSRCS()
+        def Translate(P):
+            try:
+                return _PathCS.FromLegacyString(P, _SrsCS).Resolve(_WkCS)
+            except _PECS:
+                return P
         LocalSource = Translate(SourceCanonical)
         LocalTranscoded = Translate(TranscodedCanonical)
 
@@ -1559,12 +1576,14 @@ class QualityTestingBusinessService:
             # 2. Delete the staged transcoded file (per Stage 8 contract).
             if LocalOutputPath:
                 try:
-                    from Core.WorkerContext import WorkerContext
-                    Ctx = WorkerContext.Current()
-                    StagedLocal = (
-                        Ctx.PathTranslation.ToLocalPath(LocalOutputPath)
-                        if Ctx and Ctx.PathTranslation else LocalOutputPath
-                    )
+                    # directive: path-perfect-implementation | # see path.S11
+                    from Core.Path.Path import Path as _PathRQ, PathError as _PERQ
+                    from Core.Path.PathStorageRoots import GetStorageRoots as _GSRRQ
+                    from Core.Path.Worker import Worker as _WRQ
+                    try:
+                        StagedLocal = _PathRQ.FromLegacyString(LocalOutputPath, _GSRRQ()).Resolve(_WRQ.FromWorkerContext())
+                    except _PERQ:
+                        StagedLocal = LocalOutputPath
                     if os.path.exists(StagedLocal):
                         os.remove(StagedLocal)
                         LoggingService.LogInfo(

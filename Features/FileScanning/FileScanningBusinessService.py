@@ -206,37 +206,27 @@ class FileScanningBusinessService:
         except Exception as Ex:
             LoggingService.LogException("Error checking existing scans on init", Ex, 'FileScanningBusinessService', '__init__')
 
+    # directive: path-perfect-implementation | # see path.S11
     def _ToLocalPath(self, CanonicalPath: str) -> str:
-        """Translate a canonical (Windows-style, e.g. 'T:\\Foo') DB path to the
-        local worker filesystem path (e.g. '/mnt/media_tv/Foo' on a Linux
-        container). No-op on Windows or when WorkerContext has no mappings.
-
-        Use for any os.path.exists / os.walk / os.listdir / os.path.isdir
-        call against a path that came out of RootFolders or MediaFiles.
-        """
         try:
-            from Core.WorkerContext import WorkerContext
-            Ctx = WorkerContext.Current()
-            if Ctx and Ctx.PathTranslation:
-                return Ctx.PathTranslation.ToLocalPath(CanonicalPath)
+            from Core.Path.Path import Path as _Path, PathError as _PE
+            from Core.Path.PathStorageRoots import GetStorageRoots as _GSR
+            from Core.Path.Worker import Worker as _W
+            return _Path.FromLegacyString(CanonicalPath, _GSR()).Resolve(_W.FromWorkerContext(Db=self.Repository.DatabaseService))
         except Exception:
-            pass
-        return CanonicalPath
+            return CanonicalPath
 
+    # directive: path-perfect-implementation | # see path.S11
     def _ToCanonicalPath(self, LocalPath: str) -> str:
-        """Inverse of _ToLocalPath -- translate a local worker filesystem path
-        back to canonical (Windows-style) for DB persistence. Use whenever
-        os.walk / os.listdir on Linux returns a path that needs to be stored
-        in MediaFiles.FilePath / RootFolders.RootFolder.
-        """
         try:
-            from Core.WorkerContext import WorkerContext
-            Ctx = WorkerContext.Current()
-            if Ctx and Ctx.PathTranslation:
-                return Ctx.PathTranslation.ToCanonicalPath(LocalPath)
+            from Core.Path.PathStorageRoots import GetPrefixMap as _GPM
+            from Core.Path.Worker import Worker as _W
+            P = _W.FromWorkerContext(Db=self.Repository.DatabaseService).LocalToPath(LocalPath)
+            if P is None:
+                return LocalPath
+            return P.CanonicalDisplay(_GPM())
         except Exception:
-            pass
-        return LocalPath
+            return LocalPath
 
     # directive: paths-canonical-completion
     def StartScanning(self, RootFolderPath: str, Recursive: bool = True, SkipDuplicateCleanup: bool = False, WorkerName: Optional[str] = None) -> Dict[str, Any]:
@@ -985,8 +975,9 @@ class FileScanningBusinessService:
         """
         try:
             from Core.WorkerContext import WorkerContext
+            # directive: path-perfect-implementation | # see path.S11
             Ctx = WorkerContext.Current()
-            UseFsCanonicalization = not (Ctx and Ctx.PathTranslation and Ctx.PathTranslation.IsLinux)
+            UseFsCanonicalization = not (Ctx and (Ctx.Platform or '').lower() == 'linux')
 
             CanonicalPath = (self.GetCanonicalPathFromFilesystem(RootFolderPath)
                              if UseFsCanonicalization else RootFolderPath)

@@ -96,12 +96,12 @@ class WebServiceApp:
             WorkerPlatform = platform_mod.system().lower()
             db_init = DatabaseManager()
             WorkerConfig = db_init.GetWorkerConfig(WorkerName) or {}
+            # see startup.ST4
             WorkerContext.Initialize(
                 WorkerName=WorkerName,
                 Platform=WorkerPlatform,
                 FFmpegPath=WorkerConfig.get('FFmpegPath') or WorkerConfig.get('ffmpegpath'),
                 FFprobePath=WorkerConfig.get('FFprobePath') or WorkerConfig.get('ffprobepath'),
-                ShareMappings=WorkerConfig.get('ShareMappings') or {}
             )
             LoggingService.LogInfo(f"WorkerContext initialized for {WorkerName}", "WebService", "__init__")
         except Exception as e:

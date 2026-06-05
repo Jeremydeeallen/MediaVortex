@@ -67,7 +67,6 @@ class WorkerServiceApp:
             Platform=self.WorkerPlatform,
             FFmpegPath=self.WorkerConfig.get('FFmpegPath') or self.WorkerConfig.get('ffmpegpath'),
             FFprobePath=self.WorkerConfig.get('FFprobePath') or self.WorkerConfig.get('ffprobepath'),
-            ShareMappings=self.WorkerConfig.get('ShareMappings') or {}
         )
         LoggingService.LogInfo(f"WorkerContext initialized for {self.WorkerName}", "WorkerService", "__init__")
 

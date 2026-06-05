@@ -136,21 +136,14 @@ class ProcessTranscodeQueueService:
         self.WorkerName = WorkerName or socket.gethostname()
         self.WorkerConfig = WorkerConfig or {}
 
-        # Read shared paths from WorkerContext (set at startup), fall back to WorkerConfig dict
         from Core.WorkerContext import WorkerContext
         Ctx = WorkerContext.Current()
         if Ctx:
             self.FFmpegPath = Ctx.FFmpegPath
             self.FFprobePath = Ctx.FFprobePath
-            self.PathTranslation = Ctx.PathTranslation
         else:
             self.FFmpegPath = self.WorkerConfig.get('FFmpegPath') or self.WorkerConfig.get('ffmpegpath')
             self.FFprobePath = self.WorkerConfig.get('FFprobePath') or self.WorkerConfig.get('ffprobepath')
-            self.PathTranslation = None
-            MountMap = self.WorkerConfig.get('ShareMappings') or {}
-            if MountMap:
-                from Core.Services.PathTranslationService import PathTranslationService
-                self.PathTranslation = PathTranslationService(MountMap=MountMap)
 
         if not self.FFmpegPath or not self.FFprobePath:
             try:
@@ -1208,7 +1201,6 @@ class ProcessTranscodeQueueService:
                 from Features.FileReplacement.FileReplacementBusinessService import FileReplacementBusinessService
                 ReplacementService = FileReplacementBusinessService(
                     self.DatabaseManager,
-                    PathTranslation=self.PathTranslation,
                     FFprobePath=self.FFprobePath,
                 )
                 ReplacementService.ProcessFileReplacement(TranscodeAttemptId)
@@ -1268,12 +1260,14 @@ class ProcessTranscodeQueueService:
             self.PrivateHandleFilePreparationFailure(TranscodeAttemptId, str(e))
             return None
 
-    # directive: nvenc-rate-anchored-remediation
+    # directive: path-perfect-implementation | # see path.S11
     def ComputeCanonicalOutputPath(self, OutputPath: str) -> str:
-        """Translate a worker-local output path to canonical form for TemporaryFilePaths."""
-        if self.PathTranslation:
-            return self.PathTranslation.ToCanonicalPath(OutputPath)
-        return OutputPath
+        from Core.Path.Worker import Worker as _W
+        from Core.Path.PathStorageRoots import GetPrefixMap as _GPM
+        P = _W.FromWorkerContext(Db=self.DatabaseManager.DatabaseService).LocalToPath(OutputPath)
+        if P is None:
+            return OutputPath
+        return P.CanonicalDisplay(_GPM())
 
     # directive: nvenc-rate-anchored-remediation
     def GetTranscodingSettings(self, Job: TranscodeQueueModel, MediaFile: MediaFileModel) -> Optional[Dict[str, Any]]:
@@ -1726,14 +1720,16 @@ class ProcessTranscodeQueueService:
             TemporaryFilePathRecord = QualityTestRepository(self.DatabaseManager.DatabaseService).GetTemporaryFilePath(TranscodeAttemptId)
 
             if TemporaryFilePathRecord:
-                # Delete partial output file from disk if it exists
-                LocalOutputPath = TemporaryFilePathRecord.get('LocalOutputPath')
-                if LocalOutputPath:
-                    # Translate canonical path to local mount path if needed
-                    ActualPath = LocalOutputPath
-                    if self.PathTranslation:
-                        ActualPath = self.PathTranslation.ToLocalPath(LocalOutputPath)
-
+                # directive: path-perfect-implementation | # see path.S11
+                OutSid = TemporaryFilePathRecord.get('OutputStorageRootId')
+                OutRel = TemporaryFilePathRecord.get('OutputRelativePath')
+                ActualPath = None
+                if OutSid is not None and OutRel is not None:
+                    try:
+                        ActualPath = Path(OutSid, OutRel).Resolve(Worker.FromWorkerContext(Db=self.DatabaseManager.DatabaseService))
+                    except PathError:
+                        ActualPath = None
+                if ActualPath:
                     if _LocalExists(ActualPath):
                         try:
                             os.remove(ActualPath)

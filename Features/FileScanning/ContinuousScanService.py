@@ -286,10 +286,6 @@ class ContinuousScanService:
                 import socket
                 ThisWorkerName = socket.gethostname()
 
-            # Runtime share-mapping refresh (criterion 21): reload MountMap from DB
-            # so new WorkerShareMappings rows take effect without worker restart.
-            self._RefreshShareMappings(ThisWorkerName)
-
             # Apply per-rootfolder host affinity. RootFolders.PreferredWorkerName=NULL means
             # any ScanEnabled worker may pick it up; a non-null value pins the rootfolder to
             # the named worker (e.g. larry-worker-1 has the fast backplane to porky).
@@ -327,14 +323,14 @@ class ContinuousScanService:
                     break
 
                 try:
-                    # Translate canonical (Windows-style) path to local for the
-                    # existence check. On Linux containers, T:\ paths are mapped
-                    # to /mnt/media_tv/ via WorkerContext.PathTranslation. No-op
-                    # on Windows or when no mappings are configured.
-                    from Core.WorkerContext import WorkerContext
-                    _Ctx = WorkerContext.Current()
-                    LocalRootPath = (_Ctx.PathTranslation.ToLocalPath(RootFolder.RootFolder)
-                                     if (_Ctx and _Ctx.PathTranslation) else RootFolder.RootFolder)
+                    # directive: path-perfect-implementation | # see path.S11
+                    from Core.Path.Path import Path as _PathCS, PathError as _PECS
+                    from Core.Path.PathStorageRoots import GetStorageRoots as _GSRCS
+                    from Core.Path.Worker import Worker as _WCS
+                    try:
+                        LocalRootPath = _PathCS.FromLegacyString(RootFolder.RootFolder, _GSRCS()).Resolve(_WCS.FromWorkerContext())
+                    except _PECS:
+                        LocalRootPath = RootFolder.RootFolder
                     # Criterion 20 gate. Three states fail validation:
                     #   - resolved path is not a directory (missing / file)
                     #   - directory unreadable
@@ -396,37 +392,6 @@ class ContinuousScanService:
 
         except Exception as e:
             LoggingService.LogException("Error executing scan", e, 'ContinuousScanService', '_ExecuteScan')
-
-    def _RefreshShareMappings(self, WorkerName: str):
-        """Reload WorkerShareMappings from DB into WorkerContext.PathTranslation.MountMap.
-
-        Criterion 21: new share mappings added at runtime take effect on the next
-        continuous-scan tick without requiring a worker restart.
-        """
-        try:
-            from Core.WorkerContext import WorkerContext
-            Ctx = WorkerContext.Current()
-            if not Ctx or not Ctx.PathTranslation:
-                return
-
-            from Repositories.DatabaseManager import DatabaseManager
-            DbMgr = DatabaseManager()
-            FreshMappings = DbMgr.GetWorkerShareMappings(WorkerName)
-
-            if not FreshMappings:
-                return
-
-            # Compare to current -- only log if changed
-            CurrentMap = Ctx.PathTranslation.MountMap
-            if FreshMappings != CurrentMap:
-                Ctx.PathTranslation.MountMap = {k.upper(): v for k, v in FreshMappings.items()}
-                Ctx.ShareMappings = FreshMappings
-                LoggingService.LogInfo(
-                    f"Share mappings refreshed for {WorkerName}: {FreshMappings}",
-                    'ContinuousScanService', '_RefreshShareMappings'
-                )
-        except Exception as e:
-            LoggingService.LogException("Error refreshing share mappings", e, 'ContinuousScanService', '_RefreshShareMappings')
 
     def _RecordPathValidationFailure(self, RootFolderPath: str, WorkerName: str, ErrorMessage: str):
         """Write a ScanJobs row with Status='Failed' for a path that failed pre-scan validation.

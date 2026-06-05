@@ -1,7 +1,7 @@
 # Current Directive
 
 **Set:** 2026-06-04
-**Status:** Active -- phase: IMPLEMENTING
+**Status:** Active -- phase: DELIVERING
 **Slug:** path-schema-migration
 **Predecessor:** `.claude/directives/closed/2026-06-04-filescanning-uses-path.md` (closed Success -- Phase 7 complete)
 **Program:** `.claude/programs/path-track.md` (Phase 8 of 10)

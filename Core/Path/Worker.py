@@ -39,6 +39,39 @@ class Worker:
         self._Cache[StorageRootId] = Result
         return Result
 
+    # directive: path-perfect-implementation | # see path.S11
+    def LocalToPath(self, LocalPath: str):
+        """Inverse of Path.Resolve(Worker): find the StorageRoot whose AbsolutePath is a prefix of LocalPath, return Path(Sid, Rel). None if no match."""
+        if not LocalPath:
+            return None
+        Db = self._GetDb()
+        Rows = Db.ExecuteQuery(
+            "SELECT StorageRootId, AbsolutePath FROM StorageRootResolutions WHERE WorkerName = %s AND IsActive = TRUE",
+            (self.Name,),
+        )
+        Best = None
+        BestLen = -1
+        for R in Rows:
+            Abs = R.get("AbsolutePath") or R.get("absolutepath") or ""
+            Sid = R.get("StorageRootId") if "StorageRootId" in R else R.get("storagerootid")
+            if not Abs:
+                continue
+            if LocalPath.startswith(Abs) and len(Abs) > BestLen:
+                Best = (Sid, Abs)
+                BestLen = len(Abs)
+        if Best is None:
+            return None
+        from Core.Path.Path import Path as _Path, PathError as _PE
+        Sid, Abs = Best
+        Tail = LocalPath[len(Abs):]
+        Norm = Tail.replace("\\", "/")
+        while Norm.startswith("/"):
+            Norm = Norm[1:]
+        try:
+            return _Path(int(Sid), Norm)
+        except _PE:
+            return None
+
     # directive: path-worker-class | # see path.S3
     def _GetDb(self):
         """Lazy DatabaseService construction so unit tests can inject a mock without touching real DB."""
