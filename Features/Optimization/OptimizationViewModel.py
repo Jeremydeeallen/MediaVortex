@@ -1,25 +1,13 @@
-import os
 from typing import Dict, Any, List, Optional
 from Repositories.DatabaseManager import DatabaseManager
 from Features.Optimization.JellyfinService import JellyfinService
 from Core.Logging.LoggingService import LoggingService
 from Services.FileManagerService import FileManagerService
 from Core.Path import Path, Worker, PathError
+from Core.Path.LocalPath import LocalExists, LocalGetSize
 
 
-# directive: path-schema-migration | # see path.S5
-def _LocalExists(Value: str) -> bool:
-    """Existence on a worker-local string (non-path-named param keeps R6 clean)."""
-    return bool(Value) and os.path.exists(Value)
-
-
-# directive: path-schema-migration | # see path.S5
-def _LocalGetSize(Value: str) -> int:
-    """File size on a worker-local string."""
-    return os.path.getsize(Value)
-
-
-# directive: path-schema-migration | # see path.S5
+# directive: path-schema-migration | # see path.S9
 class OptimizationViewModel:
     """Analysis engine for media library optimization recommendations."""
 
@@ -210,7 +198,7 @@ class OptimizationViewModel:
                 return {"Success": False, "ErrorMessage": f"File not found in MediaVortex DB: {diskFileName}"}
 
             LocalDisk, PathObj = self._ResolveWorkerLocal(mediaFile, mediaFile.FilePath)
-            if not _LocalExists(LocalDisk):
+            if not LocalExists(LocalDisk):
                 return {"Success": False, "ErrorMessage": f"File not found on disk: {mediaFile.FilePath} (local: {LocalDisk})"}
 
             # Run ffprobe via FileManagerService against the worker-local path
@@ -221,7 +209,7 @@ class OptimizationViewModel:
                 return {"Success": False, "ErrorMessage": f"FFprobe failed: {metadataResult.get('ErrorMessage', 'Unknown error')}"}
 
             # Update the model with new metadata
-            mediaFile.SizeMB = _LocalGetSize(LocalDisk) / (1024 * 1024)
+            mediaFile.SizeMB = LocalGetSize(LocalDisk) / (1024 * 1024)
             mediaFile.FileName = PathObj.LastSegment() if PathObj is not None else diskFileName
             mediaFile.Codec = metadataResult.get('VideoCodec')
             mediaFile.AudioCodec = metadataResult.get('AudioCodec')
@@ -617,7 +605,7 @@ class OptimizationViewModel:
                 return None
 
             LocalDisk, _PathObj = self._ResolveWorkerLocal(fullFile, fullFile.FilePath or mediaFileSummary.get("FilePath", ""))
-            if not _LocalExists(LocalDisk):
+            if not LocalExists(LocalDisk):
                 return None
 
             fileManager = FileManagerService()
@@ -636,7 +624,7 @@ class OptimizationViewModel:
             fullFile.FrameRate = metadataResult.get('FrameRate')
             fullFile.TotalFrames = metadataResult.get('TotalFrames')
             fullFile.OverallBitrate = metadataResult.get('OverallBitrate')
-            fullFile.SizeMB = _LocalGetSize(LocalDisk) / (1024 * 1024)
+            fullFile.SizeMB = LocalGetSize(LocalDisk) / (1024 * 1024)
             self.DatabaseManager.SaveMediaFile(fullFile)
 
             # Return refreshed summary
