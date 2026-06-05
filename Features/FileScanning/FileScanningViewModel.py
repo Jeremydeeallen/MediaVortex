@@ -265,11 +265,16 @@ class FileScanningViewModel:
 
     def GetRootFoldersForDisplay(self) -> List[Dict[str, Any]]:
         """Get root folders formatted for display."""
+        # directive: path-class-perfection | # see path.C23
+        from Core.Path.PathStorageRoots import GetPrefixMap as _GPMFS
+        _Pm = _GPMFS()
         DisplayFolders = []
         for folder in self.RootFolders:
+            P = folder.Path
+            Display = P.CanonicalDisplay(_Pm) if P is not None else ""
             DisplayFolders.append({
                 'Id': folder.Id,
-                'RootFolder': folder.RootFolder,
+                'RootFolder': Display,
                 'LastScannedDate': folder.LastScannedDate.strftime('%Y-%m-%d %H:%M:%S') if folder.LastScannedDate and hasattr(folder.LastScannedDate, 'strftime') else str(folder.LastScannedDate) if folder.LastScannedDate else 'Never',
                 'TotalSizeGB': f"{folder.TotalSizeGB:.2f} GB"
             })
@@ -277,34 +282,37 @@ class FileScanningViewModel:
 
     def GetRootFoldersPaginated(self, Page: int, PageSize: int, Search: str = '', SortColumn: str = 'RootFolder', SortOrder: str = 'ASC') -> Dict[str, Any]:
         """Get root folders with SQL-level pagination, filtering, and sorting."""
+        # directive: path-class-perfection | # see path.C23
+        from Core.Path.PathStorageRoots import GetPrefixMap as _GPMFS
         try:
-            # SQL-level pagination and filtering
+            _Pm = _GPMFS()
             result = self.BusinessService.Repository.GetRootFoldersPaginated(Page, PageSize, Search, SortColumn, SortOrder)
             PageFolders = result['RootFolders']
 
-            # Get MKV file counts via SQL aggregation (not loading all media files)
             MkvCounts = self.BusinessService.Repository.GetMkvCountsByRootFolder()
 
-            # Format for display
             DisplayFolders = []
             for folder in PageFolders:
-                normalizedPath = folder.RootFolder.replace('/', '\\').rstrip('\\').lower()
+                P = folder.Path
+                Display = P.CanonicalDisplay(_Pm) if P is not None else ""
+                normalizedPath = Display.replace('/', '\\').rstrip('\\').lower()
                 mkvCount = MkvCounts.get(normalizedPath, 0)
                 DisplayFolders.append({
                     'Id': folder.Id,
-                    'RootFolder': folder.RootFolder,
+                    'RootFolder': Display,
                     'LastScannedDate': folder.LastScannedDate.strftime('%Y-%m-%d %H:%M:%S') if folder.LastScannedDate and hasattr(folder.LastScannedDate, 'strftime') else str(folder.LastScannedDate) if folder.LastScannedDate else 'Never',
                     'TotalSizeGB': f"{folder.TotalSizeGB:.2f} GB",
                     'MkvFileCount': mkvCount
                 })
 
-            # Get all folders for filter dropdown (lightweight query)
             AllDisplayFolders = []
             allFolders = self.BusinessService.Repository.GetAllRootFolders()
             for folder in allFolders:
+                P = folder.Path
+                Display = P.CanonicalDisplay(_Pm) if P is not None else ""
                 AllDisplayFolders.append({
                     'Id': folder.Id,
-                    'RootFolder': folder.RootFolder,
+                    'RootFolder': Display,
                     'LastScannedDate': folder.LastScannedDate.strftime('%Y-%m-%d %H:%M:%S') if folder.LastScannedDate and hasattr(folder.LastScannedDate, 'strftime') else str(folder.LastScannedDate) if folder.LastScannedDate else 'Never',
                     'TotalSizeGB': f"{folder.TotalSizeGB:.2f} GB"
                 })

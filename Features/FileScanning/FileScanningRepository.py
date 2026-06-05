@@ -335,12 +335,18 @@ class FileScanningRepository(BaseRepository):
     # directive: path-perfect-implementation | # see path-storage.S1
     def GetMkvCountsByRootFolder(self) -> Dict[str, int]:
         try:
+            # directive: path-class-perfection | # see path.C23
+            _Pm = GetPrefixMap()
             RfRows = self.ExecuteQuery("SELECT StorageRootId, RelativePath FROM RootFolders")
             counts: Dict[str, int] = {}
             for RfRow in RfRows:
                 Sid = RfRow.get('StorageRootId') if 'StorageRootId' in RfRow else RfRow.get('storagerootid')
                 RelRoot = RfRow.get('RelativePath') if 'RelativePath' in RfRow else RfRow.get('relativepath')
-                folder_key = SynthesizeFilePath(Sid, RelRoot or '').replace('/', '\\').rstrip('\\').lower()
+                try:
+                    folder_display = Path(Sid, RelRoot or '').CanonicalDisplay(_Pm) if Sid is not None else ""
+                except PathError:
+                    folder_display = ""
+                folder_key = folder_display.replace('/', '\\').rstrip('\\').lower()
                 if Sid is None:
                     counts[folder_key] = 0
                     continue
