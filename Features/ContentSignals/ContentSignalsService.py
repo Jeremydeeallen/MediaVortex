@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from Core.Logging.LoggingService import LoggingService
+from Core.Path.LocalPath import LocalExists
 from Features.ContentSignals.Models.ContentSignalsModel import ContentSignalsModel
 
 
@@ -14,19 +15,13 @@ _SIGNALSTATS_FRAME_INTERVAL = 24
 _MOTION_THRESHOLD_YDIF = 8.0
 
 
-# directive: path-schema-migration | # see path.S5
-def _LocalExists(Value: str) -> bool:
-    """Existence on a worker-local string (non-path-named param keeps R6 clean)."""
-    return bool(Value) and os.path.exists(Value)
-
-
-# directive: path-schema-migration | # see path.S5
+# directive: path-schema-migration | # see path.S9
 def _GetFfmpegPath() -> Optional[str]:
     try:
         from Core.WorkerContext import WorkerContext
         Ctx = WorkerContext.Current()
         FfmpegCandidate = Ctx.FFmpegPath if Ctx else None
-        if _LocalExists(FfmpegCandidate):
+        if LocalExists(FfmpegCandidate):
             return FfmpegCandidate
     except Exception:
         pass
@@ -36,7 +31,7 @@ def _GetFfmpegPath() -> Optional[str]:
         "/usr/bin/ffmpeg",
         "/usr/local/bin/ffmpeg",
     ):
-        if _LocalExists(Candidate):
+        if LocalExists(Candidate):
             return Candidate
     return None
 
@@ -152,7 +147,7 @@ class ContentSignalsService:
     # directive: path-schema-migration | # see path.S5
     def ComputeSignals(LocalFilePath: str) -> Optional[ContentSignalsModel]:
         LocalFile = LocalFilePath
-        if not _LocalExists(LocalFile):
+        if not LocalExists(LocalFile):
             LoggingService.LogWarning(
                 f"ComputeSignals: file not found at {LocalFile}",
                 "ContentSignalsService", "ComputeSignals",
