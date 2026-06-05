@@ -1,6 +1,6 @@
 ﻿#!/usr/bin/env python3
 """
-Quality Testing Business Service  # allow: R12 -- preexisting
+Quality Testing Business Service
 Business logic layer for quality testing using VMAF analysis
 Implements MVVM pattern using MVVM architecture
 """
@@ -235,11 +235,12 @@ class QualityTestingBusinessService:
             except PathError as PErr:
                 return {"Success": False, "Error": f"Path resolution failed: {PErr}"}
 
-            # Verify files exist
-            if not SourcePath.Exists(Wk):
+            # directive: vmaf-restoration | # see path.S10
+            from Core.Path.PathFs import Exists as _PathFsExists
+            if not _PathFsExists(SourcePath, Wk):
                 return {"Success": False, "Error": f"Original file not found: {original_file}"}
 
-            if not OutputPath.Exists(Wk):
+            if not _PathFsExists(OutputPath, Wk):
                 return {"Success": False, "Error": f"Transcoded file not found: {transcoded_file}"}
 
             from Core.WorkerContext import WorkerContext
@@ -470,7 +471,7 @@ class QualityTestingBusinessService:
     # directive: nvenc-rate-anchored-remediation
     def ParseVMAFMetrics(self, XmlPath: str = 'vmaf_output.xml') -> dict:
         """Parse full VMAF metrics from the libvmaf XML log, with animation-aware
-        motion filtering.  # allow: R12 -- preexisting
+        motion filtering.
 
         Returns a dict with mean (the score we use for the auto-replace gate),
         plus min, max, harmonic_mean, stddev (computed from per-frame), and
@@ -824,13 +825,13 @@ class QualityTestingBusinessService:
             current_time = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
 
             # Update progress record (VMAF scores go to QualityTestResults, not here)
-            query = """
-                UPDATE QualityTestProgress  # allow: R12 -- preexisting
-                SET Status = %s, ProgressPercentage = %s, CurrentStep = %s, UpdatedAt = %s,
-                    ETA = %s, CurrentFrame = %s, CurrentTime = %s, ProcessingSpeed = %s,
-                    CurrentFps = %s, AverageFps = %s, EtaSeconds = %s
-                WHERE Id = %s
-            """
+            query = (
+                "UPDATE QualityTestProgress "
+                "SET Status = %s, ProgressPercentage = %s, CurrentStep = %s, UpdatedAt = %s, "
+                "ETA = %s, CurrentFrame = %s, CurrentTime = %s, ProcessingSpeed = %s, "
+                "CurrentFps = %s, AverageFps = %s, EtaSeconds = %s "
+                "WHERE Id = %s"
+            )
             result = self.DatabaseManager.DatabaseService.ExecuteNonQuery(
                 query,
                 (Status, ProgressPercentage, CurrentStep, current_time,
@@ -1221,7 +1222,7 @@ class QualityTestingBusinessService:
 
             M = Metrics or {}
             Query = """
-                UPDATE QualityTestResults  # allow: R12 -- preexisting
+                UPDATE QualityTestResults
                 SET VMAFScore = %s,
                     TestDuration = %s,
                     PassesThreshold = %s,
@@ -1265,7 +1266,7 @@ class QualityTestingBusinessService:
     # directive: nvenc-rate-anchored-remediation
     def GenerateComparisonStillsFromPaths(self, SourceCanonical: str, TranscodedCanonical: str, TimestampSeconds: float, ViewMode: str = 'tv_fair') -> dict:
         """Path-driven variant of GenerateComparisonStills. Useful when the
-        operator wants to A/B test two arbitrary files without going through  # allow: R12 -- preexisting
+        operator wants to A/B test two arbitrary files without going through
         a TranscodeAttempt record. Cache key hashes the paths + timestamp + view.
         """
         try:
@@ -1282,7 +1283,7 @@ class QualityTestingBusinessService:
     # directive: path-schema-migration | # see path.S8 | nvenc-rate-anchored-remediation
     def GenerateComparisonStills(self, TranscodeAttemptId: int, TimestampSeconds: float, ViewMode: str = 'tv_fair') -> dict:
         """Return {Success, SourcePath, TranscodedPath, CachedKey, ErrorMessage}.
-        Generates two PNG stills via FFmpeg at the given timestamp from the  # allow: R12 -- preexisting
+        Generates two PNG stills via FFmpeg at the given timestamp from the
         source and the transcoded output for this attempt. Cached by
         (attempt, timestamp) to skip re-extraction on repeat requests.
         """
@@ -1371,7 +1372,7 @@ class QualityTestingBusinessService:
     # directive: nvenc-rate-anchored-remediation
     def _ExtractStillPair(self, SourceCanonical, TranscodedCanonical, TimestampSeconds, CacheKey, ViewMode='tv_fair'):
         """Extract one frame from each of source and transcoded at the given
-        timestamp. ViewMode controls display normalization:  # allow: R12 -- preexisting
+        timestamp. ViewMode controls display normalization:
         - 'tv_fair' (default): scale=1920:1080:flags=lanczos,unsharp=5:5:0.5 applied
           symmetrically to both streams so different-resolution variants are compared
           on visually equal ground (approximates a generic TV upscaler).
@@ -1439,7 +1440,7 @@ class QualityTestingBusinessService:
     # directive: nvenc-rate-anchored-remediation
     def _AutoCaptureStillsIfPolicyFires(self, TranscodeAttemptId: int) -> None:
         """Read VmafStillCapturePolicy fresh from SystemSettings and, when the
-        policy fires, pre-generate comparison stills at the configured timestamp  # allow: R12 -- preexisting
+        policy fires, pre-generate comparison stills at the configured timestamp
         set. Never raises -- caller wraps and swallows so disposition is never
         blocked by capture failures. See vmaf-comparison-slider.feature.md
         criteria 11-15."""
@@ -1461,7 +1462,7 @@ class QualityTestingBusinessService:
 
         Rows = Db.ExecuteQuery(
             """
-            SELECT ta.ProfileName, ta.MediaFileId, mf.ResolutionCategory, mf.DurationMinutes  # allow: R12 -- preexisting
+            SELECT ta.ProfileName, ta.MediaFileId, mf.ResolutionCategory, mf.DurationMinutes
             FROM TranscodeAttempts ta
             LEFT JOIN MediaFiles mf ON ta.MediaFileId = mf.Id
             WHERE ta.Id = %s
@@ -1485,7 +1486,7 @@ class QualityTestingBusinessService:
                 MinSamples = 10
             CountRow = Db.ExecuteQuery(
                 """
-                SELECT COUNT(*) AS N  # allow: R12 -- preexisting
+                SELECT COUNT(*) AS N
                 FROM TranscodeAttempts ta
                 JOIN MediaFiles mf ON ta.MediaFileId = mf.Id
                 WHERE ta.ProfileName = %s
@@ -1633,7 +1634,7 @@ class QualityTestingBusinessService:
             current_time = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
 
             query = """
-                UPDATE TranscodeAttempts  # allow: R12 -- preexisting
+                UPDATE TranscodeAttempts
                 SET FileReplaced = %s, FileReplacedDate = %s, ReplacementType = %s
                 WHERE Id = %s
             """
@@ -1766,7 +1767,7 @@ class QualityTestingBusinessService:
                 # Create quality test result record showing test was skipped but file was replaced successfully
                 CurrentTime = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
                 Query = """
-                    INSERT INTO QualityTestResults  # allow: R12 -- preexisting
+                    INSERT INTO QualityTestResults
                     (TranscodeAttemptId, TestDuration, PassesThreshold, Rank, ErrorMessage, DateTested, FFmpegCommand, Status, VMAFScore)
                     VALUES (%s, %s, %s, %s, %s, NOW(), %s, %s, %s)
                 """

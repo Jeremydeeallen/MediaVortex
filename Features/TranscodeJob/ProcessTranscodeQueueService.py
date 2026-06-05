@@ -330,7 +330,7 @@ class ProcessTranscodeQueueService:
     # directive: nvenc-rate-anchored-remediation
     def GetNextJob(self) -> Optional[TranscodeQueueModel]:
         """Get and atomically claim the next pending job from the queue.
-        Uses SELECT FOR UPDATE SKIP LOCKED for safe distributed operation.  # allow: R12 -- preexisting
+        Uses SELECT FOR UPDATE SKIP LOCKED for safe distributed operation.
         Respects AcceptsInterlaced worker setting to skip interlaced files."""
         try:
             return self.DatabaseManager.ClaimNextPendingTranscodeJob(self.WorkerName, AcceptsInterlaced=self.AcceptsInterlaced)
@@ -522,7 +522,7 @@ class ProcessTranscodeQueueService:
     # directive: nvenc-rate-anchored-remediation
     def ProcessTestVariantJob(self, Job: TranscodeQueueModel):
         """Handle a queue row flagged for multi-variant testing. Loads the
-        variant set from the DB, runs each variant sequentially as its own  # allow: R12 -- preexisting
+        variant set from the DB, runs each variant sequentially as its own
         TranscodeAttempt with TestVariantSetId+TestVariantName populated. The
         disposition function (PostTranscodeDispositionService) short-circuits
         to NoReplace whenever TestVariantSetId is set -- source file is never
@@ -610,7 +610,7 @@ class ProcessTranscodeQueueService:
     # directive: nvenc-rate-anchored-remediation
     def _ProcessSingleVariant(self, Job: TranscodeQueueModel, MediaFile, Variant: Dict[str, Any], ActiveJobId: int) -> Optional[int]:
         """Run one variant's full encode + queue-VMAF flow. Each variant gets
-        its own TranscodeAttempt with TestVariantSetId+TestVariantName populated.  # allow: R12 -- preexisting
+        its own TranscodeAttempt with TestVariantSetId+TestVariantName populated.
         Returns the attempt id on encoder success, None on failure. Failures in
         one variant do not block other variants in the same queue row."""
         VariantName = Variant.get('Name', '?')
@@ -712,7 +712,7 @@ class ProcessTranscodeQueueService:
     # directive: nvenc-rate-anchored-remediation
     def _VerifyInProgressFile(self, LocalInProgressPath: str) -> bool:
         """FFprobe a freshly-written `.inprogress` file to confirm it is a valid
-        media file. Owns worker-lifecycle.feature.md criterion 7."""  # allow: R12 -- preexisting
+        media file. Owns worker-lifecycle.feature.md criterion 7."""
         try:
             if not LocalExists(LocalInProgressPath):
                 LoggingService.LogError(
@@ -739,7 +739,7 @@ class ProcessTranscodeQueueService:
     # directive: nvenc-rate-anchored-remediation
     def _DeleteInProgressFile(self, LocalInProgressPath: str) -> None:
         """Best-effort delete of a `.inprogress` artifact after FFmpeg or
-        FFprobe-verify failure. Owns worker-lifecycle.feature.md criterion 9.  # allow: R12 -- preexisting
+        FFprobe-verify failure. Owns worker-lifecycle.feature.md criterion 9.
         Defensive: refuses to delete any path that does not end in `.inprogress`
         so a bad caller can never destroy a source or finalized output."""
         if not LocalInProgressPath:
@@ -766,7 +766,7 @@ class ProcessTranscodeQueueService:
     # directive: nvenc-rate-anchored-remediation
     def _VariantizeOutputPath(self, OutputPath: str, VariantName: str) -> str:
         """Insert -test-<VariantName> before -mv. so test variants get distinct
-        on-disk filenames and never overwrite each other or a production attempt."""  # allow: R12 -- preexisting
+        on-disk filenames and never overwrite each other or a production attempt."""
         if '-mv.' in OutputPath:
             return OutputPath.replace('-mv.', f'-test-{VariantName}-mv.')
         Dir = LocalDirname(OutputPath)
@@ -777,7 +777,7 @@ class ProcessTranscodeQueueService:
     # directive: nvenc-rate-anchored-remediation
     def _CleanupTestQueueRow(self, Job: TranscodeQueueModel, ActiveJobId: Optional[int]) -> None:
         """Mark the queue row complete and delete the ActiveJob row. Called once
-        per queue row after all variants attempt (regardless of per-variant success)."""  # allow: R12 -- preexisting
+        per queue row after all variants attempt (regardless of per-variant success)."""
         try:
             self.DatabaseManager.UpdateTranscodeQueueStatus(Job.Id, "Completed")
         except Exception as Ex:
@@ -1154,7 +1154,7 @@ class ProcessTranscodeQueueService:
         """
         try:
             Query = """
-                UPDATE MediaFiles  # allow: R12 -- preexisting
+                UPDATE MediaFiles
                 SET LastFFprobeError = %s,
                     LastFFprobeAttemptDate = NOW(),
                     FFprobeFailureCount = COALESCE(FFprobeFailureCount, 0) + 1
@@ -1174,7 +1174,7 @@ class ProcessTranscodeQueueService:
     # directive: nvenc-rate-anchored-remediation
     def SetupFilePreparation(self, Job: TranscodeQueueModel, MediaFile: MediaFileModel, TranscodeAttemptId: int) -> Optional[str]:
         """Resolve the worker-local path for the job's source file. Workers read
-        the source directly from the NFS/SMB mount; no copy step.  # allow: R12 -- preexisting
+        the source directly from the NFS/SMB mount; no copy step.
         Returns the effective input path, or None on failure."""
         try:
             SourcePath = Path(Job.StorageRootId, Job.RelativePath).Resolve(Worker.FromWorkerContext(Db=self.DatabaseManager.DatabaseService))
@@ -2125,7 +2125,7 @@ class ProcessTranscodeQueueService:
         try:
             # Query to find the most recent TranscodeAttempt for this file
             query = """
-                SELECT ta.Id  # allow: R12 -- preexisting
+                SELECT ta.Id
                 FROM TranscodeAttempts ta
                 JOIN TranscodeQueue tq ON ta.MediaFileId = tq.MediaFileId
                 WHERE tq.Id = %s
