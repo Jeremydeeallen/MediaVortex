@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 import threading
 import time
 import os
+import ntpath
 import re
 from Features.TranscodeQueue.Models.TranscodeQueueModel import TranscodeQueueModel
 from Core.Models.MediaFileModel import MediaFileModel
@@ -13,9 +14,9 @@ from Models.CommandBuilder import CommandBuilder
 from Features.TranscodeJob.VideoTranscodingService import VideoTranscodingService
 from Services.QueueManagementService import QueueManagementService
 from Features.QualityTesting.PostTranscodeDispositionService import PostTranscodeDispositionService
-import os as _os
 from Core.Logging.LoggingService import LoggingService
 from Core.Path import Path, Worker, PathError
+from Core.Path.LocalPath import LocalBasename, LocalDirname, LocalJoin, LocalSplitExt, LocalExists
 
 
 _TJ_STORAGE_ROOTS_CACHE: dict = {"_StorageRoots": None, "_PrefixMap": None}
@@ -36,80 +37,6 @@ def _GetStorageRoots() -> list:
         ]
         _TJ_STORAGE_ROOTS_CACHE["_PrefixMap"] = {Sr["Id"]: Sr["CanonicalPrefix"] for Sr in _TJ_STORAGE_ROOTS_CACHE["_StorageRoots"]}
     return _TJ_STORAGE_ROOTS_CACHE["_StorageRoots"]
-
-
-# directive: transcodejob-uses-path | # see path.S5
-def _LocalExists(Value: str) -> bool:
-    """Module-level helper: existence on a worker-local string."""
-    return bool(Value) and _os.path.exists(Value)
-
-
-# directive: transcodejob-uses-path | # see path.S5
-def _LastSegment(Value: str) -> str:
-    """Shape-agnostic filename via Path.FromLegacyString.LastSegment; falls through on parse failure."""
-    if not Value:
-        return ""
-    try:
-        return Path.FromLegacyString(Value, _GetStorageRoots()).LastSegment()
-    except PathError:
-        return Value.replace("\\", "/").rsplit("/", 1)[-1]
-
-
-# directive: transcodejob-uses-path | # see path.S5
-def _ParentDir(Value: str) -> str:
-    """Shape-agnostic parent directory via Path.FromLegacyString.ParentDir.CanonicalDisplay; falls through on parse failure."""
-    if not Value:
-        return ""
-    try:
-        _GetStorageRoots()
-        P = Path.FromLegacyString(Value, _TJ_STORAGE_ROOTS_CACHE["_StorageRoots"])
-        return P.ParentDir().CanonicalDisplay(_TJ_STORAGE_ROOTS_CACHE["_PrefixMap"])
-    except PathError:
-        Norm = Value.replace("\\", "/")
-        Idx = Norm.rfind("/")
-        return Value[: Idx] if Idx >= 0 else ""
-
-
-# directive: transcodejob-uses-path | # see path.S5
-def _Join(Base: str, *Children: str) -> str:
-    """Shape-agnostic join via Path.FromLegacyString.Join chained per child; falls through on parse failure."""
-    if not Base:
-        return Base or ""
-    try:
-        _GetStorageRoots()
-        P = Path.FromLegacyString(Base, _TJ_STORAGE_ROOTS_CACHE["_StorageRoots"])
-        for Child in Children:
-            if Child:
-                P = P.Join(Child.replace("\\", "/").strip("/"))
-        return P.CanonicalDisplay(_TJ_STORAGE_ROOTS_CACHE["_PrefixMap"])
-    except PathError:
-        BackslashJoin = Base
-        for Child in Children:
-            if Child:
-                if not BackslashJoin.endswith("\\") and not BackslashJoin.endswith("/"):
-                    BackslashJoin += "\\"
-                BackslashJoin += Child.replace("/", "\\").lstrip("\\")
-        return BackslashJoin
-
-
-# directive: transcodejob-uses-path | # see path.S5
-def _SplitExt(Value: str) -> tuple:
-    """Shape-agnostic split via Path.FromLegacyString.SplitExt; falls through on parse failure."""
-    if not Value:
-        return ("", "")
-    try:
-        _GetStorageRoots()
-        P = Path.FromLegacyString(Value, _TJ_STORAGE_ROOTS_CACHE["_StorageRoots"])
-        Base, Ext = P.SplitExt()
-        BaseDisplay = Base.CanonicalDisplay(_TJ_STORAGE_ROOTS_CACHE["_PrefixMap"])
-        return (BaseDisplay, Ext)
-    except PathError:
-        Norm = Value.replace("/", "\\")
-        Idx = Norm.rfind(".")
-        SepIdx = Norm.rfind("\\")
-        if Idx <= SepIdx or Idx == SepIdx + 1:
-            return (Value, "")
-        return (Value[:Idx], Value[Idx:])
 
 
 from Core.DateTimeHelpers import ToUtcIsoZ
@@ -459,7 +386,7 @@ class ProcessTranscodeQueueService:
                 return
 
             LocalSourcePath = Path(MediaFile.StorageRootId, MediaFile.RelativePath).Resolve(Worker.FromWorkerContext(Db=self.DatabaseManager.DatabaseService))
-            if not _LocalExists(LocalSourcePath):
+            if not LocalExists(LocalSourcePath):
                 ErrMsg = f"Source file missing on disk: {LocalSourcePath}"
                 LoggingService.LogWarning(ErrMsg, "ProcessTranscodeQueueService", "ProcessJob")
                 self._MarkMediaFileSourceMissing(MediaFile.Id, ErrMsg)
@@ -637,7 +564,7 @@ class ProcessTranscodeQueueService:
                 return
 
             LocalSourcePath = Path(MediaFile.StorageRootId, MediaFile.RelativePath).Resolve(Worker.FromWorkerContext(Db=self.DatabaseManager.DatabaseService))
-            if not _LocalExists(LocalSourcePath):
+            if not LocalExists(LocalSourcePath):
                 ErrMsg = f"Source file missing on disk: {LocalSourcePath}"
                 LoggingService.LogWarning(ErrMsg, "ProcessTranscodeQueueService", "ProcessTestVariantJob")
                 self._MarkMediaFileSourceMissing(MediaFile.Id, ErrMsg)
@@ -787,7 +714,7 @@ class ProcessTranscodeQueueService:
         """FFprobe a freshly-written `.inprogress` file to confirm it is a valid
         media file. Owns worker-lifecycle.feature.md criterion 7."""  # allow: R12 -- preexisting
         try:
-            if not _LocalExists(LocalInProgressPath):
+            if not LocalExists(LocalInProgressPath):
                 LoggingService.LogError(
                     f"FFprobe verify failed: .inprogress file not found at {LocalInProgressPath}",
                     "ProcessTranscodeQueueService", "_VerifyInProgressFile"
@@ -824,7 +751,7 @@ class ProcessTranscodeQueueService:
             )
             return
         try:
-            if _LocalExists(LocalInProgressPath):
+            if LocalExists(LocalInProgressPath):
                 os.remove(LocalInProgressPath)
                 LoggingService.LogInfo(
                     f"Deleted .inprogress artifact: {LocalInProgressPath}",
@@ -842,10 +769,10 @@ class ProcessTranscodeQueueService:
         on-disk filenames and never overwrite each other or a production attempt."""  # allow: R12 -- preexisting
         if '-mv.' in OutputPath:
             return OutputPath.replace('-mv.', f'-test-{VariantName}-mv.')
-        Dir = _ParentDir(OutputPath)
-        Base = _LastSegment(OutputPath)
-        Stem, Ext = _SplitExt(Base)
-        return _Join(Dir, f"{Stem}-test-{VariantName}{Ext}")
+        Dir = LocalDirname(OutputPath)
+        Base = LocalBasename(OutputPath)
+        Stem, Ext = LocalSplitExt(Base)
+        return LocalJoin(Dir, f"{Stem}-test-{VariantName}{Ext}")
 
     # directive: nvenc-rate-anchored-remediation
     def _CleanupTestQueueRow(self, Job: TranscodeQueueModel, ActiveJobId: Optional[int]) -> None:
@@ -910,7 +837,7 @@ class ProcessTranscodeQueueService:
                 return
 
             LocalSourcePath = Path(Job.StorageRootId, Job.RelativePath).Resolve(Worker.FromWorkerContext(Db=self.DatabaseManager.DatabaseService))
-            if not _LocalExists(LocalSourcePath):
+            if not LocalExists(LocalSourcePath):
                 ErrMsg = f"Source file missing on disk: {LocalSourcePath}"
                 LoggingService.LogWarning(ErrMsg, "ProcessTranscodeQueueService", "ProcessRemuxJob")
                 self._MarkMediaFileSourceMissing(MediaFile.Id, ErrMsg)
@@ -942,8 +869,8 @@ class ProcessTranscodeQueueService:
                 self.HandleJobFailure(Job, f"Failed to setup file preparation for remux: {Detail}", TranscodeAttemptId, ActiveJobId)
                 return
 
-            BaseName, _ = _SplitExt(LastSegment(EffectiveInputPath))
-            TargetLocalPath = _Join(_ParentDir(EffectiveInputPath), BaseName + '-mv.mp4.inprogress')
+            BaseName, _ = LocalSplitExt(LocalBasename(EffectiveInputPath))
+            TargetLocalPath = LocalJoin(LocalDirname(EffectiveInputPath), BaseName + '-mv.mp4.inprogress')
 
             self.UpdateTranscodeProgress(TranscodeAttemptId, "Building Command", 0.0, "Building remux command...")
             CommandResult = self.CommandBuilder.BuildFFmpegCommand(
@@ -953,7 +880,7 @@ class ProcessTranscodeQueueService:
                     'OutputPath': TargetLocalPath,
                     'FFmpegPath': self.FFmpegPath,
                     'FFprobePath': self.FFprobePath,
-                    'OutputDirectory': _ParentDir(EffectiveInputPath),
+                    'OutputDirectory': LocalDirname(EffectiveInputPath),
                 },
             )
             if not CommandResult:
@@ -1074,7 +1001,7 @@ class ProcessTranscodeQueueService:
                     'InputPath': EffectiveInputPath,
                     'FFmpegPath': self.FFmpegPath,
                     'FFprobePath': self.FFprobePath,
-                    'OutputDirectory': _ParentDir(EffectiveInputPath),
+                    'OutputDirectory': LocalDirname(EffectiveInputPath),
                 },
             )
             if not CommandResult:
@@ -1329,7 +1256,7 @@ class ProcessTranscodeQueueService:
                                          "ProcessTranscodeQueueService", "GetTranscodingSettings")
 
             normalizedPath = Job.FilePath.lower().replace('\\', '/')
-            fileName = _LastSegment(Job.FilePath).lower()
+            fileName = ntpath.basename(Job.FilePath or "").lower()
 
             # Try full path first
             overrideKey = f"CRFOverride_{normalizedPath}"
@@ -1730,7 +1657,7 @@ class ProcessTranscodeQueueService:
                     except PathError:
                         ActualPath = None
                 if ActualPath:
-                    if _LocalExists(ActualPath):
+                    if LocalExists(ActualPath):
                         try:
                             os.remove(ActualPath)
                             LoggingService.LogInfo(f"Deleted partial output file: {ActualPath}",
@@ -1782,19 +1709,19 @@ class ProcessTranscodeQueueService:
                     LoggingService.LogWarning(f"Failed to retrieve output path from TemporaryFilePaths table for TranscodeAttempt {TranscodeAttemptId}: {str(e)}, falling back to calculation",
                                             "ProcessTranscodeQueueService", "GetOutputFilePathFromCommand")
 
-            InputFileName = _LastSegment(Job.FilePath)
+            InputFileName = ntpath.basename(Job.FilePath or "")
 
             # Get the MediaFile to determine source resolution
             MediaFile = self.DatabaseManager.GetMediaFileByPath(Job.FilePath)
             if not MediaFile:
                 LoggingService.LogWarning(f"Could not get MediaFile for {Job.FilePath}", "ProcessTranscodeQueueService", "GetOutputFilePathFromCommand")
-                return _Join("C:\\MediaVortex", InputFileName)
+                return ntpath.join("C:\\MediaVortex",InputFileName)
 
             # Get transcoding settings to determine target resolution
             TranscodingSettings = self.GetTranscodingSettings(Job, MediaFile)
             if not TranscodingSettings:
                 LoggingService.LogWarning(f"Could not get transcoding settings for {Job.FilePath}", "ProcessTranscodeQueueService", "GetOutputFilePathFromCommand")
-                return _Join("C:\\MediaVortex", InputFileName)
+                return ntpath.join("C:\\MediaVortex",InputFileName)
 
             # Generate output filename with target resolution and container type
             ProfileSettings = TranscodingSettings.get('ProfileSettings', {})
@@ -1803,7 +1730,7 @@ class ProcessTranscodeQueueService:
             ContainerType = ProfileSettings.get('ContainerType', 'mp4')
 
             OutputFileName = self._GenerateOutputFileName(InputFileName, SourceResolution, TargetResolution, ContainerType)
-            OutputFilePath = _Join("C:\\MediaVortex", OutputFileName)
+            OutputFilePath = ntpath.join("C:\\MediaVortex",OutputFileName)
 
             LoggingService.LogInfo(f"Calculated output path (fallback): {OutputFilePath}", "ProcessTranscodeQueueService", "GetOutputFilePathFromCommand")
             return OutputFilePath
@@ -1915,7 +1842,7 @@ class ProcessTranscodeQueueService:
         """Generate output filename with target resolution and container type."""
         try:
             # Get the base filename without extension
-            BaseName = _SplitExt(OriginalFileName)[0]
+            BaseName = ntpath.splitext(OriginalFileName or "")[0]
 
             # If resolutions are the same, just change extension
             if SourceResolution == TargetResolution:
@@ -1931,14 +1858,14 @@ class ProcessTranscodeQueueService:
             # Replace source resolution with target resolution
             TargetResolutionStr = self._FormatResolutionForFilename(TargetResolution)
             NewBaseName = OriginalFileName.replace(SourceResolutionStr, TargetResolutionStr)
-            NewBaseName = _SplitExt(NewBaseName)[0]  # Remove old extension
+            NewBaseName = ntpath.splitext(NewBaseName or "")[0]  # Remove old extension
 
             # Add container type extension
             return f"{NewBaseName}.{ContainerType}"
 
         except Exception:
             # If anything goes wrong, return original filename with container extension
-            BaseName = _SplitExt(OriginalFileName)[0]
+            BaseName = ntpath.splitext(OriginalFileName or "")[0]
             return f"{BaseName}.{ContainerType}"
 
     # directive: nvenc-rate-anchored-remediation
@@ -2073,7 +2000,7 @@ class ProcessTranscodeQueueService:
         fragments)."""
         SrcId = getattr(Job, 'StorageRootId', None)
         SrcRel = getattr(Job, 'RelativePath', None) or None
-        OutBase = _LastSegment(OutputPath) if OutputPath else ''
+        OutBase = LocalBasename(OutputPath) if OutputPath else ''
         OutId = SrcId
         SrcDirRel = SrcRel.rsplit('/', 1)[0] if (SrcRel and '/' in SrcRel) else ''
         OutRel = f"{SrcDirRel}/{OutBase}" if SrcDirRel else OutBase
