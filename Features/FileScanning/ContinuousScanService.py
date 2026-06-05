@@ -218,13 +218,13 @@ class ContinuousScanService:
         -- result: three Linux workers all pile on T:\\ subfolders, M:\\ and Z:\\
         never get scanned. Fix: dedup directly on the canonical backslash form.
         """
-        # Normalize: lower-case + trailing backslash for prefix matching.
-        # No os.path involvement -- canonical paths are Windows-shaped strings,
-        # not the host's native shape.
+        # directive: path-class-perfection | # see path.C23
+        from Core.Path.PathStorageRoots import GetPrefixMap as _GPM_NF
+        _PmNF = _GPM_NF()
         NormalizedFolders = []
         for Folder in RootFolders:
-            NormPath = (Folder.RootFolder or '').strip()
-            # Collapse accidental doubled backslashes (the T:\\ rows from path-shape history).
+            _FolderP = Folder.Path
+            NormPath = (_FolderP.CanonicalDisplay(_PmNF) if _FolderP is not None else '').strip()
             while '\\\\' in NormPath:
                 NormPath = NormPath.replace('\\\\', '\\')
             NormPath = NormPath.lower()
@@ -318,9 +318,10 @@ class ContinuousScanService:
 
             # directive: path-class-perfection | # see path.C18
             from Core.Path.Path import Path as _PathCS, PathError as _PECS
-            from Core.Path.PathStorageRoots import GetStorageRoots as _GSRCS
+            from Core.Path.PathStorageRoots import GetStorageRoots as _GSRCS, GetPrefixMap as _GPMCS
             from Core.Path.Worker import Worker as _WCS
             _SrsCS = _GSRCS()
+            _PmCS = _GPMCS()
             _WkCS = _WCS.FromWorkerContext()
 
             for RootFolder in EligibleFolders:
@@ -329,7 +330,10 @@ class ContinuousScanService:
                     break
 
                 # directive: path-class-perfection | # see path.C23
-                _RfDisplay = RootFolder.RootFolder
+                _RfP = RootFolder.Path
+                if _RfP is None:
+                    continue
+                _RfDisplay = _RfP.CanonicalDisplay(_PmCS)
                 try:
                     try:
                         LocalRootPath = _PathCS.FromLegacyString(_RfDisplay, _SrsCS).Resolve(_WkCS)

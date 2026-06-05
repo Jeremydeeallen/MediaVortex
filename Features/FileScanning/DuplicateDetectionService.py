@@ -24,8 +24,9 @@ class DuplicateDetectionService:
                 LoggingService.LogWarning("Root folder not found: {}", RootFolderId)
                 return []
 
-            # Get all files on disk
-            FoundFiles = self.FileManager.ScanDirectory(RootFolder.RootFolder, True)
+            # directive: path-class-perfection | # see path.C23
+            _RfDisplay = str(RootFolder.Path) if RootFolder.Path is not None else ''
+            FoundFiles = self.FileManager.ScanDirectory(_RfDisplay, True)
             LoggingService.LogInfo("Scanning {} files for duplicates", len(FoundFiles))
 
             # Group files by size (first pass - files with same size are potential duplicates)

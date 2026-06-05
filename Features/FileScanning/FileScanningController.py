@@ -207,15 +207,17 @@ class FileScanningController:
                 sortColumn = request.args.get('SortColumn', 'TotalSizeMB')
                 sortOrder = request.args.get('SortOrder', 'DESC')
 
+                # directive: path-class-perfection | # see path.C23
+                _RfDisplay = str(rootFolder.Path) if rootFolder.Path is not None else ''
                 result = self.ViewModel.GetSubfoldersPaginated(
-                    rootFolder.RootFolder, page, pageSize, search, sortColumn, sortOrder
+                    _RfDisplay, page, pageSize, search, sortColumn, sortOrder
                 )
                 return jsonify({
                     'Success': True,
                     'Subfolders': result['Subfolders'],
                     'TotalCount': result['TotalCount'],
                     'TotalPages': result['TotalPages'],
-                    'RootFolderPath': rootFolder.RootFolder
+                    'RootFolderPath': _RfDisplay
                 }), 200
 
             except Exception as e:

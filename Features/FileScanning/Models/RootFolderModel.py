@@ -27,7 +27,7 @@ class RootFolderModel:
                 if not self.RelativePath:
                     self.RelativePath = Parsed.RelativePath
             except PathError:
-                pass
+                raise
 
     # directive: path-class-perfection | # see path.C23
     @property
@@ -36,22 +36,3 @@ class RootFolderModel:
         if self.StorageRootId is None:
             return None
         return _Path(self.StorageRootId, self.RelativePath or "")
-
-    # directive: path-class-perfection | # see path.C23
-    @property
-    def RootFolder(self) -> str:
-        P = self.Path
-        return str(P) if P is not None else ""
-
-    # directive: path-class-perfection | # see path.C23
-    @RootFolder.setter
-    def RootFolder(self, Value: str) -> None:
-        if Value:
-            from Core.Path.Path import Path as _Path, PathError
-            from Core.Path.PathStorageRoots import GetStorageRoots
-            try:
-                Parsed = _Path.FromLegacyString(Value, GetStorageRoots())
-                self.StorageRootId = Parsed.StorageRootId
-                self.RelativePath = Parsed.RelativePath
-            except PathError:
-                pass

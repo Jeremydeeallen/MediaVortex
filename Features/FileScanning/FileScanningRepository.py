@@ -146,13 +146,18 @@ class FileScanningRepository(BaseRepository):
             PreferredWorkerName=row.get('PreferredWorkerName'),
         )
 
-    # directive: path-perfect-implementation | # see path-storage.S1
+    # directive: path-class-perfection | # see path.C23
     def SaveRootFolder(self, RootFolder: RootFolderModel) -> int:
         try:
-            RootFolder.RootFolder = self.NormalizePathToFilesystemCase(RootFolder.RootFolder)
+            _CurrentDisplay = str(RootFolder.Path) if RootFolder.Path is not None else ''
+            _NormDisplay = self.NormalizePathToFilesystemCase(_CurrentDisplay)
+            if _NormDisplay != _CurrentDisplay:
+                _Parsed = Path.FromLegacyString(_NormDisplay, GetStorageRoots())
+                RootFolder.StorageRootId = _Parsed.StorageRootId
+                RootFolder.RelativePath = _Parsed.RelativePath
             if RootFolder.StorageRootId is None:
-                raise ValueError(f"SaveRootFolder: RootFolder {RootFolder.RootFolder!r} did not parse to a StorageRoot prefix")
-            LoggingService.LogFunctionEntry("SaveRootFolder", 'FileScanningRepository', f"RootFolder: {RootFolder.RootFolder}, Size: {RootFolder.TotalSizeGB}GB")
+                raise ValueError(f"SaveRootFolder: RootFolder {_NormDisplay!r} did not parse to a StorageRoot prefix")
+            LoggingService.LogFunctionEntry("SaveRootFolder", 'FileScanningRepository', f"RootFolder: {_NormDisplay}, Size: {RootFolder.TotalSizeGB}GB")
             connection = self.DatabaseService.GetConnection()
             try:
                 cursor = connection.cursor()

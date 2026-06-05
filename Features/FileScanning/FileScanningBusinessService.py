@@ -887,17 +887,25 @@ class FileScanningBusinessService:
             CanonicalPath = (self.GetCanonicalPathFromFilesystem(RootFolderPath)
                              if UseFsCanonicalization else RootFolderPath)
 
-            # Find an existing row by canonical match. On Linux we compare strings
-            # directly (case-sensitive); on Windows we additionally pass through
-            # GetCanonicalPathFromFilesystem to recover the on-disk case.
+            # directive: path-class-perfection | # see path.C23
+            from Core.Path.Path import Path as _PathFS, PathError as _PEFS
+            from Core.Path.PathStorageRoots import GetPrefixMap as _GPMFS, GetStorageRoots as _GSRFS
+            _Pm = _GPMFS()
+            _Srs = _GSRFS()
             ExistingFolders = self.Repository.GetAllRootFolders()
             for Folder in ExistingFolders:
                 try:
+                    _FolderP = Folder.Path
+                    if _FolderP is None:
+                        continue
+                    _FolderDisplay = _FolderP.CanonicalDisplay(_Pm)
                     if UseFsCanonicalization:
-                        if _CanonicalExists(Folder.RootFolder):
-                            ExistingCanonical = self.GetCanonicalPathFromFilesystem(Folder.RootFolder)
+                        if _CanonicalExists(_FolderDisplay):
+                            ExistingCanonical = self.GetCanonicalPathFromFilesystem(_FolderDisplay)
                             if ExistingCanonical == CanonicalPath:
-                                Folder.RootFolder = CanonicalPath
+                                _Parsed = _PathFS.FromLegacyString(CanonicalPath, _Srs)
+                                Folder.StorageRootId = _Parsed.StorageRootId
+                                Folder.RelativePath = _Parsed.RelativePath
                                 Folder.LastScannedDate = datetime.now(timezone.utc)
                                 Folder.TotalSizeGB = TotalSizeGB
                                 FolderId = self.Repository.SaveRootFolder(Folder)
@@ -905,8 +913,7 @@ class FileScanningBusinessService:
                                 LoggingService.LogInfo(f"Updated existing root folder: {CanonicalPath}")
                                 return Folder
                     else:
-                        # Linux container: trust the canonical strings.
-                        if Folder.RootFolder == CanonicalPath:
+                        if _FolderDisplay == CanonicalPath:
                             Folder.LastScannedDate = datetime.now(timezone.utc)
                             Folder.TotalSizeGB = TotalSizeGB
                             FolderId = self.Repository.SaveRootFolder(Folder)
@@ -1418,11 +1425,17 @@ class FileScanningBusinessService:
             if len(RootFolderPath) == 2 and RootFolderPath[1] == ':':
                 RootFolderPath += '\\'
 
-            # Check for duplicates (case-insensitive)
+            # directive: path-class-perfection | # see path.C23
+            from Core.Path.PathStorageRoots import GetPrefixMap as _GPM_DUP
+            _PmDup = _GPM_DUP()
             Existing = self.Repository.GetAllRootFolders()
             for Folder in Existing:
-                if Folder.RootFolder.lower().rstrip('\\') == RootFolderPath.lower().rstrip('\\'):
-                    return {'Success': False, 'Message': f'Root folder already exists: {Folder.RootFolder}'}
+                _FolderP = Folder.Path
+                if _FolderP is None:
+                    continue
+                _Display = _FolderP.CanonicalDisplay(_PmDup)
+                if _Display.lower().rstrip('\\') == RootFolderPath.lower().rstrip('\\'):
+                    return {'Success': False, 'Message': f'Root folder already exists: {_Display}'}
 
             NewFolder = RootFolderModel(
                 Id=None,
@@ -1828,7 +1841,9 @@ class FileScanningBusinessService:
             if not RootFolder:
                 LoggingService.LogError(f"Root folder not found for ID: {RootFolderId}", 'ReconcileWithDisk', 'FileScanningBusinessService')
                 return {'Success': False, 'ErrorMessage': 'Root folder not found'}
-            DatabaseFiles = self.Repository.GetMediaFilesByRootFolder(RootFolder.RootFolder)
+            # directive: path-class-perfection | # see path.C23
+            _RfDisplay = str(RootFolder.Path) if RootFolder.Path is not None else ''
+            DatabaseFiles = self.Repository.GetMediaFilesByRootFolder(_RfDisplay)
 
             MaxFiles = self._GetMoveDetectionMaxFiles()
             MoveDetectionEnabled = len(DatabaseFiles) <= MaxFiles
@@ -1934,9 +1949,10 @@ class FileScanningBusinessService:
                     LoggingService.LogError(f"Root folder not found for ID: {RootFolderId}", 'CleanupMissingFiles', 'FileScanningBusinessService')
                     return
 
-                # Get all files in database for this root folder path
-                DatabaseFiles = self.Repository.GetMediaFilesByRootFolder(RootFolder.RootFolder)
-                LoggingService.LogInfo(f"Checking {len(DatabaseFiles)} database files for root folder: {RootFolder.RootFolder}", 'CleanupMissingFiles', 'FileScanningBusinessService')
+                # directive: path-class-perfection | # see path.C23
+                _RfDisplayCM = str(RootFolder.Path) if RootFolder.Path is not None else ''
+                DatabaseFiles = self.Repository.GetMediaFilesByRootFolder(_RfDisplayCM)
+                LoggingService.LogInfo(f"Checking {len(DatabaseFiles)} database files for root folder: {_RfDisplayCM}", 'CleanupMissingFiles', 'FileScanningBusinessService')
             else:
                 # Get all files in database
                 DatabaseFiles = self.Repository.GetAllMediaFiles()
@@ -1978,16 +1994,19 @@ class FileScanningBusinessService:
             # Get the filename to search for
             SearchFileName = DbFile.FileName
 
-            # Get all root folders
+            # directive: path-class-perfection | # see path.C23
+            from Core.Path.PathStorageRoots import GetPrefixMap as _GPM_FMF
+            _PmFmf = _GPM_FMF()
             AllRootFolders = self.Repository.GetAllRootFolders()
 
-            # Search each root folder for matching filename. Translate the
-            # canonical RootFolder path to local for fs ops; convert any found
-            # local path back to canonical before returning so DB stays portable.
             for RootFolder in AllRootFolders:
-                LocalRoot = self._ToLocalPath(RootFolder.RootFolder)
+                _RfP = RootFolder.Path
+                if _RfP is None:
+                    continue
+                _RfDisplayFM = _RfP.CanonicalDisplay(_PmFmf)
+                LocalRoot = self._ToLocalPath(_RfDisplayFM)
                 if not LocalExists(LocalRoot):
-                    LoggingService.LogDebug(f"Root folder does not exist (local: {LocalRoot}): {RootFolder.RootFolder}", 'FindMovedFile', 'FileScanningBusinessService')
+                    LoggingService.LogDebug(f"Root folder does not exist (local: {LocalRoot}): {_RfDisplayFM}", 'FindMovedFile', 'FileScanningBusinessService')
                     continue
 
                 try:
@@ -1997,11 +2016,9 @@ class FileScanningBusinessService:
                                 FoundLocalPath = LocalJoin(root, file)
                                 FoundCanonicalPath = self._ToCanonicalPath(FoundLocalPath)
 
-                                # Skip if this is the original path (not moved)
                                 if FoundCanonicalPath.lower() == DbFile.FilePath.lower():
                                     continue
 
-                                # Verify it's the same file (uses local path for fs reads)
                                 if self.IsSameFile(DbFile, FoundLocalPath):
                                     LoggingService.LogInfo(f"MOVED FILE FOUND: '{DbFile.FilePath}' -> '{FoundCanonicalPath}'", 'FindMovedFile', 'FileScanningBusinessService')
                                     return {
@@ -2010,7 +2027,7 @@ class FileScanningBusinessService:
                                     }
 
                 except Exception as e:
-                    LoggingService.LogException(f"Error searching root folder: {RootFolder.RootFolder}", e, 'FindMovedFile', 'FileScanningBusinessService')
+                    LoggingService.LogException(f"Error searching root folder: {_RfDisplayFM}", e, 'FindMovedFile', 'FileScanningBusinessService')
                     continue
 
             LoggingService.LogDebug(f"No moved location found for: {DbFile.FileName}", 'FindMovedFile', 'FileScanningBusinessService')
@@ -2053,8 +2070,10 @@ class FileScanningBusinessService:
                     LoggingService.LogError(f"Root folder not found for ID: {RootFolderId}", 'DetectMovedFiles', 'FileScanningBusinessService')
                     return {'Success': False, 'ErrorMessage': 'Root folder not found'}
 
-                DatabaseFiles = self.Repository.GetMediaFilesByRootFolder(RootFolder.RootFolder)
-                LoggingService.LogInfo(f"Checking {len(DatabaseFiles)} files in root folder: {RootFolder.RootFolder}", 'DetectMovedFiles', 'FileScanningBusinessService')
+                # directive: path-class-perfection | # see path.C23
+                _RfDisplayDM = str(RootFolder.Path) if RootFolder.Path is not None else ''
+                DatabaseFiles = self.Repository.GetMediaFilesByRootFolder(_RfDisplayDM)
+                LoggingService.LogInfo(f"Checking {len(DatabaseFiles)} files in root folder: {_RfDisplayDM}", 'DetectMovedFiles', 'FileScanningBusinessService')
             else:
                 DatabaseFiles = self.Repository.GetAllMediaFiles()
                 LoggingService.LogInfo(f"Checking {len(DatabaseFiles)} total database files", 'DetectMovedFiles', 'FileScanningBusinessService')

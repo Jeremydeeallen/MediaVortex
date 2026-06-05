@@ -400,6 +400,8 @@ class FileScanningManager {
                         const option = document.createElement('option');
                         option.value = folder.RootFolder;
                         option.textContent = folder.RootFolder;
+                        // directive: path-class-perfection | # see path.C23
+                        // Server emits RootFolder via Path.CanonicalDisplay; this binding stays for back-compat
                         dropdown.appendChild(option);
                     });
                 }

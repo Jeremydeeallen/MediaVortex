@@ -34,7 +34,7 @@ def main():
         
         print(f"Found {len(RootFolders)} root folders:")
         for i, folder in enumerate(RootFolders, 1):
-            print(f"  {i}. {folder.RootFolder}")
+            print(f"  {i}. {folder.Path}")
         
         # Let user select a root folder
         try:
@@ -58,7 +58,7 @@ def main():
         TotalWastedSpace = 0
         
         for RootFolder in SelectedFolders:
-            print(f"\nAnalyzing: {RootFolder.RootFolder}")
+            print(f"\nAnalyzing: {RootFolder.Path}")
             print("-" * 50)
             
             # Generate duplicate report
@@ -88,7 +88,7 @@ def main():
             
             # Ask if user wants to clean up this folder
             if Report['TotalDuplicateFiles'] > 0:
-                Cleanup = input(f"\nClean up duplicates in {RootFolder.RootFolder}? (y/N): ").strip().lower()
+                Cleanup = input(f"\nClean up duplicates in {RootFolder.Path}? (y/N): ").strip().lower()
                 if Cleanup == 'y':
                     print("Cleaning up duplicates...")
                     Result = DuplicateService.CleanupDuplicateMediaFiles(RootFolder.Id, KeepBestQuality=True)
