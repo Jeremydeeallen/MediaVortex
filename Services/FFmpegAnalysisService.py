@@ -568,13 +568,13 @@ class FFmpegAnalysisService:
             except PathError:
                 Sid, Rel = None, None
             Query = (
-                "INSERT INTO ScanJobs (JobId, RootFolderPath, StorageRootId, RelativePath, Recursive, Status, StartTime, LastUpdated, ScanType) "
-                "VALUES (%s, %s, %s, %s, %s, 'Pending', %s, %s, 'FFprobe')"
+                "INSERT INTO ScanJobs (JobId, StorageRootId, RelativePath, Recursive, Status, StartTime, LastUpdated, ScanType) "
+                "VALUES (%s, %s, %s, %s, 'Pending', %s, %s, 'FFprobe')"
             )
             Now = datetime.now(timezone.utc)
 
             if self.DatabaseService:
-                self.DatabaseService.ExecuteNonQuery(Query, (JobId, RootFolderPath, Sid, Rel, Recursive, Now, Now))
+                self.DatabaseService.ExecuteNonQuery(Query, (JobId, Sid, Rel, Recursive, Now, Now))
             else:
                 LoggingService.LogWarning("DatabaseService not available", 'CreateFFprobeScanJob', 'FFmpegAnalysisService')
                 return

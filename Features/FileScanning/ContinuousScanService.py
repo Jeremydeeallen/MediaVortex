@@ -5,7 +5,7 @@ from typing import Dict, Any, List
 from datetime import datetime, timezone
 from Core.Logging.LoggingService import LoggingService
 from Core.DateTimeHelpers import AsAwareUtc, ToUtcIsoZ
-from Features.FileScanning.FileScanningBusinessService import _LocalIsDir as LocalIsDir
+from Core.Path.LocalPath import LocalIsDir
 
 
 class ContinuousScanService:
@@ -414,11 +414,11 @@ class ContinuousScanService:
                 Sid, Rel = None, None
             # directive: path-perfect-implementation | # see filescanning.S1
             Query = (
-                "INSERT INTO ScanJobs (JobId, RootFolderPath, StorageRootId, RelativePath, Recursive, Status, StartTime, EndTime, "
+                "INSERT INTO ScanJobs (JobId, StorageRootId, RelativePath, Recursive, Status, StartTime, EndTime, "
                 "LastUpdated, ScanType, WorkerName, ErrorMessage) "
-                "VALUES (%s, %s, %s, %s, TRUE, 'Failed', %s, %s, %s, 'File', %s, %s)"
+                "VALUES (%s, %s, %s, TRUE, 'Failed', %s, %s, %s, 'File', %s, %s)"
             )
-            Db.ExecuteNonQuery(Query, (JobId, RootFolderPath, Sid, Rel, Now, Now, Now, WorkerName, ErrorMessage))
+            Db.ExecuteNonQuery(Query, (JobId, Sid, Rel, Now, Now, Now, WorkerName, ErrorMessage))
         except Exception as e:
             LoggingService.LogException("Error recording path validation failure", e, 'ContinuousScanService', '_RecordPathValidationFailure')
 

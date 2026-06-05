@@ -271,11 +271,11 @@ class FileScanningBusinessService:
             except PathError:
                 Sid, Rel = None, None
             Query = (
-                "INSERT INTO ScanJobs (JobId, RootFolderPath, StorageRootId, RelativePath, Recursive, Status, StartTime, LastUpdated, ScanType, WorkerName) "
-                "VALUES (%s, %s, %s, %s, %s, 'Running', %s, %s, 'File', %s)"
+                "INSERT INTO ScanJobs (JobId, StorageRootId, RelativePath, Recursive, Status, StartTime, LastUpdated, ScanType, WorkerName) "
+                "VALUES (%s, %s, %s, %s, 'Running', %s, %s, 'File', %s)"
             )
             Now = datetime.now(timezone.utc)
-            self.Repository.DatabaseService.ExecuteNonQuery(Query, (JobId, RootFolderPath, Sid, Rel, Recursive, Now, Now, WorkerName))
+            self.Repository.DatabaseService.ExecuteNonQuery(Query, (JobId, Sid, Rel, Recursive, Now, Now, WorkerName))
 
         except Exception as e:
             LoggingService.LogException(f"Error creating scan job {JobId}", e, 'FileScanningBusinessService', 'CreateScanJob')

@@ -66,39 +66,32 @@ class FileScanningRepository(BaseRepository):
 
     # ─── ScanJobs Queries ──────────────────────────────────────────────
 
+    # directive: path-perfect-implementation | # see path-storage.S1
     def GetRunningScans(self, RootFolderPath: Optional[str] = None) -> List[Dict[str, Any]]:
-        """Return ScanJobs rows in Status IN ('Pending', 'Running').
-
-        Optionally filtered to a single rootfolder path. The single source of
-        truth for "is a scan running?" -- callers derive bool/count/list from
-        the result. Replaces CheckForExistingRunningScan, IsScanRunning,
-        IsScanRunningForRootFolder, GetRunningScanCount, GetAllRunningScans
-        per FileScanning.feature.md criterion 18b.
-        """
         try:
+            Cols = (
+                "Id, JobId, StorageRootId, RelativePath, Recursive, Status, ProcessId, "
+                "StartTime, EndTime, Progress, CurrentDirectory, "
+                "TotalFiles, ProcessedFiles, SkippedFiles, EncodingErrors, "
+                "NewFiles, UpdatedFiles, DeletedFiles, ErrorMessage, "
+                "LastUpdated, WorkerName"
+            )
             if RootFolderPath:
-                query = """
-                    SELECT Id, JobId, RootFolderPath, Recursive, Status, ProcessId,
-                           StartTime, EndTime, Progress, CurrentDirectory,
-                           TotalFiles, ProcessedFiles, SkippedFiles, EncodingErrors,
-                           NewFiles, UpdatedFiles, DeletedFiles, ErrorMessage,
-                           LastUpdated, WorkerName
-                    FROM ScanJobs
-                    WHERE RootFolderPath = %s AND Status IN ('Pending', 'Running')
-                    ORDER BY StartTime ASC
-                """
-                rows = self.ExecuteQuery(query, (RootFolderPath,))
+                Parsed = LookupTypedPair(RootFolderPath)
+                if Parsed[0] is None:
+                    return []
+                query = (
+                    f"SELECT {Cols} FROM ScanJobs "
+                    "WHERE StorageRootId = %s AND RelativePath = %s AND Status IN ('Pending', 'Running') "
+                    "ORDER BY StartTime ASC"
+                )
+                rows = self.ExecuteQuery(query, (Parsed[0], Parsed[1]))
             else:
-                query = """
-                    SELECT Id, JobId, RootFolderPath, Recursive, Status, ProcessId,
-                           StartTime, EndTime, Progress, CurrentDirectory,
-                           TotalFiles, ProcessedFiles, SkippedFiles, EncodingErrors,
-                           NewFiles, UpdatedFiles, DeletedFiles, ErrorMessage,
-                           LastUpdated, WorkerName
-                    FROM ScanJobs
-                    WHERE Status IN ('Pending', 'Running')
-                    ORDER BY StartTime ASC
-                """
+                query = (
+                    f"SELECT {Cols} FROM ScanJobs "
+                    "WHERE Status IN ('Pending', 'Running') "
+                    "ORDER BY StartTime ASC"
+                )
                 rows = self.ExecuteQuery(query)
             return rows or []
         except Exception as e:
@@ -108,14 +101,16 @@ class FileScanningRepository(BaseRepository):
     # ─── Root Folder Methods ───────────────────────────────────────────
 
     # directive: path-perfect-implementation | # see path-storage.S1
-    def GetAllRootFolders(self, SortColumn='RootFolder', SortOrder='ASC') -> List[RootFolderModel]:
-        ValidColumns = ['Id', 'RootFolder', 'LastScannedDate', 'TotalSizeGB', 'PreferredWorkerName']
+    def GetAllRootFolders(self, SortColumn='RelativePath', SortOrder='ASC') -> List[RootFolderModel]:
+        ValidColumns = ['Id', 'RelativePath', 'StorageRootId', 'LastScannedDate', 'TotalSizeGB', 'PreferredWorkerName']
+        if SortColumn == 'RootFolder':
+            SortColumn = 'RelativePath'
         if SortColumn not in ValidColumns:
-            SortColumn = 'RootFolder'
+            SortColumn = 'RelativePath'
         if SortOrder.upper() not in ['ASC', 'DESC']:
             SortOrder = 'ASC'
         query = (
-            "SELECT Id, RootFolder, StorageRootId, RelativePath, LastScannedDate, TotalSizeGB, PreferredWorkerName "
+            "SELECT Id, StorageRootId, RelativePath, LastScannedDate, TotalSizeGB, PreferredWorkerName "
             f"FROM RootFolders ORDER BY {SortColumn} {SortOrder.upper()}"
         )
         rows = self.ExecuteQuery(query)
@@ -123,7 +118,6 @@ class FileScanningRepository(BaseRepository):
         for row in rows:
             rootFolder = RootFolderModel(
                 Id=row['Id'],
-                RootFolder=row['RootFolder'],
                 StorageRootId=row.get('StorageRootId'),
                 RelativePath=row.get('RelativePath') or '',
                 LastScannedDate=row['LastScannedDate'],
@@ -136,7 +130,7 @@ class FileScanningRepository(BaseRepository):
     # directive: path-perfect-implementation | # see path-storage.S1
     def GetRootFolderById(self, RootFolderId: int) -> Optional[RootFolderModel]:
         query = (
-            "SELECT Id, RootFolder, StorageRootId, RelativePath, LastScannedDate, TotalSizeGB, PreferredWorkerName "
+            "SELECT Id, StorageRootId, RelativePath, LastScannedDate, TotalSizeGB, PreferredWorkerName "
             "FROM RootFolders WHERE Id = %s"
         )
         rows = self.ExecuteQuery(query, (RootFolderId,))
@@ -145,7 +139,6 @@ class FileScanningRepository(BaseRepository):
         row = rows[0]
         return RootFolderModel(
             Id=row['Id'],
-            RootFolder=row['RootFolder'],
             StorageRootId=row.get('StorageRootId'),
             RelativePath=row.get('RelativePath') or '',
             LastScannedDate=row['LastScannedDate'],
@@ -166,10 +159,10 @@ class FileScanningRepository(BaseRepository):
                 if RootFolder.Id is None:
                     LoggingService.LogInfo("Inserting new root folder...")
                     query = (
-                        "INSERT INTO RootFolders (RootFolder, StorageRootId, RelativePath, LastScannedDate, TotalSizeGB) "
-                        "VALUES (%s, %s, %s, %s, %s) RETURNING Id"
+                        "INSERT INTO RootFolders (StorageRootId, RelativePath, LastScannedDate, TotalSizeGB) "
+                        "VALUES (%s, %s, %s, %s) RETURNING Id"
                     )
-                    parameters = (RootFolder.RootFolder, RootFolder.StorageRootId, RootFolder.RelativePath, RootFolder.LastScannedDate, RootFolder.TotalSizeGB)
+                    parameters = (RootFolder.StorageRootId, RootFolder.RelativePath, RootFolder.LastScannedDate, RootFolder.TotalSizeGB)
                     cursor.execute(query, parameters)
                     rootFolderId = cursor.fetchone()[0]
                     connection.commit()
@@ -179,10 +172,10 @@ class FileScanningRepository(BaseRepository):
                     LoggingService.LogInfo("Updating existing root folder with ID: {}", "FileScanningRepository", "SaveRootFolder", RootFolder.Id)
                     query = (
                         "UPDATE RootFolders "
-                        "SET RootFolder = %s, StorageRootId = %s, RelativePath = %s, LastScannedDate = %s, TotalSizeGB = %s "
+                        "SET StorageRootId = %s, RelativePath = %s, LastScannedDate = %s, TotalSizeGB = %s "
                         "WHERE Id = %s"
                     )
-                    parameters = (RootFolder.RootFolder, RootFolder.StorageRootId, RootFolder.RelativePath, RootFolder.LastScannedDate, RootFolder.TotalSizeGB, RootFolder.Id)
+                    parameters = (RootFolder.StorageRootId, RootFolder.RelativePath, RootFolder.LastScannedDate, RootFolder.TotalSizeGB, RootFolder.Id)
                     cursor.execute(query, parameters)
                     connection.commit()
                     affectedRows = cursor.rowcount
@@ -197,22 +190,17 @@ class FileScanningRepository(BaseRepository):
     # directive: path-schema-migration | # see path.S7
     def DeleteRootFolder(self, RootFolderId: int) -> bool:
         try:
-            rfRows = self.ExecuteQuery("SELECT RootFolder FROM RootFolders WHERE Id = %s", (RootFolderId,))
+            rfRows = self.ExecuteQuery("SELECT StorageRootId, RelativePath FROM RootFolders WHERE Id = %s", (RootFolderId,))
             if rfRows:
-                Sid, RelPrefix = LookupTypedPair(rfRows[0]['RootFolder'])
+                Sid = rfRows[0].get('StorageRootId') if 'StorageRootId' in rfRows[0] else rfRows[0].get('storagerootid')
+                RelPrefix = rfRows[0].get('RelativePath') if 'RelativePath' in rfRows[0] else rfRows[0].get('relativepath')
                 if Sid is not None:
-                    # Delete the root entry itself (exact RelativePath match) plus everything beneath it
                     EscapedPrefix = EscapeLikePattern((RelPrefix or '').rstrip('/') + '/')
                     self.ExecuteNonQuery(
                         "DELETE FROM MediaFiles WHERE StorageRootId = %s "
                         "AND (LOWER(RelativePath) = LOWER(%s) "
                         "OR LOWER(RelativePath) LIKE LOWER(%s) || '%%' ESCAPE '!')",
                         (Sid, RelPrefix, EscapedPrefix)
-                    )
-                else:
-                    LoggingService.LogWarning(
-                        f"DeleteRootFolder: could not parse RootFolder to typed pair: {rfRows[0]['RootFolder']}",
-                        "FileScanningRepository", "DeleteRootFolder"
                     )
             affectedRows = self.ExecuteNonQuery("DELETE FROM RootFolders WHERE Id = %s", (RootFolderId,))
             return affectedRows > 0
@@ -298,28 +286,30 @@ class FileScanningRepository(BaseRepository):
         }
 
     def GetRootFoldersPaginated(self, Page: int, PageSize: int, Search: str = '',
-                                SortColumn: str = 'RootFolder', SortOrder: str = 'ASC') -> Dict[str, Any]:
-        """Get root folders with SQL-level pagination, filtering, and sorting."""
-        ValidColumns = ['Id', 'RootFolder', 'LastScannedDate', 'TotalSizeGB']
+                                SortColumn: str = 'RelativePath', SortOrder: str = 'ASC') -> Dict[str, Any]:
+        ValidColumns = ['Id', 'RelativePath', 'StorageRootId', 'LastScannedDate', 'TotalSizeGB']
+        if SortColumn == 'RootFolder':
+            SortColumn = 'RelativePath'
         if SortColumn not in ValidColumns:
-            SortColumn = 'RootFolder'
+            SortColumn = 'RelativePath'
         if SortOrder.upper() not in ['ASC', 'DESC']:
             SortOrder = 'ASC'
 
         params = []
         where_clause = ""
         if Search:
-            where_clause = "WHERE LOWER(RootFolder) LIKE LOWER(%s)"
+            where_clause = "WHERE LOWER(RelativePath) LIKE LOWER(%s)"
             params.append(f"%{Search}%")
 
-        # Get total count
         count_query = f"SELECT COUNT(*) as Count FROM RootFolders {where_clause}"
         count_rows = self.ExecuteQuery(count_query, tuple(params) if params else None)
         total_count = count_rows[0]['Count'] if count_rows else 0
 
         offset = (Page - 1) * PageSize
+        if SortColumn == 'RootFolder':
+            SortColumn = 'RelativePath'
         data_query = (
-            "SELECT Id, RootFolder, StorageRootId, RelativePath, LastScannedDate, TotalSizeGB "
+            "SELECT Id, StorageRootId, RelativePath, LastScannedDate, TotalSizeGB "
             f"FROM RootFolders {where_clause} "
             f"ORDER BY {SortColumn} {SortOrder.upper()} "
             "LIMIT %s OFFSET %s"
@@ -330,7 +320,7 @@ class FileScanningRepository(BaseRepository):
         root_folders = []
         for row in rows:
             root_folders.append(RootFolderModel(
-                Id=row['Id'], RootFolder=row['RootFolder'],
+                Id=row['Id'],
                 StorageRootId=row.get('StorageRootId'),
                 RelativePath=row.get('RelativePath') or '',
                 LastScannedDate=row['LastScannedDate'], TotalSizeGB=row['TotalSizeGB'],
@@ -342,17 +332,15 @@ class FileScanningRepository(BaseRepository):
             'TotalPages': (total_count + PageSize - 1) // PageSize
         }
 
-    # directive: path-schema-migration | # see path.S7
+    # directive: path-perfect-implementation | # see path-storage.S1
     def GetMkvCountsByRootFolder(self) -> Dict[str, int]:
-        """MKV file counts per root folder; joins via typed pair (StorageRootId, RelativePath prefix)."""
         try:
-            # directive: path-schema-migration -- RootFolders has no StorageRootId; resolve per row in Python.
-            RfRows = self.ExecuteQuery("SELECT RootFolder FROM RootFolders")
+            RfRows = self.ExecuteQuery("SELECT StorageRootId, RelativePath FROM RootFolders")
             counts: Dict[str, int] = {}
             for RfRow in RfRows:
-                RootFolderStr = RfRow['RootFolder']
-                Sid, RelRoot = LookupTypedPair(RootFolderStr)
-                folder_key = RootFolderStr.replace('/', '\\').rstrip('\\').lower()
+                Sid = RfRow.get('StorageRootId') if 'StorageRootId' in RfRow else RfRow.get('storagerootid')
+                RelRoot = RfRow.get('RelativePath') if 'RelativePath' in RfRow else RfRow.get('relativepath')
+                folder_key = SynthesizeFilePath(Sid, RelRoot or '').replace('/', '\\').rstrip('\\').lower()
                 if Sid is None:
                     counts[folder_key] = 0
                     continue

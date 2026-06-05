@@ -15,10 +15,9 @@ class RootFolderModel:
         self.LastScannedDate = LastScannedDate if LastScannedDate is not None else datetime.now(timezone.utc)
         self.TotalSizeGB = TotalSizeGB
         self.PreferredWorkerName = PreferredWorkerName
-        self._LegacyRootFolder = RootFolder or ""
         self.StorageRootId = StorageRootId
         self.RelativePath = RelativePath or ""
-        if (StorageRootId is None or RelativePath == "") and RootFolder:
+        if (StorageRootId is None or not self.RelativePath) and RootFolder:
             from Core.Path.Path import Path, PathError
             from Core.Path.PathStorageRoots import GetStorageRoots
             try:
@@ -33,19 +32,18 @@ class RootFolderModel:
     # directive: path-perfect-implementation | # see path-storage.S1
     @property
     def RootFolder(self) -> str:
-        if self.StorageRootId is not None:
-            from Core.Path.Path import Path, PathError
-            from Core.Path.PathStorageRoots import GetPrefixMap
-            try:
-                return Path(self.StorageRootId, self.RelativePath or "").CanonicalDisplay(GetPrefixMap())
-            except PathError:
-                pass
-        return self._LegacyRootFolder
+        if self.StorageRootId is None:
+            return ""
+        from Core.Path.Path import Path, PathError
+        from Core.Path.PathStorageRoots import GetPrefixMap
+        try:
+            return Path(self.StorageRootId, self.RelativePath or "").CanonicalDisplay(GetPrefixMap())
+        except PathError:
+            return ""
 
     # directive: path-perfect-implementation | # see path-storage.S1
     @RootFolder.setter
     def RootFolder(self, Value: str) -> None:
-        self._LegacyRootFolder = Value or ""
         if Value:
             from Core.Path.Path import Path, PathError
             from Core.Path.PathStorageRoots import GetStorageRoots
