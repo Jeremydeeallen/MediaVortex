@@ -221,12 +221,10 @@ class ShowSettingsRepository(BaseRepository):
                 "ORDER BY SUM(mf.SizeMB) DESC"
             )
             Rows = self.ExecuteQuery(query, Params)
-            Pm = PrefixMap()
             for R in Rows:
                 Sid = R.get("storagerootid") if "storagerootid" in R else R.get("StorageRootId")
                 Rel = R.get("relativepath") if "relativepath" in R else R.get("RelativePath")
-                Prefix = Pm.get(Sid, "") if Sid is not None else ""
-                Display = (Prefix + Rel.replace("/", "\\")) if (Prefix and Rel) else ""
+                Display = _SafeCanonical(Sid, Rel)
                 R["ShowFolder"] = Display
                 R["showfolder"] = Display
             return Rows
