@@ -396,7 +396,7 @@ class CrashRecoveryService:
             _PmCR = _GPMCR()
             _CtxCR = _WorkerCR.FromWorkerContext(Db=self.DatabaseManager.DatabaseService)
             Query = (
-                "SELECT tfp.Id AS tfp_id, "
+                "SELECT tfp.Id AS tfp_id, tfp.TranscodeAttemptId AS ta_id, "
                 "tfp.SourceStorageRootId AS src_sid, tfp.SourceRelativePath AS src_rel, "
                 "tfp.OutputStorageRootId AS out_sid, tfp.OutputRelativePath AS out_rel "
                 "FROM TemporaryFilePaths tfp "
@@ -411,6 +411,7 @@ class CrashRecoveryService:
             PartialCompleted = 0
 
             for Row in Rows:
+                TaId = Row.get('ta_id')
                 SrcSid = Row.get('src_sid')
                 SrcRel = Row.get('src_rel')
                 OutSid = Row.get('out_sid')
@@ -460,7 +461,12 @@ class CrashRecoveryService:
                             FinalizeEx, "CrashRecoveryService", "_RecoverInProgressArtifacts"
                         )
 
-                if InProgressExists:
+                # directive: path-perfect-implementation -- skip .inprogress delete if there is an active QualityTestingQueue row (VMAF-pending, not orphaned)
+                ActiveQtq = self.DatabaseManager.DatabaseService.ExecuteScalar(
+                    "SELECT 1 FROM QualityTestingQueue WHERE TranscodeAttemptId = %s AND DateCompleted IS NULL LIMIT 1",
+                    (TaId,),
+                )
+                if InProgressExists and not ActiveQtq:
                     try:
                         os.remove(InProgressPath)
                         InProgressDeleted += 1

@@ -197,6 +197,25 @@ removed from `ContinuousScanService` (operator can re-deploy or restart for a
 StorageRootResolutions change; the loop no longer caches a stale map). 12 modules
 import clean. `grep -rn PathTranslation` returns 0 production hits.
 
+**PATH-PERFECT-IMPLEMENTATION STEP 4 SURGICAL FIX (2026-06-05).**
+`FileScanningBusinessService.StartScanning` no longer calls `_Normalize` on
+the worker-local path that `_ToLocalPath` returns. `_ToLocalPath` now uses
+`Path.FromLegacyString.Resolve(Worker)` which produces a worker-native string
+already in the correct shape; the prior `.replace("/", "\\")` flip was the
+direct cause of the dot-worker-1 `\mnt\media_tv\` scan failure. Full
+StartScanning signature migration to typed-pair entry deferred to Step 5
+helper purge to keep this commit minimal.
+
+**OPERATIONAL FIX (2026-06-05, technically outside path-class scope):**
+`CrashRecoveryService._RecoverInProgressArtifacts` no longer deletes
+`.inprogress` files whose `TranscodeAttemptId` has an active
+`QualityTestingQueue` row (DateCompleted IS NULL). Prior behavior treated
+all `.inprogress` artifacts as orphaned at worker restart and unconditionally
+deleted them, destroying transcoded work that was legitimately queued for
+VMAF analysis. Symptom: operator observed i9 transcodes "auto-rejected"
+with `.inprogress` deleted; 7 attempts (29464-29470) lost their staging
+files between transcode-success and VMAF-claim while this bug was live.
+
 ### Progress
 
 - [x] 1. Diagnose OS coupling in canonical path storage (KNOWN-ISSUES single source of truth)

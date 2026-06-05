@@ -269,34 +269,19 @@ class FileScanningBusinessService:
                     'Error': 'EmptyPath'
                 }
 
-            # Translate canonical (Windows-style) path to local for filesystem
-            # checks. RootFolderPath stays canonical for DB persistence; only
-            # the validation path uses the translated form. On Windows or
-            # without share mappings, this is a no-op.
+            # directive: path-perfect-implementation | # see path.S11
             LocalPath = self._ToLocalPath(RootFolderPath)
-            NormalizedPath = _Normalize(LocalPath)
-            LoggingService.LogInfo(f"Normalized local path: '{NormalizedPath}' (canonical: '{RootFolderPath}')", 'FileScanningBusinessService', 'StartScanning')
+            LoggingService.LogInfo(f"Worker-local path: '{LocalPath}' (canonical: '{RootFolderPath}')", 'FileScanningBusinessService', 'StartScanning')
 
-            # Check if path exists
-            PathExists = _LocalExists(NormalizedPath)
+            if not _LocalExists(LocalPath):
+                LoggingService.LogError(f"Path does not exist: local='{LocalPath}', canonical='{RootFolderPath}'", 'FileScanningBusinessService', 'StartScanning')
+                return {
+                    'Success': False,
+                    'Message': f'Root folder does not exist: {RootFolderPath} (local: {LocalPath})',
+                    'Error': 'InvalidPath'
+                }
 
-            if not PathExists:
-                LoggingService.LogError(f"Path does not exist: local='{NormalizedPath}', canonical='{RootFolderPath}'", 'FileScanningBusinessService', 'StartScanning')
-                try:
-                    ListDirResult = os.listdir(NormalizedPath)
-                    LoggingService.LogInfo(f"os.listdir succeeded, found {len(ListDirResult)} items", 'FileScanningBusinessService', 'StartScanning')
-                    PathExists = True
-                except Exception as e:
-                    LoggingService.LogError(f"os.listdir also failed: {str(e)}", 'FileScanningBusinessService', 'StartScanning')
-
-                if not PathExists:
-                    return {
-                        'Success': False,
-                        'Message': f'Root folder does not exist: {RootFolderPath} (local: {NormalizedPath})',
-                        'Error': 'InvalidPath'
-                    }
-
-            if not _LocalIsDir(NormalizedPath):
+            if not _LocalIsDir(LocalPath):
                 return {
                     'Success': False,
                     'Message': f'Path is not a directory: {RootFolderPath}',
