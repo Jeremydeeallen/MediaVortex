@@ -273,7 +273,8 @@ class TranscodeQueueRepository(BaseRepository):
             from Core.Database.WorkerCapabilityPredicate import BuildClaimPredicate
             CapabilityFragment, CapabilityParams = BuildClaimPredicate(WorkerName, "TranscodeEnabled")
             NvencGate = (
-                "(COALESCE(p.usenvidiahardware, 0) = 0 "
+                "p.profilename IS NOT NULL "
+                "AND (p.usenvidiahardware = 0 "
                 "OR EXISTS (SELECT 1 FROM Workers w2 "
                 "WHERE w2.WorkerName = %s AND w2.nvenccapable = TRUE))"
             )
