@@ -392,9 +392,9 @@ class CrashRecoveryService:
             # directive: path-schema-migration | # see path.S8
             from Core.Path.Path import Path as _PathCR, PathError as _PECR
             from Core.Path.PathStorageRoots import GetPrefixMap as _GPMCR
-            from Core.WorkerContext import WorkerContext as _WCCR
+            from Core.Path.Worker import Worker as _WorkerCR
             _PmCR = _GPMCR()
-            _CtxCR = _WCCR.Current()
+            _CtxCR = _WorkerCR.FromWorkerContext(Db=self.DatabaseManager.DatabaseService)
             Query = (
                 "SELECT tfp.Id AS tfp_id, "
                 "tfp.SourceStorageRootId AS src_sid, tfp.SourceRelativePath AS src_rel, "
