@@ -24,11 +24,11 @@ function Emit-Deny {
     param([string]$Reason)
     $Out = @{
         hookSpecificOutput = @{
-            hookEventName = "PreToolUse"
-            permissionDecision = "deny"
+            hookEventName            = "PreToolUse"
+            permissionDecision       = "deny"
             permissionDecisionReason = $Reason
         }
-        continue = $true
+        continue           = $true
     } | ConvertTo-Json -Depth 6 -Compress
     [Console]::Out.Write($Out)
     exit 0
@@ -38,11 +38,11 @@ function Emit-Ask {
     param([string]$Reason)
     $Out = @{
         hookSpecificOutput = @{
-            hookEventName = "PreToolUse"
-            permissionDecision = "ask"
+            hookEventName            = "PreToolUse"
+            permissionDecision       = "ask"
             permissionDecisionReason = $Reason
         }
-        continue = $true
+        continue           = $true
     } | ConvertTo-Json -Depth 6 -Compress
     [Console]::Out.Write($Out)
     exit 0
@@ -55,7 +55,8 @@ function Get-CurrentSessionStamp {
         try {
             $S = Get-Content $StateFile -Raw | ConvertFrom-Json
             return $S.session_started_at
-        } catch { }
+        }
+        catch { }
     }
     return ""
 }
@@ -73,7 +74,8 @@ function Increment-RefusalCount {
                     $Counts[$Prop.Name] = [int]$Prop.Value
                 }
             }
-        } catch { }
+        }
+        catch { }
     }
     $Key = "$RuleId|$($FilePath.ToLower())"
     if ($Counts.ContainsKey($Key)) { $Counts[$Key] = [int]$Counts[$Key] + 1 }
@@ -101,7 +103,7 @@ If the Path forward is genuinely unworkable, ask the operator with a one-sentenc
         $RuleId = $RuleMatch.Groups[1].Value
         $Count = Increment-RefusalCount $RuleId $FilePath
         if ($Count -ge 2) {
-            $Ord = switch ($Count) { 1 {'1st'} 2 {'2nd'} 3 {'3rd'} default { "${Count}th" } }
+            $Ord = switch ($Count) { 1 { '1st' } 2 { '2nd' } 3 { '3rd' } default { "${Count}th" } }
             $StoppedPreamble = @"
 STOPPED -- this is the $Ord refusal of $RuleId on this file in this session.
 
@@ -133,7 +135,8 @@ function Get-SessionState {
             if ($DirPhase) { $S.phase = $DirPhase }
             if ($DirSlug) { $S.directive_slug = $DirSlug }
             return $S
-        } catch { }
+        }
+        catch { }
     }
     if ($DirSlug -and $DirPhase) {
         return [PSCustomObject]@{ directive_slug = $DirSlug; phase = $DirPhase }
@@ -181,10 +184,10 @@ function Get-R18Overrides {
     if (-not $M.Success) { return @() }
     $Out = @()
     foreach ($Line in ($M.Groups[1].Value -split "`n")) {
-        $T = $Line.Trim().TrimStart('-','*',' ','`t')
+        $T = $Line.Trim().TrimStart('-', '*', ' ', '`t')
         if (-not $T) { continue }
-        $Cell = ($T -split '\s+--\s+|\s+#\s+|\s+:\s+',2)[0].Trim()
-        if ($Cell) { $Out += ($Cell -replace '\\','/').ToLower() }
+        $Cell = ($T -split '\s+--\s+|\s+#\s+|\s+:\s+', 2)[0].Trim()
+        if ($Cell) { $Out += ($Cell -replace '\\', '/').ToLower() }
     }
     return $Out
 }
@@ -263,12 +266,13 @@ function Synthesize-PostEditContent {
         if ($ToolInput.replace_all) {
             $Result = $Current.Replace($Old, $New)
             if ($Result -ne $Current) { return $Result }
-            return $Current.Replace($Old.Replace("`r`n","`n"), $New).Replace($Old.Replace("`n","`r`n"), $New)
-        } else {
+            return $Current.Replace($Old.Replace("`r`n", "`n"), $New).Replace($Old.Replace("`n", "`r`n"), $New)
+        }
+        else {
             $Idx = $Current.IndexOf($Old)
             if ($Idx -lt 0) {
-                $CurNorm = $Current -replace "`r`n","`n"
-                $OldNorm = $Old -replace "`r`n","`n"
+                $CurNorm = $Current -replace "`r`n", "`n"
+                $OldNorm = $Old -replace "`r`n", "`n"
                 $Idx2 = $CurNorm.IndexOf($OldNorm)
                 if ($Idx2 -lt 0) { return $Current }
                 return $CurNorm.Substring(0, $Idx2) + $New + $CurNorm.Substring($Idx2 + $OldNorm.Length)
@@ -283,11 +287,12 @@ function Synthesize-PostEditContent {
             else {
                 $Idx = $Buf.IndexOf($E.old_string)
                 if ($Idx -lt 0) {
-                    $BufNorm = $Buf -replace "`r`n","`n"
-                    $OldNorm = $E.old_string -replace "`r`n","`n"
+                    $BufNorm = $Buf -replace "`r`n", "`n"
+                    $OldNorm = $E.old_string -replace "`r`n", "`n"
                     $Idx2 = $BufNorm.IndexOf($OldNorm)
                     if ($Idx2 -ge 0) { $Buf = $BufNorm.Substring(0, $Idx2) + $E.new_string + $BufNorm.Substring($Idx2 + $OldNorm.Length) }
-                } else {
+                }
+                else {
                     $Buf = $Buf.Substring(0, $Idx) + $E.new_string + $Buf.Substring($Idx + $E.old_string.Length)
                 }
             }
@@ -335,13 +340,14 @@ function Get-EditRegion {
         # Locate new_string in post-content. Try exact match, then CRLF/LF normalized.
         $Idx = $PostContent.IndexOf($New)
         if ($Idx -lt 0) {
-            $PostNorm = $PostContent -replace "`r`n","`n"
-            $NewNorm = $New -replace "`r`n","`n"
+            $PostNorm = $PostContent -replace "`r`n", "`n"
+            $NewNorm = $New -replace "`r`n", "`n"
             $Idx2 = $PostNorm.IndexOf($NewNorm)
             if ($Idx2 -lt 0) { continue }
             $StartLine = ($PostNorm.Substring(0, $Idx2) -split "`n").Count
             $LineCount = ($NewNorm -split "`n").Count
-        } else {
+        }
+        else {
             $StartLine = ($PostContent.Substring(0, $Idx) -split "`n").Count
             $LineCount = ($New -split "`n").Count
         }
@@ -395,10 +401,10 @@ function Test-AllowOverride {
             $Reason = $M.Groups[1].Value.Trim()
             if ($Reason) {
                 $Entry = @{
-                    ts = (Get-Date -Format "yyyy-MM-ddTHH:mm:ssZ")
-                    rule = $RuleId
-                    file = $FilePath
-                    line = $LineNumber + 1
+                    ts     = (Get-Date -Format "yyyy-MM-ddTHH:mm:ssZ")
+                    rule   = $RuleId
+                    file   = $FilePath
+                    line   = $LineNumber + 1
                     reason = $Reason
                 } | ConvertTo-Json -Compress
                 Add-Content -Path $OverrideLog -Value $Entry -Encoding UTF8
@@ -415,9 +421,9 @@ function Test-TaskDelegationGate {
     param($State, $ToolName, $ToolInput)
     $FilePath = $ToolInput.file_path
     if (-not $FilePath) { return $null }
-    $NormFP = ($FilePath -replace '\\','/').ToLower()
+    $NormFP = ($FilePath -replace '\\', '/').ToLower()
     $MarkerPath = Join-Path $RepoRoot ".claude\.task-delegation-on"
-    $NormMarker = (($MarkerPath -replace '\\','/').ToLower())
+    $NormMarker = (($MarkerPath -replace '\\', '/').ToLower())
     if ($NormFP -eq $NormMarker) {
         return "Operator-only file: .claude/.task-delegation-on is a manual opt-in toggle for task-delegation mode. The operator must create/delete this file directly (New-Item / Remove-Item). Claude cannot toggle task-delegation. See .claude/rules/ceo-mode.md (Task-delegation mode is operator opt-in)."
     }
@@ -434,6 +440,7 @@ function Test-PhaseGate {
     $Phase = $State.phase
     $FilePath = $ToolInput.file_path
     $IsDirectiveDoc = $FilePath -and ((Resolve-Path $FilePath -ErrorAction SilentlyContinue).Path -eq (Resolve-Path $DirectiveFile -ErrorAction SilentlyContinue).Path)
+    $IsPlanModeFile = $FilePath -and ($FilePath -match '\.claude[\\/]+plans[\\/]+[^\\/]+\.md$')
     switch ($Phase) {
         'NEEDS_STANDARDS_REVIEW' {
             # Allow edits to the directive doc itself -- the operator needs to edit it to advance phase.
@@ -441,7 +448,11 @@ function Test-PhaseGate {
             return "Phase NEEDS_STANDARDS_REVIEW: Read every file under .claude/rules/ and .claude/standards/index.md before any Write/Edit. Then advance the directive doc Status line to 'phase: NEEDS_PLAN'. See .claude/rules/ceo-mode.md (Phase state machine section). Path forward: read every file under .claude/rules/ and .claude/standards/index.md, then advance the directive doc Status line to 'phase: NEEDS_PLAN'."
         }
         'NEEDS_PLAN' {
-            if (-not $IsDirectiveDoc) { return "Phase NEEDS_PLAN: only the directive doc ($DirectiveFile) may be edited until the plan is committed and phase advances to NEEDS_DOC_PREREAD. See .claude/rules/ceo-mode.md#phase-state-machine. Path forward: finish drafting acceptance criteria + Files list in the directive doc, then advance Status to 'phase: NEEDS_DOC_PREREAD'." }
+            if (-not $IsDirectiveDoc -and -not $IsPlanModeFile) {
+                return "Phase NEEDS_PLAN: only the directive doc ($DirectiveFile) or a Claude Code plan-mode plan file
+  (~/.claude/plans/*.md) may be edited until the plan is committed and phase advances to NEEDS_DOC_PREREAD. See .claude/rules/ceo-mode.md#phase-state-machine. Path forward: finish
+  drafting acceptance criteria + Files list in the directive doc (or in the active plan-mode plan file), then advance Status to 'phase: NEEDS_DOC_PREREAD'." 
+            }
             return $null
         }
         'NEEDS_DOC_PREREAD' {
@@ -462,9 +473,9 @@ function Test-PhaseGate {
                     $Slug = Get-DirectiveSlug
                     if ($Slug) {
                         $Snap = @{
-                            slug = $Slug
+                            slug       = $Slug
                             size_bytes = [Text.Encoding]::UTF8.GetByteCount($PostContent)
-                            timestamp = (Get-Date -Format "yyyy-MM-ddTHH:mm:ssZ")
+                            timestamp  = (Get-Date -Format "yyyy-MM-ddTHH:mm:ssZ")
                         } | ConvertTo-Json -Compress
                         Set-Content -Path $SnapshotFile -Value $Snap -Encoding UTF8
                     }
@@ -529,7 +540,8 @@ function Test-PhaseGate {
                             return "Phase DELIVERING -> Closed: directive grew from $($Snap.size_bytes) bytes (at IMPLEMENTING->DELIVERING) to $CurrentBytes bytes -- exceeds 10% tolerance ($MaxAllowed bytes max). Growth during DELIVERING means content was DUPLICATED into the directive rather than PROMOTED out to its permanent home. See .claude/rules/doc-layering.md. Path forward: move the new content INTO the target *.feature.md / *.flow.md listed in the Promotions table, then DELETE it from the directive doc. The directive's job at DELIVERING is to shrink as content moves to its permanent home, not grow."
                         }
                     }
-                } catch { }
+                }
+                catch { }
             }
             return $null
         }
@@ -570,28 +582,29 @@ function Test-R1-DocPreread {
         $DocLines = @()
         $DocSlug = $null
         $DocGovernsFile = $false
-          $DocIsActive = $true
-          try {
-              $DocLines = Get-Content $D.FullName -Encoding UTF8
-              for ($I = 0; $I -lt [Math]::Min(15, $DocLines.Length); $I++) {
-                  if ($DocLines[$I] -match '^\*\*Slug:\*\*\s*(\S+)') { $DocSlug = $Matches[1].ToLower(); break }
-              }
-              # Relevance: doc must mention the file's basename. Colocated docs that don't reference
-              # this file do not govern it.
-              foreach ($Line in $DocLines) {
-                  if ($Line -match [regex]::Escape($FileBaseName)) { $DocGovernsFile = $true; break }
-              }
-              # Status: docs marked NOT STARTED / PROPOSED / DRAFT / PAUSED describe planned work,
-              # not current behavior. They name files they plan to modify but don't yet describe
-              # what the code does today, so they should not gate edits.
-              foreach ($Line in $DocLines) {
-                  if ($Line -match '(?i)(^|\s)(NOT\s+STARTED|PROPOSED|DRAFT|PAUSED)(\s|$|\*|\.|--)') {
-                      $DocIsActive = $false; break
-                  }
-              }
-          } catch {}
-          if (-not $DocGovernsFile) { continue }
-          if (-not $DocIsActive) { continue }
+        $DocIsActive = $true
+        try {
+            $DocLines = Get-Content $D.FullName -Encoding UTF8
+            for ($I = 0; $I -lt [Math]::Min(15, $DocLines.Length); $I++) {
+                if ($DocLines[$I] -match '^\*\*Slug:\*\*\s*(\S+)') { $DocSlug = $Matches[1].ToLower(); break }
+            }
+            # Relevance: doc must mention the file's basename. Colocated docs that don't reference
+            # this file do not govern it.
+            foreach ($Line in $DocLines) {
+                if ($Line -match [regex]::Escape($FileBaseName)) { $DocGovernsFile = $true; break }
+            }
+            # Status: docs marked NOT STARTED / PROPOSED / DRAFT / PAUSED describe planned work,
+            # not current behavior. They name files they plan to modify but don't yet describe
+            # what the code does today, so they should not gate edits.
+            foreach ($Line in $DocLines) {
+                if ($Line -match '(?i)(^|\s)(NOT\s+STARTED|PROPOSED|DRAFT|PAUSED)(\s|$|\*|\.|--)') {
+                    $DocIsActive = $false; break
+                }
+            }
+        }
+        catch {}
+        if (-not $DocGovernsFile) { continue }
+        if (-not $DocIsActive) { continue }
         $MatchingAnchors = @($AnchorRefs | Where-Object { $_.slug -eq $DocSlug })
         if ($MatchingAnchors.Count -eq 0) {
             # No anchor refs to this doc.
@@ -639,14 +652,14 @@ function Test-R18-DocReadBudget {
         try { $Limit = [int]$ToolInput.limit } catch { $Limit = $null }
     }
     if ($Limit -ne $null -and $Limit -gt 0 -and $Limit -le 50) { return $null }
-    $NormFP = ($FilePath -replace '\\','/').ToLower()
+    $NormFP = ($FilePath -replace '\\', '/').ToLower()
     foreach ($O in (Get-R18Overrides)) {
         if ($NormFP.EndsWith($O) -or $O.EndsWith($NormFP) -or $NormFP -like "*$O*") {
             $Entry = @{
-                ts = (Get-Date -Format "yyyy-MM-ddTHH:mm:ssZ")
-                rule = 'R18'
-                file = $FilePath
-                line = 0
+                ts     = (Get-Date -Format "yyyy-MM-ddTHH:mm:ssZ")
+                rule   = 'R18'
+                file   = $FilePath
+                line   = 0
                 reason = "override matched directive R18 overrides line"
             } | ConvertTo-Json -Compress
             Add-Content -Path $OverrideLog -Value $Entry -Encoding UTF8
@@ -680,7 +693,7 @@ function Test-R2-SeedEvidence {
             $Literal = $NM.Groups[1].Value
             $Citation = $false
             $Cited = $null
-            for ($J = [Math]::Max(0,$I-2); $J -le [Math]::Min($Lines.Length-1,$I+2); $J++) {
+            for ($J = [Math]::Max(0, $I - 2); $J -le [Math]::Min($Lines.Length - 1, $I + 2); $J++) {
                 $CM = [regex]::Match($Lines[$J], '#\s*from:\s*([^\s:]+)(?::(\d+))?')
                 if ($CM.Success) {
                     $Citation = $true
@@ -727,8 +740,8 @@ function Test-R3-NoCachedSettings {
 function Test-R4-NoEnvVars {
     param($PostContent, $FilePath, $AllContent)
     if ($FilePath -notmatch '\.py$') { return $null }
-    $Bootstrap = @('Core/Database/DatabaseService.py','StartMediaVortex.py','StopMediaVortex.py','WebService/Main.py')
-    $Norm = $FilePath -replace '\\','/'
+    $Bootstrap = @('Core/Database/DatabaseService.py', 'StartMediaVortex.py', 'StopMediaVortex.py', 'WebService/Main.py')
+    $Norm = $FilePath -replace '\\', '/'
     foreach ($B in $Bootstrap) { if ($Norm -like "*$B") { return $null } }
     if ($Norm -match '/WorkerService/Main\.py$') { return $null }
     $Lines = $PostContent -split "`n"
@@ -746,7 +759,7 @@ function Test-R5-ExecuteQueryMisuse {
     if ($FilePath -notmatch '\.py$') { return $null }
     $Matches = [regex]::Matches($PostContent, 'ExecuteQuery\s*\(\s*["'']\s*(INSERT|UPDATE|DELETE)\b', 'IgnoreCase')
     if ($Matches.Count -gt 0) {
-        $Line = ($PostContent.Substring(0,$Matches[0].Index) -split "`n").Length - 1
+        $Line = ($PostContent.Substring(0, $Matches[0].Index) -split "`n").Length - 1
         if (Test-AllowOverride $PostContent $Line 'R5' $FilePath) { return $null }
         return "R5 ExecuteQuery misuse: $FilePath uses ExecuteQuery() on a write statement. Use ExecuteNonQuery() for INSERT/UPDATE/DELETE; ExecuteQuery() does not commit. See CLAUDE.md (Database operations section). Path forward: switch to ExecuteNonQuery for the INSERT/UPDATE/DELETE (it auto-commits). If you need the inserted row back, ExecuteNonQuery the write, then ExecuteQuery a SELECT."
     }
@@ -757,7 +770,7 @@ function Test-R6-PathShape {
     param($PostContent, $FilePath, $AllContent)
     if ($FilePath -notmatch '\.py$') { return $null }
     # directive: paths-canonical-completion -- Core/PathStorage.py IS the canonical home; its own os.path uses are correct and exempt.
-    $NormR6 = $FilePath -replace '\\','/'
+    $NormR6 = $FilePath -replace '\\', '/'
     if ($NormR6 -match '/Core/PathStorage\.py$') { return $null }
     $Lines = $PostContent -split "`n"
     for ($I = 0; $I -lt $Lines.Length; $I++) {
@@ -795,7 +808,7 @@ function Test-R7-PolymorphicCascade {
     param($PostContent, $FilePath, $AllContent)
     if ($FilePath -notmatch '[\\/]Scripts[\\/]SQLScripts[\\/].*\.py$') { return $null }
     if ($PostContent -match '(?is)(ALTER|CREATE)\s+TABLE[^;]*?(QueueId|JobId|EntityId|TargetId)[^;]*?ON\s+DELETE\s+CASCADE') {
-        $Line = ($PostContent.Substring(0,$Matches[0].Index) -split "`n").Length - 1
+        $Line = ($PostContent.Substring(0, $Matches[0].Index) -split "`n").Length - 1
         if (Test-AllowOverride $PostContent $Line 'R7' $FilePath) { return $null }
         return "R7 Polymorphic CASCADE: $FilePath has ON DELETE CASCADE on a polymorphic FK column. Use root-cause caller fix + recurring sweep instead. See .claude/rules/data-integrity.md and memory/feedback_polymorphic_fk_no_cascade.md. Path forward: drop the CASCADE; fix the caller that creates orphaned rows; add a recurring sweep job that WARN-logs each removal."
     }
@@ -807,7 +820,7 @@ function Test-R8-TestPlacement {
     if (-not $IsNew) { return $null }
     $Name = Split-Path $FilePath -Leaf
     if ($Name -notmatch '^(test_.*|Test.*)\.py$') { return $null }
-    $Norm = $FilePath -replace '\\','/'
+    $Norm = $FilePath -replace '\\', '/'
     if ($Norm -match '/Tests/(Contract|Unit)/') { return $null }
     return "R8 Test placement: new test file $FilePath must live under Tests/Contract/ or Tests/Unit/. See .claude/rules/test-placement.md. Path forward: move the new test file to Tests/Contract/ (live-DB integration) or Tests/Unit/ (no I/O); test fixtures duplicate across suites rather than import across them."
 }
@@ -820,7 +833,7 @@ function Test-R9-LikeEscape {
         $Body = $FM.Groups[2].Value
         if ($Body -match '(?i)\bLIKE\s+(\%s|\?|''%)') {
             if ($Body -notmatch 'EscapeLikePattern\s*\(') {
-                $Line = ($PostContent.Substring(0,$FM.Index) -split "`n").Length - 1
+                $Line = ($PostContent.Substring(0, $FM.Index) -split "`n").Length - 1
                 if (Test-AllowOverride $PostContent $Line 'R9' $FilePath) { continue }
                 return "R9 LIKE without escape: $FilePath function '$($FM.Groups[1].Value)' uses LIKE without calling EscapeLikePattern(). Paths contain %, _, ! which break LIKE matching."
             }
@@ -838,7 +851,7 @@ function Test-R10-ClaimPredicate {
         $Body = $FM.Groups[2].Value
         if ($Body -match '(?i)EXISTS\s*\(\s*SELECT\s+1\s+FROM\s+Workers') {
             if (-not $HasImport -or $Body -notmatch 'BuildClaimPredicate') {
-                $Line = ($PostContent.Substring(0,$FM.Index) -split "`n").Length - 1
+                $Line = ($PostContent.Substring(0, $FM.Index) -split "`n").Length - 1
                 if (Test-AllowOverride $PostContent $Line 'R10' $FilePath) { continue }
                 return "R10 Claim bypass: $FilePath function '$($FM.Groups[1].Value)' rolls its own Workers EXISTS clause. Call Core.Database.WorkerCapabilityPredicate.BuildClaimPredicate."
             }
@@ -858,7 +871,7 @@ function Test-R11-MigrationIdempotency {
     foreach ($P in $Patterns) {
         if ($PostContent -match $P.Rx) {
             $Idx = ([regex]$P.Rx).Match($PostContent).Index
-            $Line = ($PostContent.Substring(0,$Idx) -split "`n").Length - 1
+            $Line = ($PostContent.Substring(0, $Idx) -split "`n").Length - 1
             if (Test-AllowOverride $PostContent $Line 'R11' $FilePath) { continue }
             return "R11 Migration idempotency: $FilePath has $($P.Msg). Migrations must be safe to re-run. See .claude/rules/data-integrity.md (idempotent migrations). Path forward: add IF NOT EXISTS to CREATE TABLE / CREATE INDEX, and ON CONFLICT DO NOTHING (or DO UPDATE) to INSERT INTO. If no unique constraint exists, use a pre-check SELECT + conditional INSERT and override this rule with a documented reason."
         }
@@ -885,23 +898,25 @@ function Test-R12-CommentVolume {
                 if (Test-AllowOverride $PostContent $I 'R12' $FilePath) { $BlockStart = -1; continue }
                 return "R12 Comment volume: $FilePath line $BlockStartLine-$BlockEndLine is a multi-line # comment block. One-line max; rationale belongs in the directive doc. See .claude/rules/ceo-mode.md#handling-preexisting-comment--doc-violations-encountered-mid-directive. Path forward: classify the block first -- (a) pure WHAT-redundancy: delete entirely; (b) permanent-invariant WHY (BUG-NNNN, hard-won constraint): MOVE the content to memory/KNOWN-ISSUES.md or the appropriate *.feature.md, leave a single-line anchor in code ('# BUG-0005' or '# see worker-lifecycle.feature.md C6'); (c) active-directive WHY: put the content in the current directive doc, leave a '# directive: <slug>' anchor; (d) surprising WHY that fits nowhere: collapse to a single in-place comment line. If the scope is large (many blocks across many files), open a new directive ('<file>-comment-promotion') and do the classification there."
             }
-        } else { $BlockStart = -1 }
+        }
+        else { $BlockStart = -1 }
     }
     $DocMatches = [regex]::Matches($PostContent, '(?ms)"""(.*?)"""')
     foreach ($DM in $DocMatches) {
         $Body = $DM.Groups[1].Value
-        $Line = ($PostContent.Substring(0,$DM.Index) -split "`n").Length - 1
+        $Line = ($PostContent.Substring(0, $DM.Index) -split "`n").Length - 1
         $DocStartLine = $Line + 1
         $DocEndLine = $DocStartLine + ($DM.Value -split "`n").Length - 1
         $IsSqlBlock = $Body -cmatch '\b(SELECT\s+[\*\w(]|INSERT\s+INTO\s+\w|UPDATE\s+\w+\s+SET|DELETE\s+FROM\s+\w|CREATE\s+(TABLE|INDEX|VIEW|UNIQUE)|DROP\s+(TABLE|INDEX|VIEW)|ALTER\s+TABLE\s+\w|WITH\s+\w+\s+AS\s*\()'
         if ($IsSqlBlock) {
             if (-not (Test-RangeOverlapsEditRegion $DocStartLine $DocEndLine $EditRegion)) { continue }
             if (Test-AllowOverride $PostContent $Line 'R12' $FilePath) { continue }
-            $NormFP = $FilePath -replace '\\','/'
+            $NormFP = $FilePath -replace '\\', '/'
             $PlacementExempt = ($NormFP -match '/Scripts/SQLScripts/') -or ($NormFP -match '/Tests/') -or ($NormFP -match '/Scripts/QueryDatabase\.py$') -or ($NormFP -match '/Repositories/')
             $PlacementClause = if ($PlacementExempt) {
                 "Placement: exempt for this path (Scripts/SQLScripts, Tests, QueryDatabase.py, Repositories/). Format rule still applies."
-            } else {
+            }
+            else {
                 "Placement: business-logic SQL must move to a Repository method (Repositories/<X>Repository.py). Controllers/Services/ViewModels do not embed SQL."
             }
             return "R12 SQL string: $FilePath line $($Line+1) uses triple-quoted SQL. Two mandates, both required:`n(1) Format: convert to implicit string concatenation. Triple-quoted SQL is refused everywhere. Right shape:`n    Query = (`n        `"SELECT col1, col2 `"`n        `"FROM MediaFiles `"`n        `"WHERE Id = %s`"`n    )`n(2) $PlacementClause`nSee .claude/rules/sql-architecture.md."
@@ -950,10 +965,10 @@ function Test-R15-DirectiveAnchor {
     if ($FilePath -notmatch '\.py$') { return $null }
     $Slug = Get-DirectiveSlug
     if (-not $Slug) { return $null }
-    $Norm = $FilePath -replace '\\','/'
+    $Norm = $FilePath -replace '\\', '/'
     $InScope = $false
     foreach ($DF in $DirectiveFiles) {
-        $DFNorm = $DF -replace '\\','/'
+        $DFNorm = $DF -replace '\\', '/'
         if ($Norm -like "*$DFNorm" -or $Norm -like "*/$DFNorm") { $InScope = $true; break }
     }
     if (-not $InScope) { return $null }
@@ -964,9 +979,9 @@ function Test-R15-DirectiveAnchor {
     $Lines = $PostContent -split "`n"
     for ($I = 0; $I -lt $Lines.Length; $I++) {
         if ($Lines[$I] -match '^\s*(def|class)\s+\w+') {
-            $Prev = if ($I -gt 0) { $Lines[$I-1] } else { '' }
+            $Prev = if ($I -gt 0) { $Lines[$I - 1] } else { '' }
             if ($Prev -notmatch "#\s*directive:\s*[a-z0-9-]+") {
-                if (-not (Test-LineInEditRegion ($I+1) $EditRegion)) { continue }
+                if (-not (Test-LineInEditRegion ($I + 1) $EditRegion)) { continue }
                 if (Test-AllowOverride $PostContent $I 'R15' $FilePath) { continue }
                 return "R15 Directive anchor: $FilePath line $($I+1) defines a function/class without '# directive: $Slug' on the line above. This file is in the active directive's scope. See .claude/standards/index.md R15 row. Path forward: add '# directive: <active-slug>' on the line immediately above the def/class. This is the grep anchor that lets future readers find the directive that explains why this function exists in its current shape."
             }
@@ -978,16 +993,16 @@ function Test-R15-DirectiveAnchor {
     # anchor somewhere in its scope. Edited-region-only to avoid firing on legacy.
     for ($I = 0; $I -lt $Lines.Length; $I++) {
         if ($Lines[$I] -match '^\s*(def|class)\s+\w+') {
-            $Prev = if ($I -gt 0) { $Lines[$I-1] } else { '' }
+            $Prev = if ($I -gt 0) { $Lines[$I - 1] } else { '' }
             if ($Prev -match "#\s*directive:\s*[a-z0-9-]+") {
-                $StartIndent = ($Lines[$I] -replace '^(\s*).*$','$1').Length
+                $StartIndent = ($Lines[$I] -replace '^(\s*).*$', '$1').Length
                 $EndIdx = $Lines.Length - 1
                 for ($J = $I + 1; $J -lt $Lines.Length; $J++) {
-                    if ($Lines[$J] -match '^\s*(def|class)\s+' -and (($Lines[$J] -replace '^(\s*).*$','$1').Length -le $StartIndent)) { $EndIdx = $J - 1; break }
+                    if ($Lines[$J] -match '^\s*(def|class)\s+' -and (($Lines[$J] -replace '^(\s*).*$', '$1').Length -le $StartIndent)) { $EndIdx = $J - 1; break }
                 }
                 $Scope = ($Lines[$I..$EndIdx] -join "`n") + "`n" + $Prev
                 if ($Scope -notmatch "#\s*see\s+[a-z0-9-]+\.(S|W|C|ST)\d+") {
-                    if (-not (Test-LineInEditRegion ($I+1) $EditRegion)) { continue }
+                    if (-not (Test-LineInEditRegion ($I + 1) $EditRegion)) { continue }
                     if (Test-AllowOverride $PostContent $I 'R15' $FilePath) { continue }
                     return "R15 Companion see anchor: $FilePath line $($I+1) has '# directive: <slug>' but no '# see <feature-or-flow-slug>.<ID>' in scope. Directives are transient; feature/flow docs are durable. Path forward: add '# see <feature-or-flow-slug>.<criterion-or-seam-id>' somewhere in the function/class body (or on the directive anchor line, pipe-separated). For new contracts, this means writing the feature/flow doc edit FIRST and citing it."
                 }
@@ -1000,7 +1015,7 @@ function Test-R15-DirectiveAnchor {
 function Test-R19-DatabaseManagerSteering {
     # directive: db-monolith-steering-hook -- steers new/modified methods on Repositories/DatabaseManager.py to their per-aggregate repo home; see Core/Database/repository-split.feature.md#perfect-end-state and .claude/standards/database-manager-aggregates.json.
     param($PostContent, $FilePath, $ToolName, $ToolInput, $EditRegion, $AllContent)
-    $NormR19 = $FilePath -replace '\\','/'
+    $NormR19 = $FilePath -replace '\\', '/'
     if ($NormR19 -notmatch '/Repositories/DatabaseManager\.py$') { return $null }
     if ($EditRegion -and $EditRegion.Mode -eq 'NoRegion') { return $null }
     $MapPath = Join-Path $RepoRoot ".claude\standards\database-manager-aggregates.json"
@@ -1008,7 +1023,7 @@ function Test-R19-DatabaseManagerSteering {
     $Map = $null
     try { $Map = Get-Content $MapPath -Raw -Encoding UTF8 | ConvertFrom-Json } catch { return $null }
     if (-not $Map -or -not $Map.prefixes) { return $null }
-    $Prefixes = @($Map.prefixes | Sort-Object { -($_.match.Length) })
+    $Prefixes = @($Map.prefixes | Sort-Object { - ($_.match.Length) })
     $Anchor = if ($Map.feature_doc_anchor) { $Map.feature_doc_anchor } else { 'Core/Database/repository-split.feature.md#perfect-end-state' }
     $Lines = $PostContent -split "`n"
     for ($I = 0; $I -lt $Lines.Length; $I++) {
@@ -1049,7 +1064,7 @@ if ($ToolName -eq 'Read') {
     if ($R18Refusal) { Emit-DenyWithRepeatDetection $R18Refusal $ToolInput.file_path }
     Emit-Allow
 }
-if ($ToolName -notin @('Write','Edit','MultiEdit')) { Emit-Allow }
+if ($ToolName -notin @('Write', 'Edit', 'MultiEdit')) { Emit-Allow }
 if (-not $ToolInput.file_path) { Emit-Allow }
 
 $FilePath = $ToolInput.file_path
@@ -1061,7 +1076,7 @@ $TaskDelegationRefusal = Test-TaskDelegationGate $State $ToolName $ToolInput
 if ($TaskDelegationRefusal) { Emit-DenyWithRepeatDetection $TaskDelegationRefusal $FilePath }
 
 # Skip enforcement for hook scripts themselves and directive maintenance
-$NormFP = $FilePath -replace '\\','/'
+$NormFP = $FilePath -replace '\\', '/'
 if ($NormFP -match '/\.claude/(hooks|standards|directive\.md|directives/|rules/|plans/)') {
     # Hook + standards files are exempt from R1-R15 (they ARE the standards layer).
     # Phase gate still applies.
@@ -1104,7 +1119,8 @@ try {
         $Refusal = & $R
         if ($Refusal) { Emit-DenyWithRepeatDetection $Refusal $FilePath }
     }
-} catch {
+}
+catch {
     Emit-Ask "Standards hook errored: $($_.Exception.Message). Asking for human review."
 }
 
