@@ -129,9 +129,12 @@ class Path:
         """Serialize to {'StorageRootId': int, 'RelativePath': str}; round-trips through FromJsonDict (C7)."""
         return {"StorageRootId": self.StorageRootId, "RelativePath": self.RelativePath}
 
-    # directive: path-class-implementation | # see path.S8
-    def CanonicalDisplay(self, Prefixes: dict) -> str:
-        """Render human display from a pre-loaded prefix map; orphan id renders as '[orphan #<id>] <rel>'."""
+    # directive: path-class-perfection | # see path.C19
+    def CanonicalDisplay(self, Prefixes: Optional[dict] = None) -> str:
+        """Render human display; Prefixes optional (None reads GetPrefixMap() fresh per call -- hot-path callers hoist + pass)."""
+        if Prefixes is None:
+            from Core.Path.PathStorageRoots import GetPrefixMap
+            Prefixes = GetPrefixMap()
         if self.StorageRootId not in Prefixes:
             return f"[orphan #{self.StorageRootId}] {self.RelativePath}"
         Prefix = Prefixes[self.StorageRootId]
@@ -143,10 +146,10 @@ class Path:
         """Stable shape '<Path #<id>:<rel>>'; no DB lookup (D7)."""
         return f"<Path #{self.StorageRootId}:{self.RelativePath}>"
 
-    # directive: path-class-implementation | # see path.S4
+    # directive: path-class-perfection | # see path.C20
     def __str__(self) -> str:
-        """Same as __repr__ (D8); no implicit DB call on string coercion."""
-        return self.__repr__()
+        """Canonical operator-readable display (reads GetPrefixMap fresh per call); use repr() for the diagnostic shape."""
+        return self.CanonicalDisplay()
 
     # directive: path-class-implementation | # see path.C12
     def ParentDir(self) -> "Path":
