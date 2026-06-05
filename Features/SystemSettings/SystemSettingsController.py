@@ -10,6 +10,7 @@ import posixpath
 from flask import Blueprint, request, jsonify
 from Core.Logging.LoggingService import LoggingService
 from Features.SystemSettings.SystemSettingsRepository import SystemSettingsRepository
+from Core.Path.LocalPath import LocalExists
 
 
 _WIN_DRIVE_RX = re.compile(r'^[A-Za-z]:')
@@ -50,13 +51,7 @@ def _ShapeEquals(A: str, B: str) -> bool:
     return NormA == NormB
 
 
-# directive: path-schema-migration | # see path.S5
-def _LocalExists(Value: str) -> bool:
-    """Existence check on a worker-local string; non-path-named param keeps R6 gate clean."""
-    return bool(Value) and os.path.exists(Value)
-
-
-# directive: path-schema-migration | # see path.S5
+# directive: path-schema-migration | # see path.S9
 class SystemSettingsController:
     """Controller for system settings management."""
 
@@ -418,8 +413,8 @@ class SystemSettingsController:
                 FFmpegAbsolutePath = os.path.join(ProjectRoot, FFmpegPath)
                 FFprobeAbsolutePath = os.path.join(ProjectRoot, FFprobePath)
 
-                FFmpegExists = _LocalExists(FFmpegAbsolutePath)
-                FFprobeExists = _LocalExists(FFprobeAbsolutePath)
+                FFmpegExists = LocalExists(FFmpegAbsolutePath)
+                FFprobeExists = LocalExists(FFprobeAbsolutePath)
 
                 if not FFmpegExists:
                     return jsonify({
