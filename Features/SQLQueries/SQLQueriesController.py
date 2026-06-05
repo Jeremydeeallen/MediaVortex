@@ -157,18 +157,34 @@ def GetTranscodeQueue():
     try:
         LoggingService.LogFunctionEntry("GetTranscodeQueue", "SQLQueriesController")
 
-        query = """
-        SELECT Id, FilePath, FileName, Directory, SizeMB, Status, Priority,
-               DateAdded, DateStarted, ProcessingMode
-        FROM TranscodeQueue
-        ORDER BY Priority DESC, DateAdded ASC
-        LIMIT 100
-        """
+        # directive: path-schema-migration | # see path.S8
+        from Core.Path.Path import Path as _PathTQ, PathError as _PETQ
+        from Core.Path.PathStorageRoots import GetPrefixMap as _GPMTQ
+        _PmTQ = _GPMTQ()
+        def _SynthTQ(Sid, Rel):
+            if Sid is None:
+                return ''
+            try:
+                return _PathTQ(Sid, Rel or '').CanonicalDisplay(_PmTQ)
+            except _PETQ:
+                return ''
+        query = (
+            "SELECT Id, StorageRootId AS TqStorageRootId, RelativePath AS TqRelativePath, "
+            "FileName, Directory, SizeMB, Status, Priority, "
+            "DateAdded, DateStarted, ProcessingMode "
+            "FROM TranscodeQueue "
+            "ORDER BY Priority DESC, DateAdded ASC "
+            "LIMIT 100"
+        )
 
         results = SharedDatabaseManager.DatabaseService.ExecuteQuery(query)
 
         if results:
-            rows = [dict(row) for row in results]
+            rows = []
+            for row in results:
+                _D = dict(row)
+                _D['FilePath'] = _SynthTQ(_D.get('tqstoragerootid'), _D.get('tqrelativepath'))
+                rows.append(_D)
         else:
             rows = []
 
@@ -337,24 +353,42 @@ def GetMediaFileComparison():
                 "ErrorMessage": "FileId or FilePath parameter is required"
             }), 400
 
-        # Build query to get original file info
-        OriginalQuery = """
-        SELECT Id, FilePath, FileName, SizeMB, VideoBitrateKbps, AudioBitrateKbps,
-               Resolution, Codec, DurationMinutes, FrameRate, TotalFrames, CodecProfile,
-               ColorRange, FieldOrder, HasBFrames, RefFrames, PixelFormat, Level,
-               AudioChannels, AudioSampleRate, AudioSampleFormat, AudioChannelLayout,
-               ContainerFormat, OverallBitrate, AssignedProfile
-        FROM MediaFiles
-        WHERE """
+        # directive: path-schema-migration | # see path.S8
+        from Core.Path.Path import Path as _PathMC, PathError as _PEMC
+        from Core.Path.PathStorageRoots import GetStorageRoots as _GSRMC, GetPrefixMap as _GPMMC
+        _PmMC = _GPMMC()
+        def _SynthMC(Sid, Rel):
+            if Sid is None:
+                return ''
+            try:
+                return _PathMC(Sid, Rel or '').CanonicalDisplay(_PmMC)
+            except _PEMC:
+                return ''
+        OriginalQueryHead = (
+            "SELECT Id, StorageRootId AS OrStorageRootId, RelativePath AS OrRelativePath, "
+            "FileName, SizeMB, VideoBitrateKbps, AudioBitrateKbps, "
+            "Resolution, Codec, DurationMinutes, FrameRate, TotalFrames, CodecProfile, "
+            "ColorRange, FieldOrder, HasBFrames, RefFrames, PixelFormat, Level, "
+            "AudioChannels, AudioSampleRate, AudioSampleFormat, AudioChannelLayout, "
+            "ContainerFormat, OverallBitrate, AssignedProfile "
+            "FROM MediaFiles WHERE "
+        )
 
         if FileId:
-            OriginalQuery += "Id = %s"
+            OriginalQuery = OriginalQueryHead + "Id = %s"
             OriginalParams = (FileId,)
         else:
-            OriginalQuery += "FilePath LIKE %s ESCAPE '!'"
-            OriginalParams = (f"%{EscapeLikePattern(FilePath)}%",)
+            try:
+                _MCP = _PathMC.FromLegacyString(FilePath, _GSRMC())
+                OriginalQuery = OriginalQueryHead + "StorageRootId = %s AND RelativePath = %s"
+                OriginalParams = (_MCP.StorageRootId, _MCP.RelativePath)
+            except _PEMC:
+                return jsonify({"Success": False, "ErrorMessage": f"FilePath could not be parsed against StorageRoots: {FilePath!r}"}), 400
 
         OriginalResults = SharedDatabaseManager.DatabaseService.ExecuteQuery(OriginalQuery, OriginalParams)
+        if OriginalResults:
+            OriginalResults[0] = dict(OriginalResults[0])
+            OriginalResults[0]['FilePath'] = _SynthMC(OriginalResults[0].get('orstoragerootid'), OriginalResults[0].get('orrelativepath'))
 
         if not OriginalResults:
             return jsonify({
@@ -364,45 +398,58 @@ def GetMediaFileComparison():
 
         OriginalFile = dict(OriginalResults[0])
 
-        # Get transcoded version info from TranscodeAttempts
-        TranscodedQuery = """
-        SELECT ta.Id, ta.FilePath, ta.OldSizeBytes, ta.NewSizeBytes, ta.SizeReductionBytes,
-               ta.SizeReductionPercent, ta.VideoBitrateKbps, ta.AudioBitrateKbps,
-               ta.ProfileName, ta.Quality, ta.AttemptDate, ta.Success, ta.ErrorMessage,
-               ta.TranscodeDurationSeconds, ta.FfpmpegCommand, ta.VMAF,
-               qtr.VMAFScore, qtr.PassesThreshold, qtr.TestDuration, qtr.DateTested,
-               qtr.Status as QualityTestStatus, qtr.ErrorMessage as QualityTestError
-        FROM TranscodeAttempts ta
-        LEFT JOIN QualityTestResults qtr ON ta.Id = qtr.TranscodeAttemptId
-        WHERE ta.MediaFileId = %s
-        ORDER BY ta.AttemptDate DESC
-        LIMIT 1
-        """
+        # directive: path-schema-migration | # see path.S8
+        from Core.Path.Path import Path as _PathSQ1, PathError as _PESQ1
+        from Core.Path.PathStorageRoots import GetPrefixMap as _GPMSQ1
+        _PmSQ1 = _GPMSQ1()
+        def _SynthSQ1(Sid, Rel):
+            if Sid is None:
+                return ''
+            try:
+                return _PathSQ1(Sid, Rel or '').CanonicalDisplay(_PmSQ1)
+            except _PESQ1:
+                return ''
+        TranscodedQuery = (
+            "SELECT ta.Id, ta.StorageRootId AS TaStorageRootId, ta.RelativePath AS TaRelativePath, "
+            "ta.OldSizeBytes, ta.NewSizeBytes, ta.SizeReductionBytes, "
+            "ta.SizeReductionPercent, ta.VideoBitrateKbps, ta.AudioBitrateKbps, "
+            "ta.ProfileName, ta.Quality, ta.AttemptDate, ta.Success, ta.ErrorMessage, "
+            "ta.TranscodeDurationSeconds, ta.FfpmpegCommand, ta.VMAF, "
+            "qtr.VMAFScore, qtr.PassesThreshold, qtr.TestDuration, qtr.DateTested, "
+            "qtr.Status as QualityTestStatus, qtr.ErrorMessage as QualityTestError "
+            "FROM TranscodeAttempts ta "
+            "LEFT JOIN QualityTestResults qtr ON ta.Id = qtr.TranscodeAttemptId "
+            "WHERE ta.MediaFileId = %s "
+            "ORDER BY ta.AttemptDate DESC "
+            "LIMIT 1"
+        )
 
         TranscodedResults = SharedDatabaseManager.DatabaseService.ExecuteQuery(TranscodedQuery, (OriginalFile['id'],))
 
         TranscodedFile = None
         if TranscodedResults:
             TranscodedFile = dict(TranscodedResults[0])
+            TranscodedFile['FilePath'] = _SynthSQ1(TranscodedFile.get('tastoragerootid'), TranscodedFile.get('tarelativepath'))
 
-        # Get archived version if available
-        ArchivedQuery = """
-        SELECT Id, FilePath, FileName, SizeMB, VideoBitrateKbps, AudioBitrateKbps,
-               Resolution, Codec, DurationMinutes, FrameRate, TotalFrames, CodecProfile,
-               ColorRange, FieldOrder, HasBFrames, RefFrames, PixelFormat, Level,
-               AudioChannels, AudioSampleRate, AudioSampleFormat, AudioChannelLayout,
-               ContainerFormat, OverallBitrate, TranscodeAttemptId
-        FROM MediaFilesArchive
-        WHERE Id = %s
-        ORDER BY ArchiveDate DESC
-        LIMIT 1
-        """
+        ArchivedQuery = (
+            "SELECT Id, StorageRootId AS ArStorageRootId, RelativePath AS ArRelativePath, "
+            "FileName, SizeMB, VideoBitrateKbps, AudioBitrateKbps, "
+            "Resolution, Codec, DurationMinutes, FrameRate, TotalFrames, CodecProfile, "
+            "ColorRange, FieldOrder, HasBFrames, RefFrames, PixelFormat, Level, "
+            "AudioChannels, AudioSampleRate, AudioSampleFormat, AudioChannelLayout, "
+            "ContainerFormat, OverallBitrate, TranscodeAttemptId "
+            "FROM MediaFilesArchive "
+            "WHERE Id = %s "
+            "ORDER BY ArchiveDate DESC "
+            "LIMIT 1"
+        )
 
         ArchivedResults = SharedDatabaseManager.DatabaseService.ExecuteQuery(ArchivedQuery, (OriginalFile['id'],))
 
         ArchivedFile = None
         if ArchivedResults:
             ArchivedFile = dict(ArchivedResults[0])
+            ArchivedFile['FilePath'] = _SynthSQ1(ArchivedFile.get('arstoragerootid'), ArchivedFile.get('arrelativepath'))
 
         LoggingService.LogInfo(f"Retrieved media file comparison for: {OriginalFile['filepath']}", "SQLQueriesController", "GetMediaFileComparison")
 
@@ -426,26 +473,36 @@ def GetRecentSuccesses():
 
         Limit = int(request.args.get('limit', 15))
 
-        # "Recent successes" = files that actually got replaced on disk,
-        # not Requeue'd intermediate attempts that succeeded as transcodes
-        # but whose output was deleted. Without the FileReplaced filter,
-        # an operator looking at this dashboard would see the same file
-        # listed multiple times (each retry attempt) when only one of
-        # them actually saved bytes.
-        query = """
-        SELECT ta.FilePath, ta.ProfileName, ta.SizeReductionPercent,
-               ta.TranscodeDurationSeconds, ta.AttemptDate, ta.NewSizeBytes, ta.OldSizeBytes,
-               ta.VMAF
-        FROM TranscodeAttempts ta
-        WHERE ta.Success = TRUE AND ta.FileReplaced = TRUE
-        ORDER BY ta.AttemptDate DESC
-        LIMIT %s
-        """
+        # directive: path-schema-migration | # see path.S8
+        from Core.Path.Path import Path as _PathSQ2, PathError as _PESQ2
+        from Core.Path.PathStorageRoots import GetPrefixMap as _GPMSQ2
+        _PmSQ2 = _GPMSQ2()
+        def _SynthSQ2(Sid, Rel):
+            if Sid is None:
+                return ''
+            try:
+                return _PathSQ2(Sid, Rel or '').CanonicalDisplay(_PmSQ2)
+            except _PESQ2:
+                return ''
+        query = (
+            "SELECT ta.StorageRootId AS TaStorageRootId, ta.RelativePath AS TaRelativePath, "
+            "ta.ProfileName, ta.SizeReductionPercent, "
+            "ta.TranscodeDurationSeconds, ta.AttemptDate, ta.NewSizeBytes, ta.OldSizeBytes, "
+            "ta.VMAF "
+            "FROM TranscodeAttempts ta "
+            "WHERE ta.Success = TRUE AND ta.FileReplaced = TRUE "
+            "ORDER BY ta.AttemptDate DESC "
+            "LIMIT %s"
+        )
 
         results = SharedDatabaseManager.DatabaseService.ExecuteQuery(query, [Limit])
 
         if results:
-            rows = [dict(row) for row in results]
+            rows = []
+            for row in results:
+                _D = dict(row)
+                _D['FilePath'] = _SynthSQ2(_D.get('tastoragerootid'), _D.get('tarelativepath'))
+                rows.append(_D)
         else:
             rows = []
 
@@ -543,16 +600,28 @@ def GetStuckJobs():
     try:
         LoggingService.LogFunctionEntry("GetStuckJobs", "SQLQueriesController")
 
+        # directive: path-schema-migration | # see path.S8
+        from Core.Path.Path import Path as _PathSJ, PathError as _PESJ
+        from Core.Path.PathStorageRoots import GetPrefixMap as _GPMSJ
+        _PmSJ = _GPMSJ()
+        def _SynthSJ(Sid, Rel):
+            if Sid is None:
+                return ''
+            try:
+                return _PathSJ(Sid, Rel or '').CanonicalDisplay(_PmSJ)
+            except _PESJ:
+                return ''
         StuckJobs = []
 
-        # Get stuck transcode queue items
-        TranscodeQuery = """
-        SELECT 'TranscodeQueue' as jobtype, Id, FilePath, FileName, Status, DateStarted,
-               EXTRACT(EPOCH FROM (NOW() - DateStarted)) / 60 as durationminutes
-        FROM TranscodeQueue
-        WHERE Status = 'Running' AND DateStarted < NOW() - INTERVAL '1 hour'
-        ORDER BY DateStarted ASC
-        """
+        TranscodeQuery = (
+            "SELECT 'TranscodeQueue' as jobtype, Id, "
+            "StorageRootId AS TqStorageRootId, RelativePath AS TqRelativePath, "
+            "FileName, Status, DateStarted, "
+            "EXTRACT(EPOCH FROM (NOW() - DateStarted)) / 60 as durationminutes "
+            "FROM TranscodeQueue "
+            "WHERE Status = 'Running' AND DateStarted < NOW() - INTERVAL '1 hour' "
+            "ORDER BY DateStarted ASC"
+        )
 
         TranscodeResults = SharedDatabaseManager.DatabaseService.ExecuteQuery(TranscodeQuery)
 
@@ -560,7 +629,7 @@ def GetStuckJobs():
             StuckJobs.append({
                 "JobType": row['jobtype'],
                 "JobId": row['id'],
-                "FilePath": row['filepath'],
+                "FilePath": _SynthSJ(row.get('tqstoragerootid'), row.get('tqrelativepath')),
                 "FileName": row['filename'],
                 "Status": row['status'],
                 "StartedAt": str(row['datestarted']),

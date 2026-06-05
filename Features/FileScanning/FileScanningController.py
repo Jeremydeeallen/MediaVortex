@@ -718,7 +718,9 @@ class FileScanningController:
             """Remove duplicate media file records from the database."""
             try:
                 LoggingService.LogInfo("CleanupDuplicates endpoint called", "FileScanningController", "CleanupDuplicates")
-                result = self.ViewModel.BusinessService.Repository.CleanupDuplicateMediaFiles()
+                # directive: path-schema-migration | # see path.S8 -- CleanupDuplicateMediaFiles lives on MediaFilesRepository
+                from Features.MediaFiles.MediaFilesRepository import MediaFilesRepository
+                result = MediaFilesRepository(self.ViewModel.BusinessService.Repository.DatabaseService).CleanupDuplicateMediaFiles()
                 return jsonify(result), 200 if result.get('Success') else 500
             except Exception as e:
                 LoggingService.LogException("Error cleaning up duplicates", e, "FileScanningController", "CleanupDuplicates")

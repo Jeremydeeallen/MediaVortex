@@ -312,7 +312,9 @@ class ContinuousScanService:
                 if not self.FileScanningService:
                     from Features.FileScanning.FileScanningBusinessService import FileScanningBusinessService
                     self.FileScanningService = FileScanningBusinessService()
-                CleanupResult = self.FileScanningService.Repository.CleanupDuplicateMediaFiles()
+                # directive: path-schema-migration | # see path.S8 -- CleanupDuplicateMediaFiles lives on MediaFilesRepository
+                from Features.MediaFiles.MediaFilesRepository import MediaFilesRepository
+                CleanupResult = MediaFilesRepository(self.FileScanningService.Repository.DatabaseService).CleanupDuplicateMediaFiles()
                 if CleanupResult.get('DuplicatesRemoved', 0) > 0:
                     LoggingService.LogInfo(f"Pre-scan cleanup removed {CleanupResult['DuplicatesRemoved']} duplicate records", 'ContinuousScanService', '_ExecuteScan')
             except Exception as e:

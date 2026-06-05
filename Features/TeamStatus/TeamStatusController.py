@@ -199,42 +199,50 @@ def GetOverview():
         IsProcessing = bool(StatusRow.get('IsProcessing', False)) if StatusRow else False
         ActiveJobsCount = StatusRow.get('ActiveJobsCount', 0) if StatusRow else 0
 
-        # Current job info — query ALL active jobs from progress + queue
-        # Includes ClaimedBy (worker name) and worker heartbeat for stuck detection
+        # directive: path-schema-migration | # see teamstatus.C1
+        from Core.Path.Path import Path as _P, PathError as _PE
+        from Core.Path.PathStorageRoots import GetPrefixMap as _GPM
+        _Pm = _GPM()
+        def _Synth(Sid, Rel):
+            if Sid is None:
+                return ''
+            try:
+                return _P(Sid, Rel or '').CanonicalDisplay(_Pm)
+            except _PE:
+                return ''
         ActiveJobs = []
-        JobQuery = """
-            SELECT tq.Id AS QueueId, ta.FilePath, tq.FileName, tq.SizeMB,
-                   tq.ProcessingMode,
-                   tp.ProgressPercent, tp.CurrentPhase,
-                   tp.CurrentFPS, tp.CurrentSpeed, tp.ETA,
-                   tq.DateStarted, tq.ClaimedBy,
-                   w.LastHeartbeat,
-                   EXTRACT(EPOCH FROM (NOW() - w.LastHeartbeat)) AS HeartbeatAgeSec
-            FROM TranscodeProgress tp
-            JOIN TranscodeAttempts ta ON tp.TranscodeAttemptId = ta.Id
-            JOIN TranscodeQueue tq ON tq.MediaFileId = ta.MediaFileId AND tq.Status = 'Running'
-            LEFT JOIN Workers w ON w.WorkerName = tq.ClaimedBy
-            WHERE ta.Success IS NULL
-            ORDER BY tq.DateStarted ASC
-        """
+        JobQuery = (
+            "SELECT tq.Id AS QueueId, ta.StorageRootId AS TaStorageRootId, ta.RelativePath AS TaRelativePath, "
+            "tq.FileName, tq.SizeMB, tq.ProcessingMode, "
+            "tp.ProgressPercent, tp.CurrentPhase, "
+            "tp.CurrentFPS, tp.CurrentSpeed, tp.ETA, "
+            "tq.DateStarted, tq.ClaimedBy, "
+            "w.LastHeartbeat, "
+            "EXTRACT(EPOCH FROM (NOW() - w.LastHeartbeat)) AS HeartbeatAgeSec "
+            "FROM TranscodeProgress tp "
+            "JOIN TranscodeAttempts ta ON tp.TranscodeAttemptId = ta.Id "
+            "JOIN TranscodeQueue tq ON tq.MediaFileId = ta.MediaFileId AND tq.Status = 'Running' "
+            "LEFT JOIN Workers w ON w.WorkerName = tq.ClaimedBy "
+            "WHERE ta.Success IS NULL "
+            "ORDER BY tq.DateStarted ASC"
+        )
         JobRows = DbManager.DatabaseService.ExecuteQuery(JobQuery)
 
-        # Also find Running queue items with NO progress row (stuck before FFmpeg started)
-        StuckFallbackQuery = """
-            SELECT tq.Id AS QueueId, tq.FilePath, tq.FileName, tq.SizeMB,
-                   tq.ProcessingMode,
-                   tq.DateStarted, tq.ClaimedBy,
-                   w.LastHeartbeat,
-                   EXTRACT(EPOCH FROM (NOW() - w.LastHeartbeat)) AS HeartbeatAgeSec
-            FROM TranscodeQueue tq
-            LEFT JOIN Workers w ON w.WorkerName = tq.ClaimedBy
-            WHERE tq.Status = 'Running'
-              AND NOT EXISTS (
-                  SELECT 1 FROM TranscodeProgress tp
-                  JOIN TranscodeAttempts ta ON tp.TranscodeAttemptId = ta.Id
-                  WHERE ta.MediaFileId = tq.MediaFileId AND ta.Success IS NULL
-              )
-        """
+        StuckFallbackQuery = (
+            "SELECT tq.Id AS QueueId, tq.StorageRootId AS TqStorageRootId, tq.RelativePath AS TqRelativePath, "
+            "tq.FileName, tq.SizeMB, tq.ProcessingMode, "
+            "tq.DateStarted, tq.ClaimedBy, "
+            "w.LastHeartbeat, "
+            "EXTRACT(EPOCH FROM (NOW() - w.LastHeartbeat)) AS HeartbeatAgeSec "
+            "FROM TranscodeQueue tq "
+            "LEFT JOIN Workers w ON w.WorkerName = tq.ClaimedBy "
+            "WHERE tq.Status = 'Running' "
+            "  AND NOT EXISTS ("
+            "      SELECT 1 FROM TranscodeProgress tp "
+            "      JOIN TranscodeAttempts ta ON tp.TranscodeAttemptId = ta.Id "
+            "      WHERE ta.MediaFileId = tq.MediaFileId AND ta.Success IS NULL"
+            "  )"
+        )
         StuckRows = DbManager.DatabaseService.ExecuteQuery(StuckFallbackQuery)
 
         ProgressQueueIds = set()
@@ -244,7 +252,7 @@ def GetOverview():
             ProgressQueueIds.add(Row.get('QueueId', 0))
             ActiveJobs.append({
                 "QueueId": Row.get('QueueId', 0),
-                "FilePath": Row.get('FilePath', ''),
+                "FilePath": _Synth(Row.get('TaStorageRootId'), Row.get('TaRelativePath')),
                 "FileName": Row.get('FileName', ''),
                 "SizeMB": Row.get('SizeMB', 0),
                 "ProcessingMode": Row.get('ProcessingMode', 'Transcode') or 'Transcode',
@@ -264,7 +272,7 @@ def GetOverview():
                 continue
             ActiveJobs.append({
                 "QueueId": QueueId,
-                "FilePath": Row.get('FilePath', ''),
+                "FilePath": _Synth(Row.get('TqStorageRootId'), Row.get('TqRelativePath')),
                 "FileName": Row.get('FileName', ''),
                 "SizeMB": Row.get('SizeMB', 0),
                 "ProcessingMode": Row.get('ProcessingMode', 'Transcode') or 'Transcode',
@@ -330,21 +338,20 @@ def GetSavingsByVolume():
 
         DbManager = DatabaseManager()
 
-        # FileReplaced=TRUE filter: only count attempts whose output actually
-        # landed on disk -- otherwise multi-attempt files (Requeue -> Replace)
-        # double-count their savings. See StatsQuery comment above.
-        Query = """
-            SELECT UPPER(LEFT(ta.FilePath, 3)) AS Volume,
-                   COUNT(*) AS JobCount,
-                   SUM(ta.OldSizeBytes) AS TotalOriginalBytes,
-                   SUM(ta.NewSizeBytes) AS TotalNewBytes,
-                   SUM(ta.SizeReductionBytes) AS TotalSavedBytes
-            FROM TranscodeAttempts ta
-            WHERE ta.Success = TRUE AND ta.SizeReductionBytes > 0
-              AND ta.FileReplaced = TRUE
-            GROUP BY UPPER(LEFT(ta.FilePath, 3))
-            ORDER BY TotalSavedBytes DESC
-        """
+        # directive: path-schema-migration | # see path.S8 -- drive label sourced from StorageRoots.CanonicalPrefix, not the renamed FilePath column
+        Query = (
+            "SELECT UPPER(LEFT(sr.CanonicalPrefix, 3)) AS Volume, "
+            "COUNT(*) AS JobCount, "
+            "SUM(ta.OldSizeBytes) AS TotalOriginalBytes, "
+            "SUM(ta.NewSizeBytes) AS TotalNewBytes, "
+            "SUM(ta.SizeReductionBytes) AS TotalSavedBytes "
+            "FROM TranscodeAttempts ta "
+            "JOIN StorageRoots sr ON sr.Id = ta.StorageRootId "
+            "WHERE ta.Success = TRUE AND ta.SizeReductionBytes > 0 "
+            "  AND ta.FileReplaced = TRUE "
+            "GROUP BY UPPER(LEFT(sr.CanonicalPrefix, 3)) "
+            "ORDER BY TotalSavedBytes DESC"
+        )
         Rows = DbManager.DatabaseService.ExecuteQuery(Query)
 
         return jsonify({

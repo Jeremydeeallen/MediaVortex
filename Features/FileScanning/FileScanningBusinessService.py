@@ -849,7 +849,9 @@ class FileScanningBusinessService:
             # Step 0: Clean up any existing duplicate records before scanning
             # Skipped during continuous scans where cleanup runs once before the loop
             if not SkipDuplicateCleanup:
-                CleanupResult = self.Repository.CleanupDuplicateMediaFiles()
+                # directive: path-schema-migration | # see path.S8 -- CleanupDuplicateMediaFiles lives on MediaFilesRepository
+                from Features.MediaFiles.MediaFilesRepository import MediaFilesRepository
+                CleanupResult = MediaFilesRepository(self.Repository.DatabaseService).CleanupDuplicateMediaFiles()
                 if CleanupResult.get('DuplicatesRemoved', 0) > 0:
                     LoggingService.LogInfo(f"Pre-scan cleanup removed {CleanupResult['DuplicatesRemoved']} duplicate records", 'PerformScan', 'FileScanningBusinessService')
 

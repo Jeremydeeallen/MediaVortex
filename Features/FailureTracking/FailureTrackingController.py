@@ -27,31 +27,37 @@ def GetRecentFailures():
         if Limit < 1 or Limit > 200:
             Limit = 50
 
-        # Get transcode failures
         TranscodeFailures = []
         if not ServiceType or ServiceType == 'Transcode':
-            TranscodeQuery = """
-            SELECT
-                'Transcode' as ServiceType,
-                Id as FailureId,
-                FilePath as FileName,
-                AttemptDate as FailureDate,
-                ErrorMessage as FailureReason,
-                ProfileName as ServiceName,
-                'Transcode Job Failed' as FailureType,
-                TranscodeDurationSeconds as Duration
-            FROM TranscodeAttempts
-            WHERE Success = FALSE AND ErrorMessage IS NOT NULL AND ErrorMessage != ''
-            ORDER BY AttemptDate DESC
-            LIMIT %s
-            """
+            # directive: path-schema-migration | # see path.S8
+            from Core.Path.Path import Path as _PathT1, PathError as _PET1
+            from Core.Path.PathStorageRoots import GetPrefixMap as _GPMT1
+            _PmT1 = _GPMT1()
+            def _SynthT1(Sid, Rel):
+                if Sid is None:
+                    return ''
+                try:
+                    return _PathT1(Sid, Rel or '').CanonicalDisplay(_PmT1)
+                except _PET1:
+                    return ''
+            TranscodeQuery = (
+                "SELECT 'Transcode' as ServiceType, Id as FailureId, "
+                "StorageRootId AS TaStorageRootId, RelativePath AS TaRelativePath, "
+                "AttemptDate as FailureDate, ErrorMessage as FailureReason, "
+                "ProfileName as ServiceName, 'Transcode Job Failed' as FailureType, "
+                "TranscodeDurationSeconds as Duration "
+                "FROM TranscodeAttempts "
+                "WHERE Success = FALSE AND ErrorMessage IS NOT NULL AND ErrorMessage != '' "
+                "ORDER BY AttemptDate DESC "
+                "LIMIT %s"
+            )
             TranscodeResults = SharedDatabaseManager.DatabaseService.ExecuteQuery(TranscodeQuery, (Limit,))
 
             for row in TranscodeResults:
                 TranscodeFailures.append({
                     "ServiceType": row['ServiceType'],
                     "FailureId": row['FailureId'],
-                    "FileName": row['FileName'],
+                    "FileName": _SynthT1(row.get('TaStorageRootId'), row.get('TaRelativePath')),
                     "FailureDate": row['FailureDate'],
                     "FailureReason": row['FailureReason'],
                     "ServiceName": row['ServiceName'],
@@ -62,29 +68,36 @@ def GetRecentFailures():
         # Get quality testing failures from QualityTestResults table
         QualityFailures = []
         if not ServiceType or ServiceType == 'Quality':
-            QualityQuery = """
-            SELECT
-                'Quality' as ServiceType,
-                qtr.Id as FailureId,
-                ta.FilePath as FileName,
-                qtr.DateTested as FailureDate,
-                qtr.ErrorMessage as FailureReason,
-                ta.ProfileName as ServiceName,
-                'Quality Test Failed' as FailureType,
-                qtr.TestDuration as Duration
-            FROM QualityTestResults qtr
-            LEFT JOIN TranscodeAttempts ta ON qtr.TranscodeAttemptId = ta.Id
-            WHERE qtr.Status = 'Failed' AND qtr.ErrorMessage IS NOT NULL AND qtr.ErrorMessage != ''
-            ORDER BY qtr.DateTested DESC
-            LIMIT %s
-            """
+            # directive: path-schema-migration | # see path.S8 -- SELECT typed pair; synthesize display string in Python
+            from Core.Path.Path import Path as _PathQ1, PathError as _PEQ1
+            from Core.Path.PathStorageRoots import GetPrefixMap as _GPMQ1
+            _PmQ1 = _GPMQ1()
+            def _SynthQ1(Sid, Rel):
+                if Sid is None:
+                    return ''
+                try:
+                    return _PathQ1(Sid, Rel or '').CanonicalDisplay(_PmQ1)
+                except _PEQ1:
+                    return ''
+            QualityQuery = (
+                "SELECT 'Quality' as ServiceType, qtr.Id as FailureId, "
+                "ta.StorageRootId as TaStorageRootId, ta.RelativePath as TaRelativePath, "
+                "qtr.DateTested as FailureDate, qtr.ErrorMessage as FailureReason, "
+                "ta.ProfileName as ServiceName, 'Quality Test Failed' as FailureType, "
+                "qtr.TestDuration as Duration "
+                "FROM QualityTestResults qtr "
+                "LEFT JOIN TranscodeAttempts ta ON qtr.TranscodeAttemptId = ta.Id "
+                "WHERE qtr.Status = 'Failed' AND qtr.ErrorMessage IS NOT NULL AND qtr.ErrorMessage != '' "
+                "ORDER BY qtr.DateTested DESC "
+                "LIMIT %s"
+            )
             QualityResults = SharedDatabaseManager.DatabaseService.ExecuteQuery(QualityQuery, (Limit,))
 
             for row in QualityResults:
                 QualityFailures.append({
                     "ServiceType": row['ServiceType'],
                     "FailureId": row['FailureId'],
-                    "FileName": row['FileName'],
+                    "FileName": _SynthQ1(row.get('TaStorageRootId'), row.get('TaRelativePath')),
                     "FailureDate": row['FailureDate'],
                     "FailureReason": row['FailureReason'],
                     "ServiceName": row['ServiceName'],
@@ -202,25 +215,33 @@ def GetServiceFailures(service_name: str):
         Failures = []
 
         if service_name.lower() == 'transcode':
-            Query = """
-            SELECT
-                Id as FailureId,
-                FilePath as FileName,
-                AttemptDate as FailureDate,
-                ErrorMessage as FailureReason,
-                ProfileName as ServiceName,
-                TranscodeDurationSeconds as Duration
-            FROM TranscodeAttempts
-            WHERE Success = FALSE AND ErrorMessage IS NOT NULL AND ErrorMessage != ''
-            ORDER BY AttemptDate DESC
-            LIMIT %s
-            """
+            # directive: path-schema-migration | # see path.S8
+            from Core.Path.Path import Path as _PathT2, PathError as _PET2
+            from Core.Path.PathStorageRoots import GetPrefixMap as _GPMT2
+            _PmT2 = _GPMT2()
+            def _SynthT2(Sid, Rel):
+                if Sid is None:
+                    return ''
+                try:
+                    return _PathT2(Sid, Rel or '').CanonicalDisplay(_PmT2)
+                except _PET2:
+                    return ''
+            Query = (
+                "SELECT Id as FailureId, "
+                "StorageRootId AS TaStorageRootId, RelativePath AS TaRelativePath, "
+                "AttemptDate as FailureDate, ErrorMessage as FailureReason, "
+                "ProfileName as ServiceName, TranscodeDurationSeconds as Duration "
+                "FROM TranscodeAttempts "
+                "WHERE Success = FALSE AND ErrorMessage IS NOT NULL AND ErrorMessage != '' "
+                "ORDER BY AttemptDate DESC "
+                "LIMIT %s"
+            )
             Results = SharedDatabaseManager.DatabaseService.ExecuteQuery(Query, (Limit,))
 
             for row in Results:
                 Failures.append({
                     "FailureId": row['FailureId'],
-                    "FileName": row['FileName'],
+                    "FileName": _SynthT2(row.get('TaStorageRootId'), row.get('TaRelativePath')),
                     "FailureDate": row['FailureDate'],
                     "FailureReason": row['FailureReason'],
                     "ServiceName": row['ServiceName'],
@@ -228,26 +249,34 @@ def GetServiceFailures(service_name: str):
                 })
 
         elif service_name.lower() == 'quality':
-            Query = """
-            SELECT
-                qtr.Id as FailureId,
-                ta.FilePath as FileName,
-                qtr.DateTested as FailureDate,
-                qtr.ErrorMessage as FailureReason,
-                ta.ProfileName as ServiceName,
-                qtr.TestDuration as Duration
-            FROM QualityTestResults qtr
-            LEFT JOIN TranscodeAttempts ta ON qtr.TranscodeAttemptId = ta.Id
-            WHERE qtr.Status = 'Failed' AND qtr.ErrorMessage IS NOT NULL AND qtr.ErrorMessage != ''
-            ORDER BY qtr.DateTested DESC
-            LIMIT %s
-            """
+            # directive: path-schema-migration | # see path.S8 -- typed-pair SELECT + Python-side display synthesis
+            from Core.Path.Path import Path as _PathQ2, PathError as _PEQ2
+            from Core.Path.PathStorageRoots import GetPrefixMap as _GPMQ2
+            _PmQ2 = _GPMQ2()
+            def _SynthQ2(Sid, Rel):
+                if Sid is None:
+                    return ''
+                try:
+                    return _PathQ2(Sid, Rel or '').CanonicalDisplay(_PmQ2)
+                except _PEQ2:
+                    return ''
+            Query = (
+                "SELECT qtr.Id as FailureId, "
+                "ta.StorageRootId as TaStorageRootId, ta.RelativePath as TaRelativePath, "
+                "qtr.DateTested as FailureDate, qtr.ErrorMessage as FailureReason, "
+                "ta.ProfileName as ServiceName, qtr.TestDuration as Duration "
+                "FROM QualityTestResults qtr "
+                "LEFT JOIN TranscodeAttempts ta ON qtr.TranscodeAttemptId = ta.Id "
+                "WHERE qtr.Status = 'Failed' AND qtr.ErrorMessage IS NOT NULL AND qtr.ErrorMessage != '' "
+                "ORDER BY qtr.DateTested DESC "
+                "LIMIT %s"
+            )
             Results = SharedDatabaseManager.DatabaseService.ExecuteQuery(Query, (Limit,))
 
             for row in Results:
                 Failures.append({
                     "FailureId": row['FailureId'],
-                    "FileName": row['FileName'],
+                    "FileName": _SynthQ2(row.get('TaStorageRootId'), row.get('TaRelativePath')),
                     "FailureDate": row['FailureDate'],
                     "FailureReason": row['FailureReason'],
                     "ServiceName": row['ServiceName'],

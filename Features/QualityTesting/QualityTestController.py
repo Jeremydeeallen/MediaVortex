@@ -486,47 +486,57 @@ def RecentAttempts():
         Db = DatabaseManager().DatabaseService
 
         Total = Db.ExecuteQuery("SELECT COUNT(*) AS N FROM TranscodeAttempts")[0]['N']
+        # directive: path-schema-migration | # see path.S8 -- typed-pair SELECT, Python-side display synthesis
+        from Core.Path.Path import Path as _PathRA, PathError as _PERA
+        from Core.Path.PathStorageRoots import GetPrefixMap as _GPMRA
+        _PmRA = _GPMRA()
+        def _SynthRA(Sid, Rel):
+            if Sid is None:
+                return ''
+            try:
+                return _PathRA(Sid, Rel or '').CanonicalDisplay(_PmRA)
+            except _PERA:
+                return ''
         Rows = Db.ExecuteQuery(
-            """
-            SELECT ta.Id, ta.FilePath, ta.ProfileName, ta.AttemptDate,
-                   ta.Success, ta.FileReplaced, ta.Disposition, ta.DispositionReason,
-                   ta.VMAF, ta.OldSizeBytes, ta.NewSizeBytes,
-                   ta.MediaFileId, ta.TestVariantSetId, ta.TestVariantName,
-                   tvs.Name AS TestVariantSetName
-            FROM TranscodeAttempts ta
-            LEFT JOIN TestVariantSets tvs ON ta.TestVariantSetId = tvs.Id
-            ORDER BY ta.AttemptDate DESC
-            LIMIT %s OFFSET %s
-            """,
+            "SELECT ta.Id, ta.StorageRootId AS TaStorageRootId, ta.RelativePath AS TaRelativePath, "
+            "ta.ProfileName, ta.AttemptDate, ta.Success, ta.FileReplaced, "
+            "ta.Disposition, ta.DispositionReason, ta.VMAF, ta.OldSizeBytes, ta.NewSizeBytes, "
+            "ta.MediaFileId, ta.TestVariantSetId, ta.TestVariantName, "
+            "tvs.Name AS TestVariantSetName "
+            "FROM TranscodeAttempts ta "
+            "LEFT JOIN TestVariantSets tvs ON ta.TestVariantSetId = tvs.Id "
+            "ORDER BY ta.AttemptDate DESC "
+            "LIMIT %s OFFSET %s",
             (PageSize, Offset),
         )
+        import ntpath as _ntpathRA
+        def _RowProj(R):
+            _Fp = _SynthRA(R.get('TaStorageRootId'), R.get('TaRelativePath'))
+            return {
+                'Id': R['Id'],
+                'FilePath': _Fp,
+                'FileName': _ntpathRA.basename(_Fp),
+                'ProfileName': R['ProfileName'],
+                'AttemptDate': R['AttemptDate'].isoformat() if R['AttemptDate'] else None,
+                'Success': R['Success'],
+                'FileReplaced': R['FileReplaced'],
+                'Disposition': R['Disposition'],
+                'DispositionReason': R['DispositionReason'],
+                'VMAF': float(R['VMAF']) if R['VMAF'] is not None else None,
+                'OldSizeMB': round((R['OldSizeBytes'] or 0) / (1024 * 1024), 1),
+                'NewSizeMB': round((R['NewSizeBytes'] or 0) / (1024 * 1024), 1),
+                'MediaFileId': R.get('MediaFileId'),
+                'TestVariantSetId': R.get('TestVariantSetId'),
+                'TestVariantName': R.get('TestVariantName'),
+                'TestVariantSetName': R.get('TestVariantSetName'),
+            }
         return jsonify({
             'Success': True,
             'Page': Page,
             'PageSize': PageSize,
             'Total': Total,
             'TotalPages': (Total + PageSize - 1) // PageSize,
-            'Rows': [
-                {
-                    'Id': R['Id'],
-                    'FilePath': R['FilePath'],
-                    'FileName': os.path.basename(R['FilePath'] or ''),
-                    'ProfileName': R['ProfileName'],
-                    'AttemptDate': R['AttemptDate'].isoformat() if R['AttemptDate'] else None,
-                    'Success': R['Success'],
-                    'FileReplaced': R['FileReplaced'],
-                    'Disposition': R['Disposition'],
-                    'DispositionReason': R['DispositionReason'],
-                    'VMAF': float(R['VMAF']) if R['VMAF'] is not None else None,
-                    'OldSizeMB': round((R['OldSizeBytes'] or 0) / (1024 * 1024), 1),
-                    'NewSizeMB': round((R['NewSizeBytes'] or 0) / (1024 * 1024), 1),
-                    'MediaFileId': R.get('MediaFileId'),
-                    'TestVariantSetId': R.get('TestVariantSetId'),
-                    'TestVariantName': R.get('TestVariantName'),
-                    'TestVariantSetName': R.get('TestVariantSetName'),
-                }
-                for R in Rows
-            ],
+            'Rows': [_RowProj(R) for R in Rows],
         })
     except Exception as e:
         ErrorMsg = f"RecentAttempts failed: {e}"
