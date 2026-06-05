@@ -2,22 +2,7 @@ import os
 from typing import Dict, Any, Optional
 from Core.Logging.LoggingService import LoggingService
 import ntpath
-
-
-# directive: path-schema-migration | # see path.S8
-def ParentDir(Value):
-    Local = Value or ""
-    return os.path.dirname(Local)
-
-
-# directive: path-schema-migration | # see path.S8
-def Normalize(Value):
-    return (Value or "").strip().strip('"')
-
-
-# directive: path-schema-migration | # see path.S8
-def PathsEqual(A, B):
-    return os.path.normcase(Normalize(A)) == os.path.normcase(Normalize(B))
+from Core.Path.LocalPath import LocalDirname, LocalSamePath
 from Models.TranscodeQueueModel import TranscodeQueueModel
 from Models.MediaFileModel import MediaFileModel
 from Features.AudioCompletion.AudioCompletionService import AudioCompletionService
@@ -41,7 +26,7 @@ class CommandBuilder:
         r"""Collapse mixed `\` and `/` separators -- some Windows FFmpeg builds reject the mix with AVERROR(EINVAL) = -22; pure transformation, no filesystem touch."""
         if not Path:
             return Path
-        return Normalize(Path.strip().strip('"'))
+        return Path.strip().strip('"')
 
     @classmethod
     # directive: mv-suffix-greedy-collapse
@@ -189,7 +174,7 @@ class CommandBuilder:
             OutputFileName = self.GenerateOutputFileName(MediaFile.FileName, SourceResolution, TargetResolution, ContainerType, CrfValue)
 
             # In-place output: put encoded file next to the source.
-            OutputDirectory = ParentDir(InputPath)
+            OutputDirectory = LocalDirname(InputPath)
             OutputPath = self._NormalizeFfmpegPath(os.path.join(OutputDirectory, OutputFileName))
 
             FFmpegPath = CommandData.get('FFmpegPath')
@@ -686,10 +671,10 @@ class CommandBuilder:
                 OutputPath = self._NormalizeFfmpegPath(ExplicitOutputPath)
             else:
                 OutputFileName = BaseName + "-mv.mp4.inprogress"
-                OutputDirectory = ParentDir(InputPath)
+                OutputDirectory = LocalDirname(InputPath)
                 OutputPath = self._NormalizeFfmpegPath(os.path.join(OutputDirectory, OutputFileName))
 
-            if PathsEqual(OutputPath, InputPath):
+            if LocalSamePath(OutputPath, InputPath):
                 LoggingService.LogError(
                     f"_BuildRemuxShape: OutputPath equals InputPath ({InputPath}). "
                     f"OutputPath must be a `.inprogress` side-by-side file.",
@@ -792,10 +777,10 @@ class CommandBuilder:
                 OutputPath = self._NormalizeFfmpegPath(ExplicitOutputPath)
             else:
                 OutputFileName = BaseName + "-mv.mp4.inprogress"
-                OutputDirectory = ParentDir(InputPath)
+                OutputDirectory = LocalDirname(InputPath)
                 OutputPath = self._NormalizeFfmpegPath(os.path.join(OutputDirectory, OutputFileName))
 
-            if PathsEqual(OutputPath, InputPath):
+            if LocalSamePath(OutputPath, InputPath):
                 LoggingService.LogError(
                     f"_BuildSubtitleFixShape: OutputPath equals InputPath ({InputPath}). "
                     f"OutputPath must be a `.inprogress` side-by-side file.",
