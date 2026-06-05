@@ -216,6 +216,70 @@ VMAF analysis. Symptom: operator observed i9 transcodes "auto-rejected"
 with `.inprogress` deleted; 7 attempts (29464-29470) lost their staging
 files between transcode-success and VMAF-claim while this bug was live.
 
+**PATH-PERFECT-IMPLEMENTATION STEP 5 COMPLETE (2026-06-05).** Helper purge
+across 22 production files. Killed every duplicated `_LocalExists`,
+`_LocalIsDir`, `_LocalIsFile`, `_LocalGetSize`, `_LocalGetMTime`,
+`_Normalize`, `_NormalizeValue`, `_ValuesEqual`, `_PathsEqual`,
+`_CanonicalFor`, `_SynthesizeFilePath`, `_LastSegment`, `_ParentDir`,
+`_Join`, `_SplitExt`, `_LookupTypedPair`, plus the shape-agnostic
+try/except fallback branches in `ProcessTranscodeQueueService`,
+`QueueManagementBusinessService`, and `FileScanningRepository`.
+`Models/CommandBuilder.ParentDir/Normalize/PathsEqual` replaced with
+`LocalDirname`/strip/`LocalSamePath`. Replacement contract: worker-local
+strings -> `Core.Path.LocalPath.*`; canonical-display strings -> inline
+`ntpath.*`; identity-to-display synthesis -> `Path.CanonicalDisplay(GetPrefixMap())`.
+Final-grep `^def _LocalExists|_Normalize|_LastSegment|_ParentDir|_Join|_SplitExt|_PathsEqual|_NormalizeValue|_ValuesEqual|_CanonicalFor|_SynthesizeFilePath`
+returns zero hits in production code. Subsequent regression sweep at
+`5590d55` caught six dangling import sites the per-file agent commits
+missed (`FileScanningViewModel`, `FileScanningController`,
+`DuplicateDetectionService`, `TeamStatusController`, `StuckJobDetectionService`,
+`SQLQueriesController`) and brought them onto the LocalPath/ntpath/PathFs
+contract.
+
+**PATH-PERFECT-IMPLEMENTATION STEP 6 COMPLETE (2026-06-05).** 10 legacy
+columns dropped from PostgreSQL: `RootFolders.RootFolder`,
+`ScanJobs.RootFolderPath`, `MediaFiles._legacy_filepath`,
+`MediaFilesArchive._legacy_filepath`, `TranscodeQueue._legacy_filepath`,
+`TranscodeAttempts._legacy_filepath`,
+`TemporaryFilePaths._legacy_originalpath`,
+`TemporaryFilePaths._legacy_localsourcepath`,
+`TemporaryFilePaths._legacy_localoutputpath`,
+`ShowSettings._legacy_showfolder`. Migration script
+`Scripts/SQLScripts/DropLegacyPathColumns_2026_06_05.py` is idempotent
+(ALTER TABLE DROP COLUMN guarded by `information_schema` lookup).
+Dual-write code dropped from Step 2's repository + business-service
+INSERTs. `RootFolderModel.RootFolder` retained as a `@property`
+synthesized via `Path.CanonicalDisplay` so templates and existing
+consumers keep binding to it without DB change. Every path-bearing row
+in the live DB now holds typed pair only. Rollback past this point
+requires `pg_dump` restore.
+
+**PATH-PERFECT-IMPLEMENTATION STEP 7 COMPLETE (2026-06-05).** `Path` is
+a pure value object. `Path.Exists`, `Path.IsFile`, `Path.IsDir`,
+`Path.GetSize`, `Path.GetMTime` instance methods removed from
+`Core/Path/Path.py`. New `Core/Path/PathFs.py` module owns the
+filesystem seam: `Exists(P, Worker)`, `IsFile(P, Worker)`, `IsDir(P, Worker)`,
+`GetSize(P, Worker)`, `GetMTime(P, Worker)` -- each delegates internally
+to `LocalPath.Local<Op>(P.Resolve(Worker))`. Single Responsibility
+restored: identity (Path), filesystem ops (PathFs), worker-local string
+ops (LocalPath), per-worker mount resolution (Worker). Two call sites
+migrated (`MediaProbeBusinessService._ExecuteProbe`,
+`Tests/Contract/TestMediaProbeUsesPath`). A subsequent VMAF-restoration
+sweep at commit `86a0c0b` caught two more `SourcePath.Exists(Wk)` /
+`OutputPath.Exists(Wk)` calls in `QualityTestingBusinessService.BuildVMAFCommand`
+and brought them onto `PathFs.Exists(P, Worker)`.
+
+**DIRECTIVE FUNCTIONALLY COMPLETE 2026-06-05.** End-state architecture
+holds in production: identity = typed pair, display = `Path.CanonicalDisplay`,
+worker-local = `Path.Resolve(Worker)`, filesystem ops = `PathFs.*`,
+local-string ops = `LocalPath.*`, per-worker mount = `Worker.ResolveStorageRoot` +
+`Worker.LocalToPath`. Zero `PathTranslationService` refs. Zero
+shape-agnostic helpers outside `Core/Path/`. Zero `.replace("/", "\\")` /
+`.replace("\\", "/")` outside `Core/Path/Path.py`. Zero `_legacy_*`
+columns in DB. Live verification: i9 NVENC transcode through ComplianceGate
++ FileReplacement; dot + larry VMAF in parallel against typed-pair TFP
+rows; QualityTestRequired routing via `PostTranscodeDispositionService`.
+
 ### Progress
 
 - [x] 1. Diagnose OS coupling in canonical path storage (KNOWN-ISSUES single source of truth)

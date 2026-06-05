@@ -19,26 +19,6 @@ from Core.Path import Path, Worker, PathError
 from Core.Path.LocalPath import LocalBasename, LocalDirname, LocalJoin, LocalSplitExt, LocalExists
 
 
-_TJ_STORAGE_ROOTS_CACHE: dict = {"_StorageRoots": None, "_PrefixMap": None}
-
-
-# directive: transcodejob-uses-path | # see path.S6
-def _GetStorageRoots() -> list:
-    """Lazy StorageRoots prefix list for FromLegacyString."""
-    if _TJ_STORAGE_ROOTS_CACHE["_StorageRoots"] is None:
-        from Core.Database.DatabaseService import DatabaseService
-        Rows = DatabaseService().ExecuteQuery(
-            "SELECT Id, CanonicalPrefix FROM StorageRoots ORDER BY length(CanonicalPrefix) DESC"
-        )
-        _TJ_STORAGE_ROOTS_CACHE["_StorageRoots"] = [
-            {"Id": R.get("id", R.get("Id")),
-             "CanonicalPrefix": R.get("canonicalprefix", R.get("CanonicalPrefix"))}
-            for R in Rows
-        ]
-        _TJ_STORAGE_ROOTS_CACHE["_PrefixMap"] = {Sr["Id"]: Sr["CanonicalPrefix"] for Sr in _TJ_STORAGE_ROOTS_CACHE["_StorageRoots"]}
-    return _TJ_STORAGE_ROOTS_CACHE["_StorageRoots"]
-
-
 from Core.DateTimeHelpers import ToUtcIsoZ
 # directive: transcodejob-uses-path | # see path.S5
 class ProcessTranscodeQueueService:
