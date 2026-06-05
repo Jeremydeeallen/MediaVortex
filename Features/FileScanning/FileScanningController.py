@@ -2,7 +2,6 @@ from flask import Blueprint, request, jsonify, render_template
 from typing import Dict, Any
 from Features.FileScanning.FileScanningViewModel import FileScanningViewModel
 from Core.Logging.LoggingService import LoggingService
-from Features.FileScanning.FileScanningBusinessService import _LocalExists, _LocalIsDir, _Normalize
 
 
 class FileScanningController:
@@ -29,48 +28,6 @@ class FileScanningController:
 
                 LoggingService.LogInfo(f"Parsed parameters - RootFolderPath: '{RootFolderPath}' (type: {type(RootFolderPath)}), Recursive: {Recursive}", "FileScanningController", "StartScan")
 
-                # Additional path debugging
-                if RootFolderPath:
-                    LoggingService.LogInfo(f"RootFolderPath length: {len(RootFolderPath)}", "FileScanningController", "StartScan")
-                    LoggingService.LogInfo(f"RootFolderPath repr: {repr(RootFolderPath)}", "FileScanningController", "StartScan")
-
-                    # Test path validation at controller level
-                    import os
-                    try:
-                        # Log current working directory and environment
-                        CurrentDir = os.getcwd()
-                        LoggingService.LogInfo(f"Controller current working directory: '{CurrentDir}'", "FileScanningController", "StartScan")
-
-                        # List available drives
-                        try:
-                            AvailableDrives = [f"{chr(i)}:" for i in range(65, 91) if os.path.exists(f"{chr(i)}:")]
-                            LoggingService.LogInfo(f"Available drives: {AvailableDrives}", "FileScanningController", "StartScan")
-                        except Exception as e:
-                            LoggingService.LogWarning(f"Could not list drives: {str(e)}", "FileScanningController", "StartScan")
-
-                        NormalizedPath = _Normalize(RootFolderPath)
-                        LoggingService.LogInfo(f"Controller normalized path: '{NormalizedPath}'", "FileScanningController", "StartScan")
-
-                        # Test if Z: drive is accessible
-                        ZDriveRoot = "Z:\\"
-                        ZDriveExists = os.path.exists(ZDriveRoot)
-                        LoggingService.LogInfo(f"Z: drive root exists: {ZDriveExists}", "FileScanningController", "StartScan")
-
-                        if ZDriveExists:
-                            try:
-                                ZDriveContents = os.listdir(ZDriveRoot)
-                                LoggingService.LogInfo(f"Z: drive contents: {ZDriveContents[:10]}...", "FileScanningController", "StartScan")
-                            except Exception as e:
-                                LoggingService.LogError(f"Cannot list Z: drive contents: {str(e)}", "FileScanningController", "StartScan")
-
-                        PathExists = _LocalExists(NormalizedPath)
-                        LoggingService.LogInfo(f"Controller LocalExists: {PathExists}", "FileScanningController", "StartScan")
-
-                        IsDirectory = _LocalIsDir(NormalizedPath)
-                        LoggingService.LogInfo(f"Controller LocalIsDir: {IsDirectory}", "FileScanningController", "StartScan")
-
-                    except Exception as e:
-                        LoggingService.LogException(f"Controller path validation error: {str(e)}", e, "FileScanningController", "StartScan")
 
                 if not RootFolderPath:
                     LoggingService.LogError("RootFolderPath is missing", "FileScanningController", "StartScan")

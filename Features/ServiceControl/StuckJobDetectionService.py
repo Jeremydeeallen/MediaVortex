@@ -891,11 +891,11 @@ class StuckJobDetectionService:
             thresholdMin = self._GetStuckScanThresholdMin()
 
             # Pull all running scans -- typically a handful, so per-row work is fine.
-            query = """
-                SELECT Id, JobId, RootFolderPath, WorkerName, LastUpdated, StartTime
-                FROM ScanJobs
-                WHERE Status = 'Running'
-            """
+            query = (
+                "SELECT Id, JobId, StorageRootId, RelativePath, WorkerName, LastUpdated, StartTime "
+                "FROM ScanJobs "
+                "WHERE Status = 'Running'"
+            )
             runningRows = self.DatabaseManager.DatabaseService.ExecuteQuery(query)
 
             if not runningRows:
@@ -910,7 +910,14 @@ class StuckJobDetectionService:
             for row in runningRows:
                 scanId = row.get('Id') or row.get('id')
                 jobId = row.get('JobId') or row.get('jobid')
-                rootFolderPath = row.get('RootFolderPath') or row.get('rootfolderpath')
+                from Core.Path.Path import Path as _PathSJD, PathError as _PESJD
+                from Core.Path.PathStorageRoots import GetPrefixMap as _GPMSJD
+                _SidSJD = row.get('StorageRootId') or row.get('storagerootid')
+                _RelSJD = row.get('RelativePath') or row.get('relativepath')
+                try:
+                    rootFolderPath = _PathSJD(_SidSJD, _RelSJD or '').CanonicalDisplay(_GPMSJD()) if _SidSJD is not None else ''
+                except _PESJD:
+                    rootFolderPath = ''
                 workerName = row.get('WorkerName') or row.get('workername')
                 lastUpdated = row.get('LastUpdated') or row.get('lastupdated')
 

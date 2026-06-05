@@ -7,7 +7,8 @@ from Features.FileScanning.Models.SeasonModel import SeasonModel
 from Features.FileScanning.Models.FileScanResultModel import FileScanResultModel
 from Features.FileScanning.FileScanningBusinessService import FileScanningBusinessService
 from Core.Logging.LoggingService import LoggingService
-from Features.FileScanning.FileScanningBusinessService import _ParentDir, _Exists
+import ntpath
+from Core.Path.PathFs import Exists as _Exists
 
 
 class FileScanningViewModel:
@@ -391,7 +392,7 @@ class FileScanningViewModel:
             DisplayFiles = []
             for row in result['Rows']:
                 FilePath = row['FilePath'] or ''
-                Directory = _ParentDir(FilePath) if FilePath else ''
+                Directory = ntpath.dirname(FilePath) if FilePath else ''
                 SizeMB = row['SizeMB']
                 DurationMinutes = row['DurationMinutes']
                 LastScannedDate = row['LastScannedDate']
@@ -431,7 +432,9 @@ class FileScanningViewModel:
                 return {'Success': False, 'Message': 'Media file not found'}
 
             # Step 1: Check if exact file still exists
-            if _Exists(MediaFile.FilePath):
+            from Core.Path.Path import Path as _PathMF
+            from Core.Path.Worker import Worker as _WMF
+            if _Exists(_PathMF(MediaFile.StorageRootId, MediaFile.RelativePath or ''), _WMF.FromWorkerContext()):
                 # File exists - refresh it directly
                 self.BusinessService.ProcessSingleMediaFile(
                     FilePath=MediaFile.FilePath,

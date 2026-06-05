@@ -27,17 +27,17 @@ def _BuildActiveScans(DbManager):
       - IsStuck           : LastUpdated > 10 minutes ago.
     """
     from datetime import datetime, timezone
-    Query = """
-        SELECT JobId, WorkerName, RootFolderPath, CurrentDirectory, Phase,
-               Progress, TotalFiles, ProcessedFiles, FilesNeedingProbe, ProbedFiles,
-               NewFiles, UpdatedFiles, DeletedFiles, StartTime, LastUpdated,
-               TopFiles,
-               EXTRACT(EPOCH FROM (NOW() - StartTime))   AS ElapsedSec,
-               EXTRACT(EPOCH FROM (NOW() - LastUpdated)) AS StaleSec
-        FROM ScanJobs
-        WHERE Status = 'Running'
-        ORDER BY StartTime ASC
-    """
+    Query = (
+        "SELECT JobId, WorkerName, StorageRootId, RelativePath, CurrentDirectory, Phase, "
+        "Progress, TotalFiles, ProcessedFiles, FilesNeedingProbe, ProbedFiles, "
+        "NewFiles, UpdatedFiles, DeletedFiles, StartTime, LastUpdated, "
+        "TopFiles, "
+        "EXTRACT(EPOCH FROM (NOW() - StartTime))   AS ElapsedSec, "
+        "EXTRACT(EPOCH FROM (NOW() - LastUpdated)) AS StaleSec "
+        "FROM ScanJobs "
+        "WHERE Status = 'Running' "
+        "ORDER BY StartTime ASC"
+    )
     Rows = DbManager.DatabaseService.ExecuteQuery(Query) or []
     Now = datetime.now(timezone.utc).timestamp()
     SeenJobIds = set()
@@ -100,10 +100,18 @@ def _BuildActiveScans(DbManager):
             except Exception:
                 pass
 
+        from Core.Path.Path import Path as _PathTS, PathError as _PETS
+        from Core.Path.PathStorageRoots import GetPrefixMap as _GPMTS
+        _SidTS = Row.get('StorageRootId')
+        _RelTS = Row.get('RelativePath')
+        try:
+            _Rfp = _PathTS(_SidTS, _RelTS or '').CanonicalDisplay(_GPMTS()) if _SidTS is not None else ''
+        except _PETS:
+            _Rfp = ''
         Out.append({
             "JobId": JobId,
             "WorkerName": Row.get('WorkerName') or '<unknown>',
-            "RootFolderPath": Row.get('RootFolderPath'),
+            "RootFolderPath": _Rfp,
             "CurrentDirectory": Row.get('CurrentDirectory'),
             "Phase": Phase,
             "Progress": float(Row.get('Progress') or 0.0),
@@ -448,14 +456,12 @@ def GetWorkers():
         # /Activity worker-tile "Scan:" line. One round-trip across all workers
         # (no per-worker DB query in the loop).
         ScanPostureRows = DbManager.DatabaseService.ExecuteQuery(
-            """
-            SELECT WorkerName,
-                   MAX(EndTime) FILTER (WHERE Status='Completed') AS LastScanCompleted,
-                   MAX(RootFolderPath) FILTER (WHERE Status='Running') AS CurrentScanRootFolder
-            FROM ScanJobs
-            WHERE WorkerName IS NOT NULL
-            GROUP BY WorkerName
-            """
+            "SELECT WorkerName, "
+            "MAX(EndTime) FILTER (WHERE Status='Completed') AS LastScanCompleted, "
+            "MAX(RelativePath) FILTER (WHERE Status='Running') AS CurrentScanRootFolder "
+            "FROM ScanJobs "
+            "WHERE WorkerName IS NOT NULL "
+            "GROUP BY WorkerName"
         ) or []
         ScanPostureByWorker = {
             (R.get('WorkerName') or ''): {

@@ -573,22 +573,34 @@ def GetRecentScanRuns():
         # with ErrorMessage='Application restarted' (known quirk per
         # FileScanning.flow.md). Operators don't want that in their success
         # list either -- the partial counts are not a real success.
-        Query = f"""
-            SELECT sj.RootFolderPath, sj.WorkerName, sj.Status,
-                   sj.StartTime, sj.EndTime,
-                   EXTRACT(EPOCH FROM (sj.EndTime - sj.StartTime))::int AS DurationSec,
-                   sj.NewFiles, sj.UpdatedFiles, sj.DeletedFiles, sj.ProcessedFiles,
-                   sj.ErrorMessage
-            FROM ScanJobs sj
-            WHERE sj.EndTime IS NOT NULL
-              AND sj.Status IN ('Completed', 'Failed')
-              AND (sj.ErrorMessage IS NULL OR ({NotLikeClauses}))
-            ORDER BY sj.EndTime DESC
-            LIMIT %s
-        """
+        Query = (
+            "SELECT sj.StorageRootId, sj.RelativePath, sj.WorkerName, sj.Status, "
+            "sj.StartTime, sj.EndTime, "
+            "EXTRACT(EPOCH FROM (sj.EndTime - sj.StartTime))::int AS DurationSec, "
+            "sj.NewFiles, sj.UpdatedFiles, sj.DeletedFiles, sj.ProcessedFiles, "
+            "sj.ErrorMessage "
+            "FROM ScanJobs sj "
+            "WHERE sj.EndTime IS NOT NULL "
+            f"AND sj.Status IN ('Completed', 'Failed') "
+            f"AND (sj.ErrorMessage IS NULL OR ({NotLikeClauses})) "
+            "ORDER BY sj.EndTime DESC "
+            "LIMIT %s"
+        )
         Params = HousekeepingPatterns + [Limit]
         Results = SharedDatabaseManager.DatabaseService.ExecuteQuery(Query, Params)
-        Rows = [dict(R) for R in (Results or [])]
+        from Core.Path.Path import Path as _PathRS, PathError as _PERS
+        from Core.Path.PathStorageRoots import GetPrefixMap as _GPMRS
+        _PmRS = _GPMRS()
+        def _RsRfp(Sid, Rel):
+            try:
+                return _PathRS(Sid, Rel or '').CanonicalDisplay(_PmRS) if Sid is not None else ''
+            except _PERS:
+                return ''
+        Rows = []
+        for R in (Results or []):
+            D = dict(R)
+            D['RootFolderPath'] = _RsRfp(D.get('storagerootid') or D.get('StorageRootId'), D.get('relativepath') or D.get('RelativePath'))
+            Rows.append(D)
 
         LoggingService.LogInfo(f"Retrieved {len(Rows)} recent scan runs", "SQLQueriesController", "GetRecentScanRuns")
 
