@@ -12,21 +12,16 @@ _PrefixMap = GetPrefixMap()
 
 # Step 1: Get 250 candidate items the way SmartPopulate does
 t0 = time.time()
-WhereSql = """
-    WHERE m.TranscodedByMediaVortex IS NOT TRUE
-      AND m.Id NOT IN (SELECT MediaFileId FROM TranscodeQueue WHERE MediaFileId IS NOT NULL)
-      AND m.SizeMB > 0
-      AND (m.HasExplicitEnglishAudio IS NULL OR m.HasExplicitEnglishAudio = true)
-      AND m.RecommendedMode = %s
-      AND m.FilePath LIKE %s ESCAPE %s
-"""
-Sql = "SELECT m.Id, m.FilePath, m.FileName, m.SizeMB FROM MediaFiles m " + WhereSql + " ORDER BY m.PriorityScore DESC NULLS LAST, m.SizeMB DESC LIMIT 250"
-Candidates = DB.ExecuteQuery(Sql, ('Remux', 'T:%', '!'))
+# directive: path-schema-migration | # see path.S8
+WhereSql = " WHERE m.TranscodedByMediaVortex IS NOT TRUE AND m.Id NOT IN (SELECT MediaFileId FROM TranscodeQueue WHERE MediaFileId IS NOT NULL) AND m.SizeMB > 0 AND (m.HasExplicitEnglishAudio IS NULL OR m.HasExplicitEnglishAudio = true) AND m.RecommendedMode = %s AND m.RelativePath LIKE %s ESCAPE %s "
+# T:\ rows have StorageRootId for the T:\ root; the LIKE filter narrows by RelativePath prefix
+Sql = "SELECT m.Id, m.StorageRootId, m.RelativePath, m.FileName, m.SizeMB FROM MediaFiles m " + WhereSql + " ORDER BY m.PriorityScore DESC NULLS LAST, m.SizeMB DESC LIMIT 250"
+Candidates = DB.ExecuteQuery(Sql, ('Remux', '%', '!'))
 t1 = time.time()
 print(f"[1] Get 250 candidates: {t1-t0:.3f}s")
 
-# Build the Items list as the JS would send
-Items = [{'FilePath': c['FilePath'], 'MediaFileId': c['Id'], 'SizeMB': c['SizeMB'], 'Mode': 'Remux'} for c in Candidates]
+# Items mirror JS payload; FilePath synthesized from typed pair via Path.CanonicalDisplay
+Items = [{'FilePath': Path(c['StorageRootId'], c['RelativePath'] or '').CanonicalDisplay(_PrefixMap) if c.get('StorageRootId') is not None else '', 'MediaFileId': c['Id'], 'SizeMB': c['SizeMB'], 'StorageRootId': c.get('StorageRootId'), 'RelativePath': c.get('RelativePath') or '', 'Mode': 'Remux'} for c in Candidates]
 
 # Step 2: GetExistingQueueFilePaths
 from Features.TranscodeQueue.TranscodeQueueRepository import TranscodeQueueRepository
@@ -39,8 +34,9 @@ print(f"[2] GetExistingQueueFilePaths ({len(ExistingPaths)} paths): {t1-t0:.3f}s
 # Step 3: Bulk MediaFile lookup
 AllMediaFileIds = [Item.get('MediaFileId') for Item in Items if Item.get('MediaFileId')]
 t0 = time.time()
+# directive: path-schema-migration | # see path.S8
 Rows = DB.ExecuteQuery(
-    "SELECT Id, FilePath, FileName, SizeMB, DurationMinutes, AssignedProfile, Resolution "
+    "SELECT Id, StorageRootId, RelativePath, FileName, SizeMB, DurationMinutes, AssignedProfile, Resolution "
     "FROM MediaFiles WHERE Id IN %s",
     (tuple(AllMediaFileIds),)
 )
@@ -56,29 +52,30 @@ MediaFileMap = {r['Id']: r for r in Rows}
 
 t0 = time.time()
 PendingInserts = []
+# directive: path-schema-migration | # see path.S8
 for Item in Items:
     FilePath = Item['FilePath']
     if FilePath in ExistingPaths:
         continue
     Mf = MediaFileMap.get(Item['MediaFileId'])
     SizeMB = float(Item.get('SizeMB', 0))
-    try:
-        _P = Path.FromLegacyString(FilePath, _StorageRoots)
-        FileName = _P.LastSegment()
+    _MfSid = Mf.get('StorageRootId') if Mf else None
+    _MfRel = (Mf.get('RelativePath') or '') if Mf else ''
+    FileName = (Mf.get('FileName') if Mf else None) or ''
+    if _MfSid is not None:
         try:
-            _Parent = _P.ParentDir()
+            _Parent = Path(_MfSid, _MfRel).ParentDir()
             Directory = _Parent.CanonicalDisplay(_PrefixMap)
         except PathError:
             Directory = ""
-    except PathError:
-        FileName = FilePath
+    else:
         Directory = ""
-    # Build a minimal MediaFileModel-shaped object for CalculatePriority
     from Core.Models.MediaFileModel import MediaFileModel
-    MfModel = MediaFileModel(Id=Mf['Id'], FilePath=Mf['FilePath'], FileName=Mf['FileName'], SizeMB=Mf['SizeMB'] or 0.0, DurationMinutes=Mf.get('DurationMinutes'), Resolution=Mf.get('Resolution'), AssignedProfile=Mf.get('AssignedProfile'))
+    MfModel = MediaFileModel(Id=Mf['Id'], StorageRootId=_MfSid, RelativePath=_MfRel, FileName=Mf['FileName'], SizeMB=Mf['SizeMB'] or 0.0, DurationMinutes=Mf.get('DurationMinutes'), Resolution=Mf.get('Resolution'), AssignedProfile=Mf.get('AssignedProfile'))
     Priority = Svc.CalculatePriority(MfModel, None, None)
     QI = TranscodeQueueModel(
-        FilePath=FilePath, FileName=FileName, Directory=Directory,
+        StorageRootId=_MfSid, RelativePath=_MfRel,
+        FileName=FileName, Directory=Directory,
         SizeBytes=int(SizeMB * 1024 * 1024), SizeMB=SizeMB,
         Priority=Priority, Status="Pending",
         ProcessingMode='Remux', DateAdded=datetime.now(timezone.utc)
@@ -107,44 +104,40 @@ for Item in PendingInserts:
 t1 = time.time()
 print(f"[5b] Pre-resolve StorageRootId/RelativePath in Python ({len(PendingInserts)}): {t1-t0:.3f}s")
 
-# Step 6: simulate the bulk-resolve MediaFileId + execute_values WITHOUT commit
+# directive: path-schema-migration | # see path.S8
 Conn = DB.GetConnection()
 try:
     Cur = Conn.cursor()
-    AllPaths = [Item.FilePath for Item in PendingInserts]
-    
+    AllPairs = [(Item.StorageRootId, Item.RelativePath) for Item in PendingInserts if Item.StorageRootId is not None]
+
     t0 = time.time()
-    Cur.execute("SELECT Id, FilePath FROM MediaFiles WHERE FilePath IN %s", (tuple(AllPaths),))
-    PathToMfId = {Row[1]: Row[0] for Row in Cur.fetchall()}
+    Cur.execute("SELECT Id, StorageRootId, RelativePath FROM MediaFiles WHERE (StorageRootId, RelativePath) IN %s", (tuple(AllPairs),))
+    PairToMfId = {(Row[1], Row[2]): Row[0] for Row in Cur.fetchall()}
     t1 = time.time()
-    print(f"[6] Bulk MediaFileId lookup by FilePath ({len(AllPaths)}): {t1-t0:.3f}s")
-    
+    print(f"[6] Bulk MediaFileId lookup by typed pair ({len(AllPairs)}): {t1-t0:.3f}s")
+
     t0 = time.time()
     Values = []
     for Item in PendingInserts:
-        Mid = PathToMfId.get(Item.FilePath)
+        Mid = PairToMfId.get((Item.StorageRootId, Item.RelativePath))
         Values.append((
-            Item.StorageRootId, Item.RelativePath, Item.FilePath, Item.FileName, Item.Directory,
+            Item.StorageRootId, Item.RelativePath, Item.FileName, Item.Directory,
             Item.SizeBytes, Item.SizeMB, Item.Priority, Item.Status, Item.DateAdded,
             Item.DateStarted, Item.ProcessingMode, Mid
         ))
     t1 = time.time()
     print(f"[7] Build values tuples: {t1-t0:.3f}s")
-    
+
     t0 = time.time()
     execute_values(
         Cur,
-        """INSERT INTO TranscodeQueue
-           (StorageRootId, RelativePath, FilePath, FileName, Directory,
-            SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted,
-            ProcessingMode, MediaFileId)
-           VALUES %s""",
+        "INSERT INTO TranscodeQueue (StorageRootId, RelativePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status, DateAdded, DateStarted, ProcessingMode, MediaFileId) VALUES %s",
         Values,
         page_size=500
     )
     t1 = time.time()
     print(f"[8] execute_values INSERT (250 rows, NOT COMMITTED): {t1-t0:.3f}s")
-    
+
     Conn.rollback()
     print(f"[9] ROLLED BACK -- no data changes")
 finally:

@@ -570,6 +570,7 @@ def VariantSetsList():
 
 
 @QualityTestBlueprint.route('/api/QualityTest/QueueTestRun', methods=['POST'])
+# directive: path-schema-migration | # see path.S8
 def QueueTestRun():
     """Admit one or more files into the transcode queue for multi-variant testing.
     Body: {"VariantSetId": <int>, "FilePaths": ["...", "..."]}.
@@ -643,18 +644,12 @@ def QueueTestRun():
                 Rejected.append({'FilePath': Path_, 'Reason': f'already pending for this variant set (queue Id {ExistingRow[0]["Id"]})'})
                 continue
             try:
+                # directive: path-schema-migration | # see path.S8
                 Db.ExecuteNonQuery(
-                    """
-                    INSERT INTO TranscodeQueue
-                        (StorageRootId, RelativePath, FilePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status,
-                         MediaFileId, TestVariantSetId, DateAdded)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'Pending', %s, %s, NOW())
-                    RETURNING Id
-                    """,
+                    "INSERT INTO TranscodeQueue (StorageRootId, RelativePath, FileName, Directory, SizeBytes, SizeMB, Priority, Status, MediaFileId, TestVariantSetId, DateAdded) VALUES (%s, %s, %s, %s, %s, %s, %s, 'Pending', %s, %s, NOW()) RETURNING Id",
                     (
                         MfStorageRootId,
                         MfRelativePath,
-                        Path_,
                         ntpath.basename(Path_),
                         ntpath.dirname(Path_),
                         int((Mf.get('SizeMB') or 0) * 1024 * 1024),

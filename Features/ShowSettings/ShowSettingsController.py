@@ -215,27 +215,38 @@ def QueueByFolder():
 
         ProfileId = int(ProfileId)
 
+        # directive: path-schema-migration | # see path.S8
         from Core.Database.DatabaseService import DatabaseService, EscapeLikePattern
+        from Core.Path.Path import Path as _PathSS, PathError as _PESS
+        from Core.Path.PathStorageRoots import GetStorageRoots as _GSRSS
 
         FolderConditions = []
         Params = []
         for Folder in ShowFolders:
-            FolderConditions.append("m.FilePath LIKE %s ESCAPE '!'")
-            Params.append(EscapeLikePattern(Folder) + '%')
+            try:
+                _P = _PathSS.FromLegacyString(Folder, _GSRSS())
+            except _PESS:
+                continue
+            FolderConditions.append("(m.StorageRootId = %s AND m.RelativePath LIKE %s ESCAPE '!')")
+            Params.append(_P.StorageRootId)
+            Params.append(EscapeLikePattern(_P.RelativePath) + '%')
+
+        if not FolderConditions:
+            return jsonify({'Success': False, 'Message': 'None of the provided ShowFolders matched a StorageRoot prefix'}), 400
 
         FolderWhere = ' OR '.join(FolderConditions)
 
-        Sql = f"""
-            SELECT m.Id
-            FROM MediaFiles m
-            WHERE (m.TranscodedByMediaVortex IS NULL OR m.TranscodedByMediaVortex = false)
-              AND m.Id NOT IN (SELECT MediaFileId FROM TranscodeQueue WHERE MediaFileId IS NOT NULL)
-              AND m.SizeMB > 0
-              AND (m.HasExplicitEnglishAudio IS NULL OR m.HasExplicitEnglishAudio = true)
-              AND m.Resolution IS NOT NULL
-              AND ({FolderWhere})
-            ORDER BY m.SizeMB DESC
-        """
+        Sql = (
+            "SELECT m.Id "
+            "FROM MediaFiles m "
+            "WHERE (m.TranscodedByMediaVortex IS NULL OR m.TranscodedByMediaVortex = false) "
+            "  AND m.Id NOT IN (SELECT MediaFileId FROM TranscodeQueue WHERE MediaFileId IS NOT NULL) "
+            "  AND m.SizeMB > 0 "
+            "  AND (m.HasExplicitEnglishAudio IS NULL OR m.HasExplicitEnglishAudio = true) "
+            "  AND m.Resolution IS NOT NULL "
+            f"  AND ({FolderWhere}) "
+            "ORDER BY m.SizeMB DESC"
+        )
 
         Rows = DatabaseService().ExecuteQuery(Sql, tuple(Params))
 

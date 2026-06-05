@@ -4,6 +4,8 @@ from flask import Blueprint, request, jsonify
 from Features.MediaProbe.MediaProbeViewModel import MediaProbeViewModel
 from Core.Database.DatabaseService import DatabaseService, EscapeLikePattern
 from Core.Logging.LoggingService import LoggingService
+from Core.Path.Path import Path, PathError
+from Core.Path.PathStorageRoots import GetStorageRoots
 
 
 MediaProbeBlueprint = Blueprint('MediaProbe', __name__, url_prefix='/api/MediaProbe')
@@ -11,13 +13,9 @@ MediaProbeBlueprint = Blueprint('MediaProbe', __name__, url_prefix='/api/MediaPr
 _ViewModel = MediaProbeViewModel()
 
 
+# directive: path-schema-migration | # see path.S8
 def _BuildReprobeWhere(Data: dict) -> Tuple[Optional[str], list, Optional[str]]:
-    """Translate the request body into a WHERE clause for the MediaFiles UPDATE.
-
-    Accepts at least one of MediaFileIds, ShowFolder, Drive. Refuses unbounded
-    calls (no filters). Returns (WhereSql, Params, ErrorMessage). On error,
-    WhereSql is None.
-    """
+    """Translate the request body into a typed-pair WHERE for MediaFiles; returns (WhereSql, Params, ErrorMessage)."""
     if not Data:
         return None, [], 'Request body required (JSON)'
     RawIds = Data.get('MediaFileIds') or []
@@ -35,11 +33,16 @@ def _BuildReprobeWhere(Data: dict) -> Tuple[Optional[str], list, Optional[str]]:
         Clauses.append('Id = ANY(%s)')
         Params.append(Ids)
     if ShowFolder:
-        Clauses.append("FilePath LIKE %s ESCAPE '!'")
-        Params.append(f"%{EscapeLikePattern(ShowFolder)}%")
+        try:
+            Parsed = Path.FromLegacyString(ShowFolder, GetStorageRoots())
+        except PathError:
+            return None, [], 'ShowFolder did not match any StorageRoot prefix; expected canonical-shaped path (e.g. T:\\Show)'
+        Clauses.append("StorageRootId = %s AND RelativePath LIKE %s ESCAPE '!'")
+        Params.append(Parsed.StorageRootId)
+        Params.append(EscapeLikePattern(Parsed.RelativePath) + '%')
     if Drive:
-        Clauses.append("FilePath LIKE %s ESCAPE '!'")
-        Params.append(f"{EscapeLikePattern(Drive)}%")
+        Clauses.append("StorageRootId = (SELECT Id FROM StorageRoots WHERE CanonicalPrefix LIKE %s ESCAPE '!' LIMIT 1)")
+        Params.append(EscapeLikePattern(Drive) + '%')
     return ' AND '.join(Clauses), Params, None
 
 

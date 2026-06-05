@@ -3,6 +3,8 @@ from typing import Dict, Any, Optional
 from Repositories.DatabaseManager import DatabaseManager
 from Services.FileManagerService import FileManagerService
 from Core.Logging.LoggingService import LoggingService
+from Core.Path.Path import Path, PathError
+from Core.Path.PathStorageRoots import GetPrefixMap
 
 
 # directive: filereplacement-uses-path | # see path.S5
@@ -28,12 +30,21 @@ class ComplianceGate:
         self.DatabaseManager = DatabaseManagerInstance or DatabaseManager()
         self.FileManager = FileManagerInstance or FileManagerService(FFprobePath=FFprobePath)
 
-    # directive: filereplacement-decompose | see compliance-gated-rename.C1, C4
+    # directive: path-schema-migration | # see path.S8 | filereplacement-decompose | compliance-gated-rename.C1, C4
     def Evaluate(self, LocalStagedPath: str, SourceMediaFileId: int,
                  FFmpegCommand: Optional[str] = None) -> Dict[str, Any]:
         """Evaluate staged file against the cascade; see compliance-gated-rename.C1, C4."""
         try:
             from Features.TranscodeQueue.QueueManagementBusinessService import QueueManagementBusinessService
+
+            def _SynthFP(Row) -> str:
+                Sid = Row.get('StorageRootId')
+                if Sid is None:
+                    return ""
+                try:
+                    return Path(Sid, Row.get('RelativePath') or '').CanonicalDisplay(GetPrefixMap())
+                except PathError:
+                    return ""
 
             if not LocalExists(LocalStagedPath):
                 return {'Compliant': False, 'RefusalReason': 'staged_file_missing'}
@@ -45,7 +56,7 @@ class ComplianceGate:
             # allow: R12 SQL preexisting; relocate to MediaFileRepository in mediafile-persistence-no-drift
             SourceRows = self.DatabaseManager.DatabaseService.ExecuteQuery(
                 """
-                SELECT Id, FilePath, AssignedProfile,
+                SELECT Id, StorageRootId, RelativePath, AssignedProfile,
                        HasExplicitEnglishAudio, AudioLanguages,
                        SourceIntegratedLufs, SourceLoudnessRangeLU,
                        SourceTruePeakDbtp, SourceIntegratedThresholdLufs,
@@ -83,7 +94,7 @@ class ComplianceGate:
                 SizeMB = 0
 
             CandidateRow = {
-                'FilePath': Src.get('FilePath'),
+                'FilePath': _SynthFP(Src),
                 'Resolution': Resolution,
                 'ResolutionCategory': ResolutionCategory,
                 'Codec': ProbeResult.get('VideoCodec'),

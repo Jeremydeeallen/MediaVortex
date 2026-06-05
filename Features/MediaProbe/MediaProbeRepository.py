@@ -3,21 +3,25 @@ from datetime import datetime, timezone
 from Core.Database.BaseRepository import BaseRepository
 from Core.Models.MediaFileModel import MediaFileModel
 from Core.Logging.LoggingService import LoggingService
+from Core.Path.Path import Path, PathError
+from Core.Path.PathStorageRoots import GetStorageRoots
 
 
 class MediaProbeRepository(BaseRepository):
     """Repository for MediaProbe-related database operations."""
 
-    _MEDIA_FILE_SELECT_COLS = """Id, SeasonId, StorageRootId, RelativePath, FilePath, FileName,
-                   SizeMB, VideoBitrateKbps, AudioBitrateKbps,
-                   Resolution, Codec, DurationMinutes, FrameRate, LastScannedDate,
-                   CompressionPotential, AssignedProfile, IsInterlaced, ResolutionCategory,
-                   FileModificationTime, TotalFrames, CodecProfile, ColorRange, FieldOrder,
-                   HasBFrames, RefFrames, PixelFormat, Level, AudioChannels, AudioSampleRate,
-                   AudioSampleFormat, AudioChannelLayout, AudioCodec, SubtitleFormats,
-                   ContainerFormat, OverallBitrate, TranscodedByMediaVortex,
-                   FFprobeFailureCount, LastFFprobeError, LastFFprobeAttemptDate,
-                   NeedsQuick, NeedsTranscode"""
+    _MEDIA_FILE_SELECT_COLS = (
+        "Id, SeasonId, StorageRootId, RelativePath, FileName, "
+        "SizeMB, VideoBitrateKbps, AudioBitrateKbps, "
+        "Resolution, Codec, DurationMinutes, FrameRate, LastScannedDate, "
+        "CompressionPotential, AssignedProfile, IsInterlaced, ResolutionCategory, "
+        "FileModificationTime, TotalFrames, CodecProfile, ColorRange, FieldOrder, "
+        "HasBFrames, RefFrames, PixelFormat, Level, AudioChannels, AudioSampleRate, "
+        "AudioSampleFormat, AudioChannelLayout, AudioCodec, SubtitleFormats, "
+        "ContainerFormat, OverallBitrate, TranscodedByMediaVortex, "
+        "FFprobeFailureCount, LastFFprobeError, LastFFprobeAttemptDate, "
+        "NeedsQuick, NeedsTranscode"
+    )
 
     # directive: path-schema-migration | # see path.S8
     def _MapRowToMediaFile(self, Row) -> MediaFileModel:
@@ -51,42 +55,39 @@ class MediaProbeRepository(BaseRepository):
 
     # ─── Query Methods ─────────────────────────────────────────────────
 
+    # directive: path-schema-migration | # see path.S8
     def GetFilesNeedingProbe(self, RootFolderId: Optional[int] = None, MaxFailures: int = 3) -> List[MediaFileModel]:
-        """Get files that need FFprobe metadata extraction.
-
-        Returns files where any required metadata column is NULL AND
-        FFprobeFailureCount < MaxFailures (haven't exceeded retry limit).
-
-        AudioCodec is included alongside Resolution/TotalFrames because the
-        AudioStrategy.md source-preserving codec policy needs it to fire its
-        codec-matching branch -- without AudioCodec the policy falls through
-        to the EAC3 fallback for every file. Files probed before AudioCodec
-        was wired up (~86% of the library as of 2026-05-10) need re-probing
-        to populate that column; this trigger naturally catches them on the
-        next probe loop without a separate backfill.
-
-        Optionally filtered by root folder.
-        """
+        """Files that need FFprobe metadata; optionally filtered by RootFolderId (typed-pair filter on StorageRootId + RelativePath prefix)."""
         try:
             Conditions = [
-                # NeedsReprobe=TRUE (operator-triggered) OR any required metadata missing
                 "(NeedsReprobe = TRUE OR Resolution IS NULL OR TotalFrames IS NULL OR AudioCodec IS NULL)",
-                f"COALESCE(FFprobeFailureCount, 0) < %s"
+                "COALESCE(FFprobeFailureCount, 0) < %s"
             ]
-            Params = [MaxFailures]
+            Params: List[Any] = [MaxFailures]
 
             if RootFolderId is not None:
-                # Resolve root folder path
                 RootQuery = "SELECT RootFolder FROM RootFolders WHERE Id = %s"
                 RootRows = self.ExecuteQuery(RootQuery, (RootFolderId,))
                 if not RootRows:
                     return []
                 RootPath = RootRows[0]['RootFolder']
-                Conditions.append("LEFT(FilePath, %s) = %s")
-                Params.extend([len(RootPath), RootPath])
+                try:
+                    Parsed = Path.FromLegacyString(RootPath, GetStorageRoots())
+                except PathError:
+                    LoggingService.LogWarning(
+                        "GetFilesNeedingProbe: RootFolder did not match any StorageRoot prefix: " + str(RootPath),
+                        "MediaProbeRepository", "GetFilesNeedingProbe",
+                    )
+                    return []
+                Conditions.append("StorageRootId = %s AND LEFT(RelativePath, %s) = %s")
+                Params.extend([Parsed.StorageRootId, len(Parsed.RelativePath), Parsed.RelativePath])
 
             WhereClause = " AND ".join(Conditions)
-            Query = f"SELECT {self._MEDIA_FILE_SELECT_COLS} FROM MediaFiles WHERE {WhereClause} ORDER BY COALESCE(LastFFprobeAttemptDate, '1970-01-01') ASC"
+            Query = (
+                "SELECT " + self._MEDIA_FILE_SELECT_COLS + " FROM MediaFiles WHERE "
+                + WhereClause
+                + " ORDER BY COALESCE(LastFFprobeAttemptDate, '1970-01-01') ASC"
+            )
             Rows = self.ExecuteQuery(Query, tuple(Params))
             return [self._MapRowToMediaFile(Row) for Row in Rows]
 
@@ -94,28 +95,35 @@ class MediaProbeRepository(BaseRepository):
             LoggingService.LogException("Error getting files needing probe", Ex, "MediaProbeRepository", "GetFilesNeedingProbe")
             return []
 
+    # directive: path-schema-migration | # see path.S8
     def GetFilesNeedingProbeCount(self, RootFolderId: Optional[int] = None, MaxFailures: int = 3) -> int:
-        """Count of files that match the GetFilesNeedingProbe predicate.
-
-        Used by directive 2026-05-27 to populate ScanJobs.FilesNeedingProbe at
-        the start of the Probing phase so the Activity page can show a real
-        bar instead of an indeterminate spinner.
-        """
+        """Count of files matching GetFilesNeedingProbe; typed-pair filter on StorageRootId + RelativePath prefix when RootFolderId is set."""
         try:
             Conditions = [
                 "(NeedsReprobe = TRUE OR Resolution IS NULL OR TotalFrames IS NULL OR AudioCodec IS NULL)",
-                f"COALESCE(FFprobeFailureCount, 0) < %s",
+                "COALESCE(FFprobeFailureCount, 0) < %s",
             ]
-            Params = [MaxFailures]
+            Params: List[Any] = [MaxFailures]
             if RootFolderId is not None:
                 RootRows = self.ExecuteQuery("SELECT RootFolder FROM RootFolders WHERE Id = %s", (RootFolderId,))
                 if not RootRows:
                     return 0
                 RootPath = RootRows[0]['RootFolder']
-                Conditions.append("LEFT(FilePath, %s) = %s")
-                Params.extend([len(RootPath), RootPath])
+                try:
+                    Parsed = Path.FromLegacyString(RootPath, GetStorageRoots())
+                except PathError:
+                    LoggingService.LogWarning(
+                        "GetFilesNeedingProbeCount: RootFolder did not match any StorageRoot prefix: " + str(RootPath),
+                        "MediaProbeRepository", "GetFilesNeedingProbeCount",
+                    )
+                    return 0
+                Conditions.append("StorageRootId = %s AND LEFT(RelativePath, %s) = %s")
+                Params.extend([Parsed.StorageRootId, len(Parsed.RelativePath), Parsed.RelativePath])
             WhereClause = " AND ".join(Conditions)
-            Rows = self.ExecuteQuery(f"SELECT COUNT(*) AS N FROM MediaFiles WHERE {WhereClause}", tuple(Params))
+            Rows = self.ExecuteQuery(
+                "SELECT COUNT(*) AS N FROM MediaFiles WHERE " + WhereClause,
+                tuple(Params),
+            )
             return int(Rows[0]['N']) if Rows else 0
         except Exception as Ex:
             LoggingService.LogException("Error counting files needing probe", Ex, "MediaProbeRepository", "GetFilesNeedingProbeCount")

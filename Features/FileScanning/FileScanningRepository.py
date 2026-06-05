@@ -868,10 +868,12 @@ class FileScanningRepository(BaseRepository):
             LoggingService.LogException("Error getting full media file by filename", e, "FileScanningRepository", "GetFullMediaFileByFileName")
             return None
 
+    # directive: path-schema-migration | # see path.S8
     def _MapMediaFileSummaryRow(self, row, matchType: str = "exact") -> Dict[str, Any]:
-        """Map a summary row to a dict for mitigation checking."""
+        """Map a summary row to a dict for mitigation checking; FilePath synthesized from typed pair."""
         return {
-            "Id": row['id'], "FileName": row['filename'], "FilePath": row['filepath'],
+            "Id": row['id'], "FileName": row['filename'],
+            "FilePath": SynthesizeFilePath(row.get('storagerootid'), row.get('relativepath')),
             "ContainerFormat": row['containerformat'], "Codec": row['codec'],
             "AudioCodec": row['audiocodec'], "TranscodedByMediaVortex": row['transcodedbymediavortex'],
             "SubtitleFormats": row['subtitleformats'], "MatchType": matchType

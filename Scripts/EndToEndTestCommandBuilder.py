@@ -62,10 +62,12 @@ def ffprobe_parse(path):
         return False, f"ffprobe failed: {e}"
 
 
-def make_job(media_file_id, mode):
+# directive: path-schema-migration | # see path.S8
+def make_job(media_file_id, mode, storage_root_id, relative_path):
     return TranscodeQueueModel(
         Id=99000 + media_file_id,
-        FilePath=f"fake/path/id-{media_file_id}",
+        StorageRootId=storage_root_id,
+        RelativePath=relative_path,
         ProcessingMode=mode,
         Status="Pending",
     )
@@ -89,7 +91,7 @@ def run_case(dm, case):
         print(f"  SKIP: file not accessible from I9: {mf.FilePath}")
         return False
 
-    job = make_job(case["id"], case["mode"])
+    job = make_job(case["id"], case["mode"], mf.StorageRootId, mf.RelativePath or "")
     Context = {
         "FFmpegPath": I9_FFMPEG,
         "FFprobePath": I9_FFPROBE,

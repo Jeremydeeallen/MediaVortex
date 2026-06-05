@@ -29,10 +29,12 @@ SAMPLE_IDS = [620274, 19661, 620280, 11148]
 MOCK_FFMPEG = r"C:\ffmpeg\bin\ffmpeg.exe"
 MOCK_FFPROBE = r"C:\ffmpeg\bin\ffprobe.exe"
 
-def make_job(media_file_id, processing_mode):
+# directive: path-schema-migration | # see path.S8
+def make_job(media_file_id, processing_mode, storage_root_id, relative_path):
     return TranscodeQueueModel(
         Id=9999,
-        FilePath=f"fake/path/id-{media_file_id}",
+        StorageRootId=storage_root_id,
+        RelativePath=relative_path,
         ProcessingMode=processing_mode,
         Status="Pending",
     )
@@ -86,7 +88,7 @@ def run():
             mode = "Quick"
         else:
             mode = "Transcode"  # fallback for smoke
-        job = make_job(mid, mode)
+        job = make_job(mid, mode, mf.StorageRootId, mf.RelativePath or "")
         print(f"\n--- MediaFile {mid} ---")
         print(f"  Resolution={mf.Resolution} Codec={mf.Codec} AudioCodec={mf.AudioCodec} "
               f"AudioChannels={getattr(mf, 'AudioChannels', '?')}")

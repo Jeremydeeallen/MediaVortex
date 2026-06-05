@@ -1283,7 +1283,7 @@ class QualityTestingBusinessService:
             )
             return {'Success': False, 'ErrorMessage': f'Exception: {Ex}'}
 
-    # directive: nvenc-rate-anchored-remediation
+    # directive: path-schema-migration | # see path.S8 | nvenc-rate-anchored-remediation
     def GenerateComparisonStills(self, TranscodeAttemptId: int, TimestampSeconds: float, ViewMode: str = 'tv_fair') -> dict:
         """Return {Success, SourcePath, TranscodedPath, CachedKey, ErrorMessage}.
         Generates two PNG stills via FFmpeg at the given timestamp from the  # allow: R12 -- preexisting
@@ -1292,15 +1292,19 @@ class QualityTestingBusinessService:
         """
         try:
             from Core.WorkerContext import WorkerContext
+            from Core.Path.PathStorageRoots import GetPrefixMap as _GPM
             Db = self.DatabaseManager.DatabaseService
 
-            Rows = SynthesizeFilePathInRows(Db.ExecuteQuery(
+            Rows = Db.ExecuteQuery(
                 "SELECT StorageRootId, RelativePath, FileReplaced FROM TranscodeAttempts WHERE Id = %s",
                 (TranscodeAttemptId,),
-            ))
+            )
             if not Rows:
                 return {'Success': False, 'ErrorMessage': f'TranscodeAttempt {TranscodeAttemptId} not found'}
-            CanonicalFilePath = Rows[0]['FilePath']
+            try:
+                CanonicalFilePath = Path(Rows[0]['StorageRootId'], Rows[0]['RelativePath'] or '').CanonicalDisplay(_GPM())
+            except PathError:
+                CanonicalFilePath = ""
             FileReplaced = bool(Rows[0]['FileReplaced'])
 
             SourceCanonical = None

@@ -41,6 +41,31 @@ def _LocalExists(Value: str) -> bool:
     return bool(Value) and os.path.exists(Value)
 
 
+# directive: path-schema-migration | # see path.S8
+def _ResolveFolderToTypedPair(FolderPath: str) -> Tuple[Optional[int], str]:
+    """Parse a legacy folder display path into (StorageRootId, RelativePath); (None, '') on no prefix match."""
+    if not FolderPath:
+        return (None, '')
+    try:
+        P = Path.FromLegacyString(FolderPath, _GetStorageRoots())
+        return (P.StorageRootId, P.RelativePath)
+    except PathError:
+        return (None, '')
+
+
+# directive: path-schema-migration | # see path.S8
+def _ResolveStorageRootIdForDrivePrefixFn(DrivePrefix: str) -> Optional[int]:
+    """Resolve a 'X:' style drive prefix to its StorageRootId; None if no match."""
+    if not DrivePrefix:
+        return None
+    Needle = DrivePrefix.upper().rstrip('\\/')
+    for Sr in _GetStorageRoots():
+        Prefix = (Sr.get("CanonicalPrefix") or "").upper().rstrip('\\/')
+        if Prefix and Prefix == Needle:
+            return Sr.get("Id")
+    return None
+
+
 # directive: transcodequeue-uses-path | # see path.S5
 def _LastSegment(Value: str) -> str:
     """Shape-agnostic filename component via Path.FromLegacyString.LastSegment; falls through to raw tail on parse failure."""
@@ -328,15 +353,14 @@ class QueueManagementBusinessService:
             except (TypeError, ValueError):
                 Offset = 0
 
-            # Predicate uses IS NOT TRUE so the partial index idx_mediafiles_smartpopulate
-            # is usable (criterion 16 of smart-populate.feature.md).
+            # directive: path-schema-migration | # see path.S8
             Params = []
-            WhereSql = """
-                WHERE m.TranscodedByMediaVortex IS NOT TRUE
-                  AND m.Id NOT IN (SELECT MediaFileId FROM TranscodeQueue WHERE MediaFileId IS NOT NULL)
-                  AND m.SizeMB > 0
-                  AND (m.HasExplicitEnglishAudio IS NULL OR m.HasExplicitEnglishAudio = true)
-            """
+            WhereSql = (
+                " WHERE m.TranscodedByMediaVortex IS NOT TRUE "
+                "AND m.Id NOT IN (SELECT MediaFileId FROM TranscodeQueue WHERE MediaFileId IS NOT NULL) "
+                "AND m.SizeMB > 0 "
+                "AND (m.HasExplicitEnglishAudio IS NULL OR m.HasExplicitEnglishAudio = true)"
+            )
 
             # Mode filter. Post-2026-05-17 the cascade tracks two independent
             # flags (NeedsQuick, NeedsTranscode) so a file can appear in BOTH
@@ -356,19 +380,20 @@ class QueueManagementBusinessService:
 
             if Drive:
                 DrivePrefix = Drive.rstrip(':\\/') + ':'
-                WhereSql += " AND m.FilePath LIKE %s ESCAPE '!'"
-                Params.append(EscapeLikePattern(DrivePrefix) + '%')
+                DriveStorageRootId = _ResolveStorageRootIdForDrivePrefixFn(DrivePrefix)
+                if DriveStorageRootId is None:
+                    LoggingService.LogInfo(f"SmartPopulateQueue: Drive {Drive!r} did not match any StorageRoot; returning empty", "QueueManagementBusinessService", "SmartPopulateQueue")
+                    return {"Success": True, "Suggestions": [], "TotalCandidates": 0, "Offset": Offset, "Limit": Limit, "Search": Search or '', "Mode": Mode if Mode in ('Transcode', 'Remux', 'AudioFix', 'Quick') else None, "HasMore": False}
+                WhereSql += " AND m.StorageRootId = %s"
+                Params.append(DriveStorageRootId)
 
             if Search and Search.strip():
-                # Case-insensitive substring match on FileName OR the show-folder
-                # segment (the path component immediately under the drive root).
-                # SPLIT_PART(FilePath, separator, n) -- segment 2 of "T:\Show\..." is "Show".
-                # We escape the user input via EscapeLikePattern + ESCAPE '!'.
+                # directive: path-schema-migration | # see path.S8
                 Term = '%' + EscapeLikePattern(Search.strip().lower()) + '%'
-                WhereSql += """
-                    AND (LOWER(m.FileName) LIKE %s ESCAPE '!'
-                         OR LOWER(SPLIT_PART(REPLACE(m.FilePath, '\\\\', '/'), '/', 2)) LIKE %s ESCAPE '!')
-                """
+                WhereSql += (
+                    " AND (LOWER(m.FileName) LIKE %s ESCAPE '!'"
+                    "      OR LOWER(SPLIT_PART(COALESCE(m.RelativePath, ''), '/', 1)) LIKE %s ESCAPE '!')"
+                )
                 Params.append(Term)
                 Params.append(Term)
 
@@ -409,21 +434,28 @@ class QueueManagementBusinessService:
                         "END), "
                     )
 
-            Sql = f"""
-                SELECT m.Id, m.FilePath, m.FileName, m.SizeMB, m.VideoBitrateKbps,
-                       m.Codec, m.Resolution, m.ResolutionCategory, m.ContainerFormat,
-                       m.PriorityScore, m.AudioCodec, m.AudioComplete,
-                       m.SourceIntegratedLufs, m.SourceLoudnessRangeLU
-                FROM MediaFiles m
-                {WhereSql}
-                ORDER BY {FocusSql}m.PriorityScore DESC NULLS LAST, m.SizeMB DESC NULLS LAST
-                LIMIT {int(Limit)} OFFSET {int(Offset)}
-            """
+            # directive: path-schema-migration | # see path.S8
+            Sql = (
+                "SELECT m.Id, m.StorageRootId, m.RelativePath, m.FileName, m.SizeMB, m.VideoBitrateKbps, "
+                "m.Codec, m.Resolution, m.ResolutionCategory, m.ContainerFormat, "
+                "m.PriorityScore, m.AudioCodec, m.AudioComplete, "
+                "m.SourceIntegratedLufs, m.SourceLoudnessRangeLU "
+                "FROM MediaFiles m"
+                + WhereSql +
+                " ORDER BY " + FocusSql + "m.PriorityScore DESC NULLS LAST, m.SizeMB DESC NULLS LAST "
+                "LIMIT " + str(int(Limit)) + " OFFSET " + str(int(Offset))
+            )
             Rows = DatabaseService().ExecuteQuery(Sql, ParamsTuple)
 
+            _SmartPrefixes = {Sr["Id"]: Sr["CanonicalPrefix"] for Sr in _GetStorageRoots()}
             Suggestions = []
             for Row in Rows:
-                FilePath = Row.get('FilePath', '')
+                _Sid = Row.get('StorageRootId')
+                _Rel = Row.get('RelativePath')
+                try:
+                    FilePath = Path(_Sid, _Rel or '').CanonicalDisplay(_SmartPrefixes) if _Sid is not None else ''
+                except PathError:
+                    FilePath = ''
                 FileName = Row.get('FileName', '')
                 ShowName = ExtractShowFolder(FilePath)
 
@@ -528,16 +560,16 @@ class QueueManagementBusinessService:
                     (ProfileName, NormalizedIds, ProfileName)
                 )
 
+            # directive: path-schema-migration | # see path.S8
             InsertSql = (
                 "INSERT INTO TranscodeQueue "
-                "(StorageRootId, RelativePath, FilePath, FileName, Directory, "
+                "(StorageRootId, RelativePath, FileName, Directory, "
                 "SizeBytes, SizeMB, Priority, Status, DateAdded, "
                 "ProcessingMode, MediaFileId) "
                 "SELECT m.StorageRootId, "
                 "COALESCE(m.RelativePath, ''), "
-                "m.FilePath, "
                 "m.FileName, "
-                "regexp_replace(replace(m.FilePath, E'\\\\', '/'), '/[^/]+$', ''), "
+                "regexp_replace(COALESCE(m.RelativePath, ''), '/[^/]+$', ''), "
                 "(m.SizeMB * 1024 * 1024)::bigint, "
                 "m.SizeMB, "
                 "COALESCE(m.PriorityScore, " + self._SIZE_PRIORITY_SQL + "), "
@@ -599,28 +631,32 @@ class QueueManagementBusinessService:
 
             if Drive:
                 DrivePrefix = Drive.rstrip(':\\/') + ':'
-                WhereSql += " AND m.FilePath LIKE %s ESCAPE '!'"
-                Params.append(EscapeLikePattern(DrivePrefix) + '%')
+                DriveStorageRootId = _ResolveStorageRootIdForDrivePrefixFn(DrivePrefix)
+                if DriveStorageRootId is None:
+                    LoggingService.LogInfo(f"QueueAllMatching: Drive {Drive!r} did not match any StorageRoot; returning 0", "QueueManagementBusinessService", "QueueAllMatching")
+                    return {"Success": True, "ItemsAdded": 0}
+                WhereSql += " AND m.StorageRootId = %s"
+                Params.append(DriveStorageRootId)
 
             if Search and Search.strip():
                 Term = '%' + EscapeLikePattern(Search.strip().lower()) + '%'
                 WhereSql += (
                     " AND (LOWER(m.FileName) LIKE %s ESCAPE '!'"
-                    "      OR LOWER(SPLIT_PART(REPLACE(m.FilePath, '\\\\', '/'), '/', 2)) LIKE %s ESCAPE '!')"
+                    "      OR LOWER(SPLIT_PART(COALESCE(m.RelativePath, ''), '/', 1)) LIKE %s ESCAPE '!')"
                 )
                 Params.append(Term)
                 Params.append(Term)
 
+            # directive: path-schema-migration | # see path.S8
             InsertSql = (
                 "INSERT INTO TranscodeQueue "
-                "(StorageRootId, RelativePath, FilePath, FileName, Directory, "
+                "(StorageRootId, RelativePath, FileName, Directory, "
                 "SizeBytes, SizeMB, Priority, Status, DateAdded, "
                 "ProcessingMode, MediaFileId) "
                 "SELECT m.StorageRootId, "
                 "COALESCE(m.RelativePath, ''), "
-                "m.FilePath, "
                 "m.FileName, "
-                "regexp_replace(replace(m.FilePath, E'\\\\', '/'), '/[^/]+$', ''), "
+                "regexp_replace(COALESCE(m.RelativePath, ''), '/[^/]+$', ''), "
                 "(m.SizeMB * 1024 * 1024)::bigint, "
                 "m.SizeMB, "
                 "COALESCE(m.PriorityScore, " + self._SIZE_PRIORITY_SQL + "), "
@@ -652,9 +688,9 @@ class QueueManagementBusinessService:
             LoggingService.LogException(ErrorMsg, Ex, "QueueManagementBusinessService", "QueueAllMatching")
             return {"Success": False, "ErrorMessage": ErrorMsg, "ItemsAdded": 0}
 
+    # directive: path-schema-migration | # see path.S8
     def GetMediaFilesWithProfilesOrderedBySize(self, RootFolderPath: str = None) -> List[MediaFileModel]:
-        """Get media files that have assigned profiles, ordered by size (largest first).
-        Uses SQL-side filtering instead of loading all rows into Python."""
+        """Get media files with assigned profiles, ordered by size (largest first); typed-pair filter."""
         try:
             LoggingService.LogFunctionEntry("GetMediaFilesWithProfilesOrderedBySize", "QueueManagementBusinessService", RootFolderPath)
 
@@ -664,24 +700,31 @@ class QueueManagementBusinessService:
             Params: list = []
 
             if RootFolderPath:
-                NormalizedPath = RootFolderPath.replace('/', '\\').rstrip('\\')
-                WhereClauses.append("FilePath LIKE %s ESCAPE '!'")
-                Params.append(EscapeLikePattern(NormalizedPath) + '%')
+                FolderSid, FolderRel = _ResolveFolderToTypedPair(RootFolderPath)
+                if FolderSid is None:
+                    LoggingService.LogInfo(f"GetMediaFilesWithProfilesOrderedBySize: RootFolderPath {RootFolderPath!r} did not match any StorageRoot; returning []", "QueueManagementBusinessService", "GetMediaFilesWithProfilesOrderedBySize")
+                    return []
+                WhereClauses.append("StorageRootId = %s")
+                Params.append(FolderSid)
+                if FolderRel:
+                    WhereClauses.append("(RelativePath = %s OR RelativePath LIKE %s ESCAPE '!')")
+                    Params.append(FolderRel)
+                    Params.append(EscapeLikePattern(FolderRel) + '/%')
 
-            Sql = f"""
-                SELECT Id, SeasonId, StorageRootId, RelativePath, FilePath, FileName, SizeMB,
-                       VideoBitrateKbps, AudioBitrateKbps, Resolution, Codec, DurationMinutes,
-                       FrameRate, LastScannedDate, CompressionPotential, AssignedProfile,
-                       IsInterlaced, ResolutionCategory, FileModificationTime, TotalFrames,
-                       CodecProfile, ColorRange, FieldOrder, HasBFrames, RefFrames, PixelFormat,
-                       Level, AudioChannels, AudioSampleRate, AudioSampleFormat,
-                       AudioChannelLayout, AudioCodec, SubtitleFormats, ContainerFormat,
-                       OverallBitrate, TranscodedByMediaVortex,
-                       AudioLanguages, HasExplicitEnglishAudio
-                FROM MediaFiles
-                WHERE {' AND '.join(WhereClauses)}
-                ORDER BY SizeMB DESC NULLS LAST
-            """
+            Sql = (
+                "SELECT Id, SeasonId, StorageRootId, RelativePath, FileName, SizeMB, "
+                "VideoBitrateKbps, AudioBitrateKbps, Resolution, Codec, DurationMinutes, "
+                "FrameRate, LastScannedDate, CompressionPotential, AssignedProfile, "
+                "IsInterlaced, ResolutionCategory, FileModificationTime, TotalFrames, "
+                "CodecProfile, ColorRange, FieldOrder, HasBFrames, RefFrames, PixelFormat, "
+                "Level, AudioChannels, AudioSampleRate, AudioSampleFormat, "
+                "AudioChannelLayout, AudioCodec, SubtitleFormats, ContainerFormat, "
+                "OverallBitrate, TranscodedByMediaVortex, "
+                "AudioLanguages, HasExplicitEnglishAudio "
+                "FROM MediaFiles "
+                "WHERE " + ' AND '.join(WhereClauses) + " "
+                "ORDER BY SizeMB DESC NULLS LAST"
+            )
             Rows = DatabaseService().ExecuteQuery(Sql, tuple(Params))
 
             filesWithProfiles = []
@@ -1001,25 +1044,28 @@ class QueueManagementBusinessService:
                 friendlyMessage = f"No MKV files found{' in folder ' + RootFolderPath if RootFolderPath else ''} for remuxing."
                 return {"Success": False, "ErrorMessage": friendlyMessage, "ItemsAdded": 0}
 
-            # Lightweight duplicate check -- only fetch FilePaths, not full models
-            existingFilePaths = self.Repository.GetExistingQueueFilePaths()
+            # directive: path-schema-migration | # see path.S8
+            from Core.Database.DatabaseService import DatabaseService as _DbSvcRemux
+            existingPairs = {
+                (R.get('StorageRootId'), R.get('RelativePath') or '')
+                for R in _DbSvcRemux().ExecuteQuery("SELECT StorageRootId, RelativePath FROM TranscodeQueue")
+            }
 
             # Separate new items from existing-but-need-mode-switch
             itemsToInsert: List[TranscodeQueueModel] = []
             itemsUpdated = 0
 
-            # For mode-switch we still need to load existing items by path, but only
-            # for the intersection (much smaller than loading everything).
-            existingQueueByPath: Dict[str, Any] = {}
-            NeedModeCheck = [mf for mf in mkvFiles if mf.FilePath in existingFilePaths]
+            # For mode-switch we still need to load existing items, but only for the intersection.
+            existingQueueByPair: Dict[tuple, Any] = {}
+            NeedModeCheck = [mf for mf in mkvFiles if (mf.StorageRootId, mf.RelativePath or '') in existingPairs]
             if NeedModeCheck:
-                # Load only the items we need to check for mode switch
                 existingQueueItems = self.Repository.GetAllTranscodeQueueItems()
-                existingQueueByPath = {item.FilePath: item for item in existingQueueItems}
+                existingQueueByPair = {(item.StorageRootId, item.RelativePath or ''): item for item in existingQueueItems}
 
             for mediaFile in mkvFiles:
-                if mediaFile.FilePath in existingFilePaths:
-                    existingItem = existingQueueByPath.get(mediaFile.FilePath)
+                _Pair = (mediaFile.StorageRootId, mediaFile.RelativePath or '')
+                if _Pair in existingPairs:
+                    existingItem = existingQueueByPair.get(_Pair)
                     if existingItem and existingItem.ProcessingMode != "Remux" and existingItem.Status == "Pending":
                         existingItem.ProcessingMode = "Remux"
                         self.Repository.SaveTranscodeQueueItem(existingItem)
@@ -1030,7 +1076,7 @@ class QueueManagementBusinessService:
                 queueItem = self.CreateRemuxQueueItem(mediaFile)
                 if queueItem:
                     itemsToInsert.append(queueItem)
-                    existingFilePaths.add(mediaFile.FilePath)
+                    existingPairs.add(_Pair)
 
             # Bulk insert all new items in one transaction
             itemsAdded = 0
@@ -1065,9 +1111,9 @@ class QueueManagementBusinessService:
             LoggingService.LogException(errorMsg, e, "QueueManagementBusinessService", "PopulateQueueForRemux")
             return {"Success": False, "ErrorMessage": errorMsg, "ItemsAdded": 0}
 
+    # directive: path-schema-migration | # see path.S8
     def GetMkvFilesForRemux(self, RootFolderPath: str = None) -> List[MediaFileModel]:
-        """Get MKV media files eligible for remuxing, ordered by size (largest first).
-        Uses SQL-side filtering instead of loading all 59K+ rows into Python."""
+        """Get MKV media files eligible for remuxing, ordered by size (largest first); typed-pair filter."""
         try:
             from Core.Database.DatabaseService import DatabaseService, EscapeLikePattern
 
@@ -1075,17 +1121,24 @@ class QueueManagementBusinessService:
             Params: list = ['%.mkv']
 
             if RootFolderPath:
-                NormalizedPath = RootFolderPath.replace('/', '\\').rstrip('\\')
-                WhereClauses.append("FilePath LIKE %s ESCAPE '!'")
-                Params.append(EscapeLikePattern(NormalizedPath) + '%')
+                FolderSid, FolderRel = _ResolveFolderToTypedPair(RootFolderPath)
+                if FolderSid is None:
+                    LoggingService.LogInfo(f"GetMkvFilesForRemux: RootFolderPath {RootFolderPath!r} did not match any StorageRoot; returning []", "QueueManagementBusinessService", "GetMkvFilesForRemux")
+                    return []
+                WhereClauses.append("StorageRootId = %s")
+                Params.append(FolderSid)
+                if FolderRel:
+                    WhereClauses.append("(RelativePath = %s OR RelativePath LIKE %s ESCAPE '!')")
+                    Params.append(FolderRel)
+                    Params.append(EscapeLikePattern(FolderRel) + '/%')
 
-            Sql = f"""
-                SELECT Id, StorageRootId, RelativePath, FilePath, FileName, SizeMB,
-                       DurationMinutes, Resolution, Codec, ContainerFormat
-                FROM MediaFiles
-                WHERE {' AND '.join(WhereClauses)}
-                ORDER BY SizeMB DESC NULLS LAST
-            """
+            Sql = (
+                "SELECT Id, StorageRootId, RelativePath, FileName, SizeMB, "
+                "DurationMinutes, Resolution, Codec, ContainerFormat "
+                "FROM MediaFiles "
+                "WHERE " + ' AND '.join(WhereClauses) + " "
+                "ORDER BY SizeMB DESC NULLS LAST"
+            )
             Rows = DatabaseService().ExecuteQuery(Sql, tuple(Params))
 
             mkvFiles = []
@@ -1405,18 +1458,28 @@ class QueueManagementBusinessService:
             )
             return None
 
+    # directive: path-schema-migration | # see path.S8
     def _LoadShowProfileOverrides(self) -> Dict[str, str]:
-        """Return {ShowFolder: AssignedProfile} for shows with a non-NULL override.
-
-        ShowFolder is stored as 'T:\\Survivor' (drive letter + first segment).
-        Used by _GetEffectiveProfileFromCache to resolve per-show overrides.
-        """
+        """Return {ShowFolder_lower: AssignedProfile}; ShowFolder synthesized from typed pair."""
         from Core.Database.DatabaseService import DatabaseService
         try:
             rows = DatabaseService().ExecuteQuery(
-                "SELECT ShowFolder, AssignedProfile FROM ShowSettings WHERE AssignedProfile IS NOT NULL"
+                "SELECT StorageRootId, RelativePath, AssignedProfile FROM ShowSettings WHERE AssignedProfile IS NOT NULL"
             )
-            return {(r['ShowFolder'] or '').lower(): r['AssignedProfile'] for r in rows if r['ShowFolder']}
+            Prefixes = {Sr["Id"]: Sr["CanonicalPrefix"] for Sr in _GetStorageRoots()}
+            Out: Dict[str, str] = {}
+            for r in rows:
+                Sid = r.get('StorageRootId')
+                Rel = r.get('RelativePath')
+                if Sid is None or Rel is None:
+                    continue
+                try:
+                    Display = Path(Sid, Rel or '').CanonicalDisplay(Prefixes)
+                except PathError:
+                    continue
+                if Display:
+                    Out[Display.lower()] = r['AssignedProfile']
+            return Out
         except Exception as Ex:
             LoggingService.LogException(
                 "Failed to load ShowSettings overrides; per-show overrides will not apply this cycle",
@@ -1996,19 +2059,30 @@ class QueueManagementBusinessService:
                 pass  # table may not exist on older DBs; no-op
 
             placeholders = ','.join(['%s'] * len(MediaFileIds))
+            # directive: path-schema-migration | # see path.S8
             rows = db.ExecuteQuery(
-                f"""
-                SELECT Id, FilePath, FileName, SizeMB, DurationMinutes, AssignedProfile,
-                       ResolutionCategory, Resolution, Codec, ContainerFormat,
-                       AudioCodec, HasExplicitEnglishAudio,
-                       AudioComplete, AudioCorruptSuspect, AudioBitrateKbps, AudioChannels,
-                       SourceIntegratedLufs, SourceLoudnessRangeLU, SourceTruePeakDbtp,
-                       SourceIntegratedThresholdLufs, LoudnessMeasuredAt,
-                       LoudnessMeasurementFailureReason
-                FROM MediaFiles WHERE Id IN ({placeholders})
-                """,
+                "SELECT Id, StorageRootId, RelativePath, FileName, SizeMB, DurationMinutes, AssignedProfile, "
+                "ResolutionCategory, Resolution, Codec, ContainerFormat, "
+                "AudioCodec, HasExplicitEnglishAudio, "
+                "AudioComplete, AudioCorruptSuspect, AudioBitrateKbps, AudioChannels, "
+                "SourceIntegratedLufs, SourceLoudnessRangeLU, SourceTruePeakDbtp, "
+                "SourceIntegratedThresholdLufs, LoudnessMeasuredAt, "
+                "LoudnessMeasurementFailureReason "
+                "FROM MediaFiles WHERE Id IN (" + placeholders + ")",
                 tuple(MediaFileIds)
             )
+            # Synthesize FilePath display string per row for downstream consumers (read-only).
+            _Prefixes = {Sr["Id"]: Sr["CanonicalPrefix"] for Sr in _GetStorageRoots()}
+            for _R in rows:
+                _Sid = _R.get('StorageRootId')
+                _Rel = _R.get('RelativePath')
+                if _Sid is not None and _Rel is not None:
+                    try:
+                        _R['FilePath'] = Path(_Sid, _Rel or '').CanonicalDisplay(_Prefixes)
+                    except PathError:
+                        _R['FilePath'] = ''
+                else:
+                    _R['FilePath'] = ''
 
             updates = []  # list[(id, profile_or_none, score, is_compliant_or_none, recommended_or_none)]
             NoAudioFiles = []  # list of (FilePath, MediaFileId) for ProblemFile flagging

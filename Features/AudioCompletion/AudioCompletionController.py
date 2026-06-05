@@ -50,15 +50,22 @@ def _ResolveMediaFileIds(Data: dict) -> Tuple[List[int], Optional[str]]:
             return ([], "MediaFileIds must be a list of integers")
         return (ParsedIds, None)
 
+    # directive: path-schema-migration | # see audio-completion.C19
+    from Core.Path.Path import Path as _PathAC, PathError as _PEAC
+    from Core.Path.PathStorageRoots import GetStorageRoots as _GSRAC
     Filters = []
     Params: List = []
     if ShowFolder:
-        Escaped = EscapeLikePattern(ShowFolder)
-        Filters.append("FilePath LIKE %s ESCAPE '!'")
-        Params.append(f"%{Escaped}%")
+        try:
+            Parsed = _PathAC.FromLegacyString(ShowFolder, _GSRAC())
+        except _PEAC:
+            return ([], f"ShowFolder did not match any StorageRoot prefix: {ShowFolder!r}")
+        Filters.append("(StorageRootId = %s AND RelativePath LIKE %s ESCAPE '!')")
+        Params.append(Parsed.StorageRootId)
+        Params.append(EscapeLikePattern(Parsed.RelativePath) + "%")
     if Drive:
         Escaped = EscapeLikePattern(Drive)
-        Filters.append("FilePath LIKE %s ESCAPE '!'")
+        Filters.append("StorageRootId = (SELECT Id FROM StorageRoots WHERE CanonicalPrefix LIKE %s ESCAPE '!' LIMIT 1)")
         Params.append(f"{Escaped}%")
 
     Where = " AND ".join(Filters)
