@@ -10,8 +10,7 @@ from Core.Path.PathStorageRoots import GetStorageRoots, GetPrefixMap
 
 
 # directive: path-schema-migration | # see path.S8
-def _SynthesizeFilePath(StorageRootId, RelativePath) -> str:
-    """Render a canonical FilePath from typed pair via Path.CanonicalDisplay."""
+def _SafeCanonical(StorageRootId, RelativePath) -> str:
     if StorageRootId is None:
         return ""
     try:
@@ -271,9 +270,9 @@ class QualityTestRepository(BaseRepository):
 
             Results = []
             for Row in Rows:
-                FilePath = _SynthesizeFilePath(Row.get("TaStorageRootId"), Row.get("TaRelativePath"))
-                TranscodedFilePath = _SynthesizeFilePath(Row.get("OutputStorageRootId"), Row.get("OutputRelativePath"))
-                LocalSourcePath = _SynthesizeFilePath(Row.get("SourceStorageRootId"), Row.get("SourceRelativePath"))
+                FilePath = _SafeCanonical(Row.get("TaStorageRootId"), Row.get("TaRelativePath"))
+                TranscodedFilePath = _SafeCanonical(Row.get("OutputStorageRootId"), Row.get("OutputRelativePath"))
+                LocalSourcePath = _SafeCanonical(Row.get("SourceStorageRootId"), Row.get("SourceRelativePath"))
                 TranscodedFileName = ntpath.basename(TranscodedFilePath) if TranscodedFilePath else None
 
                 Results.append({
@@ -410,7 +409,7 @@ class QualityTestRepository(BaseRepository):
             Rows = self.ExecuteQuery(Query)
             Results = []
             for Row in Rows or []:
-                TaFilePath = _SynthesizeFilePath(Row.get("TaStorageRootId"), Row.get("TaRelativePath"))
+                TaFilePath = _SafeCanonical(Row.get("TaStorageRootId"), Row.get("TaRelativePath"))
                 OriginalPath = Row.get("OriginalFilePath") or TaFilePath
                 FileName = ntpath.basename(OriginalPath) if OriginalPath else f"TranscodeAttempt_{Row['TranscodeAttemptId']}"
                 Results.append({
@@ -545,13 +544,13 @@ class QualityTestRepository(BaseRepository):
             for Row in Rows:
                 Results.append({
                     "Id": Row["Id"],
-                    "FilePath": _SynthesizeFilePath(Row.get("TaStorageRootId"), Row.get("TaRelativePath")),
+                    "FilePath": _SafeCanonical(Row.get("TaStorageRootId"), Row.get("TaRelativePath")),
                     "SourceStorageRootId": Row.get("SourceStorageRootId"),
                     "SourceRelativePath": Row.get("SourceRelativePath"),
                     "OutputStorageRootId": Row.get("OutputStorageRootId"),
                     "OutputRelativePath": Row.get("OutputRelativePath"),
-                    "LocalSourcePath": _SynthesizeFilePath(Row.get("SourceStorageRootId"), Row.get("SourceRelativePath")),
-                    "LocalOutputPath": _SynthesizeFilePath(Row.get("OutputStorageRootId"), Row.get("OutputRelativePath"))
+                    "LocalSourcePath": _SafeCanonical(Row.get("SourceStorageRootId"), Row.get("SourceRelativePath")),
+                    "LocalOutputPath": _SafeCanonical(Row.get("OutputStorageRootId"), Row.get("OutputRelativePath"))
                 })
 
             LoggingService.LogInfo(f"Found {len(Results)} missed quality tests", "QualityTestRepository", "GetMissedQualityTests")
@@ -809,8 +808,8 @@ class QualityTestRepository(BaseRepository):
                 OutId = Row.get("OutputStorageRootId") if "OutputStorageRootId" in Row else Row.get("outputstoragerootid")
                 OutRel = Row.get("OutputRelativePath") if "OutputRelativePath" in Row else Row.get("outputrelativepath")
 
-                SynthesizedSource = _SynthesizeFilePath(SrcId, SrcRel)
-                SynthesizedOutput = _SynthesizeFilePath(OutId, OutRel)
+                SynthesizedSource = _SafeCanonical(SrcId, SrcRel)
+                SynthesizedOutput = _SafeCanonical(OutId, OutRel)
 
                 Record = {
                     "Id": Row.get("Id") if "Id" in Row else Row.get("id"),
